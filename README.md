@@ -1,75 +1,83 @@
 # Atelier local
 
-Un chat local avec analyse d'images, écrit en HTML, CSS et JavaScript. L'interface fonctionne dans un navigateur ; un petit serveur Node.js pilote llama.cpp. Aucune dépendance npm, ressource distante, télémétrie ou API cloud.
+**English** | [简体中文](README.zh-CN.md) | [한국어](README.ko.md)
 
-## Démarrer
+A local chat and image-understanding interface for GGUF models, built with HTML, CSS and JavaScript. The interface runs in your browser, while a small Node.js server manages llama.cpp. No npm dependencies, remote assets, telemetry or cloud APIs.
 
-Prérequis : **Node.js 22 ou ultérieur**, un navigateur récent et un **llama-server récent compatible Qwen3.5 et vision**, accompagné de ses bibliothèques natives. L'exécutable doit correspondre au système, à l'architecture et au matériel. Aucun téléchargement n'est lancé par cette application.
+The application currently uses French UI labels. Their names are included below to help you find the controls.
 
-Sous Windows, double-cliquer sur **Lancer-Windows.cmd**.
+## Getting started
 
-Sous Linux :
+Requirements: **Node.js 22 or later**, a recent browser, and a **recent llama-server build with Qwen3.5 and vision support**, together with its native libraries. Choose a build that matches your operating system, architecture and hardware. The application does not download models or install dependencies automatically.
+
+On Windows, double-click **Lancer-Windows.cmd**.
+
+On Linux:
 
 ```sh
 sh lancer-linux.sh
 ```
 
-La commande commune aux deux systèmes est :
+The same command also works on both systems:
 
 ```sh
 node server.mjs --open
 ```
 
-L'application s'ouvre sur **http://127.0.0.1:8787**. Garder son terminal ouvert. `Ctrl+C` arrête le serveur et le moteur qu'il a lancé. Si l'ouverture du navigateur échoue, saisir l'adresse manuellement. Le port 8787 doit être libre.
+Open **http://127.0.0.1:8787**. Keep the terminal running; `Ctrl+C` stops the application and the engine it started. If the browser does not open automatically, enter the address manually. Port 8787 must be available.
 
-Il n'est pas nécessaire d'exécuter `npm install`. `npm start` est également disponible.
+There is no need to run `npm install`. You can also use `npm start`.
 
-## Configurer les fichiers
+## Configuring the files
 
-Ouvrir **Configuration**, renseigner les trois chemins complets, puis choisir **Enregistrer et démarrer** :
+Open **Configuration**, enter the three full file paths, then click **Enregistrer et démarrer** (Save and start):
 
-1. L'exécutable `llama-server.exe` sous Windows ou `llama-server` sous Linux. Les bibliothèques DLL/SO de sa distribution doivent rester avec lui, dans leur organisation d'origine.
-2. Le fichier `DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic.Q6_K.gguf`.
-3. Le fichier `DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic.mmproj-f16.gguf`, pour la vision. Laisser ce champ vide pour le texte seul.
+| Component | Example file from the original model release |
+|---|---|
+| Engine | `llama-server.exe` on Windows or `llama-server` on Linux |
+| Q6_K model | [DeepSeek-V4-Pro-Qwen3.5-9B.Q6_K.gguf](https://huggingface.co/mradermacher/DeepSeek-V4-Pro-Qwen3.5-9B-GGUF/blob/main/DeepSeek-V4-Pro-Qwen3.5-9B.Q6_K.gguf) |
+| FP16 vision projector | [DeepSeek-V4-Pro-Qwen3.5-9B.mmproj-f16.gguf](https://huggingface.co/mradermacher/DeepSeek-V4-Pro-Qwen3.5-9B-GGUF/blob/main/DeepSeek-V4-Pro-Qwen3.5-9B.mmproj-f16.gguf) |
 
-Le chemin du modèle doit viser le **fichier**, même si celui-ci se trouve dans un dossier portant presque le même nom. Sous Windows, « Copier en tant que chemin d'accès » dans l'Explorateur permet de récupérer ce chemin ; les guillemets extérieurs sont acceptés. Sous Linux, donner par exemple `/home/moi/modeles/modele.Q6_K.gguf`.
+These examples use the original [Jackrong/DeepSeek-V4-Pro-Qwen3.5-9B](https://huggingface.co/Jackrong/DeepSeek-V4-Pro-Qwen3.5-9B) release. The GGUF files are available in the [corresponding quantization repository](https://huggingface.co/mradermacher/DeepSeek-V4-Pro-Qwen3.5-9B-GGUF/tree/main). Use a projector that matches your model; leave its field empty for text-only use. Keep the engine's DLL/SO libraries in the directory layout supplied by its distributor.
 
-Les fichiers GGUF ne sont pas chargés dans le navigateur. Les chemins sont enregistrés dans `data/config.json`. L'archive de distribution ne contient pas la configuration personnelle d'un autre ordinateur.
+The model path must point to the **file**, even if it is inside a folder with a similar name. On Windows, use File Explorer's **Copy as path** command; surrounding quotation marks are accepted. A generic Linux example is `/path/to/models/model.Q6_K.gguf`.
 
-Certains GGUF Qwen3.5 déclarent une couche MTP absente de leurs poids. L'application détecte ce cas précisément. Si un override en mémoire suffit, elle l'utilise. Si un tableau de métadonnées inclut aussi cette couche fantôme, elle prépare une **copie de compatibilité** dans `data/model-cache` : compteurs et tableaux corrigés, position et octets des poids préservés. Le fichier téléchargé reste intact. Cette copie demande autant d'espace disque que le modèle (environ **7,36 Go supplémentaires** pour ce Q6_K), puis est réutilisée aux lancements suivants. Un GGUF dont les tenseurs MTP sont présents n'est pas corrigé. L'application ne répare pas des poids manquants ou corrompus.
+GGUF files are not uploaded into the browser. File paths are saved in `data/config.json`. Personal configuration files are excluded from the source distribution.
 
-Le moteur llama.cpp inclus dans certaines installations d'Ollama peut être réutilisé directement. L'application détecte les bibliothèques CUDA disposées dans les sous-dossiers `cuda_v12` ou `cuda_v13` à côté du moteur. Cela ne lance ni ne reconfigure le service Ollama. Un `GGML_BACKEND_PATH` déjà défini dans l'environnement est respecté.
+Some Qwen3.5 GGUF exports declare an MTP layer without including its tensors. The application detects this specific mismatch. It uses an in-memory metadata override when possible. If per-layer metadata arrays also include the missing layer, it prepares a **compatibility copy** in `data/model-cache`, correcting the metadata while preserving the positions and bytes of the weights. The original downloaded file is unchanged. The copy requires roughly one model's worth of additional disk space and is reused on later starts. Models with an actual MTP layer are left unchanged. Missing or corrupted model weights cannot be repaired by this mechanism.
 
-## Chat et images
+The llama.cpp engine included in some Ollama installations can be reused directly. The application detects CUDA libraries in `cuda_v12` or `cuda_v13` subdirectories next to the engine. It does not start or reconfigure the Ollama service, and it respects an existing `GGML_BACKEND_PATH` environment variable.
 
-- Écrire un message, puis appuyer sur Entrée. Maj+Entrée ajoute une ligne.
-- Joindre des images PNG/JPEG avec le bouton image, par glisser-déposer ou en collant une image dans la saisie.
-- Maximum trois images par message et 10 Mo par fichier source. Les images sont redimensionnées à 2 048 pixels sur le plus grand côté et converties en JPEG sur fond blanc avant envoi local. La limite totale d'une conversation envoyée est de 20 Mo ; recommencer une conversation si elle contient trop d'images.
-- Le bouton **Réflexion** demande au template du modèle d'activer ou désactiver le raisonnement. Son effet dépend du modèle. Le raisonnement reçu apparaît dans un bloc repliable distinct.
-- Le bouton carré interrompt la réponse en cours. Le texte déjà reçu est conservé.
-- La génération est limitée à 4 096 tokens par réponse, raisonnement compris. Un message signale une réponse tronquée.
-- Les blocs de code sont affichés comme du texte. Le HTML produit par le modèle n'est jamais exécuté. Le reste du Markdown est conservé sous forme de texte dans cette première version.
+## Chat and images
 
-La conversation reste dans la mémoire de la page : **fermer ou recharger la page la perd**. Les chemins de configuration sont conservés. « Nouvelle conversation » demande confirmation si une conversation existe déjà. Un rechargement ne décharge pas automatiquement le modèle : utiliser « Arrêter le modèle » ou fermer le serveur.
+- Type a message and press Enter. Shift+Enter inserts a new line.
+- Attach PNG/JPEG images with the image button, by dragging them onto the composer, or by pasting an image into the message field.
+- Attach up to three images per message, with a maximum of 10 MiB per source file. Images are resized to a maximum of 2,048 pixels on the longest side and converted to JPEG with a white background before being sent locally. A conversation request is limited to 20 MiB in total; start a new conversation if its image history becomes too large.
+- **Réflexion** (Thinking) asks the model's chat template to enable or disable reasoning. Its effect depends on the model. Received reasoning appears in a separate collapsible section.
+- The square button interrupts the current response. Text already received is kept.
+- Each response is limited to 4,096 generated tokens, including reasoning. The interface indicates when this limit truncates a response.
+- Code blocks are displayed as text. HTML generated by the model is never executed. Other Markdown is shown as plain text in this version.
 
-## Mémoire et compatibilité matérielle
+Conversation history exists only in the page's memory: **closing or reloading the page loses it**. Configuration paths are retained. **Nouvelle conversation** (New conversation) asks for confirmation before clearing an existing conversation. Reloading the page does not unload the model: use **Arrêter le modèle** (Stop model) or stop the server.
 
-Le profil initial est de **8 192 tokens** avec toutes les couches disponibles sur le GPU. Le profil initial vise une carte graphique de 12 Go ; la consommation réelle dépend aussi du contexte et des images. Si le moteur signale un manque de mémoire, diminuer le contexte ou choisir moins de couches GPU dans Configuration après l'avoir arrêté.
+## Memory and hardware
 
-Le choix **CPU uniquement** charge le calcul sur le processeur et désactive aussi le déport du projecteur sur le GPU. Il peut être beaucoup plus lent. Le fonctionnement Windows/Linux du code de l'application ne signifie pas que ce modèle tient dans la mémoire de tout ordinateur. Une machine sans NVIDIA peut utiliser un moteur CPU ou une distribution llama.cpp adaptée à son GPU.
+The default context is **8,192 tokens**, with all available model layers requested on the GPU. The initial profile targets a 12 GB graphics card, but actual memory use depends on the model, context and images. If the engine reports insufficient memory, stop it, then reduce the context or select fewer GPU layers in Configuration.
 
-L'application n'applique et ne modifie aucun débridage de carte graphique.
+**CPU uniquement** (CPU only) runs inference on the processor and disables GPU offloading for the vision projector. It may be much slower. Windows/Linux support does not mean that every computer has enough memory for a 9B model. A machine without NVIDIA hardware can use a CPU engine or a llama.cpp build suited to its GPU.
 
-## Dépannage
+The application does not apply or modify GPU unlocking tools. Windows has been exercised locally; Linux runtime behavior has not yet been verified.
 
-- **Fichier absent** : vérifier le chemin complet et que le téléchargement est terminé.
-- **Le moteur se ferme** : ouvrir Configuration → Journaux du moteur. Une option inconnue peut indiquer un moteur trop ancien ; une architecture inconnue ou un projecteur incompatible nécessite une version et des fichiers compatibles.
-- **CUDA non détecté** : vérifier la distribution du moteur et ses bibliothèques, puis les pilotes. Le nombre de couches demandé ne garantit pas à lui seul l'utilisation du GPU ; les journaux du moteur indiquent le déport réel.
-- **Contexte dépassé** : recommencer une conversation ou augmenter le contexte si la mémoire le permet. L'historique n'est pas supprimé silencieusement.
-- **Connexion interrompue** : vérifier le terminal, puis recharger la page. Copier le texte utile auparavant, puisque l'historique de cette version n'est pas persistant.
-- **Port occupé** : une autre instance utilise peut-être 8787. Fermer cette instance avant de relancer.
+## Troubleshooting
 
-Les services écoutent seulement sur la boucle locale. Les routes de contrôle vérifient l'hôte, l'origine et un jeton de session. Les images distantes sont refusées et llama.cpp est lancé en mode hors ligne. Une seule génération est acceptée à la fois.
+- **File not found:** check the full path and make sure the download has finished.
+- **Engine exits:** open Configuration → **Journaux du moteur** (Engine logs). An unknown option can indicate an outdated engine. An unknown architecture or incompatible projector requires a compatible engine build and matching files.
+- **CUDA not detected:** check the engine distribution, its libraries and your drivers. Requesting GPU layers does not guarantee GPU use; the engine logs report actual offloading.
+- **Context exceeded:** start a new conversation or increase the context if memory allows. History is not silently removed.
+- **Connection interrupted:** check the terminal, then reload the page. Copy any useful conversation text first, since this version does not save history.
+- **Port in use:** another instance may be using 8787. Close that instance before restarting.
+
+Both services listen only on loopback. Control routes check the host, origin and a session token. Remote image URLs are rejected, and llama.cpp starts in offline mode. Only one generation is accepted at a time.
 
 ## Smoke test
 
@@ -77,12 +85,13 @@ Les services écoutent seulement sur la boucle locale. Les routes de contrôle v
 node --test tests/smoke.mjs
 ```
 
-Ou `npm run smoke`. Le smoke emploie un **moteur HTTP simulé**, clairement séparé dans `tests/fixtures/`. Il vérifie le lancement, la configuration, les restrictions d'accès, le flux texte et raisonnement, les images, l'annulation, l'arrêt et le passage des bibliothèques CUDA. Il ne mesure ni la qualité ni la vitesse du modèle réel.
+Alternatively, run `npm run smoke`. This test uses a **simulated HTTP engine**, kept separately in `tests/fixtures/`. It checks application startup, configuration, access restrictions, streamed text and reasoning, images, cancellation, shutdown, CUDA library discovery and compatibility handling for missing MTP layers. It does not measure the quality or speed of a real model.
 
-## Sources
+## References and licensing
 
 - [llama.cpp](https://github.com/ggml-org/llama.cpp)
-- [Serveur et API](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)
-- [Entrées multimodales](https://github.com/ggml-org/llama.cpp/blob/master/docs/multimodal.md)
+- [Server and API documentation](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)
+- [Multimodal input documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/multimodal.md)
+- [Source distribution notes](DISTRIBUTION.md)
 
-Les GGUF et le moteur sont fournis séparément et conservent leurs propres licences.
+The engine, models and projectors are supplied separately and retain their own licenses.
