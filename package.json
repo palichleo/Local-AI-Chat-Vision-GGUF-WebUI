@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "description": "Chat et vision GGUF en local, sans dépendances npm.",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node server.mjs --open",
-    "smoke": "node --test tests/smoke.mjs",
-    "test": "node --test tests/smoke.mjs"
+    "smoke": "node --test tests/smoke.mjs tests/markdown.mjs",
+    "test": "node --test tests/smoke.mjs tests/markdown.mjs"
   }
 }

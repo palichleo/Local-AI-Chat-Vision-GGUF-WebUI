@@ -12,3 +12,17 @@ dialog{border:0;border-left:1px solid #dce2d2;box-shadow:-15px 0 65px #26332020;
 .mobile-new{display:none}
 @media(max-width:640px){.mobile-new{display:grid}.topbar-actions{gap:7px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* Model-generated Markdown; user messages retain their plain-text layout. */
+.message-body.markdown{line-height:1.8}
+.markdown>:first-child{margin-top:0}.markdown>:last-child{margin-bottom:0}
+.markdown p{margin:0 0 1em}.markdown strong{font-weight:650}.markdown em{font-style:italic}
+.markdown h1,.markdown h2,.markdown h3,.markdown h4,.markdown h5,.markdown h6{font-weight:650;line-height:1.35;letter-spacing:-.2px;margin:1.35em 0 .65em;color:var(--ink)}
+.markdown h1{font-size:1.65em}.markdown h2{font-size:1.4em}.markdown h3{font-size:1.18em}.markdown h4,.markdown h5,.markdown h6{font-size:1em}
+.markdown ul,.markdown ol{padding-left:1.65em;margin:.6em 0 1em}.markdown li{padding-left:.2em;margin:.4em 0}.markdown li>p{margin:.3em 0}.markdown li>ul,.markdown li>ol{margin:.3em 0}
+.markdown blockquote{margin:1em 0;padding:.1em 0 .1em 1em;border-left:3px solid #a1b493;color:#68765f}.markdown blockquote p:last-child{margin-bottom:0}
+.markdown :not(pre)>code{font: .9em ui-monospace,Consolas,monospace;background:#edf0e6;border:1px solid #e0e5d7;border-radius:4px;padding:.12em .3em;overflow-wrap:anywhere}
+.markdown pre code{font:inherit;padding:0;border:0;background:none;overflow-wrap:normal}.markdown pre{margin:1em 0}
+.markdown a{color:#356c51;text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}.markdown a:hover{color:#214d38}
+.markdown hr{border:0;border-top:1px solid var(--line);margin:1.5em 0}
+.markdown-table{max-width:100%;overflow-x:auto;margin:1em 0}.markdown table{border-collapse:collapse;min-width:50%;font-size:.94em}.markdown th,.markdown td{border:1px solid #dce2d2;text-align:left;vertical-align:top;padding:.55em .8em}.markdown th{background:#eef2e7;font-weight:600}.markdown tbody tr:nth-child(even){background:#f5f6f0}

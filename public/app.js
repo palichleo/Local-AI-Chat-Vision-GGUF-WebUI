@@ -1,4 +1,5 @@
 import { readSSE } from './stream.mjs';
+import { markdownToHtml } from './markdown.mjs';
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -214,18 +215,8 @@ function scrollToBottom() {
 }
 
 function renderText(target, text) {
-  const parts = text.split(/```([^\n`]*)\n([\s\S]*?)(?:```|$)/g);
-  const fragment = document.createDocumentFragment();
-  parts.forEach((part, index) => {
-    if (index % 3 === 0 && part) fragment.append(node('div', 'text-block', part));
-    if (index % 3 === 1) {
-      const pre = node('pre');
-      if (part.trim()) pre.append(node('span', 'code-label', part.trim()));
-      pre.append(node('code', '', parts[index + 1]));
-      fragment.append(pre);
-    }
-  });
-  target.replaceChildren(fragment);
+  target.classList.add('markdown');
+  target.innerHTML = markdownToHtml(text);
 }
 
 function userMessage(text, images) {

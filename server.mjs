@@ -13,6 +13,7 @@ const staticFiles = new Map([
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/stream.mjs', ['stream.mjs', 'text/javascript; charset=utf-8']],
+  ['/markdown.mjs', ['markdown.mjs', 'text/javascript; charset=utf-8']],
 ]);
 
 async function jsonBody(req) {
