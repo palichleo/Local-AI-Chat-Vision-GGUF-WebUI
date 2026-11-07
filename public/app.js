@@ -7,7 +7,7 @@ const state = {
   token: '', config: {}, status: { state: 'stopped', vision: false, busy: false, logs: [] },
   connected: false, thinking: true, messages: [], images: [], generating: false,
   preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingPreferences: false, waitingForModel: false,
-  saveHistory: false, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false,
+  saveHistory: false, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false, clearingHistory: false,
 };
 const labels = { stopped: 'Moteur arrêté', loading: 'Chargement du modèle…', ready: 'Prêt à discuter', stopping: 'Arrêt en cours…', error: 'Vérifier le moteur' };
 
@@ -109,6 +109,25 @@ function persistConversation() {
   return historyWrite;
 }
 
+async function clearHistory() {
+  if ($('history-clear').disabled) return;
+  state.clearingHistory = true;
+  state.loadingHistory = true;
+  $('history-delete-error').hidden = true;
+  updateControls();
+  try {
+    await historyWrite;
+    await api('history/clear', { confirm: true });
+    state.historyItems = []; state.messages = []; state.conversationId = null; state.archiveSnapshot = null; state.historyDirty = false;
+    $('messages').replaceChildren(); $('welcome').hidden = false;
+    $('conversation-title').textContent = 'Nouvelle conversation';
+    renderHistory(); notice('');
+    $('live-status').textContent = 'Historique supprimé.';
+    $('history-delete-dialog').close();
+  } catch (error) { $('history-delete-error').textContent = error.message; $('history-delete-error').hidden = false; }
+  finally { state.clearingHistory = false; state.loadingHistory = false; updateControls(); }
+}
+
 function savedUser(message) {
   if (typeof message.content === 'string') return { text: message.content, images: [] };
   return {
@@ -180,7 +199,11 @@ function updateControls() {
   $('model-card').setAttribute('aria-label', `Modèle : ${text}`);
   $('model-card').title = text;
   $('history-enabled').checked = state.saveHistory;
-  $('history-enabled').disabled = state.savingPreferences || !state.connected;
+  $('history-enabled').disabled = state.savingPreferences || state.clearingHistory || !state.connected;
+  $('history-clear').disabled = !state.connected || state.generating || state.preparing || state.savingHistory || state.savingPreferences || state.loadingHistory || ['loading', 'stopping'].includes(s.state);
+  $('history-delete-confirm').disabled = state.clearingHistory;
+  $('history-delete-cancel').disabled = state.clearingHistory;
+  $('history-delete-confirm').textContent = state.clearingHistory ? 'Suppression…' : 'Supprimer définitivement';
   $('theme-toggle').disabled = state.savingPreferences || !state.connected;
   $('config-fields').disabled = running || state.operation || state.generating || !state.connected;
   $('save-config').disabled = running || state.operation || state.generating || !state.connected;
@@ -203,7 +226,7 @@ function updateControls() {
     button.classList.toggle('active', button.dataset.conversationId === state.conversationId);
   }
   $('prompt').disabled = state.loadingHistory;
-  $('compose-state').textContent = state.preparing ? 'Préparation des images…' : state.waitingForModel ? 'Chargement… message en attente' : state.generating ? 'Réponse en cours…' : s.state === 'ready' ? s.vision ? 'Texte + images' : 'Texte uniquement' : s.state === 'loading' ? 'Le modèle se charge…' : 'Démarrage automatique à l’envoi';
+  $('compose-state').textContent = state.preparing ? 'Préparation des images…' : state.waitingForModel ? 'Chargement… message en attente' : state.generating ? 'Réponse en cours…' : s.state === 'ready' ? s.vision ? 'Texte + images' : 'Texte uniquement' : s.state === 'loading' ? 'Le modèle se charge…' : '';
   $('engine-logs').textContent = s.logs?.join('\n') || 'Les journaux apparaîtront au démarrage.';
   if (s.error) {
     $('config-error').textContent = s.error;
@@ -497,6 +520,10 @@ async function sendMessage(event) {
 
 applyTheme(document.documentElement.dataset.theme);
 $('theme-toggle').onclick = toggleTheme;
+$('history-clear').onclick = () => { $('history-delete-error').hidden = true; if (!$('history-delete-dialog').open) $('history-delete-dialog').showModal(); };
+$('history-delete-cancel').onclick = () => $('history-delete-dialog').close();
+$('history-delete-confirm').onclick = clearHistory;
+$('history-delete-dialog').addEventListener('cancel', (event) => { if (state.clearingHistory) event.preventDefault(); });
 $('history-enabled').onchange = async () => {
   const enabled = $('history-enabled').checked;
   if (await changePreferences({ saveHistory: enabled }) && enabled) await persistConversation();

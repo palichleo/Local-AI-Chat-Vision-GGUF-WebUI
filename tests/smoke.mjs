@@ -134,6 +134,7 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       const response = await call('chat', { messages: [{ role: 'user', content: 'lent' }] }, { signal: controller.signal });
       const reader = response.body.getReader();
       await reader.read();
+      assert.equal((await call('history/clear', { confirm: true })).status, 409, 'La suppression attend la fin de la generation.');
       controller.abort();
       await reader.cancel().catch(() => {});
       await until(async () => !(await status()).busy);

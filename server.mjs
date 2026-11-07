@@ -88,6 +88,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   } catch { /* Missing or damaged preferences use the default appearance. */ }
   let savingPreferences = false;
   let disablingHistory = false;
+  let clearingHistory = false;
   const history = new History(historyDir);
   const token = randomBytes(32).toString('hex');
   const engine = new Engine({ spawnProcess, cacheDir: join(dataDir, 'model-cache') });
@@ -147,7 +148,15 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         } finally { savingPreferences = false; disablingHistory = false; }
         return send(200, { preferences });
       }
+      if (path === '/api/history/clear') {
+        if (body?.confirm !== true) throw problem('Confirme la suppression de l’historique.');
+        if (clearingHistory || disablingHistory || savingPreferences || engine.busy || ['loading', 'stopping'].includes(engine.state)) throw problem('Attends la fin de l’opération en cours avant de supprimer l’historique.', 409);
+        clearingHistory = true;
+        try { await history.clear(); return send(200, { cleared: true }); }
+        finally { clearingHistory = false; }
+      }
       if (path === '/api/history/save') {
+        if (clearingHistory) throw problem('Suppression de l’historique en cours.', 409);
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
         if (disablingHistory) throw problem('Désactivation de l’historique en cours.', 409);
         return send(200, { conversation: await history.save(body) });

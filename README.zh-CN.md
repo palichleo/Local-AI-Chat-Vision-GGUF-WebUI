@@ -70,7 +70,7 @@ GGUF 文件不会上传到浏览器。文件路径保存在 `data/config.json` �
 
 Configuration 中的 **Conserver les conversations**（保留对话）默认关闭。关闭时，行为与此前相同：刷新或关闭页面会丢失对话。开启后，消息、推理和浏览器压缩后的图片会保存在项目的 `history/<对话ID>/` 中：`conversation.json` 与图片文件分开保存，相同图片在重复保存时不会重复复制。`history/` 和 `data/` 均被 Git 忽略，手动上传源码时也应排除这两个目录。
 
-可从侧边栏重新打开对话；窄屏可在 Configuration 中访问历史。应用会保存待处理消息、定期保存部分回复并保存最终回复。未完成发送的用户消息恢复为草稿，不会自动重发；部分助手回复会明确标注。强制关闭仍可能丢失最近尚未保存的流式内容。关闭历史只停止后续保存并隐藏列表，不会删除旧文件。对话中开启历史会保存当前交流；保存失败时仍保留页面内容，并阻止切换对话，直到保存成功或关闭历史。文件可在应用关闭后手动备份或删除。
+可从侧边栏重新打开对话；窄屏可在 Configuration 中访问历史。应用会保存待处理消息、定期保存部分回复并保存最终回复。未完成发送的用户消息恢复为草稿，不会自动重发；部分助手回复会明确标注。强制关闭仍可能丢失最近尚未保存的流式内容。关闭历史只停止后续保存并隐藏列表，不会删除旧文件。红色 **Supprimer l’historique** 按钮可在确认后永久删除已保存的对话及其图片，即使历史保存已关闭也能使用；当前显示的对话会关闭，输入框草稿会保留。保存开关设置保持不变。对话中开启历史会保存当前交流；保存失败时仍保留页面内容，并阻止切换对话，直到保存成功或关闭历史。文件可在应用关闭后手动备份或删除。
 
 **Contexte total**（总上下文）由消息、图像令牌、推理和回复共享；选项为 4,096 至 262,144。大上下文属于高级选项，实际容量取决于模型和内存/显存。**Sortie maximale**（最大输出）单独限制每次生成，包含推理，默认 4,096，最高可选 32,768 且不超过上下文。修改时需先停止模型，保存后在下次启动生效。恢复历史不会扩大模型上下文。
 
@@ -100,7 +100,7 @@ Configuration 中的 **Conserver les conversations**（保留对话）默认关�
 ## 冒烟测试
 
 ```sh
-node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs tests/history.mjs tests/limits.mjs
+node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs tests/history.mjs tests/history-clear.mjs tests/limits.mjs
 ```
 
 也可以运行 `npm run smoke`。测试使用单独放在 `tests/fixtures/` 中的**模拟 HTTP 引擎**，检查应用启动、配置、访问限制、文字与推理流、图像、取消生成、停止引擎、CUDA 库检测，以及缺失 MTP 层的兼容性处理。它不衡量真实模型的回答质量或速度。

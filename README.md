@@ -70,7 +70,7 @@ The first message automatically starts the configured model and its vision proje
 
 Saved conversations appear in the sidebar, or inside Configuration on narrow screens. Reopen one to restore messages and images and continue chatting. Pending user turns, periodic partial replies and finished replies are saved. An unfinished user turn is restored as an editable draft and is never resent automatically. A restored partial assistant reply is marked as partial. A forced shutdown can still lose the latest unsaved part of a streamed reply.
 
-Disabling history stops further writes and hides the list; it does **not delete** existing files. Enabling it during a conversation saves the current exchange. Files are ordinary local files, grow as conversations accumulate, and can be backed up or removed manually while the app is closed. History does not increase the model's active context window: reopening an archive sends its restored messages only when you submit a new prompt, with the same context and request-size limits. Saving failures are reported and keep the conversation in the page; switching to another conversation is blocked until saving succeeds or history is disabled.
+Disabling history stops further writes and hides the list; it does **not delete** existing files. The red **Supprimer l’historique** button permanently deletes saved conversations and their images after confirmation, even when saving is disabled. It also closes the displayed exchange while keeping the current composer draft. The saving preference is retained; future exchanges can be saved again. Enabling it during a conversation saves the current exchange. Files are ordinary local files, grow as conversations accumulate, and can be backed up or removed manually while the app is closed. History does not increase the model's active context window: reopening an archive sends its restored messages only when you submit a new prompt, with the same context and request-size limits. Saving failures are reported and keep the conversation in the page; switching to another conversation is blocked until saving succeeds or history is disabled.
 
 **Nouvelle conversation** preserves saved exchanges. With history off, it asks before clearing an existing conversation. Reloading the page does not unload the model: use **Arrêter le modèle** or stop the server. The model-card border is green when ready, red when stopped or unavailable, and amber while loading or stopping; its accessible label also reports the state.
 
@@ -102,7 +102,7 @@ Both services listen only on loopback. Control routes check the host, origin and
 ## Smoke test
 
 ```sh
-node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs tests/history.mjs tests/limits.mjs
+node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs tests/history.mjs tests/history-clear.mjs tests/limits.mjs
 ```
 
 Alternatively, run `npm run smoke`. This test uses a **simulated HTTP engine**, kept separately in `tests/fixtures/`. It checks application startup, configuration, access restrictions, streamed text and reasoning, images, cancellation, shutdown, CUDA library discovery and compatibility handling for missing MTP layers. It does not measure the quality or speed of a real model.
