@@ -60,7 +60,7 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       ...(data === undefined ? {} : { body: JSON.stringify(data) }),
     });
     const status = async () => (await call('status')).json();
-    const config = { enginePath: process.execPath, modelPath, projectorPath, contextSize: 8192, gpuLayers: 0 };
+    const config = { enginePath: process.execPath, modelPath, projectorPath, contextSize: 8192, maxOutputTokens: 4096, gpuLayers: 0 };
 
     await t.test('l’application démarre sans moteur et protège son API', async () => {
       assert.equal(bootstrap.status.state, 'stopped');

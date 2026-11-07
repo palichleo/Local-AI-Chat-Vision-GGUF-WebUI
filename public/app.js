@@ -6,7 +6,8 @@ const $ = (id) => document.getElementById(id);
 const state = {
   token: '', config: {}, status: { state: 'stopped', vision: false, busy: false, logs: [] },
   connected: false, thinking: true, messages: [], images: [], generating: false,
-  preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingTheme: false, waitingForModel: false,
+  preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingPreferences: false, waitingForModel: false,
+  saveHistory: false, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false,
 };
 const labels = { stopped: 'Moteur arrêté', loading: 'Chargement du modèle…', ready: 'Prêt à discuter', stopping: 'Arrêt en cours…', error: 'Vérifier le moteur' };
 
@@ -44,6 +45,117 @@ async function api(route, body, options = {}) {
   return response;
 }
 
+let historyWrite = Promise.resolve();
+
+function renderHistory() {
+  $('history-section').hidden = !state.saveHistory;
+  $('history-mobile').hidden = !state.saveHistory;
+  $('session-note').textContent = state.saveHistory ? 'Conversations sauvegardées sur cet ordinateur.' : 'Conversation conservée pendant cette session uniquement.';
+  for (const id of ['history-list', 'history-list-mobile']) {
+    const list = $(id);
+    list.replaceChildren();
+    if (!state.historyItems.length) list.append(node('p', 'history-empty', 'Aucune conversation enregistrée.'));
+    for (const item of state.historyItems) {
+      const button = node('button', `history-item${item.id === state.conversationId ? ' active' : ''}`);
+      button.type = 'button';
+      button.dataset.conversationId = item.id;
+      button.disabled = state.generating || state.preparing || state.loadingHistory;
+      button.append(node('span', '', item.title), node('small', '', `${new Date(item.updatedAt).toLocaleDateString('fr-FR')}${item.incomplete ? ' · en cours / partielle' : ''}`));
+      button.onclick = () => loadConversation(item.id);
+      list.append(button);
+    }
+  }
+}
+
+async function refreshHistory() {
+  if (!state.saveHistory) { state.historyItems = []; renderHistory(); return; }
+  const result = await (await api('history')).json();
+  state.historyItems = result.conversations;
+  renderHistory();
+  if (result.skipped) notice(`${result.skipped} conversation(s) illisible(s) ignorée(s). Les fichiers restent sur disque.`);
+}
+
+async function changePreferences(patch) {
+  if (state.savingPreferences) return false;
+  state.savingPreferences = true;
+  updateControls();
+  try {
+    const { preferences } = await (await api('preferences', patch)).json();
+    state.saveHistory = preferences.saveHistory;
+    applyTheme(preferences.theme);
+    await refreshHistory();
+    return true;
+  } catch (error) { notice(error.message); return false; }
+  finally { state.savingPreferences = false; updateControls(); }
+}
+
+function persistConversation() {
+  const snapshot = state.archiveSnapshot || { messages: state.messages, incomplete: false };
+  if (!state.saveHistory || !snapshot.messages.length) return Promise.resolve(true);
+  const id = state.conversationId ||= crypto.randomUUID();
+  state.historyDirty = true;
+  historyWrite = historyWrite.then(async () => {
+    if (!state.saveHistory) return true;
+    state.savingHistory = true;
+    try {
+      const { conversation } = await (await api('history/save', { id, ...snapshot })).json();
+      state.historyItems = [conversation, ...state.historyItems.filter((item) => item.id !== id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      if (state.conversationId === id && (!state.archiveSnapshot || state.archiveSnapshot === snapshot)) state.historyDirty = false;
+      renderHistory();
+      return true;
+    } catch (error) { notice(`Historique non enregistré : ${error.message} La conversation reste dans la page.`); return false; }
+    finally { state.savingHistory = false; }
+  });
+  return historyWrite;
+}
+
+function savedUser(message) {
+  if (typeof message.content === 'string') return { text: message.content, images: [] };
+  return {
+    text: message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n'),
+    images: message.content.filter((part) => part.type === 'image_url').map((part, index) => ({ name: `Image enregistrée ${index + 1}`, url: part.image_url.url })),
+  };
+}
+
+async function loadConversation(id) {
+  if (state.generating || state.preparing || state.loadingHistory) return;
+  state.loadingHistory = true;
+  updateControls();
+  try {
+    if (!await persistConversation()) return;
+    const record = await (await api(`history/${id}`)).json();
+    const messages = [...record.messages];
+    const draft = record.incomplete && messages.at(-1)?.role === 'user' ? savedUser(messages.pop()) : { text: '', images: [] };
+    state.conversationId = id;
+    state.messages = messages;
+    state.archiveSnapshot = { messages: record.messages, incomplete: record.incomplete };
+    state.historyDirty = false;
+    state.images = draft.images;
+    $('prompt').value = draft.text;
+    $('messages').replaceChildren();
+    for (const [index, message] of messages.entries()) {
+      if (message.role === 'user') { const user = savedUser(message); userMessage(user.text, user.images); }
+      else {
+        const view = assistantMessage();
+        if (message.content) renderText(view.body, message.content);
+        else view.body.textContent = 'Aucune réponse finale reçue.';
+        view.reasoning.hidden = !message.reasoning_content;
+        view.thoughts.textContent = message.reasoning_content || '';
+        if (record.incomplete && index === messages.length - 1) view.note.textContent = 'Réponse partielle restaurée.';
+      }
+    }
+    $('welcome').hidden = messages.length > 0;
+    $('conversation-title').textContent = record.title;
+    $('settings').close();
+    renderAttachments();
+    resizePrompt();
+    state.stickToBottom = true;
+    scrollToBottom();
+    $('prompt').focus();
+  } catch (error) { notice(error.message); }
+  finally { state.loadingHistory = false; updateControls(); $('prompt').focus(); }
+}
+
 function applyTheme(theme) {
   state.theme = theme === 'light' ? 'light' : 'dark';
   document.documentElement.dataset.theme = state.theme;
@@ -55,23 +167,21 @@ function applyTheme(theme) {
 }
 
 async function toggleTheme() {
-  if (state.savingTheme || !state.connected) return;
-  state.savingTheme = true;
-  updateControls();
-  try {
-    const result = await (await api('preferences', { theme: state.theme === 'dark' ? 'light' : 'dark' })).json();
-    applyTheme(result.preferences.theme);
-  } catch (error) { notice(error.message); }
-  finally { state.savingTheme = false; updateControls(); }
+  await changePreferences({ theme: state.theme === 'dark' ? 'light' : 'dark' });
 }
 
 function updateControls() {
   const s = state.status;
   const running = ['loading', 'ready', 'stopping'].includes(s.state);
   const text = state.connected ? labels[s.state] || 'État inconnu' : 'Connexion interrompue';
-  for (const id of ['sidebar-status', 'settings-status']) $(id).textContent = text;
-  for (const dot of [$('sidebar-dot'), $('settings-dot')]) dot.className = `dot ${state.connected ? s.state : 'error'}`;
-  $('theme-toggle').disabled = state.savingTheme || !state.connected;
+  $('settings-status').textContent = text;
+  $('settings-dot').className = `dot ${state.connected ? s.state : 'error'}`;
+  $('model-card').className = `model-card ${state.connected && s.state === 'ready' ? 'is-ready' : state.connected && ['loading', 'stopping'].includes(s.state) ? 'is-loading' : 'is-off'}`;
+  $('model-card').setAttribute('aria-label', `Modèle : ${text}`);
+  $('model-card').title = text;
+  $('history-enabled').checked = state.saveHistory;
+  $('history-enabled').disabled = state.savingPreferences || !state.connected;
+  $('theme-toggle').disabled = state.savingPreferences || !state.connected;
   $('config-fields').disabled = running || state.operation || state.generating || !state.connected;
   $('save-config').disabled = running || state.operation || state.generating || !state.connected;
   $('save-start').disabled = running || state.operation || state.generating || !state.connected;
@@ -80,14 +190,19 @@ function updateControls() {
   $('toggle-engine').disabled = state.operation || s.state === 'stopping' || !state.connected;
   $('toggle-engine').classList.toggle('is-running', running);
   $('toggle-engine').replaceChildren(icon(running ? 'stop' : 'play'), node('span', '', running ? 'Arrêter le modèle' : 'Démarrer le modèle'));
-  $('send').disabled = !state.connected || s.state === 'stopping' || s.busy || state.generating || state.preparing || state.operation || (!$('prompt').value.trim() && !state.images.length);
+  $('send').disabled = !state.connected || s.state === 'stopping' || s.busy || state.generating || state.preparing || state.operation || state.loadingHistory || (!$('prompt').value.trim() && !state.images.length);
   $('send').hidden = state.generating;
   $('cancel').hidden = !state.generating;
   $('cancel').setAttribute('aria-label', state.waitingForModel ? 'Annuler le message en attente' : 'Interrompre la réponse');
   $('thinking').disabled = state.generating;
-  $('attach').disabled = state.generating || state.preparing;
-  $('new-chat').disabled = state.generating;
-  $('new-chat-mobile').disabled = state.generating;
+  $('attach').disabled = state.generating || state.preparing || state.loadingHistory;
+  $('new-chat').disabled = state.generating || state.loadingHistory;
+  $('new-chat-mobile').disabled = state.generating || state.loadingHistory;
+  for (const button of document.querySelectorAll('.history-item')) {
+    button.disabled = state.generating || state.preparing || state.loadingHistory;
+    button.classList.toggle('active', button.dataset.conversationId === state.conversationId);
+  }
+  $('prompt').disabled = state.loadingHistory;
   $('compose-state').textContent = state.preparing ? 'Préparation des images…' : state.waitingForModel ? 'Chargement… message en attente' : state.generating ? 'Réponse en cours…' : s.state === 'ready' ? s.vision ? 'Texte + images' : 'Texte uniquement' : s.state === 'loading' ? 'Le modèle se charge…' : 'Démarrage automatique à l’envoi';
   $('engine-logs').textContent = s.logs?.join('\n') || 'Les journaux apparaîtront au démarrage.';
   if (s.error) {
@@ -118,6 +233,12 @@ async function refreshStatus() {
   updateControls();
 }
 
+function syncOutputOptions() {
+  const context = Number($('context-size').value);
+  for (const option of $('output-tokens').options) option.disabled = Number(option.value) > context;
+  if (Number($('output-tokens').value) > context) $('output-tokens').value = [...$('output-tokens').options].filter((option) => !option.disabled).at(-1).value;
+}
+
 function openSettings() {
   $('engine-path').value = state.config.enginePath || '';
   $('model-path').value = state.config.modelPath || '';
@@ -125,6 +246,10 @@ function openSettings() {
   const size = String(state.config.contextSize || 8192);
   if (![...$('context-size').options].some((option) => option.value === size)) $('context-size').add(new Option(`${size} tokens`, size));
   $('context-size').value = size;
+  const output = String(state.config.maxOutputTokens || 4096);
+  if (![...$('output-tokens').options].some((option) => option.value === output)) $('output-tokens').add(new Option(`${output} tokens`, output));
+  $('output-tokens').value = output;
+  syncOutputOptions();
   const layers = state.config.gpuLayers ?? 99;
   $('compute-mode').value = [0, 99].includes(layers) ? String(layers) : 'custom';
   $('gpu-layers').value = String(layers);
@@ -141,7 +266,7 @@ async function saveConfiguration(start) {
   try {
     const config = {
       enginePath: $('engine-path').value, modelPath: $('model-path').value,
-      projectorPath: $('projector-path').value, contextSize: Number($('context-size').value),
+      projectorPath: $('projector-path').value, contextSize: Number($('context-size').value), maxOutputTokens: Number($('output-tokens').value),
       gpuLayers: Number($('compute-mode').value === 'custom' ? $('gpu-layers').value : $('compute-mode').value),
     };
     state.config = (await (await api('config', config)).json()).config;
@@ -194,7 +319,7 @@ function renderAttachments() {
 }
 
 async function addImages(files) {
-  if (state.generating || state.preparing) return;
+  if (state.generating || state.preparing || state.loadingHistory) return;
   if (!state.config.projectorPath) {
     notice('Ajoutez un projecteur de vision dans Configuration pour joindre des images.');
     return openSettings();
@@ -284,6 +409,7 @@ async function sendMessage(event) {
   ] : text;
   const user = { role: 'user', content };
   const history = [...state.messages, user];
+  state.archiveSnapshot = { messages: history, incomplete: true };
   const userView = userMessage(text, images);
   const view = assistantMessage();
   $('welcome').hidden = true;
@@ -297,7 +423,8 @@ async function sendMessage(event) {
   resizePrompt();
   notice('');
   scrollToBottom();
-  let output = '', reasoning = '', finishReason = '', lastRender = 0;
+  let output = '', reasoning = '', finishReason = '', lastRender = 0, lastArchive = 0;
+  let responseComplete = false;
   const started = performance.now();
   const render = () => {
     view.reasoning.hidden = !reasoning;
@@ -306,10 +433,15 @@ async function sendMessage(event) {
     else if (reasoning) view.body.replaceChildren(node('span', 'pending-dot', 'Réflexion en cours…'));
     scrollToBottom();
     lastRender = performance.now();
+    if (output || reasoning) {
+      state.archiveSnapshot = { messages: [...history, { role: 'assistant', content: output, ...(reasoning ? { reasoning_content: reasoning } : {}) }], incomplete: true };
+      if (performance.now() - lastArchive > 2000 && !state.savingHistory) { lastArchive = performance.now(); persistConversation(); }
+    }
   };
   try {
     view.body.replaceChildren(node('span', 'pending-message', 'Démarrage du modèle… Votre message est en attente.'));
     $('live-status').textContent = 'Message en attente du modèle.';
+    if (!await persistConversation()) throw new Error('Impossible de sauvegarder ce message. Vérifiez le dossier history ou désactivez l’historique.');
     await waitForModel(api, state.controller.signal, (status) => {
       state.status = status;
       updateControls();
@@ -329,7 +461,8 @@ async function sendMessage(event) {
       if (performance.now() - lastRender > 55) render();
     });
     if (!output && !reasoning) throw new Error('Le moteur a terminé sans produire de texte.');
-    view.note.textContent = finishReason === 'length' ? 'Limite de 4 096 tokens atteinte. La réponse peut être incomplète.' : `${((performance.now() - started) / 1000).toFixed(1).replace('.', ',')} s · généré sur cet ordinateur`;
+    view.note.textContent = finishReason === 'length' ? `Limite de sortie (${new Intl.NumberFormat('fr-FR').format(state.config.maxOutputTokens || 4096)} tokens) ou de contexte atteinte. La réponse peut être incomplète.` : `${((performance.now() - started) / 1000).toFixed(1).replace('.', ',')} s · généré sur cet ordinateur`;
+    responseComplete = finishReason !== 'length';
     $('live-status').textContent = 'La réponse du modèle est terminée.';
   } catch (error) {
     const canceled = state.controller.signal.aborted;
@@ -349,8 +482,10 @@ async function sendMessage(event) {
       render();
       if (!output) view.body.replaceChildren(node('div', 'text-block', 'Aucune réponse finale reçue.'));
       state.messages = [...history, { role: 'assistant', content: output, ...(reasoning ? { reasoning_content: reasoning } : {}) }];
+      state.archiveSnapshot = { messages: state.messages, incomplete: !responseComplete };
       $('conversation-title').textContent = text || 'Une image à explorer';
     }
+    await persistConversation();
     state.generating = false;
     state.waitingForModel = false;
     state.controller = null;
@@ -362,10 +497,15 @@ async function sendMessage(event) {
 
 applyTheme(document.documentElement.dataset.theme);
 $('theme-toggle').onclick = toggleTheme;
+$('history-enabled').onchange = async () => {
+  const enabled = $('history-enabled').checked;
+  if (await changePreferences({ saveHistory: enabled }) && enabled) await persistConversation();
+};
 $('settings-open').onclick = openSettings;
 $('settings-close').onclick = () => $('settings').close();
 $('settings-form').onsubmit = (event) => { event.preventDefault(); saveConfiguration(false); };
 $('save-start').onclick = () => saveConfiguration(true);
+$('context-size').onchange = syncOutputOptions;
 $('compute-mode').onchange = () => { $('custom-layers-field').hidden = $('compute-mode').value !== 'custom'; };
 $('toggle-engine').onclick = () => toggleEngine();
 $('settings-stop').onclick = () => toggleEngine(true);
@@ -377,12 +517,19 @@ $('prompt').onkeydown = (event) => {
 $('chat-form').onsubmit = sendMessage;
 $('cancel').onclick = () => state.controller?.abort();
 $('thinking').onclick = () => { state.thinking = !state.thinking; $('thinking').setAttribute('aria-pressed', String(state.thinking)); };
-function newConversation() {
-  if (state.messages.length && !confirm('Recommencer effacera cette conversation de la page. Continuer ?')) return;
-  state.messages = []; state.images = [];
-  $('messages').replaceChildren(); $('welcome').hidden = false;
-  $('conversation-title').textContent = 'Nouvelle conversation';
-  renderAttachments(); notice(''); updateControls(); $('prompt').focus();
+async function newConversation() {
+  if (state.generating || state.preparing || state.loadingHistory) return;
+  state.loadingHistory = true;
+  updateControls();
+  try {
+    if (!await persistConversation()) return;
+    if (!state.saveHistory && state.messages.length && !confirm('Recommencer effacera cette conversation de la page. Continuer ?')) return;
+    state.messages = []; state.images = []; state.conversationId = null; state.archiveSnapshot = null; state.historyDirty = false;
+    $('prompt').value = '';
+    $('messages').replaceChildren(); $('welcome').hidden = false;
+    $('conversation-title').textContent = 'Nouvelle conversation';
+    renderAttachments(); notice(''); resizePrompt();
+  } finally { state.loadingHistory = false; updateControls(); $('prompt').focus(); }
 }
 $('new-chat').onclick = newConversation;
 $('new-chat-mobile').onclick = newConversation;
@@ -407,7 +554,7 @@ document.addEventListener('dragover', (event) => event.preventDefault());
 document.addEventListener('drop', (event) => event.preventDefault());
 $('chat-area').onscroll = () => { const area = $('chat-area'); state.stickToBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 100; };
 window.addEventListener('beforeunload', (event) => {
-  if (state.messages.length || state.generating) { event.preventDefault(); event.returnValue = ''; }
+  if (state.generating || state.savingHistory || state.historyDirty || $('prompt').value.trim() || state.images.length || (!state.saveHistory && state.messages.length)) { event.preventDefault(); event.returnValue = ''; }
 });
 
 try {
@@ -416,6 +563,8 @@ try {
   const initial = await response.json();
   Object.assign(state, { token: initial.token, config: initial.config, status: initial.status, connected: true });
   applyTheme(initial.preferences?.theme);
+  state.saveHistory = initial.preferences?.saveHistory === true;
+  await refreshHistory();
   if (initial.platform !== 'win32') $('engine-path').placeholder = '/chemin/vers/llama-server';
   if (initial.warning) notice(initial.warning);
   updateControls();

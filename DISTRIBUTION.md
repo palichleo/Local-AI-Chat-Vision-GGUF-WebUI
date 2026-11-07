@@ -17,3 +17,7 @@ L'application n'embarque ni police web, ni image externe, ni bibliothèque npm t
 ## Configuration après utilisation
 
 L'exécution crée data/config.json et éventuellement un cache de modèle sous data/. Le fichier .gitignore exclut ce dossier pour les ajouts avec Git. Pour une publication manuelle via le site GitHub, sélectionner seulement les fichiers de cette archive et conserver data/ en local.
+
+## Historique facultatif
+
+Lorsque la conservation est activée, history/ contient des conversations, raisonnements et copies des images compressées. Ce dossier est exclu de Git. Ne pas l’inclure dans une archive de sources ni dans un téléversement manuel. Désactiver l’option ne supprime pas les fichiers existants.

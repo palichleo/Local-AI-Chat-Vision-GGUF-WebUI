@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
+import { History } from './lib/history.mjs';
 import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -31,7 +32,7 @@ async function jsonBody(req) {
   catch { throw problem('Le JSON reçu est invalide.'); }
 }
 
-function chatPayload(input, vision) {
+function chatPayload(input, vision, maxOutputTokens) {
   if (!input || !Array.isArray(input.messages) || !input.messages.length || input.messages.length > 100) throw problem('La conversation doit contenir entre 1 et 100 messages. Recommence une conversation si nécessaire.');
   const messages = input.messages.map((message, index) => {
     if (!message || !['system', 'user', 'assistant'].includes(message.role) || (message.role === 'system' && index !== 0)) throw problem('Rôle de message invalide.');
@@ -66,12 +67,12 @@ function chatPayload(input, vision) {
   if (last.role !== 'user' || (typeof last.content === 'string' && !last.content.trim())) throw problem('Écris un message ou joins une image.');
   return {
     model: 'local', messages, stream: true, temperature: 0.7, top_p: 0.95, top_k: 20,
-    max_tokens: 4096, reasoning_format: 'deepseek',
+    max_tokens: maxOutputTokens, reasoning_format: 'deepseek',
     chat_template_kwargs: { enable_thinking: input.thinking !== false },
   };
 }
 
-export async function createApplication({ port = 8787, dataDir = join(root, 'data'), spawnProcess } = {}) {
+export async function createApplication({ port = 8787, dataDir = join(root, 'data'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess } = {}) {
   await mkdir(dataDir, { recursive: true });
   const configPath = join(dataDir, 'config.json');
   let config = { ...defaults };
@@ -79,12 +80,15 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   try { config = normalizeConfig(JSON.parse(await readFile(configPath, 'utf8'))); }
   catch (error) { if (error.code !== 'ENOENT') configWarning = 'La configuration enregistrée est illisible. Renseigne à nouveau les chemins.'; }
   const preferencesPath = join(dataDir, 'preferences.json');
-  let preferences = { theme: 'dark' };
+  let preferences = { theme: 'dark', saveHistory: false };
   try {
     const saved = JSON.parse(await readFile(preferencesPath, 'utf8'));
-    if (['dark', 'light'].includes(saved?.theme)) preferences = { theme: saved.theme };
+    if (['dark', 'light'].includes(saved?.theme)) preferences.theme = saved.theme;
+    if (typeof saved?.saveHistory === 'boolean') preferences.saveHistory = saved.saveHistory;
   } catch { /* Missing or damaged preferences use the default appearance. */ }
   let savingPreferences = false;
+  let disablingHistory = false;
+  const history = new History(historyDir);
   const token = randomBytes(32).toString('hex');
   const engine = new Engine({ spawnProcess, cacheDir: join(dataDir, 'model-cache') });
   let url;
@@ -121,19 +125,32 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Recharge la page.', 401);
       if (path === '/api/status' && req.method === 'GET') return send(200, engine.status());
+      if (req.method === 'GET' && (path === '/api/history' || path.startsWith('/api/history/'))) {
+        if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
+        return send(200, path === '/api/history' ? await history.list() : await history.read(path.slice('/api/history/'.length)));
+      }
       if (req.method !== 'POST') throw problem('Méthode non prise en charge.', 405);
       const body = await jsonBody(req);
       if (path === '/api/preferences') {
-        if (!['dark', 'light'].includes(body?.theme)) throw problem('Choisis le mode jour ou nuit.');
+        if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.keys(body).length || Object.keys(body).some((key) => !['theme', 'saveHistory'].includes(key))) throw problem('Préférences invalides.');
+        if ('theme' in body && !['dark', 'light'].includes(body.theme)) throw problem('Choisis le mode jour ou nuit.');
+        if ('saveHistory' in body && typeof body.saveHistory !== 'boolean') throw problem('Choix d’historique invalide.');
         if (savingPreferences) throw problem('Préférences en cours d’enregistrement.', 409);
-        const next = { theme: body.theme };
+        const next = { ...preferences, ...body };
         savingPreferences = true;
+        disablingHistory = body.saveHistory === false;
         try {
+          if (disablingHistory) await history.flush();
           await writeFile(`${preferencesPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 });
           await rename(`${preferencesPath}.tmp`, preferencesPath);
           preferences = next;
-        } finally { savingPreferences = false; }
+        } finally { savingPreferences = false; disablingHistory = false; }
         return send(200, { preferences });
+      }
+      if (path === '/api/history/save') {
+        if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
+        if (disablingHistory) throw problem('Désactivation de l’historique en cours.', 409);
+        return send(200, { conversation: await history.save(body) });
       }
       if (path === '/api/config') {
         if (saving || engine.child || engine.state === 'loading' || engine.state === 'stopping') throw problem('Arrête le moteur avant de modifier sa configuration.', 409);
@@ -156,7 +173,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (path !== '/api/chat') throw problem('Route introuvable.', 404);
       if (engine.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
       if (engine.busy) throw problem('Une réponse est déjà en cours.', 409);
-      const payload = chatPayload(body, engine.vision);
+      const payload = chatPayload(body, engine.vision, config.maxOutputTokens);
       const controller = new AbortController();
       engine.activeRequest = controller;
       engine.busy = true;
@@ -207,6 +224,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
     async close() {
       await engine.stop();
       server.closeAllConnections();
+      await history.flush();
       await new Promise((done) => server.close(done));
     },
   };

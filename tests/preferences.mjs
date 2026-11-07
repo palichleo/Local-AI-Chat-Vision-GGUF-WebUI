@@ -11,15 +11,15 @@ test('night par défaut, choix enregistré et restauré après redémarrage', as
   try {
     app = await createApplication({ port: 0, dataDir });
     let initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
-    assert.deepEqual(initial.preferences, { theme: 'dark' });
+    assert.deepEqual(initial.preferences, { theme: 'dark', saveHistory: false });
     assert.match(await (await fetch(app.url)).text(), /<html[^>]*data-theme="dark"/);
     const response = await fetch(`${app.url}/api/preferences`, {
       method: 'POST', headers: { Authorization: `Bearer ${initial.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ theme: 'light' }),
+      body: JSON.stringify({ theme: 'light', saveHistory: false }),
     });
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { preferences: { theme: 'light' } });
-    assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'preferences.json'), 'utf8')), { theme: 'light' });
+    assert.deepEqual(await response.json(), { preferences: { theme: 'light', saveHistory: false } });
+    assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'preferences.json'), 'utf8')), { theme: 'light', saveHistory: false });
     await app.close();
     app = await createApplication({ port: 0, dataDir });
     initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
@@ -27,7 +27,7 @@ test('night par défaut, choix enregistré et restauré après redémarrage', as
     assert.match(await (await fetch(app.url)).text(), /<html[^>]*data-theme="light"/);
     const back = await fetch(`${app.url}/api/preferences`, {
       method: 'POST', headers: { Authorization: `Bearer ${initial.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ theme: 'dark' }),
+      body: JSON.stringify({ theme: 'dark', saveHistory: false }),
     });
     assert.equal(back.status, 200);
     assert.equal(JSON.parse(await readFile(join(dataDir, 'preferences.json'), 'utf8')).theme, 'dark');
@@ -49,7 +49,7 @@ test('les préférences refusent les écritures sans jeton et les thèmes invali
       method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    assert.equal((await request({ theme: 'dark' }, '')).status, 401);
+    assert.equal((await request({ theme: 'dark', saveHistory: false }, '')).status, 401);
     for (const invalid of [null, {}, { theme: 'night' }, { theme: '<script>' }, { theme: 0 }]) {
       assert.equal((await request(invalid)).status, 400);
     }

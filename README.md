@@ -61,18 +61,32 @@ The first message automatically starts the configured model and its vision proje
 - Attach up to three images per message, with a maximum of 10 MiB per source file. Images are resized to a maximum of 2,048 pixels on the longest side and converted to JPEG with a white background before being sent locally. A conversation request is limited to 20 MiB in total; start a new conversation if its image history becomes too large.
 - **Réflexion** (Thinking) asks the model's chat template to enable or disable reasoning. Its effect depends on the model. Received reasoning appears in a separate collapsible section.
 - The square button interrupts the current response. Text already received is kept.
-- Each response is limited to 4,096 generated tokens, including reasoning. The interface indicates when this limit truncates a response.
+- **Contexte total** is the shared window for messages, image tokens, reasoning and the reply. **Sortie maximale** independently limits generated tokens per reply, including reasoning: 4,096 by default, with choices up to 32,768 within the selected context. The interface reports a response cut short by an output or context limit. Stop the model before changing these settings, then save; they apply on its next start.
 - Model replies render common Markdown: headings, paragraphs, bold and italic text, strikethrough, lists, quotations, simple tables, links, and inline or fenced code. Formatting updates while the reply streams. Raw model HTML is escaped, unsafe link protocols are rejected, and embedded image syntax does not load remote images.
 
-Conversation history exists only in the page's memory: **closing or reloading the page loses it**. Configuration paths are retained. **Nouvelle conversation** (New conversation) asks for confirmation before clearing an existing conversation. Reloading the page does not unload the model: use **Arrêter le modèle** (Stop model) or stop the server.
+## Optional conversation history
+
+**Conserver les conversations** in Configuration is off by default. When off, messages stay in page memory and are lost on closure or reload. When enabled, the application saves messages, reasoning and copies of the browser-compressed images under `history/<conversation-id>/` in the project folder. Each conversation has `conversation.json` and content-addressed image files; repeated saves reuse the same image bytes. Both `history/` and `data/` are excluded from Git. When uploading sources manually, exclude both folders yourself.
+
+Saved conversations appear in the sidebar, or inside Configuration on narrow screens. Reopen one to restore messages and images and continue chatting. Pending user turns, periodic partial replies and finished replies are saved. An unfinished user turn is restored as an editable draft and is never resent automatically. A restored partial assistant reply is marked as partial. A forced shutdown can still lose the latest unsaved part of a streamed reply.
+
+Disabling history stops further writes and hides the list; it does **not delete** existing files. Enabling it during a conversation saves the current exchange. Files are ordinary local files, grow as conversations accumulate, and can be backed up or removed manually while the app is closed. History does not increase the model's active context window: reopening an archive sends its restored messages only when you submit a new prompt, with the same context and request-size limits. Saving failures are reported and keep the conversation in the page; switching to another conversation is blocked until saving succeeds or history is disabled.
+
+**Nouvelle conversation** preserves saved exchanges. With history off, it asks before clearing an existing conversation. Reloading the page does not unload the model: use **Arrêter le modèle** or stop the server. The model-card border is green when ready, red when stopped or unavailable, and amber while loading or stopping; its accessible label also reports the state.
 
 ## Memory and hardware
 
-The default context is **8,192 tokens**, with all available model layers requested on the GPU. The initial profile targets a 12 GB graphics card, but actual memory use depends on the model, context and images. If the engine reports insufficient memory, stop it, then reduce the context or select fewer GPU layers in Configuration.
+The default context is **8,192 tokens**, with all available model layers requested on the GPU. Context choices range from 4,096 to 262,144 tokens; the largest choices are advanced options, not a guarantee that a machine or a different GGUF model supports them. The Qwen3.5-9B base model declares a native context of 262,144 tokens ([model documentation](https://huggingface.co/Qwen/Qwen3.5-9B)), while available RAM/VRAM and the engine determine practical capacity. The initial profile targets a 12 GB graphics card, but actual memory use depends on the model, context and images. If the engine reports insufficient memory, stop it, then reduce the context or select fewer GPU layers in Configuration.
 
 **CPU uniquement** (CPU only) runs inference on the processor and disables GPU offloading for the vision projector. It may be much slower. Windows/Linux support does not mean that every computer has enough memory for a 9B model. A machine without NVIDIA hardware can use a CPU engine or a llama.cpp build suited to its GPU.
 
 The application does not apply or modify GPU unlocking tools. Windows has been exercised locally; Linux runtime behavior has not yet been verified.
+
+## Image limits and compression
+
+The current limit is **three images per message**, not three per conversation. The existing conversion uses browser JPEG quality `0.9` and a maximum 2,048-pixel longest side; this is a quality parameter, **not a 90% size reduction**. Actual size savings depend on the source, and small PNG screenshots can become larger JPEGs. Alpha is flattened onto white. Images are stored in history exactly as prepared for inference; history does not recompress them again.
+
+The browser sends the whole active conversation on each turn, including past images. Base64 adds roughly one third to binary image size, and the complete JSON request is limited to 20 MiB. Reducing JPEG bytes helps storage and transport, but does not directly reduce image tokens; dimensions and the vision encoder's processing determine those. The present image count, resolution and transport limits remain unchanged. Large reference collections and Krea2 generation/review automation are not implemented.
 
 ## Troubleshooting
 
@@ -80,7 +94,7 @@ The application does not apply or modify GPU unlocking tools. Windows has been e
 - **Engine exits:** open Configuration → **Journaux du moteur** (Engine logs). An unknown option can indicate an outdated engine. An unknown architecture or incompatible projector requires a compatible engine build and matching files.
 - **CUDA not detected:** check the engine distribution, its libraries and your drivers. Requesting GPU layers does not guarantee GPU use; the engine logs report actual offloading.
 - **Context exceeded:** start a new conversation or increase the context if memory allows. History is not silently removed.
-- **Connection interrupted:** check the terminal, then reload the page. Copy any useful conversation text first, since this version does not save history.
+- **Connection interrupted:** check the terminal, then reload the page. If history is disabled, copy useful conversation text first; if enabled, make sure saving has finished.
 - **Port in use:** another instance may be using 8787. Close that instance before restarting.
 
 Both services listen only on loopback. Control routes check the host, origin and a session token. Remote image URLs are rejected, and llama.cpp starts in offline mode. Only one generation is accepted at a time.
@@ -88,7 +102,7 @@ Both services listen only on loopback. Control routes check the host, origin and
 ## Smoke test
 
 ```sh
-node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs
+node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs tests/history.mjs tests/limits.mjs
 ```
 
 Alternatively, run `npm run smoke`. This test uses a **simulated HTTP engine**, kept separately in `tests/fixtures/`. It checks application startup, configuration, access restrictions, streamed text and reasoning, images, cancellation, shutdown, CUDA library discovery and compatibility handling for missing MTP layers. It does not measure the quality or speed of a real model.

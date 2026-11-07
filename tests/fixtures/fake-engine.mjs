@@ -20,6 +20,7 @@ const server = http.createServer(async (req, res) => {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const body = JSON.parse(Buffer.concat(chunks));
+  console.log(`Limite de sortie : ${body.max_tokens}`);
   const content = body.messages.at(-1).content;
   const isImage = Array.isArray(content) && content.some((part) => part.type === 'image_url');
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
