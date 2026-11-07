@@ -30,7 +30,7 @@ node server.mjs --open
 
 ## 配置文件路径
 
-打开 **Configuration**（配置），填写三个文件的完整路径，然后点击 **Enregistrer et démarrer**（保存并启动）：
+打开 **Configuration**（配置），填写三个文件的完整路径，然后点击 **Enregistrer**（保存）：
 
 | 组件 | 原始模型版本的示例文件 |
 |---|---|
@@ -53,6 +53,8 @@ GGUF 文件不会上传到浏览器。文件路径保存在 `data/config.json` �
 界面默认为 **Night**（深色）模式。点击 Configuration 旁的 **Day / Night** 按钮可切换主题。选择会保存在本地 `data/preferences.json` 中，关闭或重启应用后仍然保留；该文件不会提交到 Git。聊天内容可以在悬浮按钮后方滚动，按钮始终可见。
 
 ## 聊天与图像
+
+发送第一条消息时，应用会自动启动已配置的模型及其视觉投影器（如有）。消息会等待加载完成，然后仅发送一次。已配置投影器时，可以在启动前添加图片。取消等待会将文字和图片恢复到输入框，模型仍会继续加载；加载失败时也会保留消息。手动启动和停止按钮仍然可用。
 
 - 输入消息后按 Enter 发送；Shift+Enter 换行。
 - 点击图像按钮添加 PNG/JPEG 图片，也可以拖放到输入区域，或在消息输入框中粘贴图片。
@@ -86,7 +88,7 @@ GGUF 文件不会上传到浏览器。文件路径保存在 `data/config.json` �
 ## 冒烟测试
 
 ```sh
-node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs
+node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs
 ```
 
 也可以运行 `npm run smoke`。测试使用单独放在 `tests/fixtures/` 中的**模拟 HTTP 引擎**，检查应用启动、配置、访问限制、文字与推理流、图像、取消生成、停止引擎、CUDA 库检测，以及缺失 MTP 层的兼容性处理。它不衡量真实模型的回答质量或速度。

@@ -80,6 +80,23 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       assert.equal(JSON.parse(await readFile(join(folder, 'config.json'), 'utf8')).modelPath, modelPath);
     });
 
+    await t.test('le premier message attend le démarrage automatique avec la vision', async () => {
+      const { waitForModel } = await import('../public/model-ready.mjs');
+      assert.equal((await fetch(`${base}/model-ready.mjs`)).status, 200);
+      const states = [];
+      const ready = await waitForModel(call, new AbortController().signal, (s) => states.push(s.state));
+      assert.equal(ready.vision, true);
+      assert.ok(states.includes('loading'));
+      assert.equal(states.at(-1), 'ready');
+      const response = await call('chat', { messages: [{ role: 'user', content: [
+        { type: 'text', text: 'Décris cette image.' }, { type: 'image_url', image_url: { url: png } },
+      ] }] });
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /Image reçue par le moteur simulé/);
+      await until(async () => !(await status()).busy);
+      await call('stop', {});
+    });
+
     await t.test('le moteur démarre, le texte et le raisonnement arrivent progressivement', async () => {
       assert.equal((await call('start', {})).status, 202);
       await until(async () => (await status()).state === 'ready');

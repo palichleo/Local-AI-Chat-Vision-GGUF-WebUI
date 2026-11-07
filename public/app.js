@@ -1,11 +1,12 @@
 import { readSSE } from './stream.mjs';
 import { markdownToHtml } from './markdown.mjs';
+import { waitForModel } from './model-ready.mjs';
 
 const $ = (id) => document.getElementById(id);
 const state = {
   token: '', config: {}, status: { state: 'stopped', vision: false, busy: false, logs: [] },
   connected: false, thinking: true, messages: [], images: [], generating: false,
-  preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingTheme: false,
+  preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingTheme: false, waitingForModel: false,
 };
 const labels = { stopped: 'Moteur arrêté', loading: 'Chargement du modèle…', ready: 'Prêt à discuter', stopping: 'Arrêt en cours…', error: 'Vérifier le moteur' };
 
@@ -38,7 +39,7 @@ async function api(route, body, options = {}) {
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || `La requête a échoué (${response.status}).`);
+    throw Object.assign(new Error(data.error || `La requête a échoué (${response.status}).`), { status: response.status });
   }
   return response;
 }
@@ -71,36 +72,28 @@ function updateControls() {
   for (const id of ['sidebar-status', 'settings-status']) $(id).textContent = text;
   for (const dot of [$('sidebar-dot'), $('settings-dot')]) dot.className = `dot ${state.connected ? s.state : 'error'}`;
   $('theme-toggle').disabled = state.savingTheme || !state.connected;
-  $('config-fields').disabled = running || state.operation || !state.connected;
-  $('save-config').disabled = running || state.operation || !state.connected;
-  $('save-start').disabled = running || state.operation || !state.connected;
+  $('config-fields').disabled = running || state.operation || state.generating || !state.connected;
+  $('save-config').disabled = running || state.operation || state.generating || !state.connected;
+  $('save-start').disabled = running || state.operation || state.generating || !state.connected;
   $('settings-stop').hidden = !running;
   $('settings-stop').disabled = s.state === 'stopping' || state.operation;
   $('toggle-engine').disabled = state.operation || s.state === 'stopping' || !state.connected;
   $('toggle-engine').classList.toggle('is-running', running);
   $('toggle-engine').replaceChildren(icon(running ? 'stop' : 'play'), node('span', '', running ? 'Arrêter le modèle' : 'Démarrer le modèle'));
-  $('send').disabled = !state.connected || s.state !== 'ready' || s.busy || state.generating || state.preparing || (!$('prompt').value.trim() && !state.images.length);
+  $('send').disabled = !state.connected || s.state === 'stopping' || s.busy || state.generating || state.preparing || state.operation || (!$('prompt').value.trim() && !state.images.length);
   $('send').hidden = state.generating;
   $('cancel').hidden = !state.generating;
+  $('cancel').setAttribute('aria-label', state.waitingForModel ? 'Annuler le message en attente' : 'Interrompre la réponse');
   $('thinking').disabled = state.generating;
   $('attach').disabled = state.generating || state.preparing;
   $('new-chat').disabled = state.generating;
   $('new-chat-mobile').disabled = state.generating;
-  $('compose-state').textContent = state.preparing ? 'Préparation des images…' : state.generating ? 'Réponse en cours…' : s.state === 'ready' ? s.vision ? 'Texte + images' : 'Texte uniquement' : 'Démarrez le modèle pour discuter';
+  $('compose-state').textContent = state.preparing ? 'Préparation des images…' : state.waitingForModel ? 'Chargement… message en attente' : state.generating ? 'Réponse en cours…' : s.state === 'ready' ? s.vision ? 'Texte + images' : 'Texte uniquement' : s.state === 'loading' ? 'Le modèle se charge…' : 'Démarrage automatique à l’envoi';
   $('engine-logs').textContent = s.logs?.join('\n') || 'Les journaux apparaîtront au démarrage.';
   if (s.error) {
     $('config-error').textContent = s.error;
     $('config-error').hidden = false;
   }
-  const setup = {
-    stopped: ['Commençons par votre modèle', state.config.modelPath ? 'Vos chemins sont enregistrés. Démarrez le modèle.' : 'Indiquez les fichiers locaux pour démarrer.'],
-    loading: ['Le modèle prend place…', 'Le premier chargement peut prendre quelques instants.'],
-    ready: ['Tout est prêt pour commencer', s.vision ? 'La vision est active. Ajoutez une image ou écrivez un message.' : 'Le modèle est chargé. Écrivez votre premier message.'],
-    stopping: ['Arrêt du moteur…', 'La mémoire du modèle va être libérée.'],
-    error: ['Le moteur demande votre attention', 'Ouvrez la configuration pour consulter le détail.'],
-  }[s.state] || ['Connexion au serveur', 'Vérification de votre environnement…'];
-  $('setup-title').textContent = setup[0];
-  $('setup-description').textContent = setup[1];
   const basename = state.config.modelPath?.split(/[\\/]/).pop() || '';
   if (basename) {
     $('sidebar-model').textContent = /DeepSeek.*Qwen3\.5/i.test(basename) ? 'DeepSeek × Qwen3.5' : basename.replace(/\.gguf$/i, '');
@@ -202,8 +195,8 @@ function renderAttachments() {
 
 async function addImages(files) {
   if (state.generating || state.preparing) return;
-  if (!state.status.vision) {
-    notice('Pour envoyer des images, démarrez le modèle avec son projecteur de vision.');
+  if (!state.config.projectorPath) {
+    notice('Ajoutez un projecteur de vision dans Configuration pour joindre des images.');
     return openSettings();
   }
   if (files.length + state.images.length > 3) return notice('Vous pouvez joindre trois images au maximum par message.');
@@ -279,6 +272,10 @@ function assistantMessage() {
 async function sendMessage(event) {
   event.preventDefault();
   if ($('send').disabled || state.generating) return;
+  if (!state.config.enginePath || !state.config.modelPath) {
+    notice('Renseignez les chemins du moteur et du modèle dans Configuration avant le premier envoi.');
+    return openSettings();
+  }
   const text = $('prompt').value.trim();
   const images = [...state.images];
   const content = images.length ? [
@@ -294,6 +291,7 @@ async function sendMessage(event) {
   state.images = [];
   renderAttachments();
   state.generating = true;
+  state.waitingForModel = true;
   state.controller = new AbortController();
   state.stickToBottom = true;
   resizePrompt();
@@ -310,6 +308,15 @@ async function sendMessage(event) {
     lastRender = performance.now();
   };
   try {
+    view.body.replaceChildren(node('span', 'pending-message', 'Démarrage du modèle… Votre message est en attente.'));
+    $('live-status').textContent = 'Message en attente du modèle.';
+    await waitForModel(api, state.controller.signal, (status) => {
+      state.status = status;
+      updateControls();
+    });
+    state.waitingForModel = false;
+    view.body.replaceChildren(node('span', 'pending-dot', '●'));
+    updateControls();
     const response = await api('chat', { messages: [
       { role: 'system', content: 'Tu es un assistant utile. Réponds dans la langue de ton interlocuteur.' }, ...history,
     ], thinking: state.thinking }, { signal: state.controller.signal });
@@ -345,6 +352,7 @@ async function sendMessage(event) {
       $('conversation-title').textContent = text || 'Une image à explorer';
     }
     state.generating = false;
+    state.waitingForModel = false;
     state.controller = null;
     resizePrompt();
     await refreshStatus();
@@ -355,7 +363,6 @@ async function sendMessage(event) {
 applyTheme(document.documentElement.dataset.theme);
 $('theme-toggle').onclick = toggleTheme;
 $('settings-open').onclick = openSettings;
-$('welcome-config').onclick = openSettings;
 $('settings-close').onclick = () => $('settings').close();
 $('settings-form').onsubmit = (event) => { event.preventDefault(); saveConfiguration(false); };
 $('save-start').onclick = () => saveConfiguration(true);
@@ -383,7 +390,7 @@ document.querySelectorAll('[data-prompt]').forEach((button) => {
   button.onclick = () => { $('prompt').value = button.dataset.prompt; resizePrompt(); $('prompt').focus(); };
 });
 function chooseImage() {
-  if (!state.status.vision) { notice('Démarrez le modèle avec son projecteur pour activer la vision.'); openSettings(); }
+  if (!state.config.projectorPath) { notice('Ajoutez un projecteur de vision dans Configuration pour joindre des images.'); openSettings(); }
   else $('image-input').click();
 }
 $('attach').onclick = chooseImage;

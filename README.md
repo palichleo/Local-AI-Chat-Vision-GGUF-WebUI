@@ -30,7 +30,7 @@ There is no need to run `npm install`. You can also use `npm start`.
 
 ## Configuring the files
 
-Open **Configuration**, enter the three full file paths, then click **Enregistrer et démarrer** (Save and start):
+Open **Configuration**, enter the three full file paths, then click **Enregistrer** (Save):
 
 | Component | Example file from the original model release |
 |---|---|
@@ -53,6 +53,8 @@ The llama.cpp engine included in some Ollama installations can be reused directl
 The interface starts in **Night** mode. Use the **Day / Night** button beside Configuration to switch themes. Your choice is saved in `data/preferences.json` and restored after closing or restarting the application. This file stays local and is excluded from Git. The floating controls remain visible as the chat scrolls behind them.
 
 ## Chat and images
+
+The first message automatically starts the configured model and its vision projector, if provided. The message waits until loading completes, then sends once. Images can be attached before startup when a projector is configured. You can cancel the waiting message; its text and images return to the composer while model loading continues. A loading failure also preserves the message. Manual start/stop controls remain available.
 
 - Type a message and press Enter. Shift+Enter inserts a new line.
 - Attach PNG/JPEG images with the image button, by dragging them onto the composer, or by pasting an image into the message field.
@@ -86,7 +88,7 @@ Both services listen only on loopback. Control routes check the host, origin and
 ## Smoke test
 
 ```sh
-node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs
+node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs
 ```
 
 Alternatively, run `npm run smoke`. This test uses a **simulated HTTP engine**, kept separately in `tests/fixtures/`. It checks application startup, configuration, access restrictions, streamed text and reasoning, images, cancellation, shutdown, CUDA library discovery and compatibility handling for missing MTP layers. It does not measure the quality or speed of a real model.

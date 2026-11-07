@@ -30,7 +30,7 @@ node server.mjs --open
 
 ## 파일 설정
 
-**Configuration**(설정)을 열고 세 파일의 전체 경로를 입력한 뒤 **Enregistrer et démarrer**(저장 후 시작)를 누릅니다.
+**Configuration**(설정)을 열고 세 파일의 전체 경로를 입력한 뒤 **Enregistrer**(저장)를 누릅니다.
 
 | 구성 요소 | 원본 모델 배포본의 예시 파일 |
 |---|---|
@@ -53,6 +53,8 @@ GGUF 파일은 브라우저로 업로드되지 않습니다. 파일 경로는 `d
 기본 테마는 **Night**(다크 모드)입니다. Configuration 옆의 **Day / Night** 버튼으로 테마를 바꿀 수 있습니다. 선택은 로컬 `data/preferences.json` 파일에 저장되어 앱을 닫거나 다시 실행해도 유지되며, 이 파일은 Git에 포함되지 않습니다. 채팅은 고정된 버튼 뒤로 스크롤되고 버튼은 계속 표시됩니다.
 
 ## 채팅과 이미지
+
+첫 메시지를 보내면 설정된 모델과 비전 프로젝터(있는 경우)가 자동으로 시작됩니다. 메시지는 로딩이 끝날 때까지 기다린 뒤 한 번만 전송됩니다. 프로젝터가 설정되어 있으면 시작 전에도 이미지를 첨부할 수 있습니다. 대기 중인 메시지를 취소하면 텍스트와 이미지가 입력란으로 돌아오며 모델 로딩은 계속됩니다. 로딩에 실패해도 메시지는 보존됩니다. 수동 시작 및 중지 버튼도 계속 사용할 수 있습니다.
 
 - 메시지를 입력하고 Enter로 전송합니다. Shift+Enter는 줄을 바꿉니다.
 - 이미지 버튼으로 PNG/JPEG 파일을 첨부하거나, 입력 영역에 끌어 놓거나, 메시지 입력란에 이미지를 붙여 넣을 수 있습니다.
@@ -86,7 +88,7 @@ GGUF 파일은 브라우저로 업로드되지 않습니다. 파일 경로는 `d
 ## 스모크 테스트
 
 ```sh
-node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs
+node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs
 ```
 
 `npm run smoke`를 사용할 수도 있습니다. 테스트는 `tests/fixtures/`에 별도로 둔 **모의 HTTP 엔진**을 사용합니다. 앱 시작, 설정, 접근 제한, 텍스트 및 추론 스트리밍, 이미지, 생성 취소, 엔진 종료, CUDA 라이브러리 탐색, 누락된 MTP 레이어의 호환성 처리를 확인합니다. 실제 모델의 답변 품질이나 속도를 측정하지는 않습니다.
