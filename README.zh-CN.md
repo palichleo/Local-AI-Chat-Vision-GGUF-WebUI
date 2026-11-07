@@ -48,6 +48,10 @@ GGUF 文件不会上传到浏览器。文件路径保存在 `data/config.json` �
 
 部分 Ollama 安装所附带的 llama.cpp 引擎可以直接复用。应用会检测推理引擎旁 `cuda_v12` 或 `cuda_v13` 子目录中的 CUDA 库，不会启动或重新配置 Ollama 服务。如果环境中已经设置了 `GGML_BACKEND_PATH`，应用会保留该设置。
 
+## 外观
+
+界面默认为 **Night**（深色）模式。点击 Configuration 旁的 **Day / Night** 按钮可切换主题。选择会保存在本地 `data/preferences.json` 中，关闭或重启应用后仍然保留；该文件不会提交到 Git。聊天内容可以在悬浮按钮后方滚动，按钮始终可见。
+
 ## 聊天与图像
 
 - 输入消息后按 Enter 发送；Shift+Enter 换行。
@@ -82,7 +86,7 @@ GGUF 文件不会上传到浏览器。文件路径保存在 `data/config.json` �
 ## 冒烟测试
 
 ```sh
-node --test tests/smoke.mjs tests/markdown.mjs
+node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs
 ```
 
 也可以运行 `npm run smoke`。测试使用单独放在 `tests/fixtures/` 中的**模拟 HTTP 引擎**，检查应用启动、配置、访问限制、文字与推理流、图像、取消生成、停止引擎、CUDA 库检测，以及缺失 MTP 层的兼容性处理。它不衡量真实模型的回答质量或速度。

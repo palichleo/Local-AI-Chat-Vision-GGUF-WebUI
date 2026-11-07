@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.mjs --open",
-    "smoke": "node --test tests/smoke.mjs tests/markdown.mjs",
-    "test": "node --test tests/smoke.mjs tests/markdown.mjs"
+    "smoke": "node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs",
+    "test": "node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs"
   }
 }

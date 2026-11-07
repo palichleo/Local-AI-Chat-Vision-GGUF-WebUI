@@ -48,6 +48,10 @@ Some Qwen3.5 GGUF exports declare an MTP layer without including its tensors. Th
 
 The llama.cpp engine included in some Ollama installations can be reused directly. The application detects CUDA libraries in `cuda_v12` or `cuda_v13` subdirectories next to the engine. It does not start or reconfigure the Ollama service, and it respects an existing `GGML_BACKEND_PATH` environment variable.
 
+## Appearance
+
+The interface starts in **Night** mode. Use the **Day / Night** button beside Configuration to switch themes. Your choice is saved in `data/preferences.json` and restored after closing or restarting the application. This file stays local and is excluded from Git. The floating controls remain visible as the chat scrolls behind them.
+
 ## Chat and images
 
 - Type a message and press Enter. Shift+Enter inserts a new line.
@@ -82,7 +86,7 @@ Both services listen only on loopback. Control routes check the host, origin and
 ## Smoke test
 
 ```sh
-node --test tests/smoke.mjs tests/markdown.mjs
+node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs
 ```
 
 Alternatively, run `npm run smoke`. This test uses a **simulated HTTP engine**, kept separately in `tests/fixtures/`. It checks application startup, configuration, access restrictions, streamed text and reasoning, images, cancellation, shutdown, CUDA library discovery and compatibility handling for missing MTP layers. It does not measure the quality or speed of a real model.

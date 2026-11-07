@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   token: '', config: {}, status: { state: 'stopped', vision: false, busy: false, logs: [] },
   connected: false, thinking: true, messages: [], images: [], generating: false,
-  preparing: false, operation: false, controller: null, stickToBottom: true,
+  preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingTheme: false,
 };
 const labels = { stopped: 'Moteur arrêté', loading: 'Chargement du modèle…', ready: 'Prêt à discuter', stopping: 'Arrêt en cours…', error: 'Vérifier le moteur' };
 
@@ -43,19 +43,41 @@ async function api(route, body, options = {}) {
   return response;
 }
 
+function applyTheme(theme) {
+  state.theme = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = state.theme;
+  const dark = state.theme === 'dark';
+  const label = dark ? 'Passer en mode jour' : 'Passer en mode nuit';
+  $('theme-toggle').replaceChildren(icon(dark ? 'sun' : 'moon'), node('span', '', dark ? 'Day' : 'Night'));
+  $('theme-toggle').setAttribute('aria-label', label);
+  $('theme-toggle').title = label;
+}
+
+async function toggleTheme() {
+  if (state.savingTheme || !state.connected) return;
+  state.savingTheme = true;
+  updateControls();
+  try {
+    const result = await (await api('preferences', { theme: state.theme === 'dark' ? 'light' : 'dark' })).json();
+    applyTheme(result.preferences.theme);
+  } catch (error) { notice(error.message); }
+  finally { state.savingTheme = false; updateControls(); }
+}
+
 function updateControls() {
   const s = state.status;
   const running = ['loading', 'ready', 'stopping'].includes(s.state);
   const text = state.connected ? labels[s.state] || 'État inconnu' : 'Connexion interrompue';
-  for (const id of ['status-text', 'sidebar-status', 'settings-status']) $(id).textContent = text;
-  for (const dot of [$('sidebar-dot'), $('settings-dot'), $('status-pill').querySelector('.dot')]) dot.className = `dot ${state.connected ? s.state : 'error'}`;
-  $('vision-badge').textContent = s.vision ? 'Texte + vision' : 'Texte';
+  for (const id of ['sidebar-status', 'settings-status']) $(id).textContent = text;
+  for (const dot of [$('sidebar-dot'), $('settings-dot')]) dot.className = `dot ${state.connected ? s.state : 'error'}`;
+  $('theme-toggle').disabled = state.savingTheme || !state.connected;
   $('config-fields').disabled = running || state.operation || !state.connected;
   $('save-config').disabled = running || state.operation || !state.connected;
   $('save-start').disabled = running || state.operation || !state.connected;
   $('settings-stop').hidden = !running;
   $('settings-stop').disabled = s.state === 'stopping' || state.operation;
   $('toggle-engine').disabled = state.operation || s.state === 'stopping' || !state.connected;
+  $('toggle-engine').classList.toggle('is-running', running);
   $('toggle-engine').replaceChildren(icon(running ? 'stop' : 'play'), node('span', '', running ? 'Arrêter le modèle' : 'Démarrer le modèle'));
   $('send').disabled = !state.connected || s.state !== 'ready' || s.busy || state.generating || state.preparing || (!$('prompt').value.trim() && !state.images.length);
   $('send').hidden = state.generating;
@@ -330,6 +352,8 @@ async function sendMessage(event) {
   }
 }
 
+applyTheme(document.documentElement.dataset.theme);
+$('theme-toggle').onclick = toggleTheme;
 $('settings-open').onclick = openSettings;
 $('welcome-config').onclick = openSettings;
 $('settings-close').onclick = () => $('settings').close();
@@ -384,6 +408,7 @@ try {
   if (!response.ok) throw new Error('Impossible de joindre le serveur local.');
   const initial = await response.json();
   Object.assign(state, { token: initial.token, config: initial.config, status: initial.status, connected: true });
+  applyTheme(initial.preferences?.theme);
   if (initial.platform !== 'win32') $('engine-path').placeholder = '/chemin/vers/llama-server';
   if (initial.warning) notice(initial.warning);
   updateControls();

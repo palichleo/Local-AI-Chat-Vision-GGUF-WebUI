@@ -48,6 +48,10 @@ GGUF 파일은 브라우저로 업로드되지 않습니다. 파일 경로는 `d
 
 일부 Ollama 설치에 포함된 llama.cpp 엔진을 직접 재사용할 수 있습니다. 앱은 엔진 옆의 `cuda_v12` 또는 `cuda_v13` 하위 디렉터리에서 CUDA 라이브러리를 찾습니다. Ollama 서비스를 시작하거나 재설정하지 않으며, 기존 `GGML_BACKEND_PATH` 환경 변수가 있으면 해당 설정을 유지합니다.
 
+## 화면 테마
+
+기본 테마는 **Night**(다크 모드)입니다. Configuration 옆의 **Day / Night** 버튼으로 테마를 바꿀 수 있습니다. 선택은 로컬 `data/preferences.json` 파일에 저장되어 앱을 닫거나 다시 실행해도 유지되며, 이 파일은 Git에 포함되지 않습니다. 채팅은 고정된 버튼 뒤로 스크롤되고 버튼은 계속 표시됩니다.
+
 ## 채팅과 이미지
 
 - 메시지를 입력하고 Enter로 전송합니다. Shift+Enter는 줄을 바꿉니다.
@@ -82,7 +86,7 @@ GGUF 파일은 브라우저로 업로드되지 않습니다. 파일 경로는 `d
 ## 스모크 테스트
 
 ```sh
-node --test tests/smoke.mjs tests/markdown.mjs
+node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs
 ```
 
 `npm run smoke`를 사용할 수도 있습니다. 테스트는 `tests/fixtures/`에 별도로 둔 **모의 HTTP 엔진**을 사용합니다. 앱 시작, 설정, 접근 제한, 텍스트 및 추론 스트리밍, 이미지, 생성 취소, 엔진 종료, CUDA 라이브러리 탐색, 누락된 MTP 레이어의 호환성 처리를 확인합니다. 실제 모델의 답변 품질이나 속도를 측정하지는 않습니다.

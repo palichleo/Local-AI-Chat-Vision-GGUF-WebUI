@@ -77,6 +77,13 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   let configWarning = '';
   try { config = normalizeConfig(JSON.parse(await readFile(configPath, 'utf8'))); }
   catch (error) { if (error.code !== 'ENOENT') configWarning = 'La configuration enregistrée est illisible. Renseigne à nouveau les chemins.'; }
+  const preferencesPath = join(dataDir, 'preferences.json');
+  let preferences = { theme: 'dark' };
+  try {
+    const saved = JSON.parse(await readFile(preferencesPath, 'utf8'));
+    if (['dark', 'light'].includes(saved?.theme)) preferences = { theme: saved.theme };
+  } catch { /* Missing or damaged preferences use the default appearance. */ }
+  let savingPreferences = false;
   const token = randomBytes(32).toString('hex');
   const engine = new Engine({ spawnProcess, cacheDir: join(dataDir, 'model-cache') });
   let url;
@@ -101,19 +108,32 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       const path = new URL(req.url, url).pathname;
       if (req.method === 'GET' && staticFiles.has(path)) {
         const [file, mime] = staticFiles.get(path);
-        const contents = await readFile(join(root, 'public', file));
+        let contents = await readFile(join(root, 'public', file));
+        if (file === 'index.html') contents = contents.toString('utf8').replace('data-theme="dark"', `data-theme="${preferences.theme}"`);
         res.writeHead(200, { 'Content-Type': mime });
         return res.end(contents);
       }
       if (path === '/favicon.ico' && req.method === 'GET') { res.writeHead(204); return res.end(); }
       if (path === '/api/bootstrap' && req.method === 'GET') {
-        return send(200, { token, config, status: engine.status(), platform: process.platform, warning: configWarning });
+        return send(200, { token, config, preferences, status: engine.status(), platform: process.platform, warning: configWarning });
       }
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Recharge la page.', 401);
       if (path === '/api/status' && req.method === 'GET') return send(200, engine.status());
       if (req.method !== 'POST') throw problem('Méthode non prise en charge.', 405);
       const body = await jsonBody(req);
+      if (path === '/api/preferences') {
+        if (!['dark', 'light'].includes(body?.theme)) throw problem('Choisis le mode jour ou nuit.');
+        if (savingPreferences) throw problem('Préférences en cours d’enregistrement.', 409);
+        const next = { theme: body.theme };
+        savingPreferences = true;
+        try {
+          await writeFile(`${preferencesPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 });
+          await rename(`${preferencesPath}.tmp`, preferencesPath);
+          preferences = next;
+        } finally { savingPreferences = false; }
+        return send(200, { preferences });
+      }
       if (path === '/api/config') {
         if (saving || engine.child || engine.state === 'loading' || engine.state === 'stopping') throw problem('Arrête le moteur avant de modifier sa configuration.', 409);
         const next = normalizeConfig(body);

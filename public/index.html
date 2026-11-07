@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="fr">
+<html lang="fr" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="dark light">
   <title>Atelier local — Chat & vision</title>
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.js"></script>
@@ -22,16 +22,18 @@
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 4 12 8-12 8Z"/></symbol>
     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 13a8.5 8.5 0 0 1-9.5-9.5A8.5 8.5 0 1 0 20.5 13Z"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
   </svg>
   <aside class="sidebar" aria-label="Espace local">
     <a class="brand" href="/" aria-label="Atelier local, accueil"><span class="brand-mark"><svg><use href="#i-spark"/></svg></span><span>atelier<span class="brand-local">local</span></span></a>
-    <button class="new-chat secondary" id="new-chat"><svg><use href="#i-plus"/></svg>Nouvelle conversation<span class="shortcut">↗</span></button>
+    <button class="new-chat secondary" id="new-chat"><svg><use href="#i-plus"/></svg>Nouvelle conversation</button>
     <div class="sidebar-section"><p class="overline">ESPACE DE TRAVAIL</p><div class="conversation-item"><svg><use href="#i-chat"/></svg><span id="conversation-title">Nouvelle conversation</span><span class="conversation-dot"></span></div><p class="session-note">Conversation conservée pendant<br>cette session uniquement.</p></div>
-    <div class="sidebar-bottom"><p class="overline">VOTRE MODÈLE</p><div class="model-card"><div class="model-card-top"><span class="model-symbol"><svg><use href="#i-chip"/></svg></span><span class="quant-tag">GGUF</span></div><strong id="sidebar-model">DeepSeek × Qwen3.5</strong><p id="sidebar-model-detail">9B · Q6_K · vision disponible</p><div class="model-state"><span class="dot" id="sidebar-dot"></span><span id="sidebar-status">Moteur arrêté</span></div><button id="toggle-engine" class="engine-action"><svg><use href="#i-play"/></svg><span>Démarrer le modèle</span></button></div><div class="local-note"><svg><use href="#i-lock"/></svg><div><strong>Sur cet ordinateur</strong><span>Vos échanges restent locaux.</span></div></div></div>
+    <div class="sidebar-bottom"><div class="model-card"><div class="model-card-top"><span class="model-symbol"><svg><use href="#i-chip"/></svg></span><span class="quant-tag">GGUF</span></div><strong id="sidebar-model">DeepSeek × Qwen3.5</strong><p id="sidebar-model-detail">9B · Q6_K · vision disponible</p><div class="model-state"><span class="dot" id="sidebar-dot"></span><span id="sidebar-status">Moteur arrêté</span></div><button id="toggle-engine" class="engine-action"><svg><use href="#i-play"/></svg><span>Démarrer le modèle</span></button></div><div class="local-note"><svg><use href="#i-lock"/></svg><div><strong>Sur cet ordinateur</strong><span>Vos échanges restent locaux.</span></div></div></div>
   </aside>
   <div class="workspace">
-    <header class="topbar"><div class="topbar-title"><span class="mobile-brand">atelier local</span><span class="desktop-title">Votre espace de conversation</span><span id="vision-badge" class="capability">Texte</span></div><div class="topbar-actions"><span class="status-pill" id="status-pill"><span class="dot"></span><span id="status-text">Connexion…</span></span><button id="new-chat-mobile" class="icon-button mobile-new" aria-label="Nouvelle conversation"><svg><use href="#i-plus"/></svg></button><button id="settings-open" class="settings-button" aria-label="Configuration"><svg><use href="#i-settings"/></svg><span>Configuration</span></button></div></header>
+    <header class="topbar"><div class="topbar-actions"><button id="new-chat-mobile" class="icon-button mobile-new" aria-label="Nouvelle conversation"><svg><use href="#i-plus"/></svg></button><button id="theme-toggle" class="theme-button" aria-label="Passer en mode jour" title="Passer en mode jour" disabled><svg aria-hidden="true"><use href="#i-sun"/></svg><span>Day</span></button><button id="settings-open" class="settings-button" aria-label="Configuration"><svg><use href="#i-settings"/></svg><span>Configuration</span></button></div></header>
     <main class="chat-area" id="chat-area">
       <div id="welcome" class="welcome"><div class="welcome-mark"><svg><use href="#i-spark"/></svg><span class="welcome-mark-small">✦</span></div><p class="overline">UN ESPACE POUR VOS IDÉES</p><h1>Votre modèle.<br><span>Votre machine.</span></h1><p class="welcome-description">Une conversation, une image, une idée à explorer.<br>Le tout, directement sur votre ordinateur.</p><div class="setup-card" id="setup-card"><span class="setup-icon"><svg><use href="#i-chip"/></svg></span><div><strong id="setup-title">Commençons par votre modèle</strong><p id="setup-description">Indiquez les fichiers locaux pour démarrer.</p></div><button id="welcome-config" class="round-button" aria-label="Configurer le moteur"><svg><use href="#i-chevron"/></svg></button></div><div class="suggestions"><button data-prompt="Explique-moi simplement le concept suivant : "><svg><use href="#i-spark"/></svg><strong>Comprendre une idée</strong><span>Une explication claire, à votre rythme.</span></button><button id="suggest-image"><svg><use href="#i-image"/></svg><strong>Explorer une image</strong><span>Décrire, comparer, lire du texte.</span></button><button data-prompt="Aide-moi à écrire du code pour "><svg><use href="#i-code"/></svg><strong>Créer avec du code</strong><span>Passer de l’idée à la première ligne.</span></button></div></div>
       <div id="messages" class="messages" aria-label="Conversation" aria-live="off"></div>

@@ -83,6 +83,9 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
     await t.test('le moteur démarre, le texte et le raisonnement arrivent progressivement', async () => {
       assert.equal((await call('start', {})).status, 202);
       await until(async () => (await status()).state === 'ready');
+      assert.equal((await call('preferences', { theme: 'light' })).status, 200);
+      assert.equal((await status()).state, 'ready', 'Changer le thème ne doit pas arrêter le modèle.');
+      assert.deepEqual(JSON.parse(await readFile(join(folder, 'config.json'), 'utf8')), config);
       assert.equal((await status()).vision, true);
       const response = await call('chat', { messages: [{ role: 'user', content: 'Bonjour' }], thinking: true });
       assert.equal(response.status, 200);
