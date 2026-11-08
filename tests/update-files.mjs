@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm, readdir, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, readdir, symlink, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -56,4 +56,36 @@ test('installer refuses symlinks and a workspace outside its own update folder b
   await assert.rejects(module.replaceSources({ root, workspace }));
   assert.equal(await readFile(join(root, 'server.mjs'), 'utf8'), 'old server');
   assert.equal(await readFile(join(outside, 'keep.txt'), 'utf8'), 'intact');
+});
+
+test('atomic status writes retry transient Windows locks without removing the previous status', async t => {
+  const {root} = await fixture(t), target = join(root, 'data', 'status.json');
+  await module.atomicJson(target, {state:'old'}); let attempts = 0;
+  await module.atomicJson(target, {state:'done'}, async (from, to) => {
+    attempts++;
+    assert.deepEqual(JSON.parse(await readFile(to, 'utf8')), {state:'old'});
+    if (attempts <= 2) throw Object.assign(Error('Reader lock'), {code:attempts === 1 ? 'EPERM' : 'EBUSY'});
+    return rename(from, to);
+  });
+  assert.equal(attempts, 3); assert.deepEqual(JSON.parse(await readFile(target, 'utf8')), {state:'done'});
+  assert.equal((await readdir(join(root, 'data'))).includes('status.json.tmp'), false);
+});
+test('permanent status write errors are bounded and preserve the last valid JSON', async t => {
+  const {root} = await fixture(t), target = join(root, 'data', 'status.json');
+  await module.atomicJson(target, {state:'old'});
+  for (const code of ['EINVAL', 'EPERM']) {
+    let attempts = 0;
+    await assert.rejects(module.atomicJson(target, {state:'done'}, async () => { attempts++; throw Object.assign(Error('Blocked'), {code}); }), {code});
+    assert.equal(attempts, code === 'EINVAL' ? 1 : 13);
+    assert.deepEqual(JSON.parse(await readFile(target, 'utf8')), {state:'old'});
+    assert.equal((await readdir(join(root, 'data'))).includes('status.json.tmp'), false);
+  }
+});
+test('a status reader can keep polling while atomic updates complete', async t => {
+  const {root} = await fixture(t), target = join(root, 'data', 'status.json');
+  await module.atomicJson(target, {step:0}); let reading = true;
+  const reader = (async () => { while (reading) { await readFile(target).catch(() => {}); await new Promise(resolve => setTimeout(resolve, 10)); } })();
+  try { for (let step = 1; step <= 20; step++) await module.atomicJson(target, {step}); }
+  finally { reading = false; await reader; }
+  assert.deepEqual(JSON.parse(await readFile(target, 'utf8')), {step:20});
 });
