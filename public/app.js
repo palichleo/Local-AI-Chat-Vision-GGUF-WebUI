@@ -395,11 +395,14 @@ function openSettings() {
 async function saveConfiguration() {
   if (state.operation || state.settingsLoading || state.comfyWorking || !state.settingsReady || !$('settings').open) return;
   const session = state.settingsSession;
+  if (comfyUI.hasPendingImport?.()) {
+    if (!await comfyUI.finishImport?.()) return;
+    if (session !== state.settingsSession || !$('settings').open) return;
+  }
   state.operation = true;
   $('config-error').hidden = true;
   updateControls();
   try {
-    if (comfyUI.hasPendingImport?.()) throw Error('Terminez ou ignorez l’import de workflow avant d’enregistrer.');
     const config = {
       enginePath: $('engine-path').value, modelPath: $('model-path').value,
       projectorPath: $('projector-path').value, ...tokenControls.values(),

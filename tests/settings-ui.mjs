@@ -189,5 +189,17 @@ test('immediately saved preferences and reverted fields do not create a false un
 });
 test('unsaved workflow descriptions prompt, and an unfinished workflow import cannot be discarded by the save button',async()=>{
  const ui=await settingsUI();await ui.open();ui.comfyUI.workflowDescriptions=()=>[{id:'photo',description:'Draft'}];ui.$('settings-close').onclick();assert.equal(ui.$('settings-unsaved').open,true);ui.$('settings-keep').onclick();
- ui.comfyUI.hasPendingImport=()=>true;await ui.saveConfiguration();assert.equal(ui.$('settings').open,true);assert.match(ui.$('config-error').textContent,/import/);assert.equal(ui.calls.some(call=>call.route==='settings'),false);
+ ui.comfyUI.hasPendingImport=()=>true;ui.comfyUI.finishImport=async()=>false;await ui.saveConfiguration();assert.equal(ui.$('settings').open,true);assert.equal(ui.calls.some(call=>call.route==='settings'),false);
+});
+
+test('the main Save finishes a prepared workflow before saving configuration and closing',async()=>{
+ const ui=await settingsUI();await ui.open();let pending=true,finished=0;
+ ui.comfyUI.hasPendingImport=()=>pending;ui.comfyUI.finishImport=async()=>{finished++;assert.equal(ui.calls.some(call=>call.route==='settings'),false);pending=false;return true;};
+ await ui.saveConfiguration();assert.equal(finished,1);assert.equal(ui.$('settings').open,false);assert.equal(ui.calls.filter(call=>call.route==='settings').length,1);
+});
+
+test('a rejected workflow remains unsaved and closing settings asks before discarding it',async()=>{
+ const ui=await settingsUI();await ui.open();ui.comfyUI.hasPendingImport=()=>true;ui.comfyUI.finishImport=async()=>false;
+ await ui.saveConfiguration();assert.equal(ui.$('settings').open,true);assert.equal(ui.calls.some(call=>call.route==='settings'),false);
+ ui.$('settings-close').onclick();assert.equal(ui.$('settings-unsaved').open,true);ui.$('settings-keep').onclick();assert.equal(ui.$('settings').open,true);
 });

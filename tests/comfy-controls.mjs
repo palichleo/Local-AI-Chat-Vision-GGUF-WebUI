@@ -9,7 +9,7 @@ class Element {
  replaceChildren(...children){this.children=[...children];this.options=children.filter(c=>c instanceof Option);this.value=this.options[0]?.value||'';}
  setAttribute(name,value){this.attributes[name]=value;}
  add(option){this.options.push(option);}
- focus(){this.focused=true;}
+ focus(){if(!this.disabled)this.focused=true;}
 }
 async function fixture(fn){
  const previousDocument=globalThis.document,previousOption=globalThis.Option;
@@ -65,7 +65,7 @@ test('linked prompts require explicit mapping before the workflow can be added',
  const get=id=>nodes.get(id);const graph={'1':{class_type:'CLIPTextEncode',inputs:{text:['9',0]}},'2':{class_type:'SaveImage',inputs:{images:['1',0]}}};
  await get('workflow-file').onchange({target:{files:[new File([JSON.stringify(graph)],'linked.json')],value:''}});
  assert.equal(get('binding-prompt').value,'');get('workflow-description').value='Un workflow avec des entrées liées';await get('workflow-import').onclick();
- assert.match(get('comfy-status').textContent,/entrée du prompt/);
+ assert.match(get('workflow-import-error').textContent,/entrée du prompt/);
  ui.setBusy(true);assert.equal(get('workflow-import').disabled,true);ui.setBusy(false);
 }));
 
@@ -220,4 +220,37 @@ test('incomplete and duplicate image slots block import, and removing a slot rem
  await get('workflow-import').onclick();assert.equal(calls.some(call=>call.route==='comfy/import'),false);
  ui.setBusy(true);assert.equal(a.children[0].disabled,true);assert.equal(a.children[4].disabled,true);ui.setBusy(false);
  b.children[4].onclick();assert.equal(get('workflow-image-inputs').children.length,1);await get('workflow-import').onclick();assert.equal(calls.find(call=>call.route==='comfy/import').body.imageInputs.length,1);
+}));
+
+test('editor workflow rejection stays pending with a visible local error until explicitly skipped',async()=>fixture(async({ui,nodes,calls})=>{
+ const get=id=>nodes.get(id),editor={id:'test',version:0.4,nodes:[{id:1,type:'A-subgraph'}],links:[],definitions:{subgraphs:[]}};
+ await get('workflow-file').onchange({target:{files:[new File([JSON.stringify(editor)],'Image MOSS.json')],value:''}});
+ assert.equal(ui.hasPendingImport(),true);assert.equal(get('workflow-import-panel').hidden,false);assert.equal(get('workflow-import-fields').hidden,true);
+ assert.equal(get('workflow-import-error').hidden,false);assert.match(get('workflow-import-error').textContent,/Export \(API\)/);assert.match(get('workflow-import-progress').textContent,/Image MOSS/);
+ assert.equal(await ui.finishImport(),false);assert.equal(ui.hasPendingImport(),true);assert.equal(calls.some(call=>call.route==='comfy/import'),false);
+ get('workflow-skip').onclick();assert.equal(ui.hasPendingImport(),false);assert.equal(get('workflow-import-panel').hidden,true);
+}));
+
+test('valid import prompts for description and the main save path can finish it without a separate Add click',async()=>fixture(async({ui,nodes,calls})=>{
+ const get=id=>nodes.get(id),graph={'1':{class_type:'CLIPTextEncode',inputs:{text:'p'}},'2':{class_type:'SaveImage',inputs:{images:['1',0]}}};
+ await get('workflow-file').onchange({target:{files:[new File([JSON.stringify(graph)],'Image.json')],value:''}});
+ assert.equal(get('workflow-import-fields').hidden,false);assert.equal(get('workflow-description').focused,true);
+ assert.equal(await ui.finishImport(),false);assert.equal(get('workflow-import-error').hidden,false);assert.match(get('workflow-import-error').textContent,/description/);
+ get('workflow-description').value='Use for image generation.';assert.equal(await ui.finishImport(),true);assert.equal(ui.hasPendingImport(),false);
+ await ui.refresh();assert.equal(calls.filter(call=>call.route==='comfy/import').length,1);assert.match(get('workflow-list').children[0].children[1].value,/image generation/);
+}));
+
+test('imports remain pending while being read and additional file selections preserve the current description',async()=>fixture(async({ui,nodes})=>{
+ const get=id=>nodes.get(id),graph={'1':{class_type:'CLIPTextEncode',inputs:{text:'p'}},'2':{class_type:'SaveImage',inputs:{images:['1',0]}}};let release;
+ const reading=get('workflow-file').onchange({target:{files:[{name:'First.json',size:10,text:()=>new Promise(resolve=>{release=resolve;})}],value:''}});
+ assert.equal(ui.hasPendingImport(),true);release(JSON.stringify(graph));await reading;get('workflow-description').value='First purpose';
+ await get('workflow-file').onchange({target:{files:[new File([JSON.stringify(graph)],'Second.json')],value:''}});assert.equal(get('workflow-description').value,'First purpose');
+ assert.equal(await ui.finishImport(),false,'The next workflow still needs its own description');assert.match(get('workflow-import-progress').textContent,/Second/);get('workflow-description').value='Second purpose';assert.equal(await ui.finishImport(),true);
+}));
+
+test('a committed import is not retried when the subsequent metadata refresh fails',async()=>fixture(async({ui,nodes,calls,setIntercept})=>{
+ const get=id=>nodes.get(id),graph={'1':{class_type:'CLIPTextEncode',inputs:{text:'p'}},'2':{class_type:'SaveImage',inputs:{images:['1',0]}}};
+ await get('workflow-file').onchange({target:{files:[new File([JSON.stringify(graph)],'Image.json')],value:''}});get('workflow-description').value='Saved purpose';
+ setIntercept(route=>route==='comfy'?Promise.reject(Error('Disconnected')):undefined);
+ assert.equal(await ui.finishImport(),true);assert.equal(ui.hasPendingImport(),false);assert.equal(await ui.finishImport(),true);assert.equal(calls.filter(call=>call.route==='comfy/import').length,1);
 }));

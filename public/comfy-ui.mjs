@@ -47,12 +47,12 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
   function cancelSettings(){
     settingsVersion++;refreshVersion++;importVersion++;
     refreshController?.abort();connectionController?.abort();
-    descriptions.clear();queue=[];importGraph=null;
+    descriptions.clear();queue=[];importGraph=null;currentFile=null;clearImportError();
     $('workflow-import-panel').hidden=true;$('comfy-status').textContent='';
     setBusy(busy);
   }
   const descriptions=new Map();
-  let queue=[],queueTotal=0,queueIndex=0,importVersion=0,imageInputs=[],imageOptions=[],nextImageId=0;
+  let queue=[],queueTotal=0,queueIndex=0,importVersion=0,currentFile=null,importFailure='',imageInputs=[],imageOptions=[],nextImageId=0;
   function syncLimit(){
     $('comfy-unlimited').setAttribute('aria-pressed',String(unlimited));
     $('comfy-iterations').hidden=unlimited;
@@ -155,18 +155,25 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     remove.onclick=()=>{if(busy||working)return;imageInputs=imageInputs.filter(item=>item!==row);renderImageInputs();};
     card.append(name,description,target,label,remove);imageInputs.push(row);renderImageInputs();name.focus();
   };
+  function clearImportError(){importFailure='';$('workflow-import-error').textContent='';$('workflow-import-error').hidden=true;}
+  function importError(message,control=$('workflow-import-error')){
+    importFailure=message;$('workflow-import-error').textContent=message;$('workflow-import-error').hidden=false;
+    control.scrollIntoView?.({block:'nearest'});control.focus({preventScroll:true});
+  }
+  function hasPendingImport(){return currentFile!==null||queue.length>0;}
   async function nextWorkflow(){
     const version=++importVersion;
-    importGraph=null;setBusy(busy);
+    importGraph=null;currentFile=null;clearImportError();setBusy(busy);
     if(!queue.length){$('workflow-import-panel').hidden=true;return;}
-    const file=queue.shift();queueIndex++;
+    const file=currentFile=queue.shift();queueIndex++;
     $('workflow-import-panel').hidden=false;$('workflow-import-fields').hidden=true;
-    $('workflow-import-progress').textContent=`${queueIndex} / ${queueTotal} · ${file.name}`;
+    $('workflow-import-progress').textContent=`${queueIndex} / ${queueTotal} · ${file.name} · À configurer`;
+    $('workflow-import-panel').scrollIntoView?.({block:'nearest'});
     changeWorking(1);
     try{
       if(file.size>2*1024*1024)throw Error('Workflow limité à 2 Mo.');
       const contents=await file.text();if(version!==importVersion)return;
-      const graph=JSON.parse(contents);if(graph.nodes||graph.links)throw Error('Dans ComfyUI : File → Export (API). Le JSON de l’éditeur ne suffit pas.');
+      const graph=JSON.parse(contents);if(graph?.nodes||graph?.links)throw Error('Ce fichier est un workflow de l’éditeur ComfyUI, pas un export API. Dans ComfyUI, ouvrez ce workflow puis choisissez File → Export (API). Importez ensuite le fichier exporté. Aucun workflow n’a été ajouté.');
       const options=[];
       for(const[id,value]of Object.entries(graph)){if(!value?.class_type||!value.inputs)throw Error('Le fichier doit être un export API ComfyUI.');for(const[input,current]of Object.entries(value.inputs))if(['string','number','boolean'].includes(typeof current)||Array.isArray(current))options.push({id,input,label:`${id} · ${value._meta?.title||value.class_type} · ${input}`});}
       importGraph=graph;$('workflow-name').value=file.name.replace(/\.json$/i,'');$('workflow-description').value='';imageInputs=[];nextImageId=0;imageOptions=options.filter(option=>typeof graph[option.id].inputs[option.input]==='string');renderImageInputs();
@@ -177,16 +184,18 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
         if(match)select.value=JSON.stringify({node:match.id,input:match.input});
       }
       document.querySelector('.workflow-bindings').open=!$('binding-prompt').value;
-      $('workflow-import-fields').hidden=false;$('comfy-status').textContent='Décrivez quand utiliser ce workflow, puis choisissez ses entrées modifiables.';
-    }catch(e){if(version===importVersion){importGraph=null;$('comfy-status').textContent=e.message;}}
-    finally{changeWorking(-1);}
+      $('workflow-import-fields').hidden=false;$('comfy-status').textContent='Décrivez quand utiliser ce workflow, puis cliquez sur Ajouter le workflow ou Enregistrer.';
+    }catch(e){if(version===importVersion){importGraph=null;importError(e.message);}}
+    finally{changeWorking(-1);if(version===importVersion&&importGraph){$('workflow-description').focus({preventScroll:true});$('workflow-description').scrollIntoView?.({block:'nearest'});}}
   }
-  $('workflow-file').onchange=async event=>{queue=[...event.target.files];event.target.value='';queueTotal=queue.length;queueIndex=0;await nextWorkflow();};
+  $('workflow-file').onchange=async event=>{const files=[...event.target.files];event.target.value='';if(!files.length)return;if(currentFile){queue.push(...files);queueTotal+=files.length;$('workflow-import-progress').textContent=`${queueIndex} / ${queueTotal} · ${currentFile.name} · À configurer`;return;}queue=files;queueTotal=queue.length;queueIndex=0;await nextWorkflow();};
   $('workflow-skip').onclick=()=>nextWorkflow();
-  $('workflow-import').onclick=async()=>{
+  async function importWorkflow(){
+    if(busy||working)return false;
+    if(!importGraph){importError(importFailure||'Sélectionnez un workflow au format API valide.');return false;}
+    clearImportError();
     const description=$('workflow-description').value.trim();
-    if(!description){$('comfy-status').textContent='Ajoutez une courte description pour que le modèle sache quand choisir ce workflow.';$('workflow-description').focus();return;}
-    if(busy||working||!importGraph)return;
+    if(!description){importError('Ajoutez une courte description pour que le modèle sache quand choisir ce workflow.',$('workflow-description'));return false;}
     const session=settingsVersion;changeWorking(1);
     try{
       const bindings={};for(const key of ['prompt','seed','width','height','negative_prompt']){const value=$(`binding-${key}`).value;if(value)bindings[key]=JSON.parse(value);}
@@ -196,11 +205,19 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
       const outputNodes=Object.entries(importGraph||{}).filter(([,n])=>/SaveImage/.test(n.class_type)).map(([id])=>id);
       if(!outputNodes.length)throw Error('Le workflow doit contenir un nœud SaveImage.');
       await api('comfy/import',{name:$('workflow-name').value,description,graph:importGraph,bindings,outputNodes,imageInputs:images});
-      if(session!==settingsVersion)return;
-      await refresh({settings:false});if(session!==settingsVersion)return;await nextWorkflow();if(!queue.length&&$('workflow-import-panel').hidden)$('comfy-status').textContent='Workflows ajoutés. Le modèle choisira selon leurs descriptions.';
-    }catch(e){if(session===settingsVersion)$('comfy-status').textContent=e.message;}
+      if(session!==settingsVersion)return false;
+      importGraph=null;currentFile=null;
+      try{await refresh({settings:false});}catch(error){notice('Workflow enregistré, mais sa liste n’a pas pu être actualisée : '+error.message);}
+      if(session!==settingsVersion)return false;await nextWorkflow();if(!hasPendingImport())$('comfy-status').textContent='Workflows ajoutés. Le modèle choisira selon leurs descriptions.';
+      return true;
+    }catch(e){if(session===settingsVersion)importError(e.message);return false;}
     finally{changeWorking(-1);}
-  };
+  }
+  $('workflow-import').onclick=importWorkflow;
+  async function finishImport(){
+    if(!hasPendingImport())return true;
+    return await importWorkflow()&&!hasPendingImport();
+  }
   async function permission(request,signal){
     if(request.autoAllow)return undefined;
     $('tool-name').textContent=request.workflowName;$('tool-arguments').textContent=JSON.stringify(request.args,null,2);$('tool-dialog').showModal();
@@ -257,5 +274,5 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     }catch(error){if(!terminal)cancel();if(signal.aborted)throw signal.reason;throw error;}
     finally{signal.removeEventListener('abort',cancel);onChange();}
   }
-  return {refresh,cancelSettings,reset,renderGallery,requestTool,saveReview,values,workflowDescriptions,hasPendingImport:()=>!!importGraph||queue.length>0,saved,setBusy};
+  return {refresh,cancelSettings,reset,renderGallery,requestTool,saveReview,values,workflowDescriptions,hasPendingImport,finishImport,saved,setBusy};
 }
