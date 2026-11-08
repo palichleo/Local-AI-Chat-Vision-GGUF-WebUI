@@ -285,6 +285,7 @@ function updateControls() {
   $('history-delete-confirm').textContent = state.clearingHistory ? 'Suppression…' : 'Supprimer définitivement';
   $('theme-toggle').disabled = state.savingPreferences || !state.connected;
   $('config-fields').disabled = state.settingsLoading || state.settingsReady === false || state.comfyWorking || toolBusy || running || state.operation || state.generating || !state.connected;
+  $('shutdown-app').disabled = state.closingApp || state.updating || state.operation || state.generating || s.busy || toolBusy || state.savingPreferences || state.clearingHistory || state.comfyWorking || !state.connected;
   $('save-config').disabled = state.settingsReady === false || state.comfyWorking || s.busy || state.settingsLoading || toolBusy || state.operation || state.generating || !state.connected;
   $('settings-stop').hidden = !running;
   $('settings-stop').disabled = toolBusy || state.generating || s.state === 'stopping' || state.operation;
@@ -311,6 +312,7 @@ function updateControls() {
     $('config-error').textContent = s.error;
     $('config-error').hidden = false;
   }
+  if (state.closingApp) for (const control of document.querySelectorAll('button,input,textarea,select')) control.disabled = true;
   const basename = state.config.modelPath?.split(/[\\/]/).pop() || '';
   if (basename) {
     $('sidebar-model').textContent = /DeepSeek.*Qwen3\.5/i.test(basename) ? 'DeepSeek × Qwen3.5' : basename.replace(/\.gguf$/i, '');
@@ -337,7 +339,7 @@ async function checkUpdates() {
 }
 
 async function refreshStatus() {
-  if (state.updating) return;
+  if (state.updating || state.closingApp) return;
   try {
     const previous = state.status.state;
     state.status = await (await api('status')).json();
@@ -401,6 +403,23 @@ async function saveConfiguration() {
     state.operation = false;
     await refreshStatus();
   }
+}
+
+async function shutdownApplication() {
+  if ($('shutdown-app').disabled) return;
+  const controls = [...document.querySelectorAll('button,input,textarea,select')].map(control => [control, control.disabled]);
+  state.closingApp = true; updateControls();
+  try {
+    if (!await persistConversation()) throw Error('La conversation n’a pas été sauvegardée. L’application reste ouverte.');
+    await historyWrite;
+    await api('shutdown', {}); state.connected = false; $('settings').close();
+    notice('Application arrêtée. Vous pouvez fermer cet onglet.');
+  } catch (error) {
+    state.closingApp = false;
+    for (const [control, disabled] of controls) control.disabled = disabled;
+    notice(error.message);
+  }
+  finally { updateControls(); }
 }
 
 async function toggleEngine(stopOnly = false) {
@@ -625,6 +644,7 @@ for(const button of document.querySelectorAll('[data-file-kind]'))button.onclick
 $('settings-open').onclick = openSettings;
 $('update-available').onclick = installUpdate;
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
+$('shutdown-app').onclick = shutdownApplication;
 $('settings-close').onclick = () => $('settings').close();
 $('settings-form').onsubmit = (event) => { event.preventDefault(); saveConfiguration(); };
 $('toggle-engine').onclick = () => toggleEngine();

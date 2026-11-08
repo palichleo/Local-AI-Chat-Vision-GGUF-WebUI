@@ -1,6 +1,6 @@
 {
   "name": "atelier-local",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "description": "Chat et vision GGUF en local, sans dépendances npm.",
@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node server.mjs --open",
+    "start": "node scripts/launch.mjs --open",
     "smoke": "node --test tests/*.mjs",
     "test": "node --test tests/*.mjs"
   }

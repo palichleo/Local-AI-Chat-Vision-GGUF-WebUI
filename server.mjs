@@ -98,7 +98,7 @@ function chatPayload(input, vision, maxOutputTokens) {
   };
 }
 
-export async function createApplication({ port = 8787, dataDir = join(root, 'data'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null } = {}) {
+export async function createApplication({ port = 8787, dataDir = join(root, 'data'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null, managed = false, controlTimeoutMs = 15000 } = {}) {
   await mkdir(dataDir, { recursive: true });
   const { version: applicationVersion } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   let applyingUpdate = false, installState = { state: 'idle', error: '' };
@@ -167,6 +167,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
 
   const updateController = new AbortController();
   let updates = Promise.resolve({ available: false });
+  let controlResponse = null, controlledOnce = false, controlTimer;
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -193,10 +194,21 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (path === '/favicon.ico' && req.method === 'GET') { res.writeHead(204); return res.end(); }
       if (path === '/api/bootstrap' && req.method === 'GET') {
-        return send(200, { token, config, preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
+        return send(200, { application: 'atelier-local', controlled: !!controlResponse, token, config, preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
       }
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Recharge la page.', 401);
+      if (path === '/api/lifecycle' && req.method === 'GET') {
+        if (closing || controlResponse) throw problem('Une fenêtre contrôle déjà cette application.', 409);
+        controlResponse = res; controlledOnce = true; clearTimeout(controlTimer);
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.write(JSON.stringify({ state: 'running' }) + '\n');
+        res.once('close', () => {
+          if (controlResponse === res) controlResponse = null;
+          if (!closing) void stopApplication().catch(console.error);
+        });
+        return;
+      }
       if (path === '/api/updates/install' && req.method === 'GET') {
         if (!applyingUpdate && installState.state === 'idle') {
           try { return send(200, JSON.parse(await readFile(join(dataDir, 'update-status.json'), 'utf8'))); } catch {}
@@ -232,6 +244,12 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       const body = await jsonBody(req, path === '/api/updates/install' ? 40 * 1024 * 1024 : maxBody);
       if (applyingUpdate) throw problem('Installation de la mise à jour en cours.', 409);
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw problem('Un objet JSON est attendu.');
+      if (path === '/api/shutdown') {
+        send(202, { stopping: true });
+        setImmediate(() => { void stopApplication().catch(console.error); });
+        return;
+      }
+      if (closing) throw problem('L’application est en cours de fermeture.', 409);
       if (path === '/api/updates/session/clear') { await rm(join(dataDir, 'update-session.json'), { force: true }); return send(200, { cleared: true }); }
       if (path === '/api/updates/install') {
         const available = await updates;
@@ -249,7 +267,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
             await atomicJson(join(dataDir, 'update-session.json'), snapshot);
             const plan = await updateInstaller.prepare({ version: available.version, port: server.address().port, signal: installController.signal });
             installController.signal.throwIfAborted();
-            installHandle = await updateInstaller.launch(plan);
+            installHandle = await updateInstaller.launch({ ...plan, managed: managed || controlledOnce });
             installController.signal.throwIfAborted();
             installState = { state: 'restarting', error: '' };
             await closeApplication();
@@ -463,20 +481,25 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   url = `http://127.0.0.1:${server.address().port}`;
   if (updateChecker) updates = Promise.resolve().then(() => updateChecker({ signal: updateController.signal })).catch(() => ({ available: false }));
   let closing;
+  if (managed) { controlTimer = setTimeout(() => { void stopApplication().catch(console.error); }, controlTimeoutMs); controlTimer.unref(); }
   function closeApplication() {
     return closing ||= (async () => {
+      clearTimeout(controlTimer);
+      const serverClosed = new Promise(done => server.close(done));
       updateController.abort(); await updates;
       await runtime.close(); await engine.stop();
-      server.closeAllConnections();
       await history.flush(); await galleryBatch.catch(() => {}); await gallery.pending;
-      await new Promise(done => server.close(done));
+      if (controlResponse && !controlResponse.destroyed) controlResponse.end(JSON.stringify({ state: applyingUpdate ? 'restarting' : 'stopped' }) + '\n');
+      server.closeAllConnections();
+      await serverClosed;
     })();
   }
-  return { url, async close() { installController.abort(); await installTask; return closeApplication(); } };
+  async function stopApplication() { installController.abort(); await installTask; return closeApplication(); }
+  return { url, close: stopApplication };
 }
 
 
-function openBrowser(url) {
+export function openBrowser(url) {
   const command = process.platform === 'win32' ? 'rundll32.exe' : 'xdg-open';
   const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
   const child = spawn(command, args, { stdio: 'ignore', detached: true, windowsHide: true });
@@ -489,12 +512,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     console.error('Atelier local nécessite Node.js 22 ou ultérieur.');
     process.exitCode = 1;
   } else {
+    let port = 8787;
     try {
       const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-      const portArg = process.argv.find(arg => arg.startsWith('--update-port='));
-      const port = portArg ? Number(portArg.split('=')[1]) : 8787;
+      const portArg = process.argv.find(arg => arg.startsWith('--port=') || arg.startsWith('--update-port='));
+      port = portArg ? Number(portArg.split('=')[1]) : 8787;
       if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port invalide.');
-      const app = await createApplication({ port,
+      const app = await createApplication({ port, managed: process.env.ATELIER_MANAGED_LAUNCH === '1',
         updateChecker: ({ signal }) => checkForUpdates({ currentVersion: version, signal }),
         updateInstaller: { prepare: args => prepareUpdate({ ...args, root, currentVersion: version }), launch: launchInstaller },
       });
@@ -503,9 +527,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       const close = async () => { if (closing) return; closing = true; await app.close(); process.exitCode = 0; };
       process.on('SIGINT', close);
       process.on('SIGTERM', close);
+      process.on('SIGHUP', close);
       if (process.argv.includes('--open')) openBrowser(app.url);
     } catch (error) {
-      console.error(error.code === 'EADDRINUSE' ? 'Le port 8787 est déjà utilisé. Ferme l’autre instance de l’application.' : error.message);
+      console.error(error.code === 'EADDRINUSE' ? `Le port ${port} est déjà utilisé. Relance l’application avec son lanceur pour retrouver l’instance existante.` : error.message);
       process.exitCode = 1;
     }
   }

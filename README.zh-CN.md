@@ -21,10 +21,10 @@ sh lancer-linux.sh
 以下命令在两个系统上均可使用：
 
 ```sh
-node server.mjs --open
+node scripts/launch.mjs --open
 ```
 
-在浏览器中打开 **http://127.0.0.1:8787**。请保持终端运行；按 `Ctrl+C` 可停止应用及其启动的推理引擎。如果浏览器没有自动打开，请手动输入该地址。端口 8787 必须空闲。
+在浏览器中打开 **http://127.0.0.1:8787**。请保持启动器窗口运行，更新后它仍会控制应用。关闭该窗口、按 `Ctrl+C` 或在 Configuration 中选择 **Fermer l’application**，都会停止应用及其模型并释放端口。再次启动会复用已运行的 Atelier 实例；若端口被其他服务占用，只会提示，不会终止该服务。如果浏览器没有自动打开，请手动输入地址。
 
 无需运行 `npm install`，也可以使用 `npm start` 启动。
 

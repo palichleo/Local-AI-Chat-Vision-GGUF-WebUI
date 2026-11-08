@@ -21,10 +21,10 @@ sh lancer-linux.sh
 The same command also works on both systems:
 
 ```sh
-node server.mjs --open
+node scripts/launch.mjs --open
 ```
 
-Open **http://127.0.0.1:8787**. Keep the terminal running; `Ctrl+C` stops the application and the engine it started. If the browser does not open automatically, enter the address manually. Port 8787 must be available.
+Open **http://127.0.0.1:8787**. Keep the launcher window open; it stays attached through updates. Closing that window, pressing `Ctrl+C`, or choosing **Fermer l’application** in Configuration stops the app and its model and releases the port. Launching again reuses an existing Atelier instance. Another service using port 8787 is reported and left untouched. If the browser does not open automatically, enter the address manually.
 
 There is no need to run `npm install`. You can also use `npm start`.
 

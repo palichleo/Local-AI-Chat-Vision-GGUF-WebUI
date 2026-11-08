@@ -7,5 +7,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-node server.mjs --open
-if errorlevel 1 pause
+node scripts\launch.mjs --open %*
+set "ATELIER_EXIT=%errorlevel%"
+if not "%ATELIER_EXIT%"=="0" pause
+exit /b %ATELIER_EXIT%

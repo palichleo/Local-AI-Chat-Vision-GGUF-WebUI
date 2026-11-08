@@ -26,12 +26,13 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
     setupMaterialLighting() {}, dismissSettingsOnOutsideClick() {}, setupTokenControls: () => ({ setValues() {}, values: () => ({ contextSize: 4096, maxOutputTokens: 2048 }) }),
     setupComputeControls: () => ({ setValues(config) { $('compute-mode').value = String(config.gpuLayers); }, values: () => ({ gpuLayers: 999 }) }),
     setupComfy: options => { comfyOptions = options; return comfyUI; },
-    document: { getElementById: $, querySelectorAll: () => [], documentElement: { dataset: { theme: 'dark' } }, addEventListener() {}, createElement: () => $('node-' + nodes.size), createElementNS: () => $('node-' + nodes.size) },
+    document: { getElementById: $, querySelectorAll: selector => selector === 'button,input,textarea,select' ? [...nodes.values()] : [], documentElement: { dataset: { theme: 'dark' } }, addEventListener() {}, createElement: () => $('node-' + nodes.size), createElementNS: () => $('node-' + nodes.size) },
     window: { addEventListener() {} },
     fetch: async (url, options = {}) => {
       const call = { route: url.replace('/api/', ''), body: options.body === undefined ? undefined : JSON.parse(options.body), options }; calls.push(call);
       if (request) { const response = await request(call); if (response) return response; }
       if (call.route === 'bootstrap') return Response.json({ config: savedConfig, preferences: { theme: 'dark', saveHistory: true }, status: { state: 'stopped', logs: [] } });
+      if (call.route === 'shutdown') return Response.json({stopping:true});
       if (call.route === 'status') return Response.json({ state: 'stopped', logs: [] });
       if (call.route === 'history') return Response.json({ conversations: [], skipped: 0 });
       if (call.route === 'preferences') return Response.json({ preferences: { theme: 'dark', saveHistory: call.body.saveHistory ?? true } });
@@ -42,7 +43,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
     },
   };
   const application = source.slice(0, source.lastIndexOf('\ntry {')).replace(/^import .*;\r?\n/gm, '');
-  runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus };', context);
+  runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };', context);
   Object.assign(context.app.state, { token: 'test', config: { ...savedConfig }, connected: true });
   return { ...context.app, $, calls, refreshes, comfyUI, comfyOptions, async open() { context.app.openSettings(); await tick(); } };
 }
@@ -155,4 +156,17 @@ test('opening settings reflects theme and history changed in another tab', async
   const ui=await settingsUI({request:call=>call.route==='bootstrap'?Response.json({config:savedConfig,preferences:{theme:'light',saveHistory:false}}):undefined});
   await ui.open();
   assert.equal(ui.state.theme,'light');assert.equal(ui.state.saveHistory,false);assert.equal(ui.$('history-enabled').checked,false);
+});
+
+test('closing the application saves accepted conversation writes before shutting the server down',async()=>{
+ const ui=await settingsUI();assert.equal(typeof ui.shutdownApplication,'function');await ui.open();
+ ui.state.messages=[{role:'user',content:'Keep this conversation'}];await ui.shutdownApplication();
+ const routes=ui.calls.map(call=>call.route);assert.ok(routes.indexOf('history/save')<routes.indexOf('shutdown'));
+ assert.equal(ui.$('settings').open,false);assert.equal(ui.state.connected,false);assert.equal(ui.$('shutdown-app').disabled,true);
+});
+
+test('a history save failure leaves the app open and restores the settings controls',async()=>{
+ const ui=await settingsUI({request:call=>call.route==='history/save'?Response.json({error:'Disk full'},{status:500}):undefined});await ui.open();
+ ui.state.messages=[{role:'user',content:'Keep me'}];await ui.shutdownApplication();
+ assert.equal(ui.state.connected,true);assert.equal(ui.$('settings-close').disabled,false);assert.equal(ui.$('settings-open').disabled,false);assert.equal(ui.calls.some(call=>call.route==='shutdown'),false);
 });
