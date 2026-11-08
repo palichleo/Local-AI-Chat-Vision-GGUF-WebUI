@@ -274,10 +274,10 @@ test('batch output originals are transferred and compressed sequentially before 
  });
 }));
 
-test('an unreadable original does not prevent later batch outputs from being shown',async()=>fixture(async({ui,state,setIntercept})=>{
+test('an unreadable original does not prevent later batch outputs from being shown',async()=>fixture(async({ui,state,calls,setIntercept})=>{
  state.conversationId='conversation';const record={...generatedRecord,outputs:[0,1].map(i=>({source:{filename:i+'.png'}}))},shown=[];
- setIntercept(route=>route==='tools/execute'?Response.json({id:'mine',state:'done',record}):route==='gallery/conversation'?Response.json({runs:[record]}):route.endsWith('/mine/0')?Promise.reject(Error('Missing first image')):route.endsWith('/mine/1')?new Response(Buffer.from('89504e470d0a1a0a','hex'),{headers:{'content-type':'image/png'}}):undefined);
- await rasterStub(async()=>{const result=await ui.requestTool({autoAllow:true,requestId:'mine'},new AbortController().signal,()=>{},event=>shown.push(event.index));assert.deepEqual(shown,[1]);assert.equal(result.failed,true);assert.equal(result.images.length,0);assert.match(result.error,/Missing first image/);});
+ setIntercept(route=>route==='tools/execute'?Response.json({id:'mine',state:'done',record}):route==='gallery/conversation'?Response.json({runs:[record]}):route==='gallery/analysis'?Response.json({}):route.endsWith('/mine/0')?Promise.reject(Error('Missing first image')):route.endsWith('/mine/1')?new Response(Buffer.from('89504e470d0a1a0a','hex'),{headers:{'content-type':'image/png'}}):undefined);
+ await rasterStub(async()=>{const result=await ui.requestTool({autoAllow:true,requestId:'mine'},new AbortController().signal,()=>{},event=>shown.push(event.index));assert.deepEqual(shown,[1]);assert.equal(result.failed,true);assert.equal(result.images.length,1);assert.deepEqual(calls.find(call=>call.route==='gallery/analysis').body.images,[null,result.images[0]]);assert.equal(JSON.parse(result.content).analysis_outputs[0].output_index,1);assert.match(result.error,/Missing first image/);});
 }));
 test('an already cancelled automatic call releases its pending approval without executing',async()=>fixture(async({ui,calls,setIntercept})=>{
  setIntercept(route=>route==='tools/cancel'?Response.json(null):undefined);
@@ -311,4 +311,10 @@ test('video tool result retains the effective recipe even when analysis frames c
  setIntercept(route=>route==='tools/execute'?Response.json({id:'job',state:'done',record}):route==='gallery/conversation'?Response.json({runs:[record]}):undefined);
  const pending=ui.requestTool({requestId:'video',mediaType:'video',approvalToken:'token',args:{},plan:{stage:'draft',parameters:{},references:[]}},new AbortController().signal,()=>{});await new Promise(setImmediate);nodes.get('tool-once').onclick();const result=await pending,data=JSON.parse(result.content);
  assert.equal(result.record.id,'mine');assert.equal(result.failed,true);assert.equal(data.parameters.seed,123);assert.equal(data.parameters.fps,16);assert.equal(data.parameters.frames,81);assert.equal(data.workflow_digest,'version');assert.equal(data.parameters.workflow_inputs,undefined);
+}));
+
+test('photo tool results expose the actual seed and dimensions for a later correction',async()=>fixture(async({ui,state,setIntercept})=>{
+ state.conversationId='conversation';const record={...generatedRecord,parameters:{seed:42,width:1024,height:768,workflow_digest:'photo-version'}};
+ setIntercept(route=>route==='tools/execute'?Response.json({id:'mine',state:'done',record}):route==='gallery/conversation'?Response.json({runs:[record]}):route.endsWith('/mine/0')?Promise.reject(Error('No preview')):undefined);
+ const result=await ui.requestTool({autoAllow:true,requestId:'photo'},new AbortController().signal,()=>{}),data=JSON.parse(result.content);assert.equal(data.parameters.seed,42);assert.equal(data.parameters.width,1024);assert.equal(data.workflow_digest,'photo-version');
 }));

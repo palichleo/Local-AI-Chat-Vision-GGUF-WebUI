@@ -17,6 +17,15 @@ The LLM list starts on the configured model. Open **Chemins** to edit its name a
 **Consignes globales** saves up to 16,000 characters as user-supplied context for new conversations. Each conversation captures this text when its first message is submitted. Later changes affect future conversations; saved conversations and update checkpoints retain the original context. It occupies one initial system-context entry, not a new message on every turn. The stateless engine still receives the full active context with each inference request. Existing archives without instructions keep an empty context.
 
 
+## Generation execution checks
+
+Only selected output nodes and their upstream dependencies are submitted to ComfyUI, together with its partial execution targets. Unselected output branches are excluded from the submitted graph, including on older servers that ignore the partial-target field. A mapped prompt or explicitly supplied parameter disconnected from the selected outputs fails before GPU handoff. Execution metadata lists only nodes in that branch. This checks structural connections; it does not guess what a custom switch or node does internally.
+
+Both photo and video approval are bound to the selected Comfy address. Every video still requires separate confirmation. Supplied references and omitted optional inputs are distinguished: omitted inputs keep their saved workflow defaults, and zero supplied references does not prove the saved graph is text-only. Video proposals identify retained reference inputs; computed dimensions, FPS or seeds are not presented as known numeric settings.
+
+If one output cannot be decoded or downloaded, other analysis copies in the batch are retained and stored at their original output indices. Tool results identify which reduced images belong to which outputs and warn about missing copies. Original Comfy files remain untouched. Both photo and video tool results include the available actual seed, dimensions and workflow digest for follow-up; repeated model tool-call IDs no longer make restored generations display an earlier result.
+
+
 ## Video proposals and confirmation
 
 When importing an API workflow, select **Vidéo · MP4 / WebM**, declare whether it supports drafts, finals, or both, and select its saved-video output node. Map the prompt and optional seed, width, height, frame count and FPS. Reference inputs keep their explicit names and role descriptions (for example, start image, end image or style); the app does not infer these roles from a workflow or model name. Describe any constraints of custom nodes in the workflow description. Existing image workflows keep their behavior.

@@ -137,7 +137,7 @@ test('run polls its own history and returns only final saved image outputs', asy
   const { client } = await server(t, ({ method, url, body }) => {
     if (url.pathname === '/prompt') {
       assert.equal(method, 'POST');
-      assert.deepEqual(JSON.parse(body).prompt, graph);
+      const submitted=JSON.parse(body),id=submitted.partial_execution_targets[0];assert.ok(['7','9'].includes(id));assert.deepEqual(submitted.prompt,{[id]:graph[id]});
       return { body: { prompt_id: 'mine', number: 2, node_errors: {} } };
     }
     if (url.pathname === '/queue') return { body: queue(polls > 0 ? ['mine'] : ['other'], polls > 0 ? [] : ['mine']) };
@@ -362,4 +362,10 @@ test('video streaming accepts a short initial browser range and propagates cance
  const result=await client.streamVideo({filename:'clip.mp4',subfolder:'',type:'output'},{range:'bytes=0-7'});assert.equal(result.status,206);assert.deepEqual(Buffer.from(await new Response(result.body).arrayBuffer()),bytes.subarray(0,8));
  let cancelled=false;const other=new ComfyClient('http://127.0.0.1:8188',{fetchImpl:async()=>new Response(new ReadableStream({start(controller){controller.enqueue(bytes);},cancel(){cancelled=true;}}),{headers:{'content-type':'video/mp4'}})});
  const stream=await other.streamVideo({filename:'clip.mp4',subfolder:'',type:'output'});await stream.body.cancel();assert.equal(cancelled,true);
+});
+
+test('selected outputs submit only their upstream branch, excluding unselected photo and video outputs',async t=>{
+ const source={'1':{class_type:'UserPrompt',inputs:{text:'p'}},'2':{class_type:'ImageOutput',inputs:{text:['1',0]}},'3':{class_type:'VideoOutput',inputs:{text:['1',0]}},'4':{class_type:'UnusedHeavyModel',inputs:{}}};
+ const {client}=await server(t,({url,body})=>{if(url.pathname==='/prompt'){const submitted=JSON.parse(body);assert.deepEqual(Object.keys(submitted.prompt),['1','2']);assert.deepEqual(submitted.partial_execution_targets,['2']);return {body:{prompt_id:'selected'}};}return {body:{selected:{status:{completed:true},outputs:{'2':{images:[image]}}}}};});
+ assert.deepEqual((await client.run(source,{outputNodes:['2']})).outputs,[image]);assert.equal(Object.keys(source).length,4);
 });

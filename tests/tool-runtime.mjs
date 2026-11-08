@@ -26,7 +26,7 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
   digest='one'; const p=await rt.request(calls,{conversationId:id,turnId:id,messages:[]});
   const job=await rt.execute({requestId:p.requestId,permission:'once'});
   await rt.finished;
-  assert.equal(rt.job.state,'done'); assert.equal(job.id,rt.job.id);assert.equal(rt.job.record.parameters.reference_count,0);assert.equal(rt.job.record.parameters.reference_capacity,0);assert.equal(rt.job.record.parameters.reference_mode,'text_only');
+  assert.equal(rt.job.state,'done'); assert.equal(job.id,rt.job.id);assert.equal(rt.job.record.parameters.reference_count,0);assert.equal(rt.job.record.parameters.reference_capacity,0);assert.equal(rt.job.record.parameters.reference_mode,'not_provided');
   assert.deepEqual(order,['stop','run','free','start']); assert.equal(runs,1);
   await assert.rejects(rt.execute({requestId:p.requestId,permission:'once'}),/expiré/i);
   await assert.rejects(rt.request(calls,{conversationId:id,turnId:id,messages:[]}),/limite/i);
@@ -34,7 +34,7 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
 test('Comfy release failure keeps LLM stopped and records error',async()=>{
   let starts=0;
   const engine={state:'ready',stop:async()=>{},start:async()=>{starts++;}};
-  const rt=new ToolRuntime({engine,catalog:{read:async()=>({digest:'1',name:'wf'}),prepare:async()=>({graph:{},workflow:{name:'wf',digest:'1'}})},gallery:{put:async r=>r},getConfig:()=>({enabled:true,autoAllow:true,maxIterations:3}),engineConfig:()=>({}),clientFactory:()=>({status:async()=>({idle:true}),run:async()=>{throw Error('failed');},free:async()=>{throw Error('VRAM');}})});
+  const rt=new ToolRuntime({engine,catalog:{read:async()=>({digest:'1',name:'wf'}),prepare:async()=>({graph:{'1':{class_type:'SaveImage',inputs:{}}},outputNodes:['1'],workflow:{name:'wf',digest:'1'}})},gallery:{put:async r=>r},getConfig:()=>({enabled:true,autoAllow:true,maxIterations:3}),engineConfig:()=>({}),clientFactory:()=>({status:async()=>({idle:true}),run:async()=>{throw Error('failed');},free:async()=>{throw Error('VRAM');}})});
   const p=await rt.request([{id:'c',type:'function',function:{name:'comfy_generate_image',arguments:'{"workflow_id":"wf","prompt":"cat"}'}}],{conversationId:id,turnId:id,messages:[]});
   await rt.execute({requestId:p.requestId}); await rt.finished;
   assert.equal(rt.active,true); assert.equal(starts,0); assert.equal(rt.job.state,'error'); assert.match(rt.job.error,/VRAM/);
@@ -211,4 +211,13 @@ test('cancelling a pending approval releases its reference copies and prevents l
  const {rt,request,seen}=runtimeFixture(),approval=await request();
  rt.cancel({requestId:approval.requestId});assert.equal(rt.pending.size,0);
  await assert.rejects(rt.execute({requestId:approval.requestId,permission:'once'}),/expiré/i);assert.equal(seen.runs,0);
+});
+test('photo approval is bound to its Comfy address and cannot be redirected before execution',async()=>{
+ const {rt,request,seen}=runtimeFixture(),p=await request();rt.getConfig=()=>({enabled:true,autoAllow:false,maxIterations:5,baseUrl:'http://127.0.0.1:9000'});
+ await assert.rejects(rt.execute({requestId:p.requestId,permission:'once'}),{status:409});assert.equal(seen.stops,0);assert.equal(seen.runs,0);
+});
+
+test('generation metadata omits nodes outside the selected execution branch',async()=>{
+ const {rt,request,catalog}=runtimeFixture(),prepare=catalog.prepare;catalog.prepare=async(...args)=>{const result=await prepare(...args);result.graph['unused']={class_type:'UnusedHeavyVideoBranch',inputs:{seed:123}};return result;};
+ const p=await request();await rt.execute({requestId:p.requestId,permission:'once'});await rt.finished;assert.equal(rt.status().state,'done');assert.equal(rt.status().record.parameters.workflow_inputs.unused,undefined);assert.ok(rt.status().record.parameters.workflow_inputs['7']);
 });

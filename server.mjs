@@ -458,7 +458,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         if(!Array.isArray(body.images)||body.images.length!==record.outputs.length)throw problem('Copies d’analyse invalides.');
         if(body.dimensions!==undefined&&(!Array.isArray(body.dimensions)||body.dimensions.length!==record.outputs.length||body.dimensions.some(size=>size!==null&&(!size||![size.width,size.height].every(value=>Number.isInteger(value)&&value>0&&value<=131072)))))throw problem('Résolutions de sortie invalides.');
         if(body.frames!==undefined&&(!Array.isArray(body.frames)||body.frames.length!==record.outputs.length))throw problem('Images vidéo invalides.');
-        record.outputs=record.outputs.map((output,i)=>({...output,analysisDataUrl:body.images[i],...(body.dimensions?.[i]||{}),...(body.frames?{analysisFrames:body.frames[i]}:{})}));
+        record.outputs=record.outputs.map((output,i)=>(body.images[i]===null?output:{...output,analysisDataUrl:body.images[i],...(body.dimensions?.[i]||{}),...(body.frames?.[i]?{analysisFrames:body.frames[i]}:{})}));
         }
         return send(200,await gallery.put(record,{persist:preferences.saveHistory}));
         } finally { persistingGallery=false; }

@@ -11,7 +11,7 @@ function fixture(overrides = {}) {
     id: 'portrait', name: 'Portrait', description: 'A local portrait workflow.',
     graph: {
       '1': { class_type: 'CLIPTextEncode', inputs: { text: 'original', clip: ['9', 0] } },
-      '2': { class_type: 'KSampler', inputs: { seed: 7, steps: 20 } },
+      '2': { class_type: 'KSampler', inputs: { seed: 7, steps: 20, positive: ['1',0] } },
       '3': { class_type: 'SaveImage', inputs: { images: ['2', 0], filename_prefix: 'ComfyUI' } },
       '9': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'local.safetensors' } },
     },
@@ -95,7 +95,7 @@ test('mapped optional text, numeric bounds and uploaded image reach exactly thei
       negative_prompt: { node: '6', input: 'text' }, width: { node: '4', input: 'width' },
       height: { node: '4', input: 'height' }, image: { node: '5', input: 'image' },
     });
-    input.graph['3'].inputs.images=['5',0];
+    Object.assign(input.graph['2'].inputs,{reference:['5',0],latent_image:['4',0],negative:['6',0]});
     input.requiresImage = true;
     await catalog.save(input);
     await assert.rejects(catalog.prepare('portrait', { prompt: 'edit' }), /reference image/i);
@@ -209,3 +209,9 @@ test('output preview dimensions use declared numeric values without guessing arb
  const {workflowOutputSize}=await import('../lib/comfy-workflows.mjs');const w=fixture();w.bindings.width={node:'4',input:'width'};w.bindings.height={node:'4',input:'height'};w.graph['4']={class_type:'CustomSizeNode',inputs:{width:1536,height:1024}};
  assert.deepEqual(workflowOutputSize(w),{width:1536,height:1024});assert.deepEqual(workflowOutputSize(w,{width:768,height:512}),{width:768,height:512});w.graph['4'].inputs.width=['5',0];assert.equal(workflowOutputSize(w),null);
 });
+
+test('a disconnected prompt or requested parameter fails before an unchanged image can be generated',async()=>withCatalog(async catalog=>{
+ const input=fixture();input.graph['2'].inputs.positive=['1',0];input.graph['4']={class_type:'UnusedSize',inputs:{width:512}};input.bindings.width={node:'4',input:'width'};await catalog.save(input);
+ await assert.rejects(catalog.prepare(input.id,{prompt:'New',width:1024}),/connect/i);
+ delete input.graph['2'].inputs.positive;await catalog.save(input);await assert.rejects(catalog.prepare(input.id,{prompt:'New'}),/connect/i);
+}));

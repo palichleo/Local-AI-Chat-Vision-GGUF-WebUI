@@ -59,3 +59,11 @@ test('blank or token-truncated model responses never mark an image as reviewed',
   const result=await exchange(options);assert.equal(result.reviews.length,0);assert.equal(result.requests.length,2);
  }
 });
+
+test('restoring repeated model call IDs associates each generation with its following result',async()=>{
+ const source=await readFile(new URL('../public/app.js',import.meta.url),'utf8'),restored=[];
+ const element=()=>({textContent:'',hidden:false}),context={state:{conversationId:'selected'},generationUI:{restore:(_body,_conversation,run)=>restored.push(run)},assistantMessage:()=>({body:element(),reasoning:element(),thoughts:element(),note:element()}),renderText(){}};
+ const messages=[{role:'assistant',content:'',tool_calls:[call]},{role:'tool',tool_call_id:call.id,content:JSON.stringify({run_id:'first'})},{role:'assistant',content:'',tool_calls:[call]},{role:'tool',tool_call_id:call.id,content:JSON.stringify({run_id:'second'})}];
+ runInNewContext(source.slice(source.indexOf('function renderTranscript('),source.indexOf('async function restoreUpdate('))+';this.draw=renderTranscript;',context);context.draw(messages);assert.deepEqual(restored,['first','second']);
+ restored.length=0;context.draw([messages[0],messages[2],messages[3]]);assert.deepEqual(restored,['second']);
+});

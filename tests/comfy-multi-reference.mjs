@@ -12,7 +12,7 @@ const resourceId='a1111111-1111-4111-8111-111111111111';
 const first=Buffer.from('89504e470d0a1a0a01','hex'),second=Buffer.from('89504e470d0a1a0a02','hex');
 const data=bytes=>'data:image/png;base64,'+bytes.toString('base64');
 function workflow(){return {id:'two-refs',name:'Custom two-image workflow',description:'Combine the subject and the style.',
- graph:{'11':{class_type:'CustomPrompt',inputs:{instruction:'Original'}},'42':{class_type:'CustomFileLoader',inputs:{source_file:'old-subject.png',strength:0.7}},'73':{class_type:'AnotherCustomLoader',inputs:{style_file:'old-style.png'}},'99':{class_type:'CustomImageSaver',inputs:{images:['42',0],style:['73',0]}}},
+ graph:{'11':{class_type:'CustomPrompt',inputs:{instruction:'Original'}},'42':{class_type:'CustomFileLoader',inputs:{source_file:'old-subject.png',strength:0.7}},'73':{class_type:'AnotherCustomLoader',inputs:{style_file:'old-style.png'}},'99':{class_type:'CustomImageSaver',inputs:{images:['42',0],style:['73',0],prompt:['11',0]}}},
  bindings:{prompt:{node:'11',input:'instruction'}},outputNodes:['99'],imageInputs:[
  {id:'subject',name:'Sujet',description:'Personnage à conserver.',node:'42',input:'source_file',required:true},
  {id:'style',name:'Style',description:'Palette et rendu à reprendre.',node:'73',input:'style_file',required:false}]};}
@@ -86,4 +86,8 @@ test('missing or disabled sources do not unload the model; upload failures never
  const p=await request([{input:'subject',resource_id:resourceId}]);disable();await assert.rejects(runtime.execute({requestId:p.requestId,permission:'once'}),/Inactive/);assert.deepEqual(events,[]);
  const next=await request([{input:'subject',image:0},{input:'style',image:0}]);failUpload();await runtime.execute({requestId:next.requestId,permission:'once'});await runtime.finished;
  assert.equal(runtime.job.state,'error');assert.equal(uploads.length,0);assert.equal(graphs.length,0);assert.deepEqual(events,['stop','free','start']);
+}));
+
+test('omitted optional reference inputs are reported as workflow defaults rather than user-supplied pixels',async()=>runtimeTest(async({runtime,request})=>{
+ const p=await request([{input:'subject',image:0}]);await runtime.execute({requestId:p.requestId,permission:'once'});await runtime.finished;assert.equal(runtime.job.state,'done');assert.equal(runtime.job.record.parameters.reference_count,1);assert.deepEqual(runtime.job.record.parameters.reference_defaults.map(ref=>ref.input),['style']);
 }));

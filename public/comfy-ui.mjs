@@ -260,11 +260,11 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
           if(record.mediaType==='video'){
             if(!output.originalUrl)throw Error('Lien de lecture vidéo indisponible.');
             const video=await prepareVideo(output.originalUrl,{signal:originalsSignal,name:output.source.filename,frameCount:Math.max(1,Math.min(3,Math.floor(64/record.outputs.length))),totalFrames:Math.min(64,record.outputs.length*3)});
-            prepared.push({url:video.frames[0].url,width:video.width,height:video.height,frames:video.frames});
-          }else{const image=await compressImage(blob,{name:output.source.filename,count:record.outputs.length});prepared.push({url:image.url,width:image.width,height:image.height});}
+            prepared[index]={url:video.frames[0].url,width:video.width,height:video.height,frames:video.frames};
+          }else{const image=await compressImage(blob,{name:output.source.filename,count:record.outputs.length});prepared[index]={url:image.url,width:image.width,height:image.height};}
           }catch(error){originalsSignal.throwIfAborted();errors.push(`Sortie ${index+1} : ${error.message}`);}
         }
-        return errors.length?{error:new Error(errors.join(' '))}:{prepared};
+        return {prepared,errors};
       })().catch(error=>({error}));
     }
     try{
@@ -284,13 +284,15 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
       const showGallery=()=>renderGallery(record.conversationId).catch(error=>notice(`Galerie indisponible : ${error.message}`));
       await showGallery(); onOutput();
       if(job.warning)notice(job.warning);
-      let images=[],dimensions=[],frames=[],error=job.state==='done'?'':job.error||'La génération a été interrompue après production de la sortie.';
+      let images=[],dimensions=record.outputs.map(()=>null),frames=record.outputs.map(()=>null),analysisOutputs=[],error=job.state==='done'?'':job.error||'La génération a été interrompue après production de la sortie.';
       onProgress('Préparation des copies pour la vision…');
       try{
         const originals=await originalsTask;if(originals.error)throw originals.error;
+        if(originals.errors?.length){error=[error,originals.errors.join(' ')].filter(Boolean).join(' ');notice('Certaines sorties ne peuvent pas être analysées : '+originals.errors.join(' '));}
         for(let index=0;index<record.outputs.length;index++){
           signal.throwIfAborted();
-          const image=originals.prepared[index];frames.push(image.frames||null);images.push(...(image.frames?image.frames.map(frame=>frame.url):[image.url]));record.outputs[index].analysisDataUrl=image.url;const size=image.width&&image.height?{width:image.width,height:image.height}:null;dimensions.push(size);if(size)Object.assign(record.outputs[index],size);
+          const image=originals.prepared[index];if(!image)continue;const copies=image.frames?image.frames.map(frame=>frame.url):[image.url];
+          analysisOutputs.push({output_index:index,image_indices:copies.map((_,offset)=>images.length+offset)});frames[index]=image.frames||null;images.push(...copies);record.outputs[index].analysisDataUrl=image.url;const size=image.width&&image.height?{width:image.width,height:image.height}:null;dimensions[index]=size;if(size)Object.assign(record.outputs[index],size);
         }
       }catch(failure){
         if(signal.aborted)throw failure;
@@ -298,11 +300,11 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
       }
       signal.throwIfAborted();
       if(images.length){
-        try{await api('gallery/analysis',{conversationId:record.conversationId,id:record.id,images:record.outputs.map(output=>output.analysisDataUrl),dimensions,...(record.mediaType==='video'?{frames}:{})},{signal});}
+        try{await api('gallery/analysis',{conversationId:record.conversationId,id:record.id,images:record.outputs.map(output=>output.analysisDataUrl??null),dimensions,...(record.mediaType==='video'?{frames}:{})},{signal});}
         catch(failure){if(signal.aborted)throw failure;notice(`Copies d’analyse non enregistrées : ${failure.message}`);}
       }
       await showGallery();
-      return {content:JSON.stringify({status:error?'generated':'success',run_id:record.id,workflow:record.workflowName,prompt:record.prompt,...(record.mediaType==='video'?{media_type:'video',stage:record.parameters.stage,workflow_digest:record.parameters.workflow_digest,parameters:Object.fromEntries(Object.entries(record.parameters).filter(([key])=>['workflow_id','seed','width','height','frames','fps','negative_prompt','references','reference_image','reference_resource','reference_frame'].includes(key))),frame_times:frames.map((items,index)=>({output:index,times:items?.map(frame=>frame.time)||[]})),inspection_limit:'Only sampled compressed frames, without audio. Cannot verify continuous motion or exact last frames from these samples.'}:{}),reference_count:record.parameters?.reference_count??null,reference_capacity:record.parameters?.reference_capacity??null,reference_mode:record.parameters?.reference_mode||'unknown',outputs:record.outputs.map(o=>o.source),...(error?{warning:error}:{}),note:images.length?'Les images jointes ensuite sont les copies réduites des sorties. Les originaux sont dans la galerie.':'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.'}),images,record,failed:!!error,error};
+      return {content:JSON.stringify({status:error?'generated':'success',run_id:record.id,workflow:record.workflowName,prompt:record.prompt,workflow_id:record.workflowId,workflow_digest:record.parameters.workflow_digest,parameters:Object.fromEntries(Object.entries(record.parameters).filter(([key])=>['workflow_id','seed','width','height','frames','fps','negative_prompt','references','reference_image','reference_resource','reference_frame'].includes(key))),analysis_outputs:analysisOutputs,reference_default_count:record.parameters.reference_default_count??0,reference_defaults:record.parameters.reference_defaults||[],...(record.mediaType==='video'?{media_type:'video',stage:record.parameters.stage,frame_times:frames.map((items,index)=>({output:index,times:items?.map(frame=>frame.time)||[]})),inspection_limit:'Only sampled compressed frames, without audio. Cannot verify continuous motion or exact last frames from these samples.'}:{}),reference_count:record.parameters?.reference_count??null,reference_capacity:record.parameters?.reference_capacity??null,reference_mode:record.parameters?.reference_mode||'unknown',outputs:record.outputs.map(o=>o.source),...(error?{warning:error}:{}),note:images.length?'Les images jointes sont les copies réduites des sorties identifiées par analysis_outputs (indices à partir de zéro). Les sorties sans copie ne sont pas vérifiables visuellement. Les entrées optionnelles absentes conservent leurs valeurs dans le workflow ; elles ne sont pas des références fournies par l’utilisateur. Les originaux sont dans la galerie.':'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.'}),images,record,failed:!!error,error};
     }catch(error){if(!terminal)cancel();if(signal.aborted)throw signal.reason;throw error;}
     finally{originalsController.abort();signal.removeEventListener('abort',cancel);onChange();}
   }
