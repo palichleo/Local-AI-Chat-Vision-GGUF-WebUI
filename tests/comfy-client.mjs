@@ -344,3 +344,22 @@ test('mixed Windows separators cannot bypass image traversal, drive, UNC or file
   const hostile = await server(t, () => ({ body: { name: 'reference.png', subfolder: 'safe\\..\\private', type: 'input' } }));
   await assert.rejects(hostile.client.upload(png, { filename: 'reference.png', mime: 'image/png' }), /path/i);
 });
+
+test('video jobs collect final MP4/WebM outputs from native and extension history without image previews',async t=>{
+ const clip={filename:'clip.mp4',subfolder:'motion',type:'output'},webm={filename:'clip.webm',subfolder:'motion',type:'output'};
+ const {client}=await server(t,({url})=>({body:url.pathname==='/prompt'?{prompt_id:'video-job'}:{'video-job':{status:{completed:true},outputs:{'9':{images:[image],videos:[clip],gifs:[webm,{...clip,type:'temp'},clip]}}}}}));
+ const result=await client.run(graph,{outputNodes:['9'],mediaType:'video'});assert.deepEqual(result.outputs,[clip,webm]);
+});
+test('video originals are signature checked, MIME matched and filename constrained',async t=>{
+ const bytes=Buffer.from('000000186674797069736f6d0000020069736f6d6d703432','hex');let bad=false;
+ const {client}=await server(t,()=>({headers:{'content-type':'video/mp4'},body:bad?png:bytes}));
+ const clip={filename:'clip.mp4',subfolder:'motion',type:'output'};assert.deepEqual((await client.original(clip)).bytes,bytes);bad=true;await assert.rejects(client.original(clip),/video|vidéo|matching|signature|MP4/i);
+});
+
+test('video streaming accepts a short initial browser range and propagates cancellation',async t=>{
+ const bytes=Buffer.from('000000186674797069736f6d0000020069736f6d6d703432','hex');
+ const {client}=await server(t,({headers})=>{assert.equal(headers.range,'bytes=0-7');return {status:206,headers:{'content-type':'video/mp4','content-range':'bytes 0-7/24'},body:bytes.subarray(0,8)};});
+ const result=await client.streamVideo({filename:'clip.mp4',subfolder:'',type:'output'},{range:'bytes=0-7'});assert.equal(result.status,206);assert.deepEqual(Buffer.from(await new Response(result.body).arrayBuffer()),bytes.subarray(0,8));
+ let cancelled=false;const other=new ComfyClient('http://127.0.0.1:8188',{fetchImpl:async()=>new Response(new ReadableStream({start(controller){controller.enqueue(bytes);},cancel(){cancelled=true;}}),{headers:{'content-type':'video/mp4'}})});
+ const stream=await other.streamVideo({filename:'clip.mp4',subfolder:'',type:'output'});await stream.body.cancel();assert.equal(cancelled,true);
+});

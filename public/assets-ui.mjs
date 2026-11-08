@@ -57,7 +57,7 @@ export function setupAssets({api,state,node,icon,notice,onChange=()=>{},onBusy=(
  const panel=$('assets-panel');panel.ondragover=event=>{event.preventDefault();if(!locked&&!working)panel.classList.add('dragging');};panel.ondragleave=event=>{if(!panel.contains(event.relatedTarget))panel.classList.remove('dragging');};panel.ondrop=event=>{event.preventDefault();event.stopPropagation();panel.classList.remove('dragging');void importFiles([...event.dataTransfer.files]);};
  $('resource-cancel').onclick=()=>importController?.abort();
 
- function cleanViewer(){$('media-download').onclick=null;viewVersion++;viewController?.abort();$('original-video').pause();$('original-video').removeAttribute('src');$('original-video').load();$('original-image').removeAttribute('src');$('original-image').onload=null;if(objectURL)URL.revokeObjectURL(objectURL);objectURL=null;}
+ function cleanViewer(){$('media-download').onclick=null;viewVersion++;viewController?.abort();$('original-video').onloadedmetadata=null;$('original-video').onerror=null;$('original-video').removeAttribute('poster');$('original-video').pause();$('original-video').removeAttribute('src');$('original-video').load();$('original-image').removeAttribute('src');$('original-image').onload=null;if(objectURL)URL.revokeObjectURL(objectURL);objectURL=null;}
  $('original-close').onclick=()=>$('original-dialog').close();$('original-dialog').addEventListener('close',cleanViewer);dismissSettingsOnOutsideClick($('original-dialog'));
  function row(label,value){const title=node('dt','',label),content=node('dd','',value===undefined||value===null?'Non disponible':String(value));$('media-metadata').append(title,content);return content;}
  function begin(name){cleanViewer();$('original-name').textContent=name;$('media-metadata').replaceChildren();$('media-error').textContent='';$('original-image').hidden=true;$('original-video').hidden=true;$('media-download').disabled=false;if(!$('original-dialog').open)$('original-dialog').showModal();return viewVersion;}
@@ -70,11 +70,17 @@ export function setupAssets({api,state,node,icon,notice,onChange=()=>{},onBusy=(
  }
  async function viewOutput(record,index,originalBlob){
   const output=record.outputs[index],version=begin(output.source.filename);viewController=new AbortController();
-  row('Workflow',record.workflowName);row('Prompt',record.prompt);row('Date',new Date(record.createdAt).toLocaleString('fr-FR'));row('Seed',record.parameters.seed);
+  row('Workflow',record.workflowName);if(record.mediaType==='video')row('Version',record.parameters.stage==='draft'?'Brouillon vidéo':'Vidéo finale');row('Prompt',record.prompt);row('Date',new Date(record.createdAt).toLocaleString('fr-FR'));row('Seed',record.parameters.seed);
   const resolution=row('Résolution originale',output.width&&output.height?`${output.width} × ${output.height}`:null);row('Fichier',output.source.filename);row('Identifiant',record.id);
   const other=Object.fromEntries(Object.entries(record.parameters).filter(([key])=>!['seed','prompt','workflow_id'].includes(key)));if(Object.keys(other).length)row('Paramètres',JSON.stringify(other,null,2));
   if(record.analysis?.text)row('Analyse du modèle',record.analysis.text);
   $('media-download').disabled=true;$('media-error').textContent='Chargement de l’original…';
+  if(record.mediaType==='video'){
+   const video=$('original-video');video.hidden=false;video.preload='metadata';video.src=output.originalUrl||'';if(output.analysisDataUrl)video.poster=output.analysisDataUrl;
+   video.onloadedmetadata=()=>{if(version===viewVersion){resolution.textContent=video.videoWidth+' × '+video.videoHeight;row('Durée',duration(video.duration));$('media-error').textContent='';}};
+   video.onerror=()=>{if(version===viewVersion)$('media-error').textContent='Vidéo indisponible ou codec non pris en charge par le navigateur.';};
+   row('Analyse du modèle','Images compressées échantillonnées, sans audio.');download(output.originalUrl,output.source.filename);$('media-download').disabled=false;return;
+  }
   if(output.analysisDataUrl){$('original-image').src=output.analysisDataUrl;$('original-image').hidden=false;}
   try{
    const blob=originalBlob||await(await api(`gallery/${record.conversationId}/${record.id}/${index}`,undefined,{signal:viewController.signal})).blob();if(version!==viewVersion||!$('original-dialog').open)return;

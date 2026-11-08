@@ -10,6 +10,7 @@ class Element {
  setAttribute(name,value){this.attributes[name]=value;}
  add(option){this.options.push(option);}
  focus(){if(!this.disabled)this.focused=true;}
+ showModal(){this.open=true;}close(){this.open=false;}addEventListener(name,fn){(this.events??={})[name]=fn;}removeEventListener(name){delete (this.events??={})[name];}
 }
 async function fixture(fn){
  const previousDocument=globalThis.document,previousOption=globalThis.Option;
@@ -282,4 +283,32 @@ test('an already cancelled automatic call releases its pending approval without 
  setIntercept(route=>route==='tools/cancel'?Response.json(null):undefined);
  const controller=new AbortController();controller.abort();await assert.rejects(ui.requestTool({autoAllow:true,requestId:'cancelled'},controller.signal,()=>{}),{name:'AbortError'});
  assert.equal(calls.filter(call=>call.route==='tools/execute').length,0);assert.equal(calls.find(call=>call.route==='tools/cancel').body.requestId,'cancelled');
+}));
+
+test('video import declares stages, output and frame mappings without guessing custom workflow names',async()=>fixture(async({nodes,calls})=>{
+ const get=id=>nodes.get(id),graph={'1':{class_type:'CLIPTextEncode',inputs:{text:'p'}},'2':{class_type:'CustomAnimator',inputs:{length:81,fps:16,prompt:['1',0]}},'3':{class_type:'ArbitrarySaveNode',inputs:{movie:['2',0]}}};
+ await get('workflow-file').onchange({target:{files:[new File([JSON.stringify(graph)],'custom.json')],value:''}});
+ get('workflow-media').value='video';get('workflow-media').onchange();get('workflow-stages').value='both';get('workflow-output').value='3';get('binding-frames').value=JSON.stringify({node:'2',input:'length'});get('workflow-description').value='Camera motion, draft and final';
+ await get('workflow-import').onclick();const imported=calls.find(call=>call.route==='comfy/import')?.body;
+ assert.equal(imported?.mediaType,'video');assert.deepEqual(imported.videoStages,['draft','final']);assert.deepEqual(imported.outputNodes,['3']);assert.deepEqual(imported.bindings.frames,{node:'2',input:'length'});
+}));
+test('video approval is shown even with global permission, explains draft/final and revision never executes',async()=>fixture(async({ui,nodes,calls,setIntercept})=>{
+ setIntercept(route=>route==='tools/cancel'?Response.json({}):undefined);
+ const request={requestId:'proposal',mediaType:'video',autoAllow:true,workflowName:'Custom motion',args:{prompt:'A slow pan'},approvalToken:'one-use',plan:{stage:'draft',intention:'Vérifier le mouvement.',prompt:'A slow pan',parameters:{frames:81,fps:16,width:768,height:512,seed:12},references:[{input:'start',label:'Ref 2',role:'Image de début'}]}};
+ const pending=ui.requestTool(request,new AbortController().signal,()=>{});await new Promise(setImmediate);
+ assert.equal(nodes.get('tool-dialog').open,true);assert.match(nodes.get('tool-title').textContent,/Brouillon/);assert.equal(nodes.get('tool-always').hidden,true);assert.equal(nodes.get('tool-revise').hidden,false);assert.ok(!calls.some(call=>call.route==='tools/execute'));assert.match(JSON.stringify(nodes.get('tool-plan').children),/Vérifier le mouvement|Ref 2/);
+ nodes.get('tool-revise').onclick();const result=await pending;assert.equal(result.denied,true);assert.match(result.content,/revision_requested/);assert.equal(nodes.get('tool-dialog').open,false);assert.ok(!calls.some(call=>call.route==='tools/execute'));
+}));
+test('video confirm sends the exact proposal token once and final label is explicit',async()=>fixture(async({ui,nodes,calls,setIntercept})=>{
+ setIntercept(route=>route==='tools/execute'?Response.json({id:'job',state:'error',error:'test boundary'}):undefined);
+ const pending=ui.requestTool({requestId:'final-proposal',mediaType:'video',autoAllow:true,approvalToken:'final-token',workflowName:'Motion',args:{},plan:{stage:'final',intention:'Finaliser.',parameters:{},references:[]}},new AbortController().signal,()=>{});
+ await new Promise(setImmediate);assert.match(nodes.get('tool-title').textContent,/Vidéo finale/);nodes.get('tool-once').onclick();await pending;
+ assert.deepEqual(calls.find(call=>call.route==='tools/execute').body,{requestId:'final-proposal',permission:'once',approvalToken:'final-token'});
+}));
+
+test('video tool result retains the effective recipe even when analysis frames cannot be decoded',async()=>fixture(async({ui,state,nodes,setIntercept})=>{
+ state.conversationId='conversation';const record={...generatedRecord,mediaType:'video',parameters:{stage:'draft',seed:123,width:768,height:512,frames:81,fps:16,workflow_digest:'version',workflow_inputs:{private:'unneeded context'}}};
+ setIntercept(route=>route==='tools/execute'?Response.json({id:'job',state:'done',record}):route==='gallery/conversation'?Response.json({runs:[record]}):undefined);
+ const pending=ui.requestTool({requestId:'video',mediaType:'video',approvalToken:'token',args:{},plan:{stage:'draft',parameters:{},references:[]}},new AbortController().signal,()=>{});await new Promise(setImmediate);nodes.get('tool-once').onclick();const result=await pending,data=JSON.parse(result.content);
+ assert.equal(result.record.id,'mine');assert.equal(result.failed,true);assert.equal(data.parameters.seed,123);assert.equal(data.parameters.fps,16);assert.equal(data.parameters.frames,81);assert.equal(data.workflow_digest,'version');assert.equal(data.parameters.workflow_inputs,undefined);
 }));

@@ -17,6 +17,19 @@ The LLM list starts on the configured model. Open **Chemins** to edit its name a
 **Consignes globales** saves up to 16,000 characters as user-supplied context for new conversations. Each conversation captures this text when its first message is submitted. Later changes affect future conversations; saved conversations and update checkpoints retain the original context. It occupies one initial system-context entry, not a new message on every turn. The stateless engine still receives the full active context with each inference request. Existing archives without instructions keep an empty context.
 
 
+## Video proposals and confirmation
+
+When importing an API workflow, select **Vidéo · MP4 / WebM**, declare whether it supports drafts, finals, or both, and select its saved-video output node. Map the prompt and optional seed, width, height, frame count and FPS. Reference inputs keep their explicit names and role descriptions (for example, start image, end image or style); the app does not infer these roles from a workflow or model name. Describe any constraints of custom nodes in the workflow description. Existing image workflows keep their behavior.
+
+The separate native **comfy_generate_video** tool requires an intention and an explicit **draft/final** stage. **Every video call opens its own confirmation**, including retries and finalizations, even when automatic image generation is allowed. The proposal shows the intention, workflow, prompt, actual mapped values including defaults, and selected references. **Confirmer et générer** confirms that single immutable request; **Modifier** cancels it and lets you describe changes in chat; **Annuler** cancels it. Nothing is submitted and the LLM stays loaded while approval is pending. Changing the workflow or Comfy address requires a new proposal. Approvals expire after fifteen minutes and cannot be reused.
+
+Original MP4/WebM files stay in ComfyUI and stream to the chat, Output and Details views, including byte-range seeking, with a 512 MiB transfer cap. The app does not buffer a complete video in the Node process for playback. Only up to three compressed timestamped frames per output go to the model (at most 64 frames across one call, sharing the existing 4 MP image budget); no original video or audio enters its context. These samples cannot establish continuous motion, a seamless join or the exact last frame. Browser codec support is required. History stores reduced frames and links; clearing it never deletes Comfy originals.
+
+A stage label does not automatically change quality. This release does not implement universal draft-to-final latent reuse, video-source inputs, frame-overlap extraction or clip stitching. Those need the actual workflow input contracts; changing resolution with the same seed alone does not preserve a clip. The video tool is available only after a video workflow is registered and requires native tool support in the local LLM.
+
+The wire formats follow [ComfyUI's video outputs](https://github.com/comfyanonymous/ComfyUI/blob/master/comfy_extras/nodes_video.py) and [VideoHelperSuite saved-video descriptors](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite/blob/main/videohelpersuite/nodes.py); no workflow-specific node name is required for selecting the video output.
+
+
 ## Local model library
 
 Place each model in its own subfolder of `models/`. The folder name supplies the initial display name: for example `models/My model/model.gguf` and `models/My model/mmproj.gguf`. The file `put model folders here.txt` explains this layout. Git includes the guide and ignores GGUF weights. Keep llama.cpp and its libraries separate; its path is shared across models.

@@ -18,20 +18,25 @@ export async function prepareResource(file,{signal}={}){
   const image=await compressImage(source);signal?.throwIfAborted();
   return {mime,width:image.width,height:image.height,frames:[{url:image.url,time:null}]};
  }
- const video=document.createElement('video'),url=URL.createObjectURL(file);video.muted=true;video.playsInline=true;video.preload='auto';
+ return prepareVideo(file,{signal,name:file.name});
+}
+export async function prepareVideo(source,{signal,name='Vidéo',frameCount=3,totalFrames=frameCount}={}){
+ signal?.throwIfAborted();if(!Number.isInteger(frameCount)||frameCount<1||frameCount>3)throw Error('Nombre d’images vidéo invalide.');
+ const mime=source.type||({webm:'video/webm',mp4:'video/mp4'}[name.split('.').at(-1).toLowerCase()])||'video/mp4',file={name};
+ const video=document.createElement('video'),url=typeof source==='string'?source:URL.createObjectURL(source);video.muted=true;video.playsInline=true;video.preload='auto';
  try{
   const metadata=waitFor(video,'loadedmetadata',signal);video.src=url;await metadata;
   if(!Number.isFinite(video.duration)||video.duration<=0||video.duration>86400||!video.videoWidth||video.videoWidth*video.videoHeight>64_000_000)throw Error('Durée ou résolution vidéo non prise en charge.');
-  const times=video.duration<.2?[0]:[.1,.5,.9].map(fraction=>video.duration*fraction),frames=[];
+  const times=video.duration<.2||frameCount===1?[0]: (frameCount===2?[.1,.9]:[.1,.5,.9]).map(fraction=>video.duration*fraction),frames=[];
   if(video.readyState<2)await waitFor(video,'loadeddata',signal);
   for(const time of times){
    signal?.throwIfAborted();
    if(Math.abs(video.currentTime-time)>.001){const seek=waitFor(video,'seeked',signal);video.currentTime=time;await seek;}
-   const canvas=document.createElement('canvas'),side=imageBudget(times.length).maxSide,scale=Math.min(1,side/Math.max(video.videoWidth,video.videoHeight));
+   const canvas=document.createElement('canvas'),side=imageBudget(totalFrames).maxSide,scale=Math.min(1,side/Math.max(video.videoWidth,video.videoHeight));
    canvas.width=Math.max(1,Math.floor(video.videoWidth*scale));canvas.height=Math.max(1,Math.floor(video.videoHeight*scale));
-   try{canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.82));if(!blob)throw Error('Impossible de préparer cette image vidéo.');const prepared=await compressImage(blob,{name:file.name+' — '+time.toFixed(2)+'s',count:times.length});frames.push({time,url:prepared.url});}
+   try{canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.82));if(!blob)throw Error('Impossible de préparer cette image vidéo.');const prepared=await compressImage(blob,{name:file.name+' — '+time.toFixed(2)+'s',count:totalFrames});frames.push({time,url:prepared.url});}
    finally{canvas.width=0;canvas.height=0;}
   }
   return {mime,width:video.videoWidth,height:video.videoHeight,duration:video.duration,frames};
- }finally{video.pause();video.removeAttribute('src');video.load();URL.revokeObjectURL(url);}
+ }finally{video.pause();video.removeAttribute('src');video.load();if(typeof source!=='string')URL.revokeObjectURL(url);}
 }

@@ -31,16 +31,17 @@ const server = http.createServer(async (req, res) => {
     send(res, { choices: [{ delta: { content: 'Ordinary chat, no generation.' }, finish_reason: 'stop' }] });
     return res.end('data: [DONE]\n\n');
   }
-  if (body.tools?.[0]?.function?.name !== 'comfy_generate_image') {
+  const video=text.startsWith('generate video'),toolName=video?'comfy_generate_video':'comfy_generate_image';
+  if (!body.tools?.some(tool=>tool.function?.name===toolName)) {
     send(res, { error: 'The native Comfy schema is missing.' });
     return res.end('data: [DONE]\n\n');
   }
   const invalid = text.includes('malformed');
-  const argumentsText = invalid ? '{"workflow_id":' : JSON.stringify({ workflow_id: 'integration-boat', prompt: 'A red boat' });
+  const argumentsText = invalid ? '{"workflow_id":' : JSON.stringify(video?{workflow_id:'integration-motion',prompt:'A slow camera pan over a red boat',stage:text.includes('final')?'final':'draft',intention:text.includes('final')?'Produire la vidéo finale avec le mouvement de caméra prévu.':'Vérifier le mouvement de caméra avant la vidéo finale.'}:{ workflow_id: 'integration-boat', prompt: 'A red boat' });
   const middle = Math.floor(argumentsText.length / 2);
   send(res, { choices: [{ delta: { reasoning_content: 'I will use the registered workflow.' } }] });
   send(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_red_boat', type: 'function', function: { name: 'comfy_generate_', arguments: argumentsText.slice(0, middle) } }] } }] });
-  send(res, { choices: [{ delta: { tool_calls: [{ index: 0, function: { name: 'image', arguments: argumentsText.slice(middle) } }] } }] });
+  send(res, { choices: [{ delta: { tool_calls: [{ index: 0, function: { name: video?'video':'image', arguments: argumentsText.slice(middle) } }] } }] });
   if (!text.includes('truncated')) send(res, { choices: [{ delta: {}, finish_reason: text.includes('length') ? 'length' : 'tool_calls' }] });
   res.end('data: [DONE]\n\n');
 });

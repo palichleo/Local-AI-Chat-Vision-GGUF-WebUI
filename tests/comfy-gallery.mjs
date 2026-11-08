@@ -210,3 +210,10 @@ test('original lookup reads metadata without loading unrelated analysis copies o
  assert.equal(metadata.outputs[0].analysisDataUrl,undefined);assert.equal(metadata.outputs[0].source.filename,'copy.png');
  await assert.rejects(gallery.get(run.conversationId,run.id),{status:404});
 });
+
+test('video kind and timestamped reduced analysis frames survive persistence without copying original video',async t=>{
+ const directory=await mkdtemp(join(tmpdir(),'atelier-video-gallery-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ const gallery=new ComfyGallery({historyDir:directory});
+ const record={id:'a1111111-1111-4111-8111-111111111111',conversationId:'b2222222-2222-4222-8222-222222222222',workflowId:'motion',workflowName:'Custom motion',mediaType:'video',createdAt:new Date().toISOString(),prompt:'Slow pan',parameters:{stage:'draft',frames:81,fps:16},comfyUrl:'http://127.0.0.1:8188',outputs:[{source:{filename:'clip.mp4',subfolder:'',type:'output'},analysisDataUrl:'data:image/png;base64,iVBORw0KGgo=',analysisFrames:[{time:0,url:'data:image/png;base64,iVBORw0KGgo='},{time:2,url:'data:image/jpeg;base64,/9j/'}]}]};
+ await gallery.put(record,{persist:true});const loaded=await new ComfyGallery({historyDir:directory}).get(record.conversationId,record.id);assert.equal(loaded.mediaType,'video');assert.deepEqual(loaded.outputs[0].analysisFrames,record.outputs[0].analysisFrames);const metadata=await gallery.get(record.conversationId,record.id,{includeImages:false});assert.equal(metadata.outputs[0].analysisFrames,undefined);await assert.rejects(gallery.put({...record,outputs:[{...record.outputs[0],analysisFrames:[{time:-1,url:'data:image/png;base64,iVBORw0KGgo='}]}]}),/vidéo|video|time|image/i);
+});

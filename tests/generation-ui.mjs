@@ -31,3 +31,9 @@ test('restoring a long conversation defers originals, serializes transfers and r
  ui.clear();await new Promise(setImmediate);assert.equal(observed.targets.size,0);gates[1]();await new Promise(setImmediate);
  assert.doesNotMatch(second.children[0].src||'',/^blob:/,'late completion cannot resurrect a disposed original');
 });
+
+test('video output uses the original streaming URL, has controls, and never buffers a full clip in the chat',async()=>{
+ const container=new Element(),record={id:'run',conversationId:'conversation',mediaType:'video',workflowName:'Motion',prompt:'Slow pan',parameters:{stage:'draft'},outputs:[{source:{filename:'clip.mp4'},originalUrl:'/media/generated/signed'}]};let opened;
+ const ui=setupGenerationUI({node:(...args)=>new Element(...args),openOutput:(...args)=>opened=args,api:async()=>{throw Error('No full-video blob transfer expected');}}),card=ui.mount(container,{mediaType:'video',plan:{stage:'draft'}});
+ card.image({record,index:0});record.outputs[0].analysisDataUrl='compressed-preview';card.finish({record});const frame=container.children[0].children[0],wrapper=frame.children[0],video=wrapper.children.find(node=>node.tag==='video');assert.ok(video);assert.equal(video.poster,'compressed-preview');assert.equal(video.controls,true);assert.equal(video.preload,'none');assert.equal(video.src,'/media/generated/signed');assert.match(container.children[0].children[1].children[0].textContent,/Brouillon/);wrapper.children.find(node=>node.tag==='button').onclick();assert.deepEqual(opened,[record,0]);ui.clear();assert.equal(video.src,undefined);
+});

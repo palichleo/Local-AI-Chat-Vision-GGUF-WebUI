@@ -17,6 +17,8 @@ import { spawn } from 'node:child_process';
 import { History } from './lib/history.mjs';
 import { discoverComfy, testComfyConnection } from './lib/comfy-discovery.mjs';
 import { chooseLocalFile } from './lib/file-picker.mjs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { ComfyClient, normalizeComfyUrl } from './lib/comfy-client.mjs';
 import { WorkflowCatalog, validateWorkflow } from './lib/comfy-workflows.mjs';
 import { ComfyGallery } from './lib/comfy-gallery.mjs';
@@ -44,6 +46,7 @@ const staticFiles = new Map([
   ['/stream.mjs', ['stream.mjs', 'text/javascript; charset=utf-8']],
   ['/model-ready.mjs', ['model-ready.mjs', 'text/javascript; charset=utf-8']],
   ['/images.mjs', ['images.mjs', 'text/javascript; charset=utf-8']],
+  ['/video-plan.mjs',['video-plan.mjs','text/javascript; charset=utf-8']],
   ['/comfy-ui.mjs', ['comfy-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-controls.mjs', ['settings-controls.mjs', 'text/javascript; charset=utf-8']],
   ['/markdown.mjs', ['markdown.mjs', 'text/javascript; charset=utf-8']],
@@ -183,6 +186,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
     }).finally(()=>{discovering=null;});
     return discovering;
   }
+  function galleryView(record){return {...record,outputs:record.outputs.map((output,index)=>({...output,...(record.mediaType==='video'?{originalUrl: '/media/generated/'+record.conversationId+'/'+record.id+'/'+index+'?key='+mediaKey(record.conversationId+'/'+record.id+'/'+index,'generated')}:{} )}))};}
   const status=()=>({...engine.status(),toolJob:runtime.active?runtime.status():null});
   let url;
   let saving = false;
@@ -199,14 +203,15 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
     }
     const definitions=[];
     if(comfy.enabled&&body.tools!==false&&(runtime.turns.get(body.turnId)||0)<comfy.maxIterations){
-      const definition=await catalog.definition();
+      for(const mediaType of ['image','video']){
+      const definition=await catalog.definition(mediaType);
       if(definition){
         if(active.length&&definition.function.parameters.properties.reference_image){
           definition.function.parameters.properties.reference_resource={type:'string',description:'Active resource catalog ID to use instead of reference_image, only for workflows with an image input.'};
           definition.function.parameters.properties.reference_frame={type:'integer',minimum:0,maximum:2,description:'Frame index for a video reference_resource; defaults to 0.'};
         }
         definitions.push(definition);
-      }
+      }}
     }
     if(active.length&&engine.vision&&body.resources!==false&&(resourceTurns.get(body.turnId)||0)<8){
       const definition=structuredClone(resourceTool),ids=active.map(item=>item.id);
@@ -233,6 +238,20 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (req.headers.origin && ![url, `http://localhost:${expected.port}`].includes(req.headers.origin)) throw problem('Origine refusée.', 403);
       if (req.headers['sec-fetch-site'] === 'cross-site') throw problem('Requête externe refusée.', 403);
       const requestURL = new URL(req.url,url), path=requestURL.pathname;
+      const generated=path.match(/^\/media\/generated\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/([0-9]+)$/);
+      if(generated){
+        if(!['GET','HEAD'].includes(req.method))throw problem('Méthode non prise en charge.',405);
+        const key=requestURL.searchParams.get('key')||'',identity=generated.slice(1).join('/');
+        if(!/^[0-9a-f]{64}$/.test(key)||!timingSafeEqual(Buffer.from(key,'hex'),Buffer.from(mediaKey(identity,'generated'),'hex')))throw problem('Accès refusé.',401);
+        const record=await gallery.get(generated[1],generated[2],{includeImages:false}),source=record.outputs[Number(generated[3])]?.source;
+        if(!source)throw problem('Sortie introuvable.',404);
+        const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);
+        try{const stream=await new ComfyClient(record.comfyUrl).streamVideo(source,{signal:controller.signal,range:req.headers.range});
+          if(res.destroyed){await stream.body.cancel();return;}
+          res.writeHead(stream.status,{'Content-Type':stream.mime,'Accept-Ranges':'bytes',...(stream.length?{'Content-Length':stream.length}:{}),...(stream.contentRange?{'Content-Range':stream.contentRange}:{})});
+          if(req.method==='HEAD'){await stream.body.cancel();res.end();}else await pipeline(Readable.fromWeb(stream.body),res);return;
+        }finally{res.off('close',abort);}
+      }
       const media=path.match(/^\/media\/resources\/([0-9a-f-]{36})\/(original|preview)$/);
       if(media){
         if(!['GET','HEAD'].includes(req.method))throw problem('Méthode non prise en charge.',405);
@@ -287,14 +306,15 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         const resource=await resources.add(req,{name,mime:(req.headers['content-type']||'').split(';')[0],length:req.headers['content-length']});
         return send(201,resourceView(resource));
       }
-      if(req.method==='GET'&&path==='/api/tools/job')return send(200,runtime.status());
+      if(req.method==='GET'&&path==='/api/tools/job'){const job=runtime.status();return send(200,job?.record?{...job,record:galleryView(job.record)}:job);}
       if(req.method==='GET'&&path.startsWith('/api/gallery/')){
         const [, , ,conversationId,runId,index]=path.split('/');
-        if(!runId)return send(200,await gallery.list(conversationId));
+        if(!runId){const result=await gallery.list(conversationId);result.runs=result.runs.map(galleryView);return send(200,result);}
         const record=await gallery.get(conversationId,runId,{includeImages:index===undefined});
         if(res.destroyed)return;
-        if(index===undefined)return send(200,record);
+        if(index===undefined)return send(200,galleryView(record));
         if(!/^\d+$/.test(index)||!record.outputs[Number(index)])throw problem('Image introuvable.',404);
+        if(record.mediaType==='video'){res.writeHead(307,{Location:galleryView(record).outputs[Number(index)].originalUrl});return res.end();}
         const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);
         try{
           const original=await new ComfyClient(record.comfyUrl).original(record.outputs[Number(index)].source,{signal:controller.signal});
@@ -412,7 +432,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if(path==='/api/tools/execute'){
         if(clearingHistory||persistingGallery||savingComfy||savingSettings||pickingFile)throw problem('Une opération est en cours.',409);
-        return send(202,await runtime.execute(body));
+        const job=await runtime.execute(body);return send(202,job?.record?{...job,record:galleryView(job.record)}:job);
       }
       if(path==='/api/gallery/persist'){
         if(!preferences.saveHistory||disablingHistory)throw problem('L’historique est désactivé.',403);
@@ -437,7 +457,8 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         }else{
         if(!Array.isArray(body.images)||body.images.length!==record.outputs.length)throw problem('Copies d’analyse invalides.');
         if(body.dimensions!==undefined&&(!Array.isArray(body.dimensions)||body.dimensions.length!==record.outputs.length||body.dimensions.some(size=>size!==null&&(!size||![size.width,size.height].every(value=>Number.isInteger(value)&&value>0&&value<=131072)))))throw problem('Résolutions de sortie invalides.');
-        record.outputs=record.outputs.map((output,i)=>({...output,analysisDataUrl:body.images[i],...(body.dimensions?.[i]||{})}));
+        if(body.frames!==undefined&&(!Array.isArray(body.frames)||body.frames.length!==record.outputs.length))throw problem('Images vidéo invalides.');
+        record.outputs=record.outputs.map((output,i)=>({...output,analysisDataUrl:body.images[i],...(body.dimensions?.[i]||{}),...(body.frames?{analysisFrames:body.frames[i]}:{})}));
         }
         return send(200,await gallery.put(record,{persist:preferences.saveHistory}));
         } finally { persistingGallery=false; }

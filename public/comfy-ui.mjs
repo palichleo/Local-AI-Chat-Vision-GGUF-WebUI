@@ -1,3 +1,5 @@
+import { renderVideoPlan } from './video-plan.mjs';
+import { prepareVideo } from './resource-preparation.mjs';
 import { compressImage } from './images.mjs';
 
 export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=()=>{},openOutput,onOutput=()=>{}}){
@@ -14,11 +16,12 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     for(const record of result.runs){
       for(const [index,output]of record.outputs.entries()){
         const card=node('article','gallery-card');
-        if(output.analysisDataUrl){const img=node('img');img.loading='lazy';img.decoding='async';img.src=output.analysisDataUrl;img.alt=record.prompt;img.onclick=()=>openOutput(record,index);card.append(img);}
+        if(record.mediaType==='video'&&output.originalUrl){const video=node('video');video.controls=true;video.preload='none';video.playsInline=true;video.src=output.originalUrl;if(output.analysisDataUrl)video.poster=output.analysisDataUrl;card.append(video);}
+        if(output.analysisDataUrl&&record.mediaType!=='video'){const img=node('img');img.loading='lazy';img.decoding='async';img.src=output.analysisDataUrl;img.alt=record.prompt;img.onclick=()=>openOutput(record,index);card.append(img);}
         const prompt=node('details','output-prompt'),summary=node('summary');summary.setAttribute('aria-label','Afficher ou réduire le prompt');summary.append(node('span','',record.prompt));prompt.append(summary);
         card.append(node('strong','',record.workflowName),prompt,node('small','',new Date(record.createdAt).toLocaleString('fr-FR')));
         const labels={reviewed:'Analyse disponible',correction_requested:'Nouvelle génération demandée'};
-        card.append(node('small','gallery-meta',`${record.parameters.seed===undefined?'':`Seed : ${record.parameters.seed} · `}${labels[record.analysis?.status]||'À analyser'}`));
+        card.append(node('small','gallery-meta',`${record.mediaType==='video'?(record.parameters.stage==='draft'?'Brouillon · ':'Vidéo finale · '):''}${record.parameters.seed===undefined?'':`Seed : ${record.parameters.seed} · `}${labels[record.analysis?.status]||'À analyser'}`));
         if(record.analysis?.text){const details=node('details','gallery-review');details.append(node('summary','','Analyse du modèle'),node('p','',record.analysis.text));card.append(details);}
         const actions=node('div','gallery-actions');
         for(const download of [false,true]){
@@ -26,7 +29,7 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
           button.onclick=async()=>{
             if(!download){await openOutput(record,index);return;}
             button.disabled=true;
-            try{const blob=await original(record,index);const url=URL.createObjectURL(blob);urls.push(url);
+            try{const blob=record.mediaType==='video'?null:await original(record,index);const url=blob?URL.createObjectURL(blob):output.originalUrl;if(blob)urls.push(url);
               const a=node('a');a.href=url;a.download=output.source.filename;a.click();
             }catch(error){notice(`Original indisponible : ${error.message}`);}finally{button.disabled=false;}
           };actions.append(button);
@@ -69,7 +72,7 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
   function workflowDescriptions(){return [...descriptions].map(([id,description])=>({id,description}));}
   function setBusy(value){
     busy=value;const disabled=value||working;
-    for(const id of ['comfy-enabled','comfy-url','comfy-auto','comfy-iterations','comfy-test','comfy-address-edit','comfy-minus','comfy-plus','comfy-unlimited','workflow-file','workflow-skip','workflow-name','workflow-description','workflow-add-image'])$(id).disabled=disabled;
+    for(const id of ['comfy-enabled','comfy-url','comfy-auto','comfy-iterations','comfy-test','comfy-address-edit','comfy-minus','comfy-plus','comfy-unlimited','workflow-file','workflow-skip','workflow-name','workflow-description','workflow-add-image','workflow-media','workflow-stages','workflow-output'])$(id).disabled=disabled;
     $('comfy-iterations').disabled=disabled||unlimited;
     $('workflow-import').disabled=disabled||!importGraph;
     $('workflow-add-image').disabled=disabled||!importGraph||imageInputs.length>=64;
@@ -105,6 +108,7 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
       description.placeholder='Ex. : portraits réalistes, style cinéma, lumière douce…';description.setAttribute('aria-label',`Quand utiliser ${workflow.name}`);
       description.value=descriptions.get(workflow.id)??workflow.description;
       description.oninput=()=>{if(description.value===workflow.description)descriptions.delete(workflow.id);else descriptions.set(workflow.id,description.value);};
+      if(workflow.mediaType==='video')header.append(node('small','comfy-help',workflow.videoStages.map(stage=>stage==='draft'?'Brouillon':'Finale').join(' · ')));
       const count=workflow.imageInputs?.length||(workflow.bindings?.image?1:0);card.append(header,description,node('small','comfy-help',count?`${count} entrée(s) image configurée(s)`:'Aucune entrée image configurée · références transmises par le texte uniquement'));$('workflow-list').append(card);
     }
     setBusy(busy);
@@ -139,6 +143,8 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     }catch(e){if(session===settingsVersion&&!controller.signal.aborted){connection({detected:false});$('comfy-status').textContent=e.message;}}
     finally{if(connectionController===controller)connectionController=null;changeWorking(-1);}
   };
+  function syncMedia(){const video=$('workflow-media').value==='video';$('workflow-video-fields').hidden=!video;$('workflow-video-bindings').hidden=!video;}
+  $('workflow-media').onchange=syncMedia;
   function renderImageInputs(){
     $('workflow-image-inputs').replaceChildren(...imageInputs.map(row=>row.card));setBusy(busy);
   }
@@ -176,8 +182,8 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
       const graph=JSON.parse(contents);if(graph?.nodes||graph?.links)throw Error('Ce fichier est un workflow de l’éditeur ComfyUI, pas un export API. Dans ComfyUI, ouvrez ce workflow puis choisissez File → Export (API). Importez ensuite le fichier exporté. Aucun workflow n’a été ajouté.');
       const options=[];
       for(const[id,value]of Object.entries(graph)){if(!value?.class_type||!value.inputs)throw Error('Le fichier doit être un export API ComfyUI.');for(const[input,current]of Object.entries(value.inputs))if(['string','number','boolean'].includes(typeof current)||Array.isArray(current))options.push({id,input,label:`${id} · ${value._meta?.title||value.class_type} · ${input}`});}
-      importGraph=graph;$('workflow-name').value=file.name.replace(/\.json$/i,'');$('workflow-description').value='';imageInputs=[];nextImageId=0;imageOptions=options.filter(option=>typeof graph[option.id].inputs[option.input]==='string');renderImageInputs();
-      for(const key of ['prompt','seed','width','height','negative_prompt']){
+      importGraph=graph;$('workflow-name').value=file.name.replace(/\.json$/i,'');$('workflow-description').value='';imageInputs=[];nextImageId=0;$('workflow-media').value='image';$('workflow-stages').value='draft';syncMedia();$('workflow-output').replaceChildren(new Option('Choisir une sortie…',''));for(const[id,value]of Object.entries(graph))$('workflow-output').add(new Option(id+' · '+(value._meta?.title||value.class_type),id));imageOptions=options.filter(option=>typeof graph[option.id].inputs[option.input]==='string');renderImageInputs();
+      for(const key of ['prompt','seed','width','height','negative_prompt','frames','fps']){
         const select=$(`binding-${key}`);select.replaceChildren(new Option('Non utilisé',''));
         for(const option of options)select.add(new Option(option.label,JSON.stringify({node:option.id,input:option.input})));
         const match=options.find(o=>key==='prompt'?(/CLIPTextEncode/.test(graph[o.id].class_type)&&o.input==='text'&&typeof graph[o.id].inputs.text==='string'&&!/negative|négatif/i.test(graph[o.id]._meta?.title||'')):o.input===key);
@@ -198,13 +204,13 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     if(!description){importError('Ajoutez une courte description pour que le modèle sache quand choisir ce workflow.',$('workflow-description'));return false;}
     const session=settingsVersion;changeWorking(1);
     try{
-      const bindings={};for(const key of ['prompt','seed','width','height','negative_prompt']){const value=$(`binding-${key}`).value;if(value)bindings[key]=JSON.parse(value);}
+      const mediaType=$('workflow-media').value;const bindings={};for(const key of ['prompt','seed','width','height','negative_prompt',...(mediaType==='video'?['frames','fps']:[])]){const value=$(`binding-${key}`).value;if(value)bindings[key]=JSON.parse(value);}
       if(!bindings.prompt){document.querySelector('.workflow-bindings').open=true;throw Error('Choisissez l’entrée du prompt dans « Entrées que le modèle peut modifier ».');}
       const images=imageInputs.map(row=>{if(!row.name.value.trim()||!row.description.value.trim()||!row.target.value)throw Error('Chaque entrée image doit avoir un nom, un rôle et un champ de fichier.');return {id:row.id,name:row.name.value.trim(),description:row.description.value.trim(),...JSON.parse(row.target.value),required:row.required.checked};});
       if(new Set(images.map(slot=>JSON.stringify([slot.node,slot.input]))).size!==images.length)throw Error('Chaque entrée image doit cibler un champ différent.');
-      const outputNodes=Object.entries(importGraph||{}).filter(([,n])=>/SaveImage/.test(n.class_type)).map(([id])=>id);
-      if(!outputNodes.length)throw Error('Le workflow doit contenir un nœud SaveImage.');
-      await api('comfy/import',{name:$('workflow-name').value,description,graph:importGraph,bindings,outputNodes,imageInputs:images});
+      const outputNodes=mediaType==='video'?[$('workflow-output').value].filter(Boolean):Object.entries(importGraph||{}).filter(([,n])=>/SaveImage/.test(n.class_type)).map(([id])=>id);
+      if(!outputNodes.length)throw Error(mediaType==='video'?'Choisissez le nœud qui enregistre la vidéo.':'Le workflow doit contenir un nœud SaveImage.');
+      await api('comfy/import',{name:$('workflow-name').value,description,graph:importGraph,bindings,outputNodes,imageInputs:images,...(mediaType==='video'?{mediaType,videoStages:$('workflow-stages').value==='both'?['draft','final']:[$('workflow-stages').value]}:{})});
       if(session!==settingsVersion)return false;
       importGraph=null;currentFile=null;
       try{await refresh({settings:false});}catch(error){notice('Workflow enregistré, mais sa liste n’a pas pu être actualisée : '+error.message);}
@@ -219,13 +225,16 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     return await importWorkflow()&&!hasPendingImport();
   }
   async function permission(request,signal){
-    if(request.autoAllow)return undefined;
-    $('tool-name').textContent=request.workflowName;$('tool-arguments').textContent=JSON.stringify(request.args,null,2);$('tool-dialog').showModal();
+    const video=request.mediaType==='video';if(request.autoAllow&&!video)return undefined;
+    $('tool-title').textContent=video?(request.plan?.stage==='draft'?'Brouillon vidéo · Confirmer ?':'Vidéo finale · Confirmer ?'):'Autoriser la génération ?';
+    $('tool-name').textContent=request.workflowName;$('tool-arguments').textContent=JSON.stringify(request.args,null,2);$('tool-arguments').hidden=video;$('tool-plan').hidden=!video;
+    $('tool-always').hidden=video;$('tool-always').disabled=video;$('tool-revise').hidden=!video;$('tool-once').textContent=video?'Confirmer et générer':'Cette fois';$('tool-deny').textContent=video?'Annuler':'Refuser';
+    if(video)renderVideoPlan($('tool-plan'),request,node);$('tool-dialog').showModal();
     return new Promise((resolve,reject)=>{
       const finish=value=>{cleanup();resolve(value);};const cancel=event=>{event?.preventDefault();finish('deny');};
       const abort=()=>{cleanup();reject(signal.reason||new DOMException('Annulé','AbortError'));};
       function cleanup(){$('tool-dialog').close();signal.removeEventListener('abort',abort);$('tool-dialog').removeEventListener('cancel',cancel);for(const [id]of buttons)$(id).onclick=null;}
-      const buttons=[['tool-deny','deny'],['tool-once','once'],['tool-always','always']];for(const[id,value]of buttons)$(id).onclick=()=>finish(value);
+      const buttons=[['tool-deny','deny'],['tool-once','once'],['tool-always','always'],['tool-revise','revise']];for(const[id,value]of buttons)$(id).onclick=()=>finish(value);
       $('tool-dialog').addEventListener('cancel',cancel);signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
     });
   }
@@ -233,7 +242,8 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
   async function requestTool(request,signal,onProgress,onImage=()=>{}){
     const cancel=()=>api('tools/cancel',{requestId:request.requestId}).catch(()=>{});
     let decision;try{decision=await permission(request,signal);signal.throwIfAborted();}catch(error){await cancel();throw error;}
-    if(decision==='deny')await cancel();
+    if(['deny','revise'].includes(decision))await cancel();
+    if(decision==='revise')return {content:JSON.stringify({status:'revision_requested',message:'L’utilisateur souhaite modifier la proposition vidéo. Demande les changements souhaités et attends sa réponse. Aucune génération lancée.'}),images:[],denied:true,revised:true};
     if(decision==='deny')return {content:JSON.stringify({status:'denied',message:'L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.'}),images:[],denied:true};
     signal.throwIfAborted();
     signal.addEventListener('abort',cancel,{once:true});let terminal=false,originalsTask;const originalsController=new AbortController(),originalsSignal=AbortSignal.any([signal,originalsController.signal]);
@@ -245,17 +255,20 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
         const prepared=[],errors=[];
         for(const [index,output] of record.outputs.entries()){
           try{
-          originalsSignal.throwIfAborted();const blob=await original(record,index,originalsSignal);
+          originalsSignal.throwIfAborted();const blob=record.mediaType==='video'?null:await original(record,index,originalsSignal);
           try{onImage({record,index,blob});}catch(error){notice('Affichage de l’original indisponible : '+error.message);}
-          const image=await compressImage(blob,{name:output.source.filename,count:record.outputs.length});
-          prepared.push({url:image.url,width:image.width,height:image.height});
+          if(record.mediaType==='video'){
+            if(!output.originalUrl)throw Error('Lien de lecture vidéo indisponible.');
+            const video=await prepareVideo(output.originalUrl,{signal:originalsSignal,name:output.source.filename,frameCount:Math.max(1,Math.min(3,Math.floor(64/record.outputs.length))),totalFrames:Math.min(64,record.outputs.length*3)});
+            prepared.push({url:video.frames[0].url,width:video.width,height:video.height,frames:video.frames});
+          }else{const image=await compressImage(blob,{name:output.source.filename,count:record.outputs.length});prepared.push({url:image.url,width:image.width,height:image.height});}
           }catch(error){originalsSignal.throwIfAborted();errors.push(`Sortie ${index+1} : ${error.message}`);}
         }
         return errors.length?{error:new Error(errors.join(' '))}:{prepared};
       })().catch(error=>({error}));
     }
     try{
-      let job=await(await api('tools/execute',{requestId:request.requestId,permission:decision})).json();
+      let job=await(await api('tools/execute',{requestId:request.requestId,permission:decision,...(request.mediaType==='video'?{approvalToken:request.approvalToken}:{})})).json();
       if(signal.aborted){cancel();signal.throwIfAborted();}
       const jobId=job.id;
       while(!['done','error','cancelled'].includes(job.state)){
@@ -271,25 +284,25 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
       const showGallery=()=>renderGallery(record.conversationId).catch(error=>notice(`Galerie indisponible : ${error.message}`));
       await showGallery(); onOutput();
       if(job.warning)notice(job.warning);
-      let images=[],dimensions=[],error=job.state==='done'?'':job.error||'La génération a été interrompue après production de l’image.';
+      let images=[],dimensions=[],frames=[],error=job.state==='done'?'':job.error||'La génération a été interrompue après production de la sortie.';
       onProgress('Préparation des copies pour la vision…');
       try{
         const originals=await originalsTask;if(originals.error)throw originals.error;
         for(let index=0;index<record.outputs.length;index++){
           signal.throwIfAborted();
-          const image=originals.prepared[index];images.push(image.url);record.outputs[index].analysisDataUrl=image.url;const size=image.width&&image.height?{width:image.width,height:image.height}:null;dimensions.push(size);if(size)Object.assign(record.outputs[index],size);
+          const image=originals.prepared[index];frames.push(image.frames||null);images.push(...(image.frames?image.frames.map(frame=>frame.url):[image.url]));record.outputs[index].analysisDataUrl=image.url;const size=image.width&&image.height?{width:image.width,height:image.height}:null;dimensions.push(size);if(size)Object.assign(record.outputs[index],size);
         }
       }catch(failure){
         if(signal.aborted)throw failure;
-        images=[];error=[error,`Image générée, mais copie pour l’analyse indisponible : ${failure.message}`].filter(Boolean).join(' ');notice(error);
+        images=[];error=[error,`Sortie générée, mais copie pour l’analyse indisponible : ${failure.message}`].filter(Boolean).join(' ');notice(error);
       }
       signal.throwIfAborted();
       if(images.length){
-        try{await api('gallery/analysis',{conversationId:record.conversationId,id:record.id,images,dimensions},{signal});}
+        try{await api('gallery/analysis',{conversationId:record.conversationId,id:record.id,images:record.outputs.map(output=>output.analysisDataUrl),dimensions,...(record.mediaType==='video'?{frames}:{})},{signal});}
         catch(failure){if(signal.aborted)throw failure;notice(`Copies d’analyse non enregistrées : ${failure.message}`);}
       }
       await showGallery();
-      return {content:JSON.stringify({status:error?'generated':'success',run_id:record.id,workflow:record.workflowName,prompt:record.prompt,reference_count:record.parameters?.reference_count??null,reference_capacity:record.parameters?.reference_capacity??null,reference_mode:record.parameters?.reference_mode||'unknown',outputs:record.outputs.map(o=>o.source),...(error?{warning:error}:{}),note:images.length?'Les images jointes ensuite sont les copies réduites des sorties. Les originaux sont dans la galerie.':'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.'}),images,record,failed:!!error,error};
+      return {content:JSON.stringify({status:error?'generated':'success',run_id:record.id,workflow:record.workflowName,prompt:record.prompt,...(record.mediaType==='video'?{media_type:'video',stage:record.parameters.stage,workflow_digest:record.parameters.workflow_digest,parameters:Object.fromEntries(Object.entries(record.parameters).filter(([key])=>['workflow_id','seed','width','height','frames','fps','negative_prompt','references','reference_image','reference_resource','reference_frame'].includes(key))),frame_times:frames.map((items,index)=>({output:index,times:items?.map(frame=>frame.time)||[]})),inspection_limit:'Only sampled compressed frames, without audio. Cannot verify continuous motion or exact last frames from these samples.'}:{}),reference_count:record.parameters?.reference_count??null,reference_capacity:record.parameters?.reference_capacity??null,reference_mode:record.parameters?.reference_mode||'unknown',outputs:record.outputs.map(o=>o.source),...(error?{warning:error}:{}),note:images.length?'Les images jointes ensuite sont les copies réduites des sorties. Les originaux sont dans la galerie.':'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.'}),images,record,failed:!!error,error};
     }catch(error){if(!terminal)cancel();if(signal.aborted)throw signal.reason;throw error;}
     finally{originalsController.abort();signal.removeEventListener('abort',cancel);onChange();}
   }
