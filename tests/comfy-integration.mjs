@@ -146,6 +146,9 @@ test('HTTP native approval alternates engines, restores native history and clear
         ['start', {}], ['stop', {}], ['chat', { messages }], ['history/clear', { confirm: true }],
         ['history/save', { id: conversationId, messages }], ['history/delete', { id: conversationId, confirm: true }], ['preferences', { saveHistory: false }],
       ]) await json(path, body, 409);
+      await json('tools/cancel',{},400);
+      await json('tools/cancel',{requestId:randomUUID()},409);
+      await json('tools/cancel',{jobId:randomUUID()},409);
       assert.equal((await status()).toolJob.state, 'generating');
       assert.equal(events.filter((event) => event === 'engine:start').length, 1);
       comfy.complete();
@@ -187,6 +190,10 @@ test('HTTP native approval alternates engines, restores native history and clear
       assert.equal(reviewed.analysis.status,'reviewed');
       assert.equal((await call('gallery/review',{conversationId,id:record.id,text:review,status:'conforme'})).status,400);
       transcript.push({ role: 'assistant', content: review });
+      await json('comfy/config',{enabled:true,baseUrl:comfy.url,autoAllow:false,maxIterations:1});
+      const inspected=await chat([...transcript,{role:'user',content:'inspect tool context'}]);
+      assert.equal(inspected.find(event=>event.local_test_payload).local_test_payload.tools,undefined);
+      await json('comfy/config',{enabled:true,baseUrl:comfy.url,autoAllow:false,maxIterations:3});
       await assert.rejects(readdir(join(directory,'history')), {code:'ENOENT'});
       assert.equal((await call('gallery/persist',{conversationId})).status,403);
       await json('preferences',{saveHistory:true});

@@ -147,3 +147,54 @@ test('reading an imported workflow holds the settings lock until parsing complet
  finally{release(JSON.stringify({'1':{class_type:'CLIPTextEncode',inputs:{text:'p'}},'2':{class_type:'SaveImage',inputs:{images:['1',0]}}}));await pending;}
  assert.equal(busyChanges.at(-1),false);
 }));
+
+test('latest gallery refresh wins without duplicate images',async()=>fixture(async({ui,state,nodes,setIntercept})=>{
+ state.conversationId='conversation';const replies=[];
+ setIntercept(route=>route==='gallery/conversation'?new Promise(resolve=>replies.push(resolve)):undefined);
+ const record={id:'run',conversationId:'conversation',workflowName:'Portrait',prompt:'A portrait',createdAt:'2026-11-08T00:00:00Z',parameters:{},outputs:[{source:{filename:'image.png'}}]};
+ const first=ui.renderGallery('conversation'),second=ui.renderGallery('conversation');
+ replies[1](Response.json({runs:[record]}));await second;replies[0](Response.json({runs:[record]}));await first;
+ assert.equal(nodes.get('gallery-list').children.length,1);
+}));
+
+test('cancel during launch acknowledgement is sent immediately and is scoped to that request',async()=>fixture(async({ui,state,calls,setIntercept})=>{
+ state.conversationId='conversation';let release;
+ setIntercept(route=>route==='tools/execute'?new Promise(resolve=>{release=()=>resolve(Response.json({id:'mine',state:'checking'}));}):route==='tools/cancel'?Response.json({}):undefined);
+ const controller=new AbortController(),pending=assert.rejects(ui.requestTool({autoAllow:true,requestId:'request-mine'},controller.signal,()=>{}),{name:'AbortError'});
+ await new Promise(setImmediate);controller.abort();
+ try{assert.ok(calls.some(c=>c.route==='tools/cancel'&&c.body.requestId==='request-mine'));}
+ finally{release();await pending;}
+}));
+
+test('a replaced job is never followed or cancelled as if it belonged to this message',async()=>fixture(async({ui,state,calls,setIntercept})=>{
+ state.conversationId='conversation';
+ setIntercept(route=>route==='tools/execute'?Response.json({id:'mine',state:'generating'}):route==='tools/job'?Response.json({id:'other',state:'error',error:'Other job'}):route==='tools/cancel'?Response.json({}):undefined);
+ await assert.rejects(ui.requestTool({autoAllow:true,requestId:'request-mine'},new AbortController().signal,()=>{}),/remplacée|correspond/);
+ assert.ok(calls.filter(c=>c.route==='tools/cancel').every(c=>c.body.requestId==='request-mine'));
+}));
+
+async function rasterStub(check){
+ const priorBitmap=globalThis.createImageBitmap,priorCreate=document.createElement;
+ globalThis.createImageBitmap=async()=>({width:1,height:1,close(){}});
+ document.createElement=()=>({width:0,height:0,getContext:()=>({fillRect(){},drawImage(){}}),toDataURL:mime=>mime==='image/png'?'data:image/png;base64,iVBORw0KGgo=':'data:image/jpeg;base64,/9j/'});
+ try{await check();}finally{globalThis.createImageBitmap=priorBitmap;document.createElement=priorCreate;}
+}
+const generatedRecord={id:'mine',conversationId:'conversation',workflowName:'Portrait',prompt:'A portrait',createdAt:'2026-11-08T00:00:00Z',parameters:{},outputs:[{source:{filename:'image.png'}}]};
+
+test('an image survives a failed model restart and still receives its compressed gallery copy',async()=>fixture(async({ui,state,calls,setIntercept})=>{
+ state.conversationId='conversation';
+ setIntercept(route=>route==='tools/execute'?Response.json({id:'mine',state:'error',error:'Model restart failed',record:generatedRecord}):route==='gallery/conversation'?Response.json({runs:[generatedRecord]}):route.endsWith('/mine/0')?new Response(Buffer.from('89504e470d0a1a0a','hex'),{headers:{'Content-Type':'image/png'}}):route==='gallery/analysis'?Response.json({}):undefined);
+ await rasterStub(async()=>{
+  const result=await ui.requestTool({autoAllow:true,requestId:'request-mine'},new AbortController().signal,()=>{});
+  assert.equal(result.record?.id,'mine');assert.equal(result.failed,true);assert.equal(result.images.length,1);
+  assert.match(result.error,/restart failed/);assert.ok(calls.some(c=>c.route==='gallery/analysis'));
+ });
+}));
+
+test('a missing original for compression cannot turn a produced image into a lost tool result',async()=>fixture(async({ui,state,setIntercept})=>{
+ state.conversationId='conversation';
+ setIntercept(route=>route==='tools/execute'?Response.json({id:'mine',state:'done',record:generatedRecord}):route==='gallery/conversation'?Response.json({runs:[generatedRecord]}):route.endsWith('/mine/0')?Promise.reject(Error('Original unavailable')):undefined);
+ const result=await ui.requestTool({autoAllow:true,requestId:'request-mine'},new AbortController().signal,()=>{});
+ assert.equal(result.record?.id,'mine');assert.equal(result.failed,true);assert.deepEqual(result.images,[]);
+ assert.match(result.content,/generated|générée/);assert.match(result.error,/Original unavailable/);
+}));

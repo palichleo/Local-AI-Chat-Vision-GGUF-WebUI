@@ -2,13 +2,14 @@ import { compressImage } from './images.mjs';
 
 export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=()=>{}}){
   const $=id=>document.getElementById(id);
-  let config,workflows=[],importGraph=null,urls=[];
-  function reset(){for(const url of urls)URL.revokeObjectURL(url);urls=[];$('gallery-list').replaceChildren();$('gallery').hidden=true;}
-  async function original(record,index){return (await api(`gallery/${record.conversationId}/${record.id}/${index}`)).blob();}
+  let config,workflows=[],importGraph=null,urls=[],galleryVersion=0;
+  function reset(){galleryVersion++;for(const url of urls)URL.revokeObjectURL(url);urls=[];$('gallery-list').replaceChildren();$('gallery').hidden=true;}
+  async function original(record,index,signal){return (await api(`gallery/${record.conversationId}/${record.id}/${index}`,undefined,{signal})).blob();}
   async function renderGallery(conversationId){
-    reset();if(!conversationId)return;
+    if(conversationId&&conversationId!==state.conversationId)return;
+    reset();const version=galleryVersion;if(!conversationId)return;
     const result=await(await api(`gallery/${conversationId}`)).json();
-    if(conversationId!==state.conversationId)return;
+    if(version!==galleryVersion||conversationId!==state.conversationId)return;
     $('gallery').hidden=!result.runs.length;
     for(const record of result.runs){
       for(const [index,output]of record.outputs.entries()){
@@ -195,25 +196,46 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
   async function requestTool(request,signal,onProgress){
     const decision=await permission(request,signal);
     if(decision==='deny')return {content:JSON.stringify({status:'denied',message:'L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.'}),images:[],denied:true};
-    signal.throwIfAborted();let job=await(await api('tools/execute',{requestId:request.requestId,permission:decision})).json();
-    const cancel=()=>{api('tools/cancel',{}).catch(()=>{});};signal.addEventListener('abort',cancel,{once:true});if(signal.aborted){cancel();signal.throwIfAborted();}
+    signal.throwIfAborted();
+    const cancel=()=>{api('tools/cancel',{requestId:request.requestId}).catch(()=>{});};
+    signal.addEventListener('abort',cancel,{once:true});let terminal=false;
     try{
+      let job=await(await api('tools/execute',{requestId:request.requestId,permission:decision})).json();
+      if(signal.aborted){cancel();signal.throwIfAborted();}
+      const jobId=job.id;
       while(!['done','error','cancelled'].includes(job.state)){
         signal.throwIfAborted();onProgress(job.progress);await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},700);const abort=()=>{clearTimeout(timer);reject(signal.reason);};signal.addEventListener('abort',abort,{once:true});});
         job=await(await api('tools/job',undefined,{signal})).json();
+        if(job?.id!==jobId)throw Error('La génération suivie a été remplacée par une autre tâche.');
       }
-      if(job.record)try{await renderGallery(state.conversationId);}catch(error){notice(`Galerie indisponible : ${error.message}`);}
-      if(job.state!=='done')return {content:JSON.stringify({status:'error',message:job.error}),images:[],failed:true};
+      terminal=true;
+      if(!job.record)return {content:JSON.stringify({status:'error',message:job.error}),images:[],failed:true,error:job.error};
+      const record=job.record;
+      if(record.conversationId!==state.conversationId)throw Error('Cette sortie ne correspond pas à la conversation courante.');
+      const showGallery=()=>renderGallery(record.conversationId).catch(error=>notice(`Galerie indisponible : ${error.message}`));
+      await showGallery();
+      if(job.warning)notice(job.warning);
+      let images=[],error=job.state==='done'?'':job.error||'La génération a été interrompue après production de l’image.';
       onProgress('Préparation des copies pour la vision…');
-      const images=[];
-      for(let index=0;index<job.record.outputs.length;index++){
-        signal.throwIfAborted();const blob=await original(job.record,index);const image=await compressImage(blob,{name:job.record.outputs[index].source.filename,count:job.record.outputs.length});images.push(image.url);
+      try{
+        for(let index=0;index<record.outputs.length;index++){
+          signal.throwIfAborted();
+          const blob=await original(record,index,signal);
+          const image=await compressImage(blob,{name:record.outputs[index].source.filename,count:record.outputs.length});images.push(image.url);
+        }
+      }catch(failure){
+        if(signal.aborted)throw failure;
+        images=[];error=[error,`Image générée, mais copie pour l’analyse indisponible : ${failure.message}`].filter(Boolean).join(' ');notice(error);
       }
       signal.throwIfAborted();
-      await api('gallery/analysis',{conversationId:state.conversationId,id:job.record.id,images});
-      await renderGallery(state.conversationId);
-      return {content:JSON.stringify({status:'success',run_id:job.record.id,workflow:job.record.workflowName,prompt:job.record.prompt,outputs:job.record.outputs.map(o=>o.source),note:'Les images jointes ensuite sont les copies réduites des sorties. Les originaux sont dans la galerie.'}),images,record:job.record};
-    }finally{signal.removeEventListener('abort',cancel);onChange();}
+      if(images.length){
+        try{await api('gallery/analysis',{conversationId:record.conversationId,id:record.id,images},{signal});}
+        catch(failure){if(signal.aborted)throw failure;notice(`Copies d’analyse non enregistrées : ${failure.message}`);}
+      }
+      await showGallery();
+      return {content:JSON.stringify({status:error?'generated':'success',run_id:record.id,workflow:record.workflowName,prompt:record.prompt,outputs:record.outputs.map(o=>o.source),...(error?{warning:error}:{}),note:images.length?'Les images jointes ensuite sont les copies réduites des sorties. Les originaux sont dans la galerie.':'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.'}),images,record,failed:!!error,error};
+    }catch(error){if(!terminal)cancel();if(signal.aborted)throw signal.reason;throw error;}
+    finally{signal.removeEventListener('abort',cancel);onChange();}
   }
   return {refresh,cancelSettings,reset,renderGallery,requestTool,saveReview,values,workflowDescriptions,saved,setBusy};
 }

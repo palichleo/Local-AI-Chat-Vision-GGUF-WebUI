@@ -159,3 +159,50 @@ test('forgetting one conversation invalidates only its pending calls and complet
   rt.forgetConversation(id); assert.equal(rt.job.record.conversationId, other);
   rt.forgetConversation(other); assert.equal(rt.job, null);
 });
+
+test('cancel targets the owned request and cannot abort another job', async () => {
+  const {rt,client,request}=runtimeFixture(),gate=deferred();
+  client.status=async()=>{await gate.promise;return {idle:true};};
+  const p=await request();const executing=rt.execute({requestId:p.requestId,permission:'once'});
+  try{
+    assert.throws(()=>rt.cancel({requestId:'different-request'}),{status:409});
+    assert.equal(rt.job.controller.signal.aborted,false);
+    rt.cancel({requestId:p.requestId});assert.equal(rt.job.controller.signal.aborted,true);
+  }finally{gate.resolve();await assert.rejects(executing,{name:'AbortError'});await rt.close();}
+});
+
+test('closing waits for explicit GPU recovery and rejects any later execution',async()=>{
+  const {rt,client,request}=runtimeFixture(),p=await request();
+  client.free=async()=>{throw Error('not released');};
+  await rt.execute({requestId:p.requestId,permission:'once'});await rt.finished;
+  const gate=deferred();client.free=async()=>gate.promise;
+  const recovery=rt.recover();let closed=false;const closing=rt.close().then(()=>{closed=true;});
+  await new Promise(setImmediate);assert.equal(closed,false);
+  gate.resolve();await recovery;await closing;
+  await assert.rejects(request(),{status:409});
+});
+
+test('GPU recovery cannot turn a failed generation into a successful image',async()=>{
+  const {rt,client,request}=runtimeFixture(),p=await request();
+  client.run=async()=>{throw Error('workflow rejected');};client.free=async()=>{throw Error('memory unknown');};
+  await rt.execute({requestId:p.requestId,permission:'once'});await rt.finished;
+  client.free=async()=>{};await rt.recover();
+  assert.equal(rt.active,false);assert.equal(rt.status().state,'error');assert.match(rt.status().error,/workflow rejected/);
+});
+
+test('a gallery disk write failure keeps generated originals linked in session memory',async()=>{
+ const {rt,request}=runtimeFixture();const writes=[];
+ rt.persist=()=>true;rt.gallery.put=async(record,{persist})=>{writes.push(persist);if(persist)throw Error('disk full');return record;};
+ const p=await request();await rt.execute({requestId:p.requestId,permission:'once'});await rt.finished;
+ assert.equal(rt.status().state,'done');assert.equal(rt.status().record?.outputs[0].source.filename,'portrait.png');
+ assert.match(rt.status().warning,/disk full/);assert.deepEqual(writes,[true,false]);
+});
+
+test('cancelling while global approval is saved never unloads the language model',async()=>{
+ const {rt,request,seen}=runtimeFixture(),entered=deferred(),gate=deferred();
+ rt.saveConfig=async()=>{entered.resolve();await gate.promise;};
+ const p=await request(),execution=rt.execute({requestId:p.requestId,permission:'always'});
+ await entered.promise;rt.cancel({requestId:p.requestId});gate.resolve();
+ await assert.rejects(execution,{name:'AbortError'});await rt.finished;
+ assert.equal(seen.stops,0);assert.equal(seen.runs,0);
+});

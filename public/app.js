@@ -551,13 +551,14 @@ async function sendMessage(event) {
       try{result=await comfyUI.requestTool(request,signal,progress=>{view.note.textContent=progress;scrollToBottom();});}
       catch(error){history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'error',message:signal.aborted?'Génération annulée.':error.message})});throw error;}
       history.push({role:'tool',tool_call_id:request.call.id,content:result.content});
-      reviewRecord=result.record||null;
-      if(result.record)state.status=await(await api('status')).json();
-      const reviewImages=state.status.vision?result.images:[];
+      if(result.record||result.failed)state.status=await(await api('status')).json();
+      const reviewImages=state.status.state==='ready'&&state.status.vision?result.images:[];
+      reviewRecord=reviewImages.length?result.record:null;
       if(result.record){
-        history.push({role:'user',internal:true,content:[{type:'text',text:reviewImages.length?'Voici les sorties du workflow, dans le même ordre. Compare-les à la demande initiale et aux références. Explique les écarts. Si une correction est utile et autorisée, adapte ton prompt.': 'La génération est terminée. Tu ne disposes pas de la vision : indique que tu ne peux pas vérifier visuellement le résultat.'},...reviewImages.map(url=>({type:'image_url',image_url:{url}}))]});
+        history.push({role:'user',internal:true,content:[{type:'text',text:reviewImages.length?'Voici les sorties du workflow, dans le même ordre. Compare-les à la demande initiale et aux références. Explique les écarts. Si une correction est utile et autorisée, adapte ton prompt.':state.status.vision?'La génération est terminée, mais les copies pour l’analyse sont indisponibles. Signale que tu ne peux pas vérifier visuellement le résultat.': 'La génération est terminée. Tu ne disposes pas de la vision : indique que tu ne peux pas vérifier visuellement le résultat.'},...reviewImages.map(url=>({type:'image_url',image_url:{url}}))]});
       }
-      view.note.textContent=result.denied?'Génération refusée.':result.failed?'La génération a échoué.':'Sortie disponible dans la galerie.';
+      if(result.failed&&state.status.state!=='ready')throw Error(result.error||'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
+      view.note.textContent=result.denied?'Génération refusée.':result.failed?(result.record?'Image générée · analyse indisponible.':'La génération a échoué.'):'Sortie disponible dans la galerie.';
       if(result.denied||result.failed||iterations>=(state.comfy?.maxIterations||5))allowTools=false;
       state.archiveSnapshot={messages:[...history],incomplete:true};await persistConversation();
       view=assistantMessage();finishReason='';
@@ -634,7 +635,7 @@ $('prompt').onkeydown = (event) => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-form').requestSubmit(); }
 };
 $('chat-form').onsubmit = sendMessage;
-$('cancel').onclick = () => { if(state.controller)state.controller.abort(); else api('tools/cancel',{}).catch(error=>notice(error.message)); };
+$('cancel').onclick = () => { if(state.controller)state.controller.abort(); else api('tools/cancel',{jobId:state.status.toolJob?.id}).catch(error=>notice(error.message)); };
 $('thinking').onclick = () => { state.thinking = !state.thinking; $('thinking').setAttribute('aria-pressed', String(state.thinking)); };
 async function newConversation() {
   if (state.status.toolJob || state.generating || state.preparing || state.loadingHistory) return;

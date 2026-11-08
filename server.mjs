@@ -214,10 +214,15 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         const [, , ,conversationId,runId,index]=path.split('/');
         if(!runId)return send(200,await gallery.list(conversationId));
         const record=await gallery.get(conversationId,runId);
+        if(res.destroyed)return;
         if(index===undefined)return send(200,record);
         if(!/^\d+$/.test(index)||!record.outputs[Number(index)])throw problem('Image introuvable.',404);
-        const original=await new ComfyClient(record.comfyUrl).original(record.outputs[Number(index)].source);
-        res.writeHead(200,{'Content-Type':original.mime,'Content-Disposition':`inline; filename="${original.filename.replace(/[^A-Za-z0-9._-]/g,'_')}"`});return res.end(original.bytes);
+        const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);
+        try{
+          const original=await new ComfyClient(record.comfyUrl).original(record.outputs[Number(index)].source,{signal:controller.signal});
+          if(res.destroyed)return;
+          res.writeHead(200,{'Content-Type':original.mime,'Content-Disposition':`inline; filename="${original.filename.replace(/[^A-Za-z0-9._-]/g,'_')}"`});return res.end(original.bytes);
+        }finally{res.off('close',abort);}
       }
       if (req.method === 'GET' && (path === '/api/history' || path.startsWith('/api/history/'))) {
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
@@ -291,7 +296,10 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return send(200,{...result,detected:true});
       }
       if(path==='/api/tools/recover')return send(200,await runtime.recover());
-      if(path==='/api/tools/cancel')return send(200,runtime.cancel());
+      if(path==='/api/tools/cancel'){
+        if((!body.requestId&&!body.jobId)||[body.requestId,body.jobId].some(id=>id!==undefined&&(typeof id!=='string'||!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id))))throw problem('Identifiant de génération requis.');
+        return send(200,runtime.cancel(body));
+      }
       if(path==='/api/tools/execute'){
         if(clearingHistory||persistingGallery||savingComfy||savingSettings||pickingFile)throw problem('Une opération est en cours.',409);
         return send(202,await runtime.execute(body));
@@ -309,7 +317,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         finally{persistingGallery=false;}
       }
       if(path==='/api/gallery/analysis'||path==='/api/gallery/review'){
-        if(runtime.active||clearingHistory||disablingHistory||persistingGallery)throw problem('Attends la fin de l’opération en cours.',409);
+        if((runtime.active&&!runtime.gpuBlocked)||clearingHistory||disablingHistory||persistingGallery)throw problem('Attends la fin de l’opération en cours.',409);
         persistingGallery=true;
         try {
         const record=await gallery.get(body.conversationId,body.id);
@@ -408,7 +416,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       const onClose = () => controller.abort();
       res.once('close', onClose);
       try {
-      const definition=comfy.enabled&&body.tools!==false?await catalog.definition():null;
+      const definition=comfy.enabled&&body.tools!==false&&(runtime.turns.get(body.turnId)||0)<comfy.maxIterations?await catalog.definition():null;
       if(definition){
         payload.tools=[definition];payload.tool_choice='auto';payload.parallel_tool_calls=false;
 
