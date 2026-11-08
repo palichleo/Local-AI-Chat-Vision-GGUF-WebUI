@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.mjs --open",
-    "smoke": "node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs tests/history.mjs tests/history-clear.mjs tests/limits.mjs",
-    "test": "node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs tests/history.mjs tests/history-clear.mjs tests/limits.mjs"
+    "smoke": "node --test tests/*.mjs",
+    "test": "node --test tests/*.mjs"
   }
 }

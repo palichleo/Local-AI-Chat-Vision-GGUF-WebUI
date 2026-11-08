@@ -125,7 +125,7 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       await until(async () => !(await status()).busy);
       message.content[1].image_url.url = 'https://example.org/image.png';
       assert.equal((await call('chat', { messages: [message] })).status, 400);
-      message.content = Array.from({ length: 4 }, () => ({ type: 'image_url', image_url: { url: png } }));
+      message.content = Array.from({ length: 65 }, () => ({ type: 'image_url', image_url: { url: png } }));
       assert.equal((await call('chat', { messages: [message] })).status, 400);
     });
 

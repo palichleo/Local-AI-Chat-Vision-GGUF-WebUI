@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md) | [한국어](README.ko.md)
 
-A local chat and image-understanding interface for GGUF models, built with HTML, CSS and JavaScript. The interface runs in your browser, while a small Node.js server manages llama.cpp. No npm dependencies, remote assets, telemetry or cloud APIs.
+A local chat, image-understanding and optional ComfyUI image-generation interface for GGUF models, built with HTML, CSS and JavaScript. The interface runs in your browser, while a small Node.js server manages llama.cpp. No npm dependencies, remote assets, telemetry or cloud APIs.
 
 The application currently uses French UI labels. Their names are included below to help you find the controls.
 
@@ -58,17 +58,31 @@ The first message automatically starts the configured model and its vision proje
 
 - Type a message and press Enter. Shift+Enter inserts a new line.
 - Attach PNG/JPEG images with the image button, by dragging them onto the composer, or by pasting an image into the message field.
-- Attach up to three images per message, with a maximum of 10 MiB per source file. Images are resized to a maximum of 2,048 pixels on the longest side and converted to JPEG with a white background before being sent locally. A conversation request is limited to 20 MiB in total; start a new conversation if its image history becomes too large.
+- Attach up to 64 images per message, with a maximum of 10 MiB per source file. The browser prepares analysis copies with a maximum 1,024-pixel longest side and a shared four-megapixel budget. It keeps the smaller PNG or JPEG result; JPEG uses quality `0.82` and a white background. A conversation request remains limited to 20 MiB and 100 messages; start a new conversation when either limit is reached.
 - **Réflexion** (Thinking) asks the model's chat template to enable or disable reasoning. Its effect depends on the model. Received reasoning appears in a separate collapsible section.
 - The square button interrupts the current response. Text already received is kept.
 - **Contexte total** is the shared window for messages, image tokens, reasoning and the reply. **Sortie maximale** independently limits generated tokens per reply, including reasoning: 4,096 by default, with choices up to 32,768 within the selected context. The interface reports a response cut short by an output or context limit. Stop the model before changing these settings, then save; they apply on its next start.
 - Model replies render common Markdown: headings, paragraphs, bold and italic text, strikethrough, lists, quotations, simple tables, links, and inline or fenced code. Formatting updates while the reply streams. Raw model HTML is escaped, unsafe link protocols are rejected, and embedded image syntax does not load remote images.
+
+## Local image generation with ComfyUI
+
+ComfyUI tools are **disabled by default**. Run your own local ComfyUI instance, then open **Configuration → ComfyUI**, enable the connection and enter its API address. The default is `http://127.0.0.1:8188`; a Comfy backend used through SwarmUI may use another local port, such as `http://127.0.0.1:7821`. Use the backend's actual API address. The application does not install ComfyUI, download models or bundle third-party workflows.
+
+Export a copy of your workflow from ComfyUI using **File → Export (API)**, enabling developer options if necessary. Import this **API-format JSON** in Configuration. Ordinary editor workflow JSON, including complex subgraphs, must be exported through ComfyUI first; the application does not convert it. Imported copies are saved under ignored `data/workflows/`; your original workflow is untouched. Set a name and description, identify the saved-image output nodes, and provide explicit node/input bindings for the required `prompt` and any supported `negative_prompt`, `seed`, `width`, `height` and `image`. Mark image-editing workflows that require a reference. The model can change only these mapped inputs. Width and height must be multiples of 8 between 64 and 4,096; a seed must be a nonnegative safe integer.
+
+Use a **GGUF model and chat template that support native tool calls**. The application supplies the tools and starts llama-server with `--jinja`; no extra manual engine flag is needed. A text imitation of a tool call does not execute a workflow. For workflows with an image binding, the model can select a supplied reference using its zero-based index.
+
+Every execution asks for permission by default. You can approve once or allow imported workflows globally, then revoke that setting in Configuration. The default limit is **three generations per user turn**, adjustable from 1 to 10. The approval names the workflow and parameters; progress and cancellation stay visible. Restoring a conversation never silently replays an approval or starts a pending job.
+
+During a run, the application waits for ComfyUI to be idle, unloads the chat engine and its vision projector, then runs the approved workflow. It frees ComfyUI's models before restarting the chat engine and projector for review. The local ComfyUI service stays running. Only compressed analysis copies go to the vision model; it compares them with the instruction and references and can revise within the iteration limit. Its review can miss details lost in compression and does not train the model. The **right-hand gallery** shows workflow and prompt details and lets you view or download the original ComfyUI output.
 
 ## Optional conversation history
 
 **Conserver les conversations** in Configuration is off by default. When off, messages stay in page memory and are lost on closure or reload. When enabled, the application saves messages, reasoning and copies of the browser-compressed images under `history/<conversation-id>/` in the project folder. Each conversation has `conversation.json` and content-addressed image files; repeated saves reuse the same image bytes. Both `history/` and `data/` are excluded from Git. When uploading sources manually, exclude both folders yourself.
 
 Saved conversations appear in the sidebar, or inside Configuration on narrow screens. Reopen one to restore messages and images and continue chatting. Pending user turns, periodic partial replies and finished replies are saved. An unfinished user turn is restored as an editable draft and is never resent automatically. A restored partial assistant reply is marked as partial. A forced shutdown can still lose the latest unsaved part of a streamed reply.
+
+Generated-image history keeps compressed review copies and gallery metadata/links only. Originals remain in ComfyUI's output storage. **Supprimer l’historique** deletes the saved compressed copies and links along with the conversation; it leaves original ComfyUI files unchanged. With history off, gallery records stay in page/server memory only.
 
 Disabling history stops further writes and hides the list; it does **not delete** existing files. The red **Supprimer l’historique** button permanently deletes saved conversations and their images after confirmation, even when saving is disabled. It also closes the displayed exchange while keeping the current composer draft. The saving preference is retained; future exchanges can be saved again. Enabling it during a conversation saves the current exchange. Files are ordinary local files, grow as conversations accumulate, and can be backed up or removed manually while the app is closed. History does not increase the model's active context window: reopening an archive sends its restored messages only when you submit a new prompt, with the same context and request-size limits. Saving failures are reported and keep the conversation in the page; switching to another conversation is blocked until saving succeeds or history is disabled.
 
@@ -84,9 +98,9 @@ The application does not apply or modify GPU unlocking tools. Windows has been e
 
 ## Image limits and compression
 
-The current limit is **three images per message**, not three per conversation. The existing conversion uses browser JPEG quality `0.9` and a maximum 2,048-pixel longest side; this is a quality parameter, **not a 90% size reduction**. Actual size savings depend on the source, and small PNG screenshots can become larger JPEGs. Alpha is flattened onto white. Images are stored in history exactly as prepared for inference; history does not recompress them again.
+The limit is **64 images per message**. Analysis images share a **four-megapixel budget**, with a maximum 1,024-pixel longest side per image. With many references, each receives fewer pixels; 64 full-resolution images are not sent to the model. The browser compares PNG with JPEG at quality `0.82` and keeps the smaller result. The JPEG quality parameter is **not an 82% size reduction**. JPEG uses a white background. History stores images as prepared for inference without recompressing them again. ComfyUI originals are viewed and downloaded separately.
 
-The browser sends the whole active conversation on each turn, including past images. Base64 adds roughly one third to binary image size, and the complete JSON request is limited to 20 MiB. Reducing JPEG bytes helps storage and transport, but does not directly reduce image tokens; dimensions and the vision encoder's processing determine those. The present image count, resolution and transport limits remain unchanged. Large reference collections and Krea2 generation/review automation are not implemented.
+The browser sends the whole active conversation on each turn, including past images. Base64 adds roughly one third to binary image size, and the complete JSON request remains limited to **20 MiB and 100 messages**, including native tool messages. Reducing image bytes helps storage and transport, but does not directly reduce image tokens; dimensions and the vision encoder's processing determine those. Many images can still exhaust the model's context or obscure small details. The 64-image attachment limit does not guarantee that every model or context can process all of them usefully.
 
 ## Troubleshooting
 
@@ -94,6 +108,7 @@ The browser sends the whole active conversation on each turn, including past ima
 - **Engine exits:** open Configuration → **Journaux du moteur** (Engine logs). An unknown option can indicate an outdated engine. An unknown architecture or incompatible projector requires a compatible engine build and matching files.
 - **CUDA not detected:** check the engine distribution, its libraries and your drivers. Requesting GPU layers does not guarantee GPU use; the engine logs report actual offloading.
 - **Context exceeded:** start a new conversation or increase the context if memory allows. History is not silently removed.
+- **ComfyUI import or tool unavailable:** export with File → Export (API), check the local API address and enable ComfyUI, then verify the prompt binding and the GGUF's native tool support. An image-editing workflow also needs a supplied reference and an image binding.
 - **Connection interrupted:** check the terminal, then reload the page. If history is disabled, copy useful conversation text first; if enabled, make sure saving has finished.
 - **Port in use:** another instance may be using 8787. Close that instance before restarting.
 
@@ -102,10 +117,10 @@ Both services listen only on loopback. Control routes check the host, origin and
 ## Smoke test
 
 ```sh
-node --test tests/smoke.mjs tests/markdown.mjs tests/preferences.mjs tests/model-ready.mjs tests/history.mjs tests/history-clear.mjs tests/limits.mjs
+node --test tests/*.mjs
 ```
 
-Alternatively, run `npm run smoke`. This test uses a **simulated HTTP engine**, kept separately in `tests/fixtures/`. It checks application startup, configuration, access restrictions, streamed text and reasoning, images, cancellation, shutdown, CUDA library discovery and compatibility handling for missing MTP layers. It does not measure the quality or speed of a real model.
+Alternatively, run `npm test` or `npm run smoke`. Both run all top-level test files; fixture scripts in `tests/fixtures/` are excluded. The suite uses **simulated HTTP engines and local ComfyUI responses** to check chat, access restrictions, history, workflow validation, native tool approval, GPU handoff/recovery and gallery storage alongside startup, streaming, images, cancellation, CUDA library discovery and MTP compatibility handling. It does not measure the quality or speed of a real model or image workflow.
 
 ## References and licensing
 
