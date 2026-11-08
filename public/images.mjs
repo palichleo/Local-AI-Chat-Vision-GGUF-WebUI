@@ -49,7 +49,7 @@ function raster(blob, { name, count, source, maxPixels }) {
       const jpeg = canvas.toDataURL('image/jpeg', 0.82);
       const url = png.length <= jpeg.length ? png : jpeg;
       if (!/^data:image\/(png|jpeg);base64,/.test(url)) throw new Error('La compression de cette image a échoué.');
-      return { name, url, ...(source ? { source } : {}) };
+      return { name, url, width:bitmap.width, height:bitmap.height, ...(source ? { source } : {}) };
     } finally {
       bitmap.close();
       if (canvas) { canvas.width = 0; canvas.height = 0; }

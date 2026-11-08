@@ -1,3 +1,5 @@
+import { Resources, resourceCatalogPrompt, resourceTool } from './lib/resources.mjs';
+import { sendResourceMedia } from './lib/resource-media.mjs';
 import { countContext } from './lib/context-count.mjs';
 import http from 'node:http';
 import { compactSession } from './public/update-ui.mjs';
@@ -5,7 +7,7 @@ import { checkForUpdates } from './lib/updates.mjs';
 import { prepareUpdate, launchInstaller } from './lib/update-install.mjs';
 import { atomicJson } from './lib/update-files.mjs';
 import { updateSession, readUpdateSession } from './lib/update-session.mjs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -30,6 +32,8 @@ const staticFiles = new Map([
   ['/material-light.mjs', ['material-light.mjs', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/assets-ui.mjs', ['assets-ui.mjs','text/javascript; charset=utf-8']],
+  ['/resource-preparation.mjs', ['resource-preparation.mjs','text/javascript; charset=utf-8']],
   ['/copy.mjs', ['copy.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-guard.mjs', ['settings-guard.mjs', 'text/javascript; charset=utf-8']],
   ['/context-meter.mjs', ['context-meter.mjs', 'text/javascript; charset=utf-8']],
@@ -146,9 +150,13 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   }
   const catalog=new WorkflowCatalog(join(dataDir,'workflows'));
   const gallery=new ComfyGallery({historyDir});
+  const resources=new Resources(join(dataDir,'resources'));
+  const mediaSecret=randomBytes(32),resourceTurns=new Map();
+  const mediaKey=(id,part)=>createHmac('sha256',mediaSecret).update(id+'/'+part).digest('hex');
+  const resourceView=record=>({...record,originalUrl:`/media/resources/${record.id}/original?key=${mediaKey(record.id,'original')}`,previewUrl:record.ready?`/media/resources/${record.id}/preview?key=${mediaKey(record.id,'preview')}`:null});
   const pendingSession = await readUpdateSession(dataDir).catch(() => null);
   for (const record of pendingSession?.gallery || []) await gallery.put(record, { persist: false });
-  const runtime=new ToolRuntime({engine,catalog,gallery,getConfig:()=>comfy,engineConfig:()=>config,saveConfig:saveComfy,persist:()=>preferences.saveHistory});
+  const runtime=new ToolRuntime({engine,catalog,gallery,resources,getConfig:()=>comfy,engineConfig:()=>config,saveConfig:saveComfy,persist:()=>preferences.saveHistory});
   let discovery={detected:false,baseUrl:comfy.baseUrl};
   let discoveryTime=0, discovering=null;
   async function detectComfy(){
@@ -173,15 +181,32 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   let updates = Promise.resolve({ available: false });
   let controlResponse = null, controlledOnce = false, controlTimer;
   async function includeTools(payload, body) {
-    const definition = comfy.enabled && body.tools !== false && (runtime.turns.get(body.turnId) || 0) < comfy.maxIterations ? await catalog.definition() : null;
-    if (definition) { payload.tools = [definition]; payload.tool_choice = 'auto'; payload.parallel_tool_calls = false; }
-    return definition;
+    const active=await resources.catalog();
+    const context=resourceCatalogPrompt(active);
+    if(context){
+      if(payload.messages[0]?.role==='system')payload.messages[0]={...payload.messages[0],content:payload.messages[0].content+context};
+      else payload.messages.unshift({role:'system',content:context});
+    }
+    const definitions=[];
+    if(comfy.enabled&&body.tools!==false&&(runtime.turns.get(body.turnId)||0)<comfy.maxIterations){
+      const definition=await catalog.definition();
+      if(definition){
+        if(active.length&&definition.function.parameters.properties.reference_image){
+          definition.function.parameters.properties.reference_resource={type:'string',description:'Active resource catalog ID to use instead of reference_image, only for workflows with an image input.'};
+          definition.function.parameters.properties.reference_frame={type:'integer',minimum:0,maximum:2,description:'Frame index for a video reference_resource; defaults to 0.'};
+        }
+        definitions.push(definition);
+      }
+    }
+    if(active.length&&engine.vision&&body.tools!==false&&body.resources!==false&&(resourceTurns.get(body.turnId)||0)<8)definitions.push(resourceTool);
+    if(definitions.length){payload.tools=definitions;payload.tool_choice='auto';payload.parallel_tool_calls=false;}
+    return definitions;
   }
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
     const send = (status, body) => {
       if (res.destroyed || res.writableEnded) return;
       res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -193,7 +218,14 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (!allowedHosts.includes(req.headers.host)) throw problem('Hôte refusé.', 403);
       if (req.headers.origin && ![url, `http://localhost:${expected.port}`].includes(req.headers.origin)) throw problem('Origine refusée.', 403);
       if (req.headers['sec-fetch-site'] === 'cross-site') throw problem('Requête externe refusée.', 403);
-      const path = new URL(req.url, url).pathname;
+      const requestURL = new URL(req.url,url), path=requestURL.pathname;
+      const media=path.match(/^\/media\/resources\/([0-9a-f-]{36})\/(original|preview)$/);
+      if(media){
+        if(!['GET','HEAD'].includes(req.method))throw problem('Méthode non prise en charge.',405);
+        const key=requestURL.searchParams.get('key')||'';
+        if(!/^[0-9a-f]{64}$/.test(key)||!timingSafeEqual(Buffer.from(key,'hex'),Buffer.from(mediaKey(media[1],media[2]),'hex')))throw problem('Accès refusé.',401);
+        await sendResourceMedia(req,res,await resources.media(media[1],media[2]));return;
+      }
       if (req.method === 'GET' && staticFiles.has(path)) {
         const [file, mime] = staticFiles.get(path);
         let contents = await readFile(join(root, 'public', file));
@@ -230,6 +262,13 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if(req.method==='GET'&&path==='/api/comfy'){await detectComfy();return send(200,{config:comfy,discovery,workflows:await catalog.list()});}
       if(req.method==='GET'&&path==='/api/comfy/status')return send(200,await new ComfyClient(comfy.baseUrl).status());
       if(req.method==='GET'&&path==='/api/comfy/workflows')return send(200,{workflows:await new ComfyClient(comfy.baseUrl).workflows()});
+      if(req.method==='GET'&&path==='/api/resources')return send(200,{resources:(await resources.list()).map(resourceView)});
+      if(path==='/api/resources/upload'&&req.method==='POST'){
+        if(applyingUpdate||closing)throw problem('L’application est occupée.',409);
+        let name;try{name=decodeURIComponent(req.headers['x-resource-name']||'');}catch{throw problem('Nom de fichier invalide.');}
+        const resource=await resources.add(req,{name,mime:(req.headers['content-type']||'').split(';')[0],length:req.headers['content-length']});
+        return send(201,resourceView(resource));
+      }
       if(req.method==='GET'&&path==='/api/tools/job')return send(200,runtime.status());
       if(req.method==='GET'&&path.startsWith('/api/gallery/')){
         const [, , ,conversationId,runId,index]=path.split('/');
@@ -259,11 +298,20 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return;
       }
       if (closing) throw problem('L’application est en cours de fermeture.', 409);
+      if(path==='/api/resources/update'){
+        if((runtime.active||engine.busy)&&((await resources.record(body.id)).ready||!body.patch?.prepared))throw problem('Attends la fin de la réponse avant de modifier une ressource.',409);
+        return send(200,resourceView(await resources.update(body.id,body.patch)));
+      }
+      if(path==='/api/resources/delete'){
+        if((runtime.active||engine.busy)&&(await resources.record(body.id)).ready)throw problem('Attends la fin de la réponse avant de supprimer une ressource.',409);
+        await resources.remove(body.id);return send(200,{deleted:true});
+      }
+      if(path==='/api/resources/read')return send(200,await resources.readActive(body.id));
       if (path === '/api/updates/session/clear') { await rm(join(dataDir, 'update-session.json'), { force: true }); return send(200, { cleared: true }); }
       if (path === '/api/updates/install') {
         const available = await updates;
         if (!available.available || !updateInstaller) throw problem('Aucune mise à jour installable.', 409);
-        if (runtime.active || engine.busy || saving || savingSettings || savingComfy || savingPreferences || clearingHistory || disablingHistory || persistingGallery || pickingFile || ['loading', 'stopping'].includes(engine.state)) throw problem('Attends la fin de l’opération en cours avant la mise à jour.', 409);
+        if (resources.busy || runtime.active || engine.busy || saving || savingSettings || savingComfy || savingPreferences || clearingHistory || disablingHistory || persistingGallery || pickingFile || ['loading', 'stopping'].includes(engine.state)) throw problem('Attends la fin de l’opération en cours avant la mise à jour.', 409);
         let snapshot;
         try { snapshot = updateSession(body.session); } catch (error) { throw problem(error.message); }
         applyingUpdate = true; installState = { state: 'preparing', error: '' };
@@ -457,7 +505,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       const onClose = () => controller.abort();
       res.once('close', onClose);
       try {
-        const definition = await includeTools(payload, body);
+        const definitions = await includeTools(payload, body);
         const upstream = await fetch(`${engine.base}/v1/chat/completions`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${engine.apiKey}` },
           body: JSON.stringify(payload), signal: controller.signal,
@@ -475,8 +523,15 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         await readSSE(upstream.body,async(event)=>{collectToolCalls(calls,event.choices?.[0]?.delta||{});if(event.choices?.[0]?.finish_reason)terminalReason=event.choices[0].finish_reason;await emit(event);});
         if(calls.length){
           if(terminalReason!=='tool_calls')throw problem('L’appel d’outil du modèle est incomplet ou tronqué. Aucune génération lancée.',502);
-          if(!definition)throw problem('Le moteur a demandé un outil indisponible.',502);
-          await emit({local_tool_request:await runtime.request(calls,{conversationId:body.conversationId,turnId:body.turnId,messages:body.messages})});
+          if(calls.length!==1||!definitions.some(item=>item.function.name===calls[0].function?.name))throw problem('Le moteur a demandé un outil indisponible.',502);
+          if(calls[0].function.name==='local_read_resource'){
+            const call=nativeFields({role:'assistant',tool_calls:calls}).tool_calls[0];let args;
+            try{args=JSON.parse(call.function.arguments);}catch{throw problem('Paramètres de ressource invalides.',502);}
+            if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(key=>key!=='resource_id')||!body.turnId||!/^[0-9a-f-]{36}$/.test(body.turnId)||(resourceTurns.get(body.turnId)||0)>=8)throw problem('Lecture de ressource invalide.',502);
+            const resource=await resources.activeRecord(args.resource_id);
+            resourceTurns.set(body.turnId,(resourceTurns.get(body.turnId)||0)+1);if(resourceTurns.size>256)resourceTurns.delete(resourceTurns.keys().next().value);
+            await emit({local_tool_request:{kind:'resource',call,resourceId:resource.id,workflowName:resource.name}});
+          }else await emit({local_tool_request:await runtime.request(calls,{conversationId:body.conversationId,turnId:body.turnId,messages:body.messages})});
         }
         res.write('data: [DONE]\n\n');
         res.end();
@@ -506,7 +561,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       clearTimeout(controlTimer);
       const serverClosed = new Promise(done => server.close(done));
       updateController.abort(); await updates;
-      await runtime.close(); await engine.stop();
+      await resources.close(); await runtime.close(); await engine.stop();
       await history.flush(); await galleryBatch.catch(() => {}); await gallery.pending;
       if (controlResponse && !controlResponse.destroyed) controlResponse.end(JSON.stringify({ state: applyingUpdate ? 'restarting' : 'stopped' }) + '\n');
       server.closeAllConnections();

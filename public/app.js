@@ -1,3 +1,4 @@
+import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
 import { setupContextMeter } from './context-meter.mjs';
@@ -15,7 +16,7 @@ const state = {
   token: '', config: {}, status: { state: 'stopped', vision: false, busy: false, logs: [] },
   connected: false, thinking: true, messages: [], images: [], generating: false,
   preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingPreferences: false, waitingForModel: false, settingsLoading: false, settingsSession: 0, settingsReady: false, comfyWorking: false, disablingHistory: false,
-  saveHistory: true, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false, clearingHistory: false,
+  resourceWorking: false, saveHistory: true, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false, clearingHistory: false,
 };
 const labels = { stopped: 'Moteur arrêté', loading: 'Chargement du modèle…', ready: 'Prêt à discuter', stopping: 'Arrêt en cours…', error: 'Vérifier le moteur' };
 
@@ -41,10 +42,11 @@ function notice(message) {
 }
 
 async function api(route, body, options = {}) {
+  const {raw=false,headers:extraHeaders={},...requestOptions}=options;
   const response = await fetch(`/api/${route}`, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...options,
+    headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': raw?'application/octet-stream':'application/json', ...extraHeaders },
+    ...(body === undefined ? {} : { body: raw?body:JSON.stringify(body) }), ...requestOptions,
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -212,7 +214,7 @@ function renderTranscript(messages, incomplete = false) {
       else {
         const view = assistantMessage();
         if (message.content) renderText(view.body, message.content);
-        else view.body.textContent = message.tool_calls ? 'Appel ComfyUI enregistré.' : 'Aucune réponse finale reçue.';
+        else view.body.textContent = message.tool_calls ? 'Appel d’outil enregistré.' : 'Aucune réponse finale reçue.';
         view.reasoning.hidden = !message.reasoning_content;
         view.thoughts.textContent = message.reasoning_content || '';
         if (incomplete && index === messages.length - 1) view.note.textContent = 'Réponse partielle restaurée.';
@@ -272,7 +274,7 @@ async function toggleTheme() {
 
 function updateControls() {
   const s = state.status;
-  $('update-available').disabled = state.comfyWorking || state.updating || state.generating || state.preparing || state.operation || state.settingsLoading || state.loadingHistory || state.savingHistory || state.savingPreferences || !state.connected || s.busy || !!s.toolJob || ['loading','stopping'].includes(s.state);
+  $('update-available').disabled = state.resourceWorking || state.comfyWorking || state.updating || state.generating || state.preparing || state.operation || state.settingsLoading || state.loadingHistory || state.savingHistory || state.savingPreferences || !state.connected || s.busy || !!s.toolJob || ['loading','stopping'].includes(s.state);
   const toolBusy=!!s.toolJob;
   $('comfy-recover').hidden=!s.toolJob?.blocked;
   const running = ['loading', 'ready', 'stopping'].includes(s.state);
@@ -290,7 +292,7 @@ function updateControls() {
   $('history-delete-confirm').textContent = state.clearingHistory ? 'Suppression…' : 'Supprimer définitivement';
   $('theme-toggle').disabled = state.savingPreferences || !state.connected;
   $('config-fields').disabled = state.settingsLoading || state.settingsReady === false || state.comfyWorking || toolBusy || running || state.operation || state.generating || !state.connected;
-  $('shutdown-app').disabled = state.closingApp || state.updating || state.operation || state.generating || s.busy || toolBusy || state.savingPreferences || state.clearingHistory || state.comfyWorking || !state.connected;
+  $('shutdown-app').disabled = state.resourceWorking || state.closingApp || state.updating || state.operation || state.generating || s.busy || toolBusy || state.savingPreferences || state.clearingHistory || state.comfyWorking || !state.connected;
   $('save-config').disabled = state.settingsReady === false || state.comfyWorking || s.busy || state.settingsLoading || toolBusy || state.operation || state.generating || !state.connected;
   $('settings-stop').hidden = !running;
   $('settings-stop').disabled = toolBusy || state.generating || s.state === 'stopping' || state.operation;
@@ -317,6 +319,7 @@ function updateControls() {
     $('config-error').textContent = s.error;
     $('config-error').hidden = false;
   }
+  assetsUI.setBusy(state.generating || s.busy || toolBusy || state.updating || state.closingApp);
   if (state.closingApp) for (const control of document.querySelectorAll('button,input,textarea,select')) control.disabled = true;
   const basename = state.config.modelPath?.split(/[\\/]/).pop() || '';
   if (basename) {
@@ -535,25 +538,29 @@ function userContent(text, images) {
   return images.length ? [{type:'text',text:text||'Décris les images.'},...images.map(image=>({type:'image_url',image_url:{url:image.url}}))] : text;
 }
 
-function chatRequest(messages, tools = true) {
-  return {messages:[{role:'system',content:'Tu es un assistant local utile. Réponds dans la langue de l’utilisateur. Décris honnêtement les images et signale tes incertitudes.'},...messages],thinking:state.thinking,tools};
+function archiveMessages(messages) { return messages.filter(message=>!message.resourceId); }
+
+function chatRequest(messages, tools = true, resources = true) {
+  return {messages:[{role:'system',content:'Tu es un assistant local utile. Réponds dans la langue de l’utilisateur. Décris honnêtement les images et signale tes incertitudes.'},...messages],thinking:state.thinking,tools,resources};
 }
 
 async function sendMessage(event) {
   event.preventDefault();
   if ($('send').disabled || state.generating) return;
   if (!state.config.enginePath || !state.config.modelPath) { notice('Renseignez les chemins du moteur et du modèle dans Configuration avant le premier envoi.'); return openSettings(); }
+  state.preparing=true;updateControls();
+  try{if(!await assetsUI.flush()){notice('La description de ressource n’a pas été enregistrée. Réessayez avant l’envoi.');return;}}finally{state.preparing=false;updateControls();}
   const text=$('prompt').value.trim(), images=[...state.images];
   const content=userContent(text,images);
   const history=[...state.messages,{role:'user',content}],userView=userMessage(text,images);
   state.conversationId ||= crypto.randomUUID();const turnId=crypto.randomUUID();
-  state.archiveSnapshot={messages:[...history],incomplete:true};
+  state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:true};
   let view=assistantMessage(),output='',reasoning='',finishReason='',complete=false,lastRender=0,lastArchive=0,usedTool=false;
   state.generating=true;
   $('welcome').hidden=true;$('prompt').value='';state.images=[];renderAttachments();
   state.waitingForModel=true;state.controller=new AbortController();state.stickToBottom=true;
   const signal=state.controller.signal;contextMeter.pause();resizePrompt();notice('');scrollToBottom();
-  function snapshot(){return {messages:[...history,...(output||reasoning?[{role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{})}]:[])],incomplete:true};}
+  function snapshot(){return {messages:[...archiveMessages(history),...(output||reasoning?[{role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{})}]:[])],incomplete:true};}
   function render(){
     view.reasoning.hidden=!reasoning;view.thoughts.textContent=reasoning;
     if(output)renderText(view.body,output);else if(reasoning)view.body.replaceChildren(node('span','pending-dot','Réflexion en cours…'));
@@ -566,11 +573,11 @@ async function sendMessage(event) {
     if(!await persistConversation())throw Error('Impossible de sauvegarder ce message. Vérifiez le dossier history ou désactivez l’historique.');
     await waitForModel(api,signal,status=>{state.status=status;updateControls();});
     state.waitingForModel=false;updateControls();
-    let allowTools=true,iterations=0,reviewRecord=null;
+    let allowTools=true,iterations=0,resourceReads=0,reviewRecord=null;
     while(true){
       signal.throwIfAborted();let request=null;
       view.body.replaceChildren(node('span','pending-dot','●'));
-      const response=await api('chat',{...chatRequest(history,allowTools),conversationId:state.conversationId,turnId},{signal});
+      const response=await api('chat',{...chatRequest(history,allowTools,resourceReads<8),conversationId:state.conversationId,turnId},{signal});
       await readSSE(response.body,chunk=>{
         contextMeter.observe(chunk);
         if(chunk.local_tool_request)request=chunk.local_tool_request;
@@ -579,14 +586,28 @@ async function sendMessage(event) {
         if(performance.now()-lastRender>55)render();
       });
       render();
-      if(reviewRecord){
+      if(reviewRecord&&request?.kind!=='resource'){
         try{await comfyUI.saveReview(reviewRecord,output,request?'correction_requested':'reviewed');}catch(error){notice(`Analyse de galerie non enregistrée : ${error.message}`);}
       }
       if(!request){complete=true;view.note.textContent=finishReason==='length'?'Limite de sortie atteinte.':`${((performance.now()-started)/1000).toFixed(1)} s`;break;}
       await historyWrite;
-      usedTool=true;iterations++;
+      usedTool=true;
       history.push({role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{}),tool_calls:[request.call]});
       output='';reasoning='';
+      if(request.kind==='resource'){
+        resourceReads++;view.body.replaceChildren(node('span','pending-message','Ressource · '+request.workflowName));
+        view.note.textContent='Consultation de la ressource…';
+        try{
+          const resource=await(await api('resources/read',{id:request.resourceId},{signal})).json();
+          const metadata={id:resource.id,name:resource.name,description:resource.description,type:resource.mime,width:resource.width,height:resource.height,duration:resource.duration,frameTimes:resource.frames.map(frame=>frame.time)};
+          history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'loaded',resource:metadata})});
+          history.push({role:'user',internal:true,resourceId:resource.id,content:[{type:'text',text:'Consultation de la ressource '+JSON.stringify(metadata)+'. Ces copies sont temporaires pour ce tour. Pour une vidéo, ce sont des images représentatives, sans audio ni lecture continue.'},...resource.frames.map(frame=>({type:'image_url',image_url:{url:frame.url}}))]});
+          view.note.textContent='Ressource consultée · '+resource.name;
+        }catch(error){history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'error',message:error.message})});resourceReads=8;if(signal.aborted)throw error;view.note.textContent=error.message;}
+        state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:true};await persistConversation();
+        view=assistantMessage();finishReason='';continue;
+      }
+      iterations++;
       view.body.replaceChildren(node('span','pending-message',`Outil · ${request.workflowName}`));
       let result;
       try{result=await comfyUI.requestTool(request,signal,progress=>{view.note.textContent=progress;scrollToBottom();});}
@@ -601,7 +622,7 @@ async function sendMessage(event) {
       if(result.failed&&state.status.state!=='ready')throw Error(result.error||'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
       view.note.textContent=result.denied?'Génération refusée.':result.failed?(result.record?'Image générée · analyse indisponible.':'La génération a échoué.'):'Sortie disponible dans la galerie.';
       if(result.denied||result.failed||iterations>=(state.comfy?.maxIterations||5))allowTools=false;
-      state.archiveSnapshot={messages:[...history],incomplete:true};await persistConversation();
+      state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:true};await persistConversation();
       view=assistantMessage();finishReason='';
     }
   }catch(error){
@@ -613,7 +634,7 @@ async function sendMessage(event) {
     if(output||reasoning||usedTool){
       if(output||reasoning){render();if(!output)view.body.replaceChildren(node('div','text-block','Aucune réponse finale reçue.'));history.push({role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{})});}
       else if(usedTool)view.body.replaceChildren(node('div','text-block',complete?'Aucune réponse finale reçue.':'Opération interrompue.'));
-      state.messages=history;state.archiveSnapshot={messages:[...history],incomplete:!complete};setConversationTitle(text||'Une image à explorer');
+      state.messages=archiveMessages(history);state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:!complete};setConversationTitle(text||'Une image à explorer');
     }
     await persistConversation();state.generating=false;state.waitingForModel=false;state.controller=null;resizePrompt();await refreshStatus();$('prompt').focus();
   }
@@ -633,7 +654,8 @@ setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 const tokenControls=setupTokenControls($);
 const computeControls=setupComputeControls($);
 dismissSettingsOnOutsideClick($('settings'), () => settingsGuard.requestClose());
-const comfyUI=setupComfy({api,state,node,notice,onChange:()=>refreshStatus(),onSettingsBusyChange:busy=>{state.comfyWorking=busy;updateControls();}});
+const assetsUI=setupAssets({api,state,node,icon,notice,onChange:()=>contextMeter.schedule(),onBusy:()=>updateControls()});
+const comfyUI=setupComfy({api,state,node,notice,openOutput:(record,index)=>assetsUI.viewOutput(record,index),onOutput:()=>assetsUI.show('output'),onChange:()=>refreshStatus(),onSettingsBusyChange:busy=>{state.comfyWorking=busy;updateControls();}});
 
 const settingsGuard=setupSettingsGuard({
   dialog:$('settings'), confirmation:$('settings-unsaved'), keep:$('settings-keep'), discard:$('settings-discard'), saveButton:$('settings-save-close'), save:saveConfiguration,
@@ -736,7 +758,7 @@ document.addEventListener('drop', (event) => event.preventDefault());
 $('chat-area').onscroll = () => { const area = $('chat-area'); state.stickToBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 100; };
 window.addEventListener('beforeunload', (event) => {
   if (state.updateReload) return;
-  if (settingsGuard.isDirty() || state.generating || state.savingHistory || state.historyDirty || $('prompt').value.trim() || state.images.length || (!state.saveHistory && state.messages.length)) { event.preventDefault(); event.returnValue = ''; }
+  if (assetsUI.hasDraft() || state.resourceWorking || settingsGuard.isDirty() || state.generating || state.savingHistory || state.historyDirty || $('prompt').value.trim() || state.images.length || (!state.saveHistory && state.messages.length)) { event.preventDefault(); event.returnValue = ''; }
 });
 
 try {
@@ -748,6 +770,7 @@ try {
   applyTheme(initial.preferences?.theme);
   state.saveHistory = initial.preferences?.saveHistory === true;
   await refreshHistory();
+  await assetsUI.refresh().catch(error=>notice('Bibliothèque indisponible : '+error.message));
   await comfyUI.refresh();
   await restoreUpdate();
   if (initial.warning) notice(initial.warning);

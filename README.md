@@ -75,6 +75,20 @@ A small context meter below the composer shows the current conversation plus dra
 
 Closing modified Configuration asks whether to save, keep editing or discard changes. This covers the close button, Escape and outside clicks, with a browser warning on page closure. Theme/history preferences are already saved immediately and do not produce this warning. Finish or skip an incomplete workflow import before saving the main form.
 
+## Shared resources and Output
+
+The floating panel on the right has **Ressources** and **Output** tabs. Each tab scrolls independently; the resource grid adapts to the number of items. On narrower screens, the panel moves below the chat.
+
+Drop PNG/JPEG/WebP images or MP4/WebM videos into Resources, or use its file chooser. The app copies them into ignored **data/resources/** and keeps compressed analysis copies alongside them. The library survives conversation changes, history deletion and app restarts, even when chat history is off. The trash button appears on hover or keyboard focus and stays visible on touch devices. Deleting removes the app's copies, never the file originally chosen on your computer or any original ComfyUI output. Limits are 64 MiB per source image and 512 MiB per video.
+
+New resources start active. Their individual switches and short descriptions (300 characters maximum) persist. Descriptions save when leaving the field and are flushed before a chat message is sent. Unsaved descriptions trigger a page-close warning. Inactive resources remain visible to you but are excluded from the model's current catalog and visual lookup tool. Past conversation text is retained.
+
+For context efficiency, each request gets a compact text catalog of active resources. Visual copies are fetched only when the model issues the native **local_read_resource** tool call. Those copies are used within that turn and excluded from saved chat snapshots and future turns. Previous textual analysis remains in the conversation. This requires a vision projector and a model/template supporting native tool calls; text-only models can still use the annotations. No keyword rule forces generation or resource lookup. A compatible Comfy image-input workflow may also use an active resource as its reference, under the existing approval policy.
+
+Videos are preserved for normal local playback but are shown to the model through **up to three compressed frames at 10%, 50% and 90% of their duration**, with timestamps. This does not provide continuous motion analysis or audio. Browser codec support is required to prepare the frames. Video playback streams local byte ranges rather than loading the entire original into JavaScript memory.
+
+Output follows the current conversation and its existing history preference. Cards show a preview, workflow and an expandable prompt. **Details** opens the original image with the complete prompt, workflow, date, seed, original resolution and available execution parameters. New runs also retain the Comfy job identifier, workflow digest, measured Comfy duration and bounded scalar workflow inputs when available. Missing values are not guessed; if ComfyUI or its original is unavailable, the viewer identifies the compressed fallback. Original ComfyUI files remain under ComfyUI's control.
+
 ## Local image generation with ComfyUI
 
 ComfyUI tools are **disabled by default**. Run your own local ComfyUI instance, then open **Configuration → ComfyUI**, enable the connection and enter its API address. The default is `http://127.0.0.1:8188`; a Comfy backend used through SwarmUI may use another local port, such as `http://127.0.0.1:7821`. Use the backend's actual API address. The application does not install ComfyUI, download models or bundle third-party workflows.

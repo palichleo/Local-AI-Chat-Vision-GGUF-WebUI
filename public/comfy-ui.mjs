@@ -1,32 +1,33 @@
 import { compressImage } from './images.mjs';
 
-export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=()=>{}}){
+export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=()=>{},openOutput,onOutput=()=>{}}){
   const $=id=>document.getElementById(id);
   let config,workflows=[],importGraph=null,urls=[],galleryVersion=0;
-  function reset(){galleryVersion++;for(const url of urls)URL.revokeObjectURL(url);urls=[];$('gallery-list').replaceChildren();$('gallery').hidden=true;}
+  function reset(){galleryVersion++;for(const url of urls)URL.revokeObjectURL(url);urls=[];$('gallery-list').replaceChildren(node('p','asset-empty','Aucune génération dans cette conversation.'));}
   async function original(record,index,signal){return (await api(`gallery/${record.conversationId}/${record.id}/${index}`,undefined,{signal})).blob();}
   async function renderGallery(conversationId){
     if(conversationId&&conversationId!==state.conversationId)return;
     reset();const version=galleryVersion;if(!conversationId)return;
     const result=await(await api(`gallery/${conversationId}`)).json();
     if(version!==galleryVersion||conversationId!==state.conversationId)return;
-    $('gallery').hidden=!result.runs.length;
+    if(result.runs.length)$('gallery-list').replaceChildren();
     for(const record of result.runs){
       for(const [index,output]of record.outputs.entries()){
         const card=node('article','gallery-card');
-        if(output.analysisDataUrl){const img=node('img');img.src=output.analysisDataUrl;img.alt=record.prompt;card.append(img);}
-        card.append(node('strong','',record.workflowName),node('p','',record.prompt),node('small','',new Date(record.createdAt).toLocaleString('fr-FR')));
+        if(output.analysisDataUrl){const img=node('img');img.src=output.analysisDataUrl;img.alt=record.prompt;img.onclick=()=>openOutput(record,index);card.append(img);}
+        const prompt=node('details','output-prompt'),summary=node('summary');summary.setAttribute('aria-label','Afficher ou réduire le prompt');summary.append(node('span','',record.prompt));prompt.append(summary);
+        card.append(node('strong','',record.workflowName),prompt,node('small','',new Date(record.createdAt).toLocaleString('fr-FR')));
         const labels={reviewed:'Analyse disponible',correction_requested:'Nouvelle génération demandée'};
         card.append(node('small','gallery-meta',`${record.parameters.seed===undefined?'':`Seed : ${record.parameters.seed} · `}${labels[record.analysis?.status]||'À analyser'}`));
         if(record.analysis?.text){const details=node('details','gallery-review');details.append(node('summary','','Analyse du modèle'),node('p','',record.analysis.text));card.append(details);}
         const actions=node('div','gallery-actions');
         for(const download of [false,true]){
-          const button=node('button','secondary',download?'Télécharger':'Voir l’original');button.type='button';
+          const button=node('button','secondary',download?'Télécharger':'Details');button.type='button';
           button.onclick=async()=>{
+            if(!download){await openOutput(record,index);return;}
             button.disabled=true;
             try{const blob=await original(record,index);const url=URL.createObjectURL(blob);urls.push(url);
-              if(download){const a=node('a');a.href=url;a.download=output.source.filename;a.click();}
-              else{$('original-image').src=url;$('original-name').textContent=output.source.filename;$('original-dialog').showModal();}
+              const a=node('a');a.href=url;a.download=output.source.filename;a.click();
             }catch(error){notice(`Original indisponible : ${error.message}`);}finally{button.disabled=false;}
           };actions.append(button);
         }
@@ -180,7 +181,6 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     }catch(e){if(session===settingsVersion)$('comfy-status').textContent=e.message;}
     finally{changeWorking(-1);}
   };
-  $('original-close').onclick=()=>{$('original-dialog').close();$('original-image').removeAttribute('src');};
   async function permission(request,signal){
     if(request.autoAllow)return undefined;
     $('tool-name').textContent=request.workflowName;$('tool-arguments').textContent=JSON.stringify(request.args,null,2);$('tool-dialog').showModal();
@@ -213,7 +213,7 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
       const record=job.record;
       if(record.conversationId!==state.conversationId)throw Error('Cette sortie ne correspond pas à la conversation courante.');
       const showGallery=()=>renderGallery(record.conversationId).catch(error=>notice(`Galerie indisponible : ${error.message}`));
-      await showGallery();
+      await showGallery(); onOutput();
       if(job.warning)notice(job.warning);
       let images=[],error=job.state==='done'?'':job.error||'La génération a été interrompue après production de l’image.';
       onProgress('Préparation des copies pour la vision…');

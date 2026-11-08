@@ -24,6 +24,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
   let comfyOptions;
   const comfyUI = { refresh: options => { refreshes.push(options); return refresh(options); }, saved, cancelSettings() {}, setBusy() {}, values: () => savedComfy, workflowDescriptions: () => [], reset() {} };
   const context = { console, AbortController, crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
+    setupAssets:()=>({setBusy(){},hasDraft:()=>false}),
     setupSettingsGuard, setupCopy(){},setupContextMeter:()=>({schedule(){},pause(){},observe(){}}),
     setupMaterialLighting() {}, dismissSettingsOnOutsideClick() {}, setupTokenControls: () => ({ setValues() {}, values: () => ({ contextSize: 4096, maxOutputTokens: 2048 }) }),
     setupComputeControls: () => ({ setValues(config) { $('compute-mode').value = String(config.gpuLayers); }, values: () => ({ gpuLayers: 999 }) }),
