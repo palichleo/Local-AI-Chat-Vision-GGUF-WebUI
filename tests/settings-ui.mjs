@@ -238,3 +238,10 @@ test('switching the sidebar model uses the saved profile and does not discard co
  ui.state.messages=[{role:'user',content:'Keep this chat'}];ui.applyModelLibrary({models:[profile],detected:[],errors:[]});ui.updateControls();ui.$('model-select').value=profile.id;await ui.switchLLM();
  assert.equal(ui.calls.find(item=>item.route==='models/select').body.id,profile.id);assert.equal(ui.state.modelName,'Second folder');assert.equal(ui.state.messages[0].content,'Keep this chat');
 });
+
+test('manual edits after choosing a detected folder are the paths saved by Ajouter un LLM',async()=>{
+ const profile={id:'detected',name:'Detected',modelPath:'/models/Detected/main.gguf',projectorPath:'/models/Detected/mmproj.gguf'};
+ const ui=await settingsUI({request:call=>call.route==='models/add'?Response.json({profile:{...profile,modelPath:call.body.modelPath},models:[]}):undefined});await ui.open();ui.applyModelLibrary({models:[],detected:[profile],errors:[]});ui.$('detected-model').value=profile.id;ui.chooseDetectedModel();
+ ui.$('model-path').value='/external/Manual/main.gguf';ui.$('projector-path').value='';await ui.addLLM();
+ const call=ui.calls.find(item=>item.route==='models/add');assert.equal(call.body.modelPath,'/external/Manual/main.gguf');assert.equal(call.body.projectorPath,'');
+});

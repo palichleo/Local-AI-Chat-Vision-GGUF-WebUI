@@ -395,7 +395,7 @@ async function addLLM(){
  state.operation=true;updateControls();const session=state.settingsSession;
  try{
   const selected=state.detectedModels.find(item=>item.id===$('detected-model').value);
-  const result=await(await api('models/add',selected?{modelPath:selected.modelPath,projectorPath:selected.projectorPath}:{modelPath:$('model-path').value,projectorPath:$('projector-path').value})).json();state.models=result.models;renderModelSelect();
+  const result=await(await api('models/add',selected&&['ready','loading','stopping'].includes(state.status.state)?{modelPath:selected.modelPath,projectorPath:selected.projectorPath}:{modelPath:$('model-path').value,projectorPath:$('projector-path').value})).json();state.models=result.models;renderModelSelect();
   if(session===state.settingsSession&&$('settings').open){$('models-status').textContent=result.profile.name+' enregistré. Il est disponible dans le sélecteur de LLM.';}
  }catch(error){if(session===state.settingsSession){$('config-error').textContent=error.message;$('config-error').hidden=false;}}
  finally{state.operation=false;updateControls();}
