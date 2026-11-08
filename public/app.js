@@ -1,3 +1,4 @@
+import { setupSettingsSearch } from './settings-search.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
@@ -14,7 +15,7 @@ import { waitForModel } from './model-ready.mjs';
 
 const $ = (id) => document.getElementById(id);
 const state = {
-  token: '', config: {}, models: [], detectedModels: [], modelName: '', status: { state: 'stopped', vision: false, busy: false, logs: [] },
+  token: '', config: {}, globalInstructions:'', conversationInstructions:null, models: [], detectedModels: [], modelName: '', status: { state: 'stopped', vision: false, busy: false, logs: [] },
   connected: false, thinking: true, messages: [], images: [], generating: false,
   preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingPreferences: false, waitingForModel: false, settingsLoading: false, settingsSession: 0, settingsReady: false, comfyWorking: false, disablingHistory: false,
   resourceWorking: false, saveHistory: true, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false, clearingHistory: false,
@@ -131,13 +132,13 @@ async function changePreferences(patch) {
 function persistConversation() {
   const snapshot = state.archiveSnapshot || { messages: state.messages, incomplete: false };
   if (!state.saveHistory || state.disablingHistory || !snapshot.messages.length) return Promise.resolve(true);
-  const id = state.conversationId ||= crypto.randomUUID();
+  const id = state.conversationId ||= crypto.randomUUID();const instructions=state.conversationInstructions||'';
   state.historyDirty = true;
   historyWrite = historyWrite.then(async () => {
     if (!state.saveHistory) return true;
     state.savingHistory = true;
     try {
-      const { conversation } = await (await api('history/save', { id, ...snapshot })).json();
+      const { conversation } = await (await api('history/save', { id, ...snapshot, instructions })).json();
       state.historyItems = [conversation, ...state.historyItems.filter((item) => item.id !== id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       if (state.conversationId === id && (!state.archiveSnapshot || state.archiveSnapshot === snapshot)) state.historyDirty = false;
       renderHistory();
@@ -158,7 +159,7 @@ async function clearHistory() {
     await api(target ? 'history/delete' : 'history/clear', { confirm: true, ...(target ? { id: target.id } : {}) });
     state.historyItems = target ? state.historyItems.filter(item => item.id !== target.id) : [];
     if (!target || target.id === state.conversationId) {
-      state.messages = []; state.conversationId = null; state.archiveSnapshot = null; state.historyDirty = false;
+      state.messages = []; state.conversationId = null; state.conversationInstructions=null; state.archiveSnapshot = null; state.historyDirty = false;
       comfyUI.reset(); generationUI.clear();$('messages').replaceChildren(); $('welcome').hidden = false;
       setConversationTitle('Nouvelle conversation');
     }
@@ -187,7 +188,7 @@ async function loadConversation(id) {
     const record = await (await api(`history/${id}`)).json();
     const messages = [...record.messages];
     const draft = record.incomplete && messages.at(-1)?.role === 'user' && !messages.at(-1).internal ? savedUser(messages.pop()) : { text: '', images: [] };
-    state.conversationId = id;
+    state.conversationId = id;state.conversationInstructions=record.instructions||'';
     state.messages = messages;
     state.archiveSnapshot = { messages: record.messages, incomplete: record.incomplete };
     state.historyDirty = false;
@@ -228,7 +229,7 @@ function renderTranscript(messages, incomplete = false) {
 async function restoreUpdate() {
   const saved = await (await api('updates/session')).json();
   if (!saved) return;
-  state.messages = saved.messages; state.conversationId = saved.conversationId;
+  state.messages = saved.messages; state.conversationId = saved.conversationId;state.conversationInstructions=saved.conversationInstructions??(saved.messages.length?'':null);
   state.archiveSnapshot = saved.archiveSnapshot; state.historyDirty = false; state.images = saved.images; state.thinking = saved.thinking;
   $('prompt').value = saved.prompt; $('thinking').setAttribute('aria-pressed', String(state.thinking));
   generationUI.clear();$('messages').replaceChildren(); renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
@@ -250,7 +251,7 @@ async function installUpdate() {
     if (!await persistConversation()) throw new Error('La sauvegarde de la conversation a échoué. La mise à jour n’a pas commencé.');
     await historyWrite;
     await installFromButton({ api, token: state.token,
-      session: compactSession({ messages: state.messages, archiveSnapshot: state.archiveSnapshot, conversationId: state.conversationId, prompt: $('prompt').value, images: state.images, thinking: state.thinking, title: $('conversation-title').textContent }),
+      session: compactSession({ messages: state.messages, archiveSnapshot: state.archiveSnapshot, conversationId: state.conversationId, conversationInstructions: state.conversationInstructions, prompt: $('prompt').value, images: state.images, thinking: state.thinking, title: $('conversation-title').textContent }),
       onProgress: text => { $('update-progress').textContent = text; },
       reload: () => { state.updateReload = true; location.reload(); },
     });
@@ -325,8 +326,11 @@ function updateControls() {
   assetsUI.setBusy(state.generating || s.busy || toolBusy || state.updating || state.closingApp);
   if (state.closingApp) for (const control of document.querySelectorAll('button,input,textarea,select')) control.disabled = true;
   $('model-select').disabled = toolBusy || state.generating || state.preparing || state.operation || state.settingsLoading || state.loadingHistory || state.updating || state.comfyWorking || s.busy || !state.connected || ['loading','stopping'].includes(s.state);
-  $('add-llm').disabled = state.settingsLoading || state.operation || state.generating || state.comfyWorking || toolBusy || !state.settingsReady;
-  $('detected-model').disabled = $('add-llm').disabled;
+  $('add-llm').disabled = state.settingsLoading || state.operation || state.generating || state.comfyWorking || toolBusy || !state.connected || !state.settingsReady;
+  $('global-instructions').disabled=$('add-llm').disabled;
+  $('detected-model').disabled = $('add-llm').disabled || ['loading','stopping'].includes(s.state);
+  $('llm-fields').disabled = $('add-llm').disabled || ['loading','stopping'].includes(s.state);
+  $('save-llm').disabled = $('llm-fields').disabled;
   const basename = state.config.modelPath?.split(/[\\/]/).pop() || '';
   if (basename) {
     $('sidebar-model').textContent = state.modelName || state.config.modelPath.split(/[\\/]/).slice(-2,-1)[0] || 'Modèle GGUF';
@@ -380,25 +384,61 @@ function renderModelSelect(){
  for(const item of state.models||[]){const option=node('option','',item.name);option.value=item.id;option.title=item.modelPath;select.append(option);}
  select.value=active?.id||'';
 }
+function modelDraft(){return {id:state.modelEditId||'',adding:!!state.modelAdding,selection:$('detected-model').value,name:$('llm-name').value,modelPath:$('model-path').value,projectorPath:$('projector-path').value};}
+function modelEditorDirty(){return state.modelDraftBaseline!==undefined&&JSON.stringify(modelDraft())!==state.modelDraftBaseline;}
+function loadModelDraft(item,{adding=false}={}){
+ state.modelAdding=adding;state.modelEditId=!adding&&state.models.some(saved=>saved.id===item?.id)?item.id:'';
+ $('llm-name').value=item?.name||'';$('model-path').value=item?.modelPath||'';$('projector-path').value=item?.projectorPath||'';
+ $('llm-error').hidden=true;state.modelDraftBaseline=JSON.stringify(modelDraft());
+}
+function activeModel(){return (state.models||[]).find(item=>item.modelPath===state.config.modelPath&&item.projectorPath===(state.config.projectorPath||''));}
 function applyModelLibrary(library){
  state.models=library.models||[];state.detectedModels=[...state.models,...(library.detected||[]).filter(item=>!state.models.some(saved=>saved.id===item.id))];renderModelSelect();
- const select=$('detected-model');select.replaceChildren();const manual=node('option','','Chemins manuels ci-dessous');manual.value='';select.append(manual);
- for(const item of state.detectedModels){const option=node('option','',item.name+(state.models.some(saved=>saved.id===item.id)?' · enregistré':''));option.value=item.id;select.append(option);}
- select.value='';$('models-status').textContent=(library.errors||[]).map(item=>item.name+' : '+item.error).join('\n')||((library.detected||[]).length+' dossier(s) détecté(s) dans models.');
+ const current=activeModel()||{id:'current',name:state.modelName||state.config.modelPath?.split(/[\\/]/).slice(-2,-1)[0]||'',modelPath:state.config.modelPath||'',projectorPath:state.config.projectorPath||''};
+ if(current.modelPath&&!state.detectedModels.some(item=>item.modelPath===current.modelPath&&item.projectorPath===current.projectorPath))state.detectedModels.unshift(current);
+ const select=$('detected-model');select.replaceChildren();
+ if(!state.detectedModels.length){const manual=node('option','','Chemins manuels ci-dessous');manual.value='';select.append(manual);}
+ for(const item of state.detectedModels){const option=node('option','',item.name);option.value=item.id;select.append(option);}
+ const selected=state.detectedModels.find(item=>item.modelPath===current.modelPath&&item.projectorPath===current.projectorPath)||state.detectedModels[0];
+ select.value=selected?.id||'';loadModelDraft(selected);$('model-paths').open=false;
+ $('models-status').textContent=(library.errors||[]).map(item=>item.name+' : '+item.error).join('\n');$('models-status').hidden=!$('models-status').textContent;
 }
 function chooseDetectedModel(){
- const item=state.detectedModels.find(item=>item.id===$('detected-model').value);if(!item||['ready','loading','stopping'].includes(state.status.state))return;
- $('model-path').value=item.modelPath;$('projector-path').value=item.projectorPath;
+ const item=state.detectedModels.find(item=>item.id===$('detected-model').value);if(!item)return;
+ const previous=JSON.parse(state.modelDraftBaseline||'{}');
+ const edited=['name','modelPath','projectorPath'].some(key=>modelDraft()[key]!==previous[key]);
+ if(edited&&!confirm('Abandonner les modifications de ce LLM ?')){$('detected-model').value=previous.selection||'';return;}
+ loadModelDraft(item);settingsSearch.refresh();
 }
-async function addLLM(){
+function addLLM(){
  if($('add-llm').disabled)return;
- state.operation=true;updateControls();const session=state.settingsSession;
+ if(modelEditorDirty()&&!confirm('Abandonner les modifications de ce LLM ?'))return;
+ settingsSearch.reset();$('detected-model').value='';loadModelDraft(null,{adding:true});$('model-paths').open=true;$('llm-name').focus();
+}
+function cancelLLM(){
+ if(modelEditorDirty()&&!confirm('Abandonner les modifications de ce LLM ?'))return;
+ const current=activeModel()||state.detectedModels.find(item=>item.modelPath===state.config.modelPath&&item.projectorPath===(state.config.projectorPath||''));
+ $('detected-model').value=current?.id||state.detectedModels[0]?.id||'';loadModelDraft(current||state.detectedModels[0]);$('model-paths').open=false;
+}
+async function saveLLM({withinSettingsSave=false}={}){
+ if(!withinSettingsSave&&($('save-llm').disabled||state.operation))return false;
+ const session=state.settingsSession,draft=modelDraft();
+ if(!draft.name.trim()){ $('model-paths').open=true;$('llm-error').textContent='Indiquez un nom.';$('llm-error').hidden=false;$('llm-name').focus();return false;}
+ if(!withinSettingsSave){state.operation=true;updateControls();}
+ $('llm-error').hidden=true;
  try{
-  const selected=state.detectedModels.find(item=>item.id===$('detected-model').value);
-  const result=await(await api('models/add',selected&&['ready','loading','stopping'].includes(state.status.state)?{modelPath:selected.modelPath,projectorPath:selected.projectorPath}:{modelPath:$('model-path').value,projectorPath:$('projector-path').value})).json();state.models=result.models;renderModelSelect();
-  if(session===state.settingsSession&&$('settings').open){$('models-status').textContent=result.profile.name+' enregistré. Il est disponible dans le sélecteur de LLM.';}
- }catch(error){if(session===state.settingsSession){$('config-error').textContent=error.message;$('config-error').hidden=false;}}
- finally{state.operation=false;updateControls();}
+  const result=await(await api('models/add',{...(draft.id?{id:draft.id}:{}),name:draft.name,modelPath:draft.modelPath,projectorPath:draft.projectorPath})).json();state.models=result.models;renderModelSelect();
+  if(session===state.settingsSession&&$('settings').open)state.modelEditId=result.profile.id;
+  const selected=await(await api('models/select',{id:result.profile.id})).json();state.config=selected.config;state.modelName=selected.modelName;state.status=selected.status;
+  if(selected.warning||selected.status?.state==='error')throw Error(selected.warning||selected.status.error||'Le modèle n’a pas démarré.');
+  if(session===state.settingsSession&&$('settings').open){
+   state.detectedModels=[result.profile,...state.detectedModels.filter(item=>item.id!==draft.id&&item.id!==result.profile.id)];
+   const select=$('detected-model');select.replaceChildren();for(const item of state.detectedModels){const option=node('option','',item.name);option.value=item.id;select.append(option);}select.value=result.profile.id;
+   loadModelDraft(result.profile);settingsGuard.markPartSaved('llm');$('model-paths').open=false;$('models-status').hidden=true;
+  }
+  renderModelSelect();contextMeter.schedule();return true;
+ }catch(error){if(session===state.settingsSession&&$('settings').open){$('model-paths').open=true;$('llm-error').textContent=error.message;$('llm-error').hidden=false;}return false;}
+ finally{if(!withinSettingsSave){state.operation=false;await refreshStatus();}}
 }
 async function switchLLM(){
  const id=$('model-select').value;if(!id||$('model-select').disabled)return;
@@ -414,21 +454,19 @@ function openSettings() {
   filePickerController?.abort();comfyUI.cancelSettings();
   const session = state.settingsSession = (state.settingsSession || 0) + 1;
   state.settingsLoading = true; state.settingsReady = false;
-  $('config-error').hidden = true;
-  $('settings').showModal(); updateControls();
+  $('config-error').hidden = true;settingsSearch.reset();
+  $('settings').showModal();$('settings').scrollTop=0; updateControls();
   Promise.all([api('bootstrap').then(response => response.json()), comfyUI.refresh(), api('models').then(response=>response.json())]).then(([initial,,library]) => {
     if (session !== state.settingsSession || !$('settings').open) return;
-    state.config = initial.config; state.modelName=initial.modelName||''; applyModelLibrary(library);
+    state.config = initial.config; state.modelName=initial.modelName||'';state.globalInstructions=initial.instructions||'';$('global-instructions').value=state.globalInstructions;applyModelLibrary(library);
     if (initial.preferences && !state.savingPreferences) {
       const historyChanged = state.saveHistory !== initial.preferences.saveHistory;
       state.saveHistory = initial.preferences.saveHistory; applyTheme(initial.preferences.theme);
       if (historyChanged) void refreshHistory().catch(error => notice(error.message));
     }
     $('engine-path').value = state.config.enginePath || '';
-    $('model-path').value = state.config.modelPath || '';
-    $('projector-path').value = state.config.projectorPath || '';
     tokenControls.setValues(state.config); computeControls.setValues(state.config);
-    state.settingsReady = true; settingsGuard.markSaved();
+    state.settingsReady = true; settingsGuard.markSaved();settingsSearch.refresh();
   }).catch(error => {
     if (session !== state.settingsSession || !$('settings').open) return;
     $('config-error').textContent = error.message; $('config-error').hidden = false;
@@ -448,13 +486,15 @@ async function saveConfiguration() {
   $('config-error').hidden = true;
   updateControls();
   try {
+    const selectionChanged=$('model-path').value!==(state.config.modelPath||'')||$('projector-path').value!==(state.config.projectorPath||'');
+    if((state.modelAdding||modelEditorDirty()||selectionChanged)&&!await saveLLM({withinSettingsSave:true}))return false;
     const config = {
-      enginePath: $('engine-path').value, modelPath: $('model-path').value,
-      projectorPath: $('projector-path').value, ...tokenControls.values(),
+      enginePath: $('engine-path').value, modelPath: state.config.modelPath,
+      projectorPath: state.config.projectorPath, ...tokenControls.values(),
       ...computeControls.values(),
     };
-    const saved=await(await api('settings',{config,comfy:comfyUI.values(),workflowDescriptions:comfyUI.workflowDescriptions()})).json();
-    state.config=saved.config;state.comfy=saved.comfy;state.modelName='';renderModelSelect();
+    const saved=await(await api('settings',{config,instructions:$('global-instructions').value,comfy:comfyUI.values(),workflowDescriptions:comfyUI.workflowDescriptions()})).json();
+    state.config=saved.config;state.comfy=saved.comfy;state.globalInstructions=saved.instructions??$('global-instructions').value;state.modelName=activeModel()?.name||'';renderModelSelect();
     const current = session === state.settingsSession && $('settings').open;
     if (current) { comfyUI.saved(saved); settingsGuard.markSaved(); $('settings').close(); }
     contextMeter.schedule(); return current;
@@ -589,7 +629,9 @@ function userContent(text, images) {
 function archiveMessages(messages) { return messages.filter(message=>!message.resourceId); }
 
 function chatRequest(messages, tools = true, resources = true) {
-  return {messages:[{role:'system',content:'Tu es un assistant local utile. Réponds dans la langue de l’utilisateur. Décris honnêtement les images et signale tes incertitudes.'},...messages],thinking:state.thinking,tools,resources};
+  const context=state.conversationInstructions??(state.messages.length?'':state.globalInstructions||'');
+  const instructions=context?'\n\nContexte fourni par l’utilisateur au démarrage de cette conversation :\n'+context:'';
+  return {messages:[{role:'system',content:'Tu es un assistant local utile. Réponds dans la langue de l’utilisateur. Décris honnêtement les images et signale tes incertitudes.'+instructions},...messages],thinking:state.thinking,tools,resources};
 }
 
 async function sendMessage(event) {
@@ -601,6 +643,7 @@ async function sendMessage(event) {
   const text=$('prompt').value.trim(), images=[...state.images];
   const content=userContent(text,images);
   const history=[...state.messages,{role:'user',content}],userView=userMessage(text,images);
+  state.conversationInstructions??=state.messages.length?'':state.globalInstructions||'';
   state.conversationId ||= crypto.randomUUID();const turnId=crypto.randomUUID();
   state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:true};
   let view=assistantMessage(),output='',reasoning='',finishReason='',complete=false,lastRender=0,lastArchive=0,usedTool=false;
@@ -701,6 +744,7 @@ alignConversation();
 setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 const tokenControls=setupTokenControls($);
 const computeControls=setupComputeControls($);
+const settingsSearch=setupSettingsSearch({dialog:$('settings'),input:$('settings-search'),empty:$('settings-empty')});
 dismissSettingsOnOutsideClick($('settings'), () => settingsGuard.requestClose());
 const assetsUI=setupAssets({api,state,node,icon,notice,onChange:()=>contextMeter.schedule(),onBusy:()=>updateControls()});
 const generationUI=setupGenerationUI({api,node,openOutput:(record,index,blob)=>assetsUI.viewOutput(record,index,blob),onResize:scrollToBottom});
@@ -708,7 +752,7 @@ const comfyUI=setupComfy({api,state,node,notice,openOutput:(record,index)=>asset
 
 const settingsGuard=setupSettingsGuard({
   dialog:$('settings'), confirmation:$('settings-unsaved'), keep:$('settings-keep'), discard:$('settings-discard'), saveButton:$('settings-save-close'), save:saveConfiguration,
-  readDraft:()=>({fields:['engine-path','model-path','projector-path','context-size','output-tokens','compute-mode','gpu-layers','comfy-enabled','comfy-auto','comfy-url','comfy-iterations'].map(id=>[id,id==='comfy-iterations'&&$('comfy-unlimited').getAttribute('aria-pressed')==='true'?null:$(id).value,$(id).checked]), unlimited:$('comfy-unlimited').getAttribute('aria-pressed'), descriptions:comfyUI.workflowDescriptions(), pending:comfyUI.hasPendingImport?.()||false}),
+  readDraft:()=>({llm:modelDraft(),fields:['global-instructions','engine-path','context-size','output-tokens','compute-mode','gpu-layers','comfy-enabled','comfy-auto','comfy-url','comfy-iterations'].map(id=>[id,id==='comfy-iterations'&&$('comfy-unlimited').getAttribute('aria-pressed')==='true'?null:$(id).value,$(id).checked]), unlimited:$('comfy-unlimited').getAttribute('aria-pressed'), descriptions:comfyUI.workflowDescriptions(), pending:comfyUI.hasPendingImport?.()||false}),
 });
 const contextMeter=setupContextMeter({$,api,getConfig:()=>state.config,isReady:()=>state.connected&&state.status.state==='ready',isBusy:()=>state.generating||!!state.status.toolJob,
   getRequest:()=>chatRequest([...state.messages,{role:'user',content:userContent($('prompt').value.trim(),state.images)}]),
@@ -735,7 +779,7 @@ let filePickerController = null;
 $('settings').addEventListener('close', () => {
   if ($('settings').open) return;
   state.settingsSession = (state.settingsSession || 0) + 1;
-  state.settingsLoading = false; state.settingsReady = false;
+  state.settingsLoading = false; state.settingsReady = false;settingsSearch.reset();
   filePickerController?.abort(); comfyUI.cancelSettings(); updateControls();
 });
 for(const button of document.querySelectorAll('[data-file-kind]'))button.onclick=async()=>{
@@ -755,6 +799,8 @@ for(const button of document.querySelectorAll('[data-file-kind]'))button.onclick
 $('settings-open').onclick = openSettings;
 $('detected-model').onchange=chooseDetectedModel;
 $('add-llm').onclick=addLLM;
+$('save-llm').onclick=()=>saveLLM();
+$('cancel-llm').onclick=cancelLLM;
 $('model-select').onchange=switchLLM;
 $('update-available').onclick = installUpdate;
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
@@ -778,7 +824,7 @@ async function newConversation() {
   try {
     if (!await persistConversation()) return;
     if (!state.saveHistory && state.messages.length && !confirm('Recommencer effacera cette conversation de la page. Continuer ?')) return;
-    state.messages = []; state.images = []; state.conversationId = null; state.archiveSnapshot = null; state.historyDirty = false;
+    state.messages = []; state.images = []; state.conversationId = null; state.conversationInstructions=null; state.archiveSnapshot = null; state.historyDirty = false;
     $('prompt').value = '';
     comfyUI.reset();
     generationUI.clear();$('messages').replaceChildren(); $('welcome').hidden = false;
@@ -817,7 +863,7 @@ try {
   const response = await fetch('/api/bootstrap');
   if (!response.ok) throw new Error('Impossible de joindre le serveur local.');
   const initial = await response.json();
-  Object.assign(state, { token: initial.token, config: initial.config, models: initial.models||[], modelName: initial.modelName||'', status: initial.status, connected: true });
+  Object.assign(state, { token: initial.token, config: initial.config, globalInstructions:initial.instructions||'', models: initial.models||[], modelName: initial.modelName||'', status: initial.status, connected: true });
   renderModelSelect();
   void checkUpdates();
   applyTheme(initial.preferences?.theme);

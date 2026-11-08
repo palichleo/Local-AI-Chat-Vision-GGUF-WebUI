@@ -5,8 +5,8 @@ models/
     model.gguf
     mmproj.gguf
 
-The folder name is the model name shown in Atelier local.
+The folder name is the initial model name; it can be edited in Atelier local.
 Use one main GGUF and optionally its matching vision projector.
 The projector filename must contain "mmproj" (case insensitive).
-Open Configuration to detect folders, choose one, then click "Ajouter un LLM".
+Open Configuration, choose a detected folder, expand Chemins, then Enregistrer.
 GGUF weights are ignored by Git. Keep llama.cpp outside these model folders.

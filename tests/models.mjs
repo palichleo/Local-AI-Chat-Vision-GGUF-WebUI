@@ -45,3 +45,17 @@ test('a projector named mmproj with a wrong extension fails detection instead of
  const {models,library}=await fixture(t);await gguf(join(models,'Broken pair'),'main.gguf');await gguf(join(models,'Broken pair'),'mmproj.bin');
  const result=await library.scan();assert.equal(result.detected.length,0);assert.equal(result.errors.length,1);assert.match(result.errors[0].error,/GGUF/);
 });
+
+test('custom LLM names survive restart, keep the same identity and never rename the folder',async t=>{
+ const {root,models,library}=await fixture(t),modelPath=await gguf(join(models,'Folder'),'main.gguf');
+ const first=await library.add({modelPath,name:'Personal name'});assert.equal(first.name,'Personal name');
+ const second=await library.add({id:first.id,modelPath,name:'Renamed'});assert.equal(second.id,first.id);
+ const reopened=new ModelLibrary(join(root,'library.json'),models);assert.equal((await reopened.list())[0].name,'Renamed');assert.equal((await reopened.scan()).detected[0].name,'Folder');
+ for(const name of ['', ' '.repeat(3), 'a'.repeat(121)])await assert.rejects(library.add({id:first.id,modelPath,name}),/nom/i);
+});
+test('editing model paths replaces that profile and preserves other saved LLMs',async t=>{
+ const {models,library}=await fixture(t),a=await gguf(join(models,'A'),'main.gguf'),b=await gguf(join(models,'B'),'main.gguf'),c=await gguf(join(models,'C'),'main.gguf');
+ const one=await library.add({modelPath:a}),two=await library.add({modelPath:b});const changed=await library.add({id:one.id,modelPath:c,name:'C custom'});
+ assert.equal((await library.list()).length,2);assert.equal((await library.get(changed.id)).name,'C custom');assert.equal((await library.get(two.id)).modelPath,b);await assert.rejects(library.get(one.id),{status:404});
+ await assert.rejects(library.add({id:two.id,modelPath:c,name:'Duplicate'}),{status:409});
+});

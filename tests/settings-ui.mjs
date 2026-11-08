@@ -26,7 +26,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
   const context = { console, AbortController, AbortSignal, crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
     setupGenerationUI:()=>({clear(){},restore(){}}),
     setupAssets:()=>({setBusy(){},hasDraft:()=>false}),
-    setupSettingsGuard, setupCopy(){},setupContextMeter:()=>({schedule(){},pause(){},observe(){}}),
+    confirm:()=>true,setupSettingsSearch:()=>({reset(){},refresh(){}}),setupSettingsGuard, setupCopy(){},setupContextMeter:()=>({schedule(){},pause(){},observe(){}}),
     setupMaterialLighting() {}, dismissSettingsOnOutsideClick() {}, setupTokenControls: () => ({ setValues() {}, values: () => ({ contextSize: 4096, maxOutputTokens: 2048 }) }),
     setupComputeControls: () => ({ setValues(config) { $('compute-mode').value = String(config.gpuLayers); }, values: () => ({ gpuLayers: 999 }) }),
     setupComfy: options => { comfyOptions = options; return comfyUI; },
@@ -41,14 +41,15 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
       if (call.route === 'status') return Response.json({ state: 'stopped', logs: [] });
       if (call.route === 'history') return Response.json({ conversations: [], skipped: 0 });
       if (call.route === 'preferences') return Response.json({ preferences: { theme: 'dark', saveHistory: call.body.saveHistory ?? true } });
-      if (call.route === 'settings') return Response.json({ config: savedConfig, comfy: savedComfy, workflows: [] });
+      if (call.route === 'settings') return Response.json({ config: call.body.config, instructions:call.body.instructions||'', comfy: savedComfy, workflows: [] });
+      if (call.route === 'models/select') return Response.json({config:savedConfig,modelName:'Saved',status:{state:'stopped',logs:[]}});
       if (call.route === 'history/save') return Response.json({ conversation: { id: call.body.id, title: 'Saved', updatedAt: '2026-11-08T00:00:00.000Z' } });
       if (call.route === 'gallery/persist') return Response.json({});
       throw new Error('Unexpected route ' + call.route);
     },
   };
   const application = source.slice(0, source.lastIndexOf('\ntry {')).replace(/^import .*;\r?\n/gm, '');
-  runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, renderModelSelect, applyModelLibrary, switchLLM, addLLM, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };', context);
+  runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, renderModelSelect, applyModelLibrary, switchLLM, addLLM, saveLLM, cancelLLM, modelDraft, modelEditorDirty, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };', context);
   Object.assign(context.app.state, { token: 'test', config: { ...savedConfig }, connected: true });
   return { ...context.app, $, calls, refreshes, windowListeners, comfyUI, comfyOptions, async open() { context.app.openSettings(); await tick(); } };
 }
@@ -226,12 +227,6 @@ test('saved models have folder names and the sidebar selector locks during GPU w
  ui.state.generating=true;ui.updateControls();assert.equal(ui.$('model-select').disabled,true);ui.state.generating=false;ui.updateControls();assert.equal(ui.$('model-select').disabled,false);
 });
 
-test('adding a detected LLM while a model runs saves its pair without overwriting active path fields',async()=>{
- const profile={id:'second',name:'Second folder',modelPath:'/models/Second folder/model.gguf',projectorPath:'/models/Second folder/mmproj.gguf'};
- const ui=await settingsUI({request:call=>call.route==='models/add'?Response.json({profile,models:[profile]}):undefined});await ui.open();ui.state.status={state:'ready',logs:[]};
- ui.applyModelLibrary({models:[],detected:[profile],errors:[]});ui.updateControls();ui.$('detected-model').value=profile.id;ui.chooseDetectedModel();assert.equal(ui.$('model-path').value,'saved.gguf');
- await ui.addLLM();const call=ui.calls.find(item=>item.route==='models/add');assert.equal(call.body.modelPath,profile.modelPath);assert.equal(call.body.projectorPath,profile.projectorPath);assert.equal(call.body.enginePath,undefined);assert.equal(ui.state.models.length,1);
-});
 test('switching the sidebar model uses the saved profile and does not discard conversation messages',async()=>{
  const profile={id:'second',name:'Second folder',modelPath:'/models/Second folder/main.gguf',projectorPath:''};
  const ui=await settingsUI({request:call=>call.route==='models/select'?Response.json({config:{...savedConfig,...profile},modelName:profile.name,status:{state:'stopped',logs:[]}}):undefined});
@@ -239,9 +234,33 @@ test('switching the sidebar model uses the saved profile and does not discard co
  assert.equal(ui.calls.find(item=>item.route==='models/select').body.id,profile.id);assert.equal(ui.state.modelName,'Second folder');assert.equal(ui.state.messages[0].content,'Keep this chat');
 });
 
-test('manual edits after choosing a detected folder are the paths saved by Ajouter un LLM',async()=>{
- const profile={id:'detected',name:'Detected',modelPath:'/models/Detected/main.gguf',projectorPath:'/models/Detected/mmproj.gguf'};
- const ui=await settingsUI({request:call=>call.route==='models/add'?Response.json({profile:{...profile,modelPath:call.body.modelPath},models:[]}):undefined});await ui.open();ui.applyModelLibrary({models:[],detected:[profile],errors:[]});ui.$('detected-model').value=profile.id;ui.chooseDetectedModel();
- ui.$('model-path').value='/external/Manual/main.gguf';ui.$('projector-path').value='';await ui.addLLM();
- const call=ui.calls.find(item=>item.route==='models/add');assert.equal(call.body.modelPath,'/external/Manual/main.gguf');assert.equal(call.body.projectorPath,'');
+
+test('LLM dropdown initially selects the current model and details remain collapsed',async()=>{
+ const profile={id:'active',name:'Active name',modelPath:'saved.gguf',projectorPath:''},other={id:'other',name:'Other',modelPath:'other.gguf',projectorPath:''};
+ const ui=await settingsUI({request:call=>call.route==='models'?Response.json({models:[other,profile],detected:[],errors:[]}):undefined});await ui.open();
+ assert.equal(ui.$('detected-model').value,'active');assert.equal(ui.$('llm-name').value,'Active name');assert.equal(ui.$('model-paths').open,false);assert.equal(ui.$('detected-model').children.length,2);
+});
+test('Ajouter un LLM opens a blank editor and does not save before its local Enregistrer',async()=>{
+ const ui=await settingsUI();await ui.open();ui.addLLM();assert.equal(ui.$('llm-name').value,'');assert.equal(ui.$('model-path').value,'');assert.equal(ui.$('projector-path').value,'');assert.equal(ui.$('model-paths').open,true);assert.equal(ui.calls.some(call=>call.route==='models/add'),false);
+ assert.equal(await ui.saveLLM(),false);assert.equal(ui.$('llm-error').hidden,false);assert.equal(ui.calls.some(call=>call.route==='models/add'),false);ui.cancelLLM();assert.equal(ui.$('model-paths').open,false);
+});
+test('saving an LLM retains unrelated global drafts and uses the edited name and paths',async()=>{
+ let pair;const ui=await settingsUI({request:call=>{
+  if(call.route==='models/add'){pair={id:'saved',name:call.body.name,modelPath:call.body.modelPath,projectorPath:call.body.projectorPath};return Response.json({profile:pair,models:[pair]});}
+  if(call.route==='models/select')return Response.json({config:{...savedConfig,modelPath:pair.modelPath,projectorPath:pair.projectorPath},modelName:pair.name,status:{state:'stopped',logs:[]}});
+ }});await ui.open();ui.$('comfy-auto').checked=true;ui.$('global-instructions').value='Unrelated draft';ui.addLLM();ui.$('llm-name').value='Manual name';ui.$('model-path').value='/external/Manual/model.gguf';
+ assert.equal(await ui.saveLLM(),true);assert.equal(ui.$('model-paths').open,false);assert.equal(ui.$('settings').open,true);assert.equal(ui.$('llm-name').value,'Manual name');assert.equal(ui.$('global-instructions').value,'Unrelated draft');
+ ui.$('settings-close').onclick();assert.equal(ui.$('settings-unsaved').open,true,'other drafts must still warn');
+});
+test('a failed local LLM save keeps the editor and does not overwrite the active model',async()=>{
+ const ui=await settingsUI({request:call=>call.route==='models/add'?Response.json({error:'Bad GGUF'},{status:400}):undefined});await ui.open();const path=ui.state.config.modelPath;ui.addLLM();ui.$('llm-name').value='New';ui.$('model-path').value='bad';assert.equal(await ui.saveLLM(),false);assert.equal(ui.state.config.modelPath,path);assert.equal(ui.$('model-paths').open,true);assert.match(ui.$('llm-error').textContent,/Bad GGUF/);
+});
+
+test('a saved profile can be retried if activation fails after its identity changed',async()=>{
+ let activations=0,ids=[];const profile={id:'new-id',name:'Saved name',modelPath:'/new/model.gguf',projectorPath:''};
+ const ui=await settingsUI({request:call=>{
+  if(call.route==='models/add'){ids.push(call.body.id);return Response.json({profile,models:[profile]});}
+  if(call.route==='models/select'){if(++activations===1)return Response.json({error:'Busy'},{status:409});return Response.json({config:{...savedConfig,modelPath:profile.modelPath},modelName:profile.name,status:{state:'stopped',logs:[]}});}
+ }});await ui.open();ui.addLLM();ui.$('llm-name').value=profile.name;ui.$('model-path').value=profile.modelPath;
+ assert.equal(await ui.saveLLM(),false);assert.equal(ui.state.config.modelPath,'saved.gguf');assert.equal(await ui.saveLLM(),true);assert.equal(ids[1],profile.id);
 });

@@ -40,7 +40,9 @@ test('settings save model, Comfy and workflow descriptions together without rest
   const deadline=Date.now()+10000;let status;
   do{status=await(await api('status')).json();if(status.state==='ready')break;await new Promise(done=>setTimeout(done,30));}while(Date.now()<deadline);
   assert.equal(status.state,'ready');
-  assert.equal((await api('files/choose',{kind:'model'})).status,409);
+  assert.equal((await api('files/choose',{kind:'model'})).status,200,'Reading a candidate model path does not require unloading the current model.');
+  assert.equal((await api('files/choose',{kind:'engine'})).status,409);
+  assert.equal((await(await api('bootstrap')).json()).config.modelPath,modelPath);
   assert.equal((await api('settings',{config,comfy:{...comfy,maxIterations:1}})).status,200);
   assert.equal((await(await api('status')).json()).state,'ready');
   assert.equal((await api('settings',{config:{...config,contextSize:16384},comfy})).status,409);

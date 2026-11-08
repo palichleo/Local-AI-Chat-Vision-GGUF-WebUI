@@ -6,11 +6,20 @@ A local chat, image-understanding and optional ComfyUI image-generation interfac
 
 The application currently uses French UI labels. Their names are included below to help you find the controls.
 
+## Settings and global context
+
+The settings dialog groups LLMs, global instructions, the shared llama.cpp engine and compute limits, ComfyUI, preferences and diagnostics. The search at the top filters settings without changing their values. Matching collapsed details open for the search and return to their prior state when it is cleared.
+
+The LLM list starts on the configured model. Open **Chemins** to edit its name and GGUF paths, or **Ajouter un LLM** to start a blank editor. Detected folders supply the initial name; it can be customized without renaming the folder. The editor's **Enregistrer** saves the name and paths and selects that model; other unsaved settings remain pending. The dialog's bottom **Enregistrer** saves the complete configuration. llama.cpp is configured separately and shared by all LLMs.
+
+**Consignes globales** saves up to 16,000 characters as user-supplied context for new conversations. Each conversation captures this text when its first message is submitted. Later changes affect future conversations; saved conversations and update checkpoints retain the original context. It occupies one initial system-context entry, not a new message on every turn. The stateless engine still receives the full active context with each inference request. Existing archives without instructions keep an empty context.
+
+
 ## Local model library
 
-Place each model in its own subfolder of `models/`. The folder name is the display name: for example `models/My model/model.gguf` and `models/My model/mmproj.gguf`. The file `put model folders here.txt` explains this layout. Git includes the guide and ignores GGUF weights. Keep llama.cpp and its libraries separate; its path is shared across models.
+Place each model in its own subfolder of `models/`. The folder name supplies the initial display name: for example `models/My model/model.gguf` and `models/My model/mmproj.gguf`. The file `put model folders here.txt` explains this layout. Git includes the guide and ignores GGUF weights. Keep llama.cpp and its libraries separate; its path is shared across models.
 
-Opening Configuration scans these immediate subfolders. Choose a detected folder and click **Ajouter un LLM** to remember its paths, or enter/browse external paths and use the same button. Saved pairs survive restart in `data/models.json`; no model file is moved. Detection requires exactly one main GGUF and optionally one projector whose filename contains `mmproj` (case insensitive). Both extension and GGUF header are checked. Ambiguous folders and invalid files are reported. Split GGUF shards and multiple quantizations in the same folder require separate handling and are not auto-selected. Matching headers do not guarantee that a projector is compatible with the chosen model.
+Opening Configuration scans these immediate subfolders. Choose a detected folder and open **Chemins** and click its **Enregistrer** button to remember the name and paths, or click **Ajouter un LLM** to open the empty path editor, then save it. Saved pairs survive restart in `data/models.json`; no model file is moved. Detection requires exactly one main GGUF and optionally one projector whose filename contains `mmproj` (case insensitive). Both extension and GGUF header are checked. Ambiguous folders and invalid files are reported. Split GGUF shards and multiple quantizations in the same folder require separate handling and are not auto-selected. Matching headers do not guarantee that a projector is compatible with the chosen model.
 
 With several saved models, use the selector in the bottom-left model card. Switching is blocked during chat or ComfyUI work, unloads the old model, and loads the new one if the engine was running. An idle engine remains stopped until the next message. Context, output and compute settings remain shared; choose values suitable for the selected model. The current conversation is retained. Manual path controls remain available after stopping the engine. Automatic updates preserve the models directory.
 

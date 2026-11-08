@@ -3,6 +3,7 @@ export function setupSettingsGuard({ dialog, confirmation, readDraft, save, keep
   const snapshot = () => JSON.stringify(readDraft());
   const isDirty = () => dialog.open && baseline !== null && snapshot() !== baseline;
   const markSaved = () => { baseline = snapshot(); };
+  const markPartSaved = key => { if(baseline!==null){const saved=JSON.parse(baseline);saved[key]=readDraft()[key];baseline=JSON.stringify(saved);} };
   function requestClose(after) {
     if (!dialog.open) { after?.(); return; }
     if (!isDirty()) { dialog.close(); after?.(); return; }
@@ -23,5 +24,5 @@ export function setupSettingsGuard({ dialog, confirmation, readDraft, save, keep
     baseline = null;
     if (confirmation.open) stay();
   });
-  return { isDirty, markSaved, requestClose };
+  return { isDirty, markSaved, markPartSaved, requestClose };
 }

@@ -1,3 +1,4 @@
+import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
@@ -33,6 +34,7 @@ const staticFiles = new Map([
   ['/material-light.mjs', ['material-light.mjs', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/settings-search.mjs',['settings-search.mjs','text/javascript; charset=utf-8']],
   ['/generation-ui.mjs', ['generation-ui.mjs','text/javascript; charset=utf-8']],
   ['/assets-ui.mjs', ['assets-ui.mjs','text/javascript; charset=utf-8']],
   ['/resource-preparation.mjs', ['resource-preparation.mjs','text/javascript; charset=utf-8']],
@@ -120,6 +122,8 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   let configWarning = '';
   try { config = normalizeConfig(JSON.parse(await readFile(configPath, 'utf8'))); }
   catch (error) { if (error.code !== 'ENOENT') configWarning = 'La configuration enregistrée est illisible. Renseigne à nouveau les chemins.'; }
+  const instructionsPath=join(dataDir,'global-context.json');let instructions='';
+  try{const bytes=await readFile(instructionsPath);if(bytes.length>100000)throw Error('too large');instructions=globalContext(JSON.parse(bytes).instructions);}catch(error){if(error.code!=='ENOENT')configWarning='Les consignes globales enregistrées sont illisibles.';}
   const preferencesPath = join(dataDir, 'preferences.json');
   let preferences = { theme: 'dark', saveHistory: true };
   try {
@@ -243,7 +247,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (path === '/favicon.ico' && req.method === 'GET') { res.writeHead(204); return res.end(); }
       if (path === '/api/bootstrap' && req.method === 'GET') {
-        return send(200, { application: 'atelier-local', controlled: !!controlResponse, token, config, models: await models.list(), modelName: modelFolderName(config.modelPath), preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
+        return send(200, { application: 'atelier-local', controlled: !!controlResponse, token, config, instructions, models: await models.list(), modelName: (await models.list()).find(item=>item.modelPath===config.modelPath&&item.projectorPath===config.projectorPath)?.name || modelFolderName(config.modelPath), preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
       }
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Recharge la page.', 401);
@@ -314,7 +318,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         if(savingSettings||saving||savingComfy||pickingFile||runtime.active||engine.busy||clearingHistory||['loading','stopping'].includes(engine.state))throw problem('Attends la fin de l’opération en cours.',409);
         savingSettings=true;saving=true;let finishModelOperation;modelOperation=new Promise(done=>{finishModelOperation=done;});
         try{
-          if(path==='/api/models/add')return send(200,{profile:await models.add(body),models:await models.list()});
+          if(path==='/api/models/add'){const profile=await models.add(body);return send(200,{profile,models:await models.list()});}
           const selected=await models.get(body.id),next={...config,modelPath:selected.modelPath,projectorPath:selected.projectorPath};
           if(next.modelPath===config.modelPath&&next.projectorPath===config.projectorPath)return send(200,{config,modelName:selected.name,status:status()});
           const restart=engine.state==='ready';await engine.stop();
@@ -368,14 +372,14 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if(path==='/api/files/choose'){
         if(!['engine','model','projector'].includes(body?.kind))throw problem('Type de fichier invalide.');
         if(saving||savingSettings||savingComfy||pickingFile)throw problem('Un choix de fichier ou un enregistrement est déjà en cours.',409);
-        if(runtime.active||engine.busy||engine.child||['loading','stopping'].includes(engine.state))throw problem('Arrête le modèle avant de choisir un fichier.',409);
+        if(runtime.active||engine.busy||body.kind==='engine'&&engine.child||['loading','stopping'].includes(engine.state))throw problem('Arrête le modèle avant de choisir un fichier.',409);
         pickingFile=true;const controller=new AbortController();const abort=()=>controller.abort();res.once('close',abort);
         try{return send(200,{path:await filePicker(body.kind,{initialPath:body.initialPath||'',signal:controller.signal})});}
         finally{res.off('close',abort);pickingFile=false;}
       }
       if(path==='/api/settings'){
         if(pickingFile||savingSettings||savingComfy||saving||runtime.active||engine.busy||clearingHistory)throw problem('Attends la fin de l’opération en cours.',409);
-        const nextConfig=normalizeConfig(body.config),nextComfy=normalizeComfy(body.comfy);
+        const nextConfig=normalizeConfig(body.config),nextComfy=normalizeComfy(body.comfy),nextInstructions=globalContext(body.instructions===undefined?instructions:body.instructions);
         const modelChanged=JSON.stringify(config)!==JSON.stringify(nextConfig);
         if(modelChanged&&(engine.child||['loading','stopping'].includes(engine.state)))throw problem('Arrête le modèle avant de modifier ses réglages.',409);
         const edits=body.workflowDescriptions===undefined?[]:body.workflowDescriptions;
@@ -390,8 +394,9 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
           if(modelChanged){await writeFile(`${configPath}.tmp`,JSON.stringify(nextConfig,null,2),{mode:0o600});await rename(`${configPath}.tmp`,configPath);config=nextConfig;configWarning='';}
           await saveComfy(nextComfy);
           for(const update of updates)await catalog.save(update);
+          if(nextInstructions!==instructions){await atomicJson(instructionsPath,{instructions:nextInstructions});instructions=nextInstructions;}
           discoveryTime=0;
-          return send(200,{config,comfy,workflows:await catalog.list()});
+          return send(200,{config,comfy,instructions,workflows:await catalog.list()});
         }finally{savingSettings=false;saving=false;}
       }
       if(path==='/api/comfy/test'){
