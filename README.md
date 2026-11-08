@@ -28,6 +28,15 @@ Open **http://127.0.0.1:8787**. Keep the launcher window open; it stays attached
 
 There is no need to run `npm install`. You can also use `npm start`.
 
+## Multiple ComfyUI references
+
+When importing an API workflow, open **Entrées que le modèle peut modifier → Images de référence → Ajouter une entrée**. For each image input, choose its existing filename field in the graph, give it a name and a short role description, and mark it required if needed. Add as many separate inputs as the workflow supports (up to 64 for validation). Image roles and custom node types are not guessed. The workflow must already connect these inputs to its processing nodes; the app does not create connections, batch nodes or image mergers.
+
+The native tool advertises the declared input IDs and descriptions. The model can map different chat images and active library resources (including a selected video frame) to these inputs in a single Comfy call. Missing required inputs, conflicting sources, duplicate target fields, inactive resources and unknown inputs are rejected. Each distinct compressed source is uploaded once, then assigned to the selected fields. Approval, GPU handoff and generated-image history apply to the complete call. Optional inputs retain their saved workflow value if omitted.
+
+Existing single-reference workflows continue working without migration. Reimport a workflow to declare multiple image inputs. Prompt preselection and output detection still use the existing standard `CLIPTextEncode`/`SaveImage` heuristics in the import UI; the new image-input mapping has no node-class rules. Actual generation quality and multi-image support depend on the imported workflow.
+
+
 ## Configuring the files
 
 Open **Configuration**, select the files with **Parcourir…** or enter their full paths, then click **Enregistrer** (Save):

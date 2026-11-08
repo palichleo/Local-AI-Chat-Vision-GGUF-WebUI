@@ -48,7 +48,7 @@ function deferred() {
 
 function runtimeFixture() {
   const seen = { runs: 0, stops: 0, starts: 0, references: [] };
-  const workflow = { id: 'wf', name: 'Portrait', digest: 'approved' };
+  const workflow = { id: 'wf', name: 'Portrait', digest: 'approved', bindings:{image:{node:'9',input:'image'}} };
   const engine = {
     state: 'ready', busy: false,
     async stop() { seen.stops++; engine.state = 'stopped'; },

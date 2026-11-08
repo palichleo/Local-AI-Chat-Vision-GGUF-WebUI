@@ -198,3 +198,26 @@ test('a missing original for compression cannot turn a produced image into a los
  assert.equal(result.record?.id,'mine');assert.equal(result.failed,true);assert.deepEqual(result.images,[]);
  assert.match(result.content,/generated|générée/);assert.match(result.error,/Original unavailable/);
 }));
+
+test('image slots are explicitly named and mapped at import, including arbitrary custom file loaders',async()=>fixture(async({nodes,calls})=>{
+ const get=id=>nodes.get(id),graph={'1':{class_type:'CLIPTextEncode',inputs:{text:'p'}},'2':{class_type:'SaveImage',inputs:{images:['1',0]}},'17':{class_type:'CustomLoader',inputs:{source:'a.png'}},'31':{class_type:'OtherCustomLoader',inputs:{style:'b.png'}}};
+ await get('workflow-file').onchange({target:{files:[new File([JSON.stringify(graph)],'two.json')],value:''}});get('workflow-description').value='Subject and style';
+ assert.equal(get('workflow-image-inputs').children.length,0,'No image role or mapping is guessed from a node class');
+ get('workflow-add-image').onclick();get('workflow-add-image').onclick();
+ const [a,b]=get('workflow-image-inputs').children;
+ for(const [row,name,node,input]of [[a,'Subject','17','source'],[b,'Style','31','style']]){row.children[0].value=name;row.children[1].value='Use this as '+name;row.children[2].value=JSON.stringify({node,input});}
+ a.children[3].children[0].checked=true;
+ await get('workflow-import').onclick();const body=calls.find(call=>call.route==='comfy/import').body;
+ assert.equal(body.bindings.image,undefined);assert.deepEqual(body.imageInputs.map(({id,name,node,input,required})=>({id,name,node,input,required})),[{id:'ref_1',name:'Subject',node:'17',input:'source',required:true},{id:'ref_2',name:'Style',node:'31',input:'style',required:false}]);
+}));
+
+test('incomplete and duplicate image slots block import, and removing a slot removes its mapping',async()=>fixture(async({ui,nodes,calls})=>{
+ const get=id=>nodes.get(id),graph={'1':{class_type:'CLIPTextEncode',inputs:{text:'p'}},'2':{class_type:'SaveImage',inputs:{images:['1',0]}},'17':{class_type:'LoadImage',inputs:{image:'a.png'}}};
+ await get('workflow-file').onchange({target:{files:[new File([JSON.stringify(graph)],'two.json')],value:''}});get('workflow-description').value='Subject and style';get('workflow-add-image').onclick();
+ await get('workflow-import').onclick();assert.equal(calls.some(call=>call.route==='comfy/import'),false);
+ get('workflow-add-image').onclick();const [a,b]=get('workflow-image-inputs').children;
+ for(const row of [a,b]){row.children[0].value='Reference';row.children[1].value='Role';row.children[2].value=JSON.stringify({node:'17',input:'image'});}
+ await get('workflow-import').onclick();assert.equal(calls.some(call=>call.route==='comfy/import'),false);
+ ui.setBusy(true);assert.equal(a.children[0].disabled,true);assert.equal(a.children[4].disabled,true);ui.setBusy(false);
+ b.children[4].onclick();assert.equal(get('workflow-image-inputs').children.length,1);await get('workflow-import').onclick();assert.equal(calls.find(call=>call.route==='comfy/import').body.imageInputs.length,1);
+}));

@@ -112,6 +112,8 @@ test('mapped optional text, numeric bounds and uploaded image reach exactly thei
     }
     const later=await catalog.prepare('portrait',{prompt:'edit',reference_image:6399},{referenceImage:'uploaded.png'});
     assert.equal(later.graph['5'].inputs.image,'uploaded.png');
+    const args={prompt:'edit',references:[]};
+    await catalog.prepare('portrait',args,{referenceImage:'uploaded.png'});assert.deepEqual(args.references,[],'Legacy compatibility must not mutate caller arguments');
     for (const referenceImage of ['../secret.png', '.. ', 'image.png ',
       { filename: 'image.png', subfolder: '../outside' }, { filename: 'image.png', subfolder: '.. /outside' }, {}]) {
       await assert.rejects(catalog.prepare('portrait', { prompt: 'edit' }, { referenceImage }));

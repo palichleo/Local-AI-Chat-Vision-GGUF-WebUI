@@ -52,7 +52,7 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     setBusy(busy);
   }
   const descriptions=new Map();
-  let queue=[],queueTotal=0,queueIndex=0,importVersion=0;
+  let queue=[],queueTotal=0,queueIndex=0,importVersion=0,imageInputs=[],imageOptions=[],nextImageId=0;
   function syncLimit(){
     $('comfy-unlimited').setAttribute('aria-pressed',String(unlimited));
     $('comfy-iterations').hidden=unlimited;
@@ -69,9 +69,11 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
   function workflowDescriptions(){return [...descriptions].map(([id,description])=>({id,description}));}
   function setBusy(value){
     busy=value;const disabled=value||working;
-    for(const id of ['comfy-enabled','comfy-url','comfy-auto','comfy-iterations','comfy-test','comfy-address-edit','comfy-minus','comfy-plus','comfy-unlimited','workflow-file','workflow-skip','workflow-name','workflow-description','workflow-requires-image'])$(id).disabled=disabled;
+    for(const id of ['comfy-enabled','comfy-url','comfy-auto','comfy-iterations','comfy-test','comfy-address-edit','comfy-minus','comfy-plus','comfy-unlimited','workflow-file','workflow-skip','workflow-name','workflow-description','workflow-add-image'])$(id).disabled=disabled;
     $('comfy-iterations').disabled=disabled||unlimited;
     $('workflow-import').disabled=disabled||!importGraph;
+    $('workflow-add-image').disabled=disabled||!importGraph||imageInputs.length>=64;
+    for(const row of imageInputs)for(const control of row.controls)control.disabled=disabled;
     for(const input of document.querySelectorAll('.comfy-settings select,.workflow-description,.workflow-remove'))input.disabled=disabled;
   }
   function connection(result){
@@ -137,6 +139,22 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     }catch(e){if(session===settingsVersion&&!controller.signal.aborted){connection({detected:false});$('comfy-status').textContent=e.message;}}
     finally{if(connectionController===controller)connectionController=null;changeWorking(-1);}
   };
+  function renderImageInputs(){
+    $('workflow-image-inputs').replaceChildren(...imageInputs.map(row=>row.card));setBusy(busy);
+  }
+  $('workflow-add-image').onclick=()=>{
+    if(busy||working||!importGraph||imageInputs.length>=64)return;
+    const id='ref_'+(++nextImageId),card=node('div','workflow-image-row');
+    const name=node('input');name.type='text';name.maxLength=80;name.placeholder='Nom de l’entrée';name.setAttribute('aria-label','Nom de '+id);
+    const description=node('textarea');description.rows=2;description.maxLength=300;description.placeholder='Rôle de cette image dans le workflow…';description.setAttribute('aria-label','Rôle de '+id);
+    const target=node('select');target.setAttribute('aria-label','Champ du workflow pour '+id);target.add(new Option('Choisir le champ de fichier…',''));
+    for(const option of imageOptions)target.add(new Option(option.label,JSON.stringify({node:option.id,input:option.input})));
+    const required=node('input');required.type='checkbox';const label=node('label','history-toggle');label.append(required,node('span','','Référence obligatoire'));
+    const remove=node('button','text-button workflow-image-remove','Retirer cette entrée');remove.type='button';
+    const row={id,card,name,description,target,required,controls:[name,description,target,required,remove]};
+    remove.onclick=()=>{if(busy||working)return;imageInputs=imageInputs.filter(item=>item!==row);renderImageInputs();};
+    card.append(name,description,target,label,remove);imageInputs.push(row);renderImageInputs();name.focus();
+  };
   async function nextWorkflow(){
     const version=++importVersion;
     importGraph=null;setBusy(busy);
@@ -151,11 +169,11 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
       const graph=JSON.parse(contents);if(graph.nodes||graph.links)throw Error('Dans ComfyUI : File → Export (API). Le JSON de l’éditeur ne suffit pas.');
       const options=[];
       for(const[id,value]of Object.entries(graph)){if(!value?.class_type||!value.inputs)throw Error('Le fichier doit être un export API ComfyUI.');for(const[input,current]of Object.entries(value.inputs))if(['string','number','boolean'].includes(typeof current)||Array.isArray(current))options.push({id,input,label:`${id} · ${value._meta?.title||value.class_type} · ${input}`});}
-      importGraph=graph;$('workflow-name').value=file.name.replace(/\.json$/i,'');$('workflow-description').value='';$('workflow-requires-image').checked=false;
-      for(const key of ['prompt','seed','width','height','image','negative_prompt']){
+      importGraph=graph;$('workflow-name').value=file.name.replace(/\.json$/i,'');$('workflow-description').value='';imageInputs=[];nextImageId=0;imageOptions=options.filter(option=>typeof graph[option.id].inputs[option.input]==='string');renderImageInputs();
+      for(const key of ['prompt','seed','width','height','negative_prompt']){
         const select=$(`binding-${key}`);select.replaceChildren(new Option('Non utilisé',''));
         for(const option of options)select.add(new Option(option.label,JSON.stringify({node:option.id,input:option.input})));
-        const match=options.find(o=>key==='prompt'?(/CLIPTextEncode/.test(graph[o.id].class_type)&&o.input==='text'&&typeof graph[o.id].inputs.text==='string'&&!/negative|négatif/i.test(graph[o.id]._meta?.title||'')):key==='image'?graph[o.id].class_type==='LoadImage'&&o.input==='image':o.input===key);
+        const match=options.find(o=>key==='prompt'?(/CLIPTextEncode/.test(graph[o.id].class_type)&&o.input==='text'&&typeof graph[o.id].inputs.text==='string'&&!/negative|négatif/i.test(graph[o.id]._meta?.title||'')):o.input===key);
         if(match)select.value=JSON.stringify({node:match.id,input:match.input});
       }
       document.querySelector('.workflow-bindings').open=!$('binding-prompt').value;
@@ -171,11 +189,13 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     if(busy||working||!importGraph)return;
     const session=settingsVersion;changeWorking(1);
     try{
-      const bindings={};for(const key of ['prompt','seed','width','height','image','negative_prompt']){const value=$(`binding-${key}`).value;if(value)bindings[key]=JSON.parse(value);}
+      const bindings={};for(const key of ['prompt','seed','width','height','negative_prompt']){const value=$(`binding-${key}`).value;if(value)bindings[key]=JSON.parse(value);}
       if(!bindings.prompt){document.querySelector('.workflow-bindings').open=true;throw Error('Choisissez l’entrée du prompt dans « Entrées que le modèle peut modifier ».');}
+      const images=imageInputs.map(row=>{if(!row.name.value.trim()||!row.description.value.trim()||!row.target.value)throw Error('Chaque entrée image doit avoir un nom, un rôle et un champ de fichier.');return {id:row.id,name:row.name.value.trim(),description:row.description.value.trim(),...JSON.parse(row.target.value),required:row.required.checked};});
+      if(new Set(images.map(slot=>JSON.stringify([slot.node,slot.input]))).size!==images.length)throw Error('Chaque entrée image doit cibler un champ différent.');
       const outputNodes=Object.entries(importGraph||{}).filter(([,n])=>/SaveImage/.test(n.class_type)).map(([id])=>id);
       if(!outputNodes.length)throw Error('Le workflow doit contenir un nœud SaveImage.');
-      await api('comfy/import',{name:$('workflow-name').value,description,graph:importGraph,bindings,outputNodes,requiresImage:$('workflow-requires-image').checked});
+      await api('comfy/import',{name:$('workflow-name').value,description,graph:importGraph,bindings,outputNodes,imageInputs:images});
       if(session!==settingsVersion)return;
       await refresh({settings:false});if(session!==settingsVersion)return;await nextWorkflow();if(!queue.length&&$('workflow-import-panel').hidden)$('comfy-status').textContent='Workflows ajoutés. Le modèle choisira selon leurs descriptions.';
     }catch(e){if(session===settingsVersion)$('comfy-status').textContent=e.message;}
