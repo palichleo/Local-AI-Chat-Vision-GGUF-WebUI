@@ -1,6 +1,6 @@
 {
   "name": "atelier-local",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "private": true,
   "type": "module",
   "description": "Chat et vision GGUF en local, sans dépendances npm.",

@@ -310,17 +310,6 @@ function updateControls() {
   $('detected-model').disabled = $('add-llm').disabled || ['loading','stopping'].includes(s.state);
   $('llm-fields').disabled = $('add-llm').disabled || ['loading','stopping'].includes(s.state);
   $('save-llm').disabled = $('llm-fields').disabled;
-  const basename = state.config.modelPath?.split(/[\\/]/).pop() || '';
-  if (basename) {
-    $('sidebar-model').textContent = state.modelName || state.config.modelPath.split(/[\\/]/).slice(-2,-1)[0] || 'Modèle GGUF';
-    $('sidebar-model').title = basename;
-    const quant = basename.match(/(?:\.|-)(Q\d[^.]*|IQ\d[^.]*)(?:\.gguf)?$/i)?.[1] || 'GGUF';
-    $('sidebar-model-detail').textContent = `${quant} · ${state.config.projectorPath ? 'projecteur configuré' : 'texte uniquement'}`;
-  } else {
-    $('sidebar-model').textContent = 'Modèle GGUF'; $('sidebar-model').title = '';
-    $('sidebar-model-detail').textContent = 'Aucun modèle configuré';
-  }
-
 }
 
 async function checkUpdates() {

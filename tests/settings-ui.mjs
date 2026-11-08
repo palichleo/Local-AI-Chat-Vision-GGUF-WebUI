@@ -152,13 +152,6 @@ test('disabling history waits for accepted queued writes before changing the pre
   assert.equal(ui.state.saveHistory, false);
 });
 
-test('clearing the configured model also clears the sidebar model name', async () => {
-  const ui=await settingsUI();ui.updateControls();assert.equal(ui.$('sidebar-model').textContent,'Modèle GGUF');ui.state.config.modelPath='/models/Folder name/main.gguf';ui.updateControls();assert.equal(ui.$('sidebar-model').textContent,'Folder name');
-  ui.state.config.modelPath='';ui.updateControls();
-  assert.equal(ui.$('sidebar-model').textContent,'Modèle GGUF');
-  assert.equal(ui.$('sidebar-model-detail').textContent,'Aucun modèle configuré');
-});
-
 test('opening settings reflects theme and history changed in another tab', async () => {
   const ui=await settingsUI({request:call=>call.route==='bootstrap'?Response.json({config:savedConfig,preferences:{theme:'light',saveHistory:false}}):undefined});
   await ui.open();
