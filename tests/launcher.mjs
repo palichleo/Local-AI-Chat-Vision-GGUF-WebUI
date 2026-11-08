@@ -13,7 +13,7 @@ const project=fileURLToPath(new URL('../',import.meta.url));
 async function until(check,label){const end=Date.now()+20000;while(Date.now()<end){if(await check())return;await new Promise(resolve=>setTimeout(resolve,40));}assert.fail(label||'Expected launcher state was not reached');}
 async function freePort(){const socket=net.createServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));return port;}
 async function fixture(t){
- const root=await mkdtemp(join(tmpdir(),'atelier-launcher espace-'));assert.equal(dirname(root),tmpdir());
+ const root=await mkdtemp(join(tmpdir(),'atelier-lanceur été (test) & espaces-'));assert.equal(dirname(root),tmpdir());
  for(const name of ['lib','public','scripts','Lancer-Windows.cmd','lancer-linux.sh'])await cp(join(project,name),join(root,name),{recursive:true});
  await mkdir(join(root,'tests/fixtures'),{recursive:true});await cp(join(project,'tests/fixtures/fake-engine.mjs'),join(root,'tests/fixtures/fake-engine.mjs'));
  let server=await readFile(join(project,'server.mjs'),'utf8');
@@ -23,10 +23,10 @@ async function fixture(t){
  const port=await freePort(),url=`http://127.0.0.1:${port}`,children=[];
  const boot=async()=>{try{return await(await fetch(url+'/api/bootstrap',{signal:AbortSignal.timeout(500)})).json();}catch{return null;}};
  const api=async(route,body)=>{const current=await boot();return fetch(url+'/api/'+route,{method:'POST',headers:{Authorization:`Bearer ${current?.token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});};
- function launch(native=false){
-  const command=native?(process.platform==='win32'?process.env.ComSpec||'cmd.exe':'sh'):process.execPath;
-  const args=native?(process.platform==='win32'?['/d','/c','Lancer-Windows.cmd',`--port=${port}`,'--no-open']:['lancer-linux.sh',`--port=${port}`,'--no-open']):['scripts/launch.mjs',`--port=${port}`,'--no-open'];
-  const child=spawn(command,args,{cwd:root,stdio:['pipe','pipe','pipe'],windowsHide:true});let output='';for(const pipe of [child.stdout,child.stderr])pipe.on('data',data=>{output=(output+data).slice(-8000);});child.stdin.end();children.push(child);return {child,output:()=>output};
+ function launch(native=false,cwd=root){
+  const command=native?(process.platform==='win32'?process.env.ComSpec||'cmd.exe':join(root,'lancer-linux.sh')):process.execPath;
+  const args=native?(process.platform==='win32'?['/d','/c','Lancer-Windows.cmd',`--port=${port}`,'--no-open']:[`--port=${port}`,'--no-open']):[join(root,'scripts/launch.mjs'),`--port=${port}`,'--no-open'];
+  const child=spawn(command,args,{cwd,stdio:['pipe','pipe','pipe'],windowsHide:true});let output='';for(const pipe of [child.stdout,child.stderr])pipe.on('data',data=>{output=(output+data).slice(-8000);});child.stdin.end();children.push(child);return {child,output:()=>output};
  }
  t.after(async()=>{try{const live=await boot();if(live?.application==='atelier-local')await api('shutdown',{});}catch{}for(const child of children)if(child.exitCode===null&&child.signalCode===null)child.kill();await until(async()=>!(await boot()),'Test server left its port open');await rm(root,{recursive:true,force:true,maxRetries:15,retryDelay:100});});
  return {root,port,url,boot,api,launch,server};
@@ -37,6 +37,10 @@ test('native launcher remains open, reuses an existing app and exits after clean
  const second=launch();await until(async()=>second.child.exitCode!==null,'Second launch did not reuse the app');assert.equal(second.child.exitCode,0,second.output());
  assert.equal(first.child.exitCode,null);assert.equal((await boot()).controlled,true);
  assert.equal((await api('shutdown',{})).status,202);await until(async()=>first.child.exitCode!==null,'Native launcher did not finish');assert.equal(first.child.exitCode,0,first.output());
+});
+
+test('launcher resolves its installation from any working directory',{timeout:30000},async t=>{
+ const {launch,boot,api}=await fixture(t),control=launch(false,tmpdir());await until(async()=>(await boot())?.controlled,control.output());assert.equal((await api('shutdown',{})).status,202);await until(async()=>control.child.exitCode!==null,control.output());assert.equal(control.child.exitCode,0,control.output());
 });
 test('losing the controller process releases the port and terminates its model',{timeout:30000},async t=>{
  const {root,launch,boot,api}=await fixture(t),control=launch();await until(async()=>(await boot())?.controlled,control.output());

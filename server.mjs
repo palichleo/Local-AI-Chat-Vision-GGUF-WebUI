@@ -670,11 +670,12 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
 }
 
 
-export function openBrowser(url) {
-  const command = process.platform === 'win32' ? 'rundll32.exe' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
-  const child = spawn(command, args, { stdio: 'ignore', detached: true, windowsHide: true });
-  child.on('error', () => console.log(`Ouvre cette adresse dans ton navigateur : ${url}`));
+export function openBrowser(url,{platform=process.platform,spawnProcess=spawn,report=console.log}={}) {
+  const command = platform === 'win32' ? 'rundll32.exe' : 'xdg-open';
+  const args = platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
+  const child = spawnProcess(command, args, { stdio: 'ignore', detached: true, windowsHide: true, shell:false });
+  let reported=false;const fallback=()=>{if(!reported){reported=true;report(`Ouvre cette adresse dans ton navigateur : ${url}`);}};
+  child.once('error',fallback);child.once('exit',code=>{if(code!==0)fallback();});
   child.unref();
 }
 

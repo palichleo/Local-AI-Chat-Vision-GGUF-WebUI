@@ -54,7 +54,13 @@ MP4/WebM 原视频保留在 ComfyUI，通过流式及字节范围请求在聊天
 
 ## 启动
 
-运行环境：**Node.js 22 或更高版本**、较新的浏览器，以及**支持 Qwen3.5 和视觉输入的较新版 llama-server**及其原生库。请使用与操作系统、处理器架构和硬件匹配的构建版本。应用不会自动下载模型或安装依赖。
+运行环境：PATH 中的 **Node.js 22 或更高版本**、较新的浏览器，以及完整解压到可写文件夹的项目。操作系统和架构应受[所用 Node.js 版本支持](https://github.com/nodejs/node/blob/v22.x/BUILDING.md#platform-list)。运行界面不需要 npm install、Git 或 Python。
+
+聊天还需要与所选 GGUF 兼容的较新版 **llama-server** 及其原生库，二进制必须匹配系统和 CPU 架构。NVIDIA/CUDA 并非必需；有足够 RAM 和合适引擎时，可选择 **Calcul → CPU uniquement**。视觉需要兼容的模型与投影器，ComfyUI 是单独安装的可选组件。应用不会自动下载这些组件。
+
+Windows 启动器按自身位置查找项目。Linux 的 Git 检出版本可直接执行启动器；若解压后执行权限丢失，可运行 `sh lancer-linux.sh`。llama-server 本身需要执行权限，必要时使用 `chmod +x`。没有桌面浏览器助手或 zenity/kdialog 时，仍可手动打开本地地址并填写路径。视频解码取决于浏览器支持的编解码器。
+
+更换电脑、目录或系统后，请在 Configuration 中重新选择已变化的引擎和模型路径。其他系统保存的配置仍可读取，不会阻止启动，也不会被静默改写或删除。测试矩阵覆盖 Windows 与 Ubuntu 的 x64、ARM64，以及 Node.js 22、24；使用模拟引擎，不代表真实模型或 GPU 性能测试。
 
 Windows：双击 **Lancer-Windows.cmd**。
 

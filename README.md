@@ -54,7 +54,13 @@ With several saved models, use the selector in the bottom-left model card. Switc
 
 ## Getting started
 
-Requirements: **Node.js 22 or later**, a recent browser, and a **recent llama-server build with Qwen3.5 and vision support**, together with its native libraries. Choose a build that matches your operating system, architecture and hardware. The application does not download models or install dependencies automatically.
+Requirements: **Node.js 22 or later** in PATH, a recent browser, and the complete project extracted to a writable folder. Use an operating system and architecture [supported by your Node.js build](https://github.com/nodejs/node/blob/v22.x/BUILDING.md#platform-list). No npm install, Git or Python is required to run the interface.
+
+Chat additionally requires a recent **llama-server build compatible with the selected GGUF model**, together with its native libraries. Choose binaries for the target OS and CPU architecture. NVIDIA/CUDA is optional: **Calcul → CPU uniquement** supports CPU inference with an appropriate engine and enough RAM. Vision requires a compatible model and projector; ComfyUI is optional and installed separately. The application does not download these components.
+
+The Windows launcher resolves its own location; the Linux launcher supports direct execution after a Git checkout, or `sh lancer-linux.sh` if an archive lost its execute bit. On Linux, llama-server itself must be executable (`chmod +x` if needed). Browser opening and zenity/kdialog are optional: the local URL and manual file paths remain usable without desktop helpers. Video decoding depends on the browser's installed codecs.
+
+After moving to another computer, folder or OS, reselect the engine and any model paths that changed in Configuration. Saved profiles from the other OS remain readable without preventing startup; their absolute paths are not silently rewritten or deleted. The test matrix covers Node.js 22 and 24 on Windows and Ubuntu, both x64 and ARM64, with simulated engines rather than real model or GPU benchmarks.
 
 On Windows, double-click **Lancer-Windows.cmd**.
 
