@@ -25,6 +25,7 @@ const staticFiles = new Map([
   ['/model-ready.mjs', ['model-ready.mjs', 'text/javascript; charset=utf-8']],
   ['/images.mjs', ['images.mjs', 'text/javascript; charset=utf-8']],
   ['/comfy-ui.mjs', ['comfy-ui.mjs', 'text/javascript; charset=utf-8']],
+  ['/settings-controls.mjs', ['settings-controls.mjs', 'text/javascript; charset=utf-8']],
   ['/markdown.mjs', ['markdown.mjs', 'text/javascript; charset=utf-8']],
 ]);
 

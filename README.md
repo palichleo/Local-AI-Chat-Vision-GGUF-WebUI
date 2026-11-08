@@ -52,7 +52,9 @@ The llama.cpp engine included in some Ollama installations can be reused directl
 
 ## Appearance
 
-The interface starts in **Night** mode. Use the **Day / Night** button beside Configuration to switch themes. Your choice is saved in `data/preferences.json` and restored after closing or restarting the application. This file stays local and is excluded from Git. The floating controls remain visible as the chat scrolls behind them.
+The interface starts in **Night** mode. Use the **Day / Night** button beside Configuration to switch themes. Your choice is saved in `data/preferences.json` and restored after closing or restarting the application. This file stays local and is excluded from Git. Day/Night and Configuration are below the model card. Configuration opens in a centered, rounded dialog; clicking outside or pressing Escape closes it.
+
+Context and maximum output use discrete sliders with the same token presets. The output slider stays within the selected context; compute mode is below them. Empty path fields show a red **None** placeholder. The initial composer is centered with suggestions underneath; it moves to the bottom after a message. Its pearlescent border uses CSS only, animates on the welcome screen and stays static during a conversation or when reduced motion is preferred.
 
 ## Chat and images
 
@@ -78,7 +80,7 @@ Every execution asks for permission by default. You can approve once or allow im
 
 During a run, the application waits for ComfyUI to be idle, unloads the chat engine and its vision projector, then runs the approved workflow. It frees ComfyUI's models before restarting the chat engine and projector for review. The local ComfyUI service stays running. Only compressed analysis copies go to the vision model; it compares them with the instruction and references and can revise within the iteration limit. Its review can miss details lost in compression and does not train the model. The **right-hand gallery** shows workflow and prompt details and lets you view or download the original ComfyUI output.
 
-ComfyUI is detected by checking the saved address and the usual local ports 8188 and 7821, without a port scan. A detected address stays visible and read-only; **Modifier** enables manual entry. **Tester la connexion**, next to the address label, checks the address currently displayed. **Enregistrer** and **Enregistrer et démarrer** save both model and ComfyUI settings; there is no separate ComfyUI save button. ComfyUI-only changes can be saved while the chat model is running.
+ComfyUI is detected by checking the saved address and the usual local ports 8188 and 7821, without a port scan. A detected address stays visible and read-only; **Modifier** enables manual entry. **Tester la connexion**, next to the address label, checks the address currently displayed. **Enregistrer** saves both model and ComfyUI settings and closes the dialog; there is no separate ComfyUI save button. ComfyUI-only changes can be saved while the chat model is running.
 
 The generation counter has −/+ controls and an **∞** option (a backend ceiling of 10,000 attempts). Context, message and memory limits still apply. **Ajouter des workflows…** accepts multiple API JSON files and asks for a description for each one. Descriptions can also be edited in the workflow list and saved with the main buttons. The model receives all registered names, descriptions and supported inputs, and is instructed to select the most appropriate workflow.
 

@@ -2,6 +2,7 @@ import { readSSE } from './stream.mjs';
 import { markdownToHtml } from './markdown.mjs';
 import { setupComfy } from './comfy-ui.mjs';
 import { prepareImages } from './images.mjs';
+import { setupTokenControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -214,7 +215,6 @@ function updateControls() {
   $('theme-toggle').disabled = state.savingPreferences || !state.connected;
   $('config-fields').disabled = toolBusy || running || state.operation || state.generating || !state.connected;
   $('save-config').disabled = s.busy || state.settingsLoading || toolBusy || state.operation || state.generating || !state.connected;
-  $('save-start').disabled = state.settingsLoading || toolBusy || running || state.operation || state.generating || !state.connected;
   $('settings-stop').hidden = !running;
   $('settings-stop').disabled = toolBusy || state.generating || s.state === 'stopping' || state.operation;
   $('toggle-engine').disabled = toolBusy || state.generating || state.operation || s.state === 'stopping' || !state.connected;
@@ -264,23 +264,11 @@ async function refreshStatus() {
   updateControls();
 }
 
-function syncOutputOptions() {
-  const context = Number($('context-size').value);
-  for (const option of $('output-tokens').options) option.disabled = Number(option.value) > context;
-  if (Number($('output-tokens').value) > context) $('output-tokens').value = [...$('output-tokens').options].filter((option) => !option.disabled).at(-1).value;
-}
-
 function openSettings() {
   $('engine-path').value = state.config.enginePath || '';
   $('model-path').value = state.config.modelPath || '';
   $('projector-path').value = state.config.projectorPath || '';
-  const size = String(state.config.contextSize || 8192);
-  if (![...$('context-size').options].some((option) => option.value === size)) $('context-size').add(new Option(`${size} tokens`, size));
-  $('context-size').value = size;
-  const output = String(state.config.maxOutputTokens || 4096);
-  if (![...$('output-tokens').options].some((option) => option.value === output)) $('output-tokens').add(new Option(`${output} tokens`, output));
-  $('output-tokens').value = output;
-  syncOutputOptions();
+  tokenControls.setValues(state.config);
   const layers = state.config.gpuLayers ?? 99;
   $('compute-mode').value = [0, 99].includes(layers) ? String(layers) : 'custom';
   $('gpu-layers').value = String(layers);
@@ -292,20 +280,19 @@ function openSettings() {
   updateControls();
 }
 
-async function saveConfiguration(start) {
+async function saveConfiguration() {
   state.operation = true;
   $('config-error').hidden = true;
   updateControls();
   try {
     const config = {
       enginePath: $('engine-path').value, modelPath: $('model-path').value,
-      projectorPath: $('projector-path').value, contextSize: Number($('context-size').value), maxOutputTokens: Number($('output-tokens').value),
+      projectorPath: $('projector-path').value, ...tokenControls.values(),
       gpuLayers: Number($('compute-mode').value === 'custom' ? $('gpu-layers').value : $('compute-mode').value),
     };
     const saved=await(await api('settings',{config,comfy:comfyUI.values(),workflowDescriptions:comfyUI.workflowDescriptions()})).json();
     state.config=saved.config;state.comfy=saved.comfy;await comfyUI.saved();
-    if (start) state.status = await (await api('start', {})).json();
-    else $('settings').close();
+    $('settings').close();
   } catch (error) {
     $('config-error').textContent = error.message;
     $('config-error').hidden = false;
@@ -490,6 +477,8 @@ async function sendMessage(event) {
 }
 
 
+const tokenControls=setupTokenControls($);
+dismissSettingsOnOutsideClick($('settings'));
 const comfyUI=setupComfy({api,state,node,notice,onChange:()=>refreshStatus()});
 applyTheme(document.documentElement.dataset.theme);
 $('theme-toggle').onclick = toggleTheme;
@@ -517,9 +506,7 @@ for(const button of document.querySelectorAll('[data-file-kind]'))button.onclick
 };
 $('settings-open').onclick = openSettings;
 $('settings-close').onclick = () => $('settings').close();
-$('settings-form').onsubmit = (event) => { event.preventDefault(); saveConfiguration(false); };
-$('save-start').onclick = () => saveConfiguration(true);
-$('context-size').onchange = syncOutputOptions;
+$('settings-form').onsubmit = (event) => { event.preventDefault(); saveConfiguration(); };
 $('compute-mode').onchange = () => { $('custom-layers-field').hidden = $('compute-mode').value !== 'custom'; };
 $('toggle-engine').onclick = () => toggleEngine();
 $('settings-stop').onclick = () => toggleEngine(true);
@@ -581,7 +568,6 @@ try {
   state.saveHistory = initial.preferences?.saveHistory === true;
   await refreshHistory();
   await comfyUI.refresh();
-  if (initial.platform !== 'win32') $('engine-path').placeholder = '/chemin/vers/llama-server';
   if (initial.warning) notice(initial.warning);
   updateControls();
 } catch (error) { notice(error.message); updateControls(); }

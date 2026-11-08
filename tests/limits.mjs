@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createApplication } from '../server.mjs';
 import { normalizeConfig } from '../lib/engine.mjs';
+import { CONTEXT_SIZES } from '../public/settings-controls.mjs';
 import { waitForModel } from '../public/model-ready.mjs';
 
 test('contexte et sortie : migration et validation indépendantes', () => {
@@ -28,8 +29,10 @@ test('chaque choix de contexte arrive au moteur, chaque plafond de sortie arrive
     const initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
     const api = async (route, body, options = {}) => fetch(`${app.url}/api/${route}`, { method: body === undefined ? 'GET' : 'POST', headers: { Authorization: `Bearer ${initial.token}`, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...options });
     const html = await (await fetch(app.url)).text();
-    const select = html.match(/<select id="context-size">([\s\S]*?)<\/select>/)[1];
-    const sizes = [...select.matchAll(/value="(\d+)"/g)].map((match) => Number(match[1]));
+    assert.match(html, /<input id="context-size"[^>]*type="range"/);
+    assert.match(html, /<input id="output-tokens"[^>]*type="range"/);
+    assert.equal((await fetch(`${app.url}/settings-controls.mjs`)).status,200);
+    const sizes = [...CONTEXT_SIZES];
     assert.deepEqual(sizes, [4096, 8192, 16384, 32768, 65536, 131072, 262144]);
     for (const [index, contextSize] of sizes.entries()) {
       const maxOutputTokens = [1024, 2048, 4096, 8192, 16384, 32768, 32768][index];

@@ -11,4 +11,4 @@
 - Pending approvals/jobs are explicit, with cancel/progress and no silent execution after page restoration. History can restore native tool transcript and gallery metadata without rerunning a workflow.
 - Test mock protocols, permissions, VRAM sequencing/recovery, history deletion preserving originals, original byte fidelity, and actual model calls. Test an existing real Comfy workflow if possible. Stop every app/model instance launched for testing when finished; do not stop the user's existing Comfy server.
 
-Settings UX: native Windows/Linux file pickers, bounded local Comfy discovery (saved address,8188,7821), detected read-only address with manual override, one shared Save/Save-and-start, current-address connection testing, multi-file API imports and editable descriptions advertised to native workflow selection.
+Settings UX: native Windows/Linux file pickers, bounded local Comfy discovery (saved address,8188,7821), detected read-only address with manual override, one shared Save that closes the centered settings dialog, current-address connection testing, multi-file API imports and editable descriptions advertised to native workflow selection.
