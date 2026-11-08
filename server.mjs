@@ -110,7 +110,9 @@ function chatPayload(input, vision, maxOutputTokens, allowEmpty = false) {
   };
 }
 
-export async function createApplication({ port = 8787, dataDir = join(root, 'data'), modelsDir = join(root, 'models'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null, managed = false, controlTimeoutMs = 15000, controlHeartbeatMs = 10000, controlReconnectMs = 2000, chatHeartbeatMs = 10000 } = {}) {
+export async function createApplication({ port = 8787, dataDir = join(root, 'data'), publicDir = join(root,'public'), modelsDir = join(root, 'models'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null, managed = false, controlTimeoutMs = 15000, controlHeartbeatMs = 10000, controlReconnectMs = 2000, chatHeartbeatMs = 10000 } = {}) {
+  // Keep HTML, scripts and styles paired with this running backend until restart.
+  const frontend=new Map(await Promise.all([...staticFiles].map(async([path,[file,mime]])=>[path,{contents:await readFile(join(publicDir,file)),mime,file}])));
   await mkdir(dataDir, { recursive: true });
   const { version: applicationVersion } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   let applyingUpdate = false, installState = { state: 'idle', error: '' };
@@ -239,8 +241,8 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         await sendResourceMedia(req,res,await resources.media(media[1],media[2]));return;
       }
       if (req.method === 'GET' && staticFiles.has(path)) {
-        const [file, mime] = staticFiles.get(path);
-        let contents = await readFile(join(root, 'public', file));
+        const asset = frontend.get(path),{file,mime}=asset;
+        let contents = asset.contents;
         if (file === 'index.html') contents = contents.toString('utf8').replace('data-theme="dark"', `data-theme="${preferences.theme}"`);
         res.writeHead(200, { 'Content-Type': mime });
         return res.end(contents);

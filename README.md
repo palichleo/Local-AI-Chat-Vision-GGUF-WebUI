@@ -6,6 +6,8 @@ A local chat, image-understanding and optional ComfyUI image-generation interfac
 
 The application currently uses French UI labels. Their names are included below to help you find the controls.
 
+A running server keeps its HTML, scripts and styles together in memory until it stops. Editing or replacing source files therefore requires a complete application restart. The launcher reports an already running version that differs from the files on disk instead of silently reopening it. Automatic updates already stop and restart the application. This prevents a new interface from requesting modules that an older backend cannot serve.
+
 ## Settings and global context
 
 The settings dialog groups LLMs, global instructions, the shared llama.cpp engine and compute limits, ComfyUI, preferences and diagnostics. The search at the top filters settings without changing their values. Matching collapsed details open for the search and return to their prior state when it is cleared.

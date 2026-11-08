@@ -77,3 +77,11 @@ test('launcher reconnects after a transient control stream failure instead of cl
  });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{await runLauncher({port:server.address().port,signal:AbortSignal.timeout(5000)});assert.equal(streams,2);}finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
+
+test('a new launcher reports an outdated controlled instance instead of silently reusing it',async()=>{
+ const {runLauncher}=await import('../scripts/launch.mjs');let requests=0;
+ const server=http.createServer((req,res)=>{requests++;res.setHeader('content-type','application/json');res.end(JSON.stringify({application:'atelier-local',token:'old-test',version:'0.0.0',controlled:true}));});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{await assert.rejects(runLauncher({port:server.address().port,signal:AbortSignal.timeout(3000)}),/instance v0.0.0.*sources.*Fermez/);assert.equal(requests,1,'No shutdown or takeover is allowed');}
+ finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});

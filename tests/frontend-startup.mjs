@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,cp,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
 import {createApplication} from '../server.mjs';
@@ -32,4 +32,17 @@ test('the served page can load its entire JavaScript module graph', async t => {
   }
   for (const module of ['/copy.mjs','/settings-guard.mjs','/context-meter.mjs']) assert.ok(visited.has(app.url+module),'The graph must exercise '+module);
   assert.equal((await fetch(app.url+'/server.mjs')).status,404,'Backend sources must stay private');
+});
+
+test('a running server serves a consistent frontend snapshot even when files on disk change',async t=>{
+ const directory=await mkdtemp(join(tmpdir(),'atelier-snapshot-')),publicDir=join(directory,'public');
+ await cp(new URL('../public/',import.meta.url),publicDir,{recursive:true});
+ const appSource='export const snapshot="initial frontend";';await writeFile(join(publicDir,'app.js'),appSource);
+ const app=await createApplication({port:0,dataDir:join(directory,'data'),publicDir});t.after(async()=>{await app.close();await rm(directory,{recursive:true,force:true});});
+ assert.equal(await(await fetch(app.url+'/app.js')).text(),appSource);
+ const html=await(await fetch(app.url)).text();
+ await writeFile(join(publicDir,'app.js'),'import "./future-not-registered.mjs";');await writeFile(join(publicDir,'index.html'),'<h1>Future release</h1>');await rm(join(publicDir,'settings-search.mjs'));
+ assert.equal(await(await fetch(app.url+'/app.js')).text(),appSource,'Old backend must never serve newly edited scripts');
+ assert.equal(await(await fetch(app.url)).text(),html,'The HTML must match the backend lifetime');
+ assert.equal((await fetch(app.url+'/settings-search.mjs')).status,200,'A running snapshot retains its imported modules');
 });

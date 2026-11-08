@@ -1,3 +1,4 @@
+import {readFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -34,6 +35,7 @@ export async function runLauncher({root=resolve(dirname(fileURLToPath(import.met
       child.once('error',error=>{childError=error;});child.once('exit',()=>{childExited=true;});
       boot=await ready(undefined,15000);
     }
+    if(typeof boot.version==='string'){const local=JSON.parse(await readFile(join(root,'package.json'),'utf8'));if(local.version!==boot.version)throw Error(`Une instance v${boot.version} est encore ouverte ; les sources sont en v${local.version}. Fermez sa fenêtre de lancement, puis relancez l’application. Aucun processus n’a été arrêté.`);}
     if(boot.controlled){console.log(`Atelier local est déjà ouvert : ${url}`);if(open)openBrowser(url);return;}
     let opened=false;
     while(true){
