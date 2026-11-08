@@ -11,7 +11,7 @@ import {setupCopy} from '../public/copy.mjs';
 import {contextBudget,setupContextMeter} from '../public/context-meter.mjs';
 import {countContext} from '../lib/context-count.mjs';
 import {createApplication} from '../server.mjs';
-function element(){return {open:false,disabled:false,textContent:'',hidden:false,dataset:{},style:{setProperty(){}},listeners:{},addEventListener(name,fn){(this.listeners[name]??=[]).push(fn);},emit(name,event={}){for(const fn of this.listeners[name]||[])fn(event);},showModal(){this.open=true;},close(){this.open=false;this.emit('close');}};}
+function element(){return {open:false,disabled:false,textContent:'',hidden:false,dataset:{},style:{setProperty(name,value){this[name]=value;}},attributes:{},setAttribute(name,value){this.attributes[name]=String(value);},removeAttribute(name){delete this.attributes[name];},listeners:{},addEventListener(name,fn){(this.listeners[name]??=[]).push(fn);},emit(name,event={}){for(const fn of this.listeners[name]||[])fn(event);},showModal(){this.open=true;},close(){this.open=false;this.emit('close');}};}
 function settings(){
  const dialog=element(),confirmation=element(),keep=element(),discard=element(),saveButton=element();let draft='saved',saves=0,ok=true;
  const guard=setupSettingsGuard({dialog,confirmation,keep,discard,saveButton,readDraft:()=>draft,save:async()=>{saves++;if(ok){guard.markSaved();dialog.close();}return ok;}});
@@ -45,19 +45,31 @@ test('clipboard failure never reports success and restores the button',async()=>
  setupCopy(root,{writeText:async()=>{throw Error('Denied');},announce:text=>announcements.push(text)});
  await root.listeners.click[0]({target:{closest:()=>button}});assert.equal(button.disabled,false);assert.equal(label.textContent,'Copier');assert.match(announcements[0],/indisponible/);
 });
-test('context reservation and warnings use the total budget and unknown counts stay unknown',()=>{
- assert.equal(contextBudget({used:4800,capacity:10000,reserved:4096}).warning,'');
- assert.equal(contextBudget({used:5904,capacity:10000,reserved:4096}).warning,'full');
- assert.equal(contextBudget({used:5000,capacity:10000,reserved:4096}).warning,'near');
- const unknown=contextBudget({used:null,capacity:8192,reserved:4096});assert.equal(unknown.used,null);assert.equal(unknown.warning,'');assert.equal(unknown.reservation,50);
+test('context gauge fills only with used tokens, regardless of response reservation',()=>{
+ assert.equal(contextBudget({used:0,capacity:65536,reserved:32768}).occupied,0);
+ assert.equal(contextBudget({used:8192,capacity:65536,reserved:32768}).occupied,12.5);
+ assert.equal(contextBudget({used:5000,capacity:10000,reserved:4096}).warning,'');
+ assert.equal(contextBudget({used:9000,capacity:10000,reserved:0}).warning,'near');
+ assert.equal(contextBudget({used:10000,capacity:10000,reserved:0}).warning,'full');
+ const unknown=contextBudget({used:null,capacity:8192,reserved:4096});assert.equal(unknown.used,null);assert.equal(unknown.occupied,0);assert.equal(unknown.warning,'');
 });
-test('the context meter ignores stale requests, distinguishes unknown vision cost and stays idle when the model is off',async()=>{
+
+test('the context meter ignores stale counts and exposes all details only through its tooltip and accessibility',async()=>{
  const nodes=new Map(),$=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);};const calls=[];let ready=true;
- const meter=setupContextMeter({$,api:(_route,body,options)=>new Promise(resolve=>calls.push({body,options,resolve})),getRequest:()=>({messages:[]}),getConfig:()=>({contextSize:8192,maxOutputTokens:4096}),isReady:()=>ready,isBusy:()=>false,delay:0});
+ const meter=setupContextMeter({$,api:(_route,body,options)=>new Promise(resolve=>calls.push({body,options,resolve})),getRequest:()=>({messages:[{role:'user',content:'Sent'}]}),getConfig:()=>({contextSize:8192,maxOutputTokens:4096}),isReady:()=>ready,isBusy:()=>false,delay:0});
  const tick=()=>new Promise(resolve=>setTimeout(resolve,8));meter.schedule();await tick();meter.schedule();await tick();assert.equal(calls[0].options.signal.aborted,true);
- calls[1].resolve(Response.json({used:6000,precision:'text-only'}));await tick();assert.match($('context-label').textContent,/≥.*6/);assert.equal($('context-meter').dataset.warning,'full');
- calls[0].resolve(Response.json({used:1,precision:'exact'}));await tick();assert.match($('context-label').textContent,/6/);
- ready=false;meter.schedule();await tick();assert.equal(calls.length,2);assert.match($('context-label').textContent,/—/);meter.pause();
+ calls[1].resolve(Response.json({used:6000,precision:'text-only'}));await tick();assert.match($('context-meter').title,/≥.*6/);assert.equal($('context-meter').dataset.warning,'');assert.equal($('context-meter').attributes['aria-valuenow'],'6000');assert.equal($('context-meter').textContent,'');
+ calls[0].resolve(Response.json({used:1,precision:'exact'}));await tick();assert.match($('context-meter').title,/6/);
+ ready=false;meter.schedule();await tick();assert.equal(calls.length,2);assert.equal($('context-meter').attributes['aria-valuenow'],'6000');meter.pause();
+});
+
+test('a new conversation resets the gauge to zero and never counts an unsent draft',async()=>{
+ const nodes=new Map(),$=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);};let request=null,id=null,calls=0;
+ const meter=setupContextMeter({$,api:async()=>{calls++;return Response.json({used:1024,precision:'exact'});},getRequest:()=>request,getConversation:()=>id,getConfig:()=>({contextSize:8192,maxOutputTokens:4096}),isReady:()=>true,isBusy:()=>false,delay:0});
+ meter.schedule();await new Promise(resolve=>setTimeout(resolve,8));assert.equal(calls,0);assert.equal($('context-meter').style['--context-used'],'0%');
+ id='first';request={messages:[{role:'user',content:'Sent'}]};meter.schedule();await new Promise(resolve=>setTimeout(resolve,8));assert.equal(calls,1);assert.equal($('context-meter').style['--context-used'],'12.5%');
+ meter.observe({usage:{prompt_tokens:1024,completion_tokens:1024}});assert.equal($('context-meter').style['--context-used'],'25%');
+ id=null;request=null;meter.schedule();assert.equal($('context-meter').style['--context-used'],'0%');assert.equal($('context-meter').attributes['aria-valuenow'],'0');assert.equal(calls,1);meter.pause();
 });
 async function countFixture(t,handler){
  const requests=[];const server=http.createServer(async(req,res)=>{const chunks=[];for await(const chunk of req)chunks.push(chunk);const body=JSON.parse(Buffer.concat(chunks));requests.push({path:req.url,body,authorization:req.headers.authorization});const result=handler(req.url,body);res.writeHead(result.status||200,{'Content-Type':'application/json'});res.end(JSON.stringify(result.body));});
@@ -82,5 +94,7 @@ test('context API does not start a model and uses a ready local engine without s
  const modelPath=join(directory,'model.gguf');await writeFile(modelPath,Buffer.from('GGUF\x03\0\0\0'));await api('config',{enginePath:process.execPath,modelPath,projectorPath:'',contextSize:8192,maxOutputTokens:4096,gpuLayers:0});await api('start',{});
  const end=Date.now()+10000;while((await(await api('status')).json()).state!=='ready'){if(Date.now()>end)assert.fail('Engine did not start');await new Promise(resolve=>setTimeout(resolve,30));}
  result=await(await api('context',input)).json();assert.equal(result.used,321);assert.equal(result.reserved,4096);assert.equal(result.precision,'exact');assert.equal((await(await api('status')).json()).busy,false);
+ const completed={messages:[{role:'user',content:'Sent'},{role:'assistant',content:'Answer'}]};
+ const counted=await api('context',completed);assert.equal(counted.status,200);assert.equal((await counted.json()).used,321);assert.equal((await api('chat',completed)).status,400);
  assert.equal((await api('context',{messages:[]})).status,400);assert.equal((await api('chat',input)).status,400);
 });

@@ -242,12 +242,9 @@ dialog::backdrop{background:var(--overlay);backdrop-filter:none}
 
 .settings-footer .app-shutdown{margin-right:auto;padding:8px 0;background:none;border:0;color:var(--muted);font-size:11px}.settings-footer .app-shutdown:hover:enabled{color:var(--danger)}
 
-.context-meter{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:5px 9px;padding:8px 5px 0;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
-.context-track{display:flex;width:58px;height:3px;overflow:hidden;border-radius:9px;background:var(--line);flex-shrink:0}
-.context-track::before{content:"";width:var(--context-used,0%);background:var(--muted)}
-.context-track::after{content:"";width:var(--context-reserved,0%);background:var(--update-line)}
-.context-warning{flex-basis:100%;text-align:right;color:var(--warning);font-size:10px}
-.context-meter[data-warning="full"] .context-warning{color:var(--danger)}
+.context-meter{display:flex;align-items:center;justify-content:flex-end;width:fit-content;margin-left:auto;padding:8px 5px 4px;cursor:help}
+.context-track{display:block;width:72px;height:4px;overflow:hidden;border-radius:9px;background:var(--line);flex-shrink:0}
+.context-track::before{content:"";display:block;height:100%;width:var(--context-used,0%);background:var(--muted)}
 .context-meter[data-warning="near"] .context-track::before{background:var(--warning)}
 .context-meter[data-warning="full"] .context-track::before{background:var(--danger)}
 #settings-unsaved{position:fixed;inset:0;margin:auto;width:440px;max-width:calc(100% - 32px);height:fit-content;min-height:0;max-height:calc(100dvh - 32px);padding:25px;border:1px solid var(--line-strong);border-radius:18px;box-shadow:0 20px 70px var(--shadow)}
@@ -256,7 +253,7 @@ dialog::backdrop{background:var(--overlay);backdrop-filter:none}
 .unsaved-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
 .unsaved-actions button{font-size:11px;min-height:36px;padding:8px 10px}
 .unsaved-actions #settings-discard{color:var(--danger)}
-@media(max-width:640px){.context-meter{font-size:9px;gap:5px 6px}.context-track{width:40px}}
+@media(max-width:640px){.context-track{width:58px}}
 
 /* The scrollable transcript and the composer share their width and horizontal gutters. */
 :root{--chat-column:820px;--chat-side:28px;--chat-fade:18px}

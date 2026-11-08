@@ -66,7 +66,7 @@ async function jsonBody(req, limit = maxBody) {
   catch { throw problem('Le JSON reçu est invalide.'); }
 }
 
-function chatPayload(input, vision, maxOutputTokens, allowEmpty = false) {
+function chatPayload(input, vision, maxOutputTokens, countOnly = false) {
   if (!input || !Array.isArray(input.messages) || !input.messages.length || input.messages.length > 100) throw problem('La conversation doit contenir entre 1 et 100 messages. Recommence une conversation si nécessaire.');
   const messages = input.messages.map((message, index) => {
     if (!message || !['system', 'user', 'assistant', 'tool'].includes(message.role) || (message.role === 'system' && index !== 0)) throw problem('Rôle de message invalide.');
@@ -105,7 +105,7 @@ function chatPayload(input, vision, maxOutputTokens, allowEmpty = false) {
   }
   if(unresolved.size)throw problem('Résultat d’outil manquant.');
   const last = messages.at(-1);
-  if (!['user','tool'].includes(last.role) || (!allowEmpty && typeof last.content === 'string' && !last.content.trim())) throw problem('Écris un message ou joins une image.');
+  if (!countOnly && (!['user','tool'].includes(last.role) || typeof last.content === 'string' && !last.content.trim())) throw problem('Écris un message ou joins une image.');
   return {
     model: 'local', messages, stream: true, stream_options: { include_usage: true }, temperature: 0.7, top_p: 0.95, top_k: 20,
     max_tokens: maxOutputTokens, reasoning_format: 'deepseek',

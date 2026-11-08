@@ -21,12 +21,12 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
     return nodes.get(id);
   };
   const calls = [], refreshes = [], windowListeners = {};
-  let comfyOptions;
+  let comfyOptions,meterOptions,meterSchedules=0;
   const comfyUI = { refresh: options => { refreshes.push(options); return refresh(options); }, saved, cancelSettings() {}, setBusy() {}, values: () => savedComfy, workflowDescriptions: () => [], reset() {} };
   const context = { console, AbortController, AbortSignal, crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
     setupGenerationUI:()=>({clear(){},restore(){}}),
     setupAssets:()=>({setBusy(){},hasDraft:()=>false}),
-    confirm:()=>true,setupSettingsSearch:()=>({reset(){},refresh(){}}),setupSettingsGuard, setupCopy(){},setupContextMeter:()=>({schedule(){},pause(){},observe(){}}),
+    confirm:()=>true,setupSettingsSearch:()=>({reset(){},refresh(){}}),setupSettingsGuard, setupCopy(){},setupContextMeter:options=>{meterOptions=options;return {schedule(){meterSchedules++;},pause(){},observe(){}};},
     setupMaterialLighting() {}, dismissSettingsOnOutsideClick() {}, setupTokenControls: () => ({ setValues() {}, values: () => ({ contextSize: 4096, maxOutputTokens: 2048 }) }),
     setupComputeControls: () => ({ setValues(config) { $('compute-mode').value = String(config.gpuLayers); }, values: () => ({ gpuLayers: 999 }) }),
     setupComfy: options => { comfyOptions = options; return comfyUI; },
@@ -51,7 +51,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
   const application = source.slice(0, source.lastIndexOf('\ntry {')).replace(/^import .*;\r?\n/gm, '');
   runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, renderModelSelect, applyModelLibrary, switchLLM, addLLM, saveLLM, cancelLLM, modelDraft, modelEditorDirty, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };', context);
   Object.assign(context.app.state, { token: 'test', config: { ...savedConfig }, connected: true });
-  return { ...context.app, $, calls, refreshes, windowListeners, comfyUI, comfyOptions, async open() { context.app.openSettings(); await tick(); } };
+  return { ...context.app, $, calls, refreshes, windowListeners, comfyUI, comfyOptions, meterOptions, meterSchedules:()=>meterSchedules, async open() { context.app.openSettings(); await tick(); } };
 }
 
 test('an older settings load cannot unlock the next dialog', async () => {
@@ -263,4 +263,10 @@ test('a saved profile can be retried if activation fails after its identity chan
   if(call.route==='models/select'){if(++activations===1)return Response.json({error:'Busy'},{status:409});return Response.json({config:{...savedConfig,modelPath:profile.modelPath},modelName:profile.name,status:{state:'stopped',logs:[]}});}
  }});await ui.open();ui.addLLM();ui.$('llm-name').value=profile.name;ui.$('model-path').value=profile.modelPath;
  assert.equal(await ui.saveLLM(),false);assert.equal(ui.state.config.modelPath,'saved.gguf');assert.equal(await ui.saveLLM(),true);assert.equal(ids[1],profile.id);
+});
+
+test('context counting contains only the selected conversation and typing does not schedule a recount',async()=>{
+ const ui=await settingsUI();ui.$('prompt').value='Unsent draft';assert.equal(ui.meterOptions.getRequest(),null);
+ const sent={role:'user',content:'Already sent'},reply={role:'assistant',content:'Already answered'};ui.state.messages=[sent,reply];const payload=ui.meterOptions.getRequest();assert.equal(payload.messages.length,3);assert.equal(payload.messages[1].content,'Already sent');assert.equal(payload.messages[2].content,'Already answered');assert.ok(!JSON.stringify(payload).includes('Unsent draft'));
+ const scheduled=ui.meterSchedules();ui.$('prompt').oninput();assert.equal(ui.meterSchedules(),scheduled);
 });

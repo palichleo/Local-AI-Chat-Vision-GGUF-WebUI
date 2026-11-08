@@ -167,7 +167,7 @@ async function clearHistory() {
     $('live-status').textContent = target ? 'Conversation supprimée.' : 'Historique supprimé.';
     $('history-delete-dialog').close(); historyDeleteTarget = null;
   } catch (error) { $('history-delete-error').textContent = error.message; $('history-delete-error').hidden = false; }
-  finally { state.clearingHistory = false; state.loadingHistory = false; updateControls(); }
+  finally { state.clearingHistory = false; state.loadingHistory = false; updateControls(); contextMeter.schedule(); }
 }
 
 function savedUser(message) {
@@ -206,7 +206,7 @@ async function loadConversation(id) {
     try { await comfyUI.renderGallery(id); } catch(error) { notice(`Galerie indisponible : ${error.message}`); }
     $('prompt').focus();
   } catch (error) { notice(error.message); }
-  finally { state.loadingHistory = false; updateControls(); $('prompt').focus(); }
+  finally { state.loadingHistory = false; updateControls(); contextMeter.schedule(); $('prompt').focus(); }
 }
 
 function renderTranscript(messages, incomplete = false) {
@@ -234,7 +234,7 @@ async function restoreUpdate() {
   $('prompt').value = saved.prompt; $('thinking').setAttribute('aria-pressed', String(state.thinking));
   generationUI.clear();$('messages').replaceChildren(); renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
   $('welcome').hidden = state.messages.length > 0; setConversationTitle(saved.title || 'Nouvelle conversation');
-  renderAttachments(); resizePrompt(); renderHistory(); scrollToBottom();
+  renderAttachments(); resizePrompt(); renderHistory(); scrollToBottom(); contextMeter.schedule();
   if (state.conversationId) await comfyUI.renderGallery(state.conversationId);
   await api('updates/session/clear', {});
   const result = await (await api('updates/install')).json();
@@ -541,7 +541,7 @@ async function toggleEngine(stopOnly = false) {
 function resizePrompt() {
   $('prompt').style.height = 'auto';
   $('prompt').style.height = `${Math.min($('prompt').scrollHeight, 180)}px`;
-  updateControls(); contextMeter.schedule();
+  updateControls();
 }
 
 function renderAttachments() {
@@ -559,7 +559,6 @@ function renderAttachments() {
     box.append(preview, remove);
     $('attachments').append(box);
   });
-  contextMeter.schedule();
 }
 
 async function addImages(files) {
@@ -727,7 +726,7 @@ async function sendMessage(event) {
       else if(usedTool&&!view.generation)view.body.replaceChildren(node('div','text-block',complete?'Aucune réponse finale reçue.':'Opération interrompue.'));
       state.messages=archiveMessages(history);state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:!complete};setConversationTitle(text||'Une image à explorer');
     }
-    await persistConversation();state.generating=false;state.waitingForModel=false;state.controller=null;resizePrompt();await refreshStatus();$('prompt').focus();
+    await persistConversation();state.generating=false;state.waitingForModel=false;state.controller=null;resizePrompt();await refreshStatus();contextMeter.schedule();$('prompt').focus();
   }
 }
 
@@ -755,7 +754,7 @@ const settingsGuard=setupSettingsGuard({
   readDraft:()=>({llm:modelDraft(),fields:['global-instructions','engine-path','context-size','output-tokens','compute-mode','gpu-layers','comfy-enabled','comfy-auto','comfy-url','comfy-iterations'].map(id=>[id,id==='comfy-iterations'&&$('comfy-unlimited').getAttribute('aria-pressed')==='true'?null:$(id).value,$(id).checked]), unlimited:$('comfy-unlimited').getAttribute('aria-pressed'), descriptions:comfyUI.workflowDescriptions(), pending:comfyUI.hasPendingImport?.()||false}),
 });
 const contextMeter=setupContextMeter({$,api,getConfig:()=>state.config,isReady:()=>state.connected&&state.status.state==='ready',isBusy:()=>state.generating||!!state.status.toolJob,
-  getRequest:()=>chatRequest([...state.messages,{role:'user',content:userContent($('prompt').value.trim(),state.images)}]),
+  getRequest:()=>state.messages.length?chatRequest(state.messages):null, getConversation:()=>state.conversationId,
 });
 setupCopy($('messages'),{announce:message=>{$('live-status').textContent=message;if(message.startsWith('Copie indisponible'))notice(message);}});
 applyTheme(document.documentElement.dataset.theme);
@@ -830,7 +829,7 @@ async function newConversation() {
     generationUI.clear();$('messages').replaceChildren(); $('welcome').hidden = false;
     setConversationTitle('Nouvelle conversation');
     renderAttachments(); notice(''); resizePrompt();
-  } finally { state.loadingHistory = false; updateControls(); $('prompt').focus(); }
+  } finally { state.loadingHistory = false; updateControls(); contextMeter.schedule(); $('prompt').focus(); }
 }
 $('new-chat').onclick = newConversation;
 $('new-chat-mobile').onclick = newConversation;
