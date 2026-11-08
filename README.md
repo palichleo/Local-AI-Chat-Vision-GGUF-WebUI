@@ -30,7 +30,9 @@ There is no need to run `npm install`. You can also use `npm start`.
 
 ## Configuring the files
 
-Open **Configuration**, enter the three full file paths, then click **Enregistrer** (Save):
+Open **Configuration**, select the files with **Parcourir…** or enter their full paths, then click **Enregistrer** (Save):
+
+The **Parcourir…** buttons open the Windows file picker or an installed Linux zenity/kdialog picker. Files stay in place and are not uploaded. If no Linux picker is available, enter the full path manually.
 
 | Component | Example file from the original model release |
 |---|---|
@@ -58,7 +60,7 @@ The first message automatically starts the configured model and its vision proje
 
 - Type a message and press Enter. Shift+Enter inserts a new line.
 - Attach PNG/JPEG images with the image button, by dragging them onto the composer, or by pasting an image into the message field.
-- Attach up to 64 images per message, with a maximum of 10 MiB per source file. The browser prepares analysis copies with a maximum 1,024-pixel longest side and a shared four-megapixel budget. It keeps the smaller PNG or JPEG result; JPEG uses quality `0.82` and a white background. A conversation request remains limited to 20 MiB and 100 messages; start a new conversation when either limit is reached.
+- Attach up to 64 images per message, with a maximum of 64 MiB per source file. The browser prepares analysis copies with a maximum 1,024-pixel longest side and a shared four-megapixel budget. It keeps the smaller PNG or JPEG result; JPEG uses quality `0.82` and a white background. A conversation request remains limited to 20 MiB and 100 messages; start a new conversation when either limit is reached.
 - **Réflexion** (Thinking) asks the model's chat template to enable or disable reasoning. Its effect depends on the model. Received reasoning appears in a separate collapsible section.
 - The square button interrupts the current response. Text already received is kept.
 - **Contexte total** is the shared window for messages, image tokens, reasoning and the reply. **Sortie maximale** independently limits generated tokens per reply, including reasoning: 4,096 by default, with choices up to 32,768 within the selected context. The interface reports a response cut short by an output or context limit. Stop the model before changing these settings, then save; they apply on its next start.
@@ -72,9 +74,13 @@ Export a copy of your workflow from ComfyUI using **File → Export (API)**, ena
 
 Use a **GGUF model and chat template that support native tool calls**. The application supplies the tools and starts llama-server with `--jinja`; no extra manual engine flag is needed. A text imitation of a tool call does not execute a workflow. For workflows with an image binding, the model can select a supplied reference using its zero-based index.
 
-Every execution asks for permission by default. You can approve once or allow imported workflows globally, then revoke that setting in Configuration. The default limit is **three generations per user turn**, adjustable from 1 to 10. The approval names the workflow and parameters; progress and cancellation stay visible. Restoring a conversation never silently replays an approval or starts a pending job.
+Every execution asks for permission by default. You can approve once or allow imported workflows globally, then revoke that setting in Configuration. The default limit is **three generations per user turn**, adjustable from 1 to 9,999 or **∞** (10,000 internally). The approval names the workflow and parameters; progress and cancellation stay visible. Restoring a conversation never silently replays an approval or starts a pending job.
 
 During a run, the application waits for ComfyUI to be idle, unloads the chat engine and its vision projector, then runs the approved workflow. It frees ComfyUI's models before restarting the chat engine and projector for review. The local ComfyUI service stays running. Only compressed analysis copies go to the vision model; it compares them with the instruction and references and can revise within the iteration limit. Its review can miss details lost in compression and does not train the model. The **right-hand gallery** shows workflow and prompt details and lets you view or download the original ComfyUI output.
+
+ComfyUI is detected by checking the saved address and the usual local ports 8188 and 7821, without a port scan. A detected address stays visible and read-only; **Modifier** enables manual entry. **Tester la connexion**, next to the address label, checks the address currently displayed. **Enregistrer** and **Enregistrer et démarrer** save both model and ComfyUI settings; there is no separate ComfyUI save button. ComfyUI-only changes can be saved while the chat model is running.
+
+The generation counter has −/+ controls and an **∞** option (a backend ceiling of 10,000 attempts). Context, message and memory limits still apply. **Ajouter des workflows…** accepts multiple API JSON files and asks for a description for each one. Descriptions can also be edited in the workflow list and saved with the main buttons. The model receives all registered names, descriptions and supported inputs, and is instructed to select the most appropriate workflow.
 
 ## Optional conversation history
 

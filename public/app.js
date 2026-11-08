@@ -8,7 +8,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   token: '', config: {}, status: { state: 'stopped', vision: false, busy: false, logs: [] },
   connected: false, thinking: true, messages: [], images: [], generating: false,
-  preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingPreferences: false, waitingForModel: false,
+  preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingPreferences: false, waitingForModel: false, settingsLoading: false,
   saveHistory: false, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false, clearingHistory: false,
 };
 const labels = { stopped: 'Moteur arrêté', loading: 'Chargement du modèle…', ready: 'Prêt à discuter', stopping: 'Arrêt en cours…', error: 'Vérifier le moteur' };
@@ -213,8 +213,8 @@ function updateControls() {
   $('history-delete-confirm').textContent = state.clearingHistory ? 'Suppression…' : 'Supprimer définitivement';
   $('theme-toggle').disabled = state.savingPreferences || !state.connected;
   $('config-fields').disabled = toolBusy || running || state.operation || state.generating || !state.connected;
-  $('save-config').disabled = toolBusy || running || state.operation || state.generating || !state.connected;
-  $('save-start').disabled = toolBusy || running || state.operation || state.generating || !state.connected;
+  $('save-config').disabled = s.busy || state.settingsLoading || toolBusy || state.operation || state.generating || !state.connected;
+  $('save-start').disabled = state.settingsLoading || toolBusy || running || state.operation || state.generating || !state.connected;
   $('settings-stop').hidden = !running;
   $('settings-stop').disabled = toolBusy || state.generating || s.state === 'stopping' || state.operation;
   $('toggle-engine').disabled = toolBusy || state.generating || state.operation || s.state === 'stopping' || !state.connected;
@@ -234,7 +234,7 @@ function updateControls() {
   }
   $('prompt').disabled = state.loadingHistory;
   $('compose-state').textContent = toolBusy ? s.toolJob.progress || 'ComfyUI en cours…' : state.preparing ? 'Préparation des images…' : state.waitingForModel ? 'Chargement… message en attente' : state.generating ? 'Réponse en cours…' : s.state === 'ready' ? s.vision ? 'Texte + images' : 'Texte uniquement' : s.state === 'loading' ? 'Le modèle se charge…' : '';
-  for(const id of ['comfy-enabled','comfy-url','comfy-auto','comfy-iterations','comfy-save','comfy-test','workflow-file','workflow-import'])$(id).disabled=toolBusy||state.generating;
+  comfyUI.setBusy(s.busy||toolBusy||state.generating||state.operation||state.settingsLoading||!state.connected);
   $('engine-logs').textContent = s.logs?.join('\n') || 'Les journaux apparaîtront au démarrage.';
   if (s.error) {
     $('config-error').textContent = s.error;
@@ -286,7 +286,8 @@ function openSettings() {
   $('gpu-layers').value = String(layers);
   $('custom-layers-field').hidden = $('compute-mode').value !== 'custom';
   $('config-error').hidden = !state.status.error;
-  comfyUI.refresh().catch(error=>notice(error.message));
+  state.settingsLoading=true;
+  comfyUI.refresh().catch(error=>notice(error.message)).finally(()=>{state.settingsLoading=false;updateControls();});
   if (!$('settings').open) $('settings').showModal();
   updateControls();
 }
@@ -301,7 +302,8 @@ async function saveConfiguration(start) {
       projectorPath: $('projector-path').value, contextSize: Number($('context-size').value), maxOutputTokens: Number($('output-tokens').value),
       gpuLayers: Number($('compute-mode').value === 'custom' ? $('gpu-layers').value : $('compute-mode').value),
     };
-    state.config = (await (await api('config', config)).json()).config;
+    const saved=await(await api('settings',{config,comfy:comfyUI.values(),workflowDescriptions:comfyUI.workflowDescriptions()})).json();
+    state.config=saved.config;state.comfy=saved.comfy;await comfyUI.saved();
     if (start) state.status = await (await api('start', {})).json();
     else $('settings').close();
   } catch (error) {
@@ -505,6 +507,13 @@ $('history-enabled').onchange = async () => {
       finally{state.loadingHistory=false;updateControls();}
     }
   }
+};
+for(const button of document.querySelectorAll('[data-file-kind]'))button.onclick=async()=>{
+  const kind=button.dataset.fileKind,id=kind==='engine'?'engine-path':kind==='model'?'model-path':'projector-path';
+  state.operation=true;updateControls();
+  try{const result=await(await api('files/choose',{kind,initialPath:$(id).value})).json();if(result.path)$(id).value=result.path;}
+  catch(error){$('config-error').textContent=error.message;$('config-error').hidden=false;}
+  finally{state.operation=false;updateControls();}
 };
 $('settings-open').onclick = openSettings;
 $('settings-close').onclick = () => $('settings').close();

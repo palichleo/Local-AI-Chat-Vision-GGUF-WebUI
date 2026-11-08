@@ -5,6 +5,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { History } from './lib/history.mjs';
+import { discoverComfy, testComfyConnection } from './lib/comfy-discovery.mjs';
+import { chooseLocalFile } from './lib/file-picker.mjs';
 import { ComfyClient, normalizeComfyUrl } from './lib/comfy-client.mjs';
 import { WorkflowCatalog } from './lib/comfy-workflows.mjs';
 import { ComfyGallery } from './lib/comfy-gallery.mjs';
@@ -87,7 +89,7 @@ function chatPayload(input, vision, maxOutputTokens) {
   };
 }
 
-export async function createApplication({ port = 8787, dataDir = join(root, 'data'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess } = {}) {
+export async function createApplication({ port = 8787, dataDir = join(root, 'data'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy } = {}) {
   await mkdir(dataDir, { recursive: true });
   const configPath = join(dataDir, 'config.json');
   let config = { ...defaults };
@@ -112,11 +114,13 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   const comfyPath=join(dataDir,'comfy.json');
   let comfy={enabled:false,baseUrl:'http://127.0.0.1:8188',autoAllow:false,maxIterations:3};
   function normalizeComfy(value){
-    if(!value||typeof value.enabled!=='boolean'||typeof value.autoAllow!=='boolean'||!Number.isInteger(value.maxIterations)||value.maxIterations<1||value.maxIterations>10)throw problem('Configuration ComfyUI invalide.');
+    if(!value||typeof value.enabled!=='boolean'||typeof value.autoAllow!=='boolean'||!Number.isInteger(value.maxIterations)||value.maxIterations<1||value.maxIterations>10000)throw problem('Configuration ComfyUI invalide.');
     return {enabled:value.enabled,baseUrl:normalizeComfyUrl(value.baseUrl),autoAllow:value.autoAllow,maxIterations:value.maxIterations};
   }
   try{comfy=normalizeComfy(JSON.parse(await readFile(comfyPath,'utf8')));}catch{}
   let savingComfy=false;
+  let savingSettings=false;
+  let pickingFile=false;
   async function saveComfy(value){
     if(savingComfy)throw problem('Enregistrement ComfyUI en cours.',409);
     const next=normalizeComfy(value);savingComfy=true;
@@ -125,6 +129,22 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   const catalog=new WorkflowCatalog(join(dataDir,'workflows'));
   const gallery=new ComfyGallery({historyDir});
   const runtime=new ToolRuntime({engine,catalog,gallery,getConfig:()=>comfy,engineConfig:()=>config,saveConfig:saveComfy,persist:()=>preferences.saveHistory});
+  let discovery={detected:false,baseUrl:comfy.baseUrl};
+  let discoveryTime=0, discovering=null;
+  async function detectComfy(){
+    if(runtime.active||engine.busy||savingSettings||savingComfy)return discovery;
+    if(Date.now()-discoveryTime<10000)return discovery;
+    if(discovering)return discovering;
+    const previous=comfy.baseUrl;
+    discovering=comfyDiscovery(previous).then(result=>{
+      if(!runtime.active&&!engine.busy&&!savingSettings&&!savingComfy&&comfy.baseUrl===previous){
+        discovery=result;
+        if(result.detected)comfy={...comfy,baseUrl:normalizeComfyUrl(result.baseUrl)};
+      }
+      discoveryTime=Date.now();return discovery;
+    }).finally(()=>{discovering=null;});
+    return discovering;
+  }
   const status=()=>({...engine.status(),toolJob:runtime.active?runtime.status():null});
   let url;
   let saving = false;
@@ -160,7 +180,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Recharge la page.', 401);
       if (path === '/api/status' && req.method === 'GET') return send(200, status());
-      if(req.method==='GET'&&path==='/api/comfy')return send(200,{config:comfy,workflows:await catalog.list()});
+      if(req.method==='GET'&&path==='/api/comfy'){await detectComfy();return send(200,{config:comfy,discovery,workflows:await catalog.list()});}
       if(req.method==='GET'&&path==='/api/comfy/status')return send(200,await new ComfyClient(comfy.baseUrl).status());
       if(req.method==='GET'&&path==='/api/comfy/workflows')return send(200,{workflows:await new ComfyClient(comfy.baseUrl).workflows()});
       if(req.method==='GET'&&path==='/api/tools/job')return send(200,runtime.status());
@@ -179,10 +199,42 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (req.method !== 'POST') throw problem('Méthode non prise en charge.', 405);
       const body = await jsonBody(req);
+      if(path==='/api/files/choose'){
+        if(!['engine','model','projector'].includes(body?.kind))throw problem('Type de fichier invalide.');
+        if(pickingFile||runtime.active||engine.busy||engine.child||['loading','stopping'].includes(engine.state))throw problem('Arrête le modèle avant de choisir un fichier.',409);
+        pickingFile=true;const controller=new AbortController();const abort=()=>controller.abort();res.once('close',abort);
+        try{return send(200,{path:await filePicker(body.kind,{initialPath:body.initialPath||'',signal:controller.signal})});}
+        finally{res.off('close',abort);pickingFile=false;}
+      }
+      if(path==='/api/settings'){
+        if(savingSettings||savingComfy||saving||runtime.active||engine.busy||clearingHistory)throw problem('Attends la fin de l’opération en cours.',409);
+        const nextConfig=normalizeConfig(body.config),nextComfy=normalizeComfy(body.comfy);
+        const modelChanged=JSON.stringify(config)!==JSON.stringify(nextConfig);
+        if(modelChanged&&(engine.child||['loading','stopping'].includes(engine.state)))throw problem('Arrête le modèle avant de modifier ses réglages.',409);
+        const edits=body.workflowDescriptions||[];
+        if(!Array.isArray(edits)||edits.length>1000||new Set(edits.map(edit=>edit?.id)).size!==edits.length)throw problem('Descriptions de workflows invalides.');
+        savingSettings=true;saving=true;
+        try{
+          const updates=[];
+          for(const edit of edits){
+            if(typeof edit?.description!=='string'||edit.description.length>2000)throw problem('Description de workflow invalide.');
+            updates.push({...await catalog.read(edit.id),description:edit.description.trim()});
+          }
+          if(modelChanged){await writeFile(`${configPath}.tmp`,JSON.stringify(nextConfig,null,2),{mode:0o600});await rename(`${configPath}.tmp`,configPath);config=nextConfig;configWarning='';}
+          await saveComfy(nextComfy);
+          for(const update of updates)await catalog.save(update);
+          discoveryTime=0;
+          return send(200,{config,comfy,workflows:await catalog.list()});
+        }finally{savingSettings=false;saving=false;}
+      }
+      if(path==='/api/comfy/test'){
+        const result=await testComfyConnection(body.baseUrl);
+        return send(200,{...result,detected:true});
+      }
       if(path==='/api/tools/recover')return send(200,await runtime.recover());
       if(path==='/api/tools/cancel')return send(200,runtime.cancel());
       if(path==='/api/tools/execute'){
-        if(clearingHistory||persistingGallery||savingComfy)throw problem('Une opération est en cours.',409);
+        if(clearingHistory||persistingGallery||savingComfy||savingSettings||pickingFile)throw problem('Une opération est en cours.',409);
         return send(202,await runtime.execute(body));
       }
       if(path==='/api/gallery/persist'){
@@ -210,7 +262,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return send(200,await gallery.put(record,{persist:preferences.saveHistory}));
       }
       if(path.startsWith('/api/comfy/')){
-        if(runtime.active||engine.busy||clearingHistory)throw problem('Attends la fin de l’opération GPU.',409);
+        if(runtime.active||engine.busy||clearingHistory||savingSettings)throw problem('Attends la fin de l’opération GPU.',409);
         if(path==='/api/comfy/config'){await saveComfy(body);return send(200,{config:comfy});}
         if(path==='/api/comfy/import')return send(200,await catalog.save(body));
         if(path==='/api/comfy/remove'){await catalog.remove(body.id);return send(200,{removed:true});}
@@ -267,6 +319,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (path === '/api/stop') { if(runtime.active)throw problem('Annule la génération ComfyUI avec le bouton d’interruption.',409); await engine.stop(); return send(200, status()); }
       if (path !== '/api/chat') throw problem('Route introuvable.', 404);
+      if(savingSettings||savingComfy||pickingFile)throw problem('Enregistrement des réglages en cours.',409);
       if(runtime.active)throw problem('ComfyUI utilise le GPU.',409);
       if (engine.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
       if (engine.busy) throw problem('Une réponse est déjà en cours.', 409);
@@ -280,7 +333,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       const definition=comfy.enabled&&body.tools!==false?await catalog.definition():null;
       if(definition){
         payload.tools=[definition];payload.tool_choice='auto';payload.parallel_tool_calls=false;
-        const instruction=`Tu as accès à l’outil local comfy_generate_image. Utilise un véritable appel de fonction uniquement pour générer/modifier une image demandée par l’utilisateur, jamais une imitation en texte. Un seul appel à la fois. Après chaque résultat, examine l’image fournie, compare à l’instruction originale et aux références, indique les écarts et corrige le prompt seulement si utile. Maximum ${comfy.maxIterations} générations par message. Si l’outil échoue ou est refusé, explique-le sans prétendre avoir généré une image. reference_image est l’index à partir de 0 des images utilisateur dans l’ordre chronologique. Les copies d’analyse sont réduites : ne prétends pas vérifier les détails invisibles. Workflows : ${JSON.stringify((await catalog.list()).map(w=>({id:w.id,name:w.name,description:w.description,parameters:Object.keys(w.bindings),requiresImage:w.requiresImage})))}`;
+        const instruction=`Tu as accès à l’outil local comfy_generate_image. Utilise un véritable appel de fonction uniquement pour générer/modifier une image demandée par l’utilisateur, jamais une imitation en texte. Un seul appel à la fois. Choisis le workflow le plus pertinent selon sa description et les paramètres nécessaires. Si aucun workflow ne convient, explique-le. Après chaque résultat, examine l’image fournie, compare à l’instruction originale et aux références, indique les écarts et corrige le prompt seulement si utile. Maximum ${comfy.maxIterations} générations par message. Si l’outil échoue ou est refusé, explique-le sans prétendre avoir généré une image. reference_image est l’index à partir de 0 des images utilisateur dans l’ordre chronologique. Les copies d’analyse sont réduites : ne prétends pas vérifier les détails invisibles. Workflows : ${JSON.stringify((await catalog.list()).map(w=>({id:w.id,name:w.name,description:w.description,parameters:Object.keys(w.bindings),requiresImage:w.requiresImage})))}`;
         if(payload.messages[0].role==='system')payload.messages[0].content+='\n'+instruction;
         else payload.messages.unshift({role:'system',content:instruction});
       }
