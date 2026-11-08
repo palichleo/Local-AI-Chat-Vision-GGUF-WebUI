@@ -257,13 +257,14 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if(path==='/api/files/choose'){
         if(!['engine','model','projector'].includes(body?.kind))throw problem('Type de fichier invalide.');
-        if(pickingFile||runtime.active||engine.busy||engine.child||['loading','stopping'].includes(engine.state))throw problem('Arrête le modèle avant de choisir un fichier.',409);
+        if(saving||savingSettings||pickingFile)throw problem('Un choix de fichier ou un enregistrement est déjà en cours.',409);
+        if(runtime.active||engine.busy||engine.child||['loading','stopping'].includes(engine.state))throw problem('Arrête le modèle avant de choisir un fichier.',409);
         pickingFile=true;const controller=new AbortController();const abort=()=>controller.abort();res.once('close',abort);
         try{return send(200,{path:await filePicker(body.kind,{initialPath:body.initialPath||'',signal:controller.signal})});}
         finally{res.off('close',abort);pickingFile=false;}
       }
       if(path==='/api/settings'){
-        if(savingSettings||savingComfy||saving||runtime.active||engine.busy||clearingHistory)throw problem('Attends la fin de l’opération en cours.',409);
+        if(pickingFile||savingSettings||savingComfy||saving||runtime.active||engine.busy||clearingHistory)throw problem('Attends la fin de l’opération en cours.',409);
         const nextConfig=normalizeConfig(body.config),nextComfy=normalizeComfy(body.comfy);
         const modelChanged=JSON.stringify(config)!==JSON.stringify(nextConfig);
         if(modelChanged&&(engine.child||['loading','stopping'].includes(engine.state)))throw problem('Arrête le modèle avant de modifier ses réglages.',409);
@@ -369,7 +370,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return send(200, { conversation: await history.save(body) });
       }
       if (path === '/api/config') {
-        if (runtime.active || saving || engine.child || engine.state === 'loading' || engine.state === 'stopping') throw problem('Arrête le moteur avant de modifier sa configuration.', 409);
+        if (pickingFile || runtime.active || saving || engine.child || engine.state === 'loading' || engine.state === 'stopping') throw problem('Arrête le moteur avant de modifier sa configuration.', 409);
         const next = normalizeConfig(body);
         saving = true;
         try {
@@ -382,7 +383,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (path === '/api/start') {
         if (runtime.active) throw problem('ComfyUI utilise le GPU. Attends la fin de la génération.',409);
-        if (saving) throw problem('Configuration en cours d’enregistrement.', 409);
+        if (saving || pickingFile) throw problem('Choix de fichier ou enregistrement en cours.', 409);
         await engine.start(config);
         return send(202, engine.status());
       }

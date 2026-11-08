@@ -348,6 +348,8 @@ async function refreshStatus() {
 }
 
 function openSettings() {
+  if ($('settings').open) return;
+  filePickerController?.abort();
   $('engine-path').value = state.config.enginePath || '';
   $('model-path').value = state.config.modelPath || '';
   $('projector-path').value = state.config.projectorPath || '';
@@ -364,6 +366,7 @@ function openSettings() {
 }
 
 async function saveConfiguration() {
+  if (state.operation || state.settingsLoading || !$('settings').open) return;
   state.operation = true;
   $('config-error').hidden = true;
   updateControls();
@@ -581,12 +584,21 @@ $('history-enabled').onchange = async () => {
     }
   }
 };
+let filePickerController = null;
+$('settings').addEventListener('close', () => { if (!$('settings').open) filePickerController?.abort(); });
 for(const button of document.querySelectorAll('[data-file-kind]'))button.onclick=async()=>{
+  if (state.operation || button.disabled || !$('settings').open) return;
   const kind=button.dataset.fileKind,id=kind==='engine'?'engine-path':kind==='model'?'model-path':'projector-path';
-  state.operation=true;updateControls();
-  try{const result=await(await api('files/choose',{kind,initialPath:$(id).value})).json();if(result.path)$(id).value=result.path;}
-  catch(error){$('config-error').textContent=error.message;$('config-error').hidden=false;}
-  finally{state.operation=false;updateControls();}
+  const controller = new AbortController(); filePickerController = controller;
+  state.operation=true; $('config-error').hidden=true; updateControls();
+  try {
+    const result=await(await api('files/choose',{kind,initialPath:$(id).value},{signal:controller.signal})).json();
+    if (!controller.signal.aborted && $('settings').open && result.path) $(id).value=result.path;
+  } catch(error) {
+    if (!controller.signal.aborted && $('settings').open) { $('config-error').textContent=error.message; $('config-error').hidden=false; }
+  } finally {
+    if (filePickerController === controller) { filePickerController=null; state.operation=false; updateControls(); }
+  }
 };
 $('settings-open').onclick = openSettings;
 $('update-available').onclick = installUpdate;
