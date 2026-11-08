@@ -88,7 +88,7 @@ function blocks(lines, depth = 0) {
       while (i < lines.length && !endFence.test(lines[i])) contents.push(lines[i++]);
       if (i < lines.length) i++;
       const language = code[2].trim().split(/\s+/)[0];
-      html += `<pre>${language ? `<span class="code-label">${escapeHtml(language)}</span>` : ''}<code>${escapeHtml(contents.join('\n'))}</code></pre>`;
+      html += `<pre><button type="button" class="copy-button" data-copy-code aria-label="Copier le bloc de code"><svg aria-hidden="true"><use href="#i-copy"/></svg><span>Copier</span></button>${language ? `<span class="code-label">${escapeHtml(language)}</span>` : ''}<code>${escapeHtml(contents.join('\n'))}</code></pre>`;
       continue;
     }
     const title = heading(line);

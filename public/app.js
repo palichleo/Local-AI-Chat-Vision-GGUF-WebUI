@@ -1,3 +1,6 @@
+import { setupCopy } from './copy.mjs';
+import { setupSettingsGuard } from './settings-guard.mjs';
+import { setupContextMeter } from './context-meter.mjs';
 import { installFromButton, compactSession } from './update-ui.mjs';
 import { setupMaterialLighting } from './material-light.mjs';
 import { readSSE } from './stream.mjs';
@@ -78,7 +81,7 @@ function renderHistory() {
       const label = node('span', 'history-label');
       label.append(node('span', 'history-title', item.title), node('small', '', item.current ? 'En cours' : new Date(item.updatedAt).toLocaleDateString('fr-FR') + (item.incomplete ? ' · partielle' : '')));
       button.append(icon('chat'), label);
-      button.onclick = item.current ? () => { $('settings').close(); $('prompt').focus(); } : () => loadConversation(item.id);
+      button.onclick = item.current ? () => { settingsGuard.requestClose(() => $('prompt').focus()); } : () => loadConversation(item.id);
       const row = node('div', 'history-row'); row.append(button);
       if (state.saveHistory && state.historyItems.some(saved => saved.id === item.id)) {
         const remove = node('button', 'history-delete-button icon-button');
@@ -172,6 +175,7 @@ function savedUser(message) {
 }
 
 async function loadConversation(id) {
+  if (settingsGuard.isDirty()) return settingsGuard.requestClose(() => loadConversation(id));
   if (state.status.toolJob || state.generating || state.preparing || state.loadingHistory) return;
   state.loadingHistory = true;
   updateControls();
@@ -234,6 +238,7 @@ async function restoreUpdate() {
 }
 
 async function installUpdate() {
+  if (settingsGuard.isDirty()) return settingsGuard.requestClose(() => installUpdate());
   if ($('update-available').disabled) return;
   state.updating = true; updateControls(); $('settings').close();
   $('update-dialog').showModal();
@@ -342,14 +347,16 @@ async function refreshStatus() {
   if (state.updating || state.closingApp) return;
   try {
     const previous = state.status.state;
+    const wasConnected = state.connected;
     state.status = await (await api('status')).json();
     state.connected = true;
+    if (previous !== state.status.state || !wasConnected) contextMeter.schedule();
     if (state.status.state !== previous) {
       $('live-status').textContent = labels[state.status.state];
       if (state.status.state === 'error') notice(state.status.error || 'Le moteur s’est arrêté. Consultez la configuration.');
     }
   } catch {
-    state.connected = false;
+    state.connected = false; contextMeter.schedule();
   }
   updateControls();
 }
@@ -373,7 +380,7 @@ function openSettings() {
     $('model-path').value = state.config.modelPath || '';
     $('projector-path').value = state.config.projectorPath || '';
     tokenControls.setValues(state.config); computeControls.setValues(state.config);
-    state.settingsReady = true;
+    state.settingsReady = true; settingsGuard.markSaved();
   }).catch(error => {
     if (session !== state.settingsSession || !$('settings').open) return;
     $('config-error').textContent = error.message; $('config-error').hidden = false;
@@ -389,6 +396,7 @@ async function saveConfiguration() {
   $('config-error').hidden = true;
   updateControls();
   try {
+    if (comfyUI.hasPendingImport?.()) throw Error('Terminez ou ignorez l’import de workflow avant d’enregistrer.');
     const config = {
       enginePath: $('engine-path').value, modelPath: $('model-path').value,
       projectorPath: $('projector-path').value, ...tokenControls.values(),
@@ -396,7 +404,9 @@ async function saveConfiguration() {
     };
     const saved=await(await api('settings',{config,comfy:comfyUI.values(),workflowDescriptions:comfyUI.workflowDescriptions()})).json();
     state.config=saved.config;state.comfy=saved.comfy;
-    if (session === state.settingsSession && $('settings').open) { comfyUI.saved(saved); $('settings').close(); }
+    const current = session === state.settingsSession && $('settings').open;
+    if (current) { comfyUI.saved(saved); settingsGuard.markSaved(); $('settings').close(); }
+    contextMeter.schedule(); return current;
   } catch (error) {
     if (session === state.settingsSession && $('settings').open) { $('config-error').textContent = error.message; $('config-error').hidden = false; }
   } finally {
@@ -407,6 +417,7 @@ async function saveConfiguration() {
 
 async function shutdownApplication() {
   if ($('shutdown-app').disabled) return;
+  if (settingsGuard.isDirty()) return settingsGuard.requestClose(() => shutdownApplication());
   const controls = [...document.querySelectorAll('button,input,textarea,select')].map(control => [control, control.disabled]);
   state.closingApp = true; updateControls();
   try {
@@ -439,7 +450,7 @@ async function toggleEngine(stopOnly = false) {
 function resizePrompt() {
   $('prompt').style.height = 'auto';
   $('prompt').style.height = `${Math.min($('prompt').scrollHeight, 180)}px`;
-  updateControls();
+  updateControls(); contextMeter.schedule();
 }
 
 function renderAttachments() {
@@ -457,6 +468,7 @@ function renderAttachments() {
     box.append(preview, remove);
     $('attachments').append(box);
   });
+  contextMeter.schedule();
 }
 
 async function addImages(files) {
@@ -482,6 +494,9 @@ function scrollToBottom() {
 function renderText(target, text) {
   target.classList.add('markdown');
   target.innerHTML = markdownToHtml(text);
+  target.dataset.copyText = text;
+  const copy = target.closest('.message')?.querySelector('[data-copy-response]');
+  if (copy) copy.disabled = !text;
 }
 
 function userMessage(text, images) {
@@ -514,9 +529,20 @@ function assistantMessage() {
   const body = node('div', 'message-body');
   body.append(node('span', 'pending-dot', '●'));
   const note = node('div', 'message-note');
-  article.append(header, reasoning, body, note);
+  const copy = node('button', 'copy-button'); copy.type = 'button'; copy.dataset.copyResponse = ''; copy.disabled = true;
+  copy.setAttribute('aria-label', 'Copier la réponse'); copy.append(icon('copy'), node('span', '', 'Copier'));
+  const footer = node('div', 'message-footer'); footer.append(note, copy);
+  article.append(header, reasoning, body, footer);
   $('messages').append(article);
-  return { article, reasoning, summary, thoughts, body, note };
+  return { article, reasoning, summary, thoughts, body, note, copy };
+}
+
+function userContent(text, images) {
+  return images.length ? [{type:'text',text:text||'Décris les images.'},...images.map(image=>({type:'image_url',image_url:{url:image.url}}))] : text;
+}
+
+function chatRequest(messages, tools = true) {
+  return {messages:[{role:'system',content:'Tu es un assistant local utile. Réponds dans la langue de l’utilisateur. Décris honnêtement les images et signale tes incertitudes.'},...messages],thinking:state.thinking,tools};
 }
 
 async function sendMessage(event) {
@@ -524,14 +550,15 @@ async function sendMessage(event) {
   if ($('send').disabled || state.generating) return;
   if (!state.config.enginePath || !state.config.modelPath) { notice('Renseignez les chemins du moteur et du modèle dans Configuration avant le premier envoi.'); return openSettings(); }
   const text=$('prompt').value.trim(), images=[...state.images];
-  const content=images.length?[{type:'text',text:text||'Décris les images.'},...images.map(image=>({type:'image_url',image_url:{url:image.url}}))]:text;
+  const content=userContent(text,images);
   const history=[...state.messages,{role:'user',content}],userView=userMessage(text,images);
   state.conversationId ||= crypto.randomUUID();const turnId=crypto.randomUUID();
   state.archiveSnapshot={messages:[...history],incomplete:true};
   let view=assistantMessage(),output='',reasoning='',finishReason='',complete=false,lastRender=0,lastArchive=0,usedTool=false;
+  state.generating=true;
   $('welcome').hidden=true;$('prompt').value='';state.images=[];renderAttachments();
-  state.generating=true;state.waitingForModel=true;state.controller=new AbortController();state.stickToBottom=true;
-  const signal=state.controller.signal;resizePrompt();notice('');scrollToBottom();
+  state.waitingForModel=true;state.controller=new AbortController();state.stickToBottom=true;
+  const signal=state.controller.signal;contextMeter.pause();resizePrompt();notice('');scrollToBottom();
   function snapshot(){return {messages:[...history,...(output||reasoning?[{role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{})}]:[])],incomplete:true};}
   function render(){
     view.reasoning.hidden=!reasoning;view.thoughts.textContent=reasoning;
@@ -549,8 +576,9 @@ async function sendMessage(event) {
     while(true){
       signal.throwIfAborted();let request=null;
       view.body.replaceChildren(node('span','pending-dot','●'));
-      const response=await api('chat',{messages:[{role:'system',content:'Tu es un assistant local utile. Réponds dans la langue de l’utilisateur. Décris honnêtement les images et signale tes incertitudes.'},...history],thinking:state.thinking,tools:allowTools,conversationId:state.conversationId,turnId},{signal});
+      const response=await api('chat',{...chatRequest(history,allowTools),conversationId:state.conversationId,turnId},{signal});
       await readSSE(response.body,chunk=>{
+        contextMeter.observe(chunk);
         if(chunk.local_tool_request)request=chunk.local_tool_request;
         const choice=chunk.choices?.[0],delta=choice?.delta||{};
         output+=delta.content||'';reasoning+=delta.reasoning_content||'';if(choice?.finish_reason)finishReason=choice.finish_reason;
@@ -565,6 +593,7 @@ async function sendMessage(event) {
       usedTool=true;iterations++;
       history.push({role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{}),tool_calls:[request.call]});
       output='';reasoning='';
+      if (view.copy) view.copy.disabled = true;
       view.body.replaceChildren(node('span','pending-message',`Outil · ${request.workflowName}`));
       let result;
       try{result=await comfyUI.requestTool(request,signal,progress=>{view.note.textContent=progress;scrollToBottom();});}
@@ -601,8 +630,17 @@ async function sendMessage(event) {
 setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 const tokenControls=setupTokenControls($);
 const computeControls=setupComputeControls($);
-dismissSettingsOnOutsideClick($('settings'));
+dismissSettingsOnOutsideClick($('settings'), () => settingsGuard.requestClose());
 const comfyUI=setupComfy({api,state,node,notice,onChange:()=>refreshStatus(),onSettingsBusyChange:busy=>{state.comfyWorking=busy;updateControls();}});
+
+const settingsGuard=setupSettingsGuard({
+  dialog:$('settings'), confirmation:$('settings-unsaved'), keep:$('settings-keep'), discard:$('settings-discard'), saveButton:$('settings-save-close'), save:saveConfiguration,
+  readDraft:()=>({fields:['engine-path','model-path','projector-path','context-size','output-tokens','compute-mode','gpu-layers','comfy-enabled','comfy-auto','comfy-url','comfy-iterations'].map(id=>[id,id==='comfy-iterations'&&$('comfy-unlimited').getAttribute('aria-pressed')==='true'?null:$(id).value,$(id).checked]), unlimited:$('comfy-unlimited').getAttribute('aria-pressed'), descriptions:comfyUI.workflowDescriptions(), pending:comfyUI.hasPendingImport?.()||false}),
+});
+const contextMeter=setupContextMeter({$,api,getConfig:()=>state.config,isReady:()=>state.connected&&state.status.state==='ready',isBusy:()=>state.generating||!!state.status.toolJob,
+  getRequest:()=>chatRequest([...state.messages,{role:'user',content:userContent($('prompt').value.trim(),state.images)}]),
+});
+setupCopy($('messages'),{announce:message=>{$('live-status').textContent=message;if(message.startsWith('Copie indisponible'))notice(message);}});
 applyTheme(document.documentElement.dataset.theme);
 $('theme-toggle').onclick = toggleTheme;
 $('history-clear').onclick = () => confirmHistoryDeletion();
@@ -645,7 +683,7 @@ $('settings-open').onclick = openSettings;
 $('update-available').onclick = installUpdate;
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('shutdown-app').onclick = shutdownApplication;
-$('settings-close').onclick = () => $('settings').close();
+$('settings-close').onclick = () => settingsGuard.requestClose();
 $('settings-form').onsubmit = (event) => { event.preventDefault(); saveConfiguration(); };
 $('toggle-engine').onclick = () => toggleEngine();
 $('settings-stop').onclick = () => toggleEngine(true);
@@ -656,7 +694,7 @@ $('prompt').onkeydown = (event) => {
 };
 $('chat-form').onsubmit = sendMessage;
 $('cancel').onclick = () => { if(state.controller)state.controller.abort(); else api('tools/cancel',{jobId:state.status.toolJob?.id}).catch(error=>notice(error.message)); };
-$('thinking').onclick = () => { state.thinking = !state.thinking; $('thinking').setAttribute('aria-pressed', String(state.thinking)); };
+$('thinking').onclick = () => { state.thinking = !state.thinking; $('thinking').setAttribute('aria-pressed', String(state.thinking)); contextMeter.schedule(); };
 async function newConversation() {
   if (state.status.toolJob || state.generating || state.preparing || state.loadingHistory) return;
   state.loadingHistory = true;
@@ -696,7 +734,7 @@ document.addEventListener('drop', (event) => event.preventDefault());
 $('chat-area').onscroll = () => { const area = $('chat-area'); state.stickToBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 100; };
 window.addEventListener('beforeunload', (event) => {
   if (state.updateReload) return;
-  if (state.generating || state.savingHistory || state.historyDirty || $('prompt').value.trim() || state.images.length || (!state.saveHistory && state.messages.length)) { event.preventDefault(); event.returnValue = ''; }
+  if (settingsGuard.isDirty() || state.generating || state.savingHistory || state.historyDirty || $('prompt').value.trim() || state.images.length || (!state.saveHistory && state.messages.length)) { event.preventDefault(); event.returnValue = ''; }
 });
 
 try {
@@ -711,6 +749,7 @@ try {
   await comfyUI.refresh();
   await restoreUpdate();
   if (initial.warning) notice(initial.warning);
+  contextMeter.schedule();
   updateControls();
 } catch (error) { notice(error.message); updateControls(); }
 setInterval(() => { if (!document.hidden) refreshStatus(); }, 1200);

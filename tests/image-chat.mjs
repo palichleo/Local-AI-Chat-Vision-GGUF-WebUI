@@ -14,7 +14,7 @@ async function exchange({vision=true,ready=true,images=[png],failed=false,denied
  const requests=[],reviews=[],views=[];
  const context={state,$,AbortController,performance,crypto:{randomUUID:()=> 'a1111111-1111-4111-8111-111111111111'},readSSE,
   node:()=>element(),userMessage:()=>element(),assistantMessage:()=>{const view={article:element(),reasoning:element(),thoughts:element(),body:element(),note:element()};views.push(view);return view;},
-  renderAttachments(){},resizePrompt(){},notice(){},scrollToBottom(){},renderText(){},updateControls(){},openSettings(){},persistConversation:async()=>true,waitForModel:async()=>{},historyWrite:Promise.resolve(),refreshStatus:async()=>{},setConversationTitle(){},
+  contextMeter:{pause(){},observe(){}},renderAttachments(){},resizePrompt(){},notice(){},scrollToBottom(){},renderText(){},updateControls(){},openSettings(){},persistConversation:async()=>true,waitForModel:async()=>{},historyWrite:Promise.resolve(),refreshStatus:async()=>{},setConversationTitle(){},
   comfyUI:{requestTool:async()=>({content:JSON.stringify({status:denied?'denied':failed?'generated':'success'}),images,failed,denied,error:failed?'Model restart failed':'',...(denied||!hasRecord?{}:{record:{id:'run',conversationId:state.conversationId}})}),saveReview:async(...args)=>reviews.push(args)},
   api:async(route,body)=>{
    if(route==='status')return Response.json(status);
@@ -23,7 +23,8 @@ async function exchange({vision=true,ready=true,images=[png],failed=false,denied
    return new Response(events.map(event=>`data: ${JSON.stringify(event)}\n\n`).join('')+'data: [DONE]\n\n');
   }};
  const fn=source.slice(source.indexOf('async function sendMessage('),source.indexOf('setupMaterialLighting(document.'));
- runInNewContext(fn+'\nthis.sendMessage=sendMessage;',context);await context.sendMessage({preventDefault(){}});
+ const helpers=source.slice(source.indexOf('function userContent('),source.indexOf('async function sendMessage('));
+ runInNewContext(helpers+fn+'\nthis.sendMessage=sendMessage;',context);await context.sendMessage({preventDefault(){}});
  return {state,requests,reviews,views};
 }
 

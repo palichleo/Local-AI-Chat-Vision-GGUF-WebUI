@@ -1,3 +1,4 @@
+import { countContext } from './lib/context-count.mjs';
 import http from 'node:http';
 import { compactSession } from './public/update-ui.mjs';
 import { checkForUpdates } from './lib/updates.mjs';
@@ -51,7 +52,7 @@ async function jsonBody(req, limit = maxBody) {
   catch { throw problem('Le JSON reçu est invalide.'); }
 }
 
-function chatPayload(input, vision, maxOutputTokens) {
+function chatPayload(input, vision, maxOutputTokens, allowEmpty = false) {
   if (!input || !Array.isArray(input.messages) || !input.messages.length || input.messages.length > 100) throw problem('La conversation doit contenir entre 1 et 100 messages. Recommence une conversation si nécessaire.');
   const messages = input.messages.map((message, index) => {
     if (!message || !['system', 'user', 'assistant', 'tool'].includes(message.role) || (message.role === 'system' && index !== 0)) throw problem('Rôle de message invalide.');
@@ -90,9 +91,9 @@ function chatPayload(input, vision, maxOutputTokens) {
   }
   if(unresolved.size)throw problem('Résultat d’outil manquant.');
   const last = messages.at(-1);
-  if (!['user','tool'].includes(last.role) || (typeof last.content === 'string' && !last.content.trim())) throw problem('Écris un message ou joins une image.');
+  if (!['user','tool'].includes(last.role) || (!allowEmpty && typeof last.content === 'string' && !last.content.trim())) throw problem('Écris un message ou joins une image.');
   return {
-    model: 'local', messages, stream: true, temperature: 0.7, top_p: 0.95, top_k: 20,
+    model: 'local', messages, stream: true, stream_options: { include_usage: true }, temperature: 0.7, top_p: 0.95, top_k: 20,
     max_tokens: maxOutputTokens, reasoning_format: 'deepseek',
     chat_template_kwargs: { enable_thinking: input.thinking !== false },
   };
@@ -168,6 +169,11 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   const updateController = new AbortController();
   let updates = Promise.resolve({ available: false });
   let controlResponse = null, controlledOnce = false, controlTimer;
+  async function includeTools(payload, body) {
+    const definition = comfy.enabled && body.tools !== false && (runtime.turns.get(body.turnId) || 0) < comfy.maxIterations ? await catalog.definition() : null;
+    if (definition) { payload.tools = [definition]; payload.tool_choice = 'auto'; payload.parallel_tool_calls = false; }
+    return definition;
+  }
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -421,6 +427,20 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return send(202, engine.status());
       }
       if (path === '/api/stop') { if(runtime.active)throw problem('Annule la génération ComfyUI avec le bouton d’interruption.',409); await engine.stop(); return send(200, status()); }
+      if (path === '/api/context') {
+        const payload = chatPayload(body, Boolean(config.projectorPath), config.maxOutputTokens, true);
+        const limits = { capacity: config.contextSize, reserved: config.maxOutputTokens };
+        if (engine.state !== 'ready' || engine.busy || runtime.active) return send(200, { ...limits, used: null, precision: 'unavailable' });
+        const controller = new AbortController();
+        const abort = () => controller.abort(); res.once('close', abort);
+        try {
+          await includeTools(payload, body);
+          const result = await countContext({ base: engine.base, apiKey: engine.apiKey, payload, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]) });
+          return send(200, { ...limits, ...result });
+        } catch { if (!res.destroyed) return send(200, { ...limits, used: null, precision: 'unavailable' }); }
+        finally { res.off('close', abort); }
+        return;
+      }
       if (path !== '/api/chat') throw problem('Route introuvable.', 404);
       if(savingSettings||savingComfy||pickingFile)throw problem('Enregistrement des réglages en cours.',409);
       if(runtime.active)throw problem('ComfyUI utilise le GPU.',409);
@@ -434,11 +454,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       const onClose = () => controller.abort();
       res.once('close', onClose);
       try {
-      const definition=comfy.enabled&&body.tools!==false&&(runtime.turns.get(body.turnId)||0)<comfy.maxIterations?await catalog.definition():null;
-      if(definition){
-        payload.tools=[definition];payload.tool_choice='auto';payload.parallel_tool_calls=false;
-
-      }
+        const definition = await includeTools(payload, body);
         const upstream = await fetch(`${engine.base}/v1/chat/completions`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${engine.apiKey}` },
           body: JSON.stringify(payload), signal: controller.signal,

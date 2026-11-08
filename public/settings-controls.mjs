@@ -63,7 +63,7 @@ export function setupComputeControls($) {
   return { setValues, values };
 }
 
-export function dismissSettingsOnOutsideClick(dialog) {
+export function dismissSettingsOnOutsideClick(dialog, requestClose = () => dialog.close()) {
   let startedOutside = false;
   const outside = event => {
     const bounds = dialog.getBoundingClientRect();
@@ -71,6 +71,6 @@ export function dismissSettingsOnOutsideClick(dialog) {
   };
   dialog.addEventListener('pointerdown', event => { startedOutside = outside(event); });
   dialog.addEventListener('pointercancel', () => { startedOutside = false; });
-  dialog.addEventListener('click', event => { if (startedOutside && outside(event)) dialog.close(); startedOutside = false; });
+  dialog.addEventListener('click', event => { if (startedOutside && outside(event)) requestClose(); startedOutside = false; });
   dialog.addEventListener('close', () => { startedOutside = false; });
 }

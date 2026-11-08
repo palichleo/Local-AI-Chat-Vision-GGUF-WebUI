@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
+import { setupSettingsGuard } from '../public/settings-guard.mjs';
 
 const tick = () => new Promise(setImmediate);
 const savedConfig = { enginePath: 'engine.exe', modelPath: 'saved.gguf', projectorPath: '', contextSize: 4096, maxOutputTokens: 2048, gpuLayers: 999 };
@@ -15,19 +16,20 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
     if (!nodes.has(id)) nodes.set(id, { value: '', textContent: '', hidden: true, disabled: false, open: false, checked: false, dataset: {}, listeners: {}, style: {}, children: [],
       classList: { toggle() {}, contains: () => false, add() {}, remove() {} },
       addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); },
-      setAttribute() {}, append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children = children; }, focus() {},
+      setAttribute() {}, getAttribute:()=>null, append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children = children; }, focus() {},
       close() { this.open = false; for (const listener of this.listeners.close || []) listener(); }, showModal() { this.open = true; } });
     return nodes.get(id);
   };
-  const calls = [], refreshes = [];
+  const calls = [], refreshes = [], windowListeners = {};
   let comfyOptions;
   const comfyUI = { refresh: options => { refreshes.push(options); return refresh(options); }, saved, cancelSettings() {}, setBusy() {}, values: () => savedComfy, workflowDescriptions: () => [], reset() {} };
   const context = { console, AbortController, crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
+    setupSettingsGuard, setupCopy(){},setupContextMeter:()=>({schedule(){},pause(){},observe(){}}),
     setupMaterialLighting() {}, dismissSettingsOnOutsideClick() {}, setupTokenControls: () => ({ setValues() {}, values: () => ({ contextSize: 4096, maxOutputTokens: 2048 }) }),
     setupComputeControls: () => ({ setValues(config) { $('compute-mode').value = String(config.gpuLayers); }, values: () => ({ gpuLayers: 999 }) }),
     setupComfy: options => { comfyOptions = options; return comfyUI; },
     document: { getElementById: $, querySelectorAll: selector => selector === 'button,input,textarea,select' ? [...nodes.values()] : [], documentElement: { dataset: { theme: 'dark' } }, addEventListener() {}, createElement: () => $('node-' + nodes.size), createElementNS: () => $('node-' + nodes.size) },
-    window: { addEventListener() {} },
+    window: { addEventListener(name, listener) { windowListeners[name] = listener; } },
     fetch: async (url, options = {}) => {
       const call = { route: url.replace('/api/', ''), body: options.body === undefined ? undefined : JSON.parse(options.body), options }; calls.push(call);
       if (request) { const response = await request(call); if (response) return response; }
@@ -45,7 +47,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
   const application = source.slice(0, source.lastIndexOf('\ntry {')).replace(/^import .*;\r?\n/gm, '');
   runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };', context);
   Object.assign(context.app.state, { token: 'test', config: { ...savedConfig }, connected: true });
-  return { ...context.app, $, calls, refreshes, comfyUI, comfyOptions, async open() { context.app.openSettings(); await tick(); } };
+  return { ...context.app, $, calls, refreshes, windowListeners, comfyUI, comfyOptions, async open() { context.app.openSettings(); await tick(); } };
 }
 
 test('an older settings load cannot unlock the next dialog', async () => {
@@ -169,4 +171,22 @@ test('a history save failure leaves the app open and restores the settings contr
  const ui=await settingsUI({request:call=>call.route==='history/save'?Response.json({error:'Disk full'},{status:500}):undefined});await ui.open();
  ui.state.messages=[{role:'user',content:'Keep me'}];await ui.shutdownApplication();
  assert.equal(ui.state.connected,true);assert.equal(ui.$('settings-close').disabled,false);assert.equal(ui.$('settings-open').disabled,false);assert.equal(ui.calls.some(call=>call.route==='shutdown'),false);
+});
+
+test('changed paths warn on close and on browser closure; keep and discard preserve the intended settings',async()=>{
+ const ui=await settingsUI();await ui.open();ui.$('model-path').value='unsaved.gguf';ui.$('settings-close').onclick();
+ assert.equal(ui.$('settings').open,true);assert.equal(ui.$('settings-unsaved').open,true);
+ let prevented=false;ui.windowListeners.beforeunload({preventDefault(){prevented=true;}});assert.equal(prevented,true);
+ ui.$('settings-keep').onclick();assert.equal(ui.$('model-path').value,'unsaved.gguf');assert.equal(ui.$('settings').open,true);
+ ui.$('settings-close').onclick();ui.$('settings-discard').onclick();assert.equal(ui.$('settings').open,false);
+ await ui.open();assert.equal(ui.$('model-path').value,savedConfig.modelPath);
+});
+test('immediately saved preferences and reverted fields do not create a false unsaved warning',async()=>{
+ const ui=await settingsUI();await ui.open();ui.$('model-path').value='draft';ui.$('model-path').value=savedConfig.modelPath;
+ ui.$('history-enabled').checked=false;ui.$('theme-toggle').value='light';ui.$('settings-close').onclick();
+ assert.equal(ui.$('settings').open,false);assert.equal(ui.$('settings-unsaved').open,false);
+});
+test('unsaved workflow descriptions prompt, and an unfinished workflow import cannot be discarded by the save button',async()=>{
+ const ui=await settingsUI();await ui.open();ui.comfyUI.workflowDescriptions=()=>[{id:'photo',description:'Draft'}];ui.$('settings-close').onclick();assert.equal(ui.$('settings-unsaved').open,true);ui.$('settings-keep').onclick();
+ ui.comfyUI.hasPendingImport=()=>true;await ui.saveConfiguration();assert.equal(ui.$('settings').open,true);assert.match(ui.$('config-error').textContent,/import/);assert.equal(ui.calls.some(call=>call.route==='settings'),false);
 });

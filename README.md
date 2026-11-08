@@ -68,6 +68,13 @@ The first message automatically starts the configured model and its vision proje
 - **Contexte total** is the shared window for messages, image tokens, reasoning and the reply. **Sortie maximale** independently limits generated tokens per reply, including reasoning: 4,096 by default, with choices up to 32,768 within the selected context. The interface reports a response cut short by an output or context limit. Stop the model before changing these settings, then save; they apply on its next start.
 - Model replies render common Markdown: headings, paragraphs, bold and italic text, strikethrough, lists, quotations, simple tables, links, and inline or fenced code. Formatting updates while the reply streams. Raw model HTML is escaped, unsafe link protocols are rejected, and embedded image syntax does not load remote images.
 
+
+Responses and fenced code blocks have **Copier** buttons. Copying a response keeps its Markdown source; copying a code block excludes its language label and fence markers. A successful copy shows **Copié**. Clipboard failures are reported.
+
+A small context meter below the composer shows the current conversation plus draft, the configured context size and the reserved reply ceiling (including reasoning). The reply ceiling is a limit, not a guaranteed allocation. Counting waits until typing pauses and never starts an idle model. Compatible engines count the actual chat input, including tools and images, without generating a response. Older engines use their text template/tokenizer: **≈** marks an estimate and **≥** marks text-only counting with unknown extra image cost. If counting is unavailable, **—** is shown. Warnings appear as input plus the reply ceiling approaches capacity; messages and settings are never silently reduced.
+
+Closing modified Configuration asks whether to save, keep editing or discard changes. This covers the close button, Escape and outside clicks, with a browser warning on page closure. Theme/history preferences are already saved immediately and do not produce this warning. Finish or skip an incomplete workflow import before saving the main form.
+
 ## Local image generation with ComfyUI
 
 ComfyUI tools are **disabled by default**. Run your own local ComfyUI instance, then open **Configuration → ComfyUI**, enable the connection and enter its API address. The default is `http://127.0.0.1:8188`; a Comfy backend used through SwarmUI may use another local port, such as `http://127.0.0.1:7821`. Use the backend's actual API address. The application does not install ComfyUI, download models or bundle third-party workflows.
@@ -106,7 +113,7 @@ The default context is **8,192 tokens**, with all available model layers request
 
 **CPU uniquement** (CPU only) runs inference on the processor and disables GPU offloading for the vision projector. It may be much slower. Windows/Linux support does not mean that every computer has enough memory for a 9B model. A machine without NVIDIA hardware can use a CPU engine or a llama.cpp build suited to its GPU.
 
-The application does not apply or modify GPU unlocking tools. Windows has been exercised locally; Linux runtime behavior has not yet been verified.
+The application does not apply or modify GPU unlocking tools. Startup, shutdown and update lifecycle smoke tests run on Windows and Ubuntu in GitHub Actions; hardware and model compatibility still depend on the selected engine.
 
 ## Image limits and compression
 

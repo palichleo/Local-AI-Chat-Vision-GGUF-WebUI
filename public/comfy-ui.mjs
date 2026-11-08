@@ -237,5 +237,5 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     }catch(error){if(!terminal)cancel();if(signal.aborted)throw signal.reason;throw error;}
     finally{signal.removeEventListener('abort',cancel);onChange();}
   }
-  return {refresh,cancelSettings,reset,renderGallery,requestTool,saveReview,values,workflowDescriptions,saved,setBusy};
+  return {refresh,cancelSettings,reset,renderGallery,requestTool,saveReview,values,workflowDescriptions,hasPendingImport:()=>!!importGraph||queue.length>0,saved,setBusy};
 }
