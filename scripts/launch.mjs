@@ -44,14 +44,22 @@ export async function runLauncher({root=resolve(dirname(fileURLToPath(import.met
       console.log(`\nAtelier local — ${url}\nGardez cette fenêtre ouverte. Ctrl+C arrête l’application et son modèle.\n`);
       if(open&&!opened){openBrowser(url);opened=true;}
       reader=response.body.getReader();let buffer='',lastState;
-      while(true){
+      let lost;
+      try{while(true){
         const {value,done}=await reader.read();if(done)break;
         buffer+=new TextDecoder().decode(value);if(buffer.length>4096)throw Error('Réponse de contrôle invalide.');
         let newline;while((newline=buffer.indexOf('\n'))!==-1){const line=buffer.slice(0,newline);buffer=buffer.slice(newline+1);if(line)lastState=JSON.parse(line).state;}
-      }
+      }}catch(error){lost=error;}
+      if(lost)await reader.cancel().catch(()=>{});
       reader.releaseLock();reader=null;
+      signal.throwIfAborted();
       if(lastState==='stopped')return;
-      if(lastState!=='restarting')throw Error('La connexion de contrôle a été interrompue.');
+      if(lastState!=='restarting'){
+        const deadline=Date.now()+1500;let live;
+        while(Date.now()<deadline){live=await bootstrap();if(live?.token===boot.token)break;await delay(100,undefined,{signal});}
+        if(live?.token===boot.token){console.log('Reconnexion au serveur local…');continue;}
+        throw lost||Error('La connexion de contrôle a été interrompue.');
+      }
       restarting=true;console.log('Mise à jour en cours… Cette fenêtre reste active.');
       boot=await ready(boot.token,90000);restarting=false;
     }

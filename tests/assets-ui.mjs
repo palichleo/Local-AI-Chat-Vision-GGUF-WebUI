@@ -23,3 +23,8 @@ test('output details expose full prompts, workflow, seed and available parameter
  await ui.viewOutput(record,0);assert.equal($('original-dialog').open,true);const texts=$('media-metadata').children.map(item=>item.textContent);assert.ok(texts.includes(record.prompt));assert.ok(texts.includes(record.workflowName));assert.ok(texts.includes('42'));assert.ok(texts.some(text=>text.includes('1024')));assert.match($('media-error').textContent,/Aperçu compressé/);
  $('original-close').onclick();assert.equal($('original-dialog').open,false);
 });
+
+test('chat details reuse the displayed original blob and persisted original dimensions',async t=>{
+ const {ui,$,calls}=await fixture(t),original=new Blob(['Original'],{type:'image/png'}),record={id:'run',conversationId:'conversation',workflowName:'Workflow',prompt:'Prompt',createdAt:'2026-01-02T12:00:00Z',parameters:{},outputs:[{source:{filename:'original.png'},width:1448,height:1448}]};
+ const count=calls.length;await ui.viewOutput(record,0,original);assert.equal(calls.length,count);assert.equal($('media-download').disabled,false);assert.ok($('media-metadata').children.some(item=>item.textContent==='1448 × 1448'));assert.equal(await(await fetch($('original-image').src)).text(),'Original');$('original-close').onclick();
+});

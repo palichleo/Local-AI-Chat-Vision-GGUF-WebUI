@@ -254,3 +254,10 @@ test('a committed import is not retried when the subsequent metadata refresh fai
  setIntercept(route=>route==='comfy'?Promise.reject(Error('Disconnected')):undefined);
  assert.equal(await ui.finishImport(),true);assert.equal(ui.hasPendingImport(),false);assert.equal(await ui.finishImport(),true);assert.equal(calls.filter(call=>call.route==='comfy/import').length,1);
 }));
+
+test('the original reaches the chat during model reload, while only a compressed copy goes to analysis',async()=>fixture(async({ui,state,calls,setIntercept})=>{
+ state.conversationId='conversation';let shown=false;const bytes=Buffer.from('89504e470d0a1a0a0102030405060708','hex');
+ setIntercept(route=>route==='tools/execute'?Response.json({id:'mine',state:'restarting',progress:'Reloading',record:generatedRecord}):route==='tools/job'?Response.json({id:'mine',state:'done',record:generatedRecord}):route==='gallery/conversation'?Response.json({runs:[generatedRecord]}):route.endsWith('/mine/0')?new Response(bytes,{headers:{'Content-Type':'image/png'}}):route==='gallery/analysis'?Response.json({}):undefined);
+ await rasterStub(async()=>{const result=await ui.requestTool({autoAllow:true,requestId:'request-mine'},new AbortController().signal,()=>{},({blob})=>{shown=true;assert.equal(blob.size,bytes.length);assert.equal(calls.some(call=>call.route==='tools/job'),false);});assert.equal(shown,true);assert.equal(result.images[0],'data:image/jpeg;base64,/9j/');const analysis=calls.find(call=>call.route==='gallery/analysis');assert.deepEqual(analysis.body.images,result.images);assert.notEqual(analysis.body.images[0].split(',')[1],bytes.toString('base64'));});
+ assert.equal(calls.filter(call=>call.route.endsWith('/mine/0')).length,1);
+}));

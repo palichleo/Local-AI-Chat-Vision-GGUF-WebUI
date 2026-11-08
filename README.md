@@ -28,6 +28,15 @@ Open **http://127.0.0.1:8787**. Keep the launcher window open; it stays attached
 
 There is no need to run `npm install`. You can also use `npm start`.
 
+## Generation previews and reference traceability
+
+The chat shows an animated organic frame while ComfyUI runs and replaces it with the original output as soon as it can be retrieved, including while the language model reloads. This original is only a browser display blob; only compressed analysis copies are sent to the model. Declared numeric dimensions determine the loading frame ratio when known. If dimensions depend on an unexecuted custom node, the preview starts square and adopts the original size when available. No custom node formula is guessed. Reduced-motion preferences stop the animation.
+
+Resources have persistent `Ref 1`, `Ref 2`, … labels shared by the UI and the model catalog. Deactivating or deleting a resource does not renumber the remaining references. The native reading tool can inspect up to eight distinct resources together per turn. Temporary pixels are labeled separately and excluded from saved conversation messages. Generation records report the number of image references actually transmitted and the workflow's configured capacity; a text-only preset does not gain reference-image inputs from its description. Configure a suitable workflow before expecting reference pixels to reach ComfyUI.
+
+The launcher sends a control heartbeat every ten seconds and retries a briefly interrupted connection. Closing its terminal still stops its own model and server after a short reconnect grace period. Existing saved chats and ComfyUI originals are preserved.
+
+
 ## Multiple ComfyUI references
 
 When importing an API workflow, open **Entrées que le modèle peut modifier → Images de référence → Ajouter une entrée**. For each image input, choose its existing filename field in the graph, give it a name and a short role description, and mark it required if needed. Add as many separate inputs as the workflow supports (up to 64 for validation). Image roles and custom node types are not guessed. The workflow must already connect these inputs to its processing nodes; the app does not create connections, batch nodes or image mergers.

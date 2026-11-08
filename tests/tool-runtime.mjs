@@ -26,7 +26,7 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
   digest='one'; const p=await rt.request(calls,{conversationId:id,turnId:id,messages:[]});
   const job=await rt.execute({requestId:p.requestId,permission:'once'});
   await rt.finished;
-  assert.equal(rt.job.state,'done'); assert.equal(job.id,rt.job.id);
+  assert.equal(rt.job.state,'done'); assert.equal(job.id,rt.job.id);assert.equal(rt.job.record.parameters.reference_count,0);assert.equal(rt.job.record.parameters.reference_capacity,0);assert.equal(rt.job.record.parameters.reference_mode,'text_only');
   assert.deepEqual(order,['stop','run','free','start']); assert.equal(runs,1);
   await assert.rejects(rt.execute({requestId:p.requestId,permission:'once'}),/expiré/i);
   await assert.rejects(rt.request(calls,{conversationId:id,turnId:id,messages:[]}),/limite/i);

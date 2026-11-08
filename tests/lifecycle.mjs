@@ -44,3 +44,13 @@ test('authenticated application shutdown stops its own model and releases the li
  await until(async()=>child.exitCode!==null||child.signalCode!==null);
  await until(async()=>{try{await fetch(app.url+'/api/bootstrap');return false;}catch{return true;}});
 });
+
+test('control heartbeats prevent idle loss and a short transport interruption allows reconnection',async t=>{
+ const {app,api}=await fixture(t,{controlHeartbeatMs:20,controlReconnectMs:250});
+ let control=await api('lifecycle'),reader=control.body.getReader();let beats=0;
+ const untilTime=Date.now()+130;
+ while(Date.now()<untilTime){const next=await Promise.race([reader.read(),new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('Idle control stream timed out')),150);timer.unref();})]);assert.equal(next.done,false);beats+=new TextDecoder().decode(next.value).split('running').length-1;}
+ assert.ok(beats>=3);await reader.cancel();await new Promise(resolve=>setTimeout(resolve,50));assert.equal((await api('status')).status,200);
+ control=await api('lifecycle');reader=control.body.getReader();await reader.read();await new Promise(resolve=>setTimeout(resolve,350));assert.equal((await api('status')).status,200);await reader.cancel();
+ await until(async()=>{try{await fetch(app.url+'/api/bootstrap');return false;}catch{return true;}});
+});

@@ -12,7 +12,7 @@ const resourceId='a1111111-1111-4111-8111-111111111111';
 const first=Buffer.from('89504e470d0a1a0a01','hex'),second=Buffer.from('89504e470d0a1a0a02','hex');
 const data=bytes=>'data:image/png;base64,'+bytes.toString('base64');
 function workflow(){return {id:'two-refs',name:'Custom two-image workflow',description:'Combine the subject and the style.',
- graph:{'11':{class_type:'CustomPrompt',inputs:{instruction:'Original'}},'42':{class_type:'CustomFileLoader',inputs:{source_file:'old-subject.png',strength:0.7}},'73':{class_type:'AnotherCustomLoader',inputs:{style_file:'old-style.png'}},'99':{class_type:'CustomImageSaver',inputs:{images:['42',0]}}},
+ graph:{'11':{class_type:'CustomPrompt',inputs:{instruction:'Original'}},'42':{class_type:'CustomFileLoader',inputs:{source_file:'old-subject.png',strength:0.7}},'73':{class_type:'AnotherCustomLoader',inputs:{style_file:'old-style.png'}},'99':{class_type:'CustomImageSaver',inputs:{images:['42',0],style:['73',0]}}},
  bindings:{prompt:{node:'11',input:'instruction'}},outputNodes:['99'],imageInputs:[
  {id:'subject',name:'Sujet',description:'Personnage à conserver.',node:'42',input:'source_file',required:true},
  {id:'style',name:'Style',description:'Palette et rendu à reprendre.',node:'73',input:'style_file',required:false}]};}
@@ -20,6 +20,7 @@ async function catalogTest(fn){const directory=await mkdtemp(join(tmpdir(),'atel
 
 test('multiple declared image inputs persist and route uploads without any node-class convention',async()=>catalogTest(async(catalog,directory)=>{
  const saved=await new WorkflowCatalog(directory).read('two-refs');assert.equal(saved.imageInputs.length,2);
+ const broken=workflow();delete broken.graph['99'].inputs.style;await catalog.save(broken);await assert.rejects(catalog.prepare('two-refs',{prompt:'New',references:[{input:'subject',image:0},{input:'style',image:1}]},{referenceImages:{subject:'one.png',style:'two.png'}}),/not connected/);await catalog.save(workflow());
  const refs=[{input:'style',resource_id:resourceId,frame:1},{input:'subject',image:0}];
  const prepared=await catalog.prepare('two-refs',{prompt:'New',references:refs},{referenceImages:{subject:{name:'one.png',subfolder:'refs',type:'input'},style:{name:'two.png',subfolder:'different',type:'input'}}});
  assert.equal(prepared.graph['42'].inputs.source_file,'refs/one.png');assert.equal(prepared.graph['73'].inputs.style_file,'different/two.png');

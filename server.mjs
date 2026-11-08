@@ -1,4 +1,4 @@
-import { Resources, resourceCatalogPrompt, resourceTool } from './lib/resources.mjs';
+import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
 import { countContext } from './lib/context-count.mjs';
 import http from 'node:http';
@@ -32,6 +32,7 @@ const staticFiles = new Map([
   ['/material-light.mjs', ['material-light.mjs', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/generation-ui.mjs', ['generation-ui.mjs','text/javascript; charset=utf-8']],
   ['/assets-ui.mjs', ['assets-ui.mjs','text/javascript; charset=utf-8']],
   ['/resource-preparation.mjs', ['resource-preparation.mjs','text/javascript; charset=utf-8']],
   ['/copy.mjs', ['copy.mjs', 'text/javascript; charset=utf-8']],
@@ -106,7 +107,7 @@ function chatPayload(input, vision, maxOutputTokens, allowEmpty = false) {
   };
 }
 
-export async function createApplication({ port = 8787, dataDir = join(root, 'data'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null, managed = false, controlTimeoutMs = 15000 } = {}) {
+export async function createApplication({ port = 8787, dataDir = join(root, 'data'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null, managed = false, controlTimeoutMs = 15000, controlHeartbeatMs = 10000, controlReconnectMs = 2000, chatHeartbeatMs = 10000 } = {}) {
   await mkdir(dataDir, { recursive: true });
   const { version: applicationVersion } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   let applyingUpdate = false, installState = { state: 'idle', error: '' };
@@ -198,7 +199,11 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         definitions.push(definition);
       }
     }
-    if(active.length&&engine.vision&&body.tools!==false&&body.resources!==false&&(resourceTurns.get(body.turnId)||0)<8)definitions.push(resourceTool);
+    if(active.length&&engine.vision&&body.tools!==false&&body.resources!==false&&(resourceTurns.get(body.turnId)||0)<8){
+      const definition=structuredClone(resourceTool),ids=active.map(item=>item.id);
+      definition.function.parameters.properties.resource_id.enum=ids;definition.function.parameters.properties.resource_ids.items.enum=ids;definition.function.parameters.properties.resource_ids.maxItems=8-(resourceTurns.get(body.turnId)||0);
+      definitions.push(definition);
+    }
     if(definitions.length){payload.tools=definitions;payload.tool_choice='auto';payload.parallel_tool_calls=false;}
     return definitions;
   }
@@ -242,11 +247,14 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (path === '/api/lifecycle' && req.method === 'GET') {
         if (closing || controlResponse) throw problem('Une fenêtre contrôle déjà cette application.', 409);
         controlResponse = res; controlledOnce = true; clearTimeout(controlTimer);
-        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
-        res.write(JSON.stringify({ state: 'running' }) + '\n');
+        req.socket.setTimeout(0);res.setTimeout(0);
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control':'no-store', 'X-Accel-Buffering':'no' });
+        const heartbeat=()=>{if(!res.destroyed&&!res.writableEnded)res.write(JSON.stringify({state:'running'})+'\n');};
+        heartbeat();const keepalive=setInterval(heartbeat,controlHeartbeatMs);keepalive.unref();
         res.once('close', () => {
+          clearInterval(keepalive);
           if (controlResponse === res) controlResponse = null;
-          if (!closing) void stopApplication().catch(console.error);
+          if (!closing) {clearTimeout(controlTimer);controlTimer=setTimeout(()=>{void stopApplication().catch(console.error);},controlReconnectMs);controlTimer.unref();}
         });
         return;
       }
@@ -306,7 +314,10 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         if((runtime.active||engine.busy)&&(await resources.record(body.id)).ready)throw problem('Attends la fin de la réponse avant de supprimer une ressource.',409);
         await resources.remove(body.id);return send(200,{deleted:true});
       }
-      if(path==='/api/resources/read')return send(200,await resources.readActive(body.id));
+      if(path==='/api/resources/read'){
+        if(body.ids!==undefined){const ids=resourceReadIds({resource_ids:body.ids});return send(200,{resources:await Promise.all(ids.map(id=>resources.readActive(id)))});}
+        return send(200,await resources.readActive(body.id));
+      }
       if (path === '/api/updates/session/clear') { await rm(join(dataDir, 'update-session.json'), { force: true }); return send(200, { cleared: true }); }
       if (path === '/api/updates/install') {
         const available = await updates;
@@ -401,7 +412,8 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
           record.analysis={text:body.text,status:body.status,checkedAt:new Date().toISOString()};
         }else{
         if(!Array.isArray(body.images)||body.images.length!==record.outputs.length)throw problem('Copies d’analyse invalides.');
-        record.outputs=record.outputs.map((output,i)=>({...output,analysisDataUrl:body.images[i]}));
+        if(body.dimensions!==undefined&&(!Array.isArray(body.dimensions)||body.dimensions.length!==record.outputs.length||body.dimensions.some(size=>size!==null&&(!size||![size.width,size.height].every(value=>Number.isInteger(value)&&value>0&&value<=131072)))))throw problem('Résolutions de sortie invalides.');
+        record.outputs=record.outputs.map((output,i)=>({...output,analysisDataUrl:body.images[i],...(body.dimensions?.[i]||{})}));
         }
         return send(200,await gallery.put(record,{persist:preferences.saveHistory}));
         } finally { persistingGallery=false; }
@@ -504,6 +516,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       engine.busy = true;
       const onClose = () => controller.abort();
       res.once('close', onClose);
+      let streamHeartbeat;
       try {
         const definitions = await includeTools(payload, body);
         const upstream = await fetch(`${engine.base}/v1/chat/completions`, {
@@ -515,6 +528,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
           throw problem(`Le moteur refuse la requête (${upstream.status}). ${detail}`, 502);
         }
         res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'X-Accel-Buffering': 'no' });
+        streamHeartbeat=setInterval(()=>{if(!res.destroyed&&!res.writableEnded)res.write(': keepalive\n\n');},chatHeartbeatMs);streamHeartbeat.unref();
         const calls=[];let terminalReason='';
         const emit=async(event)=>{
           if(res.destroyed)return;
@@ -527,15 +541,17 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
           if(calls[0].function.name==='local_read_resource'){
             const call=nativeFields({role:'assistant',tool_calls:calls}).tool_calls[0];let args;
             try{args=JSON.parse(call.function.arguments);}catch{throw problem('Paramètres de ressource invalides.',502);}
-            if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(key=>key!=='resource_id')||!body.turnId||!/^[0-9a-f-]{36}$/.test(body.turnId)||(resourceTurns.get(body.turnId)||0)>=8)throw problem('Lecture de ressource invalide.',502);
-            const resource=await resources.activeRecord(args.resource_id);
-            resourceTurns.set(body.turnId,(resourceTurns.get(body.turnId)||0)+1);if(resourceTurns.size>256)resourceTurns.delete(resourceTurns.keys().next().value);
-            await emit({local_tool_request:{kind:'resource',call,resourceId:resource.id,workflowName:resource.name}});
+            const ids=resourceReadIds(args);
+            if(!body.turnId||!/^[0-9a-f-]{36}$/.test(body.turnId)||(resourceTurns.get(body.turnId)||0)+ids.length>8)throw problem('La limite de huit lectures pour ce tour est atteinte.',502);
+            const selected=await Promise.all(ids.map(id=>resources.activeRecord(id)));
+            resourceTurns.set(body.turnId,(resourceTurns.get(body.turnId)||0)+ids.length);if(resourceTurns.size>256)resourceTurns.delete(resourceTurns.keys().next().value);
+            await emit({local_tool_request:{kind:'resource',call,resourceId:selected[0].id,resourceIds:ids,workflowName:selected.map(item=>item.label+' · '+item.name).join(', ')}});
           }else await emit({local_tool_request:await runtime.request(calls,{conversationId:body.conversationId,turnId:body.turnId,messages:body.messages})});
         }
         res.write('data: [DONE]\n\n');
         res.end();
       } finally {
+        clearInterval(streamHeartbeat);
         res.off('close', onClose);
         if (engine.activeRequest === controller) {
           engine.activeRequest = null;

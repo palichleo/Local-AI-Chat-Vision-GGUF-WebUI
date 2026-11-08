@@ -45,7 +45,7 @@ test('closing aborts unfinished uploads and removes partial application copies',
 });
 async function apiFixture(t,{engine=false}={}){
  const root=await directory(t);let app;
- const options={port:0,dataDir:root,...(engine?{spawnProcess:(_command,args,config)=>spawn(process.execPath,[fileURLToPath(new URL('./fixtures/fake-resource-engine.mjs',import.meta.url)),...args],config)}:{})};
+ const options={port:0,dataDir:root,chatHeartbeatMs:20,...(engine?{spawnProcess:(_command,args,config)=>spawn(process.execPath,[fileURLToPath(new URL('./fixtures/fake-resource-engine.mjs',import.meta.url)),...args],config)}:{})};
  app=await createApplication(options);t.after(()=>app.close());let token=(await(await fetch(app.url+'/api/bootstrap')).json()).token;
  const request=(route,body)=>fetch(app.url+'/api/'+route,{method:body===undefined?'GET':'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
  const upload=async()=>{const response=await fetch(app.url+'/api/resources/upload',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'image/png','X-Resource-Name':encodeURIComponent('native.png')},body:bytes});assert.equal(response.status,201);const record=await response.json();return (await request('resources/update',{id:record.id,patch:{description:'Blue light reference',prepared:{width:1,height:1,frames:[{url:png,time:null}]}}})).json();};
@@ -68,7 +68,8 @@ test('native resource lookup receives the current active catalog without handing
  assert.equal(native.kind,'resource');assert.equal(native.resourceId,active.id);assert.doesNotMatch(JSON.stringify(events),/base64/);
  assert.equal((await(await f.request('status')).json()).state,'ready');assert.equal((await(await f.request('status')).json()).toolJob,null);
  const inspected=[];await readSSE((await f.request('chat',{messages:[{role:'user',content:'inspect resources'}],turnId:randomUUID(),conversationId:randomUUID()})).body,event=>inspected.push(event));const body=inspected.find(event=>event.local_test_payload).local_test_payload;
- assert.match(body.messages[0].content,/Blue light reference/);assert.doesNotMatch(body.messages[0].content,/Hidden annotation/);assert.equal(body.tools[0].function.name,'local_read_resource');
+ assert.match(body.messages[0].content,/Blue light reference/);assert.doesNotMatch(body.messages[0].content,/Hidden annotation/);assert.equal(body.tools[0].function.name,'local_read_resource');assert.deepEqual(body.tools[0].function.parameters.properties.resource_id.enum,[active.id]);
+ const another=await f.upload(),batch=[];await readSSE((await f.request('chat',{messages:[{role:'user',content:'read-many '+[active.id,another.id].join(',')}],turnId:randomUUID(),conversationId:randomUUID()})).body,event=>batch.push(event));assert.deepEqual(batch.find(event=>event.local_tool_request).local_tool_request.resourceIds,[active.id,another.id]);assert.doesNotMatch(JSON.stringify(batch),/base64/);
 });
 
 test('deleting a resource closes its open media handles before removing its managed copies',async t=>{const root=await directory(t),store=new Resources(join(root,'resources')),record=await image(store),asset=await store.media(record.id,'original');await store.remove(record.id);await assert.rejects(asset.handle.stat());assert.equal((await store.list()).length,0);});
@@ -77,5 +78,12 @@ test('a new import can finalize while another client chats, without allowing act
  const f=await apiFixture(t,{engine:true});const modelPath=join(f.root,'model.gguf');await writeFile(modelPath,Buffer.from('GGUF\x03\0\0\0'));await f.request('config',{enginePath:process.execPath,modelPath,projectorPath:'',contextSize:8192,maxOutputTokens:1024,gpuLayers:0});await f.request('start',{});
  const end=Date.now()+10000;while((await(await f.request('status')).json()).state!=='ready'){if(Date.now()>end)assert.fail('Engine did not start');await new Promise(resolve=>setTimeout(resolve,30));}
  const response=await f.request('chat',{messages:[{role:'user',content:'slow resource test'}],turnId:randomUUID(),conversationId:randomUUID()}),reader=response.body.getReader();await reader.read();assert.equal((await(await f.request('status')).json()).busy,true);
- try{const resource=await f.upload();assert.equal(resource.ready,true);assert.equal((await f.request('resources/update',{id:resource.id,patch:{enabled:false}})).status,409);}finally{await reader.cancel();}
+ try{const heartbeat=await Promise.race([reader.read(),new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('Chat stream idle timeout')),1000);timer.unref();})]);assert.match(new TextDecoder().decode(heartbeat.value),/keepalive/);const resource=await f.upload();assert.equal(resource.ready,true);assert.equal((await f.request('resources/update',{id:resource.id,patch:{enabled:false}})).status,409);}finally{await reader.cancel();}
+});
+
+test('reference labels survive deactivation, deletion, additional imports and reopening',async t=>{
+ const root=await directory(t),path=join(root,'resources'),store=new Resources(path),a=await image(store,'a.png'),b=await image(store,'b.png');
+ assert.equal(a.label,'Ref 1');assert.equal(b.label,'Ref 2');await store.update(a.id,{enabled:false});assert.equal((await store.catalog())[0].label,'Ref 2');
+ await store.remove(a.id);const c=await image(new Resources(path),'c.png');assert.equal(c.label,'Ref 3');assert.deepEqual((await new Resources(path).list()).map(item=>item.label),['Ref 2','Ref 3']);
+ const f=await apiFixture(t),one=await f.upload(),two=await f.upload();const result=await(await f.request('resources/read',{ids:[one.id,two.id]})).json();assert.deepEqual(result.resources.map(item=>item.label),['Ref 1','Ref 2']);await f.request('resources/update',{id:two.id,patch:{enabled:false}});assert.equal((await f.request('resources/read',{ids:[one.id,two.id]})).status,403);
 });

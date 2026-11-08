@@ -186,3 +186,9 @@ test('hardlinked manifests and analysis copies cannot alias an original file', a
   assert.equal(await readFile(original, 'base64'), png.split(',')[1]);
   assert.ok(await readFile(manifestOriginal, 'utf8'));
 });
+
+test('original pixel dimensions survive persistence and later metadata writes',async t=>{
+ const {historyDir}=await fixture(t),gallery=new ComfyGallery({historyDir}),run=record();run.outputs[0].width=1448;run.outputs[0].height=1448;await gallery.put(run,{persist:true});
+ const restored=await new ComfyGallery({historyDir}).get(run.conversationId,run.id);assert.equal(restored.outputs[0].width,1448);assert.equal(restored.outputs[0].height,1448);
+ const stale=record({...run,outputs:[{source:run.outputs[0].source}],analysis:{text:'Review'}});await gallery.put(stale,{persist:true});assert.equal((await gallery.get(run.conversationId,run.id)).outputs[0].width,1448);
+});

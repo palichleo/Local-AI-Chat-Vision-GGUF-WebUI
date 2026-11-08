@@ -20,7 +20,7 @@ export function setupAssets({api,state,node,icon,notice,onChange=()=>{},onBusy=(
    preview.onclick=()=>viewResource(resource);
    const remove=node('button','resource-remove icon-button');remove.type='button';remove.setAttribute('aria-label','Supprimer '+resource.name);remove.title='Supprimer la copie de la bibliothèque';remove.append(icon('trash'));controls.add(remove);
    remove.onclick=()=>mutate(async()=>{await api('resources/delete',{id:resource.id});items=items.filter(item=>item.id!==resource.id);render();});
-   const name=node('strong','resource-name',resource.name);name.title=resource.name;
+   const name=node('strong','resource-name',`${resource.label||'Ressource'} · ${resource.name}`);name.title=resource.name;
    const enabled=node('input');enabled.type='checkbox';enabled.checked=resource.enabled;enabled.dataset.unready=String(!resource.ready);enabled.setAttribute('role','switch');enabled.setAttribute('aria-label','Activer '+resource.name);controls.add(enabled);
    const label=node('label','resource-enabled');const status=node('span','',resource.ready?(resource.enabled?'Active':'Inactive'):'Indisponible');label.append(enabled,status);
    enabled.onchange=()=>{const wanted=enabled.checked;mutate(async()=>{try{Object.assign(resource,await(await api('resources/update',{id:resource.id,patch:{enabled:wanted}})).json());card.classList.toggle('inactive',!resource.enabled);status.textContent=resource.enabled?'Active':'Inactive';count();}catch(error){enabled.checked=resource.enabled;throw error;}});};
@@ -44,7 +44,7 @@ export function setupAssets({api,state,node,icon,notice,onChange=()=>{},onBusy=(
      $('resource-progress').textContent=`Import ${finished} / ${files.length} · ${file.name}`;
      uploaded=await(await api('resources/upload',file,{raw:true,signal,headers:{'Content-Type':prepared.mime,'X-Resource-Name':encodeURIComponent(file.name)}})).json();
      const resource=await(await api('resources/update',{id:uploaded.id,patch:{prepared}},{signal})).json();
-     items.unshift(resource);count();
+     items.push(resource);items.sort((a,b)=>(a.reference||0)-(b.reference||0));count();
     }catch(error){if(uploaded)await api('resources/delete',{id:uploaded.id}).catch(()=>{});if(signal.aborted)throw error;notice(`${file.name} : ${error.message}`);}
    }
    $('resource-progress').textContent='Import terminé.';
@@ -63,22 +63,22 @@ export function setupAssets({api,state,node,icon,notice,onChange=()=>{},onBusy=(
  function begin(name){cleanViewer();$('original-name').textContent=name;$('media-metadata').replaceChildren();$('media-error').textContent='';$('original-image').hidden=true;$('original-video').hidden=true;$('media-download').disabled=false;if(!$('original-dialog').open)$('original-dialog').showModal();return viewVersion;}
  function download(url,name){$('media-download').onclick=()=>{const link=node('a');link.href=url;link.download=name;link.click();};}
  function viewResource(resource){
-  begin(resource.name);row('Type',resource.mime);row('Description',resource.description||'Sans description');row('Ajoutée le',resource.createdAt?new Date(resource.createdAt).toLocaleString('fr-FR'):null);row('Taille',resource.size?size(resource.size):null);row('Résolution',resource.width?`${resource.width} × ${resource.height}`:null);row('État',resource.enabled?'Active pour le modèle':'Inactive');
+  begin(resource.name);row('Référence',resource.label);row('Type',resource.mime);row('Description',resource.description||'Sans description');row('Ajoutée le',resource.createdAt?new Date(resource.createdAt).toLocaleString('fr-FR'):null);row('Taille',resource.size?size(resource.size):null);row('Résolution',resource.width?`${resource.width} × ${resource.height}`:null);row('État',resource.enabled?'Active pour le modèle':'Inactive');
   if(resource.mime?.startsWith('video/')){row('Durée',resource.duration?duration(resource.duration):null);row('Vision du modèle','Trois images représentatives au maximum, sans audio.');$('original-video').hidden=false;$('original-video').src=resource.originalUrl;}
   else{$('original-image').hidden=false;$('original-image').src=resource.originalUrl;}
   download(resource.originalUrl,resource.name);
  }
- async function viewOutput(record,index){
+ async function viewOutput(record,index,originalBlob){
   const output=record.outputs[index],version=begin(output.source.filename);viewController=new AbortController();
   row('Workflow',record.workflowName);row('Prompt',record.prompt);row('Date',new Date(record.createdAt).toLocaleString('fr-FR'));row('Seed',record.parameters.seed);
-  const resolution=row('Résolution originale',null);row('Fichier',output.source.filename);row('Identifiant',record.id);
+  const resolution=row('Résolution originale',output.width&&output.height?`${output.width} × ${output.height}`:null);row('Fichier',output.source.filename);row('Identifiant',record.id);
   const other=Object.fromEntries(Object.entries(record.parameters).filter(([key])=>!['seed','prompt','workflow_id'].includes(key)));if(Object.keys(other).length)row('Paramètres',JSON.stringify(other,null,2));
   if(record.analysis?.text)row('Analyse du modèle',record.analysis.text);
   $('media-download').disabled=true;$('media-error').textContent='Chargement de l’original…';
   if(output.analysisDataUrl){$('original-image').src=output.analysisDataUrl;$('original-image').hidden=false;}
   try{
-   const blob=await(await api(`gallery/${record.conversationId}/${record.id}/${index}`,undefined,{signal:viewController.signal})).blob();if(version!==viewVersion||!$('original-dialog').open)return;
-   row('Format',blob.type||'image');row('Taille',size(blob.size));objectURL=URL.createObjectURL(blob);const img=$('original-image');img.onload=()=>{if(version===viewVersion){resolution.textContent=`${img.naturalWidth} × ${img.naturalHeight}`;$('media-error').textContent='';}};img.src=objectURL;img.hidden=false;download(objectURL,output.source.filename);$('media-download').disabled=false;
+   const blob=originalBlob||await(await api(`gallery/${record.conversationId}/${record.id}/${index}`,undefined,{signal:viewController.signal})).blob();if(version!==viewVersion||!$('original-dialog').open)return;
+   row('Format',blob.type||'image');row('Taille',size(blob.size));objectURL=URL.createObjectURL(blob);const img=$('original-image');img.onload=()=>{if(version===viewVersion){resolution.textContent=`${img.naturalWidth} × ${img.naturalHeight}`;$('media-error').textContent='';}};img.src=objectURL;img.hidden=false;if(img.decode)void img.decode().then(()=>{if(version===viewVersion&&img.naturalWidth){resolution.textContent=`${img.naturalWidth} × ${img.naturalHeight}`;$('media-error').textContent='';}}).catch(()=>{});download(objectURL,output.source.filename);$('media-download').disabled=false;
   }catch(error){if(version!==viewVersion)return;$('media-error').textContent='Original indisponible : '+error.message;if(output.analysisDataUrl){$('original-image').src=output.analysisDataUrl;$('original-image').hidden=false;$('media-error').textContent+=' · Aperçu compressé affiché.';}}
  }
  show('resources');sync();ready=true;

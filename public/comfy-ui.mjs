@@ -105,7 +105,7 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
       description.placeholder='Ex. : portraits réalistes, style cinéma, lumière douce…';description.setAttribute('aria-label',`Quand utiliser ${workflow.name}`);
       description.value=descriptions.get(workflow.id)??workflow.description;
       description.oninput=()=>{if(description.value===workflow.description)descriptions.delete(workflow.id);else descriptions.set(workflow.id,description.value);};
-      card.append(header,description);$('workflow-list').append(card);
+      const count=workflow.imageInputs?.length||(workflow.bindings?.image?1:0);card.append(header,description,node('small','comfy-help',count?`${count} entrée(s) image configurée(s)`:'Aucune entrée image configurée · références transmises par le texte uniquement'));$('workflow-list').append(card);
     }
     setBusy(busy);
   }
@@ -230,35 +230,42 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     });
   }
   async function saveReview(record,text,status){await api('gallery/review',{id:record.id,conversationId:record.conversationId,text,status});await renderGallery(record.conversationId);}
-  async function requestTool(request,signal,onProgress){
+  async function requestTool(request,signal,onProgress,onImage=()=>{}){
     const decision=await permission(request,signal);
     if(decision==='deny')return {content:JSON.stringify({status:'denied',message:'L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.'}),images:[],denied:true};
     signal.throwIfAborted();
     const cancel=()=>{api('tools/cancel',{requestId:request.requestId}).catch(()=>{});};
-    signal.addEventListener('abort',cancel,{once:true});let terminal=false;
+    signal.addEventListener('abort',cancel,{once:true});let terminal=false,originalsTask;const originalsController=new AbortController(),originalsSignal=AbortSignal.any([signal,originalsController.signal]);
+    function receiveOriginals(record){
+      if(originalsTask)return;
+      if(record.conversationId!==state.conversationId)throw Error('Cette sortie ne correspond pas à la conversation courante.');
+      originalsTask=Promise.all(record.outputs.map(async(output,index)=>{const blob=await original(record,index,originalsSignal);try{onImage({record,index,blob});}catch(error){notice('Affichage de l’original indisponible : '+error.message);}return blob;})).then(blobs=>({blobs}),error=>({error}));
+    }
     try{
       let job=await(await api('tools/execute',{requestId:request.requestId,permission:decision})).json();
       if(signal.aborted){cancel();signal.throwIfAborted();}
       const jobId=job.id;
       while(!['done','error','cancelled'].includes(job.state)){
+        if(job.record)receiveOriginals(job.record);
         signal.throwIfAborted();onProgress(job.progress);await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},700);const abort=()=>{clearTimeout(timer);reject(signal.reason);};signal.addEventListener('abort',abort,{once:true});});
         job=await(await api('tools/job',undefined,{signal})).json();
         if(job?.id!==jobId)throw Error('La génération suivie a été remplacée par une autre tâche.');
       }
       terminal=true;
       if(!job.record)return {content:JSON.stringify({status:'error',message:job.error}),images:[],failed:true,error:job.error};
-      const record=job.record;
+      const record=job.record;receiveOriginals(record);
       if(record.conversationId!==state.conversationId)throw Error('Cette sortie ne correspond pas à la conversation courante.');
       const showGallery=()=>renderGallery(record.conversationId).catch(error=>notice(`Galerie indisponible : ${error.message}`));
       await showGallery(); onOutput();
       if(job.warning)notice(job.warning);
-      let images=[],error=job.state==='done'?'':job.error||'La génération a été interrompue après production de l’image.';
+      let images=[],dimensions=[],error=job.state==='done'?'':job.error||'La génération a été interrompue après production de l’image.';
       onProgress('Préparation des copies pour la vision…');
       try{
+        const originals=await originalsTask;if(originals.error)throw originals.error;
         for(let index=0;index<record.outputs.length;index++){
           signal.throwIfAborted();
-          const blob=await original(record,index,signal);
-          const image=await compressImage(blob,{name:record.outputs[index].source.filename,count:record.outputs.length});images.push(image.url);
+          const blob=originals.blobs[index];
+          const image=await compressImage(blob,{name:record.outputs[index].source.filename,count:record.outputs.length});images.push(image.url);record.outputs[index].analysisDataUrl=image.url;const size=image.width&&image.height?{width:image.width,height:image.height}:null;dimensions.push(size);if(size)Object.assign(record.outputs[index],size);
         }
       }catch(failure){
         if(signal.aborted)throw failure;
@@ -266,13 +273,13 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
       }
       signal.throwIfAborted();
       if(images.length){
-        try{await api('gallery/analysis',{conversationId:record.conversationId,id:record.id,images},{signal});}
+        try{await api('gallery/analysis',{conversationId:record.conversationId,id:record.id,images,dimensions},{signal});}
         catch(failure){if(signal.aborted)throw failure;notice(`Copies d’analyse non enregistrées : ${failure.message}`);}
       }
       await showGallery();
-      return {content:JSON.stringify({status:error?'generated':'success',run_id:record.id,workflow:record.workflowName,prompt:record.prompt,outputs:record.outputs.map(o=>o.source),...(error?{warning:error}:{}),note:images.length?'Les images jointes ensuite sont les copies réduites des sorties. Les originaux sont dans la galerie.':'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.'}),images,record,failed:!!error,error};
+      return {content:JSON.stringify({status:error?'generated':'success',run_id:record.id,workflow:record.workflowName,prompt:record.prompt,reference_count:record.parameters?.reference_count??null,reference_capacity:record.parameters?.reference_capacity??null,reference_mode:record.parameters?.reference_mode||'unknown',outputs:record.outputs.map(o=>o.source),...(error?{warning:error}:{}),note:images.length?'Les images jointes ensuite sont les copies réduites des sorties. Les originaux sont dans la galerie.':'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.'}),images,record,failed:!!error,error};
     }catch(error){if(!terminal)cancel();if(signal.aborted)throw signal.reason;throw error;}
-    finally{signal.removeEventListener('abort',cancel);onChange();}
+    finally{originalsController.abort();signal.removeEventListener('abort',cancel);onChange();}
   }
   return {refresh,cancelSettings,reset,renderGallery,requestTool,saveReview,values,workflowDescriptions,hasPendingImport,finishImport,saved,setBusy};
 }

@@ -1,3 +1,4 @@
+import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
@@ -158,7 +159,7 @@ async function clearHistory() {
     state.historyItems = target ? state.historyItems.filter(item => item.id !== target.id) : [];
     if (!target || target.id === state.conversationId) {
       state.messages = []; state.conversationId = null; state.archiveSnapshot = null; state.historyDirty = false;
-      comfyUI.reset(); $('messages').replaceChildren(); $('welcome').hidden = false;
+      comfyUI.reset(); generationUI.clear();$('messages').replaceChildren(); $('welcome').hidden = false;
       setConversationTitle('Nouvelle conversation');
     }
     renderHistory(); notice('');
@@ -192,7 +193,7 @@ async function loadConversation(id) {
     state.historyDirty = false;
     state.images = draft.images;
     $('prompt').value = draft.text;
-    $('messages').replaceChildren();
+    generationUI.clear();$('messages').replaceChildren();
     renderTranscript(messages, record.incomplete);
     $('welcome').hidden = messages.length > 0;
     setConversationTitle(record.title);
@@ -215,6 +216,7 @@ function renderTranscript(messages, incomplete = false) {
         const view = assistantMessage();
         if (message.content) renderText(view.body, message.content);
         else view.body.textContent = message.tool_calls ? 'Appel d’outil enregistré.' : 'Aucune réponse finale reçue.';
+        if(message.tool_calls?.some(call=>call.function?.name==='comfy_generate_image')){const call=message.tool_calls.find(call=>call.function?.name==='comfy_generate_image'),result=messages.find(item=>item.role==='tool'&&item.tool_call_id===call.id);try{const data=JSON.parse(result?.content||'null');if(data?.run_id)generationUI.restore(view.body,state.conversationId,data.run_id);}catch{}}
         view.reasoning.hidden = !message.reasoning_content;
         view.thoughts.textContent = message.reasoning_content || '';
         if (incomplete && index === messages.length - 1) view.note.textContent = 'Réponse partielle restaurée.';
@@ -229,7 +231,7 @@ async function restoreUpdate() {
   state.messages = saved.messages; state.conversationId = saved.conversationId;
   state.archiveSnapshot = saved.archiveSnapshot; state.historyDirty = false; state.images = saved.images; state.thinking = saved.thinking;
   $('prompt').value = saved.prompt; $('thinking').setAttribute('aria-pressed', String(state.thinking));
-  $('messages').replaceChildren(); renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
+  generationUI.clear();$('messages').replaceChildren(); renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
   $('welcome').hidden = state.messages.length > 0; setConversationTitle(saved.title || 'Nouvelle conversation');
   renderAttachments(); resizePrompt(); renderHistory(); scrollToBottom();
   if (state.conversationId) await comfyUI.renderGallery(state.conversationId);
@@ -598,32 +600,32 @@ async function sendMessage(event) {
       history.push({role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{}),tool_calls:[request.call]});
       output='';reasoning='';
       if(request.kind==='resource'){
-        resourceReads++;view.body.replaceChildren(node('span','pending-message','Ressource · '+request.workflowName));
-        view.note.textContent='Consultation de la ressource…';
+        const ids=request.resourceIds||[request.resourceId];resourceReads+=ids.length;view.body.replaceChildren(node('span','pending-message','Ressource · '+request.workflowName));
+        view.note.textContent='Consultation des références…';
         try{
-          const resource=await(await api('resources/read',{id:request.resourceId},{signal})).json();
-          const metadata={id:resource.id,name:resource.name,description:resource.description,type:resource.mime,width:resource.width,height:resource.height,duration:resource.duration,frameTimes:resource.frames.map(frame=>frame.time)};
-          history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'loaded',resource:metadata})});
-          history.push({role:'user',internal:true,resourceId:resource.id,content:[{type:'text',text:'Consultation de la ressource '+JSON.stringify(metadata)+'. Ces copies sont temporaires pour ce tour. Pour une vidéo, ce sont des images représentatives, sans audio ni lecture continue.'},...resource.frames.map(frame=>({type:'image_url',image_url:{url:frame.url}}))]});
-          view.note.textContent='Ressource consultée · '+resource.name;
+          const response=await(await api('resources/read',request.resourceIds?{ids}:{id:request.resourceId},{signal})).json(),selected=response.resources||[response];
+          const metadata=selected.map(resource=>({id:resource.id,label:resource.label,name:resource.name,description:resource.description,type:resource.mime,width:resource.width,height:resource.height,duration:resource.duration,frameTimes:resource.frames.map(frame=>frame.time)}));
+          history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'loaded',resources:metadata,note:'Pixels disponibles uniquement dans ce tour. Relire les ressources pour une comparaison visuelle ultérieure.'})});
+          for(const [index,resource]of selected.entries())if(!history.some(message=>message.resourceId===resource.id))history.push({role:'user',internal:true,resourceId:resource.id,content:[{type:'text',text:'Référence visuelle '+JSON.stringify(metadata[index])+'. Les images suivantes appartiennent uniquement à cette référence. Copies temporaires pour ce tour ; pour une vidéo, images représentatives sans audio.'},...resource.frames.map(frame=>({type:'image_url',image_url:{url:frame.url}}))]});
+          view.note.textContent='Références consultées · '+selected.map(resource=>resource.label||resource.name).join(', ');
         }catch(error){history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'error',message:error.message})});resourceReads=8;if(signal.aborted)throw error;view.note.textContent=error.message;}
         state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:true};await persistConversation();
         view=assistantMessage();finishReason='';continue;
       }
       iterations++;
-      view.body.replaceChildren(node('span','pending-message',`Outil · ${request.workflowName}`));
+      view.generation=true;const generation=generationUI.mount(view.body,request);
       let result;
-      try{result=await comfyUI.requestTool(request,signal,progress=>{view.note.textContent=progress;scrollToBottom();});}
-      catch(error){history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'error',message:signal.aborted?'Génération annulée.':error.message})});throw error;}
+      try{result=await comfyUI.requestTool(request,signal,progress=>{generation.progress(progress);scrollToBottom();},image=>generation.image(image));generation.finish(result);}
+      catch(error){generation.fail(error.message);history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'error',message:signal.aborted?'Génération annulée.':error.message})});throw error;}
       history.push({role:'tool',tool_call_id:request.call.id,content:result.content});
       if(result.record||result.failed)state.status=await(await api('status')).json();
       const reviewImages=state.status.state==='ready'&&state.status.vision?result.images:[];
       reviewRecord=reviewImages.length?result.record:null;
       if(result.record){
-        history.push({role:'user',internal:true,content:[{type:'text',text:reviewImages.length?'Voici les sorties du workflow, dans le même ordre. Compare-les à la demande initiale et aux références. Explique les écarts. Si une correction est utile et autorisée, adapte ton prompt.':state.status.vision?'La génération est terminée, mais les copies pour l’analyse sont indisponibles. Signale que tu ne peux pas vérifier visuellement le résultat.': 'La génération est terminée. Tu ne disposes pas de la vision : indique que tu ne peux pas vérifier visuellement le résultat.'},...reviewImages.map(url=>({type:'image_url',image_url:{url}}))]});
+        history.push({role:'user',internal:true,content:[{type:'text',text:reviewImages.length?'Voici les copies réduites des sorties du workflow, dans le même ordre. Les originaux affichés à l’utilisateur ne font pas partie de ce contexte. Vérifie les indications reference_count, reference_capacity et reference_mode du résultat : elles décrivent les références réellement transmises à Comfy. Un workflow texte seul ne fusionne pas les pixels des références. Pour comparer aux ressources pertinentes, consulte leurs images avec local_read_resource si elles ne sont pas présentes dans ce tour ; les descriptions seules ne suffisent pas. Décris les écarts de sujet, de composition, de couleurs et de détails, ainsi que les limites observées. Ne conclus pas à la fidélité ou à une fusion sans comparaison visuelle. Si une correction est utile et possible avec les entrées configurées, adapte ton prompt.':state.status.vision?'La génération est terminée, mais les copies pour l’analyse sont indisponibles. Signale que tu ne peux pas vérifier visuellement le résultat.': 'La génération est terminée. Tu ne disposes pas de la vision : indique que tu ne peux pas vérifier visuellement le résultat.'},...reviewImages.map(url=>({type:'image_url',image_url:{url}}))]});
       }
       if(result.failed&&state.status.state!=='ready')throw Error(result.error||'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
-      view.note.textContent=result.denied?'Génération refusée.':result.failed?(result.record?'Image générée · analyse indisponible.':'La génération a échoué.'):'Sortie disponible dans la galerie.';
+      view.note.textContent=result.failed?(result.error||'Analyse indisponible.') : '';
       if(result.denied||result.failed||iterations>=(state.comfy?.maxIterations||5))allowTools=false;
       state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:true};await persistConversation();
       view=assistantMessage();finishReason='';
@@ -636,7 +638,7 @@ async function sendMessage(event) {
   }finally{
     if(output||reasoning||usedTool){
       if(output||reasoning){render();if(!output)view.body.replaceChildren(node('div','text-block','Aucune réponse finale reçue.'));history.push({role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{})});}
-      else if(usedTool)view.body.replaceChildren(node('div','text-block',complete?'Aucune réponse finale reçue.':'Opération interrompue.'));
+      else if(usedTool&&!view.generation)view.body.replaceChildren(node('div','text-block',complete?'Aucune réponse finale reçue.':'Opération interrompue.'));
       state.messages=archiveMessages(history);state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:!complete};setConversationTitle(text||'Une image à explorer');
     }
     await persistConversation();state.generating=false;state.waitingForModel=false;state.controller=null;resizePrompt();await refreshStatus();$('prompt').focus();
@@ -658,6 +660,7 @@ const tokenControls=setupTokenControls($);
 const computeControls=setupComputeControls($);
 dismissSettingsOnOutsideClick($('settings'), () => settingsGuard.requestClose());
 const assetsUI=setupAssets({api,state,node,icon,notice,onChange:()=>contextMeter.schedule(),onBusy:()=>updateControls()});
+const generationUI=setupGenerationUI({api,node,openOutput:(record,index,blob)=>assetsUI.viewOutput(record,index,blob),onResize:scrollToBottom});
 const comfyUI=setupComfy({api,state,node,notice,openOutput:(record,index)=>assetsUI.viewOutput(record,index),onOutput:()=>assetsUI.show('output'),onChange:()=>refreshStatus(),onSettingsBusyChange:busy=>{state.comfyWorking=busy;updateControls();}});
 
 const settingsGuard=setupSettingsGuard({
@@ -732,7 +735,7 @@ async function newConversation() {
     state.messages = []; state.images = []; state.conversationId = null; state.archiveSnapshot = null; state.historyDirty = false;
     $('prompt').value = '';
     comfyUI.reset();
-    $('messages').replaceChildren(); $('welcome').hidden = false;
+    generationUI.clear();$('messages').replaceChildren(); $('welcome').hidden = false;
     setConversationTitle('Nouvelle conversation');
     renderAttachments(); notice(''); resizePrompt();
   } finally { state.loadingHistory = false; updateControls(); $('prompt').focus(); }

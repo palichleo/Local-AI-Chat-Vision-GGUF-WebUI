@@ -12,7 +12,7 @@ async function exchange({vision=true,ready=true,images=[png],failed=false,denied
  const status={state:ready?'ready':'error',vision,busy:false};
  const state={config:{enginePath:'engine',modelPath:'model'},messages:[],images:[],status:{state:'ready',vision:true,busy:false},thinking:true,comfy:{maxIterations:5}};
  const requests=[],reviews=[],views=[];
- const context={assetsUI:{flush:async()=>true},state,$,AbortController,performance,crypto:{randomUUID:()=> 'a1111111-1111-4111-8111-111111111111'},readSSE,
+ const context={generationUI:{mount:()=>({progress(){},image(){},finish(){},fail(){}})},assetsUI:{flush:async()=>true},state,$,AbortController,performance,crypto:{randomUUID:()=> 'a1111111-1111-4111-8111-111111111111'},readSSE,
   node:()=>element(),userMessage:()=>element(),assistantMessage:()=>{const view={article:element(),reasoning:element(),thoughts:element(),body:element(),note:element()};views.push(view);return view;},
   contextMeter:{pause(){},observe(){}},renderAttachments(){},resizePrompt(){},notice(){},scrollToBottom(){},renderText(){},updateControls(){},openSettings(){},persistConversation:async()=>true,waitForModel:async()=>{},historyWrite:Promise.resolve(),refreshStatus:async()=>{},setConversationTitle(){},
   comfyUI:{requestTool:async()=>({content:JSON.stringify({status:denied?'denied':failed?'generated':'success'}),images,failed,denied,error:failed?'Model restart failed':'',...(denied||!hasRecord?{}:{record:{id:'run',conversationId:state.conversationId}})}),saveReview:async(...args)=>reviews.push(args)},

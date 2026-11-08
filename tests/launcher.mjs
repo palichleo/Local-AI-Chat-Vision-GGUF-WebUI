@@ -67,3 +67,13 @@ test('launcher stays attached across an installed update and can close the repla
  control.child.kill('SIGKILL');await until(async()=>!(await boot()),'Updated application survived a closed controller');
  await until(async()=>{try{process.kill(replacementPid,0);return false;}catch{return true;}},'Replacement server did not exit');
 });
+
+test('launcher reconnects after a transient control stream failure instead of closing the app',async()=>{
+ const {runLauncher}=await import('../scripts/launch.mjs');let streams=0;
+ const server=http.createServer((req,res)=>{
+  if(req.url==='/api/bootstrap'){res.setHeader('content-type','application/json');return res.end(JSON.stringify({application:'atelier-local',token:'reconnect-test',controlled:false}));}
+  if(req.url==='/api/lifecycle'){streams++;res.writeHead(200,{'content-type':'application/x-ndjson'});res.write('{"state":"running"}\n');const timer=setTimeout(()=>streams===1?res.destroy():res.end('{"state":"stopped"}\n'),40);res.on('close',()=>clearTimeout(timer));return;}
+  res.writeHead(404);res.end();
+ });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{await runLauncher({port:server.address().port,signal:AbortSignal.timeout(5000)});assert.equal(streams,2);}finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});

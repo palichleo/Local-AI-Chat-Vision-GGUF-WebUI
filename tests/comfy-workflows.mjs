@@ -95,6 +95,7 @@ test('mapped optional text, numeric bounds and uploaded image reach exactly thei
       negative_prompt: { node: '6', input: 'text' }, width: { node: '4', input: 'width' },
       height: { node: '4', input: 'height' }, image: { node: '5', input: 'image' },
     });
+    input.graph['3'].inputs.images=['5',0];
     input.requiresImage = true;
     await catalog.save(input);
     await assert.rejects(catalog.prepare('portrait', { prompt: 'edit' }), /reference image/i);
@@ -202,4 +203,9 @@ test('definition advertises only registered workflows and their supported parame
     await catalog.remove('portrait');
     assert.equal(await catalog.definition(), null);
   });
+});
+
+test('output preview dimensions use declared numeric values without guessing arbitrary custom node outputs',async()=>{
+ const {workflowOutputSize}=await import('../lib/comfy-workflows.mjs');const w=fixture();w.bindings.width={node:'4',input:'width'};w.bindings.height={node:'4',input:'height'};w.graph['4']={class_type:'CustomSizeNode',inputs:{width:1536,height:1024}};
+ assert.deepEqual(workflowOutputSize(w),{width:1536,height:1024});assert.deepEqual(workflowOutputSize(w,{width:768,height:512}),{width:768,height:512});w.graph['4'].inputs.width=['5',0];assert.equal(workflowOutputSize(w),null);
 });
