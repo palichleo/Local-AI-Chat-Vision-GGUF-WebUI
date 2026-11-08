@@ -13,6 +13,7 @@ test('new installs save conversations by default and use five generation attempt
     let initial = await (await fetch(app.url + '/api/bootstrap')).json();
     assert.equal(initial.preferences.saveHistory, true);
     assert.equal(initial.comfy.maxIterations, 5);
+    assert.equal(initial.config.gpuLayers, 999, 'A new GPU configuration must not stop offloading after 99 layers.');
     const post = (path, body) => fetch(app.url + '/api/' + path, { method: 'POST', headers: { Authorization: `Bearer ${initial.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     assert.equal((await post('preferences', { saveHistory: false })).status, 200);
     assert.equal((await post('comfy/config', { ...initial.comfy, maxIterations: 7 })).status, 200);

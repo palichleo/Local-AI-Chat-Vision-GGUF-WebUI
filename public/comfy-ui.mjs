@@ -1,6 +1,6 @@
 import { compressImage } from './images.mjs';
 
-export function setupComfy({api,state,node,notice,onChange}){
+export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=()=>{}}){
   const $=id=>document.getElementById(id);
   let config,workflows=[],importGraph=null,urls=[];
   function reset(){for(const url of urls)URL.revokeObjectURL(url);urls=[];$('gallery-list').replaceChildren();$('gallery').hidden=true;}
@@ -33,43 +33,70 @@ export function setupComfy({api,state,node,notice,onChange}){
       }
     }
   }
-  let busy=false,working=false,unlimited=false,lastLimited=5;
+  let busy=false,working=false,workingCount=0,unlimited=false,lastLimited=5;
+  let settingsVersion=0,refreshVersion=0,refreshController,connectionController;
+  let addressDiscovery={detected:false};
+  function changeWorking(delta){
+    workingCount+=delta;
+    const next=workingCount>0,changed=next!==working;working=next;
+    setBusy(busy);
+    if(changed)onSettingsBusyChange(working);
+  }
+  function cancelSettings(){
+    settingsVersion++;refreshVersion++;importVersion++;
+    refreshController?.abort();connectionController?.abort();
+    descriptions.clear();queue=[];importGraph=null;
+    $('workflow-import-panel').hidden=true;$('comfy-status').textContent='';
+    setBusy(busy);
+  }
   const descriptions=new Map();
   let queue=[],queueTotal=0,queueIndex=0,importVersion=0;
   function syncLimit(){
     $('comfy-unlimited').setAttribute('aria-pressed',String(unlimited));
     $('comfy-iterations').hidden=unlimited;
+    $('comfy-iterations').required=!unlimited;
+    $('comfy-iterations').disabled=busy||working||unlimited;
     $('comfy-infinity-value').hidden=!unlimited;
     $('comfy-limit-label').textContent=unlimited?'Sans limite':`${$('comfy-iterations').value||'—'} essai${Number($('comfy-iterations').value)>1?'s':''}`;
   }
   function values(){
-    return {enabled:$('comfy-enabled').checked,baseUrl:$('comfy-url').value,autoAllow:$('comfy-auto').checked,maxIterations:unlimited?10000:Number($('comfy-iterations').value)};
+    const maxIterations=unlimited?10000:Number($('comfy-iterations').value);
+    if(!Number.isInteger(maxIterations)||maxIterations<1||maxIterations>(unlimited?10000:9999))throw Error('Le nombre de générations doit être un entier entre 1 et 9 999, ou choisissez ∞.');
+    return {enabled:$('comfy-enabled').checked,baseUrl:$('comfy-url').value,autoAllow:$('comfy-auto').checked,maxIterations};
   }
   function workflowDescriptions(){return [...descriptions].map(([id,description])=>({id,description}));}
   function setBusy(value){
     busy=value;const disabled=value||working;
     for(const id of ['comfy-enabled','comfy-url','comfy-auto','comfy-iterations','comfy-test','comfy-address-edit','comfy-minus','comfy-plus','comfy-unlimited','workflow-file','workflow-skip','workflow-name','workflow-description','workflow-requires-image'])$(id).disabled=disabled;
+    $('comfy-iterations').disabled=disabled||unlimited;
     $('workflow-import').disabled=disabled||!importGraph;
     for(const input of document.querySelectorAll('.comfy-settings select,.workflow-description,.workflow-remove'))input.disabled=disabled;
   }
   function connection(result){
+    addressDiscovery=result;
     $('comfy-url').readOnly=result.detected===true;
     $('comfy-address-edit').hidden=!result.detected;
     $('comfy-detection').textContent=result.detected?'Adresse détectée · connexion locale':'Adresse manuelle · démarrez ComfyUI puis testez la connexion';
   }
-  async function refresh({settings=true}={}){
-    const result=await(await api('comfy')).json();config=result.config;workflows=result.workflows;state.comfy=config;
+  function applySettings(result,{settings=true}={}){
+    config=result.config;workflows=result.workflows;state.comfy=config;
     if(settings){
       $('comfy-enabled').checked=config.enabled;$('comfy-url').value=config.baseUrl;$('comfy-auto').checked=config.autoAllow;
       unlimited=config.maxIterations===10000;if(!unlimited)lastLimited=config.maxIterations;
-      $('comfy-iterations').value=lastLimited;syncLimit();connection(result.discovery||{});
+      $('comfy-iterations').value=lastLimited;syncLimit();connection(result.discovery||addressDiscovery);
     }
     $('workflow-list').replaceChildren();
     if(!workflows.length)$('workflow-list').append(node('p','comfy-help','Ajoutez vos workflows et décrivez quand les utiliser.'));
     for(const workflow of workflows){
       const card=node('article','workflow-card');const header=node('div','workflow-card-header');header.append(node('strong','',workflow.name));
       const remove=node('button','text-button workflow-remove','Retirer');remove.type='button';
-      remove.onclick=async()=>{try{await api('comfy/remove',{id:workflow.id});descriptions.delete(workflow.id);await refresh({settings:false});}catch(e){notice(e.message);}};
+      remove.onclick=async()=>{
+        if(busy||working)return;
+        const session=settingsVersion;changeWorking(1);
+        try{await api('comfy/remove',{id:workflow.id});descriptions.delete(workflow.id);if(session===settingsVersion)await refresh({settings:false});}
+        catch(e){if(session===settingsVersion)notice(e.message);}
+        finally{changeWorking(-1);}
+      };
       header.append(remove);const description=node('textarea','workflow-description');description.rows=2;description.maxLength=2000;
       description.placeholder='Ex. : portraits réalistes, style cinéma, lumière douce…';description.setAttribute('aria-label',`Quand utiliser ${workflow.name}`);
       description.value=descriptions.get(workflow.id)??workflow.description;
@@ -78,7 +105,19 @@ export function setupComfy({api,state,node,notice,onChange}){
     }
     setBusy(busy);
   }
-  async function saved(){descriptions.clear();await refresh();}
+  async function refresh({settings=true}={}){
+    const version=++refreshVersion,controller=new AbortController();
+    refreshController?.abort();refreshController=controller;changeWorking(1);
+    try{
+      const result=await(await api('comfy',undefined,{signal:controller.signal})).json();
+      if(version===refreshVersion&&!controller.signal.aborted)applySettings(result,{settings});
+    }catch(error){if(version===refreshVersion&&!controller.signal.aborted)throw error;}
+    finally{if(refreshController===controller)refreshController=null;changeWorking(-1);}
+  }
+  function saved(result){
+    refreshVersion++;refreshController?.abort();descriptions.clear();
+    applySettings({config:result.comfy,workflows:result.workflows});
+  }
   $('comfy-iterations').oninput=()=>{lastLimited=Number($('comfy-iterations').value)||5;syncLimit();};
   $('comfy-minus').onclick=()=>{if(unlimited){unlimited=false;lastLimited=9999;}else lastLimited=Math.max(1,(Number($('comfy-iterations').value)||1)-1);$('comfy-iterations').value=lastLimited;syncLimit();};
   $('comfy-plus').onclick=()=>{if(unlimited)return;const next=(Number($('comfy-iterations').value)||1)+1;if(next>=10000)unlimited=true;else lastLimited=next;$('comfy-iterations').value=lastLimited;syncLimit();};
@@ -86,10 +125,15 @@ export function setupComfy({api,state,node,notice,onChange}){
   $('comfy-address-edit').onclick=()=>{connection({detected:false});$('comfy-url').focus();};
   $('comfy-recover').onclick=async()=>{try{$('comfy-recover').disabled=true;await api('tools/recover',{});onChange();$('comfy-status').textContent='GPU libéré. Le modèle peut redémarrer.';}catch(e){$('comfy-status').textContent=e.message;}finally{$('comfy-recover').disabled=false;}};
   $('comfy-test').onclick=async()=>{
-    $('comfy-test').disabled=true;$('comfy-status').textContent='Vérification de la connexion…';
-    try{const result=await(await api('comfy/test',{baseUrl:$('comfy-url').value})).json();$('comfy-url').value=result.baseUrl;connection(result);$('comfy-status').textContent=result.status.idle?'ComfyUI connecté · disponible':'ComfyUI connecté · occupé';}
-    catch(e){connection({detected:false});$('comfy-status').textContent=e.message;}
-    finally{$('comfy-test').disabled=busy;}
+    if(busy||working)return;
+    const session=settingsVersion,baseUrl=$('comfy-url').value,controller=new AbortController();
+    connectionController=controller;changeWorking(1);$('comfy-status').textContent='Vérification de la connexion…';
+    try{
+      const result=await(await api('comfy/test',{baseUrl},{signal:controller.signal})).json();
+      if(session!==settingsVersion||controller.signal.aborted||$('comfy-url').value!==baseUrl)return;
+      $('comfy-url').value=result.baseUrl;connection(result);$('comfy-status').textContent=result.status.idle?'ComfyUI connecté · disponible':'ComfyUI connecté · occupé';
+    }catch(e){if(session===settingsVersion&&!controller.signal.aborted){connection({detected:false});$('comfy-status').textContent=e.message;}}
+    finally{if(connectionController===controller)connectionController=null;changeWorking(-1);}
   };
   async function nextWorkflow(){
     const version=++importVersion;
@@ -98,6 +142,7 @@ export function setupComfy({api,state,node,notice,onChange}){
     const file=queue.shift();queueIndex++;
     $('workflow-import-panel').hidden=false;$('workflow-import-fields').hidden=true;
     $('workflow-import-progress').textContent=`${queueIndex} / ${queueTotal} · ${file.name}`;
+    changeWorking(1);
     try{
       if(file.size>2*1024*1024)throw Error('Workflow limité à 2 Mo.');
       const contents=await file.text();if(version!==importVersion)return;
@@ -114,23 +159,25 @@ export function setupComfy({api,state,node,notice,onChange}){
       document.querySelector('.workflow-bindings').open=!$('binding-prompt').value;
       $('workflow-import-fields').hidden=false;$('comfy-status').textContent='Décrivez quand utiliser ce workflow, puis choisissez ses entrées modifiables.';
     }catch(e){if(version===importVersion){importGraph=null;$('comfy-status').textContent=e.message;}}
-    setBusy(busy);
+    finally{changeWorking(-1);}
   }
   $('workflow-file').onchange=async event=>{queue=[...event.target.files];event.target.value='';queueTotal=queue.length;queueIndex=0;await nextWorkflow();};
   $('workflow-skip').onclick=()=>nextWorkflow();
   $('workflow-import').onclick=async()=>{
     const description=$('workflow-description').value.trim();
     if(!description){$('comfy-status').textContent='Ajoutez une courte description pour que le modèle sache quand choisir ce workflow.';$('workflow-description').focus();return;}
-    working=true;setBusy(busy);
+    if(busy||working||!importGraph)return;
+    const session=settingsVersion;changeWorking(1);
     try{
       const bindings={};for(const key of ['prompt','seed','width','height','image','negative_prompt']){const value=$(`binding-${key}`).value;if(value)bindings[key]=JSON.parse(value);}
       if(!bindings.prompt){document.querySelector('.workflow-bindings').open=true;throw Error('Choisissez l’entrée du prompt dans « Entrées que le modèle peut modifier ».');}
       const outputNodes=Object.entries(importGraph||{}).filter(([,n])=>/SaveImage/.test(n.class_type)).map(([id])=>id);
       if(!outputNodes.length)throw Error('Le workflow doit contenir un nœud SaveImage.');
       await api('comfy/import',{name:$('workflow-name').value,description,graph:importGraph,bindings,outputNodes,requiresImage:$('workflow-requires-image').checked});
-      await refresh({settings:false});await nextWorkflow();if(!queue.length&&$('workflow-import-panel').hidden)$('comfy-status').textContent='Workflows ajoutés. Le modèle choisira selon leurs descriptions.';
-    }catch(e){$('comfy-status').textContent=e.message;}
-    finally{working=false;setBusy(busy);}
+      if(session!==settingsVersion)return;
+      await refresh({settings:false});if(session!==settingsVersion)return;await nextWorkflow();if(!queue.length&&$('workflow-import-panel').hidden)$('comfy-status').textContent='Workflows ajoutés. Le modèle choisira selon leurs descriptions.';
+    }catch(e){if(session===settingsVersion)$('comfy-status').textContent=e.message;}
+    finally{changeWorking(-1);}
   };
   $('original-close').onclick=()=>{$('original-dialog').close();$('original-image').removeAttribute('src');};
   async function permission(request,signal){
@@ -168,5 +215,5 @@ export function setupComfy({api,state,node,notice,onChange}){
       return {content:JSON.stringify({status:'success',run_id:job.record.id,workflow:job.record.workflowName,prompt:job.record.prompt,outputs:job.record.outputs.map(o=>o.source),note:'Les images jointes ensuite sont les copies réduites des sorties. Les originaux sont dans la galerie.'}),images,record:job.record};
     }finally{signal.removeEventListener('abort',cancel);onChange();}
   }
-  return {refresh,reset,renderGallery,requestTool,saveReview,values,workflowDescriptions,saved,setBusy};
+  return {refresh,cancelSettings,reset,renderGallery,requestTool,saveReview,values,workflowDescriptions,saved,setBusy};
 }

@@ -1,0 +1,158 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
+
+const tick = () => new Promise(setImmediate);
+const savedConfig = { enginePath: 'engine.exe', modelPath: 'saved.gguf', projectorPath: '', contextSize: 4096, maxOutputTokens: 2048, gpuLayers: 999 };
+const savedComfy = { enabled: false, baseUrl: 'http://127.0.0.1:8188', autoAllow: false, maxIterations: 5 };
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+
+async function settingsUI({ request, refresh = async () => {}, saved = () => {} } = {}) {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const nodes = new Map();
+  const $ = id => {
+    if (!nodes.has(id)) nodes.set(id, { value: '', textContent: '', hidden: true, disabled: false, open: false, checked: false, dataset: {}, listeners: {}, style: {}, children: [],
+      classList: { toggle() {}, contains: () => false, add() {}, remove() {} },
+      addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); },
+      setAttribute() {}, append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children = children; }, focus() {},
+      close() { this.open = false; for (const listener of this.listeners.close || []) listener(); }, showModal() { this.open = true; } });
+    return nodes.get(id);
+  };
+  const calls = [], refreshes = [];
+  let comfyOptions;
+  const comfyUI = { refresh: options => { refreshes.push(options); return refresh(options); }, saved, cancelSettings() {}, setBusy() {}, values: () => savedComfy, workflowDescriptions: () => [], reset() {} };
+  const context = { console, AbortController, crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
+    setupMaterialLighting() {}, dismissSettingsOnOutsideClick() {}, setupTokenControls: () => ({ setValues() {}, values: () => ({ contextSize: 4096, maxOutputTokens: 2048 }) }),
+    setupComputeControls: () => ({ setValues(config) { $('compute-mode').value = String(config.gpuLayers); }, values: () => ({ gpuLayers: 999 }) }),
+    setupComfy: options => { comfyOptions = options; return comfyUI; },
+    document: { getElementById: $, querySelectorAll: () => [], documentElement: { dataset: { theme: 'dark' } }, addEventListener() {}, createElement: () => $('node-' + nodes.size), createElementNS: () => $('node-' + nodes.size) },
+    window: { addEventListener() {} },
+    fetch: async (url, options = {}) => {
+      const call = { route: url.replace('/api/', ''), body: options.body === undefined ? undefined : JSON.parse(options.body), options }; calls.push(call);
+      if (request) { const response = await request(call); if (response) return response; }
+      if (call.route === 'bootstrap') return Response.json({ config: savedConfig, preferences: { theme: 'dark', saveHistory: true }, status: { state: 'stopped', logs: [] } });
+      if (call.route === 'status') return Response.json({ state: 'stopped', logs: [] });
+      if (call.route === 'history') return Response.json({ conversations: [], skipped: 0 });
+      if (call.route === 'preferences') return Response.json({ preferences: { theme: 'dark', saveHistory: call.body.saveHistory ?? true } });
+      if (call.route === 'settings') return Response.json({ config: savedConfig, comfy: savedComfy, workflows: [] });
+      if (call.route === 'history/save') return Response.json({ conversation: { id: call.body.id, title: 'Saved', updatedAt: '2026-11-08T00:00:00.000Z' } });
+      if (call.route === 'gallery/persist') return Response.json({});
+      throw new Error('Unexpected route ' + call.route);
+    },
+  };
+  const application = source.slice(0, source.lastIndexOf('\ntry {')).replace(/^import .*;\r?\n/gm, '');
+  runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus };', context);
+  Object.assign(context.app.state, { token: 'test', config: { ...savedConfig }, connected: true });
+  return { ...context.app, $, calls, refreshes, comfyUI, comfyOptions, async open() { context.app.openSettings(); await tick(); } };
+}
+
+test('an older settings load cannot unlock the next dialog', async () => {
+  const pending = [];
+  const ui = await settingsUI({ refresh: () => { const load = deferred(); pending.push(load); return load.promise; } });
+  await ui.open(); ui.$('settings').close(); await ui.open();
+  pending[0].resolve(); await tick();
+  assert.equal(ui.state.settingsLoading, true);
+  assert.equal(ui.$('save-config').disabled, true);
+  pending[1].resolve(); await tick();
+  assert.equal(ui.state.settingsLoading, false);
+});
+
+test('settings fields remain locked until every settings load succeeds', async () => {
+  const pending = deferred();
+  const ui = await settingsUI({ refresh: () => pending.promise });
+  await ui.open();
+  assert.equal(ui.$('config-fields').disabled, true);
+  pending.reject(new Error('Cannot read Comfy settings')); await tick();
+  assert.equal(ui.$('save-config').disabled, true);
+  await ui.saveConfiguration();
+  assert.equal(ui.calls.some(call => call.route === 'settings'), false);
+});
+
+test('a save finishing after reopening preserves the new dialog and its draft', async () => {
+  const pending = deferred();
+  const ui = await settingsUI({ request: call => call.route === 'settings' ? pending.promise : undefined });
+  await ui.open(); const saving = ui.saveConfiguration();
+  ui.$('settings').close(); await ui.open(); ui.$('model-path').value = 'new-draft.gguf';
+  pending.resolve(Response.json({ config: { ...savedConfig, modelPath: 'just-saved.gguf' }, comfy: savedComfy, workflows: [] })); await saving;
+  assert.equal(ui.$('settings').open, true);
+  assert.equal(ui.$('model-path').value, 'new-draft.gguf');
+});
+
+test('a stale save error never appears in reopened settings', async () => {
+  const pending = deferred();
+  const ui = await settingsUI({ request: call => call.route === 'settings' ? pending.promise : undefined });
+  await ui.open(); const saving = ui.saveConfiguration();
+  ui.$('settings').close(); await ui.open();
+  pending.reject(new Error('Old save failed')); await saving;
+  assert.equal(ui.$('config-error').hidden, true);
+});
+
+test('saving uses the settings result without a second network read', async () => {
+  let result;
+  const ui = await settingsUI({ saved: saved => { assert.ok(saved, 'saved settings response is required'); result = saved; } });
+  await ui.open(); await ui.saveConfiguration();
+  assert.equal(result.config.modelPath, 'saved.gguf');
+  assert.equal(ui.$('settings').open, false);
+});
+
+test('a Comfy operation locks settings saving, model fields and engine start', async () => {
+  const ui = await settingsUI(); await ui.open();
+  assert.equal(typeof ui.comfyOptions.onSettingsBusyChange, 'function');
+  ui.comfyOptions.onSettingsBusyChange(true);
+  for (const id of ['save-config', 'config-fields', 'toggle-engine', 'update-available']) assert.equal(ui.$(id).disabled, true, id);
+  await ui.saveConfiguration();
+  assert.equal(ui.calls.some(call => call.route === 'settings'), false);
+  ui.comfyOptions.onSettingsBusyChange(false);
+  assert.equal(ui.$('save-config').disabled, false);
+});
+
+test('engine polling preserves the settings validation error', async () => {
+  const ui = await settingsUI({ request: call => call.route === 'settings' ? Response.json({ error: 'Select a valid model' }, { status: 400 }) : call.route === 'status' ? Response.json({ state: 'error', error: 'Previous engine error', logs: [] }) : undefined });
+  await ui.open(); await ui.saveConfiguration(); await ui.refreshStatus();
+  assert.equal(ui.$('config-error').textContent, 'Select a valid model');
+});
+
+test('reopening settings reads current model configuration from the server', async () => {
+  const ui = await settingsUI({ request: call => call.route === 'bootstrap' ? Response.json({ config: { ...savedConfig, modelPath: 'other-tab.gguf' } }) : undefined });
+  await ui.open();
+  assert.equal(ui.$('model-path').value, 'other-tab.gguf');
+  await ui.saveConfiguration();
+  assert.equal(ui.calls.find(call => call.route === 'settings').body.config.modelPath, 'other-tab.gguf');
+});
+
+test('enabling history saves the current conversation even when listing history fails', async () => {
+  const ui = await settingsUI({ request: call => call.route === 'history' ? Response.json({ error: 'Cannot list' }, { status: 500 }) : undefined });
+  ui.state.saveHistory = false; ui.state.messages = [{ role: 'user', content: 'Keep this conversation' }];
+  ui.$('history-enabled').checked = true; await ui.$('history-enabled').onchange();
+  assert.equal(ui.state.saveHistory, true);
+  assert.equal(ui.calls.filter(call => call.route === 'history/save').length, 1);
+  assert.equal(ui.calls.filter(call => call.route === 'gallery/persist').length, 1);
+});
+
+test('disabling history waits for accepted queued writes before changing the preference', async () => {
+  const firstWrite = deferred(); let writes = 0;
+  const ui = await settingsUI({ request: call => call.route === 'history/save' && ++writes === 1 ? firstWrite.promise : undefined });
+  ui.state.messages = [{ role: 'user', content: 'First message' }]; const first = ui.persistConversation(); await tick();
+  ui.state.messages = [{ role: 'user', content: 'Second message' }]; const second = ui.persistConversation();
+  const disabling = ui.changePreferences({ saveHistory: false }); await tick();
+  assert.equal(ui.calls.some(call => call.route === 'preferences'), false);
+  firstWrite.resolve(Response.json({ conversation: { id: ui.state.conversationId, title: 'First', updatedAt: '2026-11-08T00:00:00.000Z' } }));
+  await Promise.all([first, second, disabling]);
+  assert.equal(ui.calls.filter(call => call.route === 'history/save').length, 2);
+  assert.equal(ui.state.historyDirty, false);
+  assert.equal(ui.state.saveHistory, false);
+});
+
+test('clearing the configured model also clears the sidebar model name', async () => {
+  const ui=await settingsUI();ui.updateControls();assert.equal(ui.$('sidebar-model').textContent,'saved');
+  ui.state.config.modelPath='';ui.updateControls();
+  assert.equal(ui.$('sidebar-model').textContent,'Modèle GGUF');
+  assert.equal(ui.$('sidebar-model-detail').textContent,'Aucun modèle configuré');
+});
+
+test('opening settings reflects theme and history changed in another tab', async () => {
+  const ui=await settingsUI({request:call=>call.route==='bootstrap'?Response.json({config:savedConfig,preferences:{theme:'light',saveHistory:false}}):undefined});
+  await ui.open();
+  assert.equal(ui.state.theme,'light');assert.equal(ui.state.saveHistory,false);assert.equal(ui.$('history-enabled').checked,false);
+});

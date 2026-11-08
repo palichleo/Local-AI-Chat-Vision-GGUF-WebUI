@@ -13,7 +13,7 @@ import { History } from './lib/history.mjs';
 import { discoverComfy, testComfyConnection } from './lib/comfy-discovery.mjs';
 import { chooseLocalFile } from './lib/file-picker.mjs';
 import { ComfyClient, normalizeComfyUrl } from './lib/comfy-client.mjs';
-import { WorkflowCatalog } from './lib/comfy-workflows.mjs';
+import { WorkflowCatalog, validateWorkflow } from './lib/comfy-workflows.mjs';
 import { ComfyGallery } from './lib/comfy-gallery.mjs';
 import { ToolRuntime, collectToolCalls } from './lib/tool-runtime.mjs';
 import { nativeFields } from './lib/native-messages.mjs';
@@ -130,14 +130,15 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
     if(!value||typeof value.enabled!=='boolean'||typeof value.autoAllow!=='boolean'||!Number.isInteger(value.maxIterations)||value.maxIterations<1||value.maxIterations>10000)throw problem('Configuration ComfyUI invalide.');
     return {enabled:value.enabled,baseUrl:normalizeComfyUrl(value.baseUrl),autoAllow:value.autoAllow,maxIterations:value.maxIterations};
   }
-  try{comfy=normalizeComfy(JSON.parse(await readFile(comfyPath,'utf8')));}catch{}
+  let comfyConfigured=false;
+  try{comfy=normalizeComfy(JSON.parse(await readFile(comfyPath,'utf8')));comfyConfigured=true;}catch{}
   let savingComfy=false;
   let savingSettings=false;
   let pickingFile=false;
   async function saveComfy(value){
     if(savingComfy)throw problem('Enregistrement ComfyUI en cours.',409);
     const next=normalizeComfy(value);savingComfy=true;
-    try{await writeFile(`${comfyPath}.tmp`,JSON.stringify(next,null,2),{mode:0o600});await rename(`${comfyPath}.tmp`,comfyPath);comfy=next;}finally{savingComfy=false;}
+    try{await writeFile(`${comfyPath}.tmp`,JSON.stringify(next,null,2),{mode:0o600});await rename(`${comfyPath}.tmp`,comfyPath);comfy=next;comfyConfigured=true;discoveryTime=0;discovery={detected:false,baseUrl:comfy.baseUrl};}finally{savingComfy=false;}
   }
   const catalog=new WorkflowCatalog(join(dataDir,'workflows'));
   const gallery=new ComfyGallery({historyDir});
@@ -153,8 +154,8 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
     const previous=comfy.baseUrl;
     discovering=comfyDiscovery(previous).then(result=>{
       if(!runtime.active&&!engine.busy&&!savingSettings&&!savingComfy&&comfy.baseUrl===previous){
-        discovery=result;
-        if(result.detected)comfy={...comfy,baseUrl:normalizeComfyUrl(result.baseUrl)};
+        discovery=comfyConfigured&&result.baseUrl!==comfy.baseUrl?{detected:false,baseUrl:comfy.baseUrl}:result;
+        if(discovery.detected&&!comfyConfigured)comfy={...comfy,baseUrl:normalizeComfyUrl(discovery.baseUrl)};
       }
       discoveryTime=Date.now();return discovery;
     }).finally(()=>{discovering=null;});
@@ -225,6 +226,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (req.method !== 'POST') throw problem('Méthode non prise en charge.', 405);
       const body = await jsonBody(req, path === '/api/updates/install' ? 40 * 1024 * 1024 : maxBody);
       if (applyingUpdate) throw problem('Installation de la mise à jour en cours.', 409);
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw problem('Un objet JSON est attendu.');
       if (path === '/api/updates/session/clear') { await rm(join(dataDir, 'update-session.json'), { force: true }); return send(200, { cleared: true }); }
       if (path === '/api/updates/install') {
         const available = await updates;
@@ -257,7 +259,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if(path==='/api/files/choose'){
         if(!['engine','model','projector'].includes(body?.kind))throw problem('Type de fichier invalide.');
-        if(saving||savingSettings||pickingFile)throw problem('Un choix de fichier ou un enregistrement est déjà en cours.',409);
+        if(saving||savingSettings||savingComfy||pickingFile)throw problem('Un choix de fichier ou un enregistrement est déjà en cours.',409);
         if(runtime.active||engine.busy||engine.child||['loading','stopping'].includes(engine.state))throw problem('Arrête le modèle avant de choisir un fichier.',409);
         pickingFile=true;const controller=new AbortController();const abort=()=>controller.abort();res.once('close',abort);
         try{return send(200,{path:await filePicker(body.kind,{initialPath:body.initialPath||'',signal:controller.signal})});}
@@ -268,14 +270,14 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         const nextConfig=normalizeConfig(body.config),nextComfy=normalizeComfy(body.comfy);
         const modelChanged=JSON.stringify(config)!==JSON.stringify(nextConfig);
         if(modelChanged&&(engine.child||['loading','stopping'].includes(engine.state)))throw problem('Arrête le modèle avant de modifier ses réglages.',409);
-        const edits=body.workflowDescriptions||[];
+        const edits=body.workflowDescriptions===undefined?[]:body.workflowDescriptions;
         if(!Array.isArray(edits)||edits.length>1000||new Set(edits.map(edit=>edit?.id)).size!==edits.length)throw problem('Descriptions de workflows invalides.');
         savingSettings=true;saving=true;
         try{
           const updates=[];
           for(const edit of edits){
             if(typeof edit?.description!=='string'||edit.description.length>2000)throw problem('Description de workflow invalide.');
-            updates.push({...await catalog.read(edit.id),description:edit.description.trim()});
+            updates.push(validateWorkflow({...await catalog.read(edit.id),description:edit.description.trim()}));
           }
           if(modelChanged){await writeFile(`${configPath}.tmp`,JSON.stringify(nextConfig,null,2),{mode:0o600});await rename(`${configPath}.tmp`,configPath);config=nextConfig;configWarning='';}
           await saveComfy(nextComfy);
@@ -322,17 +324,22 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         } finally { persistingGallery=false; }
       }
       if(path.startsWith('/api/comfy/')){
-        if(runtime.active||engine.busy||clearingHistory||savingSettings)throw problem('Attends la fin de l’opération GPU.',409);
+        if(runtime.active||engine.busy||clearingHistory||savingSettings||savingComfy||pickingFile)throw problem('Attends la fin de l’opération GPU.',409);
         if(path==='/api/comfy/config'){await saveComfy(body);return send(200,{config:comfy});}
-        if(path==='/api/comfy/import')return send(200,await catalog.save(body));
-        if(path==='/api/comfy/remove'){await catalog.remove(body.id);return send(200,{removed:true});}
+        if(path==='/api/comfy/import'||path==='/api/comfy/remove'){
+          savingComfy=true;
+          try{
+            if(path==='/api/comfy/import')return send(200,await catalog.save(body));
+            await catalog.remove(body.id);return send(200,{removed:true});
+          }finally{savingComfy=false;}
+        }
         throw problem('Route introuvable.',404);
       }
       if (path === '/api/preferences') {
         if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.keys(body).length || Object.keys(body).some((key) => !['theme', 'saveHistory'].includes(key))) throw problem('Préférences invalides.');
         if ('theme' in body && !['dark', 'light'].includes(body.theme)) throw problem('Choisis le mode jour ou nuit.');
         if ('saveHistory' in body && typeof body.saveHistory !== 'boolean') throw problem('Choix d’historique invalide.');
-        if ((runtime.active || persistingGallery) && 'saveHistory' in body) throw problem('Attends la fin de la génération ComfyUI.',409);
+        if ((runtime.active || persistingGallery || clearingHistory) && 'saveHistory' in body) throw problem('Attends la fin de la génération ComfyUI.',409);
         if (savingPreferences) throw problem('Préférences en cours d’enregistrement.', 409);
         const next = { ...preferences, ...body };
         savingPreferences = true;
@@ -383,7 +390,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (path === '/api/start') {
         if (runtime.active) throw problem('ComfyUI utilise le GPU. Attends la fin de la génération.',409);
-        if (saving || pickingFile) throw problem('Choix de fichier ou enregistrement en cours.', 409);
+        if (saving || savingComfy || pickingFile) throw problem('Choix de fichier ou enregistrement en cours.', 409);
         await engine.start(config);
         return send(202, engine.status());
       }

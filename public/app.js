@@ -4,14 +4,14 @@ import { readSSE } from './stream.mjs';
 import { markdownToHtml } from './markdown.mjs';
 import { setupComfy } from './comfy-ui.mjs';
 import { prepareImages } from './images.mjs';
-import { setupTokenControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
+import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
 
 const $ = (id) => document.getElementById(id);
 const state = {
   token: '', config: {}, status: { state: 'stopped', vision: false, busy: false, logs: [] },
   connected: false, thinking: true, messages: [], images: [], generating: false,
-  preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingPreferences: false, waitingForModel: false, settingsLoading: false,
+  preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingPreferences: false, waitingForModel: false, settingsLoading: false, settingsSession: 0, settingsReady: false, comfyWorking: false, disablingHistory: false,
   saveHistory: true, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false, clearingHistory: false,
 };
 const labels = { stopped: 'Moteur arrêté', loading: 'Chargement du modèle…', ready: 'Prêt à discuter', stopping: 'Arrêt en cours…', error: 'Vérifier le moteur' };
@@ -110,19 +110,21 @@ async function changePreferences(patch) {
   if (state.savingPreferences) return false;
   state.savingPreferences = true;
   updateControls();
+  state.disablingHistory = patch.saveHistory === false;
   try {
+    if (state.disablingHistory) await historyWrite;
     const { preferences } = await (await api('preferences', patch)).json();
     state.saveHistory = preferences.saveHistory;
     applyTheme(preferences.theme);
-    await refreshHistory();
+    await refreshHistory().catch(error => notice(error.message));
     return true;
   } catch (error) { notice(error.message); return false; }
-  finally { state.savingPreferences = false; updateControls(); }
+  finally { state.savingPreferences = false; state.disablingHistory = false; updateControls(); }
 }
 
 function persistConversation() {
   const snapshot = state.archiveSnapshot || { messages: state.messages, incomplete: false };
-  if (!state.saveHistory || !snapshot.messages.length) return Promise.resolve(true);
+  if (!state.saveHistory || state.disablingHistory || !snapshot.messages.length) return Promise.resolve(true);
   const id = state.conversationId ||= crypto.randomUUID();
   state.historyDirty = true;
   historyWrite = historyWrite.then(async () => {
@@ -265,7 +267,7 @@ async function toggleTheme() {
 
 function updateControls() {
   const s = state.status;
-  $('update-available').disabled = state.updating || state.generating || state.preparing || state.operation || state.settingsLoading || state.loadingHistory || state.savingHistory || state.savingPreferences || !state.connected || s.busy || !!s.toolJob || ['loading','stopping'].includes(s.state);
+  $('update-available').disabled = state.comfyWorking || state.updating || state.generating || state.preparing || state.operation || state.settingsLoading || state.loadingHistory || state.savingHistory || state.savingPreferences || !state.connected || s.busy || !!s.toolJob || ['loading','stopping'].includes(s.state);
   const toolBusy=!!s.toolJob;
   $('comfy-recover').hidden=!s.toolJob?.blocked;
   const running = ['loading', 'ready', 'stopping'].includes(s.state);
@@ -282,11 +284,11 @@ function updateControls() {
   $('history-delete-cancel').disabled = state.clearingHistory;
   $('history-delete-confirm').textContent = state.clearingHistory ? 'Suppression…' : 'Supprimer définitivement';
   $('theme-toggle').disabled = state.savingPreferences || !state.connected;
-  $('config-fields').disabled = toolBusy || running || state.operation || state.generating || !state.connected;
-  $('save-config').disabled = s.busy || state.settingsLoading || toolBusy || state.operation || state.generating || !state.connected;
+  $('config-fields').disabled = state.settingsLoading || state.settingsReady === false || state.comfyWorking || toolBusy || running || state.operation || state.generating || !state.connected;
+  $('save-config').disabled = state.settingsReady === false || state.comfyWorking || s.busy || state.settingsLoading || toolBusy || state.operation || state.generating || !state.connected;
   $('settings-stop').hidden = !running;
   $('settings-stop').disabled = toolBusy || state.generating || s.state === 'stopping' || state.operation;
-  $('toggle-engine').disabled = toolBusy || state.generating || state.operation || s.state === 'stopping' || !state.connected;
+  $('toggle-engine').disabled = state.comfyWorking || toolBusy || state.generating || state.operation || s.state === 'stopping' || !state.connected;
   $('toggle-engine').classList.toggle('is-running', running);
   $('toggle-engine').replaceChildren(icon(running ? 'stop' : 'play'), node('span', '', running ? 'Arrêter le modèle' : 'Démarrer le modèle'));
   $('send').disabled = toolBusy || !state.connected || s.state === 'stopping' || s.busy || state.generating || state.preparing || state.operation || state.loadingHistory || (!$('prompt').value.trim() && !state.images.length);
@@ -305,7 +307,7 @@ function updateControls() {
   $('compose-state').textContent = toolBusy ? s.toolJob.progress || 'ComfyUI en cours…' : state.preparing ? 'Préparation des images…' : state.waitingForModel ? 'Chargement… message en attente' : state.generating ? 'Réponse en cours…' : s.state === 'loading' ? 'Le modèle se charge…' : '';
   comfyUI.setBusy(s.busy||toolBusy||state.generating||state.operation||state.settingsLoading||!state.connected);
   $('engine-logs').textContent = s.logs?.join('\n') || 'Les journaux apparaîtront au démarrage.';
-  if (s.error) {
+  if (s.error && $('config-error').hidden) {
     $('config-error').textContent = s.error;
     $('config-error').hidden = false;
   }
@@ -315,6 +317,9 @@ function updateControls() {
     $('sidebar-model').title = basename;
     const quant = basename.match(/(?:\.|-)(Q\d[^.]*|IQ\d[^.]*)(?:\.gguf)?$/i)?.[1] || 'GGUF';
     $('sidebar-model-detail').textContent = `${quant} · ${state.config.projectorPath ? 'projecteur configuré' : 'texte uniquement'}`;
+  } else {
+    $('sidebar-model').textContent = 'Modèle GGUF'; $('sidebar-model').title = '';
+    $('sidebar-model-detail').textContent = 'Aucun modèle configuré';
   }
 
 }
@@ -349,24 +354,35 @@ async function refreshStatus() {
 
 function openSettings() {
   if ($('settings').open) return;
-  filePickerController?.abort();
-  $('engine-path').value = state.config.enginePath || '';
-  $('model-path').value = state.config.modelPath || '';
-  $('projector-path').value = state.config.projectorPath || '';
-  tokenControls.setValues(state.config);
-  const layers = state.config.gpuLayers ?? 99;
-  $('compute-mode').value = [0, 99].includes(layers) ? String(layers) : 'custom';
-  $('gpu-layers').value = String(layers);
-  $('custom-layers-field').hidden = $('compute-mode').value !== 'custom';
-  $('config-error').hidden = !state.status.error;
-  state.settingsLoading=true;
-  comfyUI.refresh().catch(error=>notice(error.message)).finally(()=>{state.settingsLoading=false;updateControls();});
-  if (!$('settings').open) $('settings').showModal();
-  updateControls();
+  filePickerController?.abort();comfyUI.cancelSettings();
+  const session = state.settingsSession = (state.settingsSession || 0) + 1;
+  state.settingsLoading = true; state.settingsReady = false;
+  $('config-error').hidden = true;
+  $('settings').showModal(); updateControls();
+  Promise.all([api('bootstrap').then(response => response.json()), comfyUI.refresh()]).then(([initial]) => {
+    if (session !== state.settingsSession || !$('settings').open) return;
+    state.config = initial.config;
+    if (initial.preferences && !state.savingPreferences) {
+      const historyChanged = state.saveHistory !== initial.preferences.saveHistory;
+      state.saveHistory = initial.preferences.saveHistory; applyTheme(initial.preferences.theme);
+      if (historyChanged) void refreshHistory().catch(error => notice(error.message));
+    }
+    $('engine-path').value = state.config.enginePath || '';
+    $('model-path').value = state.config.modelPath || '';
+    $('projector-path').value = state.config.projectorPath || '';
+    tokenControls.setValues(state.config); computeControls.setValues(state.config);
+    state.settingsReady = true;
+  }).catch(error => {
+    if (session !== state.settingsSession || !$('settings').open) return;
+    $('config-error').textContent = error.message; $('config-error').hidden = false;
+  }).finally(() => {
+    if (session === state.settingsSession) { state.settingsLoading = false; updateControls(); }
+  });
 }
 
 async function saveConfiguration() {
-  if (state.operation || state.settingsLoading || !$('settings').open) return;
+  if (state.operation || state.settingsLoading || state.comfyWorking || !state.settingsReady || !$('settings').open) return;
+  const session = state.settingsSession;
   state.operation = true;
   $('config-error').hidden = true;
   updateControls();
@@ -374,14 +390,13 @@ async function saveConfiguration() {
     const config = {
       enginePath: $('engine-path').value, modelPath: $('model-path').value,
       projectorPath: $('projector-path').value, ...tokenControls.values(),
-      gpuLayers: Number($('compute-mode').value === 'custom' ? $('gpu-layers').value : $('compute-mode').value),
+      ...computeControls.values(),
     };
     const saved=await(await api('settings',{config,comfy:comfyUI.values(),workflowDescriptions:comfyUI.workflowDescriptions()})).json();
-    state.config=saved.config;state.comfy=saved.comfy;await comfyUI.saved();
-    $('settings').close();
+    state.config=saved.config;state.comfy=saved.comfy;
+    if (session === state.settingsSession && $('settings').open) { comfyUI.saved(saved); $('settings').close(); }
   } catch (error) {
-    $('config-error').textContent = error.message;
-    $('config-error').hidden = false;
+    if (session === state.settingsSession && $('settings').open) { $('config-error').textContent = error.message; $('config-error').hidden = false; }
   } finally {
     state.operation = false;
     await refreshStatus();
@@ -565,8 +580,9 @@ async function sendMessage(event) {
 
 setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 const tokenControls=setupTokenControls($);
+const computeControls=setupComputeControls($);
 dismissSettingsOnOutsideClick($('settings'));
-const comfyUI=setupComfy({api,state,node,notice,onChange:()=>refreshStatus()});
+const comfyUI=setupComfy({api,state,node,notice,onChange:()=>refreshStatus(),onSettingsBusyChange:busy=>{state.comfyWorking=busy;updateControls();}});
 applyTheme(document.documentElement.dataset.theme);
 $('theme-toggle').onclick = toggleTheme;
 $('history-clear').onclick = () => confirmHistoryDeletion();
@@ -585,7 +601,12 @@ $('history-enabled').onchange = async () => {
   }
 };
 let filePickerController = null;
-$('settings').addEventListener('close', () => { if (!$('settings').open) filePickerController?.abort(); });
+$('settings').addEventListener('close', () => {
+  if ($('settings').open) return;
+  state.settingsSession = (state.settingsSession || 0) + 1;
+  state.settingsLoading = false; state.settingsReady = false;
+  filePickerController?.abort(); comfyUI.cancelSettings(); updateControls();
+});
 for(const button of document.querySelectorAll('[data-file-kind]'))button.onclick=async()=>{
   if (state.operation || button.disabled || !$('settings').open) return;
   const kind=button.dataset.fileKind,id=kind==='engine'?'engine-path':kind==='model'?'model-path':'projector-path';
@@ -605,7 +626,6 @@ $('update-available').onclick = installUpdate;
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('settings-close').onclick = () => $('settings').close();
 $('settings-form').onsubmit = (event) => { event.preventDefault(); saveConfiguration(); };
-$('compute-mode').onchange = () => { $('custom-layers-field').hidden = $('compute-mode').value !== 'custom'; };
 $('toggle-engine').onclick = () => toggleEngine();
 $('settings-stop').onclick = () => toggleEngine(true);
 $('notice-close').onclick = () => notice('');

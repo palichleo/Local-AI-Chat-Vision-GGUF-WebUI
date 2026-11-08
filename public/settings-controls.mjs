@@ -39,6 +39,30 @@ export function setupTokenControls($) {
   return { setValues, values: () => ({contextSize:value(context,contexts),maxOutputTokens:value(output,outputs)}) };
 }
 
+export function setupComputeControls($) {
+  const mode = $('compute-mode'), layers = $('gpu-layers');
+  function sync() {
+    const custom = mode.value === 'custom';
+    $('custom-layers-field').hidden = !custom;
+    layers.disabled = !custom;
+    layers.required = custom;
+  }
+  function values() {
+    const text = mode.value === 'custom' ? layers.value.trim() : mode.value;
+    const gpuLayers = Number(text);
+    if (!text || !Number.isInteger(gpuLayers) || gpuLayers < 0 || gpuLayers > 999) throw new Error('Le nombre de couches GPU doit être compris entre 0 et 999.');
+    return { gpuLayers };
+  }
+  function setValues({ gpuLayers = 999 } = {}) {
+    mode.value = [0, 999].includes(gpuLayers) ? String(gpuLayers) : 'custom';
+    layers.value = String(gpuLayers);
+    sync();
+  }
+  mode.onchange = sync;
+  setValues();
+  return { setValues, values };
+}
+
 export function dismissSettingsOnOutsideClick(dialog) {
   let startedOutside = false;
   const outside = event => {

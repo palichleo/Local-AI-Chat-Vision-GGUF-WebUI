@@ -21,11 +21,11 @@ test('contexte et sortie : migration et validation indépendantes', () => {
 
 test('chaque choix de contexte arrive au moteur, chaque plafond de sortie arrive aux requêtes', { timeout: 20000 }, async () => {
   const folder = await mkdtemp(join(tmpdir(), 'atelier-limits-'));
-  let app;
+  let app, engineArgs;
   try {
     const modelPath = join(folder, 'model.gguf');
     await writeFile(modelPath, Buffer.from('GGUF\x03\0\0\0'));
-    app = await createApplication({ port: 0, dataDir: folder, spawnProcess: (_command, args, options) => spawn(process.execPath, [fileURLToPath(new URL('./fixtures/fake-engine.mjs', import.meta.url)), ...args], options) });
+    app = await createApplication({ port: 0, dataDir: folder, spawnProcess: (_command, args, options) => { engineArgs = args; return spawn(process.execPath, [fileURLToPath(new URL('./fixtures/fake-engine.mjs', import.meta.url)), ...args], options); } });
     const initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
     const api = async (route, body, options = {}) => fetch(`${app.url}/api/${route}`, { method: body === undefined ? 'GET' : 'POST', headers: { Authorization: `Bearer ${initial.token}`, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...options });
     const html = await (await fetch(app.url)).text();
@@ -36,9 +36,11 @@ test('chaque choix de contexte arrive au moteur, chaque plafond de sortie arrive
     assert.deepEqual(sizes, [4096, 8192, 16384, 32768, 65536, 131072, 262144]);
     for (const [index, contextSize] of sizes.entries()) {
       const maxOutputTokens = [1024, 2048, 4096, 8192, 16384, 32768, 32768][index];
-      const config = { enginePath: process.execPath, modelPath, projectorPath: '', contextSize, maxOutputTokens, gpuLayers: 0 };
+      const config = { enginePath: process.execPath, modelPath, projectorPath: '', contextSize, maxOutputTokens, gpuLayers: [0, 12, 999][index % 3] };
       assert.equal((await api('config', config)).status, 200);
       await waitForModel(api, new AbortController().signal, () => {});
+      assert.equal(engineArgs[engineArgs.indexOf('--n-gpu-layers') + 1], String(config.gpuLayers));
+      assert.equal(engineArgs.includes('--no-mmproj-offload'), config.gpuLayers === 0);
       const response = await api('chat', { messages: [{ role: 'user', content: 'Test' }] });
       assert.equal(response.status, 200);
       assert.match(await response.text(), new RegExp(`Contexte ${contextSize}`));
