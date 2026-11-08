@@ -146,3 +146,16 @@ test('unconfirmed cleanup blocks execution until explicit recovery succeeds', as
   assert.equal(recovered.state, 'done');
   await assert.rejects(rt.recover(), { status: 409 });
 });
+
+test('forgetting one conversation invalidates only its pending calls and completed job', async () => {
+  const { rt, request, seen } = runtimeFixture();
+  const first = await request();
+  const other = 'b2222222-2222-4222-8222-222222222222';
+  const second = await rt.request([{ id: 'other_call', type: 'function', function: { name: 'comfy_generate_image', arguments: JSON.stringify({ workflow_id: 'wf', prompt: 'Another portrait' }) } }], { conversationId: other, turnId: other, messages: [] });
+  rt.forgetConversation(id);
+  await assert.rejects(rt.execute({ requestId: first.requestId, permission: 'once' }), /expiré/i);
+  await rt.execute({ requestId: second.requestId, permission: 'once' }); await rt.finished;
+  assert.equal(seen.runs, 1);
+  rt.forgetConversation(id); assert.equal(rt.job.record.conversationId, other);
+  rt.forgetConversation(other); assert.equal(rt.job, null);
+});

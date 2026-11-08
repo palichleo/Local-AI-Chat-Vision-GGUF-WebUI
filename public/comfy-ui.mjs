@@ -33,7 +33,7 @@ export function setupComfy({api,state,node,notice,onChange}){
       }
     }
   }
-  let busy=false,working=false,unlimited=false,lastLimited=3;
+  let busy=false,working=false,unlimited=false,lastLimited=5;
   const descriptions=new Map();
   let queue=[],queueTotal=0,queueIndex=0,importVersion=0;
   function syncLimit(){
@@ -79,10 +79,10 @@ export function setupComfy({api,state,node,notice,onChange}){
     setBusy(busy);
   }
   async function saved(){descriptions.clear();await refresh();}
-  $('comfy-iterations').oninput=()=>{lastLimited=Number($('comfy-iterations').value)||3;syncLimit();};
+  $('comfy-iterations').oninput=()=>{lastLimited=Number($('comfy-iterations').value)||5;syncLimit();};
   $('comfy-minus').onclick=()=>{if(unlimited){unlimited=false;lastLimited=9999;}else lastLimited=Math.max(1,(Number($('comfy-iterations').value)||1)-1);$('comfy-iterations').value=lastLimited;syncLimit();};
   $('comfy-plus').onclick=()=>{if(unlimited)return;const next=(Number($('comfy-iterations').value)||1)+1;if(next>=10000)unlimited=true;else lastLimited=next;$('comfy-iterations').value=lastLimited;syncLimit();};
-  $('comfy-unlimited').onclick=()=>{if(!unlimited)lastLimited=Math.min(9999,Math.max(1,Number($('comfy-iterations').value)||3));unlimited=!unlimited;$('comfy-iterations').value=lastLimited;syncLimit();};
+  $('comfy-unlimited').onclick=()=>{if(!unlimited)lastLimited=Math.min(9999,Math.max(1,Number($('comfy-iterations').value)||5));unlimited=!unlimited;$('comfy-iterations').value=lastLimited;syncLimit();};
   $('comfy-address-edit').onclick=()=>{connection({detected:false});$('comfy-url').focus();};
   $('comfy-recover').onclick=async()=>{try{$('comfy-recover').disabled=true;await api('tools/recover',{});onChange();$('comfy-status').textContent='GPU libéré. Le modèle peut redémarrer.';}catch(e){$('comfy-status').textContent=e.message;}finally{$('comfy-recover').disabled=false;}};
   $('comfy-test').onclick=async()=>{

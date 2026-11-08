@@ -52,9 +52,9 @@ The llama.cpp engine included in some Ollama installations can be reused directl
 
 ## Appearance
 
-The interface starts in **Night** mode. Use the **Day / Night** button beside Configuration to switch themes. Your choice is saved in `data/preferences.json` and restored after closing or restarting the application. This file stays local and is excluded from Git. Day/Night and Configuration are below the model card. Configuration opens in a centered, rounded dialog; clicking outside or pressing Escape closes it.
+The interface starts in **Night** mode. The **Day / Night** button is inside Configuration. Your choice is saved in `data/preferences.json` and restored after closing or restarting the application. This file stays local and is excluded from Git. The wider Configuration button sits below the model card. Settings open in a centered, rounded dialog; clicking outside or pressing Escape closes it.
 
-Context and maximum output use discrete sliders with the same token presets. The output slider stays within the selected context; compute mode is below them. Empty path fields show a red **None** placeholder. The initial composer is centered with suggestions underneath; it moves to the bottom after a message. Its pearlescent border uses CSS only, animates on the welcome screen and stays static during a conversation or when reduced motion is preferred.
+Context and maximum output use discrete sliders with the same token presets. The output slider stays within the selected context; compute mode is below them. Empty path fields show a red **None** placeholder. The initial composer is centered with suggestions underneath; it moves to the bottom after a message. Surfaces share an original, locally generated 2048 × 2048 metallic texture. The texture stays static. Subtle pointer lighting on the composer and model card has no idle animation loop and respects touch and reduced-motion settings.
 
 ## Chat and images
 
@@ -76,7 +76,7 @@ Export a copy of your workflow from ComfyUI using **File → Export (API)**, ena
 
 Use a **GGUF model and chat template that support native tool calls**. The application supplies the tools and starts llama-server with `--jinja`; no extra manual engine flag is needed. A text imitation of a tool call does not execute a workflow. For workflows with an image binding, the model can select a supplied reference using its zero-based index.
 
-Every execution asks for permission by default. You can approve once or allow imported workflows globally, then revoke that setting in Configuration. The default limit is **three generations per user turn**, adjustable from 1 to 9,999 or **∞** (10,000 internally). The approval names the workflow and parameters; progress and cancellation stay visible. Restoring a conversation never silently replays an approval or starts a pending job.
+Every execution asks for permission by default. You can approve once or allow imported workflows globally, then revoke that setting in Configuration. The default limit is **five generations per user turn**, adjustable from 1 to 9,999 or **∞** (10,000 internally). The approval names the workflow and parameters; progress and cancellation stay visible. Restoring a conversation never silently replays an approval or starts a pending job.
 
 During a run, the application waits for ComfyUI to be idle, unloads the chat engine and its vision projector, then runs the approved workflow. It frees ComfyUI's models before restarting the chat engine and projector for review. The local ComfyUI service stays running. Only compressed analysis copies go to the vision model; it compares them with the instruction and references and can revise within the iteration limit. Its review can miss details lost in compression and does not train the model. The **right-hand gallery** shows workflow and prompt details and lets you view or download the original ComfyUI output.
 
@@ -86,9 +86,13 @@ The generation counter has −/+ controls and an **∞** option (a backend ceili
 
 ## Optional conversation history
 
-**Conserver les conversations** in Configuration is off by default. When off, messages stay in page memory and are lost on closure or reload. When enabled, the application saves messages, reasoning and copies of the browser-compressed images under `history/<conversation-id>/` in the project folder. Each conversation has `conversation.json` and content-addressed image files; repeated saves reuse the same image bytes. Both `history/` and `data/` are excluded from Git. When uploading sources manually, exclude both folders yourself.
+**Conserver les conversations** in Configuration is on by default. When off, messages stay in page memory and are lost on closure or reload. When enabled, the application saves messages, reasoning and copies of the browser-compressed images under `history/<conversation-id>/` in the project folder. Each conversation has `conversation.json` and content-addressed image files; repeated saves reuse the same image bytes. Both `history/` and `data/` are excluded from Git. When uploading sources manually, exclude both folders yourself.
 
 Saved conversations appear in the sidebar, or inside Configuration on narrow screens. Reopen one to restore messages and images and continue chatting. Pending user turns, periodic partial replies and finished replies are saved. An unfinished user turn is restored as an editable draft and is never resent automatically. A restored partial assistant reply is marked as partial. A forced shutdown can still lose the latest unsaved part of a streamed reply.
+
+Current and saved conversations share one stack of equal-height rows. The current conversation stays first and highlighted; older conversations use a quieter style and show their date. Previously saved history and generation-limit choices remain in effect.
+
+A trash button appears on each saved conversation when hovered or focused with the keyboard; it stays visible on touch devices. After confirmation it deletes only that conversation, its compressed copies and its gallery links. Original ComfyUI output files remain at their location.
 
 Generated-image history keeps compressed review copies and gallery metadata/links only. Originals remain in ComfyUI's output storage. **Supprimer l’historique** deletes the saved compressed copies and links along with the conversation; it leaves original ComfyUI files unchanged. With history off, gallery records stay in page/server memory only.
 
@@ -121,6 +125,16 @@ The browser sends the whole active conversation on each turn, including past ima
 - **Port in use:** another instance may be using 8787. Close that instance before restarting.
 
 Both services listen only on loopback. Control routes check the host, origin and a session token. Remote image URLs are rejected, and llama.cpp starts in offline mode. Only one generation is accepted at a time.
+
+## Update notification
+
+At each launch, one background request checks the public version in this GitHub repository. It times out after four seconds without blocking startup or chat; offline checks remain silent. A light-blue button appears to the right of Configuration only when a newer stable version exists.
+
+**Clicking the button installs the update automatically.** The app downloads a source archive pinned to a GitHub commit, checks its version and paths, backs up the sources it replaces, stops the idle model and restarts on the same address. The page restores the conversation, partial-response state, generated-image links and composer draft. Generation or another active operation must finish first. If download fails the current page remains usable; if the replacement cannot start, the previous sources are restored and restarted.
+
+The installer preserves `data/`, `history/`, model weights, ComfyUI originals, Git metadata and files outside the managed source folders. A temporary session checkpoint is kept in `data/update-session.json` until the page restores it, even when regular history is off. Source backups and restart logs remain under `data/updates/`; install status is in `data/update-status.json`. Custom edits inside managed source folders are replaced, with their previous copies retained in the backup. Git metadata is not moved to the downloaded commit. No Git installation or npm dependency download is required. The project folder must be writable.
+
+Maintainers: increase `version` in `package.json` for each public update, then publish it on `main`. Equal, older and preview versions do not trigger the button. Version checks and downloads send no messages, images, configuration paths or hardware details.
 
 ## Smoke test
 

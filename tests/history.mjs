@@ -22,7 +22,8 @@ test('historique optionnel, images séparées et reprise après redémarrage', a
   try {
     app = await createApplication({ port: 0, dataDir: folder, historyDir });
     token = (await (await fetch(`${app.url}/api/bootstrap`)).json()).token;
-    assert.equal((await (await fetch(`${app.url}/api/bootstrap`)).json()).preferences.saveHistory, false);
+    assert.equal((await (await fetch(`${app.url}/api/bootstrap`)).json()).preferences.saveHistory, true);
+    assert.equal((await call('preferences', { saveHistory: false })).status, 200);
     assert.equal((await call('history/save', { id, messages })).status, 403);
     await assert.rejects(readdir(historyDir), { code: 'ENOENT' });
     assert.equal((await call('preferences', { saveHistory: true })).status, 200);

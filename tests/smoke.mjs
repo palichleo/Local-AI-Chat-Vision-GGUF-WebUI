@@ -66,6 +66,13 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       assert.equal(bootstrap.status.state, 'stopped');
       const page = await fetch(base);
       assert.equal(page.status, 200);
+      const texture = await fetch(base + '/assets/metallic-grain.png');
+      assert.equal(texture.status, 200);
+      assert.equal(texture.headers.get('content-type'), 'image/png');
+      const textureBytes = Buffer.from(await texture.arrayBuffer());
+      assert.deepEqual([...textureBytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+      assert.ok(textureBytes.length < 1500000);
+      assert.equal((await fetch(base + '/material-light.mjs')).status, 200);
       assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
       assert.equal((await fetch(`${base}/api/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
       assert.equal((await call('start', {}, { headers: { ...headers, Origin: 'https://example.org' } })).status, 403);

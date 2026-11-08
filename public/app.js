@@ -1,3 +1,5 @@
+import { installFromButton, compactSession } from './update-ui.mjs';
+import { setupMaterialLighting } from './material-light.mjs';
 import { readSSE } from './stream.mjs';
 import { markdownToHtml } from './markdown.mjs';
 import { setupComfy } from './comfy-ui.mjs';
@@ -10,7 +12,7 @@ const state = {
   token: '', config: {}, status: { state: 'stopped', vision: false, busy: false, logs: [] },
   connected: false, thinking: true, messages: [], images: [], generating: false,
   preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingPreferences: false, waitingForModel: false, settingsLoading: false,
-  saveHistory: false, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false, clearingHistory: false,
+  saveHistory: true, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false, clearingHistory: false,
 };
 const labels = { stopped: 'Moteur arrêté', loading: 'Chargement du modèle…', ready: 'Prêt à discuter', stopping: 'Arrêt en cours…', error: 'Vérifier le moteur' };
 
@@ -49,25 +51,51 @@ async function api(route, body, options = {}) {
 }
 
 let historyWrite = Promise.resolve();
+let historyDeleteTarget = null;
+function confirmHistoryDeletion(item = null) {
+  historyDeleteTarget = item;
+  $('history-delete-title').textContent = item ? 'Supprimer cette conversation ?' : 'Supprimer l’historique ?';
+  $('history-delete-description').textContent = item
+    ? '« ' + item.title + ' » sera supprimée avec ses copies compressées et ses liens vers ComfyUI. Les images originales restent à leur emplacement. Le brouillon de saisie sera conservé.'
+    : 'Les conversations, les copies compressées et les liens vers les sorties seront supprimés. Les originaux ComfyUI restent à leur emplacement. L’échange affiché sera fermé ; le brouillon de saisie sera conservé.';
+  $('history-delete-error').hidden = true;
+  if (!$('history-delete-dialog').open) $('history-delete-dialog').showModal();
+}
 
 function renderHistory() {
-  $('history-section').hidden = !state.saveHistory;
+  $('history-section').hidden = false;
   $('history-mobile').hidden = !state.saveHistory;
-  $('session-note').textContent = state.saveHistory ? 'Conversations sauvegardées sur cet ordinateur.' : 'Conversation conservée pendant cette session uniquement.';
+  const current = state.historyItems.find(item => item.id === state.conversationId);
+  const entries = [{ ...current, id: state.conversationId, title: $('conversation-title').textContent, current: true },
+    ...(state.saveHistory ? state.historyItems.filter(item => item.id !== state.conversationId) : [])];
   for (const id of ['history-list', 'history-list-mobile']) {
-    const list = $(id);
-    list.replaceChildren();
-    if (!state.historyItems.length) list.append(node('p', 'history-empty', 'Aucune conversation enregistrée.'));
-    for (const item of state.historyItems) {
-      const button = node('button', `history-item${item.id === state.conversationId ? ' active' : ''}`);
-      button.type = 'button';
-      button.dataset.conversationId = item.id;
+    const list = $(id); list.replaceChildren();
+    for (const item of entries) {
+      const button = node('button', 'history-item' + (item.current ? ' active' : ''));
+      button.type = 'button'; button.dataset.conversationId = item.id || ''; button.dataset.current = String(!!item.current);
       button.disabled = !!state.status.toolJob || state.generating || state.preparing || state.loadingHistory;
-      button.append(node('span', '', item.title), node('small', '', `${new Date(item.updatedAt).toLocaleDateString('fr-FR')}${item.incomplete ? ' · en cours / partielle' : ''}`));
-      button.onclick = () => loadConversation(item.id);
-      list.append(button);
+      if (item.current) button.setAttribute('aria-current', 'page');
+      const label = node('span', 'history-label');
+      label.append(node('span', 'history-title', item.title), node('small', '', item.current ? 'En cours' : new Date(item.updatedAt).toLocaleDateString('fr-FR') + (item.incomplete ? ' · partielle' : '')));
+      button.append(icon('chat'), label);
+      button.onclick = item.current ? () => { $('settings').close(); $('prompt').focus(); } : () => loadConversation(item.id);
+      const row = node('div', 'history-row'); row.append(button);
+      if (state.saveHistory && state.historyItems.some(saved => saved.id === item.id)) {
+        const remove = node('button', 'history-delete-button icon-button');
+        remove.type = 'button'; remove.disabled = button.disabled || state.status.busy || state.clearingHistory;
+        remove.setAttribute('aria-label', 'Supprimer la conversation : ' + item.title);
+        remove.title = 'Supprimer la conversation'; remove.append(icon('trash'));
+        remove.onclick = () => confirmHistoryDeletion(item);
+        row.append(remove);
+      }
+      list.append(row);
     }
   }
+}
+
+function setConversationTitle(title) {
+  $('conversation-title').textContent = title;
+  renderHistory();
 }
 
 async function refreshHistory() {
@@ -113,21 +141,22 @@ function persistConversation() {
 }
 
 async function clearHistory() {
-  if ($('history-clear').disabled) return;
-  state.clearingHistory = true;
-  state.loadingHistory = true;
-  $('history-delete-error').hidden = true;
-  updateControls();
+  if (state.clearingHistory) return;
+  const target = historyDeleteTarget;
+  state.clearingHistory = true; state.loadingHistory = true;
+  $('history-delete-error').hidden = true; updateControls();
   try {
     await historyWrite;
-    await api('history/clear', { confirm: true });
-    state.historyItems = []; state.messages = []; state.conversationId = null; state.archiveSnapshot = null; state.historyDirty = false;
-    comfyUI.reset();
-    $('messages').replaceChildren(); $('welcome').hidden = false;
-    $('conversation-title').textContent = 'Nouvelle conversation';
+    await api(target ? 'history/delete' : 'history/clear', { confirm: true, ...(target ? { id: target.id } : {}) });
+    state.historyItems = target ? state.historyItems.filter(item => item.id !== target.id) : [];
+    if (!target || target.id === state.conversationId) {
+      state.messages = []; state.conversationId = null; state.archiveSnapshot = null; state.historyDirty = false;
+      comfyUI.reset(); $('messages').replaceChildren(); $('welcome').hidden = false;
+      setConversationTitle('Nouvelle conversation');
+    }
     renderHistory(); notice('');
-    $('live-status').textContent = 'Historique supprimé.';
-    $('history-delete-dialog').close();
+    $('live-status').textContent = target ? 'Conversation supprimée.' : 'Historique supprimé.';
+    $('history-delete-dialog').close(); historyDeleteTarget = null;
   } catch (error) { $('history-delete-error').textContent = error.message; $('history-delete-error').hidden = false; }
   finally { state.clearingHistory = false; state.loadingHistory = false; updateControls(); }
 }
@@ -156,20 +185,9 @@ async function loadConversation(id) {
     state.images = draft.images;
     $('prompt').value = draft.text;
     $('messages').replaceChildren();
-    for (const [index, message] of messages.entries()) {
-      if(message.internal||message.role==='tool')continue;
-      if (message.role === 'user') { const user = savedUser(message); userMessage(user.text, user.images); }
-      else {
-        const view = assistantMessage();
-        if (message.content) renderText(view.body, message.content);
-        else view.body.textContent = message.tool_calls ? 'Appel ComfyUI enregistré.' : 'Aucune réponse finale reçue.';
-        view.reasoning.hidden = !message.reasoning_content;
-        view.thoughts.textContent = message.reasoning_content || '';
-        if (record.incomplete && index === messages.length - 1) view.note.textContent = 'Réponse partielle restaurée.';
-      }
-    }
+    renderTranscript(messages, record.incomplete);
     $('welcome').hidden = messages.length > 0;
-    $('conversation-title').textContent = record.title;
+    setConversationTitle(record.title);
     $('settings').close();
     renderAttachments();
     resizePrompt();
@@ -179,6 +197,56 @@ async function loadConversation(id) {
     $('prompt').focus();
   } catch (error) { notice(error.message); }
   finally { state.loadingHistory = false; updateControls(); $('prompt').focus(); }
+}
+
+function renderTranscript(messages, incomplete = false) {
+    for (const [index, message] of messages.entries()) {
+      if(message.internal||message.role==='tool')continue;
+      if (message.role === 'user') { const user = savedUser(message); userMessage(user.text, user.images); }
+      else {
+        const view = assistantMessage();
+        if (message.content) renderText(view.body, message.content);
+        else view.body.textContent = message.tool_calls ? 'Appel ComfyUI enregistré.' : 'Aucune réponse finale reçue.';
+        view.reasoning.hidden = !message.reasoning_content;
+        view.thoughts.textContent = message.reasoning_content || '';
+        if (incomplete && index === messages.length - 1) view.note.textContent = 'Réponse partielle restaurée.';
+      }
+    }
+
+}
+
+async function restoreUpdate() {
+  const saved = await (await api('updates/session')).json();
+  if (!saved) return;
+  state.messages = saved.messages; state.conversationId = saved.conversationId;
+  state.archiveSnapshot = saved.archiveSnapshot; state.historyDirty = false; state.images = saved.images; state.thinking = saved.thinking;
+  $('prompt').value = saved.prompt; $('thinking').setAttribute('aria-pressed', String(state.thinking));
+  $('messages').replaceChildren(); renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
+  $('welcome').hidden = state.messages.length > 0; setConversationTitle(saved.title || 'Nouvelle conversation');
+  renderAttachments(); resizePrompt(); renderHistory(); scrollToBottom();
+  if (state.conversationId) await comfyUI.renderGallery(state.conversationId);
+  await api('updates/session/clear', {});
+  const result = await (await api('updates/install')).json();
+  if (result.state === 'rolled-back' || result.state === 'error') notice(result.error);
+  else $('live-status').textContent = 'Mise à jour installée. Conversation restaurée.';
+}
+
+async function installUpdate() {
+  if ($('update-available').disabled) return;
+  state.updating = true; updateControls(); $('settings').close();
+  $('update-dialog').showModal();
+  try {
+    if (!await persistConversation()) throw new Error('La sauvegarde de la conversation a échoué. La mise à jour n’a pas commencé.');
+    await historyWrite;
+    await installFromButton({ api, token: state.token,
+      session: compactSession({ messages: state.messages, archiveSnapshot: state.archiveSnapshot, conversationId: state.conversationId, prompt: $('prompt').value, images: state.images, thinking: state.thinking, title: $('conversation-title').textContent }),
+      onProgress: text => { $('update-progress').textContent = text; },
+      reload: () => { state.updateReload = true; location.reload(); },
+    });
+  } catch (error) {
+    state.updating = false; state.updateReload = false; $('update-dialog').close();
+    notice(error.message); await refreshStatus();
+  }
 }
 
 function applyTheme(theme) {
@@ -197,6 +265,7 @@ async function toggleTheme() {
 
 function updateControls() {
   const s = state.status;
+  $('update-available').disabled = state.updating || state.generating || state.preparing || state.operation || state.settingsLoading || state.loadingHistory || state.savingHistory || state.savingPreferences || !state.connected || s.busy || !!s.toolJob || ['loading','stopping'].includes(s.state);
   const toolBusy=!!s.toolJob;
   $('comfy-recover').hidden=!s.toolJob?.blocked;
   const running = ['loading', 'ready', 'stopping'].includes(s.state);
@@ -228,12 +297,12 @@ function updateControls() {
   $('attach').disabled = state.generating || state.preparing || state.loadingHistory;
   $('new-chat').disabled = toolBusy || state.generating || state.loadingHistory;
   $('new-chat-mobile').disabled = toolBusy || state.generating || state.loadingHistory;
-  for (const button of document.querySelectorAll('.history-item')) {
-    button.disabled = toolBusy || state.generating || state.preparing || state.loadingHistory;
-    button.classList.toggle('active', button.dataset.conversationId === state.conversationId);
+  for (const button of document.querySelectorAll('.history-item, .history-delete-button')) {
+    button.disabled = toolBusy || state.generating || state.preparing || state.loadingHistory || (button.classList.contains('history-delete-button') && $('history-clear').disabled);
+    if (button.classList.contains('history-item')) button.classList.toggle('active', button.dataset.current === 'true');
   }
   $('prompt').disabled = state.loadingHistory;
-  $('compose-state').textContent = toolBusy ? s.toolJob.progress || 'ComfyUI en cours…' : state.preparing ? 'Préparation des images…' : state.waitingForModel ? 'Chargement… message en attente' : state.generating ? 'Réponse en cours…' : s.state === 'ready' ? s.vision ? 'Texte + images' : 'Texte uniquement' : s.state === 'loading' ? 'Le modèle se charge…' : '';
+  $('compose-state').textContent = toolBusy ? s.toolJob.progress || 'ComfyUI en cours…' : state.preparing ? 'Préparation des images…' : state.waitingForModel ? 'Chargement… message en attente' : state.generating ? 'Réponse en cours…' : s.state === 'loading' ? 'Le modèle se charge…' : '';
   comfyUI.setBusy(s.busy||toolBusy||state.generating||state.operation||state.settingsLoading||!state.connected);
   $('engine-logs').textContent = s.logs?.join('\n') || 'Les journaux apparaîtront au démarrage.';
   if (s.error) {
@@ -247,9 +316,23 @@ function updateControls() {
     const quant = basename.match(/(?:\.|-)(Q\d[^.]*|IQ\d[^.]*)(?:\.gguf)?$/i)?.[1] || 'GGUF';
     $('sidebar-model-detail').textContent = `${quant} · ${state.config.projectorPath ? 'projecteur configuré' : 'texte uniquement'}`;
   }
+
+}
+
+async function checkUpdates() {
+  try {
+    const update = await (await api('updates')).json();
+    const button = $('update-available');
+    button.hidden = update.available !== true;
+    if (update.available) {
+      const label = 'Installer la mise à jour · v' + update.version;
+      button.title = label; button.setAttribute('aria-label', label);
+    }
+  } catch { /* Offline checks stay silent. */ }
 }
 
 async function refreshStatus() {
+  if (state.updating) return;
   try {
     const previous = state.status.state;
     state.status = await (await api('status')).json();
@@ -457,7 +540,7 @@ async function sendMessage(event) {
         history.push({role:'user',internal:true,content:[{type:'text',text:reviewImages.length?'Voici les sorties du workflow, dans le même ordre. Compare-les à la demande initiale et aux références. Explique les écarts. Si une correction est utile et autorisée, adapte ton prompt.': 'La génération est terminée. Tu ne disposes pas de la vision : indique que tu ne peux pas vérifier visuellement le résultat.'},...reviewImages.map(url=>({type:'image_url',image_url:{url}}))]});
       }
       view.note.textContent=result.denied?'Génération refusée.':result.failed?'La génération a échoué.':'Sortie disponible dans la galerie.';
-      if(result.denied||result.failed||iterations>=(state.comfy?.maxIterations||3))allowTools=false;
+      if(result.denied||result.failed||iterations>=(state.comfy?.maxIterations||5))allowTools=false;
       state.archiveSnapshot={messages:[...history],incomplete:true};await persistConversation();
       view=assistantMessage();finishReason='';
     }
@@ -470,19 +553,20 @@ async function sendMessage(event) {
     if(output||reasoning||usedTool){
       if(output||reasoning){render();if(!output)view.body.replaceChildren(node('div','text-block','Aucune réponse finale reçue.'));history.push({role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{})});}
       else if(usedTool)view.body.replaceChildren(node('div','text-block',complete?'Aucune réponse finale reçue.':'Opération interrompue.'));
-      state.messages=history;state.archiveSnapshot={messages:[...history],incomplete:!complete};$('conversation-title').textContent=text||'Une image à explorer';
+      state.messages=history;state.archiveSnapshot={messages:[...history],incomplete:!complete};setConversationTitle(text||'Une image à explorer');
     }
     await persistConversation();state.generating=false;state.waitingForModel=false;state.controller=null;resizePrompt();await refreshStatus();$('prompt').focus();
   }
 }
 
 
+setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 const tokenControls=setupTokenControls($);
 dismissSettingsOnOutsideClick($('settings'));
 const comfyUI=setupComfy({api,state,node,notice,onChange:()=>refreshStatus()});
 applyTheme(document.documentElement.dataset.theme);
 $('theme-toggle').onclick = toggleTheme;
-$('history-clear').onclick = () => { $('history-delete-error').hidden = true; if (!$('history-delete-dialog').open) $('history-delete-dialog').showModal(); };
+$('history-clear').onclick = () => confirmHistoryDeletion();
 $('history-delete-cancel').onclick = () => $('history-delete-dialog').close();
 $('history-delete-confirm').onclick = clearHistory;
 $('history-delete-dialog').addEventListener('cancel', (event) => { if (state.clearingHistory) event.preventDefault(); });
@@ -505,6 +589,8 @@ for(const button of document.querySelectorAll('[data-file-kind]'))button.onclick
   finally{state.operation=false;updateControls();}
 };
 $('settings-open').onclick = openSettings;
+$('update-available').onclick = installUpdate;
+$('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('settings-close').onclick = () => $('settings').close();
 $('settings-form').onsubmit = (event) => { event.preventDefault(); saveConfiguration(); };
 $('compute-mode').onchange = () => { $('custom-layers-field').hidden = $('compute-mode').value !== 'custom'; };
@@ -529,7 +615,7 @@ async function newConversation() {
     $('prompt').value = '';
     comfyUI.reset();
     $('messages').replaceChildren(); $('welcome').hidden = false;
-    $('conversation-title').textContent = 'Nouvelle conversation';
+    setConversationTitle('Nouvelle conversation');
     renderAttachments(); notice(''); resizePrompt();
   } finally { state.loadingHistory = false; updateControls(); $('prompt').focus(); }
 }
@@ -556,6 +642,7 @@ document.addEventListener('dragover', (event) => event.preventDefault());
 document.addEventListener('drop', (event) => event.preventDefault());
 $('chat-area').onscroll = () => { const area = $('chat-area'); state.stickToBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 100; };
 window.addEventListener('beforeunload', (event) => {
+  if (state.updateReload) return;
   if (state.generating || state.savingHistory || state.historyDirty || $('prompt').value.trim() || state.images.length || (!state.saveHistory && state.messages.length)) { event.preventDefault(); event.returnValue = ''; }
 });
 
@@ -564,10 +651,12 @@ try {
   if (!response.ok) throw new Error('Impossible de joindre le serveur local.');
   const initial = await response.json();
   Object.assign(state, { token: initial.token, config: initial.config, status: initial.status, connected: true });
+  void checkUpdates();
   applyTheme(initial.preferences?.theme);
   state.saveHistory = initial.preferences?.saveHistory === true;
   await refreshHistory();
   await comfyUI.refresh();
+  await restoreUpdate();
   if (initial.warning) notice(initial.warning);
   updateControls();
 } catch (error) { notice(error.message); updateControls(); }

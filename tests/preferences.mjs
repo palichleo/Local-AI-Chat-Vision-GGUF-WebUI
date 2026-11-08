@@ -11,7 +11,7 @@ test('night par défaut, choix enregistré et restauré après redémarrage', as
   try {
     app = await createApplication({ port: 0, dataDir });
     let initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
-    assert.deepEqual(initial.preferences, { theme: 'dark', saveHistory: false });
+    assert.deepEqual(initial.preferences, { theme: 'dark', saveHistory: true });
     assert.match(await (await fetch(app.url)).text(), /<html[^>]*data-theme="dark"/);
     const response = await fetch(`${app.url}/api/preferences`, {
       method: 'POST', headers: { Authorization: `Bearer ${initial.token}`, 'Content-Type': 'application/json' },

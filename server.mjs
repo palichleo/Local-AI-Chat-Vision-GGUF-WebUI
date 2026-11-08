@@ -1,6 +1,11 @@
 import http from 'node:http';
+import { compactSession } from './public/update-ui.mjs';
+import { checkForUpdates } from './lib/updates.mjs';
+import { prepareUpdate, launchInstaller } from './lib/update-install.mjs';
+import { atomicJson } from './lib/update-files.mjs';
+import { updateSession, readUpdateSession } from './lib/update-session.mjs';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -19,6 +24,9 @@ const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 20 * 1024 * 1024;
 const staticFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
+  ['/assets/metallic-grain.png', ['assets/metallic-grain.png', 'image/png']],
+  ['/update-ui.mjs', ['update-ui.mjs', 'text/javascript; charset=utf-8']],
+  ['/material-light.mjs', ['material-light.mjs', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/stream.mjs', ['stream.mjs', 'text/javascript; charset=utf-8']],
@@ -29,14 +37,14 @@ const staticFiles = new Map([
   ['/markdown.mjs', ['markdown.mjs', 'text/javascript; charset=utf-8']],
 ]);
 
-async function jsonBody(req) {
+async function jsonBody(req, limit = maxBody) {
   if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) throw problem('Le format JSON est attendu.', 415);
-  if (Number(req.headers['content-length'] || 0) > maxBody) throw problem('La requête dépasse 20 Mo. Réduis le nombre d’images ou recommence une conversation.', 413);
+  if (Number(req.headers['content-length'] || 0) > limit) throw problem('La requête dépasse 20 Mo. Réduis le nombre d’images ou recommence une conversation.', 413);
   const chunks = [];
   let bytes = 0;
   for await (const chunk of req) {
     bytes += chunk.length;
-    if (bytes > maxBody) throw problem('La requête dépasse 20 Mo.', 413);
+    if (bytes > limit) throw problem('La requête dépasse 20 Mo.', 413);
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -90,15 +98,19 @@ function chatPayload(input, vision, maxOutputTokens) {
   };
 }
 
-export async function createApplication({ port = 8787, dataDir = join(root, 'data'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy } = {}) {
+export async function createApplication({ port = 8787, dataDir = join(root, 'data'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null } = {}) {
   await mkdir(dataDir, { recursive: true });
+  const { version: applicationVersion } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  let applyingUpdate = false, installState = { state: 'idle', error: '' };
+  let installTask = Promise.resolve(), installHandle = null;
+  const installController = new AbortController();
   const configPath = join(dataDir, 'config.json');
   let config = { ...defaults };
   let configWarning = '';
   try { config = normalizeConfig(JSON.parse(await readFile(configPath, 'utf8'))); }
   catch (error) { if (error.code !== 'ENOENT') configWarning = 'La configuration enregistrée est illisible. Renseigne à nouveau les chemins.'; }
   const preferencesPath = join(dataDir, 'preferences.json');
-  let preferences = { theme: 'dark', saveHistory: false };
+  let preferences = { theme: 'dark', saveHistory: true };
   try {
     const saved = JSON.parse(await readFile(preferencesPath, 'utf8'));
     if (['dark', 'light'].includes(saved?.theme)) preferences.theme = saved.theme;
@@ -113,7 +125,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   const token = randomBytes(32).toString('hex');
   const engine = new Engine({ spawnProcess, cacheDir: join(dataDir, 'model-cache') });
   const comfyPath=join(dataDir,'comfy.json');
-  let comfy={enabled:false,baseUrl:'http://127.0.0.1:8188',autoAllow:false,maxIterations:3};
+  let comfy={enabled:false,baseUrl:'http://127.0.0.1:8188',autoAllow:false,maxIterations:5};
   function normalizeComfy(value){
     if(!value||typeof value.enabled!=='boolean'||typeof value.autoAllow!=='boolean'||!Number.isInteger(value.maxIterations)||value.maxIterations<1||value.maxIterations>10000)throw problem('Configuration ComfyUI invalide.');
     return {enabled:value.enabled,baseUrl:normalizeComfyUrl(value.baseUrl),autoAllow:value.autoAllow,maxIterations:value.maxIterations};
@@ -129,6 +141,8 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   }
   const catalog=new WorkflowCatalog(join(dataDir,'workflows'));
   const gallery=new ComfyGallery({historyDir});
+  const pendingSession = await readUpdateSession(dataDir).catch(() => null);
+  for (const record of pendingSession?.gallery || []) await gallery.put(record, { persist: false });
   const runtime=new ToolRuntime({engine,catalog,gallery,getConfig:()=>comfy,engineConfig:()=>config,saveConfig:saveComfy,persist:()=>preferences.saveHistory});
   let discovery={detected:false,baseUrl:comfy.baseUrl};
   let discoveryTime=0, discovering=null;
@@ -150,6 +164,8 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   let url;
   let saving = false;
 
+  const updateController = new AbortController();
+  let updates = Promise.resolve({ available: false });
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -176,10 +192,18 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (path === '/favicon.ico' && req.method === 'GET') { res.writeHead(204); return res.end(); }
       if (path === '/api/bootstrap' && req.method === 'GET') {
-        return send(200, { token, config, preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning });
+        return send(200, { token, config, preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
       }
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Recharge la page.', 401);
+      if (path === '/api/updates/install' && req.method === 'GET') {
+        if (!applyingUpdate && installState.state === 'idle') {
+          try { return send(200, JSON.parse(await readFile(join(dataDir, 'update-status.json'), 'utf8'))); } catch {}
+        }
+        return send(200, installState);
+      }
+      if (path === '/api/updates/session' && req.method === 'GET') return send(200, applyingUpdate ? null : await readUpdateSession(dataDir));
+      if (path === '/api/updates' && req.method === 'GET') return send(200, await updates);
       if (path === '/api/status' && req.method === 'GET') return send(200, status());
       if(req.method==='GET'&&path==='/api/comfy'){await detectComfy();return send(200,{config:comfy,discovery,workflows:await catalog.list()});}
       if(req.method==='GET'&&path==='/api/comfy/status')return send(200,await new ComfyClient(comfy.baseUrl).status());
@@ -199,7 +223,38 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return send(200, path === '/api/history' ? await history.list() : await history.read(path.slice('/api/history/'.length)));
       }
       if (req.method !== 'POST') throw problem('Méthode non prise en charge.', 405);
-      const body = await jsonBody(req);
+      const body = await jsonBody(req, path === '/api/updates/install' ? 40 * 1024 * 1024 : maxBody);
+      if (applyingUpdate) throw problem('Installation de la mise à jour en cours.', 409);
+      if (path === '/api/updates/session/clear') { await rm(join(dataDir, 'update-session.json'), { force: true }); return send(200, { cleared: true }); }
+      if (path === '/api/updates/install') {
+        const available = await updates;
+        if (!available.available || !updateInstaller) throw problem('Aucune mise à jour installable.', 409);
+        if (runtime.active || engine.busy || saving || savingSettings || savingComfy || savingPreferences || clearingHistory || disablingHistory || persistingGallery || pickingFile || ['loading', 'stopping'].includes(engine.state)) throw problem('Attends la fin de l’opération en cours avant la mise à jour.', 409);
+        let snapshot;
+        try { snapshot = updateSession(body.session); } catch (error) { throw problem(error.message); }
+        applyingUpdate = true; installState = { state: 'preparing', error: '' };
+        installTask = (async () => {
+          try {
+            await history.flush(); await gallery.pending;
+            snapshot.gallery = snapshot.conversationId ? (await gallery.list(snapshot.conversationId)).runs : [];
+            snapshot = compactSession(snapshot);
+            if (Buffer.byteLength(JSON.stringify(snapshot)) > 40 * 1024 * 1024) throw new Error('La session est trop volumineuse pour une reprise automatique.');
+            await atomicJson(join(dataDir, 'update-session.json'), snapshot);
+            const plan = await updateInstaller.prepare({ version: available.version, port: server.address().port, signal: installController.signal });
+            installController.signal.throwIfAborted();
+            installHandle = await updateInstaller.launch(plan);
+            installController.signal.throwIfAborted();
+            installState = { state: 'restarting', error: '' };
+            await closeApplication();
+            await installHandle.commit(); installHandle = null;
+          } catch (error) {
+            installHandle?.abort(); installHandle = null;
+            applyingUpdate = false; installState = { state: 'error', error: error.message };
+            if (!closing) await rm(join(dataDir, 'update-session.json'), { force: true }).catch(() => {});
+          }
+        })();
+        return send(202, { state: 'preparing' });
+      }
       if(path==='/api/files/choose'){
         if(!['engine','model','projector'].includes(body?.kind))throw problem('Type de fichier invalide.');
         if(pickingFile||runtime.active||engine.busy||engine.child||['loading','stopping'].includes(engine.state))throw problem('Arrête le modèle avant de choisir un fichier.',409);
@@ -251,7 +306,9 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         finally{persistingGallery=false;}
       }
       if(path==='/api/gallery/analysis'||path==='/api/gallery/review'){
-        if(runtime.active||clearingHistory||disablingHistory)throw problem('Attends la fin de l’opération en cours.',409);
+        if(runtime.active||clearingHistory||disablingHistory||persistingGallery)throw problem('Attends la fin de l’opération en cours.',409);
+        persistingGallery=true;
+        try {
         const record=await gallery.get(body.conversationId,body.id);
         if(path==='/api/gallery/review'){
           if(typeof body.text!=='string'||body.text.length>200000||!['reviewed','correction_requested'].includes(body.status))throw problem('Analyse de galerie invalide.');
@@ -261,6 +318,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         record.outputs=record.outputs.map((output,i)=>({...output,analysisDataUrl:body.images[i]}));
         }
         return send(200,await gallery.put(record,{persist:preferences.saveHistory}));
+        } finally { persistingGallery=false; }
       }
       if(path.startsWith('/api/comfy/')){
         if(runtime.active||engine.busy||clearingHistory||savingSettings)throw problem('Attends la fin de l’opération GPU.',409);
@@ -285,6 +343,16 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
           preferences = next;
         } finally { savingPreferences = false; disablingHistory = false; }
         return send(200, { preferences });
+      }
+      if (path === '/api/history/delete') {
+        if (body?.confirm !== true) throw problem('Confirme la suppression de la conversation.');
+        if (persistingGallery || runtime.active || clearingHistory || disablingHistory || savingPreferences || engine.busy || ['loading', 'stopping'].includes(engine.state)) throw problem('Attends la fin de l’opération en cours avant de supprimer la conversation.', 409);
+        clearingHistory = true;
+        try {
+          await gallery.pending; await history.remove(body.id);
+          gallery.forgetConversation(body.id); runtime.forgetConversation(body.id);
+          return send(200, { deleted: body.id });
+        } finally { clearingHistory = false; }
       }
       if (path === '/api/history/clear') {
         if (body?.confirm !== true) throw problem('Confirme la suppression de l’historique.');
@@ -322,6 +390,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (path !== '/api/chat') throw problem('Route introuvable.', 404);
       if(savingSettings||savingComfy||pickingFile)throw problem('Enregistrement des réglages en cours.',409);
       if(runtime.active)throw problem('ComfyUI utilise le GPU.',409);
+      if(clearingHistory)throw problem('Suppression de l’historique en cours.',409);
       if (engine.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
       if (engine.busy) throw problem('Une réponse est déjà en cours.', 409);
       const payload = chatPayload(body, engine.vision, config.maxOutputTokens);
@@ -334,9 +403,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       const definition=comfy.enabled&&body.tools!==false?await catalog.definition():null;
       if(definition){
         payload.tools=[definition];payload.tool_choice='auto';payload.parallel_tool_calls=false;
-        const instruction=`Tu as accès à l’outil local comfy_generate_image. Utilise un véritable appel de fonction uniquement pour générer/modifier une image demandée par l’utilisateur, jamais une imitation en texte. Un seul appel à la fois. Choisis le workflow le plus pertinent selon sa description et les paramètres nécessaires. Si aucun workflow ne convient, explique-le. Après chaque résultat, examine l’image fournie, compare à l’instruction originale et aux références, indique les écarts et corrige le prompt seulement si utile. Maximum ${comfy.maxIterations} générations par message. Si l’outil échoue ou est refusé, explique-le sans prétendre avoir généré une image. reference_image est l’index à partir de 0 des images utilisateur dans l’ordre chronologique. Les copies d’analyse sont réduites : ne prétends pas vérifier les détails invisibles. Workflows : ${JSON.stringify((await catalog.list()).map(w=>({id:w.id,name:w.name,description:w.description,parameters:Object.keys(w.bindings),requiresImage:w.requiresImage})))}`;
-        if(payload.messages[0].role==='system')payload.messages[0].content+='\n'+instruction;
-        else payload.messages.unshift({role:'system',content:instruction});
+
       }
         const upstream = await fetch(`${engine.base}/v1/chat/completions`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${engine.apiKey}` },
@@ -378,19 +445,20 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   server.headersTimeout = 15000;
   await new Promise((yes, no) => { server.once('error', no); server.listen(port, '127.0.0.1', yes); });
   url = `http://127.0.0.1:${server.address().port}`;
-  return {
-    url,
-    async close() {
-      await runtime.close();
-      await engine.stop();
+  if (updateChecker) updates = Promise.resolve().then(() => updateChecker({ signal: updateController.signal })).catch(() => ({ available: false }));
+  let closing;
+  function closeApplication() {
+    return closing ||= (async () => {
+      updateController.abort(); await updates;
+      await runtime.close(); await engine.stop();
       server.closeAllConnections();
-      await history.flush();
-      await galleryBatch.catch(()=>{});
-      await gallery.pending;
-      await new Promise((done) => server.close(done));
-    },
-  };
+      await history.flush(); await galleryBatch.catch(() => {}); await gallery.pending;
+      await new Promise(done => server.close(done));
+    })();
+  }
+  return { url, async close() { installController.abort(); await installTask; return closeApplication(); } };
 }
+
 
 function openBrowser(url) {
   const command = process.platform === 'win32' ? 'rundll32.exe' : 'xdg-open';
@@ -406,8 +474,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     process.exitCode = 1;
   } else {
     try {
-      const app = await createApplication();
-      console.log(`\nAtelier local — ${app.url}\nTout reste sur cet ordinateur. Ctrl+C pour arrêter.\n`);
+      const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+      const portArg = process.argv.find(arg => arg.startsWith('--update-port='));
+      const port = portArg ? Number(portArg.split('=')[1]) : 8787;
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Port invalide.');
+      const app = await createApplication({ port,
+        updateChecker: ({ signal }) => checkForUpdates({ currentVersion: version, signal }),
+        updateInstaller: { prepare: args => prepareUpdate({ ...args, root, currentVersion: version }), launch: launchInstaller },
+      });
+      console.log(`\nAtelier local — ${app.url}\nLes conversations restent sur cet ordinateur. Ctrl+C pour arrêter.\n`);
       let closing = false;
       const close = async () => { if (closing) return; closing = true; await app.close(); process.exitCode = 0; };
       process.on('SIGINT', close);

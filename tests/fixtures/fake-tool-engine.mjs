@@ -13,6 +13,10 @@ const server = http.createServer(async (req, res) => {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const body = JSON.parse(Buffer.concat(chunks));
+  if (body.messages.at(-1).content === 'inspect tool context') {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    send(res, { local_test_payload: body }); return res.end('data: [DONE]\n\n');
+  }
   const last = body.messages.at(-1).content;
   const text = typeof last === 'string' ? last : last.filter((part) => part.type === 'text').map((part) => part.text).join(' ');
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });

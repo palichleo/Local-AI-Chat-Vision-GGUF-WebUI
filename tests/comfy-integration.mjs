@@ -111,6 +111,14 @@ test('HTTP native approval alternates engines, restores native history and clear
     await until(async () => (await status()).state === 'ready');
 
     await t.test('ordinary chat and malformed or truncated native calls cannot generate', async () => {
+      const inspected = await chat([{ role: 'system', content: 'Original assistant instructions' }, { role: 'user', content: 'inspect tool context' }]);
+      const forwarded = inspected.find(event => event.local_test_payload)?.local_test_payload;
+      assert.ok(forwarded);
+      assert.deepEqual(forwarded.messages, [{ role: 'system', content: 'Original assistant instructions' }, { role: 'user', content: 'inspect tool context' }]);
+      assert.equal(forwarded.tool_choice, 'auto');
+      assert.equal(forwarded.parallel_tool_calls, false);
+      assert.equal(forwarded.tools[0].function.name, 'comfy_generate_image');
+      assert.ok(forwarded.tools[0].function.description.includes(workflow.description));
       const ordinary = await chat([{ role: 'user', content: 'Hello' }]);
       assert.ok(ordinary.some((event) => event.choices?.[0]?.delta?.content === 'Ordinary chat, no generation.'));
       for (const content of ['generate malformed', 'generate length', 'generate truncated']) {
@@ -136,7 +144,7 @@ test('HTTP native approval alternates engines, restores native history and clear
       await until(() => events.includes('comfy:prompt'));
       for (const [path, body] of [
         ['start', {}], ['stop', {}], ['chat', { messages }], ['history/clear', { confirm: true }],
-        ['history/save', { id: conversationId, messages }], ['preferences', { saveHistory: false }],
+        ['history/save', { id: conversationId, messages }], ['history/delete', { id: conversationId, confirm: true }], ['preferences', { saveHistory: false }],
       ]) await json(path, body, 409);
       assert.equal((await status()).toolJob.state, 'generating');
       assert.equal(events.filter((event) => event === 'engine:start').length, 1);
