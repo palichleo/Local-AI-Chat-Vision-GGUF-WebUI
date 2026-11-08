@@ -23,7 +23,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
   const calls = [], refreshes = [], windowListeners = {};
   let comfyOptions;
   const comfyUI = { refresh: options => { refreshes.push(options); return refresh(options); }, saved, cancelSettings() {}, setBusy() {}, values: () => savedComfy, workflowDescriptions: () => [], reset() {} };
-  const context = { console, AbortController, crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
+  const context = { console, AbortController, AbortSignal, crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
     setupGenerationUI:()=>({clear(){},restore(){}}),
     setupAssets:()=>({setBusy(){},hasDraft:()=>false}),
     setupSettingsGuard, setupCopy(){},setupContextMeter:()=>({schedule(){},pause(){},observe(){}}),
@@ -203,4 +203,12 @@ test('a rejected workflow remains unsaved and closing settings asks before disca
  const ui=await settingsUI();await ui.open();ui.comfyUI.hasPendingImport=()=>true;ui.comfyUI.finishImport=async()=>false;
  await ui.saveConfiguration();assert.equal(ui.$('settings').open,true);assert.equal(ui.calls.some(call=>call.route==='settings'),false);
  ui.$('settings-close').onclick();assert.equal(ui.$('settings-unsaved').open,true);ui.$('settings-keep').onclick();assert.equal(ui.$('settings').open,true);
+});
+
+test('slow status checks cannot accumulate concurrent polling requests',async()=>{
+ const gate=deferred();let calls=0;
+ const ui=await settingsUI({request:call=>{if(call.route==='status'){calls++;assert.ok(call.options.signal);return gate.promise.then(response=>response.clone());}}});
+ const first=ui.refreshStatus();await ui.refreshStatus();await ui.refreshStatus();assert.equal(calls,1);
+ gate.resolve(Response.json({state:'ready',vision:false,logs:[]}));await first;
+ await ui.refreshStatus();assert.equal(calls,2);assert.equal(ui.state.connected,true);
 });

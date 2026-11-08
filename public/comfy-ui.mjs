@@ -14,7 +14,7 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     for(const record of result.runs){
       for(const [index,output]of record.outputs.entries()){
         const card=node('article','gallery-card');
-        if(output.analysisDataUrl){const img=node('img');img.src=output.analysisDataUrl;img.alt=record.prompt;img.onclick=()=>openOutput(record,index);card.append(img);}
+        if(output.analysisDataUrl){const img=node('img');img.loading='lazy';img.decoding='async';img.src=output.analysisDataUrl;img.alt=record.prompt;img.onclick=()=>openOutput(record,index);card.append(img);}
         const prompt=node('details','output-prompt'),summary=node('summary');summary.setAttribute('aria-label','Afficher ou réduire le prompt');summary.append(node('span','',record.prompt));prompt.append(summary);
         card.append(node('strong','',record.workflowName),prompt,node('small','',new Date(record.createdAt).toLocaleString('fr-FR')));
         const labels={reviewed:'Analyse disponible',correction_requested:'Nouvelle génération demandée'};
@@ -231,15 +231,28 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
   }
   async function saveReview(record,text,status){await api('gallery/review',{id:record.id,conversationId:record.conversationId,text,status});await renderGallery(record.conversationId);}
   async function requestTool(request,signal,onProgress,onImage=()=>{}){
-    const decision=await permission(request,signal);
+    const cancel=()=>api('tools/cancel',{requestId:request.requestId}).catch(()=>{});
+    let decision;try{decision=await permission(request,signal);signal.throwIfAborted();}catch(error){await cancel();throw error;}
+    if(decision==='deny')await cancel();
     if(decision==='deny')return {content:JSON.stringify({status:'denied',message:'L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.'}),images:[],denied:true};
     signal.throwIfAborted();
-    const cancel=()=>{api('tools/cancel',{requestId:request.requestId}).catch(()=>{});};
     signal.addEventListener('abort',cancel,{once:true});let terminal=false,originalsTask;const originalsController=new AbortController(),originalsSignal=AbortSignal.any([signal,originalsController.signal]);
     function receiveOriginals(record){
       if(originalsTask)return;
       if(record.conversationId!==state.conversationId)throw Error('Cette sortie ne correspond pas à la conversation courante.');
-      originalsTask=Promise.all(record.outputs.map(async(output,index)=>{const blob=await original(record,index,originalsSignal);try{onImage({record,index,blob});}catch(error){notice('Affichage de l’original indisponible : '+error.message);}return blob;})).then(blobs=>({blobs}),error=>({error}));
+      // Transfer and compress one original at a time, including large workflow batches.
+      originalsTask=(async()=>{
+        const prepared=[],errors=[];
+        for(const [index,output] of record.outputs.entries()){
+          try{
+          originalsSignal.throwIfAborted();const blob=await original(record,index,originalsSignal);
+          try{onImage({record,index,blob});}catch(error){notice('Affichage de l’original indisponible : '+error.message);}
+          const image=await compressImage(blob,{name:output.source.filename,count:record.outputs.length});
+          prepared.push({url:image.url,width:image.width,height:image.height});
+          }catch(error){originalsSignal.throwIfAborted();errors.push(`Sortie ${index+1} : ${error.message}`);}
+        }
+        return errors.length?{error:new Error(errors.join(' '))}:{prepared};
+      })().catch(error=>({error}));
     }
     try{
       let job=await(await api('tools/execute',{requestId:request.requestId,permission:decision})).json();
@@ -264,8 +277,7 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
         const originals=await originalsTask;if(originals.error)throw originals.error;
         for(let index=0;index<record.outputs.length;index++){
           signal.throwIfAborted();
-          const blob=originals.blobs[index];
-          const image=await compressImage(blob,{name:record.outputs[index].source.filename,count:record.outputs.length});images.push(image.url);record.outputs[index].analysisDataUrl=image.url;const size=image.width&&image.height?{width:image.width,height:image.height}:null;dimensions.push(size);if(size)Object.assign(record.outputs[index],size);
+          const image=originals.prepared[index];images.push(image.url);record.outputs[index].analysisDataUrl=image.url;const size=image.width&&image.height?{width:image.width,height:image.height}:null;dimensions.push(size);if(size)Object.assign(record.outputs[index],size);
         }
       }catch(failure){
         if(signal.aborted)throw failure;

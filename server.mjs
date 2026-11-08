@@ -199,7 +199,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         definitions.push(definition);
       }
     }
-    if(active.length&&engine.vision&&body.tools!==false&&body.resources!==false&&(resourceTurns.get(body.turnId)||0)<8){
+    if(active.length&&engine.vision&&body.resources!==false&&(resourceTurns.get(body.turnId)||0)<8){
       const definition=structuredClone(resourceTool),ids=active.map(item=>item.id);
       definition.function.parameters.properties.resource_id.enum=ids;definition.function.parameters.properties.resource_ids.items.enum=ids;definition.function.parameters.properties.resource_ids.maxItems=8-(resourceTurns.get(body.turnId)||0);
       definitions.push(definition);
@@ -281,7 +281,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if(req.method==='GET'&&path.startsWith('/api/gallery/')){
         const [, , ,conversationId,runId,index]=path.split('/');
         if(!runId)return send(200,await gallery.list(conversationId));
-        const record=await gallery.get(conversationId,runId);
+        const record=await gallery.get(conversationId,runId,{includeImages:index===undefined});
         if(res.destroyed)return;
         if(index===undefined)return send(200,record);
         if(!/^\d+$/.test(index)||!record.outputs[Number(index)])throw problem('Image introuvable.',404);

@@ -87,3 +87,15 @@ test('reference labels survive deactivation, deletion, additional imports and re
  await store.remove(a.id);const c=await image(new Resources(path),'c.png');assert.equal(c.label,'Ref 3');assert.deepEqual((await new Resources(path).list()).map(item=>item.label),['Ref 2','Ref 3']);
  const f=await apiFixture(t),one=await f.upload(),two=await f.upload();const result=await(await f.request('resources/read',{ids:[one.id,two.id]})).json();assert.deepEqual(result.resources.map(item=>item.label),['Ref 1','Ref 2']);await f.request('resources/update',{id:two.id,patch:{enabled:false}});assert.equal((await f.request('resources/read',{ids:[one.id,two.id]})).status,403);
 });
+
+test('the final image review can still read references when further generations are disabled',async t=>{
+ const f=await apiFixture(t,{engine:true}),active=await f.upload();
+ const modelPath=join(f.root,'model.gguf'),projectorPath=join(f.root,'vision.gguf');
+ await writeFile(modelPath,Buffer.from('GGUF\x03\0\0\0'));await writeFile(projectorPath,Buffer.from('GGUF\x03\0\0\0'));
+ await f.request('config',{enginePath:process.execPath,modelPath,projectorPath,contextSize:8192,maxOutputTokens:1024,gpuLayers:0});await f.request('start',{});
+ const deadline=Date.now()+10000;while((await(await f.request('status')).json()).state!=='ready'){if(Date.now()>deadline)assert.fail('Engine not ready');await new Promise(resolve=>setTimeout(resolve,30));}
+ const events=[];await readSSE((await f.request('chat',{messages:[{role:'user',content:'inspect resources'}],tools:false,resources:true,turnId:randomUUID(),conversationId:randomUUID()})).body,event=>events.push(event));
+ const body=events.find(event=>event.local_test_payload).local_test_payload;
+ assert.deepEqual(body.tools.map(tool=>tool.function.name),['local_read_resource']);
+ assert.deepEqual(body.tools[0].function.parameters.properties.resource_id.enum,[active.id]);
+});

@@ -192,3 +192,21 @@ test('original pixel dimensions survive persistence and later metadata writes',a
  const restored=await new ComfyGallery({historyDir}).get(run.conversationId,run.id);assert.equal(restored.outputs[0].width,1448);assert.equal(restored.outputs[0].height,1448);
  const stale=record({...run,outputs:[{source:run.outputs[0].source}],analysis:{text:'Review'}});await gallery.put(stale,{persist:true});assert.equal((await gallery.get(run.conversationId,run.id)).outputs[0].width,1448);
 });
+
+test('persisted gallery copies do not accumulate in process memory, but unsaved copies stay recoverable',async t=>{
+ const {historyDir}=await fixture(t),gallery=new ComfyGallery({historyDir});
+ const run=record({outputs:[{source:{filename:'copy.png',subfolder:'',type:'output'},analysisDataUrl:png}]});
+ await gallery.put(run);assert.equal(gallery.records.size,1);
+ await gallery.put(run,{persist:true});assert.equal(gallery.records.size,0);
+ assert.deepEqual(await gallery.get(run.conversationId,run.id),run);
+});
+test('original lookup reads metadata without loading unrelated analysis copies or retaining the last write result',async t=>{
+ const {historyDir}=await fixture(t),gallery=new ComfyGallery({historyDir});
+ const run=record({outputs:[{source:{filename:'copy.png',subfolder:'',type:'output'},analysisDataUrl:png}]});
+ await gallery.put(run,{persist:true});assert.equal(await gallery.pending,undefined);
+ const directory=join(historyDir,run.conversationId,'generated',run.id),copy=(await readdir(directory)).find(file=>file.startsWith('analysis-'));
+ await rm(join(directory,copy));
+ const metadata=await gallery.get(run.conversationId,run.id,{includeImages:false});
+ assert.equal(metadata.outputs[0].analysisDataUrl,undefined);assert.equal(metadata.outputs[0].source.filename,'copy.png');
+ await assert.rejects(gallery.get(run.conversationId,run.id),{status:404});
+});

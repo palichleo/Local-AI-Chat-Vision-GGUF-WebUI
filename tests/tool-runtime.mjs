@@ -206,3 +206,9 @@ test('cancelling while global approval is saved never unloads the language model
  await assert.rejects(execution,{name:'AbortError'});await rt.finished;
  assert.equal(seen.stops,0);assert.equal(seen.runs,0);
 });
+
+test('cancelling a pending approval releases its reference copies and prevents later execution',async()=>{
+ const {rt,request,seen}=runtimeFixture(),approval=await request();
+ rt.cancel({requestId:approval.requestId});assert.equal(rt.pending.size,0);
+ await assert.rejects(rt.execute({requestId:approval.requestId,permission:'once'}),/expiré/i);assert.equal(seen.runs,0);
+});

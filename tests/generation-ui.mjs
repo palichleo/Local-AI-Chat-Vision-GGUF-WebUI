@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {setupGenerationUI} from '../public/generation-ui.mjs';
-class Element{constructor(tag='',cls='',text=''){Object.assign(this,{tag,cls,textContent:text,children:[],style:{},attributes:{},classList:{add(){}}});}append(...items){this.children.push(...items);}replaceChildren(...items){this.children=items;}setAttribute(key,value){this.attributes[key]=value;}}
+class Element{constructor(tag='',cls='',text=''){Object.assign(this,{tag,cls,textContent:text,children:[],style:{},attributes:{},classList:{add(){}}});}append(...items){this.children.push(...items);}replaceChildren(...items){this.children=items;}setAttribute(key,value){this.attributes[key]=value;}removeAttribute(key){delete this[key];delete this.attributes[key];}}
 test('organic frame uses the known size and is replaced by an original blob outside the model payload',async()=>{
  const container=new Element(),original=new Blob(['full original bytes'],{type:'image/png'}),api=async()=>{throw Error('No request expected');};let opened;
  const ui=setupGenerationUI({api,node:(...args)=>new Element(...args),openOutput:(...args)=>{opened=args;}}),card=ui.mount(container,{resolution:{width:1536,height:1024}}),frame=container.children[0].children[0];
@@ -10,7 +10,24 @@ test('organic frame uses the known size and is replaced by an original blob outs
  const url=img.src;ui.clear();await assert.rejects(fetch(url));assert.doesNotMatch(JSON.stringify(record),/blob:|full original/);
 });
 test('restored chat resolves the saved Comfy output and releases display blobs when conversation changes',async()=>{
- const container=new Element(),requests=[],record={id:'run',workflowName:'Custom',prompt:'Prompt',parameters:{},outputs:[{source:{filename:'original.png'}}]};
+ const container=new Element(),requests=[],record={id:'run',conversationId:'conversation',workflowName:'Custom',prompt:'Prompt',parameters:{},outputs:[{source:{filename:'original.png'}}]};
  const ui=setupGenerationUI({node:(...args)=>new Element(...args),openOutput(){},api:async(route)=>{requests.push(route);return route.endsWith('/0')?new Response('original bytes',{headers:{'content-type':'image/png'}}):Response.json(record);}});
  ui.restore(container,'conversation','run');await new Promise(setImmediate);assert.deepEqual(requests,['gallery/conversation/run','gallery/conversation/run/0']);const img=container.children[0].children[0].children[0].children[0];assert.equal(await(await fetch(img.src)).text(),'original bytes');ui.clear();
+});
+
+test('restoring a long conversation defers originals, serializes transfers and revokes offscreen blobs',async t=>{
+ const previous=globalThis.IntersectionObserver;let observed;
+ globalThis.IntersectionObserver=class{constructor(callback){this.callback=callback;this.targets=new Set();observed=this;}observe(target){this.targets.add(target);}unobserve(target){this.targets.delete(target);}};
+ t.after(()=>{globalThis.IntersectionObserver=previous;});
+ const record={id:'run',conversationId:'conversation',workflowName:'Custom',prompt:'Prompt',parameters:{},outputs:[0,1].map(i=>({source:{filename:i+'.png'},width:1024,height:1024,analysisDataUrl:'compressed-preview'}))};
+ const calls=[],gates=[],container=new Element();
+ const ui=setupGenerationUI({node:(...args)=>new Element(...args),openOutput(){},api:async(route,_,options)=>{calls.push(route);if(route==='gallery/conversation/run')return Response.json(record);return new Promise((resolve,reject)=>{gates.push(()=>resolve(new Response('original bytes',{headers:{'content-type':'image/png'}})));options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true});});}});
+ ui.restore(container,'conversation','run');await new Promise(setImmediate);assert.equal(calls.length,0,'offscreen history must not fetch originals');
+ observed.callback([{target:container.children[0],isIntersecting:true}]);await new Promise(setImmediate);assert.equal(calls.length,1);
+ const frame=container.children[0].children[0],[first,second]=frame.children;
+ observed.callback([{target:first,isIntersecting:true},{target:second,isIntersecting:true}]);await new Promise(setImmediate);assert.equal(calls.length,2,'only one original transfers at a time');
+ gates[0]();await new Promise(setImmediate);assert.equal(calls.length,3);const url=first.children[0].src;assert.match(url,/^blob:/);
+ observed.callback([{target:first,isIntersecting:false}]);await assert.rejects(fetch(url));assert.equal(first.children[0].src,'compressed-preview');
+ ui.clear();await new Promise(setImmediate);assert.equal(observed.targets.size,0);gates[1]();await new Promise(setImmediate);
+ assert.doesNotMatch(second.children[0].src||'',/^blob:/,'late completion cannot resurrect a disposed original');
 });

@@ -261,3 +261,25 @@ test('the original reaches the chat during model reload, while only a compressed
  await rasterStub(async()=>{const result=await ui.requestTool({autoAllow:true,requestId:'request-mine'},new AbortController().signal,()=>{},({blob})=>{shown=true;assert.equal(blob.size,bytes.length);assert.equal(calls.some(call=>call.route==='tools/job'),false);});assert.equal(shown,true);assert.equal(result.images[0],'data:image/jpeg;base64,/9j/');const analysis=calls.find(call=>call.route==='gallery/analysis');assert.deepEqual(analysis.body.images,result.images);assert.notEqual(analysis.body.images[0].split(',')[1],bytes.toString('base64'));});
  assert.equal(calls.filter(call=>call.route.endsWith('/mine/0')).length,1);
 }));
+
+test('batch output originals are transferred and compressed sequentially before the next download',async()=>fixture(async({ui,state,setIntercept,calls})=>{
+ state.conversationId='conversation';const record={...generatedRecord,outputs:[0,1,2].map(i=>({source:{filename:i+'.png'}}))},gates=[],shown=[];
+ setIntercept(route=>route==='tools/execute'?Response.json({id:'mine',state:'done',record}):route==='gallery/conversation'?Response.json({runs:[record]}):/mine\/\d+$/.test(route)?new Promise(resolve=>gates.push(()=>resolve(new Response(Buffer.from('89504e470d0a1a0a','hex'),{headers:{'content-type':'image/png'}})))):route==='gallery/analysis'?Response.json({}):undefined);
+ await rasterStub(async()=>{
+  const pending=ui.requestTool({autoAllow:true,requestId:'mine'},new AbortController().signal,()=>{},event=>shown.push(event.index));
+  for(let i=0;i<3;i++){await new Promise(setImmediate);assert.equal(gates.length,i+1);gates[i]();}
+  const result=await pending;assert.deepEqual(shown,[0,1,2]);assert.equal(result.images.length,3);
+  assert.equal(calls.filter(call=>/mine\/\d+$/.test(call.route)).length,3);
+ });
+}));
+
+test('an unreadable original does not prevent later batch outputs from being shown',async()=>fixture(async({ui,state,setIntercept})=>{
+ state.conversationId='conversation';const record={...generatedRecord,outputs:[0,1].map(i=>({source:{filename:i+'.png'}}))},shown=[];
+ setIntercept(route=>route==='tools/execute'?Response.json({id:'mine',state:'done',record}):route==='gallery/conversation'?Response.json({runs:[record]}):route.endsWith('/mine/0')?Promise.reject(Error('Missing first image')):route.endsWith('/mine/1')?new Response(Buffer.from('89504e470d0a1a0a','hex'),{headers:{'content-type':'image/png'}}):undefined);
+ await rasterStub(async()=>{const result=await ui.requestTool({autoAllow:true,requestId:'mine'},new AbortController().signal,()=>{},event=>shown.push(event.index));assert.deepEqual(shown,[1]);assert.equal(result.failed,true);assert.equal(result.images.length,0);assert.match(result.error,/Missing first image/);});
+}));
+test('an already cancelled automatic call releases its pending approval without executing',async()=>fixture(async({ui,calls,setIntercept})=>{
+ setIntercept(route=>route==='tools/cancel'?Response.json(null):undefined);
+ const controller=new AbortController();controller.abort();await assert.rejects(ui.requestTool({autoAllow:true,requestId:'cancelled'},controller.signal,()=>{}),{name:'AbortError'});
+ assert.equal(calls.filter(call=>call.route==='tools/execute').length,0);assert.equal(calls.find(call=>call.route==='tools/cancel').body.requestId,'cancelled');
+}));

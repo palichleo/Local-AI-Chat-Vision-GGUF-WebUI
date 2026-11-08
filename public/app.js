@@ -316,7 +316,8 @@ function updateControls() {
   $('prompt').disabled = state.loadingHistory;
   $('compose-state').textContent = toolBusy ? s.toolJob.progress || 'ComfyUI en cours…' : state.preparing ? 'Préparation des images…' : state.waitingForModel ? 'Chargement… message en attente' : state.generating ? 'Réponse en cours…' : s.state === 'loading' ? 'Le modèle se charge…' : '';
   comfyUI.setBusy(s.busy||toolBusy||state.generating||state.operation||state.settingsLoading||!state.connected);
-  $('engine-logs').textContent = s.logs?.join('\n') || 'Les journaux apparaîtront au démarrage.';
+  const logs = s.logs?.join('\n') || 'Les journaux apparaîtront au démarrage.';
+  if ($('engine-logs').textContent !== logs) $('engine-logs').textContent = logs;
   if (s.error && $('config-error').hidden) {
     $('config-error').textContent = s.error;
     $('config-error').hidden = false;
@@ -348,12 +349,14 @@ async function checkUpdates() {
   } catch { /* Offline checks stay silent. */ }
 }
 
+let statusRefreshing = false;
 async function refreshStatus() {
-  if (state.updating || state.closingApp) return;
+  if (statusRefreshing || state.updating || state.closingApp) return;
+  statusRefreshing = true;
   try {
     const previous = state.status.state;
     const wasConnected = state.connected;
-    state.status = await (await api('status')).json();
+    state.status = await (await api('status',undefined,{signal:AbortSignal.timeout(5000)})).json();
     state.connected = true;
     if (previous !== state.status.state || !wasConnected) contextMeter.schedule();
     if (state.status.state !== previous) {
@@ -362,7 +365,7 @@ async function refreshStatus() {
     }
   } catch {
     state.connected = false; contextMeter.schedule();
-  }
+  } finally { statusRefreshing = false; }
   updateControls();
 }
 
@@ -591,7 +594,7 @@ async function sendMessage(event) {
         if(performance.now()-lastRender>55)render();
       });
       render();
-      if(reviewRecord&&request?.kind!=='resource'){
+      if(reviewRecord&&request?.kind!=='resource'&&output.trim()&&finishReason!=='length'){
         try{await comfyUI.saveReview(reviewRecord,output,request?'correction_requested':'reviewed');}catch(error){notice(`Analyse de galerie non enregistrée : ${error.message}`);}
       }
       if(!request){complete=true;view.note.textContent=finishReason==='length'?'Limite de sortie atteinte.':`${((performance.now()-started)/1000).toFixed(1)} s`;break;}
@@ -784,4 +787,4 @@ try {
   updateControls();
 } catch (error) { notice(error.message); updateControls(); }
 setInterval(() => { if (!document.hidden) refreshStatus(); }, 1200);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshStatus(); });
+document.addEventListener('visibilitychange', () => { document.documentElement.dataset.pageHidden=String(document.hidden); if (!document.hidden) refreshStatus(); });
