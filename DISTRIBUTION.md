@@ -21,3 +21,5 @@ L'exécution crée data/config.json et éventuellement un cache de modèle sous 
 ## Historique facultatif
 
 Lorsque la conservation est activée, history/ contient des conversations, raisonnements et copies des images compressées. Ce dossier est exclu de Git. Ne pas l’inclure dans une archive de sources ni dans un téléversement manuel. Désactiver l’option ne supprime pas les fichiers existants.
+
+Le dossier models/ contient uniquement un guide de placement dans les sources. Les poids GGUF sont ignorés par Git. Les chemins de la bibliothèque personnelle sont dans data/models.json et ne sont pas publiés.

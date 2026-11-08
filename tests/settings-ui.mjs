@@ -35,6 +35,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
     fetch: async (url, options = {}) => {
       const call = { route: url.replace('/api/', ''), body: options.body === undefined ? undefined : JSON.parse(options.body), options }; calls.push(call);
       if (request) { const response = await request(call); if (response) return response; }
+      if (call.route === 'models') return Response.json({models:[],detected:[],errors:[]});
       if (call.route === 'bootstrap') return Response.json({ config: savedConfig, preferences: { theme: 'dark', saveHistory: true }, status: { state: 'stopped', logs: [] } });
       if (call.route === 'shutdown') return Response.json({stopping:true});
       if (call.route === 'status') return Response.json({ state: 'stopped', logs: [] });
@@ -47,7 +48,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
     },
   };
   const application = source.slice(0, source.lastIndexOf('\ntry {')).replace(/^import .*;\r?\n/gm, '');
-  runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };', context);
+  runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, renderModelSelect, applyModelLibrary, switchLLM, addLLM, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };', context);
   Object.assign(context.app.state, { token: 'test', config: { ...savedConfig }, connected: true });
   return { ...context.app, $, calls, refreshes, windowListeners, comfyUI, comfyOptions, async open() { context.app.openSettings(); await tick(); } };
 }
@@ -150,7 +151,7 @@ test('disabling history waits for accepted queued writes before changing the pre
 });
 
 test('clearing the configured model also clears the sidebar model name', async () => {
-  const ui=await settingsUI();ui.updateControls();assert.equal(ui.$('sidebar-model').textContent,'saved');
+  const ui=await settingsUI();ui.updateControls();assert.equal(ui.$('sidebar-model').textContent,'Modèle GGUF');ui.state.config.modelPath='/models/Folder name/main.gguf';ui.updateControls();assert.equal(ui.$('sidebar-model').textContent,'Folder name');
   ui.state.config.modelPath='';ui.updateControls();
   assert.equal(ui.$('sidebar-model').textContent,'Modèle GGUF');
   assert.equal(ui.$('sidebar-model-detail').textContent,'Aucun modèle configuré');
@@ -211,4 +212,29 @@ test('slow status checks cannot accumulate concurrent polling requests',async()=
  const first=ui.refreshStatus();await ui.refreshStatus();await ui.refreshStatus();assert.equal(calls,1);
  gate.resolve(Response.json({state:'ready',vision:false,logs:[]}));await first;
  await ui.refreshStatus();assert.equal(calls,2);assert.equal(ui.state.connected,true);
+});
+
+test('opening settings rescans folders and selecting one fills both paths without choosing an engine',async()=>{
+ let scans=0;const profile={id:'a',name:'Folder name',modelPath:'/models/Folder name/main.gguf',projectorPath:'/models/Folder name/mmproj.gguf'};
+ const ui=await settingsUI({request:call=>call.route==='models'?(scans++,Response.json({models:[],detected:[profile],errors:[]})):undefined});
+ await ui.open();assert.equal(scans,1);ui.$('detected-model').value='a';ui.chooseDetectedModel();assert.equal(ui.$('model-path').value,profile.modelPath);assert.equal(ui.$('projector-path').value,profile.projectorPath);assert.equal(ui.$('engine-path').value,'engine.exe');
+ ui.$('settings').close();await ui.open();assert.equal(scans,2);
+});
+test('saved models have folder names and the sidebar selector locks during GPU work',async()=>{
+ const ui=await settingsUI(),profiles=[{id:'a',name:'Alpha folder',modelPath:'/models/Alpha folder/main.gguf',projectorPath:''},{id:'b',name:'Beta folder',modelPath:'/models/Beta folder/main.gguf',projectorPath:''}];
+ ui.applyModelLibrary({models:profiles,detected:[],errors:[]});ui.updateControls();assert.equal(ui.$('model-select').hidden,false);assert.ok(ui.$('model-select').children.some(item=>item.textContent==='Alpha folder'));
+ ui.state.generating=true;ui.updateControls();assert.equal(ui.$('model-select').disabled,true);ui.state.generating=false;ui.updateControls();assert.equal(ui.$('model-select').disabled,false);
+});
+
+test('adding a detected LLM while a model runs saves its pair without overwriting active path fields',async()=>{
+ const profile={id:'second',name:'Second folder',modelPath:'/models/Second folder/model.gguf',projectorPath:'/models/Second folder/mmproj.gguf'};
+ const ui=await settingsUI({request:call=>call.route==='models/add'?Response.json({profile,models:[profile]}):undefined});await ui.open();ui.state.status={state:'ready',logs:[]};
+ ui.applyModelLibrary({models:[],detected:[profile],errors:[]});ui.updateControls();ui.$('detected-model').value=profile.id;ui.chooseDetectedModel();assert.equal(ui.$('model-path').value,'saved.gguf');
+ await ui.addLLM();const call=ui.calls.find(item=>item.route==='models/add');assert.equal(call.body.modelPath,profile.modelPath);assert.equal(call.body.projectorPath,profile.projectorPath);assert.equal(call.body.enginePath,undefined);assert.equal(ui.state.models.length,1);
+});
+test('switching the sidebar model uses the saved profile and does not discard conversation messages',async()=>{
+ const profile={id:'second',name:'Second folder',modelPath:'/models/Second folder/main.gguf',projectorPath:''};
+ const ui=await settingsUI({request:call=>call.route==='models/select'?Response.json({config:{...savedConfig,...profile},modelName:profile.name,status:{state:'stopped',logs:[]}}):undefined});
+ ui.state.messages=[{role:'user',content:'Keep this chat'}];ui.applyModelLibrary({models:[profile],detected:[],errors:[]});ui.updateControls();ui.$('model-select').value=profile.id;await ui.switchLLM();
+ assert.equal(ui.calls.find(item=>item.route==='models/select').body.id,profile.id);assert.equal(ui.state.modelName,'Second folder');assert.equal(ui.state.messages[0].content,'Keep this chat');
 });

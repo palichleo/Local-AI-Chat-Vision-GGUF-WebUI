@@ -2,3 +2,6 @@ data/
 node_modules/
 *.log
 history/
+
+# Model weights stay local; keep the folder guide in the repository.
+*.[gG][gG][uU][fF]

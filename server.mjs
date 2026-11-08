@@ -1,3 +1,4 @@
+import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
 import { countContext } from './lib/context-count.mjs';
@@ -107,13 +108,14 @@ function chatPayload(input, vision, maxOutputTokens, allowEmpty = false) {
   };
 }
 
-export async function createApplication({ port = 8787, dataDir = join(root, 'data'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null, managed = false, controlTimeoutMs = 15000, controlHeartbeatMs = 10000, controlReconnectMs = 2000, chatHeartbeatMs = 10000 } = {}) {
+export async function createApplication({ port = 8787, dataDir = join(root, 'data'), modelsDir = join(root, 'models'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null, managed = false, controlTimeoutMs = 15000, controlHeartbeatMs = 10000, controlReconnectMs = 2000, chatHeartbeatMs = 10000 } = {}) {
   await mkdir(dataDir, { recursive: true });
   const { version: applicationVersion } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   let applyingUpdate = false, installState = { state: 'idle', error: '' };
   let installTask = Promise.resolve(), installHandle = null;
   const installController = new AbortController();
   const configPath = join(dataDir, 'config.json');
+  const models = new ModelLibrary(join(dataDir,'models.json'),modelsDir);
   let config = { ...defaults };
   let configWarning = '';
   try { config = normalizeConfig(JSON.parse(await readFile(configPath, 'utf8'))); }
@@ -143,6 +145,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   try{comfy=normalizeComfy(JSON.parse(await readFile(comfyPath,'utf8')));comfyConfigured=true;}catch{}
   let savingComfy=false;
   let savingSettings=false;
+  let modelOperation=Promise.resolve();
   let pickingFile=false;
   async function saveComfy(value){
     if(savingComfy)throw problem('Enregistrement ComfyUI en cours.',409);
@@ -240,7 +243,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (path === '/favicon.ico' && req.method === 'GET') { res.writeHead(204); return res.end(); }
       if (path === '/api/bootstrap' && req.method === 'GET') {
-        return send(200, { application: 'atelier-local', controlled: !!controlResponse, token, config, preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
+        return send(200, { application: 'atelier-local', controlled: !!controlResponse, token, config, models: await models.list(), modelName: modelFolderName(config.modelPath), preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
       }
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Recharge la page.', 401);
@@ -266,6 +269,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (path === '/api/updates/session' && req.method === 'GET') return send(200, applyingUpdate ? null : await readUpdateSession(dataDir));
       if (path === '/api/updates' && req.method === 'GET') return send(200, await updates);
+      if (path === '/api/models' && req.method === 'GET') return send(200,{models:await models.list(),...await models.scan()});
       if (path === '/api/status' && req.method === 'GET') return send(200, status());
       if(req.method==='GET'&&path==='/api/comfy'){await detectComfy();return send(200,{config:comfy,discovery,workflows:await catalog.list()});}
       if(req.method==='GET'&&path==='/api/comfy/status')return send(200,await new ComfyClient(comfy.baseUrl).status());
@@ -306,6 +310,19 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return;
       }
       if (closing) throw problem('L’application est en cours de fermeture.', 409);
+      if(path==='/api/models/add'||path==='/api/models/select'){
+        if(savingSettings||saving||savingComfy||pickingFile||runtime.active||engine.busy||clearingHistory||['loading','stopping'].includes(engine.state))throw problem('Attends la fin de l’opération en cours.',409);
+        savingSettings=true;saving=true;let finishModelOperation;modelOperation=new Promise(done=>{finishModelOperation=done;});
+        try{
+          if(path==='/api/models/add')return send(200,{profile:await models.add(body),models:await models.list()});
+          const selected=await models.get(body.id),next={...config,modelPath:selected.modelPath,projectorPath:selected.projectorPath};
+          if(next.modelPath===config.modelPath&&next.projectorPath===config.projectorPath)return send(200,{config,modelName:selected.name,status:status()});
+          const restart=engine.state==='ready';await engine.stop();
+          await atomicJson(configPath,next);config=next;configWarning='';
+          let warning='';if(restart&&!closing){try{await engine.start(config);}catch(error){warning=error.message;}}
+          return send(200,{config,modelName:selected.name,status:status(),warning});
+        }finally{savingSettings=false;saving=false;finishModelOperation();}
+      }
       if(path==='/api/resources/update'){
         if((runtime.active||engine.busy)&&((await resources.record(body.id)).ready||!body.patch?.prepared))throw problem('Attends la fin de la réponse avant de modifier une ressource.',409);
         return send(200,resourceView(await resources.update(body.id,body.patch)));
@@ -489,7 +506,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         await engine.start(config);
         return send(202, engine.status());
       }
-      if (path === '/api/stop') { if(runtime.active)throw problem('Annule la génération ComfyUI avec le bouton d’interruption.',409); await engine.stop(); return send(200, status()); }
+      if (path === '/api/stop') { if(savingSettings)throw problem('Changement de modèle en cours.',409);if(runtime.active)throw problem('Annule la génération ComfyUI avec le bouton d’interruption.',409); await engine.stop(); return send(200, status()); }
       if (path === '/api/context') {
         const payload = chatPayload(body, Boolean(config.projectorPath), config.maxOutputTokens, true);
         const limits = { capacity: config.contextSize, reserved: config.maxOutputTokens };
@@ -577,7 +594,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       clearTimeout(controlTimer);
       const serverClosed = new Promise(done => server.close(done));
       updateController.abort(); await updates;
-      await resources.close(); await runtime.close(); await engine.stop();
+      await resources.close(); await modelOperation; await models.pending; await runtime.close(); await engine.stop();
       await history.flush(); await galleryBatch.catch(() => {}); await gallery.pending;
       if (controlResponse && !controlResponse.destroyed) controlResponse.end(JSON.stringify({ state: applyingUpdate ? 'restarting' : 'stopped' }) + '\n');
       server.closeAllConnections();

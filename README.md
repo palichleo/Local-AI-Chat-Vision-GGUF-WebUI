@@ -6,6 +6,15 @@ A local chat, image-understanding and optional ComfyUI image-generation interfac
 
 The application currently uses French UI labels. Their names are included below to help you find the controls.
 
+## Local model library
+
+Place each model in its own subfolder of `models/`. The folder name is the display name: for example `models/My model/model.gguf` and `models/My model/mmproj.gguf`. The file `put model folders here.txt` explains this layout. Git includes the guide and ignores GGUF weights. Keep llama.cpp and its libraries separate; its path is shared across models.
+
+Opening Configuration scans these immediate subfolders. Choose a detected folder and click **Ajouter un LLM** to remember its paths, or enter/browse external paths and use the same button. Saved pairs survive restart in `data/models.json`; no model file is moved. Detection requires exactly one main GGUF and optionally one projector whose filename contains `mmproj` (case insensitive). Both extension and GGUF header are checked. Ambiguous folders and invalid files are reported. Split GGUF shards and multiple quantizations in the same folder require separate handling and are not auto-selected. Matching headers do not guarantee that a projector is compatible with the chosen model.
+
+With several saved models, use the selector in the bottom-left model card. Switching is blocked during chat or ComfyUI work, unloads the old model, and loads the new one if the engine was running. An idle engine remains stopped until the next message. Context, output and compute settings remain shared; choose values suitable for the selected model. The current conversation is retained. Manual path controls remain available after stopping the engine. Automatic updates preserve the models directory.
+
+
 ## Getting started
 
 Requirements: **Node.js 22 or later**, a recent browser, and a **recent llama-server build with Qwen3.5 and vision support**, together with its native libraries. Choose a build that matches your operating system, architecture and hardware. The application does not download models or install dependencies automatically.

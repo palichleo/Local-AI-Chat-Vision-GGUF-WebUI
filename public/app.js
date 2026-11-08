@@ -14,7 +14,7 @@ import { waitForModel } from './model-ready.mjs';
 
 const $ = (id) => document.getElementById(id);
 const state = {
-  token: '', config: {}, status: { state: 'stopped', vision: false, busy: false, logs: [] },
+  token: '', config: {}, models: [], detectedModels: [], modelName: '', status: { state: 'stopped', vision: false, busy: false, logs: [] },
   connected: false, thinking: true, messages: [], images: [], generating: false,
   preparing: false, operation: false, controller: null, stickToBottom: true, theme: 'dark', savingPreferences: false, waitingForModel: false, settingsLoading: false, settingsSession: 0, settingsReady: false, comfyWorking: false, disablingHistory: false,
   resourceWorking: false, saveHistory: true, conversationId: null, historyItems: [], archiveSnapshot: null, savingHistory: false, historyDirty: false, loadingHistory: false, clearingHistory: false,
@@ -324,9 +324,12 @@ function updateControls() {
   }
   assetsUI.setBusy(state.generating || s.busy || toolBusy || state.updating || state.closingApp);
   if (state.closingApp) for (const control of document.querySelectorAll('button,input,textarea,select')) control.disabled = true;
+  $('model-select').disabled = toolBusy || state.generating || state.preparing || state.operation || state.settingsLoading || state.loadingHistory || state.updating || state.comfyWorking || s.busy || !state.connected || ['loading','stopping'].includes(s.state);
+  $('add-llm').disabled = state.settingsLoading || state.operation || state.generating || state.comfyWorking || toolBusy || !state.settingsReady;
+  $('detected-model').disabled = $('add-llm').disabled;
   const basename = state.config.modelPath?.split(/[\\/]/).pop() || '';
   if (basename) {
-    $('sidebar-model').textContent = /DeepSeek.*Qwen3\.5/i.test(basename) ? 'DeepSeek × Qwen3.5' : basename.replace(/\.gguf$/i, '');
+    $('sidebar-model').textContent = state.modelName || state.config.modelPath.split(/[\\/]/).slice(-2,-1)[0] || 'Modèle GGUF';
     $('sidebar-model').title = basename;
     const quant = basename.match(/(?:\.|-)(Q\d[^.]*|IQ\d[^.]*)(?:\.gguf)?$/i)?.[1] || 'GGUF';
     $('sidebar-model-detail').textContent = `${quant} · ${state.config.projectorPath ? 'projecteur configuré' : 'texte uniquement'}`;
@@ -369,6 +372,43 @@ async function refreshStatus() {
   updateControls();
 }
 
+
+function renderModelSelect(){
+ const select=$('model-select');select.replaceChildren();select.hidden=(state.models||[]).length<2;
+ const active=(state.models||[]).find(item=>item.modelPath===state.config.modelPath&&item.projectorPath===(state.config.projectorPath||''));
+ if(!active){const option=node('option','','Modèle actuel');option.value='';select.append(option);}
+ for(const item of state.models||[]){const option=node('option','',item.name);option.value=item.id;option.title=item.modelPath;select.append(option);}
+ select.value=active?.id||'';
+}
+function applyModelLibrary(library){
+ state.models=library.models||[];state.detectedModels=[...state.models,...(library.detected||[]).filter(item=>!state.models.some(saved=>saved.id===item.id))];renderModelSelect();
+ const select=$('detected-model');select.replaceChildren();const manual=node('option','','Chemins manuels ci-dessous');manual.value='';select.append(manual);
+ for(const item of state.detectedModels){const option=node('option','',item.name+(state.models.some(saved=>saved.id===item.id)?' · enregistré':''));option.value=item.id;select.append(option);}
+ select.value='';$('models-status').textContent=(library.errors||[]).map(item=>item.name+' : '+item.error).join('\n')||((library.detected||[]).length+' dossier(s) détecté(s) dans models.');
+}
+function chooseDetectedModel(){
+ const item=state.detectedModels.find(item=>item.id===$('detected-model').value);if(!item||['ready','loading','stopping'].includes(state.status.state))return;
+ $('model-path').value=item.modelPath;$('projector-path').value=item.projectorPath;
+}
+async function addLLM(){
+ if($('add-llm').disabled)return;
+ state.operation=true;updateControls();const session=state.settingsSession;
+ try{
+  const selected=state.detectedModels.find(item=>item.id===$('detected-model').value);
+  const result=await(await api('models/add',selected?{modelPath:selected.modelPath,projectorPath:selected.projectorPath}:{modelPath:$('model-path').value,projectorPath:$('projector-path').value})).json();state.models=result.models;renderModelSelect();
+  if(session===state.settingsSession&&$('settings').open){$('models-status').textContent=result.profile.name+' enregistré. Il est disponible dans le sélecteur de LLM.';}
+ }catch(error){if(session===state.settingsSession){$('config-error').textContent=error.message;$('config-error').hidden=false;}}
+ finally{state.operation=false;updateControls();}
+}
+async function switchLLM(){
+ const id=$('model-select').value;if(!id||$('model-select').disabled)return;
+ if(settingsGuard.isDirty()){renderModelSelect();return settingsGuard.requestClose(()=>{ $('model-select').value=id;void switchLLM();});}
+ state.operation=true;updateControls();
+ try{const result=await(await api('models/select',{id})).json();state.config=result.config;state.modelName=result.modelName;state.status=result.status;notice(result.warning||'');contextMeter.schedule();}
+ catch(error){notice(error.message);}
+ finally{state.operation=false;renderModelSelect();await refreshStatus();}
+}
+
 function openSettings() {
   if ($('settings').open) return;
   filePickerController?.abort();comfyUI.cancelSettings();
@@ -376,9 +416,9 @@ function openSettings() {
   state.settingsLoading = true; state.settingsReady = false;
   $('config-error').hidden = true;
   $('settings').showModal(); updateControls();
-  Promise.all([api('bootstrap').then(response => response.json()), comfyUI.refresh()]).then(([initial]) => {
+  Promise.all([api('bootstrap').then(response => response.json()), comfyUI.refresh(), api('models').then(response=>response.json())]).then(([initial,,library]) => {
     if (session !== state.settingsSession || !$('settings').open) return;
-    state.config = initial.config;
+    state.config = initial.config; state.modelName=initial.modelName||''; applyModelLibrary(library);
     if (initial.preferences && !state.savingPreferences) {
       const historyChanged = state.saveHistory !== initial.preferences.saveHistory;
       state.saveHistory = initial.preferences.saveHistory; applyTheme(initial.preferences.theme);
@@ -414,7 +454,7 @@ async function saveConfiguration() {
       ...computeControls.values(),
     };
     const saved=await(await api('settings',{config,comfy:comfyUI.values(),workflowDescriptions:comfyUI.workflowDescriptions()})).json();
-    state.config=saved.config;state.comfy=saved.comfy;
+    state.config=saved.config;state.comfy=saved.comfy;state.modelName='';renderModelSelect();
     const current = session === state.settingsSession && $('settings').open;
     if (current) { comfyUI.saved(saved); settingsGuard.markSaved(); $('settings').close(); }
     contextMeter.schedule(); return current;
@@ -713,6 +753,9 @@ for(const button of document.querySelectorAll('[data-file-kind]'))button.onclick
   }
 };
 $('settings-open').onclick = openSettings;
+$('detected-model').onchange=chooseDetectedModel;
+$('add-llm').onclick=addLLM;
+$('model-select').onchange=switchLLM;
 $('update-available').onclick = installUpdate;
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('shutdown-app').onclick = shutdownApplication;
@@ -774,7 +817,8 @@ try {
   const response = await fetch('/api/bootstrap');
   if (!response.ok) throw new Error('Impossible de joindre le serveur local.');
   const initial = await response.json();
-  Object.assign(state, { token: initial.token, config: initial.config, status: initial.status, connected: true });
+  Object.assign(state, { token: initial.token, config: initial.config, models: initial.models||[], modelName: initial.modelName||'', status: initial.status, connected: true });
+  renderModelSelect();
   void checkUpdates();
   applyTheme(initial.preferences?.theme);
   state.saveHistory = initial.preferences?.saveHistory === true;

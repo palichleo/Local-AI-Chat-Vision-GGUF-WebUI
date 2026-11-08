@@ -15,9 +15,9 @@ async function pickerUI() {
   const buttons = ['engine','model','projector'].map(kind => ({ dataset: { fileKind: kind }, disabled: false }));
   const requests = [];
   const state = { operation: false, config: { modelPath: 'saved.gguf' }, status: {} };
-  const context = { $, state, settingsGuard:{markSaved(){}}, AbortController, tokenControls: { setValues() {} }, comfyUI: { refresh: async () => {}, cancelSettings() {} }, computeControls: { setValues() {} }, notice() {}, updateControls() {},
+  const context = { $, state, settingsGuard:{markSaved(){}}, applyModelLibrary(){}, AbortController, tokenControls: { setValues() {} }, comfyUI: { refresh: async () => {}, cancelSettings() {} }, computeControls: { setValues() {} }, notice() {}, updateControls() {},
     document: { querySelectorAll: () => buttons },
-    api: (_route, _body, options) => _route === 'bootstrap' ? Promise.resolve(Response.json({config:state.config})) : new Promise((resolve, reject) => requests.push({ resolve: path => resolve(Response.json({ path })), reject, signal: options?.signal })),
+    api: (_route, _body, options) => _route === 'models' ? Promise.resolve(Response.json({models:[],detected:[],errors:[]})) : _route === 'bootstrap' ? Promise.resolve(Response.json({config:state.config})) : new Promise((resolve, reject) => requests.push({ resolve: path => resolve(Response.json({ path })), reject, signal: options?.signal })),
   };
   const open = source.slice(source.indexOf('function openSettings()'), source.indexOf('async function saveConfiguration()'));
   const start = source.includes('let filePickerController = null;') ? source.indexOf('let filePickerController = null;') : source.indexOf('for(const button of document.querySelectorAll(\'[data-file-kind]\'))');
