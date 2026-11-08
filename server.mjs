@@ -1,3 +1,4 @@
+import {appSources} from './lib/app-sources.mjs';
 import {Projects} from './lib/projects.mjs';
 import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
@@ -120,6 +121,7 @@ function chatPayload(input, vision, maxOutputTokens, countOnly = false) {
 export async function createApplication({ port = 8787, dataDir = join(root, 'data'), publicDir = join(root,'public'), modelsDir = join(root, 'models'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null, managed = false, controlTimeoutMs = 15000, controlHeartbeatMs = 10000, controlReconnectMs = 2000, chatHeartbeatMs = 10000 } = {}) {
   // Keep HTML, scripts and styles paired with this running backend until restart.
   const frontend=new Map(await Promise.all([...staticFiles].map(async([path,[file,mime]])=>[path,{contents:await readFile(join(publicDir,file)),mime,file}])));
+  const sources=await appSources(root);
   await mkdir(dataDir, { recursive: true });
   const { version: applicationVersion } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   let applyingUpdate = false, installState = { state: 'idle', error: '' };
@@ -284,7 +286,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (path === '/favicon.ico' && req.method === 'GET') { res.writeHead(204); return res.end(); }
       if (path === '/api/bootstrap' && req.method === 'GET') {
-        return send(200, { application: 'atelier-local', controlled: !!controlResponse, token, config, instructions, models: await models.list(), modelName: (await models.list()).find(item=>item.modelPath===config.modelPath&&item.projectorPath===config.projectorPath)?.name || modelFolderName(config.modelPath), preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
+        return send(200, { application: 'atelier-local', ...sources, controlled: !!controlResponse, token, config, instructions, models: await models.list(), modelName: (await models.list()).find(item=>item.modelPath===config.modelPath&&item.projectorPath===config.projectorPath)?.name || modelFolderName(config.modelPath), preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
       }
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Recharge la page.', 401);
@@ -317,7 +319,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if(req.method==='GET'&&path==='/api/comfy/workflows')return send(200,{workflows:await new ComfyClient(comfy.baseUrl).workflows()});
       if(req.method==='GET'&&path==='/api/resources')return send(200,{resources:(await resources.list()).map(resourceView)});
       if(path==='/api/resources/upload'&&req.method==='POST'){
-        if(applyingUpdate||closing)throw problem('L’application est occupée.',409);
+        if(applyingUpdate||closing||relaunching)throw problem('L’application est occupée.',409);
         let name;try{name=decodeURIComponent(req.headers['x-resource-name']||'');}catch{throw problem('Nom de fichier invalide.');}
         const resource=await resources.add(req,{name,mime:(req.headers['content-type']||'').split(';')[0],length:req.headers['content-length']});
         return send(201,resourceView(resource));
@@ -349,11 +351,17 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (applyingUpdate) throw problem('Installation de la mise à jour en cours.', 409);
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw problem('Un objet JSON est attendu.');
       if (path === '/api/shutdown') {
+        if(body.onlyIfIdle===true){
+          if(body.installationId!==sources.installationId||body.sourceRevision!==sources.sourceRevision)throw problem('L’instance à relancer a changé.',409);
+          if(closing||relaunching||engine.busy||runtime.active||savingSettings||saving||savingComfy||pickingFile||savingPreferences||clearingHistory||persistingGallery||['loading','stopping'].includes(engine.state))throw problem('Termine l’opération en cours, puis relance l’application pour charger les derniers fichiers.',409);
+          relaunching=true;
+          try{await engine.stop();}catch(error){relaunching=false;throw error;}
+        }
         send(202, { stopping: true });
         setImmediate(() => { void stopApplication().catch(console.error); });
         return;
       }
-      if (closing) throw problem('L’application est en cours de fermeture.', 409);
+      if (closing||relaunching) throw problem('L’application est en cours de fermeture.', 409);
       if(path==='/api/models/add'||path==='/api/models/select'){
         if(savingSettings||saving||savingComfy||pickingFile||runtime.active||engine.busy||clearingHistory||['loading','stopping'].includes(engine.state))throw problem('Attends la fin de l’opération en cours.',409);
         savingSettings=true;saving=true;let finishModelOperation;modelOperation=new Promise(done=>{finishModelOperation=done;});
@@ -643,7 +651,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   await new Promise((yes, no) => { server.once('error', no); server.listen(port, '127.0.0.1', yes); });
   url = `http://127.0.0.1:${server.address().port}`;
   if (updateChecker) updates = Promise.resolve().then(() => updateChecker({ signal: updateController.signal })).catch(() => ({ available: false }));
-  let closing;
+  let closing,relaunching=false;
   if (managed) { controlTimer = setTimeout(() => { void stopApplication().catch(console.error); }, controlTimeoutMs); controlTimer.unref(); }
   function closeApplication() {
     return closing ||= (async () => {

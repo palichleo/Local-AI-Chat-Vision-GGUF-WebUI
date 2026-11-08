@@ -187,14 +187,15 @@ async function loadConversation(id) {
 }
 
 function renderTranscript(messages, incomplete = false) {
+    let reply=null;
     for (const [index, message] of messages.entries()) {
       if(message.internal||message.role==='tool')continue;
-      if (message.role === 'user') { const user = savedUser(message); userMessage(user.text, user.images); }
+      if (message.role === 'user') { reply=null;const user = savedUser(message); userMessage(user.text, user.images); }
       else {
-        const view = assistantMessage();
+        const view = assistantMessage(reply);reply=view;
         if (message.content) renderText(view.body, message.content);
         else view.body.textContent = message.tool_calls ? 'Appel d’outil enregistré.' : 'Aucune réponse finale reçue.';
-        if(message.tool_calls?.some(call=>['comfy_generate_image','comfy_generate_video'].includes(call.function?.name))){const call=message.tool_calls.find(call=>['comfy_generate_image','comfy_generate_video'].includes(call.function?.name)),result=messages[index+1];try{const data=result?.role==='tool'&&result.tool_call_id===call.id?JSON.parse(result.content):null;if(data?.run_id)generationUI.restore(view.body,state.conversationId,data.run_id);}catch{}}
+        if(message.tool_calls?.some(call=>['comfy_generate_image','comfy_generate_video'].includes(call.function?.name))){const call=message.tool_calls.find(call=>['comfy_generate_image','comfy_generate_video'].includes(call.function?.name)),result=messages[index+1];try{const data=result?.role==='tool'&&result.tool_call_id===call.id?JSON.parse(result.content):null;if(data?.run_id){if(!message.content)view.body.replaceChildren();generationUI.restore(view.generations,state.conversationId,data.run_id);}}catch{}}
         view.reasoning.hidden = !message.reasoning_content;
         view.thoughts.textContent = message.reasoning_content || '';
         if (incomplete && index === messages.length - 1) view.note.textContent = 'Réponse partielle restaurée.';
@@ -570,12 +571,14 @@ function userMessage(text, images) {
   return article;
 }
 
-function assistantMessage() {
-  const article = node('article', 'message assistant');
+function assistantMessage(parent=null) {
+  const article = parent?.article || node('article', 'message assistant');
   article.setAttribute('aria-label', 'Réponse du modèle');
-  const header = node('div', 'message-header');
-  const avatar = node('span', 'message-avatar'); avatar.append(icon('spark'));
-  header.append(avatar, node('span', '', 'Atelier'));
+  if(!parent){
+    const header = node('div', 'message-header');
+    const avatar = node('span', 'message-avatar'); avatar.append(icon('spark'));
+    header.append(avatar, node('span', '', 'Atelier'));article.append(header);
+  }
   const reasoning = node('details', 'reasoning');
   reasoning.hidden = true;
   const summary = node('summary', '', 'Réflexion du modèle');
@@ -584,9 +587,10 @@ function assistantMessage() {
   const body = node('div', 'message-body');
   body.append(node('span', 'pending-dot', '●'));
   const note = node('div', 'message-note');
-  article.append(header, reasoning, body, note);
-  $('messages').append(article);
-  return { article, reasoning, summary, thoughts, body, note };
+  const generations=parent?.generations || node('div','generation-grid');
+  article.append(reasoning, body, note);
+  if(!parent){article.append(generations);$('messages').append(article);}
+  return { article, reasoning, summary, thoughts, body, note, generations };
 }
 
 function userContent(text, images) {
@@ -651,6 +655,7 @@ async function sendMessage(event) {
       await historyWrite;
       usedTool=true;
       history.push({role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{}),tool_calls:[request.call]});
+      if(!output)view.body.replaceChildren();
       output='';reasoning='';
       if(request.kind==='resource'){
         const ids=request.resourceIds||[request.resourceId];resourceReads+=ids.length;view.body.replaceChildren(node('span','pending-message','Ressource · '+request.workflowName));
@@ -663,10 +668,10 @@ async function sendMessage(event) {
           view.note.textContent='Références consultées · '+selected.map(resource=>resource.label||resource.name).join(', ');
         }catch(error){history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'error',message:error.message})});resourceReads=8;if(signal.aborted)throw error;view.note.textContent=error.message;}
         state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:true};await persistConversation();
-        view=assistantMessage();finishReason='';continue;
+        view=assistantMessage(view);finishReason='';continue;
       }
       iterations++;
-      view.generation=true;const generation=generationUI.mount(view.body,request);
+      view.generation=true;const generation=generationUI.mount(view.generations,request);
       let result;
       try{result=await comfyUI.requestTool(request,signal,progress=>{generation.progress(progress);scrollToBottom();},image=>generation.image(image));generation.finish(result);}
       catch(error){generation.fail(error.message);history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'error',message:signal.aborted?'Génération annulée.':error.message})});throw error;}
@@ -681,7 +686,7 @@ async function sendMessage(event) {
       view.note.textContent=result.failed?(result.error||'Analyse indisponible.') : '';
       if(result.denied||result.failed||iterations>=(state.comfy?.maxIterations||5))allowTools=false;
       state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:true};await persistConversation();
-      view=assistantMessage();finishReason='';
+      view=assistantMessage(view);finishReason='';
     }
   }catch(error){
     const canceled=signal.aborted;

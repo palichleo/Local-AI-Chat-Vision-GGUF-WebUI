@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {setupGenerationUI} from '../public/generation-ui.mjs';
-class Element{constructor(tag='',cls='',text=''){Object.assign(this,{tag,cls,textContent:text,children:[],style:{},attributes:{},classList:{add(){}}});}append(...items){this.children.push(...items);}replaceChildren(...items){this.children=items;}setAttribute(key,value){this.attributes[key]=value;}removeAttribute(key){delete this[key];delete this.attributes[key];}}
+class Element{constructor(tag='',cls='',text=''){const classes=new Set(cls.split(' '));Object.assign(this,{tag,cls,textContent:text,children:[],style:{},attributes:{},classList:{add(...names){for(const name of names)classes.add(name);},toggle(name,value){if(value)classes.add(name);else classes.delete(name);},contains:name=>classes.has(name)}});}append(...items){this.children.push(...items);}replaceChildren(...items){this.children=items;}setAttribute(key,value){this.attributes[key]=value;}removeAttribute(key){delete this[key];delete this.attributes[key];}}
 test('organic frame uses the known size and is replaced by an original blob outside the model payload',async()=>{
  const container=new Element(),original=new Blob(['full original bytes'],{type:'image/png'}),api=async()=>{throw Error('No request expected');};let opened;
  const ui=setupGenerationUI({api,node:(...args)=>new Element(...args),openOutput:(...args)=>{opened=args;}}),card=ui.mount(container,{resolution:{width:1536,height:1024}}),frame=container.children[0].children[0];
@@ -24,7 +24,7 @@ test('restoring a long conversation defers originals, serializes transfers and r
  const ui=setupGenerationUI({node:(...args)=>new Element(...args),openOutput(){},api:async(route,_,options)=>{calls.push(route);if(route==='gallery/conversation/run')return Response.json(record);return new Promise((resolve,reject)=>{gates.push(()=>resolve(new Response('original bytes',{headers:{'content-type':'image/png'}})));options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true});});}});
  ui.restore(container,'conversation','run');await new Promise(setImmediate);assert.equal(calls.length,0,'offscreen history must not fetch originals');
  observed.callback([{target:container.children[0],isIntersecting:true}]);await new Promise(setImmediate);assert.equal(calls.length,1);
- const frame=container.children[0].children[0],[first,second]=frame.children;
+ const [first,second]=container.children.map(figure=>figure.children[0].children[0]);
  observed.callback([{target:first,isIntersecting:true},{target:second,isIntersecting:true}]);await new Promise(setImmediate);assert.equal(calls.length,2,'only one original transfers at a time');
  gates[0]();await new Promise(setImmediate);assert.equal(calls.length,3);const url=first.children[0].src;assert.match(url,/^blob:/);
  observed.callback([{target:first,isIntersecting:false}]);await assert.rejects(fetch(url));assert.equal(first.children[0].src,'compressed-preview');
@@ -57,4 +57,24 @@ test('an analysis or model reload failure preserves an original that was already
  const container=new Element(),ui=setupGenerationUI({node:(...args)=>new Element(...args),api:async()=>{throw Error('No request expected');},openOutput(){}});t.after(()=>ui.clear());
  const card=ui.mount(container),record={workflowName:'User workflow',parameters:{},outputs:[{}]};card.image({record,index:0,blob:new Blob(['original'],{type:'image/png'})});const frame=container.children[0].children[0],img=frame.children[0].children[0];
  card.finish({record,failed:true,error:'Analysis unavailable'});assert.notEqual(frame.hidden,true);assert.match(img.src,/^blob:/);card.fail('Model reload failed');assert.notEqual(frame.hidden,true);assert.match(img.src,/^blob:/);
+});
+
+test('sequential runs and batch outputs append separate tiles to the same grid without replacing originals',async t=>{
+ const container=new Element(),ui=setupGenerationUI({node:(...args)=>new Element(...args),api:async()=>{throw Error('No request expected');},openOutput(){}});t.after(()=>ui.clear());
+ const first=ui.mount(container),record={workflowName:'Batch',parameters:{},outputs:[{},{}]},blob=new Blob(['original'],{type:'image/png'});
+ first.image({record,index:0,blob});first.image({record,index:1,blob});first.finish({record});
+ const second=ui.mount(container,{resolution:{width:768,height:1024}});
+ assert.equal(container.children.length,3);assert.equal(container.children[2].children[0].style.aspectRatio,'768 / 1024');
+ for(const figure of container.children.slice(0,2)){const frame=figure.children[0];assert.equal(frame.children.length,1);assert.match(frame.children[0].children[0].src,/^blob:/);}
+ second.fail('Cancelled');assert.equal(container.children[2].children[0].hidden,true);assert.notEqual(container.children[0].children[0].hidden,true);
+});
+
+test('loading animation pauses outside the viewport and observation stops on refusal',t=>{
+ const previous=globalThis.IntersectionObserver;let observed;
+ globalThis.IntersectionObserver=class{constructor(callback){this.callback=callback;this.targets=new Set();observed=this;}observe(target){this.targets.add(target);}unobserve(target){this.targets.delete(target);}};
+ t.after(()=>{globalThis.IntersectionObserver=previous;});
+ const container=new Element(),ui=setupGenerationUI({node:(...args)=>new Element(...args),api:async()=>{throw Error('No generation expected');},openOutput(){}});t.after(()=>ui.clear());
+ const card=ui.mount(container),figure=container.children[0],frame=figure.children[0];assert.equal(frame.classList.contains('is-paused'),true);
+ observed.callback([{target:figure,isIntersecting:true}]);assert.equal(frame.classList.contains('is-paused'),false);
+ observed.callback([{target:figure,isIntersecting:false}]);assert.equal(frame.classList.contains('is-paused'),true);card.finish({denied:true});assert.equal(observed.targets.size,0);assert.equal(frame.hidden,true);
 });

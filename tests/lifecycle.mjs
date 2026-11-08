@@ -54,3 +54,13 @@ test('control heartbeats prevent idle loss and a short transport interruption al
  control=await api('lifecycle');reader=control.body.getReader();await reader.read();await new Promise(resolve=>setTimeout(resolve,350));assert.equal((await api('status')).status,200);await reader.cancel();
  await until(async()=>{try{await fetch(app.url+'/api/bootstrap');return false;}catch{return true;}});
 });
+
+test('launcher replacement verifies its source identity and never interrupts an active response',async t=>{
+ let child;const {app,boot,api,directory}=await fixture(t,{spawnProcess:(_cmd,args,options)=>child=spawn(process.execPath,[fileURLToPath(new URL('./fixtures/fake-engine.mjs',import.meta.url)),...args],options)});
+ const modelPath=join(directory,'model.gguf');await writeFile(modelPath,Buffer.from('GGUF\x03\0\0\0'));await api('config',{enginePath:process.execPath,modelPath,projectorPath:'',contextSize:4096,maxOutputTokens:1024,gpuLayers:0});await api('start',{});await until(async()=>(await(await api('status')).json()).state==='ready');
+ const request={onlyIfIdle:true,installationId:boot.installationId,sourceRevision:boot.sourceRevision};assert.match(request.installationId,/^[a-f0-9]{64}$/);assert.equal((await api('shutdown',{...request,sourceRevision:'another-instance'})).status,409);
+ const controller=new AbortController(),response=await fetch(app.url+'/api/chat',{method:'POST',headers:{Authorization:'Bearer '+boot.token,'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:'lent'}]}),signal:controller.signal});
+ try{await until(async()=>(await(await api('status')).json()).busy);assert.equal((await api('shutdown',request)).status,409);assert.equal(child.exitCode,null);assert.equal((await api('status')).status,200);}finally{controller.abort();await response.body.cancel().catch(()=>{});}
+ await until(async()=>!(await(await api('status')).json()).busy);assert.equal((await api('shutdown',request)).status,202);assert.ok(child.exitCode!==null||child.signalCode!==null,'The old model must stop before the replacement starts');
+ await until(async()=>{try{await fetch(app.url+'/api/bootstrap');return false;}catch{return true;}});
+});

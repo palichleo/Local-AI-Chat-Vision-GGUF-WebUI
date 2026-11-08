@@ -10,7 +10,7 @@ A local chat, image-understanding and optional ComfyUI image-generation interfac
 
 The application currently uses French UI labels. Their names are included below to help you find the controls.
 
-A running server keeps its HTML, scripts and styles together in memory until it stops. Editing or replacing source files therefore requires a complete application restart. The launcher reports an already running version that differs from the files on disk instead of silently reopening it. Automatic updates already stop and restart the application. This prevents a new interface from requesting modules that an older backend cannot serve.
+A running server keeps its HTML, scripts and styles together until it stops. Opening the Windows or Linux launcher compares the running sources with this folder, including changes that keep the same version number. It cleanly replaces an outdated idle instance from the same folder and opens the latest local interface. An active generation, an installation in another folder or an unrelated service is left running. Older instances without source identification need to be closed once. Files are checked only at launch; the browser is not automatically reloaded while you work.
 
 ## Settings and global context
 
@@ -70,7 +70,7 @@ The same command also works on both systems:
 node scripts/launch.mjs --open
 ```
 
-Open **http://127.0.0.1:8787**. Keep the launcher window open; it stays attached through updates. Closing that window, pressing `Ctrl+C`, or choosing **Fermer l’application** in Configuration stops the app and its model and releases the port. Launching again reuses an existing Atelier instance. Another service using port 8787 is reported and left untouched. If the browser does not open automatically, enter the address manually.
+Open **http://127.0.0.1:8787**. Keep the launcher window open; it stays attached through updates. Closing that window, pressing `Ctrl+C`, or choosing **Fermer l’application** in Configuration stops the app and its model and releases the port. Launching again reuses an up-to-date instance or cleanly replaces an outdated idle instance from this folder. Another service using port 8787 is reported and left untouched. If the browser does not open automatically, enter the address manually.
 
 There is no need to run `npm install`. You can also use `npm start`.
 

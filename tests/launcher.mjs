@@ -7,6 +7,8 @@ import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import net from 'node:net';
 import http from 'node:http';
+import {randomUUID} from 'node:crypto';
+import {appSources} from '../lib/app-sources.mjs';
 const project=fileURLToPath(new URL('../',import.meta.url));
 async function until(check,label){const end=Date.now()+20000;while(Date.now()<end){if(await check())return;await new Promise(resolve=>setTimeout(resolve,40));}assert.fail(label||'Expected launcher state was not reached');}
 async function freePort(){const socket=net.createServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));return port;}
@@ -69,9 +71,9 @@ test('launcher stays attached across an installed update and can close the repla
 });
 
 test('launcher reconnects after a transient control stream failure instead of closing the app',async()=>{
- const {runLauncher}=await import('../scripts/launch.mjs');let streams=0;
+ const {runLauncher}=await import('../scripts/launch.mjs'),sources=await appSources(project),{version}=JSON.parse(await readFile(join(project,'package.json'),'utf8'));let streams=0;
  const server=http.createServer((req,res)=>{
-  if(req.url==='/api/bootstrap'){res.setHeader('content-type','application/json');return res.end(JSON.stringify({application:'atelier-local',token:'reconnect-test',controlled:false}));}
+  if(req.url==='/api/bootstrap'){res.setHeader('content-type','application/json');return res.end(JSON.stringify({application:'atelier-local',token:'reconnect-test',controlled:false,...sources,version}));}
   if(req.url==='/api/lifecycle'){streams++;res.writeHead(200,{'content-type':'application/x-ndjson'});res.write('{"state":"running"}\n');const timer=setTimeout(()=>streams===1?res.destroy():res.end('{"state":"stopped"}\n'),40);res.on('close',()=>clearTimeout(timer));return;}
   res.writeHead(404);res.end();
  });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -84,4 +86,29 @@ test('a new launcher reports an outdated controlled instance instead of silently
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{await assert.rejects(runLauncher({port:server.address().port,signal:AbortSignal.timeout(3000)}),/instance v0.0.0.*sources.*Fermez/);assert.equal(requests,1,'No shutdown or takeover is allowed');}
  finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});
+
+test('launching again replaces stale sources from the same folder even when the version is unchanged',{timeout:30000},async t=>{
+ const {root,url,launch,boot,api}=await fixture(t),first=launch(true);await until(async()=>(await boot())?.controlled,first.output());
+ const before=await boot(),id=randomUUID();assert.equal((await api('history/save',{id,messages:[{role:'user',content:'Keep my saved conversation'}]})).status,200);
+ const cssPath=join(root,'public/workspace.css');await writeFile(cssPath,(await readFile(cssPath,'utf8'))+'\n/* latest local interface */\n');
+ const second=launch(true);await until(async()=>{const current=await boot();return current?.controlled&&current.token!==before.token;},'Launcher kept serving stale sources: '+second.output());
+ const current=await boot();assert.equal(current.version,before.version);assert.notEqual(current.sourceRevision,before.sourceRevision);assert.equal(current.sourceRevision,(await appSources(root)).sourceRevision);
+ await until(async()=>first.child.exitCode!==null,'Old launcher remained attached');assert.equal(first.child.exitCode,0,first.output());assert.equal(second.child.exitCode,null,second.output());
+ assert.match(await(await fetch(url+'/workspace.css')).text(),/latest local interface/);
+ const history=await fetch(url+'/api/history/'+id,{headers:{Authorization:'Bearer '+current.token}});assert.equal((await history.json()).messages[0].content,'Keep my saved conversation');
+});
+
+test('source fingerprints ignore private data and model weights but detect code and style edits',async t=>{
+ const {root}=await fixture(t),before=await appSources(root);await mkdir(join(root,'models'),{recursive:true});await writeFile(join(root,'models/private.gguf'),'private weights');await mkdir(join(root,'data'),{recursive:true});await writeFile(join(root,'data/preferences.json'),'{}');assert.deepEqual(await appSources(root),before);
+ await writeFile(join(root,'public/workspace.css'),'/* changed */');const after=await appSources(root);assert.equal(after.installationId,before.installationId);assert.notEqual(after.sourceRevision,before.sourceRevision);
+});
+
+test('a stale launcher never shuts down another installation or a busy conversation',async t=>{
+ const {runLauncher}=await import('../scripts/launch.mjs'),sources=await appSources(project);
+ for(const otherFolder of [true,false])await t.test(otherFolder?'another folder':'busy model',async()=>{
+  let shutdowns=0;const server=http.createServer((req,res)=>{res.setHeader('content-type','application/json');if(req.url==='/api/bootstrap')return res.end(JSON.stringify({application:'atelier-local',token:'pinned-token',controlled:true,...sources,installationId:otherFolder?'other-folder':sources.installationId,sourceRevision:'stale',status:{busy:!otherFolder,state:'ready'}}));if(req.url==='/api/shutdown'){shutdowns++;res.writeHead(409);return res.end(JSON.stringify({error:'Une génération est en cours.'}));}res.writeHead(404);res.end('{}');});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try{await assert.rejects(runLauncher({port:server.address().port,signal:AbortSignal.timeout(3000)}),otherFolder?/autre dossier|autre installation/:/génération|opération/);assert.equal(shutdowns,0);}
+  finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+ });
 });

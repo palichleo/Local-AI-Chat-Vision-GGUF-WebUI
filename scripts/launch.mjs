@@ -4,6 +4,7 @@ import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {openBrowser} from '../server.mjs';
+import {appSources} from '../lib/app-sources.mjs';
 
 export async function runLauncher({root=resolve(dirname(fileURLToPath(import.meta.url)),'..'),port=8787,open=false,signal=new AbortController().signal}={}){
   if(Number(process.versions.node.split('.')[0])<22)throw Error('Node.js 22 ou plus récent est requis.');
@@ -30,12 +31,30 @@ export async function runLauncher({root=resolve(dirname(fileURLToPath(import.met
   }
   try{
     signal.throwIfAborted();boot=await bootstrap();
+    const sources=await appSources(root),local=JSON.parse(await readFile(join(root,'package.json'),'utf8'));
+    if(boot){
+      if(!boot.installationId||!boot.sourceRevision)throw Error(`Une ancienne instance${boot.version?' v'+boot.version:''} est encore ouverte ; les sources sont en v${local.version}. Fermez sa fenêtre de lancement, puis relancez l’application.`);
+      if(boot.installationId!==sources.installationId)throw Error('Le port est utilisé par Atelier local dans un autre dossier. Aucun processus n’a été arrêté.');
+      if(boot.sourceRevision!==sources.sourceRevision||boot.version!==local.version){
+        if(boot.updating||boot.status?.busy||boot.status?.toolJob||['loading','stopping'].includes(boot.status?.state))throw Error('Termine la génération ou l’opération en cours, puis relance pour charger les derniers fichiers.');
+        console.log('Chargement des derniers fichiers de ce dossier…');
+        const previousToken=boot.token,response=await fetch(url+'/api/shutdown',{method:'POST',headers:{Authorization:'Bearer '+previousToken,'Content-Type':'application/json'},body:JSON.stringify({onlyIfIdle:true,installationId:boot.installationId,sourceRevision:boot.sourceRevision}),signal:AbortSignal.any([signal,AbortSignal.timeout(30000)])});
+        if(!response.ok){let message;try{message=(await response.json()).error;}catch{}throw Error(message||'La relance n’a pas été autorisée. La session reste ouverte.');}
+        await response.body?.cancel();
+        const deadline=Date.now()+15000;
+        while(Date.now()<deadline){
+          boot=await bootstrap();if(!boot)break;
+          if(boot.token!==previousToken)throw Error('Une autre instance a démarré pendant la relance. Relancez le lanceur.');
+          await delay(100,undefined,{signal});
+        }
+        if(boot)throw Error('L’ancienne instance termine sa fermeture. Relancez dans quelques secondes.');
+      }
+    }
     if(!boot){
       child=spawn(process.execPath,[join(root,'server.mjs'),`--port=${port}`],{cwd:root,stdio:'inherit',windowsHide:true,env:{...process.env,ATELIER_MANAGED_LAUNCH:'1'}});
       child.once('error',error=>{childError=error;});child.once('exit',()=>{childExited=true;});
       boot=await ready(undefined,15000);
     }
-    if(typeof boot.version==='string'){const local=JSON.parse(await readFile(join(root,'package.json'),'utf8'));if(local.version!==boot.version)throw Error(`Une instance v${boot.version} est encore ouverte ; les sources sont en v${local.version}. Fermez sa fenêtre de lancement, puis relancez l’application. Aucun processus n’a été arrêté.`);}
     if(boot.controlled){console.log(`Atelier local est déjà ouvert : ${url}`);if(open)openBrowser(url);return;}
     let opened=false;
     while(true){
