@@ -37,3 +37,24 @@ test('video output uses the original streaming URL, has controls, and never buff
  const ui=setupGenerationUI({node:(...args)=>new Element(...args),openOutput:(...args)=>opened=args,api:async()=>{throw Error('No full-video blob transfer expected');}}),card=ui.mount(container,{mediaType:'video',plan:{stage:'draft'}});
  card.image({record,index:0});record.outputs[0].analysisDataUrl='compressed-preview';card.finish({record});const frame=container.children[0].children[0],wrapper=frame.children[0],video=wrapper.children.find(node=>node.tag==='video');assert.ok(video);assert.equal(video.poster,'compressed-preview');assert.equal(video.controls,true);assert.equal(video.preload,'none');assert.equal(video.src,'/media/generated/signed');assert.match(container.children[0].children[1].children[0].textContent,/Brouillon/);wrapper.children.find(node=>node.tag==='button').onclick();assert.deepEqual(opened,[record,0]);ui.clear();assert.equal(video.src,undefined);
 });
+
+
+test('refused, revised, failed and cancelled generations hide the empty preview and its dimensions',async t=>{
+ for(const [name,settle]of [
+  ['refused',card=>card.finish({denied:true})],
+  ['revised',card=>card.finish({denied:true,revised:true})],
+  ['failed',card=>card.finish({failed:true,error:'ComfyUI unavailable'})],
+  ['cancelled',card=>card.fail('Generation cancelled')],
+  ['missing original',card=>card.finish({record:{outputs:[]}})]
+ ])await t.test(name,()=>{
+  const container=new Element();let resized=0;
+  const ui=setupGenerationUI({node:(...args)=>new Element(...args),api:async()=>{throw Error('No generation expected');},openOutput(){},onResize(){resized++;}}),card=ui.mount(container,{resolution:{width:512,height:512}}),[frame,caption]=container.children[0].children;
+  const before=resized;settle(card);assert.equal(frame.hidden,true);assert.equal(caption.children[1].hidden,true);assert.ok(caption.children[0].textContent);assert.equal(frame.attributes['aria-busy'],'false');assert.equal(card.finished,true);assert.ok(resized>before);ui.clear();
+ });
+});
+
+test('an analysis or model reload failure preserves an original that was already produced',t=>{
+ const container=new Element(),ui=setupGenerationUI({node:(...args)=>new Element(...args),api:async()=>{throw Error('No request expected');},openOutput(){}});t.after(()=>ui.clear());
+ const card=ui.mount(container),record={workflowName:'User workflow',parameters:{},outputs:[{}]};card.image({record,index:0,blob:new Blob(['original'],{type:'image/png'})});const frame=container.children[0].children[0],img=frame.children[0].children[0];
+ card.finish({record,failed:true,error:'Analysis unavailable'});assert.notEqual(frame.hidden,true);assert.match(img.src,/^blob:/);card.fail('Model reload failed');assert.notEqual(frame.hidden,true);assert.match(img.src,/^blob:/);
+});

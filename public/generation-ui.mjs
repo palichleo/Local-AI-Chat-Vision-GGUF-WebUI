@@ -57,12 +57,12 @@ export function setupGenerationUI({api,node,openOutput,onResize=()=>{}}){
    watch(button,visible=>{slot.visible=visible;if(visible)loadOriginal(slot);else release(slot);});
    frame.classList.add('has-image');frame.setAttribute('aria-busy','false');label.textContent='Image originale · '+record.workflowName;onResize();
   }
-  function fail(message){if(disposed)return;finished=true;frame.classList.add('is-finished');frame.setAttribute('aria-busy','false');label.textContent=message||'Génération interrompue.';}
+  function fail(message){if(disposed)return;finished=true;frame.classList.add('is-finished');frame.setAttribute('aria-busy','false');if(!slots.size){frame.hidden=true;size.hidden=true;}label.textContent=message||'Génération interrompue.';onResize();}
   function finish(result){
    if(disposed)return;finished=true;frame.classList.add('is-finished');frame.setAttribute('aria-busy','false');
    if(result.record)record=result.record;
    for(const slot of slots.values())if(slot.isVideo&&record.outputs?.[slot.index]?.analysisDataUrl)slot.img.poster=record.outputs[slot.index].analysisDataUrl;
-   if(result.denied)fail(result.revised?'Proposition à modifier · précisez vos changements dans le chat.':'Génération refusée.');else if(result.record&&!slots.size)fail('Original indisponible · consultez Output pour les détails.');else if(result.failed)progress(result.error||'Image produite · analyse indisponible.');else if(record){const count=record.parameters?.reference_count;label.textContent=`${record.mediaType==='video'?(record.parameters.stage==='draft'?'Brouillon vidéo':'Vidéo finale'):'Image originale'} · ${record.workflowName}${Number.isInteger(count)?' · '+count+' référence(s) transmise(s)':''}`;}
+   if(result.denied)fail(result.revised?'Proposition à modifier · précisez vos changements dans le chat.':'Génération refusée.');else if(result.record&&!slots.size)fail('Original indisponible · consultez Output pour les détails.');else if(result.failed)fail(result.error||'Image produite · analyse indisponible.');else if(record){const count=record.parameters?.reference_count;label.textContent=`${record.mediaType==='video'?(record.parameters.stage==='draft'?'Brouillon vidéo':'Vidéo finale'):'Image originale'} · ${record.workflowName}${Number.isInteger(count)?' · '+count+' référence(s) transmise(s)':''}`;}
   }
   function dispose(){disposed=true;controller.abort();unwatch(figure);for(const slot of slots.values()){unwatch(slot.button);release(slot);slot.button.onclick=null;for(const child of slot.button.children||[])if(child.tagName==='BUTTON')child.onclick=null;}slots.clear();cards.delete(card);}
   const card={progress,image,fail,finish,dispose,async load(conversationId,runId){
