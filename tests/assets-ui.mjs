@@ -2,6 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import{read
 import{setupAssets}from'../public/assets-ui.mjs';
 class Element{
  constructor(tag='div',className='',text=''){Object.assign(this,{tagName:tag.toUpperCase(),className,textContent:text,children:[],attributes:{},dataset:{},value:'',open:false,disabled:false,hidden:false,listeners:{},style:{}});this.classList={toggle(){},add(){},remove(){}};}
+ querySelectorAll(selector){return this.children.flatMap(child=>[...(child.tagName===selector.toUpperCase()?[child]:[]),...child.querySelectorAll(selector)]);}
  append(...children){this.children.push(...children);}replaceChildren(...children){this.children=[...children];}setAttribute(name,value){this.attributes[name]=value;}removeAttribute(name){delete this.attributes[name];}addEventListener(name,fn){(this.listeners[name]??=[]).push(fn);}getBoundingClientRect(){return{left:0,top:0,right:500,bottom:500};}focus(){}pause(){}load(){}click(){}showModal(){this.open=true;}close(){this.open=false;for(const fn of this.listeners.close||[])fn();}contains(){return false;}
 }
 async function fixture(t){
@@ -27,4 +28,8 @@ test('output details expose full prompts, workflow, seed and available parameter
 test('chat details reuse the displayed original blob and persisted original dimensions',async t=>{
  const {ui,$,calls}=await fixture(t),original=new Blob(['Original'],{type:'image/png'}),record={id:'run',conversationId:'conversation',workflowName:'Workflow',prompt:'Prompt',createdAt:'2026-01-02T12:00:00Z',parameters:{},outputs:[{source:{filename:'original.png'},width:1448,height:1448}]};
  const count=calls.length;await ui.viewOutput(record,0,original);assert.equal(calls.length,count);assert.equal($('media-download').disabled,false);assert.ok($('media-metadata').children.some(item=>item.textContent==='1448 × 1448'));assert.equal(await(await fetch($('original-image').src)).text(),'Original');$('original-close').onclick();
+});
+
+test('hidden output videos pause when switching tabs, closing files or opening Details',async t=>{
+ const{ui,$}=await fixture(t),video=new Element('video');let pauses=0;video.pause=()=>pauses++;$('output-pane').append(video);$('assets-panel').append($('output-pane'));ui.show('output');ui.show('resources');assert.equal(pauses,1);ui.pause();assert.equal(pauses,2);$('resources-list').children[0].children[0].onclick();assert.equal(pauses,3);
 });

@@ -5,7 +5,7 @@ import { compressImage } from './images.mjs';
 export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=()=>{},openOutput,onOutput=()=>{}}){
   const $=id=>document.getElementById(id);
   let config,workflows=[],importGraph=null,urls=[],galleryVersion=0;
-  function reset(){galleryVersion++;for(const url of urls)URL.revokeObjectURL(url);urls=[];$('gallery-list').replaceChildren(node('p','asset-empty','Aucune génération dans cette conversation.'));}
+  function reset(){for(const video of $('gallery-list').querySelectorAll('video'))video.pause();galleryVersion++;for(const url of urls)URL.revokeObjectURL(url);urls=[];$('gallery-list').replaceChildren(node('p','asset-empty','Aucune génération dans cette conversation.'));}
   async function original(record,index,signal){return (await api(`gallery/${record.conversationId}/${record.id}/${index}`,undefined,{signal})).blob();}
   async function renderGallery(conversationId){
     if(conversationId&&conversationId!==state.conversationId)return;

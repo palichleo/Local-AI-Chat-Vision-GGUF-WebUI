@@ -1,5 +1,9 @@
 # Atelier local
 
+The home view lists projects. Create or rename a project with the + and pencil controls, open a conversation below its project, or use the project selector above a chat to move it. Existing conversations appear in **Conversations**. Projects organize history only; they do not share messages or model context. The logo and **Home** button return to the overview without discarding the open chat. **All files** opens the shared resource/output panel. Preview cards load local compressed copies on demand, without contacting ComfyUI. Project names live in data/projects.json; each saved conversation keeps its project ID.
+
+Accepted history saves finish before deleting, clearing, moving a conversation, disabling history, updating or closing the server. Home navigation waits for pending descriptions and saves. Hidden or replaced Output videos are paused; an unavailable generation preview falls back to an older available local compressed copy. Malformed project registries are reported without overwriting their contents.
+
 **English** | [简体中文](README.zh-CN.md) | [한국어](README.ko.md)
 
 A local chat, image-understanding and optional ComfyUI image-generation interface for GGUF models, built with HTML, CSS and JavaScript. The interface runs in your browser, while a small Node.js server manages llama.cpp. No npm dependencies, remote assets, telemetry or cloud APIs.

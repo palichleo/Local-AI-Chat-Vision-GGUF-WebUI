@@ -1,3 +1,4 @@
+import {Projects} from './lib/projects.mjs';
 import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
@@ -36,6 +37,9 @@ const staticFiles = new Map([
   ['/material-light.mjs', ['material-light.mjs', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/project-navigation.mjs',['project-navigation.mjs','text/javascript; charset=utf-8']],
+  ['/workspace.css',['workspace.css','text/css; charset=utf-8']],
+  ['/assets/metallic-surface.svg',['assets/metallic-surface.svg','image/svg+xml']],
   ['/settings-search.mjs',['settings-search.mjs','text/javascript; charset=utf-8']],
   ['/generation-ui.mjs', ['generation-ui.mjs','text/javascript; charset=utf-8']],
   ['/assets-ui.mjs', ['assets-ui.mjs','text/javascript; charset=utf-8']],
@@ -142,6 +146,9 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   let persistingGallery = false;
   let galleryBatch = Promise.resolve();
   const history = new History(historyDir);
+  let historySaves=Promise.resolve();
+  const projects=new Projects(join(dataDir,'projects.json'));
+  const historyView=record=>({...record,...(record.preview?{previewUrl:'/media/previews/'+record.id+'?key='+mediaKey(record.id,'conversation-preview')}:{} )});
   const token = randomBytes(32).toString('hex');
   const engine = new Engine({ spawnProcess, cacheDir: join(dataDir, 'model-cache') });
   const comfyPath=join(dataDir,'comfy.json');
@@ -238,6 +245,15 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (req.headers.origin && ![url, `http://localhost:${expected.port}`].includes(req.headers.origin)) throw problem('Origine refusée.', 403);
       if (req.headers['sec-fetch-site'] === 'cross-site') throw problem('Requête externe refusée.', 403);
       const requestURL = new URL(req.url,url), path=requestURL.pathname;
+      const previewMatch=path.match(/^\/media\/previews\/([0-9a-f-]{36})$/);
+      if(previewMatch){
+        if(!['GET','HEAD'].includes(req.method))throw problem('Méthode non prise en charge.',405);
+        const key=requestURL.searchParams.get('key')||'';
+        if(!/^[0-9a-f]{64}$/.test(key)||!timingSafeEqual(Buffer.from(key,'hex'),Buffer.from(mediaKey(previewMatch[1],'conversation-preview'),'hex')))throw problem('Accès refusé.',401);
+        if(!preferences.saveHistory)throw problem('L’historique est désactivé.',403);
+        const {bytes,mime}=await history.preview(previewMatch[1],async runId=>(await gallery.get(previewMatch[1],runId)).outputs.find(output=>output.analysisDataUrl)?.analysisDataUrl);
+        res.writeHead(200,{'Content-Type':mime,'Content-Length':bytes.length});return res.end(req.method==='HEAD'?undefined:bytes);
+      }
       const generated=path.match(/^\/media\/generated\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/([0-9]+)$/);
       if(generated){
         if(!['GET','HEAD'].includes(req.method))throw problem('Méthode non prise en charge.',405);
@@ -322,9 +338,11 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
           res.writeHead(200,{'Content-Type':original.mime,'Content-Disposition':`inline; filename="${original.filename.replace(/[^A-Za-z0-9._-]/g,'_')}"`});return res.end(original.bytes);
         }finally{res.off('close',abort);}
       }
+      if(req.method==='GET'&&path==='/api/projects')return send(200,{projects:await projects.list()});
       if (req.method === 'GET' && (path === '/api/history' || path.startsWith('/api/history/'))) {
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
-        return send(200, path === '/api/history' ? await history.list() : await history.read(path.slice('/api/history/'.length)));
+        if(path==='/api/history'){const result=await history.list();return send(200,{...result,conversations:result.conversations.map(historyView)});}
+        return send(200,historyView(await history.read(path.slice('/api/history/'.length))));
       }
       if (req.method !== 'POST') throw problem('Méthode non prise en charge.', 405);
       const body = await jsonBody(req, path === '/api/updates/install' ? 40 * 1024 * 1024 : maxBody);
@@ -371,7 +389,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         applyingUpdate = true; installState = { state: 'preparing', error: '' };
         installTask = (async () => {
           try {
-            await history.flush(); await gallery.pending;
+            await historySaves; await history.flush(); await gallery.pending;
             snapshot.gallery = snapshot.conversationId ? (await gallery.list(snapshot.conversationId)).runs : [];
             snapshot = compactSession(snapshot);
             if (Buffer.byteLength(JSON.stringify(snapshot)) > 40 * 1024 * 1024) throw new Error('La session est trop volumineuse pour une reprise automatique.');
@@ -485,7 +503,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         savingPreferences = true;
         disablingHistory = body.saveHistory === false;
         try {
-          if (disablingHistory) await history.flush();
+          if (disablingHistory) { await historySaves; await history.flush(); }
           await writeFile(`${preferencesPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 });
           await rename(`${preferencesPath}.tmp`, preferencesPath);
           preferences = next;
@@ -497,7 +515,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         if (persistingGallery || runtime.active || clearingHistory || disablingHistory || savingPreferences || engine.busy || ['loading', 'stopping'].includes(engine.state)) throw problem('Attends la fin de l’opération en cours avant de supprimer la conversation.', 409);
         clearingHistory = true;
         try {
-          await gallery.pending; await history.remove(body.id);
+          await historySaves; await gallery.pending; await history.remove(body.id);
           gallery.forgetConversation(body.id); runtime.forgetConversation(body.id);
           return send(200, { deleted: body.id });
         } finally { clearingHistory = false; }
@@ -506,15 +524,25 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         if (body?.confirm !== true) throw problem('Confirme la suppression de l’historique.');
         if (persistingGallery || runtime.active || clearingHistory || disablingHistory || savingPreferences || engine.busy || ['loading', 'stopping'].includes(engine.state)) throw problem('Attends la fin de l’opération en cours avant de supprimer l’historique.', 409);
         clearingHistory = true;
-        try { await gallery.pending; await history.clear(); runtime.clear(); return send(200, { cleared: true }); }
+        try { await historySaves; await gallery.pending; await history.clear(); runtime.clear(); return send(200, { cleared: true }); }
         finally { clearingHistory = false; }
+      }
+      if(path==='/api/projects/save')return send(200,{project:await projects.save(body)});
+      if(path==='/api/projects/move'){
+        if(!preferences.saveHistory)throw problem('L’historique est désactivé.',403);
+        if(clearingHistory||disablingHistory||savingPreferences||runtime.active||engine.busy)throw problem('Attends la fin de l’opération en cours.',409);
+        clearingHistory=true;
+        try{await historySaves; await projects.require(body.projectId);const conversation=await history.read(body.id);
+        return send(200,{conversation:historyView(await history.save({...conversation,projectId:body.projectId}))});}finally{clearingHistory=false;}
       }
       if (path === '/api/history/save') {
         if(runtime.active)throw problem('Attends la fin de la génération ComfyUI.',409);
         if (clearingHistory) throw problem('Suppression de l’historique en cours.', 409);
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
         if (disablingHistory) throw problem('Désactivation de l’historique en cours.', 409);
-        return send(200, { conversation: await history.save(body) });
+        const save=historySaves.then(async()=>{if(body.projectId!==undefined)await projects.require(body.projectId);return history.save(body);});
+        historySaves=save.catch(()=>{});
+        return send(200, { conversation: historyView(await save) });
       }
       if (path === '/api/config') {
         if (pickingFile || runtime.active || saving || engine.child || engine.state === 'loading' || engine.state === 'stopping') throw problem('Arrête le moteur avant de modifier sa configuration.', 409);
@@ -623,7 +651,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       const serverClosed = new Promise(done => server.close(done));
       updateController.abort(); await updates;
       await resources.close(); await modelOperation; await models.pending; await runtime.close(); await engine.stop();
-      await history.flush(); await galleryBatch.catch(() => {}); await gallery.pending;
+      await projects.pending; await historySaves; await history.flush(); await galleryBatch.catch(() => {}); await gallery.pending;
       if (controlResponse && !controlResponse.destroyed) controlResponse.end(JSON.stringify({ state: applyingUpdate ? 'restarting' : 'stopped' }) + '\n');
       server.closeAllConnections();
       await serverClosed;

@@ -5,6 +5,7 @@ import { setupComfy } from '../public/comfy-ui.mjs';
 
 class Element {
  constructor(tag='div',className='',text){this.tagName=tag;this.className=className;this.textContent=text||'';this.children=[];this.value='';this.hidden=false;this.disabled=false;this.checked=false;this.attributes={};this.options=[];}
+ querySelectorAll(selector){return this.children.flatMap(child=>[...(child.tagName===selector?[child]:[]),...(child.querySelectorAll?.(selector)||[])]);}
  append(...children){this.children.push(...children);}
  replaceChildren(...children){this.children=[...children];this.options=children.filter(c=>c instanceof Option);this.value=this.options[0]?.value||'';}
  setAttribute(name,value){this.attributes[name]=value;}
@@ -317,4 +318,8 @@ test('photo tool results expose the actual seed and dimensions for a later corre
  state.conversationId='conversation';const record={...generatedRecord,parameters:{seed:42,width:1024,height:768,workflow_digest:'photo-version'}};
  setIntercept(route=>route==='tools/execute'?Response.json({id:'mine',state:'done',record}):route==='gallery/conversation'?Response.json({runs:[record]}):route.endsWith('/mine/0')?Promise.reject(Error('No preview')):undefined);
  const result=await ui.requestTool({autoAllow:true,requestId:'photo'},new AbortController().signal,()=>{}),data=JSON.parse(result.content);assert.equal(data.parameters.seed,42);assert.equal(data.parameters.width,1024);assert.equal(data.workflow_digest,'photo-version');
+}));
+
+test('replacing an Output gallery pauses its videos before removing their players',async()=>fixture(async({ui,nodes})=>{
+ const video=new Element('video');let paused=0;video.pause=()=>paused++;nodes.get('gallery-list').append(video);ui.reset();assert.equal(paused,1);assert.equal(nodes.get('gallery-list').children.includes(video),false);
 }));
