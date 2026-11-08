@@ -2,6 +2,8 @@ const escaped = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&
 const escapeHtml = (text) => text.replace(/[&<>"']/g, (character) => escaped[character]);
 const word = (character) => Boolean(character && /[\p{L}\p{N}]/u.test(character));
 
+const copyButton = kind => '<button type="button" class="copy-button" data-copy-' + kind + ' aria-label="Copier ' + (kind === 'code' ? 'le bloc de code' : 'la citation') + '" title="Copier"><svg aria-hidden="true"><use href="#i-copy"/></svg><span class="sr-only">Copier</span></button>';
+
 function safeLink(destination) {
   const match = destination.trim().match(/^<?([^\s<>]+)>?(?:\s+["'][^\n]*["'])?$/);
   if (!match) return null;
@@ -88,7 +90,7 @@ function blocks(lines, depth = 0) {
       while (i < lines.length && !endFence.test(lines[i])) contents.push(lines[i++]);
       if (i < lines.length) i++;
       const language = code[2].trim().split(/\s+/)[0];
-      html += `<pre><button type="button" class="copy-button" data-copy-code aria-label="Copier le bloc de code"><svg aria-hidden="true"><use href="#i-copy"/></svg><span>Copier</span></button>${language ? `<span class="code-label">${escapeHtml(language)}</span>` : ''}<code>${escapeHtml(contents.join('\n'))}</code></pre>`;
+      html += `<div class="code-block copy-block"><div class="copy-content">${language ? `<span class="code-label">${escapeHtml(language)}</span>` : ''}<pre><code>${escapeHtml(contents.join('\n'))}</code></pre></div>${copyButton('code')}</div>`;
       continue;
     }
     const title = heading(line);
@@ -106,7 +108,7 @@ function blocks(lines, depth = 0) {
     if (/^ {0,3}>/.test(line)) {
       const quoted = [];
       while (i < lines.length && /^ {0,3}>/.test(lines[i])) quoted.push(lines[i++].replace(/^ {0,3}> ?/, ''));
-      html += `<blockquote>${blocks(quoted, depth + 1)}</blockquote>`;
+      html += `<blockquote class="copy-block"><div class="copy-content">${blocks(quoted, depth + 1)}</div>${copyButton('quote')}</blockquote>`;
       continue;
     }
     const firstItem = list(line);

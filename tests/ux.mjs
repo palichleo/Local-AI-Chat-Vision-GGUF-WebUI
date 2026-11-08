@@ -30,14 +30,14 @@ test('settings Escape offers keep, discard and save without losing an unsuccessf
 test('Escape in the warning preserves settings and cancels the deferred action',()=>{
  const ui=settings();ui.change('draft');let actions=0;ui.guard.requestClose(()=>actions++);ui.confirmation.emit('cancel',{preventDefault(){}});assert.equal(ui.dialog.open,true);assert.equal(ui.confirmation.open,false);assert.equal(actions,0);
 });
-test('copying a response uses its Markdown and copying code excludes labels and fence markers',async()=>{
+test('copying a quote uses its text and copying code excludes labels and fence markers',async()=>{
  for(const code of [false,true]){
   const root=element(),label={textContent:'Copier'},button=element(),writes=[],announcements=[];
   root.contains=target=>target===button;button.querySelector=()=>label;button.hasAttribute=()=>code;
-  button.closest=()=>({querySelector:()=>code?{textContent:'<div>é & **literal**</div>'}:{dataset:{copyText:'### Réponse\n\n**Bonjour**'}}});
+  button.closest=()=>({querySelector:()=>code?{textContent:'<div>é & **literal**</div>'}:{nodeType:3,textContent:'Un prompt en texte simple.'}});
   setupCopy(root,{writeText:async text=>writes.push(text),announce:text=>announcements.push(text)});
   await root.listeners.click[0]({target:{closest:()=>button}});
-  assert.deepEqual(writes,[code?'<div>é & **literal**</div>':'### Réponse\n\n**Bonjour**']);assert.equal(label.textContent,'Copié');assert.match(announcements[0],/copié/);
+  assert.deepEqual(writes,[code?'<div>é & **literal**</div>':'Un prompt en texte simple.']);assert.equal(label.textContent,'Copié');assert.match(announcements[0],/copié/);
  }
 });
 test('clipboard failure never reports success and restores the button',async()=>{

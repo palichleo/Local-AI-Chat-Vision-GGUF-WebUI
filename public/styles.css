@@ -242,17 +242,6 @@ dialog::backdrop{background:var(--overlay);backdrop-filter:none}
 
 .settings-footer .app-shutdown{margin-right:auto;padding:8px 0;background:none;border:0;color:var(--muted);font-size:11px}.settings-footer .app-shutdown:hover:enabled{color:var(--danger)}
 
-/* Small, local actions stay beside the content they affect. */
-.message-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:9px}
-.message-footer .message-note{margin:0}
-.copy-button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:30px;padding:5px 8px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--muted);font-size:10px;white-space:nowrap}
-.copy-button svg{width:13px;height:13px;flex-shrink:0}
-.copy-button:hover:enabled{color:var(--ink);background:var(--hover);border-color:var(--line)}
-.copy-button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.copy-button:disabled{opacity:.5;cursor:default}
-.markdown pre{position:relative;padding-top:41px}
-.markdown pre>.code-label{position:absolute;top:14px;left:15px;margin:0;max-width:calc(100% - 110px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.markdown pre>.copy-button{position:absolute;top:7px;right:8px;background:var(--surface-raised);border-color:var(--line)}
 .context-meter{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:5px 9px;padding:8px 5px 0;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
 .context-track{display:flex;width:58px;height:3px;overflow:hidden;border-radius:9px;background:var(--line);flex-shrink:0}
 .context-track::before{content:"";width:var(--context-used,0%);background:var(--muted)}
@@ -267,4 +256,26 @@ dialog::backdrop{background:var(--overlay);backdrop-filter:none}
 .unsaved-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
 .unsaved-actions button{font-size:11px;min-height:36px;padding:8px 10px}
 .unsaved-actions #settings-discard{color:var(--danger)}
-@media(max-width:640px){.context-meter{font-size:9px;gap:5px 6px}.context-track{width:40px}.copy-button{min-height:34px}}
+@media(max-width:640px){.context-meter{font-size:9px;gap:5px 6px}.context-track{width:40px}}
+
+/* The scrollable transcript and the composer share their width and horizontal gutters. */
+:root{--chat-column:820px;--chat-side:28px;--chat-fade:18px}
+.messages,.composer-region{max-width:var(--chat-column);padding-inline:var(--chat-side)}
+.composer-region{width:calc(100% - var(--chat-scrollbar,0px));transform:translateX(calc(var(--chat-scrollbar,0px) / -2))}
+.chat-area{-webkit-mask-image:linear-gradient(to bottom,transparent,#000 var(--chat-fade),#000 calc(100% - var(--chat-fade)),transparent);mask-image:linear-gradient(to bottom,transparent,#000 var(--chat-fade),#000 calc(100% - var(--chat-fade)),transparent)}
+.chat-area::before,.chat-area::after{content:"";position:sticky;display:block;height:var(--chat-fade);z-index:2;pointer-events:none;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.chat-area::before{top:0;margin-bottom:calc(-1 * var(--chat-fade));-webkit-mask-image:linear-gradient(#000,transparent);mask-image:linear-gradient(#000,transparent)}
+.chat-area::after{bottom:0;margin-top:calc(-1 * var(--chat-fade));-webkit-mask-image:linear-gradient(transparent,#000);mask-image:linear-gradient(transparent,#000)}
+.markdown .copy-block{display:grid;grid-template-columns:minmax(0,1fr) 28px;align-items:start;column-gap:10px;max-width:100%;min-width:0}
+.copy-content{min-width:0}
+.markdown .code-block{margin:1em 0;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--surface-raised);box-shadow:inset 0 1px 0 var(--edge)}
+.markdown .code-block pre{margin:0;padding:0;border:0;border-radius:0;background:none;box-shadow:none;max-width:100%}
+.markdown .code-block .code-label{margin-bottom:8px;overflow-wrap:anywhere}
+.copy-button{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;min-width:0;min-height:0;padding:5px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);opacity:.45;justify-self:end}
+.copy-button svg{width:14px;height:14px;flex-shrink:0}
+.copy-button:hover:enabled,.copy-button:focus-visible{opacity:1;color:var(--ink);background:var(--hover);border-color:var(--line)}
+.copy-button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.copy-button:disabled{opacity:.65;cursor:default}
+@media(max-width:850px){:root{--chat-side:20px}}
+@media(max-width:640px){:root{--chat-side:14px;--chat-fade:14px}}
+@media(hover:none),(pointer:coarse){.copy-button{opacity:.75}}

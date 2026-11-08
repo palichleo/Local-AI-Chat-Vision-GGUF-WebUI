@@ -494,9 +494,6 @@ function scrollToBottom() {
 function renderText(target, text) {
   target.classList.add('markdown');
   target.innerHTML = markdownToHtml(text);
-  target.dataset.copyText = text;
-  const copy = target.closest('.message')?.querySelector('[data-copy-response]');
-  if (copy) copy.disabled = !text;
 }
 
 function userMessage(text, images) {
@@ -529,12 +526,9 @@ function assistantMessage() {
   const body = node('div', 'message-body');
   body.append(node('span', 'pending-dot', '●'));
   const note = node('div', 'message-note');
-  const copy = node('button', 'copy-button'); copy.type = 'button'; copy.dataset.copyResponse = ''; copy.disabled = true;
-  copy.setAttribute('aria-label', 'Copier la réponse'); copy.append(icon('copy'), node('span', '', 'Copier'));
-  const footer = node('div', 'message-footer'); footer.append(note, copy);
-  article.append(header, reasoning, body, footer);
+  article.append(header, reasoning, body, note);
   $('messages').append(article);
-  return { article, reasoning, summary, thoughts, body, note, copy };
+  return { article, reasoning, summary, thoughts, body, note };
 }
 
 function userContent(text, images) {
@@ -593,7 +587,6 @@ async function sendMessage(event) {
       usedTool=true;iterations++;
       history.push({role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{}),tool_calls:[request.call]});
       output='';reasoning='';
-      if (view.copy) view.copy.disabled = true;
       view.body.replaceChildren(node('span','pending-message',`Outil · ${request.workflowName}`));
       let result;
       try{result=await comfyUI.requestTool(request,signal,progress=>{view.note.textContent=progress;scrollToBottom();});}
@@ -627,6 +620,15 @@ async function sendMessage(event) {
 }
 
 
+function alignConversation() {
+  if (typeof ResizeObserver !== 'function') return;
+  const area = $('chat-area');
+  const sync = () => document.documentElement.style.setProperty('--chat-scrollbar', Math.max(0, area.offsetWidth - area.clientWidth) + 'px');
+  new ResizeObserver(sync).observe(area);
+  sync();
+}
+
+alignConversation();
 setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 const tokenControls=setupTokenControls($);
 const computeControls=setupComputeControls($);

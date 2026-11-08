@@ -21,7 +21,7 @@ test('nested lists, quotations, tables and rules keep their structure', async ()
   const { markdownToHtml } = await import(renderer);
   const html = markdownToHtml('- Parent\n  - Enfant\n- Suite\n\n> Une citation **utile**.\n\n| Nom | Valeur |\n| --- | --- |\n| A | **42** |\n\n---');
   assert.equal((html.match(/<ul>/g) || []).length, 2);
-  assert.match(html, /<blockquote>[\s\S]*<strong>utile<\/strong>/);
+  assert.match(html, /<blockquote[^>]*>[\s\S]*<strong>utile<\/strong>/);
   assert.match(html, /<table>[\s\S]*<th>Nom<\/th>[\s\S]*<td><strong>42<\/strong><\/td>/);
   assert.match(html, /<hr>/);
 });
