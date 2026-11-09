@@ -4,9 +4,10 @@ This folder contains your private native workflow JSON files, one file per workf
 The filename must equal its stable id followed by .json. Edit or import workflows
 through Settings > Workflows so policies and local assets are validated before saving.
 
-Each engine family is declared in runner/families/<family>.json, including its starting
-template. Creating a workflow copies that template; updates never replace your edited workflow. Choose registered local
-model, text encoder and VAE assets before saving. No model is downloaded automatically.
+Each engine family is declared in runner/families/<family>.json, including its
+starting template. Creating a workflow copies that template; updates never replace
+your edited workflow. Choose registered local model files before saving.
+No model is downloaded automatically.
 
 Fixed values are locked. Model values allow the assistant to choose only within your
 configured choices/ranges. Random is only for seeds. LoRA off never loads the adapter.
