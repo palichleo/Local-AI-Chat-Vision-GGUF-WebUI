@@ -49,6 +49,29 @@ test('enabled LoRA and component policies apply only allowlisted choices',async(
   await assert.rejects(resolveNativeWorkflow(workflow,{prompt:'test',components:{model:'/arbitrary/file'}},assets),/fixed|locked/i);
 });
 
+test('Krea LoRAs explicitly support signed strength within the validated bounds',async()=>{
+  const workflow=fixture();workflow.loras[0].enabled={policy:'fixed',value:true};workflow.loras[0].strength.value=-0.5;
+  assert.equal((await resolveNativeWorkflow(workflow,{prompt:'test'},assets,{seed:1})).loras[0].strength,-0.5);
+  workflow.loras[0].strength.value=-4.1;assert.throws(()=>validateNativeWorkflow(workflow),/range/i);
+});
+
+test('trusted prompt expansion preserves exact settings and prompt templates resolve once',async()=>{
+  const workflow=fixture();workflow.parameters.expandPrompt={policy:'fixed',value:true};
+  workflow.promptExpansion={template:'Rewrite {{prompt}}',maxTokens:512,temperature:0.5,topK:64,topP:0.95,minP:0.05,repetitionPenalty:1.05,seed:0,suffix:', style'};
+  const job=await resolveNativeWorkflow(workflow,{prompt:'a scene'},assets,{seed:5});
+  assert.deepEqual(job.promptExpansion,workflow.promptExpansion);assert.equal(job.parameters.prompt,'a scene');
+  workflow.promptExpansion.template='missing placeholder';assert.throws(()=>validateNativeWorkflow(workflow),/template|placeholder/i);
+  delete workflow.promptExpansion;assert.throws(()=>validateNativeWorkflow(workflow),/expansion/i);
+  workflow.parameters.expandPrompt.value=false;workflow.promptTemplate='{{prompt}}, style';
+  assert.equal((await resolveNativeWorkflow(workflow,{prompt:'a scene'},assets,{seed:5})).parameters.prompt,'a scene, style');
+});
+
+test('implicit Krea defaults resolve a complete Python job',async()=>{
+  const workflow=fixture();delete workflow.parameters.cfg;delete workflow.parameters.denoise;
+  const job=await resolveNativeWorkflow(workflow,{prompt:'a scene'},assets,{seed:5});
+  assert.equal(job.parameters.cfg,1);assert.equal(job.parameters.denoise,1);
+});
+
 test('canonical digest changes only with saved content and saved files remain atomic on invalid edits',async()=>{
   await withCatalog(async(catalog,directory)=>{
     assert.equal(catalog.kind,'native');const saved=await catalog.save(fixture());
