@@ -5,3 +5,8 @@ history/
 
 # Model weights stay local; keep the folder guide in the repository.
 *.[gG][gG][uU][fF]
+
+# Local Python experiment inputs and generated files.
+experiments/krea2-python/local.json
+experiments/krea2-python/outputs/
+experiments/krea2-python/__pycache__/
