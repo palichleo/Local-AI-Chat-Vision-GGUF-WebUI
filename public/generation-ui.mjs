@@ -4,20 +4,22 @@ export function setupGenerationUI({api,node,openOutput,onResize=()=>{}}){
  function watch(element,change){watched.set(element,change);if(observer)observer.observe(element);else change(true);}
  function unwatch(element){observer?.unobserve(element);watched.delete(element);}
  function tile(container,request){
-  const figure=node('figure','generation-card'),frame=node('div','generation-frame'),caption=node('figcaption','generation-caption'),label=node('span','','Préparation de la génération…'),size=node('span','generation-size');
+  const figure=node('figure','generation-card'),frame=node('div','generation-frame'),caption=node('figcaption','generation-caption'),label=node('span','sr-only','Préparation de la génération…'),progress=node('div','generation-progress');
   if(request.mediaType==='video')label.textContent='En attente de confirmation · '+(request.plan?.stage==='draft'?'Brouillon vidéo':'Vidéo finale');
-  frame.setAttribute('aria-busy','true');frame.setAttribute('aria-label',request.mediaType==='video'?'Génération de vidéo':'Génération d’image en cours');caption.append(label,size);figure.append(frame,caption);container.append(figure);
-  return {figure,frame,label,size};
+  progress.setAttribute('role','progressbar');progress.setAttribute('aria-label',label.textContent);progress.append(node('span'));
+  frame.setAttribute('aria-busy','true');frame.setAttribute('aria-label',request.mediaType==='video'?'Génération de vidéo':'Génération d’image en cours');caption.append(progress,label);figure.append(frame,caption);container.append(figure);
+  return {figure,frame,label,progress};
  }
  function mount(container,request={}){
   container.classList.add('generation-grid');
-  const first=tile(container,request),{figure,frame,label,size}=first,tiles=[first];
+  const first=tile(container,request),{figure,frame,label}=first,tiles=[first];
   let disposed=false,finished=false,record,controller=new AbortController();const slots=new Map();
-  function dimensions(width,height,target=first){if(!Number.isInteger(width)||!Number.isInteger(height)||width<=0||height<=0)return;target.frame.style.aspectRatio=`${width} / ${height}`;target.size.textContent=`${width} × ${height}`;onResize();}
-  function caption(text){for(const target of tiles){target.label.textContent=text;target.label.title=text;}}
+  function dimensions(width,height,target=first){if(!Number.isInteger(width)||!Number.isInteger(height)||width<=0||height<=0)return;target.frame.style.aspectRatio=`${width} / ${height}`;onResize();}
+  function caption(text){for(const target of tiles){target.label.textContent=text;target.label.title=text;target.progress.setAttribute('aria-label',text);}}
+  function settle(){for(const target of tiles){unwatch(target.figure);target.frame.classList.add('is-finished');target.frame.setAttribute('aria-busy','false');target.progress.classList.add('is-complete');target.progress.setAttribute('aria-hidden','true');target.label.classList.remove('sr-only');}}
   dimensions(request.resolution?.width,request.resolution?.height);
   frame.classList.add('is-paused');watch(figure,visible=>frame.classList.toggle('is-paused',!visible));
-  function progress(value){if(disposed)return;const text=typeof value==='string'&&!value.trim().startsWith('{')?value:request.mediaType==='video'?'Génération de la vidéo…':'Génération de l’image…';caption(text);}
+  function progress(value){if(disposed||finished)return;const text=typeof value==='string'&&!value.trim().startsWith('{')?value:request.mediaType==='video'?'Génération de la vidéo…':'Génération de l’image…';caption(text);}
   function release(slot){
    slot.controller?.abort();slot.img.onload=null;if(slot.isVideo){slot.img.onloadedmetadata=null;slot.img.pause?.();slot.img.removeAttribute('src');slot.img.load?.();return;}
    if(slot.url)URL.revokeObjectURL(slot.url);slot.url=null;slot.blob=null;
@@ -66,9 +68,9 @@ export function setupGenerationUI({api,node,openOutput,onResize=()=>{}}){
    watch(button,visible=>{slot.visible=visible;if(visible)loadOriginal(slot);else release(slot);});
    frame.classList.add('has-image');frame.setAttribute('aria-busy','false');caption('Image originale · '+record.workflowName);onResize();
   }
-  function fail(message){if(disposed)return;finished=true;for(const target of tiles){unwatch(target.figure);target.frame.classList.add('is-finished');target.frame.setAttribute('aria-busy','false');}if(!slots.size){frame.hidden=true;size.hidden=true;}caption(message||'Génération interrompue.');onResize();}
+  function fail(message){if(disposed)return;finished=true;settle();if(!slots.size)frame.hidden=true;caption(message||'Génération interrompue.');onResize();}
   function finish(result){
-   if(disposed)return;finished=true;for(const target of tiles){unwatch(target.figure);target.frame.classList.add('is-finished');target.frame.setAttribute('aria-busy','false');}
+   if(disposed)return;finished=true;settle();
    if(result.record)record=result.record;
    for(const slot of slots.values())if(slot.isVideo&&record.outputs?.[slot.index]?.analysisDataUrl)slot.img.poster=record.outputs[slot.index].analysisDataUrl;
    if(result.denied)fail(result.revised?'Proposition à modifier · précisez vos changements dans le chat.':'Génération refusée.');else if(result.record&&!slots.size)fail('Original indisponible · consultez Output pour les détails.');else if(result.failed)fail(result.error||'Image produite · analyse indisponible.');else if(record){const count=record.parameters?.reference_count;caption(`${record.mediaType==='video'?(record.parameters.stage==='draft'?'Brouillon vidéo':'Vidéo finale'):'Image originale'} · ${record.workflowName}${Number.isInteger(count)?' · '+count+' référence(s) transmise(s)':''}`);}
@@ -82,12 +84,12 @@ export function setupGenerationUI({api,node,openOutput,onResize=()=>{}}){
     finish({record:response});
    }catch(error){if(!disposed)fail('Original indisponible : '+error.message);}
   },get finished(){return finished;}};
-  cards.add(card);return {card,figure,frame,label};
+  cards.add(card);return {card,figure,frame,label,progress:first.progress};
  }
  return {
   mount(container,request){return mount(container,request).card;},
   restore(container,conversationId,runId){
-   const {card,figure,frame,label}=mount(container);frame.classList.add('is-finished');frame.setAttribute('aria-busy','false');label.textContent='Image générée';
+   const {card,figure,frame,label,progress}=mount(container);frame.classList.add('is-finished');frame.setAttribute('aria-busy','false');progress.hidden=true;label.classList.remove('sr-only');label.textContent='Image générée';
    watch(figure,visible=>{if(visible){unwatch(figure);void card.load(conversationId,runId);}});return card;
   },
   clear(){for(const card of [...cards])card.dispose();}
