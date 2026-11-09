@@ -9,7 +9,7 @@ const savedConfig = { enginePath: 'engine.exe', modelPath: 'saved.gguf', project
 const savedComfy = { enabled: false, baseUrl: 'http://127.0.0.1:8188', autoAllow: false, maxIterations: 5 };
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
-async function settingsUI({ request, refresh = async () => {}, saved = () => {} } = {}) {
+async function settingsUI({ request, refresh = async () => {}, saved = () => {}, confirm = () => true } = {}) {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const nodes = new Map();
   const $ = id => {
@@ -27,7 +27,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
     setupProjectNavigation:()=>({render(){},sync(){},refresh:async()=>{}}),
     setupGenerationUI:()=>({clear(){},restore(){}}),
     setupAssets:()=>({setBusy(){},pause(){},hasDraft:()=>false}),
-    confirm:()=>true,setupSettingsSearch:()=>({reset(){},refresh(){}}),setupSettingsGuard, setupCopy(){},setupContextMeter:options=>{meterOptions=options;return {schedule(){meterSchedules++;},pause(){},observe(){}};},
+    confirm,setupSettingsSearch:()=>({reset(){},refresh(){}}),setupSettingsGuard, setupCopy(){},setupContextMeter:options=>{meterOptions=options;return {schedule(){meterSchedules++;},pause(){},observe(){}};},
     setupMaterialLighting() {}, dismissSettingsOnOutsideClick() {}, setupTokenControls: () => ({ setValues() {}, values: () => ({ contextSize: 4096, maxOutputTokens: 2048 }) }),
     setupComputeControls: () => ({ setValues(config) { $('compute-mode').value = String(config.gpuLayers); }, values: () => ({ gpuLayers: 999 }) }),
     setupComfy: options => { comfyOptions = options; return comfyUI; },
@@ -50,7 +50,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {} 
     },
   };
   const application = source.slice(0, source.lastIndexOf('\ntry {')).replace(/^import .*;\r?\n/gm, '');
-  runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, renderModelSelect, applyModelLibrary, switchLLM, addLLM, saveLLM, cancelLLM, modelDraft, modelEditorDirty, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };', context);
+  runInNewContext(application + '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, renderModelSelect, applyModelLibrary, switchLLM, addLLM, saveLLM, removeLLM, cancelLLM, modelDraft, modelEditorDirty, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };', context);
   Object.assign(context.app.state, { token: 'test', config: { ...savedConfig }, connected: true });
   return { ...context.app, $, calls, refreshes, windowListeners, comfyUI, comfyOptions, meterOptions, meterSchedules:()=>meterSchedules, async open() { context.app.openSettings(); await tick(); } };
 }
@@ -263,4 +263,28 @@ test('context counting contains only the selected conversation and typing does n
  const ui=await settingsUI();ui.$('prompt').value='Unsent draft';assert.equal(ui.meterOptions.getRequest(),null);
  const sent={role:'user',content:'Already sent'},reply={role:'assistant',content:'Already answered'};ui.state.messages=[sent,reply];const payload=ui.meterOptions.getRequest();assert.equal(payload.messages.length,3);assert.equal(payload.messages[1].content,'Already sent');assert.equal(payload.messages[2].content,'Already answered');assert.ok(!JSON.stringify(payload).includes('Unsent draft'));
  const scheduled=ui.meterSchedules();ui.$('prompt').oninput();assert.equal(ui.meterSchedules(),scheduled);
+});
+
+test('removing an active LLM refreshes selectors without losing conversations or unrelated drafts',async()=>{
+ const profile={id:'active',name:'Active',modelPath:'saved.gguf',projectorPath:''},empty={...savedConfig,modelPath:'',projectorPath:''};
+ const ui=await settingsUI({request:call=>{
+  if(call.route==='models')return Response.json({models:[profile],detected:[profile],errors:[]});
+  if(call.route==='models/remove'){assert.equal(call.body.id,profile.id);return Response.json({models:[],detected:[],errors:[],config:empty,modelName:'',status:{state:'stopped',logs:[]}});}
+ }});await ui.open();ui.state.messages=[{role:'user',content:'Keep this'}];ui.$('global-instructions').value='Keep this draft';await ui.removeLLM();
+ assert.equal(ui.state.config.modelPath,'');assert.equal(ui.state.models.length,0);assert.equal(ui.$('model-select').hidden,true);assert.equal(ui.$('detected-model').value,'');assert.equal(ui.$('remove-llm').disabled,true);assert.equal(ui.$('model-path').value,'');assert.equal(ui.state.messages[0].content,'Keep this');assert.equal(ui.$('global-instructions').value,'Keep this draft');
+ ui.$('settings-close').onclick();assert.equal(ui.$('settings-unsaved').open,true);
+});
+
+test('removal is blocked while working and confirmation cancellation preserves the model',async()=>{
+ const profile={id:'active',name:'Active',modelPath:'saved.gguf',projectorPath:''};
+ const ui=await settingsUI({confirm:()=>false,request:call=>call.route==='models'?Response.json({models:[profile],detected:[],errors:[]}):undefined});await ui.open();
+ ui.state.generating=true;ui.updateControls();assert.equal(ui.$('remove-llm').disabled,true);await ui.removeLLM();
+ ui.state.generating=false;ui.updateControls();assert.equal(ui.$('remove-llm').disabled,false);await ui.removeLLM();assert.equal(ui.calls.some(call=>call.route==='models/remove'),false);assert.equal(ui.state.models.length,1);
+ ui.addLLM();assert.equal(ui.$('remove-llm').disabled,true);
+});
+
+test('a rejected removal preserves the selected profile and its edited paths',async()=>{
+ const profile={id:'active',name:'Active',modelPath:'saved.gguf',projectorPath:''};
+ const ui=await settingsUI({request:call=>call.route==='models'?Response.json({models:[profile],detected:[],errors:[]}):call.route==='models/remove'?Response.json({error:'Busy'},{status:409}):undefined});await ui.open();ui.$('llm-name').value='Unsaved name';await ui.removeLLM();
+ assert.equal(ui.state.models.length,1);assert.equal(ui.state.config.modelPath,'saved.gguf');assert.equal(ui.$('llm-name').value,'Unsaved name');assert.equal(ui.$('remove-llm').disabled,false);
 });

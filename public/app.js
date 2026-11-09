@@ -311,6 +311,7 @@ function updateControls() {
   $('detected-model').disabled = $('add-llm').disabled || ['loading','stopping'].includes(s.state);
   $('llm-fields').disabled = $('add-llm').disabled || ['loading','stopping'].includes(s.state);
   $('save-llm').disabled = $('llm-fields').disabled;
+  $('remove-llm').disabled = $('detected-model').disabled || state.modelAdding || !state.detectedModels?.some(item=>item.id===$('detected-model').value&&item.id!=='current');
 }
 
 async function checkUpdates() {
@@ -377,17 +378,29 @@ function chooseDetectedModel(){
  const previous=JSON.parse(state.modelDraftBaseline||'{}');
  const edited=['name','modelPath','projectorPath'].some(key=>modelDraft()[key]!==previous[key]);
  if(edited&&!confirm('Abandonner les modifications de ce LLM ?')){$('detected-model').value=previous.selection||'';return;}
- loadModelDraft(item);settingsSearch.refresh();
+ loadModelDraft(item);settingsSearch.refresh();updateControls();
 }
 function addLLM(){
  if($('add-llm').disabled)return;
  if(modelEditorDirty()&&!confirm('Abandonner les modifications de ce LLM ?'))return;
- settingsSearch.reset();$('detected-model').value='';loadModelDraft(null,{adding:true});$('model-paths').open=true;$('llm-name').focus();
+ settingsSearch.reset();$('detected-model').value='';loadModelDraft(null,{adding:true});$('model-paths').open=true;$('llm-name').focus();updateControls();
 }
 function cancelLLM(){
  if(modelEditorDirty()&&!confirm('Abandonner les modifications de ce LLM ?'))return;
  const current=activeModel()||state.detectedModels.find(item=>item.modelPath===state.config.modelPath&&item.projectorPath===(state.config.projectorPath||''));
- $('detected-model').value=current?.id||state.detectedModels[0]?.id||'';loadModelDraft(current||state.detectedModels[0]);$('model-paths').open=false;
+ $('detected-model').value=current?.id||state.detectedModels[0]?.id||'';loadModelDraft(current||state.detectedModels[0]);$('model-paths').open=false;updateControls();
+}
+async function removeLLM(){
+ if($('remove-llm').disabled||state.operation)return;
+ const item=state.detectedModels.find(item=>item.id===$('detected-model').value);if(!item)return;
+ if(!confirm('Retirer « '+item.name+' » de la liste ? Les fichiers sont conservés.'+(item.modelPath===state.config.modelPath?' Le modèle actif sera arrêté.':'')+(modelEditorDirty()?' Les modifications de ce LLM seront abandonnées.':'')))return;
+ const session=state.settingsSession;state.operation=true;updateControls();
+ try{
+  const result=await(await api('models/remove',{id:item.id})).json();state.config=result.config;state.modelName=result.modelName;state.status=result.status;state.models=result.models;renderModelSelect();
+  if(session===state.settingsSession&&$('settings').open){applyModelLibrary(result);settingsGuard.markPartSaved('llm');settingsSearch.refresh();}
+  contextMeter.schedule();
+ }catch(error){notice(error.message);}
+ finally{state.operation=false;await refreshStatus();}
 }
 async function saveLLM({withinSettingsSave=false}={}){
  if(!withinSettingsSave&&($('save-llm').disabled||state.operation))return false;
@@ -780,6 +793,7 @@ $('add-llm').onclick=addLLM;
 $('save-llm').onclick=()=>saveLLM();
 $('cancel-llm').onclick=cancelLLM;
 $('model-select').onchange=switchLLM;
+$('remove-llm').onclick=removeLLM;
 $('update-available').onclick = installUpdate;
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('shutdown-app').onclick = shutdownApplication;

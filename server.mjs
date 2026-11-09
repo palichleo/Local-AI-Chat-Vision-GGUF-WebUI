@@ -408,11 +408,19 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return;
       }
       if (closing||relaunching) throw problem('L’application est en cours de fermeture.', 409);
-      if(path==='/api/models/add'||path==='/api/models/select'){
+      if(path==='/api/models/add'||path==='/api/models/select'||path==='/api/models/remove'){
         if(savingSettings||saving||savingComfy||pickingFile||runtime.active||engine.busy||clearingHistory||['loading','stopping'].includes(engine.state))throw problem('Attends la fin de l’opération en cours.',409);
         savingSettings=true;saving=true;let finishModelOperation;modelOperation=new Promise(done=>{finishModelOperation=done;});
         try{
           if(path==='/api/models/add'){const profile=await models.add(body);return send(200,{profile,models:await models.list()});}
+          if(path==='/api/models/remove'){
+            const candidate=(await models.list()).find(item=>item.id===body.id)||(await models.scan()).detected.find(item=>item.id===body.id);
+            const previous=config,active=candidate&&candidate.modelPath===config.modelPath&&candidate.projectorPath===(config.projectorPath||'');
+            if(active){await engine.stop();const next={...config,modelPath:'',projectorPath:''};await atomicJson(configPath,next);config=next;}
+            try{await models.remove(body.id);}catch(error){if(active){await atomicJson(configPath,previous);config=previous;}throw error;}
+            if(active)configWarning='';
+            return send(200,{models:await models.list(),...await models.scan(),config,modelName:(await models.list()).find(item=>item.modelPath===config.modelPath&&item.projectorPath===(config.projectorPath||''))?.name||modelFolderName(config.modelPath),status:status()});
+          }
           const selected=await models.get(body.id),next={...config,modelPath:selected.modelPath,projectorPath:selected.projectorPath};
           if(next.modelPath===config.modelPath&&next.projectorPath===config.projectorPath)return send(200,{config,modelName:selected.name,status:status()});
           const restart=engine.state==='ready';await engine.stop();
