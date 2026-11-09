@@ -7,7 +7,7 @@ const png = 'data:image/png;base64,iVBORw0KGgo=';
 const call = {
   id: 'call_1',
   type: 'function',
-  function: { name: 'generate_image', arguments: '{"workflow_id":"photo","prompt":"cat"}' },
+  function: { name: 'create_image', arguments: '{"prompt":"cat"}' },
 };
 async function exchange({
   vision = true,

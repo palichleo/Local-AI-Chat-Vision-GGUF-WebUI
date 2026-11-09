@@ -169,7 +169,7 @@ test(
         .find(e => e.local_tool_request);
       assert.ok(frame, streamed);
       const approval = frame.local_tool_request;
-      assert.equal(approval.call.function.name, 'generate_image');
+      assert.equal(approval.call.function.name, 'create_image');
       await api('tools/execute', { requestId: approval.requestId, permission: 'once' }, 202);
       const job = await until(async () => {
         const j = await (await api('tools/job')).json();

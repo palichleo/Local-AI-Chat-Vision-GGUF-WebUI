@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { ToolCatalog } from '../lib/tool-catalog.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -105,7 +106,7 @@ test('drafts save and reopen unchanged, stay out of tools and preserve fields ou
   const record = await reopened.read(workflow.id);
   assert.deepEqual(record, workflow);
   assert.equal((await reopened.list())[0].ready, false);
-  assert.equal(await reopened.toolDefinition(), null);
+  assert.deepEqual(await new ToolCatalog(reopened).definitions(), []);
   assert.deepEqual(JSON.parse(await readFile(join(root, workflow.id + '.json'), 'utf8')).importDraft.source, graph());
 });
 

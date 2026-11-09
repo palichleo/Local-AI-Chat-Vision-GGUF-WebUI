@@ -126,7 +126,8 @@ export function setupGenerationRuntime({
         : 'Vidéo finale · Confirmer ?'
       : 'Autoriser la génération ?';
     $('tool-name').textContent = request.workflowName;
-    $('tool-arguments').textContent = JSON.stringify(request.args, null, 2);
+    $('tool-arguments').textContent =
+      JSON.stringify(request.args, null, 2) + (request.notes?.length ? '\n\n' + request.notes.join('\n') : '');
     $('tool-arguments').hidden = video;
     $('tool-plan').hidden = !video;
     $('tool-always').hidden = video;
@@ -361,6 +362,7 @@ export function setupGenerationRuntime({
         content: JSON.stringify({
           status: error ? 'generated' : 'success',
           run_id: record.id,
+          use_as_source: { output: record.id },
           workflow: record.workflowName,
           prompt: record.prompt,
           workflow_id: record.workflowId,

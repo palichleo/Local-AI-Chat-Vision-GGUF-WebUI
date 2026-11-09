@@ -311,8 +311,8 @@ async function loadConversation(id) {
 }
 
 function renderTranscript(messages, incomplete = false) {
-  // Conversations saved before the native runner used the comfy_* tool names; they are still displayed.
-  const GENERATION_TOOLS = ['generate_image', 'generate_video', 'comfy_generate_image', 'comfy_generate_video'];
+  // Every tool other than the local readers is a generation verb, including names used by older versions.
+  const isGeneration = call => Boolean(call.function?.name) && !call.function.name.startsWith('local_');
   let reply = null;
   for (const [index, message] of messages.entries()) {
     if (message.internal || message.role === 'tool') continue;
@@ -325,8 +325,8 @@ function renderTranscript(messages, incomplete = false) {
       reply = view;
       if (message.content) renderText(view.body, message.content);
       else view.body.textContent = message.tool_calls ? 'Appel d’outil enregistré.' : 'Aucune réponse finale reçue.';
-      if (message.tool_calls?.some(call => GENERATION_TOOLS.includes(call.function?.name))) {
-        const call = message.tool_calls.find(call => GENERATION_TOOLS.includes(call.function?.name)),
+      if (message.tool_calls?.some(isGeneration)) {
+        const call = message.tool_calls.find(isGeneration),
           result = messages[index + 1];
         try {
           const data = result?.role === 'tool' && result.tool_call_id === call.id ? JSON.parse(result.content) : null;

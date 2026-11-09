@@ -164,7 +164,7 @@
   "profiles": ["width", "height", "steps", "frames", "fps"],
   "template": {
     "name": "LTX2.5 video",
-    "description": "Generate video from text, optional start/end images or two MSR image slots. A source_video extends a silent video at its existing resolution and fps; use output_id for a previous native run. Every video requires approval.",
+    "description": "Short video clips from a description, optionally starting or ending on given images or keeping a subject from up to two reference images. Can also continue a silent video at its own resolution and frame rate.",
     "components": {
       "model": {
         "policy": "fixed",

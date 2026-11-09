@@ -279,8 +279,8 @@ export async function createApplication({
         return resources.media(ref.resource_id, 'original');
       }
       const record = await gallery.get(conversationId, ref.output_id, { includeImages: false });
-      if (record.provider !== 'native' || record.mediaType !== 'video' || !record.outputs[ref.output_index ?? 0])
-        throw problem('Sortie vidéo originale indisponible.');
+      if (record.provider !== 'native' || !record.outputs[ref.output_index ?? 0])
+        throw problem('Le fichier original de ce résultat est indisponible.');
       return {
         ...(await generatedMedia(outputDir, record.outputs[ref.output_index ?? 0].source)),
         name: record.workflowName,
@@ -337,10 +337,7 @@ export async function createApplication({
       body.tools !== false &&
       (runtime.turns.get(body.turnId) || 0) < toolConfig.maxIterations
     ) {
-      for (const mediaType of ['image', 'video']) {
-        const definition = await generation.catalog.definition(mediaType);
-        if (definition) definitions.push(definition);
-      }
+      definitions.push(...(await runtime.tools.definitions()));
     }
     if (active.length && engine.vision && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8) {
       const definition = structuredClone(resourceTool),

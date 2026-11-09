@@ -13,11 +13,14 @@ test('native immutable job keeps random seed through authorization and GPU hando
     description: '',
     digest: 'a'.repeat(64),
     mediaType: 'image',
-    parameters: {},
+    pipeline: 'krea2',
+    enabled: true,
+    ready: true,
+    parameters: { prompt: { policy: 'model', type: 'string' } },
     references: [],
   };
   const catalog = {
-    kind: 'native',
+    list: async () => [workflow],
     read: async () => workflow,
     prepare: async () => {
       preparation++;
@@ -81,7 +84,7 @@ test('native immutable job keeps random seed through authorization and GPU hando
   const call = {
     id: 'call',
     type: 'function',
-    function: { name: 'generate_image', arguments: JSON.stringify({ workflow_id: 'image', prompt: 'boat' }) },
+    function: { name: 'create_image', arguments: JSON.stringify({ prompt: 'boat' }) },
   };
   const request = await runtime.request([call], {
     conversationId: id,
@@ -104,11 +107,14 @@ test('native video approval shows the resolved fixed stage and cannot use global
     name: 'Video',
     digest: 'b'.repeat(64),
     mediaType: 'video',
+    pipeline: 'ltx25',
+    enabled: true,
+    ready: true,
     parameters: {},
     references: [],
   };
   const catalog = {
-    kind: 'native',
+    list: async () => [workflow],
     read: async () => workflow,
     prepare: async () => ({
       workflow,
@@ -142,7 +148,7 @@ test('native video approval shows the resolved fixed stage and cannot use global
       {
         id: 'video-call',
         type: 'function',
-        function: { name: 'generate_video', arguments: JSON.stringify({ workflow_id: 'video', intention: 'Test' }) },
+        function: { name: 'create_video', arguments: JSON.stringify({ intention: 'Test' }) },
       },
     ],
     { conversationId: id, turnId: id, messages: [] },
@@ -176,11 +182,15 @@ test('native continuation stages the original video instead of a sampled image',
     id: 'continue',
     name: 'Continue',
     mediaType: 'video',
+    pipeline: 'ltx25',
+    enabled: true,
+    ready: true,
+    parameters: { prompt: { policy: 'model', type: 'string' } },
     digest: 'c'.repeat(64),
     references: [{ id: 'source', role: 'source_video', required: true }],
   };
   const catalog = {
-    kind: 'native',
+    list: async () => [workflow],
     read: async () => workflow,
     prepare: async () => ({
       workflow,
@@ -196,7 +206,10 @@ test('native continuation stages the original video instead of a sampled image',
   const runtime = new ToolRuntime({
     catalog,
     engine: { state: 'ready', stop: async () => {}, start: async () => {} },
-    gallery: { put: async record => record },
+    gallery: {
+      put: async record => record,
+      get: async () => ({ mediaType: 'video', outputs: [{ source: { filename: 'prior.mp4' } }] }),
+    },
     getConfig: () => ({ enabled: true, autoAllow: true, maxIterations: 5, baseUrl: 'native' }),
     engineConfig: () => ({}),
     sourceMedia: async (ref, conversation) => {
@@ -226,12 +239,8 @@ test('native continuation stages the original video instead of a sampled image',
         id: 'continue-call',
         type: 'function',
         function: {
-          name: 'generate_video',
-          arguments: JSON.stringify({
-            workflow_id: 'continue',
-            intention: 'Continue',
-            references: [{ input: 'source', output_id: sourceId }],
-          }),
+          name: 'extend_video',
+          arguments: JSON.stringify({ prompt: 'continue', intention: 'Continue', source: { output: sourceId } }),
         },
       },
     ],
@@ -253,6 +262,10 @@ test('draft promotion retains seed and writable choices while final profile rema
     id: 'film',
     name: 'Film',
     mediaType: 'video',
+    pipeline: 'ltx25',
+    enabled: true,
+    ready: true,
+    parameters: {},
     digest: 'd'.repeat(64),
     references: [],
     profiles: { final: { parameters: { width: 768, height: 512 } } },
@@ -312,9 +325,8 @@ test('draft promotion retains seed and writable choices while final profile rema
       id: 'final-call',
       type: 'function',
       function: {
-        name: 'generate_video',
+        name: 'create_video',
         arguments: JSON.stringify({
-          workflow_id: 'film',
           reuse_output: draftId,
           stage: 'final',
           intention: 'Final version',

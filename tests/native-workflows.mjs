@@ -1,5 +1,6 @@
 import test from 'node:test';
 import { family, familyTemplate } from '../lib/families.mjs';
+import { ToolCatalog } from '../lib/tool-catalog.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -213,19 +214,16 @@ test('canonical digest changes only with saved content and saved files remain at
 test('tools advertise only enabled ready workflows and writable policy fields', async () => {
   await withCatalog(async catalog => {
     await catalog.save(fixture());
-    const definition = await catalog.toolDefinition('image');
-    assert.equal(definition.function.name, 'generate_image');
-    const schema = definition.function.parameters;
-    const variant = schema.oneOf?.[0] ?? schema;
+    const tools = new ToolCatalog(catalog);
+    const definition = (await tools.definitions()).find(tool => tool.function.name === 'create_image');
+    const variant = definition.function.parameters;
     assert.ok(variant.properties.prompt);
     assert.equal(variant.properties.width, undefined);
     assert.equal(variant.properties.seed, undefined);
     assert.equal(variant.properties.steps.maximum, 12);
     assert.equal(variant.properties.loras, undefined);
     catalog.capabilities = {};
-    assert.equal(await catalog.toolDefinition('image'), null);
-    catalog.capabilities = { ltx25: { ready: false, reason: 'Executor unavailable' } };
-    assert.equal(await catalog.toolDefinition('video'), null);
+    assert.deepEqual(await tools.definitions(), []);
   });
 });
 
@@ -260,7 +258,7 @@ test('family manifest limits are enforced when a workflow is saved, not discover
     catalog.assets = { resolve: async id => ({ path: join(tmpdir(), id + '.safetensors') }) };
     catalog.capabilities = { ltx25: { ready: true } };
     await catalog.save(workflow);
-    assert.ok(await catalog.toolDefinition('video'));
+    assert.ok((await new ToolCatalog(catalog).definitions()).some(tool => tool.function.name === 'create_video'));
     for (const [patch, error] of [
       [w => (w.parameters.steps.value = 12), /supported|allowed/i],
       [w => w.references.push({ id: 'edit', role: 'img2img', required: false }), /reference slot/i],

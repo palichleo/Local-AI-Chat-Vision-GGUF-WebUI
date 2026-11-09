@@ -3,7 +3,17 @@ import assert from 'node:assert/strict';
 import { ToolRuntime, collectToolCalls } from '../lib/tool-runtime.mjs';
 const id = 'a1111111-1111-4111-8111-111111111111';
 // Minimal native catalog: a resolved job plus the workflow it came from.
-const nativeWorkflow = (fields = {}) => ({ schemaVersion: 1, mediaType: 'image', references: [], ...fields });
+const nativeWorkflow = (fields = {}) => ({
+  schemaVersion: 1,
+  id: 'wf',
+  pipeline: 'krea2',
+  mediaType: 'image',
+  enabled: true,
+  ready: true,
+  parameters: { prompt: { policy: 'model', type: 'string' } },
+  references: [],
+  ...fields,
+});
 const nativePrepared = (workflow, references = []) => ({
   workflow,
   job: {
@@ -18,11 +28,11 @@ const nativePrepared = (workflow, references = []) => ({
 test('native deltas assemble tool arguments; text never becomes a tool', () => {
   const calls = [];
   collectToolCalls(calls, {
-    tool_calls: [{ index: 0, id: 'call_1', function: { name: 'generate_image', arguments: '{"prompt":' } }],
+    tool_calls: [{ index: 0, id: 'call_1', function: { name: 'create_image', arguments: '{"prompt":' } }],
   });
   collectToolCalls(calls, { tool_calls: [{ index: 0, function: { arguments: '"cat"}' } }] });
   assert.equal(calls[0].function.arguments, '{"prompt":"cat"}');
-  collectToolCalls(calls, { content: '{"tool":"generate_image"}' });
+  collectToolCalls(calls, { content: '{"tool":"create_image"}' });
   assert.equal(calls.length, 1);
 });
 test('approval pins workflow, is consumed once, and enforces a turn limit', async () => {
@@ -31,6 +41,7 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
   const order = [];
   const workflow = nativeWorkflow({ id: 'wf', name: 'test', digest });
   const catalog = {
+    list: async () => [{ ...workflow, digest }],
     read: async () => ({ ...workflow, digest }),
     prepare: async () => nativePrepared(workflow),
   };
@@ -71,7 +82,7 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
     {
       id: 'call_1',
       type: 'function',
-      function: { name: 'generate_image', arguments: '{"workflow_id":"wf","prompt":"cat"}' },
+      function: { name: 'create_image', arguments: '{"prompt":"cat"}' },
     },
   ];
   const pending = await rt.request(calls, { conversationId: id, turnId: id, messages: [] });
@@ -104,6 +115,7 @@ test('a failed GPU release keeps the LLM stopped and records the error', async (
   const rt = new ToolRuntime({
     engine,
     catalog: {
+      list: async () => [nativeWorkflow({ digest: '1', name: 'wf' })],
       read: async () => nativeWorkflow({ digest: '1', name: 'wf' }),
       prepare: async () => nativePrepared(nativeWorkflow({ name: 'wf', digest: '1' })),
     },
@@ -126,7 +138,7 @@ test('a failed GPU release keeps the LLM stopped and records the error', async (
       {
         id: 'c',
         type: 'function',
-        function: { name: 'generate_image', arguments: '{"workflow_id":"wf","prompt":"cat"}' },
+        function: { name: 'create_image', arguments: '{"prompt":"cat"}' },
       },
     ],
     { conversationId: id, turnId: id, messages: [] },
@@ -168,6 +180,9 @@ function runtimeFixture() {
     },
   };
   const catalog = {
+    async list() {
+      return [{ ...workflow }];
+    },
     async read() {
       return { ...workflow };
     },
@@ -204,8 +219,8 @@ function runtimeFixture() {
           id: 'call_1',
           type: 'function',
           function: {
-            name: 'generate_image',
-            arguments: JSON.stringify({ workflow_id: 'wf', prompt: 'portrait', ...args }),
+            name: 'create_image',
+            arguments: JSON.stringify({ prompt: 'portrait', ...args }),
           },
         },
       ],
@@ -256,7 +271,7 @@ test('a chat image reference is uploaded once and reaches the job as a staged pa
     assert.deepEqual(bytes, Buffer.from('89504e470d0a1a0a', 'hex'));
     return { path: '/staged/reference.png' };
   };
-  const pending = await request({ references: [{ input: 'source', image: 0 }] }, [
+  const pending = await request({ source: { image: 0 } }, [
     { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } }] },
   ]);
   await rt.execute({ requestId: pending.requestId, permission: 'once' });
@@ -307,8 +322,8 @@ test('forgetting one conversation invalidates only its pending calls and complet
         id: 'other_call',
         type: 'function',
         function: {
-          name: 'generate_image',
-          arguments: JSON.stringify({ workflow_id: 'wf', prompt: 'Another portrait' }),
+          name: 'create_image',
+          arguments: JSON.stringify({ prompt: 'Another portrait' }),
         },
       },
     ],
@@ -433,51 +448,59 @@ test('cancelling a pending approval releases its reference copies and prevents l
   assert.equal(seen.runs, 0);
 });
 
-test('an active library resource can be a reference, and deactivating it before execution keeps the model loaded', async () => {
+test('an active resource is passed as its original file, and deactivating it before execution keeps the model loaded', async () => {
   const { rt, seen, client, request } = runtimeFixture();
   const resource = 'c3333333-3333-4333-8333-333333333333';
   let active = true;
   rt.resources = {
-    readActive: async resourceId => {
-      assert.equal(resourceId, resource);
-      return { name: 'chair.png', label: 'Ref 1', frames: [{ url: 'data:image/png;base64,iVBORw0KGgo=' }] };
-    },
-    activeRecord: async () => {
+    activeRecord: async id => {
+      assert.equal(id, resource);
       if (!active) throw Object.assign(Error('Ressource désactivée.'), { status: 409 });
+      return { mime: 'image/png' };
     },
   };
-  client.upload = async () => ({ path: '/staged/chair.png' });
-  const approved = await request({ references: [{ input: 'source', resource_id: resource }] });
+  rt.sourceMedia = async ref => {
+    assert.equal(ref.resource_id, resource);
+    return { mime: 'image/png', name: 'chair.png', handle: { close: async () => {} } };
+  };
+  client.stage = async () => ({ path: '/staged/chair.png' });
+  const approved = await request({ source: { resource } });
   await rt.execute({ requestId: approved.requestId, permission: 'once' });
   await rt.finished;
   assert.deepEqual(seen.references.at(-1), [{ input: 'source', role: 'img2img', path: '/staged/chair.png' }]);
-  const again = await request({ references: [{ input: 'source', resource_id: resource }] }).catch(error => error);
+  const again = await request({ source: { resource } }).catch(error => error);
   // The turn limit is one in this fixture; a fresh runtime checks deactivation.
   assert.match(again.message, /limite/i);
   const second = runtimeFixture();
   second.rt.resources = rt.resources;
-  const pending = await second.request({ references: [{ input: 'source', resource_id: resource }] });
+  second.rt.sourceMedia = rt.sourceMedia;
+  const pending = await second.request({ source: { resource } });
   active = false;
   await assert.rejects(second.rt.execute({ requestId: pending.requestId, permission: 'once' }), /désactivée/);
   assert.equal(second.seen.stops, 0);
   assert.equal(second.seen.runs, 0);
 });
 
-test('a video workflow cannot be requested through the image tool', async () => {
-  const { rt, catalog } = runtimeFixture();
-  const read = catalog.read;
-  catalog.read = async (...args) => ({ ...(await read(...args)), mediaType: 'video' });
+test('a verb with no matching workflow explains which inputs are available', async () => {
+  const { rt } = runtimeFixture();
+  await assert.rejects(
+    rt.request(
+      [{ id: 'c', type: 'function', function: { name: 'create_video', arguments: '{"prompt":"x","intention":"y"}' } }],
+      { conversationId: id, turnId: id, messages: [] },
+    ),
+    /Aucun workflow/,
+  );
   await assert.rejects(
     rt.request(
       [
         {
           id: 'c',
           type: 'function',
-          function: { name: 'generate_image', arguments: '{"workflow_id":"wf","prompt":"x"}' },
+          function: { name: 'create_image', arguments: '{"prompt":"x","start_image":{"image":0}}' },
         },
       ],
       { conversationId: id, turnId: id, messages: [] },
     ),
-    /type image ou vidéo/,
+    /Aucun workflow|start_image/,
   );
 });
