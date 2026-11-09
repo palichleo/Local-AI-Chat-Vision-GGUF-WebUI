@@ -30,6 +30,8 @@ Alternatively, save this private configuration as `local.json` next to the scrip
 
 Optional: `--no-refine` skips the prompt expansion; `--image "reference.png"` selects the graph's image-to-image branch with its configured denoise value. Generated PNGs and JSON metadata go into `outputs/`; `--output` can change the destination. Each PNG also embeds its generation metadata.
 
+`--profile` captures one warmed diffusion step with the installed PyTorch CPU/CUDA profiler. Aggregate timings are embedded in the PNG and JSON metadata; a normal run does not enable profiling. See [PROFILE.md](PROFILE.md) for measured costs and attribution limits.
+
 **No automatic downloads or installations.** Hugging Face offline mode is enforced. Local paths, generated outputs and Python caches are ignored by Git. Weights and tokenizer assets are not included; their original licenses still apply.
 
 ## Memory and compatibility
@@ -48,6 +50,6 @@ It uses BF16 operations on dequantized INT8/FP8 weights rather than Comfy's opti
 python -m unittest discover -s experiments/krea2-python -v
 ```
 
-These checks verify the original graph plan, branch selection, disabled refinement, unsupported-node rejection, and ConvRot/LoRA algebra without loading model checkpoints.
+These checks verify the original graph plan, branch selection, disabled refinement, unsupported-node rejection, ConvRot/LoRA algebra, and profile aggregation without loading model checkpoints.
 
 References: [official Krea2 inference code](https://github.com/krea-ai/krea-2), [Diffusers Krea2 documentation](https://github.com/huggingface/diffusers/blob/main/docs/source/en/api/pipelines/krea2.md).

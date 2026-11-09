@@ -1,10 +1,27 @@
 """Small offline checks: graph selection and ConvRot algebra, no model loading."""
 import unittest
+from types import SimpleNamespace
 
 from try_krea import HERE, Workflow, rotation_matrix
+from profile_krea import summarize
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_profile_ignores_duplicate_cuda_annotations(self):
+        def event(key,cuda,device='DeviceType.CPU'):
+            return SimpleNamespace(key=key,device_type=device,count=1,cpu_time_total=20,
+                                   device_time_total=cuda,self_device_time_total=cuda)
+        events=[event('krea/step',1000),event('krea/base.linear',600),
+                event('krea/base.linear',5000,'DeviceType.CUDA'),
+                event('aten::scaled_dot_product_attention',250),event('aten::mm',600)]
+        profile=SimpleNamespace(key_averages=lambda:events)
+        result=summarize(profile,2,.002)
+        self.assertEqual(result['cuda_work_seconds'],.001)
+        self.assertEqual(result['categories']['base.linear']['cuda_seconds'],.0006)
+        self.assertEqual(result['categories']['other']['cuda_seconds'],.00015)
+        events[1].device_time_total=1200
+        with self.assertRaises(RuntimeError):summarize(profile,2,.002)
+
     def test_original_graph(self):
         plan = Workflow(HERE/'workflow.json').plan()
         self.assertEqual((plan['width'], plan['height']), (1448,1448))

@@ -1,16 +1,19 @@
 """Offline experiment: execute the supplied Krea2 graph with PyTorch/Diffusers, not ComfyUI."""
 import argparse
+from contextlib import nullcontext
 import gc
 import json
 import math
 import os
 from pathlib import Path
 import struct
+import sys
 import time
 
 os.environ['HF_HUB_OFFLINE'] = '1'
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0,str(HERE))  # Embedded Python can omit the script directory from its import path.
 
 
 class Workflow:
@@ -137,6 +140,8 @@ def execute(args, workflow, plan, files):
     from diffusers import Krea2Transformer2DModel, AutoencoderKLQwenImage, Krea2Pipeline
     from diffusers.loaders.single_file_utils import convert_krea2_transformer_checkpoint_to_diffusers, convert_wan_vae_to_diffusers
     from PIL import Image, ImageOps, PngImagePlugin
+    if args.profile:
+        from profile_krea import summarize
 
     if not torch.cuda.is_available():
         raise RuntimeError('This experimental streaming implementation requires a CUDA GPU')
@@ -150,6 +155,8 @@ def execute(args, workflow, plan, files):
     if not isinstance(plan['steps'],int) or not 1 <= plan['steps'] <= 10000:
         raise ValueError('Steps must be an integer between 1 and 10000')
     dtype, device = torch.bfloat16, 'cuda'
+    scope = torch.profiler.record_function if args.profile else lambda _:nullcontext()
+    profile_report = None
     start = time.perf_counter(); torch.cuda.reset_peak_memory_stats()
 
     def progress(stage, **extra):
@@ -162,10 +169,21 @@ def execute(args, workflow, plan, files):
 
     def tensor(store, key):
         # Transfer quantized bytes first; converting on the CPU wastes bandwidth and cores.
-        value = store.get_tensor(key).to(device=device).to(dtype=dtype)
-        scale = key[:-7]+'.weight_scale' if key.endswith('.weight') else None
-        if scale and scale in store.keys():
-            value = value * store.get_tensor(scale).to(device=device, dtype=dtype)
+        with scope('krea/weights.read'):
+            value = store.get_tensor(key)
+        with scope('krea/weights.upload'):
+            value = value.to(device=device)
+        with scope('krea/weights.dequantize'):
+            value = value.to(dtype=dtype)
+        with scope('krea/weights.read'):
+            scale = key[:-7]+'.weight_scale' if key.endswith('.weight') else None
+            scaled = scale and scale in store.keys()
+            factor = store.get_tensor(scale) if scaled else None
+        if scaled:
+            with scope('krea/weights.upload'):
+                factor = factor.to(device=device, dtype=dtype)
+            with scope('krea/weights.dequantize'):
+                value = value * factor
         return value
 
     progress('loading text encoder')
@@ -272,14 +290,22 @@ def execute(args, workflow, plan, files):
                 weight=tensor(weights,self.source); bias_key=self.source[:-7]+'.bias'
                 bias=tensor(weights,bias_key) if bias_key in weights.keys() else None
                 rotated=value
-                if self.rotation_size:
-                    rotated=(value.reshape(-1,self.rotation_size) @ rotations[self.rotation_size]).reshape(value.shape)
-                result=F.linear(rotated,weight,bias); del weight,bias,rotated
+                with scope('krea/convrot'):
+                    if self.rotation_size:
+                        rotated=(value.reshape(-1,self.rotation_size) @ rotations[self.rotation_size]).reshape(value.shape)
+                with scope('krea/base.linear'):
+                    result=F.linear(rotated,weight,bias)
+                del weight,bias,rotated
                 for store,key,strength in self.adapters:
-                    a=store.get_tensor(key+'.lora_A.weight').to(device=device,dtype=value.dtype)
-                    b=store.get_tensor(key+'.lora_B.weight').to(device=device,dtype=value.dtype)
-                    alpha=store.get_tensor(key+'.alpha').item()/a.shape[0] if key+'.alpha' in store.keys() else 1.0
-                    result=result+F.linear(F.linear(value,a),b)*(strength*alpha)
+                    with scope('krea/lora.read'):
+                        a=store.get_tensor(key+'.lora_A.weight')
+                        b=store.get_tensor(key+'.lora_B.weight')
+                        alpha=store.get_tensor(key+'.alpha').item()/a.shape[0] if key+'.alpha' in store.keys() else 1.0
+                    with scope('krea/lora.upload_cast'):
+                        a=a.to(device=device,dtype=value.dtype)
+                        b=b.to(device=device,dtype=value.dtype)
+                    with scope('krea/lora.linear'):
+                        result=result+F.linear(F.linear(value,a),b)*(strength*alpha)
                 return result
 
         with init_empty_weights():
@@ -304,12 +330,24 @@ def execute(args, workflow, plan, files):
         gh,gw=(height+1)//2,(width+1)//2
         positions=Krea2Pipeline.prepare_position_ids(conditioning.shape[1],gh,gw,device)
         for i in range(steps):
-            padded=F.pad(latents.to(dtype),(0,width%2,0,height%2),mode='circular')
-            packed=padded.reshape(1,16,gh,2,gw,2).permute(0,2,4,1,3,5).reshape(1,gh*gw,64)
-            prediction=transformer(hidden_states=packed,timestep=sigmas[i:i+1].to(dtype),encoder_hidden_states=conditioning,position_ids=positions,return_dict=False)[0]
-            prediction=prediction.reshape(1,gh,gw,16,2,2).permute(0,3,1,4,2,5).reshape(1,16,gh*2,gw*2)[:,:,:height,:width]
-            latents=latents+prediction.float()*(sigmas[i+1]-sigmas[i])
-            if not torch.isfinite(latents).all(): raise RuntimeError('Non-finite latent values; refusing to save a corrupt result')
+            sample = args.profile and i==min(1,steps-1)
+            if sample:
+                torch.cuda.synchronize()
+                capture=torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,torch.profiler.ProfilerActivity.CUDA])
+                capture.start(); sampled_start=time.perf_counter()
+            with scope('krea/step'):
+                padded=F.pad(latents.to(dtype),(0,width%2,0,height%2),mode='circular')
+                packed=padded.reshape(1,16,gh,2,gw,2).permute(0,2,4,1,3,5).reshape(1,gh*gw,64)
+                prediction=transformer(hidden_states=packed,timestep=sigmas[i:i+1].to(dtype),encoder_hidden_states=conditioning,position_ids=positions,return_dict=False)[0]
+                prediction=prediction.reshape(1,gh,gw,16,2,2).permute(0,3,1,4,2,5).reshape(1,16,gh*2,gw*2)[:,:,:height,:width]
+                latents=latents+prediction.float()*(sigmas[i+1]-sigmas[i])
+                if not torch.isfinite(latents).all(): raise RuntimeError('Non-finite latent values; refusing to save a corrupt result')
+            if sample:
+                torch.cuda.synchronize(); sampled_seconds=time.perf_counter()-sampled_start
+                capture.stop()
+                profile_report=summarize(capture,i+1,sampled_seconds)
+                del capture; gc.collect()
+                progress('profiled step',profile=profile_report)
             progress('denoising',step=i+1,total=steps)
         del transformer,conditioning,prediction,packed,padded,adapters,weights
         release(); progress('decoding image')
@@ -323,6 +361,7 @@ def execute(args, workflow, plan, files):
         comfy_imported=any(k in ('comfy','comfy_kitchen') or k.startswith(('comfy.','comfy_kitchen.')) for k in __import__('sys').modules)
         if comfy_imported: raise RuntimeError('Unexpected Comfy module import')
         metadata=dict(plan=plan,seconds=round(time.perf_counter()-start,2),peak_vram_gib=round(torch.cuda.max_memory_allocated()/1024**3,3),backend='pytorch-diffusers-streaming',comfy_imported=comfy_imported)
+        if profile_report is not None: metadata['profile']=profile_report
         info=PngImagePlugin.PngInfo();info.add_text('atelier',json.dumps(metadata,ensure_ascii=False));Image.fromarray(pixels).save(output,pnginfo=info)
         output.with_suffix('.json').write_text(json.dumps(metadata,indent=2,ensure_ascii=False),encoding='utf-8')
         progress('complete',output=str(output),peak_vram_gib=metadata['peak_vram_gib'],comfy_imported=metadata['comfy_imported'])
@@ -336,6 +375,7 @@ def main():
     parser.add_argument('--width',type=int);parser.add_argument('--height',type=int)
     parser.add_argument('--image');parser.add_argument('--no-refine',action='store_true')
     parser.add_argument('--inspect',action='store_true');parser.add_argument('--output',default=str(HERE/'outputs'))
+    parser.add_argument('--profile',action='store_true',help='Profile the second diffusion step with CPU/CUDA attribution')
     args=parser.parse_args()
     local=json.loads(args.config.read_text(encoding='utf-8')) if args.config.exists() else {}
     args.models_root=args.models_root or local.get('models_root');args.tokenizer=args.tokenizer or local.get('tokenizer')
