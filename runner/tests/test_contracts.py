@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from runner.contracts import validate_job, validate_config
-from runner.models.headers import header, validate_components
+from runner.models.headers import header, validate_components, validate_lora
 
 
 def job():
@@ -78,6 +78,13 @@ class ContractTests(unittest.TestCase):
             path.write_bytes(struct.pack('<Q',len(raw))+raw+b'1234')
             candidate=job();candidate['components']={k:str(path) for k in candidate['components']}
             with self.assertRaisesRegex(ValueError,'[Ii]ncompatible'):validate_components(candidate)
+
+    def test_lora_rejects_orphan_and_unsupported_tensors(self):
+        base={'layer.weight':{'shape':[4,8]}}
+        entries={'layer.lora_A.weight':{'shape':[2,8]},'layer.lora_B.weight':{'shape':[4,2]}}
+        validate_lora(entries,base)
+        with self.assertRaises(ValueError):validate_lora(entries|{'other.lora_B.weight':{'shape':[4,2]}},base)
+        with self.assertRaises(ValueError):validate_lora(entries|{'layer.dora_scale':{'shape':[4]}},base)
 
 
 if __name__=='__main__':unittest.main()

@@ -28,3 +28,13 @@ test('archive rejects traversal, links, duplicate paths, wrong versions and corr
   assert.throws(() => module.readUpdateArchive(Buffer.from('broken'), '0.3.0'));
   assert.throws(() => module.readUpdateArchive(tarball(sourceEntries.filter(entry => !entry.name.endsWith('server.mjs'))), '0.3.0'));
 });
+
+test('native runner sources are updated while workflows, caches and originals stay private',()=>{
+ const files=module.readUpdateArchive(tarball([...sourceEntries,
+  {name:'repo/runner/engine.py',text:'native runner'},
+  {name:'repo/workflow/private.json',text:'private workflow'},
+  {name:'repo/output/original.png',text:'original'},
+  {name:'repo/data/generation-cache/prepared.safetensors',text:'weights'}]),'0.3.0');
+ assert.equal(files.get('runner/engine.py').toString(),'native runner');
+ assert.ok(![...files.keys()].some(path=>/^(workflow|output|data)\//.test(path)));
+});

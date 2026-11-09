@@ -5,12 +5,22 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from runner.protocol import serve
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_release_clears_pytorch_blas_workspace_before_ack(self):
+        from runner.engine import release
+        calls=[]
+        cuda=SimpleNamespace(is_initialized=lambda:True,synchronize=lambda:calls.append('sync'),
+            empty_cache=lambda:calls.append('empty'),memory_allocated=lambda:0 if 'blas' in calls else 8519680)
+        torch=SimpleNamespace(cuda=cuda,_C=SimpleNamespace(_cuda_clearCublasWorkspaces=lambda:calls.append('blas')))
+        with patch.dict(sys.modules,torch=torch):self.assertEqual(release(),dict(released=True,allocatedGiB=0))
+        self.assertLess(calls.index('sync'),calls.index('blas'))
+
     def test_ready_errors_recovery_and_shutdown_without_heavy_imports(self):
         with tempfile.TemporaryDirectory() as directory:
             config=Path(directory)/'config.json'

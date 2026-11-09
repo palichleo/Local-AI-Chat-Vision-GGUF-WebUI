@@ -51,7 +51,11 @@ def release():
     torch=sys.modules.get('torch')
     allocated=0
     if torch is not None and torch.cuda.is_initialized():
-        torch.cuda.synchronize();torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        # PyTorch retains an 8 MiB cuBLAS scratch buffer after all model tensors have been freed.
+        clear_blas=getattr(torch._C,'_cuda_clearCublasWorkspaces',None)
+        if clear_blas is not None:clear_blas()
+        torch.cuda.empty_cache()
         allocated=torch.cuda.memory_allocated()/1024**3
     if allocated:raise RuntimeError(f'GPU cleanup incomplete: {allocated:.6f} GiB still allocated')
     return dict(released=True,allocatedGiB=allocated)

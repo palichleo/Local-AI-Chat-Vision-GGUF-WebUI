@@ -118,3 +118,7 @@ Node `GenerationWorker`: `start(config)`, `status()`, `request(method,params,{si
 ## Execution ledger
 
 2026-11-09: User approved design with “go”. Existing linked worktree verified on `prototype-runner`. Native execution selected by coordinator to preserve the ongoing session; independent domain work may be dispatched only with precise interfaces and non-overlapping file ownership under the parallel-dispatch skill. No repeated design permission is required for the approved scope.
+
+2026-11-09: Tasks 1–6 implemented. Native catalog, policies, assets, Python image modules, worker lifecycle, Node tools/media and editor are connected. Full Node suite: 440 tests, 439 pass, 1 existing skip. Python: 18 pass. Browser smoke: settings load, same-panel editor and unsaved/discard navigation verified. Browse route mismatch corrected. Additional lifecycle regression verifies close during handshake cannot leave a late worker. Update/fingerprint checks include Python while preserving workflows/output/cache.
+
+Actual Krea2 smoke on the local RTX 4070 Super: 512²/8 steps 17.10 s total, 7.597 GiB peak; 1448²/8 steps 36.91 s total, 8.199 GiB peak. Both acknowledge zero torch allocation after cleanup; owned workers exit. Local artifacts and source backups remain ignored. Task 7 is active: all DiT/connectors/Gemma tensor shapes match installed native components; 25-frame 384×256 latent generation completed at 6.295 GiB peak. Video decoder needs compiled neighborhood attention; no video capability is advertised yet. Main installation remains unchanged.

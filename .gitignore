@@ -5,8 +5,16 @@ history/
 
 # Model weights stay local; keep the folder guide in the repository.
 *.[gG][gG][uU][fF]
+*.safetensors
 
 # Local Python experiment inputs and generated files.
 experiments/krea2-python/local.json
 experiments/krea2-python/outputs/
 experiments/krea2-python/__pycache__/
+
+# Native runner user data; only generic templates and folder guides are published.
+workflow/*.json
+output/
+runner/**/__pycache__/
+runner/__pycache__/
+runner/**/*.pyc

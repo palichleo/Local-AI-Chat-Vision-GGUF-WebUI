@@ -28,6 +28,10 @@ import { ToolRuntime, collectToolCalls } from './lib/tool-runtime.mjs';
 import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
 import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
+import {GenerationService,generationConfig} from './lib/generation-service.mjs';
+import {generatedMedia} from './lib/generated-media.mjs';
+import {validateNativeWorkflow} from './lib/native-workflows.mjs';
+import {convertKreaWorkflow} from './lib/native-workflow-conversion.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 20 * 1024 * 1024;
@@ -53,6 +57,7 @@ const staticFiles = new Map([
   ['/images.mjs', ['images.mjs', 'text/javascript; charset=utf-8']],
   ['/video-plan.mjs',['video-plan.mjs','text/javascript; charset=utf-8']],
   ['/comfy-ui.mjs', ['comfy-ui.mjs', 'text/javascript; charset=utf-8']],
+  ['/native-workflow-ui.mjs', ['native-workflow-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-controls.mjs', ['settings-controls.mjs', 'text/javascript; charset=utf-8']],
   ['/markdown.mjs', ['markdown.mjs', 'text/javascript; charset=utf-8']],
 ]);
@@ -118,7 +123,7 @@ function chatPayload(input, vision, maxOutputTokens, countOnly = false) {
   };
 }
 
-export async function createApplication({ port = 8787, dataDir = join(root, 'data'), publicDir = join(root,'public'), modelsDir = join(root, 'models'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null, managed = false, controlTimeoutMs = 15000, controlHeartbeatMs = 10000, controlReconnectMs = 2000, chatHeartbeatMs = 10000 } = {}) {
+export async function createApplication({ port = 8787, dataDir = join(root, 'data'), publicDir = join(root,'public'), modelsDir = join(root, 'models'), historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'), workflowDir=dataDir===join(root,'data')?join(root,'workflow'):join(dataDir,'workflow'),outputDir=dataDir===join(root,'data')?join(root,'output'):join(dataDir,'output'),generationWorker, spawnProcess, filePicker = chooseLocalFile, comfyDiscovery = discoverComfy, updateChecker = null, updateInstaller = null, managed = false, controlTimeoutMs = 15000, controlHeartbeatMs = 10000, controlReconnectMs = 2000, chatHeartbeatMs = 10000 } = {}) {
   // Keep HTML, scripts and styles paired with this running backend until restart.
   const frontend=new Map(await Promise.all([...staticFiles].map(async([path,[file,mime]])=>[path,{contents:await readFile(join(publicDir,file)),mime,file}])));
   const sources=await appSources(root);
@@ -178,7 +183,12 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   const resourceView=record=>({...record,originalUrl:`/media/resources/${record.id}/original?key=${mediaKey(record.id,'original')}`,previewUrl:record.ready?`/media/resources/${record.id}/preview?key=${mediaKey(record.id,'preview')}`:null});
   const pendingSession = await readUpdateSession(dataDir).catch(() => null);
   for (const record of pendingSession?.gallery || []) await gallery.put(record, { persist: false });
-  const runtime=new ToolRuntime({engine,catalog,gallery,resources,getConfig:()=>comfy,engineConfig:()=>config,saveConfig:saveComfy,persist:()=>preferences.saveHistory});
+  const legacyRuntime=new ToolRuntime({engine,catalog,gallery,resources,getConfig:()=>comfy,engineConfig:()=>config,saveConfig:saveComfy,persist:()=>preferences.saveHistory});
+  const generation=await new GenerationService({root,dataDir,workflowDir,outputDir,worker:generationWorker}).init();
+  const nativeRuntime=new ToolRuntime({engine,catalog:generation.catalog,gallery,resources,getConfig:()=>({...generation.config,baseUrl:'native'}),engineConfig:()=>config,
+    saveConfig:value=>generation.save(value),persist:()=>preferences.saveHistory,clientFactory:()=>generation.client()});
+  // Legacy API clients remain supported for migration; the new UI uses the native provider.
+  let runtime=comfy.enabled?legacyRuntime:nativeRuntime;
   let discovery={detected:false,baseUrl:comfy.baseUrl};
   let discoveryTime=0, discovering=null;
   async function detectComfy(){
@@ -211,9 +221,11 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       else payload.messages.unshift({role:'system',content:context});
     }
     const definitions=[];
-    if(comfy.enabled&&body.tools!==false&&(runtime.turns.get(body.turnId)||0)<comfy.maxIterations){
+    const toolConfig=runtime===nativeRuntime?generation.config:comfy,toolCatalog=runtime===nativeRuntime?generation.catalog:catalog;
+    generation.syncCapabilities();
+    if(toolConfig.enabled&&body.tools!==false&&(runtime.turns.get(body.turnId)||0)<toolConfig.maxIterations){
       for(const mediaType of ['image','video']){
-      const definition=await catalog.definition(mediaType);
+      const definition=await toolCatalog.definition(mediaType);
       if(definition){
         if(active.length&&definition.function.parameters.properties.reference_image){
           definition.function.parameters.properties.reference_resource={type:'string',description:'Active resource catalog ID to use instead of reference_image, only for workflows with an image input.'};
@@ -263,6 +275,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         if(!/^[0-9a-f]{64}$/.test(key)||!timingSafeEqual(Buffer.from(key,'hex'),Buffer.from(mediaKey(identity,'generated'),'hex')))throw problem('Accès refusé.',401);
         const record=await gallery.get(generated[1],generated[2],{includeImages:false}),source=record.outputs[Number(generated[3])]?.source;
         if(!source)throw problem('Sortie introuvable.',404);
+        if(record.provider==='native'){await sendResourceMedia(req,res,await generatedMedia(outputDir,source));return;}
         const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);
         try{const stream=await new ComfyClient(record.comfyUrl).streamVideo(source,{signal:controller.signal,range:req.headers.range});
           if(res.destroyed){await stream.body.cancel();return;}
@@ -286,10 +299,21 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (path === '/favicon.ico' && req.method === 'GET') { res.writeHead(204); return res.end(); }
       if (path === '/api/bootstrap' && req.method === 'GET') {
-        return send(200, { application: 'atelier-local', ...sources, controlled: !!controlResponse, token, config, instructions, models: await models.list(), modelName: (await models.list()).find(item=>item.modelPath===config.modelPath&&item.projectorPath===config.projectorPath)?.name || modelFolderName(config.modelPath), preferences, status: status(), comfy, workflows: await catalog.list(), platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
+        const native=await generation.snapshot();
+        return send(200, { application: 'atelier-local', ...sources, controlled: !!controlResponse, token, config, instructions, models: await models.list(), modelName: (await models.list()).find(item=>item.modelPath===config.modelPath&&item.projectorPath===config.projectorPath)?.name || modelFolderName(config.modelPath), preferences, status: status(), comfy, workflows: await catalog.list(),generation:native.config,runner:native.runner,nativeWorkflows:native.workflows, platform: process.platform, warning: configWarning, version: applicationVersion, updateNonce: process.env.ATELIER_UPDATE_NONCE || '', updating: applyingUpdate });
       }
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Recharge la page.', 401);
+      if(req.method==='GET'&&path==='/api/generation')return send(200,await generation.snapshot());
+      if(req.method==='GET'&&path==='/api/generation/assets')return send(200,{assets:await generation.assets.list()});
+      if(req.method==='GET'&&path==='/api/generation/workflows')return send(200,{workflows:await generation.catalog.list()});
+      if(req.method==='GET'&&path.startsWith('/api/generation/workflows/'))return send(200,await generation.catalog.read(decodeURIComponent(path.slice('/api/generation/workflows/'.length))));
+      if(req.method==='GET'&&path==='/api/generation/templates'){
+        const folder=join(root,'runner','templates'),templates=[];
+        const {readdir}=await import('node:fs/promises');
+        for(const file of await readdir(folder)){if(file.endsWith('.json'))templates.push(JSON.parse(await readFile(join(folder,file),'utf8')));}
+        const family=requestURL.searchParams.get('pipeline');return send(200,family?{template:templates.find(t=>t.pipeline===family)}:{templates});
+      }
       if (path === '/api/lifecycle' && req.method === 'GET') {
         if (closing || controlResponse) throw problem('Une fenêtre contrôle déjà cette application.', 409);
         controlResponse = res; controlledOnce = true; clearTimeout(controlTimer);
@@ -332,6 +356,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         if(res.destroyed)return;
         if(index===undefined)return send(200,galleryView(record));
         if(!/^\d+$/.test(index)||!record.outputs[Number(index)])throw problem('Image introuvable.',404);
+        if(record.provider==='native'){await sendResourceMedia(req,res,await generatedMedia(outputDir,record.outputs[Number(index)].source));return;}
         if(record.mediaType==='video'){res.writeHead(307,{Location:galleryView(record).outputs[Number(index)].originalUrl});return res.end();}
         const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);
         try{
@@ -348,6 +373,19 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if (req.method !== 'POST') throw problem('Méthode non prise en charge.', 405);
       const body = await jsonBody(req, path === '/api/updates/install' ? 40 * 1024 * 1024 : maxBody);
+      if(path.startsWith('/api/generation/')){
+        if(runtime.active||engine.busy||clearingHistory||savingSettings||savingComfy||pickingFile)throw problem('Attends la fin de l’opération en cours.',409);
+        savingComfy=true;
+        try{
+          if(path==='/api/generation/config'){const result=await generation.save(body);runtime=nativeRuntime;return send(200,result);}
+          if(path==='/api/generation/test'){if(body.config||body.pythonPath!==undefined)await generation.save(body.config||body);await generation.start();return send(200,await generation.snapshot());}
+          if(path==='/api/generation/assets'){const {pipeline:familyAlias,...asset}=body;return send(200,await generation.assets.register({...asset,family:body.family||familyAlias}));}
+          if(path==='/api/generation/workflows')return send(200,await generation.catalog.save(body));
+          if(path==='/api/generation/convert-krea')return send(200,await convertKreaWorkflow(body.sourcePath,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot,backupDir:join(dataDir,'migration'),name:body.name,description:body.description}));
+          if(path==='/api/generation/remove'){await generation.catalog.remove(body.id);return send(200,{removed:true});}
+          throw problem('Route de génération introuvable.',404);
+        }finally{savingComfy=false;}
+      }
       if (applyingUpdate) throw problem('Installation de la mise à jour en cours.', 409);
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw problem('Un objet JSON est attendu.');
       if (path === '/api/shutdown') {
@@ -418,7 +456,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return send(202, { state: 'preparing' });
       }
       if(path==='/api/files/choose'){
-        if(!['engine','model','projector'].includes(body?.kind))throw problem('Type de fichier invalide.');
+        if(!['engine','model','projector','generation','python','tokenizer'].includes(body?.kind))throw problem('Type de fichier invalide.');
         if(saving||savingSettings||savingComfy||pickingFile)throw problem('Un choix de fichier ou un enregistrement est déjà en cours.',409);
         if(runtime.active||engine.busy||body.kind==='engine'&&engine.child||['loading','stopping'].includes(engine.state))throw problem('Arrête le modèle avant de choisir un fichier.',409);
         pickingFile=true;const controller=new AbortController();const abort=()=>controller.abort();res.once('close',abort);
@@ -427,7 +465,8 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if(path==='/api/settings'){
         if(pickingFile||savingSettings||savingComfy||saving||runtime.active||engine.busy||clearingHistory)throw problem('Attends la fin de l’opération en cours.',409);
-        const nextConfig=normalizeConfig(body.config),nextComfy=normalizeComfy(body.comfy),nextInstructions=globalContext(body.instructions===undefined?instructions:body.instructions);
+        const nativeSettings=body.generation!==undefined;
+        const nextConfig=normalizeConfig(body.config),nextComfy=nativeSettings?generationConfig(body.generation):normalizeComfy(body.comfy),nextInstructions=globalContext(body.instructions===undefined?instructions:body.instructions);
         const modelChanged=JSON.stringify(config)!==JSON.stringify(nextConfig);
         if(modelChanged&&(engine.child||['loading','stopping'].includes(engine.state)))throw problem('Arrête le modèle avant de modifier ses réglages.',409);
         const edits=body.workflowDescriptions===undefined?[]:body.workflowDescriptions;
@@ -437,14 +476,14 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
           const updates=[];
           for(const edit of edits){
             if(typeof edit?.description!=='string'||edit.description.length>2000)throw problem('Description de workflow invalide.');
-            updates.push(validateWorkflow({...await catalog.read(edit.id),description:edit.description.trim()}));
+            updates.push((nativeSettings?validateNativeWorkflow:validateWorkflow)({...await (nativeSettings?generation.catalog:catalog).read(edit.id),description:edit.description.trim()}));
           }
           if(modelChanged){await writeFile(`${configPath}.tmp`,JSON.stringify(nextConfig,null,2),{mode:0o600});await rename(`${configPath}.tmp`,configPath);config=nextConfig;configWarning='';}
-          await saveComfy(nextComfy);
-          for(const update of updates)await catalog.save(update);
+          if(nativeSettings){await generation.save(nextComfy);runtime=nativeRuntime;}else await saveComfy(nextComfy);
+          for(const update of updates)await (nativeSettings?generation.catalog:catalog).save(update);
           if(nextInstructions!==instructions){await atomicJson(instructionsPath,{instructions:nextInstructions});instructions=nextInstructions;}
           discoveryTime=0;
-          return send(200,{config,comfy,instructions,workflows:await catalog.list()});
+          return send(200,{config,comfy,instructions,workflows:await catalog.list(),generation:generation.config,runner:generation.worker.status(),nativeWorkflows:await generation.catalog.list()});
         }finally{savingSettings=false;saving=false;}
       }
       if(path==='/api/comfy/test'){
@@ -491,7 +530,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       }
       if(path.startsWith('/api/comfy/')){
         if(runtime.active||engine.busy||clearingHistory||savingSettings||savingComfy||pickingFile)throw problem('Attends la fin de l’opération GPU.',409);
-        if(path==='/api/comfy/config'){await saveComfy(body);return send(200,{config:comfy});}
+        if(path==='/api/comfy/config'){await saveComfy(body);runtime=legacyRuntime;return send(200,{config:comfy});}
         if(path==='/api/comfy/import'||path==='/api/comfy/remove'){
           savingComfy=true;
           try{
@@ -650,6 +689,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   server.headersTimeout = 15000;
   await new Promise((yes, no) => { server.once('error', no); server.listen(port, '127.0.0.1', yes); });
   url = `http://127.0.0.1:${server.address().port}`;
+  if(managed||generation.config.enabled)void generation.start().catch(()=>{});
   if (updateChecker) updates = Promise.resolve().then(() => updateChecker({ signal: updateController.signal })).catch(() => ({ available: false }));
   let closing,relaunching=false;
   if (managed) { controlTimer = setTimeout(() => { void stopApplication().catch(console.error); }, controlTimeoutMs); controlTimer.unref(); }
@@ -658,7 +698,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       clearTimeout(controlTimer);
       const serverClosed = new Promise(done => server.close(done));
       updateController.abort(); await updates;
-      await resources.close(); await modelOperation; await models.pending; await runtime.close(); await engine.stop();
+      await resources.close(); await modelOperation; await models.pending; await nativeRuntime.close();await legacyRuntime.close();await generation.close();await engine.stop();
       await projects.pending; await historySaves; await history.flush(); await galleryBatch.catch(() => {}); await gallery.pending;
       if (controlResponse && !controlResponse.destroyed) controlResponse.end(JSON.stringify({ state: applyingUpdate ? 'restarting' : 'stopped' }) + '\n');
       server.closeAllConnections();

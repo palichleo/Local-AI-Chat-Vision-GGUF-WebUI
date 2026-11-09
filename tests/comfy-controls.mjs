@@ -15,7 +15,7 @@ class Element {
 }
 async function fixture(fn){
  const previousDocument=globalThis.document,previousOption=globalThis.Option;
- const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8');
+ const html=await readFile(new URL('./fixtures/legacy-comfy-settings.html',import.meta.url),'utf8');
  const nodes=new Map([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element()]));
  const all=[];const details=new Element('details');
  globalThis.Option=class {constructor(text,value){this.text=text;this.value=value;}};

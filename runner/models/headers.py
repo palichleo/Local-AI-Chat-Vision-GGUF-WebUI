@@ -66,16 +66,21 @@ def validate_components(job):
             if entry['dtype']=='I8' and key.endswith('.weight'):
                 scale=entries.get(key[:-7]+'.weight_scale',{})
                 if scale.get('shape') not in ([],[entry['shape'][0],1]):raise ValueError('Missing/incompatible INT8 scale: '+key)
-    for item in job['loras']:
-        entries=header(item['path']); count=0
-        for key,entry in entries.items():
-            if not key.endswith('.lora_A.weight'):continue
-            stem=key.removesuffix('.lora_A.weight')
-            target=stem.removeprefix('model.diffusion_model.').removeprefix('diffusion_model.')+'.weight'
-            pair=entries.get(stem+'.lora_B.weight',{}).get('shape',[])
-            shape=entry['shape']; base=headers['model'].get(target,{}).get('shape',[])
-            if len(base)!=2 or len(shape)!=2 or len(pair)!=2 or shape[0]!=pair[1] or [pair[0],shape[1]]!=base:
-                raise ValueError('Incompatible LoRA target/pair: '+key)
-            count+=1
-        if not count:raise ValueError('Incompatible LoRA: no supported pairs')
+    for item in job['loras']:validate_lora(header(item['path']),headers['model'])
     return headers
+
+
+def validate_lora(entries, model):
+    accepted={'__metadata__'};count=0
+    for key,entry in entries.items():
+        if not key.endswith('.lora_A.weight'):continue
+        stem=key.removesuffix('.lora_A.weight')
+        target=stem.removeprefix('model.diffusion_model.').removeprefix('diffusion_model.')+'.weight'
+        pair_key=stem+'.lora_B.weight'
+        pair=entries.get(pair_key,{}).get('shape',[])
+        shape=entry['shape']; base=model.get(target,{}).get('shape',[])
+        if len(base)!=2 or len(shape)!=2 or len(pair)!=2 or shape[0]<=0 or shape[0]!=pair[1] or [pair[0],shape[1]]!=base:
+            raise ValueError('Incompatible LoRA target/pair: '+key)
+        accepted.update((key,pair_key,stem+'.alpha'));count+=1
+        if stem+'.alpha' in entries and math.prod(entries[stem+'.alpha']['shape'])!=1:raise ValueError('Invalid LoRA alpha')
+    if not count or entries.keys()-accepted:raise ValueError('Incompatible LoRA: unsupported or orphan tensors')

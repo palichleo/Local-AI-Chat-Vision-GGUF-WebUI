@@ -38,7 +38,7 @@ test('unknown old project associations stay visible in the default group and sor
 
 test('logo navigation keeps the current messages and draft and closes the mobile tree',async()=>{
  const source=await readFile(new URL('../public/app.js',import.meta.url),'utf8'),state={projectWorking:false,status:{},view:'chat',messages:[{role:'user',content:'Keep'}]},prompt={value:'An unsent draft'},attributes={},document={body:{dataset:{navOpen:'true'}}};let pending,saves=0,renders=0;
- const context={updateControls(){},notice(){},state,document,$:id=>id==='prompt'?prompt:{setAttribute:(name,value)=>attributes[name]=value},assetsUI:{flush:async()=>true},persistConversation:async()=>{saves++;return true;},settingsGuard:{requestClose:action=>{pending=action();}},projectUI:{render:()=>renders++}};
+ const context={requestSettingsClose:action=>context.settingsGuard.requestClose(action),updateControls(){},notice(){},state,document,$:id=>id==='prompt'?prompt:{setAttribute:(name,value)=>attributes[name]=value},assetsUI:{flush:async()=>true},persistConversation:async()=>{saves++;return true;},settingsGuard:{requestClose:action=>{pending=action();}},projectUI:{render:()=>renders++}};
  runInNewContext(source.slice(source.indexOf('function closeNavigation('),source.indexOf('async function newConversation('))+';this.show=showHome;',context);context.show();await pending;
  assert.equal(state.view,'home');assert.deepEqual(state.messages,[{role:'user',content:'Keep'}]);assert.equal(prompt.value,'An unsent draft');assert.equal(document.body.dataset.navOpen,'false');assert.equal(saves,1);assert.equal(renders,1);
 });
@@ -53,14 +53,14 @@ test('Home uses the existing return action and indicates the current view withou
 
 test('Home locks navigation while pending descriptions and saves complete',async()=>{
  const source=await readFile(new URL('../public/app.js',import.meta.url),'utf8'),state={status:{},view:'chat'},document={body:{dataset:{}}};let release,pending;
- const gate=new Promise(resolve=>{release=resolve;}),context={state,document,$:()=>({setAttribute(){}}),updateControls(){},notice(){},assetsUI:{flush:()=>gate},persistConversation:async()=>true,settingsGuard:{requestClose:action=>{pending=action();}},projectUI:{render(){}}};
+ const gate=new Promise(resolve=>{release=resolve;}),context={requestSettingsClose:action=>context.settingsGuard.requestClose(action),state,document,$:()=>({setAttribute(){}}),updateControls(){},notice(){},assetsUI:{flush:()=>gate},persistConversation:async()=>true,settingsGuard:{requestClose:action=>{pending=action();}},projectUI:{render(){}}};
  runInNewContext(source.slice(source.indexOf('function closeNavigation('),source.indexOf('async function newConversation('))+';this.home=showHome;',context);
  try{context.home();assert.equal(state.loadingHistory,true);}finally{release(true);await pending;}
  assert.equal(state.loadingHistory,false);assert.equal(state.view,'home');
 });
 test('a deferred Home action never hides a response that started while settings confirmation was pending',async()=>{
  const source=await readFile(new URL('../public/app.js',import.meta.url),'utf8'),state={status:{},view:'chat'};let deferred,flushes=0;
- const context={state,document:{body:{dataset:{}}},$:()=>({setAttribute(){}}),updateControls(){},notice(){},assetsUI:{flush:async()=>{flushes++;return true;}},persistConversation:async()=>true,settingsGuard:{requestClose:action=>{deferred=action;}},projectUI:{render(){}}};
+ const context={requestSettingsClose:action=>context.settingsGuard.requestClose(action),state,document:{body:{dataset:{}}},$:()=>({setAttribute(){}}),updateControls(){},notice(){},assetsUI:{flush:async()=>{flushes++;return true;}},persistConversation:async()=>true,settingsGuard:{requestClose:action=>{deferred=action;}},projectUI:{render(){}}};
  runInNewContext(source.slice(source.indexOf('function closeNavigation('),source.indexOf('async function newConversation('))+';this.home=showHome;',context);context.home();state.generating=true;await deferred();assert.equal(state.view,'chat');assert.equal(flushes,0);
 });
 test('closing All files pauses media before hiding the panel',async()=>{
@@ -72,7 +72,7 @@ test('failed Home preparation keeps the chat visible and releases navigation con
  const source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
  for(const failure of [false,new Error('Description save failed')]){
   const state={status:{},view:'chat'};let pending,renders=0,notices=[];
-  const context={state,document:{body:{dataset:{}}},$:()=>({setAttribute(){}}),updateControls(){},notice:text=>notices.push(text),assetsUI:{flush:async()=>{if(failure)throw failure;return false;}},persistConversation:async()=>{throw Error('Must not save');},settingsGuard:{requestClose:action=>{pending=action();}},projectUI:{render:()=>renders++}};
+  const context={requestSettingsClose:action=>context.settingsGuard.requestClose(action),state,document:{body:{dataset:{}}},$:()=>({setAttribute(){}}),updateControls(){},notice:text=>notices.push(text),assetsUI:{flush:async()=>{if(failure)throw failure;return false;}},persistConversation:async()=>{throw Error('Must not save');},settingsGuard:{requestClose:action=>{pending=action();}},projectUI:{render:()=>renders++}};
   runInNewContext(source.slice(source.indexOf('function closeNavigation('),source.indexOf('async function newConversation('))+';this.home=showHome;',context);context.home();await pending;assert.equal(state.view,'chat');assert.equal(state.loadingHistory,false);assert.equal(renders,0);assert.equal(notices.length,failure?1:0);
  }
 });

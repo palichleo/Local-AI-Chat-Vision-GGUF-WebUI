@@ -156,4 +156,3 @@ def rotation_matrix(size, torch, device, dtype):
     while result.shape[0] < size:
         result = torch.kron(result, base)
     return result/math.sqrt(size)
-
