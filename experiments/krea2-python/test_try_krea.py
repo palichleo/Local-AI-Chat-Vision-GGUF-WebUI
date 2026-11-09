@@ -1,12 +1,53 @@
 """Small offline checks: graph selection and ConvRot algebra, no model loading."""
 import unittest
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
-from try_krea import HERE, Workflow, rotation_matrix
+from try_krea import HERE, Workflow, rotation_matrix, worker_job
 from profile_krea import summarize
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_worker_job_boundary(self):
+        args=SimpleNamespace(width=512,profile=False)
+        job=worker_job(args,{'width':768,'profile':True})
+        self.assertEqual(job.width,768)
+        self.assertEqual(args.width,512)
+        for invalid in ({'profile':'false'},{'width':True},{'unknown':1},[]):
+            with self.assertRaises(ValueError):worker_job(args,invalid)
+
+    def test_fused_lora_in_convrot_basis(self):
+        import torch
+        from fast_krea import fuse
+        torch.manual_seed(4)
+        h=rotation_matrix(256,torch,'cpu',torch.float32)
+        w=torch.randn(128,256)*.05
+        scale=w.abs().amax(-1,keepdim=True)/127
+        q=(w/scale).round().clamp(-127,127).to(torch.int8)
+        adapters=[(torch.randn(8,256)*.02,torch.randn(128,8)*.02,strength) for strength in (.55,.18,-.1)]
+        packed,error=fuse(q,scale,h,adapters)
+        expected=q.float()*scale
+        expected=expected@h
+        for a,b,strength in adapters:expected=expected+(b@a)*strength
+        actual=(packed['weight'].float()*packed['scale'])@h
+        self.assertLess(error,.02)
+        self.assertLess(((actual-expected).square().mean()/expected.square().mean()).sqrt().item(),.02)
+        empty,error=fuse(torch.zeros(8,256,dtype=torch.int8),torch.ones(8,1),h,[])
+        self.assertTrue(torch.isfinite(empty['scale']).all())
+        self.assertEqual(error,0)
+
+    def test_prepared_cache_identity(self):
+        from fast_krea import cache_key
+        with tempfile.TemporaryDirectory() as folder:
+            model=Path(folder)/'model';model.write_bytes(b'model')
+            adapter=Path(folder)/'adapter';adapter.write_bytes(b'adapter')
+            key=cache_key(model,[({'strength':.5},adapter)])
+            self.assertEqual(key,cache_key(model,[({'strength':.5},adapter)]))
+            self.assertNotEqual(key,cache_key(model,[({'strength':.6},adapter)]))
+            model.write_bytes(b'updated model')
+            self.assertNotEqual(key,cache_key(model,[({'strength':.5},adapter)]))
+
     def test_profile_ignores_duplicate_cuda_annotations(self):
         def event(key,cuda,device='DeviceType.CPU'):
             return SimpleNamespace(key=key,device_type=device,count=1,cpu_time_total=20,

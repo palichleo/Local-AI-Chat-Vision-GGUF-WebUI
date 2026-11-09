@@ -47,3 +47,5 @@ These are **warm filesystem-cache** measurements. The Comfy server was already r
 Conclusion: the current standalone prototype is substantially slower on this machine. Its repeated per-matrix transfers and BF16 execution of dequantized weights are optimization candidates; the timing comparison alone does not quantify each cause. It does not yet match the speed of the installed Comfy implementation. Linux was deliberately left untested, and image quality was not re-evaluated in this speed check.
 
 The subsequent [CPU/CUDA profile](PROFILE.md) quantifies the native diffusion step: adapter calculations cost almost as much as base linear operations, while attributed uploads account for about 14% of CUDA work. Synchronous CPU upload waits alone would overstate the pure transfer cost.
+
+The [optimized follow-up](OPTIMIZED.md) implements prepared LoRA weights, standalone INT8 kernels, GPU retention and a persistent worker. It substantially improves the measured native time, with additional first-use preparation cost and disk usage. The timings above remain the reference-engine baseline.

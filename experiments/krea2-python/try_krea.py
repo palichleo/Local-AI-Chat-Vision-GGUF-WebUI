@@ -157,6 +157,8 @@ def execute(args, workflow, plan, files):
     dtype, device = torch.bfloat16, 'cuda'
     scope = torch.profiler.record_function if args.profile else lambda _:nullcontext()
     profile_report = None
+    prepared = None
+    prepared_stats = None
     start = time.perf_counter(); torch.cuda.reset_peak_memory_stats()
 
     def progress(stage, **extra):
@@ -269,6 +271,12 @@ def execute(args, workflow, plan, files):
         weights = safe_open(str(files['transformer']), framework='pt', device='cpu')
         adapters = [(safe_open(str(path),framework='pt',device='cpu'), item['strength']) for item,path in files['loras']]
         rotations = {}
+        if args.engine=='int8':
+            from fast_krea import PreparedWeights,PreparedLinear
+            available=torch.cuda.mem_get_info()[0]/1024**3
+            budget=max(0,min(6.0,available-3.5))
+            if args.cache_gib is not None:budget=min(budget,args.cache_gib)
+            prepared=PreparedWeights(files,weights,args.cache_root,budget,scope,progress)
 
         class StreamingLinear(torch.nn.Module):
             def __init__(self, name, original):
@@ -313,13 +321,21 @@ def execute(args, workflow, plan, files):
         for name,module in list(transformer.named_modules()):
             if isinstance(module,torch.nn.Linear):
                 if name+'.weight' not in rename: raise ValueError('Missing transformer matrix: '+name)
-                transformer.set_submodule(name,StreamingLinear(name,rename[name+'.weight']))
+                original=rename[name+'.weight']
+                linear=StreamingLinear(name,original)
+                if prepared is not None:
+                    linear=PreparedLinear(original,linear.adapters,rotations.get(linear.rotation_size),prepared)
+                transformer.set_submodule(name,linear)
         for key,parameter in list(transformer.named_parameters()):
             if key not in rename: raise ValueError('Missing transformer weight: '+key)
             value=tensor(weights,rename[key])
             if value.numel()!=parameter.numel(): raise ValueError('Transformer shape mismatch: '+key)
             set_module_tensor_to_device(transformer,key,device,value=value.reshape(parameter.shape),dtype=dtype)
         transformer.eval().to(device)
+        if prepared is not None:
+            # Prepared layers own their files; release the original mmap pages before sampling.
+            prepared.source=None
+            weights.__exit__(None,None,None)
         steps=plan['steps']; denoise=plan['denoise']
         if not 0 < denoise <= 1: raise ValueError('Denoise must be in (0,1]')
         total_steps=max(steps,int(steps/denoise))
@@ -329,6 +345,7 @@ def execute(args, workflow, plan, files):
         latents=noise*sigmas[0]+source*(1-sigmas[0]); del noise,source
         gh,gw=(height+1)//2,(width+1)//2
         positions=Krea2Pipeline.prepare_position_ids(conditioning.shape[1],gh,gw,device)
+        release(); progress('denoising ready',engine=args.engine)
         for i in range(steps):
             sample = args.profile and i==min(1,steps-1)
             if sample:
@@ -349,6 +366,8 @@ def execute(args, workflow, plan, files):
                 del capture; gc.collect()
                 progress('profiled step',profile=profile_report)
             progress('denoising',step=i+1,total=steps)
+        if prepared is not None:
+            prepared_stats=prepared.stats(); prepared.clear()
         del transformer,conditioning,prediction,packed,padded,adapters,weights
         release(); progress('decoding image')
         vae.to(device)
@@ -358,13 +377,41 @@ def execute(args, workflow, plan, files):
         destination=Path(args.output);destination.mkdir(parents=True,exist_ok=True)
         prefix=Path(plan['output_prefix'].replace('\\','/')).name
         output=destination/(prefix+'_'+str(plan['seed'])+'_'+str(time.time_ns())+'.png')
-        comfy_imported=any(k in ('comfy','comfy_kitchen') or k.startswith(('comfy.','comfy_kitchen.')) for k in __import__('sys').modules)
+        comfy_imported=any(k=='comfy' or k.startswith('comfy.') for k in sys.modules)
         if comfy_imported: raise RuntimeError('Unexpected Comfy module import')
-        metadata=dict(plan=plan,seconds=round(time.perf_counter()-start,2),peak_vram_gib=round(torch.cuda.max_memory_allocated()/1024**3,3),backend='pytorch-diffusers-streaming',comfy_imported=comfy_imported)
+        metadata=dict(plan=plan,seconds=round(time.perf_counter()-start,2),peak_vram_gib=round(torch.cuda.max_memory_allocated()/1024**3,3),backend='pytorch-diffusers-'+args.engine,comfy_imported=comfy_imported,
+                      kernel_library='comfy_kitchen' if args.engine=='int8' else None)
+        if prepared_stats is not None:metadata['prepared_weights']=prepared_stats
         if profile_report is not None: metadata['profile']=profile_report
         info=PngImagePlugin.PngInfo();info.add_text('atelier',json.dumps(metadata,ensure_ascii=False));Image.fromarray(pixels).save(output,pnginfo=info)
         output.with_suffix('.json').write_text(json.dumps(metadata,indent=2,ensure_ascii=False),encoding='utf-8')
         progress('complete',output=str(output),peak_vram_gib=metadata['peak_vram_gib'],comfy_imported=metadata['comfy_imported'])
+        return str(output)
+
+
+def run(args):
+    workflow=Workflow(args.workflow,args.width,args.height,args.no_refine,args.image);plan=workflow.plan()
+    for key in ('width','height'):
+        if not isinstance(plan[key],int) or plan[key]<64 or plan[key]%8: raise ValueError('Resolution must be a positive multiple of 8, at least 64')
+    if args.cache_gib is not None and (not math.isfinite(args.cache_gib) or args.cache_gib<0):
+        raise ValueError('GPU cache size must be finite and nonnegative')
+    if args.engine not in ('stream','int8'):raise ValueError('Unknown engine')
+    files={key:locate(args.models_root,plan[key]) for key in ('transformer','encoder','vae')}
+    files['loras']=[(item,locate(args.models_root,item['file'])) for item in plan['loras']]
+    if args.inspect:
+        print(json.dumps(dict(plan=plan,files={k:str(v) for k,v in files.items() if k!='loras'}),indent=2,ensure_ascii=False));return
+    if plan['image'] and not Path(plan['image']).is_file(): raise ValueError('Input image does not exist: '+plan['image'])
+    return execute(args,workflow,plan,files)
+
+
+def worker_job(args, request):
+    fields={'workflow':str,'width':int,'height':int,'no_refine':bool,'image':str,
+            'output':str,'engine':str,'profile':bool,'cache_gib':(int,float)}
+    if not isinstance(request,dict) or request.keys()-fields.keys():raise ValueError('Unsupported worker job fields')
+    for key,value in request.items():
+        if not isinstance(value,fields[key]) or (type(value) is bool and fields[key] is not bool):
+            raise ValueError('Invalid worker field: '+key)
+    return argparse.Namespace(**(vars(args)|request))
 
 
 def main():
@@ -376,19 +423,31 @@ def main():
     parser.add_argument('--image');parser.add_argument('--no-refine',action='store_true')
     parser.add_argument('--inspect',action='store_true');parser.add_argument('--output',default=str(HERE/'outputs'))
     parser.add_argument('--profile',action='store_true',help='Profile the second diffusion step with CPU/CUDA attribution')
+    parser.add_argument('--engine',choices=('stream','int8'),default='stream')
+    parser.add_argument('--cache-root',default=str(HERE/'outputs'/'weights-cache'))
+    parser.add_argument('--cache-gib',type=float,help='Maximum GPU weight cache; automatic limit reserves activation memory')
+    parser.add_argument('--worker',action='store_true',help='Read JSON jobs on stdin, reuse imports, release models between jobs')
     args=parser.parse_args()
     local=json.loads(args.config.read_text(encoding='utf-8')) if args.config.exists() else {}
     args.models_root=args.models_root or local.get('models_root');args.tokenizer=args.tokenizer or local.get('tokenizer')
-    workflow=Workflow(args.workflow,args.width,args.height,args.no_refine,args.image);plan=workflow.plan()
-    for key in ('width','height'):
-        if plan[key]<64 or plan[key]%8: raise ValueError('Resolution must be a positive multiple of 8, at least 64')
     if not args.models_root or not args.tokenizer: parser.error('Provide --models-root and --tokenizer, or an ignored local.json')
-    files={key:locate(args.models_root,plan[key]) for key in ('transformer','encoder','vae')}
-    files['loras']=[(item,locate(args.models_root,item['file'])) for item in plan['loras']]
-    if args.inspect:
-        print(json.dumps(dict(plan=plan,files={k:str(v) for k,v in files.items() if k!='loras'}),indent=2,ensure_ascii=False));return
-    if plan['image'] and not Path(plan['image']).is_file(): parser.error('Input image does not exist: '+plan['image'])
-    execute(args,workflow,plan,files)
+    if not args.worker:
+        run(args); return
+    for line in sys.stdin:
+        try:
+            request=json.loads(line)
+            job=worker_job(args,request)
+            started=time.perf_counter(); output=run(job)
+            response={'stage':'job complete','output':output,'job_wall_seconds':round(time.perf_counter()-started,3)}
+        except Exception as exc:
+            response={'stage':'job error','error':str(exc)}
+        finally:
+            if 'torch' in sys.modules:
+                torch=sys.modules['torch']; gc.collect()
+                if torch.cuda.is_initialized():
+                    torch.cuda.synchronize(); torch.cuda.empty_cache()
+                    response['idle_gpu_allocated_gib']=round(torch.cuda.memory_allocated()/1024**3,6)
+        print(json.dumps(response,ensure_ascii=False),flush=True)
 
 
 if __name__=='__main__':
