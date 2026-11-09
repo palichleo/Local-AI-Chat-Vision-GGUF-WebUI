@@ -1,5 +1,5 @@
 import { renderVideoPlan } from './video-plan.mjs';
-import { prepareVideo } from './resource-preparation.mjs';
+import { prepareStoryboard } from './resource-preparation.mjs';
 import { compressImage } from './images.mjs';
 
 /**
@@ -228,17 +228,17 @@ export function setupGenerationRuntime({
             }
             if (record.mediaType === 'video') {
               if (!output.originalUrl) throw Error('Lien de lecture vidéo indisponible.');
-              const video = await prepareVideo(output.originalUrl, {
+              const video = await prepareStoryboard(output.originalUrl, {
                 signal: originalsSignal,
                 name: output.source.filename,
-                frameCount: Math.max(1, Math.min(3, Math.floor(64 / record.outputs.length))),
-                totalFrames: Math.min(64, record.outputs.length * 3),
+                fps: record.parameters.fps || 24,
               });
               prepared[index] = {
                 url: video.frames[0].url,
                 width: video.width,
                 height: video.height,
                 frames: video.frames,
+                storyboard: video.storyboard,
               };
             } else {
               const image = await compressImage(blob, { name: output.source.filename, count: record.outputs.length });
@@ -303,6 +303,7 @@ export function setupGenerationRuntime({
       let images = [],
         dimensions = record.outputs.map(() => null),
         frames = record.outputs.map(() => null),
+        storyboards = record.outputs.map(() => null),
         analysisOutputs = [],
         error =
           job.state === 'done' ? '' : job.error || 'La génération a été interrompue après production de la sortie.';
@@ -318,12 +319,14 @@ export function setupGenerationRuntime({
           signal.throwIfAborted();
           const image = originals.prepared[index];
           if (!image) continue;
-          const copies = image.frames ? image.frames.map(frame => frame.url) : [image.url];
+          // A video reaches the model as one storyboard image; an image as its compressed copy.
+          const copies = image.storyboard ? [image.storyboard.url] : [image.url];
           analysisOutputs.push({
             output_index: index,
             image_indices: copies.map((_, offset) => images.length + offset),
           });
           frames[index] = image.frames || null;
+          storyboards[index] = image.storyboard || null;
           images.push(...copies);
           record.outputs[index].analysisDataUrl = image.url;
           const size = image.width && image.height ? { width: image.width, height: image.height } : null;
@@ -391,12 +394,13 @@ export function setupGenerationRuntime({
             ? {
                 analysis_outputs: analysisOutputs,
                 stage: record.parameters.stage,
-                frame_times: frames.map((items, index) => ({
+                storyboards: storyboards.map((board, index) => ({
                   output: index,
-                  times: items?.map(frame => frame.time) || [],
+                  layout: board ? `${board.columns}x${board.rows}` : null,
+                  times: board?.times.map(time => Math.round(time * 100) / 100) || [],
                 })),
                 inspection_limit:
-                  'Only sampled compressed frames, without audio. Cannot verify continuous motion or exact last frames from these samples.',
+                  'Each attached image is a storyboard of one output: frames read left to right then top to bottom, each stamped with its order and time in seconds. It shows the progression of the clip, not continuous motion; no audio.',
               }
             : {}),
           reference_count: record.parameters?.reference_count ?? null,
