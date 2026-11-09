@@ -1,4 +1,4 @@
-import { renderVideoPlan } from './video-plan.mjs';
+import { renderVideoEditor, renderVideoPlan } from './video-plan.mjs';
 import { prepareStoryboard } from './resource-preparation.mjs';
 import { compressImage } from './images.mjs';
 
@@ -62,11 +62,16 @@ export function setupGenerationRuntime({
         summary.setAttribute('aria-label', 'Afficher ou réduire le prompt');
         summary.append(node('span', '', record.prompt));
         prompt.append(summary);
-        card.append(
-          node('strong', '', record.workflowName),
-          prompt,
-          node('small', '', new Date(record.createdAt).toLocaleString('fr-FR')),
-        );
+        card.append(node('strong', '', record.workflowName), prompt);
+        if (record.parameters.expanded_prompt) {
+          const expanded = node('details', 'output-prompt output-prompt-enhanced'),
+            label = node('summary');
+          label.append(node('span', '', 'Prompt amélioré : ' + record.parameters.expanded_prompt));
+          label.setAttribute('aria-label', 'Afficher ou réduire le prompt amélioré');
+          expanded.append(label);
+          card.append(expanded);
+        }
+        card.append(node('small', '', new Date(record.createdAt).toLocaleString('fr-FR')));
         const labels = { reviewed: 'Analyse disponible', correction_requested: 'Nouvelle génération demandée' };
         card.append(
           node(
@@ -120,11 +125,13 @@ export function setupGenerationRuntime({
   async function permission(request, signal) {
     const video = request.mediaType === 'video';
     if (request.autoAllow && !video) return undefined;
-    $('tool-title').textContent = video
-      ? request.plan?.stage === 'draft'
-        ? 'Brouillon vidéo · Confirmer ?'
-        : 'Vidéo finale · Confirmer ?'
-      : 'Autoriser la génération ?';
+    const title = () =>
+      ($('tool-title').textContent = video
+        ? request.plan?.stage === 'draft'
+          ? 'Brouillon vidéo · Confirmer ?'
+          : 'Vidéo finale · Confirmer ?'
+        : 'Autoriser la génération ?');
+    title();
     $('tool-name').textContent = request.workflowName;
     $('tool-arguments').textContent =
       JSON.stringify(request.args, null, 2) + (request.notes?.length ? '\n\n' + request.notes.join('\n') : '');
@@ -132,10 +139,19 @@ export function setupGenerationRuntime({
     $('tool-plan').hidden = !video;
     $('tool-always').hidden = video;
     $('tool-always').disabled = video;
-    $('tool-revise').hidden = !video;
+    $('tool-revise').hidden = !video || !request.plan?.editable;
     $('tool-once').textContent = video ? 'Confirmer et générer' : 'Cette fois';
-    $('tool-deny').textContent = video ? 'Annuler' : 'Refuser';
-    if (video) renderVideoPlan($('tool-plan'), request, node);
+    // Reading mode: the proposal as it will run. Editing mode: the same proposal as a form.
+    let editor = null,
+      saving = false;
+    function read() {
+      editor = null;
+      $('tool-revise').textContent = 'Modifier';
+      $('tool-deny').textContent = video ? 'Annuler' : 'Refuser';
+      $('tool-once').disabled = false;
+      if (video) renderVideoPlan($('tool-plan'), request, node);
+    }
+    read();
     $('tool-dialog').showModal();
     return new Promise((resolve, reject) => {
       const finish = value => {
@@ -144,8 +160,43 @@ export function setupGenerationRuntime({
       };
       const cancel = event => {
         event?.preventDefault();
-        finish('deny');
+        if (editor) read();
+        else finish('deny');
       };
+      async function revise() {
+        if (!editor) {
+          editor = renderVideoEditor($('tool-plan'), request, node);
+          $('tool-revise').textContent = 'Appliquer';
+          $('tool-deny').textContent = 'Retour';
+          $('tool-once').disabled = true;
+          return;
+        }
+        if (saving) return;
+        let edits;
+        try {
+          edits = editor.edits();
+        } catch (error) {
+          editor.error(error.message);
+          return;
+        }
+        if (!Object.keys(edits).length) return read();
+        saving = true;
+        $('tool-revise').disabled = true;
+        try {
+          const revised = await (
+            await api('tools/revise', { requestId: request.requestId, approvalToken: request.approvalToken, edits })
+          ).json();
+          if (signal.aborted) return;
+          Object.assign(request, revised);
+          title();
+          read();
+        } catch (error) {
+          editor?.error(error.message);
+        } finally {
+          saving = false;
+          $('tool-revise').disabled = false;
+        }
+      }
       const abort = () => {
         cleanup();
         reject(signal.reason || new DOMException('Annulé', 'AbortError'));
@@ -157,12 +208,12 @@ export function setupGenerationRuntime({
         for (const [id] of buttons) $(id).onclick = null;
       }
       const buttons = [
-        ['tool-deny', 'deny'],
-        ['tool-once', 'once'],
-        ['tool-always', 'always'],
-        ['tool-revise', 'revise'],
+        ['tool-deny', () => (editor ? read() : finish('deny'))],
+        ['tool-once', () => finish('once')],
+        ['tool-always', () => finish('always')],
+        ['tool-revise', () => void revise()],
       ];
-      for (const [id, value] of buttons) $(id).onclick = () => finish(value);
+      for (const [id, action] of buttons) $(id).onclick = action;
       $('tool-dialog').addEventListener('cancel', cancel);
       signal.addEventListener('abort', abort, { once: true });
       if (signal.aborted) abort();
@@ -182,19 +233,8 @@ export function setupGenerationRuntime({
       await cancel();
       throw error;
     }
-    if (['deny', 'revise'].includes(decision)) await cancel();
-    if (decision === 'revise')
-      return {
-        content: JSON.stringify({
-          status: 'revision_requested',
-          message:
-            'L’utilisateur souhaite modifier la proposition vidéo. Demande les changements souhaités et attends sa réponse. Aucune génération lancée.',
-        }),
-        images: [],
-        denied: true,
-        revised: true,
-      };
-    if (decision === 'deny')
+    if (decision === 'deny') {
+      await cancel();
       return {
         content: JSON.stringify({
           status: 'denied',
@@ -203,6 +243,7 @@ export function setupGenerationRuntime({
         images: [],
         denied: true,
       };
+    }
     signal.throwIfAborted();
     signal.addEventListener('abort', cancel, { once: true });
     let terminal = false,
@@ -268,7 +309,7 @@ export function setupGenerationRuntime({
       while (!['done', 'error', 'cancelled'].includes(job.state)) {
         if (job.record) receiveOriginals(job.record);
         signal.throwIfAborted();
-        onProgress(job.progress);
+        onProgress(job.progress, job.fraction);
         await new Promise((resolve, reject) => {
           const timer = setTimeout(() => {
             signal.removeEventListener('abort', abort);
@@ -410,7 +451,7 @@ export function setupGenerationRuntime({
           ...(error ? { warning: error } : {}),
           note:
             record.mediaType !== 'video'
-              ? 'Image générée et affichée dans la galerie. Termine normalement sans analyse visuelle. Si la demande ou une raison précise le justifie, consulte la copie compressée avec local_read_output (run_id et output_index), sans demander son identifiant à l’utilisateur. Ne prétends pas avoir vu le résultat sans le consulter.'
+              ? 'Image générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil. Si l’utilisateur a demandé une vérification, consulte la copie compressée avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
               : images.length
                 ? 'Les images jointes sont les copies réduites des sorties identifiées par analysis_outputs (indices à partir de zéro). Les sorties sans copie ne sont pas vérifiables visuellement. Les entrées optionnelles absentes conservent leurs valeurs dans le workflow ; elles ne sont pas des références fournies par l’utilisateur. Les originaux sont dans la galerie.'
                 : 'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.',

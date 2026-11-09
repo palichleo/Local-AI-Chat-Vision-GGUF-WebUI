@@ -3208,6 +3208,12 @@ dialog::backdrop {
 .output-prompt[open] summary span {
   display: block;
 }
+.output-prompt-enhanced {
+  margin-top: -2px;
+  padding-left: 8px;
+  border-left: 2px solid var(--accent, currentColor);
+  color: var(--text, inherit);
+}
 .assets-panel .gallery-actions {
   display: flex;
   gap: 7px;
@@ -3382,9 +3388,9 @@ dialog::backdrop {
 
 .generation-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr));
-  gap: 12px;
-  max-width: 690px;
+  grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr));
+  gap: 14px;
+  max-width: 760px;
   margin: 12px 0 20px;
   align-items: start;
 }
@@ -3522,26 +3528,46 @@ html[data-page-hidden='true'] .generation-frame::after,
   }
 }
 
+/* Generation progress: a hairline that comes alive once the job reports real progress.
+   An aurora fill (the palette of the waiting frame) drifts inside it, a small comet leads it,
+   and a percentage counts up beside it; on completion it fills, flashes once and fades. */
+@property --generation-progress {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+@property --generation-percent {
+  syntax: '<integer>';
+  inherits: true;
+  initial-value: 0;
+}
 .generation-progress {
-  height: 3px;
+  --progress-track: color-mix(in srgb, var(--line) 75%, transparent);
+  --progress-fill: linear-gradient(90deg, #4f7f99, #a8c9cd 28%, #c3bcda 56%, #e6f1f8 78%, #a8c9cd 100%);
+  --progress-head: #f1f8ff;
+  --progress-glow: #a8c9cdcc;
+  --progress-halo: #c3bcda59;
+  position: relative;
+  height: 2px;
   flex-shrink: 0;
+  /* Exactly the preview's width: the bar measures the image it is producing. */
   width: 100%;
-  max-width: 160px;
-  margin: 5px 0 6px;
-  overflow: hidden;
+  margin: 8px 0 6px;
   border-radius: 999px;
-  background: var(--line);
+  background: var(--progress-track);
+  overflow: hidden;
   opacity: 1;
-  transform-origin: center;
+  transform-origin: left center;
   transition:
-    opacity 0.28s ease,
-    transform 0.36s ease,
-    filter 0.36s ease,
-    height 0.36s ease,
-    margin 0.36s ease,
-    visibility 0s 0.36s;
+    opacity 0.45s ease 0.55s,
+    transform 0.5s ease 0.55s,
+    filter 0.5s ease 0.55s,
+    height 0.4s ease 0.6s,
+    margin 0.4s ease 0.6s,
+    visibility 0s 1s;
 }
 .generation-progress > span {
+  position: relative;
   display: block;
   width: 42%;
   height: 100%;
@@ -3549,19 +3575,84 @@ html[data-page-hidden='true'] .generation-frame::after,
   background: linear-gradient(90deg, transparent, #a8c9cd, #c3bcda, transparent);
   animation: generation-progress-slide 1.35s ease-in-out infinite;
 }
+.generation-progress.is-determinate {
+  overflow: visible;
+  transition:
+    --generation-progress 0.7s linear,
+    --generation-percent 0.7s linear,
+    opacity 0.45s ease 0.55s,
+    transform 0.5s ease 0.55s,
+    filter 0.5s ease 0.55s,
+    height 0.4s ease 0.6s,
+    margin 0.4s ease 0.6s,
+    visibility 0s 1s;
+}
+.generation-progress.is-determinate > span {
+  width: calc(var(--generation-progress) * 100%);
+  min-width: 2px;
+  animation: generation-progress-drift 2.6s linear infinite;
+  transform: none;
+  background: var(--progress-fill);
+  background-size: 220% 100%;
+  box-shadow: 0 0 6px var(--progress-halo);
+}
+/* The comet: a bright point with a soft halo riding the leading edge. */
+.generation-progress.is-determinate > span::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--progress-head);
+  box-shadow:
+    0 0 4px 1px var(--progress-glow),
+    0 0 12px 3px var(--progress-halo);
+  transform: translateY(-50%);
+  animation: generation-progress-pulse 1.8s ease-in-out infinite;
+}
+/* The percentage counts up smoothly between polls (animated integer custom property),
+   right-aligned under the bar's end, on the status line. */
+.generation-progress.is-determinate::after {
+  counter-reset: generation-percent var(--generation-percent);
+  content: counter(generation-percent) '\202F%';
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  font-size: 9px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* Completion: fill, one light sweep, then the hairline folds away. */
+.generation-progress.is-determinate + span {
+  padding-right: 38px;
+}
 .generation-progress.is-complete {
+  --generation-progress: 1;
+  --generation-percent: 100;
   opacity: 0;
-  transform: scaleX(0.85);
+  transform: scaleX(0.92);
   filter: blur(2px);
   height: 0;
   margin: 0;
   visibility: hidden;
 }
 .generation-progress.is-complete > span {
+  animation: generation-progress-flash 0.9s ease-out forwards;
+}
+.generation-progress.is-complete > span::after {
   animation: none;
+  opacity: 0;
+  transition: opacity 0.3s ease 0.4s;
 }
 html[data-page-hidden='true'] .generation-progress > span,
-.generation-frame.is-paused + .generation-caption .generation-progress > span {
+html[data-page-hidden='true'] .generation-progress > span::after,
+.generation-frame.is-paused + .generation-caption .generation-progress > span,
+.generation-frame.is-paused + .generation-caption .generation-progress > span::after {
   animation-play-state: paused;
 }
 @keyframes generation-progress-slide {
@@ -3572,12 +3663,54 @@ html[data-page-hidden='true'] .generation-progress > span,
     transform: translateX(350%);
   }
 }
+@keyframes generation-progress-drift {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+@keyframes generation-progress-pulse {
+  0%,
+  100% {
+    opacity: 0.75;
+    transform: translateY(-50%) scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1.15);
+  }
+}
+@keyframes generation-progress-flash {
+  0% {
+    filter: brightness(1);
+  }
+  35% {
+    filter: brightness(1.9) saturate(1.2);
+    box-shadow: 0 0 10px var(--progress-glow);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+:root[data-theme='light'] .generation-progress {
+  --progress-fill: linear-gradient(90deg, #2f5d75, #5f8f9c 28%, #7d72a8 56%, #4f7f99 78%, #5f8f9c 100%);
+  --progress-head: #ffffff;
+  --progress-glow: #4f7f99b3;
+  --progress-halo: #7d72a840;
+}
 @media (prefers-reduced-motion: reduce) {
-  .generation-progress {
+  .generation-progress,
+  .generation-progress.is-determinate {
     transition: none;
   }
-  .generation-progress > span {
+  .generation-progress > span,
+  .generation-progress.is-determinate > span,
+  .generation-progress.is-determinate > span::after {
     animation: none;
+  }
+  .generation-progress > span {
     transform: translateX(70%);
   }
 }
@@ -4347,4 +4480,55 @@ html[data-page-hidden='true'] .generation-progress > span,
   .native-profile {
     gap: 10px;
   }
+}
+
+/* Video proposal edited by the user in place (approval dialog, "Modifier"). */
+.video-edit-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.video-edit-field > span {
+  color: var(--ink);
+}
+.video-edit-prompt {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.video-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 14px 18px;
+  margin: 16px 0;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.video-edit-grid input[type='number'],
+.video-edit-grid select {
+  width: 100%;
+}
+.video-edit-grid input[type='checkbox'] {
+  justify-self: start;
+}
+.video-edit-locked {
+  color: var(--ink);
+}
+.video-edit-roll {
+  justify-self: start;
+}
+.video-edit-error {
+  color: var(--danger, #c0392b);
+  font-size: 12px;
 }

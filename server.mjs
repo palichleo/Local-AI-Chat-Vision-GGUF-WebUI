@@ -3,7 +3,7 @@ import { Projects } from './lib/projects.mjs';
 import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
-import { outputTool, readOutput } from './lib/output-tools.mjs';
+import { outputToolFor, readOutput } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
 import { countContext } from './lib/context-count.mjs';
 import http from 'node:http';
@@ -17,10 +17,10 @@ import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
-import { History } from './lib/history.mjs';
+import { History, MAX_CONVERSATION_MESSAGES } from './lib/history.mjs';
 import { chooseLocalFile } from './lib/file-picker.mjs';
 import { Gallery } from './lib/gallery.mjs';
-import { ToolRuntime, collectToolCalls } from './lib/tool-runtime.mjs';
+import { ToolRuntime, chatImageUrls, collectToolCalls } from './lib/tool-runtime.mjs';
 import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
 import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
@@ -29,6 +29,7 @@ import { convertLongForge } from './lib/longforge-conversion.mjs';
 import { generatedMedia } from './lib/generated-media.mjs';
 import { validateNativeWorkflow } from './lib/native-workflows.mjs';
 import { families, familyTemplate } from './lib/families.mjs';
+import { ProgressHistory } from './lib/generation-progress.mjs';
 import { convertKreaWorkflow } from './lib/native-workflow-conversion.mjs';
 import { importComfyWorkflow } from './lib/comfy-import.mjs';
 import { previewWorkflowImport } from './lib/workflow-import.mjs';
@@ -82,8 +83,15 @@ async function jsonBody(req, limit = maxBody) {
 }
 
 function chatPayload(input, vision, maxOutputTokens, countOnly = false) {
-  if (!input || !Array.isArray(input.messages) || !input.messages.length || input.messages.length > 100)
-    throw problem('La conversation doit contenir entre 1 et 100 messages. Recommence une conversation si nécessaire.');
+  if (
+    !input ||
+    !Array.isArray(input.messages) ||
+    !input.messages.length ||
+    input.messages.length > MAX_CONVERSATION_MESSAGES
+  )
+    throw problem(
+      `La conversation doit contenir entre 1 et ${MAX_CONVERSATION_MESSAGES} messages. Recommence une conversation si nécessaire.`,
+    );
   const messages = input.messages.map((message, index) => {
     if (
       !message ||
@@ -273,6 +281,7 @@ export async function createApplication({
     saveConfig: value => generation.save(value),
     persist: () => preferences.saveHistory,
     clientFactory: () => generation.client(),
+    timing: new ProgressHistory(join(dataDir, 'generation-timing.json')),
     sourceMedia: async (ref, conversationId) => {
       if (ref.resource_id) {
         await resources.activeRecord(ref.resource_id);
@@ -332,12 +341,36 @@ export async function createApplication({
     const definitions = [];
     const toolConfig = generation.config;
     generation.syncCapabilities();
+    // Tools only advertise sources this conversation really holds, so the model is never asked
+    // for a run_id, attached image or resource that does not exist.
+    const conversationId =
+      typeof body.conversationId === 'string' &&
+      /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(body.conversationId)
+        ? body.conversationId
+        : null;
+    const runs = conversationId ? (await gallery.list(conversationId, { includeImages: false })).runs : [];
     if (
       toolConfig.enabled &&
       body.tools !== false &&
       (runtime.turns.get(body.turnId) || 0) < toolConfig.maxIterations
     ) {
-      definitions.push(...(await runtime.tools.definitions()));
+      definitions.push(
+        ...(await runtime.tools.definitions({
+          images: chatImageUrls(body.messages).length,
+          resources: active.map(({ id, type }) => ({ id, type })),
+          // Only native results can be passed to a workflow as an original file.
+          outputs: runs
+            .filter(run => run.provider === 'native')
+            .map(run => ({
+              id: run.id,
+              mediaType: run.mediaType || 'image',
+              count: run.outputs.length,
+              workflowId: run.workflowId,
+              draft:
+                run.mediaType === 'video' && run.parameters?.stage === 'draft' && Boolean(run.parameters?.replay_args),
+            })),
+        })),
+      );
     }
     if (active.length && engine.vision && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8) {
       const definition = structuredClone(resourceTool),
@@ -347,14 +380,9 @@ export async function createApplication({
       definition.function.parameters.properties.resource_ids.maxItems = 8 - (resourceTurns.get(body.turnId) || 0);
       definitions.push(definition);
     }
-    if (
-      engine.vision &&
-      typeof body.conversationId === 'string' &&
-      /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(body.conversationId) &&
-      body.resources !== false &&
-      (resourceTurns.get(body.turnId) || 0) < 8
-    )
-      definitions.push(outputTool);
+    const outputDefinition = outputToolFor(runs);
+    if (engine.vision && outputDefinition && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8)
+      definitions.push(outputDefinition);
     if (definitions.length) {
       payload.tools = definitions;
       payload.tool_choice = 'auto';
@@ -602,6 +630,8 @@ export async function createApplication({
             const { pipeline: familyAlias, ...asset } = body;
             return send(200, await generation.assets.register({ ...asset, family: body.family || familyAlias }));
           }
+          if (path === '/api/generation/tokenizer')
+            return send(200, await generation.suggestTokenizer(body.encoder, body.family));
           if (path === '/api/generation/validate') return send(200, { workflow: validateNativeWorkflow(body) });
           if (path === '/api/generation/import') {
             const importConfig = generationConfig({
@@ -617,9 +647,7 @@ export async function createApplication({
                 name: body.name,
                 assets: generation.assets,
                 modelRoot: importFolders.model,
-                additionalRoots: Object.values(importFolders).filter(
-                  path => path !== importFolders.model,
-                ),
+                additionalRoots: Object.values(importFolders).filter(path => path !== importFolders.model),
               }),
             );
           }
@@ -985,6 +1013,7 @@ export async function createApplication({
           throw problem('Identifiant de génération requis.');
         return send(200, runtime.cancel(body));
       }
+      if (path === '/api/tools/revise') return send(200, await runtime.revise(body));
       if (path === '/api/tools/execute') {
         if (clearingHistory || persistingGallery || savingGeneration || savingSettings || pickingFile)
           throw problem('Une opération est en cours.', 409);
@@ -1287,6 +1316,13 @@ export async function createApplication({
             throw problem('L’appel d’outil du modèle est incomplet ou tronqué. Aucune génération lancée.', 502);
           if (calls.length !== 1 || !definitions.some(item => item.function.name === calls[0].function?.name))
             throw problem('Le moteur a demandé un outil indisponible.', 502);
+          // Arguments the model got wrong are answered as a tool error so it can correct the call
+          // or reply without a tool; operational failures (busy GPU, closing app, unexpected
+          // errors) still end the turn.
+          const rejectCall = async (call, error) => {
+            if (!error.status || error.status === 409 || error.status === 503) throw error;
+            await emit({ local_tool_request: { kind: 'invalid', call, message: error.message } });
+          };
           if (calls[0].function.name === 'local_read_output') {
             const call = nativeFields({ role: 'assistant', tool_calls: calls }).tool_calls[0];
             let args;
@@ -1297,18 +1333,25 @@ export async function createApplication({
             }
             if (!body.turnId || !/^[0-9a-f-]{36}$/.test(body.turnId) || (resourceTurns.get(body.turnId) || 0) >= 8)
               throw problem('La limite de huit lectures pour ce tour est atteinte.', 502);
-            const { metadata } = await readOutput(gallery, body.conversationId, args, { includeImages: false });
-            resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + 1);
-            if (resourceTurns.size > 256) resourceTurns.delete(resourceTurns.keys().next().value);
-            await emit({
-              local_tool_request: {
-                kind: 'output',
-                call,
-                runId: metadata.run_id,
-                outputIndex: metadata.output_index,
-                workflowName: metadata.workflow,
-              },
-            });
+            let metadata;
+            try {
+              ({ metadata } = await readOutput(gallery, body.conversationId, args, { includeImages: false }));
+            } catch (error) {
+              await rejectCall(call, error);
+            }
+            if (metadata) {
+              resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + 1);
+              if (resourceTurns.size > 256) resourceTurns.delete(resourceTurns.keys().next().value);
+              await emit({
+                local_tool_request: {
+                  kind: 'output',
+                  call,
+                  runId: metadata.run_id,
+                  outputIndex: metadata.output_index,
+                  workflowName: metadata.workflow,
+                },
+              });
+            }
           } else if (calls[0].function.name === 'local_read_resource') {
             const call = nativeFields({ role: 'assistant', tool_calls: calls }).tool_calls[0];
             let args;
@@ -1336,14 +1379,20 @@ export async function createApplication({
                 workflowName: selected.map(item => item.label + ' · ' + item.name).join(', '),
               },
             });
-          } else
-            await emit({
-              local_tool_request: await runtime.request(calls, {
+          } else {
+            const call = nativeFields({ role: 'assistant', tool_calls: calls }).tool_calls[0];
+            let request;
+            try {
+              request = await runtime.request(calls, {
                 conversationId: body.conversationId,
                 turnId: body.turnId,
                 messages: body.messages,
-              }),
-            });
+              });
+            } catch (error) {
+              await rejectCall(call, error);
+            }
+            if (request) await emit({ local_tool_request: request });
+          }
         }
         res.write('data: [DONE]\n\n');
         res.end();

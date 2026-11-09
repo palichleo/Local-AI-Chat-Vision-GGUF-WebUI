@@ -411,7 +411,7 @@ test('an already cancelled automatic call releases its pending approval without 
     assert.equal(calls.find(call => call.route === 'tools/cancel').body.requestId, 'cancelled');
   }));
 
-test('video approval is shown even with global permission, explains draft/final and revision never executes', async () =>
+test('video approval is shown even with global permission, explains draft/final and editing never executes', async () =>
   fixture(async ({ ui, nodes, calls, setIntercept }) => {
     setIntercept(route => (route === 'tools/cancel' ? Response.json({}) : undefined));
     const request = {
@@ -427,6 +427,7 @@ test('video approval is shown even with global permission, explains draft/final 
         prompt: 'A slow pan',
         parameters: { frames: 81, fps: 16, width: 768, height: 512, seed: 12 },
         references: [{ input: 'start', label: 'Ref 2', role: 'Image de début' }],
+        editable: { prompt: true, stages: ['draft', 'final'], parameters: [] },
       },
     };
     const pending = ui.requestTool(request, new AbortController().signal, () => {});
@@ -437,12 +438,113 @@ test('video approval is shown even with global permission, explains draft/final 
     assert.equal(nodes.get('tool-revise').hidden, false);
     assert.ok(!calls.some(call => call.route === 'tools/execute'));
     assert.match(JSON.stringify(nodes.get('tool-plan').children), /Vérifier le mouvement|Ref 2/);
+    // "Modifier" opens the form in the dialog itself; nothing goes back to the model.
     nodes.get('tool-revise').onclick();
+    assert.equal(nodes.get('tool-dialog').open, true);
+    assert.equal(nodes.get('tool-revise').textContent, 'Appliquer');
+    assert.equal(nodes.get('tool-once').disabled, true);
+    // "Retour" leaves the form without changes, then "Annuler" refuses.
+    nodes.get('tool-deny').onclick();
+    assert.equal(nodes.get('tool-revise').textContent, 'Modifier');
+    assert.equal(nodes.get('tool-dialog').open, true);
+    nodes.get('tool-deny').onclick();
     const result = await pending;
     assert.equal(result.denied, true);
-    assert.match(result.content, /revision_requested/);
+    assert.match(result.content, /denied/);
     assert.equal(nodes.get('tool-dialog').open, false);
-    assert.ok(!calls.some(call => call.route === 'tools/execute'));
+    assert.ok(!calls.some(call => ['tools/execute', 'tools/revise'].includes(call.route)));
+  }));
+test('the user edits a video proposal in the dialog and confirms the revised one', async () =>
+  fixture(async ({ ui, nodes, all, calls, setIntercept }) => {
+    setIntercept((route, body) => {
+      if (route === 'tools/revise')
+        return Response.json({
+          requestId: 'revised',
+          approvalToken: 'revised-token',
+          mediaType: 'video',
+          workflowName: 'MiniMax',
+          args: { prompt: body.edits.prompt },
+          plan: {
+            stage: 'final',
+            intention: 'Continuer.',
+            prompt: body.edits.prompt,
+            parameters: { frames: 345, fps: 24, width: 768, height: 448, seed: 99 },
+            references: [],
+            editable: { prompt: true, stages: ['draft', 'final'], parameters: [] },
+            edited: ['frames', 'seed'],
+          },
+        });
+      if (route === 'tools/execute') return Response.json({ id: 'job', state: 'error', error: 'test boundary' });
+    });
+    const request = {
+      requestId: 'proposal',
+      mediaType: 'video',
+      workflowName: 'MiniMax',
+      args: { prompt: 'dives' },
+      approvalToken: 'first-token',
+      plan: {
+        stage: 'draft',
+        intention: 'Continuer.',
+        prompt: 'dives',
+        parameters: { frames: 124, fps: 24, width: 768, height: 448, seed: 7, audio: true },
+        references: [{ input: 'source', label: 'Résultat précédent', role: 'source_video' }],
+        editable: {
+          prompt: true,
+          stages: ['draft', 'final'],
+          parameters: [
+            {
+              key: 'width',
+              value: 768,
+              type: 'integer',
+              locked: 'Une continuation garde la taille de sa vidéo source.',
+            },
+            { key: 'frames', value: 124, type: 'integer', choices: [124, 141, 345] },
+            { key: 'seed', value: 7, type: 'integer', min: 0, max: 9007199254740991 },
+            { key: 'audio', value: true, type: 'boolean' },
+          ],
+        },
+      },
+    };
+    const pending = ui.requestTool(request, new AbortController().signal, () => {});
+    await new Promise(setImmediate);
+    nodes.get('tool-revise').onclick();
+    const controls = tag => all.filter(n => n.tagName === tag);
+    const prompt = controls('textarea').at(-1);
+    const [stage, frames] = controls('select').slice(-2);
+    const seed = controls('input').find(n => n.type === 'number');
+    assert.deepEqual(
+      frames.options.map(option => option.text),
+      ['124 · 5.17 s', '141 · 5.88 s', '345 · 14.38 s'],
+    );
+    assert.ok(!controls('input').some(n => n.value === '768'), 'a locked size is shown, not editable');
+    seed.value = 'abc';
+    nodes.get('tool-revise').onclick();
+    await new Promise(setImmediate);
+    assert.ok(!calls.some(call => call.route === 'tools/revise'), 'an invalid number is caught before sending');
+    assert.ok(all.some(n => n.className === 'video-edit-error' && /Seed/.test(n.textContent)));
+    seed.value = '99';
+    prompt.value = 'the boat dives into the clouds';
+    stage.value = 'final';
+    frames.value = '345';
+    nodes.get('tool-revise').onclick();
+    await new Promise(setImmediate);
+    await new Promise(setImmediate);
+    assert.deepEqual(calls.find(call => call.route === 'tools/revise').body, {
+      requestId: 'proposal',
+      approvalToken: 'first-token',
+      edits: { prompt: 'the boat dives into the clouds', stage: 'final', frames: 345, seed: 99 },
+    });
+    assert.equal(nodes.get('tool-dialog').open, true, 'the revised proposal still waits for confirmation');
+    assert.match(nodes.get('tool-title').textContent, /Vidéo finale/);
+    assert.equal(nodes.get('tool-revise').textContent, 'Modifier');
+    assert.match(JSON.stringify(nodes.get('tool-plan').children), /Modifié par vous : Images, Seed/);
+    nodes.get('tool-once').onclick();
+    await pending;
+    assert.deepEqual(calls.find(call => call.route === 'tools/execute').body, {
+      requestId: 'revised',
+      permission: 'once',
+      approvalToken: 'revised-token',
+    });
   }));
 test('video confirm sends the exact proposal token once and final label is explicit', async () =>
   fixture(async ({ ui, nodes, calls, setIntercept }) => {

@@ -1,0 +1,249 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ToolCatalog } from '../lib/tool-catalog.mjs';
+import { ToolRuntime } from '../lib/tool-runtime.mjs';
+import { resolveNativeWorkflow, validateNativeWorkflow } from '../lib/native-workflows.mjs';
+
+// A MiniMax-H3 workflow shaped like the shipped one: draft 768×448, final 1344×768, every role.
+const minimax = validateNativeWorkflow({
+  schemaVersion: 1,
+  id: 'minimax',
+  enabled: true,
+  pipeline: 'minimax_h3',
+  mediaType: 'video',
+  name: 'MiniMax H3',
+  description: 'Text, keyframes, references or continuation.',
+  components: Object.fromEntries(
+    ['model', 'textEncoder', 'tokenizer', 'vae', 'audioVae'].map(role => [role, { policy: 'fixed', asset: role }]),
+  ),
+  parameters: {
+    prompt: { policy: 'model', type: 'string', maxLength: 8000 },
+    seed: { policy: 'random', type: 'integer' },
+    width: { policy: 'fixed', value: 768 },
+    height: { policy: 'fixed', value: 448 },
+    steps: { policy: 'fixed', value: 8 },
+    stage: { policy: 'model', type: 'string', choices: ['draft', 'final'], default: 'draft' },
+    frames: { policy: 'fixed', value: 124 },
+    fps: { policy: 'fixed', value: 24 },
+    audio: { policy: 'fixed', value: true },
+    overlap_frames: { policy: 'fixed', value: 22 },
+  },
+  profiles: {
+    draft: { parameters: { width: 768, height: 448, frames: 124, fps: 24, steps: 8 } },
+    final: { parameters: { width: 1344, height: 768, frames: 124, fps: 24, steps: 8 } },
+  },
+  loras: [],
+  references: [
+    { id: 'source', role: 'source_video', required: false, name: 'Vidéo à prolonger' },
+    { id: 'start', role: 'start_image', required: false, name: 'Image de début' },
+    { id: 'end', role: 'end_image', required: false, name: 'Image de fin' },
+    { id: 'subject-1', role: 'reference_image', required: false, name: 'Référence 1' },
+    { id: 'subject-2', role: 'reference_image', required: false, name: 'Référence 2' },
+    { id: 'subject-3', role: 'reference_image', required: false, name: 'Référence 3' },
+  ],
+});
+// An LTX 2.5 workflow with fewer slots: a "more specific" match for a bare continuation.
+const ltx = {
+  schemaVersion: 1,
+  id: 'ltx',
+  name: 'LTX 2.5',
+  description: 'LTX',
+  enabled: true,
+  pipeline: 'ltx25',
+  mediaType: 'video',
+  parameters: {
+    prompt: { policy: 'model', type: 'string' },
+    stage: { policy: 'model', type: 'string', choices: ['draft', 'final'], default: 'draft' },
+  },
+  components: {},
+  loras: [],
+  references: [
+    { id: 'start', role: 'start_image', required: false },
+    { id: 'clip', role: 'source_video', required: false },
+  ],
+};
+const assets = { resolve: async id => ({ id, path: join(tmpdir(), `${id}.safetensors`) }) };
+const media = { mediaOf: async () => 'video' };
+const origins = {
+  'mm-run': { workflowId: 'minimax', pipeline: 'minimax_h3' },
+  'ltx-run': { workflowId: 'ltx', pipeline: 'ltx25' },
+};
+
+test('a continuation stays in the workflow, or the model family, that made its source', async () => {
+  const tools = new ToolCatalog({
+    list: async () => [
+      { ...minimax, ready: true },
+      { ...ltx, ready: true },
+    ],
+  });
+  const route = (output, originOf) =>
+    tools.route('extend_video', { prompt: 'x', intention: 'y', source: { output } }, { ...media, originOf });
+  const originOf = async source => origins[source.output] ?? null;
+  assert.equal((await route('mm-run', originOf)).workflow.id, 'minimax');
+  assert.equal((await route('ltx-run', originOf)).workflow.id, 'ltx');
+  const sameFamily = async () => ({ workflowId: 'deleted-workflow', pipeline: 'minimax_h3' });
+  assert.equal((await route('mm-run', sameFamily)).workflow.id, 'minimax');
+  // Without an origin the most specific workflow still wins, as before.
+  assert.equal((await route('mm-run', undefined)).workflow.id, 'ltx');
+});
+
+test('a continuation is generated at its source size, whatever the draft/final profile', async () => {
+  const args = {
+    prompt: 'x',
+    intention: 'y',
+    references: [{ input: 'source', output_id: '22222222-2222-4222-8222-222222222222' }],
+  };
+  const options = { allowPendingReferences: true, seed: 1 };
+  const draft = await resolveNativeWorkflow(minimax, args, assets, {
+    ...options,
+    sourceSize: { width: 768, height: 448 },
+  });
+  assert.deepEqual([draft.parameters.width, draft.parameters.height], [768, 448]);
+  const final = await resolveNativeWorkflow(minimax, { ...args, stage: 'final' }, assets, {
+    ...options,
+    sourceSize: { width: 768, height: 448 },
+  });
+  assert.deepEqual([final.parameters.width, final.parameters.height], [768, 448]);
+  const tall = await resolveNativeWorkflow(minimax, args, assets, {
+    ...options,
+    sourceSize: { width: 896, height: 1600 },
+  });
+  assert.deepEqual([tall.parameters.width, tall.parameters.height], [896, 1600]);
+  await assert.rejects(
+    resolveNativeWorkflow(minimax, args, assets, { ...options, sourceSize: { width: 1920, height: 1080 } }),
+    /1920×1080.*multiple of 32/,
+  );
+  // Plain creation ignores the source size and keeps the profile.
+  const created = await resolveNativeWorkflow(minimax, { prompt: 'x', intention: 'y', stage: 'final' }, assets, {
+    ...options,
+    sourceSize: { width: 768, height: 448 },
+  });
+  assert.deepEqual([created.parameters.width, created.parameters.height], [1344, 768]);
+});
+
+test('the approval card shows the source size and the job carries it', async () => {
+  const conversationId = '11111111-1111-4111-8111-111111111111';
+  const sourceId = '22222222-2222-4222-8222-222222222222';
+  const workflows = [
+    { ...minimax, ready: true },
+    { ...ltx, ready: true },
+  ];
+  const record = {
+    provider: 'native',
+    mediaType: 'video',
+    workflowId: 'minimax',
+    parameters: { pipeline: 'minimax_h3', width: 768, height: 448 },
+    outputs: [{ source: { filename: 'boat.mp4' }, width: 768, height: 448 }],
+  };
+  const runtime = new ToolRuntime({
+    catalog: {
+      kind: 'native',
+      list: async () => workflows,
+      read: async id => workflows.find(workflow => workflow.id === id),
+      prepare: async (id, args, options) => {
+        const workflow = workflows.find(item => item.id === id);
+        return { workflow, job: await resolveNativeWorkflow(workflow, args, assets, options), outputNodes: [] };
+      },
+    },
+    engine: { state: 'ready' },
+    gallery: { get: async () => record },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5 }),
+    engineConfig: () => ({}),
+    sourceMedia: async () => ({ mime: 'video/mp4', name: 'boat', handle: { close: async () => {} } }),
+    clientFactory: () => ({}),
+  });
+  for (const stage of ['draft', 'final']) {
+    const request = await runtime.request(
+      [
+        {
+          id: 'call-' + stage,
+          type: 'function',
+          function: {
+            name: 'extend_video',
+            arguments: JSON.stringify({ prompt: 'dives', intention: 'Continue', stage, source: { output: sourceId } }),
+          },
+        },
+      ],
+      { conversationId, turnId: conversationId, messages: [] },
+    );
+    assert.equal(request.workflowName, 'MiniMax H3');
+    assert.deepEqual(request.resolution, { width: 768, height: 448 });
+    assert.equal(request.plan.parameters.overlap_frames, 22);
+  }
+});
+
+test('the user revises a proposal in place: own values, same seed, size still locked to the source', async () => {
+  const conversationId = '11111111-1111-4111-8111-111111111111';
+  const sourceId = '22222222-2222-4222-8222-222222222222';
+  const workflows = [{ ...minimax, ready: true }];
+  const record = {
+    provider: 'native',
+    mediaType: 'video',
+    workflowId: 'minimax',
+    parameters: { pipeline: 'minimax_h3', width: 768, height: 448 },
+    outputs: [{ source: { filename: 'boat.mp4' }, width: 768, height: 448 }],
+  };
+  const runtime = new ToolRuntime({
+    catalog: {
+      kind: 'native',
+      list: async () => workflows,
+      read: async id => workflows.find(workflow => workflow.id === id),
+      prepare: async (id, args, options) => {
+        const workflow = workflows.find(item => item.id === id);
+        return { workflow, job: await resolveNativeWorkflow(workflow, args, assets, options), outputNodes: [] };
+      },
+    },
+    engine: { state: 'ready' },
+    gallery: { get: async () => record },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5 }),
+    engineConfig: () => ({}),
+    sourceMedia: async () => ({ mime: 'video/mp4', name: 'boat', handle: { close: async () => {} } }),
+    clientFactory: () => ({}),
+  });
+  const first = await runtime.request(
+    [
+      {
+        id: 'call',
+        type: 'function',
+        function: {
+          name: 'extend_video',
+          arguments: JSON.stringify({ prompt: 'dives', intention: 'Continue', source: { output: sourceId } }),
+        },
+      },
+    ],
+    { conversationId, turnId: conversationId, messages: [] },
+  );
+  const editable = Object.fromEntries(first.plan.editable.parameters.map(item => [item.key, item]));
+  assert.match(editable.width.locked, /taille de sa vidéo source/);
+  assert.deepEqual(editable.frames.choices.slice(0, 2), [124, 141]);
+  assert.equal(editable.prompt, undefined);
+  assert.deepEqual(first.plan.editable.stages, ['draft', 'final']);
+  const revise = edits => runtime.revise({ requestId: first.requestId, approvalToken: first.approvalToken, edits });
+  await assert.rejects(revise({ width: 1344 }), /taille de sa vidéo source/);
+  await assert.rejects(revise({ frames: 130 }), /frames/);
+  await assert.rejects(revise({ prompt: '  ' }), /vide/);
+  const second = await revise({ prompt: 'the boat dives', stage: 'final', frames: 345 });
+  assert.notEqual(second.requestId, first.requestId);
+  assert.notEqual(second.approvalToken, first.approvalToken);
+  assert.equal(second.plan.prompt, 'the boat dives');
+  assert.equal(second.plan.stage, 'final');
+  assert.equal(second.plan.parameters.frames, 345);
+  assert.equal(second.plan.parameters.seed, first.plan.parameters.seed, 'same seed unless the user changes it');
+  assert.deepEqual(second.resolution, { width: 768, height: 448 });
+  assert.deepEqual(second.plan.edited, ['frames']);
+  await assert.rejects(revise({ frames: 141 }), /expiré/, 'the replaced proposal is gone');
+  const third = await runtime.revise({
+    requestId: second.requestId,
+    approvalToken: second.approvalToken,
+    edits: { frames: 124, seed: 5, audio: false },
+  });
+  assert.deepEqual(third.plan.edited.sort(), ['audio', 'seed'], 'a value set back to the profile is no longer an edit');
+  assert.equal(third.plan.parameters.seed, 5);
+  await assert.rejects(
+    runtime.revise({ requestId: third.requestId, approvalToken: 'forged', edits: {} }),
+    /ne peut plus être modifiée/,
+  );
+});
