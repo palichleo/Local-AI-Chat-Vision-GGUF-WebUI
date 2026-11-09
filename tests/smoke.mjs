@@ -108,6 +108,11 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async t => {
       assert.equal(bootstrap.status.state, 'stopped');
       const page = await fetch(base);
       assert.equal(page.status, 200);
+      const icon = await fetch(base + '/favicon.svg');
+      assert.equal(icon.status, 200);
+      assert.equal(icon.headers.get('content-type'), 'image/svg+xml');
+      assert.match(await page.text(), /<link rel="icon"[^>]*href="\/favicon\.svg"/);
+      assert.match(await icon.text(), /<svg[^>]*viewBox="0 0 32 32"/);
       const texture = await fetch(base + '/assets/metallic-grain.png');
       assert.equal(texture.status, 200);
       assert.equal(texture.headers.get('content-type'), 'image/png');

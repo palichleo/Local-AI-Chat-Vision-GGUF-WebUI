@@ -38,6 +38,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 20 * 1024 * 1024;
 const staticFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
+  ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
   ['/assets/metallic-grain.png', ['assets/metallic-grain.png', 'image/png']],
   ['/update-ui.mjs', ['update-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/material-light.mjs', ['material-light.mjs', 'text/javascript; charset=utf-8']],
