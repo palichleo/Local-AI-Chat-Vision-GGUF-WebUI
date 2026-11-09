@@ -3,7 +3,7 @@
   "version": "0.3.16",
   "private": true,
   "type": "module",
-  "description": "Chat et vision GGUF en local, sans dépendances npm.",
+  "description": "Assistant GGUF local qui pilote la génération native d’images et de vidéos, sans dépendances npm.",
   "engines": {
     "node": ">=22"
   },

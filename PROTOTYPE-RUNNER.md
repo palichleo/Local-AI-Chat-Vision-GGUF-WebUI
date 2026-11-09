@@ -1,18 +1,10 @@
-# Prototype runner
+# Prototype runner branch
 
-Preserved experimental Python runner, on the `prototype-runner` branch. It recreates the supplied Krea2 workflow with prepared LoRA weights, standalone INT8 kernels, a bounded GPU cache and a persistent Python worker.
+Experimental branch of Atelier local. Generation runs natively: Node supervises a persistent Python worker (`runner/`) instead of calling the ComfyUI API. The worker is installed automatically in `data/runtime/` and is driven from the application interface through the LLM tools `generate_image` and `generate_video`.
 
-- [Usage and configuration](experiments/krea2-python/README.md)
-- [Optimized implementation and test results](experiments/krea2-python/OPTIMIZED.md)
-- [Original CPU/CUDA profile](experiments/krea2-python/PROFILE.md)
-- [Last speed trial against Comfy](experiments/krea2-python/LAST-TRY.md)
+- [Native runner: setup, supported pipelines and measured results](runner/README.md)
+- [Design of native workflows](docs/superpowers/specs/2026-11-09-native-workflows-design.md)
 
-Local configuration, prepared weight caches and generated images remain under `experiments/krea2-python/` and are ignored by Git. The normal application is maintained separately on `main`; this prototype is not integrated into its interface.
+`experiments/krea2-python/` keeps the original Krea2 experiment and its profiling reports (`OPTIMIZED.md`, `PROFILE.md`, `LAST-TRY.md`) as references only; the application does not import it. The original experiment is also preserved at commit `0ed79d6` on `experiment/krea2-python`.
 
-From this checkout, with the existing local Python environment:
-
-```sh
-python experiments/krea2-python/try_krea.py --engine int8 --worker
-```
-
-The original experiment is also preserved at commit `0ed79d6` on `experiment/krea2-python`.
+The ComfyUI path documented in `README.md` is the legacy implementation still present in this branch; `main` remains Comfy-based until this branch replaces it.
