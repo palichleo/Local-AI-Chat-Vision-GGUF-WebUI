@@ -49,7 +49,7 @@ MP4/WebM 原视频保留在 ComfyUI，通过流式及字节范围请求在聊天
 
 ## 本地模型库
 
-请将每个模型放入 `models/` 的独立子文件夹，文件夹名就是界面显示名称。例如 `models/My model/model.gguf` 和 `models/My model/mmproj.gguf`。文件 `put model folders here.txt` 说明了目录结构。Git 保留说明文件并忽略 GGUF 权重。llama.cpp 路径由所有模型共享，需单独配置。
+请将每个聊天模型放入 `models/LLMs/` 的独立子文件夹，例如 `models/LLMs/My model/model.gguf`，文件夹名就是初始显示名称。配套的 `mmproj.gguf` 可放在同一文件夹，或 `models/vision/My model/` 中。旧版直接位于 `models/` 下的模型文件夹仍可使用。生成模型放在 `models/checkpoints/`，文本编码器放在 `models/LLMs/`，VAE 放在 `models/VAE/`，LoRA 放在 `models/LoRa/`。各文件夹附有简短说明。可在设置的 Workflows 区域通过“浏览”修改并保存 checkpoint 文件夹；其他组件的文件选择器从对应目录开始。Git 只发布说明文件，不发布权重。llama.cpp 仍单独配置并由聊天模型共享。
 
 打开 Configuration 时自动扫描直接子文件夹。选择检测到的文件夹后点击 **Ajouter un LLM** 保存路径；也可手动输入或浏览外部文件。路径保存在 `data/models.json`，重启后仍有效。每个文件夹只允许一个主 GGUF 和最多一个名称含有 `mmproj` 的视觉投影器，不区分大小写，并检查扩展名和 GGUF 文件头。歧义目录、无效文件和多分片模型不会自动选择。文件头有效不代表模型与投影器一定兼容。
 

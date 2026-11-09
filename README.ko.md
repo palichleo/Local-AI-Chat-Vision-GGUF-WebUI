@@ -49,7 +49,7 @@ MP4/WebM 원본은 ComfyUI에 남고 채팅, Output, Details에서 바이트 범
 
 ## 로컬 모델 라이브러리
 
-각 모델을 `models/` 안의 별도 하위 폴더에 넣으세요. 폴더 이름이 화면에 표시되는 모델 이름입니다. 예: `models/My model/model.gguf`, `models/My model/mmproj.gguf`. `put model folders here.txt` 파일이 구조를 안내합니다. Git에는 안내 파일만 포함하고 GGUF 가중치는 제외합니다. llama.cpp 경로는 모델과 별도로 설정하며 모든 모델이 공유합니다.
+각 채팅 모델을 `models/LLMs/` 안의 별도 폴더에 넣으세요. 예: `models/LLMs/My model/model.gguf`. 폴더 이름이 초기 표시 이름이 됩니다. 호환되는 `mmproj.gguf`는 같은 폴더 또는 `models/vision/My model/`에 둘 수 있습니다. 기존 `models/` 바로 아래의 모델 폴더도 계속 지원합니다. 생성 모델은 `models/checkpoints/`, 텍스트 인코더는 `models/LLMs/`, VAE는 `models/VAE/`, LoRA는 `models/LoRa/`에 넣으세요. 각 폴더에 간단한 안내 파일이 있습니다. 설정의 Workflows 블록에서 찾아보기로 checkpoint 폴더를 변경하고 저장할 수 있으며, 다른 구성 요소의 파일 선택기는 해당 폴더에서 시작합니다. Git에는 안내 파일만 포함하고 가중치는 제외합니다. llama.cpp는 별도로 설정하며 채팅 모델이 공유합니다.
 
 Configuration을 열면 바로 아래 하위 폴더를 검색합니다. 검색된 폴더를 선택한 뒤 **Ajouter un LLM**을 누르거나, 외부 파일 경로를 직접 입력 또는 찾아서 같은 버튼으로 저장하세요. 경로는 `data/models.json`에 보관되어 재시작 후에도 유지됩니다. 폴더에는 주 GGUF 하나와 선택적으로 이름에 `mmproj`가 포함된 비전 프로젝터 하나가 있어야 합니다. 확장자와 GGUF 헤더를 검사하며 모호한 폴더, 잘못된 파일, 분할 GGUF는 자동 선택하지 않습니다. 올바른 헤더가 모델과 프로젝터의 호환성을 보장하지는 않습니다.
 

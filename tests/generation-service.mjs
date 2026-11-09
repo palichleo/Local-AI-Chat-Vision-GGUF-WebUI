@@ -3,8 +3,28 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {GenerationService} from '../lib/generation-service.mjs';
+import {GenerationService,generationConfig} from '../lib/generation-service.mjs';
 import {createApplication} from '../server.mjs';
+
+test('checkpoint directory defaults to this installation, custom paths persist and old settings still load',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'native-folders-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const options={root,dataDir:join(root,'data'),workflowDir:join(root,'workflow'),outputDir:join(root,'output')},service=await new GenerationService(options).init();
+ assert.equal((await service.snapshot()).folders.model,join(root,'models','checkpoints'));assert.equal(service.folders().lora,join(root,'models','LoRa'));
+ const custom=join(root,'custom checkpoints');await service.save({...service.config,modelRoot:custom});await service.close();const reopened=await new GenerationService(options).init();assert.equal(reopened.config.modelRoot,custom);assert.equal(reopened.folders().model,custom);await reopened.close();
+ const {modelRoot,...legacy}=service.config;assert.equal(generationConfig(legacy).modelRoot,'');assert.throws(()=>generationConfig({...legacy,modelRoot:'relative/path'}),/absolu/);
+});
+
+test('HTTP import validation does not save a workflow and browse defaults follow the registered folders',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'native-folder-http-')),models=join(root,'models'),calls=[];
+ const app=await createApplication({port:0,dataDir:root,modelsDir:models,filePicker:async(kind,{initialPath})=>{calls.push({kind,initialPath});return null;}});t.after(async()=>{await app.close();await rm(root,{recursive:true,force:true});});
+ const boot=await(await fetch(app.url+'/api/bootstrap')).json(),api=(route,body)=>fetch(app.url+'/api/'+route,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+boot.token,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
+ const template=(await(await api('generation/templates?pipeline=krea2')).json()).template;
+ assert.equal((await api('generation/validate',template)).status,200);assert.equal((await api('generation/validate',{...template,parameters:null})).status,400);assert.deepEqual((await(await api('generation/workflows')).json()).workflows,[]);
+ const generation=await(await api('generation')).json();assert.match(generation.folders.model,/[\\/]models[\\/]checkpoints$/);
+ const custom=join(root,'another checkpoint folder');assert.equal((await api('generation/config',{...generation.config,modelRoot:custom})).status,200);
+ for(const kind of ['directory','workflow','model','projector'])assert.equal((await api('files/choose',{kind})).status,200);
+ assert.equal(calls[0].initialPath,custom);assert.match(calls[1].initialPath,/[\\/]workflow$/);assert.equal(calls[2].initialPath,join(models,'LLMs'));assert.equal(calls[3].initialPath,join(models,'vision'));
+});
 
 test('closing during asynchronous worker setup cannot spawn an orphan after shutdown',async t=>{
  const root=await mkdtemp(join(tmpdir(),'native-start-close-'));t.after(()=>rm(root,{recursive:true,force:true}));let starts=0;

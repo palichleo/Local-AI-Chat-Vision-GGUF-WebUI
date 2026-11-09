@@ -1,0 +1,4 @@
+Put LoRA files here (.safetensors), optionally in subfolders.
+Choose them in a workflow's LoRAs section, then set their activation and strength.
+Only LoRAs compatible with the selected generation engine can be used.
+Weights are local only and ignored by Git.

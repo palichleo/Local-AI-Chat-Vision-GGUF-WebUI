@@ -1,9 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { inspectKreaWorkflow, convertKreaWorkflow } from '../lib/native-workflow-conversion.mjs';
+import { inspectKreaWorkflow, convertKreaWorkflow,localFiles,locateAsset } from '../lib/native-workflow-conversion.mjs';
+
+test('conversion resolves separated component directories and rejects ambiguous or escaping names',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'native-layout-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const checkpoint=join(root,'checkpoints'),vae=join(root,'VAE'),lora=join(root,'LoRa');for(const directory of [checkpoint,vae,lora])await mkdir(directory);
+ await writeFile(join(checkpoint,'model.safetensors'),'test');await writeFile(join(vae,'decoder.safetensors'),'test');await writeFile(join(lora,'style.safetensors'),'test');
+ const index=await localFiles(checkpoint,[vae,lora,join(root,'LLMs')]);assert.equal(index.files.length,3);assert.equal(await locateAsset(index,'decoder.safetensors'),await realpath(join(vae,'decoder.safetensors')));
+ await assert.rejects(locateAsset(index,'../decoder.safetensors'),/Unsafe/);await writeFile(join(checkpoint,'decoder.safetensors'),'duplicate');await assert.rejects(locateAsset(await localFiles(checkpoint,[vae]),'decoder.safetensors'),/found 2/);
+});
 
 function graph(){return {
   raw:{class_type:'PrimitiveStringMultiline',inputs:{value:'A local scene'}},

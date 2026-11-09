@@ -1,0 +1,12 @@
+Put each chat MODEL FOLDER here, not loose GGUF files.
+
+models/LLMs/Your model name/model.gguf
+models/LLMs/Your model name/mmproj.gguf (optional matching vision projector)
+
+The folder name becomes the model name in Atelier; you can rename it in Configuration.
+The projector may also be in models/vision/Your model name/ with "mmproj" in its filename.
+Use exactly one main GGUF and at most one matching projector per model folder.
+Existing model folders directly under models/ are still detected.
+
+Generation text encoders (.safetensors) also belong here and are selected in a workflow.
+Keep llama.cpp outside these folders. Weights are ignored by Git.

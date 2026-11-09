@@ -1,0 +1,5 @@
+Put image and video GENERATION MODEL files here (.safetensors).
+Subfolders are allowed. This is the default checkpoint folder in Configuration > Workflows.
+You can choose another folder with Browse; files stay where they are.
+Select each file in the workflow editor. Compatibility is checked before it is registered.
+Weights are local only and ignored by Git.

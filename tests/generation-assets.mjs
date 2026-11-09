@@ -29,7 +29,7 @@ test('registered assets use inspected local checkpoint headers and persisted sta
     await assert.rejects(assets.resolve('encoder',{kind:'vae',family:'krea2'}), /kind|compatible/i);
     await assert.rejects(assets.resolve('encoder',{kind:'textEncoder',family:'ltx25'}), /family|compatible/i);
     assert.equal((await assets.list()).length,1);
-    const unnamed=await assets.register({path,kind:'textEncoder',family:'krea2'});assert.equal(unnamed.name,'anything.safetensors');
+    const unnamed=await assets.register({path,kind:'textEncoder',family:'krea2'});assert.equal(unnamed.name,'My encoder');assert.equal(unnamed.id,saved.id);assert.equal((await assets.list()).length,1);
   });
 });
 

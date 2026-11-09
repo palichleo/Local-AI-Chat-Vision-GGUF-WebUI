@@ -1,0 +1,10 @@
+Put vision projectors and projection components here.
+
+For automatic pairing with a chat LLM, use the SAME folder name:
+models/LLMs/Your model name/model.gguf
+models/vision/Your model name/mmproj.gguf
+
+A matching projector next to the main GGUF takes priority.
+Loose projectors can still be selected manually with Browse in Configuration > Your LLMs.
+Generation projection files (.safetensors) can be selected in the workflow editor.
+Weights are local only and ignored by Git.

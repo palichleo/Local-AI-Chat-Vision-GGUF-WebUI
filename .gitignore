@@ -6,6 +6,10 @@ history/
 # Model weights stay local; keep the folder guide in the repository.
 *.[gG][gG][uU][fF]
 *.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
 
 # Local Python experiment inputs and generated files.
 experiments/krea2-python/local.json

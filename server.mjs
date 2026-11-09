@@ -390,9 +390,10 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
           if(path==='/api/generation/config'){const result=await generation.save(body);runtime=nativeRuntime;return send(200,result);}
           if(path==='/api/generation/test'){if(body.config||body.pythonPath!==undefined)await generation.save(body.config||body);void generation.start().catch(()=>{});return send(200,await generation.snapshot());}
           if(path==='/api/generation/assets'){const {pipeline:familyAlias,...asset}=body;return send(200,await generation.assets.register({...asset,family:body.family||familyAlias}));}
+          if(path==='/api/generation/validate')return send(200,{workflow:validateNativeWorkflow(body)});
           if(path==='/api/generation/workflows')return send(200,await generation.catalog.save(body));
-          if(path==='/api/generation/convert-krea')return send(200,await convertKreaWorkflow(body.sourcePath,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot,backupDir:join(dataDir,'migration'),name:body.name,description:body.description}));
-          if(path==='/api/generation/convert-longforge')return send(200,await convertLongForge(body.sourcePath,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot,backupDir:join(dataDir,'migration'),name:body.name,description:body.description}));
+          if(path==='/api/generation/convert-krea')return send(200,await convertKreaWorkflow(body.sourcePath,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot||generation.folders().model,additionalRoots:Object.values(generation.folders()).filter(path=>path!==generation.folders().model),backupDir:join(dataDir,'migration'),name:body.name,description:body.description}));
+          if(path==='/api/generation/convert-longforge')return send(200,await convertLongForge(body.sourcePath,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot||generation.folders().model,additionalRoots:Object.values(generation.folders()).filter(path=>path!==generation.folders().model),backupDir:join(dataDir,'migration'),name:body.name,description:body.description}));
           if(path==='/api/generation/remove'){await generation.catalog.remove(body.id);return send(200,{removed:true});}
           throw problem('Route de génération introuvable.',404);
         }finally{savingComfy=false;}
@@ -475,11 +476,12 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return send(202, { state: 'preparing' });
       }
       if(path==='/api/files/choose'){
-        if(!['engine','model','projector','generation','python','tokenizer'].includes(body?.kind))throw problem('Type de fichier invalide.');
+        if(!['engine','model','projector','generation','python','tokenizer','directory','workflow'].includes(body?.kind))throw problem('Type de fichier invalide.');
         if(saving||savingSettings||savingComfy||pickingFile)throw problem('Un choix de fichier ou un enregistrement est déjà en cours.',409);
         if(runtime.active||engine.busy||body.kind==='engine'&&engine.child||['loading','stopping'].includes(engine.state))throw problem('Arrête le modèle avant de choisir un fichier.',409);
         pickingFile=true;const controller=new AbortController();const abort=()=>controller.abort();res.once('close',abort);
-        try{return send(200,{path:await filePicker(body.kind,{initialPath:body.initialPath||'',signal:controller.signal})});}
+        const initialPath=body.initialPath||({model:join(modelsDir,'LLMs'),projector:join(modelsDir,'vision'),generation:generation.folders().model,directory:generation.folders().model,workflow:join(root,'workflow')}[body.kind]||'');
+        try{return send(200,{path:await filePicker(body.kind,{initialPath,signal:controller.signal})});}
         finally{res.off('close',abort);pickingFile=false;}
       }
       if(path==='/api/settings'){

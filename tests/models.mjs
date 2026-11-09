@@ -4,6 +4,14 @@ import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
 import {ModelLibrary} from '../lib/models.mjs';import {createApplication} from '../server.mjs';
 async function fixture(t){const root=await mkdtemp(join(tmpdir(),'atelier-models-'));t.after(()=>rm(root,{recursive:true,force:true}));const models=join(root,'models');await mkdir(models);return {root,models,library:new ModelLibrary(join(root,'library.json'),models)};}
 async function gguf(folder,name,contents='GGUF\x03\0\0\0'){await mkdir(folder,{recursive:true});const path=join(folder,name);await writeFile(path,contents);return path;}
+
+test('organized folders detect LLMs and matching vision folders without treating component folders as broken chat models',async t=>{
+ const {models,library}=await fixture(t);for(const folder of ['checkpoints','LoRa','VAE','vision'])await mkdir(join(models,folder));
+ await gguf(join(models,'LLMs','New model'),'main.gguf');const projector=await gguf(join(models,'vision','New model'),'mmproj.gguf');await gguf(join(models,'Legacy model'),'main.gguf');await writeFile(join(models,'VAE','vae.safetensors'),'test');
+ const result=await library.scan();assert.deepEqual(result.errors,[]);assert.deepEqual(result.detected.map(item=>item.name),['Legacy model','New model']);assert.equal(result.detected[1].projectorPath,projector);
+ await assert.rejects(readFile(join(models,'put model folders here.txt')),{code:'ENOENT'});
+ await gguf(join(models,'LLMs','New model'),'mmproj.gguf');assert.match((await library.scan()).detected[1].projectorPath,/LLMs/);
+});
 test('scan assigns mmproj regardless of order, derives names from folders and reports ambiguous or invalid folders',async t=>{
  const {models,library}=await fixture(t);await gguf(join(models,'My vision model'),'z.gguf');await gguf(join(models,'My vision model'),'a.MMProj.gguf');await gguf(join(models,'Text only'),'model.gguf');
  await gguf(join(models,'Ambiguous'),'a.gguf');await gguf(join(models,'Ambiguous'),'b.gguf');await gguf(join(models,'Invalid'),'a.gguf','not GGUF');await gguf(join(models,'Projector only'),'mmproj.gguf');

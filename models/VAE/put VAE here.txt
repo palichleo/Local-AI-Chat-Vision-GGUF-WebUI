@@ -1,0 +1,3 @@
+Put image, video and audio VAE files here (.safetensors).
+Select the matching VAE in each workflow. Files are not moved or downloaded.
+Subfolders are allowed. Weights are local only and ignored by Git.

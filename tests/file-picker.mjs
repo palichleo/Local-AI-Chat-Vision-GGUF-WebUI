@@ -55,3 +55,15 @@ test('aborting waits for the native process to close before releasing the picker
 test('excessive native output fails even when killing emits close synchronously', async () => {
   await assert.rejects(chooseLocalFile('model', { platform: 'win32', spawnProcess: fake('x'.repeat(8193)) }), /trop longue/);
 });
+
+test('Windows folder picking uses a directory dialog and workflow picking filters JSON',async()=>{
+ const calls=[];assert.equal(await chooseLocalFile('directory',{platform:'win32',initialPath:'C:\\models\\$(unsafe)',spawnProcess:fake('C:\\models\\checkpoints',calls)}),'C:\\models\\checkpoints');
+ const script=Buffer.from(calls[0].args.at(-1),'base64').toString('utf16le');assert.match(script,/FolderBrowserDialog/);assert.doesNotMatch(script,/\$dialog\.Filter|\$\(unsafe\)/);
+ await chooseLocalFile('workflow',{platform:'win32',spawnProcess:fake('C:\\workflow.json',calls)});assert.match(Buffer.from(calls[1].args.at(-1),'base64').toString('utf16le'),/\*\.json/);
+ await assert.rejects(chooseLocalFile('workflow',{platform:'win32',spawnProcess:fake('C:\\wrong.txt')}),/JSON/);
+});
+
+test('Linux folder picking requests directories in Zenity and KDialog',async()=>{
+ const calls=[],missing=Object.assign(Error('missing'),{code:'ENOENT'}),spawnProcess=(command,args,options)=>fake(command==='zenity'?missing:'/models/checkpoints',calls)(command,args,options);
+ assert.equal(await chooseLocalFile('directory',{platform:'linux',spawnProcess}),'/models/checkpoints');assert.ok(calls[0].args.includes('--directory'));assert.ok(calls[1].args.includes('--getexistingdirectory'));assert.equal(calls[1].args.includes('*.gguf *.GGUF'),false);
+});
