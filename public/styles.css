@@ -323,14 +323,14 @@ html[data-page-hidden=true] .generation-frame::before,html[data-page-hidden=true
 /* Workflow controls share the settings surfaces and expose complexity on demand. */
 .native-settings .history-toggle{margin-bottom:17px;font-size:12px}
 .native-environment,.native-import{margin-top:18px;border-top:1px solid var(--line);padding-top:16px}
-.native-environment>summary,.native-import>summary,.native-comfy-import>summary,.native-manual-path>summary{font-size:12px;color:var(--muted);cursor:pointer}
-.native-environment[open]>summary,.native-comfy-import[open]>summary{margin-bottom:16px}
+.native-environment>summary,.native-import>summary,.native-manual-path>summary{font-size:12px;color:var(--muted);cursor:pointer}
+.native-environment[open]>summary{margin-bottom:16px}
 .workflow-settings .workflow-heading{margin:0 0 18px;gap:12px;flex-wrap:wrap}.workflow-settings h3{margin:0;font-size:13px}.workflow-settings .secondary{font-size:11px;min-height:38px}.workflow-heading svg{width:14px;height:14px}
 .workflow-settings .workflow-card{margin:12px 0 0;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
 .workflow-settings .workflow-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.workflow-card-title{display:grid;gap:4px;min-width:0}.workflow-card-title strong{font-size:13px;overflow-wrap:anywhere}.workflow-card-title small{margin:0}
 .native-status{font-size:10px;line-height:1.4;padding:4px 8px;flex-shrink:0;border:1px solid var(--line);border-radius:99px;color:var(--muted)}.native-status[data-active=true]{color:var(--accent);border-color:var(--line-strong);background:var(--tint)}
 .native-card-actions{display:flex;justify-content:flex-end;align-items:center;gap:9px;margin-top:14px}.native-card-actions>.native-remove{margin-right:auto;margin-left:0}.native-remove{color:var(--muted);min-height:32px}.native-remove:hover:enabled{color:var(--danger)}.native-empty{font-size:12px;color:var(--muted);line-height:1.7;margin:22px 0}
-.native-import-body{padding-top:17px}.native-import-choice{display:flex;align-items:center;gap:14px;justify-content:space-between}.native-import-choice h4{font-size:12px;margin:0}.native-import-choice p{margin:7px 0 0}.native-import-choice button{flex-shrink:0}.native-comfy-import{margin-top:20px}.native-comfy-import>.comfy-help{margin:12px 0 18px}.workflow-settings .path-input input::placeholder{color:var(--muted)}
+.native-import-body{padding-top:17px}.native-import-choice{display:flex;align-items:center;gap:14px;justify-content:space-between}.native-import-choice h4{font-size:12px;margin:0}.native-import-choice p{margin:7px 0 0}.native-import-choice button{flex-shrink:0}.native-import-choice+.native-import-choice{margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}.workflow-settings .path-input input::placeholder{color:var(--muted)}
 #workflow-editor{animation:native-panel-in .16s ease-out}
 #settings #workflow-editor .settings-header{grid-template-columns:auto minmax(0,1fr) auto;gap:12px;padding-block:18px}
 #workflow-editor .settings-header h2{font-size:19px;letter-spacing:-.4px}#native-workflow-back svg{transform:rotate(180deg)}

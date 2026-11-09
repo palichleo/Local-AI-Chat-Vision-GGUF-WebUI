@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inspectKreaWorkflow, convertKreaWorkflow,localFiles,locateAsset } from '../lib/native-workflow-conversion.mjs';
+import {importComfyWorkflow} from '../lib/comfy-import.mjs';
 
 test('conversion resolves separated component directories and rejects ambiguous or escaping names',async t=>{
  const root=await mkdtemp(join(tmpdir(),'native-layout-'));t.after(()=>rm(root,{recursive:true,force:true}));
@@ -11,6 +12,21 @@ test('conversion resolves separated component directories and rejects ambiguous 
  await writeFile(join(checkpoint,'model.safetensors'),'test');await writeFile(join(vae,'decoder.safetensors'),'test');await writeFile(join(lora,'style.safetensors'),'test');
  const index=await localFiles(checkpoint,[vae,lora,join(root,'LLMs')]);assert.equal(index.files.length,3);assert.equal(await locateAsset(index,'decoder.safetensors'),await realpath(join(vae,'decoder.safetensors')));
  await assert.rejects(locateAsset(index,'../decoder.safetensors'),/Unsafe/);await writeFile(join(checkpoint,'decoder.safetensors'),'duplicate');await assert.rejects(locateAsset(await localFiles(checkpoint,[vae]),'decoder.safetensors'),/found 2/);
+});
+
+test('uploaded Krea exports select their converter from content and keep the original source backup',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'comfy-upload-'));t.after(()=>rm(root,{recursive:true,force:true}));const models=join(root,'models');await mkdir(models);
+ for(const name of ['model','encoder','vae','style'])await writeFile(join(models,name+'.safetensors'),'fixture');
+ const sourceText='\uFEFF'+JSON.stringify({graph:graph()},null,2),registered=[],saved=[];
+ const result=await importComfyWorkflow(sourceText,{modelRoot:models,backupDir:join(root,'backup'),assets:{register:async asset=>{registered.push(asset);return asset;}},catalog:{save:async workflow=>{saved.push(workflow);return workflow;}}});
+ assert.equal(result.workflow.pipeline,'krea2');assert.equal(result.workflow.enabled,false);assert.equal(registered.length,4);assert.equal(saved.length,1);assert.equal(await readFile(result.backupPath,'utf8'),sourceText);
+ const modified=graph();modified.sample.inputs.cfg=4;await assert.rejects(importComfyWorkflow(JSON.stringify(modified),{assets:{register(){assert.fail('Must validate before registering assets');}}}),/CFG/);
+});
+
+test('unknown, malformed, oversized and mixed uploaded formats fail before any file operations',async()=>{
+ for(const value of [JSON.stringify({nodes:[]}),JSON.stringify({schemaVersion:1,pipeline:'krea2'}),'null','[]','42'])await assert.rejects(importComfyWorkflow(value),/compatible/);
+ await assert.rejects(importComfyWorkflow('{'),/JSON/);await assert.rejects(importComfyWorkflow('é'.repeat(1024*1024+1)),/2 Mo/);
+ await assert.rejects(importComfyWorkflow(JSON.stringify({nodes:[{type:'LongForgeLTXVideoSettings'}],graph:graph()})),/plusieurs formats/);
 });
 
 function graph(){return {

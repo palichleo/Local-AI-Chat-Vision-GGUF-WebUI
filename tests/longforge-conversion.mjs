@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {inspectLongForge,convertLongForge} from '../lib/longforge-conversion.mjs';
 import {validateNativeWorkflow} from '../lib/native-workflows.mjs';
+import {importComfyWorkflow} from '../lib/comfy-import.mjs';
 
 function source(){return {nodes:[{type:'LongForgeLTXProject',widgets_values:['PRIVATE SCENE TEXT']},{type:'LongForgeLTXVideoSettings',widgets_values:[896,1600,5,'9',true]}],definitions:{subgraphs:[{nodes:[
  {type:'UNETLoader',widgets_values:['transformer.safetensors']},{type:'CLIPLoader',widgets_values:['text.safetensors']},
@@ -25,4 +26,6 @@ test('explicit conversion backs up source bytes and saves a disabled editable na
  const result=await convertLongForge(path,{modelRoot:models,backupDir:join(root,'backup'),assets:{list:async()=>[],register:async value=>{const asset={...value,id:value.kind};registered.push(asset);return asset;}},catalog:{save:async workflow=>validateNativeWorkflow(workflow)}});
  assert.equal(result.workflow.enabled,false);assert.equal(registered.length,4);assert.equal(result.workflow.pipeline,'ltx25');assert.equal(result.workflow.profiles.final.parameters.height,1600);
  assert.equal(await readFile(result.backupPath,'utf8'),bytes);assert.equal(await readFile(path,'utf8'),bytes);assert.ok(!JSON.stringify(result.workflow).includes('PRIVATE SCENE TEXT'));
+ const uploaded=await importComfyWorkflow(bytes,{modelRoot:models,backupDir:join(root,'backup'),assets:{list:async()=>[],register:async value=>({...value,id:value.kind})},catalog:{save:async workflow=>validateNativeWorkflow(workflow)}});
+ assert.equal(uploaded.workflow.pipeline,'ltx25');assert.equal(uploaded.workflow.enabled,false);assert.equal(await readFile(uploaded.backupPath,'utf8'),bytes);
 });

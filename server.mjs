@@ -34,6 +34,7 @@ import {convertLongForge} from './lib/longforge-conversion.mjs';
 import {generatedMedia} from './lib/generated-media.mjs';
 import {validateNativeWorkflow} from './lib/native-workflows.mjs';
 import {convertKreaWorkflow} from './lib/native-workflow-conversion.mjs';
+import {importComfyWorkflow} from './lib/comfy-import.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 20 * 1024 * 1024;
@@ -391,6 +392,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
           if(path==='/api/generation/test'){if(body.config||body.pythonPath!==undefined)await generation.save(body.config||body);void generation.start().catch(()=>{});return send(200,await generation.snapshot());}
           if(path==='/api/generation/assets'){const {pipeline:familyAlias,...asset}=body;return send(200,await generation.assets.register({...asset,family:body.family||familyAlias}));}
           if(path==='/api/generation/validate')return send(200,{workflow:validateNativeWorkflow(body)});
+          if(path==='/api/generation/import-comfy')return send(200,await importComfyWorkflow(body.sourceText,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot||generation.folders().model,additionalRoots:Object.values(generation.folders()).filter(path=>path!==generation.folders().model),backupDir:join(dataDir,'migration')}));
           if(path==='/api/generation/workflows')return send(200,await generation.catalog.save(body));
           if(path==='/api/generation/convert-krea')return send(200,await convertKreaWorkflow(body.sourcePath,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot||generation.folders().model,additionalRoots:Object.values(generation.folders()).filter(path=>path!==generation.folders().model),backupDir:join(dataDir,'migration'),name:body.name,description:body.description}));
           if(path==='/api/generation/convert-longforge')return send(200,await convertLongForge(body.sourcePath,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot||generation.folders().model,additionalRoots:Object.values(generation.folders()).filter(path=>path!==generation.folders().model),backupDir:join(dataDir,'migration'),name:body.name,description:body.description}));

@@ -20,6 +20,7 @@ test('HTTP import validation does not save a workflow and browse defaults follow
  const boot=await(await fetch(app.url+'/api/bootstrap')).json(),api=(route,body)=>fetch(app.url+'/api/'+route,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+boot.token,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
  const template=(await(await api('generation/templates?pipeline=krea2')).json()).template;
  assert.equal((await api('generation/validate',template)).status,200);assert.equal((await api('generation/validate',{...template,parameters:null})).status,400);assert.deepEqual((await(await api('generation/workflows')).json()).workflows,[]);
+ const unsupported=await api('generation/import-comfy',{sourceText:JSON.stringify({nodes:[]})});assert.equal(unsupported.status,400);assert.match((await unsupported.json()).error,/compatible/);assert.deepEqual((await(await api('generation/workflows')).json()).workflows,[]);
  const generation=await(await api('generation')).json();assert.match(generation.folders.model,/[\\/]models[\\/]checkpoints$/);
  const custom=join(root,'another checkpoint folder');assert.equal((await api('generation/config',{...generation.config,modelRoot:custom})).status,200);
  for(const kind of ['directory','workflow','model','projector'])assert.equal((await api('files/choose',{kind})).status,200);
