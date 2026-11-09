@@ -21,7 +21,12 @@ const labels = {
   overlap_frames: 'Images de chevauchement',
   msr_frames: 'Durée latente des références MSR',
   msr_strength: 'Influence des références MSR',
+  tile: 'Taille des tuiles (px, 0 = entière)',
+  max_side: 'Plus grand côté de sortie (px, 0 = libre)',
+  multiplier: 'Multiplicateur d’images',
+  mode: 'Mode',
 };
+const choiceLabels = { draft: 'Brouillon', final: 'Vidéo finale', smooth: 'Fluide', slow_motion: 'Ralenti' };
 const ownership = { fixed: 'Fixe', model: 'Assistant', random: 'Aléatoire' };
 export const parameterPolicies = name => (name === 'seed' ? ['fixed', 'model', 'random'] : ['fixed', 'model']);
 export function setupNativeWorkflows(options) {
@@ -511,10 +516,7 @@ export function setupNativeWorkflows(options) {
         : enumChoices
           ? select(
               prefix + '-value-' + name,
-              enumChoices.map(choice => [
-                String(choice),
-                choice === 'draft' ? 'Brouillon' : choice === 'final' ? 'Vidéo finale' : String(choice),
-              ]),
+              enumChoices.map(choice => [String(choice), choiceLabels[choice] || String(choice)]),
               initial ?? enumChoices[0],
             )
           : type === 'string'

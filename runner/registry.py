@@ -1,7 +1,8 @@
 """Generation families declared by data.
 
 A family is ``runner/families/<name>.json`` (what it accepts, shared with the Node server)
-plus ``runner/pipelines/<name>.py`` (how it runs). The module may define ``check(job, family)``
+plus ``runner/pipelines/<name>.py`` (how it runs; several families may share one module
+through the manifest's ``module`` field). The module may define ``check(job, family)``
 for rules that a manifest cannot express, and must define ``generate(job, config, progress)``.
 Adding a family therefore never requires editing this file, the protocol or the server.
 """
@@ -37,8 +38,11 @@ def family(name):
 
 
 def pipeline(name):
-    family(name)
-    return importlib.import_module('runner.pipelines.' + name)
+    """The module running a family: runner.pipelines.<module>, where module defaults to the family name."""
+    module = family(name).get('module', name)
+    if not NAME.match(module):
+        raise ValueError('Invalid pipeline module for ' + name)
+    return importlib.import_module('runner.pipelines.' + module)
 
 
 def capabilities():
@@ -58,7 +62,8 @@ def capabilities():
 
 
 def fields(value, allowed, required=None, label='object'):
-    if not isinstance(value, dict) or value.keys() - set(allowed) or set(required or allowed) - value.keys():
+    required = allowed if required is None else required
+    if not isinstance(value, dict) or value.keys() - set(allowed) or set(required) - value.keys():
         raise ValueError('Invalid ' + label + ' fields')
 
 

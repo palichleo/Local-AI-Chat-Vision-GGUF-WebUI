@@ -1,0 +1,76 @@
+{
+  "family": "realesrgan_image",
+  "module": "realesrgan",
+  "label": "Real-ESRGAN",
+  "mediaType": "image",
+  "tasks": ["upscale"],
+  "requires": ["torch", "PIL"],
+  "components": {
+    "upscaler": {
+      "label": "Modèle d’agrandissement",
+      "folder": "upscale_models",
+      "required": true,
+      "formats": ["pth", "safetensors"],
+      "signature": [
+        {
+          "key": "^conv_first\\.weight$"
+        },
+        {
+          "key": "^body\\.0\\.rdb1\\.conv1\\.weight$"
+        }
+      ]
+    }
+  },
+  "parameters": {
+    "tile": {
+      "type": "integer",
+      "min": 0,
+      "max": 4096,
+      "note": "Taille des tuiles (0 = image entière)."
+    },
+    "max_side": {
+      "type": "integer",
+      "min": 0,
+      "max": 16384,
+      "note": "Plus grand côté de sortie (0 = sans limite)."
+    }
+  },
+  "requiredParameters": [],
+  "roles": {
+    "source_image": {
+      "as": "source",
+      "media": "image",
+      "max": 1,
+      "label": "Image à agrandir"
+    }
+  },
+  "template": {
+    "name": "Agrandir une image",
+    "description": "Upscales an image (x2 or x4 depending on the model) to make it larger and sharper.",
+    "components": {
+      "upscaler": {
+        "policy": "fixed",
+        "asset": "select-local-upscaler"
+      }
+    },
+    "parameters": {
+      "tile": {
+        "policy": "fixed",
+        "value": 512
+      },
+      "max_side": {
+        "policy": "fixed",
+        "value": 0
+      }
+    },
+    "loras": [],
+    "references": [
+      {
+        "id": "source",
+        "name": "Image à agrandir",
+        "role": "source_image",
+        "required": true
+      }
+    ]
+  }
+}

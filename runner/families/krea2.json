@@ -6,44 +6,173 @@
   "requires": ["torch", "diffusers", "transformers", "accelerate", "safetensors", "PIL"],
   "needs": ["tokenizer"],
   "components": {
-    "model": { "label": "Modèle", "folder": "checkpoints", "required": true },
-    "textEncoder": { "label": "Encodeur de texte", "folder": "LLMs", "required": true },
-    "vae": { "label": "VAE", "folder": "VAE", "required": true }
+    "model": {
+      "label": "Modèle",
+      "folder": "checkpoints",
+      "required": true,
+      "signature": [
+        {
+          "key": "^(?:model\\.diffusion_model\\.|diffusion_model\\.)?first\\.weight$",
+          "shape": [6144, 64]
+        },
+        {
+          "key": "^(?:model\\.diffusion_model\\.|diffusion_model\\.)?blocks\\.\\d+\\.attn\\.wq\\.weight$",
+          "shape": [6144, 6144]
+        }
+      ]
+    },
+    "textEncoder": {
+      "label": "Encodeur de texte",
+      "folder": "LLMs",
+      "required": true,
+      "signature": [
+        {
+          "key": "^(?:model\\.)?embed_tokens\\.weight$",
+          "shape": [null, 2560]
+        }
+      ]
+    },
+    "vae": {
+      "label": "VAE",
+      "folder": "VAE",
+      "required": true,
+      "signature": [
+        {
+          "key": "^encoder\\.conv1\\.weight$",
+          "shape": [null, 3, null, null, null]
+        },
+        {
+          "key": "^decoder\\.conv1\\.weight$",
+          "shape": [null, 16, null, null, null]
+        }
+      ]
+    }
   },
   "parameters": {
-    "prompt": { "type": "string", "maxLength": 8000, "nonempty": true },
-    "seed": { "type": "integer", "min": 0, "max": 9007199254740991 },
-    "width": { "type": "integer", "min": 64, "max": 4096, "multipleOf": 8 },
-    "height": { "type": "integer", "min": 64, "max": 4096, "multipleOf": 8 },
-    "steps": { "type": "integer", "min": 1, "max": 1000 },
-    "cfg": { "type": "number", "choices": [1] },
-    "denoise": { "type": "number", "min": 0, "max": 1, "exclusiveMin": true },
-    "expandPrompt": { "type": "boolean" }
+    "prompt": {
+      "type": "string",
+      "maxLength": 8000,
+      "nonempty": true
+    },
+    "seed": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "width": {
+      "type": "integer",
+      "min": 64,
+      "max": 4096,
+      "multipleOf": 8
+    },
+    "height": {
+      "type": "integer",
+      "min": 64,
+      "max": 4096,
+      "multipleOf": 8
+    },
+    "steps": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "cfg": {
+      "type": "number",
+      "choices": [1]
+    },
+    "denoise": {
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "exclusiveMin": true
+    },
+    "expandPrompt": {
+      "type": "boolean"
+    }
   },
   "requiredParameters": ["prompt", "seed", "width", "height", "steps"],
-  "implicitParameters": { "cfg": 1, "denoise": 1 },
-  "roles": {
-    "img2img": { "as": "source", "media": "image", "max": 1, "label": "Image à modifier" }
+  "implicitParameters": {
+    "cfg": 1,
+    "denoise": 1
   },
-  "loras": { "max": 32, "strength": { "type": "number", "min": -4, "max": 4 } },
+  "roles": {
+    "img2img": {
+      "as": "source",
+      "media": "image",
+      "max": 1,
+      "label": "Image à modifier"
+    }
+  },
+  "loras": {
+    "max": 32,
+    "strength": {
+      "type": "number",
+      "min": -4,
+      "max": 4
+    },
+    "signature": [
+      {
+        "key": "(?:^|\\.)lora_A\\.weight$",
+        "shape": [null, null]
+      },
+      {
+        "key": "(?:^|\\.)lora_B\\.weight$",
+        "shape": [null, null]
+      }
+    ]
+  },
   "features": ["promptTemplate", "promptExpansion"],
   "template": {
     "name": "Krea2 image",
     "description": "Create or edit an image with the selected local Krea2 assets.",
     "components": {
-      "model": { "policy": "fixed", "asset": "select-local-model" },
-      "textEncoder": { "policy": "fixed", "asset": "select-local-text-encoder" },
-      "vae": { "policy": "fixed", "asset": "select-local-vae" }
+      "model": {
+        "policy": "fixed",
+        "asset": "select-local-model"
+      },
+      "textEncoder": {
+        "policy": "fixed",
+        "asset": "select-local-text-encoder"
+      },
+      "vae": {
+        "policy": "fixed",
+        "asset": "select-local-vae"
+      }
     },
     "parameters": {
-      "prompt": { "policy": "model", "type": "string", "maxLength": 8000 },
-      "seed": { "policy": "random", "type": "integer" },
-      "width": { "policy": "fixed", "value": 1448 },
-      "height": { "policy": "fixed", "value": 1448 },
-      "steps": { "policy": "fixed", "value": 8 },
-      "cfg": { "policy": "fixed", "value": 1 },
-      "denoise": { "policy": "fixed", "value": 1 },
-      "expandPrompt": { "policy": "fixed", "value": false }
+      "prompt": {
+        "policy": "model",
+        "type": "string",
+        "maxLength": 8000
+      },
+      "seed": {
+        "policy": "random",
+        "type": "integer"
+      },
+      "width": {
+        "policy": "fixed",
+        "value": 1448
+      },
+      "height": {
+        "policy": "fixed",
+        "value": 1448
+      },
+      "steps": {
+        "policy": "fixed",
+        "value": 8
+      },
+      "cfg": {
+        "policy": "fixed",
+        "value": 1
+      },
+      "denoise": {
+        "policy": "fixed",
+        "value": 1
+      },
+      "expandPrompt": {
+        "policy": "fixed",
+        "value": false
+      }
     },
     "loras": [],
     "references": [

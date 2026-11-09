@@ -1,0 +1,76 @@
+{
+  "family": "realesrgan_video",
+  "module": "realesrgan",
+  "label": "Real-ESRGAN",
+  "mediaType": "video",
+  "tasks": ["upscale"],
+  "requires": ["torch", "PIL", "av", "imageio_ffmpeg"],
+  "components": {
+    "upscaler": {
+      "label": "Modèle d’agrandissement",
+      "folder": "upscale_models",
+      "required": true,
+      "formats": ["pth", "safetensors"],
+      "signature": [
+        {
+          "key": "^conv_first\\.weight$"
+        },
+        {
+          "key": "^body\\.0\\.rdb1\\.conv1\\.weight$"
+        }
+      ]
+    }
+  },
+  "parameters": {
+    "tile": {
+      "type": "integer",
+      "min": 0,
+      "max": 4096,
+      "note": "Taille des tuiles (0 = image entière)."
+    },
+    "max_side": {
+      "type": "integer",
+      "min": 0,
+      "max": 16384,
+      "note": "Plus grand côté de sortie (0 = sans limite)."
+    }
+  },
+  "requiredParameters": [],
+  "roles": {
+    "source_video": {
+      "as": "source",
+      "media": "video",
+      "max": 1,
+      "label": "Vidéo à agrandir"
+    }
+  },
+  "template": {
+    "name": "Agrandir une vidéo",
+    "description": "Upscales a video frame by frame (x2 or x4 depending on the model), keeping its sound.",
+    "components": {
+      "upscaler": {
+        "policy": "fixed",
+        "asset": "select-local-upscaler"
+      }
+    },
+    "parameters": {
+      "tile": {
+        "policy": "fixed",
+        "value": 512
+      },
+      "max_side": {
+        "policy": "fixed",
+        "value": 1920
+      }
+    },
+    "loras": [],
+    "references": [
+      {
+        "id": "source",
+        "name": "Vidéo à agrandir",
+        "role": "source_video",
+        "required": true
+      }
+    ]
+  }
+}

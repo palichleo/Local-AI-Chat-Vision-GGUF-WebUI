@@ -20,23 +20,49 @@
     "model": {
       "label": "Modèle",
       "folder": "checkpoints",
-      "required": true
+      "required": true,
+      "signature": [
+        {
+          "key": "(?:^|\\.)(?:transformer_blocks|diffusion_model\\.transformer_blocks)\\.\\d+\\."
+        }
+      ]
     },
     "textEncoder": {
       "label": "Encodeur de texte",
       "folder": "LLMs",
-      "required": true
+      "required": true,
+      "signature": [
+        {
+          "key": "(?:^|\\.)embed_tokens\\.weight$"
+        }
+      ]
     },
     "vae": {
       "label": "VAE vidéo",
       "folder": "VAE",
-      "required": true
+      "required": true,
+      "signature": [
+        {
+          "key": "(?:^|\\.)encoder\\."
+        },
+        {
+          "key": "(?:^|\\.)decoder\\."
+        }
+      ]
     },
     "audioVae": {
       "label": "VAE audio",
       "folder": "VAE",
       "required": true,
-      "note": "Requis par l'échantillonneur couplé même pour une vidéo muette."
+      "note": "Requis par l'échantillonneur couplé même pour une vidéo muette.",
+      "signature": [
+        {
+          "key": "(?:^|\\.)encoder\\."
+        },
+        {
+          "key": "(?:^|\\.)decoder\\."
+        }
+      ]
     }
   },
   "parameters": {
@@ -159,7 +185,15 @@
       "type": "number",
       "min": 0,
       "max": 2
-    }
+    },
+    "signature": [
+      {
+        "key": "(?:^|\\.)(?:lora_A|lora_down)\\.weight$"
+      },
+      {
+        "key": "(?:^|\\.)(?:lora_B|lora_up)\\.weight$"
+      }
+    ]
   },
   "profiles": ["width", "height", "steps", "frames", "fps"],
   "template": {

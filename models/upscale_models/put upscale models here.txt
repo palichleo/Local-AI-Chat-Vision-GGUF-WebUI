@@ -1,0 +1,3 @@
+Put upscaling models here (Real-ESRGAN / RRDBNet .pth or .safetensors, x1, x2 or x4).
+Select them in an upscale workflow. Files are not moved or downloaded.
+Weights are local only and ignored by Git.

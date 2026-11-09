@@ -1,0 +1,78 @@
+{
+  "family": "rife",
+  "label": "RIFE",
+  "mediaType": "video",
+  "tasks": ["interpolate"],
+  "requires": ["torch", "safetensors", "av", "imageio_ffmpeg"],
+  "components": {
+    "interpolator": {
+      "label": "Modèle d’interpolation",
+      "folder": "frame_interpolation",
+      "required": true,
+      "signature": [
+        {
+          "key": "^encode\\.cnn3\\.weight$"
+        },
+        {
+          "key": "^blocks\\.4\\.lastconv\\.0\\.weight$"
+        }
+      ]
+    }
+  },
+  "parameters": {
+    "multiplier": {
+      "type": "integer",
+      "choices": [2, 3, 4, 8],
+      "note": "Images produites par image source."
+    },
+    "mode": {
+      "type": "string",
+      "choices": ["smooth", "slow_motion"],
+      "note": "smooth : même durée, plus d’images par seconde ; slow_motion : ralenti."
+    }
+  },
+  "requiredParameters": ["multiplier"],
+  "roles": {
+    "source_video": {
+      "as": "source",
+      "media": "video",
+      "max": 1,
+      "label": "Vidéo à fluidifier"
+    }
+  },
+  "template": {
+    "name": "Fluidifier une vidéo",
+    "description": "Adds intermediate frames with RIFE: smoother motion at a higher frame rate, or a slow-motion version.",
+    "components": {
+      "interpolator": {
+        "policy": "fixed",
+        "asset": "select-local-interpolator"
+      }
+    },
+    "parameters": {
+      "multiplier": {
+        "policy": "model",
+        "type": "integer",
+        "choices": [2, 4],
+        "default": 2,
+        "description": "2 for smoother motion, 4 for very smooth or strong slow motion."
+      },
+      "mode": {
+        "policy": "model",
+        "type": "string",
+        "choices": ["smooth", "slow_motion"],
+        "default": "smooth",
+        "description": "smooth keeps the duration; slow_motion slows the video down."
+      }
+    },
+    "loras": [],
+    "references": [
+      {
+        "id": "source",
+        "name": "Vidéo à fluidifier",
+        "role": "source_video",
+        "required": true
+      }
+    ]
+  }
+}

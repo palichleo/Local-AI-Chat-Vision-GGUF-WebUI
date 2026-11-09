@@ -105,3 +105,40 @@ test('arguments are checked against the chosen workflow, never forwarded blindly
     /exactly one/,
   );
 });
+
+test('upscale follows the media of its source and interpolate only takes videos', async () => {
+  const transform = (id, pipeline, mediaType, role, parameters = {}) => ({
+    schemaVersion: 1,
+    id,
+    name: id,
+    description: id,
+    enabled: true,
+    ready: true,
+    pipeline,
+    mediaType,
+    parameters,
+    components: {},
+    loras: [],
+    references: [slot('source', role, true)],
+  });
+  const tools = catalogOf([
+    image('portrait'),
+    transform('bigger-image', 'realesrgan_image', 'image', 'source_image'),
+    transform('bigger-video', 'realesrgan_video', 'video', 'source_video'),
+    transform('smooth', 'rife', 'video', 'source_video', {
+      multiplier: { policy: 'model', type: 'integer', choices: [2, 4], default: 2 },
+    }),
+  ]);
+  const names = (await tools.definitions()).map(tool => tool.function.name).sort();
+  assert.deepEqual(names, ['create_image', 'interpolate', 'upscale']);
+  const upscale = (await tools.definitions()).find(tool => tool.function.name === 'upscale').function.parameters;
+  assert.equal(upscale.properties.prompt, undefined, 'upscaling has no prompt');
+  assert.deepEqual(upscale.required, ['source']);
+  assert.equal((await tools.route('upscale', { source: { image: 0 } }, media)).workflow.id, 'bigger-image');
+  const video = await tools.route('upscale', { source: { output: 'video-run' } }, media);
+  assert.equal(video.workflow.id, 'bigger-video');
+  assert.ok(video.args.intention, 'a video upscale still carries an intention for its confirmation');
+  const smooth = await tools.route('interpolate', { source: { output: 'video-run' }, multiplier: 4 }, media);
+  assert.deepEqual([smooth.workflow.id, smooth.args.multiplier], ['smooth', 4]);
+  await assert.rejects(tools.route('interpolate', { source: { image: 0 } }, media), /Aucun workflow/);
+});

@@ -4,7 +4,12 @@ Atelier local is licensed under PolyForm Noncommercial 1.0.0 (see `LICENSE`). Th
 
 ## Code included in this repository
 
-None. The repository contains no source code copied or adapted from third-party projects. Any future adaptation of MIT, BSD or Apache-2.0 code must be listed here with its copyright line and license, and an Apache-2.0 `NOTICE` file must be reproduced when one exists. GPL and AGPL code (including ComfyUI) cannot be included.
+No third-party source file is copied into this repository. Two network definitions are written after published architectures, whose licenses are reproduced here:
+
+- `runner/models/rrdbnet.py` follows the RRDBNet architecture of [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) — BSD 3-Clause License, Copyright (c) 2021, Xintao Wang. All rights reserved.
+- `runner/models/rife.py` follows the IFNet architecture of [Practical-RIFE](https://github.com/hzwer/Practical-RIFE) — MIT License, Copyright (c) 2021 hzwer.
+
+Any future adaptation of MIT, BSD or Apache-2.0 code must be listed here with its copyright line and license, and an Apache-2.0 `NOTICE` file must be reproduced when one exists. GPL and AGPL code (including ComfyUI) cannot be included.
 
 ## Components installed separately
 
