@@ -28,6 +28,7 @@ import { GenerationService, generationConfig } from './lib/generation-service.mj
 import { convertLongForge } from './lib/longforge-conversion.mjs';
 import { generatedMedia } from './lib/generated-media.mjs';
 import { validateNativeWorkflow } from './lib/native-workflows.mjs';
+import { families, familyTemplate } from './lib/families.mjs';
 import { convertKreaWorkflow } from './lib/native-workflow-conversion.mjs';
 import { importComfyWorkflow } from './lib/comfy-import.mjs';
 import { previewWorkflowImport } from './lib/workflow-import.mjs';
@@ -489,14 +490,9 @@ export async function createApplication({
           await generation.catalog.read(decodeURIComponent(path.slice('/api/generation/workflows/'.length))),
         );
       if (req.method === 'GET' && path === '/api/generation/templates') {
-        const folder = join(root, 'runner', 'templates'),
-          templates = [];
-        const { readdir } = await import('node:fs/promises');
-        for (const file of await readdir(folder)) {
-          if (file.endsWith('.json')) templates.push(JSON.parse(await readFile(join(folder, file), 'utf8')));
-        }
-        const family = requestURL.searchParams.get('pipeline');
-        return send(200, family ? { template: templates.find(t => t.pipeline === family) } : { templates });
+        const templates = Object.values(families()).map(manifest => familyTemplate(manifest));
+        const name = requestURL.searchParams.get('pipeline');
+        return send(200, name ? { template: templates.find(t => t.pipeline === name) } : { templates });
       }
       if (path === '/api/lifecycle' && req.method === 'GET') {
         if (closing || controlResponse) throw problem('Une fenêtre contrôle déjà cette application.', 409);

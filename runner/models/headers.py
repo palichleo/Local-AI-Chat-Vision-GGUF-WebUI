@@ -95,22 +95,9 @@ def header(path):
     return value
 
 
-def validate_components(job):
+def validate_krea2_components(job):
+    """Checks Krea2 tensor signatures, INT8 scales and LoRA targets before any GPU work."""
     headers = {role: header(path) for role, path in job['components'].items()}
-    if job['pipeline'] == 'ltx25':
-        from runner.models.ltx25 import validate_layout, video_encoder
-
-        validate_layout(headers)
-        if job['references']:
-            video_encoder(headers)
-        if job['parameters']['audio']:
-            from runner.models.ltx25_audio import vocoder_layout
-
-            vocoder_layout(headers)
-        from runner.video.msr import validate_msr
-
-        validate_msr(job, headers)
-        return headers
     for role, signature in SIGNATURES.items():
         for key, shape in signature.items():
             if headers[role].get(key, {}).get('shape') != shape:

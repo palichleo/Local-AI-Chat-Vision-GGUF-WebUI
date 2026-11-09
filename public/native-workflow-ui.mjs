@@ -1,12 +1,7 @@
 import { setupGenerationRuntime } from './generation-runtime.mjs';
 
+// Interface wording for parameters; component, role and family labels come from the family manifests.
 const labels = {
-  model: 'Modèle',
-  textEncoder: 'Encodeur de texte',
-  vae: 'VAE image / vidéo',
-  audioVae: 'VAE audio',
-  textProjection: 'Projection de texte',
-  enhancer: 'Enhancer',
   prompt: 'Prompt',
   negative_prompt: 'Prompt négatif',
   seed: 'Seed',
@@ -18,7 +13,6 @@ const labels = {
   expandPrompt: 'Expansion du prompt',
   frames: 'Images vidéo',
   fps: 'Images par seconde',
-  duration: 'Durée (secondes)',
   audio: 'Audio',
   stage: 'Brouillon / finale',
   start_strength: 'Influence de l’image de début',
@@ -29,42 +23,27 @@ const labels = {
   msr_strength: 'Influence des références MSR',
 };
 const ownership = { fixed: 'Fixe', model: 'Assistant', random: 'Aléatoire' };
-const roleLabels = {
-  img2img: 'Image à modifier',
-  start_image: 'Image de début',
-  end_image: 'Image de fin',
-  msr_image: 'Référence de sujet',
-  source_video: 'Vidéo à prolonger',
-};
-const limits = {
-  seed: [0, Number.MAX_SAFE_INTEGER],
-  width: [64, 4096],
-  height: [64, 4096],
-  steps: [1, 1000],
-  cfg: [1, 1],
-  denoise: [0.01, 1],
-  frames: [1, 36000],
-  fps: [0.1, 240],
-  duration: [0.1, 600],
-};
-const referenceRoles = { krea2: ['img2img'], ltx25: ['start_image', 'end_image', 'msr_image', 'source_video'] };
 export const parameterPolicies = name => (name === 'seed' ? ['fixed', 'model', 'random'] : ['fixed', 'model']);
-const typeFor = (name, policy) =>
-  policy.type ||
-  (typeof policy.value === 'boolean'
-    ? 'boolean'
-    : typeof policy.value === 'string'
-      ? 'string'
-      : ['prompt', 'negative_prompt', 'stage'].includes(name)
-        ? 'string'
-        : ['cfg', 'denoise', 'fps', 'duration', 'start_strength', 'end_strength', 'msr_strength'].includes(name)
-          ? 'number'
-          : 'integer');
-
 export function setupNativeWorkflows(options) {
   const { api, state, node, notice, onSettingsBusyChange = () => {} } = options,
     $ = id => document.getElementById(id);
   const runtime = setupGenerationRuntime(options);
+  let families = [];
+  const familyOf = name => families.find(item => item.family === name);
+  const componentLabel = role =>
+    families.map(item => item.components[role]?.label).find(Boolean) || labels[role] || role;
+  const roleLabel = role => families.map(item => item.roles[role]?.label).find(Boolean) || 'Usage à définir';
+  const parameterSpec = name => familyOf(draft?.pipeline)?.parameters[name] || {};
+  const typeFor = (name, policy) =>
+    parameterSpec(name).type ||
+    policy.type ||
+    (typeof policy.value === 'boolean' ? 'boolean' : typeof policy.value === 'string' ? 'string' : 'number');
+  const familyLabel = name => {
+    const item = familyOf(name);
+    return item
+      ? `${{ image: 'Image', video: 'Vidéo', audio: 'Son' }[item.mediaType] || item.mediaType} · ${item.label}`
+      : 'Moteur à choisir';
+  };
   let workflows = [],
     assets = [],
     folders = {},
@@ -250,18 +229,7 @@ export function setupNativeWorkflows(options) {
       const card = node('article', 'workflow-card'),
         heading = node('div', 'workflow-card-header'),
         title = node('div', 'workflow-card-title');
-      title.append(
-        node('strong', '', record.name),
-        node(
-          'small',
-          'field-help',
-          record.pipeline === 'ltx25'
-            ? 'Vidéo · LTX2.5'
-            : record.pipeline === 'krea2'
-              ? 'Image · Krea2'
-              : 'Moteur à choisir',
-        ),
-      );
+      title.append(node('strong', '', record.name), node('small', 'field-help', familyLabel(record.pipeline)));
       const status = node(
         'span',
         'native-status',
@@ -317,6 +285,14 @@ export function setupNativeWorkflows(options) {
     workflows = result.workflows || [];
     assets = result.assets || assets;
     folders = result.folders || folders;
+    if (result.families) {
+      families = result.families;
+      const option = (value, text) => Object.assign(document.createElement('option'), { value, textContent: text });
+      $('native-workflow-pipeline').replaceChildren(
+        option('', 'Choisir un moteur…'),
+        ...families.map(item => option(item.family, familyLabel(item.family))),
+      );
+    }
     runner = result.runner || runner;
     const config = result.config;
     if (config) {
@@ -369,10 +345,10 @@ export function setupNativeWorkflows(options) {
       choices.push([value, draft.importDraft?.files[value] || 'Fichier à retrouver']);
     const control = select(id, choices, value),
       path = input(id + '-path', '');
-    control.setAttribute('aria-label', 'Fichier · ' + (labels[role] || role));
+    control.setAttribute('aria-label', 'Fichier · ' + componentLabel(role));
     path.placeholder = 'Coller un chemin de fichier';
     path.spellcheck = false;
-    path.setAttribute('aria-label', 'Chemin · ' + (labels[role] || role));
+    path.setAttribute('aria-label', 'Chemin · ' + componentLabel(role));
     async function register(chosen, signal) {
       if (!chosen) return;
       const result = await (
@@ -430,7 +406,7 @@ export function setupNativeWorkflows(options) {
       container,
       control,
       selected() {
-        if (path.value.trim()) throw Error('Validez le chemin avec « Utiliser » pour ' + (labels[role] || role) + '.');
+        if (path.value.trim()) throw Error('Validez le chemin avec « Utiliser » pour ' + componentLabel(role) + '.');
         return control.value;
       },
       get compatible() {
@@ -485,7 +461,7 @@ export function setupNativeWorkflows(options) {
     const active = input(id + '-enabled', present, 'checkbox');
     if (optional) {
       const label = node('label', 'history-toggle');
-      label.append(active, node('span', '', 'Utiliser ' + (labels[role] || role)));
+      label.append(active, node('span', '', 'Utiliser ' + componentLabel(role)));
       card.append(label);
       const sync = () => {
         ownershipSelect.hidden = !active.checked;
@@ -504,7 +480,7 @@ export function setupNativeWorkflows(options) {
         const choices = checks.filter(([, check]) => check.checked).map(([id]) => id);
         if (picker.selected() && !choices.includes(picker.selected()))
           throw Error(
-            'Choisissez une valeur par défaut parmi les fichiers autorisés pour ' + (labels[role] || role) + '.',
+            'Choisissez une valeur par défaut parmi les fichiers autorisés pour ' + componentLabel(role) + '.',
           );
         return {
           policy: 'model',
@@ -525,26 +501,10 @@ export function setupNativeWorkflows(options) {
         policy.policy,
       );
     const initial = policy.policy === 'fixed' ? policy.value : policy.default;
-    const boundsFor =
-      prefix === 'native-lora-strength'
-        ? draft.pipeline === 'krea2'
-          ? [-4, 4]
-          : [0, 2]
-        : draft.pipeline === 'ltx25'
-          ? {
-              cfg: [1, 1],
-              frames: [9, 481],
-              fps: [1, 60],
-              overlap_frames: [1, 33],
-              msr_frames: [25, 33],
-              msr_strength: [0, 1],
-              start_strength: [0, 1],
-              end_strength: [0, 1],
-              image_compression: [0, 51],
-            }[name] ||
-            limits[name] || [0, 100]
-          : limits[name] || [0, 100];
-    const enumChoices = policy.choices || (name === 'stage' ? ['draft', 'final'] : null);
+    const spec =
+      prefix === 'native-lora-strength' ? familyOf(draft.pipeline)?.loras?.strength || {} : parameterSpec(name);
+    const boundsFor = [spec.min ?? spec.choices?.[0] ?? 0, spec.max ?? spec.choices?.at(-1) ?? 100];
+    const enumChoices = policy.choices || (spec.type === 'string' ? spec.choices : null) || null;
     const value =
       type === 'boolean'
         ? input(prefix + '-value-' + name, initial ?? false, 'checkbox')
@@ -717,20 +677,26 @@ export function setupNativeWorkflows(options) {
   function referenceCount() {
     $('native-reference-count').textContent = String(readReferences.length);
     $('native-workflow-add-reference').dataset.unavailable = String(
-      readReferences.length >= (draft.importDraft ? 256 : draft.pipeline === 'krea2' ? 1 : 5),
+      readReferences.length >=
+        (draft.importDraft
+          ? 256
+          : Object.values(familyOf(draft.pipeline)?.roles || {}).reduce((sum, role) => sum + (role.max ?? 1), 0)),
     );
     $('native-workflow-add-reference').disabled =
       busy || working || $('native-workflow-add-reference').dataset.unavailable === 'true';
   }
   function addReference(reference) {
-    const roles = [...new Set([...(referenceRoles[draft.pipeline] || Object.keys(roleLabels)), reference.role])];
+    const known = Object.keys(familyOf(draft.pipeline)?.roles || {});
+    const roles = [
+      ...new Set([...(known.length ? known : families.flatMap(item => Object.keys(item.roles))), reference.role]),
+    ];
     const card = node('div', 'native-reference'),
       role = select(
         'native-reference-role-' + reference.id,
-        roles.map(role => [role, roleLabels[role] || 'Usage à définir']),
+        roles.map(role => [role, roleLabel(role)]),
         reference.role,
       ),
-      name = input('native-reference-name-' + reference.id, reference.name || roleLabels[reference.role]),
+      name = input('native-reference-name-' + reference.id, reference.name || roleLabel(reference.role)),
       description = input('native-reference-description-' + reference.id, reference.description || ''),
       required = input('native-reference-required-' + reference.id, reference.required, 'checkbox'),
       label = node('label', 'history-toggle');
@@ -829,7 +795,7 @@ export function setupNativeWorkflows(options) {
     $('native-workflow-description').value = draft.description;
     $('native-workflow-enabled').checked = draft.enabled;
     $('native-workflow-pipeline').value = draft.pipeline;
-    $('native-workflow-video').hidden = draft.pipeline !== 'ltx25';
+    $('native-workflow-video').hidden = !familyOf(draft.pipeline)?.profiles;
     $('native-workflow-title').textContent = isNew ? 'Créer un workflow' : 'Modifier le workflow';
     $('native-workflow-capability').textContent = draft.importDraft
       ? draft.importDraft.blockers.length
@@ -840,13 +806,18 @@ export function setupNativeWorkflows(options) {
     readComponents = [];
     $('native-workflow-components').replaceChildren();
     for (const role of [
-      ...new Set([...Object.keys(draft.components), ...(draft.pipeline === 'ltx25' ? ['audioVae'] : [])]),
+      ...new Set([
+        ...Object.keys(draft.components),
+        ...Object.entries(familyOf(draft.pipeline)?.components || {})
+          .filter(([, spec]) => spec.required)
+          .map(([role]) => role),
+      ]),
     ]) {
       const policy = draft.components[role],
         control = componentControl(
           role,
           policy || { policy: 'fixed', asset: draft.importDraft ? 'missing-' + role : '' },
-          { optional: ['textProjection', 'enhancer'].includes(role), present: Boolean(policy) },
+          { optional: !familyOf(draft.pipeline)?.components[role]?.required, present: Boolean(policy) },
         );
       readComponents.push([role, control.read]);
       $('native-workflow-components').append(control.card);
@@ -915,7 +886,7 @@ export function setupNativeWorkflows(options) {
         if (!record || session !== version) return false;
       }
       if (!record) {
-        record = await run(signal => template('krea2', signal));
+        record = await run(signal => template(families[0]?.family, signal));
         if (!record || session !== version) return false;
         record = { ...record, id: crypto.randomUUID(), name: '', description: '' };
         clearTemplateAssets(record);
@@ -977,7 +948,7 @@ export function setupNativeWorkflows(options) {
       if (!record.importDraft || record.enabled) {
         for (const [role, policy] of Object.entries(record.components))
           if ((policy.policy === 'fixed' && !policy.asset) || (policy.policy === 'model' && !policy.choices.length))
-            throw Error('Choisissez un fichier pour « ' + (labels[role] || role) + ' ».');
+            throw Error('Choisissez un fichier pour « ' + componentLabel(role) + ' ».');
         if (record.loras.some(lora => !lora.asset)) {
           const section = $('native-workflow-loras').closest?.('details');
           if (section) section.open = true;
@@ -1112,7 +1083,7 @@ export function setupNativeWorkflows(options) {
     if ($('native-workflow-add-reference').disabled) return;
     addReference({
       id: crypto.randomUUID(),
-      role: referenceRoles[draft.pipeline]?.[0] || 'reference',
+      role: Object.keys(familyOf(draft.pipeline)?.roles || {})[0] || 'reference',
       required: false,
     });
   };

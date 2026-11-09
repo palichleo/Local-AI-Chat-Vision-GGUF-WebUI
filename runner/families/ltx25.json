@@ -1,0 +1,266 @@
+{
+  "family": "ltx25",
+  "label": "LTX2.5",
+  "mediaType": "video",
+  "tasks": ["create_video", "extend_video"],
+  "requires": [
+    "torch",
+    "diffusers",
+    "transformers",
+    "accelerate",
+    "safetensors",
+    "PIL",
+    "triton",
+    "imageio",
+    "imageio_ffmpeg",
+    "av",
+    "comfy_kitchen"
+  ],
+  "components": {
+    "model": {
+      "label": "Modèle",
+      "folder": "checkpoints",
+      "required": true
+    },
+    "textEncoder": {
+      "label": "Encodeur de texte",
+      "folder": "LLMs",
+      "required": true
+    },
+    "vae": {
+      "label": "VAE vidéo",
+      "folder": "VAE",
+      "required": true
+    },
+    "audioVae": {
+      "label": "VAE audio",
+      "folder": "VAE",
+      "required": true,
+      "note": "Requis par l'échantillonneur couplé même pour une vidéo muette."
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "maxLength": 8000,
+      "nonempty": true
+    },
+    "seed": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "width": {
+      "type": "integer",
+      "min": 64,
+      "max": 4096,
+      "multipleOf": 32
+    },
+    "height": {
+      "type": "integer",
+      "min": 64,
+      "max": 4096,
+      "multipleOf": 32
+    },
+    "steps": {
+      "type": "integer",
+      "choices": [8],
+      "note": "Modèle distillé : 8 étapes."
+    },
+    "cfg": {
+      "type": "number",
+      "choices": [1]
+    },
+    "negative_prompt": {
+      "type": "string",
+      "choices": [""]
+    },
+    "frames": {
+      "type": "integer",
+      "choices": [
+        9, 17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121, 129, 137, 145, 153, 161, 169, 177, 185, 193, 201,
+        209, 217, 225, 233, 241, 249, 257, 265, 273, 281, 289, 297, 305, 313, 321, 329, 337, 345, 353, 361, 369, 377,
+        385, 393, 401, 409, 417, 425, 433, 441, 449, 457, 465, 473, 481
+      ],
+      "note": "8n+1 images."
+    },
+    "fps": {
+      "type": "number",
+      "min": 1,
+      "max": 60
+    },
+    "audio": {
+      "type": "boolean"
+    },
+    "stage": {
+      "type": "string",
+      "choices": ["draft", "final"]
+    },
+    "start_strength": {
+      "type": "number",
+      "min": 0,
+      "max": 1
+    },
+    "end_strength": {
+      "type": "number",
+      "min": 0,
+      "max": 1
+    },
+    "image_compression": {
+      "type": "integer",
+      "min": 0,
+      "max": 51
+    },
+    "overlap_frames": {
+      "type": "integer",
+      "choices": [1, 9, 17, 25, 33]
+    },
+    "msr_frames": {
+      "type": "integer",
+      "choices": [25, 33]
+    },
+    "msr_strength": {
+      "type": "number",
+      "min": 0,
+      "max": 1
+    }
+  },
+  "requiredParameters": ["prompt", "seed", "width", "height", "steps", "frames", "fps", "stage", "audio"],
+  "roles": {
+    "start_image": {
+      "as": "start_image",
+      "media": "image",
+      "max": 1,
+      "label": "Image de début"
+    },
+    "end_image": {
+      "as": "end_image",
+      "media": "image",
+      "max": 1,
+      "label": "Image de fin"
+    },
+    "msr_image": {
+      "as": "reference",
+      "media": "image",
+      "max": 2,
+      "label": "Référence de sujet",
+      "requiresLora": true
+    },
+    "source_video": {
+      "as": "source",
+      "media": "video",
+      "max": 1,
+      "label": "Vidéo à prolonger"
+    }
+  },
+  "loras": {
+    "max": 1,
+    "strength": {
+      "type": "number",
+      "min": 0,
+      "max": 2
+    }
+  },
+  "profiles": ["width", "height", "steps", "frames", "fps"],
+  "template": {
+    "name": "LTX2.5 video",
+    "description": "Generate video from text, optional start/end images or two MSR image slots. A source_video extends a silent video at its existing resolution and fps; use output_id for a previous native run. Every video requires approval.",
+    "components": {
+      "model": {
+        "policy": "fixed",
+        "asset": "select-local-model"
+      },
+      "textEncoder": {
+        "policy": "fixed",
+        "asset": "select-local-text-encoder"
+      },
+      "vae": {
+        "policy": "fixed",
+        "asset": "select-local-video-vae"
+      },
+      "audioVae": {
+        "policy": "fixed",
+        "asset": "select-local-audio-vae"
+      }
+    },
+    "parameters": {
+      "prompt": {
+        "policy": "model",
+        "type": "string",
+        "maxLength": 8000
+      },
+      "seed": {
+        "policy": "random",
+        "type": "integer"
+      },
+      "width": {
+        "policy": "fixed",
+        "value": 384
+      },
+      "height": {
+        "policy": "fixed",
+        "value": 256
+      },
+      "steps": {
+        "policy": "fixed",
+        "value": 8
+      },
+      "stage": {
+        "policy": "model",
+        "type": "string",
+        "choices": ["draft", "final"],
+        "default": "draft"
+      },
+      "frames": {
+        "policy": "fixed",
+        "value": 25
+      },
+      "fps": {
+        "policy": "fixed",
+        "value": 24
+      },
+      "audio": {
+        "policy": "fixed",
+        "value": false
+      },
+      "overlap_frames": {
+        "policy": "fixed",
+        "value": 9
+      },
+      "start_strength": {
+        "policy": "fixed",
+        "value": 0.7
+      },
+      "end_strength": {
+        "policy": "fixed",
+        "value": 0.7
+      },
+      "image_compression": {
+        "policy": "fixed",
+        "value": 18
+      }
+    },
+    "profiles": {
+      "draft": {
+        "parameters": {
+          "width": 384,
+          "height": 256,
+          "frames": 25,
+          "fps": 24,
+          "steps": 8
+        }
+      },
+      "final": {
+        "parameters": {
+          "width": 768,
+          "height": 512,
+          "frames": 25,
+          "fps": 24,
+          "steps": 8
+        }
+      }
+    },
+    "loras": [],
+    "references": []
+  }
+}

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from runner.contracts import validate_job, validate_config
-from runner.models.headers import header, validate_components, validate_lora
+from runner.models.headers import header, validate_krea2_components, validate_lora
 
 
 def job():
@@ -129,7 +129,7 @@ class ContractTests(unittest.TestCase):
             candidate = job()
             candidate['components'] = {k: str(path) for k in candidate['components']}
             with self.assertRaisesRegex(ValueError, '[Ii]ncompatible'):
-                validate_components(candidate)
+                validate_krea2_components(candidate)
 
     def test_lora_rejects_orphan_and_unsupported_tensors(self):
         base = {'layer.weight': {'shape': [4, 8]}}

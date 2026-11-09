@@ -1,60 +1,15 @@
-"""CPU diagnostics/preflight and an explicit supported-family dispatch."""
+"""Worker methods: diagnostics, CPU preflight, generation dispatch and GPU release.
+
+Nothing here names a family: each one is described by its manifest and implemented by
+``runner.pipelines.<family>`` (see runner.registry).
+"""
 
 import gc
-import importlib.util
 from pathlib import Path
 import sys
 
-from runner.contracts import validate_config, validate_job
-from runner.models.headers import validate_components
-
-PACKAGES = ('torch', 'diffusers', 'transformers', 'accelerate', 'safetensors', 'PIL')
-
-
-def capabilities():
-    missing = [name for name in PACKAGES if importlib.util.find_spec(name) is None]
-    video_missing = missing + [
-        name
-        for name in ('triton', 'imageio', 'imageio_ffmpeg', 'av', 'comfy_kitchen')
-        if importlib.util.find_spec(name) is None
-    ]
-    return dict(
-        krea2=dict(
-            ready=not missing,
-            mediaType='image',
-            references=['img2img'],
-            reason='Missing packages: ' + ', '.join(missing) if missing else '',
-        ),
-        ltx25=dict(
-            ready=not video_missing,
-            mediaType='video',
-            references=['start_image', 'end_image', 'msr_image', 'source_video'],
-            audio=True,
-            components=['model', 'textEncoder', 'vae', 'audioVae'],
-            requiredComponents=['audioVae'],
-            parameters=[
-                'prompt',
-                'seed',
-                'width',
-                'height',
-                'steps',
-                'frames',
-                'fps',
-                'stage',
-                'audio',
-                'cfg',
-                'negative_prompt',
-                'start_strength',
-                'end_strength',
-                'image_compression',
-                'overlap_frames',
-                'msr_frames',
-                'msr_strength',
-            ],
-            parameterValues=dict(steps=[8], cfg=[1], negative_prompt=['']),
-            reason='Missing packages: ' + ', '.join(video_missing) if video_missing else '',
-        ),
-    )
+from runner.contracts import validate_config
+from runner.registry import capabilities, family, pipeline, validate_job
 
 
 def diagnostics(config):
@@ -70,45 +25,35 @@ def diagnostics(config):
     )
 
 
-def preflight(job, config):
-    validate_job(job)
-    config = validate_config(config)
-    headers = validate_components(job)
-    if job['pipeline'] == 'krea2' and not Path(config['tokenizerPath']).is_dir():
-        raise ValueError('Configure an existing local tokenizer directory')
-    capability = capabilities()[job['pipeline']]
-    if not capability['ready']:
-        raise RuntimeError(capability['reason'])
-    if config['engine'] == 'int8' and importlib.util.find_spec('comfy_kitchen') is None:
-        raise RuntimeError('Missing installed comfy-kitchen INT8 kernels')
-    if config['tuned'] and importlib.util.find_spec('triton') is None:
-        raise RuntimeError('Missing installed Triton tuned kernels')
-    if job['pipeline'] == 'krea2':
-        from runner.models.shapes import validate_shapes
-
-        validate_shapes(headers)
-    for item in job['references']:
-        if item['role'] == 'source_video':
-            from runner.video.continuation import source_tail
-
-            source_tail(item['path'], job['parameters'])
-            continue
+def _check_reference(item, media):
+    if media == 'image':
         from PIL import Image
 
         with Image.open(item['path']) as image:
             image.verify()
-    return dict(ready=True, pipeline=job['pipeline'], mediaType=job['mediaType'], references=capability['references'])
+    elif not Path(item['path']).is_file():
+        raise ValueError('Reference ' + item['input'] + ' is not a readable file')
+
+
+def preflight(job, config):
+    """Everything that can fail without the GPU fails here, before the chat model is unloaded."""
+    validate_job(job)
+    config = validate_config(config)
+    manifest = family(job['pipeline'])
+    capability = capabilities()[job['pipeline']]
+    if not capability['ready']:
+        raise RuntimeError(capability['reason'])
+    module = pipeline(job['pipeline'])
+    if hasattr(module, 'preflight'):
+        module.preflight(job, config)
+    for item in job['references']:
+        _check_reference(item, manifest['roles'][item['role']]['media'])
+    return dict(ready=True, pipeline=job['pipeline'], mediaType=job['mediaType'])
 
 
 def generate(job, config, progress):
     preflight(job, config)
-    if job['pipeline'] == 'ltx25':
-        from runner.pipelines.ltx25 import generate as generate_video
-
-        return generate_video(job, validate_config(config), progress)
-    from runner.pipelines.krea2 import generate as generate_image
-
-    return generate_image(job, validate_config(config), progress)
+    return pipeline(job['pipeline']).generate(job, validate_config(config), progress)
 
 
 def release():

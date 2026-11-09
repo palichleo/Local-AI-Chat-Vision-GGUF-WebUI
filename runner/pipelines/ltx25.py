@@ -8,6 +8,41 @@ import time
 DISTILLED_SIGMAS = (1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875)
 
 
+def check(job, family):
+    """LTX2.5 rules beyond the manifest: conditioning combinations and silent continuation."""
+    parameters = job['parameters']
+    roles = {ref['role'] for ref in job['references']}
+    if {'start_image', 'source_video'} <= roles:
+        raise ValueError('Choose a start image or source video, not both')
+    if 'source_video' in roles:
+        if parameters['audio']:
+            raise ValueError('Audio continuation has not been validated')
+        if parameters.get('overlap_frames', 9) >= parameters['frames']:
+            raise ValueError('Invalid continuation overlap')
+
+
+def preflight(job, config):
+    """File-level checks run on CPU before the chat model is unloaded."""
+    from runner.models.headers import header
+    from runner.models.ltx25 import validate_layout, video_encoder
+    from runner.video.msr import validate_msr
+
+    headers = {role: header(path) for role, path in job['components'].items()}
+    validate_layout(headers)
+    if job['references']:
+        video_encoder(headers)
+    if job['parameters']['audio']:
+        from runner.models.ltx25_audio import vocoder_layout
+
+        vocoder_layout(headers)
+    validate_msr(job, headers)
+    for ref in job['references']:
+        if ref['role'] == 'source_video':
+            from runner.video.continuation import source_tail
+
+            source_tail(ref['path'], job['parameters'])
+
+
 def generate(job, config, progress):
     import torch
     from safetensors import safe_open

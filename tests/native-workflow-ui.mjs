@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { familyCatalog } from '../lib/families.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { validateNativeWorkflow } from '../lib/native-workflows.mjs';
@@ -105,6 +106,7 @@ function fixture() {
           lora: 'C:/atelier/models/LoRa',
         },
         runner: { state: 'ready', capabilities: { krea2: true } },
+        families: familyCatalog(),
         workflows,
         assets: [
           { id: 'model-one', kind: 'model', pipeline: 'krea2', path: 'model.safetensors' },
@@ -316,12 +318,10 @@ test('typing an unregistered local model path stays dirty and cannot be silently
 });
 test('shipped pipeline templates round-trip through the editor without corrupting their policy contract', async t => {
   const { validateNativeWorkflow } = await import('../lib/native-workflows.mjs'),
-    { readFile } = await import('node:fs/promises');
-  for (const pipeline of ['krea2', 'ltx25']) {
+    { families, familyTemplate } = await import('../lib/families.mjs');
+  for (const manifest of Object.values(families())) {
     const f = await setup(t),
-      record = JSON.parse(
-        await readFile(new URL('../runner/templates/' + pipeline + '.json', import.meta.url), 'utf8'),
-      );
+      record = familyTemplate(manifest);
     await f.ui.edit(record);
     assert.equal(await f.ui.saveEditor(), true);
     assert.doesNotThrow(() => validateNativeWorkflow(f.calls.find(call => call.route === 'generation/workflows').body));

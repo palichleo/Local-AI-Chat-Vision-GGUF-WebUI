@@ -11,8 +11,57 @@ from types import SimpleNamespace
 
 from runner.media import save_image
 from runner.models.headers import header
-from runner.models.weights import rotation_matrix
 from runner.pipelines.sampling import simple_sigmas
+
+
+EXPANSION_LIMITS = (
+    ('maxTokens', 1, 4096, True),
+    ('temperature', 0, 5, False),
+    ('topK', 0, 1000, True),
+    ('topP', 0, 1, False),
+    ('minP', 0, 1, False),
+    ('repetitionPenalty', 0, 10, False),
+    ('seed', 0, 2**53 - 1, True),
+)
+
+
+def check(job, family):
+    """Krea2 rules beyond the manifest: an enabled prompt expansion needs its concrete settings."""
+    from runner.registry import fields, number, text
+
+    parameters = job['parameters']
+    if parameters.get('expandPrompt') and 'promptExpansion' not in job:
+        raise ValueError('Prompt expansion requires concrete configuration')
+    if 'promptExpansion' not in job:
+        return
+    expansion = job['promptExpansion']
+    fields(expansion, ('template', 'suffix', *(name for name, *_ in EXPANSION_LIMITS)), label='prompt expansion')
+    text(expansion['template'], 'expansion template', 16000)
+    if expansion['template'].count('{{prompt}}') != 1:
+        raise ValueError('Expansion template must contain {{prompt}} exactly once')
+    if not isinstance(expansion['suffix'], str) or len(expansion['suffix']) > 8000 or '\0' in expansion['suffix']:
+        raise ValueError('Invalid expansion suffix')
+    for name, low, high, integer in EXPANSION_LIMITS:
+        number(expansion[name], 'expansion ' + name, low, high, integer)
+    if any(expansion[name] == 0 for name in ('temperature', 'topP', 'repetitionPenalty')):
+        raise ValueError('Expansion sampling values must be positive')
+
+
+def preflight(job, config):
+    """File-level checks run on CPU before the chat model is unloaded."""
+    import importlib.util
+    from pathlib import Path
+
+    from runner.models.headers import validate_krea2_components
+    from runner.models.shapes import validate_shapes
+
+    if not Path(config['tokenizerPath']).is_dir():
+        raise ValueError('Configure an existing local tokenizer directory')
+    if config['engine'] == 'int8' and importlib.util.find_spec('comfy_kitchen') is None:
+        raise RuntimeError('Missing installed comfy-kitchen INT8 kernels')
+    if config['tuned'] and importlib.util.find_spec('triton') is None:
+        raise RuntimeError('Missing installed Triton tuned kernels')
+    validate_shapes(validate_krea2_components(job))
 
 
 def generate(job, config, progress):
@@ -194,6 +243,8 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
                     if self.in_features % self.rotation_size:
                         raise ValueError('Invalid ConvRot dimensions: ' + original)
                     if self.rotation_size not in rotations:
+                        from runner.models.weights import rotation_matrix
+
                         rotations[self.rotation_size] = rotation_matrix(self.rotation_size, torch, device, dtype)
                 self.adapters = []
                 for store, strength in adapters:

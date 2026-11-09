@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { family, familyTemplate } from '../lib/families.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -252,38 +253,22 @@ test('references use declared roles and staged local files, never model-supplied
   });
 });
 
-test('unvalidated video reference and audio options never reach the advertised native tools', async () => {
+test('family manifest limits are enforced when a workflow is saved, not discovered at run time', async () => {
   await withCatalog(async catalog => {
-    const workflow = JSON.parse(await readFile(new URL('../runner/templates/ltx25.json', import.meta.url), 'utf8'));
+    const workflow = familyTemplate(family('ltx25'));
     workflow.enabled = true;
     catalog.assets = { resolve: async id => ({ path: join(tmpdir(), id + '.safetensors') }) };
-    catalog.capabilities = {
-      ltx25: {
-        ready: true,
-        references: [],
-        loras: false,
-        audio: false,
-        components: ['model', 'textEncoder', 'vae', 'audioVae'],
-        requiredComponents: ['audioVae'],
-        parameterValues: { steps: [8], cfg: [1] },
-      },
-    };
+    catalog.capabilities = { ltx25: { ready: true } };
     await catalog.save(workflow);
     assert.ok(await catalog.toolDefinition('video'));
-    for (const patch of [
-      w => w.references.push({ id: 'subject', role: 'msr_image', required: false }),
-      w => {
-        w.parameters.audio.value = true;
-      },
-      w => {
-        w.parameters.steps.value = 12;
-      },
+    for (const [patch, error] of [
+      [w => (w.parameters.steps.value = 12), /supported|allowed/i],
+      [w => w.references.push({ id: 'edit', role: 'img2img', required: false }), /reference slot/i],
+      [w => (w.parameters.frames.value = 24), /allowed|supported/i],
     ]) {
       const changed = structuredClone(workflow);
       patch(changed);
-      await catalog.save(changed);
-      assert.equal(await catalog.toolDefinition('video'), null);
-      assert.match((await catalog.list())[0].unavailableReason, /not.*validated|not support/i);
+      await assert.rejects(catalog.save(changed), error);
     }
   });
 });
