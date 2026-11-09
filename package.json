@@ -2,6 +2,7 @@
   "name": "atelier-local",
   "version": "0.3.16",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "description": "Assistant GGUF local qui pilote la génération native d’images et de vidéos, sans dépendances npm.",
   "engines": {

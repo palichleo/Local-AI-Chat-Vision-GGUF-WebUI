@@ -105,6 +105,6 @@ The Node suite uses simulated llama.cpp and generation workers; it checks behavi
 ## References and licensing
 
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) and its [server documentation](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)
-- [Source distribution notes](DISTRIBUTION.md)
+- [Source distribution notes](DISTRIBUTION.md) and [third-party components](THIRD_PARTY_NOTICES.md)
 
-Engines, models and projectors are supplied separately and keep their own licenses.
+Atelier local is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE): you may download, use, modify and share it for any noncommercial purpose. Commercial use requires separate permission. Engines, Python libraries, models and projectors are supplied separately and keep their own licenses.
