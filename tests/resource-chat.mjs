@@ -66,7 +66,7 @@ test('grouped resource frames retain their separate labels and never enter saved
       snapshots.push(JSON.stringify(state.archiveSnapshot));
       return true;
     },
-    comfyUI: { saveReview: async () => {} },
+    workflowsUI: { saveReview: async () => {} },
     api: async (route, body) => {
       if (route === 'resources/read') {
         assert.equal(body.ids.length, 2);

@@ -40,7 +40,7 @@ async function pickerUI() {
     settingsSearch: { reset() {}, refresh() {} },
     AbortController,
     tokenControls: { setValues() {} },
-    comfyUI: { refresh: async () => {}, cancelSettings() {} },
+    workflowsUI: { refresh: async () => {}, cancelSettings() {} },
     computeControls: { setValues() {} },
     notice() {},
     updateControls() {},

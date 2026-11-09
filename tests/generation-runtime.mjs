@@ -1,0 +1,560 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { setupGenerationRuntime } from '../public/generation-runtime.mjs';
+
+class Element {
+  constructor(tag = 'div', className = '', text) {
+    this.tagName = tag;
+    this.className = className;
+    this.textContent = text || '';
+    this.children = [];
+    this.value = '';
+    this.hidden = false;
+    this.disabled = false;
+    this.checked = false;
+    this.attributes = {};
+    this.options = [];
+  }
+  querySelectorAll(selector) {
+    return this.children.flatMap(child => [
+      ...(child.tagName === selector ? [child] : []),
+      ...(child.querySelectorAll?.(selector) || []),
+    ]);
+  }
+  append(...children) {
+    this.children.push(...children);
+  }
+  replaceChildren(...children) {
+    this.children = [...children];
+    this.options = children.filter(c => c instanceof Option);
+    this.value = this.options[0]?.value || '';
+  }
+  setAttribute(name, value) {
+    this.attributes[name] = value;
+  }
+  add(option) {
+    this.options.push(option);
+  }
+  focus() {
+    if (!this.disabled) this.focused = true;
+  }
+  showModal() {
+    this.open = true;
+  }
+  close() {
+    this.open = false;
+  }
+  addEventListener(name, fn) {
+    (this.events ??= {})[name] = fn;
+  }
+  removeEventListener(name) {
+    delete (this.events ??= {})[name];
+  }
+}
+async function fixture(fn) {
+  const previousDocument = globalThis.document,
+    previousOption = globalThis.Option;
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  const nodes = new Map([...html.matchAll(/id="([^"]+)"/g)].map(m => [m[1], new Element()]));
+  const all = [];
+  const details = new Element('details');
+  globalThis.Option = class {
+    constructor(text, value) {
+      this.text = text;
+      this.value = value;
+    }
+  };
+  globalThis.document = {
+    getElementById: id => {
+      assert.ok(nodes.has(id), `Missing real HTML id ${id}`);
+      return nodes.get(id);
+    },
+    querySelector: () => details,
+    querySelectorAll: () =>
+      all.filter(n => n.className.includes('workflow-description') || n.className.includes('workflow-remove')),
+  };
+  let stored = { enabled: true, baseUrl: 'http://127.0.0.1:7821', autoAllow: false, maxIterations: 3 };
+  let workflows = [];
+  const calls = [];
+  let failTest = false;
+  let importPause = Promise.resolve();
+  let intercept = () => undefined;
+  const busyChanges = [];
+  const api = async (route, body, options) => {
+    calls.push({ route, body });
+    const intercepted = intercept(route, body, options);
+    if (intercepted !== undefined) return intercepted;
+    throw Error(`Unexpected route ${route}`);
+  };
+  const state = { conversationId: null };
+  const ui = setupGenerationRuntime({
+    api,
+    state,
+    node: (tag, c, t) => {
+      const n = new Element(tag, c, t);
+      all.push(n);
+      return n;
+    },
+    notice: () => {},
+    onChange: () => {},
+  });
+  try {
+    await fn({
+      ui,
+      nodes,
+      all,
+      calls,
+      state,
+      details,
+      busyChanges,
+      setIntercept: fn => {
+        intercept = fn;
+      },
+      setImportPause: value => {
+        importPause = value;
+      },
+      setFailTest: value => {
+        failTest = value;
+      },
+      setWorkflows: value => {
+        workflows = value;
+      },
+      setStored: value => {
+        stored = value;
+      },
+    });
+  } finally {
+    globalThis.document = previousDocument;
+    globalThis.Option = previousOption;
+  }
+}
+
+test('latest gallery refresh wins without duplicate images', async () =>
+  fixture(async ({ ui, state, nodes, setIntercept }) => {
+    state.conversationId = 'conversation';
+    const replies = [];
+    setIntercept(route =>
+      route === 'gallery/conversation' ? new Promise(resolve => replies.push(resolve)) : undefined,
+    );
+    const record = {
+      id: 'run',
+      conversationId: 'conversation',
+      workflowName: 'Portrait',
+      prompt: 'A portrait',
+      createdAt: '2026-11-08T00:00:00Z',
+      parameters: {},
+      outputs: [{ source: { filename: 'image.png' } }],
+    };
+    const first = ui.renderGallery('conversation'),
+      second = ui.renderGallery('conversation');
+    replies[1](Response.json({ runs: [record] }));
+    await second;
+    replies[0](Response.json({ runs: [record] }));
+    await first;
+    assert.equal(nodes.get('gallery-list').children.length, 1);
+  }));
+
+test('cancel during launch acknowledgement is sent immediately and is scoped to that request', async () =>
+  fixture(async ({ ui, state, calls, setIntercept }) => {
+    state.conversationId = 'conversation';
+    let release;
+    setIntercept(route =>
+      route === 'tools/execute'
+        ? new Promise(resolve => {
+            release = () => resolve(Response.json({ id: 'mine', state: 'checking' }));
+          })
+        : route === 'tools/cancel'
+          ? Response.json({})
+          : undefined,
+    );
+    const controller = new AbortController(),
+      pending = assert.rejects(
+        ui.requestTool({ autoAllow: true, requestId: 'request-mine' }, controller.signal, () => {}),
+        { name: 'AbortError' },
+      );
+    await new Promise(setImmediate);
+    controller.abort();
+    try {
+      assert.ok(calls.some(c => c.route === 'tools/cancel' && c.body.requestId === 'request-mine'));
+    } finally {
+      release();
+      await pending;
+    }
+  }));
+
+test('a replaced job is never followed or cancelled as if it belonged to this message', async () =>
+  fixture(async ({ ui, state, calls, setIntercept }) => {
+    state.conversationId = 'conversation';
+    setIntercept(route =>
+      route === 'tools/execute'
+        ? Response.json({ id: 'mine', state: 'generating' })
+        : route === 'tools/job'
+          ? Response.json({ id: 'other', state: 'error', error: 'Other job' })
+          : route === 'tools/cancel'
+            ? Response.json({})
+            : undefined,
+    );
+    await assert.rejects(
+      ui.requestTool({ autoAllow: true, requestId: 'request-mine' }, new AbortController().signal, () => {}),
+      /remplacée|correspond/,
+    );
+    assert.ok(calls.filter(c => c.route === 'tools/cancel').every(c => c.body.requestId === 'request-mine'));
+  }));
+
+async function rasterStub(check) {
+  const priorBitmap = globalThis.createImageBitmap,
+    priorCreate = document.createElement;
+  globalThis.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });
+  document.createElement = () => ({
+    width: 0,
+    height: 0,
+    getContext: () => ({ fillRect() {}, drawImage() {} }),
+    toDataURL: mime => (mime === 'image/png' ? 'data:image/png;base64,iVBORw0KGgo=' : 'data:image/jpeg;base64,/9j/'),
+  });
+  try {
+    await check();
+  } finally {
+    globalThis.createImageBitmap = priorBitmap;
+    document.createElement = priorCreate;
+  }
+}
+const generatedRecord = {
+  id: 'mine',
+  conversationId: 'conversation',
+  workflowName: 'Portrait',
+  prompt: 'A portrait',
+  createdAt: '2026-11-08T00:00:00Z',
+  parameters: {},
+  outputs: [{ source: { filename: 'image.png' } }],
+};
+
+test('an image survives a failed model restart and still receives its compressed gallery copy', async () =>
+  fixture(async ({ ui, state, calls, setIntercept }) => {
+    state.conversationId = 'conversation';
+    setIntercept(route =>
+      route === 'tools/execute'
+        ? Response.json({ id: 'mine', state: 'error', error: 'Model restart failed', record: generatedRecord })
+        : route === 'gallery/conversation'
+          ? Response.json({ runs: [generatedRecord] })
+          : route.endsWith('/mine/0')
+            ? new Response(Buffer.from('89504e470d0a1a0a', 'hex'), { headers: { 'Content-Type': 'image/png' } })
+            : route === 'gallery/analysis'
+              ? Response.json({})
+              : undefined,
+    );
+    await rasterStub(async () => {
+      const result = await ui.requestTool(
+        { autoAllow: true, requestId: 'request-mine' },
+        new AbortController().signal,
+        () => {},
+      );
+      assert.equal(result.record?.id, 'mine');
+      assert.equal(result.failed, true);
+      assert.equal(result.images.length, 1);
+      assert.match(result.error, /restart failed/);
+      assert.ok(calls.some(c => c.route === 'gallery/analysis'));
+    });
+  }));
+
+test('a missing original for compression cannot turn a produced image into a lost tool result', async () =>
+  fixture(async ({ ui, state, setIntercept }) => {
+    state.conversationId = 'conversation';
+    setIntercept(route =>
+      route === 'tools/execute'
+        ? Response.json({ id: 'mine', state: 'done', record: generatedRecord })
+        : route === 'gallery/conversation'
+          ? Response.json({ runs: [generatedRecord] })
+          : route.endsWith('/mine/0')
+            ? Promise.reject(Error('Original unavailable'))
+            : undefined,
+    );
+    const result = await ui.requestTool(
+      { autoAllow: true, requestId: 'request-mine' },
+      new AbortController().signal,
+      () => {},
+    );
+    assert.equal(result.record?.id, 'mine');
+    assert.equal(result.failed, true);
+    assert.deepEqual(result.images, []);
+    assert.match(result.content, /generated|générée/);
+    assert.match(result.error, /Original unavailable/);
+  }));
+
+test('the original reaches the chat during model reload, while only a compressed copy goes to analysis', async () =>
+  fixture(async ({ ui, state, calls, setIntercept }) => {
+    state.conversationId = 'conversation';
+    let shown = false;
+    const bytes = Buffer.from('89504e470d0a1a0a0102030405060708', 'hex');
+    setIntercept(route =>
+      route === 'tools/execute'
+        ? Response.json({ id: 'mine', state: 'restarting', progress: 'Reloading', record: generatedRecord })
+        : route === 'tools/job'
+          ? Response.json({ id: 'mine', state: 'done', record: generatedRecord })
+          : route === 'gallery/conversation'
+            ? Response.json({ runs: [generatedRecord] })
+            : route.endsWith('/mine/0')
+              ? new Response(bytes, { headers: { 'Content-Type': 'image/png' } })
+              : route === 'gallery/analysis'
+                ? Response.json({})
+                : undefined,
+    );
+    await rasterStub(async () => {
+      const result = await ui.requestTool(
+        { autoAllow: true, requestId: 'request-mine' },
+        new AbortController().signal,
+        () => {},
+        ({ blob }) => {
+          shown = true;
+          assert.equal(blob.size, bytes.length);
+          assert.equal(
+            calls.some(call => call.route === 'tools/job'),
+            false,
+          );
+        },
+      );
+      assert.equal(shown, true);
+      assert.equal(result.images[0], 'data:image/jpeg;base64,/9j/');
+      const analysis = calls.find(call => call.route === 'gallery/analysis');
+      assert.deepEqual(analysis.body.images, result.images);
+      assert.notEqual(analysis.body.images[0].split(',')[1], bytes.toString('base64'));
+    });
+    assert.equal(calls.filter(call => call.route.endsWith('/mine/0')).length, 1);
+  }));
+
+test('batch output originals are transferred and compressed sequentially before the next download', async () =>
+  fixture(async ({ ui, state, setIntercept, calls }) => {
+    state.conversationId = 'conversation';
+    const record = { ...generatedRecord, outputs: [0, 1, 2].map(i => ({ source: { filename: i + '.png' } })) },
+      gates = [],
+      shown = [];
+    setIntercept(route =>
+      route === 'tools/execute'
+        ? Response.json({ id: 'mine', state: 'done', record })
+        : route === 'gallery/conversation'
+          ? Response.json({ runs: [record] })
+          : /mine\/\d+$/.test(route)
+            ? new Promise(resolve =>
+                gates.push(() =>
+                  resolve(
+                    new Response(Buffer.from('89504e470d0a1a0a', 'hex'), { headers: { 'content-type': 'image/png' } }),
+                  ),
+                ),
+              )
+            : route === 'gallery/analysis'
+              ? Response.json({})
+              : undefined,
+    );
+    await rasterStub(async () => {
+      const pending = ui.requestTool(
+        { autoAllow: true, requestId: 'mine' },
+        new AbortController().signal,
+        () => {},
+        event => shown.push(event.index),
+      );
+      for (let i = 0; i < 3; i++) {
+        await new Promise(setImmediate);
+        assert.equal(gates.length, i + 1);
+        gates[i]();
+      }
+      const result = await pending;
+      assert.deepEqual(shown, [0, 1, 2]);
+      assert.equal(result.images.length, 3);
+      assert.equal(calls.filter(call => /mine\/\d+$/.test(call.route)).length, 3);
+    });
+  }));
+
+test('an unreadable original does not prevent later batch outputs from being shown', async () =>
+  fixture(async ({ ui, state, calls, setIntercept }) => {
+    state.conversationId = 'conversation';
+    const record = { ...generatedRecord, outputs: [0, 1].map(i => ({ source: { filename: i + '.png' } })) },
+      shown = [];
+    setIntercept(route =>
+      route === 'tools/execute'
+        ? Response.json({ id: 'mine', state: 'done', record })
+        : route === 'gallery/conversation'
+          ? Response.json({ runs: [record] })
+          : route === 'gallery/analysis'
+            ? Response.json({})
+            : route.endsWith('/mine/0')
+              ? Promise.reject(Error('Missing first image'))
+              : route.endsWith('/mine/1')
+                ? new Response(Buffer.from('89504e470d0a1a0a', 'hex'), { headers: { 'content-type': 'image/png' } })
+                : undefined,
+    );
+    await rasterStub(async () => {
+      const result = await ui.requestTool(
+        { autoAllow: true, requestId: 'mine' },
+        new AbortController().signal,
+        () => {},
+        event => shown.push(event.index),
+      );
+      assert.deepEqual(shown, [1]);
+      assert.equal(result.failed, true);
+      assert.equal(result.images.length, 1);
+      assert.deepEqual(calls.find(call => call.route === 'gallery/analysis').body.images, [null, result.images[0]]);
+      assert.equal(JSON.parse(result.content).analysis_outputs, undefined);
+      assert.match(JSON.parse(result.content).note, /local_read_output/);
+      assert.match(result.error, /Missing first image/);
+    });
+  }));
+test('an already cancelled automatic call releases its pending approval without executing', async () =>
+  fixture(async ({ ui, calls, setIntercept }) => {
+    setIntercept(route => (route === 'tools/cancel' ? Response.json(null) : undefined));
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      ui.requestTool({ autoAllow: true, requestId: 'cancelled' }, controller.signal, () => {}),
+      { name: 'AbortError' },
+    );
+    assert.equal(calls.filter(call => call.route === 'tools/execute').length, 0);
+    assert.equal(calls.find(call => call.route === 'tools/cancel').body.requestId, 'cancelled');
+  }));
+
+test('video approval is shown even with global permission, explains draft/final and revision never executes', async () =>
+  fixture(async ({ ui, nodes, calls, setIntercept }) => {
+    setIntercept(route => (route === 'tools/cancel' ? Response.json({}) : undefined));
+    const request = {
+      requestId: 'proposal',
+      mediaType: 'video',
+      autoAllow: true,
+      workflowName: 'Custom motion',
+      args: { prompt: 'A slow pan' },
+      approvalToken: 'one-use',
+      plan: {
+        stage: 'draft',
+        intention: 'Vérifier le mouvement.',
+        prompt: 'A slow pan',
+        parameters: { frames: 81, fps: 16, width: 768, height: 512, seed: 12 },
+        references: [{ input: 'start', label: 'Ref 2', role: 'Image de début' }],
+      },
+    };
+    const pending = ui.requestTool(request, new AbortController().signal, () => {});
+    await new Promise(setImmediate);
+    assert.equal(nodes.get('tool-dialog').open, true);
+    assert.match(nodes.get('tool-title').textContent, /Brouillon/);
+    assert.equal(nodes.get('tool-always').hidden, true);
+    assert.equal(nodes.get('tool-revise').hidden, false);
+    assert.ok(!calls.some(call => call.route === 'tools/execute'));
+    assert.match(JSON.stringify(nodes.get('tool-plan').children), /Vérifier le mouvement|Ref 2/);
+    nodes.get('tool-revise').onclick();
+    const result = await pending;
+    assert.equal(result.denied, true);
+    assert.match(result.content, /revision_requested/);
+    assert.equal(nodes.get('tool-dialog').open, false);
+    assert.ok(!calls.some(call => call.route === 'tools/execute'));
+  }));
+test('video confirm sends the exact proposal token once and final label is explicit', async () =>
+  fixture(async ({ ui, nodes, calls, setIntercept }) => {
+    setIntercept(route =>
+      route === 'tools/execute' ? Response.json({ id: 'job', state: 'error', error: 'test boundary' }) : undefined,
+    );
+    const pending = ui.requestTool(
+      {
+        requestId: 'final-proposal',
+        mediaType: 'video',
+        autoAllow: true,
+        approvalToken: 'final-token',
+        workflowName: 'Motion',
+        args: {},
+        plan: { stage: 'final', intention: 'Finaliser.', parameters: {}, references: [] },
+      },
+      new AbortController().signal,
+      () => {},
+    );
+    await new Promise(setImmediate);
+    assert.match(nodes.get('tool-title').textContent, /Vidéo finale/);
+    nodes.get('tool-once').onclick();
+    await pending;
+    assert.deepEqual(calls.find(call => call.route === 'tools/execute').body, {
+      requestId: 'final-proposal',
+      permission: 'once',
+      approvalToken: 'final-token',
+    });
+  }));
+
+test('video tool result retains the effective recipe even when analysis frames cannot be decoded', async () =>
+  fixture(async ({ ui, state, nodes, setIntercept }) => {
+    state.conversationId = 'conversation';
+    const record = {
+      ...generatedRecord,
+      mediaType: 'video',
+      parameters: {
+        stage: 'draft',
+        seed: 123,
+        width: 768,
+        height: 512,
+        frames: 81,
+        fps: 16,
+        workflow_digest: 'version',
+        workflow_inputs: { private: 'unneeded context' },
+      },
+    };
+    setIntercept(route =>
+      route === 'tools/execute'
+        ? Response.json({ id: 'job', state: 'done', record })
+        : route === 'gallery/conversation'
+          ? Response.json({ runs: [record] })
+          : undefined,
+    );
+    const pending = ui.requestTool(
+      {
+        requestId: 'video',
+        mediaType: 'video',
+        approvalToken: 'token',
+        args: {},
+        plan: { stage: 'draft', parameters: {}, references: [] },
+      },
+      new AbortController().signal,
+      () => {},
+    );
+    await new Promise(setImmediate);
+    nodes.get('tool-once').onclick();
+    const result = await pending,
+      data = JSON.parse(result.content);
+    assert.equal(result.record.id, 'mine');
+    assert.equal(result.failed, true);
+    assert.equal(data.parameters.seed, 123);
+    assert.equal(data.parameters.fps, 16);
+    assert.equal(data.parameters.frames, 81);
+    assert.equal(data.workflow_digest, 'version');
+    assert.equal(data.parameters.workflow_inputs, undefined);
+  }));
+
+test('photo tool results expose the actual seed and dimensions for a later correction', async () =>
+  fixture(async ({ ui, state, setIntercept }) => {
+    state.conversationId = 'conversation';
+    const record = {
+      ...generatedRecord,
+      parameters: { seed: 42, width: 1024, height: 768, workflow_digest: 'photo-version' },
+    };
+    setIntercept(route =>
+      route === 'tools/execute'
+        ? Response.json({ id: 'mine', state: 'done', record })
+        : route === 'gallery/conversation'
+          ? Response.json({ runs: [record] })
+          : route.endsWith('/mine/0')
+            ? Promise.reject(Error('No preview'))
+            : undefined,
+    );
+    const result = await ui.requestTool(
+        { autoAllow: true, requestId: 'photo' },
+        new AbortController().signal,
+        () => {},
+      ),
+      data = JSON.parse(result.content);
+    assert.equal(data.parameters.seed, 42);
+    assert.equal(data.parameters.width, 1024);
+    assert.equal(data.workflow_digest, 'photo-version');
+  }));
+
+test('replacing an Output gallery pauses its videos before removing their players', async () =>
+  fixture(async ({ ui, nodes }) => {
+    const video = new Element('video');
+    let paused = 0;
+    video.pause = () => paused++;
+    nodes.get('gallery-list').append(video);
+    ui.reset();
+    assert.equal(paused, 1);
+    assert.equal(nodes.get('gallery-list').children.includes(video), false);
+  }));

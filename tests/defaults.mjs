@@ -12,7 +12,7 @@ test('new installs save conversations by default and use five generation attempt
     app = await createApplication({ port: 0, dataDir });
     let initial = await (await fetch(app.url + '/api/bootstrap')).json();
     assert.equal(initial.preferences.saveHistory, true);
-    assert.equal(initial.comfy.maxIterations, 5);
+    assert.equal(initial.generation.maxIterations, 5);
     assert.equal(initial.config.gpuLayers, 999, 'A new GPU configuration must not stop offloading after 99 layers.');
     const post = (path, body) =>
       fetch(app.url + '/api/' + path, {
@@ -21,12 +21,12 @@ test('new installs save conversations by default and use five generation attempt
         body: JSON.stringify(body),
       });
     assert.equal((await post('preferences', { saveHistory: false })).status, 200);
-    assert.equal((await post('comfy/config', { ...initial.comfy, maxIterations: 7 })).status, 200);
+    assert.equal((await post('generation/config', { ...initial.generation, maxIterations: 7 })).status, 200);
     await app.close();
     app = await createApplication({ port: 0, dataDir });
     initial = await (await fetch(app.url + '/api/bootstrap')).json();
     assert.equal(initial.preferences.saveHistory, false);
-    assert.equal(initial.comfy.maxIterations, 7);
+    assert.equal(initial.generation.maxIterations, 7);
   } finally {
     await app?.close();
     await rm(dataDir, { recursive: true, force: true });

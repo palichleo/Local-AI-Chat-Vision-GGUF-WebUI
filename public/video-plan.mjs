@@ -47,12 +47,12 @@ export function renderVideoPlan(container, request, node) {
         ),
       );
     container.append(refs);
-  } else container.append(node('p', 'comfy-help', 'Aucune référence image transmise au workflow.'));
+  } else container.append(node('p', 'field-help', 'Aucune référence image transmise au workflow.'));
   if (plan.defaultReferences?.length)
     container.append(
       node(
         'p',
-        'comfy-help',
+        'field-help',
         'Entrées conservées du workflow : ' + plan.defaultReferences.map(ref => ref.name || ref.input).join(', '),
       ),
     );

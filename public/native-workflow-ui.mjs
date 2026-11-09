@@ -1,4 +1,4 @@
-import { setupComfy } from './comfy-ui.mjs';
+import { setupGenerationRuntime } from './generation-runtime.mjs';
 
 const labels = {
   model: 'Modèle',
@@ -64,7 +64,7 @@ const typeFor = (name, policy) =>
 export function setupNativeWorkflows(options) {
   const { api, state, node, notice, onSettingsBusyChange = () => {} } = options,
     $ = id => document.getElementById(id);
-  const runtime = setupComfy({ ...options, runtimeOnly: true });
+  const runtime = setupGenerationRuntime(options);
   let workflows = [],
     assets = [],
     folders = {},
@@ -163,12 +163,12 @@ export function setupNativeWorkflows(options) {
         if (
           root === $('settings-form') &&
           ![
-            'comfy-enabled',
-            'comfy-auto',
-            'comfy-iterations',
-            'comfy-minus',
-            'comfy-plus',
-            'comfy-unlimited',
+            'generation-enabled',
+            'generation-auto',
+            'generation-iterations',
+            'generation-minus',
+            'generation-plus',
+            'generation-unlimited',
             'generation-python',
             'generation-tokenizer',
             'generation-python-browse',
@@ -185,7 +185,7 @@ export function setupNativeWorkflows(options) {
           continue;
         control.disabled = disabled || control.dataset.unavailable === 'true';
       }
-    $('comfy-iterations').disabled = disabled || unlimited;
+    $('generation-iterations').disabled = disabled || unlimited;
     $('workflow-editor').setAttribute('aria-busy', String(working));
   }
   async function run(action) {
@@ -202,22 +202,22 @@ export function setupNativeWorkflows(options) {
     }
   }
   function syncLimit() {
-    const control = $('comfy-iterations');
+    const control = $('generation-iterations');
     control.hidden = unlimited;
     control.required = !unlimited;
     control.disabled = busy || working || unlimited;
-    $('comfy-unlimited').setAttribute('aria-pressed', String(unlimited));
-    $('comfy-infinity-value').hidden = !unlimited;
-    $('comfy-limit-label').textContent = unlimited ? 'Sans limite' : `${control.value} essai(s)`;
+    $('generation-unlimited').setAttribute('aria-pressed', String(unlimited));
+    $('generation-infinity-value').hidden = !unlimited;
+    $('generation-limit-label').textContent = unlimited ? 'Sans limite' : `${control.value} essai(s)`;
   }
   function values() {
-    const maxIterations = unlimited ? 10000 : Number($('comfy-iterations').value);
+    const maxIterations = unlimited ? 10000 : Number($('generation-iterations').value);
     if (!Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > (unlimited ? 10000 : 9999))
       throw Error('Choisissez entre 1 et 9 999 générations, ou ∞.');
     const modelRoot = $('native-convert-root').value.trim();
     return {
-      enabled: $('comfy-enabled').checked,
-      autoAllow: $('comfy-auto').checked,
+      enabled: $('generation-enabled').checked,
+      autoAllow: $('generation-auto').checked,
       maxIterations,
       pythonPath: $('generation-python').value.trim(),
       tokenizerPath: $('generation-tokenizer').value.trim(),
@@ -254,7 +254,7 @@ export function setupNativeWorkflows(options) {
         node('strong', '', record.name),
         node(
           'small',
-          'comfy-help',
+          'field-help',
           record.pipeline === 'ltx25'
             ? 'Vidéo · LTX2.5'
             : record.pipeline === 'krea2'
@@ -305,8 +305,8 @@ export function setupNativeWorkflows(options) {
       actions.append(remove, cancel, editButton);
       card.append(
         heading,
-        node('p', 'comfy-help', record.description),
-        ...(record.unavailableReason ? [node('p', 'comfy-help', record.unavailableReason)] : []),
+        node('p', 'field-help', record.description),
+        ...(record.unavailableReason ? [node('p', 'field-help', record.unavailableReason)] : []),
         actions,
       );
       $('workflow-list').append(card);
@@ -321,13 +321,12 @@ export function setupNativeWorkflows(options) {
     const config = result.config;
     if (config) {
       state.generation = config;
-      state.comfy = config;
       if (settings) {
-        $('comfy-enabled').checked = config.enabled;
-        $('comfy-auto').checked = config.autoAllow;
+        $('generation-enabled').checked = config.enabled;
+        $('generation-auto').checked = config.autoAllow;
         unlimited = config.maxIterations === 10000;
         if (!unlimited) lastLimited = config.maxIterations || 5;
-        $('comfy-iterations').value = lastLimited;
+        $('generation-iterations').value = lastLimited;
         $('generation-python').value = config.pythonPath || '';
         $('generation-tokenizer').value = config.tokenizerPath || '';
         $('native-convert-root').value = config.modelRoot || folders.model || '';
@@ -349,8 +348,8 @@ export function setupNativeWorkflows(options) {
     }
   }
   function saved(result) {
-    const config = result.generation || result.comfy;
-    if (config) apply({ config, workflows: result.nativeWorkflows || result.workflows || workflows, assets, runner });
+    if (result.generation)
+      apply({ config: result.generation, workflows: result.workflows || workflows, assets, runner });
   }
   async function browse(kind, initialPath, signal) {
     return (await (await api('files/choose', { kind, initialPath }, { signal })).json()).path;
@@ -474,7 +473,7 @@ export function setupNativeWorkflows(options) {
         allowed.append(label);
         checks.push([asset.id, check]);
       }
-      if (!checks.length) allowed.append(node('p', 'comfy-help', 'Enregistrez les fichiers locaux à autoriser.'));
+      if (!checks.length) allowed.append(node('p', 'field-help', 'Enregistrez les fichiers locaux à autoriser.'));
     }
     picker.control.onchange = renderChoices;
     renderChoices();
@@ -1011,29 +1010,29 @@ export function setupNativeWorkflows(options) {
     if (draft) leaveEditor();
     importStatus('');
   }
-  $('comfy-iterations').oninput = () => {
-    lastLimited = Number($('comfy-iterations').value) || 5;
+  $('generation-iterations').oninput = () => {
+    lastLimited = Number($('generation-iterations').value) || 5;
     syncLimit();
   };
-  $('comfy-minus').onclick = () => {
+  $('generation-minus').onclick = () => {
     if (unlimited) {
       unlimited = false;
       lastLimited = 9999;
-    } else lastLimited = Math.max(1, Number($('comfy-iterations').value) - 1);
-    $('comfy-iterations').value = lastLimited;
+    } else lastLimited = Math.max(1, Number($('generation-iterations').value) - 1);
+    $('generation-iterations').value = lastLimited;
     syncLimit();
   };
-  $('comfy-plus').onclick = () => {
+  $('generation-plus').onclick = () => {
     if (unlimited) return;
-    lastLimited = Number($('comfy-iterations').value) + 1;
+    lastLimited = Number($('generation-iterations').value) + 1;
     if (lastLimited >= 10000) unlimited = true;
-    else $('comfy-iterations').value = lastLimited;
+    else $('generation-iterations').value = lastLimited;
     syncLimit();
   };
-  $('comfy-unlimited').onclick = () => {
-    if (!unlimited) lastLimited = Math.min(9999, Math.max(1, Number($('comfy-iterations').value) || 5));
+  $('generation-unlimited').onclick = () => {
+    if (!unlimited) lastLimited = Math.min(9999, Math.max(1, Number($('generation-iterations').value) || 5));
     unlimited = !unlimited;
-    $('comfy-iterations').value = lastLimited;
+    $('generation-iterations').value = lastLimited;
     syncLimit();
   };
   for (const [id, kind] of [
@@ -1061,7 +1060,7 @@ export function setupNativeWorkflows(options) {
       if (!controller.signal.aborted) $('generation-status').textContent = failure.message;
     }
   };
-  $('comfy-recover').onclick = async () => {
+  $('generation-recover').onclick = async () => {
     try {
       await api('tools/recover', {});
       options.onChange?.();
@@ -1160,7 +1159,7 @@ export function setupNativeWorkflows(options) {
   function importStatus(message, failed = false) {
     $('native-import-status').hidden = !message;
     $('native-import-status').textContent = message;
-    $('native-import-status').className = failed ? 'config-error' : 'comfy-help';
+    $('native-import-status').className = failed ? 'config-error' : 'field-help';
     if (failed) {
       $('native-import-status').scrollIntoView?.({ block: 'nearest' });
       $('native-import-status').focus();

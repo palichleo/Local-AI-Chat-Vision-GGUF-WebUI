@@ -21,7 +21,7 @@ test('global instructions are saved across app restarts and invalid input does n
     fetch(app.url + '/api/settings', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + boot.token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: boot.config, comfy: boot.comfy, ...body }),
+      body: JSON.stringify({ config: boot.config, generation: boot.generation, ...body }),
     });
   assert.equal((await post({ instructions: 'Use the supplied project context.' })).status, 200);
   assert.equal((await post({ instructions: 'x'.repeat(16001) })).status, 400);

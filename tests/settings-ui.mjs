@@ -13,7 +13,14 @@ const savedConfig = {
   maxOutputTokens: 2048,
   gpuLayers: 999,
 };
-const savedComfy = { enabled: false, baseUrl: 'http://127.0.0.1:8188', autoAllow: false, maxIterations: 5 };
+const savedGeneration = {
+  enabled: false,
+  autoAllow: false,
+  maxIterations: 5,
+  pythonPath: '',
+  tokenizerPath: '',
+  modelRoot: '',
+};
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => {
@@ -65,10 +72,10 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
   const calls = [],
     refreshes = [],
     windowListeners = {};
-  let comfyOptions,
+  let workflowOptions,
     meterOptions,
     meterSchedules = 0;
-  const comfyUI = {
+  const workflowsUI = {
     refresh: options => {
       refreshes.push(options);
       return refresh(options);
@@ -76,7 +83,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
     saved,
     cancelSettings() {},
     setBusy() {},
-    values: () => savedComfy,
+    values: () => savedGeneration,
     workflowDescriptions: () => [],
     reset() {},
   };
@@ -111,9 +118,9 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
       },
       values: () => ({ gpuLayers: 999 }),
     }),
-    setupComfy: options => {
-      comfyOptions = options;
-      return comfyUI;
+    setupNativeWorkflows: options => {
+      workflowOptions = options;
+      return workflowsUI;
     },
     document: {
       getElementById: $,
@@ -155,7 +162,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
         return Response.json({
           config: call.body.config,
           instructions: call.body.instructions || '',
-          comfy: savedComfy,
+          generation: savedGeneration,
           workflows: [],
         });
       if (call.route === 'models/select')
@@ -181,8 +188,8 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
     calls,
     refreshes,
     windowListeners,
-    comfyUI,
-    comfyOptions,
+    workflowsUI,
+    workflowOptions,
     meterOptions,
     meterSchedules: () => meterSchedules,
     async open() {
@@ -218,7 +225,7 @@ test('settings fields remain locked until every settings load succeeds', async (
   const ui = await settingsUI({ refresh: () => pending.promise });
   await ui.open();
   assert.equal(ui.$('config-fields').disabled, true);
-  pending.reject(new Error('Cannot read Comfy settings'));
+  pending.reject(new Error('Cannot read generation settings'));
   await tick();
   assert.equal(ui.$('save-config').disabled, true);
   await ui.saveConfiguration();
@@ -237,7 +244,11 @@ test('a save finishing after reopening preserves the new dialog and its draft', 
   await ui.open();
   ui.$('model-path').value = 'new-draft.gguf';
   pending.resolve(
-    Response.json({ config: { ...savedConfig, modelPath: 'just-saved.gguf' }, comfy: savedComfy, workflows: [] }),
+    Response.json({
+      config: { ...savedConfig, modelPath: 'just-saved.gguf' },
+      generation: savedGeneration,
+      workflows: [],
+    }),
   );
   await saving;
   assert.equal(ui.$('settings').open, true);
@@ -270,11 +281,11 @@ test('saving uses the settings result without a second network read', async () =
   assert.equal(ui.$('settings').open, false);
 });
 
-test('a Comfy operation locks settings saving, model fields and engine start', async () => {
+test('a generation settings operation locks settings saving, model fields and engine start', async () => {
   const ui = await settingsUI();
   await ui.open();
-  assert.equal(typeof ui.comfyOptions.onSettingsBusyChange, 'function');
-  ui.comfyOptions.onSettingsBusyChange(true);
+  assert.equal(typeof ui.workflowOptions.onSettingsBusyChange, 'function');
+  ui.workflowOptions.onSettingsBusyChange(true);
   for (const id of ['save-config', 'config-fields', 'toggle-engine', 'update-available'])
     assert.equal(ui.$(id).disabled, true, id);
   await ui.saveConfiguration();
@@ -282,7 +293,7 @@ test('a Comfy operation locks settings saving, model fields and engine start', a
     ui.calls.some(call => call.route === 'settings'),
     false,
   );
-  ui.comfyOptions.onSettingsBusyChange(false);
+  ui.workflowOptions.onSettingsBusyChange(false);
   assert.equal(ui.$('save-config').disabled, false);
 });
 
@@ -435,12 +446,12 @@ test('immediately saved preferences and reverted fields do not create a false un
 test('unsaved workflow descriptions prompt, and an unfinished workflow import cannot be discarded by the save button', async () => {
   const ui = await settingsUI();
   await ui.open();
-  ui.comfyUI.workflowDescriptions = () => [{ id: 'photo', description: 'Draft' }];
+  ui.workflowsUI.workflowDescriptions = () => [{ id: 'photo', description: 'Draft' }];
   ui.$('settings-close').onclick();
   assert.equal(ui.$('settings-unsaved').open, true);
   ui.$('settings-keep').onclick();
-  ui.comfyUI.hasPendingImport = () => true;
-  ui.comfyUI.finishImport = async () => false;
+  ui.workflowsUI.hasPendingImport = () => true;
+  ui.workflowsUI.finishImport = async () => false;
   await ui.saveConfiguration();
   assert.equal(ui.$('settings').open, true);
   assert.equal(
@@ -454,8 +465,8 @@ test('the main Save finishes a prepared workflow before saving configuration and
   await ui.open();
   let pending = true,
     finished = 0;
-  ui.comfyUI.hasPendingImport = () => pending;
-  ui.comfyUI.finishImport = async () => {
+  ui.workflowsUI.hasPendingImport = () => pending;
+  ui.workflowsUI.finishImport = async () => {
     finished++;
     assert.equal(
       ui.calls.some(call => call.route === 'settings'),
@@ -473,8 +484,8 @@ test('the main Save finishes a prepared workflow before saving configuration and
 test('a rejected workflow remains unsaved and closing settings asks before discarding it', async () => {
   const ui = await settingsUI();
   await ui.open();
-  ui.comfyUI.hasPendingImport = () => true;
-  ui.comfyUI.finishImport = async () => false;
+  ui.workflowsUI.hasPendingImport = () => true;
+  ui.workflowsUI.finishImport = async () => false;
   await ui.saveConfiguration();
   assert.equal(ui.$('settings').open, true);
   assert.equal(
@@ -634,7 +645,7 @@ test('saving an LLM retains unrelated global drafts and uses the edited name and
     },
   });
   await ui.open();
-  ui.$('comfy-auto').checked = true;
+  ui.$('generation-auto').checked = true;
   ui.$('global-instructions').value = 'Unrelated draft';
   ui.addLLM();
   ui.$('llm-name').value = 'Manual name';

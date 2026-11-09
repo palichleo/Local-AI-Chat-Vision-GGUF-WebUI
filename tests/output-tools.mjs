@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ComfyGallery } from '../lib/comfy-gallery.mjs';
+import { Gallery } from '../lib/gallery.mjs';
 import { readOutput } from '../lib/output-tools.mjs';
 import { createApplication } from '../server.mjs';
 import { readSSE } from '../public/stream.mjs';
@@ -32,7 +32,7 @@ function run(overrides = {}) {
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'atelier-output-read-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  return { root, gallery: new ComfyGallery({ historyDir: join(root, 'history') }) };
+  return { root, gallery: new Gallery({ historyDir: join(root, 'history') }) };
 }
 
 test('output inspection validates IDs and indexes and reads only the requested compressed copy', async t => {

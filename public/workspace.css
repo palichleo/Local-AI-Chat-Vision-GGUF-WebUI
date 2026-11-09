@@ -928,9 +928,7 @@ body:not([data-files='open']) .assets-panel {
   padding: 6px;
   font-size: 9px;
 }
-.gallery-prompt {
-  font-size: 10px;
-}
+
 #project-dialog {
   position: fixed;
   inset: 0;

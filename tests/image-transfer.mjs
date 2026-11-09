@@ -6,24 +6,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../server.mjs';
-import { ComfyGallery } from '../lib/comfy-gallery.mjs';
+import { Gallery } from '../lib/gallery.mjs';
 
-test('aborting a gallery original stops the upstream image transfer', { timeout: 6000 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'atelier-image-transfer-'));
-  let entered, closed;
-  const arrived = new Promise(resolve => {
-      entered = resolve;
-    }),
-    disconnected = new Promise(resolve => {
-      closed = resolve;
-    });
-  const comfy = http.createServer((req, res) => {
-    res.on('close', closed);
-    res.writeHead(200, { 'Content-Type': 'image/png' });
-    res.write(Buffer.from('89504e470d0a1a0a', 'hex'));
-    entered();
+test('a ComfyUI-era gallery record stays listed but its original is reported unavailable without contacting Comfy', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'atelier-legacy-original-'));
+  let contacted = false;
+  const comfy = http.createServer((_req, res) => {
+    contacted = true;
+    res.end();
   });
-  let app, timer;
+  let app;
   try {
     await new Promise(resolve => comfy.listen(0, '127.0.0.1', resolve));
     const record = {
@@ -37,28 +29,17 @@ test('aborting a gallery original stops the upstream image transfer', { timeout:
       comfyUrl: `http://127.0.0.1:${comfy.address().port}`,
       outputs: [{ source: { filename: 'test.png', subfolder: '', type: 'output' } }],
     };
-    await new ComfyGallery({ historyDir: join(directory, 'history') }).put(record, { persist: true });
+    await new Gallery({ historyDir: join(directory, 'history') }).put(record, { persist: true });
     app = await createApplication({ port: 0, dataDir: directory });
     const { token } = await (await fetch(`${app.url}/api/bootstrap`)).json();
-    const controller = new AbortController();
-    const request = assert.rejects(
-      fetch(`${app.url}/api/gallery/${record.conversationId}/${record.id}/0`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: controller.signal,
-      }),
-      { name: 'AbortError' },
-    );
-    await arrived;
-    controller.abort();
-    await request;
-    await Promise.race([
-      disconnected,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(Error('Upstream image transfer kept running after cancellation')), 1500);
-      }),
-    ]);
+    const headers = { Authorization: `Bearer ${token}` };
+    const listed = await (await fetch(`${app.url}/api/gallery/${record.conversationId}`, { headers })).json();
+    assert.equal(listed.runs.length, 1);
+    const original = await fetch(`${app.url}/api/gallery/${record.conversationId}/${record.id}/0`, { headers });
+    assert.equal(original.status, 410);
+    assert.match((await original.json()).error, /ComfyUI non disponible/);
+    assert.equal(contacted, false);
   } finally {
-    clearTimeout(timer);
     comfy.closeAllConnections();
     await new Promise(resolve => comfy.close(resolve));
     await app?.close();

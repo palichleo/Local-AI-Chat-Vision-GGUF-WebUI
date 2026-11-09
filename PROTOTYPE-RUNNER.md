@@ -7,4 +7,4 @@ Experimental branch of Atelier local. Generation runs natively: Node supervises 
 
 `experiments/krea2-python/` keeps the original Krea2 experiment and its profiling reports (`OPTIMIZED.md`, `PROFILE.md`, `LAST-TRY.md`) as references only; the application does not import it. The original experiment is also preserved at commit `0ed79d6` on `experiment/krea2-python`.
 
-The ComfyUI path documented in `README.md` is the legacy implementation still present in this branch; `main` remains Comfy-based until this branch replaces it.
+The ComfyUI client has been removed from this branch; ComfyUI files are only read by the workflow importer. `main` remains Comfy-based until this branch replaces it.

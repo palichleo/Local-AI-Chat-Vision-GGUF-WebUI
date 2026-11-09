@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../server.mjs';
 import { Projects, projectId } from '../lib/projects.mjs';
-import { ComfyGallery } from '../lib/comfy-gallery.mjs';
+import { Gallery } from '../lib/gallery.mjs';
 const png = 'data:image/png;base64,iVBORw0KGgo=';
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'atelier-projects-')),
@@ -101,7 +101,7 @@ test('home summaries expose bounded prompts and signed compressed previews witho
     createdAt: new Date().toISOString(),
     outputs: [{ source: { filename: 'image.png', subfolder: '', type: 'output' }, analysisDataUrl: png }],
   };
-  await new ComfyGallery({ historyDir: f.historyDir }).put(run, { persist: true });
+  await new Gallery({ historyDir: f.historyDir }).put(run, { persist: true });
   await f.call('history/save', {
     id,
     messages: [

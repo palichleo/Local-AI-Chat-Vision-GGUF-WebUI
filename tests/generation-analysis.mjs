@@ -5,14 +5,14 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../server.mjs';
-import { ComfyGallery } from '../lib/comfy-gallery.mjs';
+import { Gallery } from '../lib/gallery.mjs';
 const png = 'data:image/png;base64,iVBORw0KGgo=';
 test('partial photo and video analysis persists valid outputs without changing missing originals or their indices', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'atelier-partial-analysis-'));
   assert.equal(dirname(directory), tmpdir());
   const historyDir = join(directory, 'history');
   const app = await createApplication({ port: 0, dataDir: directory, historyDir }),
-    gallery = new ComfyGallery({ historyDir });
+    gallery = new Gallery({ historyDir });
   t.after(async () => {
     await app.close();
     await rm(directory, { recursive: true, force: true });
@@ -57,7 +57,7 @@ test('partial photo and video analysis persists valid outputs without changing m
       body: JSON.stringify(body),
     });
     assert.equal(response.status, 200, await (response.status === 200 ? Promise.resolve('') : response.clone().text()));
-    const restored = await new ComfyGallery({ historyDir }).get(record.conversationId, record.id);
+    const restored = await new Gallery({ historyDir }).get(record.conversationId, record.id);
     assert.equal(restored.outputs[0].analysisDataUrl, undefined);
     assert.equal(restored.outputs[1].analysisDataUrl, png);
     assert.equal(restored.outputs[1].width, 768);

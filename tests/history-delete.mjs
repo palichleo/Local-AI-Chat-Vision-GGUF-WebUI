@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../server.mjs';
 import { History } from '../lib/history.mjs';
-import { ComfyGallery } from '../lib/comfy-gallery.mjs';
+import { Gallery } from '../lib/gallery.mjs';
 const png =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
 
@@ -26,7 +26,7 @@ test('deleting one conversation removes copies and cached links, retaining other
     await call('preferences', { saveHistory: true });
     const ids = [randomUUID(), randomUUID()],
       runs = [];
-    const gallery = new ComfyGallery({ historyDir });
+    const gallery = new Gallery({ historyDir });
     const original = join(dataDir, 'original.png');
     await writeFile(original, Buffer.from(png.split(',')[1], 'base64'));
     for (const id of ids) {
@@ -118,7 +118,7 @@ test('an accepted gallery update prevents deletion until its write finishes', as
   const dataDir = await mkdtemp(join(tmpdir(), 'atelier-delete-')),
     historyDir = join(dataDir, 'history');
   let app, pending, release;
-  const originalPut = ComfyGallery.prototype.put;
+  const originalPut = Gallery.prototype.put;
   try {
     app = await createApplication({ port: 0, dataDir, historyDir });
     const bootstrap = await (await fetch(app.url + '/api/bootstrap')).json();
@@ -142,7 +142,7 @@ test('an accepted gallery update prevents deletion until its write finishes', as
         outputs: [{ source: { filename: 'original.png', subfolder: '', type: 'output' } }],
       };
     await call('history/save', { id, messages: [{ role: 'user', content: 'Cup' }] });
-    await new ComfyGallery({ historyDir }).put(run, { persist: true });
+    await new Gallery({ historyDir }).put(run, { persist: true });
     let entered;
     const started = new Promise(resolve => {
         entered = resolve;
@@ -150,7 +150,7 @@ test('an accepted gallery update prevents deletion until its write finishes', as
       gate = new Promise(resolve => {
         release = resolve;
       });
-    ComfyGallery.prototype.put = async function (input, options) {
+    Gallery.prototype.put = async function (input, options) {
       if (input.id === run.id) {
         entered();
         await gate;
@@ -166,7 +166,7 @@ test('an accepted gallery update prevents deletion until its write finishes', as
   } finally {
     release?.();
     await pending;
-    ComfyGallery.prototype.put = originalPut;
+    Gallery.prototype.put = originalPut;
     await app?.close();
     await rm(dataDir, { recursive: true, force: true });
   }

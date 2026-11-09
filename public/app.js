@@ -9,7 +9,7 @@ import { installFromButton, compactSession } from './update-ui.mjs';
 import { setupMaterialLighting } from './material-light.mjs';
 import { readSSE } from './stream.mjs';
 import { markdownToHtml } from './markdown.mjs';
-import { setupNativeWorkflows as setupComfy } from './native-workflow-ui.mjs';
+import { setupNativeWorkflows } from './native-workflow-ui.mjs';
 import { prepareImages } from './images.mjs';
 import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
@@ -43,7 +43,7 @@ const state = {
   settingsLoading: false,
   settingsSession: 0,
   settingsReady: false,
-  comfyWorking: false,
+  generationSettingsWorking: false,
   disablingHistory: false,
   resourceWorking: false,
   saveHistory: true,
@@ -113,8 +113,8 @@ function confirmHistoryDeletion(item = null) {
   $('history-delete-description').textContent = item
     ? '« ' +
       item.title +
-      ' » sera supprimée avec ses copies compressées et ses liens vers ComfyUI. Les images originales restent à leur emplacement. Le brouillon de saisie sera conservé.'
-    : 'Les conversations, les copies compressées et les liens vers les sorties seront supprimés. Les originaux ComfyUI restent à leur emplacement. L’échange affiché sera fermé ; le brouillon de saisie sera conservé.';
+      ' » sera supprimée avec ses copies compressées et ses liens de sortie. Les fichiers originaux restent à leur emplacement. Le brouillon de saisie sera conservé.'
+    : 'Les conversations, les copies compressées et les liens vers les sorties seront supprimés. Les fichiers originaux restent à leur emplacement. L’échange affiché sera fermé ; le brouillon de saisie sera conservé.';
   $('history-delete-error').hidden = true;
   if (!$('history-delete-dialog').open) $('history-delete-dialog').showModal();
 }
@@ -211,7 +211,7 @@ async function clearHistory() {
       state.conversationInstructions = null;
       state.archiveSnapshot = null;
       state.historyDirty = false;
-      comfyUI.reset();
+      workflowsUI.reset();
       generationUI.clear();
       $('messages').replaceChildren();
       $('welcome').hidden = false;
@@ -295,7 +295,7 @@ async function loadConversation(id) {
     state.stickToBottom = true;
     scrollToBottom();
     try {
-      await comfyUI.renderGallery(id);
+      await workflowsUI.renderGallery(id);
     } catch (error) {
       notice(`Galerie indisponible : ${error.message}`);
     }
@@ -311,6 +311,8 @@ async function loadConversation(id) {
 }
 
 function renderTranscript(messages, incomplete = false) {
+  // Conversations saved before the native runner used the comfy_* tool names; they are still displayed.
+  const GENERATION_TOOLS = ['generate_image', 'generate_video', 'comfy_generate_image', 'comfy_generate_video'];
   let reply = null;
   for (const [index, message] of messages.entries()) {
     if (message.internal || message.role === 'tool') continue;
@@ -323,18 +325,8 @@ function renderTranscript(messages, incomplete = false) {
       reply = view;
       if (message.content) renderText(view.body, message.content);
       else view.body.textContent = message.tool_calls ? 'Appel d’outil enregistré.' : 'Aucune réponse finale reçue.';
-      if (
-        message.tool_calls?.some(call =>
-          ['generate_image', 'generate_video', 'comfy_generate_image', 'comfy_generate_video'].includes(
-            call.function?.name,
-          ),
-        )
-      ) {
-        const call = message.tool_calls.find(call =>
-            ['generate_image', 'generate_video', 'comfy_generate_image', 'comfy_generate_video'].includes(
-              call.function?.name,
-            ),
-          ),
+      if (message.tool_calls?.some(call => GENERATION_TOOLS.includes(call.function?.name))) {
+        const call = message.tool_calls.find(call => GENERATION_TOOLS.includes(call.function?.name)),
           result = messages[index + 1];
         try {
           const data = result?.role === 'tool' && result.tool_call_id === call.id ? JSON.parse(result.content) : null;
@@ -376,7 +368,7 @@ async function restoreUpdate() {
   renderHistory();
   scrollToBottom();
   contextMeter.schedule();
-  if (state.conversationId) await comfyUI.renderGallery(state.conversationId);
+  if (state.conversationId) await workflowsUI.renderGallery(state.conversationId);
   await api('updates/session/clear', {});
   const result = await (await api('updates/install')).json();
   if (result.state === 'rolled-back' || result.state === 'error') notice(result.error);
@@ -444,7 +436,7 @@ function updateControls() {
   $('update-available').disabled =
     state.projectWorking ||
     state.resourceWorking ||
-    state.comfyWorking ||
+    state.generationSettingsWorking ||
     state.updating ||
     state.generating ||
     state.preparing ||
@@ -458,7 +450,7 @@ function updateControls() {
     !!s.toolJob ||
     ['loading', 'stopping'].includes(s.state);
   const toolBusy = !!s.toolJob;
-  $('comfy-recover').hidden = !s.toolJob?.blocked;
+  $('generation-recover').hidden = !s.toolJob?.blocked;
   const running = ['loading', 'ready', 'stopping'].includes(s.state);
   const text = state.connected ? labels[s.state] || 'État inconnu' : 'Connexion interrompue';
   $('settings-status').textContent = text;
@@ -486,7 +478,7 @@ function updateControls() {
   $('config-fields').disabled =
     state.settingsLoading ||
     state.settingsReady === false ||
-    state.comfyWorking ||
+    state.generationSettingsWorking ||
     toolBusy ||
     running ||
     state.operation ||
@@ -503,11 +495,11 @@ function updateControls() {
     toolBusy ||
     state.savingPreferences ||
     state.clearingHistory ||
-    state.comfyWorking ||
+    state.generationSettingsWorking ||
     !state.connected;
   $('save-config').disabled =
     state.settingsReady === false ||
-    state.comfyWorking ||
+    state.generationSettingsWorking ||
     s.busy ||
     state.settingsLoading ||
     toolBusy ||
@@ -517,7 +509,12 @@ function updateControls() {
   $('settings-stop').hidden = !running;
   $('settings-stop').disabled = toolBusy || state.generating || s.state === 'stopping' || state.operation;
   $('toggle-engine').disabled =
-    state.comfyWorking || toolBusy || state.generating || state.operation || s.state === 'stopping' || !state.connected;
+    state.generationSettingsWorking ||
+    toolBusy ||
+    state.generating ||
+    state.operation ||
+    s.state === 'stopping' ||
+    !state.connected;
   $('toggle-engine').classList.toggle('is-running', running);
   $('toggle-engine').replaceChildren(
     icon(running ? 'stop' : 'play'),
@@ -557,7 +554,7 @@ function updateControls() {
   }
   $('prompt').disabled = state.loadingHistory;
   $('compose-state').textContent = toolBusy
-    ? s.toolJob.progress || 'ComfyUI en cours…'
+    ? s.toolJob.progress || 'Génération en cours…'
     : state.preparing
       ? 'Préparation des images…'
       : state.waitingForModel
@@ -567,7 +564,7 @@ function updateControls() {
           : s.state === 'loading'
             ? 'Le modèle se charge…'
             : '';
-  comfyUI.setBusy(
+  workflowsUI.setBusy(
     s.busy || toolBusy || state.generating || state.operation || state.settingsLoading || !state.connected,
   );
   const logs = s.logs?.join('\n') || 'Les journaux apparaîtront au démarrage.';
@@ -587,7 +584,7 @@ function updateControls() {
     state.settingsLoading ||
     state.loadingHistory ||
     state.updating ||
-    state.comfyWorking ||
+    state.generationSettingsWorking ||
     s.busy ||
     !state.connected ||
     ['loading', 'stopping'].includes(s.state);
@@ -595,7 +592,7 @@ function updateControls() {
     state.settingsLoading ||
     state.operation ||
     state.generating ||
-    state.comfyWorking ||
+    state.generationSettingsWorking ||
     toolBusy ||
     !state.connected ||
     !state.settingsReady;
@@ -632,7 +629,7 @@ async function refreshStatus() {
     const previous = state.status.state;
     const wasConnected = state.connected;
     state.status = await (await api('status', undefined, { signal: AbortSignal.timeout(5000) })).json();
-    comfyUI.updateRunner?.(state.status.runner);
+    workflowsUI.updateRunner?.(state.status.runner);
     state.connected = true;
     if (previous !== state.status.state || !wasConnected) contextMeter.schedule();
     if (state.status.state !== previous) {
@@ -908,14 +905,14 @@ async function switchLLM() {
 }
 
 function requestSettingsClose(after) {
-  if (comfyUI.isEditing?.()) return comfyUI.requestBack(() => settingsGuard.requestClose(after));
+  if (workflowsUI.isEditing?.()) return workflowsUI.requestBack(() => settingsGuard.requestClose(after));
   return settingsGuard.requestClose(after);
 }
 
 function openSettings() {
   if ($('settings').open) return;
   filePickerController?.abort();
-  comfyUI.cancelSettings();
+  workflowsUI.cancelSettings();
   const session = (state.settingsSession = (state.settingsSession || 0) + 1);
   state.settingsLoading = true;
   state.settingsReady = false;
@@ -926,7 +923,7 @@ function openSettings() {
   updateControls();
   Promise.all([
     api('bootstrap').then(response => response.json()),
-    comfyUI.refresh(),
+    workflowsUI.refresh(),
     api('models').then(response => response.json()),
   ])
     .then(([initial, , library]) => {
@@ -963,11 +960,17 @@ function openSettings() {
 }
 
 async function saveConfiguration() {
-  if (state.operation || state.settingsLoading || state.comfyWorking || !state.settingsReady || !$('settings').open)
+  if (
+    state.operation ||
+    state.settingsLoading ||
+    state.generationSettingsWorking ||
+    !state.settingsReady ||
+    !$('settings').open
+  )
     return;
   const session = state.settingsSession;
-  if (comfyUI.hasPendingImport?.()) {
-    if (!(await comfyUI.finishImport?.())) return;
+  if (workflowsUI.hasPendingImport?.()) {
+    if (!(await workflowsUI.finishImport?.())) return;
     if (session !== state.settingsSession || !$('settings').open) return;
   }
   state.operation = true;
@@ -990,19 +993,18 @@ async function saveConfiguration() {
       await api('settings', {
         config,
         instructions: $('global-instructions').value,
-        ...(state.generation ? { generation: comfyUI.values() } : { comfy: comfyUI.values() }),
-        workflowDescriptions: comfyUI.workflowDescriptions(),
+        generation: workflowsUI.values(),
+        workflowDescriptions: workflowsUI.workflowDescriptions(),
       })
     ).json();
     state.config = saved.config;
-    state.comfy = saved.generation || saved.comfy;
-    if (saved.generation) state.generation = saved.generation;
+    state.generation = saved.generation;
     state.globalInstructions = saved.instructions ?? $('global-instructions').value;
     state.modelName = activeModel()?.name || '';
     renderModelSelect();
     const current = session === state.settingsSession && $('settings').open;
     if (current) {
-      comfyUI.saved(saved);
+      workflowsUI.saved(saved);
       settingsGuard.markSaved();
       $('settings').close();
     }
@@ -1314,7 +1316,7 @@ async function sendMessage(event) {
         finishReason !== 'length'
       ) {
         try {
-          await comfyUI.saveReview(reviewRecord, output, request ? 'correction_requested' : 'reviewed');
+          await workflowsUI.saveReview(reviewRecord, output, request ? 'correction_requested' : 'reviewed');
         } catch (error) {
           notice(`Analyse de galerie non enregistrée : ${error.message}`);
         }
@@ -1459,7 +1461,7 @@ async function sendMessage(event) {
       const generation = generationUI.mount(view.generations, request);
       let result;
       try {
-        result = await comfyUI.requestTool(
+        result = await workflowsUI.requestTool(
           request,
           signal,
           progress => {
@@ -1508,7 +1510,7 @@ async function sendMessage(event) {
       if (result.failed && state.status.state !== 'ready')
         throw Error(result.error || 'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
       view.note.textContent = result.failed ? result.error || 'Analyse indisponible.' : '';
-      if (result.denied || result.failed || iterations >= (state.comfy?.maxIterations || 5)) allowTools = false;
+      if (result.denied || result.failed || iterations >= (state.generation?.maxIterations || 5)) allowTools = false;
       state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
       await persistConversation();
       view = assistantMessage(view);
@@ -1608,7 +1610,7 @@ const generationUI = setupGenerationUI({
   openOutput: (record, index, blob) => assetsUI.viewOutput(record, index, blob),
   onResize: scrollToBottom,
 });
-const comfyUI = setupComfy({
+const workflowsUI = setupNativeWorkflows({
   api,
   state,
   node,
@@ -1621,7 +1623,7 @@ const comfyUI = setupComfy({
   },
   onChange: () => refreshStatus(),
   onSettingsBusyChange: busy => {
-    state.comfyWorking = busy;
+    state.generationSettingsWorking = busy;
     updateControls();
   },
 });
@@ -1642,19 +1644,23 @@ const settingsGuard = setupSettingsGuard({
       'output-tokens',
       'compute-mode',
       'gpu-layers',
-      'comfy-enabled',
-      'comfy-auto',
-      'comfy-iterations',
-      ...(state.generation ? ['generation-python', 'generation-tokenizer', 'native-convert-root'] : ['comfy-url']),
+      'generation-enabled',
+      'generation-auto',
+      'generation-iterations',
+      'generation-python',
+      'generation-tokenizer',
+      'native-convert-root',
     ].map(id => [
       id,
-      id === 'comfy-iterations' && $('comfy-unlimited').getAttribute('aria-pressed') === 'true' ? null : $(id).value,
+      id === 'generation-iterations' && $('generation-unlimited').getAttribute('aria-pressed') === 'true'
+        ? null
+        : $(id).value,
       $(id).checked,
     ]),
-    unlimited: $('comfy-unlimited').getAttribute('aria-pressed'),
-    descriptions: comfyUI.workflowDescriptions(),
-    pending: comfyUI.hasPendingImport?.() || false,
-    editor: comfyUI.editorDirty?.() || false,
+    unlimited: $('generation-unlimited').getAttribute('aria-pressed'),
+    descriptions: workflowsUI.workflowDescriptions(),
+    pending: workflowsUI.hasPendingImport?.() || false,
+    editor: workflowsUI.editorDirty?.() || false,
   }),
 });
 const contextMeter = setupContextMeter({
@@ -1707,7 +1713,7 @@ $('settings').addEventListener('close', () => {
   state.settingsReady = false;
   settingsSearch.reset();
   filePickerController?.abort();
-  comfyUI.cancelSettings();
+  workflowsUI.cancelSettings();
   updateControls();
 });
 for (const button of document.querySelectorAll('[data-file-kind]'))
@@ -1835,7 +1841,7 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     state.archiveSnapshot = null;
     state.historyDirty = false;
     $('prompt').value = '';
-    comfyUI.reset();
+    workflowsUI.reset();
     generationUI.clear();
     $('messages').replaceChildren();
     $('welcome').hidden = false;
@@ -1942,7 +1948,7 @@ try {
   await projectUI.refresh().catch(error => notice('Projets indisponibles : ' + error.message));
   await refreshHistory();
   await assetsUI.refresh().catch(error => notice('Bibliothèque indisponible : ' + error.message));
-  await comfyUI.refresh();
+  await workflowsUI.refresh();
   await restoreUpdate();
   if (initial.warning) notice(initial.warning);
   contextMeter.schedule();

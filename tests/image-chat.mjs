@@ -7,7 +7,7 @@ const png = 'data:image/png;base64,iVBORw0KGgo=';
 const call = {
   id: 'call_1',
   type: 'function',
-  function: { name: 'comfy_generate_image', arguments: '{"workflow_id":"photo","prompt":"cat"}' },
+  function: { name: 'generate_image', arguments: '{"workflow_id":"photo","prompt":"cat"}' },
 };
 async function exchange({
   vision = true,
@@ -56,7 +56,7 @@ async function exchange({
     images: [],
     status: { state: 'ready', vision: true, busy: false },
     thinking: true,
-    comfy: { maxIterations: Math.max(5, generationCalls) },
+    generation: { maxIterations: Math.max(5, generationCalls) },
   };
   const requests = [],
     reviews = [],
@@ -93,7 +93,7 @@ async function exchange({
     historyWrite: Promise.resolve(),
     refreshStatus: async () => {},
     setConversationTitle() {},
-    comfyUI: {
+    workflowsUI: {
       requestTool: async () => ({
         content: JSON.stringify({ status: denied ? 'denied' : failed ? 'generated' : 'success' }),
         images,

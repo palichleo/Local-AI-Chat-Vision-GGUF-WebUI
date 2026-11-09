@@ -57,7 +57,7 @@ The distilled pipeline requires 8 steps, CFG=1, dimensions divisible by 32 and f
 
 Select the supplied LongForge editor graph with **Importer un workflow** to prefill its known settings and component files. Its original graph, including additional scene settings, stays in the saved draft. Values outside the tested execution contract can be reviewed without running them. This imports settings; it does not implement arbitrary Comfy graph execution.
 
-**Remaining LongForge differences:** continuous audio across scenes, automatic whole-film planning, interpolation/upscaling and optional enhancement are not implemented. The original 896×1600 five-second preset has not been validated on 12 GB; conversion preserves it in the final profile for review. Real smoke tests establish working execution, not quality/speed parity with every Comfy workflow. Legacy Comfy code remains for existing records and compatibility tests.
+**Remaining LongForge differences:** continuous audio across scenes, automatic whole-film planning, interpolation/upscaling and optional enhancement are not implemented. The original 896×1600 five-second preset has not been validated on 12 GB; conversion preserves it in the final profile for review. Real smoke tests establish working execution, not quality/speed parity with every Comfy workflow.
 
 ## Checks
 

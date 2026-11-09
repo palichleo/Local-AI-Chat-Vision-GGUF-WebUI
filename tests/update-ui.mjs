@@ -108,7 +108,7 @@ test('download failure keeps configuration, file selection and composer controls
     labels: { stopped: 'Stopped' },
     icon: () => ({}),
     node: () => ({}),
-    comfyUI: { setBusy() {} },
+    workflowsUI: { setBusy() {} },
     persistConversation: async () => true,
     historyWrite: Promise.resolve(),
     installFromButton: module.installFromButton,

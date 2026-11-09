@@ -544,14 +544,12 @@ test('Atelier imports are validated, disabled and assigned new identities instea
 
 test('invalid imports and file reads completed after closing never leave a half-open editor', async t => {
   const f = await setup(t);
-  await f
-    .$('native-workflow-file')
-    .onchange({
-      target: {
-        files: [{ size: 100, text: async () => JSON.stringify({ ...f.template, components: null }) }],
-        value: '',
-      },
-    });
+  await f.$('native-workflow-file').onchange({
+    target: {
+      files: [{ size: 100, text: async () => JSON.stringify({ ...f.template, components: null }) }],
+      value: '',
+    },
+  });
   assert.equal(f.ui.isEditing(), false);
   assert.equal(f.$('native-import-status').hidden, false);
   let finish;
@@ -595,11 +593,9 @@ test('four unsupported references and three named LoRAs all appear in the editor
       inputs: { lora_name: 'my-specific-' + i + '.safetensors', strength_model: 0.5 + i },
     };
   const text = JSON.stringify(source);
-  await f
-    .$('native-workflow-file')
-    .onchange({
-      target: { files: [{ name: 'Four refs.json', size: text.length, text: async () => text }], value: '' },
-    });
+  await f.$('native-workflow-file').onchange({
+    target: { files: [{ name: 'Four refs.json', size: text.length, text: async () => text }], value: '' },
+  });
   assert.equal(f.$('native-reference-count').textContent, '4');
   assert.equal(f.$('native-lora-count').textContent, '3');
   assert.equal(f.$('native-workflow-enabled').dataset.unavailable, 'true');

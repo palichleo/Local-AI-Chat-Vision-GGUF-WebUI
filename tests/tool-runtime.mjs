@@ -2,24 +2,37 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ToolRuntime, collectToolCalls } from '../lib/tool-runtime.mjs';
 const id = 'a1111111-1111-4111-8111-111111111111';
+// Minimal native catalog: a resolved job plus the workflow it came from.
+const nativeWorkflow = (fields = {}) => ({ schemaVersion: 1, mediaType: 'image', references: [], ...fields });
+const nativePrepared = (workflow, references = []) => ({
+  workflow,
+  job: {
+    pipeline: 'krea2',
+    parameters: { prompt: 'portrait', seed: 7, width: 512, height: 512 },
+    components: {},
+    loras: [],
+    references,
+  },
+});
+
 test('native deltas assemble tool arguments; text never becomes a tool', () => {
   const calls = [];
   collectToolCalls(calls, {
-    tool_calls: [{ index: 0, id: 'call_1', function: { name: 'comfy_generate_image', arguments: '{"prompt":' } }],
+    tool_calls: [{ index: 0, id: 'call_1', function: { name: 'generate_image', arguments: '{"prompt":' } }],
   });
   collectToolCalls(calls, { tool_calls: [{ index: 0, function: { arguments: '"cat"}' } }] });
   assert.equal(calls[0].function.arguments, '{"prompt":"cat"}');
-  collectToolCalls(calls, { content: '{"tool":"comfy_generate_image"}' });
+  collectToolCalls(calls, { content: '{"tool":"generate_image"}' });
   assert.equal(calls.length, 1);
 });
 test('approval pins workflow, is consumed once, and enforces a turn limit', async () => {
   let digest = 'one',
     runs = 0;
   const order = [];
-  const workflow = { id: 'wf', name: 'test', digest, bindings: { prompt: { node: '1', input: 'text' } } };
+  const workflow = nativeWorkflow({ id: 'wf', name: 'test', digest });
   const catalog = {
     read: async () => ({ ...workflow, digest }),
-    prepare: async () => ({ graph: {}, workflow, outputNodes: ['1'] }),
+    prepare: async () => nativePrepared(workflow),
   };
   const engine = {
     state: 'ready',
@@ -35,6 +48,7 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
   };
   const client = {
     status: async () => ({ idle: true }),
+    preflight: async () => {},
     run: async () => {
       runs++;
       order.push('run');
@@ -49,7 +63,7 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
     engine,
     catalog,
     gallery,
-    getConfig: () => ({ enabled: true, baseUrl: 'http://127.0.0.1:8188', autoAllow: false, maxIterations: 1 }),
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 1 }),
     engineConfig: () => ({}),
     clientFactory: () => client,
   });
@@ -57,7 +71,7 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
     {
       id: 'call_1',
       type: 'function',
-      function: { name: 'comfy_generate_image', arguments: '{"workflow_id":"wf","prompt":"cat"}' },
+      function: { name: 'generate_image', arguments: '{"workflow_id":"wf","prompt":"cat"}' },
     },
   ];
   const pending = await rt.request(calls, { conversationId: id, turnId: id, messages: [] });
@@ -78,7 +92,7 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
   await assert.rejects(rt.execute({ requestId: p.requestId, permission: 'once' }), /expiré/i);
   await assert.rejects(rt.request(calls, { conversationId: id, turnId: id, messages: [] }), /limite/i);
 });
-test('Comfy release failure keeps LLM stopped and records error', async () => {
+test('a failed GPU release keeps the LLM stopped and records the error', async () => {
   let starts = 0;
   const engine = {
     state: 'ready',
@@ -90,18 +104,15 @@ test('Comfy release failure keeps LLM stopped and records error', async () => {
   const rt = new ToolRuntime({
     engine,
     catalog: {
-      read: async () => ({ digest: '1', name: 'wf' }),
-      prepare: async () => ({
-        graph: { 1: { class_type: 'SaveImage', inputs: {} } },
-        outputNodes: ['1'],
-        workflow: { name: 'wf', digest: '1' },
-      }),
+      read: async () => nativeWorkflow({ digest: '1', name: 'wf' }),
+      prepare: async () => nativePrepared(nativeWorkflow({ name: 'wf', digest: '1' })),
     },
     gallery: { put: async r => r },
     getConfig: () => ({ enabled: true, autoAllow: true, maxIterations: 3 }),
     engineConfig: () => ({}),
     clientFactory: () => ({
       status: async () => ({ idle: true }),
+      preflight: async () => {},
       run: async () => {
         throw Error('failed');
       },
@@ -115,7 +126,7 @@ test('Comfy release failure keeps LLM stopped and records error', async () => {
       {
         id: 'c',
         type: 'function',
-        function: { name: 'comfy_generate_image', arguments: '{"workflow_id":"wf","prompt":"cat"}' },
+        function: { name: 'generate_image', arguments: '{"workflow_id":"wf","prompt":"cat"}' },
       },
     ],
     { conversationId: id, turnId: id, messages: [] },
@@ -138,12 +149,12 @@ function deferred() {
 
 function runtimeFixture() {
   const seen = { runs: 0, stops: 0, starts: 0, references: [] };
-  const workflow = {
+  const workflow = nativeWorkflow({
     id: 'wf',
     name: 'Portrait',
     digest: 'approved',
-    bindings: { image: { node: '9', input: 'image' } },
-  };
+    references: [{ id: 'source', name: 'Source', role: 'img2img', description: 'Image to edit', required: false }],
+  });
   const engine = {
     state: 'ready',
     busy: false,
@@ -160,18 +171,19 @@ function runtimeFixture() {
     async read() {
       return { ...workflow };
     },
-    async prepare(_id, _args, { referenceImage } = {}) {
-      seen.references.push(referenceImage);
-      return { graph: { 7: { class_type: 'SaveImage', inputs: {} } }, workflow: { ...workflow }, outputNodes: ['7'] };
+    async prepare() {
+      return nativePrepared({ ...workflow });
     },
   };
   const client = {
     async status() {
       return { idle: true };
     },
-    async run() {
+    async preflight() {},
+    async run(job) {
       seen.runs++;
-      return { promptId: 'owned', outputs: [{ filename: 'portrait.png', subfolder: '', type: 'output' }] };
+      seen.references.push(job.references);
+      return { outputs: [{ filename: 'portrait.png', subfolder: '', type: 'output' }] };
     },
     async free() {
       return { idle: true, memory: { torchAllocated: 0 } };
@@ -181,7 +193,7 @@ function runtimeFixture() {
     engine,
     catalog,
     gallery: { put: async record => record },
-    getConfig: () => ({ enabled: true, baseUrl: 'http://127.0.0.1:8188', autoAllow: false, maxIterations: 1 }),
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 1 }),
     engineConfig: () => ({}),
     clientFactory: () => client,
   });
@@ -192,7 +204,7 @@ function runtimeFixture() {
           id: 'call_1',
           type: 'function',
           function: {
-            name: 'comfy_generate_image',
+            name: 'generate_image',
             arguments: JSON.stringify({ workflow_id: 'wf', prompt: 'portrait', ...args }),
           },
         },
@@ -222,7 +234,7 @@ test('concurrent execute claims one approval before asynchronous preflight', asy
   await assert.rejects(rt.execute({ requestId: pending.requestId, permission: 'once' }), /expiré/i);
 });
 
-test('a workflow changed during the Comfy status check never reaches execution', async () => {
+test('a workflow changed during the engine status check never reaches execution', async () => {
   const { rt, seen, workflow, client, request } = runtimeFixture();
   const pending = await request();
   client.status = async () => {
@@ -236,25 +248,21 @@ test('a workflow changed during the Comfy status check never reaches execution',
   assert.match(rt.status().error, /workflow.*modifié/i);
 });
 
-test('uploaded references retain the complete subfolder descriptor for graph preparation', async () => {
+test('a chat image reference is uploaded once and reaches the job as a staged path', async () => {
   const { rt, seen, client, request } = runtimeFixture();
-  const uploaded = {
-    filename: 'reference.png',
-    name: 'reference.png',
-    subfolder: 'references/portraits',
-    type: 'input',
-  };
+  let uploads = 0;
   client.upload = async bytes => {
+    uploads++;
     assert.deepEqual(bytes, Buffer.from('89504e470d0a1a0a', 'hex'));
-    return { ...uploaded };
+    return { path: '/staged/reference.png' };
   };
-  const pending = await request({ reference_image: 0 }, [
+  const pending = await request({ references: [{ input: 'source', image: 0 }] }, [
     { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } }] },
   ]);
   await rt.execute({ requestId: pending.requestId, permission: 'once' });
   await rt.finished;
-  assert.deepEqual(seen.references.at(-1), uploaded);
-  assert.equal(seen.runs, 1);
+  assert.equal(uploads, 1);
+  assert.deepEqual(seen.references.at(-1), [{ input: 'source', role: 'img2img', path: '/staged/reference.png' }]);
   assert.equal(rt.status().state, 'done');
 });
 
@@ -299,7 +307,7 @@ test('forgetting one conversation invalidates only its pending calls and complet
         id: 'other_call',
         type: 'function',
         function: {
-          name: 'comfy_generate_image',
+          name: 'generate_image',
           arguments: JSON.stringify({ workflow_id: 'wf', prompt: 'Another portrait' }),
         },
       },
@@ -424,27 +432,52 @@ test('cancelling a pending approval releases its reference copies and prevents l
   await assert.rejects(rt.execute({ requestId: approval.requestId, permission: 'once' }), /expiré/i);
   assert.equal(seen.runs, 0);
 });
-test('photo approval is bound to its Comfy address and cannot be redirected before execution', async () => {
-  const { rt, request, seen } = runtimeFixture(),
-    p = await request();
-  rt.getConfig = () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'http://127.0.0.1:9000' });
-  await assert.rejects(rt.execute({ requestId: p.requestId, permission: 'once' }), { status: 409 });
-  assert.equal(seen.stops, 0);
-  assert.equal(seen.runs, 0);
+
+test('an active library resource can be a reference, and deactivating it before execution keeps the model loaded', async () => {
+  const { rt, seen, client, request } = runtimeFixture();
+  const resource = 'c3333333-3333-4333-8333-333333333333';
+  let active = true;
+  rt.resources = {
+    readActive: async resourceId => {
+      assert.equal(resourceId, resource);
+      return { name: 'chair.png', label: 'Ref 1', frames: [{ url: 'data:image/png;base64,iVBORw0KGgo=' }] };
+    },
+    activeRecord: async () => {
+      if (!active) throw Object.assign(Error('Ressource désactivée.'), { status: 409 });
+    },
+  };
+  client.upload = async () => ({ path: '/staged/chair.png' });
+  const approved = await request({ references: [{ input: 'source', resource_id: resource }] });
+  await rt.execute({ requestId: approved.requestId, permission: 'once' });
+  await rt.finished;
+  assert.deepEqual(seen.references.at(-1), [{ input: 'source', role: 'img2img', path: '/staged/chair.png' }]);
+  const again = await request({ references: [{ input: 'source', resource_id: resource }] }).catch(error => error);
+  // The turn limit is one in this fixture; a fresh runtime checks deactivation.
+  assert.match(again.message, /limite/i);
+  const second = runtimeFixture();
+  second.rt.resources = rt.resources;
+  const pending = await second.request({ references: [{ input: 'source', resource_id: resource }] });
+  active = false;
+  await assert.rejects(second.rt.execute({ requestId: pending.requestId, permission: 'once' }), /désactivée/);
+  assert.equal(second.seen.stops, 0);
+  assert.equal(second.seen.runs, 0);
 });
 
-test('generation metadata omits nodes outside the selected execution branch', async () => {
-  const { rt, request, catalog } = runtimeFixture(),
-    prepare = catalog.prepare;
-  catalog.prepare = async (...args) => {
-    const result = await prepare(...args);
-    result.graph['unused'] = { class_type: 'UnusedHeavyVideoBranch', inputs: { seed: 123 } };
-    return result;
-  };
-  const p = await request();
-  await rt.execute({ requestId: p.requestId, permission: 'once' });
-  await rt.finished;
-  assert.equal(rt.status().state, 'done');
-  assert.equal(rt.status().record.parameters.workflow_inputs.unused, undefined);
-  assert.ok(rt.status().record.parameters.workflow_inputs['7']);
+test('a video workflow cannot be requested through the image tool', async () => {
+  const { rt, catalog } = runtimeFixture();
+  const read = catalog.read;
+  catalog.read = async (...args) => ({ ...(await read(...args)), mediaType: 'video' });
+  await assert.rejects(
+    rt.request(
+      [
+        {
+          id: 'c',
+          type: 'function',
+          function: { name: 'generate_image', arguments: '{"workflow_id":"wf","prompt":"x"}' },
+        },
+      ],
+      { conversationId: id, turnId: id, messages: [] },
+    ),
+    /type image ou vidéo/,
+  );
 });
