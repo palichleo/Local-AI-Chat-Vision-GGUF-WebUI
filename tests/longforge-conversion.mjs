@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {inspectLongForge,convertLongForge} from '../lib/longforge-conversion.mjs';
 import {validateNativeWorkflow} from '../lib/native-workflows.mjs';
 import {importComfyWorkflow} from '../lib/comfy-import.mjs';
+import {previewWorkflowImport} from '../lib/workflow-import.mjs';
 
 function source(){return {nodes:[{type:'LongForgeLTXProject',widgets_values:['PRIVATE SCENE TEXT']},{type:'LongForgeLTXVideoSettings',widgets_values:[896,1600,5,'9',true]}],definitions:{subgraphs:[{nodes:[
  {type:'UNETLoader',widgets_values:['transformer.safetensors']},{type:'CLIPLoader',widgets_values:['text.safetensors']},
@@ -17,6 +18,11 @@ test('LongForge conversion inspects the declared family/settings and isolates sa
  assert.equal(plan.parameters.overlap_frames.value,9);assert.ok(!JSON.stringify(plan).includes('PRIVATE SCENE TEXT'));assert.match(plan.warnings.join(' '),/enhancer/i);
  const unknown=source();unknown.definitions.subgraphs[0].nodes.push({type:'UnknownSampler'});assert.throws(()=>inspectLongForge(unknown),/Unsupported/);
  const modified=source();modified.definitions.subgraphs[0].nodes.at(-1).widgets_values[6]=3;assert.throws(()=>inspectLongForge(modified),/CFG/);
+});
+
+test('LongForge prefill retains settings outside the execution contract and all original scene data',async()=>{
+ const original=source();original.nodes[1].widgets_values[2]=60;const sampling=original.definitions.subgraphs[0].nodes.at(-1).widgets_values;sampling[5]='1, 0.7, 0.3, 0';sampling[6]=4;sampling[7]=4;
+ const {workflow}=await previewWorkflowImport(JSON.stringify(original));assert.equal(workflow.pipeline,'ltx25');assert.equal(workflow.parameters.steps.value,3);assert.equal(workflow.parameters.cfg.value,4);assert.equal(workflow.parameters.negative_prompt.value,'negative');assert.equal(workflow.parameters.duration.value,60);assert.equal(workflow.parameters.width.value,896);assert.equal(workflow.parameters.height.value,1600);assert.ok(workflow.importDraft.blockers.length);assert.ok(JSON.stringify(workflow.importDraft.source).includes('PRIVATE SCENE TEXT'));
 });
 
 test('explicit conversion backs up source bytes and saves a disabled editable native workflow',async t=>{

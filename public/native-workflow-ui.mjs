@@ -20,7 +20,7 @@ export function setupNativeWorkflows(options){
  const segmented=(id,items,initial)=>{const control=element('div',id);control.className='native-policy-switch';control.setAttribute('role','group');let selected=initial;const buttons=items.map(([key,label])=>{const choice=button(label,()=>{control.value=key;control.onchange?.();});choice.setAttribute('aria-pressed',String(key===selected));control.append(choice);return [key,choice];});Object.defineProperty(control,'value',{get:()=>selected,set:value=>{selected=value;for(const [key,choice]of buttons)choice.setAttribute('aria-pressed',String(key===value));}});return control;};
  const field=(label,control)=>{const group=node('div','field-group'),caption=node('label','',label);if(control.getAttribute('role')==='group')control.setAttribute('aria-label',label);else if(control.id)caption.setAttribute('for',control.id);group.append(caption,control);return group;};
  function error(message){$('native-workflow-error').textContent=message;$('native-workflow-error').hidden=!message;if(message){$('native-workflow-error').scrollIntoView?.({block:'nearest'});$('native-workflow-error').focus();}}
- function setBusy(value){busy=value;const disabled=busy||working;for(const root of [$('workflow-editor'),$('settings-form')])for(const control of root.querySelectorAll('input,textarea,select,button')){if(root===$('settings-form')&&!['comfy-enabled','comfy-auto','comfy-iterations','comfy-minus','comfy-plus','comfy-unlimited','generation-python','generation-tokenizer','generation-python-browse','generation-tokenizer-browse','generation-test','workflow-add','native-workflow-import','native-workflow-file','native-comfy-import','native-comfy-file','native-convert-root','native-convert-root-browse'].includes(control.id)&&!control.dataset.nativeControl)continue;control.disabled=disabled||control.dataset.unavailable==='true';}$('comfy-iterations').disabled=disabled||unlimited;$('workflow-editor').setAttribute('aria-busy',String(working));}
+ function setBusy(value){busy=value;const disabled=busy||working;for(const root of [$('workflow-editor'),$('settings-form')])for(const control of root.querySelectorAll('input,textarea,select,button')){if(root===$('settings-form')&&!['comfy-enabled','comfy-auto','comfy-iterations','comfy-minus','comfy-plus','comfy-unlimited','generation-python','generation-tokenizer','generation-python-browse','generation-tokenizer-browse','generation-test','workflow-add','native-workflow-import','native-workflow-file','native-convert-root','native-convert-root-browse'].includes(control.id)&&!control.dataset.nativeControl)continue;control.disabled=disabled||control.dataset.unavailable==='true';}$('comfy-iterations').disabled=disabled||unlimited;$('workflow-editor').setAttribute('aria-busy',String(working));}
  async function run(action){if(working)return;working=true;setBusy(busy);onSettingsBusyChange(true);try{return await action(controller.signal);}finally{working=false;setBusy(busy);onSettingsBusyChange(false);}}
  function syncLimit(){const control=$('comfy-iterations');control.hidden=unlimited;control.required=!unlimited;control.disabled=busy||working||unlimited;$('comfy-unlimited').setAttribute('aria-pressed',String(unlimited));$('comfy-infinity-value').hidden=!unlimited;$('comfy-limit-label').textContent=unlimited?'Sans limite':`${control.value} essai(s)`;}
  function values(){const maxIterations=unlimited?10000:Number($('comfy-iterations').value);if(!Number.isInteger(maxIterations)||maxIterations<1||maxIterations>(unlimited?10000:9999))throw Error('Choisissez entre 1 et 9 999 générations, ou ∞.');const modelRoot=$('native-convert-root').value.trim();return {enabled:$('comfy-enabled').checked,autoAllow:$('comfy-auto').checked,maxIterations,pythonPath:$('generation-python').value.trim(),tokenizerPath:$('generation-tokenizer').value.trim(),modelRoot:modelRoot===folders.model&&!state.generation?.modelRoot?'':modelRoot};}
@@ -28,11 +28,11 @@ export function setupNativeWorkflows(options){
  function updateRunner(value){if(!value)return;const ready=runner.state!=='ready'&&value.state==='ready';runner=value;runnerStatus();if(ready&&$('settings').open)void refresh({settings:false}).catch(failure=>notice(failure.message));}
  function renderList(){
   $('workflow-list').replaceChildren();
-  if(!workflows.length)$('workflow-list').append(node('p','native-empty','Aucun workflow. Créez-en un ou importez-le ci-dessous.'));
+  if(!workflows.length)$('workflow-list').append(node('p','native-empty','Aucun workflow.'));
   for(const record of workflows){
    const card=node('article','workflow-card'),heading=node('div','workflow-card-header'),title=node('div','workflow-card-title');
-   title.append(node('strong','',record.name),node('small','comfy-help',record.mediaType==='video'?'Vidéo · LTX2.5':'Image · Krea2'));
-   const status=node('span','native-status',record.enabled?'Actif':'Désactivé');status.dataset.active=String(record.enabled);heading.append(title,status);
+   title.append(node('strong','',record.name),node('small','comfy-help',record.pipeline==='ltx25'?'Vidéo · LTX2.5':record.pipeline==='krea2'?'Image · Krea2':'Moteur à choisir'));
+   const status=node('span','native-status',record.importDraft?'Brouillon':record.enabled?'Actif':'Désactivé');status.dataset.active=String(record.enabled);heading.append(title,status);
    const editButton=button('Modifier',()=>edit(record));editButton.dataset.nativeControl='true';
    let confirming=false;const cancel=button('Annuler',()=>{confirming=false;remove.textContent='Supprimer';cancel.hidden=true;});cancel.hidden=true;cancel.dataset.nativeControl='true';
    const remove=button('Supprimer',async()=>{if(!confirming){confirming=true;remove.textContent='Confirmer';cancel.hidden=false;return;}try{await run(async signal=>{await api('generation/remove',{id:record.id},{signal});workflows=workflows.filter(item=>item.id!==record.id);renderList();});}catch(failure){importStatus(failure.message,true);}},'text-button native-remove');remove.dataset.nativeControl='true';
@@ -47,7 +47,7 @@ export function setupNativeWorkflows(options){
  function assetPicker(role,id,value){
   const container=node('div','native-asset-picker'),compatible=assets.filter(asset=>asset.kind===role&&(!(asset.family||asset.pipeline)||(asset.family||asset.pipeline)===draft.pipeline));
   const choices=[['','Choisir un fichier…'],...compatible.map(asset=>[asset.id,asset.name||asset.path.split(/[\\/]/).pop()])];
-  if(value&&!compatible.some(asset=>asset.id===value))choices.push([value,'Fichier à retrouver']);
+  if(value&&!compatible.some(asset=>asset.id===value))choices.push([value,draft.importDraft?.files[value]||'Fichier à retrouver']);
   const control=select(id,choices,value),path=input(id+'-path','');control.setAttribute('aria-label','Fichier · '+(labels[role]||role));path.placeholder='Coller un chemin de fichier';path.spellcheck=false;path.setAttribute('aria-label','Chemin · '+(labels[role]||role));
   async function register(chosen,signal){
    if(!chosen)return;const result=await(await api('generation/assets',{path:chosen,kind:role,family:draft.pipeline},{signal})).json();signal.throwIfAborted();
@@ -102,22 +102,29 @@ export function setupNativeWorkflows(options){
  function renderReferences(references){readReferences=[];$('native-workflow-references').replaceChildren();for(const reference of references)addReference(reference);referenceCount();}
  function referenceCount(){
   $('native-reference-count').textContent=String(readReferences.length);
-  $('native-workflow-add-reference').dataset.unavailable=String(readReferences.length>=(draft.pipeline==='krea2'?1:5));
+  $('native-workflow-add-reference').dataset.unavailable=String(readReferences.length>=(draft.importDraft?256:draft.pipeline==='krea2'?1:5));
   $('native-workflow-add-reference').disabled=busy||working||$('native-workflow-add-reference').dataset.unavailable==='true';
  }
  function addReference(reference){
-  const card=node('div','native-reference'),role=select('native-reference-role-'+reference.id,referenceRoles[draft.pipeline].map(role=>[role,roleLabels[role]]),reference.role),name=input('native-reference-name-'+reference.id,reference.name||roleLabels[reference.role]),description=input('native-reference-description-'+reference.id,reference.description||''),required=input('native-reference-required-'+reference.id,reference.required,'checkbox'),label=node('label','history-toggle');
+  const roles=[...new Set([...(referenceRoles[draft.pipeline]||Object.keys(roleLabels)),reference.role])];
+  const card=node('div','native-reference'),role=select('native-reference-role-'+reference.id,roles.map(role=>[role,roleLabels[role]||'Usage à définir']),reference.role),name=input('native-reference-name-'+reference.id,reference.name||roleLabels[reference.role]),description=input('native-reference-description-'+reference.id,reference.description||''),required=input('native-reference-required-'+reference.id,reference.required,'checkbox'),label=node('label','history-toggle');
   name.maxLength=120;description.maxLength=1000;description.placeholder='Ce que cette référence doit apporter';label.append(required,node('span','','Référence obligatoire'));
   const item={read:()=>({id:reference.id,role:role.value,name:name.value.trim(),description:description.value.trim(),required:required.checked})};
   card.append(field('Usage',role),field('Nom',name),field('Description',description),label,button('Retirer',()=>{readReferences=readReferences.filter(value=>value!==item);card.remove();referenceCount();},'text-button native-remove'));
   readReferences.push(item);$('native-workflow-references').append(card);referenceCount();
  }
  function renderProfiles(profiles){readProfiles=[];$('native-workflow-profiles').replaceChildren();for(const [stage,profile]of Object.entries(profiles||{})){const group=node('div','native-profile');group.append(node('h4','',stage==='draft'?'Brouillon':'Vidéo finale'));const controls=[];for(const [name,value]of Object.entries(profile.parameters||{})){const control=input('native-profile-'+stage+'-'+name,value,'number');control.step='any';group.append(field(labels[name]||name,control));controls.push([name,control]);}readProfiles.push([stage,()=>({parameters:Object.fromEntries(controls.map(([name,control])=>{const value=Number(control.value);if(control.value===''||!Number.isFinite(value))throw Error('Profil vidéo : valeur numérique invalide.');return [name,value];}))})]);$('native-workflow-profiles').append(group);}}
+ function renderSource(){
+  $('native-source-settings').replaceChildren();$('native-import-notes').replaceChildren();const meta=draft.importDraft,section=$('native-source-section');section.hidden=!meta;section.open=false;let rendered=false;
+  if(!meta){section.ontoggle=null;return;}
+  for(const warning of [...meta.blockers,...meta.warnings])$('native-import-notes').append(node('p','',warning));
+  section.ontoggle=()=>{if(!section.open||rendered)return;rendered=true;for(const setting of meta.extras)$('native-source-settings').append(field(setting.label,node('pre','native-source-value',typeof setting.value==='string'?setting.value:JSON.stringify(setting.value,null,2))));};
+ }
  function renderEditor(){
-  $('native-workflow-name').value=draft.name;$('native-workflow-description').value=draft.description;$('native-workflow-enabled').checked=draft.enabled;$('native-workflow-pipeline').value=draft.pipeline;$('native-workflow-video').hidden=draft.pipeline!=='ltx25';$('native-workflow-title').textContent=isNew?'Créer un workflow':'Modifier le workflow';$('native-workflow-capability').textContent=draft.unavailableReason||'';
-  readComponents=[];$('native-workflow-components').replaceChildren();for(const role of [...new Set([...Object.keys(draft.components),...(draft.pipeline==='ltx25'?['audioVae']:[])])]){const policy=draft.components[role],control=componentControl(role,policy||{policy:'fixed',asset:''},{optional:['textProjection','enhancer'].includes(role),present:Boolean(policy)});readComponents.push([role,control.read]);$('native-workflow-components').append(control.card);}
+  $('native-workflow-name').value=draft.name;$('native-workflow-description').value=draft.description;$('native-workflow-enabled').checked=draft.enabled;$('native-workflow-pipeline').value=draft.pipeline;$('native-workflow-video').hidden=draft.pipeline!=='ltx25';$('native-workflow-title').textContent=isNew?'Créer un workflow':'Modifier le workflow';$('native-workflow-capability').textContent=draft.importDraft?(draft.importDraft.blockers.length?'Brouillon prérempli · exécution non prise en charge pour ce graphe.':'Brouillon prérempli · activation après vérification des fichiers et des réglages.'):draft.unavailableReason||'';$('native-workflow-enabled').dataset.unavailable=String(Boolean(draft.importDraft?.blockers.length));
+  readComponents=[];$('native-workflow-components').replaceChildren();for(const role of [...new Set([...Object.keys(draft.components),...(draft.pipeline==='ltx25'?['audioVae']:[])])]){const policy=draft.components[role],control=componentControl(role,policy||{policy:'fixed',asset:draft.importDraft?'missing-'+role:''},{optional:['textProjection','enhancer'].includes(role),present:Boolean(policy)});readComponents.push([role,control.read]);$('native-workflow-components').append(control.card);}
   readParameters=[];$('native-workflow-parameters').replaceChildren();for(const [name,policy]of Object.entries(draft.parameters)){if(name==='expandPrompt'&&!draft.promptExpansion&&policy.policy==='fixed'&&!policy.value){readParameters.push([name,()=>policy]);continue;}const control=primitive(name,policy);readParameters.push([name,control.read]);$('native-workflow-parameters').append(control.card);}
-  renderLoras(draft.loras||[]);renderReferences(draft.references||[]);renderProfiles(draft.profiles);error('');$('native-workflow-unsaved').hidden=true;$('native-workflow-switch').hidden=true;setBusy(busy);
+  renderLoras(draft.loras||[]);renderReferences(draft.references||[]);renderProfiles(draft.profiles);renderSource();error('');$('native-workflow-unsaved').hidden=true;$('native-workflow-switch').hidden=true;setBusy(busy);
  }
  function readEditor(){const record={...draft,name:$('native-workflow-name').value.trim(),description:$('native-workflow-description').value.trim(),enabled:$('native-workflow-enabled').checked,components:Object.fromEntries(readComponents.map(([name,read])=>[name,read()]).filter(([,value])=>value!==null)),parameters:Object.fromEntries(readParameters.map(([name,read])=>[name,read()])),loras:readLoras.map(control=>control.read()),references:readReferences.map(control=>control.read())};if(readProfiles.length)record.profiles=Object.fromEntries(readProfiles.map(([stage,read])=>[stage,read()]));for(const name of ['digest','ready','unavailableReason','error','path'])delete record[name];return record;}
  function editorDirty(includeNew=true){if(!draft)return false;try{return includeNew&&isNew||JSON.stringify(readEditor())!==baseline;}catch{return true;}}
@@ -126,6 +133,7 @@ export function setupNativeWorkflows(options){
  async function edit(record,{fresh=false}={}){
   if(busy||working)return false;const session=version;
   try{
+   if(record?.importSummary){record=await run(async signal=>(await api('generation/workflows/'+encodeURIComponent(record.id),undefined,{signal})).json());if(!record||session!==version)return false;}
    if(!record){record=await run(signal=>template('krea2',signal));if(!record||session!==version)return false;record={...record,id:crypto.randomUUID(),name:'',description:''};clearTemplateAssets(record);fresh=true;}
    isNew=fresh;draft=structuredClone(record);returnFocus=document.activeElement||$('workflow-add');parentScroll=$('settings').scrollTop||0;renderEditor();baseline=JSON.stringify(readEditor());
    $('settings-form').hidden=true;$('workflow-editor').hidden=false;$('settings').setAttribute('aria-labelledby','native-workflow-title');$('settings').scrollTop=0;$('native-workflow-name').focus();return true;
@@ -136,11 +144,13 @@ export function setupNativeWorkflows(options){
  async function saveEditor(){
   if(!draft||working||busy)return false;const session=version;
   try{
-   const record=readEditor();if(!record.name||!record.description)throw Error('Ajoutez un nom et une description indiquant quand utiliser ce workflow.');
-   for(const [role,policy]of Object.entries(record.components))if(policy.policy==='fixed'&&!policy.asset||policy.policy==='model'&&!policy.choices.length)throw Error('Choisissez un fichier pour « '+(labels[role]||role)+' ».');
-   if(record.loras.some(lora=>!lora.asset)){const section=$('native-workflow-loras').closest?.('details');if(section)section.open=true;throw Error('Choisissez le fichier de chaque LoRA, ou retirez les lignes inutilisées.');}
+   const record=readEditor();if(!record.name||(!record.importDraft&&!record.description))throw Error('Ajoutez un nom et une description indiquant quand utiliser ce workflow.');
+   if(!record.importDraft||record.enabled){
+    for(const [role,policy]of Object.entries(record.components))if(policy.policy==='fixed'&&!policy.asset||policy.policy==='model'&&!policy.choices.length)throw Error('Choisissez un fichier pour « '+(labels[role]||role)+' ».');
+    if(record.loras.some(lora=>!lora.asset)){const section=$('native-workflow-loras').closest?.('details');if(section)section.open=true;throw Error('Choisissez le fichier de chaque LoRA, ou retirez les lignes inutilisées.');}
+   }
    const result=await run(async signal=>(await api('generation/workflows',record,{signal})).json());if(session!==version||!result)return false;
-   const saved=result.workflow||record,index=workflows.findIndex(item=>item.id===saved.id);if(index<0)workflows.push(saved);else workflows[index]=saved;renderList();leaveEditor();return true;
+   const saved=result.workflow||record,index=workflows.findIndex(item=>item.id===saved.id);let view=saved;if(saved.importDraft){const {source,extras,...summary}=saved.importDraft;view={...saved,importDraft:summary,importSummary:true};}if(index<0)workflows.push(view);else workflows[index]=view;renderList();leaveEditor();return true;
   }catch(failure){if(session===version)error(failure.message);return false;}
  }
  function cancelSettings(){version++;controller.abort();controller=new AbortController();if(draft)leaveEditor();importStatus('');}
@@ -157,7 +167,7 @@ export function setupNativeWorkflows(options){
  $('native-workflow-save-back').onclick=async()=>{const after=afterBack;if(await saveEditor())after?.();};
  $('settings').addEventListener('cancel',event=>{if(draft){event.preventDefault();event.stopImmediatePropagation();if(!$('native-workflow-unsaved').hidden)$('native-workflow-keep').onclick();else requestBack();}},true);
  $('native-workflow-add-lora').onclick=()=>{addLora({id:crypto.randomUUID(),asset:'',description:'',enabled:{policy:'off'},strength:{policy:'fixed',value:1}});};
- $('native-workflow-add-reference').onclick=()=>{if($('native-workflow-add-reference').disabled)return;addReference({id:crypto.randomUUID(),role:referenceRoles[draft.pipeline][0],required:false});};
+ $('native-workflow-add-reference').onclick=()=>{if($('native-workflow-add-reference').disabled)return;addReference({id:crypto.randomUUID(),role:referenceRoles[draft.pipeline]?.[0]||'reference',required:false});};
  async function changePipeline(pipeline){
   const session=version;try{const identity={id:draft.id,name:$('native-workflow-name').value,description:$('native-workflow-description').value},next=await run(signal=>template(pipeline,signal));if(!next||session!==version)return;draft={...next,...identity,enabled:false};clearTemplateAssets(draft);renderEditor();}catch(failure){if(session===version)error(failure.message);}
  }
@@ -170,28 +180,19 @@ export function setupNativeWorkflows(options){
  $('native-workflow-switch-confirm').onclick=async()=>{const pipeline=pendingPipeline;pendingPipeline='';$('native-workflow-switch').hidden=true;if(pipeline)await changePipeline(pipeline);};
  function importStatus(message,failed=false){$('native-import-status').hidden=!message;$('native-import-status').textContent=message;$('native-import-status').className=failed?'config-error':'comfy-help';if(failed){$('native-import-status').scrollIntoView?.({block:'nearest'});$('native-import-status').focus();}}
  $('native-convert-root-browse').onclick=async()=>{try{await run(async signal=>{const path=await browse('directory',$('native-convert-root').value,signal);signal.throwIfAborted();if(path)$('native-convert-root').value=path;});}catch(failure){if(!controller.signal.aborted)importStatus(failure.message,true);}};
- $('native-comfy-import').onclick=()=>$('native-comfy-file').click();
- $('native-comfy-file').onchange=async event=>{
+ $('native-workflow-import').onclick=()=>$('native-workflow-file').click();
+ $('native-workflow-file').onchange=async event=>{
   const file=event.target.files?.[0];event.target.value='';if(!file||busy||working)return;const modelRoot=$('native-convert-root').value.trim(),session=version;
-  importStatus('Lecture du workflow et vérification des fichiers…');
+  importStatus('Lecture du workflow…');
   try{
    const result=await run(async signal=>{
     if(file.size>2*1024*1024)throw Error('Workflow limité à 2 Mo.');
     const sourceText=await file.text();signal.throwIfAborted();
-    return (await api('generation/import-comfy',{sourceText,modelRoot},{signal})).json();
+    return (await api('generation/import',{sourceText,modelRoot,name:file.name||''},{signal})).json();
    });
-   if(!result||session!==version)return;assets=result.assets?.length?[...assets.filter(asset=>!result.assets.some(item=>item.id===asset.id)),...result.assets]:assets;await refresh({settings:false});if(session!==version)return;if(result.workflow)await edit(result.workflow);importStatus('Workflow importé. Activez « Disponible pour l’assistant » lorsque vos réglages sont prêts.');if(result.warnings?.length)error(result.warnings.join(' '));
-  }catch(failure){if(session===version)importStatus(failure.message,true);}
- };
- $('native-workflow-import').onclick=()=>$('native-workflow-file').click();
- $('native-workflow-file').onchange=async event=>{
-  const file=event.target.files?.[0];event.target.value='';if(!file||busy||working)return;const session=version;
-  try{
-   if(file.size>2*1024*1024)throw Error('Workflow limité à 2 Mo.');
-   const record=JSON.parse((await file.text()).replace(/^\uFEFF/,''));if(session!==version)return;
-   if(record.schemaVersion!==1||!['krea2','ltx25'].includes(record.pipeline))throw Error('Ce fichier n’est pas un workflow Atelier. Pour un fichier ComfyUI, utilisez « Depuis ComfyUI ».');
-   const result=await run(async signal=>(await api('generation/validate',{...record,id:crypto.randomUUID(),enabled:false},{signal})).json());if(session!==version)return;
-   await edit(result.workflow,{fresh:true});importStatus('');
+   if(!result||session!==version)return;
+   assets=result.assets||assets;
+   if(await edit(result.workflow,{fresh:true}))importStatus('');
   }catch(failure){if(session===version)importStatus(failure.message,true);}
  };
  $('native-workflow-export').onclick=()=>{try{const record=readEditor(),url=URL.createObjectURL(new Blob([JSON.stringify(record,null,2)+'\n'],{type:'application/json'})),link=element('a');link.href=url;link.download=record.id+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),0);}catch(failure){error(failure.message);}};

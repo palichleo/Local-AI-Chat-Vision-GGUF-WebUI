@@ -51,6 +51,8 @@ MP4/WebM 原视频保留在 ComfyUI，通过流式及字节范围请求在聊天
 
 请将每个聊天模型放入 `models/LLMs/` 的独立子文件夹，例如 `models/LLMs/My model/model.gguf`，文件夹名就是初始显示名称。配套的 `mmproj.gguf` 可放在同一文件夹，或 `models/vision/My model/` 中。旧版直接位于 `models/` 下的模型文件夹仍可使用。生成模型放在 `models/checkpoints/`，文本编码器放在 `models/LLMs/`，VAE 放在 `models/VAE/`，LoRA 放在 `models/LoRa/`。各文件夹附有简短说明。可在设置的 Workflows 区域通过“浏览”修改并保存 checkpoint 文件夹；其他组件的文件选择器从对应目录开始。Git 只发布说明文件，不发布权重。llama.cpp 仍单独配置并由聊天模型共享。
 
+在实验性原生运行器分支中，**Importer un workflow** 位于 **Créer un workflow** 旁，通过同一个文件选择器导入 Atelier 或 ComfyUI JSON。系统会打开预填的创建界面，即使运行器尚不支持其中的某些设置。保存后保留未激活的草稿和原始 JSON；已识别字段可编辑，无法映射的设置保存在 **Réglages source** 中。可以导入不代表可以执行。详见[原生运行器说明](runner/README.md)。
+
 打开 Configuration 时自动扫描直接子文件夹。选择检测到的文件夹后点击 **Ajouter un LLM** 保存路径；也可手动输入或浏览外部文件。路径保存在 `data/models.json`，重启后仍有效。每个文件夹只允许一个主 GGUF 和最多一个名称含有 `mmproj` 的视觉投影器，不区分大小写，并检查扩展名和 GGUF 文件头。歧义目录、无效文件和多分片模型不会自动选择。文件头有效不代表模型与投影器一定兼容。
 
 保存多个模型后，可用左下角选择器切换。聊天或 ComfyUI 运行时禁止切换；切换会卸载旧模型，若引擎原本运行则加载新模型，否则等下次发送消息再启动。对话保留，上下文、输出上限和计算设置共用。自动更新保留 models 文件夹。
