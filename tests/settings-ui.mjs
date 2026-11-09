@@ -443,6 +443,21 @@ test('immediately saved preferences and reverted fields do not create a false un
   assert.equal(ui.$('settings').open, false);
   assert.equal(ui.$('settings-unsaved').open, false);
 });
+
+test('edited VAE and LoRA folders participate in unsaved-settings protection', async () => {
+  for (const id of ['generation-vae-root', 'generation-lora-root']) {
+    const ui = await settingsUI();
+    await ui.open();
+    const previous = ui.$(id).value;
+    ui.$(id).value = 'D:/edited component folder';
+    ui.$('settings-close').onclick();
+    assert.equal(ui.$('settings-unsaved').open, true);
+    ui.$('settings-keep').onclick();
+    ui.$(id).value = previous;
+    ui.$('settings-close').onclick();
+    assert.equal(ui.$('settings').open, false);
+  }
+});
 test('unsaved workflow descriptions prompt, and an unfinished workflow import cannot be discarded by the save button', async () => {
   const ui = await settingsUI();
   await ui.open();

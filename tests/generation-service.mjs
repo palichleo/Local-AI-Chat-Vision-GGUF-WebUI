@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { GenerationService, generationConfig } from '../lib/generation-service.mjs';
@@ -28,6 +28,67 @@ test('checkpoint directory defaults to this installation, custom paths persist a
   const { modelRoot, ...legacy } = service.config;
   assert.equal(generationConfig(legacy).modelRoot, '');
   assert.throws(() => generationConfig({ ...legacy, modelRoot: 'relative/path' }), /absolu/);
+});
+
+test('VAE and LoRA folder overrides persist, cover audio VAEs and reject invalid paths without losing saved settings', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'native-component-folders-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const options = { root, dataDir: join(root, 'data'), workflowDir: join(root, 'workflow'), outputDir: join(root, 'output') };
+  const service = await new GenerationService(options).init();
+  const vaeRoot = join(root, 'external VAE'), loraRoot = join(root, 'external LoRA');
+  await service.save({ ...service.config, vaeRoot, loraRoot });
+  await service.close();
+  const reopened = await new GenerationService(options).init();
+  t.after(() => reopened.close());
+  assert.equal(reopened.folders().vae, vaeRoot);
+  assert.equal(reopened.folders().audioVae, vaeRoot);
+  assert.equal(reopened.folders().lora, loraRoot);
+  assert.equal(reopened.folders().textEncoder, join(root, 'models', 'LLMs'));
+  await assert.rejects(reopened.save({ ...reopened.config, vaeRoot: '../relative' }), /absolu/);
+  await assert.rejects(reopened.save({ ...reopened.config, loraRoot: '\0bad' }), /invalide/);
+  assert.equal(reopened.folders().vae, vaeRoot);
+  await reopened.save({ ...reopened.config, vaeRoot: '', loraRoot: '' });
+  assert.equal(reopened.folders().vae, join(root, 'models', 'VAE'));
+  assert.equal(reopened.folders().lora, join(root, 'models', 'LoRa'));
+});
+
+test('HTTP import finds VAE and LoRA files in edited folders before configuration is saved', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'native-folder-import-'));
+  const modelRoot = join(root, 'checkpoints'), vaeRoot = join(root, 'external VAE'), loraRoot = join(root, 'external LoRA');
+  for (const directory of [modelRoot, vaeRoot, loraRoot]) await mkdir(directory);
+  async function weights(path, shapes) {
+    let offset = 0;
+    const header = {};
+    for (const [key, shape] of Object.entries(shapes)) {
+      const length = shape.reduce((a, b) => a * b, 4);
+      header[key] = { dtype: 'F32', shape, data_offsets: [offset, offset + length] };
+      offset += length;
+    }
+    const bytes = Buffer.from(JSON.stringify(header)), prefix = Buffer.alloc(8);
+    prefix.writeBigUInt64LE(BigInt(bytes.length));
+    await writeFile(path, Buffer.concat([prefix, bytes, Buffer.alloc(offset)]));
+  }
+  const vaePath = join(vaeRoot, 'decoder.safetensors'), loraPath = join(loraRoot, 'style.safetensors');
+  await weights(vaePath, { 'encoder.conv1.weight': [1, 3, 1, 1, 1], 'decoder.conv1.weight': [1, 16, 1, 1, 1] });
+  await weights(loraPath, { 'layer.lora_A.weight': [1, 1], 'layer.lora_B.weight': [1, 1] });
+  const app = await createApplication({ port: 0, dataDir: join(root, 'data'), modelsDir: join(root, 'models') });
+  t.after(async () => { await app.close(); await rm(root, { recursive: true, force: true }); });
+  const boot = await (await fetch(app.url + '/api/bootstrap')).json();
+  const response = await fetch(app.url + '/api/generation/import', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + boot.token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ modelRoot, vaeRoot, loraRoot, sourceText: JSON.stringify({
+      encoder: { class_type: 'CLIPLoader', inputs: { type: 'krea2' } },
+      vae: { class_type: 'VAELoader', inputs: { vae_name: 'decoder.safetensors' } },
+      lora: { class_type: 'LoraLoaderModelOnly', inputs: { lora_name: 'style.safetensors', strength_model: 0.5 } },
+    }) }),
+  });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.assets.find(asset => asset.kind === 'vae').path, await realpath(vaePath));
+  assert.equal(result.assets.find(asset => asset.kind === 'lora').path, await realpath(loraPath));
+  const saved = await (await fetch(app.url + '/api/generation', { headers: { Authorization: 'Bearer ' + boot.token } })).json();
+  assert.equal(saved.config.vaeRoot, '');
+  assert.equal(saved.config.loraRoot, '');
 });
 
 test('HTTP import validation does not save a workflow and browse defaults follow the registered folders', async t => {

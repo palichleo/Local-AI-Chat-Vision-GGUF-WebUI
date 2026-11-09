@@ -28,6 +28,11 @@ const labels = {
 };
 const choiceLabels = { draft: 'Brouillon', final: 'Vidéo finale', smooth: 'Fluide', slow_motion: 'Ralenti' };
 const ownership = { fixed: 'Fixe', model: 'Assistant', random: 'Aléatoire' };
+const folderControls = {
+  modelRoot: ['native-convert-root', 'model'],
+  vaeRoot: ['generation-vae-root', 'vae'],
+  loraRoot: ['generation-lora-root', 'lora'],
+};
 export const parameterPolicies = name => (name === 'seed' ? ['fixed', 'model', 'random'] : ['fixed', 'model']);
 export function setupNativeWorkflows(options) {
   const { api, state, node, notice, onSettingsBusyChange = () => {} } = options,
@@ -163,6 +168,10 @@ export function setupNativeWorkflows(options) {
             'native-workflow-file',
             'native-convert-root',
             'native-convert-root-browse',
+            'generation-vae-root',
+            'generation-vae-root-browse',
+            'generation-lora-root',
+            'generation-lora-root-browse',
           ].includes(control.id) &&
           !control.dataset.nativeControl
         )
@@ -194,18 +203,27 @@ export function setupNativeWorkflows(options) {
     $('generation-infinity-value').hidden = !unlimited;
     $('generation-limit-label').textContent = unlimited ? 'Sans limite' : `${control.value} essai(s)`;
   }
+  function folderValues() {
+    return Object.fromEntries(Object.entries(folderControls).map(([key, [id, role]]) => {
+      const path = $(id).value.trim();
+      return [key, path === folders[role] && !state.generation?.[key] ? '' : path];
+    }));
+  }
+  function componentFolder(role) {
+    const key = role === 'audioVae' ? 'vaeRoot' : Object.keys(folderControls).find(key => folderControls[key][1] === role);
+    return (key && $(folderControls[key][0]).value.trim()) || folders[role] || '';
+  }
   function values() {
     const maxIterations = unlimited ? 10000 : Number($('generation-iterations').value);
     if (!Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > (unlimited ? 10000 : 9999))
       throw Error('Choisissez entre 1 et 9 999 générations, ou ∞.');
-    const modelRoot = $('native-convert-root').value.trim();
     return {
       enabled: $('generation-enabled').checked,
       autoAllow: $('generation-auto').checked,
       maxIterations,
       pythonPath: $('generation-python').value.trim(),
       tokenizerPath: $('generation-tokenizer').value.trim(),
-      modelRoot: modelRoot === folders.model && !state.generation?.modelRoot ? '' : modelRoot,
+      ...folderValues(),
     };
   }
   function runnerStatus() {
@@ -310,7 +328,7 @@ export function setupNativeWorkflows(options) {
         $('generation-iterations').value = lastLimited;
         $('generation-python').value = config.pythonPath || '';
         $('generation-tokenizer').value = config.tokenizerPath || '';
-        $('native-convert-root').value = config.modelRoot || folders.model || '';
+        for (const [key, [id, role]] of Object.entries(folderControls)) $(id).value = config[key] || folders[role] || '';
         syncLimit();
       }
     }
@@ -382,7 +400,7 @@ export function setupNativeWorkflows(options) {
               'generation',
               path.value ||
                 assets.find(asset => asset.id === control.value)?.path ||
-                (role === 'model' ? $('native-convert-root').value : folders[role]) ||
+                componentFolder(role) ||
                 '',
               signal,
             ),
@@ -1138,12 +1156,12 @@ export function setupNativeWorkflows(options) {
       $('native-import-status').focus();
     }
   }
-  $('native-convert-root-browse').onclick = async () => {
+  for (const [id] of Object.values(folderControls)) $(id + '-browse').onclick = async () => {
     try {
       await run(async signal => {
-        const path = await browse('directory', $('native-convert-root').value, signal);
+        const path = await browse('directory', $(id).value, signal);
         signal.throwIfAborted();
-        if (path) $('native-convert-root').value = path;
+        if (path) $(id).value = path;
       });
     } catch (failure) {
       if (!controller.signal.aborted) importStatus(failure.message, true);
@@ -1154,7 +1172,7 @@ export function setupNativeWorkflows(options) {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file || busy || working) return;
-    const modelRoot = $('native-convert-root').value.trim(),
+    const paths = Object.fromEntries(Object.entries(folderControls).map(([key, [id]]) => [key, $(id).value.trim()])),
       session = version;
     importStatus('Lecture du workflow…');
     try {
@@ -1162,7 +1180,7 @@ export function setupNativeWorkflows(options) {
         if (file.size > 2 * 1024 * 1024) throw Error('Workflow limité à 2 Mo.');
         const sourceText = await file.text();
         signal.throwIfAborted();
-        return (await api('generation/import', { sourceText, modelRoot, name: file.name || '' }, { signal })).json();
+        return (await api('generation/import', { sourceText, ...paths, name: file.name || '' }, { signal })).json();
       });
       if (!result || session !== version) return;
       assets = result.assets || assets;

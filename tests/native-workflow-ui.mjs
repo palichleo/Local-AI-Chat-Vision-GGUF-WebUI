@@ -262,6 +262,8 @@ test('settings read native generation values and descriptions come from workflow
     pythonPath: '',
     tokenizerPath: '',
     modelRoot: '',
+    vaeRoot: '',
+    loraRoot: '',
   });
   assert.equal(
     f.calls.some(call => call.route === 'comfy'),
@@ -365,6 +367,8 @@ test('unified import accepts Comfy JSON and opens a fresh prefilled editor witho
   assert.deepEqual(f.calls.find(call => call.route === 'generation/import').body, {
     sourceText,
     modelRoot: 'C:/atelier/models/checkpoints',
+    vaeRoot: 'C:/atelier/models/VAE',
+    loraRoot: 'C:/atelier/models/LoRa',
     name: 'Custom.json',
   });
   assert.equal(f.ui.isEditing(), true);
@@ -479,6 +483,36 @@ test('checkpoint default is displayed while only a custom override is persisted;
   await f.ui.edit();
   await f.$('native-component-model').parent.children[1].onclick();
   assert.equal(f.calls.find(call => call.route === 'files/choose').body.initialPath, 'D:/other checkpoints');
+});
+
+test('VAE and LoRA folders can be edited or browsed and feed component selection and imports before Save', async t => {
+  const f = await setup(t);
+  assert.equal(f.$('generation-vae-root').value, 'C:/atelier/models/VAE');
+  assert.equal(f.$('generation-lora-root').value, 'C:/atelier/models/LoRa');
+  assert.equal(f.ui.values().vaeRoot, '');
+  assert.equal(f.ui.values().loraRoot, '');
+  f.$('generation-vae-root').value = 'D:/my VAE';
+  f.$('generation-lora-root').value = 'D:/my LoRA';
+  await f.ui.refresh({ settings: false });
+  assert.equal(f.ui.values().vaeRoot, 'D:/my VAE');
+  assert.equal(f.ui.values().loraRoot, 'D:/my LoRA');
+  await f.ui.edit();
+  await f.$('native-component-vae').parent.children[1].onclick();
+  assert.equal(f.calls.find(call => call.route === 'files/choose').body.initialPath, 'D:/my VAE');
+  f.$('native-workflow-add-lora').onclick();
+  const lora = f.$('native-workflow-loras').children[0];
+  await lora.children[0].children[1].children[0].children[1].onclick();
+  assert.equal(f.calls.filter(call => call.route === 'files/choose').at(-1).body.initialPath, 'D:/my LoRA');
+  f.ui.cancelSettings();
+  const text = JSON.stringify(f.template);
+  await f.$('native-workflow-file').onchange({ target: { files: [{ size: text.length, text: async () => text }], value: '' } });
+  assert.equal(f.calls.find(call => call.route === 'generation/import').body.vaeRoot, 'D:/my VAE');
+  assert.equal(f.calls.find(call => call.route === 'generation/import').body.loraRoot, 'D:/my LoRA');
+  f.ui.cancelSettings();
+  await f.$('generation-vae-root-browse').onclick();
+  const browse = f.calls.filter(call => call.route === 'files/choose').at(-1);
+  assert.deepEqual(browse.body, { kind: 'directory', initialPath: 'D:/my VAE' });
+  assert.equal(f.$('generation-vae-root').value, 'C:/models/new.safetensors');
 });
 
 test('LoRAs can be added and removed with incomplete sibling fields without rebuilding their drafts', async t => {

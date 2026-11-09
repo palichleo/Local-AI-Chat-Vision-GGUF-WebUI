@@ -603,18 +603,26 @@ export async function createApplication({
             return send(200, await generation.assets.register({ ...asset, family: body.family || familyAlias }));
           }
           if (path === '/api/generation/validate') return send(200, { workflow: validateNativeWorkflow(body) });
-          if (path === '/api/generation/import')
+          if (path === '/api/generation/import') {
+            const importConfig = generationConfig({
+              ...generation.config,
+              modelRoot: body.modelRoot ?? generation.config.modelRoot,
+              vaeRoot: body.vaeRoot ?? generation.config.vaeRoot,
+              loraRoot: body.loraRoot ?? generation.config.loraRoot,
+            });
+            const importFolders = generation.folders(importConfig);
             return send(
               200,
               await previewWorkflowImport(body.sourceText, {
                 name: body.name,
                 assets: generation.assets,
-                modelRoot: body.modelRoot || generation.folders().model,
-                additionalRoots: Object.values(generation.folders()).filter(
-                  path => path !== generation.folders().model,
+                modelRoot: importFolders.model,
+                additionalRoots: Object.values(importFolders).filter(
+                  path => path !== importFolders.model,
                 ),
               }),
             );
+          }
           if (path === '/api/generation/import-comfy')
             return send(
               200,

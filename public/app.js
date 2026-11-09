@@ -1650,6 +1650,8 @@ const settingsGuard = setupSettingsGuard({
       'generation-python',
       'generation-tokenizer',
       'native-convert-root',
+      'generation-vae-root',
+      'generation-lora-root',
     ].map(id => [
       id,
       id === 'generation-iterations' && $('generation-unlimited').getAttribute('aria-pressed') === 'true'
