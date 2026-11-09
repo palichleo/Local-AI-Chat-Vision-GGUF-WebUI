@@ -12,6 +12,7 @@ Aucune licence de réutilisation n'a encore été attribuée aux sources de l'ap
 - llama.cpp : moteur d'inférence externe, non inclus dans l'archive, sous licence MIT : https://github.com/ggml-org/llama.cpp/blob/master/LICENSE
 - Les modèles et projecteurs GGUF sont fournis séparément et restent soumis aux licences de leurs auteurs.
 - Branche expérimentale `prototype-runner` : Python, PyTorch, Diffusers, Transformers, Accelerate, Safetensors, Pillow, NumPy, Triton, comfy-kitchen, PyAV et ImageIO/FFmpeg sont des dépendances externes, non embarquées. Les checkpoints image/vidéo, tokenizers, LoRAs et leurs licences restent séparés des sources. Consulter `runner/README.md` pour les versions testées et les limites du moteur natif.
+- L’activation de la génération prépare automatiquement Python et ses bibliothèques dans `data/runtime/` avec uv. Ces téléchargements ne sont pas publiés dans Git ; ils restent soumis aux licences de leurs projets. uv : https://github.com/astral-sh/uv ; distributions Python : https://github.com/astral-sh/python-build-standalone. `runner/pyproject.toml` et `runner/uv.lock` décrivent les dépendances installées.
 
 L'application n'embarque ni police web, ni image externe, ni bibliothèque npm tierce. Si des binaires, modèles ou autres ressources sont ajoutés ultérieurement au dépôt, examiner leurs licences et conserver les mentions requises avant redistribution.
 

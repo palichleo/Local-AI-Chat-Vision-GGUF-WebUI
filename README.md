@@ -2,6 +2,8 @@
 
 > **Experimental `prototype-runner` branch:** native Python generation and the same-panel workflow editor replace Comfy settings here. Real GPU tests cover Krea2 images and LTX2.5 video, start/end images, MSR references, stereo audio and silent continuation. See [native runner setup and remaining LongForge differences](runner/README.md). The Comfy instructions below describe the retained legacy path, not the new editor.
 
+Native generation automatically installs its own Python and locked libraries in `data/runtime/` on Windows/Linux x64. Initial setup needs Internet and several GB; later launches reuse it. The system Python, PATH and registry are left alone. Models and tokenizers remain separate local files.
+
 The home view lists projects. Create or rename a project with the + and pencil controls, open a conversation below its project, or use the project selector above a chat to move it. Existing conversations appear in **Conversations**. Projects organize history only; they do not share messages or model context. The logo and **Home** button return to the overview without discarding the open chat. **All files** opens the shared resource/output panel. Preview cards load local compressed copies on demand, without contacting ComfyUI. Project names live in data/projects.json; each saved conversation keeps its project ID.
 
 Accepted history saves finish before deleting, clearing, moving a conversation, disabling history, updating or closing the server. Home navigation waits for pending descriptions and saves. Hidden or replaced Output videos are paused; an unavailable generation preview falls back to an older available local compressed copy. Malformed project registries are reported without overwriting their contents.

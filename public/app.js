@@ -334,6 +334,7 @@ async function refreshStatus() {
     const previous = state.status.state;
     const wasConnected = state.connected;
     state.status = await (await api('status',undefined,{signal:AbortSignal.timeout(5000)})).json();
+    comfyUI.updateRunner?.(state.status.runner);
     state.connected = true;
     if (previous !== state.status.state || !wasConnected) contextMeter.schedule();
     if (state.status.state !== previous) {

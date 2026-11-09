@@ -4,6 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {GenerationService} from '../lib/generation-service.mjs';
+import {createApplication} from '../server.mjs';
 
 test('closing during asynchronous worker setup cannot spawn an orphan after shutdown',async t=>{
  const root=await mkdtemp(join(tmpdir(),'native-start-close-'));t.after(()=>rm(root,{recursive:true,force:true}));let starts=0;
@@ -11,4 +12,35 @@ test('closing during asynchronous worker setup cannot spawn an orphan after shut
  const service=new GenerationService({root,dataDir:root,workflowDir:join(root,'workflow'),outputDir:join(root,'output'),worker});
  const starting=service.start(),rejected=assert.rejects(starting,/fermé/);await service.close();await rejected;
  assert.equal(starts,0);await assert.rejects(service.start(),/fermé/);
+});
+
+test('private setup remains visible and cancelling a generation wait does not leave shutdown blocked',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'native-setup-close-'));t.after(()=>rm(root,{recursive:true,force:true}));let begin,reject,started=0;
+ const entered=new Promise(resolve=>{begin=resolve;}),worker={status:()=>({state:'stopped',capabilities:{}}),close:async()=>{},start:async()=>{started++;}};
+ const environment={state:'idle',status(){return {state:this.state,progress:'Installation…',error:''};},ensure(){this.state='installing';begin();return new Promise((_,no)=>{reject=no;});},async cancel(){reject?.(Error('Setup cancelled'));this.state='idle';},async close(){await this.cancel();}};
+ const service=new GenerationService({root,dataDir:root,workflowDir:join(root,'workflow'),outputDir:join(root,'output'),worker,environment}),controller=new AbortController();
+ const pending=service.client().status({signal:controller.signal}),cancelled=assert.rejects(pending,/abort/i);await entered;assert.equal((await service.snapshot()).runner.state,'installing');controller.abort();await cancelled;
+ await service.close();assert.equal(started,0);await assert.rejects(service.start(),/fermé/);
+});
+
+test('an explicit Python override bypasses private installation and receives app-only caches',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'native-custom-python-'));t.after(()=>rm(root,{recursive:true,force:true}));let chosen;
+ const worker={status:()=>({state:'ready',capabilities:{}}),close:async()=>{},start:async config=>{chosen=config;}},environment={status:()=>({state:'idle'}),ensure:async()=>{throw Error('Must not install into custom Python');},close:async()=>{}};
+ const service=new GenerationService({root,dataDir:root,workflowDir:join(root,'workflow'),outputDir:join(root,'output'),worker,environment});service.config.pythonPath=process.execPath;
+ await service.start();assert.equal(chosen.pythonPath,process.execPath);assert.equal(chosen.env.UV_PROJECT_ENVIRONMENT,join(root,'runtime','venv'));await service.close();
+});
+
+test('disabling generation cancels private preparation and does not restart it',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'native-setup-disable-'));t.after(()=>rm(root,{recursive:true,force:true}));let begin,reject,starts=0;const entered=new Promise(resolve=>{begin=resolve;});
+ const environment={status:()=>({state:'installing'}),ensure(){begin();return new Promise((_,no)=>{reject=no;});},async cancel(){reject?.(Error('Setup cancelled'));},close:async()=>{}},worker={status:()=>({state:'stopped',capabilities:{}}),close:async()=>{},start:async()=>{starts++;}};
+ const service=new GenerationService({root,dataDir:root,workflowDir:join(root,'workflow'),outputDir:join(root,'output'),environment,worker});service.config.enabled=true;
+ const starting=service.start(),rejected=assert.rejects(starting,/cancelled/);await entered;await service.save({...service.config,enabled:false});await rejected;assert.equal(starts,0);assert.equal(service.config.enabled,false);await service.close();
+});
+
+test('environment verification acknowledges startup without holding the settings request open', {timeout:5000},async t=>{
+ const root=await mkdtemp(join(tmpdir(),'native-setup-http-'));let release,entered;const starting=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});let state='stopped';
+ const worker={status:()=>({state,capabilities:{}}),start:async()=>{state='starting';entered();await gate;state='ready';},close:async()=>{if(state==='starting')release();state='stopped';}};
+ const app=await createApplication({port:0,dataDir:root,generationWorker:worker});t.after(async()=>{release();await app.close();await rm(root,{recursive:true,force:true});});const boot=await(await fetch(app.url+'/api/bootstrap')).json();
+ const response=await fetch(app.url+'/api/generation/test',{method:'POST',headers:{Authorization:'Bearer '+boot.token,'Content-Type':'application/json'},body:JSON.stringify({enabled:false,autoAllow:false,maxIterations:5,pythonPath:process.execPath,tokenizerPath:''}),signal:AbortSignal.timeout(1000)});
+ assert.equal(response.status,200);await starting;const status=await(await fetch(app.url+'/api/status',{headers:{Authorization:'Bearer '+boot.token}})).json();assert.equal(status.runner.state,'starting');release();
 });

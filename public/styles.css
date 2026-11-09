@@ -71,6 +71,7 @@ dialog{border:0;border-left:1px solid var(--line);box-shadow:-15px 0 65px var(--
 #settings .settings-header h2{font-size:25px}
 #settings .settings-footer{justify-content:flex-end;margin-top:12px}
 .path-input input::placeholder{color:var(--danger);opacity:1}
+#generation-python::placeholder{color:var(--muted)}
 .token-settings{margin:2px 0 22px;gap:24px}
 .token-title{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
 .token-title label{margin:0}

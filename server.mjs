@@ -214,7 +214,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
     return discovering;
   }
   function galleryView(record){return {...record,outputs:record.outputs.map((output,index)=>({...output,...(record.mediaType==='video'?{originalUrl: '/media/generated/'+record.conversationId+'/'+record.id+'/'+index+'?key='+mediaKey(record.conversationId+'/'+record.id+'/'+index,'generated')}:{} )}))};}
-  const status=()=>({...engine.status(),toolJob:runtime.active?runtime.status():null});
+  const status=()=>({...engine.status(),toolJob:runtime.active?runtime.status():null,runner:generation.status()});
   let url;
   let saving = false;
 
@@ -383,11 +383,12 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       if (req.method !== 'POST') throw problem('Méthode non prise en charge.', 405);
       const body = await jsonBody(req, path === '/api/updates/install' ? 40 * 1024 * 1024 : maxBody);
       if(path.startsWith('/api/generation/')){
+        if(closing||relaunching)throw problem('L’application est en cours de fermeture.',409);
         if(runtime.active||engine.busy||clearingHistory||savingSettings||savingComfy||pickingFile)throw problem('Attends la fin de l’opération en cours.',409);
         savingComfy=true;
         try{
           if(path==='/api/generation/config'){const result=await generation.save(body);runtime=nativeRuntime;return send(200,result);}
-          if(path==='/api/generation/test'){if(body.config||body.pythonPath!==undefined)await generation.save(body.config||body);await generation.start();return send(200,await generation.snapshot());}
+          if(path==='/api/generation/test'){if(body.config||body.pythonPath!==undefined)await generation.save(body.config||body);void generation.start().catch(()=>{});return send(200,await generation.snapshot());}
           if(path==='/api/generation/assets'){const {pipeline:familyAlias,...asset}=body;return send(200,await generation.assets.register({...asset,family:body.family||familyAlias}));}
           if(path==='/api/generation/workflows')return send(200,await generation.catalog.save(body));
           if(path==='/api/generation/convert-krea')return send(200,await convertKreaWorkflow(body.sourcePath,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot,backupDir:join(dataDir,'migration'),name:body.name,description:body.description}));
@@ -715,7 +716,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   server.headersTimeout = 15000;
   await new Promise((yes, no) => { server.once('error', no); server.listen(port, '127.0.0.1', yes); });
   url = `http://127.0.0.1:${server.address().port}`;
-  if(managed||generation.config.enabled)void generation.start().catch(()=>{});
+  if(generation.config.enabled)void generation.start().catch(()=>{});
   if (updateChecker) updates = Promise.resolve().then(() => updateChecker({ signal: updateController.signal })).catch(() => ({ available: false }));
   let closing,relaunching=false;
   if (managed) { controlTimer = setTimeout(() => { void stopApplication().catch(console.error); }, controlTimeoutMs); controlTimer.unref(); }
