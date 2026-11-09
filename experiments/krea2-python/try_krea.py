@@ -1,6 +1,6 @@
 """Offline experiment: execute the supplied Krea2 graph with PyTorch/Diffusers, not ComfyUI."""
 import argparse
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 import gc
 import json
 import math
@@ -131,6 +131,11 @@ def rotation_matrix(size, torch, device, dtype):
 
 
 def execute(args, workflow, plan, files):
+    with ExitStack() as cleanup:
+        return _execute(args,workflow,plan,files,cleanup)
+
+
+def _execute(args, workflow, plan, files, cleanup):
     import torch
     import torch.nn.functional as F
     from safetensors import safe_open
@@ -188,6 +193,12 @@ def execute(args, workflow, plan, files):
                 value = value * factor
         return value
 
+    prefetch=None
+    if args.tuned:
+        from tuned_krea import start_prefetch
+        from fast_krea import cache_key
+        prefetch=start_prefetch(Path(args.cache_root)/cache_key(files['transformer'],files['loras']))
+        cleanup.callback(prefetch[0].shutdown,wait=True)
     progress('loading text encoder')
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, local_files_only=True)
     # shortcut: Fixed Qwen/Krea2 architecture for this try; read model configs for other families.
@@ -274,9 +285,14 @@ def execute(args, workflow, plan, files):
         if args.engine=='int8':
             from fast_krea import PreparedWeights,PreparedLinear
             available=torch.cuda.mem_get_info()[0]/1024**3
-            budget=max(0,min(6.0,available-3.5))
+            ceiling,reserve=(7.0,3.0) if args.tuned else (6.0,3.5)
+            budget=max(0,min(ceiling,available-reserve))
             if args.cache_gib is not None:budget=min(budget,args.cache_gib)
             prepared=PreparedWeights(files,weights,args.cache_root,budget,scope,progress)
+            if prefetch is not None:
+                pool,future=prefetch
+                prepared.host=future.result()
+                progress('CPU weights prefetched',layers=len(prepared.host))
 
         class StreamingLinear(torch.nn.Module):
             def __init__(self, name, original):
@@ -332,6 +348,9 @@ def execute(args, workflow, plan, files):
             if value.numel()!=parameter.numel(): raise ValueError('Transformer shape mismatch: '+key)
             set_module_tensor_to_device(transformer,key,device,value=value.reshape(parameter.shape),dtype=dtype)
         transformer.eval().to(device)
+        if args.tuned:
+            from tuned_krea import install
+            install(transformer)
         if prepared is not None:
             # Prepared layers own their files; release the original mmap pages before sampling.
             prepared.source=None
@@ -380,7 +399,7 @@ def execute(args, workflow, plan, files):
         comfy_imported=any(k=='comfy' or k.startswith('comfy.') for k in sys.modules)
         if comfy_imported: raise RuntimeError('Unexpected Comfy module import')
         metadata=dict(plan=plan,seconds=round(time.perf_counter()-start,2),peak_vram_gib=round(torch.cuda.max_memory_allocated()/1024**3,3),backend='pytorch-diffusers-'+args.engine,comfy_imported=comfy_imported,
-                      kernel_library='comfy_kitchen' if args.engine=='int8' else None)
+                      kernel_library='comfy_kitchen' if args.engine=='int8' else None,tuned=args.tuned)
         if prepared_stats is not None:metadata['prepared_weights']=prepared_stats
         if profile_report is not None: metadata['profile']=profile_report
         info=PngImagePlugin.PngInfo();info.add_text('atelier',json.dumps(metadata,ensure_ascii=False));Image.fromarray(pixels).save(output,pnginfo=info)
@@ -396,6 +415,7 @@ def run(args):
     if args.cache_gib is not None and (not math.isfinite(args.cache_gib) or args.cache_gib<0):
         raise ValueError('GPU cache size must be finite and nonnegative')
     if args.engine not in ('stream','int8'):raise ValueError('Unknown engine')
+    if args.tuned and args.engine!='int8':raise ValueError('--tuned requires --engine int8')
     files={key:locate(args.models_root,plan[key]) for key in ('transformer','encoder','vae')}
     files['loras']=[(item,locate(args.models_root,item['file'])) for item in plan['loras']]
     if args.inspect:
@@ -406,7 +426,7 @@ def run(args):
 
 def worker_job(args, request):
     fields={'workflow':str,'width':int,'height':int,'no_refine':bool,'image':str,
-            'output':str,'engine':str,'profile':bool,'cache_gib':(int,float)}
+            'output':str,'engine':str,'profile':bool,'cache_gib':(int,float),'tuned':bool}
     if not isinstance(request,dict) or request.keys()-fields.keys():raise ValueError('Unsupported worker job fields')
     for key,value in request.items():
         if not isinstance(value,fields[key]) or (type(value) is bool and fields[key] is not bool):
@@ -427,6 +447,7 @@ def main():
     parser.add_argument('--cache-root',default=str(HERE/'outputs'/'weights-cache'))
     parser.add_argument('--cache-gib',type=float,help='Maximum GPU weight cache; automatic limit reserves activation memory')
     parser.add_argument('--worker',action='store_true',help='Read JSON jobs on stdin, reuse imports, release models between jobs')
+    parser.add_argument('--tuned',action='store_true',help='Try fused elementwise kernels, cuDNN GQA and bounded CPU prefetch')
     args=parser.parse_args()
     local=json.loads(args.config.read_text(encoding='utf-8')) if args.config.exists() else {}
     args.models_root=args.models_root or local.get('models_root');args.tokenizer=args.tokenizer or local.get('tokenizer')
@@ -434,11 +455,12 @@ def main():
     if not args.worker:
         run(args); return
     for line in sys.stdin:
+        started=time.perf_counter()
         try:
             request=json.loads(line)
             job=worker_job(args,request)
-            started=time.perf_counter(); output=run(job)
-            response={'stage':'job complete','output':output,'job_wall_seconds':round(time.perf_counter()-started,3)}
+            output=run(job)
+            response={'stage':'job complete','output':output}
         except Exception as exc:
             response={'stage':'job error','error':str(exc)}
         finally:
@@ -447,6 +469,7 @@ def main():
                 if torch.cuda.is_initialized():
                     torch.cuda.synchronize(); torch.cuda.empty_cache()
                     response['idle_gpu_allocated_gib']=round(torch.cuda.memory_allocated()/1024**3,6)
+        response['job_wall_seconds']=round(time.perf_counter()-started,3)
         print(json.dumps(response,ensure_ascii=False),flush=True)
 
 

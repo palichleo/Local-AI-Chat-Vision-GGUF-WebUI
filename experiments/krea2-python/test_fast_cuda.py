@@ -8,6 +8,37 @@ import unittest
 
 @unittest.skipUnless(os.environ.get('KREA_TEST_CUDA')=='1','Set KREA_TEST_CUDA=1 for real CUDA kernel checks')
 class KernelTests(unittest.TestCase):
+    def test_tuned_norm_modulation_and_residual(self):
+        import torch
+        from tuned_krea import norm,residual
+        torch.manual_seed(5)
+        for width in (128,2560,6144):
+            x=torch.randn(2,31,width,device='cuda',dtype=torch.bfloat16)
+            gamma=(torch.randn(width,device='cuda',dtype=torch.bfloat16)*.1+1).float()
+            scale=torch.randn(2,1,width,device='cuda',dtype=torch.bfloat16)*.2
+            shift=torch.randn_like(scale)*.2
+            reference=torch.nn.functional.rms_norm(x.float(),(width,),gamma,1e-5).to(x.dtype)
+            actual=norm(x,gamma,1e-5,scale,shift)
+            expected=(1+scale)*reference+shift
+            error=((actual.float()-expected.float()).square().mean()/expected.float().square().mean()).sqrt().item()
+            self.assertLess(error,.001)
+            activation=torch.randn_like(x)
+            torch.testing.assert_close(residual(x,activation,scale),x+scale*activation,rtol=0,atol=0)
+
+    def test_tuned_attention_against_reference(self):
+        import torch
+        from diffusers.models.transformers.transformer_krea2 import Krea2Attention
+        from tuned_krea import install
+        torch.manual_seed(16)
+        with torch.inference_mode():
+            layer=Krea2Attention(1024,8,2).cuda().to(torch.bfloat16)
+            x=torch.randn(1,1024,1024,device='cuda',dtype=torch.bfloat16)
+            expected=layer(x)
+            install(layer)
+            actual=layer(x)
+            error=((actual.float()-expected.float()).square().mean()/expected.float().square().mean()).sqrt().item()
+            self.assertLess(error,.01)
+
     def test_prepared_kernel_cache_and_reference(self):
         import torch
         from safetensors import safe_open

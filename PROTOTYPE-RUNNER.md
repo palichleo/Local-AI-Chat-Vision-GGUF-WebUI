@@ -5,6 +5,7 @@ Preserved experimental Python runner, on the `prototype-runner` branch. It recre
 - [Usage and configuration](experiments/krea2-python/README.md)
 - [Optimized implementation and test results](experiments/krea2-python/OPTIMIZED.md)
 - [Original CPU/CUDA profile](experiments/krea2-python/PROFILE.md)
+- [Last speed trial against Comfy](experiments/krea2-python/LAST-TRY.md)
 
 Local configuration, prepared weight caches and generated images remain under `experiments/krea2-python/` and are ignored by Git. The normal application is maintained separately on `main`; this prototype is not integrated into its interface.
 

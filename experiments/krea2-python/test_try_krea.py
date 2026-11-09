@@ -3,18 +3,30 @@ import unittest
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from try_krea import HERE, Workflow, rotation_matrix, worker_job
 from profile_krea import summarize
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_execution_cleanup_on_failure(self):
+        import try_krea
+        called=[]
+        def fail(args,workflow,plan,files,cleanup):
+            cleanup.callback(called.append,'prefetch stopped')
+            raise ValueError('simulated model load failure')
+        with patch.object(try_krea,'_execute',side_effect=fail):
+            with self.assertRaisesRegex(ValueError,'model load failure'):
+                try_krea.execute(None,None,None,None)
+        self.assertEqual(called,['prefetch stopped'])
+
     def test_worker_job_boundary(self):
         args=SimpleNamespace(width=512,profile=False)
         job=worker_job(args,{'width':768,'profile':True})
         self.assertEqual(job.width,768)
         self.assertEqual(args.width,512)
-        for invalid in ({'profile':'false'},{'width':True},{'unknown':1},[]):
+        for invalid in ({'profile':'false'},{'width':True},{'tuned':'true'},{'unknown':1},[]):
             with self.assertRaises(ValueError):worker_job(args,invalid)
 
     def test_fused_lora_in_convrot_basis(self):

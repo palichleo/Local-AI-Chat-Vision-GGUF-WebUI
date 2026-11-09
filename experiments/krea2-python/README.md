@@ -39,6 +39,8 @@ python experiments/krea2-python/try_krea.py --engine int8 --worker
 
 These commands reuse `local.json`; otherwise provide `--models-root` and `--tokenizer` as above. Optimized mode additionally requires an installed `comfy-kitchen` with its CUDA backend (tested: 0.2.41). It does not install it, start ComfyUI, or call a Comfy server. See [OPTIMIZED.md](OPTIMIZED.md) for measured speed, memory and quality limits.
 
+The final optional tuning uses `--engine int8 --tuned --worker`. It requires installed Triton and working cuDNN attention, adds fused normalization/residual kernels and bounded CPU prefetch, and raises the GPU cache ceiling to 7 GiB with a 3 GiB activation reserve. `--cache-gib` can lower that ceiling. On the tested Windows setup it reached 30.66 s versus Comfy's 29.50 s for the same prepared prompt; the complete prompt-expansion workflow remained about 14.6% slower. See [LAST-TRY.md](LAST-TRY.md) for the paired measurements and limitations. Tuning remains opt-in.
+
 With `--engine int8`, LoRAs are merged per layer in FP32, with the correct ConvRot basis. INT8 layers are requantized once and floating layers stored as BF16. Prepared weights live under `outputs/weights-cache/`; the first use prepares them, subsequent runs reuse them. This cache takes about **13.49 GB per checkpoint/LoRA combination** for the supplied graph. Its identity includes source paths, sizes, modification times, adapter order and strengths. It does not overwrite source models. `--cache-root` changes the folder; caches are disposable and can be deleted while no job is running.
 
 The GPU weight cache automatically uses at most 6 GiB and reserves 3.5 GiB of currently free memory for activations. `--cache-gib` can lower that maximum; `--cache-gib 0` disables GPU retention. CPU source mappings stay alive until GPU work completes, and transfers are queued asynchronously. All model weights and mappings are released between worker jobs; Python imports, the CUDA context and small library buffers remain alive. This permits VRAM handoff to a separate LLM.
@@ -50,7 +52,7 @@ Worker mode reads one JSON object per stdin line, processes jobs sequentially, a
 {"workflow":"PATH_TO_ANOTHER_WORKFLOW.json","engine":"int8"}
 ```
 
-Progress and `job complete` / `job error` records are JSON on stdout; library warnings may appear on stderr. A failed job reports its error; valid subsequent jobs can still run. Supported job fields are `workflow`, `width`, `height`, `no_refine`, `image`, `output`, `engine`, `profile` and `cache_gib`. The worker is a local script protocol, not yet wired into Atelier's UI. The original `--engine stream` remains the default and preserves the reference path for comparisons.
+Progress and `job complete` / `job error` records are JSON on stdout; library warnings may appear on stderr. A failed job reports its error; valid subsequent jobs can still run. Supported job fields are `workflow`, `width`, `height`, `no_refine`, `image`, `output`, `engine`, `profile`, `cache_gib` and `tuned`. The worker is a local script protocol, not yet wired into Atelier's UI. The original `--engine stream` remains the default and preserves the reference path for comparisons.
 
 `--profile` captures one warmed diffusion step with the installed PyTorch CPU/CUDA profiler. Aggregate timings are embedded in the PNG and JSON metadata; a normal run does not enable profiling. See [PROFILE.md](PROFILE.md) for measured costs and attribution limits.
 
