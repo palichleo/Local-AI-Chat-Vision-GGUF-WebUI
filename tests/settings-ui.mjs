@@ -261,7 +261,7 @@ test('a saved profile can be retried if activation fails after its identity chan
 
 test('context counting contains only the selected conversation and typing does not schedule a recount',async()=>{
  const ui=await settingsUI();ui.$('prompt').value='Unsent draft';assert.equal(ui.meterOptions.getRequest(),null);
- const sent={role:'user',content:'Already sent'},reply={role:'assistant',content:'Already answered'};ui.state.messages=[sent,reply];const payload=ui.meterOptions.getRequest();assert.equal(payload.messages.length,3);assert.equal(payload.messages[1].content,'Already sent');assert.equal(payload.messages[2].content,'Already answered');assert.ok(!JSON.stringify(payload).includes('Unsent draft'));
+ const sent={role:'user',content:'Already sent'},reply={role:'assistant',content:'Already answered'};ui.state.messages=[sent,reply];ui.state.conversationId='selected-conversation';const payload=ui.meterOptions.getRequest();assert.equal(payload.conversationId,ui.state.conversationId);assert.equal(payload.messages.length,3);assert.equal(payload.messages[1].content,'Already sent');assert.equal(payload.messages[2].content,'Already answered');assert.ok(!JSON.stringify(payload).includes('Unsent draft'));
  const scheduled=ui.meterSchedules();ui.$('prompt').oninput();assert.equal(ui.meterSchedules(),scheduled);
 });
 

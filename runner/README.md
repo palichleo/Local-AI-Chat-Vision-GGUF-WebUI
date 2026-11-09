@@ -14,6 +14,8 @@ In **Configuration → Workflows → Environnement de génération**, select Pyt
 
 Native JSON definitions live in `workflow/`. Local asset paths and worker preferences live in `data/`. Originals and resolved-job manifests live in `output/`. These user files, model weights and caches are ignored by Git and preserved by updates. Deleting conversation history removes analysis copies and links, not original outputs.
 
+After image generation, the LLM receives the result metadata, without automatic image pixels or a critique request. It normally finishes there. The `local_read_output` tool can inspect one saved compressed output when the user asks for a check or the model finds a specific reason relevant to the task. This is guidance, not a keyword filter or a prohibition. Inspected pixels are temporary for the current turn; gallery copies and originals remain available independently.
+
 ## Verified behavior
 
 Measured on the development RTX 4070 Super, using existing local INT8 ConvRot checkpoints:

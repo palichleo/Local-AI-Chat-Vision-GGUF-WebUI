@@ -192,7 +192,7 @@ test('HTTP native approval alternates engines, restores native history and clear
       transcript.push({ role: 'assistant', content: review });
       await json('comfy/config',{enabled:true,baseUrl:comfy.url,autoAllow:false,maxIterations:1});
       const inspected=await chat([...transcript,{role:'user',content:'inspect tool context'}]);
-      assert.equal(inspected.find(event=>event.local_test_payload).local_test_payload.tools,undefined);
+      assert.deepEqual(inspected.find(event=>event.local_test_payload).local_test_payload.tools.map(tool=>tool.function.name),['local_read_output']);
       await json('comfy/config',{enabled:true,baseUrl:comfy.url,autoAllow:false,maxIterations:3});
       await assert.rejects(readdir(join(directory,'history')), {code:'ENOENT'});
       assert.equal((await call('gallery/persist',{conversationId})).status,403);

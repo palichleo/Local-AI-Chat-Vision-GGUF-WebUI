@@ -3,6 +3,7 @@ import {Projects} from './lib/projects.mjs';
 import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
+import {outputTool,readOutput} from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
 import { countContext } from './lib/context-count.mjs';
 import http from 'node:http';
@@ -246,6 +247,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
       definition.function.parameters.properties.resource_id.enum=ids;definition.function.parameters.properties.resource_ids.items.enum=ids;definition.function.parameters.properties.resource_ids.maxItems=8-(resourceTurns.get(body.turnId)||0);
       definitions.push(definition);
     }
+    if(engine.vision&&typeof body.conversationId==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(body.conversationId)&&body.resources!==false&&(resourceTurns.get(body.turnId)||0)<8)definitions.push(outputTool);
     if(definitions.length){payload.tools=definitions;payload.tool_choice='auto';payload.parallel_tool_calls=false;}
     return definitions;
   }
@@ -544,6 +546,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         return send(200,await gallery.put(record,{persist:preferences.saveHistory}));
         } finally { persistingGallery=false; }
       }
+      if(path==='/api/gallery/read')return send(200,await readOutput(gallery,body.conversationId,{run_id:body.runId,output_index:body.outputIndex}));
       if(path.startsWith('/api/comfy/')){
         if(runtime.active||engine.busy||clearingHistory||savingSettings||savingComfy||pickingFile)throw problem('Attends la fin de l’opération GPU.',409);
         if(path==='/api/comfy/config'){await saveComfy(body);runtime=legacyRuntime;return send(200,{config:comfy});}
@@ -674,7 +677,14 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
         if(calls.length){
           if(terminalReason!=='tool_calls')throw problem('L’appel d’outil du modèle est incomplet ou tronqué. Aucune génération lancée.',502);
           if(calls.length!==1||!definitions.some(item=>item.function.name===calls[0].function?.name))throw problem('Le moteur a demandé un outil indisponible.',502);
-          if(calls[0].function.name==='local_read_resource'){
+          if(calls[0].function.name==='local_read_output'){
+            const call=nativeFields({role:'assistant',tool_calls:calls}).tool_calls[0];let args;
+            try{args=JSON.parse(call.function.arguments);}catch{throw problem('Paramètres de sortie invalides.',502);}
+            if(!body.turnId||!/^[0-9a-f-]{36}$/.test(body.turnId)||(resourceTurns.get(body.turnId)||0)>=8)throw problem('La limite de huit lectures pour ce tour est atteinte.',502);
+            const {metadata}=await readOutput(gallery,body.conversationId,args,{includeImages:false});
+            resourceTurns.set(body.turnId,(resourceTurns.get(body.turnId)||0)+1);if(resourceTurns.size>256)resourceTurns.delete(resourceTurns.keys().next().value);
+            await emit({local_tool_request:{kind:'output',call,runId:metadata.run_id,outputIndex:metadata.output_index,workflowName:metadata.workflow}});
+          }else if(calls[0].function.name==='local_read_resource'){
             const call=nativeFields({role:'assistant',tool_calls:calls}).tool_calls[0];let args;
             try{args=JSON.parse(call.function.arguments);}catch{throw problem('Paramètres de ressource invalides.',502);}
             const ids=resourceReadIds(args);

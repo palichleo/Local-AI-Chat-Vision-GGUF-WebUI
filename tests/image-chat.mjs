@@ -5,7 +5,7 @@ import {runInNewContext} from 'node:vm';
 import {readSSE} from '../public/stream.mjs';
 const png='data:image/png;base64,iVBORw0KGgo=';
 const call={id:'call_1',type:'function',function:{name:'comfy_generate_image',arguments:'{"workflow_id":"photo","prompt":"cat"}'}};
-async function exchange({vision=true,ready=true,images=[png],failed=false,denied=false,hasRecord=true,readResourceDuringReview=false,finalText='Result explained',finalReason='stop',generationCalls=1}={}){
+async function exchange({vision=true,ready=true,images=[png],failed=false,denied=false,hasRecord=true,readOutputAfterGeneration=false,readResourceDuringReview=false,mediaType='image',finalText='Result explained',finalReason='stop',generationCalls=1}={}){
  const source=await readFile(new URL('../public/app.js',import.meta.url),'utf8');
  const element=(tag='',className='',textContent='')=>({tag,className,value:'',disabled:false,hidden:false,textContent,children:[],classList:{add(){}},append(...items){this.children.push(...items);},replaceChildren(...items){this.children=items;},setAttribute(){},remove(){},focus(){}});
  const nodes=new Map(),$=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);};$('prompt').value='Generate a cat';
@@ -15,12 +15,13 @@ async function exchange({vision=true,ready=true,images=[png],failed=false,denied
  const context={views,generationUI:{mount:container=>{generationContainers.push(container);return {progress(){},image(){},finish(){},fail(){}};}},assetsUI:{flush:async()=>true},state,$,AbortController,performance,crypto:{randomUUID:()=> 'a1111111-1111-4111-8111-111111111111'},readSSE,
   node:element,icon:()=>element('svg'),userMessage:()=>element(),
   contextMeter:{pause(){},observe(){},schedule(){}},renderAttachments(){},resizePrompt(){},notice(){},scrollToBottom(){},renderText(){},updateControls(){},openSettings(){},persistConversation:async()=>true,waitForModel:async()=>{},historyWrite:Promise.resolve(),refreshStatus:async()=>{},setConversationTitle(){},
-  comfyUI:{requestTool:async()=>({content:JSON.stringify({status:denied?'denied':failed?'generated':'success'}),images,failed,denied,error:failed?'Model restart failed':'',...(denied||!hasRecord?{}:{record:{id:'run',conversationId:state.conversationId}})}),saveReview:async(...args)=>reviews.push(args)},
+  comfyUI:{requestTool:async()=>({content:JSON.stringify({status:denied?'denied':failed?'generated':'success'}),images,failed,denied,error:failed?'Model restart failed':'',...(denied||!hasRecord?{}:{record:{id:'run',conversationId:state.conversationId,mediaType}})}),saveReview:async(...args)=>reviews.push(args)},
   api:async(route,body)=>{
    if(route==='status')return Response.json(status);
+   if(route==='gallery/read')return Response.json({metadata:{status:images.length?'loaded':'unavailable',run_id:body.runId,output_index:body.outputIndex,media_type:mediaType},images});
    if(route==='resources/read')return Response.json({id:'library',name:'Reference',description:'Visual reference',mime:'image/png',width:1,height:1,frames:[{url:png,time:null}]});
    assert.equal(route,'chat');requests.push(body);
-   const events=requests.length<=generationCalls?[{choices:[{delta:{},finish_reason:'tool_calls'}]},{local_tool_request:{call:{...call,id:requests.length===1?call.id:'call_'+requests.length},workflowName:'Photo'}}]:readResourceDuringReview&&requests.length===2?[{choices:[{delta:{},finish_reason:'tool_calls'}]},{local_tool_request:{kind:'resource',resourceId:'library',workflowName:'Reference',call:{id:'read_reference',type:'function',function:{name:'local_read_resource',arguments:'{"resource_id":"library"}'}}}}]:[{choices:[{delta:{content:finalText},finish_reason:finalReason}]}];
+   const events=requests.length<=generationCalls?[{choices:[{delta:{},finish_reason:'tool_calls'}]},{local_tool_request:{call:{...call,id:requests.length===1?call.id:'call_'+requests.length},workflowName:'Photo'}}]:readOutputAfterGeneration&&requests.length===generationCalls+1?[{choices:[{delta:{},finish_reason:'tool_calls'}]},{local_tool_request:{kind:'output',runId:'run',outputIndex:0,workflowName:'Photo',call:{id:'read_output',type:'function',function:{name:'local_read_output',arguments:'{"run_id":"run"}'}}}}]:readResourceDuringReview&&requests.length===generationCalls+(readOutputAfterGeneration?2:1)?[{choices:[{delta:{},finish_reason:'tool_calls'}]},{local_tool_request:{kind:'resource',resourceId:'library',workflowName:'Reference',call:{id:'read_reference',type:'function',function:{name:'local_read_resource',arguments:'{"resource_id":"library"}'}}}}]:[{choices:[{delta:{content:finalText},finish_reason:finalReason}]}];
    return new Response(events.map(event=>`data: ${JSON.stringify(event)}\n\n`).join('')+'data: [DONE]\n\n');
   }};
  const fn=source.slice(source.indexOf('async function sendMessage('),source.indexOf('setupMaterialLighting(document.'));
@@ -33,18 +34,17 @@ async function exchange({vision=true,ready=true,images=[png],failed=false,denied
 test('without vision, generated outputs are explained without marking them visually reviewed',async()=>{
  const result=await exchange({vision:false});assert.equal(result.reviews.length,0);assert.equal(result.requests.length,2);
 });
-test('unavailable copies are distinguished from a model without vision',async()=>{
+test('missing image copies do not trigger an automatic review or an injected analysis request',async()=>{
  const result=await exchange({images:[],failed:true});
- const last=result.requests[1].messages.at(-1).content[0].text;
- assert.match(last,/copies|analyse.*indisponible/i);assert.doesNotMatch(last,/ne disposes pas de la vision/);assert.equal(result.reviews.length,0);
+ assert.equal(result.requests[1].messages.at(-1).role,'tool');assert.equal(result.requests[1].messages.some(message=>message.internal),false);assert.equal(result.reviews.length,0);
 });
 test('a failed reload keeps the produced tool result and does not request a completion from a stopped engine',async()=>{
  const result=await exchange({ready:false,failed:true});assert.equal(result.requests.length,1);
  assert.ok(result.state.messages.some(m=>m.role==='tool'&&m.content.includes('generated')));
  assert.match(result.views.at(-1).note.textContent,/restart failed/);
 });
-test('successful vision reviews and explicit denial retain the native conversation protocol',async()=>{
- const result=await exchange();assert.equal(result.reviews.length,1);assert.equal(result.requests[1].messages.at(-1).internal,true);
+test('image generation finishes without automatic pixels or review, while denial retains native protocol',async()=>{
+ const result=await exchange();assert.equal(result.reviews.length,0);assert.equal(result.requests[1].messages.at(-1).role,'tool');assert.doesNotMatch(JSON.stringify(result.requests),/base64/);
  const denied=await exchange({denied:true,images:[]});assert.equal(denied.requests[1].tools,false);assert.equal(denied.reviews.length,0);
  assert.ok(denied.state.messages.some(m=>m.role==='tool'&&m.tool_call_id===call.id&&m.content.includes('denied')));
 });
@@ -53,11 +53,18 @@ test('a failed generation without output checks engine readiness before continui
  const result=await exchange({ready:false,failed:true,images:[],hasRecord:false});assert.equal(result.requests.length,1);assert.match(result.views.at(-1).note.textContent,/restart failed/);
 });
 
-test('a resource lookup during image review preserves the generated image analysis until comparison completes',async()=>{const result=await exchange({readResourceDuringReview:true});assert.equal(result.requests.length,3);assert.equal(result.reviews.length,1);assert.equal(result.reviews[0][1],'Result explained');assert.equal(result.reviews[0][2],'reviewed');});
+test('an optional output read supplies temporary pixels and can be followed by a reference comparison',async()=>{
+ const result=await exchange({readOutputAfterGeneration:true,readResourceDuringReview:true});assert.equal(result.requests.length,4);assert.equal(result.reviews.length,1);assert.equal(result.reviews[0][1],'Result explained');assert.equal(result.reviews[0][2],'reviewed');
+ assert.doesNotMatch(JSON.stringify(result.requests[1]),/base64/);assert.ok(result.requests[2].messages.some(message=>message.outputId==='run/0'&&message.content.some(part=>part.type==='image_url')));assert.doesNotMatch(JSON.stringify(result.state.messages),/base64|outputId/);
+});
+
+test('an output inspection with no copy cannot mark the output visually reviewed',async()=>{const result=await exchange({readOutputAfterGeneration:true,images:[]});assert.equal(result.requests.length,3);assert.equal(result.reviews.length,0);assert.doesNotMatch(JSON.stringify(result.requests),/base64/);});
+
+test('video review still receives sampled frames automatically',async()=>{const result=await exchange({mediaType:'video'});assert.equal(result.requests.length,2);assert.equal(result.reviews.length,1);assert.match(JSON.stringify(result.requests[1]),/base64/);});
 
 test('blank or token-truncated model responses never mark an image as reviewed',async()=>{
  for(const options of [{finalText:''},{finalText:'Partial analysis',finalReason:'length'}]){
-  const result=await exchange(options);assert.equal(result.reviews.length,0);assert.equal(result.requests.length,2);
+  const result=await exchange({...options,readOutputAfterGeneration:true});assert.equal(result.reviews.length,0);assert.equal(result.requests.length,3);
  }
 });
 

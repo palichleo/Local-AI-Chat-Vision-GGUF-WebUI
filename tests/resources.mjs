@@ -96,6 +96,6 @@ test('the final image review can still read references when further generations 
  const deadline=Date.now()+10000;while((await(await f.request('status')).json()).state!=='ready'){if(Date.now()>deadline)assert.fail('Engine not ready');await new Promise(resolve=>setTimeout(resolve,30));}
  const events=[];await readSSE((await f.request('chat',{messages:[{role:'user',content:'inspect resources'}],tools:false,resources:true,turnId:randomUUID(),conversationId:randomUUID()})).body,event=>events.push(event));
  const body=events.find(event=>event.local_test_payload).local_test_payload;
- assert.deepEqual(body.tools.map(tool=>tool.function.name),['local_read_resource']);
+ assert.deepEqual(body.tools.map(tool=>tool.function.name),['local_read_resource','local_read_output']);
  assert.deepEqual(body.tools[0].function.parameters.properties.resource_id.enum,[active.id]);
 });

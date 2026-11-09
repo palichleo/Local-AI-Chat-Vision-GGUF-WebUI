@@ -615,7 +615,7 @@ function userContent(text, images) {
   return images.length ? [{type:'text',text:text||'Décris les images.'},...images.map(image=>({type:'image_url',image_url:{url:image.url}}))] : text;
 }
 
-function archiveMessages(messages) { return messages.filter(message=>!message.resourceId); }
+function archiveMessages(messages) { return messages.filter(message=>!message.resourceId&&!message.outputId); }
 
 function chatRequest(messages, tools = true, resources = true) {
   const context=state.conversationInstructions??(state.messages.length?'':state.globalInstructions||'');
@@ -666,7 +666,7 @@ async function sendMessage(event) {
         if(performance.now()-lastRender>55)render();
       });
       render();
-      if(reviewRecord&&request?.kind!=='resource'&&output.trim()&&finishReason!=='length'){
+      if(reviewRecord&&!['resource','output'].includes(request?.kind)&&output.trim()&&finishReason!=='length'){
         try{await comfyUI.saveReview(reviewRecord,output,request?'correction_requested':'reviewed');}catch(error){notice(`Analyse de galerie non enregistrée : ${error.message}`);}
       }
       if(!request){complete=true;view.note.textContent=finishReason==='length'?'Limite de sortie atteinte.':`${((performance.now()-started)/1000).toFixed(1)} s`;break;}
@@ -675,6 +675,21 @@ async function sendMessage(event) {
       history.push({role:'assistant',content:output,...(reasoning?{reasoning_content:reasoning}:{}),tool_calls:[request.call]});
       if(!output)view.body.replaceChildren();
       output='';reasoning='';
+      if(request.kind==='output'){
+        resourceReads++;view.note.textContent='Consultation de la sortie…';
+        try{
+          const result=await(await api('gallery/read',{conversationId:state.conversationId,runId:request.runId,outputIndex:request.outputIndex},{signal})).json();
+          history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify(result.metadata)});
+          if(result.images.length){
+            reviewRecord={id:request.runId,conversationId:state.conversationId};
+            const outputId=request.runId+'/'+request.outputIndex;
+            if(!history.some(message=>message.outputId===outputId))history.push({role:'user',internal:true,outputId,content:[{type:'text',text:'Copie compressée de la sortie '+outputId+'. '+result.metadata.note+' Pixels temporaires pour ce tour uniquement.'},...result.images.map(url=>({type:'image_url',image_url:{url}}))]});
+          }
+          view.note.textContent=result.images.length?'Sortie consultée.':'Copie visuelle indisponible.';
+        }catch(error){history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'error',message:error.message})});resourceReads=8;if(signal.aborted)throw error;view.note.textContent=error.message;}
+        state.archiveSnapshot={messages:[...archiveMessages(history)],incomplete:true};await persistConversation();
+        view=assistantMessage(view);finishReason='';continue;
+      }
       if(request.kind==='resource'){
         const ids=request.resourceIds||[request.resourceId];resourceReads+=ids.length;view.body.replaceChildren(node('span','pending-message','Ressource · '+request.workflowName));
         view.note.textContent='Consultation des références…';
@@ -695,9 +710,9 @@ async function sendMessage(event) {
       catch(error){generation.fail(error.message);history.push({role:'tool',tool_call_id:request.call.id,content:JSON.stringify({status:'error',message:signal.aborted?'Génération annulée.':error.message})});throw error;}
       history.push({role:'tool',tool_call_id:request.call.id,content:result.content});
       if(result.record||result.failed)state.status=await(await api('status')).json();
-      const reviewImages=state.status.state==='ready'&&state.status.vision?result.images:[];
+      const reviewImages=result.record?.mediaType==='video'&&state.status.state==='ready'&&state.status.vision?result.images:[];
       reviewRecord=reviewImages.length?result.record:null;
-      if(result.record){
+      if(result.record?.mediaType==='video'){
         history.push({role:'user',internal:true,content:[{type:'text',text:reviewImages.length?(result.record.mediaType==='video'?'Vidéo : les images suivantes sont seulement des échantillons compressés horodatés (voir frame_times du résultat), sans audio. Elles ne prouvent pas la fluidité, le raccord temporel ni la dernière image exacte. Ne prétends pas avoir visionné toute la vidéo. Toute nouvelle génération nécessite sa propre confirmation utilisateur. ':'')+'Voici les copies réduites des sorties du workflow, dans le même ordre. Les originaux affichés à l’utilisateur ne font pas partie de ce contexte. Vérifie les indications reference_count, reference_capacity et reference_mode du résultat : elles décrivent les références réellement transmises au moteur de génération. reference_count décrit les références réellement fournies par Atelier ; reference_defaults décrit les entrées conservées du workflow. Zéro référence fournie ne prouve pas que le workflow est textuel. Respecte analysis_outputs pour associer les copies aux sorties ; ne prétends pas avoir vu une sortie sans copie. Pour comparer aux ressources pertinentes, consulte leurs images avec local_read_resource si elles ne sont pas présentes dans ce tour ; les descriptions seules ne suffisent pas. Décris les écarts de sujet, de composition, de couleurs et de détails, ainsi que les limites observées. Ne conclus pas à la fidélité ou à une fusion sans comparaison visuelle. Si une correction est utile et possible avec les entrées configurées, adapte ton prompt.':state.status.vision?'La génération est terminée, mais les copies pour l’analyse sont indisponibles. Signale que tu ne peux pas vérifier visuellement le résultat.': 'La génération est terminée. Tu ne disposes pas de la vision : indique que tu ne peux pas vérifier visuellement le résultat.'},...reviewImages.map(url=>({type:'image_url',image_url:{url}}))]});
       }
       if(result.failed&&state.status.state!=='ready')throw Error(result.error||'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
@@ -746,7 +761,7 @@ const settingsGuard=setupSettingsGuard({
   readDraft:()=>({llm:modelDraft(),fields:['global-instructions','engine-path','context-size','output-tokens','compute-mode','gpu-layers','comfy-enabled','comfy-auto','comfy-iterations',...(state.generation?['generation-python','generation-tokenizer']:['comfy-url'])].map(id=>[id,id==='comfy-iterations'&&$('comfy-unlimited').getAttribute('aria-pressed')==='true'?null:$(id).value,$(id).checked]), unlimited:$('comfy-unlimited').getAttribute('aria-pressed'), descriptions:comfyUI.workflowDescriptions(), pending:comfyUI.hasPendingImport?.()||false,editor:comfyUI.editorDirty?.()||false}),
 });
 const contextMeter=setupContextMeter({$,api,getConfig:()=>state.config,isReady:()=>state.connected&&state.status.state==='ready',isBusy:()=>state.generating||!!state.status.toolJob,
-  getRequest:()=>state.messages.length?chatRequest(state.messages):null, getConversation:()=>state.conversationId,
+  getRequest:()=>state.messages.length?{...chatRequest(state.messages),conversationId:state.conversationId}:null, getConversation:()=>state.conversationId,
 });
 setupCopy($('messages'),{announce:message=>{$('live-status').textContent=message;if(message.startsWith('Copie indisponible'))notice(message);}});
 applyTheme(document.documentElement.dataset.theme);
