@@ -1,26 +1,35 @@
 {
   "schemaVersion": 1,
   "id": "ltx25-video",
-  "name": "LTX2.5 video (executor pending validation)",
-  "description": "Video template. Native LongForge checkpoint and temporal behavior must be validated before execution is available.",
+  "name": "LTX2.5 video",
+  "description": "Generate video from text, optional start/end images or two MSR image slots. A source_video extends a silent video at its existing resolution and fps; use output_id for a previous native run. Every video requires approval.",
   "enabled": false,
   "pipeline": "ltx25",
   "mediaType": "video",
   "components": {
     "model": {"policy": "fixed", "asset": "select-local-model"},
     "textEncoder": {"policy": "fixed", "asset": "select-local-text-encoder"},
-    "vae": {"policy": "fixed", "asset": "select-local-video-vae"}
+    "vae": {"policy": "fixed", "asset": "select-local-video-vae"},
+    "audioVae": {"policy": "fixed", "asset": "select-local-audio-vae"}
   },
   "parameters": {
     "prompt": {"policy": "model", "type": "string", "maxLength": 8000},
     "seed": {"policy": "random", "type": "integer"},
-    "width": {"policy": "fixed", "value": 768},
-    "height": {"policy": "fixed", "value": 512},
+    "width": {"policy": "fixed", "value": 384},
+    "height": {"policy": "fixed", "value": 256},
     "steps": {"policy": "fixed", "value": 8},
     "stage": {"policy": "model", "type": "string", "choices": ["draft", "final"], "default": "draft"},
     "frames": {"policy": "fixed", "value": 25},
     "fps": {"policy": "fixed", "value": 24},
-    "audio": {"policy": "fixed", "value": false}
+    "audio": {"policy": "fixed", "value": false},
+    "overlap_frames": {"policy":"fixed","value":9},
+    "start_strength": {"policy":"fixed","value":0.7},
+    "end_strength": {"policy":"fixed","value":0.7},
+    "image_compression": {"policy":"fixed","value":18}
+  },
+  "profiles": {
+    "draft": {"parameters":{"width":384,"height":256,"frames":25,"fps":24,"steps":8}},
+    "final": {"parameters":{"width":768,"height":512,"frames":25,"fps":24,"steps":8}}
   },
   "loras": [],
   "references": []

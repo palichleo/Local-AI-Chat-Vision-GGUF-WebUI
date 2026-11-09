@@ -35,7 +35,8 @@ class ProtocolTests(unittest.TestCase):
             rows=[json.loads(line) for line in result.stdout.splitlines()]
             self.assertEqual(rows[0]['event'],'ready')
             self.assertEqual(rows[0]['protocol'],1)
-            self.assertFalse(rows[0]['capabilities']['ltx25']['ready'])
+            self.assertIsInstance(rows[0]['capabilities']['ltx25']['ready'],bool)
+            self.assertEqual(rows[0]['capabilities']['ltx25']['mediaType'],'video')
             self.assertIn('error',rows[1])
             self.assertFalse(rows[2]['result']['cudaInitialized'])
             self.assertFalse(rows[2]['result']['torchImported'])

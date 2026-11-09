@@ -12,9 +12,14 @@ PACKAGES=('torch','diffusers','transformers','accelerate','safetensors','PIL')
 
 def capabilities():
     missing=[name for name in PACKAGES if importlib.util.find_spec(name) is None]
+    video_missing=missing+[name for name in ('triton','imageio','imageio_ffmpeg','av','comfy_kitchen') if importlib.util.find_spec(name) is None]
     return dict(krea2=dict(ready=not missing,mediaType='image',references=['img2img'],
                           reason='Missing packages: '+', '.join(missing) if missing else ''),
-                ltx25=dict(ready=False,mediaType='video',reason='Native video validation pending'))
+                ltx25=dict(ready=not video_missing,mediaType='video',references=['start_image','end_image','msr_image','source_video'],audio=True,
+                    components=['model','textEncoder','vae','audioVae'],requiredComponents=['audioVae'],
+                    parameters=['prompt','seed','width','height','steps','frames','fps','stage','audio','cfg','negative_prompt','start_strength','end_strength','image_compression','overlap_frames','msr_frames','msr_strength'],
+                    parameterValues=dict(steps=[8],cfg=[1],negative_prompt=['']),
+                    reason='Missing packages: '+', '.join(video_missing) if video_missing else ''))
 
 
 def diagnostics(config):
@@ -27,14 +32,18 @@ def diagnostics(config):
 def preflight(job, config):
     validate_job(job);config=validate_config(config)
     headers=validate_components(job)
-    if not Path(config['tokenizerPath']).is_dir():raise ValueError('Configure an existing local tokenizer directory')
+    if job['pipeline']=='krea2' and not Path(config['tokenizerPath']).is_dir():raise ValueError('Configure an existing local tokenizer directory')
     capability=capabilities()[job['pipeline']]
     if not capability['ready']:raise RuntimeError(capability['reason'])
     if config['engine']=='int8' and importlib.util.find_spec('comfy_kitchen') is None:raise RuntimeError('Missing installed comfy-kitchen INT8 kernels')
     if config['tuned'] and importlib.util.find_spec('triton') is None:raise RuntimeError('Missing installed Triton tuned kernels')
-    from runner.models.shapes import validate_shapes
-    validate_shapes(headers)
+    if job['pipeline']=='krea2':
+        from runner.models.shapes import validate_shapes
+        validate_shapes(headers)
     for item in job['references']:
+        if item['role']=='source_video':
+            from runner.video.continuation import source_tail
+            source_tail(item['path'],job['parameters']);continue
         from PIL import Image
         with Image.open(item['path']) as image:image.verify()
     return dict(ready=True,pipeline=job['pipeline'],mediaType=job['mediaType'],references=capability['references'])
@@ -42,6 +51,9 @@ def preflight(job, config):
 
 def generate(job,config,progress):
     preflight(job,config)
+    if job['pipeline']=='ltx25':
+        from runner.pipelines.ltx25 import generate as generate_video
+        return generate_video(job,validate_config(config),progress)
     from runner.pipelines.krea2 import generate as generate_image
     return generate_image(job,validate_config(config),progress)
 

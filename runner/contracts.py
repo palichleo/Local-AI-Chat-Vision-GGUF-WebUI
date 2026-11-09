@@ -44,6 +44,9 @@ def validate_job(job):
     for key in ('id','workflowId'):text(job[key],key)
     if not isinstance(job['workflowDigest'],str) or not re.fullmatch('[a-f0-9]{64}',job['workflowDigest']):
         raise ValueError('Invalid workflow digest')
+    if job['pipeline']=='ltx25':
+        from runner.video.contracts import validate_video_job
+        return validate_video_job(job)
     if job['pipeline']!='krea2' or job['mediaType']!='image':raise ValueError('Unsupported pipeline/media type')
     parameters=job['parameters']
     required=('prompt','seed','width','height','steps','cfg','denoise')

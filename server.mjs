@@ -29,6 +29,7 @@ import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
 import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
 import {GenerationService,generationConfig} from './lib/generation-service.mjs';
+import {convertLongForge} from './lib/longforge-conversion.mjs';
 import {generatedMedia} from './lib/generated-media.mjs';
 import {validateNativeWorkflow} from './lib/native-workflows.mjs';
 import {convertKreaWorkflow} from './lib/native-workflow-conversion.mjs';
@@ -186,9 +187,15 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   const legacyRuntime=new ToolRuntime({engine,catalog,gallery,resources,getConfig:()=>comfy,engineConfig:()=>config,saveConfig:saveComfy,persist:()=>preferences.saveHistory});
   const generation=await new GenerationService({root,dataDir,workflowDir,outputDir,worker:generationWorker}).init();
   const nativeRuntime=new ToolRuntime({engine,catalog:generation.catalog,gallery,resources,getConfig:()=>({...generation.config,baseUrl:'native'}),engineConfig:()=>config,
-    saveConfig:value=>generation.save(value),persist:()=>preferences.saveHistory,clientFactory:()=>generation.client()});
+    saveConfig:value=>generation.save(value),persist:()=>preferences.saveHistory,clientFactory:()=>generation.client(),
+    sourceMedia:async(ref,conversationId)=>{
+      if(ref.resource_id){await resources.activeRecord(ref.resource_id);return resources.media(ref.resource_id,'original');}
+      const record=await gallery.get(conversationId,ref.output_id,{includeImages:false});
+      if(record.provider!=='native'||record.mediaType!=='video'||!record.outputs[ref.output_index??0])throw problem('Sortie vidéo originale indisponible.');
+      return {...await generatedMedia(outputDir,record.outputs[ref.output_index??0].source),name:record.workflowName};
+    }});
   // Legacy API clients remain supported for migration; the new UI uses the native provider.
-  let runtime=comfy.enabled?legacyRuntime:nativeRuntime;
+  let runtime=nativeRuntime;
   let discovery={detected:false,baseUrl:comfy.baseUrl};
   let discoveryTime=0, discovering=null;
   async function detectComfy(){
@@ -382,6 +389,7 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
           if(path==='/api/generation/assets'){const {pipeline:familyAlias,...asset}=body;return send(200,await generation.assets.register({...asset,family:body.family||familyAlias}));}
           if(path==='/api/generation/workflows')return send(200,await generation.catalog.save(body));
           if(path==='/api/generation/convert-krea')return send(200,await convertKreaWorkflow(body.sourcePath,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot,backupDir:join(dataDir,'migration'),name:body.name,description:body.description}));
+          if(path==='/api/generation/convert-longforge')return send(200,await convertLongForge(body.sourcePath,{assets:generation.assets,catalog:generation.catalog,modelRoot:body.modelRoot,backupDir:join(dataDir,'migration'),name:body.name,description:body.description}));
           if(path==='/api/generation/remove'){await generation.catalog.remove(body.id);return send(200,{removed:true});}
           throw problem('Route de génération introuvable.',404);
         }finally{savingComfy=false;}

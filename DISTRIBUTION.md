@@ -11,6 +11,7 @@ Aucune licence de réutilisation n'a encore été attribuée aux sources de l'ap
 - Node.js : environnement d'exécution, non inclus dans l'archive. Son code principal utilise une licence MIT, et sa distribution contient également les licences de ses composants : https://github.com/nodejs/node/blob/main/LICENSE
 - llama.cpp : moteur d'inférence externe, non inclus dans l'archive, sous licence MIT : https://github.com/ggml-org/llama.cpp/blob/master/LICENSE
 - Les modèles et projecteurs GGUF sont fournis séparément et restent soumis aux licences de leurs auteurs.
+- Branche expérimentale `prototype-runner` : Python, PyTorch, Diffusers, Transformers, Accelerate, Safetensors, Pillow, NumPy, Triton, comfy-kitchen, PyAV et ImageIO/FFmpeg sont des dépendances externes, non embarquées. Les checkpoints image/vidéo, tokenizers, LoRAs et leurs licences restent séparés des sources. Consulter `runner/README.md` pour les versions testées et les limites du moteur natif.
 
 L'application n'embarque ni police web, ni image externe, ni bibliothèque npm tierce. Si des binaires, modèles ou autres ressources sont ajoutés ultérieurement au dépôt, examiner leurs licences et conserver les mentions requises avant redistribution.
 

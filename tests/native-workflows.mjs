@@ -118,3 +118,16 @@ test('references use declared roles and staged local files, never model-supplied
     const pending=await catalog.prepare('portrait',args,{allowPendingReferences:true,seed:5});assert.equal(pending.job.references[0].path,null);
   });
 });
+
+test('unvalidated video reference and audio options never reach the advertised native tools',async()=>{
+ await withCatalog(async(catalog)=>{
+  const workflow=JSON.parse(await readFile(new URL('../runner/templates/ltx25.json',import.meta.url),'utf8'));workflow.enabled=true;
+  catalog.assets={resolve:async id=>({path:join(tmpdir(),id+'.safetensors')})};
+  catalog.capabilities={ltx25:{ready:true,references:[],loras:false,audio:false,components:['model','textEncoder','vae','audioVae'],requiredComponents:['audioVae'],parameterValues:{steps:[8],cfg:[1]}}};
+  await catalog.save(workflow);assert.ok(await catalog.toolDefinition('video'));
+  for(const patch of [w=>w.references.push({id:'subject',role:'msr_image',required:false}),w=>{w.parameters.audio.value=true;},w=>{w.parameters.steps.value=12;}]){
+   const changed=structuredClone(workflow);patch(changed);await catalog.save(changed);
+   assert.equal(await catalog.toolDefinition('video'),null);assert.match((await catalog.list())[0].unavailableReason,/not.*validated|not support/i);
+  }
+ });
+});
