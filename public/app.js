@@ -9,7 +9,7 @@ import { installFromButton, compactSession } from './update-ui.mjs';
 import { setupMaterialLighting } from './material-light.mjs';
 import { readSSE } from './stream.mjs';
 import { markdownToHtml } from './markdown.mjs';
-import { setupComfy } from './comfy-ui.mjs';
+import { setupNativeWorkflows as setupComfy } from './native-workflow-ui.mjs';
 import { prepareImages } from './images.mjs';
 import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
@@ -155,7 +155,7 @@ function savedUser(message) {
 
 async function loadConversation(id) {
   if(!state.projectWorking&&!state.generating&&!state.preparing&&!state.loadingHistory&&!state.status.toolJob&&id===state.conversationId){state.view='chat';closeNavigation();projectUI.render();$('prompt').focus();return;}
-  if (settingsGuard.isDirty()) return settingsGuard.requestClose(() => loadConversation(id));
+  if (settingsGuard.isDirty()) return requestSettingsClose(() => loadConversation(id));
   if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory) return;
   state.loadingHistory = true;
   updateControls();
@@ -195,7 +195,7 @@ function renderTranscript(messages, incomplete = false) {
         const view = assistantMessage(reply);reply=view;
         if (message.content) renderText(view.body, message.content);
         else view.body.textContent = message.tool_calls ? 'Appel d’outil enregistré.' : 'Aucune réponse finale reçue.';
-        if(message.tool_calls?.some(call=>['comfy_generate_image','comfy_generate_video'].includes(call.function?.name))){const call=message.tool_calls.find(call=>['comfy_generate_image','comfy_generate_video'].includes(call.function?.name)),result=messages[index+1];try{const data=result?.role==='tool'&&result.tool_call_id===call.id?JSON.parse(result.content):null;if(data?.run_id){if(!message.content)view.body.replaceChildren();generationUI.restore(view.generations,state.conversationId,data.run_id);}}catch{}}
+        if(message.tool_calls?.some(call=>['generate_image','generate_video','comfy_generate_image','comfy_generate_video'].includes(call.function?.name))){const call=message.tool_calls.find(call=>['generate_image','generate_video','comfy_generate_image','comfy_generate_video'].includes(call.function?.name)),result=messages[index+1];try{const data=result?.role==='tool'&&result.tool_call_id===call.id?JSON.parse(result.content):null;if(data?.run_id){if(!message.content)view.body.replaceChildren();generationUI.restore(view.generations,state.conversationId,data.run_id);}}catch{}}
         view.reasoning.hidden = !message.reasoning_content;
         view.thoughts.textContent = message.reasoning_content || '';
         if (incomplete && index === messages.length - 1) view.note.textContent = 'Réponse partielle restaurée.';
@@ -222,7 +222,7 @@ async function restoreUpdate() {
 }
 
 async function installUpdate() {
-  if (settingsGuard.isDirty()) return settingsGuard.requestClose(() => installUpdate());
+  if (settingsGuard.isDirty()) return requestSettingsClose(() => installUpdate());
   if ($('update-available').disabled) return;
   state.updating = true; updateControls(); $('settings').close();
   $('update-dialog').showModal();
@@ -411,11 +411,16 @@ async function saveLLM({withinSettingsSave=false}={}){
 }
 async function switchLLM(){
  const id=$('model-select').value;if(!id||$('model-select').disabled)return;
- if(settingsGuard.isDirty()){renderModelSelect();return settingsGuard.requestClose(()=>{ $('model-select').value=id;void switchLLM();});}
+ if(settingsGuard.isDirty()){renderModelSelect();return requestSettingsClose(()=>{ $('model-select').value=id;void switchLLM();});}
  state.operation=true;updateControls();
  try{const result=await(await api('models/select',{id})).json();state.config=result.config;state.modelName=result.modelName;state.status=result.status;notice(result.warning||'');contextMeter.schedule();}
  catch(error){notice(error.message);}
  finally{state.operation=false;renderModelSelect();await refreshStatus();}
+}
+
+function requestSettingsClose(after) {
+  if (comfyUI.isEditing?.()) return comfyUI.requestBack(() => settingsGuard.requestClose(after));
+  return settingsGuard.requestClose(after);
 }
 
 function openSettings() {
@@ -462,8 +467,8 @@ async function saveConfiguration() {
       projectorPath: state.config.projectorPath, ...tokenControls.values(),
       ...computeControls.values(),
     };
-    const saved=await(await api('settings',{config,instructions:$('global-instructions').value,comfy:comfyUI.values(),workflowDescriptions:comfyUI.workflowDescriptions()})).json();
-    state.config=saved.config;state.comfy=saved.comfy;state.globalInstructions=saved.instructions??$('global-instructions').value;state.modelName=activeModel()?.name||'';renderModelSelect();
+    const saved=await(await api('settings',{config,instructions:$('global-instructions').value,...(state.generation?{generation:comfyUI.values()}:{comfy:comfyUI.values()}),workflowDescriptions:comfyUI.workflowDescriptions()})).json();
+    state.config=saved.config;state.comfy=saved.generation||saved.comfy;if(saved.generation)state.generation=saved.generation;state.globalInstructions=saved.instructions??$('global-instructions').value;state.modelName=activeModel()?.name||'';renderModelSelect();
     const current = session === state.settingsSession && $('settings').open;
     if (current) { comfyUI.saved(saved); settingsGuard.markSaved(); $('settings').close(); }
     contextMeter.schedule(); return current;
@@ -477,7 +482,7 @@ async function saveConfiguration() {
 
 async function shutdownApplication() {
   if ($('shutdown-app').disabled) return;
-  if (settingsGuard.isDirty()) return settingsGuard.requestClose(() => shutdownApplication());
+  if (settingsGuard.isDirty()) return requestSettingsClose(() => shutdownApplication());
   const controls = [...document.querySelectorAll('button,input,textarea,select')].map(control => [control, control.disabled]);
   state.closingApp = true; updateControls();
   try {
@@ -680,7 +685,7 @@ async function sendMessage(event) {
       const reviewImages=state.status.state==='ready'&&state.status.vision?result.images:[];
       reviewRecord=reviewImages.length?result.record:null;
       if(result.record){
-        history.push({role:'user',internal:true,content:[{type:'text',text:reviewImages.length?(result.record.mediaType==='video'?'Vidéo : les images suivantes sont seulement des échantillons compressés horodatés (voir frame_times du résultat), sans audio. Elles ne prouvent pas la fluidité, le raccord temporel ni la dernière image exacte. Ne prétends pas avoir visionné toute la vidéo. Toute nouvelle génération nécessite sa propre confirmation utilisateur. ':'')+'Voici les copies réduites des sorties du workflow, dans le même ordre. Les originaux affichés à l’utilisateur ne font pas partie de ce contexte. Vérifie les indications reference_count, reference_capacity et reference_mode du résultat : elles décrivent les références réellement transmises à Comfy. reference_count décrit les références réellement fournies par Atelier ; reference_defaults décrit les entrées conservées du workflow. Zéro référence fournie ne prouve pas que le workflow est textuel. Respecte analysis_outputs pour associer les copies aux sorties ; ne prétends pas avoir vu une sortie sans copie. Pour comparer aux ressources pertinentes, consulte leurs images avec local_read_resource si elles ne sont pas présentes dans ce tour ; les descriptions seules ne suffisent pas. Décris les écarts de sujet, de composition, de couleurs et de détails, ainsi que les limites observées. Ne conclus pas à la fidélité ou à une fusion sans comparaison visuelle. Si une correction est utile et possible avec les entrées configurées, adapte ton prompt.':state.status.vision?'La génération est terminée, mais les copies pour l’analyse sont indisponibles. Signale que tu ne peux pas vérifier visuellement le résultat.': 'La génération est terminée. Tu ne disposes pas de la vision : indique que tu ne peux pas vérifier visuellement le résultat.'},...reviewImages.map(url=>({type:'image_url',image_url:{url}}))]});
+        history.push({role:'user',internal:true,content:[{type:'text',text:reviewImages.length?(result.record.mediaType==='video'?'Vidéo : les images suivantes sont seulement des échantillons compressés horodatés (voir frame_times du résultat), sans audio. Elles ne prouvent pas la fluidité, le raccord temporel ni la dernière image exacte. Ne prétends pas avoir visionné toute la vidéo. Toute nouvelle génération nécessite sa propre confirmation utilisateur. ':'')+'Voici les copies réduites des sorties du workflow, dans le même ordre. Les originaux affichés à l’utilisateur ne font pas partie de ce contexte. Vérifie les indications reference_count, reference_capacity et reference_mode du résultat : elles décrivent les références réellement transmises au moteur de génération. reference_count décrit les références réellement fournies par Atelier ; reference_defaults décrit les entrées conservées du workflow. Zéro référence fournie ne prouve pas que le workflow est textuel. Respecte analysis_outputs pour associer les copies aux sorties ; ne prétends pas avoir vu une sortie sans copie. Pour comparer aux ressources pertinentes, consulte leurs images avec local_read_resource si elles ne sont pas présentes dans ce tour ; les descriptions seules ne suffisent pas. Décris les écarts de sujet, de composition, de couleurs et de détails, ainsi que les limites observées. Ne conclus pas à la fidélité ou à une fusion sans comparaison visuelle. Si une correction est utile et possible avec les entrées configurées, adapte ton prompt.':state.status.vision?'La génération est terminée, mais les copies pour l’analyse sont indisponibles. Signale que tu ne peux pas vérifier visuellement le résultat.': 'La génération est terminée. Tu ne disposes pas de la vision : indique que tu ne peux pas vérifier visuellement le résultat.'},...reviewImages.map(url=>({type:'image_url',image_url:{url}}))]});
       }
       if(result.failed&&state.status.state!=='ready')throw Error(result.error||'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
       view.note.textContent=result.failed?(result.error||'Analyse indisponible.') : '';
@@ -717,15 +722,15 @@ setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 const tokenControls=setupTokenControls($);
 const computeControls=setupComputeControls($);
 const settingsSearch=setupSettingsSearch({dialog:$('settings'),input:$('settings-search'),empty:$('settings-empty')});
-dismissSettingsOnOutsideClick($('settings'), () => settingsGuard.requestClose());
-const projectUI=setupProjectNavigation({$,state,node,icon,api,notice,openConversation:id=>{settingsGuard.requestClose(()=>loadConversation(id));},newConversation:id=>{settingsGuard.requestClose(()=>newConversation(id));},removeConversation:confirmHistoryDeletion,showHome,onBusy:()=>updateControls()});
+dismissSettingsOnOutsideClick($('settings'), () => requestSettingsClose());
+const projectUI=setupProjectNavigation({$,state,node,icon,api,notice,openConversation:id=>{requestSettingsClose(()=>loadConversation(id));},newConversation:id=>{requestSettingsClose(()=>newConversation(id));},removeConversation:confirmHistoryDeletion,showHome,onBusy:()=>updateControls()});
 const assetsUI=setupAssets({api,state,node,icon,notice,onChange:()=>contextMeter.schedule(),onBusy:()=>updateControls()});
 const generationUI=setupGenerationUI({api,node,openOutput:(record,index,blob)=>assetsUI.viewOutput(record,index,blob),onResize:scrollToBottom});
-const comfyUI=setupComfy({api,state,node,notice,openOutput:(record,index)=>assetsUI.viewOutput(record,index),onOutput:()=>{openFiles();assetsUI.show('output');},onChange:()=>refreshStatus(),onSettingsBusyChange:busy=>{state.comfyWorking=busy;updateControls();}});
+const comfyUI=setupComfy({api,state,node,notice,onRequestClose:()=>requestSettingsClose(),openOutput:(record,index)=>assetsUI.viewOutput(record,index),onOutput:()=>{openFiles();assetsUI.show('output');},onChange:()=>refreshStatus(),onSettingsBusyChange:busy=>{state.comfyWorking=busy;updateControls();}});
 
 const settingsGuard=setupSettingsGuard({
   dialog:$('settings'), confirmation:$('settings-unsaved'), keep:$('settings-keep'), discard:$('settings-discard'), saveButton:$('settings-save-close'), save:saveConfiguration,
-  readDraft:()=>({llm:modelDraft(),fields:['global-instructions','engine-path','context-size','output-tokens','compute-mode','gpu-layers','comfy-enabled','comfy-auto','comfy-url','comfy-iterations'].map(id=>[id,id==='comfy-iterations'&&$('comfy-unlimited').getAttribute('aria-pressed')==='true'?null:$(id).value,$(id).checked]), unlimited:$('comfy-unlimited').getAttribute('aria-pressed'), descriptions:comfyUI.workflowDescriptions(), pending:comfyUI.hasPendingImport?.()||false}),
+  readDraft:()=>({llm:modelDraft(),fields:['global-instructions','engine-path','context-size','output-tokens','compute-mode','gpu-layers','comfy-enabled','comfy-auto','comfy-iterations',...(state.generation?['generation-python','generation-tokenizer']:['comfy-url'])].map(id=>[id,id==='comfy-iterations'&&$('comfy-unlimited').getAttribute('aria-pressed')==='true'?null:$(id).value,$(id).checked]), unlimited:$('comfy-unlimited').getAttribute('aria-pressed'), descriptions:comfyUI.workflowDescriptions(), pending:comfyUI.hasPendingImport?.()||false,editor:comfyUI.editorDirty?.()||false}),
 });
 const contextMeter=setupContextMeter({$,api,getConfig:()=>state.config,isReady:()=>state.connected&&state.status.state==='ready',isBusy:()=>state.generating||!!state.status.toolJob,
   getRequest:()=>state.messages.length?chatRequest(state.messages):null, getConversation:()=>state.conversationId,
@@ -778,7 +783,7 @@ $('model-select').onchange=switchLLM;
 $('update-available').onclick = installUpdate;
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('shutdown-app').onclick = shutdownApplication;
-$('settings-close').onclick = () => settingsGuard.requestClose();
+$('settings-close').onclick = () => requestSettingsClose();
 $('settings-form').onsubmit = (event) => { event.preventDefault(); saveConfiguration(); };
 $('toggle-engine').onclick = () => toggleEngine();
 $('settings-stop').onclick = () => toggleEngine(true);
@@ -795,7 +800,7 @@ function openFiles(open=true){if(!open)assetsUI.pause();document.body.dataset.fi
 function showHome(){
   const blocked=()=>state.projectWorking||state.status.toolJob||state.status.busy||state.generating||state.preparing||state.loadingHistory||state.savingPreferences||state.operation||state.updating||state.closingApp;
   if(blocked())return;
-  settingsGuard.requestClose(async()=>{
+  requestSettingsClose(async()=>{
     if(blocked())return;
     state.loadingHistory=true;updateControls();
     try{if(!await assetsUI.flush()||!await persistConversation())return;state.view='home';closeNavigation();projectUI.render();}

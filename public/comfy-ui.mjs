@@ -2,7 +2,7 @@ import { renderVideoPlan } from './video-plan.mjs';
 import { prepareVideo } from './resource-preparation.mjs';
 import { compressImage } from './images.mjs';
 
-export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=()=>{},openOutput,onOutput=()=>{}}){
+export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=()=>{},openOutput,onOutput=()=>{},runtimeOnly=false}){
   const $=id=>document.getElementById(id);
   let config,workflows=[],importGraph=null,urls=[],galleryVersion=0;
   function reset(){for(const video of $('gallery-list').querySelectorAll('video'))video.pause();galleryVersion++;for(const url of urls)URL.revokeObjectURL(url);urls=[];$('gallery-list').replaceChildren(node('p','asset-empty','Aucune génération dans cette conversation.'));}
@@ -126,6 +126,7 @@ export function setupComfy({api,state,node,notice,onChange,onSettingsBusyChange=
     refreshVersion++;refreshController?.abort();descriptions.clear();
     applySettings({config:result.comfy,workflows:result.workflows});
   }
+  if(runtimeOnly)return {reset,renderGallery,requestTool,saveReview};
   $('comfy-iterations').oninput=()=>{lastLimited=Number($('comfy-iterations').value)||5;syncLimit();};
   $('comfy-minus').onclick=()=>{if(unlimited){unlimited=false;lastLimited=9999;}else lastLimited=Math.max(1,(Number($('comfy-iterations').value)||1)-1);$('comfy-iterations').value=lastLimited;syncLimit();};
   $('comfy-plus').onclick=()=>{if(unlimited)return;const next=(Number($('comfy-iterations').value)||1)+1;if(next>=10000)unlimited=true;else lastLimited=next;$('comfy-iterations').value=lastLimited;syncLimit();};
