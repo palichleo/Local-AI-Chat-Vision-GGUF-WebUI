@@ -1,0 +1,20 @@
+Atelier native workflows
+
+This folder contains your private native workflow JSON files, one file per workflow.
+The filename must equal its stable id followed by .json. Edit or import workflows
+through Settings > Workflows so policies and local assets are validated before saving.
+
+Templates are shipped separately under runner/templates. Creating a workflow copies
+a template; updates never replace your edited workflow. Choose registered local
+model, text encoder and VAE assets before saving. No model is downloaded automatically.
+
+Fixed values are locked. Model values allow the assistant to choose only within your
+configured choices/ranges. Random is only for seeds. LoRA off never loads the adapter.
+Reference inputs have named roles and accept only staged chat/library resources.
+
+LTX2.5 workflows remain unavailable until their native executor and checkpoints have
+been validated. A template or compatible-looking filename does not establish support.
+
+Do not place ComfyUI editor/API graphs, model weights, caches or outputs here. Original
+generation media belongs in output/ and is preserved when chat history is deleted.
+Workflow files and local asset paths are user data and are excluded from version control.

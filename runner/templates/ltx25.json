@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "ltx25-video",
+  "name": "LTX2.5 video (executor pending validation)",
+  "description": "Video template. Native LongForge checkpoint and temporal behavior must be validated before execution is available.",
+  "enabled": false,
+  "pipeline": "ltx25",
+  "mediaType": "video",
+  "components": {
+    "model": {"policy": "fixed", "asset": "select-local-model"},
+    "textEncoder": {"policy": "fixed", "asset": "select-local-text-encoder"},
+    "vae": {"policy": "fixed", "asset": "select-local-video-vae"}
+  },
+  "parameters": {
+    "prompt": {"policy": "model", "type": "string", "maxLength": 8000},
+    "seed": {"policy": "random", "type": "integer"},
+    "width": {"policy": "fixed", "value": 768},
+    "height": {"policy": "fixed", "value": 512},
+    "steps": {"policy": "fixed", "value": 8},
+    "stage": {"policy": "model", "type": "string", "choices": ["draft", "final"], "default": "draft"},
+    "frames": {"policy": "fixed", "value": 25},
+    "fps": {"policy": "fixed", "value": 24},
+    "audio": {"policy": "fixed", "value": false}
+  },
+  "loras": [],
+  "references": []
+}

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "krea2-image",
+  "name": "Krea2 image",
+  "description": "Create or edit an image with the selected local Krea2 assets.",
+  "enabled": false,
+  "pipeline": "krea2",
+  "mediaType": "image",
+  "components": {
+    "model": {"policy": "fixed", "asset": "select-local-model"},
+    "textEncoder": {"policy": "fixed", "asset": "select-local-text-encoder"},
+    "vae": {"policy": "fixed", "asset": "select-local-vae"}
+  },
+  "parameters": {
+    "prompt": {"policy": "model", "type": "string", "maxLength": 8000},
+    "seed": {"policy": "random", "type": "integer"},
+    "width": {"policy": "fixed", "value": 1448},
+    "height": {"policy": "fixed", "value": 1448},
+    "steps": {"policy": "fixed", "value": 8},
+    "cfg": {"policy": "fixed", "value": 1},
+    "denoise": {"policy": "fixed", "value": 1},
+    "expandPrompt": {"policy": "fixed", "value": false}
+  },
+  "loras": [],
+  "references": [{"id": "source", "name": "Source image", "role": "img2img", "description": "Optional image to edit.", "required": false}]
+}
