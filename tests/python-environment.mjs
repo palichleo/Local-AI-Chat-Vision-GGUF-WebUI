@@ -17,7 +17,7 @@ test('Windows and Linux setup exclusively select private Python, libraries and c
   const calls=[],{root,env}=await fixture(t,{platform,arch:'x64',run:async(command,args,options)=>{calls.push({command,args,options});return {stdout:'',stderr:''};}}),uv=await cachedUv(env);
   const python=await env.ensure();assert.equal(env.status().state,'ready');assert.equal(python,join(env.directory,'venv',platform==='win32'?'Scripts/python.exe':'bin/python'));assert.equal(calls.length,3);
   assert.equal(calls[0].command,uv);assert.ok(calls[0].args.includes('--no-bin'));assert.ok(calls[0].args.includes('--no-registry'));
-  assert.ok(calls[1].args.includes('--frozen'));assert.ok(calls[1].args.includes('--managed-python'));assert.ok(calls[1].args.includes('--no-python-downloads'));assert.equal(calls[2].command,python);
+  assert.ok(calls[1].args.includes('--locked'));assert.ok(calls[1].args.includes('--managed-python'));assert.ok(calls[1].args.includes('--no-python-downloads'));assert.equal(calls[2].command,python);
   for(const {options}of calls){for(const name of ['UV_CACHE_DIR','UV_PYTHON_INSTALL_DIR','UV_PYTHON_BIN_DIR','UV_PROJECT_ENVIRONMENT','HF_HOME','TORCH_HOME','TRITON_CACHE_DIR','TORCHINDUCTOR_CACHE_DIR','TMP','TEMP','TMPDIR'])assert.ok(options.env[name].startsWith(env.directory+sep),name);assert.equal(options.env.UV_PYTHON_INSTALL_BIN,'0');assert.equal(options.env.UV_PYTHON_INSTALL_REGISTRY,'0');assert.equal(options.cwd,root);assert.equal(options.env.PATH,before.PATH);}
   await new PythonEnvironment({root,dataDir:join(root,'data'),platform,arch:'x64',run:async()=>({stdout:'',stderr:''}),fetchAsset:async()=>{throw Error('A repeat launch must reuse uv');}}).ensure();
  }
@@ -32,6 +32,12 @@ test('preparation is shared, reports progress and cancellation cannot report a l
 test('interrupted installation can retry without replacing a system Python',async t=>{
  let attempts=0;const {env}=await fixture(t,{run:async(_command,args)=>{if(args[0]==='sync'&&attempts++===0)throw Error('Network interrupted');return {stdout:'',stderr:''};}});await cachedUv(env);
  await assert.rejects(env.ensure(),/Network interrupted/);assert.equal(env.status().state,'error');await env.ensure();assert.equal(env.status().state,'ready');assert.equal(attempts,2);
+});
+
+test('environment detection never creates a fresh venv and lock mismatches cannot start the verification step',async t=>{
+ let verified=false;const {env}=await fixture(t,{run:async(_command,args)=>{if(args[0]==='sync')throw Error('The lockfile needs to be updated, but --locked was provided');if(args[0]==='-s')verified=true;return {stdout:'',stderr:''};}});
+ assert.equal(await env.exists(),false);await cachedUv(env);await mkdir(join(env.directory,'venv'));await writeFile(join(env.directory,'venv','pyvenv.cfg'),'home = private Python');assert.equal(await env.exists(),true);
+ await assert.rejects(env.ensure(),/lockfile/);assert.equal(verified,false);assert.equal(env.status().state,'error');
 });
 
 test('an unverified archive never executes and temporary downloads are removed',async t=>{

@@ -44,3 +44,12 @@ test('environment verification acknowledges startup without holding the settings
  const response=await fetch(app.url+'/api/generation/test',{method:'POST',headers:{Authorization:'Bearer '+boot.token,'Content-Type':'application/json'},body:JSON.stringify({enabled:false,autoAllow:false,maxIterations:5,pythonPath:process.execPath,tokenizerPath:''}),signal:AbortSignal.timeout(1000)});
  assert.equal(response.status,200);await starting;const status=await(await fetch(app.url+'/api/status',{headers:{Authorization:'Bearer '+boot.token}})).json();assert.equal(status.runner.state,'starting');release();
 });
+
+test('launch reconciles an existing private environment even with generation disabled, but skips fresh and external setups',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'native-reconcile-'));t.after(()=>rm(root,{recursive:true,force:true}));let present=false,checks=0,starts=0,probes=0;
+ const environment={status:()=>({state:'idle'}),exists:async()=>{probes++;return present;},ensure:async()=>{checks++;},close:async()=>{}},worker={status:()=>({state:'stopped',capabilities:{}}),start:async()=>{starts++;},close:async()=>{}};
+ const service=new GenerationService({root,dataDir:root,workflowDir:join(root,'workflow'),outputDir:join(root,'output'),worker,environment});
+ await service.prepareOnLaunch();assert.equal(checks,0);present=true;await service.prepareOnLaunch();assert.equal(checks,1);assert.equal(starts,0);
+ service.config.pythonPath=process.execPath;await service.prepareOnLaunch();assert.equal(checks,1);assert.equal(probes,2);
+ await service.close();await service.prepareOnLaunch();assert.equal(probes,2);
+});

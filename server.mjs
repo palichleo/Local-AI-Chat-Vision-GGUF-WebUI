@@ -716,7 +716,8 @@ export async function createApplication({ port = 8787, dataDir = join(root, 'dat
   server.headersTimeout = 15000;
   await new Promise((yes, no) => { server.once('error', no); server.listen(port, '127.0.0.1', yes); });
   url = `http://127.0.0.1:${server.address().port}`;
-  if(generation.config.enabled)void generation.start().catch(()=>{});
+  // A replacement process reads requirements only after all updated sources have been installed.
+  void generation.prepareOnLaunch().catch(()=>{});
   if (updateChecker) updates = Promise.resolve().then(() => updateChecker({ signal: updateController.signal })).catch(() => ({ available: false }));
   let closing,relaunching=false;
   if (managed) { controlTimer = setTimeout(() => { void stopApplication().catch(console.error); }, controlTimeoutMs); controlTimer.unref(); }
