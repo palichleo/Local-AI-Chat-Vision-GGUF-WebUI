@@ -9,35 +9,67 @@ import { spawn } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fixture = join(root, 'tests', 'fixtures', 'fake-engine.mjs');
-const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
+const png =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
 
 function qwenFixture(withMtp, recurrent = false) {
-  const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
-  const u64 = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
-  const str = (s) => Buffer.concat([u64(Buffer.byteLength(s)), Buffer.from(s)]);
+  const u32 = n => {
+    const b = Buffer.alloc(4);
+    b.writeUInt32LE(n);
+    return b;
+  };
+  const u64 = n => {
+    const b = Buffer.alloc(8);
+    b.writeBigUInt64LE(BigInt(n));
+    return b;
+  };
+  const str = s => Buffer.concat([u64(Buffer.byteLength(s)), Buffer.from(s)]);
   const layers = withMtp ? 33 : 32;
   const metadata = [
-    str('general.architecture'), u32(8), str('qwen35'),
-    str('qwen35.block_count'), u32(4), u32(33),
-    str('qwen35.nextn_predict_layers'), u32(4), u32(1),
+    str('general.architecture'),
+    u32(8),
+    str('qwen35'),
+    str('qwen35.block_count'),
+    u32(4),
+    u32(33),
+    str('qwen35.nextn_predict_layers'),
+    u32(4),
+    u32(1),
   ];
-  if (recurrent) metadata.push(str('general.name'), u32(8), str('Test Qwen'), str('qwen35.attention.recurrent_layers'), u32(9), u32(7), u64(33), Buffer.from(Array.from({ length: 33 }, (_, i) => i % 4 !== 3 ? 1 : 0)));
+  if (recurrent)
+    metadata.push(
+      str('general.name'),
+      u32(8),
+      str('Test Qwen'),
+      str('qwen35.attention.recurrent_layers'),
+      u32(9),
+      u32(7),
+      u64(33),
+      Buffer.from(Array.from({ length: 33 }, (_, i) => (i % 4 !== 3 ? 1 : 0))),
+    );
   const tensors = [];
   for (let i = 0; i < layers; i++) tensors.push(str(`blk.${i}.attn_norm.weight`), u32(1), u64(1), u32(0), u64(i * 4));
-  const header = Buffer.concat([Buffer.from('GGUF'), u32(3), u64(layers), u64(recurrent ? 5 : 3), ...metadata, ...tensors]);
-  return Buffer.concat([header, Buffer.alloc((32 - header.length % 32) % 32), Buffer.alloc(256, 42)]);
+  const header = Buffer.concat([
+    Buffer.from('GGUF'),
+    u32(3),
+    u64(layers),
+    u64(recurrent ? 5 : 3),
+    ...metadata,
+    ...tensors,
+  ]);
+  return Buffer.concat([header, Buffer.alloc((32 - (header.length % 32)) % 32), Buffer.alloc(256, 42)]);
 }
 
 async function until(check) {
   const end = Date.now() + 10000;
   while (Date.now() < end) {
     if (await check()) return;
-    await new Promise((done) => setTimeout(done, 50));
+    await new Promise(done => setTimeout(done, 50));
   }
   assert.fail('Le statut attendu n’a pas été atteint en dix secondes.');
 }
 
-test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
+test('smoke local sans modèle réel', { timeout: 30000 }, async t => {
   assert.ok(existsSync(join(root, 'server.mjs')), 'Le serveur de l’application doit exister.');
   const { createApplication } = await import('../server.mjs');
   const folder = await mkdtemp(join(tmpdir(), 'atelier-local-smoke-'));
@@ -55,12 +87,22 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
     const base = app.url;
     const bootstrap = await (await fetch(`${base}/api/bootstrap`)).json();
     const headers = { Authorization: `Bearer ${bootstrap.token}`, 'Content-Type': 'application/json' };
-    const call = (path, data, extra = {}) => fetch(`${base}/api/${path}`, {
-      method: data === undefined ? 'GET' : 'POST', headers, ...extra,
-      ...(data === undefined ? {} : { body: JSON.stringify(data) }),
-    });
+    const call = (path, data, extra = {}) =>
+      fetch(`${base}/api/${path}`, {
+        method: data === undefined ? 'GET' : 'POST',
+        headers,
+        ...extra,
+        ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+      });
     const status = async () => (await call('status')).json();
-    const config = { enginePath: process.execPath, modelPath, projectorPath, contextSize: 8192, maxOutputTokens: 4096, gpuLayers: 0 };
+    const config = {
+      enginePath: process.execPath,
+      modelPath,
+      projectorPath,
+      contextSize: 8192,
+      maxOutputTokens: 4096,
+      gpuLayers: 0,
+    };
 
     await t.test('l’application démarre sans moteur et protège son API', async () => {
       assert.equal(bootstrap.status.state, 'stopped');
@@ -74,7 +116,16 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       assert.ok(textureBytes.length < 1500000);
       assert.equal((await fetch(base + '/material-light.mjs')).status, 200);
       assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
-      assert.equal((await fetch(`${base}/api/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
+      assert.equal(
+        (
+          await fetch(`${base}/api/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+          })
+        ).status,
+        401,
+      );
       assert.equal((await call('start', {}, { headers: { ...headers, Origin: 'https://example.org' } })).status, 403);
       assert.equal((await call('chat', { messages: [{ role: 'user', content: 'Bonjour' }] })).status, 503);
     });
@@ -91,13 +142,21 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       const { waitForModel } = await import('../public/model-ready.mjs');
       assert.equal((await fetch(`${base}/model-ready.mjs`)).status, 200);
       const states = [];
-      const ready = await waitForModel(call, new AbortController().signal, (s) => states.push(s.state));
+      const ready = await waitForModel(call, new AbortController().signal, s => states.push(s.state));
       assert.equal(ready.vision, true);
       assert.ok(states.includes('loading'));
       assert.equal(states.at(-1), 'ready');
-      const response = await call('chat', { messages: [{ role: 'user', content: [
-        { type: 'text', text: 'Décris cette image.' }, { type: 'image_url', image_url: { url: png } },
-      ] }] });
+      const response = await call('chat', {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Décris cette image.' },
+              { type: 'image_url', image_url: { url: png } },
+            ],
+          },
+        ],
+      });
       assert.equal(response.status, 200);
       assert.match(await response.text(), /Image reçue par le moteur simulé/);
       await until(async () => !(await status()).busy);
@@ -114,8 +173,9 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       const response = await call('chat', { messages: [{ role: 'user', content: 'Bonjour' }], thinking: true });
       assert.equal(response.status, 200);
       const { readSSE } = await import('../public/stream.mjs');
-      let text = '', reasoning = '';
-      await readSSE(response.body, (event) => {
+      let text = '',
+        reasoning = '';
+      await readSSE(response.body, event => {
         text += event.choices?.[0]?.delta?.content ?? '';
         reasoning += event.choices?.[0]?.delta?.reasoning_content ?? '';
       });
@@ -125,7 +185,13 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
     });
 
     await t.test('une image locale est relayée, les URL distantes sont refusées', async () => {
-      const message = { role: 'user', content: [{ type: 'text', text: 'Décris cette image.' }, { type: 'image_url', image_url: { url: png } }] };
+      const message = {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Décris cette image.' },
+          { type: 'image_url', image_url: { url: png } },
+        ],
+      };
       const response = await call('chat', { messages: [message] });
       assert.equal(response.status, 200);
       assert.match(await response.text(), /Image reçue par le moteur simulé/);
@@ -138,10 +204,18 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
 
     await t.test('annuler une réponse libère la conversation', async () => {
       const controller = new AbortController();
-      const response = await call('chat', { messages: [{ role: 'user', content: 'lent' }] }, { signal: controller.signal });
+      const response = await call(
+        'chat',
+        { messages: [{ role: 'user', content: 'lent' }] },
+        { signal: controller.signal },
+      );
       const reader = response.body.getReader();
       await reader.read();
-      assert.equal((await call('history/clear', { confirm: true })).status, 409, 'La suppression attend la fin de la generation.');
+      assert.equal(
+        (await call('history/clear', { confirm: true })).status,
+        409,
+        'La suppression attend la fin de la generation.',
+      );
       controller.abort();
       await reader.cancel().catch(() => {});
       await until(async () => !(await status()).busy);
@@ -155,7 +229,14 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       await call('start', {});
       await until(async () => (await status()).state === 'ready');
       assert.equal((await status()).vision, false);
-      assert.equal((await call('chat', { messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: png } }] }] })).status, 400);
+      assert.equal(
+        (
+          await call('chat', {
+            messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: png } }] }],
+          })
+        ).status,
+        400,
+      );
       await call('stop', {});
     });
 
@@ -169,7 +250,10 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       await call('config', { ...config, enginePath: executable, gpuLayers: 99 });
       await call('start', {});
       await until(async () => (await status()).state === 'ready');
-      assert.ok((await status()).logs.some((line) => line.includes(library)), 'Le moteur enfant doit recevoir le chemin du fichier de bibliothèque CUDA.');
+      assert.ok(
+        (await status()).logs.some(line => line.includes(library)),
+        'Le moteur enfant doit recevoir le chemin du fichier de bibliothèque CUDA.',
+      );
       await call('stop', {});
     });
 
@@ -180,36 +264,47 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async (t) => {
       await call('config', { ...config, modelPath: path });
       await call('start', {});
       await until(async () => (await status()).state === 'ready');
-      assert.ok((await status()).logs.some((line) => line.includes('qwen35.block_count=int:32,qwen35.nextn_predict_layers=int:0')));
+      assert.ok(
+        (await status()).logs.some(line =>
+          line.includes('qwen35.block_count=int:32,qwen35.nextn_predict_layers=int:0'),
+        ),
+      );
       assert.deepEqual(await readFile(path), original);
       await call('stop', {});
       await writeFile(path, qwenFixture(true));
       await call('start', {});
       await until(async () => (await status()).state === 'ready');
-      assert.ok((await status()).logs.some((line) => line.includes('Métadonnées : sans correction')));
+      assert.ok((await status()).logs.some(line => line.includes('Métadonnées : sans correction')));
       await call('stop', {});
     });
 
-    await t.test('un tableau par couche est corrigé dans une copie locale, les poids et l’original restent identiques', async () => {
-      const path = join(folder, 'Qwen3.5 tableau MTP.gguf');
-      const original = qwenFixture(false, true);
-      await writeFile(path, original);
-      await call('config', { ...config, modelPath: path });
-      await call('start', {});
-      await until(async () => (await status()).state === 'ready');
-      const launched = (await status()).logs.find((line) => line.startsWith('Modèle lancé : ')).slice('Modèle lancé : '.length);
-      assert.notEqual(launched, path);
-      assert.deepEqual(await readFile(path), original);
-      const corrected = await readFile(launched);
-      assert.equal(corrected.length, original.length);
-      assert.deepEqual(corrected.subarray(-256), original.subarray(-256));
-      const { missingMtpOverride } = await import('../lib/gguf.mjs');
-      assert.equal(await missingMtpOverride(launched), '');
-      await call('stop', {});
-    });
+    await t.test(
+      'un tableau par couche est corrigé dans une copie locale, les poids et l’original restent identiques',
+      async () => {
+        const path = join(folder, 'Qwen3.5 tableau MTP.gguf');
+        const original = qwenFixture(false, true);
+        await writeFile(path, original);
+        await call('config', { ...config, modelPath: path });
+        await call('start', {});
+        await until(async () => (await status()).state === 'ready');
+        const launched = (await status()).logs
+          .find(line => line.startsWith('Modèle lancé : '))
+          .slice('Modèle lancé : '.length);
+        assert.notEqual(launched, path);
+        assert.deepEqual(await readFile(path), original);
+        const corrected = await readFile(launched);
+        assert.equal(corrected.length, original.length);
+        assert.deepEqual(corrected.subarray(-256), original.subarray(-256));
+        const { missingMtpOverride } = await import('../lib/gguf.mjs');
+        assert.equal(await missingMtpOverride(launched), '');
+        await call('stop', {});
+      },
+    );
   } finally {
     await app?.close();
-    assert.ok(resolve(folder).startsWith(resolve(tmpdir()) + '\\') || resolve(folder).startsWith(resolve(tmpdir()) + '/'));
+    assert.ok(
+      resolve(folder).startsWith(resolve(tmpdir()) + '\\') || resolve(folder).startsWith(resolve(tmpdir()) + '/'),
+    );
     await rm(folder, { recursive: true, force: true });
   }
 });

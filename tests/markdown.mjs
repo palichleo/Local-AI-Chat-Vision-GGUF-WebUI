@@ -7,7 +7,9 @@ const renderer = new URL('../public/markdown.mjs', import.meta.url);
 test('model Markdown renders headings, emphasis, lists and literal escapes', async () => {
   assert.ok(existsSync(renderer), 'Le module de rendu Markdown doit exister.');
   const { markdownToHtml } = await import(renderer);
-  const html = markdownToHtml('### Composition\n\nUne **structure forte** et une *ambiance calme*.\n\n* **Verticalité :** une silhouette\n* Horizon\n\n1. Première étape\n2. Deuxième étape\n\n\\*texte littéral\\* et `snake_case`');
+  const html = markdownToHtml(
+    '### Composition\n\nUne **structure forte** et une *ambiance calme*.\n\n* **Verticalité :** une silhouette\n* Horizon\n\n1. Première étape\n2. Deuxième étape\n\n\\*texte littéral\\* et `snake_case`',
+  );
   assert.match(html, /<h3>Composition<\/h3>/);
   assert.match(html, /<strong>structure forte<\/strong>/);
   assert.match(html, /<em>ambiance calme<\/em>/);
@@ -19,7 +21,9 @@ test('model Markdown renders headings, emphasis, lists and literal escapes', asy
 
 test('nested lists, quotations, tables and rules keep their structure', async () => {
   const { markdownToHtml } = await import(renderer);
-  const html = markdownToHtml('- Parent\n  - Enfant\n- Suite\n\n> Une citation **utile**.\n\n| Nom | Valeur |\n| --- | --- |\n| A | **42** |\n\n---');
+  const html = markdownToHtml(
+    '- Parent\n  - Enfant\n- Suite\n\n> Une citation **utile**.\n\n| Nom | Valeur |\n| --- | --- |\n| A | **42** |\n\n---',
+  );
   assert.equal((html.match(/<ul>/g) || []).length, 2);
   assert.match(html, /<blockquote[^>]*>[\s\S]*<strong>utile<\/strong>/);
   assert.match(html, /<table>[\s\S]*<th>Nom<\/th>[\s\S]*<td><strong>42<\/strong><\/td>/);
@@ -38,7 +42,9 @@ test('code fences preserve HTML and Markdown literally, including while streamin
 
 test('model HTML, unsafe links and image embeds cannot create active content', async () => {
   const { markdownToHtml } = await import(renderer);
-  const html = markdownToHtml('# <img src=x onerror=alert(1)>\n\n<script>alert(1)</script>\n\n[Ouvrir](javascript:alert(1)) [Autre](data:text/html,test)\n\n![image](https://example.org/image.png)\n\n[Source](https://example.org/?a=1&b=2)');
+  const html = markdownToHtml(
+    '# <img src=x onerror=alert(1)>\n\n<script>alert(1)</script>\n\n[Ouvrir](javascript:alert(1)) [Autre](data:text/html,test)\n\n![image](https://example.org/image.png)\n\n[Source](https://example.org/?a=1&b=2)',
+  );
   assert.doesNotMatch(html, /<(?:img|script|svg|iframe)\b/i);
   assert.doesNotMatch(html, /href=["'](?:javascript|data):/i);
   assert.match(html, /&lt;img/);

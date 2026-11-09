@@ -6,10 +6,22 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { ComfyGallery } from '../lib/comfy-gallery.mjs';
 
-const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
+const png =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
 const jpeg = 'data:image/jpeg;base64,/9j/2Q==';
 function record(overrides = {}) {
-  return { id: randomUUID(), conversationId: randomUUID(), workflowId: 'basic', workflowName: 'Basic image', prompt: 'A red boat', parameters: { seed: 42, width: 512 }, comfyUrl: 'http://127.0.0.1:7821', createdAt: '2026-11-08T01:00:00.000Z', outputs: [{ source: { filename: 'original.png', subfolder: 'boats/2026', type: 'output' } }], ...overrides };
+  return {
+    id: randomUUID(),
+    conversationId: randomUUID(),
+    workflowId: 'basic',
+    workflowName: 'Basic image',
+    prompt: 'A red boat',
+    parameters: { seed: 42, width: 512 },
+    comfyUrl: 'http://127.0.0.1:7821',
+    createdAt: '2026-11-08T01:00:00.000Z',
+    outputs: [{ source: { filename: 'original.png', subfolder: 'boats/2026', type: 'output' } }],
+    ...overrides,
+  };
 }
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'atelier-gallery-'));
@@ -17,7 +29,7 @@ async function fixture(t) {
   return { directory, historyDir: join(directory, 'history') };
 }
 
-test('persistent metadata and later analysis copies restore without touching original Comfy files', async (t) => {
+test('persistent metadata and later analysis copies restore without touching original Comfy files', async t => {
   const { directory, historyDir } = await fixture(t);
   const originals = join(directory, 'ComfyUI', 'output', 'boats', '2026');
   await mkdir(originals, { recursive: true });
@@ -30,13 +42,17 @@ test('persistent metadata and later analysis copies restore without touching ori
   const runDir = join(historyDir, run.conversationId, 'generated', run.id);
   assert.deepEqual(await readdir(runDir), ['manifest.json']);
   assert.deepEqual(await new ComfyGallery({ historyDir }).get(run.conversationId, run.id), run);
-  const reviewed = { ...run, analysis: { status: 'accepted', text: 'The boat is red.' }, outputs: [{ ...run.outputs[0], analysisDataUrl: png }] };
+  const reviewed = {
+    ...run,
+    analysis: { status: 'accepted', text: 'The boat is red.' },
+    outputs: [{ ...run.outputs[0], analysisDataUrl: png }],
+  };
   await gallery.put(reviewed, { persist: true });
   const manifest = await readFile(join(runDir, 'manifest.json'), 'utf8');
   assert.ok(!manifest.includes('base64,'));
   const files = await readdir(runDir);
   assert.equal(files.length, 2);
-  const copy = files.find((name) => name !== 'manifest.json');
+  const copy = files.find(name => name !== 'manifest.json');
   assert.deepEqual(await readFile(join(runDir, copy)), Buffer.from(png.split(',')[1], 'base64'));
   gallery.clearMemory();
   const restarted = new ComfyGallery({ historyDir });
@@ -48,10 +64,12 @@ test('persistent metadata and later analysis copies restore without touching ori
   assert.deepEqual(await gallery.list(run.conversationId), { runs: [], skipped: 0 });
 });
 
-test('nonpersistent runs stay in memory, are cloned and clearMemory never removes files', async (t) => {
+test('nonpersistent runs stay in memory, are cloned and clearMemory never removes files', async t => {
   const { historyDir } = await fixture(t);
   const gallery = new ComfyGallery({ historyDir });
-  const run = record({ outputs: [{ source: { filename: 'x.jpg', subfolder: '', type: 'output' }, analysisDataUrl: jpeg }] });
+  const run = record({
+    outputs: [{ source: { filename: 'x.jpg', subfolder: '', type: 'output' }, analysisDataUrl: jpeg }],
+  });
   const expected = structuredClone(run);
   await gallery.put(run, { persist: false });
   run.parameters.seed = 0;
@@ -67,15 +85,24 @@ test('nonpersistent runs stay in memory, are cloned and clearMemory never remove
   assert.deepEqual(await gallery.get(run.conversationId, run.id), expected);
 });
 
-test('queued updates retain analysis copies and newest runs list first', async (t) => {
+test('queued updates retain analysis copies and newest runs list first', async t => {
   const { historyDir } = await fixture(t);
   const gallery = new ComfyGallery({ historyDir });
-  const run = record({ outputs: [{ source: { filename: 'x.png', subfolder: '', type: 'output' }, analysisDataUrl: png }] });
+  const run = record({
+    outputs: [{ source: { filename: 'x.png', subfolder: '', type: 'output' }, analysisDataUrl: png }],
+  });
   const metadata = { ...run, analysis: 'The final review', outputs: [{ source: run.outputs[0].source }] };
   const newer = record({ conversationId: run.conversationId, createdAt: '2026-11-08T02:00:00.000Z' });
-  await Promise.all([gallery.put(run, { persist: true }), gallery.put(metadata, { persist: true }), gallery.put(newer, { persist: false })]);
+  await Promise.all([
+    gallery.put(run, { persist: true }),
+    gallery.put(metadata, { persist: true }),
+    gallery.put(newer, { persist: false }),
+  ]);
   const list = await gallery.list(run.conversationId);
-  assert.deepEqual(list.runs.map((item) => item.id), [newer.id, run.id]);
+  assert.deepEqual(
+    list.runs.map(item => item.id),
+    [newer.id, run.id],
+  );
   gallery.clearMemory();
   const restored = await gallery.get(run.conversationId, run.id);
   assert.equal(restored.analysis, 'The final review');
@@ -83,13 +110,17 @@ test('queued updates retain analysis copies and newest runs list first', async (
   assert.equal((await readdir(join(historyDir, run.conversationId, 'generated', run.id))).length, 2);
 });
 
-test('invalid IDs, output descriptors, remote URLs and malformed copies never create history', async (t) => {
+test('invalid IDs, output descriptors, remote URLs and malformed copies never create history', async t => {
   const { historyDir } = await fixture(t);
   const gallery = new ComfyGallery({ historyDir });
   const source = record().outputs[0].source;
   const invalid = [
-    { id: '../outside' }, { conversationId: '../outside' }, { workflowId: '../unsafe' },
-    { comfyUrl: 'https://127.0.0.1:7821' }, { comfyUrl: 'http://example.com:7821' }, { comfyUrl: 'http://localhost:7821/../../outside' },
+    { id: '../outside' },
+    { conversationId: '../outside' },
+    { workflowId: '../unsafe' },
+    { comfyUrl: 'https://127.0.0.1:7821' },
+    { comfyUrl: 'http://example.com:7821' },
+    { comfyUrl: 'http://localhost:7821/../../outside' },
     { outputs: [{ source: { ...source, filename: '../secret.png' } }] },
     { outputs: [{ source: { ...source, filename: 'C:\\secret.png' } }] },
     { outputs: [{ source: { ...source, filename: '%2e%2e.png' } }] },
@@ -99,8 +130,17 @@ test('invalid IDs, output descriptors, remote URLs and malformed copies never cr
     { outputs: [{ source, analysisDataUrl: 'data:image/png;base64,SGVsbG8=' }] },
     { outputs: [{ source, analysisDataUrl: png.replace('image/png', 'image/jpeg') }] },
     { outputs: [{ source, analysisDataUrl: 'data:image/webp;base64,UklGRg==' }] },
-    { outputs: [{ source, analysisDataUrl: `data:image/png;base64,${Buffer.concat([Buffer.from(png.split(',')[1], 'base64'), Buffer.alloc(5 * 1024 * 1024)]).toString('base64')}` }] },
-    { parameters: { reference_image: png } }, { analysis: { image: png } }, { outputs: [] },
+    {
+      outputs: [
+        {
+          source,
+          analysisDataUrl: `data:image/png;base64,${Buffer.concat([Buffer.from(png.split(',')[1], 'base64'), Buffer.alloc(5 * 1024 * 1024)]).toString('base64')}`,
+        },
+      ],
+    },
+    { parameters: { reference_image: png } },
+    { analysis: { image: png } },
+    { outputs: [] },
   ];
   for (const change of invalid) await assert.rejects(gallery.put(record(change), { persist: true }), { status: 400 });
   await assert.rejects(gallery.get('../outside', randomUUID()), { status: 400 });
@@ -108,15 +148,17 @@ test('invalid IDs, output descriptors, remote URLs and malformed copies never cr
   await assert.rejects(readdir(historyDir), { code: 'ENOENT' });
 });
 
-test('tampered manifests and copied bytes cannot escape a run or bypass integrity checks', async (t) => {
+test('tampered manifests and copied bytes cannot escape a run or bypass integrity checks', async t => {
   const { directory, historyDir } = await fixture(t);
   const gallery = new ComfyGallery({ historyDir });
-  const run = record({ outputs: [{ source: { filename: 'x.png', subfolder: '', type: 'output' }, analysisDataUrl: png }] });
+  const run = record({
+    outputs: [{ source: { filename: 'x.png', subfolder: '', type: 'output' }, analysisDataUrl: png }],
+  });
   await gallery.put(run, { persist: true });
   const runDir = join(historyDir, run.conversationId, 'generated', run.id);
   const manifestPath = join(runDir, 'manifest.json');
   const originalManifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  const copy = (await readdir(runDir)).find((name) => name !== 'manifest.json');
+  const copy = (await readdir(runDir)).find(name => name !== 'manifest.json');
   await writeFile(join(runDir, copy), Buffer.from('tampered'));
   const restored = new ComfyGallery({ historyDir });
   await assert.rejects(restored.get(run.conversationId, run.id), { status: 400 });
@@ -141,7 +183,7 @@ test('tampered manifests and copied bytes cannot escape a run or bypass integrit
   assert.deepEqual(await readdir(outside), ['sentinel']);
 });
 
-test('symlinks in history ancestors and existing manifest files are rejected', async (t) => {
+test('symlinks in history ancestors and existing manifest files are rejected', async t => {
   const { directory, historyDir } = await fixture(t);
   const outside = join(directory, 'outside');
   await mkdir(outside);
@@ -156,23 +198,32 @@ test('symlinks in history ancestors and existing manifest files are rejected', a
   const outsideFile = join(outside, 'manifest.json');
   await writeFile(outsideFile, 'untouched');
   await rm(manifestPath);
-  try { await symlink(outsideFile, manifestPath, 'file'); }
-  catch (error) { if (error.code === 'EPERM') { t.diagnostic('File symlink check unavailable without Windows symlink permission; junction checks ran.'); return; } throw error; }
+  try {
+    await symlink(outsideFile, manifestPath, 'file');
+  } catch (error) {
+    if (error.code === 'EPERM') {
+      t.diagnostic('File symlink check unavailable without Windows symlink permission; junction checks ran.');
+      return;
+    }
+    throw error;
+  }
   await assert.rejects(gallery.put(run, { persist: true }), { status: 400 });
   await assert.rejects(new ComfyGallery({ historyDir }).get(run.conversationId, run.id), { status: 400 });
   assert.equal(await readFile(outsideFile, 'utf8'), 'untouched');
 });
 
-test('hardlinked manifests and analysis copies cannot alias an original file', async (t) => {
+test('hardlinked manifests and analysis copies cannot alias an original file', async t => {
   const { directory, historyDir } = await fixture(t);
   const gallery = new ComfyGallery({ historyDir });
-  const run = record({ outputs: [{ source: { filename: 'x.png', subfolder: '', type: 'output' }, analysisDataUrl: png }] });
+  const run = record({
+    outputs: [{ source: { filename: 'x.png', subfolder: '', type: 'output' }, analysisDataUrl: png }],
+  });
   await gallery.put(run, { persist: true });
   const runDir = join(historyDir, run.conversationId, 'generated', run.id);
   const manifest = join(runDir, 'manifest.json');
   const original = join(directory, 'original.png');
   await writeFile(original, Buffer.from(png.split(',')[1], 'base64'));
-  const copy = (await readdir(runDir)).find((name) => name !== 'manifest.json');
+  const copy = (await readdir(runDir)).find(name => name !== 'manifest.json');
   await rm(join(runDir, copy));
   await link(original, join(runDir, copy));
   await assert.rejects(new ComfyGallery({ historyDir }).get(run.conversationId, run.id), { status: 400 });
@@ -187,33 +238,86 @@ test('hardlinked manifests and analysis copies cannot alias an original file', a
   assert.ok(await readFile(manifestOriginal, 'utf8'));
 });
 
-test('original pixel dimensions survive persistence and later metadata writes',async t=>{
- const {historyDir}=await fixture(t),gallery=new ComfyGallery({historyDir}),run=record();run.outputs[0].width=1448;run.outputs[0].height=1448;await gallery.put(run,{persist:true});
- const restored=await new ComfyGallery({historyDir}).get(run.conversationId,run.id);assert.equal(restored.outputs[0].width,1448);assert.equal(restored.outputs[0].height,1448);
- const stale=record({...run,outputs:[{source:run.outputs[0].source}],analysis:{text:'Review'}});await gallery.put(stale,{persist:true});assert.equal((await gallery.get(run.conversationId,run.id)).outputs[0].width,1448);
+test('original pixel dimensions survive persistence and later metadata writes', async t => {
+  const { historyDir } = await fixture(t),
+    gallery = new ComfyGallery({ historyDir }),
+    run = record();
+  run.outputs[0].width = 1448;
+  run.outputs[0].height = 1448;
+  await gallery.put(run, { persist: true });
+  const restored = await new ComfyGallery({ historyDir }).get(run.conversationId, run.id);
+  assert.equal(restored.outputs[0].width, 1448);
+  assert.equal(restored.outputs[0].height, 1448);
+  const stale = record({ ...run, outputs: [{ source: run.outputs[0].source }], analysis: { text: 'Review' } });
+  await gallery.put(stale, { persist: true });
+  assert.equal((await gallery.get(run.conversationId, run.id)).outputs[0].width, 1448);
 });
 
-test('persisted gallery copies do not accumulate in process memory, but unsaved copies stay recoverable',async t=>{
- const {historyDir}=await fixture(t),gallery=new ComfyGallery({historyDir});
- const run=record({outputs:[{source:{filename:'copy.png',subfolder:'',type:'output'},analysisDataUrl:png}]});
- await gallery.put(run);assert.equal(gallery.records.size,1);
- await gallery.put(run,{persist:true});assert.equal(gallery.records.size,0);
- assert.deepEqual(await gallery.get(run.conversationId,run.id),run);
+test('persisted gallery copies do not accumulate in process memory, but unsaved copies stay recoverable', async t => {
+  const { historyDir } = await fixture(t),
+    gallery = new ComfyGallery({ historyDir });
+  const run = record({
+    outputs: [{ source: { filename: 'copy.png', subfolder: '', type: 'output' }, analysisDataUrl: png }],
+  });
+  await gallery.put(run);
+  assert.equal(gallery.records.size, 1);
+  await gallery.put(run, { persist: true });
+  assert.equal(gallery.records.size, 0);
+  assert.deepEqual(await gallery.get(run.conversationId, run.id), run);
 });
-test('original lookup reads metadata without loading unrelated analysis copies or retaining the last write result',async t=>{
- const {historyDir}=await fixture(t),gallery=new ComfyGallery({historyDir});
- const run=record({outputs:[{source:{filename:'copy.png',subfolder:'',type:'output'},analysisDataUrl:png}]});
- await gallery.put(run,{persist:true});assert.equal(await gallery.pending,undefined);
- const directory=join(historyDir,run.conversationId,'generated',run.id),copy=(await readdir(directory)).find(file=>file.startsWith('analysis-'));
- await rm(join(directory,copy));
- const metadata=await gallery.get(run.conversationId,run.id,{includeImages:false});
- assert.equal(metadata.outputs[0].analysisDataUrl,undefined);assert.equal(metadata.outputs[0].source.filename,'copy.png');
- await assert.rejects(gallery.get(run.conversationId,run.id),{status:404});
+test('original lookup reads metadata without loading unrelated analysis copies or retaining the last write result', async t => {
+  const { historyDir } = await fixture(t),
+    gallery = new ComfyGallery({ historyDir });
+  const run = record({
+    outputs: [{ source: { filename: 'copy.png', subfolder: '', type: 'output' }, analysisDataUrl: png }],
+  });
+  await gallery.put(run, { persist: true });
+  assert.equal(await gallery.pending, undefined);
+  const directory = join(historyDir, run.conversationId, 'generated', run.id),
+    copy = (await readdir(directory)).find(file => file.startsWith('analysis-'));
+  await rm(join(directory, copy));
+  const metadata = await gallery.get(run.conversationId, run.id, { includeImages: false });
+  assert.equal(metadata.outputs[0].analysisDataUrl, undefined);
+  assert.equal(metadata.outputs[0].source.filename, 'copy.png');
+  await assert.rejects(gallery.get(run.conversationId, run.id), { status: 404 });
 });
 
-test('video kind and timestamped reduced analysis frames survive persistence without copying original video',async t=>{
- const directory=await mkdtemp(join(tmpdir(),'atelier-video-gallery-'));t.after(()=>rm(directory,{recursive:true,force:true}));
- const gallery=new ComfyGallery({historyDir:directory});
- const record={id:'a1111111-1111-4111-8111-111111111111',conversationId:'b2222222-2222-4222-8222-222222222222',workflowId:'motion',workflowName:'Custom motion',mediaType:'video',createdAt:new Date().toISOString(),prompt:'Slow pan',parameters:{stage:'draft',frames:81,fps:16},comfyUrl:'http://127.0.0.1:8188',outputs:[{source:{filename:'clip.mp4',subfolder:'',type:'output'},analysisDataUrl:'data:image/png;base64,iVBORw0KGgo=',analysisFrames:[{time:0,url:'data:image/png;base64,iVBORw0KGgo='},{time:2,url:'data:image/jpeg;base64,/9j/'}]}]};
- await gallery.put(record,{persist:true});const loaded=await new ComfyGallery({historyDir:directory}).get(record.conversationId,record.id);assert.equal(loaded.mediaType,'video');assert.deepEqual(loaded.outputs[0].analysisFrames,record.outputs[0].analysisFrames);const metadata=await gallery.get(record.conversationId,record.id,{includeImages:false});assert.equal(metadata.outputs[0].analysisFrames,undefined);await assert.rejects(gallery.put({...record,outputs:[{...record.outputs[0],analysisFrames:[{time:-1,url:'data:image/png;base64,iVBORw0KGgo='}]}]}),/vidéo|video|time|image/i);
+test('video kind and timestamped reduced analysis frames survive persistence without copying original video', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'atelier-video-gallery-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const gallery = new ComfyGallery({ historyDir: directory });
+  const record = {
+    id: 'a1111111-1111-4111-8111-111111111111',
+    conversationId: 'b2222222-2222-4222-8222-222222222222',
+    workflowId: 'motion',
+    workflowName: 'Custom motion',
+    mediaType: 'video',
+    createdAt: new Date().toISOString(),
+    prompt: 'Slow pan',
+    parameters: { stage: 'draft', frames: 81, fps: 16 },
+    comfyUrl: 'http://127.0.0.1:8188',
+    outputs: [
+      {
+        source: { filename: 'clip.mp4', subfolder: '', type: 'output' },
+        analysisDataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+        analysisFrames: [
+          { time: 0, url: 'data:image/png;base64,iVBORw0KGgo=' },
+          { time: 2, url: 'data:image/jpeg;base64,/9j/' },
+        ],
+      },
+    ],
+  };
+  await gallery.put(record, { persist: true });
+  const loaded = await new ComfyGallery({ historyDir: directory }).get(record.conversationId, record.id);
+  assert.equal(loaded.mediaType, 'video');
+  assert.deepEqual(loaded.outputs[0].analysisFrames, record.outputs[0].analysisFrames);
+  const metadata = await gallery.get(record.conversationId, record.id, { includeImages: false });
+  assert.equal(metadata.outputs[0].analysisFrames, undefined);
+  await assert.rejects(
+    gallery.put({
+      ...record,
+      outputs: [{ ...record.outputs[0], analysisFrames: [{ time: -1, url: 'data:image/png;base64,iVBORw0KGgo=' }] }],
+    }),
+    /vidéo|video|time|image/i,
+  );
 });

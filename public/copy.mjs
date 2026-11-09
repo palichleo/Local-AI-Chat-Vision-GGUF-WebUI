@@ -16,12 +16,20 @@ export function setupCopy(root, { writeText = text => navigator.clipboard.writeT
       ? button.closest('.code-block').querySelector('code').textContent
       : quoteText(button.closest('blockquote').querySelector('.copy-content')).trim();
     if (!text) return;
-    const label = button.querySelector('span'), original = label.textContent, title = button.title;
+    const label = button.querySelector('span'),
+      original = label.textContent,
+      title = button.title;
     button.disabled = true;
     try {
       await writeText(text);
-      label.textContent = 'Copié'; button.title = 'Copié'; announce('Texte copié.');
-      setTimeout(() => { label.textContent = original; button.title = title; button.disabled = false; }, 1600);
+      label.textContent = 'Copié';
+      button.title = 'Copié';
+      announce('Texte copié.');
+      setTimeout(() => {
+        label.textContent = original;
+        button.title = title;
+        button.disabled = false;
+      }, 1600);
     } catch {
       button.disabled = false;
       announce('Copie indisponible. Sélectionnez le texte pour le copier manuellement.');

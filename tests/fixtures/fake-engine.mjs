@@ -2,7 +2,7 @@
 import http from 'node:http';
 
 const args = process.argv.slice(2);
-const arg = (name) => args[args.indexOf(name) + 1];
+const arg = name => args[args.indexOf(name) + 1];
 if (!args.includes('--offline') || arg('--host') !== '127.0.0.1') process.exit(2);
 const key = arg('--api-key');
 console.log(`Bibliothèque GPU : ${process.env.GGML_BACKEND_PATH || 'aucune'}`);
@@ -20,10 +20,13 @@ const server = http.createServer(async (req, res) => {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const body = JSON.parse(Buffer.concat(chunks));
-  if (req.url === '/v1/chat/completions/input_tokens') { res.writeHead(200, {'Content-Type':'application/json'}); return res.end(JSON.stringify({input_tokens:321})); }
+  if (req.url === '/v1/chat/completions/input_tokens') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ input_tokens: 321 }));
+  }
   console.log(`Limite de sortie : ${body.max_tokens}`);
   const content = body.messages.at(-1).content;
-  const isImage = Array.isArray(content) && content.some((part) => part.type === 'image_url');
+  const isImage = Array.isArray(content) && content.some(part => part.type === 'image_url');
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
   res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'Je réfléchis. ' } }] })}\n\n`);
   if (content === 'lent') {

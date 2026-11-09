@@ -6,8 +6,20 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../server.mjs';
 import { History } from '../lib/history.mjs';
-const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
-const record = () => ({ id: randomUUID(), messages: [{ role: 'user', content: [{ type: 'text', text: 'Conversation de test' }, { type: 'image_url', image_url: { url: png } }] }] });
+const png =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
+const record = () => ({
+  id: randomUUID(),
+  messages: [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Conversation de test' },
+        { type: 'image_url', image_url: { url: png } },
+      ],
+    },
+  ],
+});
 
 test('supprimer l’historique exige confirmation et jeton, fonctionne même désactivé et préserve les préférences', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'atelier-clear-'));
@@ -16,7 +28,12 @@ test('supprimer l’historique exige confirmation et jeton, fonctionne même dé
   try {
     app = await createApplication({ port: 0, dataDir, historyDir });
     const initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
-    const post = (route, data, token = initial.token) => fetch(`${app.url}/api/${route}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const post = (route, data, token = initial.token) =>
+      fetch(`${app.url}/api/${route}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
     for (const enabled of [true, false]) {
       await post('preferences', { saveHistory: true, theme: 'light' });
       const saved = record();
@@ -27,7 +44,7 @@ test('supprimer l’historique exige confirmation et jeton, fonctionne même dé
       assert.equal((await post('history/clear', { confirm: true }, '')).status, 401);
       assert.equal((await post('history/clear', {})).status, 400);
       assert.equal((await post('history/clear', { confirm: false })).status, 400);
-      assert.ok((await readdir(join(historyDir, saved.id))).some((name) => name.startsWith('image-')));
+      assert.ok((await readdir(join(historyDir, saved.id))).some(name => name.startsWith('image-')));
       const deleted = await post('history/clear', { confirm: true });
       assert.equal(deleted.status, 200);
       assert.deepEqual(await deleted.json(), { cleared: true });
@@ -36,7 +53,10 @@ test('supprimer l’historique exige confirmation et jeton, fonctionne même dé
       assert.equal(await readFile(join(dataDir, 'outside.txt'), 'utf8'), 'À conserver');
       assert.equal((await post('history/clear', { confirm: true })).status, 200);
     }
-  } finally { await app?.close(); await rm(dataDir, { recursive: true, force: true }); }
+  } finally {
+    await app?.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
 });
 
 test('la suppression attend les sauvegardes déjà acceptées puis permet de nouveaux échanges', async () => {
@@ -53,7 +73,9 @@ test('la suppression attend les sauvegardes déjà acceptées puis permet de nou
     await history.save(fresh);
     assert.equal((await history.list()).conversations.length, 1);
     assert.deepEqual((await history.read(fresh.id)).messages, fresh.messages);
-  } finally { await rm(folder, { recursive: true, force: true }); }
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
 });
 
 test('la suppression refuse un autre dossier et un lien pointant hors de history', async () => {
@@ -66,5 +88,7 @@ test('la suppression refuse un autre dossier et un lien pointant hors de history
     await symlink(outside, join(folder, 'history'), process.platform === 'win32' ? 'junction' : 'dir');
     await assert.rejects(new History(join(folder, 'history')).clear());
     assert.equal(await readFile(join(outside, 'keep.txt'), 'utf8'), 'Intact');
-  } finally { await rm(folder, { recursive: true, force: true }); }
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
 });

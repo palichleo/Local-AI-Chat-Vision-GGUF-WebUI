@@ -8,11 +8,19 @@ export async function readSSE(stream, onEvent) {
     while ((match = /\r?\n\r?\n/.exec(buffer))) {
       const frame = buffer.slice(0, match.index);
       buffer = buffer.slice(match.index + match[0].length);
-      const data = frame.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n');
+      const data = frame
+        .split(/\r?\n/)
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trimStart())
+        .join('\n');
       if (!data) continue;
-      if (data === '[DONE]') { complete = true; return; }
+      if (data === '[DONE]') {
+        complete = true;
+        return;
+      }
       const event = JSON.parse(data);
-      if (event.error) throw new Error(typeof event.error === 'string' ? event.error : event.error.message || 'Erreur du moteur.');
+      if (event.error)
+        throw new Error(typeof event.error === 'string' ? event.error : event.error.message || 'Erreur du moteur.');
       await onEvent(event);
     }
   };

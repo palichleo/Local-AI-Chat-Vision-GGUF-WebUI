@@ -7,26 +7,45 @@ class Surface extends EventTarget {
   properties = new Map();
   reads = 0;
   style = { setProperty: (key, value) => this.properties.set(key, value) };
-  setAttribute(key, value) { this.attributes.set(key, value); }
-  removeAttribute(key) { this.attributes.delete(key); }
-  getBoundingClientRect() { this.reads++; return { left: 100, top: 50 }; }
+  setAttribute(key, value) {
+    this.attributes.set(key, value);
+  }
+  removeAttribute(key) {
+    this.attributes.delete(key);
+  }
+  getBoundingClientRect() {
+    this.reads++;
+    return { left: 100, top: 50 };
+  }
   move(x, y, pointerType = 'mouse') {
     this.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: x, clientY: y, pointerType }));
   }
 }
 function environment() {
-  const host = new EventTarget(), media = new EventTarget(), frames = new Map();
-  host.document = new EventTarget(); host.document.hidden = false;
-  media.matches = true; host.matchMedia = () => media;
+  const host = new EventTarget(),
+    media = new EventTarget(),
+    frames = new Map();
+  host.document = new EventTarget();
+  host.document.hidden = false;
+  media.matches = true;
+  host.matchMedia = () => media;
   let id = 0;
-  host.requestAnimationFrame = callback => { frames.set(++id, callback); return id; };
+  host.requestAnimationFrame = callback => {
+    frames.set(++id, callback);
+    return id;
+  };
   host.cancelAnimationFrame = frame => frames.delete(frame);
-  const flush = () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(fn => fn()); };
+  const flush = () => {
+    const callbacks = [...frames.values()];
+    frames.clear();
+    callbacks.forEach(fn => fn());
+  };
   return { host, media, frames, flush };
 }
 
 test('material lighting coalesces pointer moves and schedules no idle animation', () => {
-  const env = environment(), surface = new Surface();
+  const env = environment(),
+    surface = new Surface();
   const dispose = setupMaterialLighting([surface], env.host);
   assert.equal(env.frames.size, 0);
   for (let i = 0; i < 100; i++) surface.move(100 + i, 80);
@@ -48,7 +67,8 @@ test('material lighting coalesces pointer moves and schedules no idle animation'
 });
 
 test('touch, reduced motion and background tabs never paint a moving light', () => {
-  const env = environment(), surface = new Surface();
+  const env = environment(),
+    surface = new Surface();
   const dispose = setupMaterialLighting([surface], env.host);
   surface.move(200, 100, 'touch');
   assert.equal(env.frames.size, 0);
@@ -56,12 +76,15 @@ test('touch, reduced motion and background tabs never paint a moving light', () 
   surface.move(200, 100);
   assert.equal(env.frames.size, 0);
   env.media.matches = true;
-  surface.move(200, 100); env.flush();
-  env.media.matches = false; env.media.dispatchEvent(new Event('change'));
+  surface.move(200, 100);
+  env.flush();
+  env.media.matches = false;
+  env.media.dispatchEvent(new Event('change'));
   assert.ok(!surface.attributes.has('data-material-lit'));
   env.media.matches = true;
   surface.move(200, 100);
-  env.host.document.hidden = true; env.host.document.dispatchEvent(new Event('visibilitychange'));
+  env.host.document.hidden = true;
+  env.host.document.dispatchEvent(new Event('visibilitychange'));
   assert.equal(env.frames.size, 0);
   surface.move(200, 100);
   assert.equal(env.frames.size, 0);
@@ -70,9 +93,12 @@ test('touch, reduced motion and background tabs never paint a moving light', () 
 });
 
 test('moving between surfaces, blur and page exit clear reflections and pending work', () => {
-  const env = environment(), first = new Surface(), second = new Surface();
+  const env = environment(),
+    first = new Surface(),
+    second = new Surface();
   setupMaterialLighting([first, second], env.host);
-  first.move(130, 80); env.flush();
+  first.move(130, 80);
+  env.flush();
   second.move(250, 100);
   assert.ok(!first.attributes.has('data-material-lit'));
   env.flush();

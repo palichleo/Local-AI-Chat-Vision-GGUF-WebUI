@@ -1,15 +1,22 @@
 // One pending frame at most; nothing runs while the pointer is idle.
 export function setupMaterialLighting(surfaces, host = window) {
   const media = host.matchMedia('(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)');
-  let frame = null, pending = null, active = null;
+  let frame = null,
+    pending = null,
+    active = null;
   function reset() {
     if (frame !== null) host.cancelAnimationFrame(frame);
-    frame = null; pending = null;
-    active?.removeAttribute('data-material-lit'); active = null;
+    frame = null;
+    pending = null;
+    active?.removeAttribute('data-material-lit');
+    active = null;
   }
   function paint() {
     frame = null;
-    if (!pending || !media.matches || host.document.hidden) { reset(); return; }
+    if (!pending || !media.matches || host.document.hidden) {
+      reset();
+      return;
+    }
     const { surface, x, y } = pending;
     pending = null;
     const rect = surface.getBoundingClientRect();
@@ -39,7 +46,8 @@ export function setupMaterialLighting(surfaces, host = window) {
   host.addEventListener('blur', reset);
   host.document.addEventListener('visibilitychange', reset);
   function dispose() {
-    reset(); removers.forEach(remove => remove());
+    reset();
+    removers.forEach(remove => remove());
     media.removeEventListener('change', reset);
     host.removeEventListener('blur', reset);
     host.document.removeEventListener('visibilitychange', reset);
