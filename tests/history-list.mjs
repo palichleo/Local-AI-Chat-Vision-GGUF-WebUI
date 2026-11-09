@@ -1,8 +1,8 @@
 import{readFile}from'node:fs/promises';import{runInNewContext}from'node:vm';
 import test from 'node:test';import assert from 'node:assert/strict';import{setupProjectNavigation,projectGroups}from'../public/project-navigation.mjs';
 class Element{
- constructor(tag='',className='',textContent=''){Object.assign(this,{tag,className,textContent,children:[],dataset:{},attributes:{},hidden:false,disabled:false,value:'',classList:{remove(){}}});}
- append(...items){this.children.push(...items);}replaceChildren(...items){this.children=items;}setAttribute(name,value){this.attributes[name]=value;}addEventListener(){}focus(){}close(){this.open=false;}showModal(){this.open=true;}
+ constructor(tag='',className='',textContent=''){Object.assign(this,{tag,className,textContent,children:[],dataset:{},attributes:{},hidden:false,disabled:false,value:'',scrollTop:0,classList:{remove(){}}});}
+ append(...items){this.children.push(...items);}replaceChildren(...items){this.children=items;this.scrollTop=0;}setAttribute(name,value){this.attributes[name]=value;}addEventListener(){}focus(){}close(){this.open=false;}showModal(){this.open=true;}scrollIntoView(){this.revealed=true;}
 }
 function fixture(t,patch={}){
  const previous=globalThis.document,nodes=new Map(),$=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
@@ -13,7 +13,7 @@ function fixture(t,patch={}){
 const walk=element=>[element,...element.children.flatMap(walk)];
 test('one project level groups current and saved conversations without duplicates and keeps delete actions',t=>{
  const{$,calls}=fixture(t);for(const id of ['history-list','history-list-mobile']){
-  const groups=$(id).children;assert.equal(groups.length,2);const conversations=groups[0].children[1].children;assert.equal(conversations.length,2);
+  const groups=$(id).children;assert.equal(groups.length,2);const conversations=groups[1].children[1].children;assert.equal(conversations.length,2);
   assert.equal(conversations[0].children[0].dataset.conversationId,'current');assert.equal(conversations[0].children[0].attributes['aria-current'],'page');conversations[1].children[0].onclick();conversations[0].children[1].onclick();
  }assert.deepEqual(calls,[['open','past'],['delete','current'],['open','past'],['delete','current']]);
 });
@@ -22,10 +22,10 @@ test('history disabled still shows the current unsaved conversation only in its 
 });
 test('home shows ten most recent first prompts, a visual cover and no invented active conversation',t=>{
  const items=Array.from({length:12},(_,i)=>({id:String(i),title:'Title '+i,firstPrompt:'First prompt '+i,projectId:'project',updatedAt:String(i).padStart(2,'0'),...(i===11?{previewUrl:'/media/preview'}:{})}));const{$,calls}=fixture(t,{view:'home',historyItems:items});
- assert.equal(walk($('history-list')).filter(element=>element.attributes['aria-current']).length,0);const card=$('project-grid').children[0];assert.match(card.className,/is-visual/);const recent=walk(card).filter(element=>element.className==='project-recent-item');assert.equal(recent.length,10);assert.equal(recent[0].children[0].textContent,'First prompt 11');recent[0].onclick();assert.deepEqual(calls,[['open','11']]);
+ assert.equal(walk($('history-list')).filter(element=>element.attributes['aria-current']).length,0);const card=$('project-grid').children[1];assert.match(card.className,/is-visual/);const recent=walk(card).filter(element=>element.className==='project-recent-item');assert.equal(recent.length,10);assert.equal(recent[0].children[0].textContent,'First prompt 11');recent[0].onclick();assert.deepEqual(calls,[['open','11']]);
 });
 test('project collapse, rename and project-specific new conversation keep the hierarchy intact',async t=>{
- const{$,calls,state}=fixture(t);const group=$('history-list').children[0];group.children[0].children[0].onclick();assert.equal($('history-list').children[0].children[1].hidden,true);
+ const{$,calls,state}=fixture(t);const group=$('history-list').children[1];group.children[0].children[0].onclick();assert.equal($('history-list').children[1].children[1].hidden,true);
  $('project-create').onclick();$('project-name').value='A new idea';await $('project-form').onsubmit({preventDefault(){}});assert.ok(state.projects.some(project=>project.name==='A new idea'));
  const added=walk($('history-list')).find(element=>element.attributes['aria-label']==='Nouvelle conversation dans A new idea');added.onclick();assert.ok(calls.some(call=>call[0]==='new'&&call[1]==='created'));$('brand-home').onclick({preventDefault(){}});assert.deepEqual(calls.at(-1),['home']);
 });
@@ -34,6 +34,32 @@ test('moving an unsaved conversation changes its organization without saving cha
 });
 test('unknown old project associations stay visible in the default group and sorting does not mutate history',()=>{
  const items=[{id:'old',projectId:'missing',updatedAt:'2025'},{id:'new',updatedAt:'2026'}],groups=projectGroups([{id:'inbox',name:'Conversations'}],items);assert.deepEqual(groups[0].conversations.map(item=>item.id),['new','old']);assert.equal(items[0].id,'old');
+});
+
+test('selecting or saving an older conversation keeps both sidebar orders and projects in place',t=>{
+ const newer={id:'new',title:'New',projectId:'project',createdAt:'2026-11-08',updatedAt:'2026-11-08'},older={id:'old',title:'Old',projectId:'project',createdAt:'2026-11-07',updatedAt:'2026-11-07'};
+ const {ui,state,$,calls}=fixture(t,{conversationId:newer.id,historyItems:[newer,older]});
+ const rows=id=>walk($(id)).filter(element=>element.className.startsWith('history-item')).map(element=>element.dataset.conversationId);
+ assert.deepEqual(rows('history-list'),['new','old']);const projects=$('history-list').children.map(group=>group.children[0].children[1].attributes['aria-label']);
+ $('history-list').scrollTop=240;$('history-list-mobile').scrollTop=120;
+ walk($('history-list')).find(element=>element.dataset.conversationId==='old').onclick();assert.deepEqual(calls,[['open','old']]);state.conversationId=older.id;older.updatedAt='2026-11-09';state.historyItems=[older,newer];ui.render();assert.equal($('history-list').scrollTop,240);assert.equal($('history-list-mobile').scrollTop,120);
+ for(const id of ['history-list','history-list-mobile'])assert.deepEqual(rows(id),['new','old']);
+ assert.deepEqual($('history-list').children.map(group=>group.children[0].children[1].attributes['aria-label']),projects);
+ assert.equal(walk($('history-list')).find(element=>element.dataset.conversationId==='old').attributes['aria-current'],'page');
+});
+
+test('creating a conversation reveals its first row and expands a previously collapsed project',t=>{
+ const {ui,state,$}=fixture(t);$('history-list').children[1].children[0].children[0].onclick();assert.equal($('history-list').children[1].children[1].hidden,true);
+ state.conversationId=null;ui.render();const group=$('history-list').children[1];assert.equal(group.children[1].hidden,false);assert.equal(group.children[1].children[0].revealed,true);
+ group.children[0].children[0].onclick();assert.equal($('history-list').children[1].children[1].hidden,true,'the user can still collapse the active draft project');
+});
+
+test('a new unsaved conversation is first under its project and stays first after saving',t=>{
+ const past={id:'past',title:'Past',projectId:'project',createdAt:'2026-11-07',updatedAt:'2026-11-09'},other={id:'other',title:'Other',projectId:'inbox',createdAt:'2026-11-08',updatedAt:'2026-11-08'};
+ const {ui,state,$}=fixture(t,{conversationId:null,historyItems:[past,other]});
+ const projectRows=()=>walk($('history-list').children[1].children[1]).filter(element=>element.className.startsWith('history-item')).map(element=>element.dataset.conversationId);
+ assert.deepEqual(projectRows(),['','past']);state.conversationId='created';state.historyItems.push({id:'created',title:'New',projectId:'project',createdAt:'2026-11-09',updatedAt:'2026-11-09'});ui.render();assert.deepEqual(projectRows(),['created','past']);
+ const groups=projectGroups(state.projects,[{id:'b',createdAt:'same',projectId:'inbox'},{id:'a',createdAt:'same',projectId:'inbox'}]);assert.deepEqual(groups.map(group=>group.id),['inbox','project']);assert.deepEqual(groups[0].conversations.map(item=>item.id),['a','b']);
 });
 
 test('logo navigation keeps the current messages and draft and closes the mobile tree',async()=>{

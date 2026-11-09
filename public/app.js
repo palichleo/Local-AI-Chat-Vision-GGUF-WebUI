@@ -114,7 +114,7 @@ function persistConversation() {
     state.savingHistory = true;
     try {
       const { conversation } = await (await api('history/save', { id, ...snapshot, instructions, projectId })).json();
-      state.historyItems = [conversation, ...state.historyItems.filter((item) => item.id !== id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      state.historyItems = [conversation, ...state.historyItems.filter((item) => item.id !== id)].sort((a, b) => (b.createdAt||b.updatedAt).localeCompare(a.createdAt||a.updatedAt)||a.id.localeCompare(b.id));
       if (state.conversationId === id && (!state.archiveSnapshot || state.archiveSnapshot === snapshot)) state.historyDirty = false;
       renderHistory();
       return true;

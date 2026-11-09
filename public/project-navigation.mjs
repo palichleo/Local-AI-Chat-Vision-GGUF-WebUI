@@ -3,12 +3,12 @@ import {dismissSettingsOnOutsideClick} from './settings-controls.mjs';
 export function projectGroups(projects,conversations){
  const groups=projects.map(project=>({...project,conversations:[]})),byId=new Map(groups.map(project=>[project.id,project]));
  for(const conversation of conversations)(byId.get(conversation.projectId)||byId.get('inbox'))?.conversations.push(conversation);
- for(const group of groups)group.conversations.sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));
- return groups.sort((a,b)=>(b.conversations[0]?.updatedAt||'').localeCompare(a.conversations[0]?.updatedAt||''));
+ for(const group of groups)group.conversations.sort((a,b)=>Number(b.temporary===true)-Number(a.temporary===true)||(b.createdAt||b.updatedAt||'').localeCompare(a.createdAt||a.updatedAt||'')||(a.id||'').localeCompare(b.id||''));
+ return groups;
 }
 
 export function setupProjectNavigation({$,state,node,icon,api,notice,openConversation,newConversation,removeConversation,showHome,onBusy=()=>{}}){
- const collapsed=new Set();let editing=null,working=false;
+ const collapsed=new Set();let editing=null,working=false,draftProject=null;
  const busy=()=>working||state.savingHistory||state.generating||state.preparing||state.loadingHistory||state.updating||state.closingApp||!!state.status.toolJob;
  const date=value=>value?new Date(value).toLocaleDateString('fr-FR',{day:'numeric',month:'short'}):'';
  function button(label,cls,action,symbol){const element=node('button',cls);element.type='button';element.title=label;element.setAttribute('aria-label',label);if(symbol)element.append(icon(symbol));element.onclick=action;element.disabled=!!busy();return element;}
@@ -44,18 +44,19 @@ export function setupProjectNavigation({$,state,node,icon,api,notice,openConvers
   if(!item.temporary&&state.saveHistory){const remove=button('Supprimer la conversation : '+item.title,'history-delete-button icon-button',()=>removeConversation(item),'trash');row.append(remove);}
   return row;
  }
- function renderSidebar(groups){
+ function renderSidebar(groups,revealDraft){
   for(const id of ['history-list','history-list-mobile']){
-   const list=$(id);list.replaceChildren();
+   const list=$(id),scrollTop=list.scrollTop;let draftRow;list.replaceChildren();
    for(const group of groups){
     const section=node('section','project-group'+(state.view==='chat'&&state.projectId===group.id?' is-active':'')),header=node('div','project-row'),children=node('div','project-conversations');
     const expanded=!collapsed.has(group.id),toggle=button((expanded?'Replier ':'Déplier ')+group.name,'project-toggle icon-button',()=>{if(collapsed.has(group.id))collapsed.delete(group.id);else collapsed.add(group.id);render();},'chevron');toggle.setAttribute('aria-expanded',String(expanded));children.id=id+'-'+group.id;toggle.setAttribute('aria-controls',children.id);
     const open=button(group.name,'project-open',()=>openProject(group),'folder');open.append(node('span','project-name',group.name),node('span','project-count',String(group.conversations.length)));
     const rename=button('Renommer '+group.name,'project-rename icon-button',()=>edit(group),'edit');header.append(toggle,open,rename);children.hidden=!expanded;
-    for(const item of group.conversations)children.append(conversationRow(item));
+    for(const item of group.conversations){const row=conversationRow(item);children.append(row);if(revealDraft&&item.temporary&&group.id===state.projectId)draftRow=row;}
     if(!group.conversations.length){const create=button('Nouvelle conversation dans '+group.name,'project-empty',()=>newConversation(group.id),'plus');create.append(node('span','','Nouvelle conversation'));children.append(create);}
     section.append(header,children);list.append(section);
    }
+   list.scrollTop=scrollTop;draftRow?.scrollIntoView?.({block:'nearest'});
   }
  }
  function renderHome(groups){
@@ -68,15 +69,16 @@ export function setupProjectNavigation({$,state,node,icon,api,notice,openConvers
    const rename=button('Renommer '+group.name,'icon-button project-card-rename',()=>edit(group),'edit');head.append(title,rename);card.append(head,node('p','project-card-meta',conversations.length+' conversation'+(conversations.length>1?'s':'')+(visual?' · Visuel':' · Texte')));
    const list=node('div','project-recent');
    for(const item of conversations.slice(0,10)){
-    const row=button(item.firstPrompt||item.title,'project-recent-item',()=>openConversation(item.id));row.append(node('span','',item.firstPrompt||item.title),node('time','',date(item.updatedAt)));list.append(row);
+    const row=button(item.firstPrompt||item.title,'project-recent-item',()=>openConversation(item.id));row.append(node('span','',item.firstPrompt||item.title),node('time','',date(item.createdAt||item.updatedAt)));list.append(row);
    }
    if(!conversations.length)list.append(node('p','project-card-empty','Votre prochaine idée commence ici.'));
    const footer=node('div','project-card-footer'),create=button('Nouvelle conversation dans '+group.name,'project-card-new',()=>newConversation(group.id),'plus');create.append(node('span','','Nouvelle conversation'));footer.append(create);card.append(list,footer);grid.append(card);
   }
  }
  function render(){
+  const nextDraft=state.view==='chat'&&!state.conversationId?state.projectId:null,revealDraft=nextDraft!==null&&nextDraft!==draftProject;draftProject=nextDraft;if(revealDraft)collapsed.delete(nextDraft);
   const groups=projectGroups(state.projects||[{id:'inbox',name:'Conversations'}],entries());
-  $('history-section').hidden=false;$('history-mobile').hidden=!state.saveHistory;renderSidebar(groups);if(state.view==='home')renderHome(groups);
+  $('history-section').hidden=false;$('history-mobile').hidden=!state.saveHistory;renderSidebar(groups,revealDraft);if(state.view==='home')renderHome(groups);
   const select=$('conversation-project');select.replaceChildren();for(const project of state.projects||[]){const option=node('option','',project.name);option.value=project.id;select.append(option);}select.value=state.projectId||'inbox';
   $('home-open').setAttribute('aria-current',state.view==='home'?'page':'false');
   $('home-view').hidden=state.view!=='home';$('chat-header').hidden=state.view==='home';document.body.dataset.view=state.view||'home';sync();

@@ -288,3 +288,9 @@ test('a rejected removal preserves the selected profile and its edited paths',as
  const ui=await settingsUI({request:call=>call.route==='models'?Response.json({models:[profile],detected:[],errors:[]}):call.route==='models/remove'?Response.json({error:'Busy'},{status:409}):undefined});await ui.open();ui.$('llm-name').value='Unsaved name';await ui.removeLLM();
  assert.equal(ui.state.models.length,1);assert.equal(ui.state.config.modelPath,'saved.gguf');assert.equal(ui.$('llm-name').value,'Unsaved name');assert.equal(ui.$('remove-llm').disabled,false);
 });
+
+test('saving an older conversation never moves it ahead of a newer creation',async()=>{
+ const old={id:'old',title:'Old',createdAt:'2026-11-07',updatedAt:'2026-11-07'},recent={id:'new',title:'New',createdAt:'2026-11-08',updatedAt:'2026-11-08'};
+ const ui=await settingsUI({request:call=>call.route==='history/save'?Response.json({conversation:{...old,updatedAt:'2026-11-09'}}):undefined});ui.state.conversationId=old.id;ui.state.historyItems=[recent,old];ui.state.messages=[{role:'user',content:'Existing message'}];
+ assert.equal(await ui.persistConversation(),true);assert.equal(ui.state.historyItems[0].id,recent.id);assert.equal(ui.state.historyItems[1].id,old.id);
+});

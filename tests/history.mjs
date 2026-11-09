@@ -5,8 +5,18 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../server.mjs';
+import {History} from '../lib/history.mjs';
 
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
+
+test('history stays ordered by creation after an old conversation is saved again and reopened',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'atelier-history-order-'));t.after(()=>rm(root,{recursive:true,force:true}));const directory=join(root,'history'),history=new History(directory),older=randomUUID(),newer=randomUUID(),messages=[{role:'user',content:'Keep this conversation'}];
+ for(const [id,createdAt]of [[older,'2026-11-07T00:00:00.000Z'],[newer,'2026-11-08T00:00:00.000Z']]){
+  await history.save({id,messages});const path=join(directory,id,'conversation.json'),stored=JSON.parse(await readFile(path,'utf8'));await writeFile(path,JSON.stringify({...stored,createdAt,updatedAt:createdAt}));
+ }
+ assert.deepEqual((await history.list()).conversations.map(item=>item.id),[newer,older]);const resaved=await history.save({id:older,messages:[...messages,{role:'assistant',content:'A later reply'}]});assert.equal(resaved.createdAt,'2026-11-07T00:00:00.000Z');assert.ok(resaved.updatedAt>resaved.createdAt);
+ assert.deepEqual((await history.list()).conversations.map(item=>item.id),[newer,older]);assert.deepEqual((await new History(directory).list()).conversations.map(item=>item.id),[newer,older]);
+});
 
 test('historique optionnel, images séparées et reprise après redémarrage', async () => {
   const folder = await mkdtemp(join(tmpdir(), 'atelier-history-'));
