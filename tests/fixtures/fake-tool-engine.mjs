@@ -77,7 +77,12 @@ const server = http.createServer(async (req, res) => {
                 ? 'Produire la vidéo finale avec le mouvement de caméra prévu.'
                 : 'Vérifier le mouvement de caméra avant la vidéo finale.',
             }
-          : { prompt: 'A red boat' },
+          : text.includes('invented source')
+            ? // What a small model does with an optional source it cannot fill: copy the placeholder.
+              { prompt: 'A red boat', source: { output: 'run_id' } }
+            : text.startsWith('generate from ')
+              ? { prompt: 'A red boat', source: { output: text.slice(14) } }
+              : { prompt: 'A red boat' },
       );
   const middle = Math.floor(argumentsText.length / 2);
   send(res, { choices: [{ delta: { reasoning_content: 'I will use the registered workflow.' } }] });

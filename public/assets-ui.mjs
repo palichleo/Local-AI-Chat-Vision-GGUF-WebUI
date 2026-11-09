@@ -330,7 +330,10 @@ export function setupAssets({
     row('Workflow', record.workflowName);
     if (record.mediaType === 'video')
       row('Version', record.parameters.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale');
-    row('Prompt', record.prompt);
+    const expanded = record.parameters.expanded_prompt;
+    row(expanded ? 'Prompt demandé' : 'Prompt', record.prompt);
+    if (expanded) row('Prompt amélioré (utilisé pour l’image)', expanded);
+    if (record.parameters.expandPrompt !== undefined) row('Prompt enhance', expanded ? 'Activé' : 'Désactivé');
     row('Date', new Date(record.createdAt).toLocaleString('fr-FR'));
     row('Seed', record.parameters.seed);
     const resolution = row(
@@ -340,7 +343,9 @@ export function setupAssets({
     row('Fichier', output.source.filename);
     row('Identifiant', record.id);
     const other = Object.fromEntries(
-      Object.entries(record.parameters).filter(([key]) => !['seed', 'prompt', 'workflow_id'].includes(key)),
+      Object.entries(record.parameters).filter(
+        ([key]) => !['seed', 'prompt', 'workflow_id', 'expanded_prompt', 'expandPrompt'].includes(key),
+      ),
     );
     if (Object.keys(other).length) row('Paramètres', JSON.stringify(other, null, 2));
     if (record.analysis?.text) row('Analyse du modèle', record.analysis.text);

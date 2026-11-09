@@ -70,6 +70,7 @@ def serve(config, source=None, destination=None):
                         result = release()
                 response = dict(id=request_id, result=result)
             except Exception as exc:
+                _log_failure(method, exc)
                 # Do not retain an inference traceback (and its model tensors) during cleanup.
                 response = dict(
                     id=request_id,
@@ -93,3 +94,22 @@ def serve(config, source=None, destination=None):
     finally:
         with redirect_stdout(sys.stderr):
             release()
+
+
+def _log_failure(method, exc):
+    """Keep the traceback of a failed request (text only) in data/runner-errors.log for diagnosis."""
+    import datetime
+    import traceback
+    from pathlib import Path
+
+    try:
+        folder = Path(__file__).resolve().parent.parent / 'data'
+        if not folder.is_dir():
+            return
+        text = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        stamp = datetime.datetime.now().isoformat(timespec='seconds')
+        log = folder / 'runner-errors.log'
+        previous = log.read_text(encoding='utf8')[-200_000:] if log.exists() else ''
+        log.write_text(previous + f'--- {stamp} {method}\n{text}\n', encoding='utf8')
+    except Exception:
+        pass

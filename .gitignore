@@ -16,8 +16,7 @@ experiments/krea2-python/local.json
 experiments/krea2-python/outputs/
 experiments/krea2-python/__pycache__/
 
-# Native runner user data; only generic templates and folder guides are published.
-workflow/*.json
+# Native runner user data. The workflows in workflow/ ship with the application.
 output/
 runner/**/__pycache__/
 runner/__pycache__/

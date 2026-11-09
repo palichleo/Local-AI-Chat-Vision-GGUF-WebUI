@@ -18,6 +18,7 @@ const assetMap = new Map(
     { id, path: join(tmpdir(), `${id}.safetensors`), kind: id, family: 'krea2' },
   ]),
 );
+assetMap.set('tokenizer', { id: 'tokenizer', path: join(tmpdir(), 'tokenizer'), kind: 'tokenizer', family: 'krea2' });
 const assets = {
   async resolve(id, { kind, family }) {
     const asset = assetMap.get(id);
@@ -35,7 +36,7 @@ function fixture() {
     pipeline: 'krea2',
     mediaType: 'image',
     components: Object.fromEntries(
-      ['model', 'textEncoder', 'vae'].map(role => [role, { policy: 'fixed', asset: role }]),
+      ['model', 'textEncoder', 'tokenizer', 'vae'].map(role => [role, { policy: 'fixed', asset: role }]),
     ),
     parameters: {
       prompt: { policy: 'model', type: 'string', maxLength: 8000 },

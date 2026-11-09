@@ -19,7 +19,6 @@ def diagnostics(config):
         python=sys.version.split()[0],
         executable=sys.executable,
         capabilities=capabilities(),
-        tokenizerAvailable=Path(config['tokenizerPath']).is_dir(),
         torchImported=torch is not None,
         cudaInitialized=bool(torch and torch.cuda.is_initialized()),
     )

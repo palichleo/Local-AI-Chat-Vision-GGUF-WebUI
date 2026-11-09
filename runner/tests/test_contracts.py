@@ -18,7 +18,8 @@ def job():
         workflowId='preset',
         workflowDigest='a' * 64,
         parameters=dict(prompt='a tree', seed=7, width=64, height=64, steps=1, cfg=1, denoise=1),
-        components={k: str(Path.cwd() / f'{k}.safetensors') for k in ('model', 'textEncoder', 'vae')},
+        components={k: str(Path.cwd() / f'{k}.safetensors') for k in ('model', 'textEncoder', 'vae')}
+        | {'tokenizer': str(Path.cwd() / 'tokenizer')},
         loras=[],
         references=[],
     )

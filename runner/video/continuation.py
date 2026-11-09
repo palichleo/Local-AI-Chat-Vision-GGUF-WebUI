@@ -5,15 +5,19 @@ from collections import deque
 OVERLAPS = (1, 9, 17, 25, 33)
 
 
-def source_tail(path, parameters):
+def source_tail(path, parameters, overlaps=OVERLAPS, default=9):
+    """The last `overlap_frames` frames of the source (PIL images) and the continuation plan.
+
+    `overlaps` are the counts a family's latent grid can protect exactly (LTX2.5: 8n+1,
+    MiniMax-H3: 17n+5)."""
     import av
 
-    count = parameters.get('overlap_frames', 9)
-    if count not in OVERLAPS or count >= parameters['frames']:
-        raise ValueError('Overlap must be 1, 9, 17, 25 or 33 frames and shorter than the generation window')
+    count = parameters.get('overlap_frames', default)
+    if count not in overlaps or count >= parameters['frames']:
+        choices = ', '.join(map(str, overlaps))
+        raise ValueError(f'Overlap must be one of {choices} frames and shorter than the generation window')
     with av.open(path) as source:
-        if any(s.type == 'audio' for s in source.streams):
-            raise ValueError('Audio source continuation is not supported yet; use a silent source')
+        source_audio = any(s.type == 'audio' for s in source.streams)
         video = next((s for s in source.streams if s.type == 'video'), None)
         if video is None or not video.average_rate:
             raise ValueError('Source has no usable video stream')
@@ -42,4 +46,5 @@ def source_tail(path, parameters):
             sourceFrames=video.frames or round(duration * fps),
             sourceDuration=duration,
             newFrames=parameters['frames'] - count,
+            sourceAudio=source_audio,
         )

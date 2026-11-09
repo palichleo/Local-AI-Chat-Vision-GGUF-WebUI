@@ -142,3 +142,49 @@ test('upscale follows the media of its source and interpolate only takes videos'
   assert.deepEqual([smooth.workflow.id, smooth.args.multiplier], ['smooth', 4]);
   await assert.rejects(tools.route('interpolate', { source: { image: 0 } }, media), /Aucun workflow/);
 });
+
+test('with a conversation context, sources list only what exists and never accept an empty object', async () => {
+  const run = (id, mediaType, extra = {}) => ({ id, mediaType, count: 2, workflowId: 't2v', ...extra });
+  const tools = catalogOf([...workflows, video('final', [], { profiles: { final: {} } })]);
+  const named = async available =>
+    Object.fromEntries((await tools.definitions(available)).map(tool => [tool.function.name, tool.function]));
+
+  const empty = await named({ images: 0, resources: [], outputs: [] });
+  assert.equal(empty.extend_video, undefined, 'a verb whose required source cannot exist is not offered');
+  assert.equal(empty.create_image.parameters.properties.source, undefined);
+  assert.equal(empty.create_video.parameters.properties.reference, undefined);
+  assert.equal(empty.create_video.parameters.properties.reuse_output, undefined);
+  assert.doesNotMatch(empty.create_image.description, /Sources:/);
+
+  const rich = await named({
+    images: 2,
+    resources: [{ id: 'r-image', type: 'image' }],
+    outputs: [run('img-run', 'image'), run('clip-run', 'video', { draft: true }), { id: 'broken', count: 0 }],
+  });
+  const source = rich.create_image.parameters.properties.source;
+  assert.equal(source.anyOf.length, 3);
+  for (const variant of source.anyOf) {
+    assert.equal(variant.required.length, 1, 'each variant names exactly one kind of source');
+    assert.equal(variant.additionalProperties, false);
+  }
+  assert.equal(source.anyOf[0].properties.image.maximum, 1);
+  assert.deepEqual(source.anyOf[1].properties.resource.enum, ['r-image']);
+  assert.deepEqual(source.anyOf[2].properties.output.enum, ['img-run'], 'a video result cannot be an image source');
+  assert.equal(source.anyOf[2].properties.index.maximum, 1);
+  assert.deepEqual(rich.extend_video.parameters.properties.source.properties.output.enum, ['clip-run']);
+  assert.equal(
+    rich.create_video.parameters.properties.reuse_output,
+    undefined,
+    'only drafts of a final-capable workflow',
+  );
+  assert.match(rich.create_image.description, /Sources: \{"image": n\}.*\{"resource": "id"\}.*\{"output": "run_id"\}/);
+
+  const drafts = await named({
+    images: 0,
+    resources: [],
+    outputs: [run('draft-run', 'video', { workflowId: 'final', draft: true })],
+  });
+  assert.deepEqual(drafts.create_video.parameters.properties.reuse_output.enum, ['draft-run']);
+  const legacy = (await tools.definitions()).find(tool => tool.function.name === 'create_image').function;
+  assert.ok(legacy.parameters.properties.source.properties.output, 'without context the generic schema is kept');
+});

@@ -276,7 +276,8 @@ def load_streamed(model, names, pool):
                     self.rotation or 256,
                 )
             else:
-                result = F.linear(value, bundle['weight'].to(value.dtype), bundle.get('bias'))
+                bias = bundle.get('bias')
+                result = F.linear(value, bundle['weight'].to(value.dtype), None if bias is None else bias.to(value.dtype))
             for source, key, strength in self.adapters:
                 a = pool.bundle((source, key + '.lora_A.weight', None))['weight'].to(value.dtype)
                 b = pool.bundle((source, key + '.lora_B.weight', None))['weight'].to(value.dtype)

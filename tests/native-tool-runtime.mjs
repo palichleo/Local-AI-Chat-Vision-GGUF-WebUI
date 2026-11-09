@@ -344,3 +344,63 @@ test('draft promotion retains seed and writable choices while final profile rema
     runtime.request(call({ prompt: 'different' }), { conversationId: id, turnId: id, messages: [] }),
   );
 });
+
+test('an enhanced prompt is kept with the image, and only when enhancement ran', async () => {
+  async function generate(expandPrompt, used) {
+    let saved;
+    const workflow = {
+      schemaVersion: 1,
+      id: 'image',
+      name: 'Image',
+      description: '',
+      digest: 'a'.repeat(64),
+      mediaType: 'image',
+      pipeline: 'krea2',
+      enabled: true,
+      ready: true,
+      parameters: { prompt: { policy: 'model', type: 'string' } },
+      references: [],
+    };
+    const job = {
+      schemaVersion: 1,
+      id,
+      pipeline: 'krea2',
+      mediaType: 'image',
+      workflowId: 'image',
+      workflowDigest: workflow.digest,
+      parameters: { prompt: 'boat', seed: 1, width: 1024, height: 1024, expandPrompt },
+      components: {},
+      loras: [],
+      references: [],
+    };
+    const engine = { busy: false, state: 'ready', stop: async () => {}, start: async () => {} };
+    const runtime = new ToolRuntime({
+      engine,
+      catalog: { list: async () => [workflow], read: async () => workflow, prepare: async () => ({ workflow, job }) },
+      gallery: { put: async record => (saved = record) },
+      getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'native' }),
+      engineConfig: () => ({}),
+      clientFactory: () => ({
+        status: async () => ({ idle: true }),
+        preflight: async () => {},
+        free: async () => {},
+        // The worker reports the prompt it actually encoded.
+        run: async () => ({
+          outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }],
+          metadata: { parameters: { prompt: used } },
+        }),
+      }),
+    });
+    const call = { id: 'call', type: 'function', function: { name: 'create_image', arguments: '{"prompt":"boat"}' } };
+    const request = await runtime.request([call], { conversationId: id, turnId: id, messages: [] });
+    await runtime.execute({ requestId: request.requestId, permission: 'once' });
+    await runtime.finished;
+    assert.equal(runtime.status().state, 'done', runtime.status().error);
+    return saved;
+  }
+  const enhanced = await generate(true, 'A small red wooden boat drifting on a calm misty lake at dawn.');
+  assert.equal(enhanced.prompt, 'boat', 'the requested prompt stays the record prompt');
+  assert.equal(enhanced.parameters.expanded_prompt, 'A small red wooden boat drifting on a calm misty lake at dawn.');
+  const plain = await generate(false, 'boat');
+  assert.equal(plain.parameters.expanded_prompt, undefined);
+});

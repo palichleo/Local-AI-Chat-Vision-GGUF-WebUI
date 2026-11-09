@@ -7,13 +7,14 @@ path = absolute
 
 
 def validate_config(config):
+    # tokenizerPath is accepted from older launchers but unused: each job names its own tokenizer.
     fields(
         config,
         ('tokenizerPath', 'cacheRoot', 'outputRoot', 'engine', 'tuned', 'cacheGiB'),
-        ('tokenizerPath', 'cacheRoot', 'outputRoot'),
+        ('cacheRoot', 'outputRoot'),
         'worker configuration',
     )
-    for key in ('tokenizerPath', 'cacheRoot', 'outputRoot'):
+    for key in ('cacheRoot', 'outputRoot'):
         path(config[key], key)
     result = {'engine': 'int8', 'tuned': True} | config
     if result['engine'] not in ('int8', 'stream'):

@@ -118,8 +118,49 @@ class VideoTests(unittest.TestCase):
             )
             with av.open(str(Path(folder) / audio['outputs'][0]['filename'])) as clip:
                 self.assertEqual(clip.streams.audio[0].rate, 48000)
-            with self.assertRaisesRegex(ValueError, 'Audio source'):
-                source_tail(str(Path(folder) / audio['outputs'][0]['filename']), value['parameters'])
+            audible = str(Path(folder) / audio['outputs'][0]['filename'])
+            tail, plan = source_tail(audible, value['parameters'])
+            self.assertTrue(plan['sourceAudio'])
+            value['references'] = [dict(input='source', role='source_video', path=audible)]
+            extended = save_video(
+                pixels,
+                {'outputRoot': folder},
+                value,
+                {'continuation': plan},
+                audio=(np.zeros((50000, 2), dtype=np.float32), 48000),
+            )
+            with av.open(str(Path(folder) / extended['outputs'][0]['filename'])) as clip:
+                self.assertEqual(len(list(clip.decode(clip.streams.video[0]))), 41)
+                sound = clip.streams.audio[0]
+                self.assertAlmostEqual(float(sound.duration * sound.time_base), 41 / 24, delta=0.03)
+
+    def test_continuation_audio_graph_covers_every_source_and_generation_case(self):
+        from runner.video.export import continuation_audio
+
+        self.assertIsNone(continuation_audio(False, False, 1, 0.375, 2))
+        self.assertIn('acrossfade', continuation_audio(True, True, 1, 0.375, 2))
+        self.assertIn('adelay=delays=1000', continuation_audio(False, True, 1, 0.375, 2))
+        self.assertTrue(continuation_audio(True, False, 1, 0.375, 2).startswith('[0:a]apad'))
+
+    def test_source_audio_mel_matches_the_encoder_preprocessing(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest('torch is not installed')
+        import numpy as np
+        from runner.video.audio_tail import filterbank, log_mel, protected_latents, MELS
+
+        bank = filterbank(torch)
+        self.assertEqual(tuple(bank.shape), (513, MELS))
+        # Slaney area normalization: each triangle has unit area on the Hz axis.
+        hz = np.linspace(0, 8000, 513)
+        self.assertTrue(np.allclose(np.trapezoid(bank.numpy().T, hz, axis=1)[1:-1], 1, atol=0.05))
+        tone = np.sin(2 * np.pi * 440 * np.arange(16000) / 16000).astype(np.float32)
+        mel = log_mel(np.stack([tone, tone]), torch)
+        self.assertEqual(tuple(mel.shape), (1, 2, 101, MELS))
+        self.assertEqual(int(mel[0, 0, 50].argmax()), int(bank[round(440 / 8000 * 512)].argmax()))
+        self.assertEqual(protected_latents(9 / 24), 9)
+        self.assertEqual(protected_latents(1 / 24), 1)
 
     def test_msr_slots_remain_distinct_and_wrong_lora_shapes_are_rejected(self):
         import torch

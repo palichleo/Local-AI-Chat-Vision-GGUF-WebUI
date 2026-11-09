@@ -79,6 +79,7 @@ function fixture() {
     components: {
       model: { policy: 'fixed', asset: 'model-one' },
       textEncoder: { policy: 'fixed', asset: 'encoder-one' },
+      tokenizer: { policy: 'fixed', asset: 'tokenizer-one' },
       vae: { policy: 'fixed', asset: 'vae-one' },
     },
     parameters: {
@@ -92,13 +93,14 @@ function fixture() {
     references: [],
   };
   const calls = [],
+    tokenizerRequests = [],
     workflows = [structuredClone(template)];
   let failSave = false;
   const api = async (route, body) => {
     calls.push({ route, body: structuredClone(body) });
     if (route === 'generation')
       return Response.json({
-        config: { enabled: true, autoAllow: false, maxIterations: 5, pythonPath: '', tokenizerPath: '' },
+        config: { enabled: true, autoAllow: false, maxIterations: 5, pythonPath: '' },
         folders: {
           model: 'C:/atelier/models/checkpoints',
           textEncoder: 'C:/atelier/models/LLMs',
@@ -111,6 +113,12 @@ function fixture() {
         assets: [
           { id: 'model-one', kind: 'model', pipeline: 'krea2', path: 'model.safetensors' },
           { id: 'encoder-one', kind: 'textEncoder', pipeline: 'krea2', path: 'encoder.safetensors' },
+          {
+            id: 'tokenizer-one',
+            kind: 'tokenizer',
+            pipeline: 'krea2',
+            path: 'C:/comfy/text_encoders/qwen25_tokenizer',
+          },
           { id: 'vae-one', kind: 'vae', pipeline: 'krea2', path: 'vae.safetensors' },
           { id: 'lora-one', kind: 'lora', pipeline: 'krea2', path: 'lora.safetensors' },
         ],
@@ -118,6 +126,17 @@ function fixture() {
     if (route === 'files/choose') return Response.json({ path: 'C:/models/new.safetensors' });
     if (route === 'generation/assets')
       return Response.json({ asset: { id: 'model-new', path: body.path, kind: body.kind, family: body.family } });
+    if (route === 'generation/tokenizer') {
+      tokenizerRequests.push(body);
+      return Response.json({
+        asset: {
+          id: 'tokenizer-one',
+          kind: 'tokenizer',
+          family: 'krea2',
+          path: 'C:/comfy/text_encoders/qwen25_tokenizer',
+        },
+      });
+    }
     if (route === 'generation/import')
       return Response.json(await previewWorkflowImport(body.sourceText, { name: body.name }));
     if (route === 'generation/validate') return Response.json({ workflow: validateNativeWorkflow(body) });
@@ -145,6 +164,7 @@ function fixture() {
     template,
     workflows,
     calls,
+    tokenizerRequests,
     api,
     node: (...args) => new Element(...args),
     set failSave(value) {
@@ -171,14 +191,15 @@ test('only seed offers random ownership', () => {
 
 test('private setup progress refreshes without overwriting unsaved settings or blocking the editor', async t => {
   const f = await setup(t);
-  f.$('generation-tokenizer').value = 'unsaved tokenizer';
+  f.$('generation-python').value = 'unsaved python';
   f.ui.updateRunner({ state: 'installing', progress: 'Installation des bibliothèques…' });
   assert.match(f.$('generation-status').textContent, /Préparation automatique.*bibliothèques/);
-  assert.equal(f.$('generation-tokenizer').value, 'unsaved tokenizer');
+  assert.equal(f.$('generation-python').value, 'unsaved python');
   assert.equal(f.$('workflow-add').disabled, false);
   f.ui.updateRunner({ state: 'ready' });
   assert.match(f.$('generation-status').textContent, /Prêt/);
-  assert.equal(f.$('generation-tokenizer').value, 'unsaved tokenizer');
+  assert.equal(f.$('generation-python').value, 'unsaved python');
+  assert.equal(f.$('generation-tokenizer'), null, 'the tokenizer is chosen per workflow, not in settings');
 });
 test('editor swaps the existing panel, saves native policies and reopens saved description', async t => {
   const f = await setup(t);
@@ -260,7 +281,6 @@ test('settings read native generation values and descriptions come from workflow
     autoAllow: false,
     maxIterations: 5,
     pythonPath: '',
-    tokenizerPath: '',
     modelRoot: '',
     vaeRoot: '',
     loraRoot: '',
@@ -647,4 +667,92 @@ test('four unsupported references and three named LoRAs all appear in the editor
   assert.ok(f.calls.some(call => call.route === 'generation/workflows/' + record.id));
   assert.equal(f.$('native-reference-count').textContent, '4');
   assert.equal(f.$('native-value-cfg').value, 4);
+});
+
+test('the tokenizer is chosen in the workflow, proposed from its encoder and required to save', async t => {
+  const f = await setup(t),
+    record = structuredClone(f.template);
+  delete record.components.tokenizer;
+  await f.ui.edit(record);
+  await new Promise(resolve => setImmediate(resolve));
+  // Proposed from the selected text encoder, without asking the user what a tokenizer is.
+  assert.deepEqual(f.tokenizerRequests, [{ encoder: 'encoder-one', family: 'krea2' }]);
+  assert.equal(f.$('native-component-tokenizer').value, 'tokenizer-one');
+  // It must match its encoder, so the assistant can never be given the choice.
+  assert.equal(f.$('native-component-tokenizer-policy').hidden, true);
+  assert.equal(f.$('native-component-textEncoder-policy').hidden, false);
+  f.$('native-component-tokenizer').value = '';
+  assert.equal(await f.ui.saveEditor(), false);
+  assert.match(f.$('native-workflow-error').textContent, /dossier du tokenizer.*requis pour enregistrer/);
+  assert.equal(
+    f.calls.some(call => call.route === 'generation/workflows'),
+    false,
+  );
+  f.$('native-component-tokenizer').value = 'tokenizer-one';
+  assert.equal(await f.ui.saveEditor(), true);
+  assert.deepEqual(f.workflows.at(-1).components.tokenizer, { policy: 'fixed', asset: 'tokenizer-one' });
+});
+
+test('an existing tokenizer is never replaced by a suggestion, and families without one show no tokenizer', async t => {
+  const f = await setup(t);
+  await f.ui.edit(f.template);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.tokenizerRequests, []);
+  const video = structuredClone(f.template);
+  video.pipeline = 'ltx25';
+  video.mediaType = 'video';
+  delete video.components.tokenizer;
+  f.ui.cancelSettings();
+  await f.ui.edit(video);
+  await new Promise(resolve => setImmediate(resolve));
+  const ids = element => [element.id, ...element.children.flatMap(ids)].filter(Boolean);
+  assert.ok(ids(f.$('native-workflow-components')).includes('native-component-audioVae'));
+  assert.ok(!ids(f.$('native-workflow-components')).includes('native-component-tokenizer'));
+  assert.deepEqual(f.tokenizerRequests, []);
+});
+
+test('prompt enhancement is one visible Off/On switch whose instruction is saved with the workflow', async t => {
+  const f = await setup(t);
+  await f.ui.edit(f.template);
+  assert.equal(f.$('native-workflow-enhance').hidden, false);
+  const toggle = f.$('native-enhance-switch'),
+    instruction = f.$('native-enhance-template');
+  assert.equal(toggle.value, 'off');
+  assert.match(instruction.value, /\{\{prompt\}\}/, 'the family default instruction is proposed');
+  assert.equal(instruction.parent.hidden, true, 'the instruction only shows when enhancement is on');
+  toggle.value = 'on';
+  toggle.onchange();
+  assert.equal(instruction.parent.hidden, false);
+  instruction.value = 'Describe {{prompt}} in rich detail.';
+  assert.equal(await f.ui.saveEditor(), true);
+  let saved = f.calls.filter(call => call.route === 'generation/workflows').at(-1).body;
+  assert.deepEqual(saved.parameters.expandPrompt, { policy: 'fixed', value: true });
+  assert.equal(saved.promptExpansion.template, 'Describe {{prompt}} in rich detail.');
+  assert.equal(
+    saved.promptExpansion.maxTokens,
+    familyCatalog().find(item => item.family === 'krea2').promptExpansionDefault.maxTokens,
+  );
+  assert.ok(validateNativeWorkflow(saved), 'what the editor saves is a valid workflow');
+
+  await f.ui.edit(saved);
+  assert.equal(f.$('native-enhance-switch').value, 'on');
+  f.$('native-enhance-template').value = 'No placeholder';
+  assert.equal(await f.ui.saveEditor(), false);
+  assert.match(f.$('native-workflow-error').textContent, /\{\{prompt\}\} exactement une fois/);
+  f.$('native-enhance-switch').value = 'off';
+  f.$('native-enhance-switch').onchange();
+  assert.equal(await f.ui.saveEditor(), true);
+  saved = f.calls.filter(call => call.route === 'generation/workflows').at(-1).body;
+  assert.deepEqual(saved.parameters.expandPrompt, { policy: 'fixed', value: false });
+  assert.equal(
+    saved.promptExpansion.template,
+    'Describe {{prompt}} in rich detail.',
+    'turning it off keeps the saved instruction',
+  );
+
+  const video = structuredClone(f.template);
+  video.pipeline = 'ltx25';
+  video.mediaType = 'video';
+  await f.ui.edit(video);
+  assert.equal(f.$('native-workflow-enhance').hidden, true);
 });

@@ -76,7 +76,8 @@ export function setupNativeWorkflows(options) {
     readParameters = [],
     readLoras = [],
     readReferences = [],
-    readProfiles = [];
+    readProfiles = [],
+    readEnhance = null;
   const element = (tag, id, text = '') => {
     const value = node(tag, '', text);
     if (id) value.id = id;
@@ -159,9 +160,7 @@ export function setupNativeWorkflows(options) {
             'generation-plus',
             'generation-unlimited',
             'generation-python',
-            'generation-tokenizer',
             'generation-python-browse',
-            'generation-tokenizer-browse',
             'generation-test',
             'workflow-add',
             'native-workflow-import',
@@ -222,7 +221,6 @@ export function setupNativeWorkflows(options) {
       autoAllow: $('generation-auto').checked,
       maxIterations,
       pythonPath: $('generation-python').value.trim(),
-      tokenizerPath: $('generation-tokenizer').value.trim(),
       ...folderValues(),
     };
   }
@@ -327,7 +325,6 @@ export function setupNativeWorkflows(options) {
         if (!unlimited) lastLimited = config.maxIterations || 5;
         $('generation-iterations').value = lastLimited;
         $('generation-python').value = config.pythonPath || '';
-        $('generation-tokenizer').value = config.tokenizerPath || '';
         for (const [key, [id, role]] of Object.entries(folderControls)) $(id).value = config[key] || folders[role] || '';
         syncLimit();
       }
@@ -354,7 +351,8 @@ export function setupNativeWorkflows(options) {
     return (await (await api('files/choose', { kind, initialPath }, { signal })).json()).path;
   }
   function assetPicker(role, id, value) {
-    const container = node('div', 'native-asset-picker'),
+    const spec = familyOf(draft.pipeline)?.components[role] || {},
+      container = node('div', 'native-asset-picker'),
       compatible = assets.filter(
         asset =>
           asset.kind === role &&
@@ -369,7 +367,7 @@ export function setupNativeWorkflows(options) {
     const control = select(id, choices, value),
       path = input(id + '-path', '');
     control.setAttribute('aria-label', 'Fichier · ' + componentLabel(role));
-    path.placeholder = 'Coller un chemin de fichier';
+    path.placeholder = spec.format === 'tokenizer' ? 'Coller le chemin du dossier' : 'Coller un chemin de fichier';
     path.spellcheck = false;
     path.setAttribute('aria-label', 'Chemin · ' + componentLabel(role));
     async function register(chosen, signal) {
@@ -378,8 +376,10 @@ export function setupNativeWorkflows(options) {
         await api('generation/assets', { path: chosen, kind: role, family: draft.pipeline }, { signal })
       ).json();
       signal.throwIfAborted();
-      const asset = result.asset || result;
-      if (!asset.id) throw Error('Le fichier n’a pas pu être enregistré.');
+      adopt(result.asset || result);
+    }
+    function adopt(asset) {
+      if (!asset?.id) throw Error('Le fichier n’a pas pu être enregistré.');
       assets = assets.filter(item => item.id !== asset.id).concat(asset);
       if (![...control.children].some(option => option.value === asset.id)) {
         const option = element('option', null, asset.name || asset.path?.split(/[\\/]/).pop() || asset.id);
@@ -397,11 +397,8 @@ export function setupNativeWorkflows(options) {
         await run(async signal =>
           register(
             await browse(
-              'generation',
-              path.value ||
-                assets.find(asset => asset.id === control.value)?.path ||
-                componentFolder(role) ||
-                '',
+              spec.picker || 'generation',
+              path.value || assets.find(asset => asset.id === control.value)?.path || componentFolder(role) || '',
               signal,
             ),
             signal,
@@ -428,6 +425,7 @@ export function setupNativeWorkflows(options) {
     return {
       container,
       control,
+      adopt,
       selected() {
         if (path.value.trim()) throw Error('Validez le chemin avec « Utiliser » pour ' + componentLabel(role) + '.');
         return control.value;
@@ -440,6 +438,36 @@ export function setupNativeWorkflows(options) {
         );
       },
     };
+  }
+  /**
+   * A tokenizer must match its text encoder, and Comfy ships it inside its own code where
+   * users rarely look: when the encoder is set and no tokenizer is, the server proposes one.
+   */
+  function suggestTokenizers(controls) {
+    const pipeline = draft.pipeline;
+    for (const [role, spec] of Object.entries(familyOf(pipeline)?.components || {})) {
+      const tokenizer = controls[role],
+        encoder = controls[spec.vocabularyOf];
+      if (spec.format !== 'tokenizer' || !tokenizer || !encoder) continue;
+      const suggest = async () => {
+        const encoderId = encoder.picker.control.value;
+        if (!encoderId || tokenizer.picker.control.value || !assets.some(asset => asset.id === encoderId)) return;
+        try {
+          const { asset } = await (
+            await api('generation/tokenizer', { encoder: encoderId, family: pipeline }, { signal: controller.signal })
+          ).json();
+          if (asset && draft.pipeline === pipeline && !tokenizer.picker.control.value) tokenizer.picker.adopt(asset);
+        } catch {
+          // No suggestion: the user picks the folder.
+        }
+      };
+      const previous = encoder.picker.control.onchange;
+      encoder.picker.control.onchange = () => {
+        previous?.();
+        void suggest();
+      };
+      void suggest();
+    }
   }
   function componentControl(role, policy, { optional = false, present = true } = {}) {
     const card = node('div', 'native-component'),
@@ -480,7 +508,11 @@ export function setupNativeWorkflows(options) {
       allowed.hidden = ownershipSelect.value !== 'model';
     };
     ownershipSelect.onchange();
+    const spec = familyOf(draft.pipeline)?.components[role] || {};
+    // A component the assistant may not choose (a tokenizer must match its encoder) shows no ownership switch.
+    if (spec.policies && !spec.policies.includes('model')) ownershipSelect.hidden = true;
     card.append(field(labels[role] || role, ownershipSelect), picker.container, allowed);
+    if (spec.help) card.append(node('p', 'field-help', spec.help));
     const active = input(id + '-enabled', present, 'checkbox');
     if (optional) {
       const label = node('label', 'history-toggle');
@@ -497,6 +529,7 @@ export function setupNativeWorkflows(options) {
     }
     return {
       card,
+      picker,
       read() {
         if (optional && !active.checked) return null;
         if (ownershipSelect.value === 'fixed') return { policy: 'fixed', asset: picker.selected() };
@@ -824,6 +857,7 @@ export function setupNativeWorkflows(options) {
       : draft.unavailableReason || '';
     $('native-workflow-enabled').dataset.unavailable = String(Boolean(draft.importDraft?.blockers.length));
     readComponents = [];
+    const componentControls = {};
     $('native-workflow-components').replaceChildren();
     for (const role of [
       ...new Set([
@@ -840,11 +874,16 @@ export function setupNativeWorkflows(options) {
           { optional: !familyOf(draft.pipeline)?.components[role]?.required, present: Boolean(policy) },
         );
       readComponents.push([role, control.read]);
+      componentControls[role] = control;
       $('native-workflow-components').append(control.card);
     }
+    suggestTokenizers(componentControls);
     readParameters = [];
     $('native-workflow-parameters').replaceChildren();
+    const enhanced = renderEnhance();
     for (const [name, policy] of Object.entries(draft.parameters)) {
+      // Shown as its own on/off section (renderEnhance) rather than as one more number or checkbox.
+      if (name === 'expandPrompt' && enhanced) continue;
       if (name === 'expandPrompt' && !draft.promptExpansion && policy.policy === 'fixed' && !policy.value) {
         readParameters.push([name, () => policy]);
         continue;
@@ -862,6 +901,69 @@ export function setupNativeWorkflows(options) {
     $('native-workflow-switch').hidden = true;
     setBusy(busy);
   }
+  /**
+   * Prompt enhancement as one visible Off/On switch. When on, the family's text encoder rewrites the
+   * prompt before each image with an editable instruction; the prompt actually used is kept with the image.
+   * Returns whether the family offers it.
+   */
+  function renderEnhance() {
+    const manifest = familyOf(draft.pipeline),
+      policy = draft.parameters.expandPrompt,
+      config = draft.promptExpansion || manifest?.promptExpansionDefault;
+    const supported = Boolean(
+      manifest?.features?.includes('promptExpansion') && manifest.parameters?.expandPrompt && config,
+    );
+    $('native-workflow-enhance').hidden = !supported;
+    $('native-workflow-enhance-body').replaceChildren();
+    readEnhance = null;
+    if (!supported) return false;
+    const current = policy?.policy === 'model' ? 'model' : policy?.value === true ? 'on' : 'off';
+    const toggle = segmented(
+      'native-enhance-switch',
+      [['off', 'Off'], ['on', 'On'], ...(current === 'model' ? [['model', 'Assistant']] : [])],
+      current,
+    );
+    const template = element('textarea', 'native-enhance-template');
+    template.value = config.template;
+    template.rows = 6;
+    template.spellcheck = false;
+    template.setAttribute('aria-label', 'Consigne d’amélioration du prompt');
+    const instruction = node('details', 'native-manual-path');
+    instruction.append(
+      node('summary', '', 'Consigne d’amélioration'),
+      template,
+      node(
+        'p',
+        'field-help',
+        'Le texte {{prompt}} est remplacé par le prompt demandé ; il doit apparaître une seule fois.',
+      ),
+    );
+    const sync = () => {
+      instruction.hidden = toggle.value === 'off';
+    };
+    toggle.onchange = sync;
+    sync();
+    $('native-workflow-enhance-body').append(
+      field('Améliorer le prompt avant chaque image', toggle),
+      node(
+        'p',
+        'field-help',
+        'L’encodeur de texte réécrit le prompt en une description plus détaillée avant la génération (quelques secondes de plus). Le prompt réellement utilisé est affiché dans les détails de l’image.',
+      ),
+      instruction,
+    );
+    readEnhance = () => {
+      const value = toggle.value;
+      if (value === 'off') return { parameter: { policy: 'fixed', value: false }, expansion: draft.promptExpansion };
+      if (template.value.split('{{prompt}}').length !== 2)
+        throw Error('La consigne d’amélioration doit contenir {{prompt}} exactement une fois.');
+      return {
+        parameter: value === 'model' ? policy : { policy: 'fixed', value: true },
+        expansion: { ...config, template: template.value },
+      };
+    };
+    return true;
+  }
   function readEditor() {
     const record = {
       ...draft,
@@ -876,6 +978,12 @@ export function setupNativeWorkflows(options) {
       references: readReferences.map(control => control.read()),
     };
     if (readProfiles.length) record.profiles = Object.fromEntries(readProfiles.map(([stage, read]) => [stage, read()]));
+    if (readEnhance) {
+      const { parameter, expansion } = readEnhance();
+      record.parameters.expandPrompt = parameter;
+      if (expansion) record.promptExpansion = expansion;
+      else delete record.promptExpansion;
+    }
     for (const name of ['digest', 'ready', 'unavailableReason', 'error', 'path']) delete record[name];
     return record;
   }
@@ -968,7 +1076,11 @@ export function setupNativeWorkflows(options) {
       if (!record.importDraft || record.enabled) {
         for (const [role, policy] of Object.entries(record.components))
           if ((policy.policy === 'fixed' && !policy.asset) || (policy.policy === 'model' && !policy.choices.length))
-            throw Error('Choisissez un fichier pour « ' + componentLabel(role) + ' ».');
+            throw Error(
+              familyOf(record.pipeline)?.components[role]?.format === 'tokenizer'
+                ? 'Choisissez le dossier du tokenizer : il est requis pour enregistrer ce workflow.'
+                : 'Choisissez un fichier pour « ' + componentLabel(role) + ' ».',
+            );
         if (record.loras.some(lora => !lora.asset)) {
           const section = $('native-workflow-loras').closest?.('details');
           if (section) section.open = true;
@@ -1026,10 +1138,7 @@ export function setupNativeWorkflows(options) {
     $('generation-iterations').value = lastLimited;
     syncLimit();
   };
-  for (const [id, kind] of [
-    ['generation-python', 'python'],
-    ['generation-tokenizer', 'tokenizer'],
-  ])
+  for (const [id, kind] of [['generation-python', 'python']])
     $(id + '-browse').onclick = async () => {
       try {
         await run(async signal => {

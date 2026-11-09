@@ -4,7 +4,6 @@
   "mediaType": "image",
   "tasks": ["create_image"],
   "requires": ["torch", "diffusers", "transformers", "accelerate", "safetensors", "PIL"],
-  "needs": ["tokenizer"],
   "components": {
     "model": {
       "label": "Modèle",
@@ -31,6 +30,16 @@
           "shape": [null, 2560]
         }
       ]
+    },
+    "tokenizer": {
+      "label": "Tokenizer",
+      "folder": "LLMs",
+      "required": true,
+      "format": "tokenizer",
+      "policies": ["fixed"],
+      "picker": "tokenizer",
+      "vocabularyOf": "textEncoder",
+      "help": "Dossier qui découpe le prompt en tokens pour l’encodeur de texte (tokenizer_config.json, vocab.json…). Proposé automatiquement d’après l’encodeur."
     },
     "vae": {
       "label": "VAE",
@@ -122,6 +131,17 @@
     ]
   },
   "features": ["promptTemplate", "promptExpansion"],
+  "promptExpansionDefault": {
+    "template": "Rewrite the following image request as one detailed English prompt for the Krea 2 image model. Keep every subject, object, text, style and constraint that is asked for, and only add fitting concrete details: composition, framing, lighting, colors, materials, setting and atmosphere. Answer with the prompt paragraph only, without title, list or commentary.\n\nRequest: {{prompt}}",
+    "maxTokens": 320,
+    "temperature": 0.5,
+    "topK": 64,
+    "topP": 0.95,
+    "minP": 0.05,
+    "repetitionPenalty": 1.05,
+    "seed": 0,
+    "suffix": ""
+  },
   "template": {
     "name": "Krea2 image",
     "description": "Create or edit an image with the selected local Krea2 assets.",
@@ -133,6 +153,10 @@
       "textEncoder": {
         "policy": "fixed",
         "asset": "select-local-text-encoder"
+      },
+      "tokenizer": {
+        "policy": "fixed",
+        "asset": "select-local-tokenizer"
       },
       "vae": {
         "policy": "fixed",
@@ -151,11 +175,11 @@
       },
       "width": {
         "policy": "fixed",
-        "value": 1448
+        "value": 1024
       },
       "height": {
         "policy": "fixed",
-        "value": 1448
+        "value": 1024
       },
       "steps": {
         "policy": "fixed",

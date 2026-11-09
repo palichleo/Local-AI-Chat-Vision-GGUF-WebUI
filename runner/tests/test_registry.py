@@ -73,10 +73,8 @@ class RegistryTests(unittest.TestCase):
         both = [dict(input='s', role='source_video', path=video), dict(input='i', role='start_image', path=image)]
         with self.assertRaisesRegex(ValueError, 'start image or source video'):
             validate_job(ltx_job(references=both))
-        with self.assertRaisesRegex(ValueError, 'Audio continuation'):
-            validate_job(
-                ltx_job(references=both[:1], parameters=ltx_job()['parameters'] | {'audio': True}),
-            )
+        # Continuation with sound is allowed: the source audio under the overlap is held fixed.
+        validate_job(ltx_job(references=both[:1], parameters=ltx_job()['parameters'] | {'audio': True}))
 
 
 if __name__ == '__main__':

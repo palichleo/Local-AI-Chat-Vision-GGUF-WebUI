@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "id": "e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f",
+  "enabled": true,
+  "pipeline": "minimax_h3",
+  "mediaType": "video",
+  "name": "MiniMax H3 Omni",
+  "description": "Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, entre une image de début et/ou de fin, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Images de début/fin et références ne se combinent pas. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo.",
+  "components": {
+    "model": {
+      "policy": "fixed",
+      "asset": "9402b90a-3328-4df1-b74f-3ab854d0d537"
+    },
+    "textEncoder": {
+      "policy": "fixed",
+      "asset": "b90c6a2e-6d7f-4dbe-ac00-feb72ffa6580"
+    },
+    "tokenizer": {
+      "policy": "fixed",
+      "asset": "008ee18d-bf96-4704-aedf-8574cc486d2a"
+    },
+    "vae": {
+      "policy": "fixed",
+      "asset": "cd940898-cc18-4792-91f3-60a2689d724a"
+    },
+    "audioVae": {
+      "policy": "fixed",
+      "asset": "ee081ce8-2784-47b8-91fa-07852a6712d9"
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "policy": "model",
+      "type": "string",
+      "maxLength": 8000
+    },
+    "seed": {
+      "policy": "random",
+      "type": "integer"
+    },
+    "width": {
+      "policy": "fixed",
+      "value": 768
+    },
+    "height": {
+      "policy": "fixed",
+      "value": 448
+    },
+    "steps": {
+      "policy": "fixed",
+      "value": 8
+    },
+    "stage": {
+      "policy": "model",
+      "type": "string",
+      "choices": [
+        "draft",
+        "final"
+      ],
+      "default": "draft"
+    },
+    "frames": {
+      "policy": "fixed",
+      "value": 124
+    },
+    "fps": {
+      "policy": "fixed",
+      "value": 24
+    },
+    "audio": {
+      "policy": "fixed",
+      "value": true
+    },
+    "overlap_frames": {
+      "policy": "fixed",
+      "value": 22
+    }
+  },
+  "profiles": {
+    "draft": {
+      "parameters": {
+        "width": 768,
+        "height": 448,
+        "frames": 124,
+        "fps": 24,
+        "steps": 8
+      }
+    },
+    "final": {
+      "parameters": {
+        "width": 1344,
+        "height": 768,
+        "frames": 124,
+        "fps": 24,
+        "steps": 8
+      }
+    }
+  },
+  "loras": [],
+  "references": [
+    {
+      "id": "source",
+      "role": "source_video",
+      "required": false,
+      "name": "Vidéo à prolonger"
+    },
+    {
+      "id": "start",
+      "role": "start_image",
+      "required": false,
+      "name": "Image de début"
+    },
+    {
+      "id": "end",
+      "role": "end_image",
+      "required": false,
+      "name": "Image de fin"
+    },
+    {
+      "id": "subject-1",
+      "role": "reference_image",
+      "required": false,
+      "name": "Référence 1"
+    },
+    {
+      "id": "subject-2",
+      "role": "reference_image",
+      "required": false,
+      "name": "Référence 2"
+    },
+    {
+      "id": "subject-3",
+      "role": "reference_image",
+      "required": false,
+      "name": "Référence 3"
+    }
+  ]
+}

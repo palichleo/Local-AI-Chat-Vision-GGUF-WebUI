@@ -41,6 +41,7 @@ def encode_prompt(plan, files, tokenizer_path, tensor, device, dtype, progress):
                 set_module_tensor_to_device(text_model, key, device, value=value, dtype=dtype)
         text_model.lm_head.weight = text_model.model.embed_tokens.weight
         text_model.eval().to(device)
+        progress('text encoder loaded')
         if plan['refine_enabled']:
             progress('expanding prompt')
             options = plan['promptExpansion']
@@ -82,5 +83,6 @@ def encode_prompt(plan, files, tokenizer_path, tensor, device, dtype, progress):
         del outputs, tokens, text_model
         gc.collect()
         torch.cuda.empty_cache()
+        progress('prompt encoded')
 
         return conditioning

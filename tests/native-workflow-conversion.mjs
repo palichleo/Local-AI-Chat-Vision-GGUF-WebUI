@@ -11,6 +11,22 @@ import {
 } from '../lib/native-workflow-conversion.mjs';
 import { importComfyWorkflow } from '../lib/comfy-import.mjs';
 
+/** A text encoder header with a 3-token embedding and the matching tokenizer folder beside it. */
+async function encoderWithTokenizer(folder) {
+  const header = Buffer.from(
+    JSON.stringify({ 'model.embed_tokens.weight': { dtype: 'BF16', shape: [3, 2560], data_offsets: [0, 0] } }),
+  );
+  const length = Buffer.alloc(8);
+  length.writeBigUInt64LE(BigInt(header.length));
+  await writeFile(join(folder, 'encoder.safetensors'), Buffer.concat([length, header]));
+  const tokenizer = join(folder, 'qwen_tokenizer');
+  await mkdir(tokenizer);
+  await writeFile(join(tokenizer, 'tokenizer_config.json'), '{}');
+  await writeFile(join(tokenizer, 'vocab.json'), JSON.stringify({ a: 0, b: 1, c: 2 }));
+  await writeFile(join(tokenizer, 'merges.txt'), '');
+  return tokenizer;
+}
+
 test('conversion resolves separated component directories and rejects ambiguous or escaping names', async t => {
   const root = await mkdtemp(join(tmpdir(), 'native-layout-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -34,8 +50,8 @@ test('uploaded Krea exports select their converter from content and keep the ori
   t.after(() => rm(root, { recursive: true, force: true }));
   const models = join(root, 'models');
   await mkdir(models);
-  for (const name of ['model', 'encoder', 'vae', 'style'])
-    await writeFile(join(models, name + '.safetensors'), 'fixture');
+  for (const name of ['model', 'vae', 'style']) await writeFile(join(models, name + '.safetensors'), 'fixture');
+  const tokenizer = await encoderWithTokenizer(models);
   const sourceText = '\uFEFF' + JSON.stringify({ graph: graph() }, null, 2),
     registered = [],
     saved = [];
@@ -57,7 +73,9 @@ test('uploaded Krea exports select their converter from content and keep the ori
   });
   assert.equal(result.workflow.pipeline, 'krea2');
   assert.equal(result.workflow.enabled, false);
-  assert.equal(registered.length, 4);
+  assert.equal(registered.length, 5);
+  assert.equal(registered.find(asset => asset.kind === 'tokenizer').path, tokenizer);
+  assert.equal(result.workflow.components.tokenizer.policy, 'fixed');
   assert.equal(saved.length, 1);
   assert.equal(await readFile(result.backupPath, 'utf8'), sourceText);
   const modified = graph();
@@ -208,8 +226,9 @@ test('explicit conversion backs up exact source bytes and resolves only assets u
   try {
     const modelRoot = join(directory, 'models');
     await mkdir(modelRoot);
-    for (const name of ['model', 'encoder', 'vae', 'style'])
+    for (const name of ['model', 'vae', 'style'])
       await writeFile(join(modelRoot, `${name}.safetensors`), 'local checkpoint');
+    await encoderWithTokenizer(modelRoot);
     const sourcePath = join(directory, 'source.json'),
       backupDir = join(directory, 'backups');
     const original = JSON.stringify({ id: 'old', name: 'Old', description: 'Local workflow', graph: graph() }, null, 2);
@@ -236,8 +255,10 @@ test('explicit conversion backs up exact source bytes and resolves only assets u
     assert.equal(saved.enabled, false);
     assert.equal(saved.parameters.seed.value, 0);
     assert.equal(saved.loras[0].strength.value, -0.5);
-    assert.equal(registered.length, 4);
-    assert.ok(registered.every(asset => asset.path.endsWith('.safetensors')));
+    assert.equal(registered.length, 5);
+    assert.ok(
+      registered.every(asset => asset.path.endsWith(asset.kind === 'tokenizer' ? 'qwen_tokenizer' : '.safetensors')),
+    );
     assert.equal((await readdir(backupDir)).length, 1);
     const unsafe = graph();
     unsafe.model.inputs.unet_name = '../model.safetensors';

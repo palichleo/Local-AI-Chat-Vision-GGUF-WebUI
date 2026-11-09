@@ -1,0 +1,331 @@
+{
+  "family": "minimax_h3",
+  "label": "MiniMax H3",
+  "mediaType": "video",
+  "tasks": [
+    "create_video",
+    "extend_video"
+  ],
+  "requires": [
+    "torch",
+    "torchvision",
+    "diffusers",
+    "transformers",
+    "accelerate",
+    "safetensors",
+    "PIL",
+    "imageio",
+    "imageio_ffmpeg",
+    "av",
+    "comfy_kitchen"
+  ],
+  "components": {
+    "model": {
+      "label": "Modèle",
+      "folder": "checkpoints",
+      "required": true,
+      "note": "Checkpoints élagués 8 étapes : FastH3 Omni (références) ou FastH3 v2 (texte, image de début/fin).",
+      "signature": [
+        {
+          "key": "^adaln_t_table$",
+          "shape": [
+            1025,
+            8
+          ]
+        },
+        {
+          "key": "^blocks\\.\\d+\\.attn\\.qkv_proj\\.weight$",
+          "shape": [
+            21504,
+            5376
+          ]
+        }
+      ]
+    },
+    "textEncoder": {
+      "label": "Encodeur de texte",
+      "folder": "LLMs",
+      "required": true,
+      "note": "Qwen3-VL-32B tronqué à 50 couches (NVFP4 AWQ ou int8 ConvRot).",
+      "signature": [
+        {
+          "key": "^(?:model\\.)?embed_tokens\\.weight$",
+          "shape": [
+            151936,
+            5120
+          ]
+        },
+        {
+          "key": "^visual\\.merger\\.linear_fc2\\.weight$",
+          "shape": [
+            5120,
+            null
+          ]
+        }
+      ]
+    },
+    "tokenizer": {
+      "label": "Tokenizer",
+      "folder": "LLMs",
+      "required": true,
+      "format": "tokenizer",
+      "policies": [
+        "fixed"
+      ],
+      "picker": "tokenizer",
+      "vocabularyOf": "textEncoder",
+      "help": "Dossier qui découpe le prompt en tokens pour l’encodeur de texte (tokenizer_config.json, vocab.json…). Proposé automatiquement d’après l’encodeur."
+    },
+    "vae": {
+      "label": "VAE vidéo",
+      "folder": "VAE",
+      "required": true,
+      "signature": [
+        {
+          "key": "^decoder\\.x_embedder\\.weight$",
+          "shape": [
+            2048,
+            24
+          ]
+        },
+        {
+          "key": "^encoder\\.conv_in\\.weight$"
+        }
+      ]
+    },
+    "audioVae": {
+      "label": "VAE audio",
+      "folder": "VAE",
+      "required": true,
+      "signature": [
+        {
+          "key": "^dec_in_proj\\.weight$",
+          "shape": [
+            2048,
+            32,
+            1
+          ]
+        },
+        {
+          "key": "^mean_proj\\.weight$"
+        }
+      ]
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "maxLength": 8000,
+      "nonempty": true
+    },
+    "seed": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "width": {
+      "type": "integer",
+      "min": 256,
+      "max": 2048,
+      "multipleOf": 32
+    },
+    "height": {
+      "type": "integer",
+      "min": 256,
+      "max": 2048,
+      "multipleOf": 32
+    },
+    "steps": {
+      "type": "integer",
+      "choices": [
+        8
+      ],
+      "note": "Modèle distillé : 8 étapes."
+    },
+    "frames": {
+      "type": "integer",
+      "choices": [
+        124,
+        141,
+        158,
+        175,
+        192,
+        209,
+        226,
+        243,
+        260,
+        277,
+        294,
+        311,
+        328,
+        345
+      ],
+      "note": "17n+5 images à 24 i/s, de 5 à 15 secondes."
+    },
+    "fps": {
+      "type": "number",
+      "choices": [
+        24
+      ]
+    },
+    "audio": {
+      "type": "boolean"
+    },
+    "stage": {
+      "type": "string",
+      "choices": [
+        "draft",
+        "final"
+      ]
+    },
+    "overlap_frames": {
+      "type": "integer",
+      "choices": [
+        22,
+        39,
+        56
+      ],
+      "note": "Images reprises de la vidéo source (17n+5)."
+    }
+  },
+  "requiredParameters": [
+    "prompt",
+    "seed",
+    "width",
+    "height",
+    "steps",
+    "frames",
+    "fps",
+    "stage",
+    "audio"
+  ],
+  "roles": {
+    "reference_image": {
+      "as": "reference",
+      "media": "image",
+      "max": 9,
+      "label": "Image de référence"
+    },
+    "start_image": {
+      "as": "start_image",
+      "media": "image",
+      "max": 1,
+      "label": "Image de début"
+    },
+    "end_image": {
+      "as": "end_image",
+      "media": "image",
+      "max": 1,
+      "label": "Image de fin"
+    },
+    "source_video": {
+      "as": "source",
+      "media": "video",
+      "max": 1,
+      "label": "Vidéo à prolonger"
+    }
+  },
+  "profiles": [
+    "width",
+    "height",
+    "steps",
+    "frames",
+    "fps"
+  ],
+  "template": {
+    "name": "MiniMax H3 video",
+    "description": "Video clips of 5 to 15 seconds with synchronized sound: from text, between a start and/or end image, keeping the subjects of up to nine reference images (FastH3 Omni), or continuing a video and its sound at its own resolution.",
+    "components": {
+      "model": {
+        "policy": "fixed",
+        "asset": "select-local-model"
+      },
+      "textEncoder": {
+        "policy": "fixed",
+        "asset": "select-local-text-encoder"
+      },
+      "tokenizer": {
+        "policy": "fixed",
+        "asset": "select-local-tokenizer"
+      },
+      "vae": {
+        "policy": "fixed",
+        "asset": "select-local-video-vae"
+      },
+      "audioVae": {
+        "policy": "fixed",
+        "asset": "select-local-audio-vae"
+      }
+    },
+    "parameters": {
+      "prompt": {
+        "policy": "model",
+        "type": "string",
+        "maxLength": 8000
+      },
+      "seed": {
+        "policy": "random",
+        "type": "integer"
+      },
+      "width": {
+        "policy": "fixed",
+        "value": 768
+      },
+      "height": {
+        "policy": "fixed",
+        "value": 448
+      },
+      "steps": {
+        "policy": "fixed",
+        "value": 8
+      },
+      "stage": {
+        "policy": "model",
+        "type": "string",
+        "choices": [
+          "draft",
+          "final"
+        ],
+        "default": "draft"
+      },
+      "frames": {
+        "policy": "fixed",
+        "value": 124
+      },
+      "fps": {
+        "policy": "fixed",
+        "value": 24
+      },
+      "audio": {
+        "policy": "fixed",
+        "value": true
+      },
+      "overlap_frames": {
+        "policy": "fixed",
+        "value": 22
+      }
+    },
+    "profiles": {
+      "draft": {
+        "parameters": {
+          "width": 768,
+          "height": 448,
+          "frames": 124,
+          "fps": 24,
+          "steps": 8
+        }
+      },
+      "final": {
+        "parameters": {
+          "width": 1344,
+          "height": 768,
+          "frames": 124,
+          "fps": 24,
+          "steps": 8
+        }
+      }
+    },
+    "loras": [],
+    "references": []
+  }
+}

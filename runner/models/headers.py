@@ -97,7 +97,8 @@ def header(path):
 
 def validate_krea2_components(job):
     """Checks Krea2 tensor signatures, INT8 scales and LoRA targets before any GPU work."""
-    headers = {role: header(path) for role, path in job['components'].items()}
+    # The tokenizer is a folder, not a checkpoint: it is checked by preflight and the pipeline.
+    headers = {role: header(path) for role, path in job['components'].items() if role != 'tokenizer'}
     for role, signature in SIGNATURES.items():
         for key, shape in signature.items():
             if headers[role].get(key, {}).get('shape') != shape:

@@ -55,8 +55,8 @@ def preflight(job, config):
     from runner.models.headers import validate_krea2_components
     from runner.models.shapes import validate_shapes
 
-    if not Path(config['tokenizerPath']).is_dir():
-        raise ValueError('Configure an existing local tokenizer directory')
+    if not Path(job['components']['tokenizer']).is_dir():
+        raise ValueError('The workflow tokenizer folder does not exist')
     if config['engine'] == 'int8' and importlib.util.find_spec('comfy_kitchen') is None:
         raise RuntimeError('Missing installed comfy-kitchen INT8 kernels')
     if config['tuned'] and importlib.util.find_spec('triton') is None:
@@ -85,7 +85,7 @@ def generate(job, config, progress):
         tuned=config['tuned'],
         cache_gib=config.get('cacheGiB'),
         cache_root=config['cacheRoot'],
-        tokenizer=config['tokenizerPath'],
+        tokenizer=job['components']['tokenizer'],
     )
     with ExitStack() as cleanup:
         return _generate(args, plan, files, job, config, progress, cleanup)
@@ -119,14 +119,19 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
     prepared_stats = None
     start = time.perf_counter()
     torch.cuda.reset_peak_memory_stats()
+    # Every stage with its elapsed time, kept with the image so slow phases can be found later.
+    timeline = []
 
     def progress(stage, **extra):
         data = dict(
             stage=stage,
             seconds=round(time.perf_counter() - start, 2),
             allocated_gib=round(torch.cuda.memory_allocated() / 1024**3, 3),
+            reserved_gib=round(torch.cuda.memory_reserved() / 1024**3, 3),
+            free_gib=round(torch.cuda.mem_get_info()[0] / 1024**3, 3),
             **extra,
         )
+        timeline.append({key: value for key, value in data.items() if key != 'prompt'})
         progress_callback(**data)
 
     def release():
@@ -172,6 +177,7 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
         del state
         vae.eval().to(dtype=dtype)
         vae.enable_tiling()
+        progress('VAE loaded')
         mean = torch.tensor(vae.config.latents_mean, device=device, dtype=dtype).view(1, 16, 1, 1)
         std = torch.tensor(vae.config.latents_std, device=device, dtype=dtype).view(1, 16, 1, 1)
         height, width = plan['height'] // 8, plan['width'] // 8
@@ -210,6 +216,7 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
             meta = torch.empty(entry['shape'], device='meta')
             converted = convert_krea2_transformer_checkpoint_to_diffusers({key: meta})
             rename.update({dest: key for dest in converted})
+        progress('transformer header mapped')
         weights = cleanup.enter_context(safe_open(str(files['transformer']), framework='pt', device='cpu'))
         adapters = [
             (cleanup.enter_context(safe_open(str(path), framework='pt', device='cpu')), item['strength'])
@@ -294,6 +301,7 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
                 if prepared is not None:
                     linear = PreparedLinear(original, linear.adapters, rotations.get(linear.rotation_size), prepared)
                 transformer.set_submodule(name, linear)
+        progress('transformer layers prepared')
         for key, parameter in list(transformer.named_parameters()):
             if key not in rename:
                 raise ValueError('Missing transformer weight: ' + key)
@@ -302,6 +310,7 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
                 raise ValueError('Transformer shape mismatch: ' + key)
             set_module_tensor_to_device(transformer, key, device, value=value.reshape(parameter.shape), dtype=dtype)
         transformer.eval().to(device)
+        progress('transformer parameters loaded')
         if args.tuned:
             from runner.models.kernels import install
 
@@ -350,6 +359,7 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
         decoded = vae.decode((latents.to(dtype) * std + mean).unsqueeze(2), return_dict=False)[0][0, :, 0]
         if not torch.isfinite(decoded).all():
             raise RuntimeError('Non-finite decoded image')
+        progress('decoded')
         pixels = ((decoded.float().clamp(-1, 1) + 1) * 127.5).round().byte().permute(1, 2, 0).cpu().numpy()
         comfy_imported = any(k == 'comfy' or k.startswith('comfy.') for k in sys.modules)
         if comfy_imported:
@@ -362,6 +372,7 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
             backend='pytorch-diffusers-' + args.engine,
             kernel_library='comfy_kitchen' if args.engine == 'int8' else None,
             tuned=args.tuned,
+            timeline=timeline,
         )
         if prepared_stats is not None:
             metadata['prepared_weights'] = prepared_stats

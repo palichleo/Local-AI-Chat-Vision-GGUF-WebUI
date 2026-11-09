@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "id": "eaec4e2f-0649-4e56-9bd9-809dc9390452",
+  "name": "LTX 2.5",
+  "description": "Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo.",
+  "enabled": true,
+  "pipeline": "ltx25",
+  "mediaType": "video",
+  "components": {
+    "model": {
+      "policy": "fixed",
+      "asset": "0e393c88-b185-4a05-8e2a-8d4978c61f72"
+    },
+    "textEncoder": {
+      "policy": "fixed",
+      "asset": "dc08f331-092c-40ef-b5d1-b58fa74d560e"
+    },
+    "vae": {
+      "policy": "fixed",
+      "asset": "fb61ac4a-a94e-4698-b83d-1fa14f551199"
+    },
+    "audioVae": {
+      "policy": "fixed",
+      "asset": "a6882e04-1752-4c7c-99dd-09a1ee27a5d2"
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "policy": "model",
+      "type": "string",
+      "maxLength": 8000
+    },
+    "seed": {
+      "policy": "random",
+      "type": "integer"
+    },
+    "width": {
+      "policy": "fixed",
+      "value": 896
+    },
+    "height": {
+      "policy": "fixed",
+      "value": 1600
+    },
+    "steps": {
+      "policy": "fixed",
+      "value": 8
+    },
+    "frames": {
+      "policy": "fixed",
+      "value": 121
+    },
+    "fps": {
+      "policy": "fixed",
+      "value": 24
+    },
+    "stage": {
+      "policy": "model",
+      "type": "string",
+      "choices": [
+        "draft",
+        "final"
+      ],
+      "default": "draft"
+    },
+    "audio": {
+      "policy": "fixed",
+      "value": true
+    },
+    "start_strength": {
+      "policy": "fixed",
+      "value": 0.7
+    },
+    "end_strength": {
+      "policy": "fixed",
+      "value": 0.7
+    },
+    "image_compression": {
+      "policy": "fixed",
+      "value": 18
+    },
+    "msr_strength": {
+      "policy": "fixed",
+      "value": 1
+    },
+    "msr_frames": {
+      "policy": "fixed",
+      "value": 33
+    }
+  },
+  "loras": [
+    {
+      "id": "reference-slots",
+      "asset": "f35e9e78-b899-4af9-965a-61f9a6e2dbd8",
+      "description": "Enable with MSR reference images.",
+      "enabled": {
+        "policy": "model",
+        "default": false
+      },
+      "strength": {
+        "policy": "fixed",
+        "value": 1
+      }
+    }
+  ],
+  "references": [
+    {
+      "id": "start",
+      "role": "start_image",
+      "required": false,
+      "name": "Start image"
+    },
+    {
+      "id": "end",
+      "role": "end_image",
+      "required": false,
+      "name": "End image"
+    },
+    {
+      "id": "source",
+      "role": "source_video",
+      "required": false,
+      "name": "Video to extend"
+    },
+    {
+      "id": "subject-1",
+      "role": "msr_image",
+      "required": false,
+      "name": "Subject 1"
+    },
+    {
+      "id": "subject-2",
+      "role": "msr_image",
+      "required": false,
+      "name": "Subject 2"
+    }
+  ],
+  "profiles": {
+    "draft": {
+      "parameters": {
+        "width": 384,
+        "height": 256,
+        "steps": 8,
+        "frames": 25,
+        "fps": 24
+      }
+    },
+    "final": {
+      "parameters": {
+        "width": 896,
+        "height": 1600,
+        "frames": 121,
+        "fps": 24,
+        "steps": 8
+      }
+    }
+  }
+}

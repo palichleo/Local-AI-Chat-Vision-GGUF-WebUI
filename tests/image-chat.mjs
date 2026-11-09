@@ -305,7 +305,12 @@ test('six sequential generations share one Atelier response and one image grid',
   assert.equal(result.messages.children.length, 1);
   assert.equal(new Set(result.views.map(view => view.article)).size, 1);
   assert.equal(result.state.messages.filter(message => message.role === 'tool').length, 6);
-  assert.equal(result.state.messages.at(-1).content, 'Result explained');
+  // Each request after an unseen image only decides whether to chain: no thinking, and its text is withheld.
+  assert.equal(result.requests.length, 7);
+  assert.ok(result.requests.slice(1).every(request => request.thinking === false));
+  assert.equal(result.requests[0].thinking, true);
+  assert.equal(result.state.messages.at(-1).role, 'tool');
+  assert.ok(!result.state.messages.some(message => message.content === 'Result explained'));
 });
 
 test('restored generations share a response until the next real user message', async () => {

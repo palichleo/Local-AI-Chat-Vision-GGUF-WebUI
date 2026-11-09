@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "id": "fefb88eb-8311-4409-b636-6efbb42e952c",
+  "enabled": true,
+  "pipeline": "krea2",
+  "mediaType": "image",
+  "name": "Krea 2",
+  "description": "Creer une image",
+  "components": {
+    "model": {
+      "policy": "fixed",
+      "asset": "4b404ba0-159a-421d-be77-38210a055ac2"
+    },
+    "textEncoder": {
+      "policy": "fixed",
+      "asset": "0c8b0769-3995-40ec-ab6b-490eeb992489"
+    },
+    "vae": {
+      "policy": "fixed",
+      "asset": "9b98298b-e2b8-4c32-8b50-bd2d23bc488d"
+    },
+    "tokenizer": {
+      "policy": "fixed",
+      "asset": "c7932ea5-58cc-4abc-a617-083cd00fdd3f"
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "policy": "model",
+      "type": "string",
+      "maxLength": 8000
+    },
+    "seed": {
+      "policy": "random",
+      "type": "integer"
+    },
+    "width": {
+      "policy": "model",
+      "type": "integer",
+      "default": 1024,
+      "min": 64,
+      "max": 4096
+    },
+    "height": {
+      "policy": "model",
+      "type": "integer",
+      "default": 1024,
+      "min": 64,
+      "max": 4096
+    },
+    "steps": {
+      "policy": "fixed",
+      "value": 8
+    },
+    "cfg": {
+      "policy": "fixed",
+      "value": 1
+    },
+    "denoise": {
+      "policy": "fixed",
+      "value": 1
+    },
+    "expandPrompt": {
+      "policy": "fixed",
+      "value": false
+    }
+  },
+  "loras": [],
+  "references": [
+    {
+      "id": "source",
+      "role": "img2img",
+      "name": "Source image",
+      "description": "Optional image to edit.",
+      "required": false
+    }
+  ]
+}

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { Resources, resourceCatalogPrompt } from '../lib/resources.mjs';
 import { createApplication } from '../server.mjs';
+import { Gallery } from '../lib/gallery.mjs';
 import { readSSE } from '../public/stream.mjs';
 const png =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
@@ -371,6 +372,23 @@ test('the final image review can still read references when further generations 
     if (Date.now() > deadline) assert.fail('Engine not ready');
     await new Promise(resolve => setTimeout(resolve, 30));
   }
+  // The review follows a generated image: that result is the only one the model may inspect.
+  const conversationId = randomUUID(),
+    runId = randomUUID();
+  await new Gallery({ historyDir: join(f.root, 'history') }).put(
+    {
+      id: runId,
+      conversationId,
+      provider: 'native',
+      workflowId: 'custom',
+      workflowName: 'User workflow',
+      prompt: 'A boat',
+      parameters: { seed: 1 },
+      createdAt: new Date().toISOString(),
+      outputs: [{ source: { filename: 'boat.png', subfolder: '', type: 'output' } }],
+    },
+    { persist: true },
+  );
   const events = [];
   await readSSE(
     (
@@ -379,7 +397,7 @@ test('the final image review can still read references when further generations 
         tools: false,
         resources: true,
         turnId: randomUUID(),
-        conversationId: randomUUID(),
+        conversationId,
       })
     ).body,
     event => events.push(event),
@@ -390,4 +408,5 @@ test('the final image review can still read references when further generations 
     ['local_read_resource', 'local_read_output'],
   );
   assert.deepEqual(body.tools[0].function.parameters.properties.resource_id.enum, [active.id]);
+  assert.deepEqual(body.tools[1].function.parameters.properties.run_id.enum, [runId]);
 });

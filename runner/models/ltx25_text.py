@@ -5,15 +5,15 @@ import gc
 
 def encode(job, headers, progress):
     import torch
-    from safetensors import safe_open
     from tokenizers import Tokenizer
+    from runner.models.residency import open_store
     from runner.models.ltx25 import architectures, mappings, WeightPool, load_streamed
 
     models = architectures(headers)
     model = models.pop('textEncoder')
     del models
     names = mappings(headers)['textEncoder']
-    with safe_open(job['components']['textEncoder'], framework='pt') as source:
+    with open_store(job['components']['textEncoder']) as source:
         if 'tokenizer_json' not in source.keys():
             raise ValueError('Gemma4 checkpoint must contain its tokenizer_json tensor')
         tokenizer = Tokenizer.from_str(source.get_tensor('tokenizer_json').numpy().tobytes().decode('utf8'))

@@ -176,6 +176,14 @@ test('HTTP output tool remains available after generation is disabled, enforces 
     ['local_read_output'],
   );
   assert.doesNotMatch(JSON.stringify(initial), /base64/);
+  assert.deepEqual(initial.tools[0].function.parameters.properties.run_id.enum, [record.id]);
+  // A wrong run_id is answered to the model as a refused call instead of ending the turn.
+  const refused = (await chat('inspect output ' + JSON.stringify({ run_id: 'run_id' }))).find(
+    event => event.local_tool_request,
+  ).local_tool_request;
+  assert.equal(refused.kind, 'invalid');
+  assert.equal(refused.message, 'Identifiant de sortie invalide.');
+  assert.equal(refused.call.function.name, 'local_read_output');
   for (let i = 0; i < 8; i++) {
     const events = await chat('inspect output ' + JSON.stringify({ run_id: record.id })),
       tool = events.find(event => event.local_tool_request).local_tool_request;
@@ -233,12 +241,18 @@ test('HTTP output tool remains available after generation is disabled, enforces 
       .status,
     400,
   );
+  // A conversation without results is never offered the inspection tool, so another
+  // conversation's run_id cannot be requested through it.
+  const empty = (await chat('inspect resources', { turnId: randomUUID(), conversationId: randomUUID() })).find(
+    event => event.local_test_payload,
+  ).local_test_payload;
+  assert.equal(empty.tools, undefined);
   await assert.rejects(
     chat('inspect output ' + JSON.stringify({ run_id: record.id }), {
       turnId: randomUUID(),
       conversationId: randomUUID(),
     }),
-    /introuvable/,
+    /indisponible/,
   );
   const disabled = (await chat('inspect resources', { resources: false, turnId: randomUUID() })).find(
     event => event.local_test_payload,

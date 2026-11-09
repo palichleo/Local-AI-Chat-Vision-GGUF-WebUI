@@ -267,7 +267,12 @@ async function loadConversation(id) {
   state.loadingHistory = true;
   updateControls();
   try {
-    if (!(await persistConversation())) return;
+    // A conversation that cannot be saved must not trap the user in it.
+    if (
+      !(await persistConversation()) &&
+      !confirm('Cette conversation n’a pas pu être enregistrée. Ouvrir l’autre conversation quand même ?')
+    )
+      return;
     const record = await (await api(`history/${id}`)).json();
     const messages = [...record.messages];
     const draft =
@@ -1236,7 +1241,9 @@ async function sendMessage(event) {
     complete = false,
     lastRender = 0,
     lastArchive = 0,
-    usedTool = false;
+    usedTool = false,
+    // After an image the assistant has not seen, it may only chain another tool: any text is withheld.
+    silent = false;
   state.generating = true;
   $('welcome').hidden = true;
   $('prompt').value = '';
@@ -1262,6 +1269,7 @@ async function sendMessage(event) {
     };
   }
   function render() {
+    if (silent) return;
     view.reasoning.hidden = !reasoning;
     view.thoughts.textContent = reasoning;
     if (output) renderText(view.body, output);
@@ -1287,6 +1295,7 @@ async function sendMessage(event) {
     updateControls();
     let allowTools = true,
       iterations = 0,
+      invalidCalls = 0,
       resourceReads = 0,
       reviewRecord = null;
     while (true) {
@@ -1295,7 +1304,13 @@ async function sendMessage(event) {
       view.body.replaceChildren(node('span', 'pending-dot', '●'));
       const response = await api(
         'chat',
-        { ...chatRequest(history, allowTools, resourceReads < 8), conversationId: state.conversationId, turnId },
+        {
+          ...chatRequest(history, allowTools, resourceReads < 8),
+          // Only deciding whether to chain another tool: thinking would cost seconds for nothing shown.
+          ...(silent ? { thinking: false } : {}),
+          conversationId: state.conversationId,
+          turnId,
+        },
         { signal },
       );
       await readSSE(response.body, chunk => {
@@ -1308,10 +1323,22 @@ async function sendMessage(event) {
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         if (performance.now() - lastRender > 55) render();
       });
+      if (silent && !request) {
+        // Nothing true to say about an unseen image: the image itself ends the turn.
+        output = '';
+        reasoning = '';
+        view.silent = true;
+        view.body.replaceChildren();
+        view.reasoning.hidden = true;
+        complete = true;
+        view.note.textContent = `${((performance.now() - started) / 1000).toFixed(1)} s`;
+        break;
+      }
+      silent = false;
       render();
       if (
         reviewRecord &&
-        !['resource', 'output'].includes(request?.kind) &&
+        !['resource', 'output', 'invalid'].includes(request?.kind) &&
         output.trim() &&
         finishReason !== 'length'
       ) {
@@ -1340,6 +1367,30 @@ async function sendMessage(event) {
       if (!output) view.body.replaceChildren();
       output = '';
       reasoning = '';
+      if (request.kind === 'invalid') {
+        // Refused before any read or generation: the model learns why and may correct its call;
+        // after a second refusal it must answer without tools, so a turn can never loop.
+        invalidCalls++;
+        history.push({
+          role: 'tool',
+          tool_call_id: request.call.id,
+          content: JSON.stringify({
+            status: 'error',
+            message: request.message,
+            note: 'Appel refusé avant toute génération. Corrige les arguments sans inventer d’identifiant, ou réponds sans outil.',
+          }),
+        });
+        if (invalidCalls >= 2) {
+          allowTools = false;
+          resourceReads = 8;
+        }
+        view.note.textContent = 'Appel d’outil refusé : ' + request.message;
+        state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+        await persistConversation();
+        view = assistantMessage(view);
+        finishReason = '';
+        continue;
+      }
       if (request.kind === 'output') {
         resourceReads++;
         view.note.textContent = 'Consultation de la sortie…';
@@ -1464,8 +1515,8 @@ async function sendMessage(event) {
         result = await workflowsUI.requestTool(
           request,
           signal,
-          progress => {
-            generation.progress(progress);
+          (progress, fraction) => {
+            generation.progress(progress, fraction);
             scrollToBottom();
           },
           image => generation.image(image),
@@ -1511,6 +1562,7 @@ async function sendMessage(event) {
         throw Error(result.error || 'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
       view.note.textContent = result.failed ? result.error || 'Analyse indisponible.' : '';
       if (result.denied || result.failed || iterations >= (state.generation?.maxIterations || 5)) allowTools = false;
+      silent = Boolean(result.record && result.record.mediaType !== 'video' && !result.failed);
       state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
       await persistConversation();
       view = assistantMessage(view);
@@ -1537,7 +1589,7 @@ async function sendMessage(event) {
         render();
         if (!output) view.body.replaceChildren(node('div', 'text-block', 'Aucune réponse finale reçue.'));
         history.push({ role: 'assistant', content: output, ...(reasoning ? { reasoning_content: reasoning } : {}) });
-      } else if (usedTool && !view.generation)
+      } else if (usedTool && !view.generation && !view.silent)
         view.body.replaceChildren(
           node('div', 'text-block', complete ? 'Aucune réponse finale reçue.' : 'Opération interrompue.'),
         );
@@ -1648,7 +1700,6 @@ const settingsGuard = setupSettingsGuard({
       'generation-auto',
       'generation-iterations',
       'generation-python',
-      'generation-tokenizer',
       'native-convert-root',
       'generation-vae-root',
       'generation-lora-root',
@@ -1826,7 +1877,12 @@ async function newConversation(projectId = state.projectId || 'inbox') {
   state.loadingHistory = true;
   updateControls();
   try {
-    if (!(await persistConversation())) return;
+    // A conversation that cannot be saved must not trap the user in it.
+    if (
+      !(await persistConversation()) &&
+      !confirm('Cette conversation n’a pas pu être enregistrée. En commencer une nouvelle quand même ?')
+    )
+      return;
     if (
       !state.saveHistory &&
       state.messages.length &&

@@ -9,7 +9,14 @@ class Element {
       cls,
       textContent: text,
       children: [],
-      style: {},
+      style: {
+        setProperty(name, value) {
+          this[name] = value;
+        },
+        removeProperty(name) {
+          delete this[name];
+        },
+      },
       attributes: {},
       classList: {
         add(...names) {
@@ -91,6 +98,31 @@ test('organic frame uses the known size and is replaced by an original blob outs
   await assert.rejects(fetch(url));
   assert.doesNotMatch(JSON.stringify(record), /blob:|full original/);
 });
+test('a reported fraction turns the bar determinate and completion hands it to the CSS finish', () => {
+  const container = new Element();
+  const ui = setupGenerationUI({
+    api: async () => {
+      throw Error('No request expected');
+    },
+    node: (...args) => new Element(...args),
+    openOutput: () => {},
+  });
+  const card = ui.mount(container, { mediaType: 'video', resolution: { width: 384, height: 256 } });
+  const [bar] = container.children[0].children[1].children;
+  card.progress('Génération · 3/8');
+  assert.equal(bar.classList.contains('is-determinate'), false);
+  card.progress('Génération · 3/8', 0.384);
+  assert.equal(bar.classList.contains('is-determinate'), true);
+  assert.equal(bar.style['--generation-progress'], '0.384');
+  assert.equal(bar.style['--generation-percent'], '38');
+  assert.equal(bar.attributes['aria-valuenow'], '38');
+  card.progress('Génération · 9/8', 7);
+  assert.equal(bar.style['--generation-progress'], '1');
+  card.fail('Interrompu');
+  assert.equal(bar.classList.contains('is-complete'), true);
+  assert.equal(bar.style['--generation-progress'], undefined);
+});
+
 test('restored chat resolves the saved Comfy output and releases display blobs when conversation changes', async () => {
   const container = new Element(),
     requests = [],

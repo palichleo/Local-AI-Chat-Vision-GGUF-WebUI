@@ -69,6 +69,8 @@ export function setupGenerationUI({ api, node, openOutput, onResize = () => {} }
         unwatch(target.figure);
         target.frame.classList.add('is-finished');
         target.frame.setAttribute('aria-busy', 'false');
+        target.progress.style.removeProperty('--generation-progress');
+        target.progress.style.removeProperty('--generation-percent');
         target.progress.classList.add('is-complete');
         target.progress.setAttribute('aria-hidden', 'true');
         target.label.classList.remove('sr-only');
@@ -77,8 +79,21 @@ export function setupGenerationUI({ api, node, openOutput, onResize = () => {} }
     dimensions(request.resolution?.width, request.resolution?.height);
     frame.classList.add('is-paused');
     watch(figure, visible => frame.classList.toggle('is-paused', !visible));
-    function progress(value) {
+    function progress(value, fraction) {
       if (disposed || finished) return;
+      // A real fraction replaces the indeterminate shimmer as soon as the job reports one.
+      if (Number.isFinite(fraction)) {
+        const percent = Math.round(Math.min(1, Math.max(0, fraction)) * 1000) / 10;
+        for (const target of tiles) {
+          // Custom properties registered with @property: CSS eases fill and counter between polls.
+          target.progress.classList.add('is-determinate');
+          target.progress.style.setProperty('--generation-progress', String(percent / 100));
+          target.progress.style.setProperty('--generation-percent', String(Math.floor(percent)));
+          target.progress.setAttribute('aria-valuemin', '0');
+          target.progress.setAttribute('aria-valuemax', '100');
+          target.progress.setAttribute('aria-valuenow', String(Math.round(percent)));
+        }
+      }
       const text =
         typeof value === 'string' && !value.trim().startsWith('{')
           ? value

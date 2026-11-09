@@ -9,14 +9,12 @@ DISTILLED_SIGMAS = (1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421
 
 
 def check(job, family):
-    """LTX2.5 rules beyond the manifest: conditioning combinations and silent continuation."""
+    """LTX2.5 rules beyond the manifest: conditioning combinations and continuation overlap."""
     parameters = job['parameters']
     roles = {ref['role'] for ref in job['references']}
     if {'start_image', 'source_video'} <= roles:
         raise ValueError('Choose a start image or source video, not both')
     if 'source_video' in roles:
-        if parameters['audio']:
-            raise ValueError('Audio continuation has not been validated')
         if parameters.get('overlap_frames', 9) >= parameters['frames']:
             raise ValueError('Invalid continuation overlap')
 
@@ -45,9 +43,9 @@ def preflight(job, config):
 
 def generate(job, config, progress):
     import torch
-    from safetensors import safe_open
     from runner.models.headers import header
     from runner.models.ltx25 import validate_layout, video_encoder, WeightPool, load_streamed
+    from runner.models.residency import RESIDENCY, open_store
     from runner.models.ltx25_text import encode
     from runner.video.export import save_video
     from diffusers import LTX2Pipeline, LTX2ConditionPipeline, FlowMatchEulerDiscreteScheduler
@@ -58,6 +56,21 @@ def generate(job, config, progress):
         raise RuntimeError('Free the other GPU models before generating video')
     start = time.perf_counter()
     torch.cuda.reset_peak_memory_stats()
+    # Every stage with its elapsed time and GPU memory, kept with the video to find slow phases.
+    timeline = []
+    report = progress
+
+    def progress(**data):
+        entry = dict(
+            data,
+            seconds=round(time.perf_counter() - start, 2),
+            allocated_gib=round(torch.cuda.memory_allocated() / 1024**3, 3),
+            free_gib=round(torch.cuda.mem_get_info()[0] / 1024**3, 3),
+        )
+        timeline.append({key: value for key, value in entry.items() if key != 'prompt'})
+        report(**data)
+
+    progress(stage='loading video prompt encoder')
     headers = {role: header(path) for role, path in job['components'].items()}
     continuation = None
     source_frames = None
@@ -67,18 +80,30 @@ def generate(job, config, progress):
 
         source_frames, continuation = source_tail(source_ref['path'], job['parameters'])
     embeds, mask = encode(job, headers, progress)
+    progress(stage='video prompt encoded')
     with ExitStack() as stack, torch.inference_mode():
         models, names = validate_layout(headers)
         del models['textEncoder']
+        # Weights come from RAM-resident arenas when they fit (kept between jobs); the text
+        # encoder file only lends its projection here, so it is not loaded for that alone.
         stores = {
-            role: stack.enter_context(safe_open(path, framework='pt')) for role, path in job['components'].items()
+            role: stack.enter_context(open_store(path, 'if-present' if role == 'textEncoder' else True))
+            for role, path in job['components'].items()
         }
         adapters = []
         for index, item in enumerate(job['loras']):
             key = 'lora-' + str(index)
-            stores[key] = stack.enter_context(safe_open(item['path'], framework='pt'))
+            stores[key] = stack.enter_context(open_store(item['path']))
             adapters.append((key, item['strength']))
-        budget = min(config.get('cacheGiB', 6), max(0, torch.cuda.mem_get_info()[0] / 1024**3 - 4))
+        free = torch.cuda.mem_get_info()[0] / 1024**3
+        p = job['parameters']
+        # Keep more of the DiT on the GPU when the activations are small (drafts): the rest is
+        # copied from RAM at every step. Never less than the former fixed 6 GiB rule.
+        tokens = ((p['frames'] - 1) // 8 + 1) * (p['height'] // 32) * (p['width'] // 32)
+        reserve = 2.5 + tokens * 4096 * 2 * 24 / 1024**3
+        budget = max(min(6, max(0, free - 4)), free - reserve)
+        if 'cacheGiB' in config:
+            budget = min(config['cacheGiB'], budget)
         hot = WeightPool(stores, budget, adapters=adapters)
         cold = WeightPool(stores, 0)
         try:
@@ -119,6 +144,22 @@ def generate(job, config, progress):
                 return args, values
 
             transformer.register_forward_pre_hook(keyframe_marker, with_kwargs=True)
+            if continuation and p['audio'] and continuation['sourceAudio']:
+                # Source sound under the overlap stays fixed, so the new audio continues it.
+                from runner.video.audio_tail import encode_tail, protect_head
+
+                progress(stage='encoding source audio')
+                start_seconds = (continuation['sourceFrames'] - continuation['overlapFrames']) / p['fps']
+                clean = encode_tail(
+                    source_ref['path'], start_seconds, continuation['sourceFrames'] / p['fps'], audio, torch
+                )
+                if clean is not None:
+                    clean = pipe._normalize_audio_latents(
+                        pipe._pack_audio_latents(clean.to('cuda')), audio.latents_mean, audio.latents_std
+                    )
+                    protect_head(transformer, clean)
+                    continuation['audioProtectedLatents'] = clean.shape[1]
+                    del clean
             if msr_refs:
                 pipe.msr_references = msr_refs
                 pipe.msr_store = stores['lora-0']
@@ -180,6 +221,13 @@ def generate(job, config, progress):
             )
             video = video.cpu()
             audio_latents = _audio.cpu()
+            cache = dict(
+                gpu_cache_gib=round(hot.bytes / 1024**3, 3),
+                gpu_cache_limit_gib=round(budget, 3),
+                pinned_model=stores['model'].pinned,
+                residency=RESIDENCY.summary(),
+            )
+            progress(stage='video sampled', **cache)
             del _audio, pipe, transformer, connectors, vae, audio
         finally:
             hot.clear()
@@ -188,7 +236,7 @@ def generate(job, config, progress):
     gc.collect()
     torch.cuda.empty_cache()
     # Close the large DiT/Gemma mmaps before decode, so their CPU pages can be reclaimed.
-    with safe_open(job['components']['vae'], framework='pt') as source, torch.inference_mode():
+    with open_store(job['components']['vae']) as source, torch.inference_mode():
         models, names = validate_layout(headers)
         vae = models.pop('vae')
         del models
@@ -204,6 +252,7 @@ def generate(job, config, progress):
             if not torch.isfinite(decoded).all():
                 raise RuntimeError('Non-finite decoded video; no output saved')
             pixels = ((decoded[0].float().clamp(-1, 1) + 1) * 127.5).round().byte().permute(1, 2, 3, 0).cpu().numpy()
+            progress(stage='video decoded')
         finally:
             del vae
             pool.clear()
@@ -215,6 +264,7 @@ def generate(job, config, progress):
         from runner.models.ltx25_audio import decode
 
         generated_audio = decode(audio_latents, job, headers, progress)
+        progress(stage='audio decoded')
     if any(name == 'comfy' or name.startswith('comfy.') for name in sys.modules):
         raise RuntimeError('Unexpected Comfy runtime import')
     metadata = dict(
@@ -227,6 +277,8 @@ def generate(job, config, progress):
         fps=p['fps'],
         stage=p['stage'],
         audio=p['audio'],
+        timeline=timeline,
+        weight_cache=cache,
     )
     if continuation:
         metadata['continuation'] = continuation
