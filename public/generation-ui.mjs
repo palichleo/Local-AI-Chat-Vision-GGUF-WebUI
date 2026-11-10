@@ -1,3 +1,5 @@
+import { comparedSource, imageCompare, loadSource } from './image-compare.mjs';
+
 export function setupGenerationUI({ api, node, openOutput, actions = null, onResize = () => {} }) {
   const cards = new Set(),
     watched = new Map();
@@ -112,6 +114,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
         slot.img.load?.();
         return;
       }
+      slot.compare?.release();
       if (slot.url) URL.revokeObjectURL(slot.url);
       slot.url = null;
       slot.blob = null;
@@ -218,6 +221,12 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
         dimensions(output.width, output.height, target);
       } else dimensions(request.resolution?.width, request.resolution?.height, target);
       button.append(img);
+      // An upscale shows its source under the pointer; the upscaled image stays the one clicked and dragged.
+      const source = comparedSource(record);
+      if (source) {
+        const owner = record;
+        slot.compare = imageCompare({ node, host: button, load: signal => loadSource(api, owner, source, signal) });
+      }
       button.onclick = () => openOutput(record, index, slot.blob || undefined);
       frame.replaceChildren(button);
       target.figure.append(buttons(record, index));
@@ -278,6 +287,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       for (const slot of slots.values()) {
         unwatch(slot.button);
         release(slot);
+        slot.compare?.dispose();
         slot.button.onclick = null;
         for (const child of slot.button.children || []) if (child.tagName === 'BUTTON') child.onclick = null;
       }

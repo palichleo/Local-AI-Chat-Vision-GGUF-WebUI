@@ -1,3 +1,4 @@
+import { comparedSource, imageCompare, loadSource } from './image-compare.mjs';
 import { prepareResource } from './resource-preparation.mjs';
 import { dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 
@@ -21,6 +22,7 @@ export function setupAssets({
     viewController,
     viewVersion = 0,
     objectURL,
+    comparison = null,
     ready = false,
     activity = Promise.resolve();
   const size = value => (value >= 1024 ** 2 ? (value / 1024 ** 2).toFixed(1) + ' Mo' : Math.ceil(value / 1024) + ' Ko');
@@ -271,6 +273,11 @@ export function setupAssets({
     $('original-video').load();
     $('original-image').removeAttribute('src');
     $('original-image').onload = null;
+    if (comparison) {
+      comparison.dispose();
+      comparison = null;
+      $('original-frame').style.removeProperty('--compare-ratio');
+    }
     if (objectURL) URL.revokeObjectURL(objectURL);
     objectURL = null;
   }
@@ -377,6 +384,13 @@ export function setupAssets({
       $('original-image').src = output.analysisDataUrl;
       $('original-image').hidden = false;
     }
+    // The same before/after comparison as in the chat, at the size of the view.
+    const source = comparedSource(record);
+    if (source) {
+      const frame = $('original-frame');
+      if (output.width && output.height) frame.style.setProperty('--compare-ratio', String(output.width / output.height));
+      comparison = imageCompare({ node, host: frame, load: signal => loadSource(api, record, source, signal) });
+    }
     try {
       const blob =
         originalBlob ||
@@ -392,6 +406,8 @@ export function setupAssets({
       const img = $('original-image');
       img.onload = () => {
         if (version === viewVersion) {
+          if (comparison && img.naturalWidth)
+            $('original-frame').style.setProperty('--compare-ratio', String(img.naturalWidth / img.naturalHeight));
           resolution.textContent = `${img.naturalWidth} × ${img.naturalHeight}`;
           $('media-error').textContent = '';
         }
