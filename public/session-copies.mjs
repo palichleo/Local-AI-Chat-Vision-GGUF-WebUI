@@ -6,6 +6,7 @@
  * the context meter) and kept in memory until the page closes. Nothing here touches the disk.
  */
 import { compressImage } from './images.mjs';
+import { prepareStoryboard } from './resource-preparation.mjs';
 
 const copies = new Map();
 
@@ -74,4 +75,30 @@ export function withoutCopies(messages) {
         }
       : message,
   );
+}
+
+/**
+ * Makes again the model's copy of a generated output from its original file (after a restart,
+ * the copies made when it was generated are gone) and hands it to the server for this session.
+ */
+export async function remakeOutputCopy({ api, conversationId, runId, index = 0, signal }) {
+  const record = await (await api(`gallery/${conversationId}/${runId}`, undefined, { signal })).json();
+  const output = record.outputs?.[index];
+  if (!output || record.provider !== 'native') throw Error('Le fichier original de cette sortie est indisponible.');
+  const images = record.outputs.map(() => null);
+  let frames;
+  if (record.mediaType === 'video') {
+    if (!output.originalUrl) throw Error('Lien de lecture vidéo indisponible.');
+    const video = await prepareStoryboard(output.originalUrl, {
+      signal,
+      name: output.source.filename,
+      fps: record.parameters?.fps || 24,
+    });
+    images[index] = video.frames[0].url;
+    frames = record.outputs.map((_, i) => (i === index ? video.frames : null));
+  } else {
+    const blob = await (await api(`gallery/${conversationId}/${runId}/${index}`, undefined, { signal })).blob();
+    images[index] = (await compressImage(blob, { name: output.source.filename, count: record.outputs.length })).url;
+  }
+  await api('gallery/analysis', { conversationId, id: runId, images, ...(frames ? { frames } : {}) }, { signal });
 }
