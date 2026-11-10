@@ -1,5 +1,5 @@
 import { appSources } from './lib/app-sources.mjs';
-import { Projects } from './lib/projects.mjs';
+import { Projects, projectId } from './lib/projects.mjs';
 import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
@@ -1263,6 +1263,28 @@ export async function createApplication({
         }
       }
       if (path === '/api/projects/save') return send(200, { project: await projects.save(body) });
+      if (path === '/api/projects/delete') {
+        if (body?.confirm !== true) throw problem('Confirme la suppression du projet.');
+        projectId(body.id);
+        if (body.id === 'inbox') throw problem('Le projet Conversations ne peut pas être supprimé.');
+        if (clearingHistory || disablingHistory || savingPreferences || runtime.active || engine.busy)
+          throw problem('Attends la fin de l’opération en cours.', 409);
+        clearingHistory = true;
+        try {
+          await historySaves;
+          await projects.require(body.id);
+          // Nothing is erased: the project's conversations go back to Conversations.
+          const moved = [];
+          for (const item of (await history.list()).conversations.filter(item => item.projectId === body.id)) {
+            const conversation = await history.read(item.id);
+            moved.push(historyView(await history.save({ ...conversation, projectId: 'inbox' })));
+          }
+          await projects.remove(body.id);
+          return send(200, { deleted: body.id, moved });
+        } finally {
+          clearingHistory = false;
+        }
+      }
       if (path === '/api/projects/move') {
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
         if (clearingHistory || disablingHistory || savingPreferences || runtime.active || engine.busy)

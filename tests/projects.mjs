@@ -250,3 +250,26 @@ test('a missing latest generation preview falls back to an older attached image'
   await f.call('history/delete', { id, confirm: true });
   assert.equal((await fetch(f.url() + item.previewUrl)).status, 404);
 });
+
+test('deleting a project keeps its conversations, which go back to Conversations', async t => {
+  const f = await fixture(t),
+    project = (await (await f.call('projects/save', { name: 'Trip' })).json()).project,
+    inside = randomUUID(),
+    outside = randomUUID();
+  await f.call('history/save', { id: inside, messages: [{ role: 'user', content: 'Inside' }], projectId: project.id });
+  await f.call('history/save', { id: outside, messages: [{ role: 'user', content: 'Outside' }] });
+  assert.equal((await f.call('projects/delete', { id: project.id })).status, 400, 'a confirmation is required');
+  assert.equal((await f.call('projects/delete', { id: 'inbox', confirm: true })).status, 400);
+  const response = await f.call('projects/delete', { id: project.id, confirm: true });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.deepEqual(
+    result.moved.map(item => [item.id, item.projectId]),
+    [[inside, 'inbox']],
+  );
+  assert.deepEqual((await (await f.call('projects')).json()).projects, [{ id: 'inbox', name: 'Conversations' }]);
+  const conversations = (await (await f.call('history')).json()).conversations;
+  assert.deepEqual(conversations.map(item => item.projectId).sort(), ['inbox', 'inbox']);
+  assert.equal((await (await f.call('history/' + inside)).json()).messages[0].content, 'Inside');
+  assert.equal((await f.call('projects/delete', { id: project.id, confirm: true })).status, 404);
+});

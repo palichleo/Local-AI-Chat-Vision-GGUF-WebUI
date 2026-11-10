@@ -67,6 +67,108 @@ export function setupProjectNavigation({
     $('project-dialog').showModal();
     $('project-name').focus();
   }
+  // Deleting a project keeps its conversations: they go back to Conversations.
+  let deleting = null;
+  function remove(project) {
+    if (busy() || project.id === 'inbox') return;
+    closeMenu();
+    deleting = project;
+    const count = project.conversations?.filter(item => !item.temporary).length ?? 0;
+    $('project-delete-title').textContent = `Supprimer le projet « ${project.name} » ?`;
+    $('project-delete-description').textContent = count
+      ? `Ses ${count > 1 ? count + ' conversations seront déplacées' : 'conversation sera déplacée'} dans Conversations. Aucune conversation ni image n’est effacée.`
+      : 'Ce projet est vide. Aucune conversation ni image n’est effacée.';
+    $('project-delete-error').hidden = true;
+    $('project-delete-confirm').disabled = false;
+    $('project-delete-dialog').showModal();
+  }
+  $('project-delete-cancel').onclick = () => $('project-delete-dialog').close();
+  dismissSettingsOnOutsideClick($('project-delete-dialog'));
+  $('project-delete-confirm').onclick = async () => {
+    if (working || !deleting) return;
+    const project = deleting;
+    working = true;
+    state.projectWorking = true;
+    onBusy();
+    $('project-delete-confirm').disabled = true;
+    try {
+      const { moved = [] } = await (await api('projects/delete', { id: project.id, confirm: true })).json();
+      const updated = new Map(moved.map(item => [item.id, item]));
+      state.projects = state.projects.filter(item => item.id !== project.id);
+      state.historyItems = state.historyItems.map(item => updated.get(item.id) || item);
+      if (state.projectId === project.id) state.projectId = 'inbox';
+      collapsed.delete(project.id);
+      $('project-delete-dialog').close();
+      render();
+    } catch (error) {
+      $('project-delete-error').textContent = error.message;
+      $('project-delete-error').hidden = false;
+      $('project-delete-confirm').disabled = false;
+    } finally {
+      working = false;
+      state.projectWorking = false;
+      onBusy();
+      sync();
+    }
+  };
+
+  // Right click on a project: rename or delete.
+  let menu = null;
+  const outside = event => {
+    if (menu && !menu.contains(event.target)) closeMenu();
+  };
+  const escape = event => {
+    if (event.key === 'Escape') closeMenu();
+  };
+  function closeMenu() {
+    if (!menu) return;
+    menu.remove();
+    menu = null;
+    document.removeEventListener('pointerdown', outside, true);
+    document.removeEventListener('keydown', escape);
+    window.removeEventListener('blur', closeMenu);
+    window.removeEventListener('resize', closeMenu);
+  }
+  function openMenu(event, project) {
+    event.preventDefault();
+    if (busy()) return;
+    closeMenu();
+    menu = node('div', 'project-menu');
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Actions du projet ' + project.name);
+    const item = (label, symbol, action, cls = '') => {
+      const entry = node('button', 'project-menu-item ' + cls);
+      entry.type = 'button';
+      entry.setAttribute('role', 'menuitem');
+      entry.append(icon(symbol), node('span', '', label));
+      entry.onclick = () => {
+        closeMenu();
+        action();
+      };
+      return entry;
+    };
+    menu.append(item('Renommer', 'edit', () => edit(project)));
+    if (project.id !== 'inbox') menu.append(item('Supprimer', 'trash', () => remove(project), 'is-danger'));
+    document.body.append(menu);
+    const width = menu.offsetWidth || 160,
+      height = menu.offsetHeight || 80;
+    menu.style.left = Math.min(event.clientX, window.innerWidth - width - 8) + 'px';
+    menu.style.top = Math.min(event.clientY, window.innerHeight - height - 8) + 'px';
+    menu.querySelector('button')?.focus();
+    // Listening only while the menu is open: a click elsewhere, Escape or a resize closes it.
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('keydown', escape);
+    window.addEventListener('blur', closeMenu);
+    window.addEventListener('resize', closeMenu);
+  }
+  /** Double click renames; right click opens the menu. */
+  function projectGestures(element, project) {
+    element.ondblclick = event => {
+      event.preventDefault();
+      edit(project);
+    };
+    element.oncontextmenu = event => openMenu(event, project);
+  }
   $('project-cancel').onclick = () => $('project-dialog').close();
   dismissSettingsOnOutsideClick($('project-dialog'));
   $('project-form').onsubmit = async event => {
@@ -208,8 +310,13 @@ export function setupProjectNavigation({
           node('span', 'project-name', group.name),
           node('span', 'project-count', String(group.conversations.length)),
         );
-        const rename = button('Renommer ' + group.name, 'project-rename icon-button', () => edit(group), 'edit');
-        header.append(toggle, open, rename);
+        projectGestures(open, group);
+        header.oncontextmenu = event => openMenu(event, group);
+        header.append(toggle, open);
+        if (group.id !== 'inbox')
+          header.append(
+            button('Supprimer ' + group.name, 'project-rename project-delete icon-button', () => remove(group), 'trash'),
+          );
         children.hidden = !expanded;
         for (const item of group.conversations) {
           const row = conversationRow(item);
@@ -266,8 +373,13 @@ export function setupProjectNavigation({
       const head = node('div', 'project-card-heading'),
         title = button(group.name, 'project-card-title', () => openProject(group), 'folder');
       title.append(node('h2', '', group.name));
-      const rename = button('Renommer ' + group.name, 'icon-button project-card-rename', () => edit(group), 'edit');
-      head.append(title, rename);
+      projectGestures(title, group);
+      head.oncontextmenu = event => openMenu(event, group);
+      head.append(title);
+      if (group.id !== 'inbox')
+        head.append(
+          button('Supprimer ' + group.name, 'icon-button project-card-rename project-delete', () => remove(group), 'trash'),
+        );
       card.append(
         head,
         node(

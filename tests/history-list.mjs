@@ -18,6 +18,7 @@ class Element {
       value: '',
       scrollTop: 0,
       classList: { remove() {} },
+      style: {},
     });
   }
   append(...items) {
@@ -31,6 +32,10 @@ class Element {
     this.attributes[name] = value;
   }
   addEventListener() {}
+  querySelector() {
+    return null;
+  }
+  remove() {}
   focus() {}
   close() {
     this.open = false;
@@ -470,4 +475,38 @@ test('failed Home preparation keeps the chat visible and releases navigation con
     assert.equal(renders, 0);
     assert.equal(notices.length, failure ? 1 : 0);
   }
+});
+
+test('a project is deleted with its bin, renamed by double click, and both are in its right-click menu', async t => {
+  const { $, calls, state } = fixture(t);
+  const label = name => walk($('history-list')).find(element => element.attributes['aria-label'] === name);
+  assert.equal(label('Renommer A project'), undefined, 'the pencil is gone');
+  assert.equal(label('Supprimer Conversations'), undefined, 'the default project cannot be deleted');
+  const open = label('A project');
+  open.ondblclick({ preventDefault() {} });
+  assert.equal($('project-dialog').open, true);
+  assert.equal($('project-name').value, 'A project');
+  $('project-dialog').close();
+
+  const appended = [];
+  globalThis.document.body.append = element => appended.push(element);
+  globalThis.document.addEventListener = () => {};
+  globalThis.document.removeEventListener = () => {};
+  globalThis.window = { innerWidth: 1000, innerHeight: 800, addEventListener() {}, removeEventListener() {} };
+  t.after(() => delete globalThis.window);
+  open.oncontextmenu({ preventDefault() {}, clientX: 20, clientY: 30 });
+  const menu = appended[0];
+  assert.deepEqual(
+    menu.children.map(item => item.children[1].textContent),
+    ['Renommer', 'Supprimer'],
+  );
+  menu.children[1].onclick();
+  assert.equal($('project-delete-dialog').open, true);
+  assert.match($('project-delete-description').textContent, /2 conversations seront déplacées dans Conversations/);
+
+  label('Supprimer A project').onclick();
+  await $('project-delete-confirm').onclick();
+  assert.deepEqual(calls.at(-1), ['projects/delete', { id: 'project', confirm: true }]);
+  assert.deepEqual(state.projects.map(project => project.id), ['inbox']);
+  assert.equal(state.projectId, 'inbox');
 });

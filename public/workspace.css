@@ -1308,3 +1308,81 @@ body:not([data-files='open']) .assets-panel {
     animation: none;
   }
 }
+
+/* Project deletion: the bin replaces the pencil; rename by double click or right click. */
+.project-delete {
+  color: var(--muted);
+}
+.project-delete:hover:enabled {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+#project-delete-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: 440px;
+  max-width: calc(100% - 32px);
+  height: fit-content;
+  min-height: 0;
+  overflow: auto;
+  max-height: calc(100dvh - 32px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 24px;
+}
+#project-delete-dialog h2 {
+  font-size: 19px;
+  margin: 0 0 14px;
+  overflow-wrap: anywhere;
+}
+#project-delete-dialog p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.project-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 160px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: 0 12px 32px var(--shadow);
+  display: grid;
+  gap: 2px;
+}
+.project-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.project-menu-item svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.project-menu-item:hover,
+.project-menu-item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+.project-menu-item.is-danger,
+.project-menu-item.is-danger svg {
+  color: var(--danger);
+}
+.project-menu-item.is-danger:hover,
+.project-menu-item.is-danger:focus-visible {
+  background: var(--danger-bg);
+}
