@@ -18,11 +18,13 @@ async function exchange({
   denied = false,
   hasRecord = true,
   readOutputAfterGeneration = false,
+  readOutputAgain = false,
   readResourceDuringReview = false,
   mediaType = 'image',
   finalText = 'Result explained',
   finalReason = 'stop',
   generationCalls = 1,
+  reviewVideos = false,
 } = {}) {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const element = (tag = '', className = '', textContent = '') => ({
@@ -57,9 +59,10 @@ async function exchange({
     images: [],
     status: { state: 'ready', vision: true, busy: false },
     thinking: true,
-    generation: { maxIterations: Math.max(5, generationCalls) },
+    generation: { maxIterations: Math.max(5, generationCalls), reviewVideos },
   };
   const requests = [],
+    toolOptions = [],
     reviews = [],
     views = [],
     generationContainers = [];
@@ -96,7 +99,8 @@ async function exchange({
     refreshStatus: async () => {},
     setConversationTitle() {},
     workflowsUI: {
-      requestTool: async () => ({
+      requestTool: async (...args) => ({
+        ...(toolOptions.push(args[4]) && {}),
         content: JSON.stringify({ status: denied ? 'denied' : failed ? 'generated' : 'success' }),
         images,
         failed,
@@ -141,7 +145,9 @@ async function exchange({
                 },
               },
             ]
-          : readOutputAfterGeneration && requests.length === generationCalls + 1
+          : readOutputAfterGeneration &&
+              requests.length > generationCalls &&
+              requests.length <= generationCalls + (readOutputAgain ? 2 : 1)
             ? [
                 { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
                 {
@@ -193,7 +199,7 @@ async function exchange({
     context,
   );
   await context.sendMessage({ preventDefault() {} });
-  return { state, requests, reviews, views, generationContainers, messages: $('messages') };
+  return { state, requests, toolOptions, reviews, views, generationContainers, messages: $('messages') };
 }
 
 test('without vision, generated outputs are explained without marking them visually reviewed', async () => {
@@ -250,6 +256,16 @@ test('an optional output read supplies temporary pixels and can be followed by a
   assert.doesNotMatch(JSON.stringify(result.state.messages), /base64|outputId/);
 });
 
+test('an output already read in the turn is not read again: the model answers from what it has', async () => {
+  const result = await exchange({ readOutputAfterGeneration: true, readOutputAgain: true });
+  assert.equal(result.requests.length, 4);
+  const last = result.requests[3];
+  assert.equal(last.messages.filter(message => message.outputId === 'run/0').length, 1);
+  assert.match(last.messages.at(-1).content, /already_loaded/);
+  assert.equal(last.resources, false, 'no further read is offered');
+  assert.equal(result.reviews.length, 1);
+});
+
 test('an output inspection with no copy cannot mark the output visually reviewed', async () => {
   const result = await exchange({ readOutputAfterGeneration: true, images: [] });
   assert.equal(result.requests.length, 3);
@@ -257,11 +273,37 @@ test('an output inspection with no copy cannot mark the output visually reviewed
   assert.doesNotMatch(JSON.stringify(result.requests), /base64/);
 });
 
-test('video review still receives sampled frames automatically', async () => {
-  const result = await exchange({ mediaType: 'video' });
+test('a video is analysed after its generation only when the user chose it in the settings', async () => {
+  const result = await exchange({ mediaType: 'video', reviewVideos: true });
   assert.equal(result.requests.length, 2);
   assert.equal(result.reviews.length, 1);
   assert.match(JSON.stringify(result.requests[1]), /base64/);
+  assert.equal(result.toolOptions[0].review, true);
+});
+
+test('by default a video ends the turn like an image: no frames sent, no thinking, no text', async () => {
+  const result = await exchange({ mediaType: 'video' });
+  assert.equal(result.toolOptions[0].review, false);
+  assert.equal(result.requests.length, 2);
+  assert.equal(result.requests[1].thinking, false);
+  assert.equal(result.requests[1].messages.at(-1).role, 'tool');
+  assert.doesNotMatch(JSON.stringify(result.requests), /base64/);
+  assert.equal(result.reviews.length, 0);
+  assert.ok(!result.state.messages.some(message => message.content === 'Result explained'));
+  // The model can still look at it when asked: the read tool hands it the frames.
+  const read = await exchange({ mediaType: 'video', readOutputAfterGeneration: true });
+  assert.equal(read.reviews.length, 1);
+  assert.match(JSON.stringify(read.requests[2]), /base64/);
+});
+
+test('a tool call written as text once tools are withdrawn is never shown or stored', async () => {
+  const leak = '<tool_call>\n<function=create_video>\n<parameter=prompt>\nA boat\n</parameter>\n</function>\n</tool_call>';
+  const only = await exchange({ failed: true, images: [], finalText: leak });
+  assert.equal(only.requests[1].tools, false);
+  assert.doesNotMatch(JSON.stringify(only.state.messages.at(-1)), /tool_call|function=/);
+  assert.match(only.state.messages.at(-1).content, /Renvoie ta demande/);
+  const after = await exchange({ failed: true, images: [], finalText: 'La génération a échoué. ' + leak });
+  assert.equal(after.state.messages.at(-1).content, 'La génération a échoué.');
 });
 
 test('blank or token-truncated model responses never mark an image as reviewed', async () => {

@@ -1257,6 +1257,8 @@ export async function createApplication({
           await gallery.pending;
           await history.clear();
           runtime.clear();
+          // The text conditioning kept for recent prompts is derived from them: it goes too.
+          await rm(join(dataDir, 'generation-cache', 'conditioning'), { recursive: true, force: true });
           return send(200, { cleared: true });
         } finally {
           clearingHistory = false;

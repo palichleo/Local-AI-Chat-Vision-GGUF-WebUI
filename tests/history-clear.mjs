@@ -48,6 +48,10 @@ test('supprimer l’historique exige confirmation et jeton, fonctionne même dé
       if (!enabled) await post('preferences', { saveHistory: false });
       const before = JSON.parse(await readFile(join(dataDir, 'preferences.json'), 'utf8'));
       await writeFile(join(dataDir, 'outside.txt'), 'À conserver');
+      const conditioning = join(dataDir, 'generation-cache', 'conditioning');
+      await mkdir(conditioning, { recursive: true });
+      await writeFile(join(conditioning, 'a'.repeat(64) + '.safetensors'), 'derived from a prompt');
+      await writeFile(join(dataDir, 'generation-cache', 'weights.safetensors'), 'model cache');
       assert.equal((await post('history/clear', { confirm: true }, '')).status, 401);
       assert.equal((await post('history/clear', {})).status, 400);
       assert.equal((await post('history/clear', { confirm: false })).status, 400);
@@ -58,6 +62,8 @@ test('supprimer l’historique exige confirmation et jeton, fonctionne même dé
       await assert.rejects(readdir(historyDir), { code: 'ENOENT' });
       assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'preferences.json'), 'utf8')), before);
       assert.equal(await readFile(join(dataDir, 'outside.txt'), 'utf8'), 'À conserver');
+      await assert.rejects(readdir(conditioning), { code: 'ENOENT' });
+      assert.equal(await readFile(join(dataDir, 'generation-cache', 'weights.safetensors'), 'utf8'), 'model cache');
       assert.equal((await post('history/clear', { confirm: true })).status, 200);
     }
   } finally {

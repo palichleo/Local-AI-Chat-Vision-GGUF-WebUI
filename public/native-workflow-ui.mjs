@@ -155,6 +155,7 @@ export function setupNativeWorkflows(options) {
           ![
             'generation-enabled',
             'generation-auto',
+            'generation-review',
             'generation-iterations',
             'generation-minus',
             'generation-plus',
@@ -220,6 +221,7 @@ export function setupNativeWorkflows(options) {
       enabled: $('generation-enabled').checked,
       autoAllow: $('generation-auto').checked,
       maxIterations,
+      reviewVideos: $('generation-review').checked,
       pythonPath: $('generation-python').value.trim(),
       ...folderValues(),
     };
@@ -321,6 +323,7 @@ export function setupNativeWorkflows(options) {
       if (settings) {
         $('generation-enabled').checked = config.enabled;
         $('generation-auto').checked = config.autoAllow;
+        $('generation-review').checked = config.reviewVideos === true;
         unlimited = config.maxIterations === 10000;
         if (!unlimited) lastLimited = config.maxIterations || 5;
         $('generation-iterations').value = lastLimited;

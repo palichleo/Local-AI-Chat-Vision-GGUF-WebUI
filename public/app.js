@@ -1217,8 +1217,9 @@ async function runOutputAction(record, index, action) {
           scrollToBottom();
         },
         image => generation.image(image),
-        // The click on Upscale or Interpoler is the confirmation: no second question.
-        { confirmed: true },
+        // The click on Upscale or Interpoler is the confirmation: no second question. No model
+        // runs here, so the result does not say that images of the output are attached.
+        { confirmed: true, review: false },
       );
       generation.finish(result);
     } catch (error) {
@@ -1359,7 +1360,8 @@ async function sendMessage(event) {
     lastRender = 0,
     lastArchive = 0,
     usedTool = false,
-    // After an image the assistant has not seen, it may only chain another tool: any text is withheld.
+    // After an output the assistant has not seen (an image, or a video without the automatic
+    // analysis), it may only chain another tool: any text is withheld.
     silent = false;
   state.generating = true;
   $('welcome').hidden = true;
@@ -1417,7 +1419,10 @@ async function sendMessage(event) {
       reviewRecord = null;
     while (true) {
       signal.throwIfAborted();
-      let request = null;
+      let request = null,
+        // Without tools (after a failure, a refusal or the limit), a model that still wants to
+        // generate writes its call as text: that markup is never shown.
+        leaked = false;
       view.body.replaceChildren(node('span', 'pending-dot', '●'));
       // Attached images of a reopened conversation get their compressed copy from the original.
       await fillCopies(history, { api, conversationId: state.conversationId, signal });
@@ -1437,11 +1442,20 @@ async function sendMessage(event) {
         if (chunk.local_tool_request) request = chunk.local_tool_request;
         const choice = chunk.choices?.[0],
           delta = choice?.delta || {};
-        output += delta.content || '';
+        if (!leaked) output += delta.content || '';
+        if (!allowTools && !leaked) {
+          const cut = output.search(/<tool_call>|<function=/);
+          if (cut >= 0) {
+            output = output.slice(0, cut).trimEnd();
+            leaked = true;
+          }
+        }
         reasoning += delta.reasoning_content || '';
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         if (performance.now() - lastRender > 55) render();
       });
+      if (leaked && !output)
+        output = 'Je ne peux pas lancer d’autre génération dans ce message. Renvoie ta demande pour que je réessaie.';
       if (silent && !request) {
         // Nothing true to say about an unseen image: the image itself ends the turn.
         output = '';
@@ -1512,6 +1526,25 @@ async function sendMessage(event) {
       }
       if (request.kind === 'output') {
         resourceReads++;
+        // Its images are already in this turn: reading it again would only loop.
+        if (history.some(message => message.outputId === request.runId + '/' + request.outputIndex)) {
+          history.push({
+            role: 'tool',
+            tool_call_id: request.call.id,
+            content: JSON.stringify({
+              status: 'already_loaded',
+              run_id: request.runId,
+              output_index: request.outputIndex,
+              note: 'Les images de cette sortie sont déjà jointes à ce tour. Réponds à l’utilisateur à partir d’elles, sans la relire.',
+            }),
+          });
+          resourceReads = 8;
+          state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+          await persistConversation();
+          view = assistantMessage(view);
+          finishReason = '';
+          continue;
+        }
         view.note.textContent = 'Consultation de la sortie…';
         try {
           const read = async () =>
@@ -1647,6 +1680,9 @@ async function sendMessage(event) {
       iterations++;
       view.generation = true;
       const generation = generationUI.mount(view.generations, request);
+      // A video is commented by the model only when the user chose it in the settings: the
+      // reload and the analysis take about a minute. Otherwise it ends the turn, like an image.
+      const review = state.generation?.reviewVideos === true;
       let result;
       try {
         result = await workflowsUI.requestTool(
@@ -1657,6 +1693,7 @@ async function sendMessage(event) {
             scrollToBottom();
           },
           image => generation.image(image),
+          { review },
         );
         generation.finish(result);
       } catch (error) {
@@ -1671,11 +1708,11 @@ async function sendMessage(event) {
       history.push({ role: 'tool', tool_call_id: request.call.id, content: result.content });
       if (result.record || result.failed) state.status = await (await api('status')).json();
       const reviewImages =
-        result.record?.mediaType === 'video' && state.status.state === 'ready' && state.status.vision
+        review && result.record?.mediaType === 'video' && state.status.state === 'ready' && state.status.vision
           ? result.images
           : [];
       reviewRecord = reviewImages.length ? result.record : null;
-      if (result.record?.mediaType === 'video') {
+      if (review && result.record?.mediaType === 'video') {
         history.push({
           role: 'user',
           internal: true,
@@ -1701,7 +1738,7 @@ async function sendMessage(event) {
       if (result.denied || result.failed || iterations >= (state.generation?.maxIterations || 5)) allowTools = false;
       // After a refusal or a failure the model explains it: it does not go on inspecting outputs.
       if (result.denied || result.failed) resourceReads = 8;
-      silent = Boolean(result.record && result.record.mediaType !== 'video' && !result.failed);
+      silent = Boolean(result.record && !(review && result.record.mediaType === 'video') && !result.failed);
       state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
       await persistConversation();
       view = assistantMessage(view);
@@ -1845,6 +1882,7 @@ const settingsGuard = setupSettingsGuard({
       'gpu-layers',
       'generation-enabled',
       'generation-auto',
+      'generation-review',
       'generation-iterations',
       'generation-python',
       'native-convert-root',

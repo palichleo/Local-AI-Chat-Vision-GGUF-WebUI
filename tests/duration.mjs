@@ -70,7 +70,7 @@ test('the model asks for seconds; the router picks frames and says when it round
     media,
   );
   assert.equal(extended.args.frames, 124);
-  assert.match(extended.notes.join(), /3 s → 4\.25 s added/);
+  assert.match(extended.notes.join(), /ajoutée : 3 s → 4\.25 s/);
   await assert.rejects(tools.route('create_video', { prompt: 'x', intention: 'y', duration: -1 }, media), /duration/);
 });
 
@@ -82,7 +82,7 @@ test('a locked clip length keeps the workflow’s value and tells the model', as
   assert.equal(definitions.create_video.parameters.properties.duration, undefined);
   const routed = await tools.route('create_video', { prompt: 'x', intention: 'y', duration: 10 }, media);
   assert.equal(routed.args.frames, undefined);
-  assert.match(routed.notes.join(), /duration ignored/);
+  assert.match(routed.notes.join(), /Durée ignorée/);
 });
 
 test('a length the model chose outlives the draft and final profiles', async () => {

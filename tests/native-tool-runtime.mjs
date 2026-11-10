@@ -100,6 +100,64 @@ test('native immutable job keeps random seed through authorization and GPU hando
   assert.deepEqual(events, ['preflight', 'llm stopped', 'generate', 'gpu released', 'llm started']);
 });
 
+test('a seed named by the user reaches the job instead of a drawn one', async () => {
+  const workflow = {
+    schemaVersion: 1,
+    id: 'image',
+    name: 'Image',
+    description: '',
+    digest: 'a'.repeat(64),
+    mediaType: 'image',
+    pipeline: 'krea2',
+    enabled: true,
+    ready: true,
+    parameters: { prompt: { policy: 'model', type: 'string' }, seed: { policy: 'random', type: 'integer' } },
+    references: [],
+  };
+  const seeds = [];
+  const runtime = new ToolRuntime({
+    engine: { busy: false, state: 'ready' },
+    catalog: {
+      list: async () => [workflow],
+      read: async () => workflow,
+      prepare: async (_id, args, options) => {
+        seeds.push([args.seed, options.seed]);
+        return {
+          workflow,
+          job: {
+            schemaVersion: 1,
+            id,
+            pipeline: 'krea2',
+            mediaType: 'image',
+            workflowId: 'image',
+            workflowDigest: workflow.digest,
+            parameters: { prompt: 'boat', seed: options.seed ?? 1, width: 512, height: 512 },
+            components: {},
+            loras: [],
+            references: [],
+          },
+          outputNodes: [],
+        };
+      },
+    },
+    gallery: {},
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'native' }),
+    engineConfig: () => ({}),
+    clientFactory: () => ({ status: async () => ({ idle: true }), preflight: async () => {} }),
+  });
+  const ask = args =>
+    runtime.request(
+      [{ id: 'call', type: 'function', function: { name: 'create_image', arguments: JSON.stringify(args) } }],
+      { conversationId: id, turnId: id, messages: [{ role: 'user', content: 'boat' }] },
+    );
+  await ask({ prompt: 'boat', seed: 42 });
+  await ask({ prompt: 'boat' });
+  assert.deepEqual(seeds, [
+    [undefined, 42],
+    [undefined, undefined],
+  ]);
+});
+
 test('native video approval shows the resolved fixed stage and cannot use global image authorization', async () => {
   const workflow = {
     schemaVersion: 1,

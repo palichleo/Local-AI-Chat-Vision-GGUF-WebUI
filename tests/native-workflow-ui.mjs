@@ -280,6 +280,7 @@ test('settings read native generation values and descriptions come from workflow
     enabled: true,
     autoAllow: false,
     maxIterations: 5,
+    reviewVideos: false,
     pythonPath: '',
     modelRoot: '',
     vaeRoot: '',

@@ -220,7 +220,9 @@ test('tools advertise only enabled ready workflows and writable policy fields', 
     const variant = definition.function.parameters;
     assert.ok(variant.properties.prompt);
     assert.equal(variant.properties.width, undefined);
-    assert.equal(variant.properties.seed, undefined);
+    // A drawn seed is not the model's to choose, but it passes on the one the user names.
+    assert.match(variant.properties.seed.description, /Only when the user gives a seed number/);
+    assert.ok(!variant.required.includes('seed'));
     assert.equal(variant.properties.steps.maximum, 12);
     assert.equal(variant.properties.loras, undefined);
     catalog.capabilities = {};
@@ -270,4 +272,22 @@ test('family manifest limits are enforced when a workflow is saved, not discover
       await assert.rejects(catalog.save(changed), error);
     }
   });
+});
+
+test('a reference that depends on a LoRA switches it on, or is refused in plain words', async () => {
+  const workflow = JSON.parse(
+    await readFile(new URL('../workflow/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8'),
+  );
+  const assets = { resolve: async id => ({ path: join(tmpdir(), id) }) };
+  const resolve = (references, input = workflow) =>
+    resolveNativeWorkflow(input, { prompt: 'a tiger runs', intention: 'x', ...(references ? { references } : {}) }, assets, {
+      allowPendingReferences: true,
+    });
+  // LTX subject references need the learned-slot LoRA: an image is enough to ask for it.
+  assert.deepEqual((await resolve([{ input: 'subject-1', image: 0 }])).loras.map(lora => lora.id), ['reference-slots']);
+  assert.deepEqual((await resolve([{ input: 'start', image: 0 }])).loras, []);
+  assert.deepEqual((await resolve()).loras, []);
+  const without = structuredClone(workflow);
+  without.loras[0].enabled = { policy: 'off' };
+  await assert.rejects(resolve([{ input: 'subject-1', image: 0 }], without), /référence de sujet.*LoRA/);
 });

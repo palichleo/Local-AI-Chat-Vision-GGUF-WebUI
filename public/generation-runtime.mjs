@@ -215,7 +215,14 @@ export function setupGenerationRuntime({
    * `confirmed`: the user started this very action with a button (Upscale, Interpoler), which
    * is their confirmation; a proposal coming from the model always asks.
    */
-  async function requestTool(request, signal, onProgress, onImage = () => {}, { confirmed = false } = {}) {
+  async function requestTool(
+    request,
+    signal,
+    onProgress,
+    onImage = () => {},
+    // `review`: the storyboard of a generated video is handed to the model with the result.
+    { confirmed = false, review = true } = {},
+  ) {
     const cancel = () => api('tools/cancel', { requestId: request.requestId }).catch(() => {});
     let decision;
     try {
@@ -319,7 +326,11 @@ export function setupGenerationRuntime({
       terminal = true;
       if (!job.record)
         return {
-          content: JSON.stringify({ status: 'error', message: job.error }),
+          content: JSON.stringify({
+            status: 'error',
+            message: job.error,
+            note: 'La génération a échoué et rien n’a été produit. Aucun outil n’est disponible pour la suite de ce message : explique l’échec à l’utilisateur en une ou deux phrases, sans écrire d’appel d’outil. Il relancera s’il le souhaite.',
+          }),
           images: [],
           failed: true,
           error: job.error,
@@ -425,10 +436,10 @@ export function setupGenerationRuntime({
           ),
           reference_default_count: record.parameters.reference_default_count ?? 0,
           reference_defaults: record.parameters.reference_defaults || [],
-          ...(record.mediaType === 'video'
+          ...(record.mediaType === 'video' ? { stage: record.parameters.stage } : {}),
+          ...(record.mediaType === 'video' && review
             ? {
                 analysis_outputs: analysisOutputs,
-                stage: record.parameters.stage,
                 storyboards: storyboards.map((board, index) => ({
                   output: index,
                   layout: board ? `${board.columns}x${board.rows}` : null,
@@ -446,7 +457,9 @@ export function setupGenerationRuntime({
           note:
             record.mediaType !== 'video'
               ? 'Image générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil. Si l’utilisateur a demandé une vérification, consulte la copie compressée avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
-              : images.length
+              : !review
+                ? 'Vidéo générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque vidéo demande la confirmation de l’utilisateur. Si l’utilisateur demande une vérification, consulte sa planche d’images avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
+                : images.length
                 ? 'Les images jointes sont les copies réduites des sorties identifiées par analysis_outputs (indices à partir de zéro). Les sorties sans copie ne sont pas vérifiables visuellement. Les entrées optionnelles absentes conservent leurs valeurs dans le workflow ; elles ne sont pas des références fournies par l’utilisateur. Les originaux sont dans la galerie.'
                 : 'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.',
         }),

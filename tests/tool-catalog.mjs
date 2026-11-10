@@ -98,12 +98,32 @@ test('arguments are checked against the chosen workflow, never forwarded blindly
   const routed = await tools.route('create_video', { prompt: 'x', intention: 'y', fps: 12, stage: 'final' }, media);
   assert.equal(routed.args.stage, 'final');
   assert.equal(routed.args.fps, undefined);
-  assert.match(routed.notes[0], /fps ignored/);
+  assert.match(routed.notes[0], /fps ignoré/);
   await assert.rejects(tools.route('create_image', { prompt: 'x', colour: 'red' }, media), /argument colour/);
   await assert.rejects(
     tools.route('create_image', { prompt: 'x', source: { image: 0, resource: 'r' } }, media),
     /exactly one/,
   );
+});
+
+test('the seed the user names is passed on, only to a workflow that draws its seed', async () => {
+  const drawn = video('drawn', [], {});
+  drawn.parameters.seed = { policy: 'random', type: 'integer' };
+  const tools = catalogOf([drawn]);
+  const definition = (await tools.definitions()).find(tool => tool.function.name === 'create_video').function;
+  assert.equal(definition.parameters.properties.seed.type, 'integer');
+  assert.ok(!definition.parameters.required.includes('seed'));
+  const routed = await tools.route('create_video', { prompt: 'x', intention: 'y', seed: 7704106376826763 }, media);
+  assert.equal(routed.seed, 7704106376826763);
+  assert.equal(routed.args.seed, undefined, 'the seed is not a workflow argument: the application sets it');
+  assert.equal((await tools.route('create_video', { prompt: 'x', intention: 'y' }, media)).seed, undefined);
+  assert.equal((await tools.route('create_video', { prompt: 'x', intention: 'y', seed: null }, media)).seed, undefined);
+  for (const seed of [-1, 1.5, '12', 2 ** 60])
+    await assert.rejects(tools.route('create_video', { prompt: 'x', intention: 'y', seed }, media), /seed doit être/);
+  // A workflow with its own seed keeps it, and says so.
+  const fixed = await catalogOf(workflows).route('create_video', { prompt: 'x', intention: 'y', seed: 5 }, media);
+  assert.equal(fixed.seed, undefined);
+  assert.match(fixed.notes.join(), /seed ignoré/);
 });
 
 test('upscale follows the media of its source and interpolate only takes videos', async () => {

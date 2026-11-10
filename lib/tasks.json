@@ -19,12 +19,12 @@
     "guidance": "Propose a video only when the user asks for one. Every video waits for the user's explicit confirmation.",
     "prompt": "Complete description of the clip: action, camera movement, style and, if wanted, sound.",
     "roles": {
-      "start_image": { "media": ["image"], "description": "Image the video starts on." },
+      "start_image": { "media": ["image"], "description": "Image the video starts on, as its first frame: the choice to animate an image or to make a video from it." },
       "end_image": { "media": ["image"], "description": "Image the video ends on." },
       "reference": {
         "media": ["image"],
         "many": true,
-        "description": "Subject or character images to keep consistent in the clip."
+        "description": "Subject or character images to keep consistent in a new scene. They are not frames of the clip: to animate an image, use start_image."
       }
     }
   },

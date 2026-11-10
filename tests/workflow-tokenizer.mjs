@@ -192,6 +192,7 @@ test('the former application-wide tokenizer moves into existing workflows and le
     enabled: true,
     autoAllow: true,
     maxIterations: 5,
+    reviewVideos: false,
     pythonPath: '',
     modelRoot: '',
     vaeRoot: '',
