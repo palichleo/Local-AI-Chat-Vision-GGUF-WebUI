@@ -27,6 +27,44 @@ class SeedVR2Test(unittest.TestCase):
         folded = seedvr2_vae.folded({'w': weight[:, :, None].repeat(1, 1, 3, 1, 1) / 3})['w']
         self.assertTrue(torch.allclose(folded, weight, atol=1e-6))
 
+    def test_sliced_vae_attention_matches_whole_attention(self):
+        import torch
+
+        from runner.models import seedvr2_vae
+
+        torch.manual_seed(0)
+        layer = seedvr2_vae.Attention(64).eval()
+        x = torch.randn(1, 64, 12, 10)
+        with torch.no_grad():
+            whole = layer(x)
+            previous, seedvr2_vae.SLICE_SCORES = seedvr2_vae.SLICE_SCORES, 120 * 7
+            try:
+                sliced = layer(x)
+            finally:
+                seedvr2_vae.SLICE_SCORES = previous
+        self.assertTrue(torch.allclose(whole, sliced, atol=1e-5))
+
+    def test_strip_decoder_matches_a_single_strip(self):
+        import torch
+
+        from runner.models import seedvr2_vae
+
+        torch.manual_seed(0)
+        vae = seedvr2_vae.VAE().eval()
+        for parameter in vae.parameters():
+            parameter.data.normal_(0, 0.05)
+        z = torch.randn(1, 16, 6, 5)
+        previous = seedvr2_vae.STRIP_ELEMENTS
+        try:
+            with torch.no_grad():
+                seedvr2_vae.STRIP_ELEMENTS = 1 << 40
+                whole = vae.decoder(z)
+                seedvr2_vae.STRIP_ELEMENTS = 128 * 20 * 3  # down to one-row strips
+                strips = vae.decoder(z)
+        finally:
+            seedvr2_vae.STRIP_ELEMENTS = previous
+        self.assertTrue(torch.allclose(whole, strips, atol=1e-4))
+
     def test_colour_corrections_keep_an_identical_image(self):
         import torch
 

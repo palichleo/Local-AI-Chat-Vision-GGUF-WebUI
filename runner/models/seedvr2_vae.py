@@ -36,6 +36,62 @@ def norm(channels):
     return GroupNorm(32, channels, eps=1e-6)
 
 
+# Elements of one strip. A 2048 px image has 128 x 4 M activations: whole-tensor float32
+# copies, SiLU outputs and up-sampler expansions (up to 2 GB each) overflow the VRAM.
+# Convolutions are local, so they run over horizontal strips with a one-row halo; group
+# norms only need whole-image statistics. The result is the whole-image result.
+STRIP_ELEMENTS = 1 << 26
+
+
+def _rows(x, channels=None):
+    _, c, _, w = x.shape
+    return max(1, STRIP_ELEMENTS // ((channels or c) * w))
+
+
+def norm_silu(gn, x):
+    """SiLU(GroupNorm(x)) as a function of a strip of x, with whole-image float32 statistics."""
+    b, c, h, w = x.shape
+    groups = gn.num_groups
+    per = x.view(b, groups, -1)
+    mean = torch.empty(b, groups, device=x.device)
+    var = torch.empty_like(mean)
+    step = max(1, STRIP_ELEMENTS // per.shape[-1])
+    for g in range(0, groups, step):
+        var[:, g : g + step], mean[:, g : g + step] = torch.var_mean(
+            per[:, g : g + step].float(), dim=-1, unbiased=False
+        )
+    rstd = (var + gn.eps).rsqrt()
+    scale = gn.weight.float().view(groups, -1) * rstd[..., None]  # b, groups, c/groups
+    shift = gn.bias.float().view(groups, -1) - mean[..., None] * scale
+    scale, shift = scale.reshape(b, c, 1, 1), shift.reshape(b, c, 1, 1)
+    return lambda part: F.silu(part.float() * scale + shift).to(x.dtype)
+
+
+def conv3(conv, x, pre=None):
+    """3x3 convolution (padding 1) over strips of rows; `pre` maps a strip of x first."""
+    b, _, h, w = x.shape
+    out = torch.empty(b, conv.out_channels, h, w, device=x.device, dtype=x.dtype)
+    rows = _rows(x, max(x.shape[1], conv.out_channels))
+    for top in range(0, h, rows):
+        bottom = min(top + rows, h)
+        part = x[:, :, max(top - 1, 0) : min(bottom + 1, h)]
+        if pre is not None:
+            part = pre(part)
+        # Zero rows only at the image borders, as the whole-image padding would add.
+        part = F.pad(part, (0, 0, 1 if top == 0 else 0, 1 if bottom == h else 0))
+        out[:, :, top:bottom] = F.conv2d(part, conv.weight, conv.bias, padding=(0, 1))
+    return out
+
+
+def conv1(conv, x):
+    b, _, h, w = x.shape
+    out = torch.empty(b, conv.out_channels, h, w, device=x.device, dtype=x.dtype)
+    rows = _rows(x, max(x.shape[1], conv.out_channels))
+    for top in range(0, h, rows):
+        out[:, :, top : top + rows] = conv(x[:, :, top : top + rows])
+    return out
+
+
 class Resnet(nn.Module):
     def __init__(self, n_in, n_out):
         super().__init__()
@@ -44,13 +100,22 @@ class Resnet(nn.Module):
         self.conv_shortcut = nn.Conv2d(n_in, n_out, 1) if n_in != n_out else None
 
     def forward(self, x):
-        h = self.conv1(F.silu(self.norm1(x)))
-        h = self.conv2(F.silu(self.norm2(h)))
-        return (self.conv_shortcut(x) if self.conv_shortcut is not None else x) + h
+        h = conv3(self.conv1, x, norm_silu(self.norm1, x))
+        h = conv3(self.conv2, h, norm_silu(self.norm2, h))
+        h += conv1(self.conv_shortcut, x) if self.conv_shortcut is not None else x
+        return h
+
+
+# Query rows per attention slice: the scores of one slice stay near 256 M entries.
+SLICE_SCORES = 1 << 28
 
 
 class Attention(nn.Module):
-    """Single-head spatial self-attention of the middle block."""
+    """Single-head spatial self-attention of the middle block.
+
+    Its head has 512 channels, beyond the fused kernels: PyTorch would build the whole score
+    matrix (65 536^2 for a 2048 px image, several GB), which spills out of VRAM on Windows.
+    Queries are therefore processed in slices, as ComfyUI does."""
 
     def __init__(self, channels):
         super().__init__()
@@ -62,8 +127,12 @@ class Attention(nn.Module):
         b, c, h, w = x.shape
         y = self.group_norm(x).flatten(2).transpose(1, 2)
         q, k, v = (proj(y)[:, None] for proj in (self.to_q, self.to_k, self.to_v))
-        y = F.scaled_dot_product_attention(q, k, v)[:, 0]
-        return x + self.to_out[0](y).transpose(1, 2).reshape(b, c, h, w)
+        n = q.shape[2]
+        step = max(1, SLICE_SCORES // n)
+        y = torch.empty_like(q)
+        for start in range(0, n, step):
+            y[:, :, start : start + step] = F.scaled_dot_product_attention(q[:, :, start : start + step], k, v)
+        return x + self.to_out[0](y[:, 0]).transpose(1, 2).reshape(b, c, h, w)
 
 
 class Mid(nn.Module):
@@ -97,9 +166,13 @@ class Up(nn.Module):
 
     def forward(self, x):
         b, c, h, w = x.shape
-        y = self.upscale_conv(x).view(b, 2, 2, self.frames, c, h, w)[:, :, :, 0]
-        y = y.permute(0, 3, 4, 1, 5, 2).reshape(b, c, 2 * h, 2 * w)
-        return self.conv(y)
+        y = torch.empty(b, c, 2 * h, 2 * w, device=x.device, dtype=x.dtype)
+        rows = _rows(x, c * 4 * self.frames)
+        for top in range(0, h, rows):
+            n = min(rows, h - top)
+            part = self.upscale_conv(x[:, :, top : top + n]).view(b, 2, 2, self.frames, c, n, w)[:, :, :, 0]
+            y[:, :, 2 * top : 2 * (top + n)] = part.permute(0, 3, 4, 1, 5, 2).reshape(b, c, 2 * n, 2 * w)
+        return conv3(self.conv, y)
 
 
 class Stage(nn.Module):
@@ -132,10 +205,11 @@ class Encoder(nn.Module):
         self.conv_out = nn.Conv2d(CHANNELS[-1], 32, 3, padding=1)
 
     def forward(self, x):
-        x = self.conv_in(x)
+        x = conv3(self.conv_in, x)
         for block in self.down_blocks:
             x = block(x)
-        return self.conv_out(F.silu(self.conv_norm_out(self.mid_block(x))))
+        x = self.mid_block(x)
+        return conv3(self.conv_out, x, norm_silu(self.conv_norm_out, x))
 
 
 class Decoder(nn.Module):
@@ -157,10 +231,10 @@ class Decoder(nn.Module):
         self.conv_out = nn.Conv2d(CHANNELS[0], 3, 3, padding=1)
 
     def forward(self, z):
-        x = self.mid_block(self.conv_in(z))
+        x = self.mid_block(conv3(self.conv_in, z))
         for block in self.up_blocks:
             x = block(x)
-        return self.conv_out(F.silu(self.conv_norm_out(x)))
+        return conv3(self.conv_out, x, norm_silu(self.conv_norm_out, x))
 
 
 class VAE(nn.Module):

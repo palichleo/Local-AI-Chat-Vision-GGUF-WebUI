@@ -86,7 +86,7 @@ def generate(job, config, progress):
                 pad_h, pad_w = -height % 16, -width % 16
                 pixels = torch.nn.functional.pad(reference, (0, pad_w, 0, pad_h)) * 2 - 1
                 progress(stage='encoding', step=done, total=total)
-                latent = seedvr2_vae.tiled(vae.encode, pixels.to(torch.bfloat16), 1 / 8, 2048, 128)
+                latent = seedvr2_vae.tiled(vae.encode, pixels.to(torch.bfloat16), 1 / 8, 4096, 256)
                 latent = latent[0].permute(1, 2, 0)[None].to(torch.bfloat16)  # (1, h, w, 16)
                 condition = torch.cat([latent, torch.ones_like(latent[..., :1])], dim=-1)
                 generator = torch.Generator('cuda').manual_seed(seed + index)
@@ -107,7 +107,14 @@ def generate(job, config, progress):
                         x = x0
                     done += seedvr2.LAYERS
                 progress(stage='decoding', step=done, total=total)
-                decoded = seedvr2_vae.tiled(vae.decode, x[0].permute(2, 0, 1)[None], 8, 256, 16)
+                # The decoder's full-resolution activations need the VRAM the DiT cache holds,
+                # and its RAM copies (8 GB) push Windows into paging. A further pass re-reads
+                # the weights from the mapped file.
+                pool.clear()
+                torch.cuda.empty_cache()
+                # Whole images up to 4096 px: the strip decoder keeps the VRAM low without tile
+                # seams. Beyond, tiles bound the middle attention (quadratic in the latent area).
+                decoded = seedvr2_vae.tiled(vae.decode, x[0].permute(2, 0, 1)[None], 8, 512, 32)
                 decoded = ((decoded[:, :, :height, :width].float() + 1) / 2).clamp(0, 1)
                 corrected = seedvr2_color.correct(decoded, reference, method)
                 current = Image.fromarray(
