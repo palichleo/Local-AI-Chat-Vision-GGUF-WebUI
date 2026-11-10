@@ -4343,7 +4343,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   gap: 9px;
   min-width: 0;
 }
-.native-asset-picker .path-input > select {
+.native-asset-picker .path-input > input {
   min-width: 0;
   flex: 1;
   width: 0;

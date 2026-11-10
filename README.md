@@ -51,7 +51,7 @@ Some Qwen3.5 GGUF exports declare an MTP layer without its tensors; the app dete
 
 Enable generation in **Configuration → Génération**. The private Python environment is prepared automatically; its progress is shown there and chat remains available meanwhile.
 
-**Workflows** are small JSON files in `workflow/`, created and edited in **Configuration → Workflows**. A workflow selects an engine, its local model files, LoRAs and reference slots, and decides who controls each parameter:
+**Workflows** are small JSON files, created and edited in **Configuration → Workflows**. The workflows shipped with Atelier live in `runner/workflows/` and come with every download and update. Your own workflows, and your edits of shipped ones, are saved in `workflow/`, which updates never touch: an update never replaces a workflow you edited or created. When it brings a new version of a workflow you edited, or one named like yours, the new one is listed beside yours as « … V2 » (then V3…). A shipped workflow you delete stays hidden until an update changes it. A workflow selects an engine, its local model files, LoRAs and reference slots, and decides who controls each parameter:
 
 - **Fixe** — your value, invisible to the assistant;
 - **Assistant** — the assistant chooses within your limits;

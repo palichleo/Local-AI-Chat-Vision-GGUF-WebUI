@@ -150,31 +150,31 @@
       "id": "start",
       "role": "start_image",
       "required": false,
-      "name": "Start image"
+      "name": "Image de début"
     },
     {
       "id": "end",
       "role": "end_image",
       "required": false,
-      "name": "End image"
+      "name": "Image de fin"
     },
     {
       "id": "source",
       "role": "source_video",
       "required": false,
-      "name": "Video to extend"
+      "name": "Vidéo à prolonger"
     },
     {
       "id": "subject-1",
       "role": "msr_image",
       "required": false,
-      "name": "Subject 1"
+      "name": "Sujet 1"
     },
     {
       "id": "subject-2",
       "role": "msr_image",
       "required": false,
-      "name": "Subject 2"
+      "name": "Sujet 2"
     }
   ],
   "profiles": {

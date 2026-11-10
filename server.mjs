@@ -177,6 +177,8 @@ export async function createApplication({
   modelsDir = join(root, 'models'),
   historyDir = dataDir === join(root, 'data') ? join(root, 'history') : join(dataDir, 'history'),
   workflowDir = dataDir === join(root, 'data') ? join(root, 'workflow') : join(dataDir, 'workflow'),
+  // Workflows shipped with Atelier (replaced by updates); tests start without them.
+  builtinWorkflowDir = dataDir === join(root, 'data') ? join(root, 'runner', 'workflows') : null,
   outputDir = dataDir === join(root, 'data') ? join(root, 'output') : join(dataDir, 'output'),
   generationWorker,
   spawnProcess,
@@ -301,6 +303,7 @@ export async function createApplication({
     root,
     dataDir,
     workflowDir,
+    builtinWorkflowDir,
     outputDir,
     worker: generationWorker,
   }).init();
@@ -770,6 +773,14 @@ export async function createApplication({
           if (path === '/api/generation/remove') {
             await generation.catalog.remove(body.id);
             return send(200, { removed: true });
+          }
+          if (path === '/api/generation/reset') {
+            await generation.catalog.reset(body.id);
+            return send(200, await generation.snapshot());
+          }
+          if (path === '/api/generation/unhide') {
+            await generation.catalog.unhide();
+            return send(200, await generation.snapshot());
           }
           throw problem('Route de génération introuvable.', 404);
         } finally {

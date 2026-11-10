@@ -1,6 +1,6 @@
 {
   "name": "atelier-local",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node scripts/launch.mjs --open",
     "smoke": "node --test tests/*.mjs",
-    "test": "node --test tests/*.mjs"
+    "test": "node --test tests/*.mjs",
+    "ship-workflows": "node scripts/ship-workflows.mjs"
   }
 }

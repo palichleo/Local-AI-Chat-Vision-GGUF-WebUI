@@ -90,7 +90,11 @@ export function setupNativeWorkflows(options) {
     readLoras = [],
     readReferences = [],
     readProfiles = [],
-    readEnhance = null;
+    readEnhance = null,
+    // Shipped workflows the user deleted (hidden until an update changes them).
+    hiddenWorkflows = 0;
+  // Paths being registered from a file field: Save waits for them.
+  const pendingFiles = new Set();
   const element = (tag, id, text = '') => {
     const value = node(tag, '', text);
     if (id) value.id = id;
@@ -265,13 +269,26 @@ export function setupNativeWorkflows(options) {
       const card = node('article', 'workflow-card'),
         heading = node('div', 'workflow-card-header'),
         title = node('div', 'workflow-card-title');
-      title.append(node('strong', '', record.name), node('small', 'field-help', familyLabel(record.pipeline)));
+      // Where it comes from: shipped with Atelier (and followed by updates) or the user's own.
+      const origin = record.update
+        ? ' · nouvelle version fournie'
+        : record.customized
+          ? ' · fourni, modifié par vous'
+          : record.builtin
+            ? ' · fourni avec Atelier'
+            : '';
+      title.append(
+        node('strong', '', record.name),
+        node('small', 'field-help', familyLabel(record.pipeline) + origin),
+      );
+      // « Actif » only when the assistant can really use it now.
+      const usable = !record.importDraft && record.enabled && record.ready !== false;
       const status = node(
         'span',
         'native-status',
-        record.importDraft ? 'Brouillon' : record.enabled ? 'Actif' : 'Désactivé',
+        record.importDraft ? 'Brouillon' : !record.enabled ? 'Désactivé' : usable ? 'Actif' : 'Indisponible',
       );
-      status.dataset.active = String(record.enabled);
+      status.dataset.active = String(usable);
       heading.append(title, status);
       const editButton = button('Modifier', () => edit(record));
       editButton.dataset.nativeControl = 'true';
@@ -296,8 +313,11 @@ export function setupNativeWorkflows(options) {
             await run(async signal => {
               await api('generation/remove', { id: record.id }, { signal });
               workflows = workflows.filter(item => item.id !== record.id);
+              if (record.builtin) hiddenWorkflows++;
               renderList();
             });
+            // A deleted edit of a shipped workflow hides that one too; the list is the server's.
+            if (record.builtin) await refresh({ settings: false });
           } catch (failure) {
             importStatus(failure.message, true);
           }
@@ -306,7 +326,25 @@ export function setupNativeWorkflows(options) {
       );
       remove.dataset.nativeControl = 'true';
       const actions = node('div', 'native-card-actions');
-      actions.append(remove, cancel, editButton);
+      actions.append(remove, cancel);
+      if (record.customized) {
+        const reset = button(
+          'Rétablir',
+          async () => {
+            try {
+              const result = await run(async signal => (await api('generation/reset', { id: record.id }, { signal })).json());
+              if (result) apply(result, { settings: false });
+            } catch (failure) {
+              importStatus(failure.message, true);
+            }
+          },
+          'text-button',
+        );
+        reset.title = 'Revenir à la version fournie avec Atelier';
+        reset.dataset.nativeControl = 'true';
+        actions.append(reset);
+      }
+      actions.append(editButton);
       card.append(
         heading,
         node('p', 'field-help', record.description),
@@ -315,10 +353,27 @@ export function setupNativeWorkflows(options) {
       );
       $('workflow-list').append(card);
     }
+    if (hiddenWorkflows > 0) {
+      const restore = button(
+        `Réafficher les workflows fournis supprimés (${hiddenWorkflows})`,
+        async () => {
+          try {
+            const result = await run(async signal => (await api('generation/unhide', {}, { signal })).json());
+            if (result) apply(result, { settings: false });
+          } catch (failure) {
+            importStatus(failure.message, true);
+          }
+        },
+        'text-button native-unhide',
+      );
+      restore.dataset.nativeControl = 'true';
+      $('workflow-list').append(restore);
+    }
     setBusy(busy);
   }
   function apply(result, { settings = true } = {}) {
     workflows = result.workflows || [];
+    hiddenWorkflows = result.hiddenWorkflows ?? hiddenWorkflows;
     assets = result.assets || assets;
     folders = result.folders || folders;
     if (result.families) {
@@ -366,26 +421,52 @@ export function setupNativeWorkflows(options) {
   async function browse(kind, initialPath, signal) {
     return (await (await api('files/choose', { kind, initialPath }, { signal })).json()).path;
   }
+  /**
+   * One field per file: pick a registered file from its suggestions, paste a path, or browse.
+   * The chosen asset id is kept in a hidden control (`control`, whose onchange other parts of
+   * the editor listen to); the visible field shows the file's name.
+   */
   function assetPicker(role, id, value) {
     const spec = familyOf(draft.pipeline)?.components[role] || {},
       container = node('div', 'native-asset-picker'),
-      compatible = assets.filter(
-        asset =>
-          asset.kind === role &&
-          (!(asset.family || asset.pipeline) || (asset.family || asset.pipeline) === draft.pipeline),
+      folder = spec.format === 'tokenizer',
+      compatibleAssets = () =>
+        assets.filter(
+          asset =>
+            asset.kind === role &&
+            (!(asset.family || asset.pipeline) || (asset.family || asset.pipeline) === draft.pipeline),
+        ),
+      control = input(id, value ?? '', 'hidden'),
+      field = input(id + '-file', ''),
+      list = element('datalist', id + '-files'),
+      hint = folder ? 'Choisir un dossier ou coller son chemin…' : 'Choisir un fichier ou coller son chemin…';
+    const fileName = path => path?.split(/[\\/]/).pop() || '';
+    // Two files of the same name (in different folders) are told apart by their folder.
+    function display(assetId) {
+      const asset = assets.find(item => item.id === assetId);
+      if (!asset) return assetId ? draft.importDraft?.files[assetId] || 'Fichier à retrouver' : '';
+      const name = asset.name || fileName(asset.path),
+        twins = compatibleAssets().filter(item => item.id !== asset.id && (item.name || fileName(item.path)) === name);
+      return twins.length ? `${name} (${fileName(asset.path?.replace(/[\\/][^\\/]*$/, ''))})` : name;
+    }
+    let shown = '';
+    function show() {
+      shown = display(control.value);
+      field.value = shown;
+      field.placeholder = hint;
+      list.replaceChildren(
+        ...compatibleAssets().map(asset => {
+          const option = element('option');
+          option.value = display(asset.id);
+          option.label = asset.path || '';
+          return option;
+        }),
       );
-    const choices = [
-      ['', 'Choisir un fichier…'],
-      ...compatible.map(asset => [asset.id, asset.name || asset.path.split(/[\\/]/).pop()]),
-    ];
-    if (value && !compatible.some(asset => asset.id === value))
-      choices.push([value, draft.importDraft?.files[value] || 'Fichier à retrouver']);
-    const control = select(id, choices, value),
-      path = input(id + '-path', '');
-    control.setAttribute('aria-label', 'Fichier · ' + componentLabel(role));
-    path.placeholder = spec.format === 'tokenizer' ? 'Coller le chemin du dossier' : 'Coller un chemin de fichier';
-    path.spellcheck = false;
-    path.setAttribute('aria-label', 'Chemin · ' + componentLabel(role));
+    }
+    field.spellcheck = false;
+    field.autocomplete = 'off';
+    field.setAttribute('list', id + '-files');
+    field.setAttribute('aria-label', 'Fichier · ' + componentLabel(role));
     async function register(chosen, signal) {
       if (!chosen) return;
       const result = await (
@@ -397,24 +478,67 @@ export function setupNativeWorkflows(options) {
     function adopt(asset) {
       if (!asset?.id) throw Error('Le fichier n’a pas pu être enregistré.');
       assets = assets.filter(item => item.id !== asset.id).concat(asset);
-      if (![...control.children].some(option => option.value === asset.id)) {
-        const option = element('option', null, asset.name || asset.path?.split(/[\\/]/).pop() || asset.id);
-        option.value = asset.id;
-        control.append(option);
-      }
-      control.value = asset.id;
+      choose(asset.id);
+    }
+    function choose(assetId) {
+      control.value = assetId;
+      show();
       control.onchange?.();
-      path.value = '';
-      manual.open = false;
       error('');
     }
-    const choose = button('Parcourir…', async () => {
+    // A registration in progress is awaited by Save, so a pasted path is never lost.
+    function registerTyped(text) {
+      const task = run(signal => register(text, signal))
+        .catch(failure => {
+          if (!controller.signal.aborted) error(failure.message);
+        })
+        .finally(() => pendingFiles.delete(task));
+      pendingFiles.add(task);
+      return task;
+    }
+    /** What the field holds now: a known file, a path to register, or nothing usable. */
+    function resolveTyped({ final }) {
+      const text = field.value.trim();
+      if (!text || text === shown) return;
+      const lower = text.toLowerCase(),
+        known = compatibleAssets().find(
+          asset => display(asset.id) === text || asset.path === text || asset.path?.toLowerCase() === lower,
+        );
+      if (known) return choose(known.id);
+      if (!final) return;
+      if (/[\\/]/.test(text)) return registerTyped(text);
+      error(`Aucun fichier « ${text} » : choisissez-le dans la liste, collez son chemin complet ou utilisez Parcourir…`);
+    }
+    // Focused, the field empties so the suggestions list every file; left empty, it shows the choice again.
+    field.onfocus = () => {
+      if (field.value === shown && shown) {
+        field.placeholder = shown;
+        field.value = '';
+      }
+    };
+    field.onblur = () => {
+      if (!field.value.trim()) {
+        field.value = shown;
+        field.placeholder = hint;
+      }
+    };
+    field.oninput = () => resolveTyped({ final: false });
+    field.onchange = () => resolveTyped({ final: true });
+    field.onkeydown = event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      resolveTyped({ final: true });
+    };
+    const browseButton = button('Parcourir…', async () => {
       try {
         await run(async signal =>
           register(
             await browse(
               spec.picker || 'generation',
-              path.value || assets.find(asset => asset.id === control.value)?.path || componentFolder(role) || '',
+              (field.value.trim() !== shown && field.value.trim()) ||
+                assets.find(asset => asset.id === control.value)?.path ||
+                componentFolder(role) ||
+                '',
               signal,
             ),
             signal,
@@ -424,34 +548,24 @@ export function setupNativeWorkflows(options) {
         if (!controller.signal.aborted) error(failure.message);
       }
     });
-    const add = button('Utiliser', async () => {
-        try {
-          await run(signal => register(path.value.trim(), signal));
-        } catch (failure) {
-          if (!controller.signal.aborted) error(failure.message);
-        }
-      }),
-      row = node('div', 'path-input'),
-      manual = node('details', 'native-manual-path'),
-      manualRow = node('div', 'path-input');
-    row.append(control, choose);
-    manualRow.append(path, add);
-    manual.append(node('summary', '', 'Saisir un chemin'), manualRow);
-    container.append(row, manual);
+    const row = node('div', 'path-input');
+    row.append(field, browseButton, control, list);
+    container.append(row);
+    show();
     return {
       container,
       control,
       adopt,
       selected() {
-        if (path.value.trim()) throw Error('Validez le chemin avec « Utiliser » pour ' + componentLabel(role) + '.');
+        const text = field.value.trim();
+        if (text && text !== shown)
+          throw Error(
+            `Fichier non reconnu pour « ${componentLabel(role)} » : choisissez-le dans la liste, collez son chemin complet ou utilisez Parcourir…`,
+          );
         return control.value;
       },
       get compatible() {
-        return assets.filter(
-          asset =>
-            asset.kind === role &&
-            (!(asset.family || asset.pipeline) || (asset.family || asset.pipeline) === draft.pipeline),
-        );
+        return compatibleAssets();
       },
     };
   }
@@ -592,7 +706,7 @@ export function setupNativeWorkflows(options) {
     if (type === 'string' && !enumChoices) {
       value.value = initial ?? '';
       value.rows = 3;
-      value.maxLength = policy.maxLength || 8000;
+      value.maxLength = policy.maxLength || spec.maxLength || 8000;
     }
     if (type === 'integer') value.step = '1';
     else if (type === 'number') value.step = 'any';
@@ -654,12 +768,16 @@ export function setupNativeWorkflows(options) {
         const result = { policy: 'model', type };
         if (useDefault.checked) result.default = concrete;
         if (enumChoices) result.choices = enumChoices;
-        if (type === 'string') result.maxLength = policy.maxLength || 8000;
+        // Only what the workflow narrows is written: the family's own limits stay the family's,
+        // so a workflow follows them when an update widens them.
+        if (type === 'string' && !enumChoices && policy.maxLength) result.maxLength = policy.maxLength;
         if (['number', 'integer'].includes(type)) {
-          result.min = number(min, 'Minimum');
-          result.max = number(max, 'Maximum');
-          if (result.min > result.max || (useDefault.checked && (concrete < result.min || concrete > result.max)))
+          const low = number(min, 'Minimum'),
+            high = number(max, 'Maximum');
+          if (low > high || (useDefault.checked && (concrete < low || concrete > high)))
             throw Error((labels[name] || name) + ' : la valeur par défaut doit être dans les limites choisies.');
+          if (policy.min !== undefined || (!enumChoices && low !== spec.min)) result.min = low;
+          if (policy.max !== undefined || (!enumChoices && high !== spec.max)) result.max = high;
         }
         if (description.value.trim()) result.description = description.value.trim();
         return result;
@@ -1000,7 +1118,8 @@ export function setupNativeWorkflows(options) {
       if (expansion) record.promptExpansion = expansion;
       else delete record.promptExpansion;
     }
-    for (const name of ['digest', 'ready', 'unavailableReason', 'error', 'path']) delete record[name];
+    for (const name of ['digest', 'ready', 'unavailableReason', 'error', 'path', 'builtin', 'customized', 'update'])
+      delete record[name];
     return record;
   }
   function editorDirty(includeNew = true) {
@@ -1083,6 +1202,7 @@ export function setupNativeWorkflows(options) {
     after?.();
   }
   async function saveEditor() {
+    if (pendingFiles.size) await Promise.allSettled([...pendingFiles]);
     if (!draft || working || busy) return false;
     const session = version;
     try {
@@ -1116,6 +1236,8 @@ export function setupNativeWorkflows(options) {
       else workflows[index] = view;
       renderList();
       leaveEditor();
+      // Readiness and origin (a shipped workflow becomes "modified by you") come from the server.
+      void refresh({ settings: false }).catch(() => {});
       return true;
     } catch (failure) {
       if (session === version) error(failure.message);

@@ -276,7 +276,7 @@ test('family manifest limits are enforced when a workflow is saved, not discover
 
 test('a reference that depends on a LoRA switches it on, or is refused in plain words', async () => {
   const workflow = JSON.parse(
-    await readFile(new URL('../workflow/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8'),
+    await readFile(new URL('../runner/workflows/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8'),
   );
   const assets = { resolve: async id => ({ path: join(tmpdir(), id) }) };
   const resolve = (references, input = workflow) =>

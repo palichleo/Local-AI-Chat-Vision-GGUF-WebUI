@@ -1,0 +1,29 @@
+{
+  "note": "Fingerprints (workflowFingerprint) of every version of the shipped workflows: an unedited copy left in the user folder by an earlier version is recognised and removed.",
+  "workflows": {
+    "2c7e9a41-5b3d-4f8a-a1c6-7d0e3b9f2a58": [
+      "3ed48c55d453dd415459538cb57157298e780119cbf6d3a12761ada2a8677c53"
+    ],
+    "5e1b8c3a-9d2f-4a6e-b7c4-1f0d6e3a9b85": [
+      "dce4a6f42288193fbba155a45b1c1746bd6764141ebd577709639cef5967c32f"
+    ],
+    "6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87": [
+      "a58aeaa97c841ab46ba9e45b039dc70eec26d4b5edd85a164a86008da9622d7b"
+    ],
+    "9f3c6a2e-4d1b-4e8f-8c7a-3b5d0e2f6a19": [
+      "2282475e7e8343ab097bbdba092644c8ea2f4f8304accc3a00e8574a3bdae767"
+    ],
+    "e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f": [
+      "86a8b51735977cf6ac53cabb54f747f896eefa452466f89a0145bde06181d2d6",
+      "dc15c6a8b3c363c515e3096b523329155cdad71de8a6f7d9ad15aca0e47a875c"
+    ],
+    "eaec4e2f-0649-4e56-9bd9-809dc9390452": [
+      "1b8c022f0a8939f20796d1374df515fec010148b2bd57d691e1439c382da48e7",
+      "723dc11cc17bef4e897ff20ab051376be528b5a012bda5567564a3761fe8e6f5",
+      "7db77bd40c82b4f8da68483630c061dae6eba36dba61b5c7354cbe3f31f14c64"
+    ],
+    "fefb88eb-8311-4409-b636-6efbb42e952c": [
+      "3c226edb2e8ff6de88fedbe96386bc452a37757ef7c2ac2ed6a290c93318ea2b"
+    ]
+  }
+}

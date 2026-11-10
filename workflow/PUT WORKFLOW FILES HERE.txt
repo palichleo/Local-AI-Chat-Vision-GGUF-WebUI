@@ -1,13 +1,15 @@
-Atelier native workflows
+Atelier native workflows: your own
 
-This folder contains your private native workflow JSON files, one file per workflow.
-The filename must equal its stable id followed by .json. Edit or import workflows
-through Settings > Workflows so policies and local assets are validated before saving.
+This folder holds YOUR native workflows, one JSON file per workflow, named by its stable id
+followed by .json: the ones you create, import, and your edited versions of the workflows
+shipped with Atelier. Edit or import them through Settings > Workflows so policies and local
+assets are validated before saving.
 
-Each engine family is declared in runner/families/<family>.json, including its
-starting template. Creating a workflow copies that template; updates never replace
-your edited workflow. Choose registered local model files before saving.
-No model is downloaded automatically.
+The workflows shipped with Atelier live in runner/workflows/ and come with every download and
+update. Updates never touch this folder: a workflow you edited or created is never replaced.
+When an update brings a new version of a workflow you edited, or a workflow named like one of
+yours, the new one is listed beside yours as "... V2" (then V3...). A shipped workflow you
+delete stays hidden until an update changes it; "Réafficher" in Settings shows it again.
 
 Fixed values are locked. Model values allow the assistant to choose only within your
 configured choices/ranges. Random is only for seeds. LoRA off never loads the adapter.
@@ -15,4 +17,4 @@ Reference inputs have named roles and accept only staged chat/library resources.
 
 Do not place ComfyUI editor/API graphs, model weights, caches or outputs here. Original
 generation media belongs in output/ and is preserved when chat history is deleted.
-Workflow files and local asset paths are user data and are excluded from version control.
+These files are user data and are excluded from version control.

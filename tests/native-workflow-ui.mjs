@@ -341,14 +341,50 @@ test('a role shared by several families is named by the family of the open workf
   await f.ui.edit(familyTemplate(families().ltx25));
   assert.ok(options('native-reference-role-source').some(([, label]) => label === 'Vidéo à prolonger'));
 });
-test('typing an unregistered local model path stays dirty and cannot be silently saved', async t => {
+test('a file field takes a listed file or a pasted path, and never saves text it does not recognise', async t => {
   const f = await setup(t);
   await f.ui.edit(f.template);
-  f.$('native-component-model-path').value = 'new-model.safetensors';
+  const field = f.$('native-component-model-file');
+  // One field: no separate path section.
+  assert.equal(f.$('native-component-model-path'), null);
+  assert.equal(field.value, 'model.safetensors');
+  assert.equal(field.attributes.list, 'native-component-model-files');
+  assert.deepEqual(
+    f.$('native-component-model-files').children.map(option => [option.value, option.label]),
+    [['model.safetensors', 'model.safetensors']],
+  );
+  // Focused, it empties so every file is suggested; left untouched, it shows the choice again.
+  field.onfocus();
+  assert.equal(field.value, '');
+  field.onblur();
+  assert.equal(field.value, 'model.safetensors');
+  // A name that is not a file and not a path: reported, kept dirty, not saved.
+  field.value = 'new-model';
+  field.onchange();
+  assert.match(f.$('native-workflow-error').textContent, /Aucun fichier « new-model »/);
   assert.equal(f.ui.editorDirty(), true);
   assert.equal(await f.ui.saveEditor(), false);
-  assert.match(f.$('native-workflow-error').textContent, /Utiliser/);
+  assert.match(f.$('native-workflow-error').textContent, /Fichier non reconnu/);
   assert.equal(f.ui.isEditing(), true);
+  // A pasted path is registered, and Save waits for it.
+  field.value = 'C:/models/pasted.safetensors';
+  field.onchange();
+  assert.equal(await f.ui.saveEditor(), true);
+  const registered = f.calls.find(call => call.route === 'generation/assets');
+  assert.deepEqual(registered.body, { path: 'C:/models/pasted.safetensors', kind: 'model', family: 'krea2' });
+  const saved = f.calls.findLast(call => call.route === 'generation/workflows').body;
+  assert.equal(saved.components.model.asset, 'model-new');
+});
+test('typing the name of a listed file selects it without a path', async t => {
+  const f = await setup(t);
+  await f.ui.edit();
+  const field = f.$('native-component-model-file');
+  assert.equal(field.value, '');
+  assert.match(field.placeholder, /coller son chemin/);
+  field.value = 'model.safetensors';
+  field.oninput();
+  assert.equal(f.$('native-component-model').value, 'model-one');
+  assert.equal(f.calls.some(call => call.route === 'generation/assets'), false);
 });
 test('shipped pipeline templates round-trip through the editor without corrupting their policy contract', async t => {
   const { validateNativeWorkflow } = await import('../lib/native-workflows.mjs'),
@@ -767,4 +803,29 @@ test('prompt enhancement is one visible Off/On switch whose instruction is saved
   video.mediaType = 'video';
   await f.ui.edit(video);
   assert.equal(f.$('native-workflow-enhance').hidden, true);
+});
+
+test('every shipped workflow comes out of the editor unchanged when saved untouched', async t => {
+  const { readdir, readFile } = await import('node:fs/promises');
+  const folder = new URL('../runner/workflows/', import.meta.url);
+  for (const name of (await readdir(folder)).filter(name => name.endsWith('.json'))) {
+    const stored = JSON.parse(await readFile(new URL(name, folder), 'utf8'));
+    const f = await setup(t);
+    await f.ui.edit(structuredClone(stored));
+    assert.equal(f.ui.editorDirty(false), false, name + ' is dirty right after opening');
+    assert.equal(await f.ui.saveEditor(), true, name + ': ' + f.$('native-workflow-error').textContent);
+    const saved = f.calls.findLast(call => call.route === 'generation/workflows').body;
+    // The file name is added on save; an empty reference description is the same as none.
+    const strip = value =>
+      JSON.parse(
+        JSON.stringify(value, (key, item) => (key === 'file' || (key === 'description' && item === '') ? undefined : item)),
+      );
+    const diff = (a, b, path = '') => {
+      if (JSON.stringify(a) === JSON.stringify(b)) return [];
+      if (a && b && typeof a === 'object' && typeof b === 'object')
+        return [...new Set([...Object.keys(a), ...Object.keys(b)])].flatMap(k => diff(a[k], b[k], path + '.' + k));
+      return [path + ': ' + JSON.stringify(b) + ' -> ' + JSON.stringify(a)];
+    };
+    assert.deepEqual(diff(strip(saved), strip(stored)), [], name);
+  }
 });
