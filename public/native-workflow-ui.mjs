@@ -40,9 +40,22 @@ export function setupNativeWorkflows(options) {
   const runtime = setupGenerationRuntime(options);
   let families = [];
   const familyOf = name => families.find(item => item.family === name);
+  // Several families share a role or a component name with their own meaning (a source video
+  // is extended by LTX, enlarged by Real-ESRGAN): the open workflow's family names it first.
+  const ownFirst = () => {
+    const own = familyOf(draft?.pipeline);
+    return own ? [own, ...families.filter(item => item !== own)] : families;
+  };
   const componentLabel = role =>
-    families.map(item => item.components[role]?.label).find(Boolean) || labels[role] || role;
-  const roleLabel = role => families.map(item => item.roles[role]?.label).find(Boolean) || 'Usage à définir';
+    ownFirst()
+      .map(item => item.components[role]?.label)
+      .find(Boolean) ||
+    labels[role] ||
+    role;
+  const roleLabel = role =>
+    ownFirst()
+      .map(item => item.roles[role]?.label)
+      .find(Boolean) || 'Usage à définir';
   const parameterSpec = name => familyOf(draft?.pipeline)?.parameters[name] || {};
   const typeFor = (name, policy) =>
     parameterSpec(name).type ||

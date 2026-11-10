@@ -330,6 +330,17 @@ test('video editor requires the coupled audio VAE without inventing selections o
   assert.equal(await f.ui.saveEditor(), false);
   assert.match(f.$('native-workflow-error').textContent, /VAE audio/);
 });
+test('a role shared by several families is named by the family of the open workflow', async t => {
+  const { families, familyTemplate } = await import('../lib/families.mjs');
+  const options = id => f.$(id).children.map(option => [option.value, option.textContent]);
+  let f = await setup(t);
+  // LTX extends a source video; Real-ESRGAN enlarges it, whatever family is listed first.
+  await f.ui.edit(familyTemplate(families().realesrgan_video));
+  assert.deepEqual(options('native-reference-role-source'), [['source_video', 'Vidéo à agrandir']]);
+  f = await setup(t);
+  await f.ui.edit(familyTemplate(families().ltx25));
+  assert.ok(options('native-reference-role-source').some(([, label]) => label === 'Vidéo à prolonger'));
+});
 test('typing an unregistered local model path stays dirty and cannot be silently saved', async t => {
   const f = await setup(t);
   await f.ui.edit(f.template);
