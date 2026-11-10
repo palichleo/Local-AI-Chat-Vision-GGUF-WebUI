@@ -16,7 +16,7 @@
   "create_video": {
     "output": "video",
     "summary": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images.",
-    "guidance": "Propose a video only when the user asks for one. Every video waits for the user's explicit confirmation.",
+    "guidance": "Propose a video only when the user asks for one. Every video is shown to the user, who can edit it before it runs.",
     "prompt": "Complete description of the clip: action, camera movement, style and, if wanted, sound.",
     "roles": {
       "start_image": { "media": ["image"], "description": "Image the video starts on, as its first frame: the choice to animate an image or to make a video from it." },
@@ -31,7 +31,7 @@
   "extend_video": {
     "output": "video",
     "summary": "Continue an existing video with a new shot that follows its last frames.",
-    "guidance": "Every video waits for the user's explicit confirmation.",
+    "guidance": "Every video is shown to the user, who can edit it before it runs.",
     "prompt": "What happens next in the continuation.",
     "roles": {
       "source": { "media": ["video"], "required": true, "description": "Video to continue." }

@@ -52,7 +52,7 @@ class Element {
     delete (this.events ??= {})[name];
   }
 }
-async function fixture(fn) {
+async function fixture(fn, { confirmDelay = 0 } = {}) {
   const previousDocument = globalThis.document,
     previousOption = globalThis.Option;
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
@@ -98,6 +98,7 @@ async function fixture(fn) {
     },
     notice: () => {},
     onChange: () => {},
+    confirmDelay,
   });
   try {
     await fn({
@@ -411,141 +412,145 @@ test('an already cancelled automatic call releases its pending approval without 
     assert.equal(calls.find(call => call.route === 'tools/cancel').body.requestId, 'cancelled');
   }));
 
-test('video approval is shown even with global permission, explains draft/final and editing never executes', async () =>
-  fixture(async ({ ui, nodes, calls, setIntercept }) => {
+const labelled = (all, label) =>
+  all.find(n => n.tagName === 'label' && n.children[0]?.textContent === label)?.children[1];
+const videoProposal = () => ({
+  requestId: 'proposal',
+  mediaType: 'video',
+  autoAllow: true,
+  workflowName: 'MiniMax',
+  args: { prompt: 'dives' },
+  approvalToken: 'first-token',
+  plan: {
+    stage: 'draft',
+    intention: 'Continuer.',
+    prompt: 'dives',
+    parameters: { frames: 124, fps: 24, width: 768, height: 448, seed: 7, audio: true },
+    references: [{ input: 'source', label: 'Résultat précédent', role: 'source_video', roleLabel: 'Vidéo à prolonger' }],
+    editable: {
+      prompt: true,
+      stages: ['draft', 'final'],
+      references: [[]],
+      parameters: [
+        { key: 'width', value: 768, type: 'integer', locked: 'Une continuation garde la taille de sa vidéo source.' },
+        { key: 'height', value: 448, type: 'integer', locked: 'Une continuation garde la taille de sa vidéo source.' },
+        { key: 'frames', value: 124, type: 'integer', choices: [124, 141, 345] },
+        { key: 'seed', value: 7, type: 'integer', min: 0, max: 9007199254740991 },
+        { key: 'audio', value: true, type: 'boolean' },
+      ],
+    },
+  },
+});
+test('a video proposal is edited in place: no « Modifier », no unload notice, cancelling sends nothing', async () =>
+  fixture(async ({ ui, nodes, all, calls, setIntercept }) => {
     setIntercept(route => (route === 'tools/cancel' ? Response.json({}) : undefined));
-    const request = {
-      requestId: 'proposal',
-      mediaType: 'video',
-      autoAllow: true,
-      workflowName: 'Custom motion',
-      args: { prompt: 'A slow pan' },
-      approvalToken: 'one-use',
-      plan: {
-        stage: 'draft',
-        intention: 'Vérifier le mouvement.',
-        prompt: 'A slow pan',
-        parameters: { frames: 81, fps: 16, width: 768, height: 512, seed: 12 },
-        references: [{ input: 'start', label: 'Ref 2', role: 'Image de début' }],
-        editable: { prompt: true, stages: ['draft', 'final'], parameters: [] },
-      },
-    };
-    const pending = ui.requestTool(request, new AbortController().signal, () => {});
+    const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+    assert.doesNotMatch(html, /tool-revise|seront déchargés/);
+    const pending = ui.requestTool(videoProposal(), new AbortController().signal, () => {});
     await new Promise(setImmediate);
     assert.equal(nodes.get('tool-dialog').open, true);
     assert.match(nodes.get('tool-title').textContent, /Brouillon/);
     assert.equal(nodes.get('tool-always').hidden, true);
-    assert.equal(nodes.get('tool-revise').hidden, false);
-    assert.ok(!calls.some(call => call.route === 'tools/execute'));
-    assert.match(JSON.stringify(nodes.get('tool-plan').children), /Vérifier le mouvement|Ref 2/);
-    // "Modifier" opens the form in the dialog itself; nothing goes back to the model.
-    nodes.get('tool-revise').onclick();
-    assert.equal(nodes.get('tool-dialog').open, true);
-    assert.equal(nodes.get('tool-revise').textContent, 'Appliquer');
-    assert.equal(nodes.get('tool-once').disabled, true);
-    // "Retour" leaves the form without changes, then "Annuler" refuses.
-    nodes.get('tool-deny').onclick();
-    assert.equal(nodes.get('tool-revise').textContent, 'Modifier');
-    assert.equal(nodes.get('tool-dialog').open, true);
+    assert.equal(nodes.get('tool-once').textContent, 'Confirmer et générer');
+    assert.equal(labelled(all, 'Prompt').value, 'dives');
+    labelled(all, 'Prompt').value = 'changed but cancelled';
     nodes.get('tool-deny').onclick();
     const result = await pending;
     assert.equal(result.denied, true);
-    assert.match(result.content, /denied/);
     assert.equal(nodes.get('tool-dialog').open, false);
     assert.ok(!calls.some(call => ['tools/execute', 'tools/revise'].includes(call.route)));
   }));
-test('the user edits a video proposal in the dialog and confirms the revised one', async () =>
+test('confirming applies the edits first and runs the revised proposal', async () =>
   fixture(async ({ ui, nodes, all, calls, setIntercept }) => {
     setIntercept((route, body) => {
       if (route === 'tools/revise')
-        return Response.json({
-          requestId: 'revised',
-          approvalToken: 'revised-token',
-          mediaType: 'video',
-          workflowName: 'MiniMax',
-          args: { prompt: body.edits.prompt },
-          plan: {
-            stage: 'final',
-            intention: 'Continuer.',
-            prompt: body.edits.prompt,
-            parameters: { frames: 345, fps: 24, width: 768, height: 448, seed: 99 },
-            references: [],
-            editable: { prompt: true, stages: ['draft', 'final'], parameters: [] },
-            edited: ['frames', 'seed'],
-          },
-        });
+        return Response.json({ ...videoProposal(), requestId: 'revised', approvalToken: 'revised-token' });
       if (route === 'tools/execute') return Response.json({ id: 'job', state: 'error', error: 'test boundary' });
     });
-    const request = {
-      requestId: 'proposal',
-      mediaType: 'video',
-      workflowName: 'MiniMax',
-      args: { prompt: 'dives' },
-      approvalToken: 'first-token',
-      plan: {
-        stage: 'draft',
-        intention: 'Continuer.',
-        prompt: 'dives',
-        parameters: { frames: 124, fps: 24, width: 768, height: 448, seed: 7, audio: true },
-        references: [{ input: 'source', label: 'Résultat précédent', role: 'source_video' }],
-        editable: {
-          prompt: true,
-          stages: ['draft', 'final'],
-          parameters: [
-            {
-              key: 'width',
-              value: 768,
-              type: 'integer',
-              locked: 'Une continuation garde la taille de sa vidéo source.',
-            },
-            { key: 'frames', value: 124, type: 'integer', choices: [124, 141, 345] },
-            { key: 'seed', value: 7, type: 'integer', min: 0, max: 9007199254740991 },
-            { key: 'audio', value: true, type: 'boolean' },
-          ],
-        },
-      },
-    };
-    const pending = ui.requestTool(request, new AbortController().signal, () => {});
+    const pending = ui.requestTool(videoProposal(), new AbortController().signal, () => {});
     await new Promise(setImmediate);
-    nodes.get('tool-revise').onclick();
-    const controls = tag => all.filter(n => n.tagName === tag);
-    const prompt = controls('textarea').at(-1);
-    const [stage, frames] = controls('select').slice(-2);
-    const seed = controls('input').find(n => n.type === 'number');
-    assert.deepEqual(
-      frames.options.map(option => option.text),
-      ['124 · 5.17 s', '141 · 5.88 s', '345 · 14.38 s'],
-    );
-    assert.ok(!controls('input').some(n => n.value === '768'), 'a locked size is shown, not editable');
+    const seed = all.find(n => n.attributes['aria-label'] === 'Seed');
     seed.value = 'abc';
-    nodes.get('tool-revise').onclick();
+    nodes.get('tool-once').onclick();
     await new Promise(setImmediate);
-    assert.ok(!calls.some(call => call.route === 'tools/revise'), 'an invalid number is caught before sending');
+    assert.ok(!calls.some(call => ['tools/revise', 'tools/execute'].includes(call.route)), 'caught before sending');
     assert.ok(all.some(n => n.className === 'video-edit-error' && /Seed/.test(n.textContent)));
     seed.value = '99';
-    prompt.value = 'the boat dives into the clouds';
-    stage.value = 'final';
-    frames.value = '345';
-    nodes.get('tool-revise').onclick();
-    await new Promise(setImmediate);
-    await new Promise(setImmediate);
+    labelled(all, 'Prompt').value = 'the boat dives into the clouds';
+    const duration = labelled(all, 'Durée');
+    duration.value = '345';
+    duration.onchange();
+    nodes.get('tool-once').onclick();
+    await pending;
     assert.deepEqual(calls.find(call => call.route === 'tools/revise').body, {
       requestId: 'proposal',
       approvalToken: 'first-token',
-      edits: { prompt: 'the boat dives into the clouds', stage: 'final', frames: 345, seed: 99 },
+      edits: { prompt: 'the boat dives into the clouds', frames: 345, seed: 99 },
     });
-    assert.equal(nodes.get('tool-dialog').open, true, 'the revised proposal still waits for confirmation');
-    assert.match(nodes.get('tool-title').textContent, /Vidéo finale/);
-    assert.equal(nodes.get('tool-revise').textContent, 'Modifier');
-    assert.match(JSON.stringify(nodes.get('tool-plan').children), /Modifié par vous : Images, Seed/);
-    nodes.get('tool-once').onclick();
-    await pending;
     assert.deepEqual(calls.find(call => call.route === 'tools/execute').body, {
       requestId: 'revised',
       permission: 'once',
       approvalToken: 'revised-token',
     });
   }));
+test('changing the version asks for the new profile at once and shows it', async () =>
+  fixture(async ({ ui, nodes, all, calls, setIntercept }) => {
+    setIntercept((route, body) => {
+      if (route === 'tools/revise') {
+        const revised = videoProposal();
+        revised.requestId = 'final';
+        revised.approvalToken = 'final-token';
+        revised.plan.stage = 'final';
+        revised.plan.parameters.frames = 141;
+        revised.plan.editable.parameters[2].value = 141;
+        return Response.json(revised);
+      }
+      if (route === 'tools/cancel') return Response.json({});
+    });
+    const pending = ui.requestTool(videoProposal(), new AbortController().signal, () => {});
+    await new Promise(setImmediate);
+    labelled(all, 'Prompt').value = 'kept across the version change';
+    const stage = labelled(all, 'Version');
+    stage.value = 'final';
+    stage.onchange();
+    await new Promise(setImmediate);
+    await new Promise(setImmediate);
+    assert.deepEqual(calls.find(call => call.route === 'tools/revise').body.edits, {
+      prompt: 'kept across the version change',
+      stage: 'final',
+    });
+    assert.match(nodes.get('tool-title').textContent, /Vidéo finale/);
+    assert.equal(nodes.get('tool-dialog').open, true, 'still waiting for the user');
+    nodes.get('tool-deny').onclick();
+    await pending;
+  }));
+test('an untouched video proposal starts by itself; touching the window stops the countdown', async () => {
+  await fixture(
+    async ({ ui, nodes, calls, setIntercept }) => {
+      setIntercept(route =>
+        route === 'tools/execute' ? Response.json({ id: 'job', state: 'error', error: 'test boundary' }) : undefined,
+      );
+      await ui.requestTool(videoProposal(), new AbortController().signal, () => {});
+      assert.equal(calls.find(call => call.route === 'tools/execute').body.requestId, 'proposal');
+      assert.equal(nodes.get('tool-dialog').open, false);
+    },
+    { confirmDelay: 20 },
+  );
+  await fixture(
+    async ({ ui, nodes, calls, setIntercept }) => {
+      setIntercept(route => (route === 'tools/cancel' ? Response.json({}) : undefined));
+      const pending = ui.requestTool(videoProposal(), new AbortController().signal, () => {});
+      await new Promise(setImmediate);
+      nodes.get('tool-dialog').events.pointerdown();
+      await new Promise(resolve => setTimeout(resolve, 60));
+      assert.ok(!calls.some(call => call.route === 'tools/execute'), 'stopped by a click in the window');
+      assert.equal(nodes.get('tool-dialog').open, true);
+      nodes.get('tool-deny').onclick();
+      await pending;
+    },
+    { confirmDelay: 20 },
+  );
+});
 test('video confirm sends the exact proposal token once and final label is explicit', async () =>
   fixture(async ({ ui, nodes, calls, setIntercept }) => {
     setIntercept(route =>
@@ -660,71 +665,56 @@ test('replacing an Output gallery pauses its videos before removing their player
     assert.equal(paused, 1);
     assert.equal(nodes.get('gallery-list').children.includes(video), false);
   }));
-test('an image proposal reads as a plan and is edited in the dialog like a video', async () =>
-  fixture(async ({ ui, nodes, all, calls, setIntercept }) => {
-    setIntercept((route, body) => {
-      if (route === 'tools/revise')
-        return Response.json({
-          requestId: 'image-revised',
-          approvalToken: 'image-token-2',
+test('an image proposal is the same form, never starts by itself, and keeps « Toujours autoriser »', async () =>
+  fixture(
+    async ({ ui, nodes, all, calls, setIntercept }) => {
+      setIntercept((route, body) => {
+        if (route === 'tools/revise')
+          return Response.json({ requestId: 'image-revised', approvalToken: 'image-token-2', workflowName: 'Krea 2', plan: { parameters: {} } });
+        if (route === 'tools/execute') return Response.json({ id: 'job', state: 'error', error: 'test boundary' });
+      });
+      const pending = ui.requestTool(
+        {
+          requestId: 'image',
+          approvalToken: 'image-token',
+          autoAllow: false,
           workflowName: 'Krea 2',
           args: { prompt: 'a lighthouse' },
-          resolution: { width: 768, height: 1024 },
           plan: {
             prompt: 'a lighthouse',
-            parameters: { width: 768, height: 1024, seed: 3 },
+            parameters: { width: 1024, height: 1024, seed: 3 },
             references: [],
-            editable: { prompt: true, stages: [], parameters: [] },
-            edited: ['width'],
-          },
-        });
-      if (route === 'tools/execute') return Response.json({ id: 'job', state: 'error', error: 'test boundary' });
-    });
-    const pending = ui.requestTool(
-      {
-        requestId: 'image',
-        approvalToken: 'image-token',
-        autoAllow: false,
-        workflowName: 'Krea 2',
-        args: { prompt: 'a lighthouse' },
-        plan: {
-          prompt: 'a lighthouse',
-          parameters: { width: 1024, height: 1024, seed: 3 },
-          references: [],
-          editable: {
-            prompt: true,
-            stages: [],
-            parameters: [{ key: 'width', value: 1024, type: 'integer', min: 256, max: 2048 }],
+            editable: {
+              prompt: true,
+              stages: [],
+              parameters: [
+                { key: 'width', value: 1024, type: 'integer', min: 64, max: 4096, multipleOf: 8 },
+                { key: 'height', value: 1024, type: 'integer', min: 64, max: 4096, multipleOf: 8 },
+              ],
+            },
           },
         },
-      },
-      new AbortController().signal,
-      () => {},
-    );
-    await new Promise(setImmediate);
-    assert.equal(nodes.get('tool-plan').hidden, false);
-    assert.equal(nodes.get('tool-arguments').hidden, true);
-    assert.equal(nodes.get('tool-revise').hidden, false);
-    assert.match(JSON.stringify(nodes.get('tool-plan').children), /Génération d’image/);
-    nodes.get('tool-revise').onclick();
-    assert.equal(nodes.get('tool-always').disabled, true, 'no permanent permission while editing');
-    all.filter(n => n.tagName === 'input' && n.type === 'number').at(-1).value = '768';
-    nodes.get('tool-revise').onclick();
-    await new Promise(setImmediate);
-    await new Promise(setImmediate);
-    assert.deepEqual(calls.find(call => call.route === 'tools/revise').body, {
-      requestId: 'image',
-      approvalToken: 'image-token',
-      edits: { width: 768 },
-    });
-    assert.equal(nodes.get('tool-always').disabled, false);
-    nodes.get('tool-once').onclick();
-    await pending;
-    assert.deepEqual(calls.find(call => call.route === 'tools/execute').body, {
-      requestId: 'image-revised',
-      permission: 'once',
-    });
-  }));
+        new AbortController().signal,
+        () => {},
+      );
+      await new Promise(resolve => setTimeout(resolve, 40));
+      assert.ok(!calls.some(call => call.route === 'tools/execute'), 'an image never starts by itself');
+      assert.equal(nodes.get('tool-always').hidden, false);
+      assert.equal(nodes.get('tool-once').textContent, 'Cette fois');
+      const format = labelled(all, 'Format');
+      assert.equal(format.value, '1:1');
+      format.value = '3:4';
+      format.onchange();
+      nodes.get('tool-once').onclick();
+      await pending;
+      assert.deepEqual(calls.find(call => call.route === 'tools/revise').body.edits, { width: 960, height: 1280 });
+      assert.deepEqual(calls.find(call => call.route === 'tools/execute').body, {
+        requestId: 'image-revised',
+        permission: 'once',
+      });
+    },
+    { confirmDelay: 20 },
+  ));
 
 test('an action the user started with a button runs without a second confirmation', async () =>
   fixture(async ({ ui, nodes, calls, setIntercept }) => {

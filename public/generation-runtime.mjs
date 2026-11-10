@@ -1,4 +1,4 @@
-import { renderVideoEditor, renderVideoPlan } from './video-plan.mjs';
+import { renderProposal } from './video-plan.mjs';
 import { prepareStoryboard } from './resource-preparation.mjs';
 import { compressImage } from './images.mjs';
 
@@ -15,6 +15,8 @@ export function setupGenerationRuntime({
   openOutput,
   outputActions = null,
   onOutput = () => {},
+  // A video proposal left untouched starts by itself after this delay (0: never).
+  confirmDelay = 30000,
 }) {
   const $ = id => document.getElementById(id);
   let urls = [],
@@ -106,6 +108,10 @@ export function setupGenerationRuntime({
       }
     }
   }
+  /**
+   * The proposal, editable in place. A video starts by itself after CONFIRM_DELAY unless the
+   * user does anything in the window (a click, a key): the countdown fills its button.
+   */
   async function permission(request, signal) {
     const video = request.mediaType === 'video';
     if (request.autoAllow && !video) return undefined;
@@ -115,95 +121,108 @@ export function setupGenerationRuntime({
           ? 'Brouillon vidéo · Confirmer ?'
           : 'Vidéo finale · Confirmer ?'
         : 'Autoriser la génération ?');
-    title();
-    $('tool-name').textContent = request.workflowName;
-    $('tool-arguments').textContent =
-      JSON.stringify(request.args, null, 2) + (request.notes?.length ? '\n\n' + request.notes.join('\n') : '');
-    // Every proposal reads as a plan when the server sends one; raw arguments are the fallback.
     const planned = Boolean(request.plan);
     $('tool-arguments').hidden = planned;
     $('tool-plan').hidden = !planned;
     $('tool-always').hidden = video;
-    $('tool-always').disabled = video;
-    $('tool-revise').hidden = !request.plan?.editable;
+    $('tool-deny').textContent = video ? 'Annuler' : 'Refuser';
     $('tool-once').textContent = video ? 'Confirmer et générer' : 'Cette fois';
-    // Reading mode: the proposal as it will run. Editing mode: the same proposal as a form.
-    let editor = null,
+    $('tool-once').title = video && confirmDelay > 0 ? `Se lance seul après ${Math.round(confirmDelay / 1000)} s, sauf si vous touchez à la fenêtre` : '';
+    let form = null,
       saving = false;
-    function read() {
-      editor = null;
-      $('tool-revise').textContent = 'Modifier';
-      $('tool-deny').textContent = video ? 'Annuler' : 'Refuser';
-      $('tool-once').disabled = false;
-      $('tool-always').disabled = video;
-      if (planned) renderVideoPlan($('tool-plan'), request, node);
+    function render() {
+      title();
+      $('tool-name').textContent = request.workflowName;
+      $('tool-arguments').textContent =
+        JSON.stringify(request.args, null, 2) + (request.notes?.length ? '\n\n' + request.notes.join('\n') : '');
+      form = planned ? renderProposal($('tool-plan'), request, { node, onStage: (stage, edits) => void revise({ ...edits, stage }) }) : null;
     }
-    read();
+    function busy(value) {
+      saving = value;
+      for (const id of ['tool-once', 'tool-always']) $(id).disabled = value;
+    }
+    // Sends the edits; the revised proposal (new token) replaces this one.
+    async function revise(edits) {
+      if (saving) return false;
+      busy(true);
+      try {
+        const revised = await (
+          await api('tools/revise', { requestId: request.requestId, approvalToken: request.approvalToken, edits })
+        ).json();
+        if (signal.aborted) return false;
+        Object.assign(request, revised);
+        render();
+        return true;
+      } catch (error) {
+        form?.error(error.message);
+        return false;
+      } finally {
+        busy(false);
+      }
+    }
+    render();
     $('tool-dialog').showModal();
     return new Promise((resolve, reject) => {
+      let timer = null;
+      const stopCountdown = () => {
+        clearTimeout(timer);
+        timer = null;
+        $('tool-once').classList?.remove('is-counting');
+        $('tool-dialog').removeEventListener('pointerdown', stopCountdown, true);
+        $('tool-dialog').removeEventListener('keydown', stopCountdown, true);
+      };
       const finish = value => {
         cleanup();
         resolve(value);
       };
+      // Confirming applies what the user changed first: what runs is what the window shows.
+      async function confirm(decision) {
+        if (saving) return;
+        if (form) {
+          let edits;
+          try {
+            edits = form.edits();
+          } catch (error) {
+            form.error(error.message);
+            return;
+          }
+          if (Object.keys(edits).length && !(await revise(edits))) return;
+        }
+        finish(decision);
+      }
       const cancel = event => {
         event?.preventDefault();
-        if (editor) read();
-        else finish('deny');
+        finish('deny');
       };
-      async function revise() {
-        if (!editor) {
-          editor = renderVideoEditor($('tool-plan'), request, node);
-          $('tool-revise').textContent = 'Appliquer';
-          $('tool-deny').textContent = 'Retour';
-          $('tool-once').disabled = true;
-          $('tool-always').disabled = true;
-          return;
-        }
-        if (saving) return;
-        let edits;
-        try {
-          edits = editor.edits();
-        } catch (error) {
-          editor.error(error.message);
-          return;
-        }
-        if (!Object.keys(edits).length) return read();
-        saving = true;
-        $('tool-revise').disabled = true;
-        try {
-          const revised = await (
-            await api('tools/revise', { requestId: request.requestId, approvalToken: request.approvalToken, edits })
-          ).json();
-          if (signal.aborted) return;
-          Object.assign(request, revised);
-          title();
-          read();
-        } catch (error) {
-          editor?.error(error.message);
-        } finally {
-          saving = false;
-          $('tool-revise').disabled = false;
-        }
-      }
       const abort = () => {
         cleanup();
         reject(signal.reason || new DOMException('Annulé', 'AbortError'));
       };
       function cleanup() {
+        stopCountdown();
         $('tool-dialog').close();
         signal.removeEventListener('abort', abort);
         $('tool-dialog').removeEventListener('cancel', cancel);
         for (const [id] of buttons) $(id).onclick = null;
       }
       const buttons = [
-        ['tool-deny', () => (editor ? read() : finish('deny'))],
-        ['tool-once', () => finish('once')],
-        ['tool-always', () => finish('always')],
-        ['tool-revise', () => void revise()],
+        ['tool-deny', () => finish('deny')],
+        ['tool-once', () => void confirm('once')],
+        ['tool-always', () => void confirm('always')],
       ];
       for (const [id, action] of buttons) $(id).onclick = action;
       $('tool-dialog').addEventListener('cancel', cancel);
       signal.addEventListener('abort', abort, { once: true });
+      if (video && confirmDelay > 0) {
+        $('tool-once').style?.setProperty('--countdown', confirmDelay + 'ms');
+        $('tool-once').classList?.add('is-counting');
+        $('tool-dialog').addEventListener('pointerdown', stopCountdown, true);
+        $('tool-dialog').addEventListener('keydown', stopCountdown, true);
+        timer = setTimeout(() => {
+          timer = null;
+          void confirm('once');
+        }, confirmDelay);
+      }
       if (signal.aborted) abort();
     });
   }

@@ -365,3 +365,69 @@ test('the next shot of a final video is final too, unless the model says otherwi
   const draft = derivedConversation();
   assert.equal((await draft.extend(draft.ids.clip)).plan.stage, 'draft');
 });
+
+test('the user gives an input another role: a subject reference becomes the first frame, its LoRA goes', async () => {
+  const conversationId = '11111111-1111-4111-8111-111111111111';
+  const imageId = '33333333-3333-4333-8333-333333333333';
+  const shipped = validateNativeWorkflow(
+    JSON.parse(readFileSync(new URL('../runner/workflows/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8')),
+  );
+  const workflows = [{ ...shipped, ready: true }];
+  const runtime = new ToolRuntime({
+    catalog: {
+      kind: 'native',
+      list: async () => workflows,
+      read: async id => workflows.find(workflow => workflow.id === id),
+      prepare: async (id, args, options) => {
+        const workflow = workflows.find(item => item.id === id);
+        return { workflow, job: await resolveNativeWorkflow(workflow, args, assets, options), outputNodes: [] };
+      },
+    },
+    engine: { state: 'ready' },
+    gallery: {
+      get: async () => ({
+        provider: 'native',
+        mediaType: 'image',
+        workflowId: 'krea',
+        parameters: { pipeline: 'krea2', width: 1024, height: 1024 },
+        outputs: [{ source: { filename: 'tiger.png' }, width: 1024, height: 1024 }],
+      }),
+    },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5 }),
+    engineConfig: () => ({}),
+    sourceMedia: async () => ({ mime: 'image/png', name: 'Upscale SeedVR2', handle: { close: async () => {} } }),
+    clientFactory: () => ({}),
+  });
+  const first = await runtime.request(
+    [
+      {
+        id: 'call',
+        type: 'function',
+        function: {
+          name: 'create_video',
+          arguments: JSON.stringify({ prompt: 'a tiger runs', intention: 'Le tigre court.', reference: [{ output: imageId }] }),
+        },
+      },
+    ],
+    { conversationId, turnId: conversationId, messages: [] },
+  );
+  const loras = request => runtime.pending.get(request.requestId).prepared.job.loras.map(lora => lora.id);
+  assert.deepEqual(loras(first), ['reference-slots']);
+  assert.equal(first.plan.references[0].role, 'msr_image');
+  assert.equal(first.plan.references[0].roleLabel, 'Référence de sujet');
+  assert.deepEqual(
+    first.plan.editable.references[0].map(option => option.role).sort(),
+    ['end_image', 'msr_image', 'start_image'],
+  );
+  const revise = (request, edits) =>
+    runtime.revise({ requestId: request.requestId, approvalToken: request.approvalToken, edits });
+  await assert.rejects(revise(first, { references: [{ index: 0, role: 'source_video' }] }), /ne peut pas prendre ce rôle/);
+  await assert.rejects(revise(first, { references: [{ index: 3, role: 'start_image' }] }), /invalides/);
+  const second = await revise(first, { references: [{ index: 0, role: 'start_image' }] });
+  assert.equal(second.plan.references[0].role, 'start_image');
+  assert.equal(second.plan.references[0].input, 'start');
+  assert.equal(second.plan.references[0].roleLabel, 'Image de début');
+  assert.equal(second.args.references[0].input, 'start');
+  assert.equal(second.plan.parameters.start_strength, first.plan.parameters.start_strength);
+  assert.deepEqual(loras(second), [], 'a first frame needs no subject LoRA');
+});

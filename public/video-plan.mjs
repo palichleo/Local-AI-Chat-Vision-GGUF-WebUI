@@ -1,85 +1,4 @@
-export function renderVideoPlan(container, request, node) {
-  container.replaceChildren();
-  const plan = request.plan || {},
-    parameters = plan.parameters || {};
-  const video = request.mediaType === 'video';
-  container.append(
-    node('p', 'video-intention', plan.intention || (video ? 'Proposition vidéo' : 'Génération d’image')),
-  );
-  const details = node('dl', 'video-plan-fields');
-  function row(label, value) {
-    if (value === undefined || value === null) return;
-    details.append(node('dt', '', label), node('dd', '', String(value)));
-  }
-  const numeric = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
-  const value = (key, suffix = '') =>
-    parameters[key] === undefined
-      ? undefined
-      : numeric(parameters[key])
-        ? parameters[key] + suffix
-        : 'Calculé par le workflow';
-  for (const note of request.notes || []) container.append(node('p', 'field-help', note));
-  if (plan.edited?.length)
-    container.append(
-      node('p', 'field-help', 'Modifié par vous : ' + plan.edited.map(key => LABELS[key] || key).join(', ') + '.'),
-    );
-  row('Workflow', request.workflowName);
-  row('Version', plan.stage === 'draft' ? 'Brouillon' : plan.stage === 'final' ? 'Finale' : undefined);
-  if (parameters.width !== undefined || parameters.height !== undefined)
-    row(
-      'Résolution',
-      numeric(parameters.width) && numeric(parameters.height)
-        ? parameters.width + ' × ' + parameters.height
-        : 'Calculée par le workflow',
-    );
-  row('Images', value('frames'));
-  row('Cadence', value('fps', ' i/s'));
-  if (numeric(parameters.frames) && parameters.frames > 0 && numeric(parameters.fps) && parameters.fps > 0) {
-    // A continuation renders its overlap with the source again: only the rest is new footage.
-    const overlap =
-      plan.references?.some(ref => ref.role === 'source_video') && numeric(parameters.overlap_frames)
-        ? parameters.overlap_frames
-        : 0;
-    if (overlap && overlap < parameters.frames)
-      row('Durée ajoutée', ((parameters.frames - overlap) / parameters.fps).toFixed(2) + ' s');
-    else row('Durée estimée', (parameters.frames / parameters.fps).toFixed(2) + ' s');
-  }
-  row('Seed', value('seed'));
-  if (typeof parameters.audio === 'boolean') row('Audio', parameters.audio ? 'Oui' : 'Non');
-  if (plan.references?.some(ref => ref.role === 'source_video'))
-    row('Chevauchement', value('overlap_frames', ' images'));
-  container.append(details);
-  if (plan.references?.length) {
-    const refs = node('ul', 'video-plan-references');
-    for (const ref of plan.references)
-      refs.append(
-        node(
-          'li',
-          '',
-          (ref.label || ref.resource_id || 'Image ' + (ref.image + 1)) +
-            ' → ' +
-            (ref.role || ref.input) +
-            (Number.isFinite(ref.time) ? ' · ' + ref.time.toFixed(2) + ' s' : ''),
-        ),
-      );
-    container.append(refs);
-  } else if (video) container.append(node('p', 'field-help', 'Aucune référence image transmise au workflow.'));
-  if (plan.defaultReferences?.length)
-    container.append(
-      node(
-        'p',
-        'field-help',
-        'Entrées conservées du workflow : ' + plan.defaultReferences.map(ref => ref.name || ref.input).join(', '),
-      ),
-    );
-  const prompt = node('details', 'video-plan-prompt');
-  prompt.open = true;
-  prompt.append(node('summary', '', 'Prompt'), node('p', '', plan.prompt || request.args?.prompt || ''));
-  container.append(prompt);
-  const other = node('details', 'video-plan-extra');
-  other.append(node('summary', '', 'Paramètres effectifs'), node('pre', '', JSON.stringify(parameters, null, 2)));
-  container.append(other);
-}
+import { formatOf, formatsFor, nearestSize, sizesFor } from './formats.mjs';
 
 const LABELS = {
   width: 'Largeur',
@@ -93,62 +12,241 @@ const LABELS = {
   cfg: 'CFG',
   guidance: 'Guidance',
   denoise: 'Débruitage',
+  start_strength: 'Force de l’image de début',
+  end_strength: 'Force de l’image de fin',
+  image_compression: 'Compression des images',
+  msr_strength: 'Force des références',
+  msr_frames: 'Images guidées par les références',
+  max_side: 'Plus grand côté (px)',
+  scale: 'Facteur',
+  passes: 'Passes',
+  color_correction: 'Correction des couleurs',
+  multiplier: 'Multiplicateur',
+  mode: 'Mode',
+  tile: 'Tuile',
+  expandPrompt: 'Prompt enrichi',
 };
 const STAGES = { draft: 'Brouillon', final: 'Finale' };
+// Shown in the main area; every other editable parameter goes to « Paramètres avancés ».
+const MAIN = new Set(['frames', 'width', 'height', 'seed']);
+const ADVANCED_FIRST = ['frames', 'fps', 'audio', 'width', 'height'];
+const numeric = value => typeof value === 'number' && Number.isFinite(value);
+const seconds = value => value.toFixed(2).replace('.', ',') + ' s';
 
 /**
- * The proposal as a form the user edits directly: prompt, draft/final version and the
- * parameters the server lists as editable. `edits()` returns only what changed (and throws a
- * readable message for an invalid number); `error(text)` shows a server refusal in place.
+ * A proposal as one form: everything the user may change is editable in place, the common
+ * settings first and the rest under « Paramètres avancés ». `edits()` returns only what
+ * changed (and throws a readable message for an invalid value); `error(text)` shows a refusal.
+ * `onStage(stage, edits)` is called when the version changes: its profile changes the size and
+ * length, so the caller asks the server for the new proposal and renders it again.
  */
-export function renderVideoEditor(container, request, node) {
+export function renderProposal(container, request, { node, onStage } = {}) {
   container.replaceChildren();
   const plan = request.plan || {},
     editable = plan.editable || {},
     parameters = plan.parameters || {},
-    fields = [];
+    video = request.mediaType === 'video',
+    items = new Map((editable.parameters || []).map(item => [item.key, item])),
+    controls = new Map(),
+    continues = plan.references?.some(ref => ref.role === 'source_video'),
+    overlap = continues && numeric(parameters.overlap_frames) ? parameters.overlap_frames : 0;
   const message = node('p', 'video-edit-error');
   message.setAttribute('role', 'alert');
   message.hidden = true;
-  container.append(
-    node(
-      'p',
-      'video-intention',
-      plan.intention || (request.mediaType === 'video' ? 'Proposition vidéo' : 'Génération d’image'),
-    ),
-  );
-  function field(label, control, help) {
-    const wrapper = node('label', 'video-edit-field');
+
+  function field(label, control, { help, wide = false } = {}) {
+    const wrapper = node('label', 'proposal-field' + (wide ? ' is-wide' : ''));
     wrapper.append(node('span', '', label), control);
     if (help) wrapper.append(node('small', 'field-help', help));
     return wrapper;
   }
+  function select(choices, value) {
+    const control = node('select');
+    for (const [key, text] of choices) control.add(new Option(text, String(key)));
+    control.value = String(value);
+    return control;
+  }
+  function fixed(text) {
+    return node('output', 'proposal-fixed', text);
+  }
+
+  container.append(node('p', 'video-intention', plan.intention || (video ? 'Proposition vidéo' : 'Génération d’image')));
+
+  // Prompt: editable when the model owns it.
   let prompt = null;
   if (editable.prompt) {
-    prompt = node('textarea', 'video-edit-prompt');
-    prompt.rows = 5;
+    prompt = node('textarea', 'proposal-prompt');
+    prompt.rows = 4;
     prompt.value = plan.prompt || '';
-    container.append(field('Prompt', prompt));
-  } else {
-    const fixed = node('details', 'video-plan-prompt');
-    fixed.open = true;
-    fixed.append(node('summary', '', 'Prompt (fixé par le workflow)'), node('p', '', plan.prompt || ''));
-    container.append(fixed);
-  }
-  const grid = node('div', 'video-edit-grid');
-  let stage = null;
+    prompt.setAttribute('aria-label', 'Prompt');
+    container.append(field('Prompt', prompt, { wide: true }));
+  } else if (plan.prompt) container.append(field('Prompt (fixé par le workflow)', fixed(plan.prompt), { wide: true }));
+
+  // Inputs, each with the role it plays (and the others it may play).
+  const roleControls = [];
+  if (plan.references?.length) {
+    const list = node('div', 'proposal-inputs');
+    plan.references.forEach((ref, index) => {
+      const label = ref.label || ref.resource_id || 'Image ' + ((ref.image ?? index) + 1),
+        options = editable.references?.[index] || [];
+      const row = node('div', 'proposal-input');
+      row.append(node('span', 'proposal-input-name', label));
+      if (options.length > 1) {
+        const control = select(
+          options.map(option => [option.role, option.label]),
+          ref.role,
+        );
+        control.setAttribute('aria-label', 'Rôle de ' + label);
+        roleControls.push({ index, control, initial: ref.role });
+        row.append(control);
+      } else row.append(node('span', 'proposal-input-role', ref.roleLabel || ref.role || ref.input));
+      list.append(row);
+    });
+    container.append(list);
+  } else if (video && !continues) container.append(node('p', 'field-help', 'Aucune image transmise : vidéo créée depuis le texte.'));
+
+  const grid = node('div', 'proposal-grid');
+  container.append(grid);
+
+  // Version: changing it changes the profile, so the server proposes again.
   if (editable.stages?.length > 1) {
-    stage = node('select');
-    for (const value of editable.stages) stage.add(new Option(STAGES[value] || value, value));
-    stage.value = plan.stage;
-    grid.append(field('Version', stage, 'Change la taille et la durée du profil, sauf valeurs modifiées ici.'));
+    const stage = select(
+      editable.stages.map(value => [value, STAGES[value] || value]),
+      plan.stage,
+    );
+    stage.onchange = () => {
+      let edits;
+      try {
+        edits = form.edits();
+      } catch (error) {
+        stage.value = plan.stage;
+        form.error(error.message);
+        return;
+      }
+      delete edits.stage;
+      onStage?.(stage.value, edits);
+    };
+    controls.set('stage', stage);
+    grid.append(field('Version', stage));
+  } else if (STAGES[plan.stage]) grid.append(field('Version', fixed(STAGES[plan.stage])));
+
+  // Length: in seconds here, in frames under the advanced settings; both are the same value.
+  const fps = () => {
+    const control = controls.get('fps');
+    const value = control ? Number(control.value) : parameters.fps;
+    return value > 0 ? value : null;
+  };
+  const framesItem = items.get('frames');
+  let frames = parameters.frames;
+  const lengthText = count => {
+    const rate = fps();
+    if (!rate || !numeric(count)) return String(count);
+    return overlap && count > overlap ? '+' + seconds((count - overlap) / rate) : seconds(count / rate);
+  };
+  let duration = null;
+  if (framesItem && !framesItem.locked && framesItem.choices && fps()) {
+    duration = select(
+      framesItem.choices.map(choice => [choice, lengthText(choice)]),
+      frames,
+    );
+    duration.disabled = framesItem.choices.length < 2;
+    grid.append(field(overlap ? 'Durée ajoutée' : 'Durée', duration));
+  } else if (numeric(frames) && fps()) grid.append(field(overlap ? 'Durée ajoutée' : 'Durée', fixed(lengthText(frames))));
+
+  // Format and resolution: a clean size for each format, within what the model accepts.
+  const widthItem = items.get('width'),
+    heightItem = items.get('height'),
+    limits = { width: widthItem, height: heightItem },
+    formats = formatsFor(limits);
+  let size = { width: parameters.width, height: parameters.height };
+  let formatControl = null,
+    resolutionControl = null;
+  const sizeText = value => value.width + ' × ' + value.height;
+  const sizeKey = value => value.width + 'x' + value.height;
+  const formatOfSize = () => {
+    const format = formatOf(size.width, size.height);
+    return format && formats.includes(format) ? format : null;
+  };
+  // Shows the format of the size (or « Autre ») and the sizes of that format.
+  function showSize() {
+    const format = formatOfSize();
+    if (!format && ![...(formatControl.options || [])].some(option => option.value === 'custom'))
+      formatControl.add(new Option('Autre', 'custom'));
+    formatControl.value = format ? format.id : 'custom';
+    const list = format ? sizesFor(format, limits) : [];
+    const known = list.some(item => sizeKey(item) === sizeKey(size));
+    resolutionControl.replaceChildren();
+    for (const item of [...list, ...(known ? [] : [size])].sort((a, b) => a.width * a.height - b.width * b.height))
+      resolutionControl.add(new Option(sizeText(item) + (!known && item === size && format ? ' (actuelle)' : ''), sizeKey(item)));
+    resolutionControl.value = sizeKey(size);
+    if (controls.get('width')) controls.get('width').value = String(size.width);
+    if (controls.get('height')) controls.get('height').value = String(size.height);
   }
-  const fps = Number(parameters.fps),
-    overlap = plan.references?.some(ref => ref.role === 'source_video') ? Number(parameters.overlap_frames) || 0 : 0;
-  for (const item of editable.parameters || []) {
-    const label = LABELS[item.key] || item.key;
+  const resizable =
+    widthItem && heightItem && !widthItem.locked && !heightItem.locked && numeric(size.width) && numeric(size.height);
+  if (resizable) {
+    formatControl = select(
+      formats.map(format => [format.id, format.label]),
+      formats[0]?.id ?? '',
+    );
+    resolutionControl = node('select');
+    formatControl.onchange = () => {
+      const format = formats.find(item => item.id === formatControl.value);
+      const next = format && nearestSize(sizesFor(format, limits), size.width * size.height);
+      if (next) size = { ...next };
+      showSize();
+    };
+    resolutionControl.onchange = () => {
+      const [width, height] = resolutionControl.value.split('x').map(Number);
+      size = { width, height };
+      showSize();
+    };
+    grid.append(field('Format', formatControl), field('Résolution', resolutionControl));
+  } else if (numeric(size.width) && numeric(size.height))
+    grid.append(
+      field('Résolution', fixed(sizeText(size)), widthItem?.locked ? { help: 'Gardée de la vidéo source.' } : undefined),
+    );
+
+  // Seed, with a new random one at a click.
+  const seedItem = items.get('seed');
+  if (seedItem && !seedItem.locked) {
+    const seed = node('input');
+    seed.type = 'number';
+    seed.value = String(seedItem.value);
+    seed.min = String(seedItem.min ?? 0);
+    if (seedItem.max !== undefined) seed.max = String(seedItem.max);
+    seed.step = '1';
+    seed.setAttribute('aria-label', 'Seed');
+    const roll = node('button', 'icon-button proposal-roll');
+    roll.type = 'button';
+    roll.title = 'Seed aléatoire';
+    roll.setAttribute('aria-label', 'Seed aléatoire');
+    roll.append(diceIcon(node));
+    roll.onclick = () => {
+      const max = Math.min(seedItem.max ?? 2 ** 32, Number.MAX_SAFE_INTEGER);
+      seed.value = String(Math.floor(Math.random() * (max + 1)));
+    };
+    const row = node('div', 'proposal-seed');
+    row.append(seed, roll);
+    controls.set('seed', seed);
+    grid.append(field('Seed', row));
+  } else if (numeric(parameters.seed)) grid.append(field('Seed', fixed(String(parameters.seed))));
+
+  // Everything else the user may change.
+  const advanced = node('details', 'proposal-advanced');
+  advanced.append(node('summary', '', 'Paramètres avancés'));
+  const more = node('div', 'proposal-grid');
+  advanced.append(more);
+  const keys = [
+    ...ADVANCED_FIRST.filter(key => items.has(key)),
+    ...[...items.keys()].filter(key => !ADVANCED_FIRST.includes(key)),
+  ];
+  for (const key of keys) {
+    const item = items.get(key);
+    if (MAIN.has(key) && !['frames', 'width', 'height'].includes(key)) continue;
+    const label = LABELS[key] || key;
     if (item.locked) {
-      grid.append(field(label, node('output', 'video-edit-locked', String(item.value)), item.locked));
+      more.append(field(label, fixed(String(item.value)), { help: item.locked }));
       continue;
     }
     let control;
@@ -157,18 +255,10 @@ export function renderVideoEditor(container, request, node) {
       control.type = 'checkbox';
       control.checked = item.value === true;
     } else if (item.choices) {
-      control = node('select');
-      for (const choice of item.choices) {
-        // For a continuation, the seconds are those it adds after its source.
-        const text =
-          item.key !== 'frames' || !(fps > 0)
-            ? String(choice)
-            : overlap && choice > overlap
-              ? `${choice} · +${((choice - overlap) / fps).toFixed(2)} s`
-              : `${choice} · ${(choice / fps).toFixed(2)} s`;
-        control.add(new Option(text, String(choice)));
-      }
-      control.value = String(item.value);
+      control = select(
+        item.choices.map(choice => [choice, String(choice)]),
+        item.value,
+      );
       control.disabled = item.choices.length < 2;
     } else {
       control = node('input');
@@ -178,41 +268,77 @@ export function renderVideoEditor(container, request, node) {
       if (item.max !== undefined) control.max = String(item.max);
       control.step = item.multipleOf ? String(item.multipleOf) : item.type === 'integer' ? '1' : 'any';
     }
-    const wrapper = field(label, control, item.note);
-    if (item.key === 'seed' && control.type === 'number') {
-      const roll = node('button', 'secondary video-edit-roll', 'Aléatoire');
-      roll.type = 'button';
-      roll.onclick = () => {
-        control.value = String(Math.floor(Math.random() * Math.min(item.max ?? 2 ** 32, Number.MAX_SAFE_INTEGER)));
-      };
-      wrapper.append(roll);
-    }
-    grid.append(wrapper);
-    fields.push({ item, label, control });
+    controls.set(key, control);
+    more.append(field(label, control, { help: item.note }));
   }
-  container.append(grid, message);
-  if (plan.references?.length)
-    container.append(
-      node(
-        'p',
-        'field-help',
-        'Entrées : ' + plan.references.map(ref => ref.label || ref.role || ref.input).join(', ') + ' (inchangées).',
-      ),
-    );
-  return {
+  if (more.children.length) container.append(advanced);
+
+  // The two length controls and the two size controls follow each other.
+  const framesControl = controls.get('frames');
+  if (duration && framesControl) {
+    duration.onchange = () => {
+      framesControl.value = duration.value;
+    };
+    framesControl.onchange = () => {
+      duration.value = framesControl.value;
+    };
+  }
+  if (controls.get('fps') && duration)
+    controls.get('fps').onchange = controls.get('fps').oninput = () => {
+      for (const option of duration.options || []) option.text = lengthText(Number(option.value));
+    };
+  if (resizable) {
+    showSize();
+    for (const key of ['width', 'height'])
+      if (controls.get(key))
+        controls.get(key).onchange = () => {
+          const width = Number(controls.get('width').value),
+            height = Number(controls.get('height').value);
+          if (Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0) {
+            size = { width, height };
+            showSize();
+          }
+        };
+  }
+
+  const notes = [...(request.notes || [])];
+  if (plan.edited?.length) notes.push('Modifié par vous : ' + plan.edited.map(key => LABELS[key] || key).join(', ') + '.');
+  for (const note of notes) container.append(node('p', 'field-help proposal-note', note));
+  container.append(message);
+
+  const form = {
     edits() {
       const edits = {};
       if (prompt && prompt.value !== (plan.prompt || '')) {
         if (!prompt.value.trim()) throw Error('Le prompt ne peut pas être vide.');
         edits.prompt = prompt.value;
       }
-      if (stage && stage.value !== plan.stage) edits.stage = stage.value;
-      for (const { item, label, control } of fields) {
+      const roles = roleControls
+        .filter(({ control, initial }) => control.value !== initial)
+        .map(({ index, control }) => ({ index, role: control.value }));
+      if (roles.length) edits.references = roles;
+      // The main controls carry the same values as their advanced twins: read those last.
+      const values = new Map();
+      if (duration) values.set('frames', duration.value);
+      if (resizable) {
+        values.set('width', String(size.width));
+        values.set('height', String(size.height));
+      }
+      for (const [key, control] of controls) {
+        if (key === 'stage') continue;
+        const item = items.get(key);
+        if (!item) continue;
+        if (item.type === 'boolean') values.set(key, control.checked);
+        else if (!(values.has(key) && ['frames', 'width', 'height'].includes(key))) values.set(key, control.value);
+      }
+      for (const [key, raw] of values) {
+        const item = items.get(key),
+          label = LABELS[key] || key;
         let value;
-        if (item.type === 'boolean') value = control.checked;
-        else if (item.choices) value = item.choices.find(choice => String(choice) === control.value);
+        if (item.type === 'boolean') value = raw;
+        else if (item.choices) value = item.choices.find(choice => String(choice) === String(raw));
         else {
-          const text = String(control.value).trim();
+          const text = String(raw).trim();
           value = Number(text);
           if (!text || !Number.isFinite(value) || (item.type === 'integer' && !Number.isSafeInteger(value)))
             throw Error(`${label} : nombre invalide.`);
@@ -220,7 +346,7 @@ export function renderVideoEditor(container, request, node) {
             throw Error(`${label} : entre ${item.min ?? '…'} et ${item.max ?? '…'}.`);
           if (item.multipleOf && value % item.multipleOf) throw Error(`${label} : multiple de ${item.multipleOf}.`);
         }
-        if (value !== item.value) edits[item.key] = value;
+        if (value !== undefined && value !== item.value) edits[key] = value;
       }
       return edits;
     },
@@ -229,4 +355,19 @@ export function renderVideoEditor(container, request, node) {
       message.hidden = !text;
     },
   };
+  return form;
+}
+
+function diceIcon(node) {
+  const make = tag =>
+    globalThis.document?.createElementNS
+      ? document.createElementNS('http://www.w3.org/2000/svg', tag)
+      : node(tag);
+  const svg = make('svg'),
+    use = make('use');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('class', 'proposal-dice');
+  use.setAttribute('href', '#i-dice');
+  svg.append(use);
+  return svg;
 }
