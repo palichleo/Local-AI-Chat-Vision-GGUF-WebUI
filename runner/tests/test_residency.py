@@ -96,6 +96,75 @@ class PrefetchTest(unittest.TestCase):
             self.assertIsNone(residency.prefetch({'model': path}, {'model': resident}, [('model', 'a.weight', None)]))
             self.assertIsNone(residency.prefetch({'model': path}, {'model': mapped}, [('other', 'a.weight', None)]))
 
+    def test_with_a_window_the_read_stays_just_ahead_of_what_the_model_uses(self):
+        import time
+        from runner.models import residency
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'weights.safetensors')
+            base = _safetensors(path, {'a.weight': b'a' * 10000})
+            used = [0]
+            ahead = residency.Prefetch([(path, [(base, base + 10000)])], chunk=1000, window=2000, lead=lambda: used[0])
+            time.sleep(0.3)
+            self.assertFalse(ahead.done)
+            self.assertEqual(ahead.bytes, 3000)  # one chunk past the window, then it waits
+            used[0] = 4000
+            time.sleep(0.3)
+            self.assertEqual(ahead.bytes, 7000)
+            used[0] = 10000
+            ahead._thread.join(timeout=10)
+            self.assertEqual(ahead.bytes, 10000)
+            self.assertEqual(ahead.stop()['window_gib'], 0.0)
+            # Stopped while it waits (the step is over): it ends at once.
+            waiting = residency.Prefetch([(path, [(base, base + 10000)])], chunk=1000, window=0, lead=lambda: 0)
+            time.sleep(0.1)
+            waiting.stop()
+            self.assertTrue(waiting.done)
+
+    def test_a_plan_too_large_for_the_ram_follows_the_layers_not_the_file(self):
+        from runner.models import residency
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'weights.safetensors')
+            # Stored by name, as ComfyUI does: block 10 before block 2.
+            base = _safetensors(
+                path,
+                {
+                    'blocks.0.fc.weight': b'a' * 100,
+                    'blocks.0.fc.weight_scale': b's' * 10,
+                    'blocks.1.fc.weight': b'b' * 100,
+                    'blocks.10.fc.weight': b'c' * 100,
+                    'blocks.2.fc.weight': b'd' * 100,
+                    'blocks.2.fc.bias': b'e' * 10,
+                },
+            )
+            names = {
+                f'transformer_blocks.{index}.fc.weight': ('model', f'blocks.{index}.fc.weight', None)
+                for index in (0, 1, 10, 2)
+            }
+            order = residency.use_order(names)
+            self.assertEqual([key for _role, key, _part in order], [f'blocks.{index}.fc.weight' for index in (0, 1, 2, 10)])
+            # Three parts of one stored tensor (q, k, v) are one read.
+            order.insert(1, ('model', 'blocks.0.fc.weight', 1))
+            plan = residency._as_used({'model': path}, order, lambda role: True)
+            self.assertEqual(
+                plan,
+                [
+                    (path, [(base, base + 210)]),  # blocks 0 and 1 follow each other in the file
+                    (path, [(base + 310, base + 420)]),  # block 2 and its bias
+                    (path, [(base + 210, base + 310)]),  # block 10, stored before it
+                ],
+            )
+            self.assertEqual(residency._as_used({'model': path}, order, lambda role: False), [])
+            saved = residency._fits
+            residency._fits = lambda plan: False
+            try:
+                ahead = residency.prefetch({'model': path}, {'model': SimpleNamespace(arena=None)}, order, lead=lambda: 10**9)
+            finally:
+                residency._fits = saved
+            ahead._thread.join(timeout=10)
+            self.assertEqual((ahead.bytes, ahead.window, ahead.error), (420, residency.WINDOW, None))
+
     def test_a_missing_file_is_reported_not_raised(self):
         from runner.models import residency
 

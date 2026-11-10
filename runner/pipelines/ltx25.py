@@ -43,9 +43,10 @@ def preflight(job, config):
 
 def generate(job, config, progress):
     import torch
+    from runner.models import conditioning
     from runner.models.headers import header
     from runner.models.ltx25 import validate_layout, video_encoder, WeightPool, load_streamed
-    from runner.models.residency import RESIDENCY, open_store, prefetch
+    from runner.models.residency import RESIDENCY, open_store, prefetch, use_order
     from runner.models.ltx25_text import encode
     from runner.video.export import save_video
     from diffusers import LTX2Pipeline, LTX2ConditionPipeline, FlowMatchEulerDiscreteScheduler
@@ -80,8 +81,21 @@ def generate(job, config, progress):
         from runner.video.continuation import source_tail
 
         source_frames, continuation = source_tail(source_ref['path'], job['parameters'])
-    embeds, mask = encode(job, headers, progress)
-    progress(stage='video prompt encoded', weights=getattr(encode, 'weights', None))
+    # A prompt this encoder has already read comes back from the disk: the 12 GiB encoder
+    # is not loaded, and the video model stays in the system's file cache.
+    entry = conditioning.key('ltx25', conditioning.stamp(job['components']['textEncoder']), job['parameters']['prompt'])
+    found = conditioning.load(config, entry)
+    if found:
+        embeds, mask = found[0]['embeds'], found[0]['mask']
+        progress(stage='video prompt encoded', conditioning='kept from an earlier generation')
+    else:
+        embeds, mask = encode(job, headers, progress)
+        kept = conditioning.save(config, entry, {'embeds': embeds, 'mask': mask})
+        progress(
+            stage='video prompt encoded',
+            weights=getattr(encode, 'weights', None),
+            conditioning='kept for the next generations' if kept else 'not kept',
+        )
     setup = {}
     lap = time.perf_counter()
 
@@ -119,7 +133,12 @@ def generate(job, config, progress):
         cold = WeightPool(stores, 0)
         # From here to the end of the first step, the disk reads the DiT in sequence: its
         # layers then find their weights in RAM instead of faulting them in one by one.
-        ahead = prefetch(job['components'], stores, [*names['model'].values(), *names['connectors'].values()])
+        ahead = prefetch(
+            job['components'],
+            stores,
+            [*use_order(names['connectors']), *use_order(names['model'])],
+            lead=lambda: hot.used() + cold.used(),
+        )
         timed('layouts and stores')
         try:
             transformer = load_streamed(models.pop('model'), names['model'], hot)

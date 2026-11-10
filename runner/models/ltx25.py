@@ -212,6 +212,10 @@ class WeightPool:
         # the disk or the file cache (timed); `again` is every later copy, from RAM.
         self.stats = dict(first_gib=0.0, first_seconds=0.0, again_gib=0.0)
 
+    def used(self):
+        """Bytes of weights read so far from the files, for a read-ahead to keep its distance."""
+        return int(self.stats['first_gib'] * 1024**3)
+
     def read(self, location):
         source, key, part = location
         value = self.stores[source].get_tensor(key)
@@ -249,6 +253,8 @@ class WeightPool:
         if self.bytes + size <= self.limit:
             self.gpu[location] = result
             self.bytes += size
+            # It stays on the GPU: its pages in RAM are free for the weights still to come.
+            del self.host[location]
         elif size <= RECENT:
             self.recent[location] = (result, size)
             self.recent_bytes += size

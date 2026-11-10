@@ -185,9 +185,9 @@ def generate(job, config, progress):
     from diffusers.modular_pipelines.minimax_h3 import encoders as reference_encoders
     from diffusers.modular_pipelines.minimax_h3.references import MiniMaxH3ImageReference
     from runner.models.headers import header
-    from runner.models import minimax_h3, minimax_h3_text, minimax_h3_vae
+    from runner.models import conditioning, minimax_h3, minimax_h3_text, minimax_h3_vae
     from runner.models.ltx25 import WeightPool
-    from runner.models.residency import RESIDENCY, open_store, prefetch
+    from runner.models.residency import RESIDENCY, open_store, prefetch, use_order
     from runner.pipelines.ltx25 import memory
     from runner.video.export import save_video
 
@@ -255,32 +255,62 @@ def generate(job, config, progress):
 
     # 1. Presentation and conditioner (streamed Qwen3-VL-32B).
     progress(stage='loading video prompt encoder')
-    tokenizer, processor = minimax_h3_text.processor(paths['tokenizer'])
     # LongForge's "max" reference sizing: never upscale, cap the short edge at 2048.
     # (diffusers rescales every reference image to one configured short edge.)
     reference_edge = min([2048, *(min(ref.image.size) for ref in references)])
     state = _stage('before_encode', {'reference_image_short_edge': reference_edge}, state)
-    text_encoder, text_store = minimax_h3_text.load(paths['textEncoder'])
-    # The disk reads the conditioner in sequence while its layers run, then the DiT while the
-    # conditions are encoded and the model is built (see Prefetch).
-    ahead = prefetch(paths, {'textEncoder': text_store}, [('textEncoder', key, None) for key in text_store.keys()])
-    original = reference_encoders.get_qwen3vl_prompt_embeds
-    reference_encoders.get_qwen3vl_prompt_embeds = minimax_h3_text.prompt_embeds
-    try:
-        progress(stage='encoding video prompt')
-        state = _stage('text_encoder', dict(text_encoder=text_encoder, tokenizer=tokenizer, processor=processor), state)
-    finally:
-        reference_encoders.get_qwen3vl_prompt_embeds = original
-        read = ahead.stop() if ahead else None
+    # What the conditioner wrote for the same request (prompt, images, sizes) with the same
+    # files comes back from the disk: the 16 GiB conditioner is not loaded, and the video
+    # model stays in the system's file cache.
+    entry = conditioning.key(
+        'minimax_h3',
+        conditioning.stamp(paths['textEncoder']),
+        conditioning.stamp(paths['tokenizer']),
+        dict(state.values),
+    )
+    found = conditioning.load(config, entry)
+    read = None
+    if found:
+        for name, value in conditioning.restore(*found).items():
+            state.set(name, value)
+        for kind, names in found[1].get('kinds', {}).items():
+            known = state.kwargs_mapping.setdefault(kind, [])
+            known.extend(name for name in names if name not in known)
+        kept = 'kept from an earlier generation'
+    else:
+        tokenizer, processor = minimax_h3_text.processor(paths['tokenizer'])
+        text_encoder, text_store = minimax_h3_text.load(paths['textEncoder'])
+        # The disk reads the conditioner in sequence while its layers run, then the DiT while
+        # the conditions are encoded and the model is built (see Prefetch).
+        ahead = prefetch(paths, {'textEncoder': text_store}, [('textEncoder', key, None) for key in text_store.keys()])
+        original = reference_encoders.get_qwen3vl_prompt_embeds
+        reference_encoders.get_qwen3vl_prompt_embeds = minimax_h3_text.prompt_embeds
+        before = dict(state.values)
+        try:
+            progress(stage='encoding video prompt')
+            state = _stage(
+                'text_encoder', dict(text_encoder=text_encoder, tokenizer=tokenizer, processor=processor), state
+            )
+        finally:
+            reference_encoders.get_qwen3vl_prompt_embeds = original
+            read = ahead.stop() if ahead else None
+        written = conditioning.changes(before, state.values)
+        kept = (
+            'kept for the next generations'
+            if written
+            and conditioning.save(config, entry, written[0], dict(written[1], kinds=dict(state.kwargs_mapping)))
+            else 'not kept'
+        )
+        del text_encoder, text_store, before, written
     state.set('prompt_embeds', state.get('prompt_embeds').to('cuda', torch.bfloat16))
-    del text_encoder, text_store
     _free(scope={})
     progress(
         stage='video prompt encoded',
         tokens=int(state.get('prompt_embeds').shape[1]),
+        conditioning=kept,
         **({'prefetch': read} if read else {}),
     )
-    ahead = prefetch(paths, {}, minimax_h3.names(dit_header).values())
+    ahead = prefetch(paths, {}, use_order(minimax_h3.names(dit_header)))
 
     # 2. Conditions through the VAE encoders (only when there are any).
     video_head = audio_head = None
@@ -309,6 +339,8 @@ def generate(job, config, progress):
         room = torch.cuda.mem_get_info()[0] / 1024**3 - 5 - tokens * 7168 * 2 * 6 / 1024**3
         budget = min(config.get('cacheGiB', 6), max(0, room))
         pool = WeightPool({'model': store}, budget)
+        if ahead:
+            ahead.lead = pool.used
         try:
             fast_attention = minimax_h3.INT8_ATTENTION and minimax_h3.int8_attention_ready()
             dit, _heads = minimax_h3.load(dit_header, paths['model'], pool, fast_attention)

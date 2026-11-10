@@ -267,6 +267,10 @@ def open_store(path, resident=True):
     return Store(path, resident=resident)
 
 
+WINDOW = 4 * GiB
+PATIENCE = 60  # seconds without any weight being used before a waiting read-ahead gives up
+
+
 class Prefetch:
     """Read model weights ahead, in file order, while another stage works.
 
@@ -275,45 +279,69 @@ class Prefetch:
     reads in sequence. This thread reads the wanted byte ranges once with large sequential
     reads; the system cache shares those pages with the mapping, so the first use of each
     weight finds it in RAM. Nothing is kept by this process, and `stop()` ends the read early.
+
+    When the files do not fit in the free RAM, pages read long before their layer runs are
+    pushed out of the cache and the disk reads them twice (measured: 40 GiB read for a 22 GiB
+    model whose file is not in layer order). The plan is then given in the order the layers
+    run and read with a `window`: the thread stays that far ahead of `lead()`, the bytes the
+    model has used so far.
     """
 
-    def __init__(self, plan, chunk=32 * 1024**2):
+    def __init__(self, plan, chunk=32 * 1024**2, window=None, lead=None):
         """`plan`: [(path, [(start, end), ...]), ...] with sorted, non-overlapping ranges."""
-        import time
-
-        self.plan, self.chunk = plan, chunk
+        self.plan, self.chunk, self.window, self.lead = plan, chunk, window, lead
         self.bytes, self.seconds, self.error = 0, 0.0, None
         self._stop = threading.Event()
-        self._started = time.perf_counter()
         self._thread = threading.Thread(target=self._run, name='prefetch', daemon=True)
         self._thread.start()
+
+    def _wait(self):
+        """Hold the read while it is a window ahead of what the model has used."""
+        import time
+
+        waited, seen = 0.0, None
+        while self.window is not None and not self._stop.is_set():
+            used = self.lead() if self.lead else 0
+            if self.bytes - used <= self.window:
+                return
+            if used != seen:
+                waited, seen = 0.0, used
+            elif waited > PATIENCE:
+                self._stop.set()
+            time.sleep(0.02)
+            waited += 0.02
 
     def _run(self):
         import time
 
+        descriptors = {}
         try:
             for path, ranges in self.plan:
-                # O_SEQUENTIAL (Windows) asks the cache manager for large read-ahead.
-                flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_SEQUENTIAL', 0)
-                descriptor = os.open(path, flags)
-                try:
-                    for start, end in ranges:
-                        os.lseek(descriptor, start, os.SEEK_SET)
-                        while start < end and not self._stop.is_set():
-                            count = len(os.read(descriptor, min(self.chunk, end - start)))
-                            if not count:
-                                break
-                            start += count
-                            self.bytes += count
+                if path not in descriptors:
+                    # O_SEQUENTIAL (Windows) asks the cache manager for large read-ahead.
+                    flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_SEQUENTIAL', 0)
+                    descriptors[path] = os.open(path, flags)
+                descriptor = descriptors[path]
+                for start, end in ranges:
+                    os.lseek(descriptor, start, os.SEEK_SET)
+                    while start < end and not self._stop.is_set():
+                        self._wait()
                         if self._stop.is_set():
                             break
-                finally:
-                    os.close(descriptor)
+                        began = time.perf_counter()
+                        count = len(os.read(descriptor, min(self.chunk, end - start)))
+                        self.seconds += time.perf_counter() - began
+                        if not count:
+                            break
+                        start += count
+                        self.bytes += count
                 if self._stop.is_set():
                     break
         except OSError as error:  # a warm-up only: the mapping still works without it
             self.error = str(error)
-        self.seconds = time.perf_counter() - self._started
+        finally:
+            for descriptor in descriptors.values():
+                os.close(descriptor)
 
     @property
     def done(self):
@@ -326,21 +354,24 @@ class Prefetch:
         gib = self.bytes / GiB
         return dict(
             read_gib=round(gib, 2),
-            seconds=round(self.seconds, 2),
+            seconds=round(self.seconds, 2),  # spent reading, not waiting for the model
             **({'gib_per_second': round(gib / self.seconds, 2)} if self.seconds > 0.05 else {}),
+            **({'window_gib': round(self.window / GiB, 1)} if self.window is not None else {}),
             **({'error': self.error} if self.error else {}),
         )
+
+
+def _companions(key):
+    """A weight and what is stored beside it: its scale, bias and quantization notes."""
+    stem = key.removesuffix('.weight')
+    return [key, *(stem + suffix for suffix in ('.weight_scale', '.bias', '.comfy_quant'))]
 
 
 def weight_ranges(path, keys, gap=4 * 1024**2):
     """Byte ranges of the named tensors of a safetensors file (with the scale, bias and
     quantization notes stored beside a weight), merged when less than `gap` apart."""
     header, base = _header(path)
-    wanted = set()
-    for key in keys:
-        wanted.add(key)
-        stem = key.removesuffix('.weight')
-        wanted.update(stem + suffix for suffix in ('.weight_scale', '.bias', '.comfy_quant'))
+    wanted = {name for key in keys for name in _companions(key)}
     spans = sorted(
         (base + header[key]['data_offsets'][0], base + header[key]['data_offsets'][1])
         for key in wanted
@@ -355,9 +386,15 @@ def weight_ranges(path, keys, gap=4 * 1024**2):
     return [(start, end) for start, end in merged]
 
 
-def prefetch(paths, stores, locations):
+def prefetch(paths, stores, locations, lead=None):
     """Starts reading ahead the weights at `locations` ((role, key, part) as in a WeightPool)
-    from the files of `paths` that are used through their mapping; None when all are resident."""
+    from the files of `paths` that are used through their mapping; None when all are resident.
+
+    Give `locations` in the order the layers run (see `use_order`), and `lead`, a function
+    giving the bytes of these weights used so far: a plan larger than the free RAM is then read
+    in that order, a window ahead of its use, instead of all at once in file order. `lead` may
+    also be set later on the returned object, which reads one window in the meantime."""
+    locations = list(locations)
     keys = {}
     for role, key, _part in locations:
         keys.setdefault(role, set()).add(key)
@@ -367,4 +404,55 @@ def prefetch(paths, stores, locations):
 
     plan = [(paths[role], weight_ranges(paths[role], wanted)) for role, wanted in keys.items() if role in paths and mapped(role)]
     plan = [(path, ranges) for path, ranges in plan if ranges]
-    return Prefetch(plan) if plan else None
+    if not plan:
+        return None
+    if _fits(plan):
+        return Prefetch(plan)
+    return Prefetch(_as_used(paths, locations, mapped), window=WINDOW, lead=lead)
+
+
+def use_order(names):
+    """The locations of {parameter name: location} in the order the layers run: block 2 before
+    block 10, where the file may store them by name."""
+    import re
+
+    def natural(name):
+        return [int(part) if part.isdigit() else part for part in re.split(r'(\d+)', name)]
+
+    return [names[name] for name in sorted(names, key=natural)]
+
+
+def _as_used(paths, locations, mapped):
+    """The plan in the order of `locations`: each weight once, with what is stored beside it;
+    consecutive weights that also follow each other in the file are read as one range."""
+    headers, seen, plan = {}, set(), []
+    for role, key, _part in locations:
+        if (role, key) in seen or role not in paths or not mapped(role):
+            continue
+        seen.add((role, key))
+        path = paths[role]
+        if path not in headers:
+            headers[path] = _header(path)
+        header, base = headers[path]
+        for name in _companions(key):
+            if name not in header or name == '__metadata__':
+                continue
+            start, end = (base + offset for offset in header[name]['data_offsets'])
+            if end <= start:
+                continue
+            last = plan[-1] if plan else None
+            if last and last[0] == path and start == last[1][-1][1]:
+                last[1][-1] = (last[1][-1][0], end)
+            else:
+                plan.append((path, [(start, end)]))
+    return plan
+
+
+def _fits(plan):
+    """Whether the whole plan can sit in the system cache until its layers run."""
+    try:
+        import psutil
+    except ImportError:
+        return True
+    total = sum(end - start for _path, ranges in plan for start, end in ranges)
+    return total <= psutil.virtual_memory().available - GiB
