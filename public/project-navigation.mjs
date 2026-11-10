@@ -76,7 +76,7 @@ export function setupProjectNavigation({
     const count = project.conversations?.filter(item => !item.temporary).length ?? 0;
     $('project-delete-title').textContent = `Supprimer le projet « ${project.name} » ?`;
     $('project-delete-description').textContent = count
-      ? `Ses ${count > 1 ? count + ' conversations seront déplacées' : 'conversation sera déplacée'} dans Conversations. Aucune conversation ni image n’est effacée.`
+      ? `${count > 1 ? `Ses ${count} conversations seront déplacées` : 'Sa conversation sera déplacée'} dans Conversations. Aucune conversation ni image n’est effacée.`
       : 'Ce projet est vide. Aucune conversation ni image n’est effacée.';
     $('project-delete-error').hidden = true;
     $('project-delete-confirm').disabled = false;
