@@ -12,7 +12,7 @@ import { checkForUpdates } from './lib/updates.mjs';
 import { prepareUpdate, launchInstaller } from './lib/update-install.mjs';
 import { atomicJson } from './lib/update-files.mjs';
 import { updateSession, readUpdateSession } from './lib/update-session.mjs';
-import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -59,6 +59,7 @@ const staticFiles = new Map([
   ['/model-ready.mjs', ['model-ready.mjs', 'text/javascript; charset=utf-8']],
   ['/images.mjs', ['images.mjs', 'text/javascript; charset=utf-8']],
   ['/video-plan.mjs', ['video-plan.mjs', 'text/javascript; charset=utf-8']],
+  ['/output-actions.mjs', ['output-actions.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-runtime.mjs', ['generation-runtime.mjs', 'text/javascript; charset=utf-8']],
   ['/native-workflow-ui.mjs', ['native-workflow-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-controls.mjs', ['settings-controls.mjs', 'text/javascript; charset=utf-8']],
@@ -592,6 +593,7 @@ export async function createApplication({
         });
         return send(201, resourceView(resource));
       }
+      if (req.method === 'GET' && path === '/api/tools/actions') return send(200, await runtime.tools.actions());
       if (req.method === 'GET' && path === '/api/tools/job') {
         const job = runtime.status();
         return send(200, job?.record ? { ...job, record: galleryView(job.record) } : job);
@@ -1025,6 +1027,24 @@ export async function createApplication({
         return send(200, runtime.cancel(body));
       }
       if (path === '/api/tools/revise') return send(200, await runtime.revise(body));
+      // Output buttons (Upscale, Interpoler): the same proposal a model call would make, without the model.
+      if (path === '/api/tools/action') {
+        if (clearingHistory || savingGeneration || savingSettings || pickingFile)
+          throw problem('Une opération est en cours.', 409);
+        if (engine.busy) throw problem('Une réponse est en cours. Attends sa fin.', 409);
+        if (!['upscale', 'interpolate'].includes(body.name)) throw problem('Action inconnue.');
+        if (!body.arguments || typeof body.arguments !== 'object' || Array.isArray(body.arguments))
+          throw problem('Action invalide.');
+        const call = {
+          id: 'action' + randomUUID().replaceAll('-', '').slice(0, 24),
+          type: 'function',
+          function: { name: body.name, arguments: JSON.stringify(body.arguments) },
+        };
+        return send(
+          200,
+          await runtime.request([call], { conversationId: body.conversationId, turnId: randomUUID(), messages: [] }),
+        );
+      }
       if (path === '/api/tools/execute') {
         if (clearingHistory || persistingGallery || savingGeneration || savingSettings || pickingFile)
           throw problem('Une opération est en cours.', 409);

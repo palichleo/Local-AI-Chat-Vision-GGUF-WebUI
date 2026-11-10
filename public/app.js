@@ -13,6 +13,7 @@ import { setupNativeWorkflows } from './native-workflow-ui.mjs';
 import { prepareImages } from './images.mjs';
 import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
+import { outputActions } from './output-actions.mjs';
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -1173,6 +1174,101 @@ function assistantMessage(parent = null) {
   return { article, reasoning, summary, thoughts, body, note, generations };
 }
 
+/**
+ * Output buttons. Prolonger writes a line the model understands in the composer, for the user to
+ * finish. Upscale and Interpoler run the same proposal a model call would, without a model reply:
+ * the user confirms it, the result joins the conversation as an ordinary tool call.
+ */
+async function runOutputAction(record, index, action) {
+  const reference = record.id + (index ? ` (sortie ${index + 1})` : '');
+  if (action === 'extend') {
+    const line = `Pour la sortie ${reference}, continue la vidéo : `,
+      prompt = $('prompt');
+    prompt.value = line + (prompt.value.trim() ? '\n\n' + prompt.value : '');
+    resizePrompt();
+    prompt.focus();
+    prompt.setSelectionRange(line.length, line.length);
+    return;
+  }
+  if (state.generating || state.preparing || state.loadingHistory || state.status.toolJob)
+    return notice('Attends la fin de la réponse ou de la génération en cours.');
+  if (record.conversationId !== state.conversationId) return notice('Ouvre la conversation de ce résultat.');
+  const video = record.mediaType === 'video',
+    text =
+      action === 'upscale'
+        ? `Upscale de la sortie ${reference}.`
+        : `Interpolation de la sortie ${reference} pour une vidéo plus fluide.`,
+    history = [...state.messages, { role: 'user', content: text }];
+  state.generating = true;
+  state.controller = new AbortController();
+  const signal = state.controller.signal;
+  updateControls();
+  $('welcome').hidden = true;
+  userMessage(text, []);
+  const view = assistantMessage();
+  view.body.replaceChildren();
+  state.stickToBottom = true;
+  scrollToBottom();
+  try {
+    const request = await (
+      await api(
+        'tools/action',
+        {
+          conversationId: state.conversationId,
+          name: action,
+          arguments: {
+            source: { output: record.id, ...(index ? { index } : {}) },
+            intention:
+              action === 'upscale' ? `Agrandir ${video ? 'la vidéo' : 'l’image'}.` : 'Rendre la vidéo plus fluide.',
+          },
+        },
+        { signal },
+      )
+    ).json();
+    history.push({ role: 'assistant', content: '', tool_calls: [request.call] });
+    view.generation = true;
+    const generation = generationUI.mount(view.generations, request);
+    let result;
+    try {
+      result = await workflowsUI.requestTool(
+        request,
+        signal,
+        (progress, fraction) => {
+          generation.progress(progress, fraction);
+          scrollToBottom();
+        },
+        image => generation.image(image),
+      );
+      generation.finish(result);
+    } catch (error) {
+      generation.fail(error.message);
+      history.push({
+        role: 'tool',
+        tool_call_id: request.call.id,
+        content: JSON.stringify({ status: 'error', message: signal.aborted ? 'Génération annulée.' : error.message }),
+      });
+      throw error;
+    }
+    history.push({ role: 'tool', tool_call_id: request.call.id, content: result.content });
+    if (result.record || result.failed) state.status = await (await api('status')).json();
+    view.note.textContent = result.denied ? 'Action annulée.' : result.failed ? result.error || '' : '';
+  } catch (error) {
+    view.note.textContent = signal.aborted ? 'Opération interrompue à votre demande.' : error.message;
+    if (!signal.aborted) {
+      view.note.classList.add('error');
+      notice(error.message);
+    }
+  } finally {
+    if (history.length > state.messages.length + 1) {
+      state.messages = archiveMessages(history);
+      state.archiveSnapshot = { messages: [...state.messages], incomplete: false };
+      await persistConversation();
+    }
+    state.generating = false;
+    updateControls();
+  }
+}
+
 function userContent(text, images) {
   return images.length
     ? [
@@ -1656,9 +1752,16 @@ const assetsUI = setupAssets({
   onChange: () => contextMeter.schedule(),
   onBusy: () => updateControls(),
 });
+const actionButtons = outputActions({
+  api,
+  node,
+  onDetails: (record, index) => assetsUI.viewOutput(record, index),
+  onAction: (record, index, action) => runOutputAction(record, index, action),
+});
 const generationUI = setupGenerationUI({
   api,
   node,
+  actions: actionButtons,
   openOutput: (record, index, blob) => assetsUI.viewOutput(record, index, blob),
   onResize: scrollToBottom,
 });
@@ -1669,6 +1772,7 @@ const workflowsUI = setupNativeWorkflows({
   notice,
   onRequestClose: () => requestSettingsClose(),
   openOutput: (record, index) => assetsUI.viewOutput(record, index),
+  outputActions: actionButtons,
   onOutput: () => {
     openFiles();
     assetsUI.show('output');

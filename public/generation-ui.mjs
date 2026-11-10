@@ -1,4 +1,4 @@
-export function setupGenerationUI({ api, node, openOutput, onResize = () => {} }) {
+export function setupGenerationUI({ api, node, openOutput, actions = null, onResize = () => {} }) {
   const cards = new Set(),
     watched = new Map();
   let downloads = Promise.resolve();
@@ -177,17 +177,15 @@ export function setupGenerationUI({ api, node, openOutput, onResize = () => {} }
       if (record.mediaType === 'video') {
         const output = record.outputs?.[index],
           wrapper = node('div', 'video-original'),
-          video = node('video'),
-          details = node('button', 'secondary', 'Details');
-        details.type = 'button';
-        details.onclick = () => openOutput(record, index);
+          video = node('video');
         video.controls = true;
         video.preload = 'none';
         video.playsInline = true;
         video.setAttribute('aria-label', 'Vidéo originale · ' + record.workflowName);
         if (output.analysisDataUrl) video.poster = output.analysisDataUrl;
         video.onloadedmetadata = () => dimensions(video.videoWidth, video.videoHeight, target);
-        wrapper.append(video, details);
+        wrapper.append(video);
+        target.figure.append(buttons(record, index));
         const slot = { index, button: wrapper, img: video, isVideo: true, tile: target };
         slots.set(index, slot);
         frame.replaceChildren(wrapper);
@@ -222,6 +220,7 @@ export function setupGenerationUI({ api, node, openOutput, onResize = () => {} }
       button.append(img);
       button.onclick = () => openOutput(record, index, slot.blob || undefined);
       frame.replaceChildren(button);
+      target.figure.append(buttons(record, index));
       if (blob) display(slot, blob);
       else if (output?.analysisDataUrl) img.src = output.analysisDataUrl;
       else img.hidden = true;
@@ -234,6 +233,14 @@ export function setupGenerationUI({ api, node, openOutput, onResize = () => {} }
       frame.setAttribute('aria-busy', 'false');
       caption('Image originale · ' + record.workflowName);
       onResize();
+    }
+    // Output buttons (Détails, Upscale…) below each result; Détails alone without an action set.
+    function buttons(record, index) {
+      if (actions) return actions(record, index);
+      const details = node('button', 'secondary', 'Détails');
+      details.type = 'button';
+      details.onclick = () => openOutput(record, index);
+      return details;
     }
     function fail(message) {
       if (disposed) return;

@@ -13,6 +13,7 @@ export function setupGenerationRuntime({
   notice,
   onChange = () => {},
   openOutput,
+  outputActions = null,
   onOutput = () => {},
 }) {
   const $ = id => document.getElementById(id);
@@ -91,33 +92,13 @@ export function setupGenerationRuntime({
           details.append(node('summary', '', 'Analyse du modèle'), node('p', '', record.analysis.text));
           card.append(details);
         }
-        const actions = node('div', 'gallery-actions');
-        for (const download of [false, true]) {
-          const button = node('button', 'secondary', download ? 'Télécharger' : 'Details');
-          button.type = 'button';
-          button.onclick = async () => {
-            if (!download) {
-              await openOutput(record, index);
-              return;
-            }
-            button.disabled = true;
-            try {
-              const blob = record.mediaType === 'video' ? null : await original(record, index);
-              const url = blob ? URL.createObjectURL(blob) : output.originalUrl;
-              if (blob) urls.push(url);
-              const a = node('a');
-              a.href = url;
-              a.download = output.source.filename;
-              a.click();
-            } catch (error) {
-              notice(`Original indisponible : ${error.message}`);
-            } finally {
-              button.disabled = false;
-            }
-          };
-          actions.append(button);
+        if (outputActions) card.append(outputActions(record, index));
+        else {
+          const details = node('button', 'secondary', 'Détails');
+          details.type = 'button';
+          details.onclick = () => openOutput(record, index);
+          card.append(details);
         }
-        card.append(actions);
         $('gallery-list').append(card);
       }
     }

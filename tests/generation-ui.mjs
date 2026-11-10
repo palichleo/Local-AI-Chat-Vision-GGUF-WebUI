@@ -266,7 +266,8 @@ test('video output uses the original streaming URL, has controls, and never buff
   assert.equal(video.src, '/media/generated/signed');
   assert.match(label.textContent, /Brouillon/);
   assert.equal(bar.classList.contains('is-complete'), true);
-  wrapper.children.find(node => node.tag === 'button').onclick();
+  // Détails sits below the video, with the other output buttons.
+  container.children[0].children.find(node => node.tag === 'button').onclick();
   assert.deepEqual(opened, [record, 0]);
   ui.clear();
   assert.equal(video.src, undefined);
