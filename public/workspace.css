@@ -383,13 +383,19 @@ dialog,
 .model-card.is-ready {
   border-color: color-mix(in srgb, var(--success) 60%, var(--line));
 }
+/* The bottom bar is one block, framed like « Nouvelle conversation ». */
 .sidebar-actions {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   margin-top: 12px;
   min-height: 40px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background-color: var(--surface);
+  box-shadow: inset 0 1px 0 var(--metal-edge);
 }
 .sidebar-actions .settings-button,
 .sidebar-actions .files-button,
@@ -1067,6 +1073,11 @@ body:not([data-files='open']) .assets-panel {
     margin: 0;
     gap: 3px;
     min-height: 32px;
+    /* In the top bar on small screens: no frame. */
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
   }
   .sidebar-actions .mobile-new {
     display: grid;
