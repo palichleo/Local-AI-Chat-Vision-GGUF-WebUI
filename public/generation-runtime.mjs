@@ -211,11 +211,15 @@ export function setupGenerationRuntime({
     await api('gallery/review', { id: record.id, conversationId: record.conversationId, text, status });
     await renderGallery(record.conversationId);
   }
-  async function requestTool(request, signal, onProgress, onImage = () => {}) {
+  /**
+   * `confirmed`: the user started this very action with a button (Upscale, Interpoler), which
+   * is their confirmation; a proposal coming from the model always asks.
+   */
+  async function requestTool(request, signal, onProgress, onImage = () => {}, { confirmed = false } = {}) {
     const cancel = () => api('tools/cancel', { requestId: request.requestId }).catch(() => {});
     let decision;
     try {
-      decision = await permission(request, signal);
+      decision = confirmed ? 'once' : await permission(request, signal);
       signal.throwIfAborted();
     } catch (error) {
       await cancel();

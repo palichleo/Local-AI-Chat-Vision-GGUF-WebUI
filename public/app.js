@@ -1217,6 +1217,8 @@ async function runOutputAction(record, index, action) {
           scrollToBottom();
         },
         image => generation.image(image),
+        // The click on Upscale or Interpoler is the confirmation: no second question.
+        { confirmed: true },
       );
       generation.finish(result);
     } catch (error) {
@@ -1697,6 +1699,8 @@ async function sendMessage(event) {
         throw Error(result.error || 'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
       view.note.textContent = result.failed ? result.error || 'Analyse indisponible.' : '';
       if (result.denied || result.failed || iterations >= (state.generation?.maxIterations || 5)) allowTools = false;
+      // After a refusal or a failure the model explains it: it does not go on inspecting outputs.
+      if (result.denied || result.failed) resourceReads = 8;
       silent = Boolean(result.record && result.record.mediaType !== 'video' && !result.failed);
       state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
       await persistConversation();

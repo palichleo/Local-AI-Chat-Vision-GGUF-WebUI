@@ -53,7 +53,12 @@ test('a requested length becomes the closest frame count the workflow allows', (
 test('the model asks for seconds; the router picks frames and says when it rounded', async () => {
   const tools = new ToolCatalog({ list: async () => [{ ...minimax(), ready: true }] });
   const definitions = Object.fromEntries((await tools.definitions()).map(tool => [tool.function.name, tool.function]));
-  assert.equal(definitions.create_video.parameters.properties.duration.type, 'number');
+  // Always asked for (null = the workflow's default), so a length is not left in the prompt.
+  assert.deepEqual(definitions.create_video.parameters.properties.duration.type, ['number', 'null']);
+  assert.ok(definitions.create_video.parameters.required.includes('duration'));
+  assert.ok(definitions.extend_video.parameters.required.includes('duration'));
+  const unset = await tools.route('create_video', { prompt: 'x', intention: 'y', duration: null }, media);
+  assert.equal(unset.args.frames, undefined, 'null leaves the workflow default');
   assert.equal(definitions.create_video.parameters.properties.frames, undefined, 'no raw frame count');
   assert.match(definitions.extend_video.parameters.properties.duration.description, /new footage/);
   const created = await tools.route('create_video', { prompt: 'x', intention: 'y', duration: 10 }, media);
@@ -93,4 +98,24 @@ test('a length the model chose outlives the draft and final profiles', async () 
   });
   assert.equal(plain.parameters.frames, 124, 'without a choice, the profile still decides');
   assert.equal(plain.parameters.width, 1344);
+});
+
+test('without a chosen length, a continuation adds one profile-length clip of new footage', async () => {
+  const workflow = minimax();
+  const source = { references: [{ input: 'source', output_id: '22222222-2222-4222-8222-222222222222' }] };
+  const options = { seed: 1, allowPendingReferences: true };
+  const extended = await resolveNativeWorkflow(workflow, { prompt: 'x', intention: 'y', ...source }, assets, options);
+  // 124 frames would re-render 22 source frames and add 102: 141 adds 119, the closest to 124.
+  assert.equal(extended.parameters.frames, 141);
+  const chosen = await resolveNativeWorkflow(workflow, { prompt: 'x', intention: 'y', frames: 124, ...source }, assets, options);
+  assert.equal(chosen.parameters.frames, 124, 'a chosen length is kept');
+  const created = await resolveNativeWorkflow(workflow, { prompt: 'x', intention: 'y' }, assets, options);
+  assert.equal(created.parameters.frames, 124, 'a new clip keeps the profile length');
+  const fixed = await resolveNativeWorkflow(
+    minimax({ policy: 'fixed', value: 124 }),
+    { prompt: 'x', intention: 'y', ...source },
+    assets,
+    options,
+  );
+  assert.equal(fixed.parameters.frames, 124, 'a locked length stays locked');
 });

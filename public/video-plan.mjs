@@ -34,8 +34,16 @@ export function renderVideoPlan(container, request, node) {
     );
   row('Images', value('frames'));
   row('Cadence', value('fps', ' i/s'));
-  if (numeric(parameters.frames) && parameters.frames > 0 && numeric(parameters.fps) && parameters.fps > 0)
-    row('Durée estimée', (parameters.frames / parameters.fps).toFixed(2) + ' s');
+  if (numeric(parameters.frames) && parameters.frames > 0 && numeric(parameters.fps) && parameters.fps > 0) {
+    // A continuation renders its overlap with the source again: only the rest is new footage.
+    const overlap =
+      plan.references?.some(ref => ref.role === 'source_video') && numeric(parameters.overlap_frames)
+        ? parameters.overlap_frames
+        : 0;
+    if (overlap && overlap < parameters.frames)
+      row('Durée ajoutée', ((parameters.frames - overlap) / parameters.fps).toFixed(2) + ' s');
+    else row('Durée estimée', (parameters.frames / parameters.fps).toFixed(2) + ' s');
+  }
   row('Seed', value('seed'));
   if (typeof parameters.audio === 'boolean') row('Audio', parameters.audio ? 'Oui' : 'Non');
   if (plan.references?.some(ref => ref.role === 'source_video'))
@@ -135,7 +143,8 @@ export function renderVideoEditor(container, request, node) {
     stage.value = plan.stage;
     grid.append(field('Version', stage, 'Change la taille et la durée du profil, sauf valeurs modifiées ici.'));
   }
-  const fps = Number(parameters.fps);
+  const fps = Number(parameters.fps),
+    overlap = plan.references?.some(ref => ref.role === 'source_video') ? Number(parameters.overlap_frames) || 0 : 0;
   for (const item of editable.parameters || []) {
     const label = LABELS[item.key] || item.key;
     if (item.locked) {
@@ -150,7 +159,13 @@ export function renderVideoEditor(container, request, node) {
     } else if (item.choices) {
       control = node('select');
       for (const choice of item.choices) {
-        const text = item.key === 'frames' && fps > 0 ? `${choice} · ${(choice / fps).toFixed(2)} s` : String(choice);
+        // For a continuation, the seconds are those it adds after its source.
+        const text =
+          item.key !== 'frames' || !(fps > 0)
+            ? String(choice)
+            : overlap && choice > overlap
+              ? `${choice} · +${((choice - overlap) / fps).toFixed(2)} s`
+              : `${choice} · ${(choice / fps).toFixed(2)} s`;
         control.add(new Option(text, String(choice)));
       }
       control.value = String(item.value);

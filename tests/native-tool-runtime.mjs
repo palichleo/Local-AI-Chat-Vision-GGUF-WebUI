@@ -478,3 +478,73 @@ test('an image attached in the chat is upscaled from the file the user gave, not
   assert.equal(staged, 1);
   assert.deepEqual(generated.references, [{ input: 'source', role: 'source_image', path: '/local/original.png' }]);
 });
+
+test('a source the worker refuses fails before the chat model is unloaded, and its staged copy is removed', async () => {
+  const events = [];
+  const sourceId = '22222222-2222-4222-8222-222222222222';
+  const workflow = {
+    schemaVersion: 1,
+    id: 'continue',
+    name: 'Continue',
+    mediaType: 'video',
+    pipeline: 'ltx25',
+    enabled: true,
+    ready: true,
+    parameters: { prompt: { policy: 'model', type: 'string' } },
+    digest: 'c'.repeat(64),
+    references: [{ id: 'source', role: 'source_video', required: true }],
+  };
+  const runtime = new ToolRuntime({
+    catalog: {
+      list: async () => [workflow],
+      read: async () => workflow,
+      prepare: async () => ({
+        workflow,
+        job: { parameters: { prompt: 'continue', seed: 2, stage: 'draft', width: 384, height: 256 }, components: {}, loras: [], references: [] },
+        outputNodes: [],
+      }),
+    },
+    engine: { state: 'ready', stop: async () => events.push('llm stopped'), start: async () => events.push('llm started') },
+    gallery: {
+      put: async record => record,
+      get: async () => ({ provider: 'native', mediaType: 'video', outputs: [{ source: { filename: 'prior.mp4' } }], parameters: {} }),
+    },
+    getConfig: () => ({ enabled: true, autoAllow: true, maxIterations: 5, baseUrl: 'native' }),
+    engineConfig: () => ({}),
+    sourceMedia: async () => ({ mime: 'video/mp4', name: 'Previous output', handle: { close: async () => {} } }),
+    clientFactory: () => ({
+      status: async () => ({ idle: true }),
+      stage: async media => {
+        events.push('staged');
+        await media.handle.close();
+        return { path: '/local/staged-source.mp4' };
+      },
+      preflight: async job => {
+        events.push('preflight ' + job.references.map(ref => ref.path).join());
+        throw Error('La vidéo source est à 48 images/s');
+      },
+      run: () => assert.fail('Must not generate'),
+      free: async () => events.push('staged copies removed'),
+    }),
+  });
+  const request = await runtime.request(
+    [
+      {
+        id: 'continue-call',
+        type: 'function',
+        function: {
+          name: 'extend_video',
+          arguments: JSON.stringify({ prompt: 'continue', intention: 'Continue', source: { output: sourceId } }),
+        },
+      },
+    ],
+    { conversationId: id, turnId: id, messages: [] },
+  );
+  await assert.rejects(
+    runtime.execute({ requestId: request.requestId, permission: 'once', approvalToken: request.approvalToken }),
+    /48 images\/s/,
+  );
+  assert.deepEqual(events, ['staged', 'preflight /local/staged-source.mp4', 'staged copies removed']);
+  assert.equal(runtime.status().state, 'error');
+  assert.equal(runtime.active, false);
+});

@@ -45,8 +45,13 @@ def preflight(job, config):
     from runner.models.headers import header
     from runner.models import minimax_h3
 
-    # References are staged after preflight, so their checks happen in generate().
     minimax_h3.validate(header(job['components']['model']))
+    # A source video of another size or frame rate is refused here, before the chat model is unloaded.
+    for ref in job['references']:
+        if ref['role'] == 'source_video':
+            from runner.video.continuation import source_tail
+
+            source_tail(ref['path'], job['parameters'], overlaps=OVERLAPS, default=22)
 
 
 def _stage(block_name, components, state, **inputs):

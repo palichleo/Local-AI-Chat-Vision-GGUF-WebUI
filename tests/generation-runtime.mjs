@@ -725,3 +725,26 @@ test('an image proposal reads as a plan and is edited in the dialog like a video
       permission: 'once',
     });
   }));
+
+test('an action the user started with a button runs without a second confirmation', async () =>
+  fixture(async ({ ui, nodes, calls, setIntercept }) => {
+    setIntercept(route => (route === 'tools/execute' ? Promise.reject(Error('stop here')) : undefined));
+    const request = {
+      requestId: 'upscale',
+      mediaType: 'video',
+      workflowName: 'Upscale vidéo',
+      approvalToken: 'one-use',
+      args: {},
+      plan: { parameters: {}, references: [] },
+    };
+    await assert.rejects(
+      ui.requestTool(request, new AbortController().signal, () => {}, () => {}, { confirmed: true }),
+      /stop here/,
+    );
+    assert.notEqual(nodes.get('tool-dialog')?.open, true, 'no dialog was shown');
+    assert.deepEqual(calls.find(call => call.route === 'tools/execute').body, {
+      requestId: 'upscale',
+      permission: 'once',
+      approvalToken: 'one-use',
+    });
+  }));

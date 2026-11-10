@@ -22,10 +22,17 @@ def source_tail(path, parameters, overlaps=OVERLAPS, default=9):
         if video is None or not video.average_rate:
             raise ValueError('Source has no usable video stream')
         fps = float(video.average_rate)
+        # The new shot is joined to its source: both must share one frame rate and one size.
         if abs(fps - parameters['fps']) > 0.01:
-            raise ValueError('Continuation fps must match the source video')
+            raise ValueError(
+                f'La vidéo source est à {fps:g} images/s ; la suite serait générée à {parameters["fps"]:g} images/s. '
+                'Elle ne peut pas être prolongée telle quelle.'
+            )
         if (video.width, video.height) != (parameters['width'], parameters['height']):
-            raise ValueError('Continuation resolution must match the source video')
+            raise ValueError(
+                f'La vidéo source fait {video.width}×{video.height} ; la suite serait générée en '
+                f'{parameters["width"]}×{parameters["height"]}. Elle ne peut pas être prolongée telle quelle.'
+            )
         duration = (
             float(video.duration * video.time_base)
             if video.duration is not None

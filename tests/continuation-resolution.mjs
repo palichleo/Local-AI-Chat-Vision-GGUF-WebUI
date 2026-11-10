@@ -247,3 +247,121 @@ test('the user revises a proposal in place: own values, same seed, size still lo
     /ne peut plus être modifiée/,
   );
 });
+
+// A conversation as in real use: a clip, its upscale, then the upscale smoothed to 48 fps.
+function derivedConversation({ stage = 'draft', fps = 24, mode = 'smooth' } = {}) {
+  const ids = {
+    clip: '22222222-2222-4222-8222-222222222222',
+    upscaled: '33333333-3333-4333-8333-333333333333',
+    smoothed: '44444444-4444-4444-8444-444444444444',
+  };
+  const records = {
+    [ids.clip]: {
+      provider: 'native',
+      mediaType: 'video',
+      workflowId: 'minimax',
+      workflowName: 'MiniMax H3',
+      parameters: { pipeline: 'minimax_h3', width: 768, height: 448, fps, stage },
+      outputs: [{ source: { filename: 'clip.mp4' }, width: 768, height: 448 }],
+    },
+    [ids.upscaled]: {
+      provider: 'native',
+      mediaType: 'video',
+      workflowId: 'esrgan',
+      workflowName: 'Upscale vidéo',
+      parameters: {
+        pipeline: 'realesrgan_video',
+        references: [{ input: 'source', output_id: ids.clip, original: true, role: 'source_video' }],
+      },
+      outputs: [{ source: { filename: 'big.mp4' }, width: 1536, height: 896 }],
+    },
+    [ids.smoothed]: {
+      provider: 'native',
+      mediaType: 'video',
+      workflowId: 'rife',
+      workflowName: 'Interpoler',
+      parameters: {
+        pipeline: 'rife',
+        multiplier: 2,
+        mode,
+        references: [{ input: 'source', output_id: ids.upscaled, original: true, role: 'source_video' }],
+      },
+      outputs: [{ source: { filename: 'smooth.mp4' }, width: 1536, height: 896 }],
+    },
+  };
+  const workflows = [
+    { ...minimax, ready: true },
+    { ...ltx, ready: true },
+  ];
+  const runtime = new ToolRuntime({
+    catalog: {
+      kind: 'native',
+      list: async () => workflows,
+      read: async id => workflows.find(workflow => workflow.id === id),
+      prepare: async (id, args, options) => {
+        const workflow = workflows.find(item => item.id === id);
+        return { workflow, job: await resolveNativeWorkflow(workflow, args, assets, options), outputNodes: [] };
+      },
+    },
+    engine: { state: 'ready' },
+    gallery: {
+      get: async (_conversation, id) => {
+        if (!records[id]) throw Object.assign(Error('missing'), { status: 404 });
+        return records[id];
+      },
+    },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5 }),
+    engineConfig: () => ({}),
+    sourceMedia: async () => ({ mime: 'video/mp4', name: 'clip', handle: { close: async () => {} } }),
+    clientFactory: () => ({}),
+  });
+  const conversationId = '11111111-1111-4111-8111-111111111111';
+  const extend = (output, extra = {}) =>
+    runtime.request(
+      [
+        {
+          id: 'call',
+          type: 'function',
+          function: {
+            name: 'extend_video',
+            arguments: JSON.stringify({ prompt: 'flies', intention: 'Continue', source: { output }, ...extra }),
+          },
+        },
+      ],
+      { conversationId, turnId: conversationId, messages: [] },
+    );
+  return { ids, records, extend };
+}
+
+test('extending an upscaled then smoothed video continues the clip it was made from', async () => {
+  const { ids, extend } = derivedConversation();
+  for (const output of [ids.smoothed, ids.upscaled]) {
+    const request = await extend(output);
+    assert.equal(request.workflowName, 'MiniMax H3', 'the model that made the clip continues it');
+    assert.deepEqual(request.resolution, { width: 768, height: 448 }, 'at the size it generates, not the upscaled one');
+    assert.equal(request.plan.references[0].output_id, ids.clip);
+    assert.match(request.notes.join(' '), /vidéo d’origine.*Upscale vidéo/);
+  }
+  const direct = await extend(ids.clip);
+  assert.equal(direct.plan.references[0].output_id, ids.clip);
+  assert.equal(direct.notes, undefined, 'a plain clip is continued as it is');
+});
+
+test('a slow-motion video is its own source; a frame rate the model cannot join is refused before confirmation', async () => {
+  // Slow motion keeps 24 fps but is other footage: it is continued itself, at its own (upscaled) size.
+  const slow = derivedConversation({ mode: 'slow_motion' });
+  const request = await slow.extend(slow.ids.smoothed);
+  assert.equal(request.plan.references[0].output_id, slow.ids.smoothed);
+  assert.deepEqual(request.resolution, { width: 1536, height: 896 });
+  const odd = derivedConversation({ fps: 30 });
+  await assert.rejects(odd.extend(odd.ids.clip), /30 images\/s.*24 images\/s/);
+});
+
+test('the next shot of a final video is final too, unless the model says otherwise', async () => {
+  const final = derivedConversation({ stage: 'final' });
+  assert.equal((await final.extend(final.ids.clip)).plan.stage, 'final');
+  assert.equal((await final.extend(final.ids.smoothed)).plan.stage, 'final');
+  assert.equal((await final.extend(final.ids.clip, { stage: 'draft' })).plan.stage, 'draft');
+  const draft = derivedConversation();
+  assert.equal((await draft.extend(draft.ids.clip)).plan.stage, 'draft');
+});
