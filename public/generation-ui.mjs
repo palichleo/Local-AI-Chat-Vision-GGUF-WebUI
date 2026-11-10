@@ -59,8 +59,10 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       target.frame.style.aspectRatio = `${width} / ${height}`;
       onResize();
     }
-    function caption(text) {
+    function caption(text, shown = false) {
       for (const target of tiles) {
+        // The stage in progress is shown beside the percentage: a long one is not a frozen bar.
+        if (shown) target.label.classList.remove('sr-only');
         target.label.textContent = text;
         target.label.title = text;
         target.progress.setAttribute('aria-label', text);
@@ -78,11 +80,21 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
         target.label.classList.remove('sr-only');
       }
     }
-    dimensions(request.resolution?.width, request.resolution?.height);
+    // The size shown while waiting is the proposal's; the user may change it before confirming.
+    let shownSize = '';
+    function followSize() {
+      const { width, height } = request.resolution || {},
+        size = width + '×' + height;
+      if (size === shownSize || record) return;
+      shownSize = size;
+      dimensions(width, height);
+    }
+    followSize();
     frame.classList.add('is-paused');
     watch(figure, visible => frame.classList.toggle('is-paused', !visible));
     function progress(value, fraction) {
       if (disposed || finished) return;
+      followSize();
       // A real fraction replaces the indeterminate shimmer as soon as the job reports one.
       if (Number.isFinite(fraction)) {
         const percent = Math.round(Math.min(1, Math.max(0, fraction)) * 1000) / 10;
@@ -96,13 +108,10 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
           target.progress.setAttribute('aria-valuenow', String(Math.round(percent)));
         }
       }
-      const text =
-        typeof value === 'string' && !value.trim().startsWith('{')
-          ? value
-          : request.mediaType === 'video'
-            ? 'Génération de la vidéo…'
-            : 'Génération de l’image…';
-      caption(text);
+      const named = typeof value === 'string' && !value.trim().startsWith('{');
+      const text = named ? value : request.mediaType === 'video' ? 'Génération de la vidéo…' : 'Génération de l’image…';
+      // A named stage (loading, step 3/11, decoding…) is worth showing; the generic line is not.
+      caption(text, named && !/^Génération (de la vidéo|de l’image|en cours)…$/.test(text));
     }
     function release(slot) {
       slot.controller?.abort();

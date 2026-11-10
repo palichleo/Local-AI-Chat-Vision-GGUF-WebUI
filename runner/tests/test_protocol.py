@@ -47,7 +47,7 @@ class ProtocolTests(unittest.TestCase):
             patch.object(engine, 'validate_config', lambda config: config),
             patch.object(engine, 'pipeline', lambda name: module),
         ):
-            return engine.generate({'pipeline': 'any'}, {}, None)
+            return engine.generate({'pipeline': 'any'}, {}, lambda **_: None)
 
     def test_generation_keeps_pytorch_inside_the_free_video_memory(self):
         torch, fractions = self._engine_torch()

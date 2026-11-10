@@ -44,6 +44,7 @@ Measured on the development RTX 4070 Super, using existing local INT8 ConvRot ch
 | LTX2.5 distilled | Silent continuation, 9 context + 16 new frames | 64.56 s | 7.288 GiB |
 | LTX2.5 distilled | Video with 48 kHz stereo audio, 384×256 | 68.14 s | 6.634 GiB |
 | LTX2.5 distilled | Final profile, 768×512, 25 frames | 108.22 s | 6.779 GiB |
+| LTX2.5 distilled | 896×1600, 121 frames with audio, start image, two passes (10 Nov 2026) | 192 s | under the 12 GB card |
 
 Startup/imports, disk cache state and first kernel compilation affect total latency. These are local measurements, not guarantees or a video comparison against ComfyUI. All successful smoke runs acknowledged zero remaining torch GPU allocation after cleanup.
 
@@ -51,13 +52,19 @@ Krea2 supports text-to-image and one img2img reference. The converter accepts on
 
 LTX2.5 supports text-to-video, start/end images, two learned MSR image slots, optional stereo audio, and silent continuation. It uses the 22B distilled transformer, Gemma4 Unified encoder with projections, diffusion video VAE, and audio VAE/vocoder. Start/end strengths default to 0.7 and image recompression to CRF 18. MSR additionally requires its compatible learned-slot LoRA; its strength and 25/33-frame guide window can be declared in JSON. Arbitrary video LoRAs are rejected until their layout is supported.
 
+**Large videos run in two passes**, as the model's own recipe does, when the optional `upscaler` component (the ×2 latent spatial upscaler, e.g. `ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors`) is set and the shorter side is at least 512 px: eight steps at half the size, the latents doubled by the upscaler, then three steps at the full size (sigmas 0.909375, 0.725, 0.421875) with the start image held exactly. Measured on the 12 GB card at 896×1600, 121 frames: 48 s for the first pass (about 4 s per step after the model is read), 65 s for the three full-size steps, 60 s to decode. Without the upscaler the eight steps run at the full size: several times slower, and beyond what 12 GB holds at this size. The share of the model kept on the GPU is recomputed for the second pass, feed-forwards run in slices of 8192 tokens, and a pass that still runs out of memory is tried again with no weights kept, instead of starting the whole generation over.
+
+The video is decoded in equal tiles (256 px, 64 frames, 32 px and 8 frames shared), which the decoder compiles once per shape. Wider tiles were measured to cost as much per pixel; wider overlaps only decode more.
+
+Every stage of every generation (time, video memory, what failed) is appended to `data/generation-journal.jsonl` as it happens, so a generation that hangs, fails or is cancelled can be diagnosed; `data/runner-errors.log` keeps the tracebacks.
+
 The distilled pipeline requires 8 steps, CFG=1, dimensions divisible by 32 and frame counts of 8n+1. The audio VAE is required by the coupled sampler even when audio is not exported. Every video needs its own approval, including its concrete draft/final stage, seed and dimensions. Draft/final profiles set explicit dimensions and duration. `reuse_output` promotes a draft from the current conversation while retaining its prompt, seed, component choices, references and LoRA settings. The final render is a new generation, not a guarantee of pixel-identical composition at another resolution.
 
 `source_video` uses an active video resource or a previous native video `output_id`. The original is staged on disk; sampled preview frames never stand in for it. A bounded tail of 1/9/17/25/33 frames conditions the next window. Export appends only the newly generated frames, keeps a constant frame rate and never overwrites the source. Continuation currently requires a **silent source at the selected output resolution and fps**; incompatible audio, dimensions or cadence fail explicitly. The output metadata records its source and overlap. Successive separately approved continuations can form a sequence.
 
 Select the supplied LongForge editor graph with **Importer un workflow** to prefill its known settings and component files. Its original graph, including additional scene settings, stays in the saved draft. Values outside the tested execution contract can be reviewed without running them. This imports settings; it does not implement arbitrary Comfy graph execution.
 
-**Remaining LongForge differences:** continuous audio across scenes, automatic whole-film planning, interpolation/upscaling and optional enhancement are not implemented. The original 896×1600 five-second preset has not been validated on 12 GB; conversion preserves it in the final profile for review. Real smoke tests establish working execution, not quality/speed parity with every Comfy workflow.
+**Remaining LongForge differences:** continuous audio across scenes, automatic whole-film planning, interpolation/upscaling and optional enhancement are not implemented. The 896×1600 five-second preset runs on 12 GB with the two passes described above. Real smoke tests establish working execution, not quality/speed parity with every Comfy workflow.
 
 ## Checks
 

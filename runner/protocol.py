@@ -72,7 +72,7 @@ def serve(config, source=None, destination=None):
                         result = release()
                 response = dict(id=request_id, result=result)
             except Exception as exc:
-                _log_failure(method, exc)
+                _log_failure(config, method, exc)
                 # Do not retain an inference traceback (and its model tensors) during cleanup.
                 response = dict(
                     id=request_id,
@@ -98,14 +98,15 @@ def serve(config, source=None, destination=None):
             release()
 
 
-def _log_failure(method, exc):
-    """Keep the traceback of a failed request (text only) in data/runner-errors.log for diagnosis."""
+def _log_failure(config, method, exc):
+    """Keep the traceback of a failed request (text only) in runner-errors.log, beside the
+    generation journal (the folder that holds the cache), for diagnosis."""
     import datetime
     import traceback
     from pathlib import Path
 
     try:
-        folder = Path(__file__).resolve().parent.parent / 'data'
+        folder = Path(config['cacheRoot']).resolve().parent
         if not folder.is_dir():
             return
         text = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))

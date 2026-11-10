@@ -183,6 +183,41 @@ def video_encoder(headers):
     return model, names
 
 
+def latent_upscaler(header, source=None):
+    """Checks the ×2 latent upscaler's file; with `source` (its open store), builds it on the GPU.
+
+    A small convolutional model (1 GiB) that doubles the width and height of video latents:
+    the bridge between the half-size first pass and the full-size refining pass.
+    """
+    try:
+        config = json.loads(header['__metadata__']['config'])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError('Unsupported latent upscaler: no configuration in the file') from None
+    wanted = dict(dims=3, spatial_upsample=True, temporal_upsample=False, spatial_scale=2.0, rational_resampler=False)
+    if any(config.get(key) != value for key, value in wanted.items()):
+        raise ValueError('Unsupported latent upscaler: a spatial ×2 upscaler is expected')
+    settings = dict(
+        in_channels=config.get('in_channels'),
+        mid_channels=config.get('mid_channels'),
+        num_blocks_per_stage=config.get('num_blocks_per_stage'),
+    )
+    if settings['in_channels'] != 128 or any(type(value) is not int or value < 1 for value in settings.values()):
+        raise ValueError('Unsupported latent upscaler configuration')
+    mid = settings['mid_channels']
+    if header.get('upsampler.0.weight', {}).get('shape') != [4 * mid, mid, 3, 3]:
+        raise ValueError('Unsupported latent upscaler layout')
+    if source is None:
+        return None
+    import torch
+    from diffusers.pipelines.ltx2.latent_upsampler import LTX2LatentUpsamplerModel
+
+    model = LTX2LatentUpsamplerModel(
+        **settings, dims=3, spatial_upsample=True, temporal_upsample=False, use_rational_resampler=False
+    )
+    model.load_state_dict({key: source.get_tensor(key) for key in source.keys()}, strict=True)
+    return model.eval().to('cuda', dtype=torch.bfloat16)
+
+
 RECENT = 384 * 1024**2
 
 
@@ -274,12 +309,49 @@ class WeightPool:
             if location not in self.gpu:
                 break
 
+    def resize(self, limit_gib):
+        """Start the GPU share over at another size: everything leaves, then it is filled again
+        in layer order. Kept weights scattered between freed ones would split what is free
+        into pieces too small for the tensors of a larger video."""
+        self.torch.cuda.synchronize()
+        self.gpu.clear()
+        self.recent.clear()
+        self.bytes = self.recent_bytes = 0
+        self.torch.cuda.empty_cache()
+        self.limit = int(limit_gib * 1024**3)
+        if self.limit:
+            self.preload()
+
     def clear(self):
         self.torch.cuda.synchronize()
         self.gpu.clear()
         self.recent.clear()
         self.host.clear()
         self.bytes = self.recent_bytes = 0
+
+
+def chunk_feed_forwards(transformer, rows=8192):
+    """Run each block's feed-forward a few thousand tokens at a time.
+
+    Its inner layer is four times as wide as the tokens: for a large video that is one block of
+    700 MiB per layer, asked from a GPU already full of smaller pieces. In slices the result is
+    the same and the largest block is the size of the tokens themselves.
+    """
+    import torch
+
+    class Chunked(torch.nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, hidden, *args, **kwargs):
+            if hidden.shape[1] <= rows:
+                return self.inner(hidden, *args, **kwargs)
+            return torch.cat([self.inner(part, *args, **kwargs) for part in hidden.split(rows, dim=1)], dim=1)
+
+    for block in transformer.transformer_blocks:
+        block.ff = Chunked(block.ff)
+    return transformer
 
 
 def load_streamed(model, names, pool):
@@ -329,7 +401,9 @@ def load_streamed(model, names, pool):
                 )
             else:
                 bias = bundle.get('bias')
-                result = F.linear(value, bundle['weight'].to(value.dtype), None if bias is None else bias.to(value.dtype))
+                result = F.linear(
+                    value, bundle['weight'].to(value.dtype), None if bias is None else bias.to(value.dtype)
+                )
             for source, key, strength in self.adapters:
                 a = pool.bundle((source, key + '.lora_A.weight', None))['weight'].to(value.dtype)
                 b = pool.bundle((source, key + '.lora_B.weight', None))['weight'].to(value.dtype)

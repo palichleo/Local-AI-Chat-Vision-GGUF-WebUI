@@ -1420,8 +1420,8 @@ async function sendMessage(event) {
     while (true) {
       signal.throwIfAborted();
       let request = null,
-        // Without tools (after a failure, a refusal or the limit), a model that still wants to
-        // generate writes its call as text: that markup is never shown.
+        // A model that wants a tool it was not given (after a failure, a refusal, the limit, or
+        // while generation is unavailable) writes its call as text: that markup is never shown.
         leaked = false;
       view.body.replaceChildren(node('span', 'pending-dot', '●'));
       // Attached images of a reopened conversation get their compressed copy from the original.
@@ -1443,8 +1443,11 @@ async function sendMessage(event) {
         const choice = chunk.choices?.[0],
           delta = choice?.delta || {};
         if (!leaked) output += delta.content || '';
-        if (!allowTools && !leaked) {
-          const cut = output.search(/<tool_call>|<function=/);
+        if (!leaked) {
+          // With tools on offer, only what is unmistakably a call (a reply may quote the tags).
+          const cut = output.search(
+            allowTools ? /<tool_call>\s*(?:<function=|\{)|(?:^|\n)<function=\w+>/ : /<tool_call>|<function=/,
+          );
           if (cut >= 0) {
             output = output.slice(0, cut).trimEnd();
             leaked = true;
@@ -1455,7 +1458,9 @@ async function sendMessage(event) {
         if (performance.now() - lastRender > 55) render();
       });
       if (leaked && !output)
-        output = 'Je ne peux pas lancer d’autre génération dans ce message. Renvoie ta demande pour que je réessaie.';
+        output = allowTools
+          ? 'Je n’ai pas pu lancer cet outil : la génération est peut-être indisponible en ce moment (voir les réglages). Renvoie ta demande pour que je réessaie.'
+          : 'Je ne peux pas lancer d’autre génération dans ce message. Renvoie ta demande pour que je réessaie.';
       if (silent && !request) {
         // Nothing true to say about an unseen image: the image itself ends the turn.
         output = '';
@@ -1701,7 +1706,15 @@ async function sendMessage(event) {
         history.push({
           role: 'tool',
           tool_call_id: request.call.id,
-          content: JSON.stringify({ status: 'error', message: signal.aborted ? 'Génération annulée.' : error.message }),
+          content: JSON.stringify(
+            signal.aborted
+              ? {
+                  status: 'cancelled',
+                  message:
+                    'L’utilisateur a arrêté cette génération avant la fin : rien n’a été produit. S’il demande de recommencer, refais le même appel d’outil.',
+                }
+              : { status: 'error', message: error.message },
+          ),
         });
         throw error;
       }

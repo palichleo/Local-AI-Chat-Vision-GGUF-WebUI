@@ -31,17 +31,24 @@ test('worker handshake, typed protocol, progress, release and owned process clos
   assert.equal(w.status().state, 'stopped');
   assert.equal(w.child, null);
 });
-test('abort kills and reaps only the owned child, then supports fresh startup', async () => {
+test('abort kills and reaps only the owned child, and a new worker starts by itself', async () => {
   const w = worker();
   try {
     await w.start({ pythonPath: process.execPath, configPath: 'unused' });
+    const old = w.child;
     const controller = new AbortController();
     const request = w.request('hang', {}, { signal: controller.signal });
     controller.abort();
     await assert.rejects(request, /annul|abort/i);
-    assert.equal(w.child, null);
+    assert.ok(old.exitCode !== null || old.signalCode !== null, 'the busy worker is gone');
+    // Cancelling was the user's choice, not a failure: generation stays available meanwhile.
+    assert.equal(w.status().recovering, true);
+    assert.notEqual(w.child, old);
+    assert.equal((await w.release()).released, true, 'a starting worker holds no GPU memory');
     await w.start({ pythonPath: process.execPath, configPath: 'unused' });
-    assert.equal(w.status().state, 'ready');
+    await new Promise(setImmediate);
+    assert.deepEqual([w.status().state, w.status().recovering], ['ready', false]);
+    assert.deepEqual(await w.request('generate', { seed: 1 }), { method: 'generate', params: { seed: 1 } });
   } finally {
     await w.close();
   }

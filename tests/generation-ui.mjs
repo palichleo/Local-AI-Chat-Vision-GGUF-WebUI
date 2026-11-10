@@ -123,6 +123,32 @@ test('a reported fraction turns the bar determinate and completion hands it to t
   assert.equal(bar.style['--generation-progress'], undefined);
 });
 
+test('the waiting frame takes the size the user chose in the confirmation window', () => {
+  const container = new Element();
+  const ui = setupGenerationUI({
+    api: async () => {
+      throw Error('No request expected');
+    },
+    node: (...args) => new Element(...args),
+    openOutput: () => {},
+  });
+  // The proposal is landscape; the user picks 9:16 before confirming (the request is revised in place).
+  const request = { mediaType: 'video', resolution: { width: 384, height: 256 } };
+  const card = ui.mount(container, request);
+  const frame = container.children[0].children[0];
+  assert.equal(frame.style.aspectRatio, '384 / 256');
+  Object.assign(request, { resolution: { width: 896, height: 1600 } });
+  const label = container.children[0].children[1].children[1];
+  assert.equal(label.classList.contains('sr-only'), true);
+  card.progress('Génération · 1/11', 0.1);
+  assert.equal(frame.style.aspectRatio, '896 / 1600');
+  // The stage in progress is shown beside the percentage.
+  assert.deepEqual([label.textContent, label.classList.contains('sr-only')], ['Génération · 1/11', false]);
+  card.progress('Décodage de la vidéo…', 0.9);
+  assert.equal(label.textContent, 'Décodage de la vidéo…');
+  card.fail('Interrompu');
+});
+
 test('restored chat resolves the saved Comfy output and releases display blobs when conversation changes', async () => {
   const container = new Element(),
     requests = [],

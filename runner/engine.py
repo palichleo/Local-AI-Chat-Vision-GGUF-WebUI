@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 
 from runner.contracts import validate_config
+from runner.journal import Journal
 from runner.registry import capabilities, family, pipeline, validate_job
 
 
@@ -73,23 +74,40 @@ def _vram_ceiling(torch, margin=VRAM_MARGIN):
 def generate(job, config, progress):
     preflight(job, config)
     module, config = pipeline(job['pipeline']), validate_config(config)
+    journal = Journal(config, job)
+
+    def report(**data):
+        journal.write(**data)
+        progress(**data)
+
     try:
         import torch
     except ImportError:
         torch = None
-    if not _vram_ceiling(torch):
-        return module.generate(job, config, progress)
     try:
-        return module.generate(job, config, progress)
-    except torch.OutOfMemoryError:
-        pass  # left below, once the failed attempt's tensors are out of scope
-    finally:
-        torch.cuda.set_per_process_memory_fraction(1.0)
-    # This job needs more than the card has free: better slow than failed, so run it again
-    # without the ceiling, as before.
-    gc.collect()
-    torch.cuda.empty_cache()
-    return module.generate(job, config, progress)
+        if not _vram_ceiling(torch):
+            result = module.generate(job, config, report)
+        else:
+            try:
+                result = module.generate(job, config, report)
+            except torch.OutOfMemoryError as error:
+                # Left below, once the failed attempt's tensors are out of scope.
+                result = None
+                journal.write(event='out of video memory under the ceiling', error=str(error)[:300])
+            finally:
+                torch.cuda.set_per_process_memory_fraction(1.0)
+            if result is None:
+                # This job needs more than the card has free: better slow than failed, so run
+                # it again without the ceiling, as before.
+                gc.collect()
+                torch.cuda.empty_cache()
+                report(stage='retrying without the video memory ceiling')
+                result = module.generate(job, config, report)
+    except BaseException as error:
+        journal.write(event='failed', error=f'{type(error).__name__}: {error}'[:500])
+        raise
+    journal.write(event='done')
+    return result
 
 
 def unload():

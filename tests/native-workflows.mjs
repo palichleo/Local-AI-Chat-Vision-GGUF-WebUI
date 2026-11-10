@@ -280,14 +280,51 @@ test('a reference that depends on a LoRA switches it on, or is refused in plain 
   );
   const assets = { resolve: async id => ({ path: join(tmpdir(), id) }) };
   const resolve = (references, input = workflow) =>
-    resolveNativeWorkflow(input, { prompt: 'a tiger runs', intention: 'x', ...(references ? { references } : {}) }, assets, {
-      allowPendingReferences: true,
-    });
+    resolveNativeWorkflow(
+      input,
+      { prompt: 'a tiger runs', intention: 'x', ...(references ? { references } : {}) },
+      assets,
+      {
+        allowPendingReferences: true,
+      },
+    );
   // LTX subject references need the learned-slot LoRA: an image is enough to ask for it.
-  assert.deepEqual((await resolve([{ input: 'subject-1', image: 0 }])).loras.map(lora => lora.id), ['reference-slots']);
+  assert.deepEqual(
+    (await resolve([{ input: 'subject-1', image: 0 }])).loras.map(lora => lora.id),
+    ['reference-slots'],
+  );
   assert.deepEqual((await resolve([{ input: 'start', image: 0 }])).loras, []);
   assert.deepEqual((await resolve()).loras, []);
   const without = structuredClone(workflow);
   without.loras[0].enabled = { policy: 'off' };
   await assert.rejects(resolve([{ input: 'subject-1', image: 0 }], without), /référence de sujet.*LoRA/);
+});
+
+test('an optional component whose file is absent is left out; the workflow still runs', async () => {
+  const workflow = JSON.parse(
+    await readFile(new URL('../runner/workflows/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8'),
+  );
+  workflow.components.upscaler = { policy: 'fixed', asset: 'latent-upscaler', file: 'upscaler-x2.safetensors' };
+  assert.equal(family('ltx25').components.upscaler.required, false);
+  const here = { resolve: async id => ({ path: join(tmpdir(), id) }) };
+  const absent = {
+    resolve: async id => {
+      if (id === 'latent-upscaler') throw new Error('Asset latent-upscaler not found');
+      return { path: join(tmpdir(), id) };
+    },
+  };
+  const wrong = {
+    resolve: async id => {
+      if (id === 'latent-upscaler') throw new Error('Asset latent-upscaler has incompatible kind; expected upscaler');
+      return { path: join(tmpdir(), id) };
+    },
+  };
+  const resolve = assets =>
+    resolveNativeWorkflow(workflow, { prompt: 'a boat', intention: 'x' }, assets, { allowPendingReferences: true });
+  assert.equal((await resolve(here)).components.upscaler, join(tmpdir(), 'latent-upscaler'));
+  const without = await resolve(absent);
+  assert.equal(without.components.upscaler, undefined);
+  assert.ok(without.components.model, 'the required components are still there');
+  // A file that is there but is not an upscaler is an error to show, not something to skip.
+  await assert.rejects(resolve(wrong), /incompatible kind/);
 });

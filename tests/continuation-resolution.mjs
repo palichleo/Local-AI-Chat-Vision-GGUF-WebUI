@@ -370,7 +370,9 @@ test('the user gives an input another role: a subject reference becomes the firs
   const conversationId = '11111111-1111-4111-8111-111111111111';
   const imageId = '33333333-3333-4333-8333-333333333333';
   const shipped = validateNativeWorkflow(
-    JSON.parse(readFileSync(new URL('../runner/workflows/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8')),
+    JSON.parse(
+      readFileSync(new URL('../runner/workflows/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8'),
+    ),
   );
   const workflows = [{ ...shipped, ready: true }];
   const runtime = new ToolRuntime({
@@ -405,7 +407,11 @@ test('the user gives an input another role: a subject reference becomes the firs
         type: 'function',
         function: {
           name: 'create_video',
-          arguments: JSON.stringify({ prompt: 'a tiger runs', intention: 'Le tigre court.', reference: [{ output: imageId }] }),
+          arguments: JSON.stringify({
+            prompt: 'a tiger runs',
+            intention: 'Le tigre court.',
+            reference: [{ output: imageId }],
+          }),
         },
       },
     ],
@@ -415,13 +421,17 @@ test('the user gives an input another role: a subject reference becomes the firs
   assert.deepEqual(loras(first), ['reference-slots']);
   assert.equal(first.plan.references[0].role, 'msr_image');
   assert.equal(first.plan.references[0].roleLabel, 'Référence de sujet');
-  assert.deepEqual(
-    first.plan.editable.references[0].map(option => option.role).sort(),
-    ['end_image', 'msr_image', 'start_image'],
-  );
+  assert.deepEqual(first.plan.editable.references[0].map(option => option.role).sort(), [
+    'end_image',
+    'msr_image',
+    'start_image',
+  ]);
   const revise = (request, edits) =>
     runtime.revise({ requestId: request.requestId, approvalToken: request.approvalToken, edits });
-  await assert.rejects(revise(first, { references: [{ index: 0, role: 'source_video' }] }), /ne peut pas prendre ce rôle/);
+  await assert.rejects(
+    revise(first, { references: [{ index: 0, role: 'source_video' }] }),
+    /ne peut pas prendre ce rôle/,
+  );
   await assert.rejects(revise(first, { references: [{ index: 3, role: 'start_image' }] }), /invalides/);
   const second = await revise(first, { references: [{ index: 0, role: 'start_image' }] });
   assert.equal(second.plan.references[0].role, 'start_image');
@@ -430,4 +440,111 @@ test('the user gives an input another role: a subject reference becomes the firs
   assert.equal(second.args.references[0].input, 'start');
   assert.equal(second.plan.parameters.start_strength, first.plan.parameters.start_strength);
   assert.deepEqual(loras(second), [], 'a first frame needs no subject LoRA');
+});
+
+test('a size the workflow sets takes the format of the image the video starts from, at the profile scale', async () => {
+  const args = { prompt: 'x', intention: 'y', references: [{ input: 'start', image: 0 }] };
+  const sized = async (extra, options) => {
+    const job = await resolveNativeWorkflow(minimax, { ...args, ...extra }, assets, {
+      allowPendingReferences: true,
+      seed: 1,
+      ...options,
+    });
+    return [job.parameters.width, job.parameters.height];
+  };
+  const portrait = { aspect: { width: 1024, height: 1792 } };
+  assert.deepEqual(await sized({}, {}), [768, 448], 'without an image, the profile');
+  assert.deepEqual(await sized({}, portrait), [448, 768], 'a portrait image is animated in portrait');
+  assert.deepEqual(await sized({ stage: 'final' }, portrait), [768, 1344]);
+  assert.deepEqual(await sized({}, { aspect: { format: '1:1' } }), [512, 512], 'a format asked for by name');
+  assert.deepEqual(await sized({}, { aspect: { width: 3000, height: 3010 } }), [512, 512]);
+  // No listed format is close to a banner: the profile stays.
+  assert.deepEqual(await sized({}, { aspect: { width: 4000, height: 500 } }), [768, 448]);
+  // The user's own size still wins, and a continuation keeps its source size.
+  assert.deepEqual(await sized({}, { ...portrait, overrides: { width: 1024, height: 576 } }), [1024, 576]);
+  const continued = await resolveNativeWorkflow(
+    minimax,
+    {
+      prompt: 'x',
+      intention: 'y',
+      references: [{ input: 'source', output_id: '22222222-2222-4222-8222-222222222222' }],
+    },
+    assets,
+    { allowPendingReferences: true, seed: 1, sourceSize: { width: 768, height: 448 }, ...portrait },
+  );
+  assert.deepEqual([continued.parameters.width, continued.parameters.height], [768, 448]);
+});
+
+test('a proposal follows its start image, the format the model names, and keeps it across versions', async () => {
+  const conversationId = '11111111-1111-4111-8111-111111111111';
+  const imageId = '22222222-2222-4222-8222-222222222222';
+  const workflows = [{ ...minimax, ready: true }];
+  const record = {
+    provider: 'native',
+    workflowId: 'krea',
+    parameters: { pipeline: 'krea2', width: 1024, height: 1792 },
+    outputs: [{ source: { filename: 'ship.png' }, width: 1024, height: 1792 }],
+  };
+  const runtime = new ToolRuntime({
+    catalog: {
+      kind: 'native',
+      list: async () => workflows,
+      read: async id => workflows.find(workflow => workflow.id === id),
+      prepare: async (id, args, options) => {
+        const workflow = workflows.find(item => item.id === id);
+        return { workflow, job: await resolveNativeWorkflow(workflow, args, assets, options), outputNodes: [] };
+      },
+    },
+    engine: { state: 'ready' },
+    gallery: { get: async () => record },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5 }),
+    engineConfig: () => ({}),
+    sourceMedia: async () => ({ mime: 'image/png', name: 'ship', handle: { close: async () => {} } }),
+    clientFactory: () => ({}),
+  });
+  const propose = args =>
+    runtime.request(
+      [
+        {
+          id: 'call',
+          type: 'function',
+          function: { name: 'create_video', arguments: JSON.stringify({ prompt: 'sails', intention: 'x', ...args }) },
+        },
+      ],
+      { conversationId, turnId: conversationId, messages: [] },
+    );
+  const size = request => [request.resolution.width, request.resolution.height];
+  const revise = (request, edits) =>
+    runtime.revise({ requestId: request.requestId, approvalToken: request.approvalToken, edits });
+
+  const animated = await propose({ start_image: { output: imageId } });
+  assert.deepEqual(size(animated), [448, 768], 'the ship is 9:16: so is its video');
+  const final = await revise(animated, { stage: 'final' });
+  assert.deepEqual(size(final), [768, 1344], 'the final version keeps the format');
+  assert.equal(final.plan.edited, undefined, 'a format that follows the image is not an edit');
+
+  // Text only: the profile, unless the model passes the format the user named.
+  assert.deepEqual(size(await propose({})), [768, 448]);
+  const square = await propose({ format: '1:1' });
+  assert.deepEqual(size(square), [512, 512]);
+  await assert.rejects(propose({ format: '5:4' }), /format doit être/);
+
+  // The user picks another size in the window, then another version: the format stays, the
+  // scale is the new profile's (the draft size is not carried into the final).
+  const chosen = await revise(square, { width: 576, height: 1024, stage: 'final' });
+  assert.deepEqual(size(chosen), [768, 1344]);
+  const back = await revise(chosen, { stage: 'draft' });
+  assert.deepEqual(size(back), [448, 768]);
+});
+
+test('video tools offer a picture format when the workflow sets its own size, never for a continuation', async () => {
+  const tools = new ToolCatalog({ list: async () => [{ ...minimax, ready: true }] });
+  const definitions = Object.fromEntries(
+    (await tools.definitions({ images: 1, resources: [], outputs: [] })).map(item => [
+      item.function.name,
+      item.function,
+    ]),
+  );
+  assert.deepEqual(definitions.create_video.parameters.properties.format.enum.slice(0, 3), ['16:9', '9:16', '1:1']);
+  assert.equal(definitions.extend_video?.parameters.properties.format, undefined);
 });

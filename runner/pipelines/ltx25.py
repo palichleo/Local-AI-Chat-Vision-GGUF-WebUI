@@ -6,6 +6,28 @@ import sys
 import time
 
 DISTILLED_SIGMAS = (1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875)
+# The second pass of a large video: its upscaled first pass, noised again to the first of
+# these levels, then three steps at the full size.
+REFINE_SIGMAS = (0.909375, 0.725, 0.421875)
+# Below this side, half the size is too small for a first pass worth refining.
+TWO_PASS_SIDE = 512
+
+
+def first_pass_size(parameters, components):
+    """The half size a large video is first sampled at, or None for a single pass.
+
+    Sampling costs grow faster than the picture: at 896 × 1600 each step takes many times a
+    step at 448 × 800. With the latent upscaler, the eight steps run at half the size, the
+    result is doubled in latent space and three steps at the full size restore the detail:
+    the model's own two-pass recipe. Odd latent sizes round the half up; the doubled result
+    is cropped back.
+    """
+    if 'upscaler' not in components:
+        return None
+    width, height = parameters['width'] // 32, parameters['height'] // 32
+    if min(width, height) * 32 < TWO_PASS_SIDE:
+        return None
+    return (width + 1) // 2 * 32, (height + 1) // 2 * 32
 
 
 def check(job, family):
@@ -34,6 +56,10 @@ def preflight(job, config):
 
         vocoder_layout(headers)
     validate_msr(job, headers)
+    if 'upscaler' in headers:
+        from runner.models.ltx25 import latent_upscaler
+
+        latent_upscaler(headers['upscaler'])
     for ref in job['references']:
         if ref['role'] == 'source_video':
             from runner.video.continuation import source_tail
@@ -45,7 +71,14 @@ def generate(job, config, progress):
     import torch
     from runner.models import conditioning
     from runner.models.headers import header
-    from runner.models.ltx25 import validate_layout, video_encoder, WeightPool, load_streamed
+    from runner.models.ltx25 import (
+        validate_layout,
+        video_encoder,
+        WeightPool,
+        load_streamed,
+        latent_upscaler,
+        chunk_feed_forwards,
+    )
     from runner.models.residency import RESIDENCY, open_store, prefetch, use_order
     from runner.models.ltx25_text import encode
     from runner.video.export import save_video
@@ -112,6 +145,7 @@ def generate(job, config, progress):
         stores = {
             role: stack.enter_context(open_store(path, 'if-present' if role == 'textEncoder' else True))
             for role, path in job['components'].items()
+            if role != 'upscaler'
         }
         adapters = []
         for index, item in enumerate(job['loras']):
@@ -125,10 +159,18 @@ def generate(job, config, progress):
         # encoders at their peak, the allocator's slack, the engine's margin) plus the
         # activations, which grow with the video. Video memory that runs out halves the speed,
         # a smaller share costs a second per step at most.
-        tokens = ((p['frames'] - 1) // 8 + 1) * (p['height'] // 32) * (p['width'] // 32)
-        budget = max(0, free - 5 - tokens * 4096 * 2 * 24 / 1024**3)
-        if 'cacheGiB' in config:
-            budget = min(config['cacheGiB'], budget)
+        first = first_pass_size(p, job['components'])
+        subjects = sum(ref['role'] == 'msr_image' for ref in job['references'])
+
+        def share(width, height):
+            """GiB of the DiT kept on the GPU while sampling at this size."""
+            area = (height // 32) * (width // 32)
+            # Each subject reference adds its own short clip of tokens to the sequence.
+            tokens = area * ((p['frames'] - 1) // 8 + 1 + subjects * ((p.get('msr_frames', 33) - 1) // 8 + 1))
+            kept = max(0, free - 5 - tokens * 4096 * 2 * 30 / 1024**3)
+            return min(config['cacheGiB'], kept) if 'cacheGiB' in config else kept
+
+        budget = share(*(first or (p['width'], p['height'])))
         hot = WeightPool(stores, budget, adapters=adapters)
         cold = WeightPool(stores, 0)
         # From here to the end of the first step, the disk reads the DiT in sequence: its
@@ -141,7 +183,7 @@ def generate(job, config, progress):
         )
         timed('layouts and stores')
         try:
-            transformer = load_streamed(models.pop('model'), names['model'], hot)
+            transformer = chunk_feed_forwards(load_streamed(models.pop('model'), names['model'], hot))
             timed('transformer')
             hot.preload()
             timed('weights kept on the GPU')
@@ -174,12 +216,13 @@ def generate(job, config, progress):
             )
             pipe.set_progress_bar_config(disable=True)
             p = job['parameters']
-            spatial_tokens = p['width'] // 32 * (p['height'] // 32)
+            # The size being sampled: the first pass of a large video runs at half of it.
+            current = dict(width=p['width'], height=p['height'])
 
             def keyframe_marker(_module, args, values):
                 hidden = values['hidden_states']
                 marker = torch.zeros((*hidden.shape[:2], 1), device=hidden.device, dtype=torch.bool)
-                marker[:, :spatial_tokens] = True
+                marker[:, : current['width'] // 32 * (current['height'] // 32)] = True
                 values['video_keyframes_mask'] = marker
                 return args, values
 
@@ -205,62 +248,114 @@ def generate(job, config, progress):
                 pipe.msr_store = stores['lora-0']
                 pipe.msr_frames = p.get('msr_frames', 33)
                 pipe.msr_strength = p.get('msr_strength', 1)
-            conditions = {}
+            images = {}
             if job['references']:
                 from PIL import Image
                 from diffusers.pipelines.ltx2.pipeline_ltx2_condition import LTX2VideoCondition
 
-                conditions['conditions'] = []
+                for ref in job['references']:
+                    if ref['role'] in ('start_image', 'end_image'):
+                        with Image.open(ref['path']) as image:
+                            images[ref['input']] = image.convert('RGB')
+
+            def conditions(refining):
+                """The images and source frames that guide this pass. The refining pass holds
+                the first frame exactly: the first pass only followed it."""
+                if not job['references']:
+                    return {}
+                found = []
                 for ref in job['references']:
                     if ref['role'] == 'msr_image':
                         continue
                     if ref['role'] == 'source_video':
-                        conditions['conditions'].append(
-                            LTX2VideoCondition(frames=source_frames, index=0, strength=1.0, crf=0)
-                        )
+                        found.append(LTX2VideoCondition(frames=source_frames, index=0, strength=1.0, crf=0))
                         continue
-                    with Image.open(ref['path']) as image:
-                        pixels = image.convert('RGB')
                     start_frame = ref['role'] == 'start_image'
-                    conditions['conditions'].append(
+                    found.append(
                         LTX2VideoCondition(
-                            frames=pixels,
+                            frames=images[ref['input']],
                             index=0 if start_frame else -1,
-                            strength=p.get('start_strength' if start_frame else 'end_strength', 0.7),
+                            strength=1.0
+                            if start_frame and refining
+                            else p.get('start_strength' if start_frame else 'end_strength', 0.7),
                             crf=p.get('image_compression', 18),
                         )
                     )
+                return {'conditions': found}
 
-            def step(_pipe, index, _timestep, values):
-                read = {'prefetch': ahead.stop()} if ahead and index == 0 else {}
-                progress(stage='generating video', step=index + 1, total=8, weights=hot.summary(), **read)
-                return values
+            passes = [(first, DISTILLED_SIGMAS), ((p['width'], p['height']), REFINE_SIGMAS)] if first else []
+            passes = passes or [((p['width'], p['height']), DISTILLED_SIGMAS)]
+            total = sum(len(sigmas) for _, sigmas in passes)
+            generator = torch.Generator('cuda').manual_seed(p['seed'])
+
+            def sample(size, sigmas, done, refine=None):
+                current['width'], current['height'] = size
+
+                def step(_pipe, index, _timestep, values):
+                    read = {'prefetch': ahead.stop()} if ahead and not done and index == 0 else {}
+                    progress(
+                        stage='generating video', step=done + index + 1, total=total, weights=hot.summary(), **read
+                    )
+                    return values
+
+                return pipe(
+                    prompt_embeds=embeds.to('cuda'),
+                    prompt_attention_mask=mask.to('cuda'),
+                    height=size[1],
+                    width=size[0],
+                    num_frames=p['frames'],
+                    frame_rate=p['fps'],
+                    num_inference_steps=len(sigmas),
+                    sigmas=list(sigmas),
+                    guidance_scale=1,
+                    audio_guidance_scale=1,
+                    stg_scale=0,
+                    audio_stg_scale=0,
+                    modality_scale=1,
+                    audio_modality_scale=1,
+                    guidance_rescale=0,
+                    audio_guidance_rescale=0,
+                    generator=generator,
+                    output_type='latent',
+                    return_dict=False,
+                    callback_on_step_end=step,
+                    **(refine or {}),
+                    **conditions(bool(refine)),
+                )
 
             timed('conditions')
-            progress(stage='sampling video', setup=setup)
-            video, _audio = pipe(
-                prompt_embeds=embeds.to('cuda'),
-                prompt_attention_mask=mask.to('cuda'),
-                height=p['height'],
-                width=p['width'],
-                num_frames=p['frames'],
-                frame_rate=p['fps'],
-                num_inference_steps=8,
-                sigmas=list(DISTILLED_SIGMAS),
-                guidance_scale=1,
-                audio_guidance_scale=1,
-                stg_scale=0,
-                audio_stg_scale=0,
-                modality_scale=1,
-                audio_modality_scale=1,
-                guidance_rescale=0,
-                audio_guidance_rescale=0,
-                generator=torch.Generator('cuda').manual_seed(p['seed']),
-                output_type='latent',
-                return_dict=False,
-                callback_on_step_end=step,
-                **conditions,
-            )
+            progress(stage='sampling video', setup=setup, passes=[list(size) for size, _ in passes])
+            video, _audio = sample(*passes[0], 0)
+            if first:
+                # The full size leaves less room for weights: all of them leave the GPU, so that
+                # what is free is in one piece for the upscaler and the larger activations.
+                budget = share(p['width'], p['height'])
+                hot.resize(0)
+                progress(stage='upscaling video latents', gpu_cache_limit_gib=round(budget, 3))
+                with open_store(job['components']['upscaler'], False) as source:
+                    upscaler = latent_upscaler(headers['upscaler'], source)
+                    video = upscaler(video.to('cuda', dtype=torch.bfloat16)).float()
+                    del upscaler
+                # An odd latent size was rounded up for the first pass: keep the middle.
+                rows, columns = p['height'] // 32, p['width'] // 32
+                top, left = (video.shape[-2] - rows) // 2, (video.shape[-1] - columns) // 2
+                video = video[..., top : top + rows, left : left + columns].contiguous()
+                torch.cuda.empty_cache()
+                refine = dict(latents=video, audio_latents=_audio.float(), noise_scale=REFINE_SIGMAS[0])
+                del video, _audio
+                hot.resize(budget)
+                progress(stage='refining video')
+                try:
+                    video, _audio = sample(*passes[1], len(passes[0][1]), refine=refine)
+                except torch.OutOfMemoryError:
+                    video = None
+                if video is None:
+                    # Memory ran short with weights kept on the GPU: three steps again with
+                    # none kept (each a little slower) cost far less than starting over.
+                    hot.resize(0)
+                    progress(stage='refining video', gpu_cache_limit_gib=0)
+                    video, _audio = sample(*passes[1], len(passes[0][1]), refine=refine)
+                    budget = 0
             video = video.cpu()
             audio_latents = _audio.cpu()
             cache = dict(
@@ -279,30 +374,8 @@ def generate(job, config, progress):
     del hot, cold, stores, models, embeds, mask
     gc.collect()
     torch.cuda.empty_cache()
-    # Close the large DiT/Gemma mmaps before decode, so their CPU pages can be reclaimed.
-    with open_store(job['components']['vae']) as source, torch.inference_mode():
-        models, names = validate_layout(headers)
-        vae = models.pop('vae')
-        del models
-        pool = WeightPool({'vae': source}, 0)
-        try:
-            vae = load_streamed(vae, names['vae'], pool)
-            configure_decode(vae)
-            progress(stage='decoding video')
-            with torch._dynamo.config.patch(recompile_limit=64, fail_on_recompile_limit_hit=True):
-                decoded = vae.decode(
-                    video.to('cuda', dtype=torch.bfloat16), generator=torch.Generator('cuda').manual_seed(p['seed'])
-                ).sample
-            if not torch.isfinite(decoded).all():
-                raise RuntimeError('Non-finite decoded video; no output saved')
-            pixels = ((decoded[0].float().clamp(-1, 1) + 1) * 127.5).round().byte().permute(1, 2, 3, 0).cpu().numpy()
-            progress(stage='video decoded')
-        finally:
-            del vae
-            pool.clear()
-    del decoded, pool
-    gc.collect()
-    torch.cuda.empty_cache()
+    # The large DiT/Gemma mappings are closed before the decode: their pages can be reclaimed.
+    pixels = decode_pixels(job, headers, video, progress)
     generated_audio = None
     if p['audio']:
         from runner.models.ltx25_audio import decode
@@ -323,6 +396,7 @@ def generate(job, config, progress):
         audio=p['audio'],
         timeline=timeline,
         weight_cache=cache,
+        passes=[dict(width=size[0], height=size[1], steps=len(sigmas)) for size, sigmas in passes],
     )
     if continuation:
         metadata['continuation'] = continuation
@@ -357,20 +431,134 @@ def memory():
     return result
 
 
-def configure_decode(vae):
+def tiling(length, largest, overlap):
+    """(tile, stride) in cells: equal tiles of at most `largest`, sharing at least `overlap`,
+    that cover `length` exactly, with the least to compute."""
+    if length <= largest:
+        return length, length
+    first = -(-(length - overlap) // (largest - overlap))
+    best = None
+    for count in range(first, first + 17):
+        # The stride that keeps the tile within `largest`, and the one that keeps the overlap.
+        low, high = -(-(length - largest) // (count - 1)), (length - overlap) // count
+        if low <= high:
+            tile = length - (count - 1) * high
+            if best is None or count * tile < best[0]:
+                best = (count * tile, tile, high)
+    if best:
+        return best[1], best[2]
+    stride = (length - overlap) // first
+    return length - (first - 1) * stride, stride
+
+
+def equal_tiles(length, tile, stride, _min_size=0):
+    """Tiles `stride` apart, all of `tile` cells when `tiling` chose them (the last ends the video)."""
+    if length <= tile:
+        return [(0, length)]
+    count = -(-(length - tile) // stride) + 1
+    return [(index * stride, min(index * stride + tile, length)) for index in range(count - 1)] + [
+        ((count - 1) * stride, length)
+    ]
+
+
+# The largest tile the last decoder stages run on, and what two tiles share to hide their seam,
+# in cells of 8 pixels and 2 frames: 256 pixels and 64 frames, 32 pixels and 8 frames shared.
+# Measured on a 896 × 1600 clip of 121 frames: wider tiles cost as much (the decoder's local
+# attention works on whole rows of a tile), a wider overlap decodes up to twice the video.
+TILE = dict(frames=32, side=32, overlap_frames=4, overlap_side=4)
+
+
+def configure_decode(vae, shape):
+    """Tiled decode with tiles of one size: returns the plan, for the timeline.
+
+    The decoder's attention is compiled for each tile shape it meets (seconds each time). The
+    library's own tiling ends every axis on a shorter tile, up to eight shapes for one video;
+    equal tiles leave the first and last in time as the only different ones.
+    """
     import torch
     import torch.nn.attention.flex_attention as flex
+    from diffusers.models.autoencoders import ltx2_diffusion_decoder as library
 
     if not getattr(configure_decode, 'compiled', False):
         # Eager attention AND eager mask construction materialize quadratic matrices.
         flex.flex_attention = torch.compile(flex.flex_attention, dynamic=False)
         flex.create_block_mask = torch.compile(flex.create_block_mask, dynamic=False)
         configure_decode.compiled = True
-    vae.enable_tiling(
-        tile_sample_min_height=256,
-        tile_sample_min_width=256,
-        tile_sample_min_num_frames=16,
-        tile_sample_stride_height=192,
-        tile_sample_stride_width=192,
-        tile_sample_stride_num_frames=8,
+    tile = TILE
+    decoder = vae.decoder
+    stride = decoder.upsamples[-1].stride
+    cell_frames, cell_side = stride[0], stride[1] * decoder.patch_size
+    ratio_frames, ratio_side = vae.temporal_compression_ratio, vae.spatial_compression_ratio
+    # Cells of the grid the tiles are cut on, from the latent size.
+    frames = ((shape[2] - 1) * ratio_frames + 1 + cell_frames - 1) // cell_frames
+    height, width = shape[3] * ratio_side // cell_side, shape[4] * ratio_side // cell_side
+    plan = dict(
+        frames=tiling(frames, tile['frames'], tile['overlap_frames']),
+        height=tiling(height, tile['side'], tile['overlap_side']),
+        width=tiling(width, tile['side'], tile['overlap_side']),
     )
+    library._tile_intervals = equal_tiles
+    vae.enable_tiling(
+        tile_sample_min_height=plan['height'][0] * cell_side,
+        tile_sample_min_width=plan['width'][0] * cell_side,
+        tile_sample_min_num_frames=plan['frames'][0] * cell_frames,
+        tile_sample_stride_height=plan['height'][1] * cell_side,
+        tile_sample_stride_width=plan['width'][1] * cell_side,
+        tile_sample_stride_num_frames=plan['frames'][1] * cell_frames,
+    )
+    return {
+        axis: dict(cells=cells, tile=size, stride=step, tiles=len(equal_tiles(cells, size, step)))
+        for (axis, (size, step)), cells in zip(plan.items(), (frames, height, width))
+    }
+
+
+def decode_pixels(job, headers, latents, progress):
+    """Video latents to frames (uint8, frames × height × width × 3), tile by tile."""
+    import numpy
+    import torch
+    from runner.models.ltx25 import validate_layout, WeightPool, load_streamed
+    from runner.models.residency import open_store
+
+    seed = job['parameters']['seed']
+    with open_store(job['components']['vae']) as source, torch.inference_mode():
+        models, names = validate_layout(headers)
+        vae = models.pop('vae')
+        del models
+        pool = WeightPool({'vae': source}, 0)
+        try:
+            vae = load_streamed(vae, names['vae'], pool)
+            plan = configure_decode(vae, latents.shape)
+            progress(stage='decoding video', tiles=plan)
+            # The decode is the longest silent stage of a large video: say where it is.
+            total = plan['frames']['tiles'] * plan['height']['tiles'] * plan['width']['tiles']
+            denoise, done, told = vae.decoder.denoise, 0, time.perf_counter()
+
+            def counted(*args, **kwargs):
+                nonlocal done, told
+                result = denoise(*args, **kwargs)
+                done += 1
+                if done in (1, total) or time.perf_counter() - told > 5:
+                    told = time.perf_counter()
+                    progress(stage='decoding video', tile=done, tiles=total)
+                return result
+
+            vae.decoder.denoise = counted
+            with torch._dynamo.config.patch(recompile_limit=64, fail_on_recompile_limit_hit=True):
+                decoded = vae.decode(
+                    latents.to('cuda', dtype=torch.bfloat16), generator=torch.Generator('cuda').manual_seed(seed)
+                ).sample
+            # A few frames at a time: the whole video as 32-bit floats would not fit beside itself.
+            frames = []
+            for start in range(0, decoded.shape[2], 8):
+                part = decoded[0, :, start : start + 8].float()
+                if not torch.isfinite(part).all():
+                    raise RuntimeError('Non-finite decoded video; no output saved')
+                frames.append(((part.clamp(-1, 1) + 1) * 127.5).round().byte().permute(1, 2, 3, 0).cpu().numpy())
+            del decoded, part
+            progress(stage='video decoded')
+        finally:
+            del vae
+            pool.clear()
+    gc.collect()
+    torch.cuda.empty_cache()
+    return numpy.concatenate(frames)

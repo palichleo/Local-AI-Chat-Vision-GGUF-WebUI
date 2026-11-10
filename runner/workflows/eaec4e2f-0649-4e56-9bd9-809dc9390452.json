@@ -26,6 +26,11 @@
       "policy": "fixed",
       "asset": "a6882e04-1752-4c7c-99dd-09a1ee27a5d2",
       "file": "ltx-2.5-audio-vae-bf16.safetensors"
+    },
+    "upscaler": {
+      "policy": "fixed",
+      "asset": "7c1e5a9d-3b2f-4e6a-8d04-9f1b6c3a2e57",
+      "file": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
     }
   },
   "parameters": {
@@ -180,8 +185,8 @@
   "profiles": {
     "draft": {
       "parameters": {
-        "width": 384,
-        "height": 256,
+        "width": 288,
+        "height": 512,
         "steps": 8,
         "frames": 25,
         "fps": 24
