@@ -16,7 +16,7 @@ const LABELS = {
   end_strength: 'Force de l’image de fin',
   image_compression: 'Compression des images',
   msr_strength: 'Force des références',
-  msr_frames: 'Images guidées par les références',
+  msr_frames: 'Longueur des références (images)',
   max_side: 'Plus grand côté (px)',
   scale: 'Facteur',
   passes: 'Passes',
@@ -30,6 +30,14 @@ const STAGES = { draft: 'Brouillon', final: 'Finale' };
 // Shown in the main area; every other editable parameter goes to « Paramètres avancés ».
 const MAIN = new Set(['frames', 'width', 'height', 'seed']);
 const ADVANCED_FIRST = ['frames', 'fps', 'audio', 'width', 'height'];
+const HELP = {
+  msr_frames:
+    'Chaque référence de sujet est montrée au modèle comme un court plan fixe de ce nombre d’images, avant la vidéo : plus long, elle pèse un peu plus et coûte un peu plus de calcul.',
+  msr_strength: 'À quel point la vidéo suit les références de sujet (1 : au plus près).',
+};
+// Settings that only matter with a subject reference, and the role that brings one.
+const SUBJECT_ROLE = 'msr_image';
+const subjectSetting = key => key.startsWith('msr_');
 const numeric = value => typeof value === 'number' && Number.isFinite(value);
 const seconds = value => value.toFixed(2).replace('.', ',') + ' s';
 
@@ -54,9 +62,11 @@ export function renderProposal(container, request, { node, onStage } = {}) {
   message.setAttribute('role', 'alert');
   message.hidden = true;
 
-  function field(label, control, { help, wide = false } = {}) {
+  function field(label, control, { help, wide = false, name = false } = {}) {
     const wrapper = node('label', 'proposal-field' + (wide ? ' is-wide' : ''));
-    wrapper.append(node('span', '', label), control);
+    const title = node('span', name ? 'proposal-input-name' : '', label);
+    if (name) title.title = label;
+    wrapper.append(title, control);
     if (help) wrapper.append(node('small', 'field-help', help));
     return wrapper;
   }
@@ -70,7 +80,9 @@ export function renderProposal(container, request, { node, onStage } = {}) {
     return node('output', 'proposal-fixed', text);
   }
 
-  container.append(node('p', 'video-intention', plan.intention || (video ? 'Proposition vidéo' : 'Génération d’image')));
+  container.append(
+    node('p', 'video-intention', plan.intention || (video ? 'Proposition vidéo' : 'Génération d’image')),
+  );
 
   // Prompt: editable when the model owns it.
   let prompt = null;
@@ -82,31 +94,24 @@ export function renderProposal(container, request, { node, onStage } = {}) {
     container.append(field('Prompt', prompt, { wide: true }));
   } else if (plan.prompt) container.append(field('Prompt (fixé par le workflow)', fixed(plan.prompt), { wide: true }));
 
-  // Inputs, each with the role it plays (and the others it may play).
-  const roleControls = [];
-  if (plan.references?.length) {
-    const list = node('div', 'proposal-inputs');
-    plan.references.forEach((ref, index) => {
-      const label = ref.label || ref.resource_id || 'Image ' + ((ref.image ?? index) + 1),
-        options = editable.references?.[index] || [];
-      const row = node('div', 'proposal-input');
-      row.append(node('span', 'proposal-input-name', label));
-      if (options.length > 1) {
-        const control = select(
-          options.map(option => [option.role, option.label]),
-          ref.role,
-        );
-        control.setAttribute('aria-label', 'Rôle de ' + label);
-        roleControls.push({ index, control, initial: ref.role });
-        row.append(control);
-      } else row.append(node('span', 'proposal-input-role', ref.roleLabel || ref.role || ref.input));
-      list.append(row);
-    });
-    container.append(list);
-  } else if (video && !continues) container.append(node('p', 'field-help', 'Aucune image transmise : vidéo créée depuis le texte.'));
-
   const grid = node('div', 'proposal-grid');
   container.append(grid);
+
+  // Inputs, each with the role it plays (and the others it may play).
+  const roleControls = [];
+  plan.references?.forEach((ref, index) => {
+    const label = ref.label || ref.resource_id || 'Entrée ' + ((ref.image ?? index) + 1),
+      options = editable.references?.[index] || [];
+    if (options.length > 1) {
+      const control = select(
+        options.map(option => [option.role, option.label]),
+        ref.role,
+      );
+      control.setAttribute('aria-label', 'Rôle de ' + label);
+      roleControls.push({ index, control, initial: ref.role });
+      grid.append(field(label, control, { name: true }));
+    } else grid.append(field(label, fixed(ref.roleLabel || ref.role || ref.input), { name: true }));
+  });
 
   // Version: changing it changes the profile, so the server proposes again.
   if (editable.stages?.length > 1) {
@@ -151,7 +156,8 @@ export function renderProposal(container, request, { node, onStage } = {}) {
     );
     duration.disabled = framesItem.choices.length < 2;
     grid.append(field(overlap ? 'Durée ajoutée' : 'Durée', duration));
-  } else if (numeric(frames) && fps()) grid.append(field(overlap ? 'Durée ajoutée' : 'Durée', fixed(lengthText(frames))));
+  } else if (numeric(frames) && fps())
+    grid.append(field(overlap ? 'Durée ajoutée' : 'Durée', fixed(lengthText(frames))));
 
   // Format and resolution: a clean size for each format, within what the model accepts.
   const widthItem = items.get('width'),
@@ -177,7 +183,9 @@ export function renderProposal(container, request, { node, onStage } = {}) {
     const known = list.some(item => sizeKey(item) === sizeKey(size));
     resolutionControl.replaceChildren();
     for (const item of [...list, ...(known ? [] : [size])].sort((a, b) => a.width * a.height - b.width * b.height))
-      resolutionControl.add(new Option(sizeText(item) + (!known && item === size && format ? ' (actuelle)' : ''), sizeKey(item)));
+      resolutionControl.add(
+        new Option(sizeText(item) + (!known && item === size && format ? ' (actuelle)' : ''), sizeKey(item)),
+      );
     resolutionControl.value = sizeKey(size);
     if (controls.get('width')) controls.get('width').value = String(size.width);
     if (controls.get('height')) controls.get('height').value = String(size.height);
@@ -204,7 +212,11 @@ export function renderProposal(container, request, { node, onStage } = {}) {
     grid.append(field('Format', formatControl), field('Résolution', resolutionControl));
   } else if (numeric(size.width) && numeric(size.height))
     grid.append(
-      field('Résolution', fixed(sizeText(size)), widthItem?.locked ? { help: 'Gardée de la vidéo source.' } : undefined),
+      field(
+        'Résolution',
+        fixed(sizeText(size)),
+        widthItem?.locked ? { help: 'Gardée de la vidéo source.' } : undefined,
+      ),
     );
 
   // Seed, with a new random one at a click.
@@ -237,6 +249,7 @@ export function renderProposal(container, request, { node, onStage } = {}) {
   advanced.append(node('summary', '', 'Paramètres avancés'));
   const more = node('div', 'proposal-grid');
   advanced.append(more);
+  const subjectFields = [];
   const keys = [
     ...ADVANCED_FIRST.filter(key => items.has(key)),
     ...[...items.keys()].filter(key => !ADVANCED_FIRST.includes(key)),
@@ -244,9 +257,13 @@ export function renderProposal(container, request, { node, onStage } = {}) {
   for (const key of keys) {
     const item = items.get(key);
     if (MAIN.has(key) && !['frames', 'width', 'height'].includes(key)) continue;
-    const label = LABELS[key] || key;
+    // The length is chosen in seconds above; a count of frames would only repeat it.
+    if (key === 'frames' && duration) continue;
+    const label = key === 'frames' ? 'Durée (images)' : LABELS[key] || key;
     if (item.locked) {
-      more.append(field(label, fixed(String(item.value)), { help: item.locked }));
+      const wrapper = field(label, fixed(String(item.value)), { help: item.locked });
+      more.append(wrapper);
+      if (subjectSetting(key)) subjectFields.push(wrapper);
       continue;
     }
     let control;
@@ -269,9 +286,24 @@ export function renderProposal(container, request, { node, onStage } = {}) {
       control.step = item.multipleOf ? String(item.multipleOf) : item.type === 'integer' ? '1' : 'any';
     }
     controls.set(key, control);
-    more.append(field(label, control, { help: item.note }));
+    const wrapper = field(label, control, { help: item.note || HELP[key] });
+    more.append(wrapper);
+    if (subjectSetting(key)) subjectFields.push(wrapper);
   }
+  // Subject-reference settings show only while an input is a subject reference.
+  const showSubject = () => {
+    const subject = roleControls.length
+      ? roleControls.some(({ control }) => control.value === SUBJECT_ROLE) ||
+        plan.references.some(
+          (ref, index) => ref.role === SUBJECT_ROLE && !roleControls.some(item => item.index === index),
+        )
+      : plan.references?.some(ref => ref.role === SUBJECT_ROLE);
+    for (const wrapper of subjectFields) wrapper.hidden = !subject;
+    advanced.hidden = ![...more.children].some(child => !child.hidden);
+  };
+  for (const { control } of roleControls) control.onchange = showSubject;
   if (more.children.length) container.append(advanced);
+  showSubject();
 
   // The two length controls and the two size controls follow each other.
   const framesControl = controls.get('frames');
@@ -302,7 +334,8 @@ export function renderProposal(container, request, { node, onStage } = {}) {
   }
 
   const notes = [...(request.notes || [])];
-  if (plan.edited?.length) notes.push('Modifié par vous : ' + plan.edited.map(key => LABELS[key] || key).join(', ') + '.');
+  if (plan.edited?.length)
+    notes.push('Modifié par vous : ' + plan.edited.map(key => LABELS[key] || key).join(', ') + '.');
   for (const note of notes) container.append(node('p', 'field-help proposal-note', note));
   container.append(message);
 
@@ -360,9 +393,7 @@ export function renderProposal(container, request, { node, onStage } = {}) {
 
 function diceIcon(node) {
   const make = tag =>
-    globalThis.document?.createElementNS
-      ? document.createElementNS('http://www.w3.org/2000/svg', tag)
-      : node(tag);
+    globalThis.document?.createElementNS ? document.createElementNS('http://www.w3.org/2000/svg', tag) : node(tag);
   const svg = make('svg'),
     use = make('use');
   svg.setAttribute('aria-hidden', 'true');

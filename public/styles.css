@@ -3993,7 +3993,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   margin: 18px 0;
 }
 .video-intention {
-  font-size: 14px !important;
+  font-size: 13px !important;
   color: var(--ink) !important;
   white-space: pre-wrap;
 }
@@ -4455,65 +4455,35 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   font-size: 12px;
 }
 
-/* Generation proposal: one editable form, common settings first, the rest folded away. */
-.proposal-field {
+/* Generation proposal: the summary card of before (label on the left, value on the right,
+   small text on a light grey card), whose values can be changed in place. */
+.proposal-grid {
   display: grid;
-  align-content: start;
-  gap: 6px;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--muted);
-}
-.proposal-field.is-wide {
-  margin: 14px 0;
-}
-.proposal-field select,
-.proposal-field input[type='number'] {
-  width: 100%;
-  min-height: 36px;
-  font-size: 12px;
-}
-.proposal-field input[type='checkbox'] {
-  justify-self: start;
-}
-.proposal-fixed {
-  display: flex;
-  align-items: center;
-  min-height: 36px;
-  font-size: 12px;
-  color: var(--ink);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-.proposal-prompt {
-  width: 100%;
-  min-height: 92px;
-  max-height: 40dvh;
-  resize: vertical;
-  font: inherit;
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--ink);
+  gap: 2px;
+  padding: 8px 10px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: 12px;
 }
-.proposal-prompt:focus-visible {
-  border-color: var(--line-strong);
-  outline: none;
-}
-.proposal-inputs {
+.proposal-field {
   display: grid;
-  gap: 6px;
-  margin: 0 0 14px;
-}
-.proposal-input {
-  display: flex;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 2px 16px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 6px;
   font-size: 12px;
+  color: var(--muted);
+}
+.proposal-field[hidden] {
+  display: none;
+}
+.proposal-field > .field-help {
+  grid-column: 1 / -1;
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.5;
 }
 .proposal-input-name {
   min-width: 0;
@@ -4522,51 +4492,131 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   white-space: nowrap;
   color: var(--ink);
 }
-.proposal-input-role {
-  color: var(--muted);
-  flex-shrink: 0;
-}
-.proposal-input select {
-  flex: 0 1 220px;
-  min-height: 32px;
+.proposal-grid select,
+.proposal-grid input[type='number'] {
+  appearance: none;
+  max-width: 240px;
+  min-height: 28px;
+  padding: 3px 8px;
   font-size: 12px;
+  color: var(--ink);
+  text-align: right;
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
 }
-.proposal-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 16px;
-  padding: 14px;
+.proposal-grid select {
+  text-align-last: right;
+  padding-right: 26px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%23929b9c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: right 8px center;
+  background-repeat: no-repeat;
+  background-size: 11px 11px;
+  cursor: pointer;
+}
+.proposal-grid select option {
+  color: var(--ink);
+  background: var(--surface);
+  text-align: left;
+}
+.proposal-grid input[type='number'] {
+  width: 130px;
+  -moz-appearance: textfield;
+}
+.proposal-grid input[type='number']::-webkit-inner-spin-button,
+.proposal-grid input[type='number']::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+.proposal-grid select:not(:disabled):hover,
+.proposal-grid input[type='number']:hover {
+  border-color: var(--line);
+}
+.proposal-grid select:focus-visible,
+.proposal-grid input[type='number']:focus-visible {
+  outline: none;
+  border-color: var(--line-strong);
+  background-color: var(--input);
+}
+.proposal-grid select:disabled {
+  opacity: 1;
+  cursor: default;
+  background-image: none;
+  padding-right: 8px;
+}
+.proposal-grid input[type='checkbox'] {
+  justify-self: end;
+  margin: 0 8px 0 0;
+  accent-color: var(--accent);
+}
+.proposal-fixed {
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--ink);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.proposal-field.is-wide {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  margin: 14px 0;
+  padding: 0;
+}
+.proposal-field.is-wide .proposal-fixed {
+  text-align: left;
+  padding: 0;
+  white-space: pre-wrap;
+}
+.proposal-prompt {
+  width: 100%;
+  min-height: 84px;
+  max-height: 40dvh;
+  resize: vertical;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
+  padding: 10px 14px;
+}
+.proposal-prompt:hover {
+  border-color: var(--line-strong);
+}
+.proposal-prompt:focus-visible {
+  border-color: var(--line-strong);
+  outline: none;
 }
 .proposal-seed {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 2px;
 }
-.proposal-seed input {
-  flex: 1;
-  min-width: 0;
+.proposal-seed input[type='number'] {
+  width: 120px;
 }
 .proposal-roll {
   display: grid;
   place-items: center;
-  flex: 0 0 36px;
-  width: 36px;
-  height: 36px;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--muted);
 }
 .proposal-roll:hover {
   color: var(--ink);
-  border-color: var(--line-strong);
+  background: var(--hover);
 }
 .proposal-dice {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
@@ -4574,22 +4624,21 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 .proposal-advanced {
   margin-top: 12px;
 }
+.proposal-advanced[hidden] {
+  display: none;
+}
 .proposal-advanced > summary {
+  width: fit-content;
   font-size: 12px;
   color: var(--muted);
   cursor: pointer;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .proposal-advanced > summary:hover {
   color: var(--ink);
 }
 .proposal-note {
   margin: 10px 0 0 !important;
-}
-@media (max-width: 520px) {
-  .proposal-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 /* The buttons stay in view while the advanced settings are open. */
@@ -4745,7 +4794,9 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   width: 2px;
   margin-left: -1px;
   background: rgb(255 255 255 / 0.9);
-  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.35), 0 0 12px rgb(0 0 0 / 0.35);
+  box-shadow:
+    0 0 0 0.5px rgb(0 0 0 / 0.35),
+    0 0 12px rgb(0 0 0 / 0.35);
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.16s ease;

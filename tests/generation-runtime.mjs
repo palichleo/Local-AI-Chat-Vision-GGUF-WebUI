@@ -479,7 +479,6 @@ test('confirming applies the edits first and runs the revised proposal', async (
     labelled(all, 'Prompt').value = 'the boat dives into the clouds';
     const duration = labelled(all, 'Durée');
     duration.value = '345';
-    duration.onchange();
     nodes.get('tool-once').onclick();
     await pending;
     assert.deepEqual(calls.find(call => call.route === 'tools/revise').body, {
