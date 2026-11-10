@@ -21,9 +21,9 @@
     "max_side": {
       "policy": "model",
       "type": "integer",
+      "default": 3840,
       "min": 0,
       "max": 4096,
-      "default": 3840,
       "description": "Largest output side in pixels (3840 = 4K)."
     }
   },
@@ -31,8 +31,9 @@
   "references": [
     {
       "id": "source",
-      "name": "Vidéo à agrandir",
       "role": "source_video",
+      "name": "Vidéo à agrandir",
+      "description": "",
       "required": true
     }
   ]
