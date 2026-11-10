@@ -660,3 +660,68 @@ test('replacing an Output gallery pauses its videos before removing their player
     assert.equal(paused, 1);
     assert.equal(nodes.get('gallery-list').children.includes(video), false);
   }));
+test('an image proposal reads as a plan and is edited in the dialog like a video', async () =>
+  fixture(async ({ ui, nodes, all, calls, setIntercept }) => {
+    setIntercept((route, body) => {
+      if (route === 'tools/revise')
+        return Response.json({
+          requestId: 'image-revised',
+          approvalToken: 'image-token-2',
+          workflowName: 'Krea 2',
+          args: { prompt: 'a lighthouse' },
+          resolution: { width: 768, height: 1024 },
+          plan: {
+            prompt: 'a lighthouse',
+            parameters: { width: 768, height: 1024, seed: 3 },
+            references: [],
+            editable: { prompt: true, stages: [], parameters: [] },
+            edited: ['width'],
+          },
+        });
+      if (route === 'tools/execute') return Response.json({ id: 'job', state: 'error', error: 'test boundary' });
+    });
+    const pending = ui.requestTool(
+      {
+        requestId: 'image',
+        approvalToken: 'image-token',
+        autoAllow: false,
+        workflowName: 'Krea 2',
+        args: { prompt: 'a lighthouse' },
+        plan: {
+          prompt: 'a lighthouse',
+          parameters: { width: 1024, height: 1024, seed: 3 },
+          references: [],
+          editable: {
+            prompt: true,
+            stages: [],
+            parameters: [{ key: 'width', value: 1024, type: 'integer', min: 256, max: 2048 }],
+          },
+        },
+      },
+      new AbortController().signal,
+      () => {},
+    );
+    await new Promise(setImmediate);
+    assert.equal(nodes.get('tool-plan').hidden, false);
+    assert.equal(nodes.get('tool-arguments').hidden, true);
+    assert.equal(nodes.get('tool-revise').hidden, false);
+    assert.match(JSON.stringify(nodes.get('tool-plan').children), /Génération d’image/);
+    nodes.get('tool-revise').onclick();
+    assert.equal(nodes.get('tool-always').disabled, true, 'no permanent permission while editing');
+    all.filter(n => n.tagName === 'input' && n.type === 'number').at(-1).value = '768';
+    nodes.get('tool-revise').onclick();
+    await new Promise(setImmediate);
+    await new Promise(setImmediate);
+    assert.deepEqual(calls.find(call => call.route === 'tools/revise').body, {
+      requestId: 'image',
+      approvalToken: 'image-token',
+      edits: { width: 768 },
+    });
+    assert.equal(nodes.get('tool-always').disabled, false);
+    nodes.get('tool-once').onclick();
+    await pending;
+    assert.deepEqual(calls.find(call => call.route === 'tools/execute').body, {
+      requestId: 'image-revised',
+      permission: 'once',
+    });
+  }));

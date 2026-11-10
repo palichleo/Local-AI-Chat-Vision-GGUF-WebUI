@@ -2,7 +2,10 @@ export function renderVideoPlan(container, request, node) {
   container.replaceChildren();
   const plan = request.plan || {},
     parameters = plan.parameters || {};
-  container.append(node('p', 'video-intention', plan.intention || 'Proposition vidéo'));
+  const video = request.mediaType === 'video';
+  container.append(
+    node('p', 'video-intention', plan.intention || (video ? 'Proposition vidéo' : 'Génération d’image')),
+  );
   const details = node('dl', 'video-plan-fields');
   function row(label, value) {
     if (value === undefined || value === null) return;
@@ -52,7 +55,7 @@ export function renderVideoPlan(container, request, node) {
         ),
       );
     container.append(refs);
-  } else container.append(node('p', 'field-help', 'Aucune référence image transmise au workflow.'));
+  } else if (video) container.append(node('p', 'field-help', 'Aucune référence image transmise au workflow.'));
   if (plan.defaultReferences?.length)
     container.append(
       node(
@@ -99,7 +102,13 @@ export function renderVideoEditor(container, request, node) {
   const message = node('p', 'video-edit-error');
   message.setAttribute('role', 'alert');
   message.hidden = true;
-  container.append(node('p', 'video-intention', plan.intention || 'Proposition vidéo'));
+  container.append(
+    node(
+      'p',
+      'video-intention',
+      plan.intention || (request.mediaType === 'video' ? 'Proposition vidéo' : 'Génération d’image'),
+    ),
+  );
   function field(label, control, help) {
     const wrapper = node('label', 'video-edit-field');
     wrapper.append(node('span', '', label), control);

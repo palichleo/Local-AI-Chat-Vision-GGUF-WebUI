@@ -135,11 +135,13 @@ export function setupGenerationRuntime({
     $('tool-name').textContent = request.workflowName;
     $('tool-arguments').textContent =
       JSON.stringify(request.args, null, 2) + (request.notes?.length ? '\n\n' + request.notes.join('\n') : '');
-    $('tool-arguments').hidden = video;
-    $('tool-plan').hidden = !video;
+    // Every proposal reads as a plan when the server sends one; raw arguments are the fallback.
+    const planned = Boolean(request.plan);
+    $('tool-arguments').hidden = planned;
+    $('tool-plan').hidden = !planned;
     $('tool-always').hidden = video;
     $('tool-always').disabled = video;
-    $('tool-revise').hidden = !video || !request.plan?.editable;
+    $('tool-revise').hidden = !request.plan?.editable;
     $('tool-once').textContent = video ? 'Confirmer et générer' : 'Cette fois';
     // Reading mode: the proposal as it will run. Editing mode: the same proposal as a form.
     let editor = null,
@@ -149,7 +151,8 @@ export function setupGenerationRuntime({
       $('tool-revise').textContent = 'Modifier';
       $('tool-deny').textContent = video ? 'Annuler' : 'Refuser';
       $('tool-once').disabled = false;
-      if (video) renderVideoPlan($('tool-plan'), request, node);
+      $('tool-always').disabled = video;
+      if (planned) renderVideoPlan($('tool-plan'), request, node);
     }
     read();
     $('tool-dialog').showModal();
@@ -169,6 +172,7 @@ export function setupGenerationRuntime({
           $('tool-revise').textContent = 'Appliquer';
           $('tool-deny').textContent = 'Retour';
           $('tool-once').disabled = true;
+          $('tool-always').disabled = true;
           return;
         }
         if (saving) return;
