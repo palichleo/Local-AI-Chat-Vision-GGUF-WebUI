@@ -31,6 +31,9 @@ RENAMES = (
     ('.mlp.fc1.', '.ff.net.0.proj.'),
     ('.mlp.fc2.', '.ff.net.2.'),
 )
+# Attention through the INT8 kernel when the GPU has it (see Int8Attention); False keeps
+# PyTorch's exact attention, about a third slower on a 5 s draft and more on longer videos.
+INT8_ATTENTION = True
 VIDEO_PATCH = 96
 AUDIO_PATCH = 32
 VIDEO_SHIFT = 12.0
@@ -135,7 +138,45 @@ def _chunked_feed_forward(self, hidden_states, chunk=8192):
     return torch.cat(out).reshape(*hidden_states.shape[:-1], -1)
 
 
-def architecture(header):
+class Int8Attention:
+    """Attention through comfy-kitchen's INT8 kernel, the method of SageAttention: queries, keys
+    and values are quantized to 8 bits for the tensor cores and the softmax stays in FP32.
+
+    Attention is the one cost of the model that grows with the square of the video's length and
+    size; this kernel runs it two to three times faster than PyTorch's."""
+
+    def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None):
+        import comfy_kitchen
+        from diffusers.models.transformers.transformer_minimax_h3 import _apply_rotary_emb
+
+        heads = (attn.heads, -1)
+        query = attn.norm_q(attn.to_q(hidden_states).unflatten(-1, heads))
+        key = attn.norm_k(attn.to_k(hidden_states).unflatten(-1, heads))
+        value = attn.to_v(hidden_states).unflatten(-1, heads)
+        if rotary_emb is not None:
+            query = _apply_rotary_emb(query, *rotary_emb)
+            key = _apply_rotary_emb(key, *rotary_emb)
+        # The kernel reads [batch, heads, sequence, head]; the model keeps heads third.
+        result = comfy_kitchen.int8_attention(
+            query.transpose(1, 2),
+            key.to(query.dtype).transpose(1, 2),
+            value.to(query.dtype).transpose(1, 2),
+            attn_mask=attention_mask,
+        )
+        result = result.transpose(1, 2).flatten(2, 3).type_as(query)
+        return attn.to_out[1](attn.to_out[0](result))
+
+
+def int8_attention_ready():
+    try:
+        import comfy_kitchen
+
+        return bool(comfy_kitchen.int8_attention_is_available(torch.device('cuda')))
+    except Exception:
+        return False
+
+
+def architecture(header, int8_attention=False):
     """Empty diffusers model adapted to the pruned checkpoint, and its PDD head count."""
     from accelerate import init_empty_weights
     from diffusers import MiniMaxH3Transformer3DModel
@@ -154,6 +195,8 @@ def architecture(header):
             module.forward = _curve_norm_out.__get__(module)
         elif isinstance(module, FeedForward):
             module.forward = _chunked_feed_forward.__get__(module)
+        elif int8_attention and isinstance(module, reference.MiniMaxH3Attention):
+            module.processor = Int8Attention()
     return model, pdd_heads(header)
 
 
@@ -212,11 +255,11 @@ class PDDHead(torch.nn.Module):
         return F.linear(hidden_states.float(), weight, bias)
 
 
-def load(header, store_path, pool):
+def load(header, store_path, pool, int8_attention=False):
     """Build the DiT on CUDA: int8 linears streamed through `pool`, small tensors resident."""
     from runner.models.ltx25 import load_streamed
 
-    model, heads = architecture(header)
+    model, heads = architecture(header, int8_attention)
     mapping = names(header)
     store = pool.stores['model']
 

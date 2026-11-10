@@ -1,6 +1,7 @@
 """LTX2.5 checkpoint layouts and bounded INT8 loading, independent of ComfyUI."""
 
 import json
+import time
 
 
 def architectures(headers):
@@ -182,8 +183,16 @@ def video_encoder(headers):
     return model, names
 
 
+RECENT = 384 * 1024**2
+
+
 class WeightPool:
-    """Keep a fixed subset resident; streaming a whole traversal must not thrash an LRU."""
+    """Keep a fixed subset resident; streaming a whole traversal must not thrash an LRU.
+
+    The other weights are copied to the GPU each time a layer runs. The last ones copied stay
+    for a moment (`RECENT` bytes): a layer that runs its rows in chunks, as the wide
+    feed-forwards do, then copies its weights once per step instead of once per chunk.
+    """
 
     def __init__(self, stores, limit_gib=0, adapters=()):
         import torch, comfy_kitchen
@@ -194,18 +203,31 @@ class WeightPool:
         self.limit = int(limit_gib * 1024**3)
         self.bytes = 0
         self.gpu = {}
+        self.recent = {}
+        self.recent_bytes = 0
+        self.order = []
         self.host = {}
         self.adapters = adapters
+        # What streaming costs: `first` is the first copy of each tensor, whose pages come from
+        # the disk or the file cache (timed); `again` is every later copy, from RAM.
+        self.stats = dict(first_gib=0.0, first_seconds=0.0, again_gib=0.0)
 
     def read(self, location):
         source, key, part = location
         value = self.stores[source].get_tensor(key)
         return value.chunk(3, dim=0)[part] if part is not None else value
 
+    def summary(self):
+        return {key: round(value, 2) for key, value in self.stats.items()}
+
     def bundle(self, location):
         if location in self.gpu:
             return self.gpu[location]
-        if location not in self.host:
+        if location in self.recent:
+            return self.recent[location][0]
+        started = time.perf_counter()
+        first = location not in self.host
+        if first:
             source, key, part = location
             store = self.stores[source]
             values = {'weight': self.read(location)}
@@ -219,16 +241,39 @@ class WeightPool:
             self.host[location] = values
         result = {key: value.to('cuda', non_blocking=True) for key, value in self.host[location].items()}
         size = sum(value.numel() * value.element_size() for value in result.values())
+        if first:
+            self.stats['first_gib'] += size / 1024**3
+            self.stats['first_seconds'] += time.perf_counter() - started
+        else:
+            self.stats['again_gib'] += size / 1024**3
         if self.bytes + size <= self.limit:
             self.gpu[location] = result
             self.bytes += size
+        elif size <= RECENT:
+            self.recent[location] = (result, size)
+            self.recent_bytes += size
+            while self.recent_bytes > RECENT:
+                self.recent_bytes -= self.recent.pop(next(iter(self.recent)))[1]
         return result
+
+    def preload(self):
+        """Fill the GPU share now, in layer order, before the model runs.
+
+        Filled on the way, the weights that stay were allocated between the short-lived
+        tensors of the first step: PyTorch then held up to 2 GiB of video memory it could not
+        reuse, enough to push a 12 GiB card past its own memory.
+        """
+        for location in self.order:
+            self.bundle(location)
+            if location not in self.gpu:
+                break
 
     def clear(self):
         self.torch.cuda.synchronize()
         self.gpu.clear()
+        self.recent.clear()
         self.host.clear()
-        self.bytes = 0
+        self.bytes = self.recent_bytes = 0
 
 
 def load_streamed(model, names, pool):
@@ -240,6 +285,7 @@ def load_streamed(model, names, pool):
         def __init__(self, location):
             super().__init__()
             self.location = location
+            pool.order.append(location)
             self.out_features, self.in_features = pool.read(location).shape
             store = pool.stores[location[0]]
             key = location[1].removesuffix('.weight') + '.comfy_quant'

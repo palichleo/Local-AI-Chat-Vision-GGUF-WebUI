@@ -27,6 +27,66 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(release(), dict(released=True, allocatedGiB=0))
         self.assertLess(calls.index('sync'), calls.index('blas'))
 
+    def _engine_torch(self, free_gib=10):
+        fractions = []
+        cuda = SimpleNamespace(
+            is_available=lambda: True,
+            mem_get_info=lambda: (free_gib * 1024**3, 12 * 1024**3),
+            set_per_process_memory_fraction=fractions.append,
+            empty_cache=lambda: fractions.append('empty'),
+        )
+        return SimpleNamespace(cuda=cuda, OutOfMemoryError=type('OutOfMemoryError', (RuntimeError,), {})), fractions
+
+    def _generate(self, torch, attempt):
+        from runner import engine
+
+        module = SimpleNamespace(generate=attempt)
+        with (
+            patch.dict(sys.modules, torch=torch),
+            patch.object(engine, 'preflight', lambda job, config: None),
+            patch.object(engine, 'validate_config', lambda config: config),
+            patch.object(engine, 'pipeline', lambda name: module),
+        ):
+            return engine.generate({'pipeline': 'any'}, {}, None)
+
+    def test_generation_keeps_pytorch_inside_the_free_video_memory(self):
+        torch, fractions = self._engine_torch()
+        seen = []
+        self.assertEqual(self._generate(torch, lambda *_: seen.append(list(fractions)) or 'video'), 'video')
+        self.assertEqual(seen, [[9 / 12]])  # what is free less 1 GiB, while the pipeline runs
+        self.assertEqual(fractions, [9 / 12, 1.0])
+
+    def test_generation_that_needs_more_runs_again_without_the_ceiling(self):
+        torch, fractions = self._engine_torch()
+        attempts = []
+
+        def attempt(*_):
+            attempts.append(fractions[-1])
+            if len(attempts) == 1:
+                raise torch.OutOfMemoryError('CUDA out of memory')
+            return 'video'
+
+        self.assertEqual(self._generate(torch, attempt), 'video')
+        self.assertEqual(attempts, [9 / 12, 'empty'])
+        self.assertEqual(fractions, [9 / 12, 1.0, 'empty'])
+
+    def test_other_failures_lift_the_ceiling_and_are_not_retried(self):
+        torch, fractions = self._engine_torch()
+        attempts = []
+
+        def attempt(*_):
+            attempts.append(1)
+            raise ValueError('bad prompt')
+
+        with self.assertRaises(ValueError):
+            self._generate(torch, attempt)
+        self.assertEqual((len(attempts), fractions), (1, [9 / 12, 1.0]))
+
+    def test_no_ceiling_when_little_video_memory_is_free(self):
+        torch, fractions = self._engine_torch(free_gib=3)
+        self.assertEqual(self._generate(torch, lambda *_: 'image'), 'image')
+        self.assertEqual(fractions, [])
+
     def test_ready_errors_recovery_and_shutdown_without_heavy_imports(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / 'config.json'

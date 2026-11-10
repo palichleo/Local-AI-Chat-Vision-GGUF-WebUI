@@ -1,6 +1,9 @@
+import json
 import os
+import struct
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 
 class ResidencyTest(unittest.TestCase):
@@ -43,6 +46,61 @@ class ResidencyTest(unittest.TestCase):
         finally:
             residency.RESERVE = saved
             residency.RESIDENCY.clear()
+
+
+def _safetensors(path, tensors):
+    """A safetensors file written by hand: {name: bytes}, each stored as I8."""
+    header, offset = {}, 0
+    for name, data in tensors.items():
+        header[name] = dict(dtype='I8', shape=[len(data)], data_offsets=[offset, offset + len(data)])
+        offset += len(data)
+    encoded = json.dumps(header).encode()
+    with open(path, 'wb') as handle:
+        handle.write(struct.pack('<Q', len(encoded)) + encoded + b''.join(tensors.values()))
+    return 8 + len(encoded)
+
+
+class PrefetchTest(unittest.TestCase):
+    def test_reads_ahead_only_the_wanted_weights_of_mapped_files(self):
+        from runner.models import residency
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'weights.safetensors')
+            base = _safetensors(
+                path,
+                {
+                    'a.weight': b'a' * 1000,
+                    'a.weight_scale': b's' * 10,
+                    'unused.weight': b'u' * 5000,
+                    'b.weight': b'b' * 2000,
+                    'b.bias': b'c' * 20,
+                },
+            )
+            # A weight comes with its scale and bias; close ranges are read as one.
+            self.assertEqual(
+                residency.weight_ranges(path, ['a.weight', 'b.weight'], gap=100),
+                [(base, base + 1010), (base + 6010, base + 8030)],
+            )
+            self.assertEqual(
+                residency.weight_ranges(path, ['a.weight', 'b.weight'], gap=5000), [(base, base + 8030)]
+            )
+            mapped = SimpleNamespace(arena=None)
+            ahead = residency.prefetch({'model': path}, {'model': mapped}, [('model', 'a.weight', None), ('model', 'b.weight', 1)])
+            ahead._thread.join(timeout=10)
+            self.assertTrue(ahead.done)
+            report = ahead.stop()
+            self.assertEqual(ahead.bytes, 8030)  # one range: the default gap spans the unused tensor
+            self.assertNotIn('error', report)
+            # A file held in RAM is already read in sequence: nothing to do.
+            resident = SimpleNamespace(arena=object())
+            self.assertIsNone(residency.prefetch({'model': path}, {'model': resident}, [('model', 'a.weight', None)]))
+            self.assertIsNone(residency.prefetch({'model': path}, {'model': mapped}, [('other', 'a.weight', None)]))
+
+    def test_a_missing_file_is_reported_not_raised(self):
+        from runner.models import residency
+
+        ahead = residency.Prefetch([(os.path.join(tempfile.gettempdir(), 'atelier-missing.safetensors'), [(0, 10)])])
+        self.assertIn('error', ahead.stop())
 
 
 if __name__ == '__main__':

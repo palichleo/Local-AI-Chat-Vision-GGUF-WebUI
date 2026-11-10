@@ -187,7 +187,8 @@ def generate(job, config, progress):
     from runner.models.headers import header
     from runner.models import minimax_h3, minimax_h3_text, minimax_h3_vae
     from runner.models.ltx25 import WeightPool
-    from runner.models.residency import RESIDENCY, open_store
+    from runner.models.residency import RESIDENCY, open_store, prefetch
+    from runner.pipelines.ltx25 import memory
     from runner.video.export import save_video
 
     if not torch.cuda.is_available():
@@ -206,6 +207,7 @@ def generate(job, config, progress):
                 seconds=round(time.perf_counter() - start, 2),
                 allocated_gib=round(torch.cuda.memory_allocated() / 1024**3, 3),
                 free_gib=round(torch.cuda.mem_get_info()[0] / 1024**3, 3),
+                **memory(),
             )
         )
         report(**data)
@@ -259,6 +261,9 @@ def generate(job, config, progress):
     reference_edge = min([2048, *(min(ref.image.size) for ref in references)])
     state = _stage('before_encode', {'reference_image_short_edge': reference_edge}, state)
     text_encoder, text_store = minimax_h3_text.load(paths['textEncoder'])
+    # The disk reads the conditioner in sequence while its layers run, then the DiT while the
+    # conditions are encoded and the model is built (see Prefetch).
+    ahead = prefetch(paths, {'textEncoder': text_store}, [('textEncoder', key, None) for key in text_store.keys()])
     original = reference_encoders.get_qwen3vl_prompt_embeds
     reference_encoders.get_qwen3vl_prompt_embeds = minimax_h3_text.prompt_embeds
     try:
@@ -266,10 +271,16 @@ def generate(job, config, progress):
         state = _stage('text_encoder', dict(text_encoder=text_encoder, tokenizer=tokenizer, processor=processor), state)
     finally:
         reference_encoders.get_qwen3vl_prompt_embeds = original
+        read = ahead.stop() if ahead else None
     state.set('prompt_embeds', state.get('prompt_embeds').to('cuda', torch.bfloat16))
     del text_encoder, text_store
     _free(scope={})
-    progress(stage='video prompt encoded', tokens=int(state.get('prompt_embeds').shape[1]))
+    progress(
+        stage='video prompt encoded',
+        tokens=int(state.get('prompt_embeds').shape[1]),
+        **({'prefetch': read} if read else {}),
+    )
+    ahead = prefetch(paths, {}, minimax_h3.names(dit_header).values())
 
     # 2. Conditions through the VAE encoders (only when there are any).
     video_head = audio_head = None
@@ -289,10 +300,19 @@ def generate(job, config, progress):
     # 3. Joint denoise: DiT streamed from its file, PDD heads told each step's interval.
     progress(stage='loading video model')
     with open_store(paths['model']) as store, torch.inference_mode():
-        budget = min(config.get('cacheGiB', 6), max(0, torch.cuda.mem_get_info()[0] / 1024**3 - 5))
+        # The share of the DiT kept on the GPU; the rest is copied from RAM at every step, at
+        # about 12 GiB/s. What the model computes with comes first: 5 GiB (a feed-forward
+        # chunk, the allocator's slack, the engine's margin) plus the activations, which grow
+        # with the video (1 GiB for a 5 s draft). Video memory that runs out halves the speed,
+        # a smaller share costs a second per step at most.
+        tokens = ((p['frames'] - 5) // 17 * 5 + 2) * (p['height'] // 32) * (p['width'] // 32) + 512
+        room = torch.cuda.mem_get_info()[0] / 1024**3 - 5 - tokens * 7168 * 2 * 6 / 1024**3
+        budget = min(config.get('cacheGiB', 6), max(0, room))
         pool = WeightPool({'model': store}, budget)
         try:
-            dit, _heads = minimax_h3.load(dit_header, paths['model'], pool)
+            fast_attention = minimax_h3.INT8_ATTENTION and minimax_h3.int8_attention_ready()
+            dit, _heads = minimax_h3.load(dit_header, paths['model'], pool, fast_attention)
+            pool.preload()
             scheduler, audio_scheduler = MiniMaxH3Scheduler(shift=12.0), MiniMaxH3Scheduler(shift=3.0)
             calls = {'step': 0}
 
@@ -307,7 +327,8 @@ def generate(job, config, progress):
 
             def after(_module, _args, _values, output):
                 calls['step'] += 1
-                progress(stage='generating video', step=calls['step'], total=STEPS)
+                read = {'prefetch': ahead.stop()} if ahead and calls['step'] == 1 else {}
+                progress(stage='generating video', step=calls['step'], total=STEPS, weights=pool.summary(), **read)
                 return output
 
             dit.register_forward_pre_hook(before, with_kwargs=True)
@@ -324,7 +345,7 @@ def generate(job, config, progress):
                     latent_frames * (p['height'] // 32) * (p['width'] // 32),
                     round(p['frames'] / 24 * AUDIO_LATENTS_PER_SECOND),
                 )
-            progress(stage='sampling video')
+            progress(stage='sampling video', attention='int8' if fast_attention else 'pytorch')
             # The diffusers blocks name the DiT by workflow: ref2va reads `transformer_ref`.
             name = 'transformer_ref' if references else 'transformer'
             state = _stage(
@@ -345,6 +366,8 @@ def generate(job, config, progress):
             progress(stage='video sampled', **cache)
             del dit
         finally:
+            if ahead:
+                ahead.stop()
             pool.clear()
     del pool
     state.set('prompt_embeds', None)

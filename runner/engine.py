@@ -50,9 +50,46 @@ def preflight(job, config):
     return dict(ready=True, pipeline=job['pipeline'], mediaType=job['mediaType'])
 
 
+VRAM_MARGIN = 1024**3
+
+
+def _vram_ceiling(torch, margin=VRAM_MARGIN):
+    """Keep PyTorch inside the video memory that is free now, less a margin.
+
+    PyTorch keeps freed blocks for reuse and takes new ones while the driver gives any. On
+    Windows the driver never refuses: past the card's own memory it hands out system RAM, and
+    every step then runs two to three times slower. Under a ceiling PyTorch reuses what it
+    holds instead. Returns whether a ceiling was set.
+    """
+    if torch is None or not torch.cuda.is_available():
+        return False
+    free, total = torch.cuda.mem_get_info()
+    if free - margin < total * 0.25:  # too little is free for a ceiling to help
+        return False
+    torch.cuda.set_per_process_memory_fraction((free - margin) / total)
+    return True
+
+
 def generate(job, config, progress):
     preflight(job, config)
-    return pipeline(job['pipeline']).generate(job, validate_config(config), progress)
+    module, config = pipeline(job['pipeline']), validate_config(config)
+    try:
+        import torch
+    except ImportError:
+        torch = None
+    if not _vram_ceiling(torch):
+        return module.generate(job, config, progress)
+    try:
+        return module.generate(job, config, progress)
+    except torch.OutOfMemoryError:
+        pass  # left below, once the failed attempt's tensors are out of scope
+    finally:
+        torch.cuda.set_per_process_memory_fraction(1.0)
+    # This job needs more than the card has free: better slow than failed, so run it again
+    # without the ceiling, as before.
+    gc.collect()
+    torch.cuda.empty_cache()
+    return module.generate(job, config, progress)
 
 
 def unload():

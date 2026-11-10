@@ -45,7 +45,7 @@ def generate(job, config, progress):
     import torch
     from runner.models.headers import header
     from runner.models.ltx25 import validate_layout, video_encoder, WeightPool, load_streamed
-    from runner.models.residency import RESIDENCY, open_store
+    from runner.models.residency import RESIDENCY, open_store, prefetch
     from runner.models.ltx25_text import encode
     from runner.video.export import save_video
     from diffusers import LTX2Pipeline, LTX2ConditionPipeline, FlowMatchEulerDiscreteScheduler
@@ -66,6 +66,7 @@ def generate(job, config, progress):
             seconds=round(time.perf_counter() - start, 2),
             allocated_gib=round(torch.cuda.memory_allocated() / 1024**3, 3),
             free_gib=round(torch.cuda.mem_get_info()[0] / 1024**3, 3),
+            **memory(),
         )
         timeline.append({key: value for key, value in entry.items() if key != 'prompt'})
         report(**data)
@@ -80,7 +81,15 @@ def generate(job, config, progress):
 
         source_frames, continuation = source_tail(source_ref['path'], job['parameters'])
     embeds, mask = encode(job, headers, progress)
-    progress(stage='video prompt encoded')
+    progress(stage='video prompt encoded', weights=getattr(encode, 'weights', None))
+    setup = {}
+    lap = time.perf_counter()
+
+    def timed(name):
+        nonlocal lap
+        setup[name] = round(time.perf_counter() - lap, 2)
+        lap = time.perf_counter()
+
     with ExitStack() as stack, torch.inference_mode():
         models, names = validate_layout(headers)
         del models['textEncoder']
@@ -97,25 +106,37 @@ def generate(job, config, progress):
             adapters.append((key, item['strength']))
         free = torch.cuda.mem_get_info()[0] / 1024**3
         p = job['parameters']
-        # Keep more of the DiT on the GPU when the activations are small (drafts): the rest is
-        # copied from RAM at every step. Never less than the former fixed 6 GiB rule.
+        # The share of the DiT kept on the GPU; the rest is copied from RAM at every step, at
+        # about 12 GiB/s. What the model computes with comes first: 5 GiB (the connectors and
+        # encoders at their peak, the allocator's slack, the engine's margin) plus the
+        # activations, which grow with the video. Video memory that runs out halves the speed,
+        # a smaller share costs a second per step at most.
         tokens = ((p['frames'] - 1) // 8 + 1) * (p['height'] // 32) * (p['width'] // 32)
-        reserve = 2.5 + tokens * 4096 * 2 * 24 / 1024**3
-        budget = max(min(6, max(0, free - 4)), free - reserve)
+        budget = max(0, free - 5 - tokens * 4096 * 2 * 24 / 1024**3)
         if 'cacheGiB' in config:
             budget = min(config['cacheGiB'], budget)
         hot = WeightPool(stores, budget, adapters=adapters)
         cold = WeightPool(stores, 0)
+        # From here to the end of the first step, the disk reads the DiT in sequence: its
+        # layers then find their weights in RAM instead of faulting them in one by one.
+        ahead = prefetch(job['components'], stores, [*names['model'].values(), *names['connectors'].values()])
+        timed('layouts and stores')
         try:
             transformer = load_streamed(models.pop('model'), names['model'], hot)
+            timed('transformer')
+            hot.preload()
+            timed('weights kept on the GPU')
             connectors = load_streamed(models.pop('connectors'), names['connectors'], cold)
+            timed('connectors')
             if job['references']:
                 encoder, encoder_names = video_encoder(headers)
                 vae = load_streamed(encoder, encoder_names, cold)
                 del encoder, models['vae']
             else:
                 vae = load_streamed(models.pop('vae'), names['vae'], cold)
+            timed('vae')
             audio = load_streamed(models.pop('audioVae'), names['audioVae'], cold)
+            timed('audio vae')
             pipeline = LTX2ConditionPipeline if job['references'] else LTX2Pipeline
             msr_refs = [ref for ref in job['references'] if ref['role'] == 'msr_image']
             if msr_refs:
@@ -192,10 +213,12 @@ def generate(job, config, progress):
                     )
 
             def step(_pipe, index, _timestep, values):
-                progress(stage='generating video', step=index + 1, total=8)
+                read = {'prefetch': ahead.stop()} if ahead and index == 0 else {}
+                progress(stage='generating video', step=index + 1, total=8, weights=hot.summary(), **read)
                 return values
 
-            progress(stage='sampling video')
+            timed('conditions')
+            progress(stage='sampling video', setup=setup)
             video, _audio = pipe(
                 prompt_embeds=embeds.to('cuda'),
                 prompt_attention_mask=mask.to('cuda'),
@@ -230,6 +253,8 @@ def generate(job, config, progress):
             progress(stage='video sampled', **cache)
             del _audio, pipe, transformer, connectors, vae, audio
         finally:
+            if ahead:
+                ahead.stop()
             hot.clear()
             cold.clear()
     del hot, cold, stores, models, embeds, mask
@@ -290,6 +315,27 @@ def generate(job, config, progress):
             timeOffsets=list(range(-len(msr_refs), 0)),
         )
     return save_video(pixels, config, job, metadata, audio=generated_audio)
+
+
+def memory():
+    """Free RAM, this process's own share, what the disks have read since the system started
+    and the VRAM PyTorch holds (in use or cached): tells a slow disk from a full memory, and
+    a full GPU from a slow model."""
+    result = {}
+    torch = sys.modules.get('torch')
+    if torch is not None and torch.cuda.is_initialized():
+        result['reserved_gib'] = round(torch.cuda.memory_reserved() / 1024**3, 2)
+    try:
+        import psutil
+
+        result.update(
+            disk_read_gib=round(psutil.disk_io_counters().read_bytes / 1024**3, 2),
+            ram_available_gib=round(psutil.virtual_memory().available / 1024**3, 1),
+            ram_process_gib=round(psutil.Process().memory_info().rss / 1024**3, 1),
+        )
+    except Exception:
+        pass
+    return result
 
 
 def configure_decode(vae):

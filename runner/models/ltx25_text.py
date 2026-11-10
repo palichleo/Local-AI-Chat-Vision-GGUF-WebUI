@@ -6,7 +6,7 @@ import gc
 def encode(job, headers, progress):
     import torch
     from tokenizers import Tokenizer
-    from runner.models.residency import open_store
+    from runner.models.residency import open_store, prefetch
     from runner.models.ltx25 import architectures, mappings, WeightPool, load_streamed
 
     models = architectures(headers)
@@ -23,14 +23,19 @@ def encode(job, headers, progress):
         mask = torch.tensor([[0] * (1024 - len(ids)) + [1] * len(ids)], device='cuda')
         tokens = torch.tensor([[0] * (1024 - len(ids)) + ids], device='cuda')
         pool = WeightPool({'textEncoder': source}, 0)
+        # The disk reads the encoder's weights in sequence while its layers are built and run.
+        ahead = prefetch(job['components'], {'textEncoder': source}, names.values())
         try:
             model = load_streamed(model, names, pool)
             progress(stage='encoding video prompt')
             with torch.inference_mode():
                 outputs = model(input_ids=tokens, attention_mask=mask, output_hidden_states=True, use_cache=False)
                 embeds = torch.stack(outputs.hidden_states, dim=-1).flatten(2, 3).to('cpu', dtype=torch.bfloat16)
+            encode.weights = dict(pool.summary(), **({'prefetch': ahead.stop()} if ahead else {}))
             return embeds, mask.cpu()
         finally:
+            if ahead:
+                ahead.stop()
             del model, tokens, mask
             if 'outputs' in locals():
                 del outputs
