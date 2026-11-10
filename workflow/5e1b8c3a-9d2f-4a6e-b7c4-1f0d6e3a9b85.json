@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "5e1b8c3a-9d2f-4a6e-b7c4-1f0d6e3a9b85",
+  "enabled": true,
+  "pipeline": "realesrgan_image",
+  "mediaType": "image",
+  "name": "Upscale rapide (Real-ESRGAN ×4)",
+  "description": "Fast x4 upscale of an image with Real-ESRGAN, without diffusion. Use it only when the user asks for a quick or plain enlargement; SeedVR2 is the default upscaler.",
+  "components": {
+    "upscaler": {
+      "policy": "fixed",
+      "asset": "d3a7f2c1-6b8e-4c5d-a9f0-2e4b7c1d8a36",
+      "file": "RealESRGAN_x4plus.pth"
+    }
+  },
+  "parameters": {
+    "tile": {
+      "policy": "fixed",
+      "value": 512
+    },
+    "max_side": {
+      "policy": "model",
+      "type": "integer",
+      "min": 0,
+      "max": 16384,
+      "default": 0,
+      "description": "Largest output side in pixels (0 = no limit)."
+    }
+  },
+  "loras": [],
+  "references": [
+    {
+      "id": "source",
+      "name": "Image à agrandir",
+      "role": "source_image",
+      "required": true
+    }
+  ]
+}

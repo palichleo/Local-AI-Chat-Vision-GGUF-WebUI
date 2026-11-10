@@ -1,0 +1,151 @@
+{
+  "family": "seedvr2",
+  "label": "SeedVR2",
+  "mediaType": "image",
+  "tasks": ["upscale"],
+  "requires": ["torch", "PIL", "safetensors"],
+  "components": {
+    "model": {
+      "label": "Modèle SeedVR2 (DiT 7B)",
+      "folder": "checkpoints",
+      "required": true,
+      "note": "DiT SeedVR2 7B en fp8 ou int8 ConvRot (Comfy-Org ou numz), par exemple seedvr2_7b_sharp_fp8_e4m3fn.",
+      "signature": [
+        {
+          "key": "^vid_in\\.proj\\.weight$",
+          "shape": [3072, 132]
+        },
+        {
+          "key": "^blocks\\.35\\.attn\\.proj_qkv\\.vid\\.weight$",
+          "shape": [9216, 3072]
+        }
+      ]
+    },
+    "vae": {
+      "label": "VAE SeedVR2",
+      "folder": "VAE",
+      "required": true,
+      "note": "ema_vae_fp16.safetensors",
+      "signature": [
+        {
+          "key": "^decoder\\.up_blocks\\.0\\.upsamplers\\.0\\.upscale_conv\\.weight$",
+          "shape": [4096, 512, 1, 1, 1]
+        },
+        {
+          "key": "^encoder\\.conv_out\\.weight$",
+          "shape": [32, 512, 3, 3, 3]
+        }
+      ]
+    }
+  },
+  "parameters": {
+    "seed": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "scale": {
+      "type": "number",
+      "min": 1,
+      "max": 4,
+      "note": "Agrandissement par passe (2 = taille doublée)."
+    },
+    "passes": {
+      "type": "integer",
+      "choices": [1, 2, 3],
+      "note": "Passes successives ; une seule suffit en général."
+    },
+    "steps": {
+      "type": "integer",
+      "choices": [1, 2, 3, 4],
+      "note": "Étapes de restauration ; 1 est le réglage distillé, plus naturel."
+    },
+    "color_correction": {
+      "type": "string",
+      "choices": ["lab", "wavelet", "adain", "none"],
+      "note": "Couleurs reprises de l’original : lab (fidèle), wavelet, adain (léger), none."
+    },
+    "max_side": {
+      "type": "integer",
+      "min": 0,
+      "max": 8192,
+      "note": "Plus grand côté de sortie (0 = sans limite, 8192 au plus)."
+    }
+  },
+  "requiredParameters": ["seed"],
+  "roles": {
+    "source_image": {
+      "as": "source",
+      "media": "image",
+      "max": 1,
+      "label": "Image à agrandir"
+    }
+  },
+  "template": {
+    "name": "Upscale SeedVR2",
+    "description": "Upscales and restores an image with SeedVR2 7B: sharper details without the plastic AI look, colours kept from the original. One x2 pass by default; scale, passes, steps and colour correction can follow the request.",
+    "components": {
+      "model": {
+        "policy": "fixed",
+        "asset": "select-local-model"
+      },
+      "vae": {
+        "policy": "fixed",
+        "asset": "select-local-vae"
+      }
+    },
+    "parameters": {
+      "seed": {
+        "policy": "random",
+        "type": "integer"
+      },
+      "scale": {
+        "policy": "model",
+        "type": "number",
+        "min": 1,
+        "max": 4,
+        "default": 2,
+        "description": "Enlargement per pass (2 doubles the size). Only change it if the user asks for a size."
+      },
+      "passes": {
+        "policy": "model",
+        "type": "integer",
+        "choices": [1, 2, 3],
+        "default": 1,
+        "description": "Repeat the upscale; 1 unless the user wants a much larger or stronger result."
+      },
+      "steps": {
+        "policy": "model",
+        "type": "integer",
+        "choices": [1, 2, 3, 4],
+        "default": 1,
+        "description": "Restoration steps; 1 is the natural distilled setting, more adds invented detail."
+      },
+      "color_correction": {
+        "policy": "model",
+        "type": "string",
+        "choices": ["lab", "wavelet", "adain", "none"],
+        "default": "lab",
+        "description": "How colours are taken back from the original: lab (faithful), wavelet, adain (light), none."
+      },
+      "max_side": {
+        "policy": "model",
+        "type": "integer",
+        "min": 0,
+        "max": 8192,
+        "default": 0,
+        "description": "Largest output side in pixels (0 = no limit)."
+      }
+    },
+    "loras": [],
+    "references": [
+      {
+        "id": "source",
+        "name": "Image à agrandir",
+        "role": "source_image",
+        "required": true
+      }
+    ]
+  },
+  "preference": 1
+}

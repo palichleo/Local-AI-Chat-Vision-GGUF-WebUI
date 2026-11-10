@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "id": "9f3c6a2e-4d1b-4e8f-8c7a-3b5d0e2f6a19",
+  "enabled": true,
+  "pipeline": "rife",
+  "mediaType": "video",
+  "name": "Interpoler (RIFE 4.26)",
+  "description": "Adds intermediate frames with RIFE 4.26: smoother motion at the same duration, or slow motion.",
+  "components": {
+    "interpolator": {
+      "policy": "fixed",
+      "asset": "4b8e2d7a-1c3f-4a9e-b6d5-7e0c2a9f3b14",
+      "file": "rife_v4.26.safetensors"
+    }
+  },
+  "parameters": {
+    "multiplier": {
+      "policy": "model",
+      "type": "integer",
+      "choices": [
+        2,
+        4
+      ],
+      "default": 2,
+      "description": "2 for smoother motion, 4 for very smooth or strong slow motion."
+    },
+    "mode": {
+      "policy": "model",
+      "type": "string",
+      "choices": [
+        "smooth",
+        "slow_motion"
+      ],
+      "default": "smooth",
+      "description": "smooth keeps the duration; slow_motion slows the video down."
+    }
+  },
+  "loras": [],
+  "references": [
+    {
+      "id": "source",
+      "name": "Vidéo à fluidifier",
+      "role": "source_video",
+      "required": true
+    }
+  ]
+}

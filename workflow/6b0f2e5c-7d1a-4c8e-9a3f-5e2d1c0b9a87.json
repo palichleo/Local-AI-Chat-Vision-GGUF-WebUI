@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "id": "6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87",
+  "enabled": true,
+  "pipeline": "seedvr2",
+  "mediaType": "image",
+  "name": "Upscale SeedVR2",
+  "description": "Upscales and restores an image with SeedVR2 7B: sharper details without the plastic AI look, colours kept from the original. One x2 pass by default; scale, passes, steps and colour correction can follow the request.",
+  "components": {
+    "model": {
+      "policy": "fixed",
+      "asset": "3f6c1a2e-8b4d-4e7a-9c15-2d0e7f8a6b31",
+      "file": "seedvr2_7b_sharp_fp8_e4m3fn.safetensors"
+    },
+    "vae": {
+      "policy": "fixed",
+      "asset": "9d2b7c4e-1f3a-4b6c-8e5d-0a9f2c7b1e64",
+      "file": "ema_vae_fp16.safetensors"
+    }
+  },
+  "parameters": {
+    "seed": {
+      "policy": "random",
+      "type": "integer"
+    },
+    "scale": {
+      "policy": "model",
+      "type": "number",
+      "min": 1,
+      "max": 4,
+      "default": 2,
+      "description": "Enlargement per pass (2 doubles the size). Only change it if the user asks for a size."
+    },
+    "passes": {
+      "policy": "model",
+      "type": "integer",
+      "choices": [
+        1,
+        2,
+        3
+      ],
+      "default": 1,
+      "description": "Repeat the upscale; 1 unless the user wants a much larger or stronger result."
+    },
+    "steps": {
+      "policy": "model",
+      "type": "integer",
+      "choices": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "default": 1,
+      "description": "Restoration steps; 1 is the natural distilled setting, more adds invented detail."
+    },
+    "color_correction": {
+      "policy": "model",
+      "type": "string",
+      "choices": [
+        "lab",
+        "wavelet",
+        "adain",
+        "none"
+      ],
+      "default": "lab",
+      "description": "How colours are taken back from the original: lab (faithful), wavelet, adain (light), none."
+    },
+    "max_side": {
+      "policy": "model",
+      "type": "integer",
+      "min": 0,
+      "max": 8192,
+      "default": 0,
+      "description": "Largest output side in pixels (0 = no limit)."
+    }
+  },
+  "loras": [],
+  "references": [
+    {
+      "id": "source",
+      "name": "Image à agrandir",
+      "role": "source_image",
+      "required": true
+    }
+  ]
+}

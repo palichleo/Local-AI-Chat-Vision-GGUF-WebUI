@@ -4,10 +4,11 @@ Atelier local is licensed under PolyForm Noncommercial 1.0.0 (see `LICENSE`). Th
 
 ## Code included in this repository
 
-No third-party source file is copied into this repository. Two network definitions are written after published architectures, whose licenses are reproduced here:
+No third-party source file is copied into this repository. Some network definitions are written after published architectures, whose licenses are reproduced here:
 
 - `runner/models/rrdbnet.py` follows the RRDBNet architecture of [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) — BSD 3-Clause License, Copyright (c) 2021, Xintao Wang. All rights reserved.
 - `runner/models/rife.py` follows the IFNet architecture of [Practical-RIFE](https://github.com/hzwer/Practical-RIFE) — MIT License, Copyright (c) 2021 hzwer.
+- `runner/models/seedvr2.py`, `runner/models/seedvr2_vae.py` and `runner/pipelines/seedvr2.py` follow the SeedVR2 architecture and one-step sampling of [SeedVR](https://github.com/ByteDance-Seed/SeedVR) — Apache License 2.0, Copyright (c) 2025 Bytedance Ltd. and/or its affiliates — as packaged by [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) — Apache License 2.0, Copyright 2025 seed. `runner/models/seedvr2_color.py` implements the colour corrections described there (CIELAB histogram matching, wavelet, AdaIN).
 
 Any future adaptation of MIT, BSD or Apache-2.0 code must be listed here with its copyright line and license, and an Apache-2.0 `NOTICE` file must be reproduced when one exists. GPL and AGPL code (including ComfyUI) cannot be included.
 
