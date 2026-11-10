@@ -611,7 +611,14 @@ export async function createApplication({
       }
       if (path === '/api/updates/session' && req.method === 'GET')
         return send(200, applyingUpdate ? null : await readUpdateSession(dataDir));
-      if (path === '/api/updates' && req.method === 'GET') return send(200, await updates);
+      if (path === '/api/updates' && req.method === 'GET') {
+        // Asked again from the update button: a failed check (offline) never hides a known update.
+        if (requestURL.searchParams.get('refresh') === '1' && updateChecker && !applyingUpdate) {
+          const fresh = await updateChecker({ signal: updateController.signal }).catch(() => ({ available: false }));
+          if (fresh.available || !(await updates).available) updates = Promise.resolve(fresh);
+        }
+        return send(200, await updates);
+      }
       if (path === '/api/models' && req.method === 'GET')
         return send(200, { models: await models.list(), ...(await models.scan()) });
       if (path === '/api/status' && req.method === 'GET') return send(200, status());
@@ -1317,6 +1324,8 @@ export async function createApplication({
         if (savingSettings) throw problem('Changement de modèle en cours.', 409);
         if (runtime.active) throw problem('Annule la génération avec le bouton d’interruption.', 409);
         await engine.stop();
+        // Stopped by hand: the image and video models kept between generations leave RAM and VRAM too.
+        await generation.unload().catch(error => console.error('Déchargement des modèles :', error.message));
         return send(200, status());
       }
       if (path === '/api/context') {
@@ -1512,6 +1521,9 @@ export async function createApplication({
     updates = Promise.resolve()
       .then(() => updateChecker({ signal: updateController.signal }))
       .catch(() => ({ available: false }));
+  // Launched as the application (not as a test server): the registered LLM starts by itself.
+  if (managed && config.enginePath && config.modelPath && engine.state === 'stopped')
+    void engine.start(config).catch(error => console.error('Démarrage automatique du modèle :', error.message));
   let closing,
     relaunching = false;
   if (managed) {

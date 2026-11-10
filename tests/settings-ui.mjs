@@ -181,7 +181,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
   const application = source.slice(0, source.lastIndexOf('\ntry {')).replace(/^import .*;\r?\n/gm, '');
   runInNewContext(
     application +
-      '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, renderModelSelect, applyModelLibrary, switchLLM, addLLM, saveLLM, removeLLM, cancelLLM, modelDraft, modelEditorDirty, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };',
+      '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, applyModelLibrary, addLLM, saveLLM, removeLLM, cancelLLM, modelDraft, modelEditorDirty, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };',
     context,
   );
   Object.assign(context.app.state, { token: 'test', config: { ...savedConfig }, connected: true });
@@ -562,49 +562,22 @@ test('opening settings rescans folders and selecting one fills both paths withou
   await ui.open();
   assert.equal(scans, 2);
 });
-test('saved models have folder names and the sidebar selector locks during GPU work', async () => {
-  const ui = await settingsUI(),
-    profiles = [
-      { id: 'a', name: 'Alpha folder', modelPath: '/models/Alpha folder/main.gguf', projectorPath: '' },
-      { id: 'b', name: 'Beta folder', modelPath: '/models/Beta folder/main.gguf', projectorPath: '' },
-    ];
-  ui.applyModelLibrary({ models: profiles, detected: [], errors: [] });
+test('the start/stop button: green play when stopped, red stop while running, amber stop during a generation', async () => {
+  const ui = await settingsUI();
+  const button = ui.$('toggle-engine');
+  ui.state.status = { state: 'stopped', logs: [] };
   ui.updateControls();
-  assert.equal(ui.$('model-select').hidden, false);
-  assert.ok(ui.$('model-select').children.some(item => item.textContent === 'Alpha folder'));
-  ui.state.generating = true;
+  assert.match(button.className, /is-off/);
+  assert.match(button.title, /Démarrer/);
+  ui.state.status = { state: 'ready', logs: [] };
   ui.updateControls();
-  assert.equal(ui.$('model-select').disabled, true);
-  ui.state.generating = false;
+  assert.match(button.className, /is-running/);
+  assert.doesNotMatch(button.className, /is-busy/);
+  assert.match(button.title, /Arrêter/);
+  ui.state.status = { state: 'stopped', logs: [], toolJob: { state: 'generating' } };
   ui.updateControls();
-  assert.equal(ui.$('model-select').disabled, false);
-});
-
-test('switching the sidebar model uses the saved profile and does not discard conversation messages', async () => {
-  const profile = {
-    id: 'second',
-    name: 'Second folder',
-    modelPath: '/models/Second folder/main.gguf',
-    projectorPath: '',
-  };
-  const ui = await settingsUI({
-    request: call =>
-      call.route === 'models/select'
-        ? Response.json({
-            config: { ...savedConfig, ...profile },
-            modelName: profile.name,
-            status: { state: 'stopped', logs: [] },
-          })
-        : undefined,
-  });
-  ui.state.messages = [{ role: 'user', content: 'Keep this chat' }];
-  ui.applyModelLibrary({ models: [profile], detected: [], errors: [] });
-  ui.updateControls();
-  ui.$('model-select').value = profile.id;
-  await ui.switchLLM();
-  assert.equal(ui.calls.find(item => item.route === 'models/select').body.id, profile.id);
-  assert.equal(ui.state.modelName, 'Second folder');
-  assert.equal(ui.state.messages[0].content, 'Keep this chat');
+  assert.match(button.className, /is-paused/);
+  assert.match(button.title, /pause/);
 });
 
 test('LLM dropdown initially selects the current model and details remain collapsed', async () => {
@@ -765,7 +738,6 @@ test('removing an active LLM refreshes selectors without losing conversations or
   await ui.removeLLM();
   assert.equal(ui.state.config.modelPath, '');
   assert.equal(ui.state.models.length, 0);
-  assert.equal(ui.$('model-select').hidden, true);
   assert.equal(ui.$('detected-model').value, '');
   assert.equal(ui.$('remove-llm').disabled, true);
   assert.equal(ui.$('model-path').value, '');

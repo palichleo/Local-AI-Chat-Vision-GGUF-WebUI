@@ -1220,3 +1220,91 @@ body:not([data-files='open']) .assets-panel {
     flex-basis: 32px;
   }
 }
+
+/* Model start/stop: same size as the other sidebar icons, left of the settings. */
+.sidebar-actions .engine-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+.sidebar-actions .engine-button svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+  fill: currentColor;
+  stroke: none;
+}
+.engine-button.is-off {
+  color: var(--success);
+}
+.engine-button.is-running {
+  color: var(--danger);
+}
+.engine-button.is-paused,
+.engine-button.is-paused:disabled {
+  color: var(--warning);
+  opacity: 1;
+  cursor: default;
+}
+.engine-button.is-busy svg {
+  animation: engine-busy 1.2s ease-in-out infinite;
+}
+@keyframes engine-busy {
+  50% {
+    opacity: 0.45;
+  }
+}
+.engine-button.is-off:hover:enabled {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+}
+.engine-button.is-running:hover:enabled {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+.engine-button:disabled:not(.is-paused) {
+  opacity: 0.45;
+}
+.engine-button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* The update button is always shown: neutral like its neighbours, blue when an update exists. */
+.sidebar-actions .update-button:not(.has-update) {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+.sidebar-actions .update-button:not(.has-update):hover:enabled {
+  background: var(--surface-raised);
+  color: var(--ink);
+  border-color: var(--line);
+}
+.sidebar-actions .update-button.is-checking svg {
+  animation: update-checking 0.9s linear infinite;
+}
+@keyframes update-checking {
+  to {
+    rotate: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .engine-button.is-busy svg,
+  .sidebar-actions .update-button.is-checking svg {
+    animation: none;
+  }
+}

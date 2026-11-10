@@ -119,7 +119,9 @@ test('background check never blocks startup or chat status and repeated reads re
     assert.equal(calls, 1);
     const html = await (await fetch(app.url)).text();
     assert.ok(html.indexOf('id="settings-open"') < html.indexOf('id="update-available"'));
-    assert.match(html, /id="update-available"[^>]+hidden/);
+    assert.doesNotMatch(html, /id="update-available"[^>]+hidden/, 'the update button is always shown');
+    assert.ok(html.indexOf('id="toggle-engine"') < html.indexOf('id="settings-open"'), 'start/stop sits left of the settings');
+    assert.doesNotMatch(html, /id="model-select"|id="model-card"/, 'the LLM is chosen in the settings only');
   } finally {
     release({ available: false });
     await app?.close();
@@ -164,6 +166,38 @@ test('failed background checks are cached silently and app closure cancels pendi
     await app.close();
     app = null;
     assert.equal(cancelled, true);
+  } finally {
+    await app?.close();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test('the update button checks again on demand, and a failed check keeps a known update', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'atelier-updates-'));
+  const answers = [{ available: false }, { available: true, version: '9.0.0' }, null];
+  let app;
+  try {
+    app = await createApplication({
+      port: 0,
+      dataDir: folder,
+      updateChecker: async () => {
+        const answer = answers.shift();
+        if (!answer) throw new Error('offline');
+        return answer;
+      },
+    });
+    const { token } = await (await fetch(app.url + '/api/bootstrap')).json();
+    const read = async (refresh = false) =>
+      (
+        await fetch(app.url + '/api/updates' + (refresh ? '?refresh=1' : ''), {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      ).json();
+    assert.deepEqual(await read(), { available: false }, 'launch check');
+    assert.deepEqual(await read(), { available: false }, 'a plain read reuses it');
+    assert.deepEqual(await read(true), { available: true, version: '9.0.0' }, 'the button checks again');
+    assert.deepEqual(await read(true), { available: true, version: '9.0.0' }, 'offline keeps the known update');
+    assert.deepEqual(await read(), { available: true, version: '9.0.0' });
   } finally {
     await app?.close();
     await rm(folder, { recursive: true, force: true });

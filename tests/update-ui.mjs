@@ -61,7 +61,7 @@ test('download failure keeps configuration, file selection and composer controls
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const controls = source.slice(
     source.indexOf('function updateControls()'),
-    source.indexOf('async function checkUpdates()'),
+    source.indexOf('async function checkUpdates('),
   );
   const install = source.slice(
     source.indexOf('async function installUpdate()'),

@@ -55,6 +55,17 @@ def generate(job, config, progress):
     return pipeline(job['pipeline']).generate(job, validate_config(config), progress)
 
 
+def unload():
+    """Everything the worker keeps between generations leaves RAM and VRAM: the model files
+    held in RAM (and pinned for fast transfers), then the GPU allocator's cache."""
+    residency = sys.modules.get('runner.models.residency')
+    freed = 0.0
+    if residency is not None:
+        freed = sum(arena.size for arena in residency.RESIDENCY.arenas.values()) / 1024**3
+        residency.RESIDENCY.clear()
+    return dict(release(), freedRamGiB=round(freed, 2))
+
+
 def release():
     gc.collect()
     torch = sys.modules.get('torch')

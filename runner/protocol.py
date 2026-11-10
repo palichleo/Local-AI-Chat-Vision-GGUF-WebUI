@@ -5,7 +5,7 @@ import json
 import sys
 
 from runner.contracts import fields
-from runner.engine import capabilities, diagnostics, generate, preflight, release
+from runner.engine import capabilities, diagnostics, generate, preflight, release, unload
 from runner.models.headers import unique_object
 
 MAX_LINE = 1024 * 1024
@@ -49,7 +49,7 @@ def serve(config, source=None, destination=None):
                 ):
                     request_id = None
                     raise ValueError('Invalid request id')
-                if method not in ('diagnostics', 'preflight', 'generate', 'release', 'shutdown'):
+                if method not in ('diagnostics', 'preflight', 'generate', 'release', 'unload', 'shutdown'):
                     raise ValueError('Unsupported worker method')
                 if not isinstance(params, dict):
                     raise ValueError('Worker params must be an object')
@@ -66,6 +66,8 @@ def serve(config, source=None, destination=None):
                         result = preflight(params, config)
                     elif method == 'generate':
                         result = generate(params, config, progress)
+                    elif method == 'unload':
+                        result = unload()
                     else:
                         result = release()
                 response = dict(id=request_id, result=result)

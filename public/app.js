@@ -475,10 +475,6 @@ function updateControls() {
   const text = state.connected ? labels[s.state] || 'État inconnu' : 'Connexion interrompue';
   $('settings-status').textContent = text;
   $('settings-dot').className = `dot ${state.connected ? s.state : 'error'}`;
-  $('model-card').className =
-    `model-card ${state.connected && s.state === 'ready' ? 'is-ready' : state.connected && ['loading', 'stopping'].includes(s.state) ? 'is-loading' : 'is-off'}`;
-  $('model-card').setAttribute('aria-label', `Modèle : ${text}`);
-  $('model-card').title = text;
   $('history-enabled').checked = state.saveHistory;
   $('history-enabled').disabled =
     state.savingPreferences || state.clearingHistory || toolBusy || state.generating || !state.connected;
@@ -535,11 +531,22 @@ function updateControls() {
     state.operation ||
     s.state === 'stopping' ||
     !state.connected;
-  $('toggle-engine').classList.toggle('is-running', running);
-  $('toggle-engine').replaceChildren(
-    icon(running ? 'stop' : 'play'),
-    node('span', '', running ? 'Arrêter le modèle' : 'Démarrer le modèle'),
-  );
+  // Green play when stopped, red stop while it runs; during a generation the model is set
+  // aside to free the GPU: a stop square in amber, reloaded by itself afterwards.
+  const paused = toolBusy && !running,
+    engineLabel = paused
+      ? 'Modèle en pause pendant la génération · il redémarre ensuite'
+      : running
+        ? `Arrêter le modèle · ${text}`
+        : state.config.modelPath
+          ? 'Démarrer le modèle'
+          : 'Aucun LLM enregistré · ouvrir les paramètres';
+  $('toggle-engine').className =
+    'engine-button ' +
+    (paused ? 'is-paused' : running ? (s.state === 'ready' ? 'is-running' : 'is-running is-busy') : 'is-off');
+  $('toggle-engine').setAttribute('aria-label', engineLabel);
+  $('toggle-engine').title = engineLabel;
+  $('toggle-engine').replaceChildren(icon(paused || running ? 'stop' : 'play'));
   $('send').disabled =
     state.projectWorking ||
     toolBusy ||
@@ -596,18 +603,6 @@ function updateControls() {
   assetsUI.setBusy(state.generating || s.busy || toolBusy || state.updating || state.closingApp);
   if (state.closingApp)
     for (const control of document.querySelectorAll('button,input,textarea,select')) control.disabled = true;
-  $('model-select').disabled =
-    toolBusy ||
-    state.generating ||
-    state.preparing ||
-    state.operation ||
-    state.settingsLoading ||
-    state.loadingHistory ||
-    state.updating ||
-    state.generationSettingsWorking ||
-    s.busy ||
-    !state.connected ||
-    ['loading', 'stopping'].includes(s.state);
   $('add-llm').disabled =
     state.settingsLoading ||
     state.operation ||
@@ -626,18 +621,39 @@ function updateControls() {
     !state.detectedModels?.some(item => item.id === $('detected-model').value && item.id !== 'current');
 }
 
-async function checkUpdates() {
+/**
+ * The update button is always there: blue when an update is available (checked at launch),
+ * like the other sidebar icons otherwise. A click on it then checks again.
+ */
+async function checkUpdates({ refresh = false } = {}) {
+  const button = $('update-available');
   try {
-    const update = await (await api('updates')).json();
-    const button = $('update-available');
-    button.hidden = update.available !== true;
-    if (update.available) {
-      const label = 'Installer la mise à jour · v' + update.version;
-      button.title = label;
-      button.setAttribute('aria-label', label);
-    }
+    const update = await (await api(refresh ? 'updates?refresh=1' : 'updates')).json();
+    state.updateAvailable = update.available === true;
+    button.classList.toggle('has-update', state.updateAvailable);
+    const label = state.updateAvailable
+      ? 'Installer la mise à jour · v' + update.version
+      : refresh
+        ? 'Atelier est à jour · cliquer pour vérifier à nouveau'
+        : 'Rechercher une mise à jour';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    if (refresh) $('live-status').textContent = state.updateAvailable ? 'Mise à jour disponible.' : 'Atelier est à jour.';
   } catch {
     /* Offline checks stay silent. */
+  }
+}
+
+async function updateButton() {
+  if (state.updateAvailable) return installUpdate();
+  if (state.checkingUpdates) return;
+  state.checkingUpdates = true;
+  $('update-available').classList.add('is-checking');
+  try {
+    await checkUpdates({ refresh: true });
+  } finally {
+    state.checkingUpdates = false;
+    $('update-available').classList.remove('is-checking');
   }
 }
 
@@ -666,26 +682,6 @@ async function refreshStatus() {
   updateControls();
 }
 
-function renderModelSelect() {
-  const select = $('model-select');
-  select.replaceChildren();
-  select.hidden = (state.models || []).length < 2;
-  const active = (state.models || []).find(
-    item => item.modelPath === state.config.modelPath && item.projectorPath === (state.config.projectorPath || ''),
-  );
-  if (!active) {
-    const option = node('option', '', 'Modèle actuel');
-    option.value = '';
-    select.append(option);
-  }
-  for (const item of state.models || []) {
-    const option = node('option', '', item.name);
-    option.value = item.id;
-    option.title = item.modelPath;
-    select.append(option);
-  }
-  select.value = active?.id || '';
-}
 function modelDraft() {
   return {
     id: state.modelEditId || '',
@@ -719,7 +715,6 @@ function applyModelLibrary(library) {
     ...state.models,
     ...(library.detected || []).filter(item => !state.models.some(saved => saved.id === item.id)),
   ];
-  renderModelSelect();
   const current = activeModel() || {
     id: 'current',
     name: state.modelName || state.config.modelPath?.split(/[\\/]/).slice(-2, -1)[0] || '',
@@ -813,7 +808,6 @@ async function removeLLM() {
     state.modelName = result.modelName;
     state.status = result.status;
     state.models = result.models;
-    renderModelSelect();
     if (session === state.settingsSession && $('settings').open) {
       applyModelLibrary(result);
       settingsGuard.markPartSaved('llm');
@@ -853,7 +847,6 @@ async function saveLLM({ withinSettingsSave = false } = {}) {
       })
     ).json();
     state.models = result.models;
-    renderModelSelect();
     if (session === state.settingsSession && $('settings').open) state.modelEditId = result.profile.id;
     const selected = await (await api('models/select', { id: result.profile.id })).json();
     state.config = selected.config;
@@ -879,7 +872,6 @@ async function saveLLM({ withinSettingsSave = false } = {}) {
       $('model-paths').open = false;
       $('models-status').hidden = true;
     }
-    renderModelSelect();
     contextMeter.schedule();
     return true;
   } catch (error) {
@@ -896,34 +888,6 @@ async function saveLLM({ withinSettingsSave = false } = {}) {
     }
   }
 }
-async function switchLLM() {
-  const id = $('model-select').value;
-  if (!id || $('model-select').disabled) return;
-  if (settingsGuard.isDirty()) {
-    renderModelSelect();
-    return requestSettingsClose(() => {
-      $('model-select').value = id;
-      void switchLLM();
-    });
-  }
-  state.operation = true;
-  updateControls();
-  try {
-    const result = await (await api('models/select', { id })).json();
-    state.config = result.config;
-    state.modelName = result.modelName;
-    state.status = result.status;
-    notice(result.warning || '');
-    contextMeter.schedule();
-  } catch (error) {
-    notice(error.message);
-  } finally {
-    state.operation = false;
-    renderModelSelect();
-    await refreshStatus();
-  }
-}
-
 function requestSettingsClose(after) {
   if (workflowsUI.isEditing?.()) return workflowsUI.requestBack(() => settingsGuard.requestClose(after));
   return settingsGuard.requestClose(after);
@@ -1021,7 +985,6 @@ async function saveConfiguration() {
     state.generation = saved.generation;
     state.globalInstructions = saved.instructions ?? $('global-instructions').value;
     state.modelName = activeModel()?.name || '';
-    renderModelSelect();
     const current = session === state.settingsSession && $('settings').open;
     if (current) {
       workflowsUI.saved(saved);
@@ -1992,9 +1955,8 @@ $('detected-model').onchange = chooseDetectedModel;
 $('add-llm').onclick = addLLM;
 $('save-llm').onclick = () => saveLLM();
 $('cancel-llm').onclick = cancelLLM;
-$('model-select').onchange = switchLLM;
 $('remove-llm').onclick = removeLLM;
-$('update-available').onclick = installUpdate;
+$('update-available').onclick = updateButton;
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('shutdown-app').onclick = shutdownApplication;
 $('settings-close').onclick = () => requestSettingsClose();
@@ -2189,7 +2151,6 @@ try {
     status: initial.status,
     connected: true,
   });
-  renderModelSelect();
   void checkUpdates();
   applyTheme(initial.preferences?.theme);
   state.saveHistory = initial.preferences?.saveHistory === true;
