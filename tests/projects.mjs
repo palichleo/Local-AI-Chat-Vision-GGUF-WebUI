@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -28,6 +28,15 @@ async function fixture(t) {
     historyDir,
     call,
     url: () => app.url,
+    // Stores an attached image as given; messages refer to it by its file name.
+    async attach(id, bytes = Buffer.from(png.split(',')[1], 'base64')) {
+      const response = await fetch(app.url + '/api/attachments', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'image/png', 'X-Conversation-Id': id },
+        body: bytes,
+      });
+      return (await response.json()).file;
+    },
     async restart() {
       await app.close();
       app = await createApplication({ port: 0, dataDir: directory, historyDir });
@@ -46,7 +55,7 @@ test('projects persist names and assignments while each conversation retains onl
         role: 'user',
         content: [
           { type: 'text', text: 'First prompt' },
-          { type: 'image_url', image_url: { url: png } },
+          { type: 'image_url', file: await f.attach(id) },
         ],
       },
     ];
@@ -59,7 +68,10 @@ test('projects persist names and assignments while each conversation retains onl
   await f.restart();
   const restored = await (await f.call('history/' + id)).json();
   assert.equal(restored.projectId, project.id);
-  assert.deepEqual(restored.messages, messages);
+  assert.deepEqual(
+    restored.messages.map(message => ({ ...message, content: message.content.map(({ view, ...part }) => part) })),
+    messages,
+  );
   assert.equal(restored.instructions, 'Only this conversation');
   const sibling = await (await f.call('history/' + other)).json();
   assert.equal(sibling.projectId, 'inbox');
@@ -70,7 +82,7 @@ test('projects persist names and assignments while each conversation retains onl
   assert.equal((await f.call('projects/move', { id, projectId: randomUUID() })).status, 404);
   assert.equal((await f.call('history/save', { id: randomUUID(), messages, projectId: '../outside' })).status, 400);
 });
-test('home summaries expose bounded prompts and signed compressed previews without requesting Comfy originals', async t => {
+test('home summaries expose bounded prompts and signed previews made from the originals', async t => {
   const f = await fixture(t),
     id = randomUUID();
   await f.call('history/save', {
@@ -80,7 +92,7 @@ test('home summaries expose bounded prompts and signed compressed previews witho
         role: 'user',
         content: [
           { type: 'text', text: 'A'.repeat(1000) },
-          { type: 'image_url', image_url: { url: png } },
+          { type: 'image_url', file: await f.attach(id) },
         ],
       },
     ],
@@ -97,10 +109,13 @@ test('home summaries expose bounded prompts and signed compressed previews witho
     workflowName: 'User workflow',
     prompt: 'Result',
     parameters: {},
-    comfyUrl: 'http://127.0.0.1:1',
+    provider: 'native',
     createdAt: new Date().toISOString(),
     outputs: [{ source: { filename: 'image.png', subfolder: '', type: 'output' }, analysisDataUrl: png }],
   };
+  const result = Buffer.from('the generated original, not the model copy');
+  await mkdir(join(f.directory, 'output'), { recursive: true });
+  await writeFile(join(f.directory, 'output', 'image.png'), result);
   await new Gallery({ historyDir: f.historyDir }).put(run, { persist: true });
   await f.call('history/save', {
     id,
@@ -117,7 +132,7 @@ test('home summaries expose bounded prompts and signed compressed previews witho
   record = (await (await f.call('history')).json()).conversations[0];
   const preview = await fetch(f.url() + record.previewUrl);
   assert.equal(preview.status, 200);
-  assert.deepEqual(Buffer.from(await preview.arrayBuffer()), Buffer.from(png.split(',')[1], 'base64'));
+  assert.deepEqual(Buffer.from(await preview.arrayBuffer()), result);
   await f.call('preferences', { saveHistory: false });
   assert.equal((await fetch(f.url() + record.previewUrl)).status, 403);
 });
@@ -206,7 +221,7 @@ test('project identifiers reject arrays and corrupt registries fail clearly with
   assert.equal(await readFile(path, 'utf8'), '[null]');
 });
 
-test('a missing latest generation preview falls back to an older local compressed image', async t => {
+test('a missing latest generation preview falls back to an older attached image', async t => {
   const f = await fixture(t),
     id = randomUUID(),
     missing = randomUUID();
@@ -215,7 +230,7 @@ test('a missing latest generation preview falls back to an older local compresse
       role: 'user',
       content: [
         { type: 'text', text: 'Reference' },
-        { type: 'image_url', image_url: { url: png } },
+        { type: 'image_url', file: await f.attach(id) },
       ],
     },
     {

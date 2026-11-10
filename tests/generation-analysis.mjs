@@ -57,14 +57,22 @@ test('partial photo and video analysis persists valid outputs without changing m
       body: JSON.stringify(body),
     });
     assert.equal(response.status, 200, await (response.status === 200 ? Promise.resolve('') : response.clone().text()));
+    // The copies serve this session (read through the application); a restart only keeps metadata.
+    const session = await (
+      await fetch(`${app.url}/api/gallery/${record.conversationId}/${record.id}`, {
+        headers: { Authorization: 'Bearer ' + token },
+      })
+    ).json();
+    assert.equal(session.outputs[0].analysisDataUrl, undefined);
+    assert.equal(session.outputs[1].analysisDataUrl, png);
+    if (video) assert.equal(session.outputs[1].analysisFrames.length, 2);
     const restored = await new Gallery({ historyDir }).get(record.conversationId, record.id);
-    assert.equal(restored.outputs[0].analysisDataUrl, undefined);
-    assert.equal(restored.outputs[1].analysisDataUrl, png);
+    assert.equal(restored.outputs[1].analysisDataUrl, undefined);
+    assert.equal(restored.outputs[1].analysisFrames, undefined);
     assert.equal(restored.outputs[1].width, 768);
     assert.deepEqual(
       restored.outputs.map(output => output.source),
       record.outputs.map(output => output.source),
     );
-    if (video) assert.equal(restored.outputs[1].analysisFrames.length, 2);
   }
 });

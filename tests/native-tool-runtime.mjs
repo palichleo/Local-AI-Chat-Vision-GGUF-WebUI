@@ -404,3 +404,77 @@ test('an enhanced prompt is kept with the image, and only when enhancement ran',
   const plain = await generate(false, 'boat');
   assert.equal(plain.parameters.expanded_prompt, undefined);
 });
+
+test('an image attached in the chat is upscaled from the file the user gave, not the model’s copy', async () => {
+  const attachment = 'original-' + 'b'.repeat(64) + '.png';
+  let staged = 0,
+    generated,
+    opened;
+  const workflow = {
+    schemaVersion: 1,
+    id: 'seedvr2',
+    name: 'Upscale SeedVR2',
+    mediaType: 'image',
+    pipeline: 'seedvr2',
+    enabled: true,
+    ready: true,
+    parameters: { scale: { policy: 'fixed', type: 'number', default: 2 } },
+    digest: 'd'.repeat(64),
+    references: [{ id: 'source', role: 'source_image', required: true }],
+  };
+  const catalog = {
+    list: async () => [workflow],
+    read: async () => workflow,
+    prepare: async () => ({
+      workflow,
+      job: { parameters: { scale: 2, seed: 1 }, components: {}, loras: [], references: [] },
+      outputNodes: [],
+    }),
+  };
+  const runtime = new ToolRuntime({
+    catalog,
+    engine: { state: 'ready', stop: async () => {}, start: async () => {} },
+    gallery: { put: async record => record, get: async () => assert.fail('No earlier output is involved') },
+    getConfig: () => ({ enabled: true, autoAllow: true, maxIterations: 5, baseUrl: 'native' }),
+    engineConfig: () => ({}),
+    sourceMedia: async (ref, conversation) => {
+      assert.equal(conversation, id);
+      opened = ref.attachment;
+      return { mime: 'image/png', name: 'Image jointe', handle: { close: async () => {} } };
+    },
+    clientFactory: () => ({
+      status: async () => ({ idle: true }),
+      preflight: async () => {},
+      stage: async media => {
+        staged++;
+        await media.handle.close();
+        return { path: '/local/original.png' };
+      },
+      upload: () => assert.fail('The compressed copy must not reach the upscaler'),
+      run: async job => {
+        generated = job;
+        return { outputs: [{ filename: 'upscaled.png', subfolder: '', type: 'output' }] };
+      },
+      free: async () => {},
+    }),
+  });
+  const messages = [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Agrandis cette photo' },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/' }, file: attachment },
+      ],
+    },
+  ];
+  const request = await runtime.request(
+    [{ id: 'up', type: 'function', function: { name: 'upscale', arguments: JSON.stringify({ source: { image: 0 } }) } }],
+    { conversationId: id, turnId: id, messages },
+  );
+  await runtime.execute({ requestId: request.requestId, permission: 'once', approvalToken: request.approvalToken });
+  await runtime.finished;
+  assert.equal(runtime.status().state, 'done', runtime.status().error);
+  assert.equal(opened, attachment);
+  assert.equal(staged, 1);
+  assert.deepEqual(generated.references, [{ input: 'source', role: 'source_image', path: '/local/original.png' }]);
+});

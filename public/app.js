@@ -14,6 +14,7 @@ import { prepareImages } from './images.mjs';
 import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
 import { outputActions } from './output-actions.mjs';
+import { fillCopies, forgetCopies, needsCopies, rememberCopy, remakeOutputCopy, withoutCopies } from './session-copies.mjs';
 
 const $ = id => document.getElementById(id);
 const state = {
@@ -176,7 +177,15 @@ function persistConversation() {
     if (!state.saveHistory) return true;
     state.savingHistory = true;
     try {
-      const { conversation } = await (await api('history/save', { id, ...snapshot, instructions, projectId })).json();
+      const { conversation } = await (
+        await api('history/save', {
+          id,
+          ...snapshot,
+          messages: withoutCopies(snapshot.messages),
+          instructions,
+          projectId,
+        })
+      ).json();
       state.historyItems = [conversation, ...state.historyItems.filter(item => item.id !== id)].sort(
         (a, b) => (b.createdAt || b.updatedAt).localeCompare(a.createdAt || a.updatedAt) || a.id.localeCompare(b.id),
       );
@@ -205,6 +214,7 @@ async function clearHistory() {
   try {
     await historyWrite;
     await api(target ? 'history/delete' : 'history/clear', { confirm: true, ...(target ? { id: target.id } : {}) });
+    forgetCopies(target?.id ?? null);
     state.historyItems = target ? state.historyItems.filter(item => item.id !== target.id) : [];
     if (!target || target.id === state.conversationId) {
       state.messages = [];
@@ -243,7 +253,11 @@ function savedUser(message) {
       .join('\n'),
     images: message.content
       .filter(part => part.type === 'image_url')
-      .map((part, index) => ({ name: `Image enregistrée ${index + 1}`, url: part.image_url.url })),
+      .map((part, index) => ({
+        name: `Image enregistrée ${index + 1}`,
+        ...(part.image_url?.url ? { url: part.image_url.url } : {}),
+        ...(part.file ? { file: part.file, view: part.view } : {}),
+      })),
   };
 }
 
@@ -1082,7 +1096,7 @@ function renderAttachments() {
   state.images.forEach((image, index) => {
     const box = node('div', 'attachment');
     const preview = node('img');
-    preview.src = image.url;
+    preview.src = image.url || image.view;
     preview.alt = image.name;
     const remove = node('button');
     remove.type = 'button';
@@ -1136,8 +1150,10 @@ function userMessage(text, images) {
     const previews = node('div', 'message-images');
     for (const image of images) {
       const img = node('img');
-      img.src = image.url;
+      // The stored original when there is one; the model's copy is not what the user attached.
+      img.src = image.view || image.url;
       img.alt = image.name;
+      img.decoding = 'async';
       previews.append(img);
     }
     article.append(previews);
@@ -1273,7 +1289,11 @@ function userContent(text, images) {
   return images.length
     ? [
         { type: 'text', text: text || 'Décris les images.' },
-        ...images.map(image => ({ type: 'image_url', image_url: { url: image.url } })),
+        ...images.map(image => ({
+          type: 'image_url',
+          ...(image.url ? { image_url: { url: image.url } } : {}),
+          ...(image.file ? { file: image.file, view: image.view } : {}),
+        })),
       ]
     : text;
 }
@@ -1303,6 +1323,31 @@ function chatRequest(messages, tools = true, resources = true) {
   };
 }
 
+/**
+ * Stores each attached image as the user gave it, before it is sent: the conversation keeps
+ * the original (shown on screen, passed to generation models) and the model gets the reduced
+ * copy made when it was attached, held in memory for this session.
+ */
+async function storeAttachments(images, conversationId) {
+  const stored = [];
+  for (const image of images) {
+    if (image.file) {
+      stored.push(image);
+      continue;
+    }
+    const blob = image.source || (await (await fetch(image.url)).blob());
+    const result = await (
+      await api('attachments', blob, {
+        raw: true,
+        headers: { 'Content-Type': blob.type || 'application/octet-stream', 'X-Conversation-Id': conversationId },
+      })
+    ).json();
+    rememberCopy(conversationId, result.file, image.url);
+    stored.push({ ...image, file: result.file, view: result.view });
+  }
+  return stored;
+}
+
 async function sendMessage(event) {
   event.preventDefault();
   if ($('send').disabled || state.generating) return;
@@ -1321,13 +1366,24 @@ async function sendMessage(event) {
     state.preparing = false;
     updateControls();
   }
-  const text = $('prompt').value.trim(),
-    images = [...state.images];
+  const text = $('prompt').value.trim();
+  state.conversationId ||= crypto.randomUUID();
+  let images;
+  state.preparing = true;
+  updateControls();
+  try {
+    images = await storeAttachments(state.images, state.conversationId);
+  } catch (error) {
+    notice(`Image jointe non enregistrée : ${error.message}`);
+    return;
+  } finally {
+    state.preparing = false;
+    updateControls();
+  }
   const content = userContent(text, images);
   const history = [...state.messages, { role: 'user', content }],
     userView = userMessage(text, images);
   state.conversationInstructions ??= state.messages.length ? '' : state.globalInstructions || '';
-  state.conversationId ||= crypto.randomUUID();
   const turnId = crypto.randomUUID();
   state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
   let view = assistantMessage(),
@@ -1398,6 +1454,8 @@ async function sendMessage(event) {
       signal.throwIfAborted();
       let request = null;
       view.body.replaceChildren(node('span', 'pending-dot', '●'));
+      // Attached images of a reopened conversation get their compressed copy from the original.
+      await fillCopies(history, { api, conversationId: state.conversationId, signal });
       const response = await api(
         'chat',
         {
@@ -1491,13 +1549,31 @@ async function sendMessage(event) {
         resourceReads++;
         view.note.textContent = 'Consultation de la sortie…';
         try {
-          const result = await (
-            await api(
-              'gallery/read',
-              { conversationId: state.conversationId, runId: request.runId, outputIndex: request.outputIndex },
-              { signal },
-            )
-          ).json();
+          const read = async () =>
+            (
+              await api(
+                'gallery/read',
+                { conversationId: state.conversationId, runId: request.runId, outputIndex: request.outputIndex },
+                { signal },
+              )
+            ).json();
+          let result = await read();
+          // Its copy dates from an earlier session: make it again from the original file.
+          if (!result.images.length && result.metadata.status === 'unavailable') {
+            view.note.textContent = 'Préparation d’une copie compressée de la sortie…';
+            try {
+              await remakeOutputCopy({
+                api,
+                conversationId: state.conversationId,
+                runId: request.runId,
+                index: request.outputIndex ?? 0,
+                signal,
+              });
+              result = await read();
+            } catch (error) {
+              if (signal.aborted) throw error;
+            }
+          }
           history.push({ role: 'tool', tool_call_id: request.call.id, content: JSON.stringify(result.metadata) });
           if (result.images.length) {
             reviewRecord = { id: request.runId, conversationId: state.conversationId };
@@ -1826,8 +1902,18 @@ const contextMeter = setupContextMeter({
   getConfig: () => state.config,
   isReady: () => state.connected && state.status.state === 'ready',
   isBusy: () => state.generating || !!state.status.toolJob,
-  getRequest: () =>
-    state.messages.length ? { ...chatRequest(state.messages), conversationId: state.conversationId } : null,
+  getRequest: () => {
+    if (!state.messages.length) return null;
+    // Counting needs the model's copies: make them from the originals, then count again.
+    if (needsCopies(state.messages)) {
+      const conversationId = state.conversationId;
+      void fillCopies(state.messages, { api, conversationId })
+        .then(() => conversationId === state.conversationId && contextMeter.schedule())
+        .catch(() => {});
+      return null;
+    }
+    return { ...chatRequest(state.messages), conversationId: state.conversationId };
+  },
   getConversation: () => state.conversationId,
 });
 setupCopy($('messages'), {

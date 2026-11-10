@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { quoteText } from '../public/copy.mjs';
 import { markdownToHtml } from '../public/markdown.mjs';
+import * as sessionCopies from '../public/session-copies.mjs';
 
 test('copy actions belong to quotes and fenced code, while ordinary prose and lists have none', () => {
   assert.doesNotMatch(
@@ -46,6 +47,7 @@ test('conversation alignment follows scrollbar changes and handles the hidden we
   const values = [];
   const area = { offsetWidth: 900, clientWidth: 890 };
   const context = {
+    ...sessionCopies,
     $: id => {
       assert.equal(id, 'chat-area');
       return area;

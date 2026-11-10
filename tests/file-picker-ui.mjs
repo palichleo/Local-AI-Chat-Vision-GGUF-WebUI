@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
+import * as sessionCopies from '../public/session-copies.mjs';
 
 async function pickerUI() {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
@@ -31,6 +32,7 @@ async function pickerUI() {
   const requests = [];
   const state = { operation: false, config: { modelPath: 'saved.gguf' }, status: {} };
   const context = {
+    ...sessionCopies,
     $,
     state,
     settingsGuard: { markSaved() {} },

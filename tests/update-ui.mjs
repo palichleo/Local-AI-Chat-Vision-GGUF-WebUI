@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import * as module from '../public/update-ui.mjs';
+import * as sessionCopies from '../public/session-copies.mjs';
 test('install click sends the session once and reloads only when a replacement server is ready', async () => {
   assert.equal(typeof module.installFromButton, 'function');
   let sent = 0,
@@ -96,6 +97,7 @@ test('download failure keeps configuration, file selection and composer controls
     token: 'old',
   };
   const context = {
+    ...sessionCopies,
     projectUI: { sync() {} },
     assetsUI: { setBusy() {} },
     settingsGuard: { isDirty: () => false },

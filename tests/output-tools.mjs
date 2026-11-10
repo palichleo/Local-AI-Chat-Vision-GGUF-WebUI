@@ -35,7 +35,7 @@ async function fixture(t) {
   return { root, gallery: new Gallery({ historyDir: join(root, 'history') }) };
 }
 
-test('output inspection validates IDs and indexes and reads only the requested compressed copy', async t => {
+test('output inspection validates IDs and indexes and reads only the requested session copy', async t => {
   const { root, gallery } = await fixture(t),
     record = run({
       outputs: [
@@ -44,9 +44,8 @@ test('output inspection validates IDs and indexes and reads only the requested c
       ],
     });
   await gallery.put(record, { persist: true });
-  const folder = join(root, 'history', record.conversationId, 'generated', record.id),
-    other = (await readdir(folder)).find(name => name.endsWith('.jpg'));
-  await writeFile(join(folder, other), 'corrupted unrelated image');
+  const folder = join(root, 'history', record.conversationId, 'generated', record.id);
+  assert.deepEqual(await readdir(folder), ['manifest.json'], 'the copies stay in this session’s memory');
   const result = await readOutput(gallery, record.conversationId, { run_id: record.id, output_index: 1 });
   assert.deepEqual(result.images, [png]);
   assert.equal(result.metadata.output_index, 1);
@@ -55,7 +54,9 @@ test('output inspection validates IDs and indexes and reads only the requested c
   const metadata = await readOutput(gallery, record.conversationId, { run_id: record.id }, { includeImages: false });
   assert.deepEqual(metadata.images, []);
   assert.doesNotMatch(JSON.stringify(metadata), /base64|original\.png/);
-  await assert.rejects(readOutput(gallery, record.conversationId, { run_id: record.id }), /endommag/);
+  const restarted = new Gallery({ historyDir: join(root, 'history') });
+  const later = await readOutput(restarted, record.conversationId, { run_id: record.id });
+  assert.equal(later.metadata.status, 'unavailable', 'a later session makes its own copy from the original');
   for (const args of [
     null,
     [],
@@ -193,13 +194,21 @@ test('HTTP output tool remains available after generation is disabled, enforces 
   }
   const exhausted = (await chat('inspect resources')).find(event => event.local_test_payload).local_test_payload;
   assert.equal(exhausted.tools, undefined);
-  const read = await request('gallery/read', {
-    conversationId: record.conversationId,
-    runId: record.id,
-    outputIndex: 0,
-  });
-  assert.equal(read.status, 200);
-  assert.deepEqual((await read.json()).images, [png]);
+  const read = () =>
+    request('gallery/read', {
+      conversationId: record.conversationId,
+      runId: record.id,
+      outputIndex: 0,
+    });
+  // This application session has no copy yet: the page makes one from the original and hands it over.
+  assert.deepEqual((await (await read()).json()).images, []);
+  assert.equal(
+    (await request('gallery/analysis', { conversationId: record.conversationId, id: record.id, images: [png] })).status,
+    200,
+  );
+  const loaded = await read();
+  assert.equal(loaded.status, 200);
+  assert.deepEqual((await loaded.json()).images, [png]);
   const messages = [
     { role: 'user', content: 'Check the image' },
     {

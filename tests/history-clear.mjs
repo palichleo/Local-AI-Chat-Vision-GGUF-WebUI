@@ -8,15 +8,14 @@ import { createApplication } from '../server.mjs';
 import { History } from '../lib/history.mjs';
 const png =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
-const record = () => ({
-  id: randomUUID(),
+const bytes = Buffer.from(png.split(',')[1], 'base64');
+// An attached image is stored first, as given; the conversation refers to it by name.
+const record = (id = randomUUID(), file = null) => ({
+  id,
   messages: [
     {
       role: 'user',
-      content: [
-        { type: 'text', text: 'Conversation de test' },
-        { type: 'image_url', image_url: { url: png } },
-      ],
+      content: [{ type: 'text', text: 'Conversation de test' }, ...(file ? [{ type: 'image_url', file }] : [])],
     },
   ],
 });
@@ -36,7 +35,15 @@ test('supprimer l’historique exige confirmation et jeton, fonctionne même dé
       });
     for (const enabled of [true, false]) {
       await post('preferences', { saveHistory: true, theme: 'light' });
-      const saved = record();
+      const id = randomUUID();
+      const { file } = await (
+        await fetch(`${app.url}/api/attachments`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${initial.token}`, 'Content-Type': 'image/png', 'X-Conversation-Id': id },
+          body: bytes,
+        })
+      ).json();
+      const saved = record(id, file);
       assert.equal((await post('history/save', saved)).status, 200);
       if (!enabled) await post('preferences', { saveHistory: false });
       const before = JSON.parse(await readFile(join(dataDir, 'preferences.json'), 'utf8'));
@@ -44,7 +51,7 @@ test('supprimer l’historique exige confirmation et jeton, fonctionne même dé
       assert.equal((await post('history/clear', { confirm: true }, '')).status, 401);
       assert.equal((await post('history/clear', {})).status, 400);
       assert.equal((await post('history/clear', { confirm: false })).status, 400);
-      assert.ok((await readdir(join(historyDir, saved.id))).some(name => name.startsWith('image-')));
+      assert.ok((await readdir(join(historyDir, saved.id))).some(name => name.startsWith('original-')));
       const deleted = await post('history/clear', { confirm: true });
       assert.equal(deleted.status, 200);
       assert.deepEqual(await deleted.json(), { cleared: true });
@@ -64,12 +71,15 @@ test('la suppression attend les sauvegardes déjà acceptées puis permet de nou
   try {
     const directory = join(folder, 'history');
     const history = new History(directory);
-    const saved = history.save(record());
+    const first = randomUUID();
+    const { file } = await history.addOriginal(first, [bytes]);
+    const saved = history.save(record(first, file));
     const cleared = history.clear();
     await Promise.all([saved, cleared]);
     await assert.rejects(readdir(directory), { code: 'ENOENT' });
     assert.deepEqual(await history.list(), { conversations: [], skipped: 0 });
-    const fresh = record();
+    const id = randomUUID();
+    const fresh = record(id, (await history.addOriginal(id, [bytes])).file);
     await history.save(fresh);
     assert.equal((await history.list()).conversations.length, 1);
     assert.deepEqual((await history.read(fresh.id)).messages, fresh.messages);

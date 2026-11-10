@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { readSSE } from '../public/stream.mjs';
+import * as sessionCopies from '../public/session-copies.mjs';
 const png = 'data:image/png;base64,iVBORw0KGgo=';
 const call = {
   id: 'call_1',
@@ -63,6 +64,7 @@ async function exchange({
     views = [],
     generationContainers = [];
   const context = {
+    ...sessionCopies,
     views,
     generationUI: {
       mount: container => {
@@ -275,6 +277,7 @@ test('restoring repeated model call IDs associates each generation with its foll
     restored = [];
   const element = () => ({ textContent: '', hidden: false, replaceChildren() {} }),
     context = {
+    ...sessionCopies,
       state: { conversationId: 'selected' },
       generationUI: { restore: (_body, _conversation, run) => restored.push(run) },
       assistantMessage: () => ({ body: element(), reasoning: element(), thoughts: element(), note: element() }),
@@ -332,6 +335,7 @@ test('restored generations share a response until the next real user message', a
     setAttribute() {},
   });
   const context = {
+    ...sessionCopies,
     state: { conversationId: 'saved' },
     node,
     icon: () => node('svg'),

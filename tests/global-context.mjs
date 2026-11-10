@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { History } from '../lib/history.mjs';
 import { createApplication } from '../server.mjs';
 import { updateSession } from '../lib/update-session.mjs';
+import * as sessionCopies from '../public/session-copies.mjs';
 test('global instructions are saved across app restarts and invalid input does not overwrite them', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'atelier-instructions-'));
   let app;
@@ -54,7 +55,7 @@ test('global context appears once at the start of the model context and never gr
     begin = source.indexOf('function chatRequest('),
     end = source.indexOf('async function sendMessage(', begin);
   const state = { messages: [], globalInstructions: 'Initial guidance', conversationInstructions: null };
-  const sandbox = { state };
+  const sandbox = { state, ...sessionCopies };
   runInNewContext(source.slice(begin, end) + '\nthis.request=chatRequest;', sandbox);
   let request = sandbox.request([{ role: 'user', content: 'Hi' }]);
   assert.equal(request.messages[0].role, 'system');

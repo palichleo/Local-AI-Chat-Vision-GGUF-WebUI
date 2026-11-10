@@ -29,7 +29,7 @@ async function fixture(t) {
   return { directory, historyDir: join(directory, 'history') };
 }
 
-test('persistent metadata and later analysis copies restore without touching original Comfy files', async t => {
+test('persistent metadata restores from disk; analysis copies stay in session memory only', async t => {
   const { directory, historyDir } = await fixture(t);
   const originals = join(directory, 'ComfyUI', 'output', 'boats', '2026');
   await mkdir(originals, { recursive: true });
@@ -50,14 +50,12 @@ test('persistent metadata and later analysis copies restore without touching ori
   await gallery.put(reviewed, { persist: true });
   const manifest = await readFile(join(runDir, 'manifest.json'), 'utf8');
   assert.ok(!manifest.includes('base64,'));
-  const files = await readdir(runDir);
-  assert.equal(files.length, 2);
-  const copy = files.find(name => name !== 'manifest.json');
-  assert.deepEqual(await readFile(join(runDir, copy)), Buffer.from(png.split(',')[1], 'base64'));
-  gallery.clearMemory();
+  assert.deepEqual(await readdir(runDir), ['manifest.json'], 'no compressed copy on disk');
+  assert.deepEqual(await gallery.get(run.conversationId, run.id), reviewed, 'the copy serves this session');
   const restarted = new Gallery({ historyDir });
-  assert.deepEqual(await restarted.get(run.conversationId, run.id), reviewed);
-  assert.deepEqual(await restarted.list(run.conversationId), { runs: [reviewed], skipped: 0 });
+  const { analysisDataUrl, ...withoutCopy } = reviewed.outputs[0];
+  assert.deepEqual(await restarted.get(run.conversationId, run.id), { ...reviewed, outputs: [withoutCopy] });
+  assert.deepEqual(await restarted.list(run.conversationId), { runs: [{ ...reviewed, outputs: [withoutCopy] }], skipped: 0 });
   await rm(historyDir, { recursive: true });
   gallery.clearMemory();
   assert.deepEqual(await readFile(originalPath), original);
@@ -81,11 +79,13 @@ test('nonpersistent runs stay in memory, are cloned and clearMemory never remove
   gallery.clearMemory();
   await assert.rejects(gallery.get(run.conversationId, run.id), { status: 404 });
   await gallery.put(expected, { persist: true });
-  gallery.clearMemory();
   assert.deepEqual(await gallery.get(run.conversationId, run.id), expected);
+  gallery.clearMemory();
+  const { analysisDataUrl, ...output } = expected.outputs[0];
+  assert.deepEqual(await gallery.get(run.conversationId, run.id), { ...expected, outputs: [output] });
 });
 
-test('queued updates retain analysis copies and newest runs list first', async t => {
+test('queued updates retain session analysis copies and newest runs list first', async t => {
   const { historyDir } = await fixture(t);
   const gallery = new Gallery({ historyDir });
   const run = record({
@@ -103,11 +103,12 @@ test('queued updates retain analysis copies and newest runs list first', async t
     list.runs.map(item => item.id),
     [newer.id, run.id],
   );
-  gallery.clearMemory();
   const restored = await gallery.get(run.conversationId, run.id);
   assert.equal(restored.analysis, 'The final review');
   assert.equal(restored.outputs[0].analysisDataUrl, png);
-  assert.equal((await readdir(join(historyDir, run.conversationId, 'generated', run.id))).length, 2);
+  assert.deepEqual(await readdir(join(historyDir, run.conversationId, 'generated', run.id)), ['manifest.json']);
+  gallery.forgetConversation(run.conversationId);
+  assert.equal((await gallery.get(run.conversationId, run.id)).outputs[0].analysisDataUrl, undefined);
 });
 
 test('invalid IDs, output descriptors, remote URLs and malformed copies never create history', async t => {
@@ -146,26 +147,25 @@ test('invalid IDs, output descriptors, remote URLs and malformed copies never cr
   await assert.rejects(readdir(historyDir), { code: 'ENOENT' });
 });
 
-test('tampered manifests and copied bytes cannot escape a run or bypass integrity checks', async t => {
+test('tampered manifests cannot escape a run; copies left by earlier versions are ignored', async t => {
   const { directory, historyDir } = await fixture(t);
   const gallery = new Gallery({ historyDir });
-  const run = record({
-    outputs: [{ source: { filename: 'x.png', subfolder: '', type: 'output' }, analysisDataUrl: png }],
-  });
+  const run = record({ outputs: [{ source: { filename: 'x.png', subfolder: '', type: 'output' } }] });
   await gallery.put(run, { persist: true });
   const runDir = join(historyDir, run.conversationId, 'generated', run.id);
   const manifestPath = join(runDir, 'manifest.json');
   const originalManifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  const copy = (await readdir(runDir)).find(name => name !== 'manifest.json');
-  await writeFile(join(runDir, copy), Buffer.from('tampered'));
   const restored = new Gallery({ historyDir });
-  await assert.rejects(restored.get(run.conversationId, run.id), { status: 400 });
-  assert.deepEqual(await restored.list(run.conversationId), { runs: [], skipped: 1 });
-  await writeFile(join(runDir, copy), Buffer.from(png.split(',')[1], 'base64'));
+  // An earlier version stored a compressed copy beside the manifest: it is no longer read.
+  await writeFile(join(runDir, 'analysis-' + 'a'.repeat(64) + '.png'), Buffer.from('tampered'));
+  await writeFile(
+    manifestPath,
+    JSON.stringify({ ...originalManifest, outputs: [{ ...originalManifest.outputs[0], analysisImage: '../../secret.png' }] }),
+  );
+  assert.deepEqual(await restored.get(run.conversationId, run.id), run);
   for (const change of [
     { ...originalManifest, id: randomUUID() },
-    { ...originalManifest, outputs: [{ source: run.outputs[0].source, analysisImage: '../../secret.png' }] },
-    { ...originalManifest, outputs: [{ source: run.outputs[0].source, analysisDataUrl: png }] },
+    { ...originalManifest, outputs: [{ source: { ...run.outputs[0].source, filename: '../x.png' } }] },
   ]) {
     await writeFile(manifestPath, JSON.stringify(change));
     await assert.rejects(restored.get(run.conversationId, run.id), { status: 400 });
@@ -210,29 +210,18 @@ test('symlinks in history ancestors and existing manifest files are rejected', a
   assert.equal(await readFile(outsideFile, 'utf8'), 'untouched');
 });
 
-test('hardlinked manifests and analysis copies cannot alias an original file', async t => {
+test('hardlinked manifests cannot alias an original file', async t => {
   const { directory, historyDir } = await fixture(t);
   const gallery = new Gallery({ historyDir });
-  const run = record({
-    outputs: [{ source: { filename: 'x.png', subfolder: '', type: 'output' }, analysisDataUrl: png }],
-  });
+  const run = record({ outputs: [{ source: { filename: 'x.png', subfolder: '', type: 'output' } }] });
   await gallery.put(run, { persist: true });
-  const runDir = join(historyDir, run.conversationId, 'generated', run.id);
-  const manifest = join(runDir, 'manifest.json');
-  const original = join(directory, 'original.png');
-  await writeFile(original, Buffer.from(png.split(',')[1], 'base64'));
-  const copy = (await readdir(runDir)).find(name => name !== 'manifest.json');
-  await rm(join(runDir, copy));
-  await link(original, join(runDir, copy));
-  await assert.rejects(new Gallery({ historyDir }).get(run.conversationId, run.id), { status: 400 });
-  await assert.rejects(gallery.put(run, { persist: true }), { status: 400 });
-  await rm(join(runDir, copy));
+  const manifest = join(historyDir, run.conversationId, 'generated', run.id, 'manifest.json');
   const manifestOriginal = join(directory, 'original-manifest.json');
   await writeFile(manifestOriginal, await readFile(manifest));
   await rm(manifest);
   await link(manifestOriginal, manifest);
   await assert.rejects(gallery.put(run, { persist: true }), { status: 400 });
-  assert.equal(await readFile(original, 'base64'), png.split(',')[1]);
+  await assert.rejects(new Gallery({ historyDir }).get(run.conversationId, run.id), { status: 400 });
   assert.ok(await readFile(manifestOriginal, 'utf8'));
 });
 
@@ -263,7 +252,7 @@ test('persisted gallery copies do not accumulate in process memory, but unsaved 
   assert.equal(gallery.records.size, 0);
   assert.deepEqual(await gallery.get(run.conversationId, run.id), run);
 });
-test('original lookup reads metadata without loading unrelated analysis copies or retaining the last write result', async t => {
+test('original lookup reads metadata without session copies or retaining the last write result', async t => {
   const { historyDir } = await fixture(t),
     gallery = new Gallery({ historyDir });
   const run = record({
@@ -271,16 +260,13 @@ test('original lookup reads metadata without loading unrelated analysis copies o
   });
   await gallery.put(run, { persist: true });
   assert.equal(await gallery.pending, undefined);
-  const directory = join(historyDir, run.conversationId, 'generated', run.id),
-    copy = (await readdir(directory)).find(file => file.startsWith('analysis-'));
-  await rm(join(directory, copy));
   const metadata = await gallery.get(run.conversationId, run.id, { includeImages: false });
   assert.equal(metadata.outputs[0].analysisDataUrl, undefined);
   assert.equal(metadata.outputs[0].source.filename, 'copy.png');
-  await assert.rejects(gallery.get(run.conversationId, run.id), { status: 404 });
+  assert.equal((await gallery.get(run.conversationId, run.id)).outputs[0].analysisDataUrl, png);
 });
 
-test('video kind and timestamped reduced analysis frames survive persistence without copying original video', async t => {
+test('video kind persists; timestamped reduced frames stay in session memory', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'atelier-video-gallery-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const gallery = new Gallery({ historyDir: directory });
@@ -306,9 +292,11 @@ test('video kind and timestamped reduced analysis frames survive persistence wit
     ],
   };
   await gallery.put(record, { persist: true });
+  assert.deepEqual((await gallery.get(record.conversationId, record.id)).outputs[0].analysisFrames, record.outputs[0].analysisFrames);
   const loaded = await new Gallery({ historyDir: directory }).get(record.conversationId, record.id);
   assert.equal(loaded.mediaType, 'video');
-  assert.deepEqual(loaded.outputs[0].analysisFrames, record.outputs[0].analysisFrames);
+  assert.equal(loaded.outputs[0].analysisFrames, undefined);
+  assert.deepEqual(await readdir(join(directory, record.conversationId, 'generated', record.id)), ['manifest.json']);
   const metadata = await gallery.get(record.conversationId, record.id, { includeImages: false });
   assert.equal(metadata.outputs[0].analysisFrames, undefined);
   await assert.rejects(

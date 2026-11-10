@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { readSSE } from '../public/stream.mjs';
+import * as sessionCopies from '../public/session-copies.mjs';
 test('grouped resource frames retain their separate labels and never enter saved conversation snapshots', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     png = 'data:image/png;base64,iVBORw0KGgo=';
@@ -33,6 +34,7 @@ test('grouped resource frames retain their separate labels and never enter saved
     snapshots = [];
   let calls = 0;
   const context = {
+    ...sessionCopies,
     generationUI: { mount: () => ({ progress() {}, image() {}, finish() {}, fail() {} }) },
     assetsUI: { flush: async () => true },
     state,
@@ -146,6 +148,7 @@ test('a failed description save keeps the composer intact and never sends a chat
   let calls = 0,
     warning = '';
   const context = {
+    ...sessionCopies,
     generationUI: { mount: () => ({ progress() {}, image() {}, finish() {}, fail() {} }) },
     state,
     $: id => (id === 'send' ? send : prompt),

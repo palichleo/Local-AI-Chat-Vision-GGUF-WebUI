@@ -47,7 +47,7 @@ test('history stays ordered by creation after an old conversation is saved again
   );
 });
 
-test('historique optionnel, images séparées et reprise après redémarrage', async () => {
+test('historique optionnel : l’original joint est conservé, les copies du modèle jamais', async () => {
   const folder = await mkdtemp(join(tmpdir(), 'atelier-history-'));
   const historyDir = join(folder, 'history');
   const id = randomUUID();
@@ -58,60 +58,96 @@ test('historique optionnel, images séparées et reprise après redémarrage', a
       headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-  const messages = [
-    {
-      role: 'user',
-      content: [
-        { type: 'text', text: 'Une image à conserver' },
-        { type: 'image_url', image_url: { url: png } },
-      ],
-    },
-    { role: 'assistant', content: '**Réponse**', reasoning_content: 'Réflexion.' },
-  ];
+  const original = Buffer.from(png.split(',')[1], 'base64');
+  const upload = conversationId =>
+    fetch(`${app.url}/api/attachments`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/png', 'X-Conversation-Id': conversationId },
+      body: original,
+    });
   try {
     app = await createApplication({ port: 0, dataDir: folder, historyDir });
     token = (await (await fetch(`${app.url}/api/bootstrap`)).json()).token;
-    assert.equal((await (await fetch(`${app.url}/api/bootstrap`)).json()).preferences.saveHistory, true);
+    const stored = await (await upload(id)).json();
+    assert.match(stored.file, /^original-[0-9a-f]{64}\.png$/);
+    assert.deepEqual(Buffer.from(await (await fetch(app.url + stored.view)).arrayBuffer()), original);
+    assert.equal((await upload(id)).status, 201, 'the same image is stored once');
+    const messages = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Une image à conserver' },
+          { type: 'image_url', image_url: { url: png }, file: stored.file },
+        ],
+      },
+      { role: 'assistant', content: '**Réponse**', reasoning_content: 'Réflexion.' },
+      {
+        role: 'user',
+        internal: true,
+        content: [
+          { type: 'text', text: 'Copie compressée pour ce tour.' },
+          { type: 'image_url', image_url: { url: png } },
+        ],
+      },
+    ];
     assert.equal((await call('preferences', { saveHistory: false })).status, 200);
     assert.equal((await call('history/save', { id, messages })).status, 403);
-    await assert.rejects(readdir(historyDir), { code: 'ENOENT' });
     assert.equal((await call('preferences', { saveHistory: true })).status, 200);
     assert.equal((await call('history/save', { id, messages }, '')).status, 401);
+    const unsaved = [{ role: 'user', content: [{ type: 'image_url', image_url: { url: png } }] }];
+    assert.equal((await call('history/save', { id, messages: unsaved })).status, 400, 'a compressed copy is not kept');
     assert.equal((await call('history/save', { id, messages, incomplete: true })).status, 200);
     assert.equal((await call('history/save', { id, messages })).status, 200);
     const files = await readdir(join(historyDir, id));
-    assert.equal(
-      files.filter(name => name.startsWith('image-')).length,
-      1,
-      'La même image ne doit pas être recopiée à chaque sauvegarde.',
-    );
+    assert.deepEqual(files.sort(), ['conversation.json', stored.file]);
     assert.ok(!(await readFile(join(historyDir, id, 'conversation.json'), 'utf8').then(s => s.includes('base64,'))));
-    const imageName = files.find(name => name.startsWith('image-'));
-    assert.deepEqual(await readFile(join(historyDir, id, imageName)), Buffer.from(png.split(',')[1], 'base64'));
     await app.close();
     app = await createApplication({ port: 0, dataDir: folder, historyDir });
-    const initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
-    token = initial.token;
-    assert.equal(initial.preferences.saveHistory, true);
+    token = (await (await fetch(`${app.url}/api/bootstrap`)).json()).token;
     const list = await (await call('history')).json();
     assert.equal(list.conversations.length, 1);
-    assert.equal(list.conversations[0].id, id);
     const loaded = await (await call(`history/${id}`)).json();
-    assert.deepEqual(loaded.messages, messages);
-    assert.equal(loaded.incomplete, false);
-    assert.equal((await call('preferences', { theme: 'light' })).status, 200);
-    assert.equal((await (await fetch(`${app.url}/api/bootstrap`)).json()).preferences.saveHistory, true);
+    const image = loaded.messages[0].content[1];
+    assert.equal(image.file, stored.file);
+    assert.equal(image.image_url, undefined, 'the model’s copy is made again in the session');
+    assert.deepEqual(Buffer.from(await (await fetch(app.url + image.view)).arrayBuffer()), original);
+    assert.deepEqual(loaded.messages[2].content, [{ type: 'text', text: 'Copie compressée pour ce tour.' }]);
+    const read = await fetch(`${app.url}/api/attachments/${id}/${stored.file}`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.deepEqual(Buffer.from(await read.arrayBuffer()), original);
+    assert.equal((await fetch(app.url + image.view.replace(/key=.*/, 'key=' + '0'.repeat(64)))).status, 401);
+    assert.equal((await call('history/save', { id, messages: loaded.messages })).status, 200, 'a reopened conversation saves again');
     assert.equal((await call('preferences', { saveHistory: false })).status, 200);
-    assert.equal((await call('history/save', { id, messages })).status, 403);
     assert.equal((await call('history')).status, 403);
-    assert.ok(
-      (await readdir(join(historyDir, id))).includes('conversation.json'),
-      'Désactiver ne doit pas effacer les fichiers.',
-    );
-    assert.deepEqual(JSON.parse(await readFile(join(folder, 'preferences.json'), 'utf8')), {
-      theme: 'light',
-      saveHistory: false,
+    assert.ok((await readdir(join(historyDir, id))).includes('conversation.json'), 'Désactiver ne doit pas effacer les fichiers.');
+  } finally {
+    await app?.close();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test('les images jointes d’une conversation jamais enregistrée sont retirées au démarrage suivant', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'atelier-history-'));
+  const historyDir = join(folder, 'history');
+  const saved = randomUUID(),
+    unsaved = randomUUID();
+  let app;
+  try {
+    app = await createApplication({ port: 0, dataDir: folder, historyDir });
+    const { token } = await (await fetch(`${app.url}/api/bootstrap`)).json();
+    for (const id of [saved, unsaved])
+      await fetch(`${app.url}/api/attachments`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/png', 'X-Conversation-Id': id },
+        body: Buffer.from(png.split(',')[1], 'base64'),
+      });
+    await fetch(`${app.url}/api/history/save`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: saved, messages: [{ role: 'user', content: 'Kept' }] }),
     });
+    await app.close();
+    app = await createApplication({ port: 0, dataDir: folder, historyDir });
+    assert.deepEqual((await readdir(historyDir)).sort(), [saved]);
   } finally {
     await app?.close();
     await rm(folder, { recursive: true, force: true });

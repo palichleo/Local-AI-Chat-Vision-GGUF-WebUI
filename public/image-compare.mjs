@@ -13,6 +13,7 @@ export function comparedSource(record) {
 
 /** Fetches the original pixels of that source: an earlier output or an imported resource. */
 export async function loadSource(api, record, source, signal) {
+  if (source.attachment) return (await api(`attachments/${record.conversationId}/${source.attachment}`, undefined, { signal })).blob();
   if (source.output_id !== undefined) {
     const route = `gallery/${record.conversationId}/${source.output_id}/${source.output_index ?? 0}`;
     return (await api(route, undefined, { signal })).blob();

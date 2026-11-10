@@ -61,6 +61,7 @@ const staticFiles = new Map([
   ['/video-plan.mjs', ['video-plan.mjs', 'text/javascript; charset=utf-8']],
   ['/output-actions.mjs', ['output-actions.mjs', 'text/javascript; charset=utf-8']],
   ['/image-compare.mjs', ['image-compare.mjs', 'text/javascript; charset=utf-8']],
+  ['/session-copies.mjs', ['session-copies.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-runtime.mjs', ['generation-runtime.mjs', 'text/javascript; charset=utf-8']],
   ['/native-workflow-ui.mjs', ['native-workflow-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-controls.mjs', ['settings-controls.mjs', 'text/javascript; charset=utf-8']],
@@ -250,10 +251,27 @@ export async function createApplication({
   const history = new History(historyDir);
   let historySaves = Promise.resolve();
   const projects = new Projects(join(dataDir, 'projects.json'));
+  const attachmentUrl = (conversationId, file) =>
+    `/media/attachments/${conversationId}/${file}?key=${mediaKey(conversationId + '/' + file, 'attachment')}`;
   const historyView = record => ({
     ...record,
     ...(record.preview
       ? { previewUrl: '/media/previews/' + record.id + '?key=' + mediaKey(record.id, 'conversation-preview') }
+      : {}),
+    // Each attached image links to its stored file, which the page shows instead of the model's copy.
+    ...(Array.isArray(record.messages)
+      ? {
+          messages: record.messages.map(message =>
+            Array.isArray(message.content)
+              ? {
+                  ...message,
+                  content: message.content.map(part =>
+                    part.type === 'image_url' && part.file ? { ...part, view: attachmentUrl(record.id, part.file) } : part,
+                  ),
+                }
+              : message,
+          ),
+        }
       : {}),
   });
   const token = randomBytes(32).toString('hex');
@@ -277,6 +295,8 @@ export async function createApplication({
   });
   const pendingSession = await readUpdateSession(dataDir).catch(() => null);
   for (const record of pendingSession?.gallery || []) await gallery.put(record, { persist: false });
+  // Attachments of conversations never saved belong to a session that has ended.
+  await history.pruneUnsaved(pendingSession?.conversationId ?? null).catch(error => console.error(error));
   const generation = await new GenerationService({
     root,
     dataDir,
@@ -296,6 +316,7 @@ export async function createApplication({
     clientFactory: () => generation.client(),
     timing: new ProgressHistory(join(dataDir, 'generation-timing.json')),
     sourceMedia: async (ref, conversationId) => {
+      if (ref.attachment) return { ...(await history.attachment(conversationId, ref.attachment)), name: 'Image jointe' };
       if (ref.resource_id) {
         await resources.activeRecord(ref.resource_id);
         return resources.media(ref.resource_id, 'original');
@@ -314,7 +335,7 @@ export async function createApplication({
       ...record,
       outputs: record.outputs.map((output, index) => ({
         ...output,
-        ...(record.mediaType === 'video'
+        ...(record.provider === 'native'
           ? {
               originalUrl:
                 '/media/generated/' +
@@ -438,13 +459,30 @@ export async function createApplication({
         )
           throw problem('Accès refusé.', 401);
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
-        const { bytes, mime } = await history.preview(
-          previewMatch[1],
-          async runId =>
-            (await gallery.get(previewMatch[1], runId)).outputs.find(output => output.analysisDataUrl)?.analysisDataUrl,
-        );
+        const { bytes, mime } = await history.preview(previewMatch[1], async runId => {
+          const record = await gallery.get(previewMatch[1], runId, { includeImages: false });
+          if (record.provider !== 'native' || record.mediaType === 'video') return null;
+          const { handle, mime } = await generatedMedia(outputDir, record.outputs[0].source);
+          try {
+            return { bytes: await handle.readFile(), mime };
+          } finally {
+            await handle.close();
+          }
+        });
         res.writeHead(200, { 'Content-Type': mime, 'Content-Length': bytes.length });
         return res.end(req.method === 'HEAD' ? undefined : bytes);
+      }
+      const attached = path.match(/^\/media\/attachments\/([0-9a-f-]{36})\/([a-z0-9.-]{1,90})$/);
+      if (attached) {
+        if (!['GET', 'HEAD'].includes(req.method)) throw problem('Méthode non prise en charge.', 405);
+        const key = requestURL.searchParams.get('key') || '';
+        if (
+          !/^[0-9a-f]{64}$/.test(key) ||
+          !timingSafeEqual(Buffer.from(key, 'hex'), Buffer.from(mediaKey(attached[1] + '/' + attached[2], 'attachment'), 'hex'))
+        )
+          throw problem('Accès refusé.', 401);
+        await sendResourceMedia(req, res, await history.attachment(attached[1], attached[2]));
+        return;
       }
       const generated = path.match(/^\/media\/generated\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/([0-9]+)$/);
       if (generated) {
@@ -579,6 +617,19 @@ export async function createApplication({
       if (path === '/api/status' && req.method === 'GET') return send(200, status());
       if (req.method === 'GET' && path === '/api/resources')
         return send(200, { resources: (await resources.list()).map(resourceView) });
+      // An attached image as the user gave it, stored before the message is sent.
+      if (path === '/api/attachments' && req.method === 'POST') {
+        if (applyingUpdate || closing || relaunching) throw problem('L’application est occupée.', 409);
+        if (clearingHistory) throw problem('Suppression de l’historique en cours.', 409);
+        const conversationId = String(req.headers['x-conversation-id'] || '');
+        const stored = await history.addOriginal(conversationId, req);
+        return send(201, { ...stored, view: attachmentUrl(conversationId, stored.file) });
+      }
+      const attachmentRead = req.method === 'GET' && path.match(/^\/api\/attachments\/([0-9a-f-]{36})\/([a-z0-9.-]{1,90})$/);
+      if (attachmentRead) {
+        await sendResourceMedia(req, res, await history.attachment(attachmentRead[1], attachmentRead[2]));
+        return;
+      }
       if (path === '/api/resources/upload' && req.method === 'POST') {
         if (applyingUpdate || closing || relaunching) throw problem('L’application est occupée.', 409);
         let name;

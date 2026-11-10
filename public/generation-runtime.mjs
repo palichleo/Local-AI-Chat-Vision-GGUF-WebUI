@@ -43,17 +43,20 @@ export function setupGenerationRuntime({
         if (record.mediaType === 'video' && output.originalUrl) {
           const video = node('video');
           video.controls = true;
-          video.preload = 'none';
+          // Without this session's copy as a poster, the first frame comes from the original.
+          video.preload = output.analysisDataUrl ? 'none' : 'metadata';
           video.playsInline = true;
           video.src = output.originalUrl;
           if (output.analysisDataUrl) video.poster = output.analysisDataUrl;
           card.append(video);
         }
-        if (output.analysisDataUrl && record.mediaType !== 'video') {
+        // The user sees the original; the model's compressed copy only exists in this session.
+        const still = record.mediaType !== 'video' && (output.originalUrl || output.analysisDataUrl);
+        if (still) {
           const img = node('img');
           img.loading = 'lazy';
           img.decoding = 'async';
-          img.src = output.analysisDataUrl;
+          img.src = still;
           img.alt = record.prompt;
           img.onclick = () => openOutput(record, index);
           card.append(img);

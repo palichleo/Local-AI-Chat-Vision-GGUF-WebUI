@@ -3,6 +3,7 @@ import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setupProjectNavigation, projectGroups } from '../public/project-navigation.mjs';
+import * as sessionCopies from '../public/session-copies.mjs';
 class Element {
   constructor(tag = '', className = '', textContent = '') {
     Object.assign(this, {
@@ -270,6 +271,7 @@ test('logo navigation keeps the current messages and draft and closes the mobile
     saves = 0,
     renders = 0;
   const context = {
+    ...sessionCopies,
     requestSettingsClose: action => context.settingsGuard.requestClose(action),
     updateControls() {},
     notice() {},
@@ -341,6 +343,7 @@ test('Home locks navigation while pending descriptions and saves complete', asyn
       release = resolve;
     }),
     context = {
+    ...sessionCopies,
       requestSettingsClose: action => context.settingsGuard.requestClose(action),
       state,
       document,
@@ -377,6 +380,7 @@ test('a deferred Home action never hides a response that started while settings 
   let deferred,
     flushes = 0;
   const context = {
+    ...sessionCopies,
     requestSettingsClose: action => context.settingsGuard.requestClose(action),
     state,
     document: { body: { dataset: {} } },
@@ -431,6 +435,7 @@ test('failed Home preparation keeps the chat visible and releases navigation con
       renders = 0,
       notices = [];
     const context = {
+    ...sessionCopies,
       requestSettingsClose: action => context.settingsGuard.requestClose(action),
       state,
       document: { body: { dataset: {} } },

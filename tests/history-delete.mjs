@@ -30,6 +30,13 @@ test('deleting one conversation removes copies and cached links, retaining other
     const original = join(dataDir, 'original.png');
     await writeFile(original, Buffer.from(png.split(',')[1], 'base64'));
     for (const id of ids) {
+      const { file } = await (
+        await fetch(app.url + '/api/attachments', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${bootstrap.token}`, 'Content-Type': 'image/png', 'X-Conversation-Id': id },
+          body: Buffer.from(png.split(',')[1], 'base64'),
+        })
+      ).json();
       assert.equal(
         (
           await call('history/save', {
@@ -39,7 +46,7 @@ test('deleting one conversation removes copies and cached links, retaining other
                 role: 'user',
                 content: [
                   { type: 'text', text: id },
-                  { type: 'image_url', image_url: { url: png } },
+                  { type: 'image_url', file },
                 ],
               },
             ],
