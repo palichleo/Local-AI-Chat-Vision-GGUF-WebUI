@@ -87,7 +87,8 @@ class Rope:
 
     def __init__(self):
         per_axis = HEAD_DIM // 2 // 3  # 21 -> 10 frequencies, 20 channels per axis
-        self.freqs = torch.linspace(1.0, 256 / 2, per_axis // 2) * math.pi
+        # Explicit CPU: the model is built under torch.device('meta'), which would leave this empty.
+        self.freqs = torch.linspace(1.0, 256 / 2, per_axis // 2, device='cpu') * math.pi
         self.cache = {}
 
     def __call__(self, size, device):
@@ -95,7 +96,7 @@ class Rope:
         if key not in self.cache:
             axes = []
             for index, n in enumerate(size):
-                pos = torch.linspace(-1, 1, steps=n)
+                pos = torch.linspace(-1, 1, steps=n, device='cpu')
                 f = (pos[:, None] * self.freqs[None]).repeat_interleave(2, dim=-1)  # n, 20
                 shape = [1, 1, 1, f.shape[-1]]
                 shape[index] = n

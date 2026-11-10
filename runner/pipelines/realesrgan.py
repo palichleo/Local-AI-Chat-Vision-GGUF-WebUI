@@ -24,6 +24,9 @@ def _model_scale(path):
 def preflight(job, config):
     """Reads the checkpoint layout and the source size on CPU, before the chat model is unloaded."""
     scale = _model_scale(job['components']['upscaler'])
+    # The first check runs before the sources are copied; generation checks again with them.
+    if not job['references']:
+        return
     source = job['references'][0]['path']
     max_side = job['parameters'].get('max_side', 0)
     if job['mediaType'] == 'image':

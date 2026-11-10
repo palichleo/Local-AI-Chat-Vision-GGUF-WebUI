@@ -81,13 +81,20 @@ export function outputActions({ api, node, onDetails, onAction }) {
       }
       row.append(button);
     }
-    load().then(verbs => {
-      for (const [button, action] of buttons) {
-        const ready = (verbs[action.verb] || []).includes(media);
-        button.disabled = !ready;
-        button.title = ready ? TITLES[action.id] : action.missing(media);
-      }
-    });
+    function refresh() {
+      return load().then(verbs => {
+        for (const [button, action] of buttons) {
+          const ready = (verbs[action.verb] || []).includes(media);
+          button.disabled = !ready;
+          button.title = ready ? TITLES[action.id] : action.missing(media);
+        }
+      });
+    }
+    // Workflows can become ready after the row was drawn (relaunch, model added):
+    // the row checks again when the pointer reaches it. A disabled button gets no
+    // pointer events, so the listener sits on the row.
+    if (buttons.length) row.addEventListener('pointerenter', refresh);
+    refresh();
     return row;
   };
 }

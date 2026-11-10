@@ -43,8 +43,10 @@ def preflight(job, config):
         raise ValueError('Ce fichier n’est pas un DiT SeedVR2 7B.')
     if not seedvr2_vae.signature(header(job['components']['vae'])):
         raise ValueError('Ce fichier n’est pas le VAE de SeedVR2 (ema_vae_fp16).')
-    with Image.open(job['references'][0]['path']) as image:
-        _sizes(*image.size, job['parameters'])
+    # The first check runs before the sources are copied; generation checks again with them.
+    if job['references']:
+        with Image.open(job['references'][0]['path']) as image:
+            _sizes(*image.size, job['parameters'])
 
 
 def generate(job, config, progress):

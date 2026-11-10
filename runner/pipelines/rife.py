@@ -8,6 +8,9 @@ MAX_FPS = 240
 def preflight(job, config):
     from runner.video.stream import probe
 
+    # The first check runs before the sources are copied; generation checks again with them.
+    if not job['references']:
+        return
     info = probe(job['references'][0]['path'])
     multiplier = job['parameters']['multiplier']
     if job['parameters'].get('mode', 'smooth') == 'smooth' and info['fps'] * multiplier > MAX_FPS:
