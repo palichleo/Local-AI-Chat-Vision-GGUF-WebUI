@@ -120,7 +120,12 @@ const h3 = (overrides = {}) =>
       audioVae: models + 'vae\\MiniMaxH3\\h3-audio.safetensors',
     },
   });
+// Large enough for the two passes of an LTX video.
+const large = { width: 896, height: 1600 };
 const source = (role, path = '/source') => [{ input: 'source', role, path }];
+const subjects = (count = 1) =>
+  Array.from({ length: count }, (_, n) => ({ input: 'ref' + (n + 1), role: 'msr_image', path: `/s${n + 1}.png` }));
+const msr = { id: 'msr', path: models + 'loras\\subjects\\msr.safetensors', strength: 1 };
 const lists = {
   UNETLoader: [
     'unet_name',
@@ -143,11 +148,12 @@ const lists = {
   LoraLoaderModelOnly: ['lora_name', ['style.safetensors', 'detail.safetensors']],
   UpscaleModelLoader: ['model_name', ['RealESRGAN_x2plus.pth', 'RealESRGAN_x4plus.pth']],
   FrameInterpolationModelLoader: ['model_name', ['rife.safetensors']],
+  LatentUpscaleModelLoader: ['model_name', ['upscaler.safetensors', 'temporal.safetensors']],
 };
 
 /** A ComfyUI that knows every node but `missing`, lists `lists`, and answers a run with `film`. */
-async function comfy(t, { missing = [], files = lists, result, ram = 32 * 1024 ** 3 } = {}) {
-  const seen = { uploads: [], prompts: [], freed: 0 };
+async function comfy(t, { missing = [], files = lists, result, ram = 32 * 1024 ** 3, available = ram / 2 } = {}) {
+  const seen = { uploads: [], prompts: [], freed: [] };
   const app = createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -160,7 +166,7 @@ async function comfy(t, { missing = [], files = lists, result, ram = 32 * 1024 *
     if (url.pathname === '/queue') return json({ queue_running: [], queue_pending: [] });
     if (url.pathname === '/system_stats')
       return json({
-        system: { ram_total: ram },
+        system: { ram_total: ram, ram_free: available },
         devices: [{ type: 'cuda', vram_total: 12, vram_free: 11, torch_vram_total: 2, torch_vram_free: 1 }],
       });
     if (url.pathname.startsWith('/object_info/')) {
@@ -204,7 +210,7 @@ async function comfy(t, { missing = [], files = lists, result, ram = 32 * 1024 *
       return res.end(seen.film);
     }
     if (url.pathname === '/free') {
-      seen.freed++;
+      seen.freed.push(JSON.parse(body));
       return json({});
     }
     json({ error: 'unexpected ' + url.pathname }, 500);
@@ -248,24 +254,35 @@ test('the trial is off unless data/comfy-engine.json enables a loopback ComfyUI'
 });
 
 test('what no graph is written for stays on the built-in engine', () => {
-  for (const work of [ltx(), krea(), h3(), h3({ parameters: { audio: false } })])
+  for (const work of [ltx(), ltx({ parameters: { audio: false, fps: 30, frames: 17 } }), krea(), h3()])
     assert.equal(comfyUnsupported(work), '');
+  assert.equal(comfyUnsupported(h3({ parameters: { audio: false } })), '');
   assert.match(comfyUnsupported(job('flux9')), /no ComfyUI graph/);
   assert.match(comfyUnsupported(ltx({ references: source('source_video') })), /continuations/);
   assert.match(comfyUnsupported(h3({ references: source('source_video') })), /continuations/);
-  assert.match(comfyUnsupported(ltx({ parameters: { audio: false } })), /sound/);
-  assert.match(comfyUnsupported(ltx({ parameters: { fps: 30 } })), /24/);
-  assert.match(comfyUnsupported(ltx({ parameters: { frames: 17 } })), /one second/);
-  const subjects = [1, 2, 3].map(n => ({ input: 'ref' + n, role: 'msr_image', path: `/s${n}.png` }));
-  assert.match(comfyUnsupported(ltx({ references: subjects })), /two subject/);
+  // With subject references the video goes through LongForge, which renders less freely.
+  const withSubjects = parameters => ltx({ references: subjects(), loras: [msr], parameters });
+  assert.equal(comfyUnsupported(withSubjects()), '');
+  assert.match(comfyUnsupported(withSubjects({ audio: false })), /sound/);
+  assert.match(comfyUnsupported(withSubjects({ fps: 30 })), /24/);
+  assert.match(comfyUnsupported(withSubjects({ frames: 17 })), /one second/);
+  assert.match(comfyUnsupported(ltx({ references: subjects(3), loras: [msr] })), /two subject/);
+  // What the built-in engine refuses with its own words is left to it.
+  const mixed = [
+    { input: 'start', role: 'start_image', path: '/a.png' },
+    { input: 'subject-1', role: 'reference_image', path: '/b.png' },
+  ];
+  assert.match(comfyUnsupported(h3({ references: mixed })), /do not combine/);
+  const restore = parameters => job('seedvr2', { parameters, references: source('source_image') });
   assert.match(comfyUnsupported(job('seedvr2')), /one source/);
+  assert.match(comfyUnsupported(restore({ scale: 4, passes: 3 })), /sixteen/);
+  assert.equal(comfyUnsupported(restore({ scale: 2, passes: 3 })), '');
   assert.equal(comfyUnsupported(job('rife', { references: source('source_video') })), '');
 });
 
 test('model files take the names ComfyUI lists them under, and every node of the graph is checked', async t => {
   const fake = await comfy(t);
-  const lora = { id: 'msr', path: models + 'loras\\subjects\\msr.safetensors', strength: 1 };
-  assert.deepEqual(await comfyNames(fake.connect(fake.baseUrl), ltx({ loras: [lora] })), {
+  assert.deepEqual(await comfyNames(fake.connect(fake.baseUrl), ltx({ loras: [msr], references: subjects() })), {
     model: 'ltx-transformer.safetensors',
     textEncoder: 'gemma.safetensors',
     vae: 'video-vae.safetensors',
@@ -273,6 +290,12 @@ test('model files take the names ComfyUI lists them under, and every node of the
     audioVae: 'LTX-2\\audio-vae.safetensors',
     lora: 'subjects\\msr.safetensors',
   });
+  // Without a subject: ComfyUI's own nodes, the latent upscaler for the two passes of a large size.
+  assert.equal(
+    (await comfyNames(fake.connect(fake.baseUrl), ltx({ parameters: large }))).upscaler,
+    'upscaler.safetensors',
+  );
+  assert.equal((await comfyNames(fake.connect(fake.baseUrl), ltx())).upscaler, undefined);
   const styles = ['style', 'detail'].map(id => ({ id, path: `E:\\loras\\${id}.safetensors`, strength: 0.5 }));
   assert.deepEqual(await comfyNames(fake.connect(fake.baseUrl), krea({ loras: styles })), {
     model: 'krea.safetensors',
@@ -289,24 +312,25 @@ test('model files take the names ComfyUI lists them under, and every node of the
   await assert.rejects(comfyNames(other.connect(other.baseUrl), krea()), /krea\.safetensors/);
 });
 
-test('LTX: the LongForge graph carries the prompt, seed, size, length and the images by role', () => {
-  const { graph: text, output } = comfyGraph(ltx());
-  linked(text);
-  assert.equal(output, 'render');
-  assert.equal(text.project.inputs.project_name, 'atelier_5b1f6f0e6f0c4b659d3b0c3f3a8f7a11');
-  assert.deepEqual(JSON.parse(text.project.inputs.scene_data), [{ name: 'Scene 1', prompt: 'un bateau fantôme' }]);
-  assert.deepEqual([text.video.inputs.width, text.video.inputs.height, text.video.inputs.new_seconds], [576, 1024, 5]);
-  assert.equal(text.sampling.inputs.seed, 1075036270707423);
-  assert.equal(text.model.inputs.unet_name, 'ltx-transformer.safetensors');
-  assert.equal(text.render.inputs.media, undefined);
+test('LTX with subject references: the LongForge graph carries the prompt, seed, size, length and images', () => {
+  const lora = { id: 'msr', path: models + 'loras\\msr.safetensors', strength: 0.95 };
+  const one = comfyGraph(ltx({ references: subjects(), loras: [lora] }), { ref1: 'in/c.png' });
+  linked(one.graph);
+  assert.equal(one.output, 'render');
+  assert.equal(one.graph.project.inputs.project_name, 'atelier_5b1f6f0e6f0c4b659d3b0c3f3a8f7a11');
+  assert.deepEqual(JSON.parse(one.graph.project.inputs.scene_data), [{ name: 'Scene 1', prompt: 'un bateau fantôme' }]);
+  assert.deepEqual(
+    [one.graph.video.inputs.width, one.graph.video.inputs.height, one.graph.video.inputs.new_seconds],
+    [576, 1024, 5],
+  );
+  assert.equal(one.graph.sampling.inputs.seed, 1075036270707423);
+  assert.equal(one.graph.model.inputs.unet_name, 'ltx-transformer.safetensors');
 
   const references = [
     { input: 'start', role: 'start_image', path: '/a.png' },
     { input: 'end', role: 'end_image', path: '/b.png' },
-    { input: 'ref1', role: 'msr_image', path: '/c.png' },
-    { input: 'ref2', role: 'msr_image', path: '/d.png' },
+    ...subjects(2),
   ];
-  const lora = { id: 'msr', path: models + 'loras\\msr.safetensors', strength: 0.95 };
   const inputs = { start: 'in/a.png', end: 'in/b.png', ref1: 'in/c.png', ref2: 'in/d.png' };
   const { graph: full } = comfyGraph(ltx({ references, loras: [lora] }), inputs, { lora: 'subjects\\msr.safetensors' });
   linked(full);
@@ -332,6 +356,75 @@ test('LTX: the LongForge graph carries the prompt, seed, size, length and the im
   assert.deepEqual(full.render.inputs.media, ['subjects', 0]);
   assert.throws(() => comfyGraph(ltx({ references, loras: [lora] }), {}), /non transmis/);
   assert.throws(() => comfyGraph(ltx({ references }), inputs), /LoRA/);
+});
+
+test('LTX: a large video is sampled at half size, enlarged, then refined; a small one in one pass', () => {
+  const { graph, output, steps } = comfyGraph(ltx({ parameters: large }));
+  linked(graph);
+  assert.equal(output, 'save');
+  assert.deepEqual(steps, [
+    ['sampler1', 8],
+    ['sampler2', 3],
+  ]);
+  assert.deepEqual(graph.empty.inputs, { width: 448, height: 800, length: 121, batch_size: 1 });
+  assert.deepEqual(graph.enlarged.inputs.samples, ['parts1', 0]);
+  // The sound follows the picture from one pass to the next.
+  assert.deepEqual(graph.joined2.inputs, { video_latent: ['enlarged', 0], audio_latent: ['parts1', 1] });
+  assert.deepEqual(
+    [graph.sigmas1.inputs.sigmas.split(',').length, graph.sigmas2.inputs.sigmas],
+    [9, '0.909375, 0.725, 0.421875, 0.0'],
+  );
+  assert.deepEqual(
+    [graph.noise1.inputs.noise_seed, graph.noise2.inputs.noise_seed],
+    [1075036270707423, 1075036270707424],
+  );
+  assert.equal(graph.positive.inputs.text, 'un bateau fantôme');
+  assert.deepEqual(graph.decode.inputs.samples, ['parts2', 0]);
+  assert.deepEqual(graph.video.inputs.audio, ['sound', 0]);
+
+  // One pass: a size where two would be slower, one whose half the model does not take, or no latent upscaler.
+  for (const parameters of [
+    { width: 576, height: 1024 },
+    { width: 928, height: 1632 },
+  ]) {
+    const small = comfyGraph(ltx({ parameters }));
+    assert.deepEqual(
+      [small.steps, small.graph.enlarged, small.graph.empty.inputs.width],
+      [['sampler1'], undefined, parameters.width],
+    );
+    assert.deepEqual(linked(small.graph).decode.inputs.samples, ['parts1', 0]);
+  }
+  const bare = ltx({ parameters: large });
+  delete bare.components.upscaler;
+  assert.deepEqual(comfyGraph(bare).steps, ['sampler1']);
+
+  // A start image is written into the first frame: followed in the first pass, held in the second.
+  const start = [{ input: 'start', role: 'start_image', path: '/a.png' }];
+  const animated = linked(comfyGraph(ltx({ references: start, parameters: large }), { start: 'atelier/a.png' }).graph);
+  assert.deepEqual(animated.startFitted.inputs['resize_type.width'], 896);
+  assert.equal(animated.startImage.inputs.img_compression, 12);
+  assert.deepEqual([animated.started1.inputs.strength, animated.started2.inputs.strength], [0.8, 1]);
+  assert.deepEqual(animated.started2.inputs.latent, ['enlarged', 0]);
+
+  // With an end image both are guides, taken out of the latent after each pass.
+  const ends = [...start, { input: 'end', role: 'end_image', path: '/b.png' }];
+  const between = linked(
+    comfyGraph(ltx({ references: ends, parameters: { ...large, audio: false } }), { start: 'a', end: 'b' }).graph,
+  );
+  assert.deepEqual(
+    [between.startGuide1.inputs.frame_idx, between.endGuide1.inputs.frame_idx, between.endGuide2.inputs.strength],
+    [0, -1, 0.6],
+  );
+  assert.deepEqual(between.guider1.inputs.positive, ['endGuide1', 0]);
+  assert.deepEqual(between.enlarged.inputs.samples, ['cropped1', 2]);
+  assert.deepEqual(between.decode.inputs.samples, ['cropped2', 2]);
+  // Silent on request: the model still makes its sound, the video is saved without it.
+  assert.deepEqual([between.sound, between.video.inputs.audio], [undefined, undefined]);
+
+  const styled = comfyGraph(
+    ltx({ parameters: large, loras: [{ id: 'style', path: 'E:\\loras\\style.safetensors', strength: 0.4 }] }),
+  ).graph;
+  assert.deepEqual(linked(styled).guider2.inputs.model, ['lora0', 0]);
 });
 
 test('Krea 2: text, LoRAs in a chain, an image to start from, a prompt rewritten first', () => {
@@ -621,14 +714,48 @@ test('a video too long for ComfyUI to hold in memory stays on the built-in engin
   // A source that does not say its length (another container) is not risked either.
   await writeFile(join(dataDir, 'other.webm'), Buffer.from('1a45dfa3', 'hex'));
   assert.equal(await comfyRoute(dataDir, upscale(join(dataDir, 'other.webm')), options), null);
-  const smooth = path =>
+  const smooth = (path, parameters) =>
     job('rife', {
-      parameters: { multiplier: 8 },
+      parameters,
       components: { interpolator: models + 'frame_interpolation\\rife.safetensors' },
       references: source('source_video', path),
     });
-  assert.ok(await comfyRoute(dataDir, smooth(join(dataDir, 'short.mp4')), options));
-  assert.equal(await comfyRoute(dataDir, smooth(join(dataDir, 'long.mp4')), options), null);
+  assert.ok(await comfyRoute(dataDir, smooth(join(dataDir, 'short.mp4'), { multiplier: 4 }), options));
+  assert.equal(await comfyRoute(dataDir, smooth(join(dataDir, 'long.mp4'), { multiplier: 4 }), options), null);
+  // 24 images a second made eight times smoother: more than ComfyUI writes. Slowed down, the rate stays.
+  assert.equal(await comfyRoute(dataDir, smooth(join(dataDir, 'short.mp4'), { multiplier: 8 }), options), null);
+  const slowed = smooth(join(dataDir, 'short.mp4'), { multiplier: 8, mode: 'slow_motion' });
+  assert.ok(await comfyRoute(dataDir, slowed, options));
+});
+
+test('steps are counted over every pass, then the decoding is said once', async () => {
+  const dataDir = await trial(),
+    seen = [];
+  const client = {
+    run: async (graph, { onProgress }) => {
+      const step = (node, value, max) => onProgress({ state: 'step', node, value, max });
+      onProgress({ state: 'queued' });
+      for (let value = 1; value <= 8; value++) step('sampler1', value, 8);
+      step('enlarged', 1, 1);
+      for (let value = 1; value <= 3; value++) step('sampler2', value, 3);
+      for (let value = 1; value <= 4; value++) step('decode', value, 4);
+      return { promptId: 'p', outputs: [{ filename: 'f.mp4', subfolder: 'atelier', type: 'output' }] };
+    },
+    original: async () => ({ bytes: mp4(), mime: 'video/mp4' }),
+  };
+  await runOnComfy(ltx({ parameters: large }), {
+    client,
+    names: {},
+    outputDir: join(dataDir, 'output'),
+    onProgress: value => seen.push(value.step ? `${value.step}/${value.total}` : value.stage),
+  });
+  assert.deepEqual(seen, [
+    'sending to ComfyUI',
+    'sampling video',
+    ...Array.from({ length: 10 }, (_, index) => `${index + 1}/11`),
+    'decoding video',
+    'audio decoded',
+  ]);
 });
 
 test('the index of an MP4 gives its size, length and rate', async () => {
@@ -673,7 +800,7 @@ test('the generation service sends jobs to ComfyUI only while the trial is on', 
   assert.deepEqual((await client.run(ltx())).outputs, []);
   await client.free();
   assert.deepEqual(calls, ['preflight', 'generate', 'release']);
-  assert.equal(fake.seen.prompts.length + fake.seen.freed, 0);
+  assert.equal(fake.seen.prompts.length + fake.seen.freed.length, 0);
 
   await writeFile(join(dataDir, 'comfy-engine.json'), JSON.stringify({ enabled: true, baseUrl: fake.baseUrl }));
   assert.match(await service.backendNote(ltx()), /ComfyUI/);
@@ -687,7 +814,7 @@ test('the generation service sends jobs to ComfyUI only while the trial is on', 
   await client.run(continuation);
   await client.free();
   assert.deepEqual(calls, ['preflight', 'generate', 'release']);
-  assert.equal(fake.seen.prompts.length + fake.seen.freed, 0);
+  assert.equal(fake.seen.prompts.length + fake.seen.freed.length, 0);
 
   for (const [work, extension] of [
     [ltx(), '.mp4'],
@@ -700,11 +827,20 @@ test('the generation service sends jobs to ComfyUI only while the trial is on', 
     assert.equal(result.metadata.backend, 'comfyui');
     assert.ok(result.outputs[0].filename.endsWith(extension));
     await client.free();
-    // The built-in engine checks the job and empties its memory; it does not generate.
-    assert.deepEqual(calls, ['preflight', 'unload', 'release']);
+    // The built-in engine is not asked anything but to leave memory, if it holds any.
+    assert.deepEqual(calls, ['unload', 'release']);
   }
-  assert.equal(fake.seen.freed, 2);
+  // The video memory is given back each time; the models stay in main memory while there is room.
+  assert.deepEqual(fake.seen.freed, [{ unload_models: true }, { unload_models: true }]);
   assert.equal((await readdir(outputDir)).length, 4);
+
+  // On a machine short of memory, ComfyUI lets go of everything.
+  const tight = await comfy(t, { available: 1024 ** 3 });
+  await writeFile(join(dataDir, 'comfy-engine.json'), JSON.stringify({ enabled: true, baseUrl: tight.baseUrl }));
+  client = service.client();
+  await client.preflight(krea());
+  await client.free();
+  assert.deepEqual(tight.seen.freed, [{ unload_models: true }, { unload_models: true, free_memory: true }]);
 
   // A ComfyUI that is not running is said before anything is unloaded.
   await writeFile(join(dataDir, 'comfy-engine.json'), JSON.stringify({ enabled: true, baseUrl: 'http://127.0.0.1:9' }));
