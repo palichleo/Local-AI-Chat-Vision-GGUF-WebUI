@@ -51,8 +51,42 @@
       "value": 8
     },
     "frames": {
-      "policy": "fixed",
-      "value": 121
+      "policy": "model",
+      "type": "integer",
+      "choices": [
+        9,
+        17,
+        25,
+        33,
+        41,
+        49,
+        57,
+        65,
+        73,
+        81,
+        89,
+        97,
+        105,
+        113,
+        121,
+        129,
+        137,
+        145,
+        153,
+        161,
+        169,
+        177,
+        185,
+        193,
+        201,
+        209,
+        217,
+        225,
+        233,
+        241
+      ],
+      "default": 121,
+      "description": "Longueur du clip (24 i/s) : de 9 (0,4 s) à 241 images (10 s)."
     },
     "fps": {
       "policy": "fixed",
@@ -90,6 +124,10 @@
     "msr_frames": {
       "policy": "fixed",
       "value": 33
+    },
+    "overlap_frames": {
+      "policy": "fixed",
+      "value": 9
     }
   },
   "loras": [

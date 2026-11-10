@@ -65,8 +65,26 @@
       "default": "draft"
     },
     "frames": {
-      "policy": "fixed",
-      "value": 124
+      "policy": "model",
+      "type": "integer",
+      "choices": [
+        124,
+        141,
+        158,
+        175,
+        192,
+        209,
+        226,
+        243,
+        260,
+        277,
+        294,
+        311,
+        328,
+        345
+      ],
+      "default": 124,
+      "description": "Longueur du clip (24 i/s) : de 124 (5,2 s) à 345 images (14,4 s)."
     },
     "fps": {
       "policy": "fixed",

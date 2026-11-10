@@ -15,6 +15,7 @@ export function renderVideoPlan(container, request, node) {
       : numeric(parameters[key])
         ? parameters[key] + suffix
         : 'Calculé par le workflow';
+  for (const note of request.notes || []) container.append(node('p', 'field-help', note));
   if (plan.edited?.length)
     container.append(
       node('p', 'field-help', 'Modifié par vous : ' + plan.edited.map(key => LABELS[key] || key).join(', ') + '.'),

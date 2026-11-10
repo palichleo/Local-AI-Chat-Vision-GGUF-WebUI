@@ -426,6 +426,8 @@ export function setupGenerationRuntime({
                 'reference_image',
                 'reference_resource',
                 'reference_frame',
+                'routing_notes',
+                'user_overrides',
               ].includes(key),
             ),
           ),
