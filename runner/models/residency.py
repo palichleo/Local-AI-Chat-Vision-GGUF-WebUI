@@ -53,6 +53,8 @@ class Arena:
         self.path, self.stamp, self.header, self.base = path, stamp, header, base
         self.data, self.pinned = data, pinned
         self.size = data.numel()
+        # Open stores reading from this arena: it is not released under them (see Residency.hold).
+        self.users = 0
 
     def tensor(self, key):
         import torch
@@ -101,7 +103,7 @@ class Residency:
                 self.stats['hits'] += 1
                 return found
             if found:
-                self.arenas.pop(path).release()
+                self._discard(self.arenas.pop(path))
             header, base = _header(path)
             size = stamp[0] - base
             if not self._make_room(size):
@@ -142,10 +144,32 @@ class Residency:
             return False
         if size + RESERVE > psutil.virtual_memory().total:
             return False
-        # Evict least recently used arenas until this file fits above the reserve.
-        while self.arenas and psutil.virtual_memory().available - size < RESERVE:
-            self.arenas.popitem(last=False)[1].release()
+        # Evict the least recently used arenas until this file fits above the reserve. Never one
+        # a store of the running generation reads from: when memory is short (another program
+        # holding its own models), this file is read from its mapping instead.
+        while psutil.virtual_memory().available - size < RESERVE:
+            idle = next((path for path, arena in self.arenas.items() if not arena.users), None)
+            if idle is None:
+                break
+            self.arenas.pop(idle).release()
         return psutil.virtual_memory().available - size >= RESERVE
+
+    @staticmethod
+    def _discard(arena):
+        """Releases an arena that left the table, unless a store still reads from it: its memory
+        then goes with the last tensor taken from it."""
+        if not arena.users:
+            arena.release()
+
+    def hold(self, arena):
+        """A store starts reading from this arena."""
+        with self.lock:
+            arena.users += 1
+
+    def drop(self, arena):
+        """A store is done with this arena."""
+        with self.lock:
+            arena.users = max(0, arena.users - 1)
 
     def _pin(self, data):
         import torch
@@ -176,7 +200,7 @@ class Residency:
     def clear(self):
         with self.lock:
             while self.arenas:
-                self.arenas.popitem()[1].release()
+                self._discard(self.arenas.popitem()[1])
 
     def summary(self):
         try:
@@ -221,6 +245,8 @@ class Store:
         else:
             self.arena = RESIDENCY.arena(path) if resident else None
         self.mapping = None
+        if self.arena is not None:
+            RESIDENCY.hold(self.arena)
         if self.arena is None:
             from safetensors import safe_open
 
@@ -236,6 +262,8 @@ class Store:
         if self.mapping is not None:
             self.mapping.__exit__(None, None, None)
             self.mapping = None
+        if self.arena is not None:
+            RESIDENCY.drop(self.arena)
         self.arena = None
 
     def keys(self):
@@ -398,11 +426,16 @@ def prefetch(paths, stores, locations, lead=None):
     keys = {}
     for role, key, _part in locations:
         keys.setdefault(role, set()).add(key)
+
     def mapped(role):
         store = stores.get(role)
         return store.arena is None if store is not None else not RESIDENCY.resident_soon(paths[role])
 
-    plan = [(paths[role], weight_ranges(paths[role], wanted)) for role, wanted in keys.items() if role in paths and mapped(role)]
+    plan = [
+        (paths[role], weight_ranges(paths[role], wanted))
+        for role, wanted in keys.items()
+        if role in paths and mapped(role)
+    ]
     plan = [(path, ranges) for path, ranges in plan if ranges]
     if not plan:
         return None

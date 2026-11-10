@@ -48,6 +48,47 @@ class ResidencyTest(unittest.TestCase):
             residency.RESIDENCY.clear()
 
 
+class EvictionTest(unittest.TestCase):
+    """Memory short while a generation runs: the arenas it reads from stay, the others go."""
+
+    def test_an_arena_a_store_reads_from_is_never_evicted(self):
+        try:
+            import psutil
+        except ImportError:
+            self.skipTest('psutil is required')
+        from runner.models import residency
+
+        released = []
+
+        def arena(name, users):
+            return SimpleNamespace(users=users, size=1, pinned=False, release=lambda: released.append(name))
+
+        table = residency.Residency()
+        table.arenas['vae'] = arena('vae', users=1)
+        table.arenas['old'] = arena('old', users=0)
+        table.arenas['audio'] = arena('audio', users=1)
+        saved_reserve, saved_memory = residency.RESERVE, psutil.virtual_memory
+        residency.RESERVE = 4
+        # 10 units in all; 2 available, 2 more once the idle arena is gone.
+        psutil.virtual_memory = lambda: SimpleNamespace(total=10, available=2 + 2 * ('old' in released))
+        try:
+            # Even with the idle arena gone the file does not fit: it will be read from its mapping.
+            self.assertFalse(table._make_room(3))
+            self.assertEqual(released, ['old'])
+            self.assertEqual(list(table.arenas), ['vae', 'audio'])
+            # A store closes: its arena may go when room is needed again, the one still read stays.
+            table.drop(table.arenas['vae'])
+            self.assertFalse(table._make_room(3))
+            self.assertEqual(released, ['old', 'vae'])
+            self.assertEqual(list(table.arenas), ['audio'])
+            # Unloading between generations leaves alone what is still being read.
+            table.clear()
+            self.assertEqual(released, ['old', 'vae'])
+            self.assertEqual(len(table.arenas), 0)
+        finally:
+            residency.RESERVE, psutil.virtual_memory = saved_reserve, saved_memory
+
+
 def _safetensors(path, tensors):
     """A safetensors file written by hand: {name: bytes}, each stored as I8."""
     header, offset = {}, 0
@@ -81,11 +122,11 @@ class PrefetchTest(unittest.TestCase):
                 residency.weight_ranges(path, ['a.weight', 'b.weight'], gap=100),
                 [(base, base + 1010), (base + 6010, base + 8030)],
             )
-            self.assertEqual(
-                residency.weight_ranges(path, ['a.weight', 'b.weight'], gap=5000), [(base, base + 8030)]
-            )
+            self.assertEqual(residency.weight_ranges(path, ['a.weight', 'b.weight'], gap=5000), [(base, base + 8030)])
             mapped = SimpleNamespace(arena=None)
-            ahead = residency.prefetch({'model': path}, {'model': mapped}, [('model', 'a.weight', None), ('model', 'b.weight', 1)])
+            ahead = residency.prefetch(
+                {'model': path}, {'model': mapped}, [('model', 'a.weight', None), ('model', 'b.weight', 1)]
+            )
             ahead._thread.join(timeout=10)
             self.assertTrue(ahead.done)
             report = ahead.stop()
@@ -143,7 +184,9 @@ class PrefetchTest(unittest.TestCase):
                 for index in (0, 1, 10, 2)
             }
             order = residency.use_order(names)
-            self.assertEqual([key for _role, key, _part in order], [f'blocks.{index}.fc.weight' for index in (0, 1, 2, 10)])
+            self.assertEqual(
+                [key for _role, key, _part in order], [f'blocks.{index}.fc.weight' for index in (0, 1, 2, 10)]
+            )
             # Three parts of one stored tensor (q, k, v) are one read.
             order.insert(1, ('model', 'blocks.0.fc.weight', 1))
             plan = residency._as_used({'model': path}, order, lambda role: True)
@@ -159,7 +202,9 @@ class PrefetchTest(unittest.TestCase):
             saved = residency._fits
             residency._fits = lambda plan: False
             try:
-                ahead = residency.prefetch({'model': path}, {'model': SimpleNamespace(arena=None)}, order, lead=lambda: 10**9)
+                ahead = residency.prefetch(
+                    {'model': path}, {'model': SimpleNamespace(arena=None)}, order, lead=lambda: 10**9
+                )
             finally:
                 residency._fits = saved
             ahead._thread.join(timeout=10)

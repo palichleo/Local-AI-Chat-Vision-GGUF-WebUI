@@ -814,7 +814,9 @@ test('the generation service sends jobs to ComfyUI only while the trial is on', 
   await client.run(continuation);
   await client.free();
   assert.deepEqual(calls, ['preflight', 'generate', 'release']);
-  assert.equal(fake.seen.prompts.length + fake.seen.freed.length, 0);
+  // ComfyUI only lets go of what it kept, so the built-in engine has the memory to itself.
+  assert.equal(fake.seen.prompts.length, 0);
+  assert.deepEqual(fake.seen.freed.splice(0), [{ unload_models: true, free_memory: true }]);
 
   for (const [work, extension] of [
     [ltx(), '.mp4'],
