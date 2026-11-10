@@ -24,6 +24,7 @@ import { ToolRuntime, chatImageUrls, collectToolCalls } from './lib/tool-runtime
 import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
 import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
+import { relocate } from './lib/relocate.mjs';
 import { GenerationService, generationConfig } from './lib/generation-service.mjs';
 import { convertLongForge } from './lib/longforge-conversion.mjs';
 import { generatedMedia } from './lib/generated-media.mjs';
@@ -208,6 +209,15 @@ export async function createApplication({
   let configWarning = '';
   try {
     config = normalizeConfig(JSON.parse(await readFile(configPath, 'utf8')));
+    const moved = {
+      ...config,
+      modelPath: relocate(config.modelPath, root),
+      projectorPath: relocate(config.projectorPath, root),
+    };
+    if (moved.modelPath !== config.modelPath || moved.projectorPath !== config.projectorPath) {
+      config = moved;
+      await atomicJson(configPath, config);
+    }
   } catch (error) {
     if (error.code !== 'ENOENT')
       configWarning = 'La configuration enregistrée est illisible. Renseigne à nouveau les chemins.';

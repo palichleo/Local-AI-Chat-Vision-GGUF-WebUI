@@ -9,19 +9,23 @@
   "components": {
     "model": {
       "policy": "fixed",
-      "asset": "4b404ba0-159a-421d-be77-38210a055ac2"
+      "asset": "4b404ba0-159a-421d-be77-38210a055ac2",
+      "file": "krea2TurboOfficialComfy_krea2TurboInt8.safetensors"
     },
     "textEncoder": {
       "policy": "fixed",
-      "asset": "0c8b0769-3995-40ec-ab6b-490eeb992489"
+      "asset": "0c8b0769-3995-40ec-ab6b-490eeb992489",
+      "file": "qwen3vl_4b_fp8_scaled.safetensors"
     },
     "vae": {
       "policy": "fixed",
-      "asset": "9b98298b-e2b8-4c32-8b50-bd2d23bc488d"
+      "asset": "9b98298b-e2b8-4c32-8b50-bd2d23bc488d",
+      "file": "krea2RealVae_v10.safetensors"
     },
     "tokenizer": {
       "policy": "fixed",
-      "asset": "c7932ea5-58cc-4abc-a617-083cd00fdd3f"
+      "asset": "c7932ea5-58cc-4abc-a617-083cd00fdd3f",
+      "file": "qwen25_tokenizer"
     }
   },
   "parameters": {

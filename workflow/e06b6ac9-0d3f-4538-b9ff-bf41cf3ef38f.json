@@ -9,23 +9,28 @@
   "components": {
     "model": {
       "policy": "fixed",
-      "asset": "9402b90a-3328-4df1-b74f-3ab854d0d537"
+      "asset": "9402b90a-3328-4df1-b74f-3ab854d0d537",
+      "file": "fasth3_omniref_8step_pruned_int8_convrot.safetensors"
     },
     "textEncoder": {
       "policy": "fixed",
-      "asset": "b90c6a2e-6d7f-4dbe-ac00-feb72ffa6580"
+      "asset": "b90c6a2e-6d7f-4dbe-ac00-feb72ffa6580",
+      "file": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
     },
     "tokenizer": {
       "policy": "fixed",
-      "asset": "008ee18d-bf96-4704-aedf-8574cc486d2a"
+      "asset": "008ee18d-bf96-4704-aedf-8574cc486d2a",
+      "file": "qwen25_tokenizer"
     },
     "vae": {
       "policy": "fixed",
-      "asset": "cd940898-cc18-4792-91f3-60a2689d724a"
+      "asset": "cd940898-cc18-4792-91f3-60a2689d724a",
+      "file": "minimax_h3_video_vae_fp16.safetensors"
     },
     "audioVae": {
       "policy": "fixed",
-      "asset": "ee081ce8-2784-47b8-91fa-07852a6712d9"
+      "asset": "ee081ce8-2784-47b8-91fa-07852a6712d9",
+      "file": "minimax_h3_audio_vae_fp32.safetensors"
     }
   },
   "parameters": {

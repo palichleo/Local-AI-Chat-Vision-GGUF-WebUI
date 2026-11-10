@@ -9,19 +9,23 @@
   "components": {
     "model": {
       "policy": "fixed",
-      "asset": "0e393c88-b185-4a05-8e2a-8d4978c61f72"
+      "asset": "0e393c88-b185-4a05-8e2a-8d4978c61f72",
+      "file": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
     },
     "textEncoder": {
       "policy": "fixed",
-      "asset": "dc08f331-092c-40ef-b5d1-b58fa74d560e"
+      "asset": "dc08f331-092c-40ef-b5d1-b58fa74d560e",
+      "file": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot-v2.safetensors"
     },
     "vae": {
       "policy": "fixed",
-      "asset": "fb61ac4a-a94e-4698-b83d-1fa14f551199"
+      "asset": "fb61ac4a-a94e-4698-b83d-1fa14f551199",
+      "file": "ltx-2.5-video-vae-bf16.safetensors"
     },
     "audioVae": {
       "policy": "fixed",
-      "asset": "a6882e04-1752-4c7c-99dd-09a1ee27a5d2"
+      "asset": "a6882e04-1752-4c7c-99dd-09a1ee27a5d2",
+      "file": "ltx-2.5-audio-vae-bf16.safetensors"
     }
   },
   "parameters": {
