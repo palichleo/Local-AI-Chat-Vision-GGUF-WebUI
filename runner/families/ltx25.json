@@ -295,6 +295,37 @@
       }
     },
     "loras": [],
-    "references": []
+    "references": [
+      {
+        "id": "start",
+        "role": "start_image",
+        "required": false,
+        "name": "Image de début"
+      },
+      {
+        "id": "end",
+        "role": "end_image",
+        "required": false,
+        "name": "Image de fin"
+      },
+      {
+        "id": "source",
+        "role": "source_video",
+        "required": false,
+        "name": "Vidéo à prolonger"
+      },
+      {
+        "id": "subject-1",
+        "role": "msr_image",
+        "required": false,
+        "name": "Sujet 1"
+      },
+      {
+        "id": "subject-2",
+        "role": "msr_image",
+        "required": false,
+        "name": "Sujet 2"
+      }
+    ]
   }
 }

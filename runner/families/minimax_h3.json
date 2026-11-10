@@ -2,10 +2,7 @@
   "family": "minimax_h3",
   "label": "MiniMax H3",
   "mediaType": "video",
-  "tasks": [
-    "create_video",
-    "extend_video"
-  ],
+  "tasks": ["create_video", "extend_video"],
   "requires": [
     "torch",
     "torchvision",
@@ -28,17 +25,11 @@
       "signature": [
         {
           "key": "^adaln_t_table$",
-          "shape": [
-            1025,
-            8
-          ]
+          "shape": [1025, 8]
         },
         {
           "key": "^blocks\\.\\d+\\.attn\\.qkv_proj\\.weight$",
-          "shape": [
-            21504,
-            5376
-          ]
+          "shape": [21504, 5376]
         }
       ]
     },
@@ -50,17 +41,11 @@
       "signature": [
         {
           "key": "^(?:model\\.)?embed_tokens\\.weight$",
-          "shape": [
-            151936,
-            5120
-          ]
+          "shape": [151936, 5120]
         },
         {
           "key": "^visual\\.merger\\.linear_fc2\\.weight$",
-          "shape": [
-            5120,
-            null
-          ]
+          "shape": [5120, null]
         }
       ]
     },
@@ -69,9 +54,7 @@
       "folder": "LLMs",
       "required": true,
       "format": "tokenizer",
-      "policies": [
-        "fixed"
-      ],
+      "policies": ["fixed"],
       "picker": "tokenizer",
       "vocabularyOf": "textEncoder",
       "help": "Dossier qui découpe le prompt en tokens pour l’encodeur de texte (tokenizer_config.json, vocab.json…). Proposé automatiquement d’après l’encodeur."
@@ -83,10 +66,7 @@
       "signature": [
         {
           "key": "^decoder\\.x_embedder\\.weight$",
-          "shape": [
-            2048,
-            24
-          ]
+          "shape": [2048, 24]
         },
         {
           "key": "^encoder\\.conv_in\\.weight$"
@@ -100,11 +80,7 @@
       "signature": [
         {
           "key": "^dec_in_proj\\.weight$",
-          "shape": [
-            2048,
-            32,
-            1
-          ]
+          "shape": [2048, 32, 1]
         },
         {
           "key": "^mean_proj\\.weight$"
@@ -137,68 +113,32 @@
     },
     "steps": {
       "type": "integer",
-      "choices": [
-        8
-      ],
+      "choices": [8],
       "note": "Modèle distillé : 8 étapes."
     },
     "frames": {
       "type": "integer",
-      "choices": [
-        124,
-        141,
-        158,
-        175,
-        192,
-        209,
-        226,
-        243,
-        260,
-        277,
-        294,
-        311,
-        328,
-        345
-      ],
+      "choices": [124, 141, 158, 175, 192, 209, 226, 243, 260, 277, 294, 311, 328, 345],
       "note": "17n+5 images à 24 i/s, de 5 à 15 secondes."
     },
     "fps": {
       "type": "number",
-      "choices": [
-        24
-      ]
+      "choices": [24]
     },
     "audio": {
       "type": "boolean"
     },
     "stage": {
       "type": "string",
-      "choices": [
-        "draft",
-        "final"
-      ]
+      "choices": ["draft", "final"]
     },
     "overlap_frames": {
       "type": "integer",
-      "choices": [
-        22,
-        39,
-        56
-      ],
+      "choices": [22, 39, 56],
       "note": "Images reprises de la vidéo source (17n+5)."
     }
   },
-  "requiredParameters": [
-    "prompt",
-    "seed",
-    "width",
-    "height",
-    "steps",
-    "frames",
-    "fps",
-    "stage",
-    "audio"
-  ],
+  "requiredParameters": ["prompt", "seed", "width", "height", "steps", "frames", "fps", "stage", "audio"],
   "roles": {
     "reference_image": {
       "as": "reference",
@@ -225,13 +165,7 @@
       "label": "Vidéo à prolonger"
     }
   },
-  "profiles": [
-    "width",
-    "height",
-    "steps",
-    "frames",
-    "fps"
-  ],
+  "profiles": ["width", "height", "steps", "frames", "fps"],
   "template": {
     "name": "MiniMax H3 video",
     "description": "Video clips of 5 to 15 seconds with synchronized sound: from text, between a start and/or end image, keeping the subjects of up to nine reference images (FastH3 Omni), or continuing a video and its sound at its own resolution.",
@@ -282,10 +216,7 @@
       "stage": {
         "policy": "model",
         "type": "string",
-        "choices": [
-          "draft",
-          "final"
-        ],
+        "choices": ["draft", "final"],
         "default": "draft"
       },
       "frames": {
@@ -326,6 +257,43 @@
       }
     },
     "loras": [],
-    "references": []
+    "references": [
+      {
+        "id": "source",
+        "role": "source_video",
+        "required": false,
+        "name": "Vidéo à prolonger"
+      },
+      {
+        "id": "start",
+        "role": "start_image",
+        "required": false,
+        "name": "Image de début"
+      },
+      {
+        "id": "end",
+        "role": "end_image",
+        "required": false,
+        "name": "Image de fin"
+      },
+      {
+        "id": "subject-1",
+        "role": "reference_image",
+        "required": false,
+        "name": "Référence 1"
+      },
+      {
+        "id": "subject-2",
+        "role": "reference_image",
+        "required": false,
+        "name": "Référence 2"
+      },
+      {
+        "id": "subject-3",
+        "role": "reference_image",
+        "required": false,
+        "name": "Référence 3"
+      }
+    ]
   }
 }
