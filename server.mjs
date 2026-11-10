@@ -318,6 +318,7 @@ export async function createApplication({
     saveConfig: value => generation.save(value),
     persist: () => preferences.saveHistory,
     clientFactory: () => generation.client(),
+    backendNote: job => generation.backendNote(job),
     timing: new ProgressHistory(join(dataDir, 'generation-timing.json')),
     sourceMedia: async (ref, conversationId) => {
       if (ref.attachment) return { ...(await history.attachment(conversationId, ref.attachment)), name: 'Image jointe' };
