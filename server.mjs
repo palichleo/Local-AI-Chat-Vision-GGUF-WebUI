@@ -24,6 +24,7 @@ import { spawn } from 'node:child_process';
 import { History, MAX_CONVERSATION_MESSAGES } from './lib/history.mjs';
 import { chooseLocalFile } from './lib/file-picker.mjs';
 import { Gallery } from './lib/gallery.mjs';
+import { Thumbnails } from './lib/thumbnails.mjs';
 import { ToolRuntime, chatImageUrls, collectToolCalls } from './lib/tool-runtime.mjs';
 import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
@@ -58,6 +59,7 @@ const staticFiles = new Map([
   ['/assets-ui.mjs', ['assets-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/resource-preparation.mjs', ['resource-preparation.mjs', 'text/javascript; charset=utf-8']],
   ['/copy.mjs', ['copy.mjs', 'text/javascript; charset=utf-8']],
+  ['/thumbnails.mjs', ['thumbnails.mjs', 'text/javascript; charset=utf-8']],
   ['/transcript.mjs', ['transcript.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-guard.mjs', ['settings-guard.mjs', 'text/javascript; charset=utf-8']],
   ['/context-meter.mjs', ['context-meter.mjs', 'text/javascript; charset=utf-8']],
@@ -299,6 +301,8 @@ export async function createApplication({
   let pickingFile = false;
   let savingGeneration = false;
   const gallery = new Gallery({ historyDir });
+  // Small pictures of the creations, made by the page and kept here (lib/thumbnails.mjs).
+  const thumbnails = await new Thumbnails(join(dataDir, 'thumbnails')).load();
   const resources = new Resources(join(dataDir, 'resources'));
   const mediaSecret = randomBytes(32),
     resourceTurns = new Map();
@@ -365,11 +369,31 @@ export async function createApplication({
                 index +
                 '?key=' +
                 mediaKey(record.conversationId + '/' + record.id + '/' + index, 'generated'),
+              // Only once the page has sent one: until then the original is shown.
+              ...(thumbnails.has(Thumbnails.key(record.conversationId, record.id, index))
+                ? { thumbUrl: thumbUrl(record.conversationId, record.id, index) }
+                : {}),
             }
           : {}),
       })),
     };
   }
+  const thumbUrl = (conversationId, runId, index) =>
+    `/media/thumbs/${conversationId}/${runId}/${index}?key=${mediaKey(conversationId + '/' + runId + '/' + index, 'thumb')}`;
+  /** The creation the cover of a conversation shows: its thumbnail when there is one, else the image itself. */
+  const coverOf = conversationId =>
+    history.preview(conversationId, async runId => {
+      const key = Thumbnails.key(conversationId, runId, 0);
+      if (thumbnails.has(key)) return { bytes: await thumbnails.read(key), mime: 'image/jpeg', thumbnail: true };
+      const record = await gallery.get(conversationId, runId, { includeImages: false });
+      if (record.provider !== 'native' || ['video', 'audio'].includes(record.mediaType)) return null;
+      const { handle, mime } = await generatedMedia(outputDir, record.outputs[0].source);
+      try {
+        return { bytes: await handle.readFile(), mime };
+      } finally {
+        await handle.close();
+      }
+    });
   const status = () => ({
     ...engine.status(),
     toolJob: runtime.active ? runtime.status() : null,
@@ -479,17 +503,35 @@ export async function createApplication({
         )
           throw problem('Accès refusé.', 401);
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
-        const { bytes, mime } = await history.preview(previewMatch[1], async runId => {
-          const record = await gallery.get(previewMatch[1], runId, { includeImages: false });
-          if (record.provider !== 'native' || ['video', 'audio'].includes(record.mediaType)) return null;
-          const { handle, mime } = await generatedMedia(outputDir, record.outputs[0].source);
-          try {
-            return { bytes: await handle.readFile(), mime };
-          } finally {
-            await handle.close();
-          }
+        let cover;
+        try {
+          cover = await coverOf(previewMatch[1]);
+        } catch (error) {
+          if (error.status !== 404) throw error;
+          // Nothing to show (a conversation whose creations are videos without a thumbnail
+          // yet): an empty answer, which the page takes as « no cover », not an error.
+          res.writeHead(204);
+          return res.end();
+        }
+        res.writeHead(200, { 'Content-Type': cover.mime, 'Content-Length': cover.bytes.length });
+        return res.end(req.method === 'HEAD' ? undefined : cover.bytes);
+      }
+      const thumb = path.match(/^\/media\/thumbs\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/([0-9]{1,3})$/);
+      if (thumb) {
+        if (!['GET', 'HEAD'].includes(req.method)) throw problem('Méthode non prise en charge.', 405);
+        const key = requestURL.searchParams.get('key') || '';
+        if (
+          !/^[0-9a-f]{64}$/.test(key) ||
+          !timingSafeEqual(Buffer.from(key, 'hex'), Buffer.from(mediaKey(thumb.slice(1).join('/'), 'thumb'), 'hex'))
+        )
+          throw problem('Accès refusé.', 401);
+        const bytes = await thumbnails.read(Thumbnails.key(thumb[1], thumb[2], thumb[3]));
+        // Written once and never changed: the browser keeps it.
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': bytes.length,
+          'Cache-Control': 'private, max-age=31536000, immutable',
         });
-        res.writeHead(200, { 'Content-Type': mime, 'Content-Length': bytes.length });
         return res.end(req.method === 'HEAD' ? undefined : bytes);
       }
       const attached = path.match(/^\/media\/attachments\/([0-9a-f-]{36})\/([a-z0-9.-]{1,90})$/);
@@ -665,6 +707,31 @@ export async function createApplication({
         const conversationId = String(req.headers['x-conversation-id'] || '');
         const stored = await history.addOriginal(conversationId, req);
         return send(201, { ...stored, view: attachmentUrl(conversationId, stored.file) });
+      }
+      if (path === '/api/gallery/thumbnail' && req.method === 'POST') {
+        if (applyingUpdate || closing || relaunching) throw problem('L’application est occupée.', 409);
+        if (clearingHistory) throw problem('Suppression de l’historique en cours.', 409);
+        const conversationId = String(req.headers['x-conversation-id'] || '');
+        const parts = [];
+        let size = 0;
+        for await (const chunk of req) {
+          size += chunk.length;
+          if (size > 400 * 1024) throw problem('Vignette trop lourde.', 413);
+          parts.push(chunk);
+        }
+        let runId = String(req.headers['x-run-id'] || ''),
+          index = Number(req.headers['x-output-index'] || 0);
+        if (req.headers['x-preview'] === '1') {
+          // The cover of a conversation: the server knows which creation it shows.
+          const cover = await coverOf(conversationId);
+          if (cover.kind !== 'generation' || cover.thumbnail) return send(200, {});
+          runId = cover.runId;
+          index = 0;
+        }
+        const record = await gallery.get(conversationId, runId, { includeImages: false });
+        if (record.provider !== 'native' || !record.outputs[index]) throw problem('Sortie introuvable.', 404);
+        await thumbnails.write(Thumbnails.key(conversationId, runId, index), Buffer.concat(parts));
+        return send(201, { thumbUrl: thumbUrl(conversationId, runId, index) });
       }
       const attachmentRead = req.method === 'GET' && path.match(/^\/api\/attachments\/([0-9a-f-]{36})\/([a-z0-9.-]{1,90})$/);
       if (attachmentRead) {
@@ -1361,6 +1428,7 @@ export async function createApplication({
           await historySaves;
           await gallery.pending;
           await history.remove(body.id);
+          await thumbnails.forget(body.id);
           gallery.forgetConversation(body.id);
           runtime.forgetConversation(body.id);
           return send(200, { deleted: body.id });
@@ -1385,6 +1453,7 @@ export async function createApplication({
           await historySaves;
           await gallery.pending;
           await history.clear();
+          await thumbnails.forget();
           runtime.clear();
           // The text conditioning kept for recent prompts is derived from them: it goes too.
           await rm(join(dataDir, 'generation-cache', 'conditioning'), { recursive: true, force: true });

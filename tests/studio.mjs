@@ -218,17 +218,18 @@ test('the workflows are listed once for a whole answer, whatever the number of v
 test('each banner shows the last creation of its mode and how many there are', async () => {
   const { showcased } = await import('../public/studio.mjs');
   const run = (mediaType, url) => ({ ...(mediaType ? { mediaType } : {}), outputs: [{ originalUrl: url }] });
-  assert.deepEqual(showcased([]), {
-    image: { count: '', latest: null },
-    video: { count: '', latest: null },
-    audio: { count: '', latest: null },
-  });
+  const nothing = { count: '', latest: null, small: null, record: null };
+  assert.deepEqual(showcased([]), { image: nothing, video: nothing, audio: nothing });
   // Newest first, as the gallery gives them; a record without a type is an image.
-  const shown = showcased([run('video', '/v2'), run(undefined, '/i3'), run('image', '/i2'), run('video', '/v1'), run('audio', '/a1')]);
-  assert.deepEqual(shown.image, { count: '2 images', latest: '/i3' });
-  assert.deepEqual(shown.video, { count: '2 clips', latest: '/v2' });
+  const clip = { mediaType: 'video', outputs: [{ originalUrl: '/v2', thumbUrl: '/v2.jpg' }] },
+    picture = run(undefined, '/i3');
+  const shown = showcased([clip, picture, run('image', '/i2'), run('video', '/v1'), run('audio', '/a1')]);
+  // Without a thumbnail the original is shown, and its record is there to make one from.
+  assert.deepEqual(shown.image, { count: '2 images', latest: '/i3', small: null, record: picture });
+  // With one, a clip is shown as a picture too: nothing of the video is loaded.
+  assert.deepEqual(shown.video, { count: '2 clips', latest: '/v2', small: '/v2.jpg', record: clip });
   // A sound has no picture: its number only.
-  assert.deepEqual(shown.audio, { count: '1 son', latest: null });
+  assert.deepEqual(shown.audio, { count: '1 son', latest: null, small: null, record: null });
 });
 
 test('leaving a mode stops following the size of its frame', async () => {

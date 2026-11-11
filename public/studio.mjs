@@ -1,4 +1,5 @@
 import { FORMATS, formatOf, nearestSize, sizesFor } from './formats.mjs';
+import { thumbnailOf } from './thumbnails.mjs';
 
 /**
  * The Studio: the creation tools used by hand. The user picks Image, Vidéo or Son, writes the
@@ -60,17 +61,22 @@ const COUNTED = { image: 'image', video: 'clip', audio: 'son' };
 
 /**
  * What each banner shows of its mode: how many were made and, for a picture or a clip, the last
- * one (the runs come newest first). A sound has nothing to show but its number.
+ * one (the runs come newest first), as its thumbnail when the server keeps one (`small`),
+ * else as the original. A sound has nothing to show but its number.
  */
 export function showcased(runs) {
   return Object.fromEntries(
     MODES.map(item => {
-      const mine = runs.filter(record => (record.mediaType || 'image') === item.id);
+      const mine = runs.filter(record => (record.mediaType || 'image') === item.id),
+        last = item.id === 'audio' ? null : (mine[0] ?? null),
+        output = last?.outputs?.[0];
       return [
         item.id,
         {
           count: mine.length ? `${mine.length} ${COUNTED[item.id]}${mine.length > 1 ? 's' : ''}` : '',
-          latest: item.id === 'audio' ? null : (mine[0]?.outputs?.[0]?.originalUrl ?? null),
+          latest: output?.originalUrl ?? null,
+          small: output?.thumbUrl ?? null,
+          record: output?.originalUrl ? last : null,
         },
       ];
     }),
@@ -698,6 +704,8 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
         player.controls = true;
         player.preload = 'metadata';
         player.playsInline = true;
+        if (record.outputs[0].thumbUrl) player.poster = record.outputs[0].thumbUrl;
+        player.onloadeddata = () => void thumbnailOf(api, record, 0, player);
         player.src = record.outputs[0].originalUrl || '';
         const caption = node(
           'p',
@@ -739,11 +747,15 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       const card = node('article', 'studio-card');
       if (mode === 'image') {
         const picture = node('img');
-        picture.src = record.outputs[0].originalUrl || '';
+        // A card is small: the thumbnail when the server keeps one. « Détails » shows the original.
+        picture.src = record.outputs[0].thumbUrl || record.outputs[0].originalUrl || '';
         picture.alt = record.prompt;
         picture.loading = 'lazy';
         picture.onclick = () => viewOutput(record, 0);
-        picture.onload = () => measured.set(record.id, { width: picture.naturalWidth, height: picture.naturalHeight });
+        picture.onload = () => {
+          measured.set(record.id, { width: picture.naturalWidth, height: picture.naturalHeight });
+          void thumbnailOf(api, record, 0, picture);
+        };
         card.append(picture);
       } else {
         const player = node('audio');
@@ -1006,18 +1018,25 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
   }
   /** Each banner shows the last creation of its mode in its outline, and how many there are. */
   function showcase() {
-    for (const [id, { count, latest }] of Object.entries(showcased(runs))) {
+    for (const [id, { count, latest, small, record }] of Object.entries(showcased(runs))) {
       const banner = banners[id];
       banner.count.textContent = count;
       banner.count.hidden = !count;
       banner.shape.replaceChildren();
       banner.shape.classList.toggle('is-filled', Boolean(latest));
       if (!latest) continue;
-      const media = node(id === 'video' ? 'video' : 'img');
-      if (id === 'video') {
+      // The thumbnail when there is one, for a clip as for a picture; else the original, of
+      // which a thumbnail is made for the next time.
+      const media = node(id === 'video' && !small ? 'video' : 'img');
+      if (small) Object.assign(media, { alt: '', decoding: 'async', src: small });
+      else if (id === 'video') {
         // Its first picture only: nothing plays on the banner.
         Object.assign(media, { muted: true, preload: 'metadata', playsInline: true, src: latest + '#t=0.1' });
-      } else Object.assign(media, { alt: '', loading: 'lazy', decoding: 'async', src: latest });
+        media.onloadeddata = () => void thumbnailOf(api, record, 0, media);
+      } else {
+        Object.assign(media, { alt: '', loading: 'lazy', decoding: 'async', src: latest });
+        media.onload = () => void thumbnailOf(api, record, 0, media);
+      }
       // A file that cannot be shown leaves the empty outline.
       media.onerror = () => {
         banner.shape.replaceChildren();

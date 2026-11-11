@@ -1,4 +1,5 @@
 import { comparedSource, imageCompare, loadSource } from './image-compare.mjs';
+import { thumbnailOf } from './thumbnails.mjs';
 
 export function setupGenerationUI({ api, node, openOutput, actions = null, onResize = () => {} }) {
   const cards = new Set(),
@@ -141,7 +142,9 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       if (slot.url) URL.revokeObjectURL(slot.url);
       slot.url = null;
       slot.blob = null;
-      const preview = record?.outputs?.[slot.index]?.analysisDataUrl;
+      // Out of view: back to the small picture, the copy the model saw or the kept thumbnail.
+      const output = record?.outputs?.[slot.index],
+        preview = output?.analysisDataUrl || output?.thumbUrl;
       slot.img.hidden = !preview;
       if (preview) slot.img.src = preview;
       else slot.img.removeAttribute('src');
@@ -158,6 +161,8 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
           slot.button.style.aspectRatio = `${width} / ${height}`;
           dimensions(width, height, slot.tile);
         }
+        // The original is decoded: a thumbnail of it is kept for the next displays.
+        void thumbnailOf(api, record, slot.index, slot.img);
       };
       slot.img.hidden = false;
       slot.img.src = slot.url;
@@ -226,8 +231,10 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
         video.preload = 'none';
         video.playsInline = true;
         video.setAttribute('aria-label', 'Vidéo originale · ' + record.workflowName);
-        if (output.analysisDataUrl) video.poster = output.analysisDataUrl;
+        const poster = output.analysisDataUrl || output.thumbUrl;
+        if (poster) video.poster = poster;
         video.onloadedmetadata = () => dimensions(video.videoWidth, video.videoHeight, target);
+        video.onloadeddata = () => void thumbnailOf(api, record, index, video);
         wrapper.append(video);
         target.figure.append(buttons(record, index));
         const slot = { index, button: wrapper, img: video, isVideo: true, tile: target };
@@ -271,8 +278,10 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       button.onclick = () => openOutput(record, index, slot.blob || undefined);
       frame.replaceChildren(button);
       target.figure.append(buttons(record, index));
+      // While the original loads: the copy the model saw, or the thumbnail kept by the server.
+      const small = output?.analysisDataUrl || output?.thumbUrl;
       if (blob) display(slot, blob);
-      else if (output?.analysisDataUrl) img.src = output.analysisDataUrl;
+      else if (small) img.src = small;
       else img.hidden = true;
       watch(button, visible => {
         slot.visible = visible;

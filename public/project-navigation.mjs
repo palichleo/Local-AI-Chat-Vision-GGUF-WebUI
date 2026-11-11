@@ -1,3 +1,4 @@
+import { keepThumbnail } from './thumbnails.mjs';
 import { dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 
 export function projectGroups(projects, conversations) {
@@ -363,6 +364,11 @@ export function setupProjectNavigation({
         image.loading = 'lazy';
         image.decoding = 'async';
         image.src = visual.previewUrl;
+        // Served the whole original (several megabytes for this tile): a thumbnail is kept for next time.
+        image.onload = () => {
+          if (Math.max(image.naturalWidth, image.naturalHeight) > 600)
+            void keepThumbnail(api, { conversationId: visual.id, preview: true }, image);
+        };
         image.onerror = () => {
           cover.hidden = true;
           card.classList.remove('is-visual');

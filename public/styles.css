@@ -3501,7 +3501,8 @@ dialog::backdrop {
     0 5px 15px var(--shadow);
 }
 .generation-frame::before,
-.generation-frame::after {
+.generation-frame::after,
+.generation-original[aria-busy='true']::before {
   content: '';
   position: absolute;
   z-index: -1;
@@ -3567,6 +3568,12 @@ dialog::backdrop {
   object-fit: contain;
   border: 1px solid var(--line);
   border-radius: 12px;
+}
+/* The original is on its way and no small picture stands in for it: the tile shows the same
+   moving background as a generation (the rule of .generation-frame::before above), not black. */
+.generation-original {
+  position: relative;
+  isolation: isolate;
 }
 .generation-card.is-video .generation-frame.has-image {
   aspect-ratio: auto !important;
