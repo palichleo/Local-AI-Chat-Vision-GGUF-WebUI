@@ -34,7 +34,7 @@ const server = http.createServer(async (req, res) => {
   const isImage = Array.isArray(content) && content.some(part => part.type === 'image_url');
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
   res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'Je réfléchis. ' } }] })}\n\n`);
-  if (content === 'lent') {
+  if (content === 'lent' || /sans réponse$/.test(content)) {
     const timer = setInterval(() => res.write(': attente\n\n'), 100);
     res.on('close', () => clearInterval(timer));
     return;

@@ -90,7 +90,15 @@ function notice(message) {
   $('notice').hidden = !message;
 }
 
+// The page learns its token from its first request, which takes up to several seconds while the
+// model loads. Everything is already on screen: an action clicked meanwhile waits for the token
+// instead of being refused (« Accès refusé. Recharge la page. »).
+let tokenKnown;
+const pageReady = new Promise(resolve => {
+  tokenKnown = resolve;
+});
 async function api(route, body, options = {}) {
+  await pageReady;
   const { raw = false, headers: extraHeaders = {}, ...requestOptions } = options;
   const response = await fetch(`/api/${route}`, {
     method: body === undefined ? 'GET' : 'POST',
@@ -2384,6 +2392,7 @@ try {
     status: initial.status,
     connected: true,
   });
+  tokenKnown();
   void checkUpdates();
   applyTheme(initial.preferences?.theme);
   state.saveHistory = initial.preferences?.saveHistory === true;
@@ -2396,6 +2405,8 @@ try {
   contextMeter.schedule();
   updateControls();
 } catch (error) {
+  // Nothing is left waiting: each action then says itself what it could not do.
+  tokenKnown();
   notice(error.message);
   updateControls();
 }

@@ -379,6 +379,31 @@ test('Home locks navigation while pending descriptions and saves complete', asyn
   assert.equal(state.loadingHistory, false);
   assert.equal(state.view, 'home');
 });
+test('an action clicked before the page knows its token waits for it instead of being refused', async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    state = { token: '' },
+    sent = [];
+  const context = {
+    state,
+    fetch: async (url, options) => {
+      sent.push([url, options.headers.Authorization]);
+      return { ok: true };
+    },
+  };
+  runInNewContext(
+    source.slice(source.indexOf('let tokenKnown;'), source.indexOf('let historyWrite')) +
+      ';this.api=api;this.tokenKnown=tokenKnown;',
+    context,
+  );
+  // The first answer of the server takes seconds while the model loads; the page is already usable.
+  const clicked = context.api('studio');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(sent, [], 'nothing leaves without a token');
+  state.token = 'abc';
+  context.tokenKnown();
+  await clicked;
+  assert.deepEqual(sent, [['/api/studio', 'Bearer abc']]);
+});
 test('the Studio is unlocked while its tools load: a mode opened at once is not refused', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     state = { status: {}, view: 'chat' },

@@ -203,6 +203,8 @@ export async function createApplication({
   controlHeartbeatMs = 10000,
   controlReconnectMs = 2000,
   chatHeartbeatMs = 10000,
+  // How long the chat model may take to write a style line for the Studio.
+  styleTimeoutMs = 90000,
 } = {}) {
   // Keep HTML, scripts and styles paired with this running backend until restart.
   const frontend = new Map(
@@ -1208,13 +1210,22 @@ export async function createApplication({
               reasoning_format: 'deepseek',
               chat_template_kwargs: { enable_thinking: false },
             }),
-            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90000)]),
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(styleTimeoutMs)]),
           });
           if (!upstream.ok)
             throw problem(`Le moteur refuse la requête (${upstream.status}). ${(await upstream.text()).slice(0, 500)}`, 502);
           const style = styleLine((await upstream.json()).choices?.[0]?.message?.content);
           if (!style) throw problem('Le modèle n’a pas écrit de style. Réessayez.', 502);
           return send(200, { style });
+        } catch (error) {
+          // A model slowed down to a crawl (the graphics card shared with another program) is
+          // said as such, not as an unexpected local error.
+          if (error.name === 'TimeoutError')
+            throw problem(
+              `Le modèle n’a pas répondu en ${Math.round(styleTimeoutMs / 1000)} secondes : la carte graphique est peut-être occupée par un autre programme. Réessayez une fois qu’elle est libre.`,
+              504,
+            );
+          throw error;
         } finally {
           res.off('close', onClose);
           if (engine.activeRequest === controller) {

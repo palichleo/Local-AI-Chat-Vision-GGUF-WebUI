@@ -182,10 +182,12 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
   const application = source.slice(0, source.lastIndexOf('\ntry {')).replace(/^import .*;\r?\n/gm, '');
   runInNewContext(
     application +
-      '\nthis.app = { state, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, applyModelLibrary, addLLM, saveLLM, removeLLM, cancelLLM, modelDraft, modelEditorDirty, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };',
+      '\nthis.app = { state, tokenKnown, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, applyModelLibrary, addLLM, saveLLM, removeLLM, cancelLLM, modelDraft, modelEditorDirty, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };',
     context,
   );
   Object.assign(context.app.state, { token: 'test', config: { ...savedConfig }, connected: true });
+  // What the page does once its first request has answered: its actions stop waiting.
+  context.app.tokenKnown();
   return {
     ...context.app,
     $,

@@ -4,6 +4,12 @@ import { STUDIO_ID, STUDIO_VERBS, styleLine, styleMessages } from '../lib/studio
 import { ToolRuntime, checkStyles } from '../lib/tool-runtime.mjs';
 import { comfyGraph } from '../lib/comfy-graphs.mjs';
 import { comfyNames } from '../lib/comfy-engine.mjs';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { createApplication } from '../server.mjs';
 
 test('a style is asked as one short line, from the description or from random starting points', () => {
   const [system, user] = styleMessages('  affiche soviétique  ', 'image');
@@ -139,6 +145,47 @@ test('the format frame keeps the ratio and fits its box, wide or tall', async ()
     assert.ok(size.width <= box.width && size.height <= box.height);
     assert.ok(Math.abs(size.width / size.height / ratio - 1) < 0.02);
   }
+});
+
+test('a style the model does not write in time is said as such, and the model is free again', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'atelier-style-'));
+  const app = await createApplication({
+    port: 0,
+    dataDir: directory,
+    styleTimeoutMs: 400,
+    spawnProcess: (_command, args, options) =>
+      spawn(process.execPath, [fileURLToPath(new URL('./fixtures/fake-engine.mjs', import.meta.url)), ...args], options),
+  });
+  t.after(async () => {
+    await app.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const { token } = await (await fetch(app.url + '/api/bootstrap?brief=1')).json();
+  const api = (route, body) =>
+    fetch(app.url + '/api/' + route, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  const modelPath = join(directory, 'model.gguf');
+  await writeFile(modelPath, Buffer.from('GGUF   '));
+  await api('config', {
+    enginePath: process.execPath,
+    modelPath,
+    projectorPath: '',
+    contextSize: 4096,
+    maxOutputTokens: 1024,
+    gpuLayers: 0,
+  });
+  assert.equal((await api('start', {})).status, 202);
+  for (let tries = 0; tries < 200 && (await (await api('status')).json()).state !== 'ready'; tries++)
+    await new Promise(resolve => setTimeout(resolve, 25));
+  // The simulated engine never finishes this one, like a model crawling on a shared graphics card.
+  const late = await api('studio/style', { description: 'aquarelle, sans réponse', media: 'image' });
+  assert.equal(late.status, 504);
+  assert.match((await late.json()).error, /n’a pas répondu en 0 secondes.*carte graphique/);
+  const status = await (await api('status')).json();
+  assert.deepEqual([status.state, status.busy], ['ready', false]);
 });
 
 test('leaving a mode stops following the size of its frame', async () => {
