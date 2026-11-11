@@ -1,12 +1,10 @@
-import copy
-import json
 from pathlib import Path
 import struct
 import tempfile
 import unittest
 
 from runner.contracts import validate_job, validate_config
-from runner.models.headers import header, validate_krea2_components, validate_lora
+from runner.models.headers import header
 
 
 def job():
@@ -87,27 +85,6 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_job(candidate)
 
-    def test_expansion_requires_concrete_config_and_rejects_unknown_options(self):
-        candidate = job()
-        candidate['parameters']['expandPrompt'] = True
-        with self.assertRaises(ValueError):
-            validate_job(candidate)
-        candidate['promptExpansion'] = dict(
-            template='Describe {{prompt}}',
-            maxTokens=128,
-            temperature=0.7,
-            topK=50,
-            topP=0.95,
-            minP=0,
-            repetitionPenalty=1.05,
-            seed=7,
-            suffix=' visual details',
-        )
-        self.assertEqual(validate_job(candidate), candidate)
-        candidate['promptExpansion']['template'] = 'no prompt placeholder'
-        with self.assertRaises(ValueError):
-            validate_job(candidate)
-
     def test_safetensors_header_rejects_truncation_invalid_offsets_and_duplicates(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'fake.safetensors'
@@ -121,25 +98,6 @@ class ContractTests(unittest.TestCase):
                 path.write_bytes(struct.pack('<Q', len(raw)) + raw + payload)
                 with self.assertRaises(ValueError):
                     header(path)
-
-    def test_layout_inspection_rejects_wrong_family(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'fake.safetensors'
-            raw = json.dumps({'x': {'dtype': 'F32', 'shape': [1], 'data_offsets': [0, 4]}}).encode()
-            path.write_bytes(struct.pack('<Q', len(raw)) + raw + b'1234')
-            candidate = job()
-            candidate['components'] = {k: str(path) for k in candidate['components']}
-            with self.assertRaisesRegex(ValueError, '[Ii]ncompatible'):
-                validate_krea2_components(candidate)
-
-    def test_lora_rejects_orphan_and_unsupported_tensors(self):
-        base = {'layer.weight': {'shape': [4, 8]}}
-        entries = {'layer.lora_A.weight': {'shape': [2, 8]}, 'layer.lora_B.weight': {'shape': [4, 2]}}
-        validate_lora(entries, base)
-        with self.assertRaises(ValueError):
-            validate_lora(entries | {'other.lora_B.weight': {'shape': [4, 2]}}, base)
-        with self.assertRaises(ValueError):
-            validate_lora(entries | {'layer.dora_scale': {'shape': [4]}}, base)
 
 
 if __name__ == '__main__':

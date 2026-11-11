@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36",
+  "enabled": true,
+  "pipeline": "moss",
+  "mediaType": "image",
+  "name": "MOSS Image",
+  "description": "Créer une image avec MOSS Image : affiches, mises en page et texte écrit dans l’image.",
+  "components": {
+    "model": {
+      "policy": "fixed",
+      "asset": "a1c4e7b2-5d8f-4a3b-9e6c-2f7d0b8a4c51",
+      "file": "mossImage_sft_pruned_int8.safetensors"
+    },
+    "textEncoder": {
+      "policy": "fixed",
+      "asset": "b2d5f8c3-6e9a-4b4c-8f7d-3a8e1c9b5d62",
+      "file": "mossImage_sft_txt_int8.safetensors"
+    },
+    "vae": {
+      "policy": "fixed",
+      "asset": "c3e6a9d4-7f0b-4c5d-9a8e-4b9f2d0c6e73",
+      "file": "flux2-vae.safetensors"
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "policy": "model",
+      "type": "string",
+      "maxLength": 8000
+    },
+    "negative_prompt": {
+      "policy": "fixed",
+      "value": ""
+    },
+    "seed": {
+      "policy": "random",
+      "type": "integer"
+    },
+    "width": {
+      "policy": "model",
+      "type": "integer",
+      "default": 1024,
+      "min": 256,
+      "max": 4096
+    },
+    "height": {
+      "policy": "model",
+      "type": "integer",
+      "default": 1024,
+      "min": 256,
+      "max": 4096
+    },
+    "steps": {
+      "policy": "fixed",
+      "value": 50
+    },
+    "cfg": {
+      "policy": "fixed",
+      "value": 3
+    }
+  },
+  "loras": [],
+  "references": []
+}

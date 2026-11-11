@@ -23,3 +23,6 @@ workflow/*.json
 runner/**/__pycache__/
 runner/__pycache__/
 runner/**/*.pyc
+
+# Built-in engines set aside when ComfyUI took their families over: kept on disk, out of the repository.
+experiment_keep_engine/

@@ -4052,6 +4052,36 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   width: 14px;
   height: 14px;
 }
+.workflow-section {
+  margin: 22px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.workflow-section:first-child {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+.workflow-section h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+.workflow-section .field-help {
+  margin: 0;
+}
+.comfy-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  margin-top: 12px;
+}
+.comfy-panel .history-toggle {
+  margin: 0;
+}
+.comfy-panel .path-input {
+  flex: 1 1 100%;
+}
 .workflow-settings .workflow-card {
   margin: 12px 0 0;
   padding: 16px;

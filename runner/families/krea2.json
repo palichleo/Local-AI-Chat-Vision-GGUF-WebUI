@@ -3,7 +3,8 @@
   "label": "Krea2",
   "mediaType": "image",
   "tasks": ["create_image"],
-  "requires": ["torch", "diffusers", "transformers", "accelerate", "safetensors", "PIL"],
+  "engine": "external",
+  "native": false,
   "components": {
     "model": {
       "label": "Modèle",
@@ -34,12 +35,12 @@
     "tokenizer": {
       "label": "Tokenizer",
       "folder": "LLMs",
-      "required": true,
+      "required": false,
       "format": "tokenizer",
       "policies": ["fixed"],
       "picker": "tokenizer",
       "vocabularyOf": "textEncoder",
-      "help": "Dossier qui découpe le prompt en tokens pour l’encodeur de texte (tokenizer_config.json, vocab.json…). Proposé automatiquement d’après l’encodeur."
+      "help": "Dossier du tokenizer de l’encodeur de texte. Facultatif : ComfyUI, qui génère les images Krea 2, a le sien."
     },
     "vae": {
       "label": "VAE",

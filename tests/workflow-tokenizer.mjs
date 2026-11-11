@@ -137,7 +137,7 @@ test('the tokenizer ComfyUI ships is found from the encoder and registered as a 
   );
 });
 
-test('a workflow without its tokenizer stays readable but cannot be saved, offered or run', async t => {
+test('Krea 2 runs on ComfyUI: no tokenizer is needed, and one that is given must still fit', async t => {
   const root = await directory(t),
     files = await comfy(root),
     assets = new GenerationAssets(join(root, 'assets.json')),
@@ -153,11 +153,11 @@ test('a workflow without its tokenizer stays readable but cannot be saved, offer
   await mkdir(join(root, 'workflow'));
   await writeFile(join(root, 'workflow', 'krea.json'), JSON.stringify(workflow(base)));
   assert.equal((await catalog.read('krea')).components.tokenizer, undefined);
+  // ComfyUI has its own tokenizer: the workflow is whole without one.
   const [listed] = await catalog.list();
-  assert.equal(listed.ready, false);
-  assert.match(listed.unavailableReason, /Tokenizer/);
-  await assert.rejects(catalog.save(workflow(base)), /Tokenizer/);
-  await assert.rejects(catalog.prepare('krea', { prompt: 'a boat' }), /Tokenizer/);
+  assert.equal(listed.ready, true, listed.unavailableReason);
+  await catalog.save(workflow(base));
+  assert.equal((await catalog.prepare('krea', { prompt: 'a boat' })).job.components.tokenizer, undefined);
 
   const other = await assets.register({ path: files.other, kind: 'tokenizer', family: 'krea2' });
   await assert.rejects(

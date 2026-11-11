@@ -3,6 +3,7 @@
   "label": "RIFE",
   "mediaType": "video",
   "tasks": ["interpolate"],
+  "engine": "internal",
   "requires": ["torch", "safetensors", "av", "imageio_ffmpeg"],
   "components": {
     "interpolator": {

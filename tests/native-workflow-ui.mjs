@@ -384,7 +384,10 @@ test('typing the name of a listed file selects it without a path', async t => {
   field.value = 'model.safetensors';
   field.oninput();
   assert.equal(f.$('native-component-model').value, 'model-one');
-  assert.equal(f.calls.some(call => call.route === 'generation/assets'), false);
+  assert.equal(
+    f.calls.some(call => call.route === 'generation/assets'),
+    false,
+  );
 });
 test('shipped pipeline templates round-trip through the editor without corrupting their policy contract', async t => {
   const { validateNativeWorkflow } = await import('../lib/native-workflows.mjs'),
@@ -573,7 +576,9 @@ test('VAE and LoRA folders can be edited or browsed and feed component selection
   assert.equal(f.calls.filter(call => call.route === 'files/choose').at(-1).body.initialPath, 'D:/my LoRA');
   f.ui.cancelSettings();
   const text = JSON.stringify(f.template);
-  await f.$('native-workflow-file').onchange({ target: { files: [{ size: text.length, text: async () => text }], value: '' } });
+  await f
+    .$('native-workflow-file')
+    .onchange({ target: { files: [{ size: text.length, text: async () => text }], value: '' } });
   assert.equal(f.calls.find(call => call.route === 'generation/import').body.vaeRoot, 'D:/my VAE');
   assert.equal(f.calls.find(call => call.route === 'generation/import').body.loraRoot, 'D:/my LoRA');
   f.ui.cancelSettings();
@@ -717,28 +722,43 @@ test('four unsupported references and three named LoRAs all appear in the editor
   assert.equal(f.$('native-value-cfg').value, 4);
 });
 
-test('the tokenizer is chosen in the workflow, proposed from its encoder and required to save', async t => {
+test('Krea 2 is run by ComfyUI: its tokenizer is neither asked for nor proposed', async t => {
   const f = await setup(t),
     record = structuredClone(f.template);
   delete record.components.tokenizer;
   await f.ui.edit(record);
   await new Promise(resolve => setImmediate(resolve));
-  // Proposed from the selected text encoder, without asking the user what a tokenizer is.
-  assert.deepEqual(f.tokenizerRequests, [{ encoder: 'encoder-one', family: 'krea2' }]);
-  assert.equal(f.$('native-component-tokenizer').value, 'tokenizer-one');
-  // It must match its encoder, so the assistant can never be given the choice.
-  assert.equal(f.$('native-component-tokenizer-policy').hidden, true);
-  assert.equal(f.$('native-component-textEncoder-policy').hidden, false);
-  f.$('native-component-tokenizer').value = '';
-  assert.equal(await f.ui.saveEditor(), false);
-  assert.match(f.$('native-workflow-error').textContent, /dossier du tokenizer.*requis pour enregistrer/);
-  assert.equal(
-    f.calls.some(call => call.route === 'generation/workflows'),
-    false,
-  );
-  f.$('native-component-tokenizer').value = 'tokenizer-one';
+  const ids = element => [element.id, ...element.children.flatMap(ids)].filter(Boolean);
+  assert.ok(ids(f.$('native-workflow-components')).includes('native-component-textEncoder'));
+  assert.ok(!ids(f.$('native-workflow-components')).includes('native-component-tokenizer'));
+  assert.deepEqual(f.tokenizerRequests, []);
   assert.equal(await f.ui.saveEditor(), true);
-  assert.deepEqual(f.workflows.at(-1).components.tokenizer, { policy: 'fixed', asset: 'tokenizer-one' });
+  assert.equal(f.workflows.at(-1).components.tokenizer, undefined);
+});
+
+test('workflows are listed by engine: the built-in one, then ComfyUI with its address', async t => {
+  const f = await setup(t);
+  const list = f.$('workflow-list').children;
+  const sections = list.filter(item => item.className === 'workflow-section');
+  assert.deepEqual(
+    sections.map(section => section.children[0].textContent),
+    ['Moteur interne', 'Moteur externe · ComfyUI'],
+  );
+  // Nothing of the built-in engine in this installation; Krea 2 is ComfyUI's.
+  assert.equal(list[list.indexOf(sections[0]) + 1].textContent, 'Aucun workflow.');
+  assert.equal(list.at(-1).className, 'workflow-card');
+  const panel = sections[1].children.at(-1),
+    ids = element => [element.id, ...element.children.flatMap(ids)].filter(Boolean);
+  assert.equal(panel.className, 'comfy-panel');
+  assert.ok(ids(panel).includes('comfy-url') && ids(panel).includes('comfy-enabled'));
+  // Saving the address goes to the server, whose answer redraws the list.
+  f.$('comfy-url').value = ' http://127.0.0.1:7821 ';
+  f.$('comfy-enabled').checked = true;
+  await panel.children.at(-1).children.at(-1).onclick();
+  assert.deepEqual(f.calls.at(-1), {
+    route: 'generation/comfy',
+    body: { enabled: true, baseUrl: 'http://127.0.0.1:7821' },
+  });
 });
 
 test('an existing tokenizer is never replaced by a suggestion, and families without one show no tokenizer', async t => {
@@ -818,7 +838,9 @@ test('every shipped workflow comes out of the editor unchanged when saved untouc
     // The file name is added on save; an empty reference description is the same as none.
     const strip = value =>
       JSON.parse(
-        JSON.stringify(value, (key, item) => (key === 'file' || (key === 'description' && item === '') ? undefined : item)),
+        JSON.stringify(value, (key, item) =>
+          key === 'file' || (key === 'description' && item === '') ? undefined : item,
+        ),
       );
     const diff = (a, b, path = '') => {
       if (JSON.stringify(a) === JSON.stringify(b)) return [];

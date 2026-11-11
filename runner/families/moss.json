@@ -1,0 +1,122 @@
+{
+  "family": "moss",
+  "label": "MOSS Image",
+  "mediaType": "image",
+  "tasks": ["create_image"],
+  "engine": "external",
+  "native": false,
+  "components": {
+    "model": {
+      "label": "Modèle",
+      "folder": "checkpoints",
+      "required": true,
+      "note": "MOSS Image SFT, par exemple mossImage_sft_pruned_int8.safetensors."
+    },
+    "textEncoder": {
+      "label": "Encodeur de texte",
+      "folder": "LLMs",
+      "required": true,
+      "note": "L’encodeur de MOSS Image, par exemple mossImage_sft_txt_int8.safetensors."
+    },
+    "vae": {
+      "label": "VAE",
+      "folder": "VAE",
+      "required": true,
+      "note": "flux2-vae.safetensors"
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "maxLength": 8000,
+      "nonempty": true
+    },
+    "negative_prompt": {
+      "type": "string",
+      "maxLength": 8000
+    },
+    "seed": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "width": {
+      "type": "integer",
+      "min": 256,
+      "max": 4096,
+      "multipleOf": 16
+    },
+    "height": {
+      "type": "integer",
+      "min": 256,
+      "max": 4096,
+      "multipleOf": 16
+    },
+    "steps": {
+      "type": "integer",
+      "min": 1,
+      "max": 200
+    },
+    "cfg": {
+      "type": "number",
+      "min": 1,
+      "max": 20
+    }
+  },
+  "requiredParameters": ["prompt", "seed", "width", "height", "steps", "cfg"],
+  "implicitParameters": {
+    "negative_prompt": ""
+  },
+  "roles": {},
+  "template": {
+    "name": "MOSS Image",
+    "description": "Create an image with MOSS Image, strong at layouts, posters and text written in the picture.",
+    "components": {
+      "model": {
+        "policy": "fixed",
+        "asset": "select-local-model"
+      },
+      "textEncoder": {
+        "policy": "fixed",
+        "asset": "select-local-text-encoder"
+      },
+      "vae": {
+        "policy": "fixed",
+        "asset": "select-local-vae"
+      }
+    },
+    "parameters": {
+      "prompt": {
+        "policy": "model",
+        "type": "string",
+        "maxLength": 8000
+      },
+      "negative_prompt": {
+        "policy": "fixed",
+        "value": ""
+      },
+      "seed": {
+        "policy": "random",
+        "type": "integer"
+      },
+      "width": {
+        "policy": "fixed",
+        "value": 1024
+      },
+      "height": {
+        "policy": "fixed",
+        "value": 1024
+      },
+      "steps": {
+        "policy": "fixed",
+        "value": 50
+      },
+      "cfg": {
+        "policy": "fixed",
+        "value": 3
+      }
+    },
+    "loras": [],
+    "references": []
+  }
+}

@@ -3,6 +3,7 @@
   "label": "MiniMax H3",
   "mediaType": "video",
   "tasks": ["create_video", "extend_video"],
+  "engine": "external",
   "requires": [
     "torch",
     "torchvision",

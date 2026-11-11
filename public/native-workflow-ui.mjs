@@ -92,7 +92,9 @@ export function setupNativeWorkflows(options) {
     readProfiles = [],
     readEnhance = null,
     // Shipped workflows the user deleted (hidden until an update changes them).
-    hiddenWorkflows = 0;
+    hiddenWorkflows = 0,
+    // Where ComfyUI, the external engine, is and whether it answers.
+    comfy = { enabled: false, baseUrl: '', reachable: false, version: '' };
   // Paths being registered from a file field: Save waits for them.
   const pendingFiles = new Set();
   const element = (tag, id, text = '') => {
@@ -221,13 +223,16 @@ export function setupNativeWorkflows(options) {
     $('generation-limit-label').textContent = unlimited ? 'Sans limite' : `${control.value} essai(s)`;
   }
   function folderValues() {
-    return Object.fromEntries(Object.entries(folderControls).map(([key, [id, role]]) => {
-      const path = $(id).value.trim();
-      return [key, path === folders[role] && !state.generation?.[key] ? '' : path];
-    }));
+    return Object.fromEntries(
+      Object.entries(folderControls).map(([key, [id, role]]) => {
+        const path = $(id).value.trim();
+        return [key, path === folders[role] && !state.generation?.[key] ? '' : path];
+      }),
+    );
   }
   function componentFolder(role) {
-    const key = role === 'audioVae' ? 'vaeRoot' : Object.keys(folderControls).find(key => folderControls[key][1] === role);
+    const key =
+      role === 'audioVae' ? 'vaeRoot' : Object.keys(folderControls).find(key => folderControls[key][1] === role);
     return (key && $(folderControls[key][0]).value.trim()) || folders[role] || '';
   }
   function values() {
@@ -262,96 +267,145 @@ export function setupNativeWorkflows(options) {
     runnerStatus();
     if (ready && $('settings').open) void refresh({ settings: false }).catch(failure => notice(failure.message));
   }
-  function renderList() {
-    $('workflow-list').replaceChildren();
-    if (!workflows.length) $('workflow-list').append(node('p', 'native-empty', 'Aucun workflow.'));
-    for (const record of workflows) {
-      const card = node('article', 'workflow-card'),
-        heading = node('div', 'workflow-card-header'),
-        title = node('div', 'workflow-card-title');
-      // Where it comes from: shipped with Atelier (and followed by updates) or the user's own.
-      const origin = record.update
-        ? ' · nouvelle version fournie'
-        : record.customized
-          ? ' · fourni, modifié par vous'
-          : record.builtin
-            ? ' · fourni avec Atelier'
-            : '';
-      title.append(
-        node('strong', '', record.name),
-        node('small', 'field-help', familyLabel(record.pipeline) + origin),
-      );
-      // « Actif » only when the assistant can really use it now.
-      const usable = !record.importDraft && record.enabled && record.ready !== false;
-      const status = node(
+  /** Internal: Atelier's own engine runs the family. External: ComfyUI does. */
+  const engineOf = record => families.find(item => item.family === record.pipeline)?.engine || 'internal';
+  const ENGINES = [
+    ['internal', 'Moteur interne', 'Agrandissement et interpolation : Atelier les exécute lui-même.'],
+    ['external', 'Moteur externe · ComfyUI', 'Images et vidéos générées par ComfyUI, lancé à côté d’Atelier.'],
+  ];
+  /** The address of ComfyUI and whether it answers, at the top of the external section. */
+  function comfyPanel() {
+    const panel = node('div', 'comfy-panel'),
+      status = node(
         'span',
         'native-status',
-        record.importDraft ? 'Brouillon' : !record.enabled ? 'Désactivé' : usable ? 'Actif' : 'Indisponible',
+        !comfy.enabled
+          ? 'Désactivé'
+          : comfy.reachable
+            ? 'Connecté' + (comfy.version ? ' · ComfyUI ' + comfy.version : '')
+            : 'Ne répond pas',
       );
-      status.dataset.active = String(usable);
-      heading.append(title, status);
-      const editButton = button('Modifier', () => edit(record));
-      editButton.dataset.nativeControl = 'true';
-      let confirming = false;
-      const cancel = button('Annuler', () => {
-        confirming = false;
-        remove.textContent = 'Supprimer';
-        cancel.hidden = true;
-      });
+    status.dataset.active = String(comfy.enabled && comfy.reachable);
+    const use = input('comfy-enabled', comfy.enabled, 'checkbox'),
+      toggle = node('label', 'history-toggle'),
+      address = input('comfy-url', comfy.baseUrl);
+    toggle.append(use, node('span', '', 'Utiliser ComfyUI'));
+    address.spellcheck = false;
+    address.placeholder = 'http://127.0.0.1:8188';
+    address.setAttribute('aria-label', 'Adresse de ComfyUI');
+    const save = button('Enregistrer', async () => {
+      try {
+        const result = await run(async signal =>
+          (await api('generation/comfy', { enabled: use.checked, baseUrl: address.value.trim() }, { signal })).json(),
+        );
+        if (result) apply(result, { settings: false });
+      } catch (failure) {
+        importStatus(failure.message, true);
+      }
+    });
+    for (const control of [use, address, save]) control.dataset.nativeControl = 'true';
+    const row = node('div', 'path-input');
+    row.append(address, save);
+    panel.append(toggle, status, row);
+    return panel;
+  }
+  function workflowCard(record) {
+    const card = node('article', 'workflow-card'),
+      heading = node('div', 'workflow-card-header'),
+      title = node('div', 'workflow-card-title');
+    // Where it comes from: shipped with Atelier (and followed by updates) or the user's own.
+    const origin = record.update
+      ? ' · nouvelle version fournie'
+      : record.customized
+        ? ' · fourni, modifié par vous'
+        : record.builtin
+          ? ' · fourni avec Atelier'
+          : '';
+    title.append(node('strong', '', record.name), node('small', 'field-help', familyLabel(record.pipeline) + origin));
+    // « Actif » only when the assistant can really use it now.
+    const usable = !record.importDraft && record.enabled && record.ready !== false;
+    const status = node(
+      'span',
+      'native-status',
+      record.importDraft ? 'Brouillon' : !record.enabled ? 'Désactivé' : usable ? 'Actif' : 'Indisponible',
+    );
+    status.dataset.active = String(usable);
+    heading.append(title, status);
+    const editButton = button('Modifier', () => edit(record));
+    editButton.dataset.nativeControl = 'true';
+    let confirming = false;
+    const cancel = button('Annuler', () => {
+      confirming = false;
+      remove.textContent = 'Supprimer';
       cancel.hidden = true;
-      cancel.dataset.nativeControl = 'true';
-      const remove = button(
-        'Supprimer',
+    });
+    cancel.hidden = true;
+    cancel.dataset.nativeControl = 'true';
+    const remove = button(
+      'Supprimer',
+      async () => {
+        if (!confirming) {
+          confirming = true;
+          remove.textContent = 'Confirmer';
+          cancel.hidden = false;
+          return;
+        }
+        try {
+          await run(async signal => {
+            await api('generation/remove', { id: record.id }, { signal });
+            workflows = workflows.filter(item => item.id !== record.id);
+            if (record.builtin) hiddenWorkflows++;
+            renderList();
+          });
+          // A deleted edit of a shipped workflow hides that one too; the list is the server's.
+          if (record.builtin) await refresh({ settings: false });
+        } catch (failure) {
+          importStatus(failure.message, true);
+        }
+      },
+      'text-button native-remove',
+    );
+    remove.dataset.nativeControl = 'true';
+    const actions = node('div', 'native-card-actions');
+    actions.append(remove, cancel);
+    if (record.customized) {
+      const reset = button(
+        'Rétablir',
         async () => {
-          if (!confirming) {
-            confirming = true;
-            remove.textContent = 'Confirmer';
-            cancel.hidden = false;
-            return;
-          }
           try {
-            await run(async signal => {
-              await api('generation/remove', { id: record.id }, { signal });
-              workflows = workflows.filter(item => item.id !== record.id);
-              if (record.builtin) hiddenWorkflows++;
-              renderList();
-            });
-            // A deleted edit of a shipped workflow hides that one too; the list is the server's.
-            if (record.builtin) await refresh({ settings: false });
+            const result = await run(async signal =>
+              (await api('generation/reset', { id: record.id }, { signal })).json(),
+            );
+            if (result) apply(result, { settings: false });
           } catch (failure) {
             importStatus(failure.message, true);
           }
         },
-        'text-button native-remove',
+        'text-button',
       );
-      remove.dataset.nativeControl = 'true';
-      const actions = node('div', 'native-card-actions');
-      actions.append(remove, cancel);
-      if (record.customized) {
-        const reset = button(
-          'Rétablir',
-          async () => {
-            try {
-              const result = await run(async signal => (await api('generation/reset', { id: record.id }, { signal })).json());
-              if (result) apply(result, { settings: false });
-            } catch (failure) {
-              importStatus(failure.message, true);
-            }
-          },
-          'text-button',
-        );
-        reset.title = 'Revenir à la version fournie avec Atelier';
-        reset.dataset.nativeControl = 'true';
-        actions.append(reset);
-      }
-      actions.append(editButton);
-      card.append(
-        heading,
-        node('p', 'field-help', record.description),
-        ...(record.unavailableReason ? [node('p', 'field-help', record.unavailableReason)] : []),
-        actions,
-      );
-      $('workflow-list').append(card);
+      reset.title = 'Revenir à la version fournie avec Atelier';
+      reset.dataset.nativeControl = 'true';
+      actions.append(reset);
+    }
+    actions.append(editButton);
+    card.append(
+      heading,
+      node('p', 'field-help', record.description),
+      ...(record.unavailableReason ? [node('p', 'field-help', record.unavailableReason)] : []),
+      actions,
+    );
+    return card;
+  }
+  function renderList() {
+    $('workflow-list').replaceChildren();
+    for (const [engine, title, help] of ENGINES) {
+      const heading = node('div', 'workflow-section');
+      heading.append(node('h4', '', title), node('p', 'field-help', help));
+      if (engine === 'external') heading.append(comfyPanel());
+      $('workflow-list').append(heading);
+      const own = workflows.filter(record => engineOf(record) === engine);
+      if (!own.length) $('workflow-list').append(node('p', 'native-empty', 'Aucun workflow.'));
+      for (const record of own) $('workflow-list').append(workflowCard(record));
     }
     if (hiddenWorkflows > 0) {
       const restore = button(
@@ -373,6 +427,7 @@ export function setupNativeWorkflows(options) {
   }
   function apply(result, { settings = true } = {}) {
     workflows = result.workflows || [];
+    comfy = result.comfy || comfy;
     hiddenWorkflows = result.hiddenWorkflows ?? hiddenWorkflows;
     assets = result.assets || assets;
     folders = result.folders || folders;
@@ -396,7 +451,8 @@ export function setupNativeWorkflows(options) {
         if (!unlimited) lastLimited = config.maxIterations || 5;
         $('generation-iterations').value = lastLimited;
         $('generation-python').value = config.pythonPath || '';
-        for (const [key, [id, role]] of Object.entries(folderControls)) $(id).value = config[key] || folders[role] || '';
+        for (const [key, [id, role]] of Object.entries(folderControls))
+          $(id).value = config[key] || folders[role] || '';
         syncLimit();
       }
     }
@@ -507,7 +563,9 @@ export function setupNativeWorkflows(options) {
       if (known) return choose(known.id);
       if (!final) return;
       if (/[\\/]/.test(text)) return registerTyped(text);
-      error(`Aucun fichier « ${text} » : choisissez-le dans la liste, collez son chemin complet ou utilisez Parcourir…`);
+      error(
+        `Aucun fichier « ${text} » : choisissez-le dans la liste, collez son chemin complet ou utilisez Parcourir…`,
+      );
     }
     // Focused, the field empties so the suggestions list every file; left empty, it shows the choice again.
     field.onfocus = () => {
@@ -1403,17 +1461,18 @@ export function setupNativeWorkflows(options) {
       $('native-import-status').focus();
     }
   }
-  for (const [id] of Object.values(folderControls)) $(id + '-browse').onclick = async () => {
-    try {
-      await run(async signal => {
-        const path = await browse('directory', $(id).value, signal);
-        signal.throwIfAborted();
-        if (path) $(id).value = path;
-      });
-    } catch (failure) {
-      if (!controller.signal.aborted) importStatus(failure.message, true);
-    }
-  };
+  for (const [id] of Object.values(folderControls))
+    $(id + '-browse').onclick = async () => {
+      try {
+        await run(async signal => {
+          const path = await browse('directory', $(id).value, signal);
+          signal.throwIfAborted();
+          if (path) $(id).value = path;
+        });
+      } catch (failure) {
+        if (!controller.signal.aborted) importStatus(failure.message, true);
+      }
+    };
   $('native-workflow-import').onclick = () => $('native-workflow-file').click();
   $('native-workflow-file').onchange = async event => {
     const file = event.target.files?.[0];

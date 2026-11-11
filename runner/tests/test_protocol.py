@@ -158,24 +158,6 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(rows[2]['result']['released'])
         self.assertGreaterEqual(len(calls), 2)
 
-    def test_architecture_preflight_imports_never_initialize_cuda(self):
-        code = '''import sys
-sys.path.insert(0,sys.argv[1])
-import torch
-def forbid(*args,**kwargs):
-    raise AssertionError('Preflight attempted CUDA initialization')
-torch.cuda._lazy_init=forbid
-from runner.models.shapes import validate_shapes
-try:validate_shapes(dict(model={},textEncoder={},vae={}))
-except ValueError:pass
-assert not torch.cuda.is_initialized()
-assert 'sageattention' not in sys.modules
-'''
-        result = subprocess.run(
-            [sys.executable, '-s', '-c', code, str(Path.cwd())], text=True, capture_output=True, timeout=60
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-
 
 if __name__ == '__main__':
     unittest.main()

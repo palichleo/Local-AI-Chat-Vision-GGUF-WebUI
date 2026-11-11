@@ -1,6 +1,8 @@
 # Native generation runner — experimental branch
 
-This runner uses local PyTorch/Diffusers pipelines. It never imports the ComfyUI runtime or submits native jobs to a Comfy server. The separate `comfy-kitchen` package supplies CUDA INT8 kernels.
+This runner uses local PyTorch/Diffusers pipelines. It never imports the ComfyUI runtime. The separate `comfy-kitchen` package supplies CUDA INT8 kernels.
+
+Since 0.4.14 it is Atelier's *internal* engine: it upscales (Real-ESRGAN, SeedVR2), interpolates (RIFE) and continues LTX 2.5 and MiniMax H3 videos. New images and videos are made by ComfyUI, the *external* engine, which the Node server calls over HTTP (`lib/comfy-engine.mjs`, `lib/comfy-graphs.mjs`); a family whose manifest says `"native": false` (Krea 2, MOSS Image) has no pipeline here. The Krea 2 pipeline this runner had is kept out of the repository in `experiment_keep_engine/`; what this page says of Krea 2 below describes that pipeline.
 
 The Node server owns one CPU-idle Python worker. Before generation it validates the resolved job, unloads llama.cpp and its vision projector, runs the pipeline, verifies GPU release, then reloads the LLM. Cancellation terminates and reaps the owned worker. A worker failure does not close the chat server.
 

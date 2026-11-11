@@ -4,6 +4,7 @@
   "label": "Real-ESRGAN",
   "mediaType": "video",
   "tasks": ["upscale"],
+  "engine": "internal",
   "requires": ["torch", "PIL", "av", "imageio_ffmpeg"],
   "components": {
     "upscaler": {

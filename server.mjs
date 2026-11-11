@@ -318,7 +318,6 @@ export async function createApplication({
     saveConfig: value => generation.save(value),
     persist: () => preferences.saveHistory,
     clientFactory: () => generation.client(),
-    backendNote: job => generation.backendNote(job),
     timing: new ProgressHistory(join(dataDir, 'generation-timing.json')),
     sourceMedia: async (ref, conversationId) => {
       if (ref.attachment) return { ...(await history.attachment(conversationId, ref.attachment)), name: 'Image jointe' };
@@ -379,6 +378,7 @@ export async function createApplication({
     }
     const definitions = [];
     const toolConfig = generation.config;
+    await generation.refreshComfy();
     generation.syncCapabilities();
     // Tools only advertise sources this conversation really holds, so the model is never asked
     // for a run_id, attached image or resource that does not exist.
@@ -698,6 +698,7 @@ export async function createApplication({
           if (path === '/api/generation/config') {
             return send(200, await generation.save(body));
           }
+          if (path === '/api/generation/comfy') return send(200, await generation.saveComfy(body));
           if (path === '/api/generation/test') {
             if (body.config || body.pythonPath !== undefined) await generation.save(body.config || body);
             void generation.start().catch(() => {});

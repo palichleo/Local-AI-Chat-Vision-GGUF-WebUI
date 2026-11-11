@@ -4,6 +4,7 @@
   "label": "Real-ESRGAN",
   "mediaType": "image",
   "tasks": ["upscale"],
+  "engine": "internal",
   "requires": ["torch", "PIL"],
   "components": {
     "upscaler": {

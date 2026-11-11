@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../server.mjs';
 const fixture = fileURLToPath(new URL('./fixtures/fake-tool-engine.mjs', import.meta.url));
@@ -40,6 +41,58 @@ async function tokenizerFolder(root) {
   await writeFile(join(folder, 'merges.txt'), '');
   return folder;
 }
+/**
+ * A ComfyUI as far as Atelier asks: it knows every node, lists the fixture files and answers
+ * each graph with one saved image. Krea 2 images are ComfyUI's, the built-in engine has none.
+ */
+async function fakeComfy(onPrompt = () => {}) {
+  const names = ['model.safetensors', 'textEncoder.safetensors', 'vae.safetensors'];
+  const app = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const url = new URL(req.url, 'http://localhost');
+    const json = value => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(value));
+    };
+    if (url.pathname === '/queue') return json({ queue_running: [], queue_pending: [] });
+    if (url.pathname === '/system_stats')
+      return json({
+        system: { ram_total: 32 * 1024 ** 3, ram_free: 16 * 1024 ** 3 },
+        devices: [{ type: 'cuda', vram_total: 12, vram_free: 11, torch_vram_total: 2, torch_vram_free: 1 }],
+      });
+    if (url.pathname.startsWith('/object_info/')) {
+      const node = decodeURIComponent(url.pathname.slice(13)),
+        input = { UNETLoader: 'unet_name', CLIPLoader: 'clip_name', VAELoader: 'vae_name' }[node];
+      return json({ [node]: { input: { required: input ? { [input]: [names, {}] } : {} } } });
+    }
+    if (url.pathname === '/upload/image') return json({ name: 'source.png', subfolder: 'atelier', type: 'input' });
+    if (url.pathname === '/prompt') {
+      onPrompt(JSON.parse(Buffer.concat(chunks)).prompt);
+      return json({ prompt_id: 'prompt-1' });
+    }
+    if (url.pathname === '/history/prompt-1')
+      return json({
+        'prompt-1': {
+          status: { status_str: 'success', completed: true, messages: [] },
+          outputs: { save: { images: [{ filename: 'made.png', subfolder: 'atelier', type: 'output' }] } },
+        },
+      });
+    if (url.pathname === '/view') {
+      res.writeHead(200, { 'content-type': 'image/png' });
+      return res.end(png);
+    }
+    json({});
+  });
+  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
+  return {
+    baseUrl: `http://127.0.0.1:${app.address().port}`,
+    close() {
+      app.closeAllConnections();
+      return new Promise(resolve => app.close(resolve));
+    },
+  };
+}
 async function until(check) {
   for (let i = 0; i < 300; i++) {
     const v = await check();
@@ -55,6 +108,10 @@ test(
     const root = await mkdtemp(join(tmpdir(), 'native-http-'));
     let app;
     const events = [];
+    const comfy = await fakeComfy(graph => {
+      events.push('generate');
+      assert.equal(graph.sampler.inputs.seed, 99);
+    });
     const outputDir = join(root, 'output');
     await mkdir(outputDir);
     const worker = {
@@ -63,9 +120,10 @@ test(
         return {
           state: this.state,
           error: '',
-          capabilities: { krea2: { ready: this.state === 'ready' }, ltx25: { ready: false } },
+          capabilities: { ltx25: { ready: false } },
         };
       },
+      async unload() {},
       async start() {
         this.state = 'ready';
         return this.status();
@@ -77,16 +135,9 @@ test(
         events.push('runner released');
         return { released: true, allocatedGiB: 0 };
       },
-      async request(method, job) {
-        if (method === 'preflight') {
-          events.push('preflight');
-          return { ready: true };
-        }
-        assert.equal(method, 'generate');
-        events.push('generate');
-        assert.equal(job.parameters.seed, 99);
-        await writeFile(join(outputDir, 'original.png'), png);
-        return { jobId: job.id, outputs: [{ type: 'output', subfolder: '', filename: 'original.png' }] };
+      // ComfyUI makes the image: the built-in engine is asked nothing.
+      async request(method) {
+        assert.fail('the built-in engine was asked to ' + method);
       },
     };
     try {
@@ -134,6 +185,8 @@ test(
         maxIterations: 5,
         pythonPath: process.execPath,
       });
+      const settings = await (await api('generation/comfy', { enabled: true, baseUrl: comfy.baseUrl })).json();
+      assert.equal(settings.comfy.reachable, true);
       const workflow = {
         schemaVersion: 1,
         id: 'integration-boat',
@@ -201,9 +254,10 @@ test(
         png,
       );
       await api('history/clear', { confirm: true });
-      assert.deepEqual(await readFile(join(outputDir, 'original.png')), png);
+      assert.deepEqual(await readFile(join(outputDir, job.record.outputs[0].source.filename)), png);
     } finally {
       await app?.close();
+      await comfy.close();
       await rm(root, { recursive: true, force: true });
     }
   },
@@ -217,11 +271,13 @@ test(
     const outputDir = join(root, 'output');
     await mkdir(outputDir);
     let app;
+    const comfy = await fakeComfy();
     const worker = {
       state: 'stopped',
       status() {
-        return { state: this.state, error: '', capabilities: { krea2: { ready: this.state === 'ready' } } };
+        return { state: this.state, error: '', capabilities: {} };
       },
+      async unload() {},
       async start() {
         this.state = 'ready';
         return this.status();
@@ -232,10 +288,8 @@ test(
       async release() {
         return { released: true, allocatedGiB: 0 };
       },
-      async request(method, job) {
-        if (method === 'preflight') return { ready: true };
-        await writeFile(join(outputDir, 'original.png'), png);
-        return { jobId: job.id, outputs: [{ type: 'output', subfolder: '', filename: 'original.png' }] };
+      async request(method) {
+        assert.fail('the built-in engine was asked to ' + method);
       },
     };
     try {
@@ -278,6 +332,7 @@ test(
         maxIterations: 5,
         pythonPath: process.execPath,
       });
+      await api('generation/comfy', { enabled: true, baseUrl: comfy.baseUrl });
       // Same shape as a Krea 2 workflow imported with its optional image-to-image slot.
       await api('generation/workflows', {
         schemaVersion: 1,
@@ -364,6 +419,7 @@ test(
       assert.equal(edit.referenceCount, 1);
     } finally {
       await app?.close();
+      await comfy.close();
       await rm(root, { recursive: true, force: true });
     }
   },

@@ -3,6 +3,7 @@
   "label": "SeedVR2",
   "mediaType": "image",
   "tasks": ["upscale"],
+  "engine": "internal",
   "requires": ["torch", "PIL", "safetensors"],
   "components": {
     "model": {

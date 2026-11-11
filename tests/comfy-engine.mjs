@@ -8,7 +8,7 @@ import { ComfyClient } from '../lib/comfy-client.mjs';
 import { comfyEngine, comfyNames, comfyRoute, comfyUnsupported, runOnComfy } from '../lib/comfy-engine.mjs';
 import { comfyGraph } from '../lib/comfy-graphs.mjs';
 import { GenerationService } from '../lib/generation-service.mjs';
-import { mp4Bytes, mp4Info } from '../lib/video-info.mjs';
+import { mp4Bytes } from '../lib/video-info.mjs';
 
 const u32 = value => {
   const bytes = Buffer.alloc(4);
@@ -122,6 +122,25 @@ const h3 = (overrides = {}) =>
   });
 // Large enough for the two passes of an LTX video.
 const large = { width: 896, height: 1600 };
+const moss = (overrides = {}) =>
+  job('moss', {
+    ...overrides,
+    parameters: {
+      prompt: 'une affiche',
+      negative_prompt: 'flou',
+      seed: 3,
+      width: 1024,
+      height: 1536,
+      steps: 50,
+      cfg: 3,
+      ...overrides.parameters,
+    },
+    components: {
+      model: models + 'diffusion_models\\moss.safetensors',
+      textEncoder: models + 'text_encoders\\moss-text.safetensors',
+      vae: models + 'vae\\flux2-vae.safetensors',
+    },
+  });
 const source = (role, path = '/source') => [{ input: 'source', role, path }];
 const subjects = (count = 1) =>
   Array.from({ length: count }, (_, n) => ({ input: 'ref' + (n + 1), role: 'msr_image', path: `/s${n + 1}.png` }));
@@ -129,9 +148,9 @@ const msr = { id: 'msr', path: models + 'loras\\subjects\\msr.safetensors', stre
 const lists = {
   UNETLoader: [
     'unet_name',
-    ['other.safetensors', 'ltx-transformer.safetensors', 'krea.safetensors', 'h3.safetensors', 'seedvr.safetensors'],
+    ['other.safetensors', 'ltx-transformer.safetensors', 'krea.safetensors', 'h3.safetensors', 'moss.safetensors'],
   ],
-  CLIPLoader: ['clip_name', ['gemma.safetensors', 'qwen.safetensors', 'qwen32.safetensors']],
+  CLIPLoader: ['clip_name', ['gemma.safetensors', 'qwen.safetensors', 'qwen32.safetensors', 'moss-text.safetensors']],
   VAELoader: [
     'vae_name',
     [
@@ -141,13 +160,11 @@ const lists = {
       'krea-vae.safetensors',
       'MiniMaxH3\\h3-vae.safetensors',
       'MiniMaxH3\\h3-audio.safetensors',
-      'ema.safetensors',
+      'flux2-vae.safetensors',
     ],
   ],
   LongForgeLTXMSRReferences: ['lora_name', ['subjects\\msr.safetensors']],
   LoraLoaderModelOnly: ['lora_name', ['style.safetensors', 'detail.safetensors']],
-  UpscaleModelLoader: ['model_name', ['RealESRGAN_x2plus.pth', 'RealESRGAN_x4plus.pth']],
-  FrameInterpolationModelLoader: ['model_name', ['rife.safetensors']],
   LatentUpscaleModelLoader: ['model_name', ['upscaler.safetensors', 'temporal.safetensors']],
 };
 
@@ -237,7 +254,7 @@ const linked = graph => {
   return graph;
 };
 
-test('the trial is off unless data/comfy-engine.json enables a loopback ComfyUI', async () => {
+test('ComfyUI is used only when data/comfy-engine.json enables a loopback address', async () => {
   const dir = await trial(null);
   assert.equal(await comfyEngine(dir), null);
   await writeFile(join(dir, 'comfy-engine.json'), JSON.stringify({ enabled: false, baseUrl: 'http://127.0.0.1:7821' }));
@@ -249,7 +266,7 @@ test('the trial is off unless data/comfy-engine.json enables a loopback ComfyUI'
   assert.equal(await comfyEngine(dir), null);
   await writeFile(join(dir, 'comfy-engine.json'), JSON.stringify({ enabled: true, baseUrl: 'http://127.0.0.1:7821/' }));
   assert.deepEqual(await comfyEngine(dir), { baseUrl: 'http://127.0.0.1:7821' });
-  // Only an enabled trial sends a job elsewhere.
+  // Without it no job goes anywhere.
   assert.equal(await comfyRoute(await trial(null), ltx()), null);
 });
 
@@ -273,11 +290,10 @@ test('what no graph is written for stays on the built-in engine', () => {
     { input: 'subject-1', role: 'reference_image', path: '/b.png' },
   ];
   assert.match(comfyUnsupported(h3({ references: mixed })), /do not combine/);
-  const restore = parameters => job('seedvr2', { parameters, references: source('source_image') });
-  assert.match(comfyUnsupported(job('seedvr2')), /one source/);
-  assert.match(comfyUnsupported(restore({ scale: 4, passes: 3 })), /sixteen/);
-  assert.equal(comfyUnsupported(restore({ scale: 2, passes: 3 })), '');
-  assert.equal(comfyUnsupported(job('rife', { references: source('source_video') })), '');
+  // Upscaling and interpolation are the built-in engine's: no graph, whatever is asked.
+  for (const family of ['realesrgan_image', 'realesrgan_video', 'rife', 'seedvr2'])
+    assert.match(comfyUnsupported(job(family, { references: source('source_video') })), /no ComfyUI graph/);
+  assert.equal(comfyUnsupported(moss()), '');
 });
 
 test('model files take the names ComfyUI lists them under, and every node of the graph is checked', async t => {
@@ -529,76 +545,29 @@ test('MiniMax H3: text and references, or a start and an end image; silent on re
   assert.equal(between.video.inputs.audio, undefined);
 });
 
-test('upscales and smoothing: the source goes through the model, the longer side is held', () => {
-  const image = job('realesrgan_image', {
-    parameters: { max_side: 1500 },
-    components: { upscaler: models + 'upscale_models\\RealESRGAN_x4plus.pth' },
-    references: source('source_image'),
+test('MOSS Image: the prompt and its negative, a late layer skipped for half the steps', () => {
+  const { graph, output, steps } = comfyGraph(moss());
+  linked(graph);
+  assert.deepEqual([output, steps], ['save', ['sampler']]);
+  assert.equal(graph.clip.inputs.type, 'moss_image');
+  assert.deepEqual([graph.positive.inputs.text, graph.negative.inputs.text], ['une affiche', 'flou']);
+  assert.deepEqual(graph.latent, {
+    class_type: 'EmptyFlux2LatentImage',
+    inputs: { width: 1024, height: 1536, batch_size: 1 },
   });
-  const still = comfyGraph(image, { source: 'atelier/in.png' }).graph;
-  linked(still);
-  assert.deepEqual(still.upscale.inputs, { upscale_model: ['upscaler', 0], image: ['source', 0] });
-  assert.match(still.limitWidth.inputs.expression, /^a if max\(a, b\) <= 1500 else/);
-  assert.deepEqual(still.save.inputs.images, ['limited', 0]);
-
-  const film = job('realesrgan_video', {
-    components: { upscaler: models + 'upscale_models\\RealESRGAN_x2plus.pth' },
-    references: source('source_video'),
+  assert.deepEqual(graph.model.inputs, {
+    model: ['loaded', 0],
+    double_layers: '',
+    single_layers: '22',
+    start_percent: 0,
+    end_percent: 0.5,
   });
-  const moving = comfyGraph(film, { source: 'atelier/in.mp4' }).graph;
-  linked(moving);
-  assert.equal(moving.source.class_type, 'LoadVideo');
-  // No limit asked: the frames go straight from the model to the video, at the source's rate and with its sound.
-  assert.deepEqual(moving.video.inputs.images, ['upscale', 0]);
   assert.deepEqual(
-    [moving.video.inputs.fps, moving.video.inputs.audio],
-    [
-      ['parts', 2],
-      ['parts', 1],
-    ],
+    Object.fromEntries(
+      ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler', 'model'].map(k => [k, graph.sampler.inputs[k]]),
+    ),
+    { seed: 3, steps: 50, cfg: 3, sampler_name: 'euler', scheduler: 'normal', model: ['model', 0] },
   );
-
-  const smoother = mode =>
-    comfyGraph(
-      job('rife', {
-        parameters: { multiplier: 3, mode },
-        components: { interpolator: models + 'frame_interpolation\\rife.safetensors' },
-        references: source('source_video'),
-      }),
-      { source: 'atelier/in.mp4' },
-    ).graph;
-  const smooth = linked(smoother('smooth')),
-    slow = linked(smoother('slow_motion'));
-  assert.equal(smooth.interpolate.inputs.multiplier, 3);
-  assert.equal(smooth.rate.inputs.expression, 'a * 3');
-  assert.deepEqual(
-    [smooth.video.inputs.fps, smooth.video.inputs.audio],
-    [
-      ['rate', 0],
-      ['parts', 1],
-    ],
-  );
-  // Slow motion: the same rate, three times as long, and no sound to stretch.
-  assert.deepEqual([slow.video.inputs.fps, slow.video.inputs.audio, slow.rate], [['parts', 2], undefined, undefined]);
-
-  const restore = job('seedvr2', {
-    parameters: { seed: 9, scale: 2, passes: 2, steps: 2, color_correction: 'wavelet', max_side: 3000 },
-    components: { model: models + 'diffusion_models\\seedvr.safetensors', vae: models + 'vae\\ema.safetensors' },
-    references: source('source_image'),
-  });
-  const { graph: passes, steps } = comfyGraph(restore, { source: 'atelier/in.png' });
-  linked(passes);
-  assert.deepEqual(steps, ['sampler1', 'sampler2']);
-  assert.equal(passes.enlarged1.inputs['resize_type.multiplier'], 2);
-  // Only the last pass is held to the longest side asked.
-  assert.equal(passes.longer2.inputs.expression, 'min(3000, round(max(a, b) * 2))');
-  assert.deepEqual(passes.enlarged2.inputs.input, ['corrected1', 0]);
-  assert.deepEqual(
-    [passes.sampler1.inputs.seed, passes.sampler2.inputs.seed, passes.sampler2.inputs.steps],
-    [9, 10, 2],
-  );
-  assert.equal(passes.corrected2.inputs.color_correction_method, 'wavelet');
-  assert.deepEqual(passes.save.inputs.images, ['corrected2', 0]);
 });
 
 test('a video runs on ComfyUI and lands in the output folder like a built-in result', async t => {
@@ -681,51 +650,8 @@ test('an image result takes its real size, and the prompt it was really made fro
   // The request is kept as it was asked.
   assert.equal(made.metadata.job.parameters.prompt, 'un renard');
 
-  // An upscale: the size is the one of the file ComfyUI made, not a parameter.
-  await writeFile(join(dataDir, 'small.png'), png(1024, 768));
-  const upscale = job('realesrgan_image', {
-    components: { upscaler: models + 'upscale_models\\RealESRGAN_x2plus.pth' },
-    references: source('source_image', join(dataDir, 'small.png')),
-  });
-  const large = await runOnComfy(upscale, {
-    client,
-    names: await comfyNames(client, upscale),
-    outputDir: join(dataDir, 'output'),
-  });
-  assert.deepEqual([large.outputs[0].width, large.outputs[0].height], [2048, 1536]);
-  assert.deepEqual(fake.seen.uploads.at(-1).subfolder, 'atelier');
-  assert.equal(fake.seen.prompts.at(-1).prompt.source.inputs.image, 'atelier/' + fake.seen.uploads.at(-1).name);
-});
-
-test('a video too long for ComfyUI to hold in memory stays on the built-in engine', async t => {
-  const fake = await comfy(t),
-    dataDir = await trial(fake.baseUrl);
-  const film = (name, frames) =>
-    writeFile(join(dataDir, name), mp4({ width: 1920, height: 1080, frames })).then(() => join(dataDir, name));
-  const upscale = path =>
-    job('realesrgan_video', {
-      components: { upscaler: models + 'upscale_models\\RealESRGAN_x2plus.pth' },
-      references: source('source_video', path),
-    });
-  const options = { connect: fake.connect };
-  // 48 frames enlarged twice: 9 GiB held. 480 of them: 90 GiB, more than half of this memory.
-  assert.ok(await comfyRoute(dataDir, upscale(await film('short.mp4', 48)), options));
-  assert.equal(await comfyRoute(dataDir, upscale(await film('long.mp4', 480)), options), null);
-  // A source that does not say its length (another container) is not risked either.
-  await writeFile(join(dataDir, 'other.webm'), Buffer.from('1a45dfa3', 'hex'));
-  assert.equal(await comfyRoute(dataDir, upscale(join(dataDir, 'other.webm')), options), null);
-  const smooth = (path, parameters) =>
-    job('rife', {
-      parameters,
-      components: { interpolator: models + 'frame_interpolation\\rife.safetensors' },
-      references: source('source_video', path),
-    });
-  assert.ok(await comfyRoute(dataDir, smooth(join(dataDir, 'short.mp4'), { multiplier: 4 }), options));
-  assert.equal(await comfyRoute(dataDir, smooth(join(dataDir, 'long.mp4'), { multiplier: 4 }), options), null);
-  // 24 images a second made eight times smoother: more than ComfyUI writes. Slowed down, the rate stays.
-  assert.equal(await comfyRoute(dataDir, smooth(join(dataDir, 'short.mp4'), { multiplier: 8 }), options), null);
-  const slowed = smooth(join(dataDir, 'short.mp4'), { multiplier: 8, mode: 'slow_motion' });
-  assert.ok(await comfyRoute(dataDir, slowed, options));
+  // The size is the one of the file ComfyUI made (2048 × 1536 here), whatever was asked.
+  assert.deepEqual([made.outputs[0].width, made.outputs[0].height], [2048, 1536]);
 });
 
 test('steps are counted over every pass, then the decoding is said once', async () => {
@@ -761,20 +687,22 @@ test('steps are counted over every pass, then the decoding is said once', async 
 test('the index of an MP4 gives its size, length and rate', async () => {
   const bytes = mp4({ width: 1152, height: 2048, frames: 241, fps: 48 });
   assert.deepEqual(mp4Bytes(bytes), { width: 1152, height: 2048, frames: 241, seconds: 241 / 48, fps: 48 });
-  const dir = await mkdtemp(join(tmpdir(), 'comfy-engine-'));
-  await writeFile(join(dir, 'film.mp4'), bytes);
-  assert.deepEqual(await mp4Info(join(dir, 'film.mp4')), mp4Bytes(bytes));
   assert.equal(mp4Bytes(png()), null);
-  assert.equal(await mp4Info(join(dir, 'absent.mp4')), null);
 });
 
-test('the generation service sends jobs to ComfyUI only while the trial is on', async t => {
+test('the generation service: ComfyUI for its families, the built-in engine for the others', async t => {
   const fake = await comfy(t),
     dataDir = await trial(null),
     outputDir = join(dataDir, 'output');
   const calls = [];
+  const ready = { ready: true, reason: '' };
   const worker = {
-    status: () => ({ state: 'ready', busy: false }),
+    // The built-in engine answers for the families it runs itself.
+    status: () => ({
+      state: 'ready',
+      busy: false,
+      capabilities: { ltx25: { ...ready, mediaType: 'video' }, rife: { ...ready, mediaType: 'video' } },
+    }),
     request: async (method, payload) => {
       calls.push(method);
       return method === 'generate' ? { jobId: payload.id, outputs: [], metadata: {} } : {};
@@ -789,38 +717,59 @@ test('the generation service sends jobs to ComfyUI only while the trial is on', 
     workflowDir: join(dataDir, 'workflows'),
     outputDir,
     worker,
-    environment: { close: async () => {} },
+    environment: { close: async () => {}, status: () => ({ state: 'ready' }) },
     comfyConnect: fake.connect,
   });
+  const available = async () => {
+    await service.refreshComfy();
+    service.syncCapabilities();
+    return Object.fromEntries(
+      Object.entries(service.catalog.capabilities).map(([name, capability]) => [name, capability.ready]),
+    );
+  };
 
-  // Off: the built-in worker, and ComfyUI is never called.
-  assert.equal(await service.backendNote(ltx()), null);
+  // ComfyUI not set: its own families cannot run, LTX still can on the built-in engine.
+  assert.deepEqual(await available(), { ltx25: true, rife: true, krea2: false, moss: false });
+  assert.match(service.catalog.capabilities.krea2.reason, /ComfyUI n’est pas configuré/);
   let client = service.client();
   await client.preflight(ltx());
   assert.deepEqual((await client.run(ltx())).outputs, []);
   await client.free();
   assert.deepEqual(calls, ['preflight', 'generate', 'release']);
+  await assert.rejects(service.client().preflight(krea()), /ComfyUI n’est pas configuré/);
   assert.equal(fake.seen.prompts.length + fake.seen.freed.length, 0);
 
-  await writeFile(join(dataDir, 'comfy-engine.json'), JSON.stringify({ enabled: true, baseUrl: fake.baseUrl }));
-  assert.match(await service.backendNote(ltx()), /ComfyUI/);
-  assert.match(await service.backendNote(krea()), /ComfyUI/);
-  // A continuation still belongs to the built-in engine.
+  // Set from the settings: an address on this machine, or nothing is saved.
+  await assert.rejects(service.saveComfy({ enabled: true, baseUrl: 'http://example.com:8188' }), /Adresse ComfyUI/);
+  const saved = await service.saveComfy({ enabled: true, baseUrl: fake.baseUrl + '/' });
+  assert.deepEqual(saved.comfy, { enabled: true, baseUrl: fake.baseUrl + '/', reachable: true, version: '' });
+  assert.deepEqual(await available(), { ltx25: true, rife: true, krea2: true, minimax_h3: true, moss: true });
+
+  // A continuation still belongs to the built-in engine, which gets the memory ComfyUI kept.
   const continuation = ltx({ references: source('source_video', '/x.mp4') });
-  assert.equal(await service.backendNote(continuation), null);
   calls.length = 0;
   client = service.client();
   await client.preflight(continuation);
   await client.run(continuation);
   await client.free();
   assert.deepEqual(calls, ['preflight', 'generate', 'release']);
-  // ComfyUI only lets go of what it kept, so the built-in engine has the memory to itself.
   assert.equal(fake.seen.prompts.length, 0);
   assert.deepEqual(fake.seen.freed.splice(0), [{ unload_models: true, free_memory: true }]);
+
+  // Interpolation and upscaling never go to ComfyUI, and leave it its models: they are light.
+  const smooth = job('rife', { parameters: { multiplier: 2 }, references: source('source_video', '/x.mp4') });
+  calls.length = 0;
+  client = service.client();
+  await client.preflight(smooth);
+  await client.run(smooth);
+  await client.free();
+  assert.deepEqual(calls, ['preflight', 'generate', 'release']);
+  assert.equal(fake.seen.prompts.length + fake.seen.freed.length, 0);
 
   for (const [work, extension] of [
     [ltx(), '.mp4'],
     [krea(), '.png'],
+    [moss(), '.png'],
   ]) {
     calls.length = 0;
     client = service.client();
@@ -833,18 +782,23 @@ test('the generation service sends jobs to ComfyUI only while the trial is on', 
     assert.deepEqual(calls, ['unload', 'release']);
   }
   // The video memory is given back each time; the models stay in main memory while there is room.
-  assert.deepEqual(fake.seen.freed, [{ unload_models: true }, { unload_models: true }]);
-  assert.equal((await readdir(outputDir)).length, 4);
+  assert.deepEqual(fake.seen.freed, Array(3).fill({ unload_models: true }));
+  assert.equal((await readdir(outputDir)).length, 6);
 
   // On a machine short of memory, ComfyUI lets go of everything.
   const tight = await comfy(t, { available: 1024 ** 3 });
-  await writeFile(join(dataDir, 'comfy-engine.json'), JSON.stringify({ enabled: true, baseUrl: tight.baseUrl }));
+  await service.saveComfy({ enabled: true, baseUrl: tight.baseUrl });
   client = service.client();
   await client.preflight(krea());
   await client.free();
   assert.deepEqual(tight.seen.freed, [{ unload_models: true }, { unload_models: true, free_memory: true }]);
 
-  // A ComfyUI that is not running is said before anything is unloaded.
-  await writeFile(join(dataDir, 'comfy-engine.json'), JSON.stringify({ enabled: true, baseUrl: 'http://127.0.0.1:9' }));
+  // A ComfyUI that is not running: said in the settings, and before anything is unloaded.
+  const stopped = await service.saveComfy({ enabled: true, baseUrl: 'http://127.0.0.1:9' });
+  assert.equal(stopped.comfy.reachable, false);
   await assert.rejects(service.client().preflight(ltx()), /ComfyUI ne répond pas/);
+  // Switched off: the address is kept, the families are ComfyUI's no more.
+  const off = await service.saveComfy({ enabled: false, baseUrl: 'http://127.0.0.1:9' });
+  assert.deepEqual([off.comfy.enabled, off.comfy.baseUrl], [false, 'http://127.0.0.1:9']);
+  assert.equal((await available()).krea2, false);
 });

@@ -30,10 +30,19 @@ def ltx_job(**changes):
 
 class RegistryTests(unittest.TestCase):
     def test_every_manifest_has_a_runnable_module_and_a_capability(self):
-        self.assertEqual(set(capabilities()), set(families()))
+        # A family ComfyUI runs is known here by its manifest only: no module, no capability.
+        own = {name for name, manifest in families().items() if manifest.get('native', True)}
+        self.assertEqual(set(capabilities()), own)
+        self.assertIn(families()['krea2']['engine'], ('external',))
+        self.assertNotIn('krea2', own)
         for name, manifest in families().items():
             with self.subTest(family=name):
-                self.assertTrue(callable(pipeline(name).generate))
+                self.assertIn(manifest['engine'], ('internal', 'external'))
+                if name in own:
+                    self.assertTrue(callable(pipeline(name).generate))
+                else:
+                    with self.assertRaisesRegex(ValueError, 'ComfyUI'):
+                        pipeline(name)
                 for role, spec in manifest['roles'].items():
                     self.assertIn(spec['media'], ('image', 'video', 'audio'), role)
                     self.assertTrue(spec['as'])
@@ -42,8 +51,8 @@ class RegistryTests(unittest.TestCase):
 
     def test_family_modules_import_without_torch(self):
         code = (
-            'import sys; from runner.registry import families, pipeline\n'
-            '[pipeline(name) for name in families()]\n'
+            'import sys; from runner.registry import families, native, pipeline\n'
+            '[pipeline(name) for name in families() if native(name)]\n'
             'print(json.dumps("torch" in sys.modules))'
         )
         result = subprocess.run(
