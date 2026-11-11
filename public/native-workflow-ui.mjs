@@ -701,7 +701,7 @@ export function setupNativeWorkflows(options) {
     const spec = familyOf(draft.pipeline)?.components[role] || {};
     // A component the assistant may not choose (a tokenizer must match its encoder) shows no ownership switch.
     if (spec.policies && !spec.policies.includes('model')) ownershipSelect.hidden = true;
-    card.append(field(labels[role] || role, ownershipSelect), picker.container, allowed);
+    card.append(field(componentLabel(role), ownershipSelect), picker.container, allowed);
     if (spec.help) card.append(node('p', 'field-help', spec.help));
     const active = input(id + '-enabled', present, 'checkbox');
     if (optional) {

@@ -4968,3 +4968,233 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   padding: 5px 10px;
   font-size: 11px;
 }
+
+/* Compact settings: the same content, tighter spacing and smaller controls, so most of a section
+   fits on the screen. Kept here, last, so it reads as one layer over the rules above. */
+#settings .settings-header {
+  gap: 10px;
+  padding: 14px 20px 12px;
+}
+#settings .settings-header h2 {
+  font-size: 17px;
+}
+#settings .settings-search input {
+  padding: 8px 0;
+}
+#settings .settings-body {
+  padding: 12px 16px;
+}
+#settings .settings-footer {
+  padding: 10px 18px;
+}
+#settings .settings-block {
+  margin-bottom: 10px;
+  padding: 13px 15px;
+  border-radius: 12px;
+}
+#settings .settings-block > h3,
+#settings .workflow-settings h3 {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+}
+#settings .settings-block [data-settings-item] + [data-settings-item] {
+  margin-top: 12px;
+}
+#settings .settings-block .field-group {
+  margin-bottom: 10px;
+}
+#settings .settings-block .field-group:last-child {
+  margin-bottom: 0;
+}
+#settings .field-group label {
+  margin-bottom: 5px;
+}
+#settings .field-group input:not([type='checkbox']):not([type='range']),
+#settings .field-group select,
+#settings .model-library-row select {
+  min-height: 34px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+#settings .path-input button,
+#settings .model-library-row button,
+#settings .workflow-heading-actions button {
+  min-height: 34px;
+  padding: 6px 11px;
+}
+#settings #global-instructions {
+  min-height: 60px;
+  padding: 9px 11px;
+  line-height: 1.55;
+}
+#settings .settings-hint {
+  margin-top: 5px;
+}
+#settings .model-paths {
+  margin-top: 10px;
+}
+#settings .model-paths > summary {
+  padding-top: 9px;
+}
+#settings .model-paths[open] > summary {
+  margin-bottom: 10px;
+}
+/* Engine: the two token sliders side by side, their value on the label's line. */
+#settings .token-settings {
+  margin: 0 0 10px;
+  gap: 18px;
+}
+#settings .token-title {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+#settings .token-title output {
+  font-size: 12px;
+}
+#settings .range-endpoints {
+  margin-top: 6px;
+}
+/* Generation: the toggles as a tight list, the limit on one row. */
+#settings .native-settings .history-toggle {
+  margin-bottom: 7px;
+  font-size: 12px;
+}
+#settings .generation-auto-label {
+  margin-bottom: 10px !important;
+}
+#settings .iteration-setting {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 2px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  box-shadow: none;
+}
+#settings .iteration-setting label {
+  grid-column: 1;
+}
+#settings .iteration-setting p {
+  grid-column: 1;
+  margin: 0;
+  line-height: 1.5;
+}
+#settings .iteration-controls {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  gap: 6px;
+}
+#settings .iteration-stepper button {
+  width: 28px;
+  height: 30px;
+  font-size: 16px;
+}
+#settings .iteration-stepper input,
+#settings .iteration-stepper span {
+  width: 46px;
+  height: 30px;
+  font-size: 14px;
+}
+#settings #generation-unlimited {
+  width: 34px;
+  height: 32px;
+  font-size: 19px;
+}
+#settings .native-environment {
+  margin-top: 10px;
+  padding-top: 9px;
+}
+#settings #generation-status {
+  margin: 6px 0 0;
+}
+/* Workflows. */
+#settings .workflow-settings .workflow-heading {
+  margin-bottom: 8px;
+}
+#settings .workflow-section {
+  margin-top: 12px;
+  padding-top: 10px;
+}
+#settings .workflow-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+}
+#settings .workflow-settings .workflow-section + .workflow-card {
+  margin-top: 8px;
+}
+#settings .workflow-settings .workflow-card {
+  padding: 8px 12px;
+}
+#settings .comfy-panel {
+  gap: 8px 10px;
+  margin-top: 8px;
+}
+/* Preferences and diagnostic. */
+#settings .preference-row + * {
+  margin-top: 8px;
+}
+#settings .runtime-status {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: 0;
+}
+#settings .logs-panel {
+  margin: 8px 0 0;
+}
+#settings .logs-panel summary {
+  padding: 8px 10px;
+}
+/* Workflow editor, at the same density. */
+#settings #workflow-editor .settings-header {
+  padding-block: 12px;
+}
+#settings #workflow-editor .settings-header h2 {
+  font-size: 16px;
+}
+#settings #workflow-editor .settings-block > h3 {
+  margin-bottom: 10px;
+}
+#settings #workflow-editor .native-identity .history-toggle {
+  margin-top: 10px;
+}
+#settings #workflow-editor textarea {
+  min-height: 60px;
+  padding: 8px 10px;
+}
+#settings .native-editor-section > summary {
+  font-size: 12.5px;
+}
+#settings .native-editor-section[open] > summary {
+  margin-bottom: 10px;
+}
+#settings .native-component,
+#settings .native-parameter,
+#settings .native-lora,
+#settings .native-reference,
+#settings .native-profile {
+  padding: 10px 0;
+}
+#settings .native-component:first-child,
+#settings .native-parameter:first-child,
+#settings .native-lora:first-child,
+#settings .native-reference:first-child,
+#settings .native-profile:first-child {
+  padding-top: 0;
+}
+#settings .native-parameter {
+  gap: 7px;
+}
+#settings #workflow-editor .native-component > .field-group:first-child {
+  margin-bottom: 6px;
+}
+#settings .native-policy-switch {
+  padding: 2px;
+}
+#settings .native-policy-switch button {
+  min-height: 26px;
+  padding: 4px 10px;
+}
