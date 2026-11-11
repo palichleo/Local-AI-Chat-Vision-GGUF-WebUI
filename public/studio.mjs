@@ -279,11 +279,14 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
   function room(frame) {
     const box = frame.parentElement,
       chips = box?.querySelector('.studio-formats'),
+      // The stage has a padding of its own when the middle column dissolves (narrow windows).
+      style = box && typeof getComputedStyle === 'function' ? getComputedStyle(box) : null,
+      pad = side => parseFloat(style?.[side]) || 0,
+      width = (box?.clientWidth ?? 0) - pad('paddingLeft') - pad('paddingRight'),
       // The formats sit under the frame, in the same stage.
-      height = (box?.clientHeight ?? 0) - (chips ? chips.offsetHeight + 12 : 0) - 4;
-    return box?.clientWidth > 40 && height > 40
-      ? { width: Math.min(box.clientWidth - 20, 560), height: Math.min(height, 440) }
-      : FRAME;
+      height =
+        (box?.clientHeight ?? 0) - pad('paddingTop') - pad('paddingBottom') - (chips ? chips.offsetHeight + 12 : 0) - 4;
+    return width > 40 && height > 40 ? { width: Math.min(width - 20, 560), height: Math.min(height, 440) } : FRAME;
   }
   function reshape(frame, { ratio, label }) {
     const size = frameSize(ratio, room(frame));

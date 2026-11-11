@@ -1142,23 +1142,32 @@ body[data-view='studio'] .chat-header {
   padding: 3px 9px;
   font-size: 10.5px;
 }
-/* Narrower: the frame stays on top in the middle, writing and settings side by side under it. */
+/* Narrower: the frame stays on top, writing and settings side by side under it, and « Générer »
+   comes last, after what it sends. The middle column dissolves into the desk for that: its
+   frame keeps the look of a column, its button stands alone at the bottom. */
 @container studio (max-width: 800px) {
   .studio-desk,
   .studio-desk.is-two {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
   }
   .studio-center {
-    grid-column: 1 / -1;
-    order: -1;
+    display: contents;
   }
   .studio-center .studio-stage {
+    grid-column: 1 / -1;
+    order: -1;
     flex: none;
-    height: clamp(190px, 30vh, 300px);
+    height: clamp(218px, 30vh + 28px, 328px);
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--surface) 55%, transparent);
   }
   .studio-center .studio-footer {
-    align-self: center;
+    grid-column: 1 / -1;
+    order: 1;
+    justify-self: center;
     width: min(100%, 420px);
     margin-top: 0;
   }
@@ -1166,7 +1175,7 @@ body[data-view='studio'] .chat-header {
     grid-column: 1 / -1;
   }
 }
-/* Narrow: one column, in the order one works: the frame, the words, the settings. */
+/* Narrow: one column, in the order one works: the frame, the words, the settings, the button. */
 @container studio (max-width: 620px) {
   .studio-desk,
   .studio-desk.is-two {
