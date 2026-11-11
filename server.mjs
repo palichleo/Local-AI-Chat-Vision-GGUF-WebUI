@@ -188,6 +188,9 @@ export async function createApplication({
   updateChecker = null,
   updateInstaller = null,
   managed = false,
+  // Starts the launcher again (POST /api/relaunch); tests pass their own.
+  launcher = startLauncher,
+  currentSources = appSources,
   controlTimeoutMs = 15000,
   controlHeartbeatMs = 10000,
   controlReconnectMs = 2000,
@@ -793,24 +796,36 @@ export async function createApplication({
       }
       if (applyingUpdate) throw problem('Installation de la mise à jour en cours.', 409);
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw problem('Un objet JSON est attendu.');
+      // Nothing running that a relaunch would cut short.
+      const occupied = () =>
+        closing ||
+        relaunching ||
+        engine.busy ||
+        runtime.active ||
+        savingSettings ||
+        saving ||
+        savingGeneration ||
+        pickingFile ||
+        savingPreferences ||
+        clearingHistory ||
+        persistingGallery ||
+        ['loading', 'stopping'].includes(engine.state);
+      if (path === '/api/relaunch') {
+        // Loads the files of this folder as they are now, without a hand on the launcher: the
+        // launcher is started again in its own window, stops this instance (only if idle, see
+        // /api/shutdown below) and starts the new one. For changes made from another program.
+        if (occupied())
+          throw problem('Termine l’opération en cours avant de relancer l’application.', 409);
+        if ((await currentSources(root)).sourceRevision === sources.sourceRevision)
+          throw problem('Les fichiers de ce dossier n’ont pas changé depuis le lancement : rien à recharger.', 409);
+        launcher({ root, port: server.address().port });
+        return send(202, { relaunching: true });
+      }
       if (path === '/api/shutdown') {
         if (body.onlyIfIdle === true) {
           if (body.installationId !== sources.installationId || body.sourceRevision !== sources.sourceRevision)
             throw problem('L’instance à relancer a changé.', 409);
-          if (
-            closing ||
-            relaunching ||
-            engine.busy ||
-            runtime.active ||
-            savingSettings ||
-            saving ||
-            savingGeneration ||
-            pickingFile ||
-            savingPreferences ||
-            clearingHistory ||
-            persistingGallery ||
-            ['loading', 'stopping'].includes(engine.state)
-          )
+          if (occupied())
             throw problem(
               'Termine l’opération en cours, puis relance l’application pour charger les derniers fichiers.',
               409,
@@ -1605,6 +1620,19 @@ export async function createApplication({
   return { url, close: stopApplication };
 }
 
+/**
+ * Starts the launcher of this folder again, as a double click on it would: in a console window
+ * of its own on Windows, in the background elsewhere. It finds the running instance, stops it
+ * and starts the new one; if it cannot, the running instance simply stays.
+ */
+export function startLauncher({ root, port }, { platform = process.platform, spawnProcess = spawn } = {}) {
+  const script = [process.execPath, join(root, 'scripts', 'launch.mjs'), `--port=${port}`];
+  const [command, ...args] =
+    platform === 'win32' ? ['cmd.exe', '/c', 'start', 'Atelier local', '/D', root, ...script] : script;
+  const child = spawnProcess(command, args, { cwd: root, stdio: 'ignore', detached: true, windowsHide: true });
+  child.once('error', () => {});
+  child.unref();
+}
 export function openBrowser(url, { platform = process.platform, spawnProcess = spawn, report = console.log } = {}) {
   const command = platform === 'win32' ? 'rundll32.exe' : 'xdg-open';
   const args = platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
