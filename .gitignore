@@ -26,3 +26,7 @@ runner/**/*.pyc
 
 # Built-in engines set aside when ComfyUI took their families over: kept on disk, out of the repository.
 experiment_keep_engine/
+
+# Working notes and assistant instructions: kept on this machine, out of the repository.
+doc/
+CLAUDE.md
