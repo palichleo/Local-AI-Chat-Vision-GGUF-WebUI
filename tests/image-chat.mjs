@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { readSSE } from '../public/stream.mjs';
 import * as sessionCopies from '../public/session-copies.mjs';
 import * as chatVideos from '../public/chat-videos.mjs';
+import * as transcript from '../public/transcript.mjs';
 const png = 'data:image/png;base64,iVBORw0KGgo=';
 const call = {
   id: 'call_1',
@@ -71,6 +72,7 @@ async function exchange({
   const context = {
     ...sessionCopies,
     ...chatVideos,
+    ...transcript,
     views,
     generationUI: {
       mount: container => {
@@ -325,10 +327,13 @@ test('restoring repeated model call IDs associates each generation with its foll
     context = {
     ...sessionCopies,
     ...chatVideos,
+    ...transcript,
       state: { conversationId: 'selected' },
       generationUI: { restore: (_body, _conversation, run) => restored.push(run) },
       assistantMessage: () => ({ body: element(), reasoning: element(), thoughts: element(), note: element() }),
       renderText() {},
+      // A call without its result is told in a line of its own.
+      node: () => element(),
     };
   const messages = [
     { role: 'assistant', content: '', tool_calls: [call] },
@@ -384,6 +389,7 @@ test('restored generations share a response until the next real user message', a
   const context = {
     ...sessionCopies,
     ...chatVideos,
+    ...transcript,
     state: { conversationId: 'saved' },
     node,
     icon: () => node('svg'),

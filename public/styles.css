@@ -571,6 +571,11 @@ button svg {
 .message-note.error {
   color: var(--danger);
 }
+/* What the model did between two replies, read back from the history. */
+.message-step {
+  font-size: 12px;
+  color: var(--muted);
+}
 .message-images {
   display: flex;
   flex-wrap: wrap;

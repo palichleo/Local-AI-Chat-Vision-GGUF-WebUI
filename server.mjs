@@ -58,6 +58,7 @@ const staticFiles = new Map([
   ['/assets-ui.mjs', ['assets-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/resource-preparation.mjs', ['resource-preparation.mjs', 'text/javascript; charset=utf-8']],
   ['/copy.mjs', ['copy.mjs', 'text/javascript; charset=utf-8']],
+  ['/transcript.mjs', ['transcript.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-guard.mjs', ['settings-guard.mjs', 'text/javascript; charset=utf-8']],
   ['/context-meter.mjs', ['context-meter.mjs', 'text/javascript; charset=utf-8']],
   ['/stream.mjs', ['stream.mjs', 'text/javascript; charset=utf-8']],

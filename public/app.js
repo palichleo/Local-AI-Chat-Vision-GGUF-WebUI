@@ -3,6 +3,7 @@ import { setupSettingsSearch } from './settings-search.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
+import { callNote, spokenText } from './transcript.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
 import { setupContextMeter } from './context-meter.mjs';
 import { installFromButton, compactSession } from './update-ui.mjs';
@@ -358,15 +359,24 @@ function renderTranscript(messages, incomplete = false) {
     } else {
       const view = assistantMessage(reply);
       reply = view;
-      if (message.content) renderText(view.body, message.content);
-      else view.body.textContent = message.tool_calls ? 'Appel d’outil enregistré.' : 'Aucune réponse finale reçue.';
+      // A call the model wrote as text is not shown, as while a reply arrives; a call that left
+      // no media is told in a line of its own words, not the result kept for the model.
+      const text = spokenText(message.content);
+      if (text) renderText(view.body, text);
+      else if (message.tool_calls?.length) {
+        const told = callNote(message.tool_calls[0], messages[index + 1]);
+        view.body.replaceChildren(...(told ? [node('div', 'message-step', told)] : []));
+      } else
+        view.body.textContent = message.content
+          ? 'Le modèle a écrit un appel d’outil au lieu de le lancer : rien n’a été généré.'
+          : 'Aucune réponse finale reçue.';
       if (message.tool_calls?.some(isGeneration)) {
         const call = message.tool_calls.find(isGeneration),
           result = messages[index + 1];
         try {
           const data = result?.role === 'tool' && result.tool_call_id === call.id ? JSON.parse(result.content) : null;
           if (data?.run_id) {
-            if (!message.content) view.body.replaceChildren();
+            if (!text) view.body.replaceChildren();
             generationUI.restore(view.generations, state.conversationId, data.run_id);
           }
         } catch {}
