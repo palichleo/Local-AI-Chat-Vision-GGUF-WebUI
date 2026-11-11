@@ -22,6 +22,8 @@ const ROLES = {
   end_image: 'Image de fin',
   reference: 'Référence',
 };
+// Under each input tile: one word, the full name in its tooltip.
+const SHORT = { source: 'À modifier', start_image: 'Début', end_image: 'Fin', reference: 'Réf.' };
 const SETTINGS = { lyrics: 'Paroles', seconds: 'Durée (s)', language: 'Langue' };
 const SETTING_HELP = { lyrics: 'Vide pour un morceau instrumental. Balises : [Verse], [Chorus], [Bridge]…' };
 const MAX_STYLES = 4;
@@ -32,6 +34,15 @@ const leaf = name =>
     .replace(/\.safetensors$/i, '');
 const seconds = value => (Math.round(value * 10) / 10).toString().replace('.', ',') + ' s';
 const sizeKey = size => size.width + 'x' + size.height;
+// The box the format frame fits in: the widest and the tallest it gets.
+const FRAME = { width: 264, height: 176 };
+
+/** The frame of a ratio, as large as its box allows. */
+export function frameSize(ratio, box = FRAME) {
+  return ratio >= box.width / box.height
+    ? { width: box.width, height: Math.round(box.width / ratio) }
+    : { width: Math.round(box.height * ratio), height: box.height };
+}
 
 /** The prompt sent: what the user wrote, then the style as its last line. */
 export function withStyle(prompt, style) {
@@ -55,7 +66,8 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     working = null, // { label, fraction, requestId, controller } while a generation runs
     styling = false,
     extending = null, // the clip being continued
-    failure = '';
+    failure = '',
+    drawn = null; // the size the frame was last drawn at, to ease from
   const drafts = Object.fromEntries(
     MODES.map(item => [
       item.id,
@@ -153,7 +165,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     const format = formatOf(image.width, image.height);
     if (format) Object.assign(draft, { format: format.id, size: null });
   }
-  function slot(workflow, role, index, label) {
+  function slot(workflow, role, index, label, short = label) {
     const draft = drafts[mode],
       value = draft.inputs[role]?.[index],
       clash = exclusiveWith(workflow, role),
@@ -180,7 +192,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       event.stopPropagation();
       if (!choose.disabled) void fill(role, index, event.dataTransfer.files[0]);
     };
-    tile.append(choose, node('span', 'studio-slot-label', label));
+    tile.append(choose, node('span', 'studio-slot-label', short));
     if (value) {
       const remove = button(
         'studio-slot-remove',
@@ -201,14 +213,22 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     for (const [role, spec] of Object.entries(workflow.roles)) {
       if (!spec.count || !spec.media.includes('image')) continue;
       for (let index = 0; index < spec.count; index++)
-        row.append(slot(workflow, role, index, ROLES[role] + (spec.count > 1 ? ' ' + (index + 1) : '')));
+        row.append(
+          slot(
+            workflow,
+            role,
+            index,
+            ROLES[role] + (spec.count > 1 ? ' ' + (index + 1) : ''),
+            SHORT[role] + (spec.count > 1 ? ' ' + (index + 1) : ''),
+          ),
+        );
     }
     return row.children.length ? row : null;
   }
 
   // ------------------------------------------------------------------ size, length
-  function sizeFields(workflow, grid) {
-    if (!workflow.limits) return;
+  /** The formats and sizes a workflow offers, with the draft settled on one of each. */
+  function sizing(workflow) {
     const draft = drafts[mode],
       formats = FORMATS.filter(format => sizesFor(format, workflow.limits).length),
       base = workflow.size ?? { width: 1024, height: 1024 };
@@ -216,34 +236,77 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       draft.format = (formatOf(base.width, base.height) ?? formats[0])?.id ?? null;
     const { sizes, nearest } = sizeChoices(workflow, draft.format, base.width * base.height);
     if (!sizes.some(size => sizeKey(size) === draft.size)) draft.size = nearest ? sizeKey(nearest) : null;
-    const final = workflow.final && sizeKey(workflow.final);
-    grid.append(
-      field(
-        'Format',
-        select(
-          formats.map(format => [format.id, format.label]),
-          draft.format,
-          value => {
-            Object.assign(draft, { format: value, size: null, formatChosen: true });
-            render();
-          },
-        ),
-      ),
-      field(
-        'Résolution',
-        select(
-          sizes.map(size => [
-            sizeKey(size),
-            `${size.width} × ${size.height}` + (sizeKey(size) === final ? ' · finale' : ''),
-          ]),
-          draft.size,
-          value => {
-            draft.size = value;
-          },
-        ),
-        mode === 'video' ? { help: 'Plus grand : plus long à générer.' } : undefined,
-      ),
-    );
+    return { formats, sizes, final: workflow.final && sizeKey(workflow.final) };
+  }
+  /** Fills the resolution list for the draft's format. */
+  function listSizes(control, workflow) {
+    const { sizes, final } = sizing(workflow);
+    control.replaceChildren();
+    for (const size of sizes)
+      control.add(
+        new Option(`${size.width} × ${size.height}` + (sizeKey(size) === final ? ' · finale' : ''), sizeKey(size)),
+      );
+    control.value = drafts[mode].size ?? '';
+  }
+
+  // ------------------------------------------------------------------ the stage
+  /** The shape of what will be made: a ratio and the few words written in the frame. */
+  function shapeOf(workflow) {
+    if (mode === 'audio') return { ratio: 3.4, label: '' };
+    if (extending) {
+      const { width, height } = extending.parameters ?? {},
+        format = formatOf(width, height);
+      return { ratio: width > 0 && height > 0 ? width / height : 16 / 9, label: format?.id ?? 'Suite' };
+    }
+    const format = FORMATS.find(item => item.id === drafts[mode].format);
+    return { ratio: format?.ratio ?? 1, label: format?.id ?? '' };
+  }
+  function reshape(frame, { ratio, label }) {
+    const size = frameSize(ratio);
+    frame.style.width = size.width + 'px';
+    frame.style.height = size.height + 'px';
+    frame.querySelector('.studio-frame-label').textContent = label;
+    drawn = size;
+  }
+  /**
+   * An empty frame in the format of the image or the video to come (its shape only, not its
+   * size). It eases from the shape it had to the new one, across formats and across modes.
+   */
+  function stage(workflow) {
+    const box = node('div', 'studio-stage'),
+      frame = node('div', 'studio-frame' + (mode === 'audio' ? ' is-audio' : '')),
+      next = shapeOf(workflow);
+    frame.setAttribute('aria-hidden', 'true');
+    frame.append(node('span', 'studio-frame-label', next.label));
+    if (drawn && typeof requestAnimationFrame === 'function') {
+      // Drawn at the previous shape first, so the browser has something to ease from.
+      frame.style.width = drawn.width + 'px';
+      frame.style.height = drawn.height + 'px';
+      requestAnimationFrame(() => requestAnimationFrame(() => reshape(frame, next)));
+    } else reshape(frame, next);
+    box.append(frame);
+    return { box, frame };
+  }
+  /** The formats as a row of chips under the frame: choosing one reshapes it in place. */
+  function formatChips(workflow, frame, resolution) {
+    const draft = drafts[mode],
+      row = node('div', 'studio-formats');
+    row.setAttribute('role', 'radiogroup');
+    row.setAttribute('aria-label', 'Format');
+    for (const format of sizing(workflow).formats) {
+      const chip = button('studio-format', format.id, () => {
+        Object.assign(draft, { format: format.id, size: null, formatChosen: true });
+        for (const other of row.children) other.setAttribute('aria-checked', String(other === chip));
+        listSizes(resolution, workflow);
+        reshape(frame, shapeOf(workflow));
+      });
+      chip.title = format.label;
+      chip.setAttribute('role', 'radio');
+      chip.setAttribute('aria-checked', String(format.id === draft.format));
+      chip.disabled = Boolean(working);
+      row.append(chip);
+    }
+    return row;
   }
   function lengthField(workflow, grid) {
     const lengths = workflow.lengths;
@@ -361,7 +424,8 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       'spark',
     );
     make.disabled = styling || Boolean(working);
-    section.append(box, make, node('small', 'field-help', 'Le style est ajouté à la fin du prompt.'));
+    box.title = 'Le style est ajouté à la fin du prompt.';
+    section.append(box, make);
     return section;
   }
 
@@ -601,7 +665,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       section.append(
         node('p', 'asset-empty', mode === 'image' ? 'Vos images apparaîtront ici.' : 'Vos sons apparaîtront ici.'),
       );
-    const grid = node('div', mode === 'image' ? 'studio-grid' : 'studio-sounds');
+    const grid = node('div', 'studio-timeline ' + (mode === 'image' ? 'is-images' : 'is-sounds'));
     for (const record of mine) {
       const card = node('article', 'studio-card');
       if (mode === 'image') {
@@ -654,15 +718,33 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
   }
 
   // ------------------------------------------------------------------ the page
+  function message(text) {
+    const panel = node('section', 'studio-desk is-empty');
+    panel.append(node('p', 'asset-empty', text));
+    return panel;
+  }
+  /**
+   * The desk: what is written on the left, the frame and « Générer » in the middle, the
+   * settings on the right. Wide rather than tall: everything stays in view.
+   */
   function form() {
     const draft = drafts[mode],
-      panel = node('section', 'studio-form'),
       list = offered(),
       workflow = current();
-    if (!info.enabled) {
-      panel.append(node('p', 'asset-empty', 'La génération locale est désactivée : activez-la dans Configuration.'));
-      return panel;
-    }
+    if (!info.enabled) return message('La génération locale est désactivée : activez-la dans Configuration.');
+    if (!workflow)
+      return message(
+        mode === 'audio'
+          ? 'Aucun workflow de son prêt : téléchargez les modèles de musique et de bruitages dans models\\audio.'
+          : 'Aucun workflow prêt pour cette création : vérifiez Configuration, Workflows.',
+      );
+    const desk = node('section', 'studio-desk'),
+      write = node('div', 'studio-col studio-write'),
+      center = node('div', 'studio-col studio-center'),
+      settings = node('div', 'studio-col studio-settings'),
+      grid = node('div', 'studio-grid-fields');
+
+    // Left: what the user writes and hands over.
     if (mode === 'video' && extending) {
       const banner = node('div', 'studio-extending');
       banner.append(
@@ -673,56 +755,29 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
           render();
         }),
       );
-      panel.append(banner);
+      write.append(banner);
     }
-    if (!workflow) {
-      panel.append(
-        node(
-          'p',
-          'asset-empty',
-          mode === 'audio'
-            ? 'Aucun workflow de son prêt : téléchargez les modèles de musique et de bruitages dans models\\audio.'
-            : 'Aucun workflow prêt pour cette création : vérifiez Configuration, Workflows.',
-        ),
-      );
-      return panel;
-    }
-    if (list.length > 1 && !extending) {
-      if (mode === 'audio') {
-        // The kind of sound is the first choice: music, or sound effects.
-        const kinds = node('div', 'studio-kinds');
-        kinds.setAttribute('role', 'radiogroup');
-        kinds.setAttribute('aria-label', 'Type de son');
-        for (const item of list) {
-          const kind = button('studio-kind', '', () => {
-            draft.workflow = item.id;
-            render();
-          });
-          kind.setAttribute('role', 'radio');
-          kind.setAttribute('aria-checked', String(item.id === workflow.id));
-          kind.append(node('strong', '', item.name), node('span', '', item.description));
-          kinds.append(kind);
-        }
-        panel.append(kinds);
-      } else
-        panel.append(
-          field(
-            'Modèle',
-            select(
-              list.map(item => [item.id, item.name]),
-              workflow.id,
-              value => {
-                draft.workflow = value;
-                render();
-              },
-            ),
-            { help: workflow.description, wide: true },
-          ),
-        );
+    if (mode === 'audio' && list.length > 1) {
+      // The kind of sound is the first choice: music, or sound effects.
+      const kinds = node('div', 'studio-kinds');
+      kinds.setAttribute('role', 'radiogroup');
+      kinds.setAttribute('aria-label', 'Type de son');
+      for (const item of list) {
+        const kind = button('studio-kind', '', () => {
+          draft.workflow = item.id;
+          render();
+        });
+        kind.title = item.description;
+        kind.setAttribute('role', 'radio');
+        kind.setAttribute('aria-checked', String(item.id === workflow.id));
+        kind.append(node('strong', '', item.name), node('span', '', item.description));
+        kinds.append(kind);
+      }
+      write.append(kinds);
     }
     const prompt = textarea(
       draft.prompt,
-      mode === 'audio' ? 3 : 5,
+      4,
       extending
         ? 'Ce qui se passe ensuite…'
         : mode === 'image'
@@ -735,14 +790,40 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       },
     );
     prompt.maxLength = 4000;
-    panel.append(field('Prompt', prompt, { wide: true }));
+    write.append(field('Prompt', prompt, { wide: true }));
     if (!extending) {
       const row = inputs(workflow);
-      if (row) panel.append(row);
+      if (row) write.append(row);
     }
-    const grid = node('div', 'studio-grid-fields');
-    if (!extending) sizeFields(workflow, grid);
+
+    // Right: the settings, two to a row.
+    if (list.length > 1 && !extending && mode !== 'audio') {
+      const model = field(
+        'Modèle',
+        select(
+          list.map(item => [item.id, item.name]),
+          workflow.id,
+          value => {
+            draft.workflow = value;
+            render();
+          },
+        ),
+      );
+      model.title = workflow.description;
+      grid.append(model);
+    }
+    const resolution = node('select');
+    if (workflow.limits && !extending) {
+      listSizes(resolution, workflow);
+      resolution.onchange = () => {
+        draft.size = resolution.value;
+      };
+      const sized = field('Résolution', resolution);
+      if (mode === 'video') sized.title = 'Plus grand : plus long à générer.';
+      grid.append(sized);
+    }
     lengthField(workflow, grid);
+    const texts = [];
     for (const setting of workflow.settings) {
       // Kept per workflow: a song's length is not a sound effect's.
       const store = (draft.settings[workflow.id] ??= {}),
@@ -752,9 +833,9 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
           store[setting.key] = next;
         };
       if (setting.type === 'string' && !setting.choices) {
-        const box = textarea(String(value), 5, '', set);
+        const box = textarea(String(value), 4, SETTING_HELP[setting.key] ?? '', set);
         if (setting.maxLength) box.maxLength = setting.maxLength;
-        panel.append(field(label, box, { wide: true, help: SETTING_HELP[setting.key] }));
+        texts.push(field(label, box, { wide: true }));
       } else if (setting.choices)
         grid.append(
           field(
@@ -773,11 +854,9 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
         if (setting.min !== undefined) input.min = String(setting.min);
         if (setting.max !== undefined) input.max = String(setting.max);
         input.oninput = () => set(input.value);
-        grid.append(
-          field(label, input, {
-            help: setting.max !== undefined ? `De ${setting.min ?? 0} à ${setting.max}.` : undefined,
-          }),
-        );
+        const wrapper = field(label, input);
+        if (setting.max !== undefined) wrapper.title = `De ${setting.min ?? 0} à ${setting.max}.`;
+        grid.append(wrapper);
       }
     }
     if (workflow.seeded) {
@@ -791,9 +870,14 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       };
       grid.append(field('Seed', seed));
     }
-    if (grid.children.length) panel.append(grid);
-    if (mode !== 'audio' && !extending) panel.append(styleSection(workflow, mode));
+    if (grid.children.length) settings.append(grid);
+    settings.append(...texts);
+    if (mode !== 'audio' && !extending) settings.append(styleSection(workflow, mode));
 
+    // Middle: the frame in the format to come, its formats, and the button.
+    const { box, frame } = stage(workflow);
+    center.append(box);
+    if (workflow.limits && !extending) center.append(formatChips(workflow, frame, resolution));
     const footer = node('div', 'studio-footer');
     if (working) {
       const line = node('div', 'studio-progress');
@@ -816,22 +900,26 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       alert.setAttribute('role', 'alert');
       footer.append(alert);
     }
-    panel.append(footer);
-    if (working) for (const control of panel.querySelectorAll('textarea, select, input')) control.disabled = true;
-    return panel;
+    center.append(footer);
+
+    desk.append(write, center, ...(settings.children.length ? [settings] : []));
+    if (!settings.children.length) desk.classList.add('is-two');
+    if (working) for (const control of desk.querySelectorAll('textarea, select, input')) control.disabled = true;
+    return desk;
   }
   function render() {
-    for (const tab of $('studio-modes').children) {
-      tab.setAttribute('aria-selected', String(tab.dataset.mode === mode));
-      tab.disabled = Boolean(working);
-    }
+    const chosen = MODES.find(item => item.id === mode);
+    // One mode at a time: the three choices leave once one is taken, « Retour » brings them back.
+    $('studio-modes').hidden = Boolean(chosen);
+    $('studio-back').hidden = !chosen;
+    $('studio-back').disabled = Boolean(working) || styling;
+    $('studio-title').textContent = chosen ? chosen.label : 'Studio';
+    $('studio-summary').textContent = chosen ? 'Studio' : 'Créez directement, avec vos propres prompts.';
+    $('studio-view').classList.toggle('is-working', Boolean(chosen));
     const body = $('studio-body');
     body.dataset.mode = mode ?? '';
     if (!info) return body.replaceChildren(node('p', 'asset-empty', 'Chargement…'));
-    if (!mode)
-      return body.replaceChildren(
-        node('p', 'studio-choose', 'Choisissez ce que vous voulez créer : une image, une vidéo ou un son.'),
-      );
+    if (!mode) return body.replaceChildren();
     body.replaceChildren(form(), results());
     progress();
   }
@@ -862,9 +950,15 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       item.icon,
     );
     tab.dataset.mode = item.id;
-    tab.setAttribute('role', 'tab');
     tab.append(node('strong', '', item.label), node('span', '', item.hint));
     $('studio-modes').append(tab);
   }
+  $('studio-back').onclick = () => {
+    if (working || styling) return;
+    mode = null;
+    extending = null;
+    failure = '';
+    render();
+  };
   return { open, render, busy: () => Boolean(working) || styling };
 }

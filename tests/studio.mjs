@@ -127,3 +127,16 @@ test('the page module loads, adds the style to the prompt and offers the sizes o
   assert.ok(sizes.every(size => size.width > size.height && size.width % 32 === 0 && size.height % 32 === 0));
   assert.ok(Math.abs(nearest.width * nearest.height - 768 * 448) < 768 * 448 * 0.4);
 });
+
+test('the format frame keeps the ratio and fits its box, wide or tall', async () => {
+  const { frameSize } = await import('../public/studio.mjs');
+  const box = { width: 264, height: 176 };
+  assert.deepEqual(frameSize(16 / 9, box), { width: 264, height: 149 });
+  assert.deepEqual(frameSize(9 / 16, box), { width: 99, height: 176 });
+  assert.deepEqual(frameSize(1, box), { width: 176, height: 176 });
+  for (const ratio of [16 / 9, 4 / 3, 3 / 2, 1, 2 / 3, 3 / 4, 9 / 16]) {
+    const size = frameSize(ratio, box);
+    assert.ok(size.width <= box.width && size.height <= box.height);
+    assert.ok(Math.abs(size.width / size.height / ratio - 1) < 0.02);
+  }
+});
