@@ -2,8 +2,8 @@ import { setupProjectNavigation } from './project-navigation.mjs';
 import { setupSettingsSearch } from './settings-search.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
-import { setupCopy } from './copy.mjs';
-import { callNote, spokenText } from './transcript.mjs';
+import { quoteText, setupCopy } from './copy.mjs';
+import { callNote, lastExchange, spokenText } from './transcript.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
 import { setupContextMeter } from './context-meter.mjs';
 import { installFromButton, compactSession } from './update-ui.mjs';
@@ -323,6 +323,7 @@ async function loadConversation(id) {
     generationUI.clear();
     $('messages').replaceChildren();
     renderTranscript(messages, record.incomplete);
+    turnActions();
     $('welcome').hidden = messages.length > 0;
     setConversationTitle(record.title);
     $('settings').close();
@@ -403,6 +404,7 @@ async function restoreUpdate() {
   generationUI.clear();
   $('messages').replaceChildren();
   renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
+  turnActions();
   $('welcome').hidden = state.messages.length > 0;
   setConversationTitle(saved.title || 'Nouvelle conversation');
   const restored = state.historyItems.find(item => item.id === state.conversationId);
@@ -1220,6 +1222,97 @@ function userMessage(text, images, videos = []) {
   return article;
 }
 
+/**
+ * Under each message, « Copier » ; under the last exchange, « Modifier » on what the user sent
+ * and « Régénérer » on the reply. Drawn again whenever the conversation shown changes.
+ */
+function turnActions() {
+  for (const row of document.querySelectorAll('#messages .message-actions')) row.remove();
+  const action = (label, glyph, title, onclick) => {
+    const control = node('button', 'message-action');
+    control.type = 'button';
+    control.title = title;
+    control.append(icon(glyph), node('span', '', label));
+    control.onclick = () => onclick(control);
+    return control;
+  };
+  const copy = read =>
+    action('Copier', 'copy', 'Copier ce message', async control => {
+      const label = control.querySelector('span');
+      try {
+        await navigator.clipboard.writeText(read());
+        label.textContent = 'Copié';
+        $('live-status').textContent = 'Texte copié.';
+      } catch {
+        label.textContent = 'Copie indisponible';
+      }
+      setTimeout(() => {
+        label.textContent = 'Copier';
+      }, 1600);
+    });
+  // Not while a reply is being written, nor for a message the application wrote itself.
+  const open = !state.generating && lastExchange(state.messages) >= 0,
+    users = [...document.querySelectorAll('#messages .message.user')],
+    replies = [...document.querySelectorAll('#messages .message.assistant')];
+  users.forEach((article, index) => {
+    const body = article.querySelector('.message-body'),
+      row = node('div', 'message-actions');
+    if (body?.textContent.trim()) row.append(copy(() => body.textContent));
+    if (open && index === users.length - 1)
+      row.append(
+        action('Modifier', 'edit', 'Reprendre ce message dans la zone de texte ; sa réponse est retirée', () =>
+          takeBack(false),
+        ),
+      );
+    if (row.children.length) article.append(row);
+  });
+  replies.forEach((article, index) => {
+    // What the model said, without the lines that only tell what it did.
+    const read = () =>
+        [...article.querySelectorAll('.message-body')]
+          .filter(body => !body.querySelector('.message-step, .pending-dot, .pending-message'))
+          .map(body => quoteText(body).trim())
+          .filter(Boolean)
+          .join('\n\n'),
+      row = node('div', 'message-actions');
+    if (read()) row.append(copy(read));
+    if (open && index === replies.length - 1 && article === $('messages').lastElementChild)
+      row.append(
+        action('Régénérer', 'update', 'Renvoyer le même message pour obtenir une autre réponse', () => takeBack(true)),
+      );
+    if (row.children.length) article.append(row);
+  });
+}
+/** Takes back the last message the user wrote: to edit it, or to send it again as it is. */
+async function takeBack(resend) {
+  if (state.generating || state.preparing || state.loadingHistory || state.status.toolJob)
+    return notice('Attends la fin de la réponse ou de la génération en cours.');
+  const index = lastExchange(state.messages);
+  if (index < 0) return;
+  const draft = savedUser(state.messages[index]),
+    waiting = $('prompt').value.trim();
+  if (resend && (waiting || state.images.length || state.videos.length))
+    return notice('Envoyez ou effacez d’abord le message en cours d’écriture.');
+  // Kept as a conversation whose last message is still being written: opened again, that
+  // message comes back in the message box.
+  state.archiveSnapshot = { messages: state.messages.slice(0, index + 1), incomplete: true };
+  state.messages = state.messages.slice(0, index);
+  state.images = [...draft.images, ...state.images];
+  state.videos = [...draft.videos, ...state.videos];
+  $('prompt').value = draft.text + (waiting ? '\n\n' + waiting : '');
+  generationUI.clear();
+  $('messages').replaceChildren();
+  renderTranscript(state.messages);
+  turnActions();
+  $('welcome').hidden = state.messages.length > 0;
+  renderAttachments();
+  resizePrompt();
+  updateControls();
+  contextMeter.schedule();
+  await persistConversation();
+  if (resend) $('chat-form').requestSubmit();
+  else $('prompt').focus();
+}
 function assistantMessage(parent = null) {
   const article = parent?.article || node('article', 'message assistant');
   article.setAttribute('aria-label', 'Réponse du modèle');
@@ -1273,6 +1366,7 @@ async function runOutputAction(record, index, action) {
         : `Interpolation de la sortie ${reference} pour une vidéo plus fluide.`,
     history = [...state.messages, { role: 'user', content: text }];
   state.generating = true;
+  turnActions();
   state.controller = new AbortController();
   const signal = state.controller.signal;
   updateControls();
@@ -1341,6 +1435,7 @@ async function runOutputAction(record, index, action) {
       await persistConversation();
     }
     state.generating = false;
+    turnActions();
     updateControls();
   }
 }
@@ -1459,6 +1554,7 @@ async function sendMessage(event) {
     // analysis), it may only chain another tool: any text is withheld.
     silent = false;
   state.generating = true;
+  turnActions();
   $('welcome').hidden = true;
   $('prompt').value = '';
   state.images = [];
@@ -1929,6 +2025,7 @@ async function sendMessage(event) {
     state.generating = false;
     state.waitingForModel = false;
     state.controller = null;
+    turnActions();
     resizePrompt();
     await refreshStatus();
     contextMeter.schedule();

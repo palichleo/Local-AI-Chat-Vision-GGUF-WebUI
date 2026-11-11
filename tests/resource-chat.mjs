@@ -38,6 +38,7 @@ test('grouped resource frames retain their separate labels and never enter saved
   const context = {
     ...sessionCopies,
     ...chatVideos,
+    turnActions() {},
     generationUI: { mount: () => ({ progress() {}, image() {}, finish() {}, fail() {} }) },
     assetsUI: { flush: async () => true },
     state,
@@ -153,6 +154,7 @@ test('a failed description save keeps the composer intact and never sends a chat
   const context = {
     ...sessionCopies,
     ...chatVideos,
+    turnActions() {},
     generationUI: { mount: () => ({ progress() {}, image() {}, finish() {}, fail() {} }) },
     state,
     $: id => (id === 'send' ? send : prompt),

@@ -73,6 +73,7 @@ async function exchange({
     ...sessionCopies,
     ...chatVideos,
     ...transcript,
+    turnActions() {},
     views,
     generationUI: {
       mount: container => {
@@ -328,6 +329,7 @@ test('restoring repeated model call IDs associates each generation with its foll
     ...sessionCopies,
     ...chatVideos,
     ...transcript,
+    turnActions() {},
       state: { conversationId: 'selected' },
       generationUI: { restore: (_body, _conversation, run) => restored.push(run) },
       assistantMessage: () => ({ body: element(), reasoning: element(), thoughts: element(), note: element() }),
@@ -390,6 +392,7 @@ test('restored generations share a response until the next real user message', a
     ...sessionCopies,
     ...chatVideos,
     ...transcript,
+    turnActions() {},
     state: { conversationId: 'saved' },
     node,
     icon: () => node('svg'),

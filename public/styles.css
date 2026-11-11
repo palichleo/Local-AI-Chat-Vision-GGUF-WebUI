@@ -576,6 +576,38 @@ button svg {
   font-size: 12px;
   color: var(--muted);
 }
+/* Under a message: copy it, or take the last exchange back. Quiet until the message is pointed at. */
+.message-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+.message:hover .message-actions,
+.message-actions:focus-within {
+  opacity: 1;
+}
+.message-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+.message-action:hover {
+  background: var(--hover);
+  border-color: var(--line);
+  color: var(--ink);
+}
+.message-action svg {
+  width: 13px;
+  height: 13px;
+}
 .message-images {
   display: flex;
   flex-wrap: wrap;

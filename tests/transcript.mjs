@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { callNote, spokenText } from '../public/transcript.mjs';
+import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
+import { callNote, lastExchange, spokenText } from '../public/transcript.mjs';
+import * as chatVideos from '../public/chat-videos.mjs';
 
 const call = (name, id = 'c1') => ({ id, type: 'function', function: { name, arguments: '{}' } });
 const result = (content, id = 'c1') => ({ role: 'tool', tool_call_id: id, content: JSON.stringify(content) });
@@ -64,4 +67,89 @@ test('looking at an earlier creation or at a resource is one discreet line', () 
   // A reading that showed nothing (an invalid call, a note before a generation) says nothing.
   assert.equal(callNote(call('local_read_resource'), result({ status: 'nothing_generated' })), '');
   assert.equal(callNote(call('local_read_output'), undefined), '');
+});
+
+test('the last message the user wrote can be taken back, not one the application wrote', () => {
+  const user = content => ({ role: 'user', content }),
+    reply = { role: 'assistant', content: 'Voici.' };
+  assert.equal(lastExchange([]), -1);
+  assert.equal(lastExchange([user('bonjour'), reply]), 0);
+  assert.equal(lastExchange([user('un'), reply, user('deux'), reply]), 2);
+  // What the model is told between two tools is not a message of the user.
+  assert.equal(lastExchange([user('un'), reply, { role: 'user', internal: true, content: 'note' }]), 0);
+  // A message with an image: its text parts are read.
+  assert.equal(lastExchange([user([{ type: 'text', text: 'anime-la' }, { type: 'image_url', file: 'a.png' }])]), 0);
+  // The buttons under a creation write their own message: nothing to edit or to send again.
+  const id = 'e7e4ac1a-2bef-4c7f-adf8-fce2835dcdd6';
+  assert.equal(lastExchange([user('un'), reply, user(`Upscale de la sortie ${id}.`), reply]), -1);
+  assert.equal(lastExchange([user(`Interpolation de la sortie ${id} pour une vidéo plus fluide.`)]), -1);
+});
+
+async function page(messages, { prompt = '', busy = false } = {}) {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const fields = { prompt: { value: prompt, focus() {} }, welcome: {}, messages: { replaceChildren() {} } };
+  const done = [];
+  const context = {
+    ...chatVideos,
+    lastExchange,
+    state: { messages, images: [], videos: [], status: {}, generating: busy },
+    $: id => fields[id] ?? (fields[id] = { requestSubmit: () => done.push('envoi') }),
+    notice: text => done.push('avis : ' + text),
+    generationUI: { clear() {} },
+    renderTranscript: shown => done.push('affiche ' + shown.length),
+    turnActions() {},
+    renderAttachments() {},
+    resizePrompt() {},
+    updateControls() {},
+    contextMeter: { schedule() {} },
+    persistConversation: async () => done.push('enregistre'),
+  };
+  // The function that reads a saved message back, then the one under test.
+  const reader = source.indexOf('function savedUser(');
+  runInNewContext(
+    source.slice(reader, source.indexOf('\n}', reader) + 2) +
+      source.slice(source.indexOf('async function takeBack('), source.indexOf('function assistantMessage(')) +
+      ';this.takeBack=takeBack;',
+    context,
+  );
+  return { ...context, fields, done };
+}
+const exchange = () => [
+  { role: 'user', content: 'premier' },
+  { role: 'assistant', content: 'un' },
+  { role: 'user', content: [{ type: 'text', text: 'second' }, { type: 'image_url', file: 'a.png', view: '/a' }] },
+  { role: 'assistant', content: '', tool_calls: [{ id: 'c', function: { name: 'create_image' } }] },
+  { role: 'tool', tool_call_id: 'c', content: '{"run_id":"r"}' },
+];
+
+test('« Modifier » puts the last message back in the message box and removes its reply', async () => {
+  const { state, fields, done, takeBack } = await page(exchange(), { prompt: 'déjà écrit' });
+  await takeBack(false);
+  assert.equal(state.messages.length, 2);
+  assert.equal(fields.prompt.value, 'second\n\ndéjà écrit');
+  assert.deepEqual(JSON.parse(JSON.stringify(state.images)), [{ name: 'Image enregistrée 1', file: 'a.png', view: '/a' }]);
+  // Saved as a message still being written: reopened, it comes back as a draft.
+  assert.equal(state.archiveSnapshot.incomplete, true);
+  assert.equal(state.archiveSnapshot.messages.length, 3);
+  assert.equal(state.archiveSnapshot.messages.at(-1).role, 'user');
+  assert.deepEqual(done, ['affiche 2', 'enregistre']);
+});
+
+test('« Régénérer » sends the same message again, unless another one is being written', async () => {
+  const again = await page(exchange());
+  await again.takeBack(true);
+  assert.equal(again.fields.prompt.value, 'second');
+  assert.deepEqual(again.done, ['affiche 2', 'enregistre', 'envoi']);
+  const writing = await page(exchange(), { prompt: 'autre chose' });
+  await writing.takeBack(true);
+  assert.equal(writing.state.messages.length, 5, 'nothing is removed');
+  assert.equal(writing.fields.prompt.value, 'autre chose');
+  assert.match(writing.done[0], /^avis : Envoyez ou effacez/);
+});
+
+test('nothing is taken back while a reply or a generation is running', async () => {
+  const { state, done, takeBack } = await page(exchange(), { busy: true });
+  await takeBack(true);
+  assert.equal(state.messages.length, 5);
+  assert.match(done[0], /^avis : Attends la fin/);
 });

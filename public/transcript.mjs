@@ -46,3 +46,26 @@ export function callNote(call, result) {
     return `${made} : génération non aboutie` + (data.message ? ` (${String(data.message).replace(/\.$/, '')}).` : '.');
   return '';
 }
+
+// What the application writes for the user when a button under a creation is pressed.
+const DIRECT_ACTION = /^(?:Upscale|Interpolation) de la sortie [0-9a-f]{8}-/;
+const written = message =>
+  typeof message.content === 'string'
+    ? message.content
+    : (message.content ?? [])
+        .filter(part => part.type === 'text')
+        .map(part => part.text)
+        .join('\n');
+
+/**
+ * Where the last message the user wrote sits, when it can be taken back to be edited or sent
+ * again; -1 when there is none, or when the application wrote it itself.
+ */
+export function lastExchange(messages) {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role !== 'user' || message.internal) continue;
+    return DIRECT_ACTION.test(written(message)) ? -1 : index;
+  }
+  return -1;
+}
