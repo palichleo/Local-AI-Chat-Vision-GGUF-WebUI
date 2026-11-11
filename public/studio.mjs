@@ -955,8 +955,9 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     $('studio-view').classList.toggle('is-open', Boolean(chosen));
     const body = $('studio-body');
     body.dataset.mode = mode ?? '';
-    if (!info) return body.replaceChildren(node('p', 'asset-empty', 'Chargement…'));
+    // Nothing under the banners: they keep the whole height, also while the tools load.
     if (!mode) return body.replaceChildren();
+    if (!info) return body.replaceChildren(node('p', 'asset-empty', 'Chargement…'));
     body.replaceChildren(form(), results());
     progress();
   }
