@@ -1470,6 +1470,8 @@ export async function createApplication({
         if (runtime.active) throw problem('La génération utilise le GPU. Attends sa fin.', 409);
         if (saving || savingGeneration || pickingFile)
           throw problem('Choix de fichier ou enregistrement en cours.', 409);
+        // The chat model takes the card: what the Studio left loaded in the generator leaves first.
+        await runtime.yieldGpu();
         await engine.start(config);
         return send(202, engine.status());
       }
@@ -1478,6 +1480,7 @@ export async function createApplication({
         if (runtime.active) throw problem('Annule la génération avec le bouton d’interruption.', 409);
         await engine.stop();
         // Stopped by hand: the image and video models kept between generations leave RAM and VRAM too.
+        await runtime.yieldGpu();
         await generation.unload().catch(error => console.error('Déchargement des modèles :', error.message));
         return send(200, status());
       }

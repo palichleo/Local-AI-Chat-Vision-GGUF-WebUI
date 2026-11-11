@@ -319,7 +319,8 @@ test('leaving a mode stops following the size of its frame', async () => {
   }
 });
 
-test('a Studio generation unloads the chat model and leaves it unloaded; a conversation gets it back', async () => {
+/** A runtime with one image workflow, a chat model and a generator that only note what they are asked. */
+function handover({ keepMs, fails = false } = {}) {
   const turn = 'a1111111-1111-4111-8111-111111111111';
   const workflow = {
     schemaVersion: 1,
@@ -334,65 +335,125 @@ test('a Studio generation unloads the chat model and leaves it unloaded; a conve
     parameters: { prompt: { policy: 'model', type: 'string' } },
     references: [],
   };
-  for (const [conversationId, expected] of [
-    [STUDIO_ID, ['llm stopped', 'generate', 'gpu released']],
-    [turn, ['llm stopped', 'generate', 'gpu released', 'llm started']],
-  ]) {
-    const events = [];
-    const engine = {
-      busy: false,
-      state: 'ready',
-      stop: async () => {
-        events.push('llm stopped');
-        engine.state = 'stopped';
-      },
-      start: async () => {
-        events.push('llm started');
-        engine.state = 'ready';
-      },
-    };
-    const runtime = new ToolRuntime({
-      engine,
-      catalog: {
-        list: async () => [workflow],
-        read: async () => workflow,
-        prepare: async () => ({
-          workflow,
-          job: {
-            schemaVersion: 1,
-            id: turn,
-            pipeline: 'krea2',
-            mediaType: 'image',
-            workflowId: 'image',
-            workflowDigest: workflow.digest,
-            parameters: { prompt: 'boat', seed: 1, width: 512, height: 512 },
-            components: {},
-            loras: [],
-            references: [],
-          },
-          outputNodes: [],
-        }),
-      },
-      gallery: { put: async record => record },
-      getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'native' }),
-      engineConfig: () => ({}),
-      clientFactory: () => ({
-        status: async () => ({ idle: true }),
-        preflight: async () => {},
-        run: async () => {
-          events.push('generate');
-          return { outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] };
+  const events = [];
+  const engine = {
+    busy: false,
+    state: 'ready',
+    stop: async () => {
+      events.push('llm stopped');
+      engine.state = 'stopped';
+    },
+    start: async () => {
+      events.push('llm started');
+      engine.state = 'ready';
+    },
+  };
+  const runtime = new ToolRuntime({
+    engine,
+    ...(keepMs ? { keepMs } : {}),
+    catalog: {
+      list: async () => [workflow],
+      read: async () => workflow,
+      prepare: async () => ({
+        workflow,
+        job: {
+          schemaVersion: 1,
+          id: turn,
+          pipeline: 'krea2',
+          mediaType: 'image',
+          workflowId: 'image',
+          workflowDigest: workflow.digest,
+          parameters: { prompt: 'boat', seed: 1, width: 512, height: 512 },
+          components: {},
+          loras: [],
+          references: [],
         },
-        free: async () => events.push('gpu released'),
+        outputNodes: [],
       }),
-    });
+    },
+    gallery: { put: async record => record },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'native' }),
+    engineConfig: () => ({}),
+    clientFactory: () => ({
+      status: async () => ({ idle: true }),
+      preflight: async () => {},
+      run: async () => {
+        events.push('generate');
+        if (fails) throw Error('Mémoire vidéo insuffisante.');
+        return { outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] };
+      },
+      free: async options => events.push(options?.keep ? 'sources removed' : 'gpu released'),
+    }),
+  });
+  /** One image asked from this conversation, run to its end. */
+  async function create(conversationId) {
     const request = await runtime.request(
       [{ id: 'call', type: 'function', function: { name: 'create_image', arguments: '{"prompt":"boat"}' } }],
       { conversationId, turnId: turn, messages: [] },
     );
     await runtime.execute({ requestId: request.requestId, permission: 'once' });
     await runtime.finished;
-    assert.equal(runtime.status().state, 'done', runtime.status().error);
-    assert.deepEqual(events, expected);
+    return runtime.status();
   }
+  return { runtime, events, create, turn };
+}
+
+test('a Studio generation unloads the chat model and leaves it unloaded; a conversation gets it back', async () => {
+  for (const studio of [true, false]) {
+    const { runtime, events, create, turn } = handover();
+    const status = await create(studio ? STUDIO_ID : turn);
+    assert.equal(status.state, 'done', status.error);
+    assert.deepEqual(
+      events,
+      studio
+        ? // The generator stays loaded for the next creation: only the copies of the sources go.
+          ['llm stopped', 'generate', 'sources removed']
+        : ['llm stopped', 'generate', 'gpu released', 'llm started'],
+    );
+    // The chat model is wanted (a message, a style): the card is given back first, once.
+    events.length = 0;
+    assert.equal(await runtime.yieldGpu(), studio);
+    assert.deepEqual(events, studio ? ['gpu released'] : []);
+    assert.equal(await runtime.yieldGpu(), false);
+    await runtime.close();
+  }
+});
+
+test('the generator a Studio creation left loaded gives the card back by itself after a while', async () => {
+  const { runtime, events, create } = handover({ keepMs: 40 });
+  await create(STUDIO_ID);
+  await create(STUDIO_ID);
+  // Two creations in a row: nothing was unloaded between them.
+  assert.deepEqual(events, ['llm stopped', 'generate', 'sources removed', 'llm stopped', 'generate', 'sources removed']);
+  events.length = 0;
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.deepEqual(events, ['gpu released']);
+  assert.equal(await runtime.yieldGpu(), false);
+  await runtime.close();
+});
+
+test('a failed Studio creation, a conversation or closing give the whole card back', async () => {
+  // A failure may have left the card full: nothing is kept after it.
+  const failed = handover({ fails: true });
+  const status = await failed.create(STUDIO_ID);
+  assert.equal(status.state, 'error');
+  assert.deepEqual(failed.events, ['llm stopped', 'generate', 'gpu released']);
+  assert.equal(await failed.runtime.yieldGpu(), false);
+  await failed.runtime.close();
+
+  // A creation asked in a conversation ends with the chat model back: what the Studio left
+  // loaded leaves before it, with the generator of that creation.
+  const mixed = handover();
+  await mixed.create(STUDIO_ID);
+  mixed.events.length = 0;
+  await mixed.create(mixed.turn);
+  assert.deepEqual(mixed.events, ['llm stopped', 'generate', 'gpu released', 'gpu released', 'llm started']);
+  await mixed.runtime.close();
+
+  // Closing the application does not leave the generator holding the card.
+  const closed = handover();
+  await closed.create(STUDIO_ID);
+  closed.events.length = 0;
+  await closed.runtime.close();
+  assert.deepEqual(closed.events, ['gpu released']);
 });
