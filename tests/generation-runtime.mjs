@@ -17,8 +17,9 @@ class Element {
     this.options = [];
   }
   querySelectorAll(selector) {
+    const tags = selector.split(',').map(tag => tag.trim());
     return this.children.flatMap(child => [
-      ...(child.tagName === selector ? [child] : []),
+      ...(tags.includes(child.tagName) ? [child] : []),
       ...(child.querySelectorAll?.(selector) || []),
     ]);
   }

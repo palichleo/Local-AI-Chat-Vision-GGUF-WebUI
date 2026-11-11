@@ -1,10 +1,11 @@
 /**
  * Buttons under every generated output, in the Output panel and in the chat:
- * Détails for all; Upscale for images and videos; Interpoler and Prolonger for videos.
+ * Détails for all; Upscale for images and videos; Interpoler and Prolonger for videos; nothing
+ * else for sounds.
  * A button is disabled, with the reason, when no active workflow can do it.
  */
 const ACTIONS = [
-  { id: 'details', label: 'Détails', icon: 'info', media: ['image', 'video'] },
+  { id: 'details', label: 'Détails', icon: 'info', media: ['image', 'video', 'audio'] },
   {
     id: 'upscale',
     verb: 'upscale',
@@ -63,7 +64,7 @@ export function outputActions({ api, node, onDetails, onAction }) {
     return svg;
   }
   return function actions(record, index) {
-    const media = record.mediaType === 'video' ? 'video' : 'image',
+    const media = ['video', 'audio'].includes(record.mediaType) ? record.mediaType : 'image',
       row = node('div', 'output-actions');
     row.setAttribute('role', 'group');
     row.setAttribute('aria-label', 'Actions sur ce résultat');

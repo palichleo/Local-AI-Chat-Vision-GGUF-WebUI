@@ -45,9 +45,9 @@
   },
   "create_audio": {
     "output": "audio",
-    "summary": "Create music, an ambience or sound effects from a description.",
-    "guidance": "Use only when the user asks for sound or music to be produced.",
-    "prompt": "Description of the sound or music: genre, instruments, mood, tempo, duration.",
+    "summary": "Create music (a song with sung lyrics, or an instrumental piece) or sound effects from a description.",
+    "guidance": "Use only when the user asks for music or a sound to be produced; writing lyrics alone does not mean generating. Every sound is shown to the user, who can edit it before it runs. You cannot hear the result: to judge it, ask the user. For a song, write the lyrics in full yourself unless the user gave them, and pass them in lyrics.",
+    "prompt": "The sound, written for an audio model that knows nothing of this conversation, in English. For music: a comma-separated list of tags, then one sentence: genre and era, mood, tempo in BPM, key if it matters, the instruments, the voice (female or male, its tone, sung or rapped) or \"instrumental\", and the production (lo-fi, live room, polished studio). For a sound effect: one or two sentences saying what makes the sound, the material, the action and its rhythm, the place and its acoustics (small room, open field, street), how near it is, and what comes before or after. Only concrete, audible things: a word like \"epic\" or \"beautiful\" alone says little. Never put the lyrics here.",
     "roles": {}
   },
   "upscale": {

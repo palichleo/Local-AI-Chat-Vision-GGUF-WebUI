@@ -3271,6 +3271,10 @@ dialog::backdrop {
   max-height: 73dvh;
   object-fit: contain;
 }
+#original-video.is-audio {
+  width: calc(100% - 32px);
+  height: 54px;
+}
 .media-information {
   min-width: 0;
   max-height: 73dvh;

@@ -1,0 +1,113 @@
+{
+  "family": "acestep15",
+  "label": "ACE-Step 1.5",
+  "mediaType": "audio",
+  "tasks": ["create_audio"],
+  "engine": "internal",
+  "chooseFor": "music: a song with sung lyrics, or an instrumental piece",
+  "requires": ["torch", "diffusers", "transformers", "accelerate", "safetensors"],
+  "components": {
+    "musicModel": {
+      "label": "Modèle de musique (dossier diffusers)",
+      "folder": "audio",
+      "required": true,
+      "format": "pipeline",
+      "pipelineClass": "AceStepPipeline",
+      "picker": "directory",
+      "help": "Dossier complet téléchargé depuis Hugging Face (ACE-Step/acestep-v15-xl-sft-diffusers), avec son model_index.json."
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "maxLength": 4000,
+      "nonempty": true
+    },
+    "lyrics": {
+      "type": "string",
+      "maxLength": 8000
+    },
+    "seconds": {
+      "type": "number",
+      "min": 10,
+      "max": 600
+    },
+    "language": {
+      "type": "string",
+      "choices": ["en", "fr", "es", "de", "it", "pt", "nl", "ru", "pl", "zh", "ja", "ko", "ar", "hi", "unknown"]
+    },
+    "seed": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "steps": {
+      "type": "integer",
+      "min": 1,
+      "max": 200
+    },
+    "guidance_scale": {
+      "type": "number",
+      "min": 1,
+      "max": 15
+    },
+    "shift": {
+      "type": "number",
+      "choices": [1, 2, 3]
+    }
+  },
+  "requiredParameters": ["prompt", "seed", "seconds", "steps", "guidance_scale", "shift"],
+  "roles": {},
+  "template": {
+    "name": "Musique",
+    "description": "Créer une musique : une chanson avec paroles chantées, ou un morceau instrumental.",
+    "components": {
+      "musicModel": {
+        "policy": "fixed",
+        "asset": "select-local-music-model"
+      }
+    },
+    "parameters": {
+      "prompt": {
+        "policy": "model",
+        "type": "string",
+        "maxLength": 4000
+      },
+      "lyrics": {
+        "policy": "model",
+        "type": "string",
+        "default": ""
+      },
+      "seconds": {
+        "policy": "model",
+        "type": "number",
+        "min": 10,
+        "max": 600,
+        "default": 60
+      },
+      "language": {
+        "policy": "model",
+        "type": "string",
+        "default": "en"
+      },
+      "seed": {
+        "policy": "random",
+        "type": "integer"
+      },
+      "steps": {
+        "policy": "fixed",
+        "value": 50
+      },
+      "guidance_scale": {
+        "policy": "fixed",
+        "value": 7
+      },
+      "shift": {
+        "policy": "fixed",
+        "value": 3
+      }
+    },
+    "loras": [],
+    "references": []
+  }
+}

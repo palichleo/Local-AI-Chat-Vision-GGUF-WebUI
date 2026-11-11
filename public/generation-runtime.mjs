@@ -22,7 +22,7 @@ export function setupGenerationRuntime({
   let urls = [],
     galleryVersion = 0;
   function reset() {
-    for (const video of $('gallery-list').querySelectorAll('video')) video.pause();
+    for (const media of $('gallery-list').querySelectorAll('video, audio')) media.pause();
     galleryVersion++;
     for (const url of urls) URL.revokeObjectURL(url);
     urls = [];
@@ -52,8 +52,15 @@ export function setupGenerationRuntime({
           if (output.analysisDataUrl) video.poster = output.analysisDataUrl;
           card.append(video);
         }
+        if (record.mediaType === 'audio' && output.originalUrl) {
+          const audio = node('audio');
+          audio.controls = true;
+          audio.preload = 'metadata';
+          audio.src = output.originalUrl;
+          card.append(audio);
+        }
         // The user sees the original; the model's compressed copy only exists in this session.
-        const still = record.mediaType !== 'video' && (output.originalUrl || output.analysisDataUrl);
+        const still = !['video', 'audio'].includes(record.mediaType) && (output.originalUrl || output.analysisDataUrl);
         if (still) {
           const img = node('img');
           img.loading = 'lazy';
@@ -113,21 +120,28 @@ export function setupGenerationRuntime({
    * user does anything in the window (a click, a key): the countdown fills its button.
    */
   async function permission(request, signal) {
-    const video = request.mediaType === 'video';
-    if (request.autoAllow && !video) return undefined;
+    const video = request.mediaType === 'video',
+      // A sound is confirmed like a video (its lyrics and length are worth a look), without the countdown.
+      confirmed = video || request.mediaType === 'audio';
+    if (request.autoAllow && !confirmed) return undefined;
     const title = () =>
       ($('tool-title').textContent = video
         ? request.plan?.stage === 'draft'
           ? 'Brouillon vidéo · Confirmer ?'
           : 'Vidéo finale · Confirmer ?'
-        : 'Autoriser la génération ?');
+        : confirmed
+          ? 'Son · Confirmer ?'
+          : 'Autoriser la génération ?');
     const planned = Boolean(request.plan);
     $('tool-arguments').hidden = planned;
     $('tool-plan').hidden = !planned;
-    $('tool-always').hidden = video;
-    $('tool-deny').textContent = video ? 'Annuler' : 'Refuser';
-    $('tool-once').textContent = video ? 'Confirmer et générer' : 'Cette fois';
-    $('tool-once').title = video && confirmDelay > 0 ? `Se lance seul après ${Math.round(confirmDelay / 1000)} s, sauf si vous touchez à la fenêtre` : '';
+    $('tool-always').hidden = confirmed;
+    $('tool-deny').textContent = confirmed ? 'Annuler' : 'Refuser';
+    $('tool-once').textContent = confirmed ? 'Confirmer et générer' : 'Cette fois';
+    $('tool-once').title =
+      video && confirmDelay > 0
+        ? `Se lance seul après ${Math.round(confirmDelay / 1000)} s, sauf si vous touchez à la fenêtre`
+        : '';
     let form = null,
       saving = false;
     function render() {
@@ -135,7 +149,9 @@ export function setupGenerationRuntime({
       $('tool-name').textContent = request.workflowName;
       $('tool-arguments').textContent =
         JSON.stringify(request.args, null, 2) + (request.notes?.length ? '\n\n' + request.notes.join('\n') : '');
-      form = planned ? renderProposal($('tool-plan'), request, { node, onStage: (stage, edits) => void revise({ ...edits, stage }) }) : null;
+      form = planned
+        ? renderProposal($('tool-plan'), request, { node, onStage: (stage, edits) => void revise({ ...edits, stage }) })
+        : null;
     }
     function busy(value) {
       saving = value;
@@ -279,12 +295,15 @@ export function setupGenerationRuntime({
         for (const [index, output] of record.outputs.entries()) {
           try {
             originalsSignal.throwIfAborted();
-            const blob = record.mediaType === 'video' ? null : await original(record, index, originalsSignal);
+            const played = ['video', 'audio'].includes(record.mediaType),
+              blob = played ? null : await original(record, index, originalsSignal);
             try {
               onImage({ record, index, blob });
             } catch (error) {
               notice('Affichage de l’original indisponible : ' + error.message);
             }
+            // A sound reaches the model as its description only: it cannot hear it.
+            if (record.mediaType === 'audio') continue;
             if (record.mediaType === 'video') {
               if (!output.originalUrl) throw Error('Lien de lecture vidéo indisponible.');
               const video = await prepareStoryboard(output.originalUrl, {
@@ -316,7 +335,7 @@ export function setupGenerationRuntime({
         await api('tools/execute', {
           requestId: request.requestId,
           permission: decision,
-          ...(request.mediaType === 'video' ? { approvalToken: request.approvalToken } : {}),
+          ...(['video', 'audio'].includes(request.mediaType) ? { approvalToken: request.approvalToken } : {}),
         })
       ).json();
       if (signal.aborted) {
@@ -443,6 +462,8 @@ export function setupGenerationRuntime({
                 'height',
                 'frames',
                 'fps',
+                'seconds',
+                'language',
                 'negative_prompt',
                 'references',
                 'reference_image',
@@ -474,13 +495,15 @@ export function setupGenerationRuntime({
           outputs: record.outputs.map(o => o.source),
           ...(error ? { warning: error } : {}),
           note:
-            record.mediaType !== 'video'
-              ? 'Image générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil. Si l’utilisateur a demandé une vérification, consulte la copie compressée avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
-              : !review
-                ? 'Vidéo générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque vidéo demande la confirmation de l’utilisateur. Si l’utilisateur demande une vérification, consulte sa planche d’images avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
-                : images.length
-                ? 'Les images jointes sont les copies réduites des sorties identifiées par analysis_outputs (indices à partir de zéro). Les sorties sans copie ne sont pas vérifiables visuellement. Les entrées optionnelles absentes conservent leurs valeurs dans le workflow ; elles ne sont pas des références fournies par l’utilisateur. Les originaux sont dans la galerie.'
-                : 'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.',
+            record.mediaType === 'audio'
+              ? 'Son généré et proposé à l’écoute de l’utilisateur. Tu ne peux pas l’entendre : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque son demande la confirmation de l’utilisateur. Sinon termine sans texte.'
+              : record.mediaType !== 'video'
+                ? 'Image générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil. Si l’utilisateur a demandé une vérification, consulte la copie compressée avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
+                : !review
+                  ? 'Vidéo générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque vidéo demande la confirmation de l’utilisateur. Si l’utilisateur demande une vérification, consulte sa planche d’images avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
+                  : images.length
+                    ? 'Les images jointes sont les copies réduites des sorties identifiées par analysis_outputs (indices à partir de zéro). Les sorties sans copie ne sont pas vérifiables visuellement. Les entrées optionnelles absentes conservent leurs valeurs dans le workflow ; elles ne sont pas des références fournies par l’utilisateur. Les originaux sont dans la galerie.'
+                    : 'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.',
         }),
         images,
         record,

@@ -606,3 +606,87 @@ test('a source the worker refuses fails before the chat model is unloaded, and i
   assert.equal(runtime.status().state, 'error');
   assert.equal(runtime.active, false);
 });
+
+test('a sound is always confirmed with its token, runs as audio and is saved as audio', async () => {
+  const workflow = {
+    schemaVersion: 1,
+    id: 'music',
+    name: 'Musique',
+    description: '',
+    digest: 'c'.repeat(64),
+    mediaType: 'audio',
+    pipeline: 'acestep15',
+    enabled: true,
+    ready: true,
+    parameters: {
+      prompt: { policy: 'model', type: 'string' },
+      lyrics: { policy: 'model', type: 'string', default: '' },
+      seconds: { policy: 'model', type: 'number', min: 10, max: 600, default: 60 },
+    },
+    references: [],
+  };
+  let prepared, ran, saved;
+  const catalog = {
+    list: async () => [workflow],
+    read: async () => workflow,
+    prepare: async (_workflow, args) => {
+      prepared = args;
+      return {
+        workflow,
+        job: {
+          schemaVersion: 1,
+          id,
+          pipeline: 'acestep15',
+          mediaType: 'audio',
+          workflowId: 'music',
+          workflowDigest: workflow.digest,
+          parameters: { prompt: args.prompt, lyrics: args.lyrics, seconds: args.seconds, seed: 5 },
+          components: {},
+          loras: [],
+          references: [],
+        },
+        outputNodes: [],
+      };
+    },
+  };
+  const runtime = new ToolRuntime({
+    catalog,
+    engine: { state: 'ready', stop: async () => {}, start: async () => {} },
+    gallery: {
+      put: async record => {
+        saved = record;
+        return record;
+      },
+    },
+    // « Toujours autoriser » is for images: it never starts a sound by itself.
+    getConfig: () => ({ enabled: true, autoAllow: true, maxIterations: 5, baseUrl: 'native' }),
+    engineConfig: () => ({}),
+    clientFactory: () => ({
+      status: async () => ({ idle: true }),
+      preflight: async () => {},
+      run: async (job, options) => {
+        ran = { job, options };
+        return { outputs: [{ filename: 'song.wav', subfolder: '', type: 'output', seconds: 30 }] };
+      },
+      free: async () => {},
+    }),
+  });
+  const args = { prompt: 'synth-pop, 110 BPM, female voice', lyrics: '[Chorus]\nLa nuit', seconds: 30 };
+  const request = await runtime.request(
+    [{ id: 'song', type: 'function', function: { name: 'create_audio', arguments: JSON.stringify(args) } }],
+    { conversationId: id, turnId: id, messages: [{ role: 'user', content: 'une chanson' }] },
+  );
+  assert.equal(request.autoAllow, false);
+  assert.equal(request.mediaType, 'audio');
+  assert.equal(prepared.lyrics, '[Chorus]\nLa nuit');
+  assert.equal(prepared.seconds, 30);
+  await assert.rejects(runtime.execute({ requestId: request.requestId, permission: 'once' }));
+  assert.equal(ran, undefined);
+  await runtime.execute({ requestId: request.requestId, permission: 'once', approvalToken: request.approvalToken });
+  await runtime.finished;
+  assert.equal(runtime.status().state, 'done', runtime.status().error);
+  assert.equal(ran.job.mediaType, 'audio');
+  assert.equal(ran.options?.mediaType, 'audio');
+  assert.equal(saved.mediaType, 'audio');
+  assert.equal(saved.outputs[0].filename ?? saved.outputs[0].source?.filename, 'song.wav');
+});

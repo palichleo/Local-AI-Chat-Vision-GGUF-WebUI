@@ -31,13 +31,21 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
     if (request.mediaType === 'video')
       label.textContent =
         'En attente de confirmation · ' + (request.plan?.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale');
+    else if (request.mediaType === 'audio') {
+      label.textContent = 'En attente de confirmation · Son';
+      figure.classList.add('is-audio');
+    }
     progress.setAttribute('role', 'progressbar');
     progress.setAttribute('aria-label', label.textContent);
     progress.append(node('span'));
     frame.setAttribute('aria-busy', 'true');
     frame.setAttribute(
       'aria-label',
-      request.mediaType === 'video' ? 'Génération de vidéo' : 'Génération d’image en cours',
+      request.mediaType === 'video'
+        ? 'Génération de vidéo'
+        : request.mediaType === 'audio'
+          ? 'Génération de son'
+          : 'Génération d’image en cours',
     );
     caption.append(progress, label);
     figure.append(frame, caption);
@@ -109,9 +117,15 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
         }
       }
       const named = typeof value === 'string' && !value.trim().startsWith('{');
-      const text = named ? value : request.mediaType === 'video' ? 'Génération de la vidéo…' : 'Génération de l’image…';
+      const text = named
+        ? value
+        : request.mediaType === 'video'
+          ? 'Génération de la vidéo…'
+          : request.mediaType === 'audio'
+            ? 'Génération du son…'
+            : 'Génération de l’image…';
       // A named stage (loading, step 3/11, decoding…) is worth showing; the generic line is not.
-      caption(text, named && !/^Génération (de la vidéo|de l’image|en cours)…$/.test(text));
+      caption(text, named && !/^Génération (de la vidéo|de l’image|du son|en cours)…$/.test(text));
     }
     function release(slot) {
       slot.controller?.abort();
@@ -186,6 +200,24 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       if (target !== first) tiles.push(target);
       unwatch(target.figure);
       if (record.mediaType === 'video') target.figure.classList.add('is-video');
+      if (record.mediaType === 'audio') {
+        // A sound: its player, and the actions on the output beside it.
+        const output = record.outputs?.[index],
+          audio = node('audio');
+        audio.controls = true;
+        audio.preload = 'metadata';
+        audio.setAttribute('aria-label', 'Son généré · ' + record.workflowName);
+        audio.src = output?.originalUrl || '';
+        const slot = { index, button: audio, img: audio, isVideo: true, tile: target };
+        slots.set(index, slot);
+        target.figure.classList.add('is-audio');
+        target.figure.append(buttons(record, index));
+        frame.replaceChildren(audio);
+        frame.classList.add('has-image');
+        frame.setAttribute('aria-busy', 'false');
+        onResize();
+        return;
+      }
       if (record.mediaType === 'video') {
         const output = record.outputs?.[index],
           wrapper = node('div', 'video-original'),
@@ -285,7 +317,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       else if (record) {
         const count = record.parameters?.reference_count;
         caption(
-          `${record.mediaType === 'video' ? (record.parameters.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale') : 'Image originale'} · ${record.workflowName}${Number.isInteger(count) ? ' · ' + count + ' référence(s) transmise(s)' : ''}`,
+          `${record.mediaType === 'video' ? (record.parameters.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale') : record.mediaType === 'audio' ? 'Son' + (record.parameters.seconds ? ' · ' + Math.round(record.parameters.seconds) + ' s' : '') : 'Image originale'} · ${record.workflowName}${Number.isInteger(count) ? ' · ' + count + ' référence(s) transmise(s)' : ''}`,
         );
       }
     }

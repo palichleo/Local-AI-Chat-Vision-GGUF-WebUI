@@ -268,6 +268,7 @@ export function setupAssets({
     $('original-video').onloadedmetadata = null;
     $('original-video').onerror = null;
     $('original-video').removeAttribute('poster');
+    $('original-video').classList.remove('is-audio');
     $('original-video').pause();
     $('original-video').removeAttribute('src');
     $('original-video').load();
@@ -343,10 +344,10 @@ export function setupAssets({
     if (record.parameters.expandPrompt !== undefined) row('Prompt enhance', expanded ? 'Activé' : 'Désactivé');
     row('Date', new Date(record.createdAt).toLocaleString('fr-FR'));
     row('Seed', record.parameters.seed);
-    const resolution = row(
-      'Résolution originale',
-      output.width && output.height ? `${output.width} × ${output.height}` : null,
-    );
+    const resolution =
+      record.mediaType === 'audio'
+        ? null
+        : row('Résolution originale', output.width && output.height ? `${output.width} × ${output.height}` : null);
     row('Fichier', output.source.filename);
     row('Identifiant', record.id);
     const other = Object.fromEntries(
@@ -358,6 +359,26 @@ export function setupAssets({
     if (record.analysis?.text) row('Analyse du modèle', record.analysis.text);
     $('media-download').disabled = true;
     $('media-error').textContent = 'Chargement de l’original…';
+    if (record.mediaType === 'audio') {
+      // A sound plays in the same player, as a bar of controls without a picture.
+      const player = $('original-video');
+      player.classList.add('is-audio');
+      player.hidden = false;
+      player.preload = 'metadata';
+      player.src = output.originalUrl || '';
+      player.onloadedmetadata = () => {
+        if (version === viewVersion) {
+          row('Durée', duration(player.duration));
+          $('media-error').textContent = '';
+        }
+      };
+      player.onerror = () => {
+        if (version === viewVersion) $('media-error').textContent = 'Son indisponible ou format non pris en charge.';
+      };
+      download(output.originalUrl, output.source.filename);
+      $('media-download').disabled = false;
+      return;
+    }
     if (record.mediaType === 'video') {
       const video = $('original-video');
       video.hidden = false;

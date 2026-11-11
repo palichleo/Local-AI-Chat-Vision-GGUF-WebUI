@@ -1,0 +1,47 @@
+{
+  "family": "moss_sfx",
+  "label": "MOSS-SoundEffect v2",
+  "mediaType": "audio",
+  "tasks": ["create_audio"],
+  "engine": "internal",
+  "chooseFor": "sound effects, noises and ambiences, without music or singing",
+  "requires": ["torch", "transformers", "safetensors"],
+  "components": {
+    "soundModel": {
+      "label": "Modèle de bruitages (dossier Hugging Face)",
+      "folder": "audio",
+      "required": true,
+      "format": "pipeline",
+      "pipelineClass": "MossSoundEffectPipeline",
+      "picker": "directory",
+      "help": "Dossier complet téléchargé depuis Hugging Face (OpenMOSS-Team/MOSS-SoundEffect-v2.0), avec son model_index.json."
+    }
+  },
+  "parameters": {
+    "prompt": { "type": "string", "maxLength": 4000, "nonempty": true },
+    "seconds": { "type": "number", "min": 1, "max": 30 },
+    "seed": { "type": "integer", "min": 0, "max": 9007199254740991 },
+    "steps": { "type": "integer", "min": 1, "max": 200 },
+    "guidance_scale": { "type": "number", "min": 1, "max": 15 },
+    "shift": { "type": "number", "min": 1, "max": 10 }
+  },
+  "requiredParameters": ["prompt", "seed", "seconds", "steps", "guidance_scale", "shift"],
+  "roles": {},
+  "template": {
+    "name": "Bruitages",
+    "description": "Créer un bruitage ou une ambiance sonore, jusqu’à 30 secondes.",
+    "components": {
+      "soundModel": { "policy": "fixed", "asset": "select-local-sound-model" }
+    },
+    "parameters": {
+      "prompt": { "policy": "model", "type": "string", "maxLength": 4000 },
+      "seconds": { "policy": "model", "type": "number", "min": 1, "max": 30, "default": 10 },
+      "seed": { "policy": "random", "type": "integer" },
+      "steps": { "policy": "fixed", "value": 100 },
+      "guidance_scale": { "policy": "fixed", "value": 4 },
+      "shift": { "policy": "fixed", "value": 5 }
+    },
+    "loras": [],
+    "references": []
+  }
+}

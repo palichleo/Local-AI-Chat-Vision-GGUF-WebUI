@@ -248,3 +248,66 @@ test('with a conversation context, sources list only what exists and never accep
   const legacy = (await tools.definitions()).find(tool => tool.function.name === 'create_image').function;
   assert.ok(legacy.parameters.properties.source.properties.output, 'without context the generic schema is kept');
 });
+
+test('the shipped music workflow gives create_audio its lyrics, length and language, and routes them', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const music = {
+    ...JSON.parse(
+      await readFile(new URL('../runner/workflows/8a2e5baf-0c02-4077-b36c-482b4e54bb13.json', import.meta.url), 'utf8'),
+    ),
+    ready: true,
+  };
+  const catalog = catalogOf([...workflows, music]);
+  const tool = (await catalog.definitions()).find(item => item.function.name === 'create_audio').function;
+  const { properties, required } = tool.parameters;
+  assert.deepEqual(Object.keys(properties).sort(), ['language', 'lyrics', 'prompt', 'seconds', 'seed']);
+  assert.deepEqual(required, ['prompt']);
+  assert.match(properties.prompt.description, /BPM/);
+  assert.match(properties.lyrics.description, /\[Chorus\]/);
+  assert.equal(properties.seconds.maximum, 600);
+  assert.ok(properties.language.enum.includes('fr'));
+  assert.doesNotMatch(tool.description, /intention/);
+  const routed = await catalog.route(
+    'create_audio',
+    { prompt: 'synth-pop, 110 BPM', lyrics: '[Verse]\nLa nuit', seconds: 30, language: 'fr' },
+    media,
+  );
+  assert.equal(routed.workflow.id, music.id);
+  assert.deepEqual(
+    { lyrics: routed.args.lyrics, seconds: routed.args.seconds, language: routed.args.language },
+    { lyrics: '[Verse]\nLa nuit', seconds: 30, language: 'fr' },
+  );
+});
+
+test('music and sound effects: the model names the workflow, and each keeps its own limits', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const shipped = async id => ({
+    ...JSON.parse(await readFile(new URL(`../runner/workflows/${id}.json`, import.meta.url), 'utf8')),
+    ready: true,
+  });
+  const music = await shipped('8a2e5baf-0c02-4077-b36c-482b4e54bb13'),
+    effects = await shipped('84390db5-e4b9-413c-9352-bbac225fe79c');
+  const catalog = catalogOf([music, effects]);
+  const tool = (await catalog.definitions()).find(item => item.function.name === 'create_audio').function;
+  const { properties, required } = tool.parameters;
+  assert.deepEqual(required.sort(), ['prompt', 'workflow']);
+  assert.match(properties.workflow.description, /sound effects/);
+  assert.match(properties.workflow.description, /music/);
+  assert.equal(properties.seconds.minimum, 1);
+  assert.equal(properties.seconds.maximum, 600);
+  assert.match(properties.seconds.description, /30 at most/);
+  assert.match(properties.lyrics.description, /Only for: 8a2e5baf/);
+  const routed = await catalog.route(
+    'create_audio',
+    { workflow: effects.id, prompt: 'Rain on a tin roof', seconds: 60, lyrics: '' },
+    media,
+  );
+  assert.equal(routed.workflow.id, effects.id);
+  assert.equal(routed.args.seconds, 30);
+  assert.equal(routed.args.lyrics, undefined);
+  assert.ok(routed.notes.some(note => /seconds : 60 → 30/.test(note)));
+  assert.ok(routed.notes.some(note => /lyrics ignoré/.test(note)));
+  const song = await catalog.route('create_audio', { workflow: music.id, prompt: 'synth-pop', seconds: 200 }, media);
+  assert.equal(song.args.seconds, 200);
+  assert.deepEqual(song.notes, []);
+});

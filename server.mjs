@@ -475,7 +475,7 @@ export async function createApplication({
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
         const { bytes, mime } = await history.preview(previewMatch[1], async runId => {
           const record = await gallery.get(previewMatch[1], runId, { includeImages: false });
-          if (record.provider !== 'native' || record.mediaType === 'video') return null;
+          if (record.provider !== 'native' || ['video', 'audio'].includes(record.mediaType)) return null;
           const { handle, mime } = await generatedMedia(outputDir, record.outputs[0].source);
           try {
             return { bytes: await handle.readFile(), mime };

@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "id": "8a2e5baf-0c02-4077-b36c-482b4e54bb13",
+  "enabled": true,
+  "pipeline": "acestep15",
+  "mediaType": "audio",
+  "name": "Musique (ACE-Step 1.5 XL)",
+  "description": "Composer une musique avec ACE-Step 1.5 XL : chanson aux paroles chantées ou morceau instrumental, de 10 secondes à 10 minutes, en stéréo 48 kHz.",
+  "components": {
+    "musicModel": {
+      "policy": "fixed",
+      "asset": "149541bd-7fda-417b-9beb-44932d9a2d63",
+      "file": "acestep-v15-xl-sft-diffusers"
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "policy": "model",
+      "type": "string",
+      "maxLength": 4000
+    },
+    "lyrics": {
+      "policy": "model",
+      "type": "string",
+      "default": "",
+      "description": "The words to sing, in the language set in language, one line per sung line, with section tags on their own line: [Intro], [Verse], [Pre-Chorus], [Chorus], [Bridge], [Outro]. Write them in full when the user wants a song (their own words if they gave any). Empty for an instrumental piece. Never put the style here."
+    },
+    "seconds": {
+      "policy": "model",
+      "type": "number",
+      "min": 10,
+      "max": 600,
+      "default": 60,
+      "description": "Length in seconds: the length the user asked for. About 60 to 90 for a short song with a verse and a chorus, 150 to 240 for a full song; 30 when the user wants a short loop or jingle."
+    },
+    "language": {
+      "policy": "model",
+      "type": "string",
+      "choices": [
+        "en",
+        "fr",
+        "es",
+        "de",
+        "it",
+        "pt",
+        "nl",
+        "ru",
+        "pl",
+        "zh",
+        "ja",
+        "ko",
+        "ar",
+        "hi",
+        "unknown"
+      ],
+      "default": "en",
+      "description": "Language the lyrics are sung in (fr for French). Ignored for an instrumental piece."
+    },
+    "seed": {
+      "policy": "random",
+      "type": "integer"
+    },
+    "steps": {
+      "policy": "fixed",
+      "value": 50
+    },
+    "guidance_scale": {
+      "policy": "fixed",
+      "value": 7
+    },
+    "shift": {
+      "policy": "fixed",
+      "value": 3
+    }
+  },
+  "loras": [],
+  "references": []
+}

@@ -221,3 +221,44 @@ test('computed values never masquerade as numbers', () => {
   );
   assert.doesNotMatch(text(box), /size,0 ×|Durée|rate,0|random,0/);
 });
+
+test('a sound proposal shows its lyrics, length and language in view, and edits them as text and numbers', () => {
+  const box = node('section');
+  const form = renderProposal(
+    box,
+    {
+      mediaType: 'audio',
+      workflowName: 'Musique (ACE-Step 1.5 XL)',
+      plan: {
+        prompt: 'synth-pop, 110 BPM',
+        parameters: { prompt: 'synth-pop, 110 BPM', lyrics: '[Verse]\nLa nuit', seconds: 60, language: 'fr', seed: 3 },
+        references: [],
+        editable: {
+          prompt: true,
+          stages: [],
+          references: [],
+          parameters: [
+            { key: 'lyrics', value: '[Verse]\nLa nuit', type: 'string', maxLength: 20 },
+            { key: 'seconds', value: 60, type: 'number', min: 10, max: 600 },
+            { key: 'language', value: 'fr', type: 'string', choices: ['en', 'fr'] },
+            { key: 'seed', value: 3, type: 'integer', min: 0, max: 9007199254740991 },
+          ],
+        },
+      },
+    },
+    { node },
+  );
+  assert.match(text(box), /Proposition de son/);
+  assert.equal(labelled(box, 'Paroles').tag, 'textarea');
+  assert.match(text(box), /Vide pour un morceau instrumental/);
+  assert.equal(labelled(box, 'Durée (s)').value, '60');
+  assert.equal(labelled(box, 'Langue').value, 'fr');
+  assert.ok(!all(box).some(item => item.className === 'proposal-advanced'), 'nothing left for the advanced settings');
+  assert.deepEqual(form.edits(), {});
+  labelled(box, 'Paroles').value = '';
+  labelled(box, 'Durée (s)').value = '30';
+  labelled(box, 'Langue').value = 'en';
+  assert.deepEqual(form.edits(), { lyrics: '', seconds: 30, language: 'en' });
+  labelled(box, 'Paroles').value = 'x'.repeat(21);
+  assert.throws(() => form.edits(), /Paroles : 20 caractères au plus/);
+});

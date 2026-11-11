@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "84390db5-e4b9-413c-9352-bbac225fe79c",
+  "enabled": true,
+  "pipeline": "moss_sfx",
+  "mediaType": "audio",
+  "name": "Bruitages (MOSS-SoundEffect v2)",
+  "description": "Créer un bruitage ou une ambiance avec MOSS-SoundEffect v2 : de 1 à 30 secondes, mono 48 kHz, sans musique ni voix chantée.",
+  "components": {
+    "soundModel": {
+      "policy": "fixed",
+      "asset": "44ad62ff-a9b1-4d72-b4d3-ddc0a029e751",
+      "file": "MOSS-SoundEffect-v2.0"
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "policy": "model",
+      "type": "string",
+      "maxLength": 4000
+    },
+    "seconds": {
+      "policy": "model",
+      "type": "number",
+      "min": 1,
+      "max": 30,
+      "default": 10,
+      "description": "Length in seconds: the length the user asked for, 30 at most. About 3 for a single hit or a short effect, 10 for an action, 20 to 30 for an ambience."
+    },
+    "seed": {
+      "policy": "random",
+      "type": "integer"
+    },
+    "steps": {
+      "policy": "fixed",
+      "value": 100
+    },
+    "guidance_scale": {
+      "policy": "fixed",
+      "value": 4
+    },
+    "shift": {
+      "policy": "fixed",
+      "value": 5
+    }
+  },
+  "loras": [],
+  "references": []
+}

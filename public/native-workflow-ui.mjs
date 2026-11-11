@@ -487,7 +487,7 @@ export function setupNativeWorkflows(options) {
   function assetPicker(role, id, value) {
     const spec = familyOf(draft.pipeline)?.components[role] || {},
       container = node('div', 'native-asset-picker'),
-      folder = spec.format === 'tokenizer',
+      folder = ['tokenizer', 'pipeline'].includes(spec.format),
       compatibleAssets = () =>
         assets.filter(
           asset =>

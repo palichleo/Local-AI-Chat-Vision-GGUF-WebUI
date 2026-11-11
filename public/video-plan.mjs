@@ -25,10 +25,17 @@ const LABELS = {
   mode: 'Mode',
   tile: 'Tuile',
   expandPrompt: 'Prompt enrichi',
+  seconds: 'Durée (s)',
+  lyrics: 'Paroles',
+  language: 'Langue',
+  guidance_scale: 'Guidance',
+  shift: 'Décalage',
 };
 const STAGES = { draft: 'Brouillon', final: 'Finale' };
 // Shown in the main area; every other editable parameter goes to « Paramètres avancés ».
 const MAIN = new Set(['frames', 'width', 'height', 'seed']);
+// Sound settings that matter to every take: shown in the main area too.
+const SOUND_MAIN = ['seconds', 'language'];
 const ADVANCED_FIRST = ['frames', 'fps', 'audio', 'width', 'height'];
 const HELP = {
   msr_frames:
@@ -54,6 +61,7 @@ export function renderProposal(container, request, { node, onStage } = {}) {
     editable = plan.editable || {},
     parameters = plan.parameters || {},
     video = request.mediaType === 'video',
+    audio = request.mediaType === 'audio',
     items = new Map((editable.parameters || []).map(item => [item.key, item])),
     controls = new Map(),
     continues = plan.references?.some(ref => ref.role === 'source_video'),
@@ -80,8 +88,40 @@ export function renderProposal(container, request, { node, onStage } = {}) {
     return node('output', 'proposal-fixed', text);
   }
 
+  // The control of one generic parameter: a checkbox, a list, a text or a number.
+  function control(item) {
+    let input;
+    if (item.type === 'boolean') {
+      input = node('input');
+      input.type = 'checkbox';
+      input.checked = item.value === true;
+    } else if (item.choices) {
+      input = select(
+        item.choices.map(choice => [choice, String(choice)]),
+        item.value,
+      );
+      input.disabled = item.choices.length < 2;
+    } else if (item.type === 'string') {
+      input = node('textarea', 'proposal-prompt');
+      input.rows = 4;
+      input.value = String(item.value ?? '');
+    } else {
+      input = node('input');
+      input.type = 'number';
+      input.value = String(item.value);
+      if (item.min !== undefined) input.min = String(item.min);
+      if (item.max !== undefined) input.max = String(item.max);
+      input.step = item.multipleOf ? String(item.multipleOf) : item.type === 'integer' ? '1' : 'any';
+    }
+    return input;
+  }
+
   container.append(
-    node('p', 'video-intention', plan.intention || (video ? 'Proposition vidéo' : 'Génération d’image')),
+    node(
+      'p',
+      'video-intention',
+      plan.intention || (video ? 'Proposition vidéo' : audio ? 'Proposition de son' : 'Génération d’image'),
+    ),
   );
 
   // Prompt: editable when the model owns it.
@@ -94,8 +134,36 @@ export function renderProposal(container, request, { node, onStage } = {}) {
     container.append(field('Prompt', prompt, { wide: true }));
   } else if (plan.prompt) container.append(field('Prompt (fixé par le workflow)', fixed(plan.prompt), { wide: true }));
 
+  // Text settings (the lyrics of a song): wide, under the prompt.
+  const texts = [...items.values()].filter(item => item.type === 'string' && !item.choices && !item.locked);
+  for (const item of texts) {
+    const input = control(item);
+    input.setAttribute('aria-label', LABELS[item.key] || item.key);
+    controls.set(item.key, input);
+    container.append(
+      field(LABELS[item.key] || item.key, input, {
+        wide: true,
+        help: item.key === 'lyrics' ? 'Vide pour un morceau instrumental.' : item.note,
+      }),
+    );
+  }
+
   const grid = node('div', 'proposal-grid');
   container.append(grid);
+  const shown = new Set(texts.map(item => item.key));
+  if (audio)
+    for (const key of SOUND_MAIN) {
+      const item = items.get(key);
+      if (!item) continue;
+      shown.add(key);
+      if (item.locked) {
+        grid.append(field(LABELS[key] || key, fixed(String(item.value)), { help: item.locked }));
+        continue;
+      }
+      const input = control(item);
+      controls.set(key, input);
+      grid.append(field(LABELS[key] || key, input));
+    }
 
   // Inputs, each with the role it plays (and the others it may play).
   const roleControls = [];
@@ -257,6 +325,7 @@ export function renderProposal(container, request, { node, onStage } = {}) {
   for (const key of keys) {
     const item = items.get(key);
     if (MAIN.has(key) && !['frames', 'width', 'height'].includes(key)) continue;
+    if (shown.has(key)) continue;
     // The length is chosen in seconds above; a count of frames would only repeat it.
     if (key === 'frames' && duration) continue;
     const label = key === 'frames' ? 'Durée (images)' : LABELS[key] || key;
@@ -266,27 +335,9 @@ export function renderProposal(container, request, { node, onStage } = {}) {
       if (subjectSetting(key)) subjectFields.push(wrapper);
       continue;
     }
-    let control;
-    if (item.type === 'boolean') {
-      control = node('input');
-      control.type = 'checkbox';
-      control.checked = item.value === true;
-    } else if (item.choices) {
-      control = select(
-        item.choices.map(choice => [choice, String(choice)]),
-        item.value,
-      );
-      control.disabled = item.choices.length < 2;
-    } else {
-      control = node('input');
-      control.type = 'number';
-      control.value = String(item.value);
-      if (item.min !== undefined) control.min = String(item.min);
-      if (item.max !== undefined) control.max = String(item.max);
-      control.step = item.multipleOf ? String(item.multipleOf) : item.type === 'integer' ? '1' : 'any';
-    }
-    controls.set(key, control);
-    const wrapper = field(label, control, { help: item.note || HELP[key] });
+    const input = control(item);
+    controls.set(key, input);
+    const wrapper = field(label, input, { help: item.note || HELP[key] });
     more.append(wrapper);
     if (subjectSetting(key)) subjectFields.push(wrapper);
   }
@@ -369,7 +420,11 @@ export function renderProposal(container, request, { node, onStage } = {}) {
           label = LABELS[key] || key;
         let value;
         if (item.type === 'boolean') value = raw;
-        else if (item.choices) value = item.choices.find(choice => String(choice) === String(raw));
+        else if (item.type === 'string') {
+          value = String(raw);
+          if (item.maxLength !== undefined && value.length > item.maxLength)
+            throw Error(`${label} : ${item.maxLength} caractères au plus.`);
+        } else if (item.choices) value = item.choices.find(choice => String(choice) === String(raw));
         else {
           const text = String(raw).trim();
           value = Number(text);
