@@ -168,7 +168,7 @@ test('a style the model does not write in time is said as such, and the model is
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   const modelPath = join(directory, 'model.gguf');
-  await writeFile(modelPath, Buffer.from('GGUF   '));
+  await writeFile(modelPath, Buffer.from('GGUF\x03\0\0\0'));
   await api('config', {
     enginePath: process.execPath,
     modelPath,
