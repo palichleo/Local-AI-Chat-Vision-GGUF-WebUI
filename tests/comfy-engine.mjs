@@ -202,6 +202,7 @@ async function comfy(t, { missing = [], files = lists, result, ram = 32 * 1024 *
       return json({ name, subfolder, type: 'input' });
     }
     if (url.pathname === '/prompt') {
+      seen.lastFree = null;
       seen.prompts.push(JSON.parse(body));
       return json({ prompt_id: 'prompt-1' });
     }
@@ -227,7 +228,9 @@ async function comfy(t, { missing = [], files = lists, result, ram = 32 * 1024 *
       return res.end(seen.film);
     }
     if (url.pathname === '/free') {
-      seen.freed.push(JSON.parse(body));
+      // The client repeats its request until the memory is back: one entry per release.
+      if (String(body) !== seen.lastFree || !seen.freed.length) seen.freed.push(JSON.parse(body));
+      seen.lastFree = String(body);
       return json({});
     }
     json({ error: 'unexpected ' + url.pathname }, 500);

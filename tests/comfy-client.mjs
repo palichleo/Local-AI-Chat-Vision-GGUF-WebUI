@@ -338,7 +338,8 @@ test('free waits for an idle queue then confirms low torch allocation', async t 
   });
   const result = await client.free();
   assert.ok(result.memory.torchAllocated <= 512 * 1024 ** 2);
-  assert.equal(requests.filter(({ url }) => url.pathname === '/free').length, 1);
+  // Asked again at each poll: a request that arrives while ComfyUI finishes a job can wait.
+  assert.ok(requests.filter(({ url }) => url.pathname === '/free').length >= 1);
 });
 
 test('free can be aborted before unload and refuses unmeasurable memory', async t => {
