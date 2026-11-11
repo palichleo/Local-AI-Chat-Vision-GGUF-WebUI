@@ -25,12 +25,12 @@
       },
       "end_image": {
         "media": ["image"],
-        "description": "Image the video ends on, as its last frame: where the camera or the action arrives. Can be combined with start_image."
+        "description": "Image the clip must end on exactly, as its last frame. Only when the user asks for that in so many words (an end image, a last frame, \"finit sur cette image\"). A place, an object or a person the camera goes to, reveals or discovers during the clip is not an end image: pass it in reference."
       },
       "reference": {
         "media": ["image"],
         "many": true,
-        "description": "Images of a person, a character, an object or a place that must appear in the clip, kept as they look. They are not frames of the clip: to animate an image, use start_image."
+        "description": "Images of a person, a character, an object or a place that must appear in the clip, kept as they look: also what the camera goes to or reveals during the clip (the camera then turns to a door: the image of that door is a reference). They are not frames of the clip: to animate an image, use start_image. Between end_image and reference, choose reference unless the user asked for an exact last frame."
       }
     }
   },
