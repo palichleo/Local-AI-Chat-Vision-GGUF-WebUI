@@ -19,6 +19,11 @@ export async function waitForModel(api, signal, onStatus) {
     return (await api(route, body, { signal })).json();
   };
   let status = await read('status');
+  // A model on its way out (the Studio frees the GPU) is waited out, then started again.
+  while (status.state === 'stopping') {
+    await pause(signal);
+    status = await read('status');
+  }
   if (['stopped', 'error'].includes(status.state)) {
     try {
       status = await read('start', {});

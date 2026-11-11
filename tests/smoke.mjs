@@ -245,6 +245,26 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async t => {
       await call('stop', {});
     });
 
+    await t.test('ouvrir un mode du Studio décharge le modèle, chargé ou en cours de chargement', async () => {
+      await call('start', {});
+      await until(async () => (await status()).state === 'ready');
+      let body = await (await call('studio/release', {})).json();
+      assert.equal(body.released, true);
+      assert.equal(body.status.state, 'stopped');
+      // Nothing to unload: said, without an error.
+      const again = await call('studio/release', {});
+      assert.equal(again.status, 200);
+      assert.equal((await again.json()).released, false);
+      // Still loading: stopped cleanly, and the model starts again afterwards.
+      assert.equal((await call('start', {})).status, 202);
+      body = await (await call('studio/release', {})).json();
+      assert.equal(body.released, true);
+      assert.equal((await status()).state, 'stopped');
+      assert.equal((await call('start', {})).status, 202);
+      await until(async () => (await status()).state === 'ready');
+      await call('stop', {});
+    });
+
     await t.test('les bibliothèques CUDA séparées du moteur sont transmises au processus', async () => {
       const native = join(folder, 'moteur local');
       const library = join(native, 'cuda_v12', process.platform === 'win32' ? 'ggml-cuda.dll' : 'libggml-cuda.so');

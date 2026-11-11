@@ -22,6 +22,18 @@ test('un moteur arrêté démarre une seule fois et attend aussi la vision', asy
   assert.deepEqual(states, ['loading', 'ready']);
 });
 
+test('un moteur en cours d’arrêt est attendu, puis redémarré', async () => {
+  const fake = engine([
+    { state: 'stopping' },
+    { state: 'stopping' },
+    { state: 'stopped' },
+    { state: 'loading' },
+    { state: 'ready' },
+  ]);
+  assert.equal((await waitForModel(fake.request, new AbortController().signal, () => {})).state, 'ready');
+  assert.deepEqual(fake.calls, ['status', 'status', 'status', 'start', 'status']);
+});
+
 test('un moteur prêt ou déjà en chargement ne redémarre pas', async () => {
   for (const states of [[{ state: 'ready' }], [{ state: 'loading' }, { state: 'ready' }]]) {
     const fake = engine(states);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { STUDIO_ID, STUDIO_VERBS, styleLine, styleMessages } from '../lib/studio.mjs';
-import { checkStyles } from '../lib/tool-runtime.mjs';
+import { ToolRuntime, checkStyles } from '../lib/tool-runtime.mjs';
 import { comfyGraph } from '../lib/comfy-graphs.mjs';
 import { comfyNames } from '../lib/comfy-engine.mjs';
 
@@ -138,5 +138,83 @@ test('the format frame keeps the ratio and fits its box, wide or tall', async ()
     const size = frameSize(ratio, box);
     assert.ok(size.width <= box.width && size.height <= box.height);
     assert.ok(Math.abs(size.width / size.height / ratio - 1) < 0.02);
+  }
+});
+
+test('a Studio generation unloads the chat model and leaves it unloaded; a conversation gets it back', async () => {
+  const turn = 'a1111111-1111-4111-8111-111111111111';
+  const workflow = {
+    schemaVersion: 1,
+    id: 'image',
+    name: 'Image',
+    description: '',
+    digest: 'a'.repeat(64),
+    mediaType: 'image',
+    pipeline: 'krea2',
+    enabled: true,
+    ready: true,
+    parameters: { prompt: { policy: 'model', type: 'string' } },
+    references: [],
+  };
+  for (const [conversationId, expected] of [
+    [STUDIO_ID, ['llm stopped', 'generate', 'gpu released']],
+    [turn, ['llm stopped', 'generate', 'gpu released', 'llm started']],
+  ]) {
+    const events = [];
+    const engine = {
+      busy: false,
+      state: 'ready',
+      stop: async () => {
+        events.push('llm stopped');
+        engine.state = 'stopped';
+      },
+      start: async () => {
+        events.push('llm started');
+        engine.state = 'ready';
+      },
+    };
+    const runtime = new ToolRuntime({
+      engine,
+      catalog: {
+        list: async () => [workflow],
+        read: async () => workflow,
+        prepare: async () => ({
+          workflow,
+          job: {
+            schemaVersion: 1,
+            id: turn,
+            pipeline: 'krea2',
+            mediaType: 'image',
+            workflowId: 'image',
+            workflowDigest: workflow.digest,
+            parameters: { prompt: 'boat', seed: 1, width: 512, height: 512 },
+            components: {},
+            loras: [],
+            references: [],
+          },
+          outputNodes: [],
+        }),
+      },
+      gallery: { put: async record => record },
+      getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'native' }),
+      engineConfig: () => ({}),
+      clientFactory: () => ({
+        status: async () => ({ idle: true }),
+        preflight: async () => {},
+        run: async () => {
+          events.push('generate');
+          return { outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] };
+        },
+        free: async () => events.push('gpu released'),
+      }),
+    });
+    const request = await runtime.request(
+      [{ id: 'call', type: 'function', function: { name: 'create_image', arguments: '{"prompt":"boat"}' } }],
+      { conversationId, turnId: turn, messages: [] },
+    );
+    await runtime.execute({ requestId: request.requestId, permission: 'once' });
+    await runtime.finished;
+    assert.equal(runtime.status().state, 'done', runtime.status().error);
+    assert.deepEqual(events, expected);
   }
 });

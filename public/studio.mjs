@@ -76,6 +76,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     mode = null,
     runs = [],
     working = null, // { label, fraction, requestId, controller } while a generation runs
+    releasing = null, // the chat model leaving the GPU, asked when a mode is opened
     styling = false,
     extending = null, // the clip being continued
     failure = '',
@@ -436,7 +437,8 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
         render();
         const controller = new AbortController();
         try {
-          // The chat model is started when it is not running.
+          // The chat model is started when it is not running, once it has finished leaving.
+          await releasing;
           await waitForModel(api, controller.signal, () => {});
           const result = await (await api('studio/style', { description: draft.style, media })).json();
           draft.style = result.style;
@@ -501,6 +503,18 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     const styles = workflow.external && mode !== 'audio' && !extending ? draft.styles.filter(style => style.name) : [];
     return { verb, args, edits, styles };
   }
+  // A mode is opened to generate: the chat model leaves the GPU now, not at the first « Générer ».
+  // Asked in the background, never under an answer or a message waiting for the model; a refusal
+  // changes nothing, the generation unloads the model itself anyway.
+  function release() {
+    if (releasing || working || styling || blocked()) return;
+    releasing = api('studio/release', {})
+      .then(() => onChange())
+      .catch(() => {})
+      .finally(() => {
+        releasing = null;
+      });
+  }
   async function generate() {
     if (working) return;
     const reason = blocked();
@@ -519,6 +533,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     onChange();
     const pause = () => new Promise(resolve => setTimeout(resolve, 700));
     try {
+      await releasing;
       let proposal = await (
         await api('tools/action', {
           conversationId: info.conversationId,
@@ -985,6 +1000,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
         mode = item.id;
         failure = '';
         render();
+        release();
       },
       item.icon,
     );

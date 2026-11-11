@@ -1158,6 +1158,15 @@ export async function createApplication({
           }),
         );
       }
+      // A Studio mode is opened: the chat model leaves the GPU before the first generation, whether
+      // it is loaded or still loading. Never under an answer, a generation or a change of model, and
+      // the image and video models kept between generations stay (unlike /api/stop).
+      if (path === '/api/studio/release') {
+        const released =
+          ['ready', 'loading', 'stopping'].includes(engine.state) && !engine.busy && !runtime.active && !savingSettings;
+        if (released) await engine.stop();
+        return send(200, { released, status: status() });
+      }
       if (path === '/api/studio/delete') {
         if (runtime.active || clearingHistory || persistingGallery) throw problem('Une opération est en cours.', 409);
         await gallery.remove(STUDIO_ID, body.id);
