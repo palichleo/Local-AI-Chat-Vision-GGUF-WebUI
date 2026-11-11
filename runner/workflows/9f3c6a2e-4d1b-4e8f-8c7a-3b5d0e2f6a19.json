@@ -5,7 +5,7 @@
   "pipeline": "rife",
   "mediaType": "video",
   "name": "Interpoler (RIFE 4.26)",
-  "description": "Adds intermediate frames with RIFE 4.26: smoother motion at the same duration, or slow motion.",
+  "description": "Ajouter des images intermédiaires avec RIFE 4.26 : mouvement plus fluide à durée égale, ou ralenti.",
   "components": {
     "interpolator": {
       "policy": "fixed",

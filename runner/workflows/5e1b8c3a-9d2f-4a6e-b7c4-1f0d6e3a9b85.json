@@ -5,7 +5,7 @@
   "pipeline": "realesrgan_image",
   "mediaType": "image",
   "name": "Upscale rapide (Real-ESRGAN ×4)",
-  "description": "Fast x4 upscale of an image with Real-ESRGAN, without diffusion. Use it only when the user asks for a quick or plain enlargement; SeedVR2 is the default upscaler.",
+  "description": "Agrandir une image ×4 avec Real-ESRGAN, sans diffusion. Seulement quand l’utilisateur demande un agrandissement rapide ou simple : SeedVR2 est l’agrandissement par défaut.",
   "components": {
     "upscaler": {
       "policy": "fixed",

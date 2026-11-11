@@ -5,7 +5,7 @@
   "pipeline": "realesrgan_video",
   "mediaType": "video",
   "name": "Upscale vidéo (Real-ESRGAN ×2)",
-  "description": "Upscales a video x2 frame by frame with Real-ESRGAN, keeping its sound. Fast and faithful.",
+  "description": "Agrandir une vidéo ×2 image par image avec Real-ESRGAN, en gardant son son. Rapide et fidèle.",
   "components": {
     "upscaler": {
       "policy": "fixed",

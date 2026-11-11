@@ -388,10 +388,12 @@ export function setupNativeWorkflows(options) {
       actions.append(reset);
     }
     actions.append(editButton);
+    const description = node('p', 'field-help workflow-card-description', record.description);
+    description.title = record.description;
     card.append(
       heading,
-      node('p', 'field-help', record.description),
-      ...(record.unavailableReason ? [node('p', 'field-help', record.unavailableReason)] : []),
+      description,
+      ...(record.unavailableReason ? [node('p', 'field-help workflow-card-problem', record.unavailableReason)] : []),
       actions,
     );
     return card;

@@ -4097,18 +4097,79 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 .comfy-panel .path-input input:hover {
   border-color: var(--line-strong);
 }
+/* The workflows of a section read as one list: a row each, name and state on the left, actions
+   on the right, the description on one line (in full in its tooltip). */
 .workflow-settings .workflow-card {
-  margin: 12px 0 0;
-  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  row-gap: 3px;
+  align-items: center;
+  margin: 0;
+  padding: 11px 14px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-top: 0;
+  border-radius: 0;
   background: var(--bg);
+  box-shadow: none;
+}
+.workflow-settings .workflow-card:hover {
+  background: var(--surface);
+}
+.workflow-settings .workflow-section + .workflow-card {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  border-radius: 10px 10px 0 0;
+}
+.workflow-settings .workflow-card:has(+ .workflow-section),
+.workflow-settings .workflow-card:last-child {
+  border-radius: 0 0 10px 10px;
+}
+.workflow-settings .workflow-section + .workflow-card:has(+ .workflow-section),
+.workflow-settings .workflow-section + .workflow-card:last-child {
+  border-radius: 10px;
+}
+.workflow-settings .workflow-card > * {
+  grid-column: 1;
+  margin: 0;
+}
+.workflow-settings .workflow-card > .native-card-actions {
+  grid-column: 2;
+  grid-row: 1 / span 3;
 }
 .workflow-settings .workflow-card-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  margin: 0;
+  min-width: 0;
+}
+.workflow-settings .workflow-card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.workflow-settings .workflow-card-title strong {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.workflow-settings .workflow-card-title small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workflow-settings .workflow-card > .workflow-card-description {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.workflow-settings .workflow-card > .workflow-card-problem {
+  color: var(--warning);
+}
+.workflow-settings .native-status {
+  padding: 2px 7px;
 }
 .workflow-card-title {
   display: grid;
@@ -4894,4 +4955,16 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   .image-compare .compare-tag {
     transition: none;
   }
+}
+.workflow-settings .workflow-card > .native-card-actions {
+  margin: 0;
+  gap: 6px;
+}
+.workflow-settings .native-card-actions > .native-remove {
+  margin: 0;
+}
+.workflow-settings .native-card-actions button {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 11px;
 }

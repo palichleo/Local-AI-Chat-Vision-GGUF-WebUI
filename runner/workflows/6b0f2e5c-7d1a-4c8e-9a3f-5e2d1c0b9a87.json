@@ -5,7 +5,7 @@
   "pipeline": "seedvr2",
   "mediaType": "image",
   "name": "Upscale SeedVR2",
-  "description": "Upscales and restores an image with SeedVR2 7B: sharper details without the plastic AI look, colours kept from the original. One x2 pass by default; scale, passes, steps and colour correction can follow the request.",
+  "description": "Agrandir et restaurer une image avec SeedVR2 7B : détails plus nets sans aspect plastique, couleurs de l’original gardées. Une passe ×2 par défaut ; échelle, passes, étapes et correction des couleurs suivent la demande.",
   "components": {
     "model": {
       "policy": "fixed",
