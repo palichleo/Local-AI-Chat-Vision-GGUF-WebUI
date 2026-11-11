@@ -487,3 +487,123 @@ test('the picture the generator has so far is kept one at a time, and dropped wi
   assert.equal(runtime.preview(status.id), null);
   await runtime.close();
 });
+
+test('the last creation of a visit stays in the frame, and a new visit starts from an empty frame', async () => {
+  // A page that remembers what each element is, so the frame can be looked into.
+  class Element {
+    constructor(tag = '', className = '') {
+      Object.assign(this, { tag, className, children: [], style: {}, dataset: {} });
+      this.classList = { toggle() {}, add() {}, remove() {} };
+    }
+    append(...nodes) {
+      this.children.push(...nodes);
+    }
+    replaceChildren(...nodes) {
+      this.children = nodes;
+    }
+    add(option) {
+      this.children.push(option);
+    }
+    setAttribute() {}
+    querySelector() {
+      return new Element();
+    }
+    querySelectorAll() {
+      return [];
+    }
+    /** Every element under this one whose classes include `name`. */
+    find(name) {
+      return this.children.flatMap(child =>
+        child instanceof Element
+          ? [...(child.className.split(' ').includes(name) ? [child] : []), ...child.find(name)]
+          : [],
+      );
+    }
+  }
+  const page = Object.fromEntries(
+    ['studio-view', 'studio-modes', 'studio-back', 'studio-title', 'studio-summary', 'studio-body'].map(id => [
+      id,
+      new Element(),
+    ]),
+  );
+  const globals = {
+    document: { getElementById: id => page[id] ?? null, querySelector: () => null },
+    Option: class {},
+    ResizeObserver: undefined,
+  };
+  const before = Object.fromEntries(Object.keys(globals).map(key => [key, globalThis[key]]));
+  Object.assign(globalThis, globals);
+  try {
+    const { setupStudio } = await import('../public/studio.mjs');
+    const limits = { width: { min: 256, max: 2048, multipleOf: 32 }, height: { min: 256, max: 2048, multipleOf: 32 } };
+    const workflow = {
+      id: 'w',
+      name: 'Image',
+      roles: {},
+      limits,
+      direct: true,
+      size: { width: 1024, height: 1024 },
+      settings: [],
+      seeded: true,
+    };
+    const info = { enabled: true, conversationId: STUDIO_ID, styles: [], tools: { create_image: [workflow] } };
+    const made = { id: 'r1', prompt: 'un phare', outputs: [{ originalUrl: '/media/generated/phare' }] };
+    const runs = [];
+    const opened = [];
+    const studio = setupStudio({
+      api: async route => ({
+        json: async () => {
+          if (route === 'studio') return info;
+          if (route.startsWith('gallery/')) return { runs };
+          if (route === 'tools/action') return { requestId: 'q', plan: { parameters: {} } };
+          if (route === 'tools/execute') {
+            // The creation is made at once, and listed by the gallery from then on.
+            runs.unshift(made);
+            return { id: 'j', state: 'done', record: made };
+          }
+          return {};
+        },
+      }),
+      node: (tag, className) => new Element(tag, className),
+      icon: () => new Element('svg'),
+      notice() {},
+      assets: {},
+      viewOutput: record => opened.push(record.id),
+      waitForModel: async () => {},
+      blocked: () => '',
+      onChange() {},
+    });
+    const body = page['studio-body'],
+      enter = async () => {
+        await studio.open();
+        page['studio-modes'].children[0].onclick();
+      };
+    await enter();
+    assert.deepEqual(body.find('studio-frame-result'), [], 'an empty frame to begin with');
+
+    const [prompt] = body.find('studio-write')[0].children[0].children.filter(child => child.tag === 'textarea');
+    prompt.value = 'un phare';
+    prompt.oninput();
+    await body.find('studio-go')[0].onclick();
+    const [kept] = body.find('studio-frame-result');
+    assert.equal(kept.tag, 'img');
+    assert.equal(kept.src, '/media/generated/phare');
+    assert.match(body.find('studio-frame')[0].className, /has-result/);
+    // A click shows it whole, with its settings.
+    kept.onclick();
+    assert.deepEqual(opened, ['r1']);
+
+    // Back to the three choices and in again: still the same visit.
+    page['studio-back'].onclick();
+    page['studio-modes'].children[0].onclick();
+    assert.equal(body.find('studio-frame-result').length, 1);
+
+    // The Studio is left and entered again: the frame is empty, the creation is in the list below.
+    await enter();
+    assert.deepEqual(body.find('studio-frame-result'), []);
+    assert.doesNotMatch(body.find('studio-frame')[0].className, /has-result/);
+    assert.equal(body.find('studio-card').length, 1);
+  } finally {
+    Object.assign(globalThis, before);
+  }
+});

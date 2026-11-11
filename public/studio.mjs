@@ -111,6 +111,9 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     drawn = null, // the size the frame was last drawn at, to ease from
     watching = null, // follows the size of the stage
     live = null; // { frame, preview } : the picture so far, in the frame now on the page
+  // The last creation of each mode since the Studio was entered: it stays in the frame until the
+  // next one. Forgotten when the Studio is left: coming back starts from an empty frame.
+  const kept = {};
   const drafts = Object.fromEntries(
     MODES.map(item => [
       item.id,
@@ -331,10 +334,19 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
    */
   function stage(workflow) {
     const box = node('div', 'studio-stage'),
-      frame = node('div', 'studio-frame' + (mode === 'audio' ? ' is-audio' : '') + (working ? ' is-busy' : '')),
+      // While a creation is being made the frame is its own (the picture so far).
+      last = working || mode === 'audio' ? null : (kept[mode] ?? null),
+      frame = node(
+        'div',
+        'studio-frame' +
+          (mode === 'audio' ? ' is-audio' : '') +
+          (working ? ' is-busy' : '') +
+          (last ? ' has-result' : ''),
+      ),
       next = shapeOf(workflow);
-    frame.setAttribute('aria-hidden', 'true');
     frame.append(node('span', 'studio-frame-fill'), node('span', 'studio-frame-label', next.label));
+    if (last) frame.append(result(last));
+    else frame.setAttribute('aria-hidden', 'true');
     // Drawn at the previous shape first, so the browser has something to ease from.
     const from = drawn ?? frameSize(next.ratio);
     frame.style.width = from.width + 'px';
@@ -347,6 +359,17 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       watching.observe(box);
     }
     return { box, frame };
+  }
+  /** The creation kept in the frame: the image, or the first picture of the clip; a click shows it whole. */
+  function result(record) {
+    const output = record.outputs[0],
+      clip = mediaOf(record) === 'video',
+      media = node(clip ? 'video' : 'img', 'studio-frame-result');
+    if (clip) Object.assign(media, { muted: true, preload: 'metadata', playsInline: true, src: output.originalUrl + '#t=0.1' });
+    else Object.assign(media, { alt: record.prompt || 'Dernière image créée', decoding: 'async', src: output.originalUrl });
+    media.title = 'Voir l’original et ses paramètres';
+    media.onclick = () => viewOutput(record, 0);
+    return media;
   }
   /** The formats as a row of chips under the frame: choosing one reshapes it in place. */
   function formatChips(workflow, frame, resolution) {
@@ -559,7 +582,10 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       return render();
     }
     failure = '';
-    const controller = new AbortController();
+    const controller = new AbortController(),
+      // Where the creation will be kept once made: the mode it was asked in.
+      asked = mode;
+    let made = null;
     working = { label: 'Préparation…', fraction: null, controller };
     render();
     onChange();
@@ -613,12 +639,16 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       }
       if (!job.record)
         throw Error(controller.signal.aborted ? 'Génération arrêtée.' : job.error || 'La génération a échoué.');
+      made = job.record.id;
       if (extending) extending = null;
     } catch (error) {
       failure = controller.signal.aborted ? 'Génération arrêtée.' : error.message;
     } finally {
       working = null;
       await refresh().catch(() => {});
+      // It stays in the frame, as the gallery lists it (with the addresses it is shown from).
+      const record = made && runs.find(item => item.id === made);
+      if (record) kept[asked] = record;
       onChange();
       render();
     }
@@ -665,6 +695,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     try {
       await api('studio/delete', { id: record.id });
       if (extending?.id === record.id) extending = null;
+      for (const key of Object.keys(kept)) if (kept[key].id === record.id) delete kept[key];
       await refresh();
     } catch (error) {
       notice(error.message);
@@ -1071,6 +1102,8 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     showcase();
   }
   async function open() {
+    // Entering the Studio: nothing from an earlier visit stays in the frames.
+    for (const key of Object.keys(kept)) delete kept[key];
     render();
     try {
       info = await (await api('studio')).json();

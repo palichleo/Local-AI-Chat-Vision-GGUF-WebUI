@@ -826,6 +826,22 @@ body[data-view='studio'] .chat-header {
   color: #e9f3f8cc;
   text-shadow: 0 1px 6px #0009;
 }
+/* The last creation of this visit to the Studio, kept in the frame until the next one. */
+.studio-frame-result {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: zoom-in;
+}
+.studio-frame.has-result {
+  border-style: solid;
+  border-color: var(--line-strong);
+}
+.studio-frame.has-result .studio-frame-label {
+  opacity: 0;
+}
 /* The picture so far says the format better than its name. */
 .studio-frame.has-preview .studio-frame-label {
   opacity: 0;
