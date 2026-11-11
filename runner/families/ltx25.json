@@ -164,6 +164,11 @@
       "type": "number",
       "min": 0,
       "max": 1
+    },
+    "attention": {
+      "type": "string",
+      "choices": ["pytorch", "comfy_kitchen"],
+      "note": "Attention dense : comfy_kitchen calcule en INT8 (plus rapide, à peine différent), pytorch exactement."
     }
   },
   "requiredParameters": ["prompt", "seed", "width", "height", "steps", "frames", "fps", "stage", "audio"],
@@ -287,6 +292,10 @@
       "image_compression": {
         "policy": "fixed",
         "value": 18
+      },
+      "attention": {
+        "policy": "fixed",
+        "value": "pytorch"
       }
     },
     "profiles": {

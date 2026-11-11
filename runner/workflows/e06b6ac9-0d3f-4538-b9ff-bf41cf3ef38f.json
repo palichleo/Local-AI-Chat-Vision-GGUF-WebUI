@@ -97,6 +97,22 @@
     "overlap_frames": {
       "policy": "fixed",
       "value": 22
+    },
+    "attention": {
+      "policy": "fixed",
+      "value": "comfy_kitchen"
+    },
+    "sparse_attention": {
+      "policy": "fixed",
+      "value": "vsa"
+    },
+    "sparse_keep": {
+      "policy": "fixed",
+      "value": 10
+    },
+    "sparse_start": {
+      "policy": "fixed",
+      "value": 0.2
     }
   },
   "profiles": {

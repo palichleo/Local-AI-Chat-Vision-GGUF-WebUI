@@ -5,7 +5,14 @@ import { mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ComfyClient } from '../lib/comfy-client.mjs';
-import { comfyEngine, comfyNames, comfyRoute, comfyUnsupported, runOnComfy } from '../lib/comfy-engine.mjs';
+import {
+  comfyEngine,
+  comfyFeatures,
+  comfyNames,
+  comfyRoute,
+  comfyUnsupported,
+  runOnComfy,
+} from '../lib/comfy-engine.mjs';
 import { comfyGraph } from '../lib/comfy-graphs.mjs';
 import { GenerationService } from '../lib/generation-service.mjs';
 import { mp4Bytes } from '../lib/video-info.mjs';
@@ -817,4 +824,91 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
   const off = await service.saveComfy({ enabled: false, baseUrl: 'http://127.0.0.1:9' });
   assert.deepEqual([off.comfy.enabled, off.comfy.baseUrl], [false, 'http://127.0.0.1:9']);
   assert.equal((await available()).krea2, false);
+});
+
+test('MiniMax H3 FastH3: comfy-kitchen attention, then VSA, between the sigma shift and the sampler', () => {
+  const fast = { attention: 'comfy_kitchen', sparse_attention: 'vsa', sparse_keep: 10, sparse_start: 0.2 };
+  const plan = comfyGraph(h3({ parameters: fast }));
+  const graph = linked(plan.graph);
+  assert.deepEqual(graph.attention.inputs, { model: ['shifted', 0], attention: 'comfy kitchen attention' });
+  assert.deepEqual(graph.sparse.inputs, {
+    model: ['attention', 0],
+    selection: 'vsa',
+    'selection.keep_percent': 10,
+    start_percent: 0.2,
+    end_percent: 1,
+    dense_blocks: '',
+    min_tokens: 12288,
+    extra_tokens: 0,
+    sink_conditioning: 'exact_kv_and_rows',
+    verbose: false,
+  });
+  assert.deepEqual(
+    [graph.guider.inputs.model, graph.sigmas.inputs.model],
+    [
+      ['sparse', 0],
+      ['sparse', 0],
+    ],
+  );
+  assert.deepEqual(plan.attention, ['comfy kitchen attention', 'vsa 10 % from 20 %']);
+  // A ComfyUI without them: the default attention, nothing else changes.
+  const plain = comfyGraph(h3({ parameters: fast }), {}, {}, { kitchen: false, sparse: false });
+  assert.equal(plain.graph.attention, undefined);
+  assert.equal(plain.graph.sparse, undefined);
+  assert.deepEqual(plain.graph.guider.inputs.model, ['shifted', 0]);
+  assert.deepEqual(plain.attention, ['default attention']);
+  // Asked for nothing, nothing is added.
+  assert.equal(comfyGraph(h3()).graph.attention, undefined);
+});
+
+test('the INT8 attention reaches every sampler: LTX, LTX through LongForge, Krea 2, MOSS', () => {
+  const kitchen = { attention: 'comfy_kitchen' };
+  const video = linked(comfyGraph(ltx({ parameters: { ...large, ...kitchen } })).graph);
+  assert.deepEqual(video.attention.inputs.model, ['model', 0]);
+  for (const id of Object.keys(video).filter(id => id.startsWith('sampler') || id.startsWith('guider')))
+    if (video[id].inputs.model) assert.deepEqual(video[id].inputs.model, ['attention', 0], id);
+  const longforge = linked(
+    comfyGraph(ltx({ references: subjects(), loras: [msr], parameters: kitchen }), { ref1: 'in/a.png' }).graph,
+  );
+  assert.deepEqual(longforge.render.inputs.model, ['attention', 0]);
+  assert.deepEqual(linked(comfyGraph(krea({ parameters: kitchen })).graph).sampler.inputs.model, ['attention', 0]);
+  const image = linked(comfyGraph(moss({ parameters: kitchen })).graph);
+  assert.deepEqual(image.attention.inputs.model, ['model', 0]);
+  assert.deepEqual(image.sampler.inputs.model, ['attention', 0]);
+});
+
+test('what a ComfyUI offers of the attention nodes is read from its node list', async () => {
+  const info = {
+    ModelAttentionBackend: {
+      input: { required: { attention: ['COMBO', { options: ['pytorch attention', 'comfy kitchen attention'] }] } },
+    },
+    BlockSparseAttention: {
+      input: {
+        required: {
+          selection: [
+            'COMFY_DYNAMICCOMBO_V3',
+            {
+              options: [
+                { key: 'sol-attn', inputs: {} },
+                { key: 'vsa', inputs: {} },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  };
+  const asked = [];
+  const client = available => ({
+    objectInfo: async ({ node }) => {
+      asked.push(node);
+      return available.includes(node) ? { [node]: info[node] } : {};
+    },
+  });
+  const fast = h3({ parameters: { attention: 'comfy_kitchen', sparse_attention: 'vsa' } });
+  assert.deepEqual(await comfyFeatures(client(Object.keys(info)), fast), { kitchen: true, sparse: true });
+  assert.deepEqual(await comfyFeatures(client([]), fast), { kitchen: false, sparse: false });
+  asked.length = 0;
+  assert.deepEqual(await comfyFeatures(client(Object.keys(info)), h3()), { kitchen: false, sparse: false });
+  assert.deepEqual(asked, [], 'nothing asked when the job wants neither');
 });

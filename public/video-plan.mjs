@@ -30,6 +30,10 @@ const LABELS = {
   language: 'Langue',
   guidance_scale: 'Guidance',
   shift: 'Décalage',
+  attention: 'Attention',
+  sparse_attention: 'Attention creuse',
+  sparse_keep: 'Cubes gardés (%)',
+  sparse_start: 'Début de l’attention creuse',
 };
 const STAGES = { draft: 'Brouillon', final: 'Finale' };
 // Shown in the main area; every other editable parameter goes to « Paramètres avancés ».

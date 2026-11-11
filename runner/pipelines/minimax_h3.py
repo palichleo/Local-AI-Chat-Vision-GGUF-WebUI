@@ -342,7 +342,12 @@ def generate(job, config, progress):
         if ahead:
             ahead.lead = pool.used
         try:
-            fast_attention = minimax_h3.INT8_ATTENTION and minimax_h3.int8_attention_ready()
+            # The workflow's « attention » choice; comfy-kitchen's INT8 kernel unless it asks for PyTorch's.
+            fast_attention = (
+                p.get('attention', 'comfy_kitchen') == 'comfy_kitchen'
+                and minimax_h3.INT8_ATTENTION
+                and minimax_h3.int8_attention_ready()
+            )
             dit, _heads = minimax_h3.load(dit_header, paths['model'], pool, fast_attention)
             pool.preload()
             scheduler, audio_scheduler = MiniMaxH3Scheduler(shift=12.0), MiniMaxH3Scheduler(shift=3.0)

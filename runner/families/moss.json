@@ -61,6 +61,11 @@
       "type": "number",
       "min": 1,
       "max": 20
+    },
+    "attention": {
+      "type": "string",
+      "choices": ["pytorch", "comfy_kitchen"],
+      "note": "Attention dense : comfy_kitchen calcule en INT8 (plus rapide, à peine différent), pytorch exactement."
     }
   },
   "requiredParameters": ["prompt", "seed", "width", "height", "steps", "cfg"],
@@ -114,6 +119,10 @@
       "cfg": {
         "policy": "fixed",
         "value": 3
+      },
+      "attention": {
+        "policy": "fixed",
+        "value": "pytorch"
       }
     },
     "loras": [],
