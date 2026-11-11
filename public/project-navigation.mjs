@@ -433,14 +433,16 @@ export function setupProjectNavigation({
     }
     select.value = state.projectId || 'inbox';
     $('home-open').setAttribute('aria-current', state.view === 'home' ? 'page' : 'false');
+    $('studio-open').setAttribute('aria-current', state.view === 'studio' ? 'page' : 'false');
     $('home-view').hidden = state.view !== 'home';
-    $('chat-header').hidden = state.view === 'home';
+    $('studio-view').hidden = state.view !== 'studio';
+    $('chat-header').hidden = state.view !== 'chat';
     document.body.dataset.view = state.view || 'home';
     sync();
   }
   function sync() {
     for (const control of document.querySelectorAll(
-      '.project-group button,.project-card button,#project-create,#home-create-project,#conversation-project,#home-open',
+      '.project-group button,.project-card button,#project-create,#home-create-project,#conversation-project,#home-open,#studio-open',
     ))
       control.disabled = !!busy();
   }

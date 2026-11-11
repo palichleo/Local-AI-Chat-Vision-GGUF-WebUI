@@ -38,6 +38,7 @@ import { ProgressHistory } from './lib/generation-progress.mjs';
 import { convertKreaWorkflow } from './lib/native-workflow-conversion.mjs';
 import { importComfyWorkflow } from './lib/comfy-import.mjs';
 import { previewWorkflowImport } from './lib/workflow-import.mjs';
+import { STUDIO_ID, STUDIO_VERBS, styleLine, styleMessages } from './lib/studio.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 20 * 1024 * 1024;
@@ -66,6 +67,7 @@ const staticFiles = new Map([
   ['/formats.mjs', ['formats.mjs', 'text/javascript; charset=utf-8']],
   ['/output-actions.mjs', ['output-actions.mjs', 'text/javascript; charset=utf-8']],
   ['/chat-videos.mjs', ['chat-videos.mjs', 'text/javascript; charset=utf-8']],
+  ['/studio.mjs', ['studio.mjs', 'text/javascript; charset=utf-8']],
   ['/image-compare.mjs', ['image-compare.mjs', 'text/javascript; charset=utf-8']],
   ['/session-copies.mjs', ['session-copies.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-runtime.mjs', ['generation-runtime.mjs', 'text/javascript; charset=utf-8']],
@@ -668,6 +670,14 @@ export async function createApplication({
         return send(201, resourceView(resource));
       }
       if (req.method === 'GET' && path === '/api/tools/actions') return send(200, await runtime.tools.actions());
+      // The Studio: where its results are kept, and the style LoRAs ComfyUI offers.
+      if (req.method === 'GET' && path === '/api/studio')
+        return send(200, {
+          conversationId: STUDIO_ID,
+          enabled: generation.config.enabled === true,
+          tools: await runtime.tools.studio(),
+          styles: await generation.styles(),
+        });
       if (req.method === 'GET' && path === '/api/tools/job') {
         const job = runtime.status();
         return send(200, job?.record ? { ...job, record: galleryView(job.record) } : job);
@@ -1127,7 +1137,10 @@ export async function createApplication({
         if (clearingHistory || savingGeneration || savingSettings || pickingFile)
           throw problem('Une opération est en cours.', 409);
         if (engine.busy) throw problem('Une réponse est en cours. Attends sa fin.', 409);
-        if (!['upscale', 'interpolate'].includes(body.name)) throw problem('Action inconnue.');
+        // In a conversation only the output buttons; the Studio starts every creation itself.
+        const allowed = body.conversationId === STUDIO_ID ? STUDIO_VERBS : ['upscale', 'interpolate'];
+        if (!allowed.includes(body.name)) throw problem('Action inconnue.');
+        if (body.styles !== undefined && body.conversationId !== STUDIO_ID) throw problem('Action invalide.');
         if (!body.arguments || typeof body.arguments !== 'object' || Array.isArray(body.arguments))
           throw problem('Action invalide.');
         const call = {
@@ -1137,8 +1150,55 @@ export async function createApplication({
         };
         return send(
           200,
-          await runtime.request([call], { conversationId: body.conversationId, turnId: randomUUID(), messages: [] }),
+          await runtime.request([call], {
+            conversationId: body.conversationId,
+            turnId: randomUUID(),
+            messages: [],
+            ...(body.styles !== undefined ? { styles: body.styles } : {}),
+          }),
         );
+      }
+      if (path === '/api/studio/delete') {
+        if (runtime.active || clearingHistory || persistingGallery) throw problem('Une opération est en cours.', 409);
+        await gallery.remove(STUDIO_ID, body.id);
+        return send(200, { removed: body.id });
+      }
+      // One short style line written by the chat model, from the user's words or from nothing.
+      if (path === '/api/studio/style') {
+        if (runtime.active) throw problem('La génération utilise le GPU.', 409);
+        if (engine.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
+        if (engine.busy) throw problem('Une réponse est déjà en cours.', 409);
+        const controller = new AbortController();
+        engine.activeRequest = controller;
+        engine.busy = true;
+        const onClose = () => controller.abort();
+        res.once('close', onClose);
+        try {
+          const upstream = await fetch(`${engine.base}/v1/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${engine.apiKey}` },
+            body: JSON.stringify({
+              messages: styleMessages(body.description, body.media),
+              stream: false,
+              max_tokens: 160,
+              temperature: 1,
+              reasoning_format: 'deepseek',
+              chat_template_kwargs: { enable_thinking: false },
+            }),
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90000)]),
+          });
+          if (!upstream.ok)
+            throw problem(`Le moteur refuse la requête (${upstream.status}). ${(await upstream.text()).slice(0, 500)}`, 502);
+          const style = styleLine((await upstream.json()).choices?.[0]?.message?.content);
+          if (!style) throw problem('Le modèle n’a pas écrit de style. Réessayez.', 502);
+          return send(200, { style });
+        } finally {
+          res.off('close', onClose);
+          if (engine.activeRequest === controller) {
+            engine.activeRequest = null;
+            engine.busy = false;
+          }
+        }
       }
       if (path === '/api/tools/execute') {
         if (clearingHistory || persistingGallery || savingGeneration || savingSettings || pickingFile)

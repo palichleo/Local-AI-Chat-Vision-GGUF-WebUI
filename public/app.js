@@ -12,6 +12,7 @@ import { markdownToHtml } from './markdown.mjs';
 import { setupNativeWorkflows } from './native-workflow-ui.mjs';
 import { prepareImages } from './images.mjs';
 import { isVideo, splitVideos, withVideos } from './chat-videos.mjs';
+import { setupStudio } from './studio.mjs';
 import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
 import { outputActions } from './output-actions.mjs';
@@ -1971,6 +1972,23 @@ const actionButtons = outputActions({
   onDetails: (record, index) => assetsUI.viewOutput(record, index),
   onAction: (record, index, action) => runOutputAction(record, index, action),
 });
+const studioUI = setupStudio({
+  api,
+  node,
+  icon,
+  notice,
+  assets: assetsUI,
+  viewOutput: (record, index) => assetsUI.viewOutput(record, index),
+  waitForModel: (...args) => waitForModel(...args),
+  // A chat answer in progress keeps the model: the Studio waits for it.
+  blocked: () =>
+    state.generating || state.status.busy
+      ? 'Attends la fin de la réponse en cours.'
+      : state.preparing || state.loadingHistory || state.updating || state.closingApp
+        ? 'Attends la fin de l’opération en cours.'
+        : '',
+  onChange: () => refreshStatus(),
+});
 const generationUI = setupGenerationUI({
   api,
   node,
@@ -2198,6 +2216,37 @@ function showHome() {
     }
   });
 }
+/** The Studio: the creation tools used by hand, beside the conversations. */
+function showStudio() {
+  const blocked = () =>
+    state.projectWorking ||
+    state.generating ||
+    state.preparing ||
+    state.loadingHistory ||
+    state.savingPreferences ||
+    state.operation ||
+    state.updating ||
+    state.closingApp;
+  if (blocked()) return;
+  requestSettingsClose(async () => {
+    if (blocked()) return;
+    state.loadingHistory = true;
+    updateControls();
+    try {
+      if (!(await assetsUI.flush()) || !(await persistConversation())) return;
+      state.view = 'studio';
+      closeNavigation();
+      projectUI.render();
+      await studioUI.open();
+    } catch (error) {
+      notice(error.message);
+    } finally {
+      state.loadingHistory = false;
+      updateControls();
+    }
+  });
+}
+$('studio-open').onclick = () => showStudio();
 async function newConversation(projectId = state.projectId || 'inbox') {
   if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)
     return;
