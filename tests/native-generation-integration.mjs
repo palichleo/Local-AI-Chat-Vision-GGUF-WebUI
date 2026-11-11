@@ -142,6 +142,8 @@ test(
     };
     try {
       app = await createApplication({
+        // The scripted model writes three-word prompts: the length of a prompt is tested apart.
+        fullPrompts: false,
         port: 0,
         dataDir: root,
         outputDir,
@@ -294,6 +296,8 @@ test(
     };
     try {
       app = await createApplication({
+        // The scripted model writes three-word prompts: the length of a prompt is tested apart.
+        fullPrompts: false,
         port: 0,
         dataDir: root,
         outputDir,

@@ -5,6 +5,8 @@ import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
 import { citedMessage, citedUnused } from './lib/cited-resources.mjs';
 import { briefMessage, briefMissing } from './lib/video-brief.mjs';
+import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
+import { THIN_NOTE, passedImages, thinPrompt } from './lib/thin-prompt.mjs';
 import { outputToolFor, readOutput } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
 import { countContext } from './lib/context-count.mjs';
@@ -191,6 +193,8 @@ export async function createApplication({
   managed = false,
   // Starts the launcher again (POST /api/relaunch); tests pass their own.
   launcher = startLauncher,
+  // A generation call with a two-line prompt is sent back once (lib/thin-prompt.mjs).
+  fullPrompts = true,
   currentSources = appSources,
   controlTimeoutMs = 15000,
   controlHeartbeatMs = 10000,
@@ -1529,8 +1533,33 @@ export async function createApplication({
           } else {
             const call = nativeFields({ role: 'assistant', tool_calls: calls }).tool_calls[0];
             let request;
+            // Images passed to the generator and never looked at: the model sees them first.
+            const unseen =
+              engine.vision && body.resources !== false && /^[0-9a-f-]{36}$/.test(body.turnId || '')
+                ? unseenResources(body.messages, await resources.catalog(), call)
+                : [];
+            if (unseen.length && (resourceTurns.get(body.turnId) || 0) + unseen.length <= 8) {
+              resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + unseen.length);
+              if (resourceTurns.size > 256) resourceTurns.delete(resourceTurns.keys().next().value);
+              // For a video not agreed on yet, the plan put to the user is written right after.
+              const brief = briefMissing(body.messages, call);
+              await emit({
+                local_tool_request: {
+                  kind: 'resource',
+                  call,
+                  resourceId: unseen[0].id,
+                  resourceIds: unseen.map(item => item.id),
+                  workflowName: unseen.map(item => item.label + ' · ' + item.name).join(', '),
+                  note: brief
+                    ? 'You now see the images below. ' +
+                      briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []))
+                    : SEEN_NOTE,
+                  brief,
+                },
+              });
+            }
             // A video is agreed on first: the model writes its short plan and its questions.
-            if (briefMissing(body.messages, call))
+            else if (briefMissing(body.messages, call))
               await emit({
                 local_tool_request: {
                   kind: 'brief',
@@ -1538,7 +1567,24 @@ export async function createApplication({
                   message: briefMessage(await runtime.tools.lengths(call.function.name).catch(() => [])),
                 },
               });
-            else
+            // A prompt of two lines: sent back once, with the images it is about shown again.
+            else if (fullPrompts && thinPrompt(body.messages, call)) {
+              const images = engine.vision && body.resources !== false ? passedImages(await resources.catalog(), call) : [];
+              const room = /^[0-9a-f-]{36}$/.test(body.turnId || '') && (resourceTurns.get(body.turnId) || 0) + images.length <= 8;
+              if (images.length && room) {
+                resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + images.length);
+                await emit({
+                  local_tool_request: {
+                    kind: 'resource',
+                    call,
+                    resourceId: images[0].id,
+                    resourceIds: images.map(item => item.id),
+                    workflowName: images.map(item => item.label + ' · ' + item.name).join(', '),
+                    note: THIN_NOTE,
+                  },
+                });
+              } else await emit({ local_tool_request: { kind: 'retry', call, message: THIN_NOTE } });
+            } else
               try {
                 // An image the user named by its label and the model left out: said once.
                 const unused = citedUnused(body.messages, await resources.catalog(), call);

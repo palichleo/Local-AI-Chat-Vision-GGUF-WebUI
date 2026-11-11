@@ -1507,6 +1507,18 @@ async function sendMessage(event) {
       if (!output) view.body.replaceChildren();
       output = '';
       reasoning = '';
+      if (request.kind === 'retry') {
+        // Sent back before any generation with what to improve: the model makes its call again.
+        history.push({
+          role: 'tool',
+          tool_call_id: request.call.id,
+          content: JSON.stringify({ status: 'nothing_generated', message: request.message }),
+        });
+        state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+        await persistConversation();
+        finishReason = '';
+        continue;
+      }
       if (request.kind === 'brief') {
         // A video is agreed on before it is generated: the model now writes its short plan and
         // its questions, without tools, and the user's answer starts the generation.
@@ -1660,7 +1672,8 @@ async function sendMessage(event) {
             role: 'tool',
             tool_call_id: request.call.id,
             content: JSON.stringify({
-              status: 'loaded',
+              // Shown before a generation the model asked for: said first, so it is not taken for a result.
+              ...(request.note ? { status: 'nothing_generated', message: request.note } : { status: 'loaded' }),
               resources: metadata,
               note: 'Pixels disponibles uniquement dans ce tour. Relire les ressources pour une comparaison visuelle ultérieure.',
             }),
@@ -1693,6 +1706,12 @@ async function sendMessage(event) {
           resourceReads = 8;
           if (signal.aborted) throw error;
           view.note.textContent = error.message;
+        }
+        if (request.brief) {
+          // The images were shown before a video not agreed on yet: the model now writes its plan.
+          allowTools = false;
+          resourceReads = 8;
+          briefing = true;
         }
         state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
         await persistConversation();
