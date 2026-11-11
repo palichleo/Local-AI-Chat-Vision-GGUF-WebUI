@@ -77,3 +77,16 @@ test('conversation alignment follows scrollbar changes and handles the hidden we
   update();
   assert.deepEqual(values.at(-1), ['--chat-scrollbar', '6px']);
 });
+
+test('a new conversation suggests what the application makes: an image, a video, or starting from an image', async () => {
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  const cards = html.match(/<div class="suggestions">.*?<\/div>/s)[0];
+  const titles = [...cards.matchAll(/<strong>(.*?)<\/strong>/g)].map(match => match[1]);
+  assert.deepEqual(titles, ['Créer une image', 'Créer une vidéo', 'Partir d’une image']);
+  // Two of them start the request in the message box, the third opens the file chooser.
+  assert.deepEqual(
+    [...cards.matchAll(/data-prompt="(.*?)"/g)].map(match => match[1]),
+    ['Crée une image : ', 'Crée une vidéo de 5 secondes : '],
+  );
+  assert.match(cards, /<button id="suggest-image">/);
+});
