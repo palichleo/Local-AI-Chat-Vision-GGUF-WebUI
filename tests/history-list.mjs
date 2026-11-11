@@ -379,6 +379,53 @@ test('Home locks navigation while pending descriptions and saves complete', asyn
   assert.equal(state.loadingHistory, false);
   assert.equal(state.view, 'home');
 });
+test('the Studio is unlocked while its tools load: a mode opened at once is not refused', async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    state = { status: {}, view: 'chat' },
+    document = { body: { dataset: {} } };
+  let loaded, pending, lockedWhileLoading;
+  const tools = new Promise(resolve => {
+      loaded = resolve;
+    }),
+    context = {
+      ...sessionCopies,
+      requestSettingsClose: action => {
+        pending = action();
+      },
+      state,
+      document,
+      $: () => ({ setAttribute() {} }),
+      updateControls() {},
+      notice() {},
+      assetsUI: { flush: async () => true },
+      persistConversation: async () => true,
+      projectUI: { render() {} },
+      // GET /api/studio takes seconds; the banners are on screen meanwhile.
+      studioUI: {
+        open() {
+          lockedWhileLoading = state.loadingHistory;
+          return tools;
+        },
+      },
+    };
+  runInNewContext(
+    source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
+      ';this.studio=showStudio;',
+    context,
+  );
+  try {
+    context.studio();
+    assert.equal(state.loadingHistory, true, 'locked while the conversation is saved');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(state.view, 'studio');
+    // What the Studio asks before it unloads the chat model or starts a generation.
+    assert.equal(lockedWhileLoading, false);
+    assert.equal(state.loadingHistory, false);
+  } finally {
+    loaded();
+    await pending;
+  }
+});
 test('a deferred Home action never hides a response that started while settings confirmation was pending', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     state = { status: {}, view: 'chat' };

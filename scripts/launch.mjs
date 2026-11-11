@@ -13,6 +13,9 @@ export async function runLauncher({
   // Started by the application itself (/api/relaunch): a moment of activity in the page (a
   // conversation saved, the context counted) is waited out instead of ending the relaunch.
   waitIdle = 0,
+  // How long an instance may take to say who it is. An instance of an earlier version reads its
+  // whole workflow catalog to answer, seconds of it while its model loads.
+  answerTimeout = 10000,
   signal = new AbortController().signal,
 } = {}) {
   if (Number(process.versions.node.split('.')[0]) < 22) throw Error('Node.js 22 ou plus récent est requis.');
@@ -24,18 +27,21 @@ export async function runLauncher({
     reader,
     boot,
     restarting = false;
-  async function bootstrap() {
-    let response;
+  // The port is held, but no answer came in time: never the same as nothing listening there.
+  const SILENT = Symbol('silent');
+  /** Who answers on the port: an instance, null when nothing listens, SILENT when it is late. */
+  async function bootstrap(wait = answerTimeout) {
+    let response, value;
     try {
-      response = await fetch(url + '/api/bootstrap', { signal: AbortSignal.any([signal, AbortSignal.timeout(1000)]) });
+      response = await fetch(url + '/api/bootstrap?brief=1', {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(wait)]),
+      });
+      value = await response.json();
     } catch (error) {
       signal.throwIfAborted();
-      return null;
+      if (error.name === 'TimeoutError') return SILENT;
+      if (!response) return null;
     }
-    let value;
-    try {
-      value = await response.json();
-    } catch {}
     if (!response.ok || value?.application !== 'atelier-local' || typeof value.token !== 'string')
       throw Error(
         `Le port ${port} est occupé par un autre service ou une ancienne instance. Aucun processus n’a été arrêté.`,
@@ -47,7 +53,7 @@ export async function runLauncher({
     while (Date.now() < end) {
       signal.throwIfAborted();
       const value = await bootstrap();
-      if (value && value.token !== previousToken) return value;
+      if (value && value !== SILENT && value.token !== previousToken) return value;
       if (!previousToken && (childError || childExited))
         throw childError || Error('Le serveur s’est arrêté au lancement.');
       await delay(100, undefined, { signal });
@@ -57,6 +63,11 @@ export async function runLauncher({
   try {
     signal.throwIfAborted();
     boot = await bootstrap();
+    // Starting a second server here would only fail on the port, after its startup housekeeping.
+    if (boot === SILENT)
+      throw Error(
+        `Le port ${port} est tenu par un programme qui ne répond pas : une instance d’Atelier local très occupée, ou un autre service. Aucun processus n’a été arrêté. Réessayez dans un instant.`,
+      );
     const sources = await appSources(root),
       local = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
     if (boot) {
@@ -96,6 +107,8 @@ export async function runLauncher({
             );
           await delay(500, undefined, { signal });
           const again = await bootstrap();
+          // Late to answer: still the same instance, asked again at the next turn.
+          if (again === SILENT) continue;
           if (!again || again.token !== boot.token)
             throw Error('L’instance a changé pendant la relance. Relancez le lanceur.');
           boot = again;
@@ -111,9 +124,13 @@ export async function runLauncher({
         await response.body?.cancel();
         const deadline = Date.now() + 15000;
         while (Date.now() < deadline) {
-          boot = await bootstrap();
-          if (!boot) break;
-          if (boot.token !== previousToken)
+          const seen = await bootstrap(1000);
+          // Gone only once nothing listens: an instance late to answer is still closing.
+          if (!seen) {
+            boot = null;
+            break;
+          }
+          if (seen !== SILENT && seen.token !== previousToken)
             throw Error('Une autre instance a démarré pendant la relance. Relancez le lanceur.');
           await delay(100, undefined, { signal });
         }
@@ -188,11 +205,12 @@ export async function runLauncher({
         const deadline = Date.now() + 1500;
         let live;
         while (Date.now() < deadline) {
-          live = await bootstrap();
-          if (live?.token === boot.token) break;
+          live = await bootstrap(1500);
+          if (live === SILENT || live?.token === boot.token) break;
           await delay(100, undefined, { signal });
         }
-        if (live?.token === boot.token) {
+        // An instance late to answer is still there: the control stream is asked for again.
+        if (live === SILENT || live?.token === boot.token) {
           console.log('Reconnexion au serveur local…');
           continue;
         }
@@ -229,6 +247,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
+    // Started by the application in a window of its own, which closes with this process: the
+    // message stays on screen until a key is pressed.
+    if (process.argv.includes('--wait-idle') && process.stdin.isTTY && process.stdout.isTTY) {
+      console.error('\nAppuyez sur Entrée pour fermer cette fenêtre.');
+      await new Promise(resolve => process.stdin.once('data', resolve));
+      process.stdin.pause();
+    }
   } finally {
     for (const signal of signals) process.off(signal, stop);
   }

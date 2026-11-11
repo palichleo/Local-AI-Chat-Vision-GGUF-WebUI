@@ -141,6 +141,94 @@ test('the format frame keeps the ratio and fits its box, wide or tall', async ()
   }
 });
 
+test('leaving a mode stops following the size of its frame', async () => {
+  // Just enough of a page for the Studio to draw itself.
+  class Element {
+    children = [];
+    style = {};
+    dataset = {};
+    classList = { toggle() {}, add() {} };
+    append(...nodes) {
+      this.children.push(...nodes);
+    }
+    replaceChildren(...nodes) {
+      this.children = nodes;
+    }
+    add(option) {
+      this.children.push(option);
+    }
+    setAttribute() {}
+    querySelector() {
+      return new Element();
+    }
+    querySelectorAll() {
+      return [];
+    }
+  }
+  const page = Object.fromEntries(
+    ['studio-view', 'studio-modes', 'studio-back', 'studio-title', 'studio-summary', 'studio-body'].map(id => [
+      id,
+      new Element(),
+    ]),
+  );
+  const observers = [];
+  const globals = {
+    document: { getElementById: id => page[id] ?? null, querySelector: () => null },
+    Option: class {},
+    ResizeObserver: class {
+      constructor(callback) {
+        Object.assign(this, { callback, watched: null });
+        observers.push(this);
+      }
+      observe(target) {
+        this.watched = target;
+      }
+      disconnect() {
+        this.watched = null;
+      }
+    },
+  };
+  const before = Object.fromEntries(Object.keys(globals).map(key => [key, globalThis[key]]));
+  Object.assign(globalThis, globals);
+  try {
+    const { setupStudio } = await import('../public/studio.mjs');
+    const limits = { width: { min: 256, max: 2048, multipleOf: 32 }, height: { min: 256, max: 2048, multipleOf: 32 } };
+    const info = {
+      enabled: true,
+      conversationId: STUDIO_ID,
+      styles: [],
+      tools: {
+        create_image: [
+          { id: 'w', name: 'Image', roles: {}, limits, size: { width: 1024, height: 1024 }, settings: [], seeded: true },
+        ],
+      },
+    };
+    const studio = setupStudio({
+      api: async route => ({ json: async () => (route === 'studio' ? info : { runs: [] }) }),
+      node: () => new Element(),
+      icon: () => new Element(),
+      notice() {},
+      assets: {},
+      viewOutput() {},
+      waitForModel: async () => {},
+      blocked: () => '',
+      onChange() {},
+    });
+    await studio.open();
+    const [image] = page['studio-modes'].children;
+    image.onclick();
+    const following = observers.at(-1);
+    assert.ok(following.watched, 'the frame follows its stage while the mode is open');
+    page['studio-back'].onclick();
+    assert.equal(page['studio-body'].dataset.mode, '');
+    // Still watched, the stage was reported once more as it left, and no mode had a format to read.
+    assert.equal(following.watched, null);
+    assert.ok(observers.every(observer => !observer.watched));
+  } finally {
+    Object.assign(globalThis, before);
+  }
+});
+
 test('a Studio generation unloads the chat model and leaves it unloaded; a conversation gets it back', async () => {
   const turn = 'a1111111-1111-4111-8111-111111111111';
   const workflow = {

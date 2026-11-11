@@ -35,6 +35,16 @@ test('bootstrap identifies Atelier and exposes launcher attachment state', async
   assert.equal(boot.application, 'atelier-local');
   assert.equal(boot.controlled, false);
 });
+test('the launcher gets a short answer: who runs here, without the workflow catalog', async t => {
+  const { app, boot } = await fixture(t);
+  const brief = await (await fetch(app.url + '/api/bootstrap?brief=1')).json();
+  for (const key of ['application', 'installationId', 'sourceRevision', 'token', 'version', 'controlled', 'updating'])
+    assert.deepEqual(brief[key], boot[key], key);
+  assert.equal(brief.status.state, 'stopped');
+  assert.equal(brief.status.busy, false);
+  for (const key of ['workflows', 'generation', 'config', 'models']) assert.equal(key in brief, false, key);
+  assert.ok(Array.isArray(boot.workflows), 'the page still gets everything');
+});
 test('closing the launcher control connection stops the application and releases its port', async t => {
   const { app, api } = await fixture(t);
   assert.equal((await api('lifecycle', undefined, 'wrong')).status, 401);

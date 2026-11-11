@@ -545,6 +545,20 @@ export async function createApplication({
         return res.end();
       }
       if (path === '/api/bootstrap' && req.method === 'GET') {
+        // Who answers on this port, for the launcher and the update installer: said from memory
+        // alone. The page's answer below reads the workflow catalog and checks its files, which
+        // takes most of a second, and several at once while the model loads.
+        if (requestURL.searchParams.get('brief') === '1')
+          return send(200, {
+            application: 'atelier-local',
+            ...sources,
+            controlled: !!controlResponse,
+            token,
+            status: status(),
+            version: applicationVersion,
+            updateNonce: process.env.ATELIER_UPDATE_NONCE || '',
+            updating: applyingUpdate,
+          });
         const native = await generation.snapshot();
         return send(200, {
           application: 'atelier-local',

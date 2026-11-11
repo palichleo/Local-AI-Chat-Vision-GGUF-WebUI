@@ -233,7 +233,7 @@ test('launcher reconnects after a transient control stream failure instead of cl
     { version } = JSON.parse(await readFile(join(project, 'package.json'), 'utf8'));
   let streams = 0;
   const server = http.createServer((req, res) => {
-    if (req.url === '/api/bootstrap') {
+    if (req.url.startsWith('/api/bootstrap')) {
       res.setHeader('content-type', 'application/json');
       return res.end(
         JSON.stringify({
@@ -260,6 +260,51 @@ test('launcher reconnects after a transient control stream failure instead of cl
   try {
     await runLauncher({ port: server.address().port, signal: AbortSignal.timeout(5000) });
     assert.equal(streams, 2);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('an instance slow to say who it is is still found: no second server is started', async () => {
+  const { runLauncher } = await import('../scripts/launch.mjs'),
+    sources = await appSources(project),
+    { version } = JSON.parse(await readFile(join(project, 'package.json'), 'utf8'));
+  const asked = [];
+  // Slower than the second the launcher used to wait: it then took the port for free.
+  const server = http.createServer((req, res) => {
+    asked.push(req.url);
+    setTimeout(() => {
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({ application: 'atelier-local', token: 'slow-test', controlled: true, ...sources, version }),
+      );
+    }, 1300);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    await runLauncher({ port: server.address().port, signal: AbortSignal.timeout(8000) });
+    // Asked once, with the short answer; found open and left alone.
+    assert.deepEqual(asked, ['/api/bootstrap?brief=1']);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('a port held by a program that never answers is reported and nothing is started', async () => {
+  const { runLauncher } = await import('../scripts/launch.mjs');
+  let asked = 0;
+  const server = http.createServer(() => {
+    asked++;
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    await assert.rejects(
+      runLauncher({ port: server.address().port, answerTimeout: 300, signal: AbortSignal.timeout(5000) }),
+      /ne répond pas.*Aucun processus/,
+    );
+    assert.equal(asked, 1);
   } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
@@ -353,7 +398,7 @@ test('a stale launcher never shuts down another installation or a busy conversat
       let shutdowns = 0;
       const server = http.createServer((req, res) => {
         res.setHeader('content-type', 'application/json');
-        if (req.url === '/api/bootstrap')
+        if (req.url.startsWith('/api/bootstrap'))
           return res.end(
             JSON.stringify({
               application: 'atelier-local',

@@ -78,8 +78,9 @@ async function restart(expectedVersion) {
     while (Date.now() < deadline) {
       if (spawnError || exited) throw spawnError || new Error('La nouvelle application s’est arrêtée.');
       try {
-        const response = await fetch(`http://127.0.0.1:${plan.port}/api/bootstrap`, {
-          signal: AbortSignal.timeout(1000),
+        // The short answer: the full one reads the workflow catalog and can take over a second.
+        const response = await fetch(`http://127.0.0.1:${plan.port}/api/bootstrap?brief=1`, {
+          signal: AbortSignal.timeout(5000),
         });
         const data = await response.json();
         if (data.version === expectedVersion && data.updateNonce === nonce) {

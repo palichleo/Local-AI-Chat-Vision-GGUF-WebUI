@@ -2237,12 +2237,18 @@ function showStudio() {
       state.view = 'studio';
       closeNavigation();
       projectUI.render();
-      await studioUI.open();
     } catch (error) {
-      notice(error.message);
+      return notice(error.message);
     } finally {
       state.loadingHistory = false;
       updateControls();
+    }
+    // The tools load once the view is shown, outside the lock: the banners are already there,
+    // and a mode opened at once must free the GPU at once (the Studio asks `blocked` first).
+    try {
+      await studioUI.open();
+    } catch (error) {
+      notice(error.message);
     }
   });
 }
