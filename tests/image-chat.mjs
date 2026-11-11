@@ -228,7 +228,8 @@ test('image generation finishes without automatic pixels or review, while denial
   assert.equal(result.requests[1].messages.at(-1).role, 'tool');
   assert.doesNotMatch(JSON.stringify(result.requests), /base64/);
   const denied = await exchange({ denied: true, images: [] });
-  assert.equal(denied.requests[1].tools, false);
+  // A refusal ends the turn: the model is not asked to comment on it.
+  assert.equal(denied.requests.length, 1);
   assert.equal(denied.reviews.length, 0);
   assert.ok(
     denied.state.messages.some(m => m.role === 'tool' && m.tool_call_id === call.id && m.content.includes('denied')),

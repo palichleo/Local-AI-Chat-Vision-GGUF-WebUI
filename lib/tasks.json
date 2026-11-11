@@ -16,7 +16,7 @@
   "create_video": {
     "output": "video",
     "summary": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images.",
-    "guidance": "Propose a video only when the user asks for one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits.",
+    "guidance": "Propose a video only when the user asks for one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits. Before generating, agree on the video with the user in a short message (a few lines, no tool): how you understand the clip, the length in seconds, what each image is used for, and only the questions still open; call this tool once they answered.",
     "prompt": "Complete description of the clip: action, camera movement, style and, if wanted, sound. Naming an image here does not show it to the video model.",
     "roles": {
       "start_image": {
@@ -37,7 +37,7 @@
   "extend_video": {
     "output": "video",
     "summary": "Continue an existing video with a new shot that follows its last frames.",
-    "guidance": "Every video is shown to the user, who can edit it before it runs.",
+    "guidance": "Every video is shown to the user, who can edit it before it runs. Before generating, agree with the user in a short message (no tool) on what happens next and for how many seconds; call this tool once they answered.",
     "prompt": "What happens next in the continuation.",
     "roles": {
       "source": { "media": ["video"], "required": true, "description": "Video to continue." }

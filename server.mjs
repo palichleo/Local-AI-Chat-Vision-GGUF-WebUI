@@ -4,6 +4,7 @@ import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
 import { citedMessage, citedUnused } from './lib/cited-resources.mjs';
+import { briefMessage, briefMissing } from './lib/video-brief.mjs';
 import { outputToolFor, readOutput } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
 import { countContext } from './lib/context-count.mjs';
@@ -1528,18 +1529,28 @@ export async function createApplication({
           } else {
             const call = nativeFields({ role: 'assistant', tool_calls: calls }).tool_calls[0];
             let request;
-            try {
-              // An image the user named by its label and the model left out: said once.
-              const unused = citedUnused(body.messages, await resources.catalog(), call);
-              if (unused.length) throw problem(citedMessage(unused), 400);
-              request = await runtime.request(calls, {
-                conversationId: body.conversationId,
-                turnId: body.turnId,
-                messages: body.messages,
+            // A video is agreed on first: the model writes its short plan and its questions.
+            if (briefMissing(body.messages, call))
+              await emit({
+                local_tool_request: {
+                  kind: 'brief',
+                  call,
+                  message: briefMessage(await runtime.tools.lengths(call.function.name).catch(() => [])),
+                },
               });
-            } catch (error) {
-              await rejectCall(call, error);
-            }
+            else
+              try {
+                // An image the user named by its label and the model left out: said once.
+                const unused = citedUnused(body.messages, await resources.catalog(), call);
+                if (unused.length) throw problem(citedMessage(unused), 400);
+                request = await runtime.request(calls, {
+                  conversationId: body.conversationId,
+                  turnId: body.turnId,
+                  messages: body.messages,
+                });
+              } catch (error) {
+                await rejectCall(call, error);
+              }
             if (request) await emit({ local_tool_request: request });
           }
         }

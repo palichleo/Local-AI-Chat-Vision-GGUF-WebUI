@@ -1416,6 +1416,7 @@ async function sendMessage(event) {
       iterations = 0,
       invalidCalls = 0,
       resourceReads = 0,
+      briefing = false,
       reviewRecord = null;
     while (true) {
       signal.throwIfAborted();
@@ -1431,7 +1432,8 @@ async function sendMessage(event) {
         {
           ...chatRequest(history, allowTools, resourceReads < 8),
           // Only deciding whether to chain another tool: thinking would cost seconds for nothing shown.
-          ...(silent ? { thinking: false } : {}),
+          // A plan put to the user before a video is a few lines: no thinking either.
+          ...(silent || briefing ? { thinking: false } : {}),
           conversationId: state.conversationId,
           turnId,
         },
@@ -1505,6 +1507,22 @@ async function sendMessage(event) {
       if (!output) view.body.replaceChildren();
       output = '';
       reasoning = '';
+      if (request.kind === 'brief') {
+        // A video is agreed on before it is generated: the model now writes its short plan and
+        // its questions, without tools, and the user's answer starts the generation.
+        history.push({
+          role: 'tool',
+          tool_call_id: request.call.id,
+          content: JSON.stringify({ status: 'waiting_for_user', message: request.message }),
+        });
+        allowTools = false;
+        resourceReads = 8;
+        briefing = true;
+        state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+        await persistConversation();
+        finishReason = '';
+        continue;
+      }
       if (request.kind === 'invalid') {
         // Refused before any read or generation: the model learns why and may correct its call;
         // after a second refusal it must answer without tools, so a turn can never loop.
@@ -1744,6 +1762,12 @@ async function sendMessage(event) {
             ...reviewImages.map(url => ({ type: 'image_url', image_url: { url } })),
           ],
         });
+      }
+      if (result.denied) {
+        // Refused in the confirmation window: the turn ends there, without an analysis of the
+        // refusal. The model keeps it in its context for what the user asks next.
+        complete = true;
+        break;
       }
       if (result.failed && state.status.state !== 'ready')
         throw Error(result.error || 'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');

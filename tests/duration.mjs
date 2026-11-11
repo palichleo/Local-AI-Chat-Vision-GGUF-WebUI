@@ -176,6 +176,11 @@ test('a clip length the model made up is recognised: nobody spoke of a length', 
   ])
     assert.equal(inventedLength([user(text)]), false, text);
   assert.equal(inventedLength([user('10 secondes'), { role: 'assistant', content: 'ok' }, user('refais-la')]), false);
+  // A length the model proposed and the user answered was agreed on.
+  const agreed = [user(request), { role: 'assistant', content: 'Je propose 8 secondes. On y va ?' }, user('go')];
+  assert.equal(inventedLength(agreed), false);
+  // What the application says for the user (a review prompt) is not the user speaking.
+  assert.equal(inventedLength([user(request), { role: 'user', internal: true, content: 'frame_times 0 s' }]), true);
   // An output button asks without a conversation: its length is not the model's.
   assert.equal(inventedLength([]), false);
   assert.equal(inventedLength([{ role: 'assistant', content: 'une vidéo' }]), false);
