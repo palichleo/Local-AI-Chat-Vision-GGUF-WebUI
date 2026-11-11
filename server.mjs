@@ -3,6 +3,7 @@ import { Projects, projectId } from './lib/projects.mjs';
 import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
+import { citedMessage, citedUnused } from './lib/cited-resources.mjs';
 import { outputToolFor, readOutput } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
 import { countContext } from './lib/context-count.mjs';
@@ -1513,6 +1514,9 @@ export async function createApplication({
             const call = nativeFields({ role: 'assistant', tool_calls: calls }).tool_calls[0];
             let request;
             try {
+              // An image the user named by its label and the model left out: said once.
+              const unused = citedUnused(body.messages, await resources.catalog(), call);
+              if (unused.length) throw problem(citedMessage(unused), 400);
               request = await runtime.request(calls, {
                 conversationId: body.conversationId,
                 turnId: body.turnId,

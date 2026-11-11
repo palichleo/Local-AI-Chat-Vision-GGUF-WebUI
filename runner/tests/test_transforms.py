@@ -9,6 +9,37 @@ import unittest
 HAVE = all(importlib.util.find_spec(name) for name in ('torch', 'PIL', 'av', 'imageio_ffmpeg', 'safetensors'))
 
 
+@unittest.skipUnless(
+    all(importlib.util.find_spec(name) for name in ('numpy', 'imageio_ffmpeg')), 'numpy and imageio-ffmpeg are required'
+)
+class VideoWriterTests(unittest.TestCase):
+    def test_a_sound_shorter_than_the_picture_costs_no_frame(self):
+        """A video made by ComfyUI has a sound track a few milliseconds shorter than its picture."""
+        import imageio_ffmpeg
+        import numpy as np
+
+        from runner.video.stream import VideoWriter
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            sound = root / 'sound.mp4'
+            subprocess.run(
+                [imageio_ffmpeg.get_ffmpeg_exe(), '-v', 'error', '-y', '-f', 'lavfi', '-i',
+                 'testsrc=size=64x48:rate=24:duration=1', '-f', 'lavfi', '-i', 'sine=duration=1',
+                 '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', str(sound)],
+                check=True,
+            )  # fmt: skip
+            noise = np.random.default_rng(0)
+            for name, audio in (('with-sound.mp4', sound), ('silent.mp4', None)):
+                writer = VideoWriter(root / name, 320, 192, 24)
+                for _ in range(41):
+                    writer.write(noise.integers(0, 255, (192, 320, 3), dtype=np.uint8))
+                writer.close(audio_from=audio)
+                frames, seconds = imageio_ffmpeg.count_frames_and_secs(str(root / name))
+                self.assertEqual(frames, 41, name)
+                self.assertAlmostEqual(seconds, 41 / 24, delta=0.05)
+
+
 @unittest.skipUnless(HAVE, 'torch, Pillow, PyAV and imageio-ffmpeg are required')
 class TransformTests(unittest.TestCase):
     def setUp(self):

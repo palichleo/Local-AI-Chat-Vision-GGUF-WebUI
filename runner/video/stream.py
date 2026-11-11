@@ -65,6 +65,7 @@ class VideoWriter:
 
         self.path = Path(path)
         self.size = (width, height)
+        self.fps = float(fps)
         self.count = 0
         self._writer = imageio_ffmpeg.write_frames(
             str(self.path),
@@ -92,9 +93,14 @@ class VideoWriter:
         if audio_from:
             muxed = self.path.with_name(self.path.stem + '.mux' + self.path.suffix)
             try:
+                # Every frame written stays: the sound is cut to the length of the picture as it is
+                # read. (`-shortest` ends the file when the sound runs out, and drops the frames
+                # still waiting to be written: four of 121 when the sound is 30 ms shorter.)
                 _ffmpeg(
                     '-i',
                     self.path,
+                    '-t',
+                    f'{self.count / self.fps:.6f}',
                     '-i',
                     audio_from,
                     '-map',
@@ -105,7 +111,6 @@ class VideoWriter:
                     'copy',
                     '-c:a',
                     'aac',
-                    '-shortest',
                     '-movflags',
                     '+faststart',
                     muxed,

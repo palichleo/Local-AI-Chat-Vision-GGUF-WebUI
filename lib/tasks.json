@@ -2,7 +2,7 @@
   "create_image": {
     "output": "image",
     "summary": "Create a new image from a description, or modify an image.",
-    "guidance": "Use only when the user asks for an image to be produced or changed; writing or improving a prompt alone does not mean generating.",
+    "guidance": "Use only when the user asks for an image to be produced or changed; writing or improving a prompt alone does not mean generating. The image model only sees the images passed in source and reference: an image that is only described in the prompt is not used.",
     "prompt": "Complete description of the image to produce (subject, composition, style, lighting).",
     "roles": {
       "source": { "media": ["image"], "description": "Image to modify. Omit to create a new image." },
@@ -16,15 +16,21 @@
   "create_video": {
     "output": "video",
     "summary": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images.",
-    "guidance": "Propose a video only when the user asks for one. Every video is shown to the user, who can edit it before it runs.",
-    "prompt": "Complete description of the clip: action, camera movement, style and, if wanted, sound.",
+    "guidance": "Propose a video only when the user asks for one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits.",
+    "prompt": "Complete description of the clip: action, camera movement, style and, if wanted, sound. Naming an image here does not show it to the video model.",
     "roles": {
-      "start_image": { "media": ["image"], "description": "Image the video starts on, as its first frame: the choice to animate an image or to make a video from it." },
-      "end_image": { "media": ["image"], "description": "Image the video ends on." },
+      "start_image": {
+        "media": ["image"],
+        "description": "Image the video starts on, as its first frame: the choice to animate an image or to make a video from it."
+      },
+      "end_image": {
+        "media": ["image"],
+        "description": "Image the video ends on, as its last frame: where the camera or the action arrives. Can be combined with start_image."
+      },
       "reference": {
         "media": ["image"],
         "many": true,
-        "description": "Subject or character images to keep consistent in a new scene. They are not frames of the clip: to animate an image, use start_image."
+        "description": "Images of a person, a character, an object or a place that must appear in the clip, kept as they look. They are not frames of the clip: to animate an image, use start_image."
       }
     }
   },
