@@ -3571,14 +3571,16 @@ dialog::backdrop {
   z-index: 1;
   pointer-events: none;
   opacity: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.5' numOctaves='2' seed='11' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncG type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncB type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='256' height='256' filter='url(%23g)'/%3E%3C/svg%3E");
-  background-size: 340px 340px;
-  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.5' numOctaves='2' seed='11' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='1.35' intercept='-0.175'/%3E%3CfeFuncG type='linear' slope='1.35' intercept='-0.175'/%3E%3CfeFuncB type='linear' slope='1.35' intercept='-0.175'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='256' height='256' filter='url(%23g)'/%3E%3C/svg%3E");
+  /* Tuned by eye on a real generation: the size of the grain is this number (three pixels or so),
+     its strength the opacity below; a harder contrast in the noise looked like dust. */
+  background-size: 400px 400px;
+  mix-blend-mode: soft-light;
   transition: opacity 0.9s ease;
   animation: film-grain 0.64s steps(1) infinite;
 }
 .has-preview > .film-grain {
-  opacity: 0.5;
+  opacity: 0.62;
 }
 @keyframes film-grain {
   0% {

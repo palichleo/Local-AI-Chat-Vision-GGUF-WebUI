@@ -826,6 +826,10 @@ body[data-view='studio'] .chat-header {
   color: #e9f3f8cc;
   text-shadow: 0 1px 6px #0009;
 }
+/* The picture so far says the format better than its name. */
+.studio-frame.has-preview .studio-frame-label {
+  opacity: 0;
+}
 .studio-progress .generation-progress {
   grid-column: 1;
   margin: 0;
