@@ -793,6 +793,19 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
   await client.free();
   assert.deepEqual(tight.seen.freed, [{ unload_models: true }, { unload_models: true, free_memory: true }]);
 
+  // Room is counted after the chat model is back: 12 GiB available do not hold both ComfyUI's
+  // models and a chat model of 8 GiB, which would then answer several times slower.
+  const shared = await comfy(t, { available: 12 * 1024 ** 3 });
+  await service.saveComfy({ enabled: true, baseUrl: shared.baseUrl });
+  client = service.client();
+  await client.preflight(krea());
+  await client.free();
+  assert.deepEqual(shared.seen.freed.splice(0), [{ unload_models: true }]);
+  client = service.client();
+  await client.preflight(krea());
+  await client.free({ reserve: 8 * 1024 ** 3 });
+  assert.deepEqual(shared.seen.freed, [{ unload_models: true }, { unload_models: true, free_memory: true }]);
+
   // A ComfyUI that is not running: said in the settings, and before anything is unloaded.
   const stopped = await service.saveComfy({ enabled: true, baseUrl: 'http://127.0.0.1:9' });
   assert.equal(stopped.comfy.reachable, false);

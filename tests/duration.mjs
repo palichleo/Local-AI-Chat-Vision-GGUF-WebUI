@@ -58,7 +58,7 @@ test('the model asks for seconds; the router picks frames and says when it round
   assert.ok(definitions.create_video.parameters.required.includes('duration'));
   assert.ok(definitions.extend_video.parameters.required.includes('duration'));
   const unset = await tools.route('create_video', { prompt: 'x', intention: 'y', duration: null }, media);
-  assert.equal(unset.args.frames, undefined, 'null leaves the workflow default');
+  assert.equal(unset.args.frames, 124, 'null is the workflow’s standard length');
   assert.equal(definitions.create_video.parameters.properties.frames, undefined, 'no raw frame count');
   assert.match(definitions.extend_video.parameters.properties.duration.description, /new footage/);
   const created = await tools.route('create_video', { prompt: 'x', intention: 'y', duration: 10 }, media);
@@ -125,18 +125,52 @@ test('without a chosen length, a continuation adds one profile-length clip of ne
   assert.equal(fixed.parameters.frames, 124, 'a locked length stays locked');
 });
 
+test('without a length, a draft is the standard clip, not the short one of its profile', async () => {
+  // As LTX is shipped (a draft profile of 25 frames, a standard clip of 121), with MiniMax's numbers.
+  const base = minimax({ policy: 'model', type: 'integer', choices: MINIMAX_FRAMES, default: 243 });
+  const workflow = {
+    ...base,
+    ready: true,
+    profiles: {
+      draft: { parameters: { width: 768, height: 448, frames: 124, fps: 24, steps: 8 } },
+      final: { parameters: { width: 1344, height: 768, frames: 243, fps: 24, steps: 8 } },
+    },
+  };
+  const tools = new ToolCatalog({ list: async () => [workflow] });
+  const created = await tools.route('create_video', { prompt: 'x', intention: 'y', duration: null }, media);
+  assert.equal(created.args.frames, 243);
+  const job = await resolveNativeWorkflow(workflow, created.args, assets, { seed: 1 });
+  assert.equal(job.parameters.frames, 243, 'the standard length');
+  assert.equal(job.parameters.width, 768, 'at the size of the draft');
+  const extended = await tools.route(
+    'extend_video',
+    { prompt: 'x', intention: 'y', duration: null, source: { output: '22222222-2222-4222-8222-222222222222' } },
+    media,
+  );
+  // 22 frames of the source are rendered again: 260 adds 238 new ones, the closest to 243.
+  assert.equal(extended.args.frames, 260);
+  const asked = await tools.route('create_video', { prompt: 'x', intention: 'y', duration: 5 }, media);
+  assert.equal(asked.args.frames, 124, 'a length that was asked for is kept');
+});
+
 test('a clip length the model made up is recognised: nobody spoke of a length', async () => {
   const { inventedLength } = await import('../lib/tool-runtime.mjs');
   const user = content => ({ role: 'user', content });
   const request =
     'je veux une video qui commence avec la fille dans la balencoire, elle pointe vers la droite, puis la caméra va sur l’escalier';
   assert.equal(inventedLength([user(request)]), true);
+  // « court » the verb and « le long de » the place say nothing of a length.
+  for (const text of ['fais une vidéo d’un chien qui court sur la plage', 'elle marche le long de la rivière'])
+    assert.equal(inventedLength([user(text)]), true, text);
   assert.equal(inventedLength([user([{ type: 'text', text: request }])]), true);
   // Any number or word about time keeps the model's answer, here or earlier in the conversation.
   for (const text of [
     'une vidéo de 8 secondes',
     'huit secondes de pluie',
     'plus longue',
+    'un clip très court',
+    'une vidéo courte',
+    'un long plan',
     'a short clip',
     'durée libre',
   ])
