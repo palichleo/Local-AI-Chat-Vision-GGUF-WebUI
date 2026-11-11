@@ -86,7 +86,12 @@ test('roles choose the most specific workflow, and forcing one is still checked'
     route('create_video', { reference: [{ image: 0 }, { image: 1 }, { image: 2 }] }),
     /Aucun workflow/,
   );
-  await assert.rejects(route('create_video', { workflow: 'subject', start_image: { image: 0 } }), /Aucun workflow/);
+  // A named workflow that cannot take the images gives way to one that can, and says so.
+  const moved = await route('create_video', { workflow: 'subject', start_image: { image: 0 } });
+  assert.equal(moved.workflow.id, 'keyframes');
+  assert.match(moved.notes.join(), /subject ne prend pas ces entrées ensemble : keyframes/);
+  assert.equal((await route('create_video', { workflow: 'keyframes' })).workflow.id, 'keyframes', 'named and able');
+  await assert.rejects(route('create_video', { workflow: 'nowhere' }), /ne peut pas exécuter/);
   assert.equal((await route('extend_video', { source: { output: 'video-run' } })).workflow.id, 'continue');
   await assert.rejects(route('extend_video', { source: { image: 0 } }), /Aucun workflow/);
   await assert.rejects(route('extend_video', {}), /needs a source/);
@@ -98,10 +103,34 @@ test('a plain image request goes to Krea 2; MOSS Image runs when the model asks 
   // request: the Krea family is preferred instead, as the everyday image model.
   const tools = catalogOf([{ ...image('moss-image'), pipeline: 'moss' }, image('krea', [slot('source', 'img2img')])]);
   assert.equal((await tools.route('create_image', { prompt: 'un chat' }, media)).workflow.id, 'krea');
+  // Only a family that says what it is the one for is put forward to the model.
+  const choice = (await tools.definitions())[0].function.parameters.properties.workflow.description;
+  assert.match(choice, /Omit it to let the application pick.* Pass moss-image for a poster/);
+  const videos = await catalogOf(workflows).definitions();
+  const video = videos.find(tool => tool.function.name === 'create_video').function.parameters.properties.workflow;
+  assert.doesNotMatch(video.description, / Pass /);
   assert.equal(
     (await tools.route('create_image', { prompt: 'une affiche', workflow: 'moss-image' }, media)).workflow.id,
     'moss-image',
   );
+});
+
+test('MiniMax does not get a start image together with references, even when the model names it', async () => {
+  const minimax = {
+    ...video('minimax', [slot('s', 'start_image'), slot('e', 'end_image'), slot('r1', 'reference_image')]),
+    pipeline: 'minimax_h3',
+  };
+  const ltx = video('ltx', [slot('first', 'start_image'), slot('a', 'msr_image')]);
+  const tools = catalogOf([minimax, ltx]);
+  const both = () => ({ prompt: 'x', intention: 'y', start_image: { image: 0 }, reference: [{ image: 1 }] });
+  assert.equal((await tools.route('create_video', both(), media)).workflow.id, 'ltx');
+  const named = await tools.route('create_video', { ...both(), workflow: 'minimax' }, media);
+  assert.equal(named.workflow.id, 'ltx');
+  assert.match(named.notes.join(), /minimax ne prend pas ces entrées ensemble/);
+  // Alone, MiniMax refuses with the reason instead of failing later in its engine.
+  await assert.rejects(catalogOf([minimax]).route('create_video', both(), media), /do not combine/);
+  const refs = { prompt: 'x', intention: 'y', reference: [{ image: 1 }], workflow: 'minimax' };
+  assert.equal((await tools.route('create_video', refs, media)).workflow.id, 'minimax');
 });
 
 test('arguments are checked against the chosen workflow, never forwarded blindly', async () => {
