@@ -321,7 +321,7 @@ test('leaving a mode stops following the size of its frame', async () => {
 });
 
 /** A runtime with one image workflow, a chat model and a generator that only note what they are asked. */
-function handover({ keepMs, fails = false } = {}) {
+function handover({ keepMs, fails = false, onRun } = {}) {
   const turn = 'a1111111-1111-4111-8111-111111111111';
   const workflow = {
     schemaVersion: 1,
@@ -378,8 +378,9 @@ function handover({ keepMs, fails = false } = {}) {
     clientFactory: () => ({
       status: async () => ({ idle: true }),
       preflight: async () => {},
-      run: async () => {
+      run: async (job, options) => {
         events.push('generate');
+        await onRun?.(options);
         if (fails) throw Error('Mémoire vidéo insuffisante.');
         return { outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] };
       },
@@ -457,4 +458,32 @@ test('a failed Studio creation, a conversation or closing give the whole card ba
   closed.events.length = 0;
   await closed.runtime.close();
   assert.deepEqual(closed.events, ['gpu released']);
+});
+
+test('the picture the generator has so far is kept one at a time, and dropped with the job', async () => {
+  const first = { bytes: Buffer.from([0xff, 0xd8, 0xff, 1]), mime: 'image/jpeg' },
+    second = { bytes: Buffer.from([0xff, 0xd8, 0xff, 2]), mime: 'image/jpeg' };
+  let during;
+  const { runtime, create } = handover({
+    onRun: ({ onProgress }) => {
+      onProgress({ stage: 'generating', step: 1, total: 8 });
+      const before = runtime.status();
+      onProgress({ preview: first });
+      onProgress({ preview: second });
+      const { id, preview, progress } = runtime.status();
+      during = { before: before.preview, preview, progress, kept: runtime.preview(id), other: runtime.preview('x') };
+    },
+  });
+  const status = await create(STUDIO_ID);
+  // Its number only goes with the status; the bytes are asked for apart, for this job alone.
+  assert.equal(during.before, undefined);
+  assert.equal(during.preview, 2);
+  assert.deepEqual(during.kept, { ...second, seq: 2 });
+  assert.equal(during.other, null);
+  // A picture is not a stage of the work: the progress line is not touched by it.
+  assert.doesNotMatch(String(during.progress), /preview|object/i);
+  // Once the creation is there, nothing of it stays in memory.
+  assert.equal(status.preview, undefined);
+  assert.equal(runtime.preview(status.id), null);
+  await runtime.close();
 });

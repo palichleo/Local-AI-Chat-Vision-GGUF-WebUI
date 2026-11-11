@@ -1,5 +1,6 @@
 import { comparedSource, imageCompare, loadSource } from './image-compare.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
+import { livePreview } from './live-preview.mjs';
 
 export function setupGenerationUI({ api, node, openOutput, actions = null, onResize = () => {} }) {
   const cards = new Set(),
@@ -62,7 +63,9 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       finished = false,
       record,
       controller = new AbortController();
-    const slots = new Map();
+    const slots = new Map(),
+      // What the generator has so far, in the first tile.
+      live = livePreview(node, frame);
     function dimensions(width, height, target = first) {
       if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return;
       target.frame.style.aspectRatio = `${width} / ${height}`;
@@ -78,6 +81,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       }
     }
     function settle() {
+      live.clear();
       for (const target of tiles) {
         unwatch(target.figure);
         target.frame.classList.add('is-finished');
@@ -101,9 +105,10 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
     followSize();
     frame.classList.add('is-paused');
     watch(figure, visible => frame.classList.toggle('is-paused', !visible));
-    function progress(value, fraction) {
+    function progress(value, fraction, preview) {
       if (disposed || finished) return;
       followSize();
+      if (preview && !record) live.show(preview);
       // A real fraction replaces the indeterminate shimmer as soon as the job reports one.
       if (Number.isFinite(fraction)) {
         const percent = Math.round(Math.min(1, Math.max(0, fraction)) * 1000) / 10;
@@ -200,6 +205,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
     function image({ record: outputRecord, index, blob }) {
       if (disposed || slots.has(index)) return;
       record = outputRecord;
+      live.clear();
       const target = slots.size ? tile(container, request) : first,
         { frame } = target;
       if (target !== first) tiles.push(target);

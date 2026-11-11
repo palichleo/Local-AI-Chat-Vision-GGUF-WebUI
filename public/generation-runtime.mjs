@@ -346,7 +346,7 @@ export function setupGenerationRuntime({
       while (!['done', 'error', 'cancelled'].includes(job.state)) {
         if (job.record) receiveOriginals(job.record);
         signal.throwIfAborted();
-        onProgress(job.progress, job.fraction);
+        onProgress(job.progress, job.fraction, job.previewUrl);
         await new Promise((resolve, reject) => {
           const timer = setTimeout(() => {
             signal.removeEventListener('abort', abort);

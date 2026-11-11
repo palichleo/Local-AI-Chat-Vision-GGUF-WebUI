@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { ComfyClient, normalizeComfyUrl } from '../lib/comfy-client.mjs';
+import { ComfyClient, normalizeComfyUrl, previewFrame } from '../lib/comfy-client.mjs';
 
 const png = Buffer.from('89504e470d0a1a0a000102030405', 'hex');
 const graph = {
@@ -58,7 +58,8 @@ async function server(t, handler) {
         app.close(error => (error ? reject(error) : resolve()));
       }),
   );
-  return { client: new ComfyClient(`http://127.0.0.1:${app.address().port}`, { pollMs: 1 }), requests };
+  const url = `http://127.0.0.1:${app.address().port}`;
+  return { client: new ComfyClient(url, { pollMs: 1 }), requests, url };
 }
 
 test('normalizes literal loopback HTTP URLs and rejects authority tricks', () => {
@@ -616,4 +617,74 @@ test('selected outputs submit only their upstream branch, excluding unselected p
   });
   assert.deepEqual((await client.run(source, { outputNodes: ['2'] })).outputs, [image]);
   assert.equal(Object.keys(source).length, 4);
+});
+
+const jpegPreview = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(40, 7)]);
+/** A binary message as ComfyUI sends it: the kind of message, the kind of image, the image. */
+const binary = (event, format, image) => {
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(event, 0);
+  head.writeUInt32BE(format, 4);
+  const bytes = Buffer.concat([head, image]);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length);
+};
+
+test('a preview message gives its image; anything else gives nothing', () => {
+  assert.deepEqual(previewFrame(binary(1, 1, jpegPreview)), { bytes: jpegPreview, mime: 'image/jpeg' });
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(20)]);
+  assert.deepEqual(previewFrame(binary(1, 2, png)), { bytes: png, mime: 'image/png' });
+  // Another kind of message, bytes that are no image, a text message, too large a picture.
+  assert.equal(previewFrame(binary(3, 1, jpegPreview)), null);
+  assert.equal(previewFrame(binary(1, 1, Buffer.from('<svg onload=alert(1)>'))), null);
+  assert.equal(previewFrame('{"type":"progress"}'), null);
+  assert.equal(previewFrame(binary(1, 1, Buffer.concat([jpegPreview, Buffer.alloc(3 * 1024 * 1024)]))), null);
+  assert.equal(previewFrame(new ArrayBuffer(4)), null);
+});
+
+test('the picture ComfyUI has so far reaches the caller, and the cheap preview is asked for by name', async t => {
+  const sockets = [];
+  class Socket {
+    constructor(address) {
+      this.address = address;
+      sockets.push(this);
+    }
+    close() {
+      this.closed = true;
+    }
+  }
+  let submitted,
+    polls = 0;
+  const { url } = await server(t, ({ url, body }) => {
+    if (url.pathname === '/prompt') {
+      submitted = JSON.parse(body);
+      return { body: { prompt_id: 'mine' } };
+    }
+    if (url.pathname === '/queue') return { body: queue(['mine']) };
+    if (++polls === 1) {
+      // While it samples: a step, the picture so far, then messages that are not pictures.
+      const [socket] = sockets;
+      socket.onmessage({ data: JSON.stringify({ type: 'progress', data: { value: 3, max: 8, node: '7' } }) });
+      socket.onmessage({ data: binary(1, 1, jpegPreview) });
+      socket.onmessage({ data: binary(3, 1, jpegPreview) });
+      socket.onmessage({ data: binary(1, 1, Buffer.from('not a picture at all')) });
+    }
+    return {
+      body:
+        polls < 2
+          ? {}
+          : { mine: { status: { status_str: 'success', completed: true }, outputs: { 7: { images: [image] } } } },
+    };
+  });
+  const client = new ComfyClient(url, { pollMs: 1, socketImpl: Socket });
+  const seen = [];
+  await client.run(graph, { outputNodes: ['7'], onProgress: entry => seen.push(entry) });
+  // latent2rgb turns the latent into colours without the VAE: no video memory is spent on it.
+  assert.deepEqual(submitted.extra_data, { preview_method: 'latent2rgb' });
+  assert.equal(sockets[0].binaryType, 'arraybuffer');
+  assert.deepEqual(
+    seen.filter(entry => entry.state === 'preview'),
+    [{ state: 'preview', promptId: 'mine', bytes: jpegPreview, mime: 'image/jpeg' }],
+  );
+  assert.ok(seen.some(entry => entry.state === 'step' && entry.value === 3));
+  assert.equal(sockets[0].closed, true);
 });

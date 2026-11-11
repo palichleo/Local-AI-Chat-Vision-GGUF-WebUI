@@ -3502,6 +3502,8 @@ dialog::backdrop {
 }
 .generation-frame::before,
 .generation-frame::after,
+.studio-frame.is-busy:not(.is-audio)::before,
+.studio-frame.is-busy:not(.is-audio)::after,
 .generation-original[aria-busy='true']::before {
   content: '';
   position: absolute;
@@ -3522,8 +3524,10 @@ dialog::backdrop {
   filter: blur(5px);
   animation: generation-flow 3.2s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
   will-change: transform;
+  transition: opacity 0.9s ease;
 }
-.generation-frame::after {
+.generation-frame::after,
+.studio-frame.is-busy:not(.is-audio)::after {
   opacity: 0.7;
   mix-blend-mode: screen;
   animation-duration: 4.1s;
@@ -3532,6 +3536,80 @@ dialog::backdrop {
     radial-gradient(ellipse at 48% 36%, transparent 14%, #dce9f39c 19%, #618eaa88 23%, #0c1a3000 32%),
     radial-gradient(ellipse at 36% 75%, transparent 18%, #b6cfb88c 24%, #516b8588 29%, transparent 39%);
   filter: blur(3px);
+}
+/* The picture so far (live-preview.mjs): under the moving background, which fades to let it
+   through, and under a film grain that sits over everything. */
+.live-preview {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  /* A latent turned into colours is coarse: softened, it reads as a picture coming into focus. */
+  filter: blur(1.2px) saturate(1.08) contrast(1.04);
+  transform: scale(1.03);
+  transition: opacity 0.9s ease;
+}
+.has-preview > .live-preview {
+  opacity: 1;
+}
+.generation-frame.has-preview::before,
+.studio-frame.is-busy.has-preview::before {
+  opacity: 0.4;
+}
+.generation-frame.has-preview::after,
+.studio-frame.is-busy.has-preview::after {
+  opacity: 0.26;
+}
+/* Old-film grain: neither dust nor fine noise, a soft grain of two to three pixels that never
+   sits still. Fractal noise drawn once (an inline SVG), moved a few times a second. */
+.film-grain {
+  position: absolute;
+  inset: -25%;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.5' numOctaves='2' seed='11' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncG type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncB type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='256' height='256' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size: 340px 340px;
+  mix-blend-mode: overlay;
+  transition: opacity 0.9s ease;
+  animation: film-grain 0.64s steps(1) infinite;
+}
+.has-preview > .film-grain {
+  opacity: 0.5;
+}
+@keyframes film-grain {
+  0% {
+    transform: translate(0, 0);
+  }
+  12.5% {
+    transform: translate(-6%, 4%);
+  }
+  25% {
+    transform: translate(5%, -7%);
+  }
+  37.5% {
+    transform: translate(-3%, 8%);
+  }
+  50% {
+    transform: translate(7%, 3%);
+  }
+  62.5% {
+    transform: translate(-8%, -4%);
+  }
+  75% {
+    transform: translate(4%, 6%);
+  }
+  87.5% {
+    transform: translate(-5%, -8%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .film-grain {
+    animation: none;
+  }
 }
 .generation-frame.has-image,
 .generation-frame.is-finished {

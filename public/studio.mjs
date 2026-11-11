@@ -1,5 +1,6 @@
 import { FORMATS, formatOf, nearestSize, sizesFor } from './formats.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
+import { livePreview } from './live-preview.mjs';
 
 /**
  * The Studio: the creation tools used by hand. The user picks Image, Vidéo or Son, writes the
@@ -108,7 +109,8 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     extending = null, // the clip being continued
     failure = '',
     drawn = null, // the size the frame was last drawn at, to ease from
-    watching = null; // follows the size of the stage
+    watching = null, // follows the size of the stage
+    live = null; // { frame, preview } : the picture so far, in the frame now on the page
   const drafts = Object.fromEntries(
     MODES.map(item => [
       item.id,
@@ -593,7 +595,11 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       const jobId = job.id;
       let listed = false;
       while (!['done', 'error', 'cancelled'].includes(job.state)) {
-        Object.assign(working, { label: job.progress || 'Génération…', fraction: job.fraction ?? null });
+        Object.assign(working, {
+          label: job.progress || 'Génération…',
+          fraction: job.fraction ?? null,
+          preview: job.previewUrl ?? working.preview,
+        });
         // The result is shown as soon as it exists, while the chat model reloads.
         if (job.record && !listed) {
           listed = true;
@@ -627,11 +633,22 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     const line = $('studio-progress');
     if (!line || !working) return;
     line.querySelector('.studio-progress-label').textContent = working.label;
-    const bar = line.querySelector('progress');
-    if (working.fraction === null) bar.removeAttribute('value');
-    else bar.value = working.fraction;
-    // The frame fills as the generation advances.
-    document.querySelector('.studio-frame')?.style.setProperty('--progress', String(working.fraction ?? 0));
+    // The bar of a generation in a conversation: indeterminate until the job gives a fraction.
+    const bar = line.querySelector('.generation-progress'),
+      known = working.fraction !== null;
+    bar.classList.toggle('is-determinate', known);
+    if (known) {
+      const percent = Math.round(Math.min(1, Math.max(0, working.fraction)) * 1000) / 10;
+      bar.style.setProperty('--generation-progress', String(percent / 100));
+      bar.style.setProperty('--generation-percent', String(Math.floor(percent)));
+      bar.setAttribute('aria-valuenow', String(Math.round(percent)));
+    }
+    // What the generator has so far, in the frame; the frame is rebuilt with the page.
+    const frame = document.querySelector('.studio-frame');
+    if (frame && working.preview) {
+      if (live?.frame !== frame) live = { frame, preview: livePreview(node, frame) };
+      live.preview.show(working.preview);
+    }
   }
 
   // ------------------------------------------------------------------ results
@@ -970,8 +987,11 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     if (working) {
       const line = node('div', 'studio-progress');
       line.id = 'studio-progress';
-      const bar = node('progress');
-      bar.max = 1;
+      const bar = node('div', 'generation-progress');
+      bar.setAttribute('role', 'progressbar');
+      bar.setAttribute('aria-valuemin', '0');
+      bar.setAttribute('aria-valuemax', '100');
+      bar.append(node('span'));
       line.append(
         node('span', 'studio-progress-label', working.label),
         bar,

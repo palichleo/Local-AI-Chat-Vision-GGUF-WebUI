@@ -60,6 +60,7 @@ const staticFiles = new Map([
   ['/resource-preparation.mjs', ['resource-preparation.mjs', 'text/javascript; charset=utf-8']],
   ['/copy.mjs', ['copy.mjs', 'text/javascript; charset=utf-8']],
   ['/thumbnails.mjs', ['thumbnails.mjs', 'text/javascript; charset=utf-8']],
+  ['/live-preview.mjs', ['live-preview.mjs', 'text/javascript; charset=utf-8']],
   ['/transcript.mjs', ['transcript.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-guard.mjs', ['settings-guard.mjs', 'text/javascript; charset=utf-8']],
   ['/context-meter.mjs', ['context-meter.mjs', 'text/javascript; charset=utf-8']],
@@ -516,6 +517,28 @@ export async function createApplication({
         res.writeHead(200, { 'Content-Type': cover.mime, 'Content-Length': cover.bytes.length });
         return res.end(req.method === 'HEAD' ? undefined : cover.bytes);
       }
+      const livePreview = path.match(/^\/media\/job-preview\/([0-9a-f-]{36})\/[0-9]{1,6}$/);
+      if (livePreview) {
+        if (req.method !== 'GET') throw problem('Méthode non prise en charge.', 405);
+        const key = requestURL.searchParams.get('key') || '';
+        if (
+          !/^[0-9a-f]{64}$/.test(key) ||
+          !timingSafeEqual(Buffer.from(key, 'hex'), Buffer.from(mediaKey(livePreview[1], 'job-preview'), 'hex'))
+        )
+          throw problem('Accès refusé.', 401);
+        // Whatever number was asked, the picture so far: the job may have moved on, or ended.
+        const picture = runtime.preview(livePreview[1]);
+        if (!picture) {
+          res.writeHead(204);
+          return res.end();
+        }
+        res.writeHead(200, {
+          'Content-Type': picture.mime,
+          'Content-Length': picture.bytes.length,
+          'Cache-Control': 'no-store',
+        });
+        return res.end(picture.bytes);
+      }
       const thumb = path.match(/^\/media\/thumbs\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/([0-9]{1,3})$/);
       if (thumb) {
         if (!['GET', 'HEAD'].includes(req.method)) throw problem('Méthode non prise en charge.', 405);
@@ -762,7 +785,17 @@ export async function createApplication({
       }
       if (req.method === 'GET' && path === '/api/tools/job') {
         const job = runtime.status();
-        return send(200, job?.record ? { ...job, record: galleryView(job.record) } : job);
+        return send(
+          200,
+          job && {
+            ...job,
+            ...(job.record ? { record: galleryView(job.record) } : {}),
+            // Its number is in the address: the page loads each new picture once.
+            ...(job.preview
+              ? { previewUrl: `/media/job-preview/${job.id}/${job.preview}?key=${mediaKey(job.id, 'job-preview')}` }
+              : {}),
+          },
+        );
       }
       if (req.method === 'GET' && path.startsWith('/api/gallery/')) {
         const [, , , conversationId, runId, index] = path.split('/');

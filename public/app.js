@@ -1370,8 +1370,8 @@ async function runOutputAction(record, index, action) {
       result = await workflowsUI.requestTool(
         request,
         signal,
-        (progress, fraction) => {
-          generation.progress(progress, fraction);
+        (progress, fraction, preview) => {
+          generation.progress(progress, fraction, preview);
           scrollToBottom();
         },
         image => generation.image(image),
@@ -1892,8 +1892,8 @@ async function sendMessage(event) {
         result = await workflowsUI.requestTool(
           request,
           signal,
-          (progress, fraction) => {
-            generation.progress(progress, fraction);
+          (progress, fraction, preview) => {
+            generation.progress(progress, fraction, preview);
             scrollToBottom();
           },
           image => generation.image(image),
