@@ -107,7 +107,12 @@ test('without a chosen length, a continuation adds one profile-length clip of ne
   const extended = await resolveNativeWorkflow(workflow, { prompt: 'x', intention: 'y', ...source }, assets, options);
   // 124 frames would re-render 22 source frames and add 102: 141 adds 119, the closest to 124.
   assert.equal(extended.parameters.frames, 141);
-  const chosen = await resolveNativeWorkflow(workflow, { prompt: 'x', intention: 'y', frames: 124, ...source }, assets, options);
+  const chosen = await resolveNativeWorkflow(
+    workflow,
+    { prompt: 'x', intention: 'y', frames: 124, ...source },
+    assets,
+    options,
+  );
   assert.equal(chosen.parameters.frames, 124, 'a chosen length is kept');
   const created = await resolveNativeWorkflow(workflow, { prompt: 'x', intention: 'y' }, assets, options);
   assert.equal(created.parameters.frames, 124, 'a new clip keeps the profile length');
@@ -118,4 +123,26 @@ test('without a chosen length, a continuation adds one profile-length clip of ne
     options,
   );
   assert.equal(fixed.parameters.frames, 124, 'a locked length stays locked');
+});
+
+test('a clip length the model made up is recognised: nobody spoke of a length', async () => {
+  const { inventedLength } = await import('../lib/tool-runtime.mjs');
+  const user = content => ({ role: 'user', content });
+  const request =
+    'je veux une video qui commence avec la fille dans la balencoire, elle pointe vers la droite, puis la caméra va sur l’escalier';
+  assert.equal(inventedLength([user(request)]), true);
+  assert.equal(inventedLength([user([{ type: 'text', text: request }])]), true);
+  // Any number or word about time keeps the model's answer, here or earlier in the conversation.
+  for (const text of [
+    'une vidéo de 8 secondes',
+    'huit secondes de pluie',
+    'plus longue',
+    'a short clip',
+    'durée libre',
+  ])
+    assert.equal(inventedLength([user(text)]), false, text);
+  assert.equal(inventedLength([user('10 secondes'), { role: 'assistant', content: 'ok' }, user('refais-la')]), false);
+  // An output button asks without a conversation: its length is not the model's.
+  assert.equal(inventedLength([]), false);
+  assert.equal(inventedLength([{ role: 'assistant', content: 'une vidéo' }]), false);
 });
