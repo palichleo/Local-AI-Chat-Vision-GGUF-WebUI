@@ -215,6 +215,22 @@ test('the workflows are listed once for a whole answer, whatever the number of v
   assert.equal(listed, 1, 'the buttons under a creation');
 });
 
+test('each banner shows the last creation of its mode and how many there are', async () => {
+  const { showcased } = await import('../public/studio.mjs');
+  const run = (mediaType, url) => ({ ...(mediaType ? { mediaType } : {}), outputs: [{ originalUrl: url }] });
+  assert.deepEqual(showcased([]), {
+    image: { count: '', latest: null },
+    video: { count: '', latest: null },
+    audio: { count: '', latest: null },
+  });
+  // Newest first, as the gallery gives them; a record without a type is an image.
+  const shown = showcased([run('video', '/v2'), run(undefined, '/i3'), run('image', '/i2'), run('video', '/v1'), run('audio', '/a1')]);
+  assert.deepEqual(shown.image, { count: '2 images', latest: '/i3' });
+  assert.deepEqual(shown.video, { count: '2 clips', latest: '/v2' });
+  // A sound has no picture: its number only.
+  assert.deepEqual(shown.audio, { count: '1 son', latest: null });
+});
+
 test('leaving a mode stops following the size of its frame', async () => {
   // Just enough of a page for the Studio to draw itself.
   class Element {

@@ -56,6 +56,27 @@ export function frameSize(ratio, box = FRAME) {
     : { width: Math.round(box.height * ratio), height: box.height };
 }
 
+const COUNTED = { image: 'image', video: 'clip', audio: 'son' };
+
+/**
+ * What each banner shows of its mode: how many were made and, for a picture or a clip, the last
+ * one (the runs come newest first). A sound has nothing to show but its number.
+ */
+export function showcased(runs) {
+  return Object.fromEntries(
+    MODES.map(item => {
+      const mine = runs.filter(record => (record.mediaType || 'image') === item.id);
+      return [
+        item.id,
+        {
+          count: mine.length ? `${mine.length} ${COUNTED[item.id]}${mine.length > 1 ? 's' : ''}` : '',
+          latest: item.id === 'audio' ? null : (mine[0]?.outputs?.[0]?.originalUrl ?? null),
+        },
+      ];
+    }),
+  );
+}
+
 /** The prompt sent: what the user wrote, then the style as its last line. */
 export function withStyle(prompt, style) {
   const text = String(prompt ?? '').trim(),
@@ -983,9 +1004,32 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     body.replaceChildren(form(), results());
     progress();
   }
+  /** Each banner shows the last creation of its mode in its outline, and how many there are. */
+  function showcase() {
+    for (const [id, { count, latest }] of Object.entries(showcased(runs))) {
+      const banner = banners[id];
+      banner.count.textContent = count;
+      banner.count.hidden = !count;
+      banner.shape.replaceChildren();
+      banner.shape.classList.toggle('is-filled', Boolean(latest));
+      if (!latest) continue;
+      const media = node(id === 'video' ? 'video' : 'img');
+      if (id === 'video') {
+        // Its first picture only: nothing plays on the banner.
+        Object.assign(media, { muted: true, preload: 'metadata', playsInline: true, src: latest + '#t=0.1' });
+      } else Object.assign(media, { alt: '', loading: 'lazy', decoding: 'async', src: latest });
+      // A file that cannot be shown leaves the empty outline.
+      media.onerror = () => {
+        banner.shape.replaceChildren();
+        banner.shape.classList.toggle('is-filled', false);
+      };
+      banner.shape.append(media);
+    }
+  }
   async function refresh() {
     if (!info) return;
     runs = (await (await api(`gallery/${info.conversationId}`)).json()).runs;
+    showcase();
   }
   async function open() {
     render();
@@ -999,6 +1043,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
   }
 
   // The three choices: wide banners, each with the outline of what it makes.
+  const banners = {};
   for (const item of MODES) {
     const banner = button(
       'studio-mode',
@@ -1012,10 +1057,13 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       item.icon,
     );
     banner.dataset.mode = item.id;
-    const words = node('span', 'studio-mode-words');
-    words.append(node('strong', '', item.label), node('span', '', item.hint));
+    const words = node('span', 'studio-mode-words'),
+      count = node('span', 'studio-mode-count');
+    count.hidden = true;
+    words.append(node('strong', '', item.label), node('span', '', item.hint), count);
     const shape = node('span', 'studio-mode-shape');
     shape.setAttribute('aria-hidden', 'true');
+    banners[item.id] = { shape, count };
     banner.append(words, shape, icon('chevron'));
     $('studio-modes').append(banner);
   }
