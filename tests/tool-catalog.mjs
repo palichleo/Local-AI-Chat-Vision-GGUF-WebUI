@@ -93,6 +93,17 @@ test('roles choose the most specific workflow, and forcing one is still checked'
   assert.equal((await tools.route('create_image', { prompt: 'x', source: { image: 0 } }, media)).workflow.id, 'edit');
 });
 
+test('a plain image request goes to Krea 2; MOSS Image runs when the model asks for it', async () => {
+  // MOSS takes no image at all, so it would win as the "most specific" workflow for a text-only
+  // request: the Krea family is preferred instead, as the everyday image model.
+  const tools = catalogOf([{ ...image('moss-image'), pipeline: 'moss' }, image('krea', [slot('source', 'img2img')])]);
+  assert.equal((await tools.route('create_image', { prompt: 'un chat' }, media)).workflow.id, 'krea');
+  assert.equal(
+    (await tools.route('create_image', { prompt: 'une affiche', workflow: 'moss-image' }, media)).workflow.id,
+    'moss-image',
+  );
+});
+
 test('arguments are checked against the chosen workflow, never forwarded blindly', async () => {
   const tools = catalogOf(workflows);
   const routed = await tools.route('create_video', { prompt: 'x', intention: 'y', fps: 12, stage: 'final' }, media);

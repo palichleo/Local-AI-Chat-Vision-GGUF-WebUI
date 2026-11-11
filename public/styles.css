@@ -4082,6 +4082,21 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 .comfy-panel .path-input {
   flex: 1 1 100%;
 }
+.comfy-panel .path-input input {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 11px;
+  font-size: 11px;
+  color: var(--ink);
+  min-height: 40px;
+}
+.comfy-panel .path-input input::placeholder {
+  color: var(--muted);
+}
+.comfy-panel .path-input input:hover {
+  border-color: var(--line-strong);
+}
 .workflow-settings .workflow-card {
   margin: 12px 0 0;
   padding: 16px;

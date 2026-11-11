@@ -5,7 +5,7 @@
   "pipeline": "krea2",
   "mediaType": "image",
   "name": "Krea 2",
-  "description": "Creer une image",
+  "description": "Créer une image : photo, illustration, ou retouche d’une image existante. Modèle d’image par défaut, rapide.",
   "components": {
     "model": {
       "policy": "fixed",
