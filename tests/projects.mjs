@@ -251,6 +251,31 @@ test('a missing latest generation preview falls back to an older attached image'
   assert.equal((await fetch(f.url() + item.previewUrl)).status, 404);
 });
 
+test('a conversation with nothing to show as a cover answers empty, not with an error', async t => {
+  const f = await fixture(t),
+    id = randomUUID();
+  // Its only creation cannot be shown as a picture (here it is gone; a video is the usual case).
+  await f.call('history/save', {
+    id,
+    messages: [
+      { role: 'user', content: 'Une vidéo' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'call_video', type: 'function', function: { name: 'create_video', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_video', content: JSON.stringify({ run_id: randomUUID() }) },
+    ],
+  });
+  const item = (await (await f.call('history')).json()).conversations[0],
+    response = await fetch(f.url() + item.previewUrl);
+  assert.equal(response.status, 204);
+  assert.equal((await response.arrayBuffer()).byteLength, 0);
+  // A conversation that no longer exists stays an error.
+  await f.call('history/delete', { id, confirm: true });
+  assert.equal((await fetch(f.url() + item.previewUrl)).status, 404);
+});
+
 test('deleting a project keeps its conversations, which go back to Conversations', async t => {
   const f = await fixture(t),
     project = (await (await f.call('projects/save', { name: 'Trip' })).json()).project,

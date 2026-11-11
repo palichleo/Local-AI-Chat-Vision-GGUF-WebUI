@@ -507,7 +507,7 @@ export async function createApplication({
         try {
           cover = await coverOf(previewMatch[1]);
         } catch (error) {
-          if (error.status !== 404) throw error;
+          if (!error.nothingToShow) throw error;
           // Nothing to show (a conversation whose creations are videos without a thumbnail
           // yet): an empty answer, which the page takes as « no cover », not an error.
           res.writeHead(204);
