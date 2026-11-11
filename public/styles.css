@@ -576,7 +576,7 @@ button svg {
   font-size: 12px;
   color: var(--muted);
 }
-/* Under a message: copy it, or take the last exchange back. Quiet until the message is pointed at. */
+/* Under the last exchange: take it back to edit it or to send it again. Quiet until pointed at. */
 .message-actions {
   display: flex;
   gap: 4px;

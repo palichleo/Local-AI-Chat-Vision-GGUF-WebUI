@@ -2,7 +2,7 @@ import { setupProjectNavigation } from './project-navigation.mjs';
 import { setupSettingsSearch } from './settings-search.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
-import { quoteText, setupCopy } from './copy.mjs';
+import { setupCopy } from './copy.mjs';
 import { callNote, lastExchange, spokenText } from './transcript.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
 import { setupContextMeter } from './context-meter.mjs';
@@ -1223,65 +1223,35 @@ function userMessage(text, images, videos = []) {
 }
 
 /**
- * Under each message, « Copier » ; under the last exchange, « Modifier » on what the user sent
- * and « Régénérer » on the reply. Drawn again whenever the conversation shown changes.
+ * Under the last exchange: « Modifier » on what the user sent, « Régénérer » on the reply.
+ * Drawn again whenever the conversation shown changes. Nothing copies a whole message: copying
+ * belongs to the quotes and the code blocks of a reply (copy.mjs), and stays there.
  */
 function turnActions() {
   for (const row of document.querySelectorAll('#messages .message-actions')) row.remove();
+  // Not while a reply is being written, nor for a message the application wrote itself.
+  if (state.generating || lastExchange(state.messages) < 0) return;
   const action = (label, glyph, title, onclick) => {
     const control = node('button', 'message-action');
     control.type = 'button';
     control.title = title;
     control.append(icon(glyph), node('span', '', label));
-    control.onclick = () => onclick(control);
-    return control;
+    control.onclick = onclick;
+    const row = node('div', 'message-actions');
+    row.append(control);
+    return row;
   };
-  const copy = read =>
-    action('Copier', 'copy', 'Copier ce message', async control => {
-      const label = control.querySelector('span');
-      try {
-        await navigator.clipboard.writeText(read());
-        label.textContent = 'Copié';
-        $('live-status').textContent = 'Texte copié.';
-      } catch {
-        label.textContent = 'Copie indisponible';
-      }
-      setTimeout(() => {
-        label.textContent = 'Copier';
-      }, 1600);
-    });
-  // Not while a reply is being written, nor for a message the application wrote itself.
-  const open = !state.generating && lastExchange(state.messages) >= 0,
-    users = [...document.querySelectorAll('#messages .message.user')],
-    replies = [...document.querySelectorAll('#messages .message.assistant')];
-  users.forEach((article, index) => {
-    const body = article.querySelector('.message-body'),
-      row = node('div', 'message-actions');
-    if (body?.textContent.trim()) row.append(copy(() => body.textContent));
-    if (open && index === users.length - 1)
-      row.append(
-        action('Modifier', 'edit', 'Reprendre ce message dans la zone de texte ; sa réponse est retirée', () =>
-          takeBack(false),
-        ),
-      );
-    if (row.children.length) article.append(row);
-  });
-  replies.forEach((article, index) => {
-    // What the model said, without the lines that only tell what it did.
-    const read = () =>
-        [...article.querySelectorAll('.message-body')]
-          .filter(body => !body.querySelector('.message-step, .pending-dot, .pending-message'))
-          .map(body => quoteText(body).trim())
-          .filter(Boolean)
-          .join('\n\n'),
-      row = node('div', 'message-actions');
-    if (read()) row.append(copy(read));
-    if (open && index === replies.length - 1 && article === $('messages').lastElementChild)
-      row.append(
-        action('Régénérer', 'update', 'Renvoyer le même message pour obtenir une autre réponse', () => takeBack(true)),
-      );
-    if (row.children.length) article.append(row);
-  });
+  const sent = [...document.querySelectorAll('#messages .message.user')].at(-1),
+    reply = $('messages').lastElementChild;
+  sent?.append(
+    action('Modifier', 'edit', 'Reprendre ce message dans la zone de texte ; sa réponse est retirée', () =>
+      takeBack(false),
+    ),
+  );
+  if (reply?.classList.contains('assistant'))
+    reply.append(
+      action('Régénérer', 'update', 'Renvoyer le même message pour obtenir une autre réponse', () => takeBack(true)),
+    );
 }
 /** Takes back the last message the user wrote: to edit it, or to send it again as it is. */
 async function takeBack(resend) {

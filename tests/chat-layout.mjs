@@ -90,3 +90,14 @@ test('a new conversation suggests what the application makes: an image, a video,
   );
   assert.match(cards, /<button id="suggest-image">/);
 });
+
+test('under a message, only the last exchange can be taken back: nothing copies a whole message', async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const actions = source.slice(source.indexOf('function turnActions('), source.indexOf('async function takeBack('));
+  // Copying stays where the first test of this file puts it: the quotes and the code blocks.
+  assert.deepEqual(
+    [...actions.matchAll(/action\('([^']+)'/g)].map(match => match[1]),
+    ['Modifier', 'Régénérer'],
+  );
+  assert.doesNotMatch(actions, /clipboard|Copier/);
+});
