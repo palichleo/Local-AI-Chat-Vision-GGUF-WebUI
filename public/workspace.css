@@ -719,7 +719,7 @@ body[data-view='studio'] .chat-header {
   min-height: 96px;
 }
 .studio-results h3,
-.studio-style h3 {
+.studio-loras-head h3 {
   margin: 0 0 10px;
   font-size: 11px;
   font-weight: 560;
@@ -971,8 +971,23 @@ body[data-view='studio'] .chat-header {
   border-color: var(--accent);
   color: var(--ink);
 }
-.studio-slot-pick:disabled {
+.studio-slot-pick:disabled,
+.studio-slot.is-blocked .studio-slot-pick {
   opacity: 0.4;
+}
+/* An image dragged from a slot to another changes role: the one it leaves fades, the one under
+   the pointer lights up (also a slot that does not combine: the move may be what frees it). */
+.studio-slot.is-filled .studio-slot-pick {
+  cursor: grab;
+}
+.studio-slot.is-dragged .studio-slot-pick {
+  opacity: 0.35;
+}
+.studio-slot.is-target .studio-slot-pick {
+  opacity: 1;
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--tint);
 }
 .studio-slot-pick img {
   width: 100%;
@@ -1003,24 +1018,103 @@ body[data-view='studio'] .chat-header {
   width: 11px;
   height: 11px;
 }
-.studio-style {
+/* The LoRAs of a creation: three at most, a small card each, its name over its strength. */
+.studio-loras {
   display: grid;
   gap: 8px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
-.studio-style h3 {
+.studio-loras-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.studio-loras-head h3 {
   margin: 0;
 }
-.studio-loras {
-  display: grid;
-  gap: 6px;
+.studio-loras-count {
+  font-size: 10.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 .studio-lora {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px auto;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
   align-items: center;
+  padding: 7px 8px 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--tint) 45%, transparent);
+  transition: border-color 0.2s;
+}
+.studio-lora:hover,
+.studio-lora:focus-within {
+  border-color: var(--line-strong);
+}
+.studio-desk .studio-lora select {
+  min-height: 24px;
+  padding: 0 18px 0 0;
+  border: 0;
+  background-color: transparent;
+  font-size: 12px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+}
+.studio-lora-remove {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+.studio-lora-remove:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.studio-lora-remove svg {
+  width: 11px;
+  height: 11px;
+}
+.studio-lora input[type='range'] {
+  width: 100%;
+  height: 4px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.studio-lora-strength {
+  min-width: 30px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.studio-lora-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.studio-lora-add:hover {
+  border-color: var(--accent);
+  background: var(--tint);
+  color: var(--ink);
+}
+.studio-lora-add svg {
+  width: 13px;
+  height: 13px;
 }
 .studio-link {
   display: inline-flex;
@@ -1040,14 +1134,20 @@ body[data-view='studio'] .chat-header {
 .studio-link:hover {
   color: var(--ink);
 }
-.studio-make-style {
-  justify-self: start;
+/* Under the prompt: the chat model rewrites it in full, and what was typed can be taken back. */
+.studio-enrich {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.studio-enrich-go {
   gap: 7px;
   min-height: 30px;
   padding: 5px 11px;
   font-size: 11px;
 }
-.studio-make-style svg {
+.studio-enrich-go svg {
   width: 14px;
   height: 14px;
 }
@@ -1057,12 +1157,29 @@ body[data-view='studio'] .chat-header {
   margin-top: auto;
 }
 .studio-go {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   min-height: 40px;
   font-size: 12.5px;
+}
+/* The keys that start it, in the bottom right corner of the button. */
+.studio-go-key {
+  position: absolute;
+  right: 7px;
+  bottom: 5px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  opacity: 0.62;
+  pointer-events: none;
 }
 .studio-go svg {
   width: 16px;

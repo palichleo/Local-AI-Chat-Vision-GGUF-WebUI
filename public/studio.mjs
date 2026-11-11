@@ -40,7 +40,10 @@ const ROLES = {
 const SHORT = { source: 'À modifier', start_image: 'Début', end_image: 'Fin', reference: 'Réf.' };
 const SETTINGS = { lyrics: 'Paroles', seconds: 'Durée (s)', language: 'Langue' };
 const SETTING_HELP = { lyrics: 'Vide pour un morceau instrumental. Balises : [Verse], [Chorus], [Bridge]…' };
-const MAX_STYLES = 4;
+const MAX_STYLES = 3;
+// The key that goes with Entrée to generate, as the keyboard names it.
+const MODIFIER = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘' : 'Ctrl';
+const strengthText = value => (Math.round(value * 100) / 100).toFixed(2).replace('.', ',');
 const leaf = name =>
   String(name)
     .split(/[\\/]/)
@@ -84,13 +87,6 @@ export function showcased(runs) {
   );
 }
 
-/** The prompt sent: what the user wrote, then the style as its last line. */
-export function withStyle(prompt, style) {
-  const text = String(prompt ?? '').trim(),
-    look = String(style ?? '').trim();
-  return look ? `${text}\n\nStyle: ${look}` : text;
-}
-
 /** The sizes offered for a workflow in a format, and the one closest to `pixels`. */
 export function sizeChoices(workflow, formatId, pixels) {
   const format = FORMATS.find(item => item.id === formatId),
@@ -105,7 +101,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     runs = [],
     working = null, // { label, fraction, requestId, controller } while a generation runs
     releasing = null, // the chat model leaving the GPU, asked when a mode is opened
-    styling = false,
+    enriching = false,
     extending = null, // the clip being continued
     failure = '',
     drawn = null, // the size the frame was last drawn at, to ease from
@@ -120,7 +116,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       {
         workflow: null,
         prompt: '',
-        style: '',
+        before: null, // what was typed before « Enrichir le prompt », to come back to
         styles: [],
         format: null,
         size: null,
@@ -211,12 +207,40 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     const format = formatOf(image.width, image.height);
     if (format) Object.assign(draft, { format: format.id, size: null });
   }
+  // The slot an image is being dragged from: dropped on another, the image changes role.
+  let dragged = null;
+  /**
+   * Moves an image to another slot; the two swap when that slot is taken. Refused, with the
+   * reason, when the inputs would no longer combine (MiniMax: references, or start and end).
+   */
+  function move(workflow, from, to) {
+    const draft = drafts[mode],
+      image = draft.inputs[from.role]?.[from.index];
+    if (!image || (from.role === to.role && from.index === to.index)) return;
+    const other = draft.inputs[to.role]?.[to.index] ?? null;
+    (draft.inputs[to.role] ??= [])[to.index] = image;
+    draft.inputs[from.role][from.index] = other;
+    const clash = [...exclusiveWith(workflow, to.role), ...(other ? exclusiveWith(workflow, from.role) : [])];
+    if (clash.length) {
+      draft.inputs[to.role][to.index] = other;
+      draft.inputs[from.role][from.index] = image;
+      failure = `${ROLES[to.role]} ne se combine pas avec : ${[...new Set(clash)].map(role => ROLES[role]).join(', ')}.`;
+    } else {
+      failure = '';
+      followFormat(to.role);
+    }
+    render();
+  }
   function slot(workflow, role, index, label, short = label) {
     const draft = drafts[mode],
       value = draft.inputs[role]?.[index],
       clash = exclusiveWith(workflow, role),
-      tile = node('div', 'studio-slot' + (value ? ' is-filled' : ''));
+      refused = clash.length ? `Ne se combine pas avec : ${clash.map(other => ROLES[other]).join(', ')}` : '',
+      tile = node('div', 'studio-slot' + (value ? ' is-filled' : '') + (refused ? ' is-blocked' : ''));
     const choose = button('studio-slot-pick', '', () => {
+      // An input that does not combine with those given says why. It still takes the image of
+      // one of them, dragged here: that is how a role is changed.
+      if (refused) return notice(refused);
       picker.onchange = () => {
         const [file] = picker.files;
         picker.value = '';
@@ -224,19 +248,47 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       };
       picker.click();
     });
-    choose.title = clash.length ? `Ne se combine pas avec : ${clash.map(other => ROLES[other]).join(', ')}` : label;
-    choose.disabled = Boolean(clash.length) || Boolean(working);
+    choose.title = refused || (value ? label + ' · glissez-la vers un autre emplacement pour changer son rôle' : label);
+    choose.disabled = Boolean(working);
+    if (refused) choose.setAttribute('aria-disabled', 'true');
     if (value) {
       const preview = node('img');
       preview.src = value.preview;
       preview.alt = value.name;
+      // The tile is what is dragged, not the picture as a file of the browser.
+      preview.draggable = false;
       choose.append(preview);
+      choose.draggable = !working;
+      choose.ondragstart = event => {
+        dragged = { role, index };
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', label);
+        tile.classList.add('is-dragged');
+      };
+      choose.ondragend = () => {
+        dragged = null;
+        tile.classList.remove('is-dragged');
+      };
     } else choose.append(icon('plus'));
-    choose.ondragover = event => event.preventDefault();
-    choose.ondrop = event => {
+    // The whole tile takes a drop: a file from the computer, or the image of another slot.
+    tile.ondragover = event => {
+      event.preventDefault();
+      if (dragged) event.dataTransfer.dropEffect = 'move';
+      tile.classList.add('is-target');
+    };
+    tile.ondragleave = () => tile.classList.remove('is-target');
+    tile.ondrop = event => {
       event.preventDefault();
       event.stopPropagation();
-      if (!choose.disabled) void fill(role, index, event.dataTransfer.files[0]);
+      tile.classList.remove('is-target');
+      if (working) return;
+      if (dragged) {
+        const from = dragged;
+        dragged = null;
+        return move(workflow, from, { role, index });
+      }
+      if (refused) return notice(refused);
+      void fill(role, index, event.dataTransfer.files[0]);
     };
     tile.append(choose, node('span', 'studio-slot-label', short));
     if (value) {
@@ -414,104 +466,116 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     );
   }
 
-  // ------------------------------------------------------------------ style
-  function styleSection(workflow, media) {
+  // ------------------------------------------------------------------ LoRA
+  /** The LoRAs added to the model for this creation: three at most, a card each, its name over its strength. */
+  function loraSection() {
     const draft = drafts[mode],
-      section = node('section', 'studio-style');
-    section.append(node('h3', '', 'Style'));
-    if (workflow.external) {
-      const list = node('div', 'studio-loras');
-      draft.styles.forEach((style, index) => {
-        const row = node('div', 'studio-lora');
-        const strength = node('input');
-        strength.type = 'number';
-        strength.step = '0.05';
-        strength.min = '-4';
-        strength.max = '4';
-        strength.value = String(style.strength);
-        strength.title = 'Force du LoRA';
-        strength.setAttribute('aria-label', 'Force du LoRA');
-        strength.oninput = () => {
-          style.strength = Number(strength.value);
-        };
-        const remove = button(
-          'icon-button',
-          '',
+      section = node('section', 'studio-loras'),
+      head = node('div', 'studio-loras-head');
+    head.append(node('h3', '', 'LoRA'), node('span', 'studio-loras-count', `${draft.styles.length} / ${MAX_STYLES}`));
+    section.append(head);
+    draft.styles.forEach((style, index) => {
+      const card = node('div', 'studio-lora'),
+        name = select(
+          info.styles.map(file => [file, leaf(file)]),
+          style.name,
+          value => {
+            style.name = value;
+          },
+        ),
+        slider = node('input'),
+        amount = node('output', 'studio-lora-strength', strengthText(style.strength));
+      name.setAttribute('aria-label', 'LoRA');
+      slider.type = 'range';
+      slider.min = '0';
+      slider.max = '2';
+      slider.step = '0.05';
+      slider.value = String(style.strength);
+      slider.title = 'Force du LoRA';
+      slider.setAttribute('aria-label', 'Force du LoRA');
+      slider.oninput = () => {
+        style.strength = Number(slider.value);
+        amount.textContent = strengthText(style.strength);
+      };
+      const remove = button(
+        'studio-lora-remove',
+        '',
+        () => {
+          draft.styles.splice(index, 1);
+          render();
+        },
+        'close',
+      );
+      remove.title = 'Retirer ce LoRA';
+      remove.setAttribute('aria-label', 'Retirer ce LoRA');
+      card.append(name, remove, slider, amount);
+      section.append(card);
+    });
+    if (!info.styles.length)
+      section.append(node('small', 'field-help', 'Aucun LoRA listé : ComfyUI est arrêté ou son dossier loras est vide.'));
+    else if (draft.styles.length < MAX_STYLES)
+      section.append(
+        button(
+          'studio-lora-add',
+          'Ajouter un LoRA',
           () => {
-            draft.styles.splice(index, 1);
+            draft.styles.push({ name: info.styles[0], strength: 1 });
             render();
           },
-          'close',
-        );
-        remove.setAttribute('aria-label', 'Retirer ce LoRA');
-        row.append(
-          select(
-            info.styles.map(name => [name, leaf(name)]),
-            style.name,
-            value => {
-              style.name = value;
-            },
-          ),
-          strength,
-          remove,
-        );
-        list.append(row);
-      });
-      if (info.styles.length) {
-        if (draft.styles.length < MAX_STYLES)
-          list.append(
-            button(
-              'studio-link',
-              draft.styles.length ? 'Ajouter un LoRA' : 'Ajouter un LoRA de style',
-              () => {
-                draft.styles.push({ name: info.styles[0], strength: 1 });
-                render();
-              },
-              'plus',
-            ),
-          );
-      } else
-        list.append(
-          node('small', 'field-help', 'Aucun LoRA listé : ComfyUI est arrêté ou son dossier loras est vide.'),
-        );
-      section.append(list);
-    }
-    const box = textarea(draft.style, 2, 'Décrivez un style, ou laissez vide pour un style au hasard…', value => {
-      draft.style = value;
-    });
-    box.maxLength = 2000;
-    box.setAttribute('aria-label', 'Style ajouté au prompt');
-    const make = button(
-      'secondary studio-make-style',
-      styling ? 'Écriture du style…' : 'Générer un style à partir de la description',
-      async () => {
-        if (styling || working) return;
-        const reason = blocked();
-        if (reason) return notice(reason);
-        styling = true;
-        render();
-        const controller = new AbortController();
-        try {
-          // The chat model is started when it is not running, once it has finished leaving.
-          await releasing;
-          await waitForModel(api, controller.signal, () => {});
-          const result = await (await api('studio/style', { description: draft.style, media })).json();
-          draft.style = result.style;
-          notice('');
-        } catch (error) {
-          notice('Style non généré : ' + error.message);
-        } finally {
-          styling = false;
-          onChange();
-          render();
-        }
-      },
-      'spark',
-    );
-    make.disabled = styling || Boolean(working);
-    box.title = 'Le style est ajouté à la fin du prompt.';
-    section.append(box, make);
+          'plus',
+        ),
+      );
     return section;
+  }
+
+  // ------------------------------------------------------------------ the prompt, enriched
+  /** The chat model rewrites what is typed as a full prompt; what was typed can be taken back. */
+  async function enrich() {
+    if (enriching || working) return;
+    const draft = drafts[mode],
+      text = draft.prompt.trim();
+    if (!text) {
+      failure = 'Écrivez d’abord quelques mots à enrichir.';
+      return render();
+    }
+    const reason = blocked();
+    if (reason) return notice(reason);
+    enriching = true;
+    failure = '';
+    render();
+    const controller = new AbortController();
+    try {
+      // The chat model is started when it is not running, once it has finished leaving.
+      await releasing;
+      await waitForModel(api, controller.signal, () => {});
+      const result = await (await api('studio/enrich', { prompt: text, verb: verbOf() })).json();
+      draft.before = text;
+      draft.prompt = result.prompt;
+      notice('');
+    } catch (error) {
+      notice('Prompt non enrichi : ' + error.message);
+    } finally {
+      enriching = false;
+      onChange();
+      render();
+    }
+  }
+  function enrichRow() {
+    const draft = drafts[mode],
+      row = node('div', 'studio-enrich'),
+      make = button('secondary studio-enrich-go', enriching ? 'Enrichissement…' : 'Enrichir le prompt', enrich, 'spark');
+    make.title = 'Le modèle de chat réécrit votre texte en un prompt complet';
+    make.disabled = enriching || Boolean(working);
+    row.append(make);
+    if (draft.before !== null && !enriching && !working) {
+      const back = button('studio-link', 'Revenir à mon texte', () => {
+        draft.prompt = draft.before;
+        draft.before = null;
+        render();
+      });
+      row.append(back);
+    }
+    return row;
   }
 
   // ------------------------------------------------------------------ generation
@@ -522,7 +586,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       prompt = draft.prompt.trim();
     if (!workflow) throw Error('Aucun workflow prêt pour cette création.');
     if (!prompt) throw Error('Écrivez un prompt.');
-    const args = { prompt: mode === 'audio' ? prompt : withStyle(prompt, draft.style) },
+    const args = { prompt },
       edits = {};
     if (offered().length > 1 && !extending) args.workflow = workflow.id;
     if (mode === 'video')
@@ -562,7 +626,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
   // Asked in the background, never under an answer or a message waiting for the model; a refusal
   // changes nothing, the generation unloads the model itself anyway.
   function release() {
-    if (releasing || working || styling || blocked()) return;
+    if (releasing || working || enriching || blocked()) return;
     releasing = api('studio/release', {})
       .then(() => onChange())
       .catch(() => {})
@@ -919,14 +983,9 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       },
     );
     prompt.maxLength = 4000;
-    prompt.title = 'Ctrl + Entrée pour générer';
-    prompt.onkeydown = event => {
-      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
-        void generate();
-      }
-    };
+    prompt.title = MODIFIER + ' + Entrée pour générer';
     write.append(field('Prompt', prompt, { wide: true }));
+    if (mode !== 'audio') write.append(enrichRow());
     if (!extending) {
       const row = inputs(workflow);
       if (row) write.append(row);
@@ -1008,7 +1067,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     }
     if (grid.children.length) settings.append(grid);
     settings.append(...texts);
-    if (mode !== 'audio' && !extending) settings.append(styleSection(workflow, mode));
+    if (workflow.external && mode !== 'audio' && !extending) settings.append(loraSection());
 
     // Middle: the frame in the format to come, its formats, and the button.
     const { box, frame } = stage(workflow);
@@ -1030,8 +1089,13 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       );
       footer.append(line);
     } else {
-      const go = button('primary studio-go', extending ? 'Générer la suite' : 'Générer', generate, 'spark');
-      go.disabled = styling;
+      const go = button('primary studio-go', extending ? 'Générer la suite' : 'Générer', generate, 'spark'),
+        // How to start it from the keyboard, in the corner of the button.
+        key = node('kbd', 'studio-go-key', MODIFIER + ' + Entrée');
+      key.setAttribute('aria-hidden', 'true');
+      go.append(key);
+      go.title = MODIFIER + ' + Entrée';
+      go.disabled = enriching;
       footer.append(go);
     }
     if (failure) {
@@ -1051,7 +1115,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     // One mode at a time: the three choices leave once one is taken, « Retour » brings them back.
     $('studio-modes').hidden = Boolean(chosen);
     $('studio-back').hidden = !chosen;
-    $('studio-back').disabled = Boolean(working) || styling;
+    $('studio-back').disabled = Boolean(working) || enriching;
     $('studio-title').textContent = chosen ? chosen.label : 'Studio';
     $('studio-summary').textContent = chosen ? 'Studio' : 'Créez directement, avec vos propres prompts.';
     $('studio-view').classList.toggle('is-open', Boolean(chosen));
@@ -1114,6 +1178,12 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     render();
   }
 
+  // Ctrl + Entrée (⌘ on a Mac) generates from anywhere in an open mode, not only from the prompt.
+  $('studio-view').onkeydown = event => {
+    if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || !mode || working || enriching) return;
+    event.preventDefault();
+    void generate();
+  };
   // The three choices: wide banners, each with the outline of what it makes.
   const banners = {};
   for (const item of MODES) {
@@ -1140,11 +1210,11 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     $('studio-modes').append(banner);
   }
   $('studio-back').onclick = () => {
-    if (working || styling) return;
+    if (working || enriching) return;
     mode = null;
     extending = null;
     failure = '';
     render();
   };
-  return { open, render, busy: () => Boolean(working) || styling };
+  return { open, render, busy: () => Boolean(working) || enriching };
 }

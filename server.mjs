@@ -39,7 +39,7 @@ import { ProgressHistory } from './lib/generation-progress.mjs';
 import { convertKreaWorkflow } from './lib/native-workflow-conversion.mjs';
 import { importComfyWorkflow } from './lib/comfy-import.mjs';
 import { previewWorkflowImport } from './lib/workflow-import.mjs';
-import { STUDIO_ID, STUDIO_VERBS, styleLine, styleMessages } from './lib/studio.mjs';
+import { STUDIO_ID, STUDIO_VERBS, enrichedPrompt, enrichMessages } from './lib/studio.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 20 * 1024 * 1024;
@@ -207,8 +207,8 @@ export async function createApplication({
   controlHeartbeatMs = 10000,
   controlReconnectMs = 2000,
   chatHeartbeatMs = 10000,
-  // How long the chat model may take to write a style line for the Studio.
-  styleTimeoutMs = 90000,
+  // How long the chat model may take to enrich a prompt for the Studio.
+  enrichTimeoutMs = 90000,
 } = {}) {
   // Keep HTML, scripts and styles paired with this running backend until restart.
   const frontend = new Map(
@@ -1287,8 +1287,9 @@ export async function createApplication({
         await gallery.remove(STUDIO_ID, body.id);
         return send(200, { removed: body.id });
       }
-      // One short style line written by the chat model, from the user's words or from nothing.
-      if (path === '/api/studio/style') {
+      // What the user typed in the Studio, rewritten by the chat model as a full prompt.
+      if (path === '/api/studio/enrich') {
+        if (typeof body.prompt !== 'string' || !body.prompt.trim()) throw problem('Écrivez d’abord quelques mots à enrichir.');
         if (runtime.active) throw problem('La génération utilise le GPU.', 409);
         if (engine.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
         if (engine.busy) throw problem('Une réponse est déjà en cours.', 409);
@@ -1302,26 +1303,27 @@ export async function createApplication({
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${engine.apiKey}` },
             body: JSON.stringify({
-              messages: styleMessages(body.description, body.media),
+              // The global instructions of the user say how he wants his prompts (length, language).
+              messages: enrichMessages(body.prompt, { verb: body.verb, preferences: instructions }),
               stream: false,
-              max_tokens: 160,
-              temperature: 1,
+              max_tokens: 700,
+              temperature: 0.7,
               reasoning_format: 'deepseek',
               chat_template_kwargs: { enable_thinking: false },
             }),
-            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(styleTimeoutMs)]),
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(enrichTimeoutMs)]),
           });
           if (!upstream.ok)
             throw problem(`Le moteur refuse la requête (${upstream.status}). ${(await upstream.text()).slice(0, 500)}`, 502);
-          const style = styleLine((await upstream.json()).choices?.[0]?.message?.content);
-          if (!style) throw problem('Le modèle n’a pas écrit de style. Réessayez.', 502);
-          return send(200, { style });
+          const prompt = enrichedPrompt((await upstream.json()).choices?.[0]?.message?.content);
+          if (!prompt) throw problem('Le modèle n’a rien écrit. Réessayez.', 502);
+          return send(200, { prompt });
         } catch (error) {
           // A model slowed down to a crawl (the graphics card shared with another program) is
           // said as such, not as an unexpected local error.
           if (error.name === 'TimeoutError')
             throw problem(
-              `Le modèle n’a pas répondu en ${Math.round(styleTimeoutMs / 1000)} secondes : la carte graphique est peut-être occupée par un autre programme. Réessayez une fois qu’elle est libre.`,
+              `Le modèle n’a pas répondu en ${Math.round(enrichTimeoutMs / 1000)} secondes : la carte graphique est peut-être occupée par un autre programme. Réessayez une fois qu’elle est libre.`,
               504,
             );
           throw error;
