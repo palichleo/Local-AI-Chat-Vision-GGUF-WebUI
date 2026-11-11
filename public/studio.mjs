@@ -6,15 +6,27 @@ import { FORMATS, formatOf, nearestSize, sizesFor } from './formats.mjs';
  * Videos line up in a timeline, where each can be continued.
  */
 const MODES = [
-  { id: 'image', verb: 'create_image', label: 'Image', icon: 'image', hint: 'Créer ou modifier une image.' },
+  {
+    id: 'image',
+    verb: 'create_image',
+    label: 'Image',
+    icon: 'image',
+    hint: 'Une image à partir de votre prompt, ou une image à retoucher.',
+  },
   {
     id: 'video',
     verb: 'create_video',
     label: 'Vidéo',
     icon: 'video',
-    hint: 'Un clip, puis sa suite dans la timeline.',
+    hint: 'Un clip à partir d’un prompt et de vos images, puis sa suite dans la timeline.',
   },
-  { id: 'audio', verb: 'create_audio', label: 'Son', icon: 'sound', hint: 'Musique ou bruitages.' },
+  {
+    id: 'audio',
+    verb: 'create_audio',
+    label: 'Son',
+    icon: 'sound',
+    hint: 'Une musique, chantée ou instrumentale, ou des bruitages.',
+  },
 ];
 const ROLES = {
   source: 'Image à modifier',
@@ -67,7 +79,8 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     styling = false,
     extending = null, // the clip being continued
     failure = '',
-    drawn = null; // the size the frame was last drawn at, to ease from
+    drawn = null, // the size the frame was last drawn at, to ease from
+    watching = null; // follows the size of the stage
   const drafts = Object.fromEntries(
     MODES.map(item => [
       item.id,
@@ -261,8 +274,18 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     const format = FORMATS.find(item => item.id === drafts[mode].format);
     return { ratio: format?.ratio ?? 1, label: format?.id ?? '' };
   }
+  /** The room the frame has: its stage, less a margin; a default before the stage is laid out. */
+  function room(frame) {
+    const box = frame.parentElement,
+      chips = box?.querySelector('.studio-formats'),
+      // The formats sit under the frame, in the same stage.
+      height = (box?.clientHeight ?? 0) - (chips ? chips.offsetHeight + 12 : 0) - 4;
+    return box?.clientWidth > 40 && height > 40
+      ? { width: Math.min(box.clientWidth - 20, 560), height: Math.min(height, 440) }
+      : FRAME;
+  }
   function reshape(frame, { ratio, label }) {
-    const size = frameSize(ratio);
+    const size = frameSize(ratio, room(frame));
     frame.style.width = size.width + 'px';
     frame.style.height = size.height + 'px';
     frame.querySelector('.studio-frame-label').textContent = label;
@@ -270,21 +293,26 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
   }
   /**
    * An empty frame in the format of the image or the video to come (its shape only, not its
-   * size). It eases from the shape it had to the new one, across formats and across modes.
+   * size), as large as the stage allows. It eases from the shape it had to the new one, across
+   * formats and across modes, and follows the window when it is resized.
    */
   function stage(workflow) {
     const box = node('div', 'studio-stage'),
-      frame = node('div', 'studio-frame' + (mode === 'audio' ? ' is-audio' : '')),
+      frame = node('div', 'studio-frame' + (mode === 'audio' ? ' is-audio' : '') + (working ? ' is-busy' : '')),
       next = shapeOf(workflow);
     frame.setAttribute('aria-hidden', 'true');
-    frame.append(node('span', 'studio-frame-label', next.label));
-    if (drawn && typeof requestAnimationFrame === 'function') {
-      // Drawn at the previous shape first, so the browser has something to ease from.
-      frame.style.width = drawn.width + 'px';
-      frame.style.height = drawn.height + 'px';
-      requestAnimationFrame(() => requestAnimationFrame(() => reshape(frame, next)));
-    } else reshape(frame, next);
+    frame.append(node('span', 'studio-frame-fill'), node('span', 'studio-frame-label', next.label));
+    // Drawn at the previous shape first, so the browser has something to ease from.
+    const from = drawn ?? frameSize(next.ratio);
+    frame.style.width = from.width + 'px';
+    frame.style.height = from.height + 'px';
     box.append(frame);
+    watching?.disconnect();
+    if (typeof ResizeObserver === 'function') {
+      // Called once the stage is laid out, then at every change of its size.
+      watching = new ResizeObserver(() => reshape(frame, shapeOf(workflow)));
+      watching.observe(box);
+    }
     return { box, frame };
   }
   /** The formats as a row of chips under the frame: choosing one reshapes it in place. */
@@ -557,6 +585,8 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     const bar = line.querySelector('progress');
     if (working.fraction === null) bar.removeAttribute('value');
     else bar.value = working.fraction;
+    // The frame fills as the generation advances.
+    document.querySelector('.studio-frame')?.style.setProperty('--progress', String(working.fraction ?? 0));
   }
 
   // ------------------------------------------------------------------ results
@@ -790,6 +820,13 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       },
     );
     prompt.maxLength = 4000;
+    prompt.title = 'Ctrl + Entrée pour générer';
+    prompt.onkeydown = event => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        void generate();
+      }
+    };
     write.append(field('Prompt', prompt, { wide: true }));
     if (!extending) {
       const row = inputs(workflow);
@@ -877,7 +914,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     // Middle: the frame in the format to come, its formats, and the button.
     const { box, frame } = stage(workflow);
     center.append(box);
-    if (workflow.limits && !extending) center.append(formatChips(workflow, frame, resolution));
+    if (workflow.limits && !extending) box.append(formatChips(workflow, frame, resolution));
     const footer = node('div', 'studio-footer');
     if (working) {
       const line = node('div', 'studio-progress');
@@ -915,7 +952,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     $('studio-back').disabled = Boolean(working) || styling;
     $('studio-title').textContent = chosen ? chosen.label : 'Studio';
     $('studio-summary').textContent = chosen ? 'Studio' : 'Créez directement, avec vos propres prompts.';
-    $('studio-view').classList.toggle('is-working', Boolean(chosen));
+    $('studio-view').classList.toggle('is-open', Boolean(chosen));
     const body = $('studio-body');
     body.dataset.mode = mode ?? '';
     if (!info) return body.replaceChildren(node('p', 'asset-empty', 'Chargement…'));
@@ -938,8 +975,9 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     render();
   }
 
+  // The three choices: wide banners, each with the outline of what it makes.
   for (const item of MODES) {
-    const tab = button(
+    const banner = button(
       'studio-mode',
       '',
       () => {
@@ -949,9 +987,13 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       },
       item.icon,
     );
-    tab.dataset.mode = item.id;
-    tab.append(node('strong', '', item.label), node('span', '', item.hint));
-    $('studio-modes').append(tab);
+    banner.dataset.mode = item.id;
+    const words = node('span', 'studio-mode-words');
+    words.append(node('strong', '', item.label), node('span', '', item.hint));
+    const shape = node('span', 'studio-mode-shape');
+    shape.setAttribute('aria-hidden', 'true');
+    banner.append(words, shape, icon('chevron'));
+    $('studio-modes').append(banner);
   }
   $('studio-back').onclick = () => {
     if (working || styling) return;

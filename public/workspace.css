@@ -467,31 +467,38 @@ body[data-view='studio'] .chat-header {
   margin-bottom: 2px;
 }
 
-/* Studio: the creation tools used by hand. */
+/* Studio: the creation tools used by hand. It fills the window, whatever its size. */
 .studio-view {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: auto;
-  padding: 40px clamp(18px, 3vw, 48px) 32px;
+  padding: clamp(18px, 4vh, 44px) clamp(16px, 3vw, 48px) clamp(14px, 3vh, 28px);
   scrollbar-width: thin;
   container: studio / inline-size;
 }
-.studio-view.is-working {
-  padding-top: 22px;
+.studio-view[hidden] {
+  display: none;
+}
+.studio-view.is-open {
+  padding-top: clamp(12px, 2.4vh, 22px);
 }
 .studio-header,
 .studio-modes,
 .studio-body {
-  max-width: 1320px;
+  width: 100%;
+  max-width: 1760px;
   margin-left: auto;
   margin-right: auto;
 }
 .studio-header {
+  flex: none;
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 22px;
+  margin-bottom: clamp(14px, 3vh, 26px);
 }
 .studio-header h1 {
   font-size: clamp(25px, 2.5vw, 36px);
@@ -503,14 +510,14 @@ body[data-view='studio'] .chat-header {
 .studio-header .home-summary {
   margin: 0 0 8px;
 }
-.studio-view.is-working .studio-header {
-  margin-bottom: 14px;
+.studio-view.is-open .studio-header {
+  margin-bottom: clamp(8px, 1.6vh, 14px);
 }
-.studio-view.is-working .studio-header h1 {
+.studio-view.is-open .studio-header h1 {
   font-size: 22px;
   letter-spacing: -0.6px;
 }
-.studio-view.is-working .studio-header .home-summary {
+.studio-view.is-open .studio-header .home-summary {
   margin-bottom: 2px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -527,64 +534,136 @@ body[data-view='studio'] .chat-header {
   height: 14px;
   transform: rotate(180deg);
 }
-/* The three choices: all there is until one is taken. */
+/* The three choices: wide banners stacked, sharing the height of the window. */
 .studio-modes {
+  flex: 1;
+  min-height: 0;
+  max-height: 780px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 8vh;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(92px, 1fr);
+  gap: clamp(10px, 1.8vh, 16px);
 }
 .studio-modes[hidden] {
   display: none;
 }
 .studio-mode {
+  position: relative;
   display: grid;
-  justify-items: center;
-  gap: 6px;
-  padding: 44px 18px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: clamp(14px, 2.6cqw, 34px);
+  padding: 0 clamp(18px, 4cqw, 56px);
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
+  border-radius: 18px;
+  background: radial-gradient(90% 160% at 0% 0%, var(--light-reflection), transparent 55%), var(--surface);
   color: var(--muted);
-  text-align: center;
+  text-align: left;
+  overflow: hidden;
   transition:
-    border-color 0.2s,
-    background 0.2s,
-    transform 0.2s;
+    border-color 0.25s,
+    background-color 0.25s,
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.studio-mode svg {
-  width: 30px;
-  height: 30px;
-  margin-bottom: 8px;
+.studio-mode > svg:first-child {
+  width: clamp(26px, 3.6cqw, 44px);
+  height: clamp(26px, 3.6cqw, 44px);
   color: var(--ink);
+  stroke-width: 1.4;
+}
+.studio-mode-words {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 .studio-mode strong {
   color: var(--ink);
-  font-size: 15px;
-  font-weight: 560;
+  font-size: clamp(18px, 2.4cqw, 30px);
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
 }
-.studio-mode span {
-  font-size: 11.5px;
+.studio-mode-words span {
+  font-size: clamp(11.5px, 1.2cqw, 13.5px);
   line-height: 1.5;
 }
-.studio-mode:hover {
-  border-color: var(--line-strong);
-  background: var(--tint);
-  transform: translateY(-2px);
+/* The outline of what the banner makes: a picture, a clip, a strip of sound. */
+.studio-mode-shape {
+  height: min(58%, 120px);
+  aspect-ratio: 1;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 10px;
+  opacity: 0.55;
+  transition:
+    opacity 0.25s,
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.25s;
 }
+.studio-mode[data-mode='video'] .studio-mode-shape {
+  aspect-ratio: 16 / 9;
+}
+.studio-mode[data-mode='audio'] .studio-mode-shape {
+  aspect-ratio: 3.2;
+  height: min(34%, 70px);
+  border-style: none;
+  background: repeating-linear-gradient(90deg, var(--line-strong) 0 2px, transparent 2px 7px);
+  -webkit-mask-image: radial-gradient(60% 100% at 50% 50%, #000 30%, transparent 100%);
+  mask-image: radial-gradient(60% 100% at 50% 50%, #000 30%, transparent 100%);
+}
+.studio-mode > svg:last-child {
+  width: 18px;
+  height: 18px;
+  opacity: 0.6;
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.studio-mode:hover,
+.studio-mode:focus-visible {
+  border-color: var(--line-strong);
+  background-color: var(--tint);
+  transform: translateY(-1px);
+}
+.studio-mode:hover .studio-mode-shape,
+.studio-mode:focus-visible .studio-mode-shape {
+  opacity: 0.95;
+  border-color: var(--accent);
+  transform: scale(1.06);
+}
+.studio-mode:hover > svg:last-child,
+.studio-mode:focus-visible > svg:last-child {
+  transform: translateX(4px);
+}
+/* The working page: the desk takes the height the window leaves, the results stay below. */
 .studio-body {
-  display: grid;
-  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1.6vh, 14px);
+}
+.studio-body:empty {
+  display: none;
+}
+.studio-body > .asset-empty {
+  margin: auto;
 }
 /* The desk: writing on the left, the frame in the middle, the settings on the right. */
 .studio-desk {
+  flex: 1 0 auto;
+  min-height: 330px;
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) 300px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1.1fr) clamp(250px, 29cqw, 540px) minmax(0, 1fr);
+  gap: clamp(10px, 1.2cqw, 16px);
   align-items: stretch;
 }
 .studio-desk.is-two {
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) clamp(250px, 32cqw, 520px);
+}
+.studio-desk.is-empty {
+  flex: none;
+  min-height: 0;
+}
+.studio-results {
+  flex: none;
 }
 .studio-desk.is-empty {
   grid-template-columns: minmax(0, 1fr);
@@ -667,12 +746,19 @@ body[data-view='studio'] .chat-header {
   align-items: start;
 }
 /* The stage: an empty frame in the format of what will be made. */
+/* The frame sits at the top, in the middle; its formats follow right under it. */
 .studio-stage {
-  display: grid;
-  place-items: center;
-  height: 192px;
+  flex: 1 1 0;
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  overflow: hidden;
 }
 .studio-frame {
+  flex: none;
   position: relative;
   display: grid;
   place-items: center;
@@ -688,7 +774,25 @@ body[data-view='studio'] .chat-header {
     height 0.55s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: width, height;
 }
+.studio-frame-fill {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: calc(var(--progress, 0) * 100%);
+  background: linear-gradient(0deg, color-mix(in srgb, var(--accent) 32%, transparent), transparent);
+  opacity: 0;
+  transition:
+    height 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.4s;
+}
+.studio-frame.is-busy {
+  border-style: solid;
+  border-color: var(--accent);
+}
+.studio-frame.is-busy .studio-frame-fill {
+  opacity: 1;
+}
 .studio-frame-label {
+  position: relative;
   font-size: 13px;
   font-weight: 560;
   letter-spacing: 0.04em;
@@ -779,20 +883,20 @@ body[data-view='studio'] .chat-header {
 }
 .studio-slots {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
 }
 .studio-slot {
   position: relative;
   display: grid;
   gap: 4px;
-  width: 68px;
+  flex: 0 1 68px;
+  min-width: 46px;
 }
 .studio-slot-pick {
   display: grid;
   place-items: center;
-  width: 68px;
-  height: 68px;
+  width: 100%;
+  aspect-ratio: 1;
   padding: 0;
   border: 1px dashed var(--line-strong);
   border-radius: 10px;
@@ -972,7 +1076,7 @@ body[data-view='studio'] .chat-header {
 }
 .studio-clip,
 .studio-card {
-  flex: 0 0 230px;
+  flex: 0 0 clamp(232px, 20cqw, 270px);
   min-width: 0;
   padding: 8px;
   border: 1px solid var(--line);
@@ -981,10 +1085,10 @@ body[data-view='studio'] .chat-header {
   scroll-snap-align: start;
 }
 .studio-timeline.is-images .studio-card {
-  flex-basis: 168px;
+  flex-basis: clamp(132px, 13cqw, 176px);
 }
 .studio-timeline.is-sounds .studio-card {
-  flex-basis: 280px;
+  flex-basis: clamp(240px, 26cqw, 320px);
 }
 .studio-clip.is-selected {
   border-color: var(--accent);
@@ -1039,53 +1143,59 @@ body[data-view='studio'] .chat-header {
   font-size: 10.5px;
 }
 /* Narrower: the frame stays on top in the middle, writing and settings side by side under it. */
-@container studio (max-width: 940px) {
+@container studio (max-width: 800px) {
   .studio-desk,
   .studio-desk.is-two {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
   .studio-center {
     grid-column: 1 / -1;
     order: -1;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 280px minmax(0, 1fr);
-    align-items: center;
-    column-gap: 16px;
   }
   .studio-center .studio-stage {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  .studio-center .studio-formats {
-    grid-column: 1;
-    grid-row: 1;
+    flex: none;
+    height: clamp(190px, 30vh, 300px);
   }
   .studio-center .studio-footer {
-    grid-column: 3;
-    grid-row: 1;
+    align-self: center;
+    width: min(100%, 420px);
     margin-top: 0;
   }
   .studio-desk.is-two .studio-write {
     grid-column: 1 / -1;
   }
 }
+/* Narrow: one column, in the order one works: the frame, the words, the settings. */
 @container studio (max-width: 620px) {
   .studio-desk,
   .studio-desk.is-two {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .studio-center {
-    display: flex;
+    grid-template-rows: none;
   }
   .studio-center .studio-footer {
-    margin-top: 0;
+    width: 100%;
   }
-  .studio-modes {
-    grid-template-columns: 1fr;
-    margin-top: 0;
+  .studio-write > .studio-field textarea {
+    min-height: 120px;
   }
   .studio-mode {
-    padding: 22px 16px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .studio-mode-shape {
+    display: none;
+  }
+}
+/* A low window: less air, and the page scrolls rather than squeezing the desk. */
+@media (max-height: 640px) {
+  .studio-stage {
+    min-height: 170px;
+  }
+  .studio-clip video {
+    aspect-ratio: 2;
+  }
+  .studio-prompt {
+    -webkit-line-clamp: 1;
   }
 }
 .home-view {
