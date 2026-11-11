@@ -65,6 +65,7 @@ const staticFiles = new Map([
   ['/video-plan.mjs', ['video-plan.mjs', 'text/javascript; charset=utf-8']],
   ['/formats.mjs', ['formats.mjs', 'text/javascript; charset=utf-8']],
   ['/output-actions.mjs', ['output-actions.mjs', 'text/javascript; charset=utf-8']],
+  ['/chat-videos.mjs', ['chat-videos.mjs', 'text/javascript; charset=utf-8']],
   ['/image-compare.mjs', ['image-compare.mjs', 'text/javascript; charset=utf-8']],
   ['/session-copies.mjs', ['session-copies.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-runtime.mjs', ['generation-runtime.mjs', 'text/javascript; charset=utf-8']],

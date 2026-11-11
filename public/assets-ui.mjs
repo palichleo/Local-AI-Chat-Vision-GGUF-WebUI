@@ -171,9 +171,14 @@ export function setupAssets({
     items = result.resources;
     render();
   }
-  async function importFiles(files) {
-    if (working || locked || !files.length) return;
-    show('resources');
+  /**
+   * Imports files into the library and returns the resources made. `reveal: false` leaves the
+   * panel as it is (a video joined from the message box).
+   */
+  async function importFiles(files, { reveal = true } = {}) {
+    const imported = [];
+    if (working || locked || !files.length) return imported;
+    if (reveal) show('resources');
     let done;
     activity = new Promise(resolve => {
       done = resolve;
@@ -203,6 +208,7 @@ export function setupAssets({
             await api('resources/update', { id: uploaded.id, patch: { prepared } }, { signal })
           ).json();
           items.push(resource);
+          imported.push(resource);
           items.sort((a, b) => (a.reference || 0) - (b.reference || 0));
           count();
         } catch (error) {
@@ -221,6 +227,7 @@ export function setupAssets({
       onChange();
       done();
     }
+    return imported;
   }
   $('assets-resources-tab').onclick = () => show('resources');
   $('assets-output-tab').onclick = () => show('output');
@@ -477,6 +484,8 @@ export function setupAssets({
       sync();
     },
     importFiles,
+    /** A resource of the library by its id, or null (removed since). */
+    resource: id => items.find(item => item.id === id) ?? null,
     hasDraft: () => items.some(item => item.descriptionControl && item.descriptionControl.value !== item.description),
   };
 }

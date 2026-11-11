@@ -11,6 +11,7 @@ import { readSSE } from './stream.mjs';
 import { markdownToHtml } from './markdown.mjs';
 import { setupNativeWorkflows } from './native-workflow-ui.mjs';
 import { prepareImages } from './images.mjs';
+import { isVideo, splitVideos, withVideos } from './chat-videos.mjs';
 import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
 import { outputActions } from './output-actions.mjs';
@@ -34,6 +35,8 @@ const state = {
   thinking: true,
   messages: [],
   images: [],
+  // Videos joined to the message being written: library resources ({ id, label, name }).
+  videos: [],
   generating: false,
   preparing: false,
   operation: false,
@@ -245,12 +248,14 @@ async function clearHistory() {
 }
 
 function savedUser(message) {
-  if (typeof message.content === 'string') return { text: message.content, images: [] };
+  if (typeof message.content === 'string') return { ...splitVideos(message.content), images: [] };
   return {
-    text: message.content
-      .filter(part => part.type === 'text')
-      .map(part => part.text)
-      .join('\n'),
+    ...splitVideos(
+      message.content
+        .filter(part => part.type === 'text')
+        .map(part => part.text)
+        .join('\n'),
+    ),
     images: message.content
       .filter(part => part.type === 'image_url')
       .map((part, index) => ({
@@ -293,7 +298,7 @@ async function loadConversation(id) {
     const draft =
       record.incomplete && messages.at(-1)?.role === 'user' && !messages.at(-1).internal
         ? savedUser(messages.pop())
-        : { text: '', images: [] };
+        : { text: '', images: [], videos: [] };
     state.conversationId = id;
     state.conversationInstructions = record.instructions || '';
     state.messages = messages;
@@ -303,6 +308,7 @@ async function loadConversation(id) {
     state.archiveSnapshot = { messages: record.messages, incomplete: record.incomplete };
     state.historyDirty = false;
     state.images = draft.images;
+    state.videos = draft.videos;
     $('prompt').value = draft.text;
     generationUI.clear();
     $('messages').replaceChildren();
@@ -339,7 +345,7 @@ function renderTranscript(messages, incomplete = false) {
     if (message.role === 'user') {
       reply = null;
       const user = savedUser(message);
-      userMessage(user.text, user.images);
+      userMessage(user.text, user.images, user.videos);
     } else {
       const view = assistantMessage(reply);
       reply = view;
@@ -557,7 +563,7 @@ function updateControls() {
     state.preparing ||
     state.operation ||
     state.loadingHistory ||
-    (!$('prompt').value.trim() && !state.images.length);
+    (!$('prompt').value.trim() && !state.images.length && !state.videos.length);
   $('send').hidden = state.generating || toolBusy;
   $('cancel').hidden = !state.generating && (!toolBusy || s.toolJob.blocked);
   $('cancel').setAttribute(
@@ -1073,6 +1079,58 @@ function renderAttachments() {
     box.append(preview, remove);
     $('attachments').append(box);
   });
+  state.videos.forEach((video, index) => {
+    const box = node('div', 'attachment is-video'),
+      resource = assetsUI.resource(video.id);
+    box.title = `${video.label} · ${video.name}`;
+    if (resource?.previewUrl) {
+      const preview = node('img');
+      preview.src = resource.previewUrl;
+      preview.alt = video.name;
+      box.append(preview);
+    }
+    box.append(node('span', 'attachment-badge', '▶ ' + video.label));
+    const remove = node('button');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', `Retirer ${video.name}`);
+    remove.append(icon('close'));
+    // The video stays in the library: only this message no longer names it.
+    remove.onclick = () => {
+      state.videos.splice(index, 1);
+      renderAttachments();
+      updateControls();
+    };
+    box.append(remove);
+    $('attachments').append(box);
+  });
+}
+
+/** Images and videos dropped, pasted or chosen: videos go to the library, images to the message. */
+function addFiles(files) {
+  const videos = files.filter(isVideo),
+    images = files.filter(file => !isVideo(file));
+  if (videos.length) addVideos(videos);
+  if (images.length) addImages(images);
+}
+
+async function addVideos(files) {
+  if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)
+    return;
+  state.preparing = true;
+  updateControls();
+  try {
+    const imported = await assetsUI.importFiles(files, { reveal: false });
+    if (!imported.length)
+      return notice('Vidéo non importée : la bibliothèque est occupée ou le fichier est illisible.');
+    state.videos.push(...imported.map(resource => ({ id: resource.id, label: resource.label, name: resource.name })));
+    notice('');
+  } catch (error) {
+    notice(error.message || 'Cette vidéo ne peut pas être lue.');
+  } finally {
+    state.preparing = false;
+    renderAttachments();
+    updateControls();
+  }
 }
 
 async function addImages(files) {
@@ -1106,9 +1164,26 @@ function renderText(target, text) {
   target.innerHTML = markdownToHtml(text);
 }
 
-function userMessage(text, images) {
+function userMessage(text, images, videos = []) {
   const article = node('article', 'message user');
   article.setAttribute('aria-label', 'Votre message');
+  if (videos.length) {
+    const previews = node('div', 'message-videos');
+    for (const video of videos) {
+      const resource = assetsUI.resource(video.id);
+      if (resource?.originalUrl) {
+        const player = node('video');
+        player.controls = true;
+        player.preload = 'none';
+        player.playsInline = true;
+        player.src = resource.originalUrl;
+        if (resource.previewUrl) player.poster = resource.previewUrl;
+        player.setAttribute('aria-label', `${video.label} · ${video.name}`);
+        previews.append(player);
+      } else previews.append(node('span', 'message-video-missing', `▶ ${video.label} · ${video.name}`));
+    }
+    article.append(previews);
+  }
   if (images.length) {
     const previews = node('div', 'message-images');
     for (const image of images) {
@@ -1346,9 +1421,10 @@ async function sendMessage(event) {
     state.preparing = false;
     updateControls();
   }
-  const content = userContent(text, images);
+  const videos = state.videos;
+  const content = userContent(withVideos(text, videos), images);
   const history = [...state.messages, { role: 'user', content }],
-    userView = userMessage(text, images);
+    userView = userMessage(text, images, videos);
   state.conversationInstructions ??= state.messages.length ? '' : state.globalInstructions || '';
   const turnId = crypto.randomUUID();
   state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
@@ -1367,6 +1443,7 @@ async function sendMessage(event) {
   $('welcome').hidden = true;
   $('prompt').value = '';
   state.images = [];
+  state.videos = [];
   renderAttachments();
   state.waitingForModel = true;
   state.controller = new AbortController();
@@ -2144,6 +2221,7 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     closeNavigation();
     state.messages = [];
     state.images = [];
+    state.videos = [];
     state.conversationId = null;
     state.conversationInstructions = null;
     state.archiveSnapshot = null;
@@ -2186,18 +2264,19 @@ function chooseImage() {
     openSettings();
   } else $('image-input').click();
 }
-$('attach').onclick = chooseImage;
+// Images need the vision projector (checked when they are added); videos go to the library.
+$('attach').onclick = () => $('image-input').click();
 $('suggest-image').onclick = chooseImage;
 $('image-input').onchange = event => {
   const files = [...event.target.files];
   event.target.value = '';
-  addImages(files);
+  addFiles(files);
 };
 $('prompt').onpaste = event => {
   const files = [...event.clipboardData.files];
   if (files.length) {
     event.preventDefault();
-    addImages(files);
+    addFiles(files);
   }
 };
 $('chat-form').ondragover = event => {
@@ -2210,7 +2289,7 @@ $('chat-form').ondragleave = event => {
 $('chat-form').ondrop = event => {
   event.preventDefault();
   $('chat-form').classList.remove('dragging');
-  addImages([...event.dataTransfer.files]);
+  addFiles([...event.dataTransfer.files]);
 };
 document.addEventListener('dragover', event => event.preventDefault());
 document.addEventListener('drop', event => event.preventDefault());
@@ -2229,6 +2308,7 @@ window.addEventListener('beforeunload', event => {
     state.historyDirty ||
     $('prompt').value.trim() ||
     state.images.length ||
+    state.videos.length ||
     (!state.saveHistory && state.messages.length)
   ) {
     event.preventDefault();

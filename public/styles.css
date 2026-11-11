@@ -758,6 +758,50 @@ button svg {
   width: 11px;
   height: 11px;
 }
+/* A video joined to the message: its first frame, and its library label over it. */
+.attachment.is-video {
+  width: 96px;
+}
+.attachment-badge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.62);
+  color: #fff;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.attachment.is-video:not(:has(img)) .attachment-badge {
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: none;
+  color: var(--muted);
+}
+.message-videos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 9px;
+  justify-content: flex-end;
+}
+.message-videos video {
+  height: 160px;
+  max-width: 300px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #000;
+}
+.message-video-missing {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .notice {
   display: flex;
   align-items: center;

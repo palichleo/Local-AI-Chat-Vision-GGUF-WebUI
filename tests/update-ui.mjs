@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import * as module from '../public/update-ui.mjs';
 import * as sessionCopies from '../public/session-copies.mjs';
+import * as chatVideos from '../public/chat-videos.mjs';
 test('install click sends the session once and reloads only when a replacement server is ready', async () => {
   assert.equal(typeof module.installFromButton, 'function');
   let sent = 0,
@@ -94,10 +95,12 @@ test('download failure keeps configuration, file selection and composer controls
     config: {},
     messages: [],
     images: [],
+    videos: [],
     token: 'old',
   };
   const context = {
     ...sessionCopies,
+    ...chatVideos,
     projectUI: { sync() {} },
     assetsUI: { setBusy() {} },
     settingsGuard: { isDirty: () => false },
