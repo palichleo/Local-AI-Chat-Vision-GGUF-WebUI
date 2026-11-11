@@ -688,13 +688,11 @@ export async function createApplication({
       }
       if (req.method === 'GET' && path === '/api/tools/actions') return send(200, await runtime.tools.actions());
       // The Studio: where its results are kept, and the style LoRAs ComfyUI offers.
-      if (req.method === 'GET' && path === '/api/studio')
-        return send(200, {
-          conversationId: STUDIO_ID,
-          enabled: generation.config.enabled === true,
-          tools: await runtime.tools.studio(),
-          styles: await generation.styles(),
-        });
+      if (req.method === 'GET' && path === '/api/studio') {
+        // Asked together: the workflows are read from the disk, the LoRAs from ComfyUI.
+        const [tools, styles] = await Promise.all([runtime.tools.studio(), generation.styles()]);
+        return send(200, { conversationId: STUDIO_ID, enabled: generation.config.enabled === true, tools, styles });
+      }
       if (req.method === 'GET' && path === '/api/tools/job') {
         const job = runtime.status();
         return send(200, job?.record ? { ...job, record: galleryView(job.record) } : job);

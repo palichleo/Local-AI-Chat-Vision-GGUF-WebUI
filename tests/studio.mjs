@@ -188,6 +188,33 @@ test('a style the model does not write in time is said as such, and the model is
   assert.deepEqual([status.state, status.busy], ['ready', false]);
 });
 
+test('the workflows are listed once for a whole answer, whatever the number of verbs', async () => {
+  const { readFile, readdir } = await import('node:fs/promises');
+  const { ToolCatalog } = await import('../lib/tool-catalog.mjs');
+  const folder = new URL('../runner/workflows/', import.meta.url);
+  const workflows = [];
+  for (const name of await readdir(folder))
+    workflows.push({ ...JSON.parse(await readFile(new URL(name, folder), 'utf8')), ready: true });
+  // Each listing checks the files of every workflow: 0.6 s on the machine it was measured on.
+  let listed = 0;
+  const tools = new ToolCatalog({
+    list: async () => {
+      listed++;
+      return workflows;
+    },
+  });
+  const studio = await tools.studio();
+  assert.equal(listed, 1, 'the Studio');
+  assert.ok(studio.create_image.length && studio.create_video.length);
+  listed = 0;
+  const offered = await tools.definitions({ images: 0, resources: [], outputs: [] });
+  assert.equal(listed, 1, 'the tools offered to the model');
+  assert.ok(offered.length > 1);
+  listed = 0;
+  assert.ok((await tools.actions()).upscale.length);
+  assert.equal(listed, 1, 'the buttons under a creation');
+});
+
 test('leaving a mode stops following the size of its frame', async () => {
   // Just enough of a page for the Studio to draw itself.
   class Element {
