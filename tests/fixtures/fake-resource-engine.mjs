@@ -1,4 +1,9 @@
 import http from 'node:http';
+if (process.argv[2] === '--version') {
+  // As llama-server says it, on its error stream.
+  console.error('version: 1 (fake)');
+  process.exit(0);
+}
 const args = process.argv.slice(2),
   arg = name => args[args.indexOf(name) + 1],
   key = arg('--api-key');

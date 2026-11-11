@@ -1,6 +1,11 @@
 // Test fixture only: deterministic native tools, without loading a model.
 import http from 'node:http';
 
+if (process.argv[2] === '--version') {
+  // As llama-server says it, on its error stream.
+  console.error('version: 1 (fake)');
+  process.exit(0);
+}
 const args = process.argv.slice(2);
 const arg = name => args[args.indexOf(name) + 1];
 if (!args.includes('--offline') || arg('--host') !== '127.0.0.1') process.exit(2);

@@ -59,8 +59,8 @@ test('the launcher is started in its own window on Windows, in the background el
   assert.deepEqual(windows.args.slice(0, 5), ['/c', 'start', 'Atelier local', '/D', 'F:\\Atelier']);
   assert.equal(windows.args[5], process.execPath);
   assert.match(windows.args[6], /scripts.launch\.mjs$/);
-  assert.equal(windows.args.at(-1), '--port=8787');
+  assert.deepEqual(windows.args.slice(-2), ['--port=8787', '--wait-idle']);
   assert.equal(linux.command, process.execPath);
-  assert.equal(linux.args.at(-1), '--port=9000');
+  assert.deepEqual(linux.args.slice(-2), ['--port=9000', '--wait-idle']);
   for (const { options } of calls) assert.deepEqual([options.detached, options.stdio], [true, 'ignore']);
 });

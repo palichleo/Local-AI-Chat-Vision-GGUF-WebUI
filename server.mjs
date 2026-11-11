@@ -1683,7 +1683,7 @@ export async function createApplication({
  * and starts the new one; if it cannot, the running instance simply stays.
  */
 export function startLauncher({ root, port }, { platform = process.platform, spawnProcess = spawn } = {}) {
-  const script = [process.execPath, join(root, 'scripts', 'launch.mjs'), `--port=${port}`];
+  const script = [process.execPath, join(root, 'scripts', 'launch.mjs'), `--port=${port}`, '--wait-idle'];
   const [command, ...args] =
     platform === 'win32' ? ['cmd.exe', '/c', 'start', 'Atelier local', '/D', root, ...script] : script;
   const child = spawnProcess(command, args, { cwd: root, stdio: 'ignore', detached: true, windowsHide: true });

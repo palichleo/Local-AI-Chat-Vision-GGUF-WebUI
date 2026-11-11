@@ -10,6 +10,9 @@ export async function runLauncher({
   root = resolve(dirname(fileURLToPath(import.meta.url)), '..'),
   port = 8787,
   open = false,
+  // Started by the application itself (/api/relaunch): a moment of activity in the page (a
+  // conversation saved, the context counted) is waited out instead of ending the relaunch.
+  waitIdle = 0,
   signal = new AbortController().signal,
 } = {}) {
   if (Number(process.versions.node.split('.')[0]) < 22) throw Error('Node.js 22 ou plus récent est requis.');
@@ -64,27 +67,40 @@ export async function runLauncher({
       if (boot.installationId !== sources.installationId)
         throw Error('Le port est utilisé par Atelier local dans un autre dossier. Aucun processus n’a été arrêté.');
       if (boot.sourceRevision !== sources.sourceRevision || boot.version !== local.version) {
-        if (
-          boot.updating ||
-          boot.status?.busy ||
-          boot.status?.toolJob ||
-          ['loading', 'stopping'].includes(boot.status?.state)
-        )
-          throw Error(
-            'Termine la génération ou l’opération en cours, puis relance pour charger les derniers fichiers.',
-          );
-        console.log('Chargement des derniers fichiers de ce dossier…');
-        const previousToken = boot.token,
-          response = await fetch(url + '/api/shutdown', {
-            method: 'POST',
-            headers: { Authorization: 'Bearer ' + previousToken, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              onlyIfIdle: true,
-              installationId: boot.installationId,
-              sourceRevision: boot.sourceRevision,
-            }),
-            signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
-          });
+        const busy = value =>
+          value.updating ||
+          value.status?.busy ||
+          value.status?.toolJob ||
+          ['loading', 'stopping'].includes(value.status?.state);
+        const until = Date.now() + waitIdle;
+        let response;
+        while (true) {
+          if (!busy(boot)) {
+            console.log('Chargement des derniers fichiers de ce dossier…');
+            response = await fetch(url + '/api/shutdown', {
+              method: 'POST',
+              headers: { Authorization: 'Bearer ' + boot.token, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                onlyIfIdle: true,
+                installationId: boot.installationId,
+                sourceRevision: boot.sourceRevision,
+              }),
+              signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
+            });
+            // Busy again between the check and the request: waited out like the rest.
+            if (response.ok || response.status !== 409 || Date.now() >= until) break;
+            await response.body?.cancel();
+          } else if (Date.now() >= until)
+            throw Error(
+              'Termine la génération ou l’opération en cours, puis relance pour charger les derniers fichiers.',
+            );
+          await delay(500, undefined, { signal });
+          const again = await bootstrap();
+          if (!again || again.token !== boot.token)
+            throw Error('L’instance a changé pendant la relance. Relancez le lanceur.');
+          boot = again;
+        }
+        const previousToken = boot.token;
         if (!response.ok) {
           let message;
           try {
@@ -207,6 +223,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     await runLauncher({
       port: portArg ? Number(portArg.split('=')[1]) : 8787,
       open: process.argv.includes('--open') && !process.argv.includes('--no-open'),
+      waitIdle: process.argv.includes('--wait-idle') ? 60000 : 0,
       signal: controller.signal,
     });
   } catch (error) {

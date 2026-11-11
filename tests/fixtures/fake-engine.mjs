@@ -2,6 +2,11 @@
 import http from 'node:http';
 
 const args = process.argv.slice(2);
+if (args[0] === '--version') {
+  // As llama-server says it, on its error stream.
+  console.error('version: 1 (fake)\nbuilt with node');
+  process.exit(0);
+}
 const arg = name => args[args.indexOf(name) + 1];
 if (!args.includes('--offline') || arg('--host') !== '127.0.0.1') process.exit(2);
 const key = arg('--api-key');
