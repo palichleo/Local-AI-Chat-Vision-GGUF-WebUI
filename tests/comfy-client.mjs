@@ -275,7 +275,45 @@ test('run surfaces validation and execution failures without returning partial i
   });
   await assert.rejects(client.run(graph), /Invalid graph|Missing images/);
   mode = 'execution';
-  await assert.rejects(client.run(graph), /Out of VRAM/);
+  await assert.rejects(client.run(graph), /^Error: Out of VRAM$/);
+});
+
+test('a file that is not the model its loader expects is said so, not as « meta tensor » alone', async t => {
+  let node = 'CLIPTextEncode';
+  const { client } = await server(t, ({ url }) => {
+    if (url.pathname === '/prompt') return { body: { prompt_id: 'mine' } };
+    if (url.pathname === '/queue') return { body: queue() };
+    return {
+      body: {
+        mine: {
+          status: {
+            status_str: 'error',
+            completed: false,
+            messages: [
+              [
+                'execution_error',
+                {
+                  // As ComfyUI 0.45 answers a diffusion model loaded as a text encoder.
+                  exception_message: 'Cannot copy out of meta tensor; no data!\n',
+                  exception_type: 'NotImplementedError',
+                  node_id: 'negative',
+                  node_type: node,
+                },
+              ],
+            ],
+          },
+          outputs: {},
+        },
+      },
+    };
+  });
+  await assert.rejects(
+    client.run(graph),
+    /^Error: L’encodeur de texte choisi pour ce workflow n’est pas le bon .* Choisissez le bon fichier dans le workflow, dans les réglages\. \(ComfyUI : Cannot copy out of meta tensor; no data!\)$/,
+  );
+  // The same empty weights met by another node: the file is not named, the remedy is the same.
+  node = 'KSampler';
+  await assert.rejects(client.run(graph), /^Error: Un des fichiers choisi pour ce workflow n’est pas le bon/);
 });
 
 test('run abort deletes only its own queued prompt and never interrupts unrelated execution', async t => {
