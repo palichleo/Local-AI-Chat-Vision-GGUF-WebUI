@@ -203,7 +203,14 @@ test('the former application-wide tokenizer moves into existing workflows and le
   const service = await new GenerationService(options).init();
   t.after(() => service.close());
   assert.equal(service.config.tokenizerPath, undefined);
-  assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'generation.json'), 'utf8')), settings);
+  // Rewritten with the folders added since, empty.
+  assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'generation.json'), 'utf8')), {
+    ...settings,
+    textEncoderRoot: '',
+    tokenizerRoot: '',
+    upscaleRoot: '',
+    latentUpscaleRoot: '',
+  });
   const migrated = await service.catalog.read('krea');
   const tokenizerAsset = await service.assets.read(migrated.components.tokenizer.asset);
   assert.equal(tokenizerAsset.path, await realpath(files.matching));

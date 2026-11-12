@@ -32,7 +32,14 @@ const folderControls = {
   modelRoot: ['native-convert-root', 'model'],
   vaeRoot: ['generation-vae-root', 'vae'],
   loraRoot: ['generation-lora-root', 'lora'],
+  textEncoderRoot: ['generation-text-encoder-root', 'textEncoder'],
+  tokenizerRoot: ['generation-tokenizer-root', 'tokenizer'],
+  upscaleRoot: ['generation-upscale-root', 'upscaler'],
+  latentUpscaleRoot: ['generation-latent-upscale-root', 'latentUpscaler'],
 };
+// What an optional component that is used, but left to the folders of the settings, holds in
+// place of a file: an id no file is registered under, so the server looks in the folders.
+const AUTOMATIC = 'automatic';
 export const parameterPolicies = name => (name === 'seed' ? ['fixed', 'model', 'random'] : ['fixed', 'model']);
 export function setupNativeWorkflows(options) {
   const { api, state, node, notice, onSettingsBusyChange = () => {} } = options,
@@ -231,9 +238,15 @@ export function setupNativeWorkflows(options) {
     );
   }
   function componentFolder(role) {
-    const key =
-      role === 'audioVae' ? 'vaeRoot' : Object.keys(folderControls).find(key => folderControls[key][1] === role);
-    return (key && $(folderControls[key][0]).value.trim()) || folders[role] || '';
+    // « upscaler » is an image model for Real-ESRGAN and a latent one for LTX: each has its folder.
+    const kind =
+      role === 'audioVae'
+        ? 'vae'
+        : familyOf(draft?.pipeline)?.components[role]?.folder === 'latent_upscale_models'
+          ? 'latentUpscaler'
+          : role;
+    const key = Object.keys(folderControls).find(key => folderControls[key][1] === kind);
+    return (key && $(folderControls[key][0]).value.trim()) || folders[kind] || folders[role] || '';
   }
   function values() {
     const maxIterations = unlimited ? 10000 : Number($('generation-iterations').value);
@@ -494,10 +507,16 @@ export function setupNativeWorkflows(options) {
             asset.kind === role &&
             (!(asset.family || asset.pipeline) || (asset.family || asset.pipeline) === draft.pipeline),
         ),
-      control = input(id, value ?? '', 'hidden'),
+      control = input(id, value === AUTOMATIC ? '' : (value ?? ''), 'hidden'),
       field = input(id + '-file', ''),
       list = element('datalist', id + '-files'),
-      hint = folder ? 'Choisir un dossier ou coller son chemin…' : 'Choisir un fichier ou coller son chemin…';
+      // Left without a file, such a component takes the one the folders of the settings hold
+      // for it (the server names it in `automatic`): it is a choice, not something missing.
+      automatic = spec.format === 'tokenizer' || Boolean(spec.signature?.length),
+      found = draft.automatic?.[role] || '',
+      replaced = node('p', 'field-help', ''),
+      hint = folder ? 'Choisir un dossier ou coller son chemin…' : 'Choisir un fichier ou coller son chemin…',
+      unset = automatic ? 'Automatique' + (found ? ' : ' + found : '') + ' · ou ' + hint.toLowerCase() : hint;
     const fileName = path => path?.split(/[\\/]/).pop() || '';
     // Two files of the same name (in different folders) are told apart by their folder.
     function display(assetId) {
@@ -508,10 +527,19 @@ export function setupNativeWorkflows(options) {
       return twins.length ? `${name} (${fileName(asset.path?.replace(/[\\/][^\\/]*$/, ''))})` : name;
     }
     let shown = '';
+    const placeholder = () => (control.value ? hint : unset);
     function show() {
       shown = display(control.value);
       field.value = shown;
-      field.placeholder = hint;
+      field.placeholder = placeholder();
+      field.dataset.automatic = String(automatic && !control.value);
+      back.hidden = !automatic || !control.value;
+      // The file chosen is not here any more: the one that stands in for it is named.
+      replaced.textContent =
+        control.value && found && control.value === value
+          ? `Ce fichier n’est plus à sa place : ${found} le remplace, pris dans le dossier des réglages.`
+          : '';
+      replaced.hidden = !replaced.textContent;
       list.replaceChildren(
         ...compatibleAssets().map(asset => {
           const option = element('option');
@@ -579,7 +607,7 @@ export function setupNativeWorkflows(options) {
     field.onblur = () => {
       if (!field.value.trim()) {
         field.value = shown;
-        field.placeholder = hint;
+        field.placeholder = placeholder();
       }
     };
     field.oninput = () => resolveTyped({ final: false });
@@ -608,14 +636,19 @@ export function setupNativeWorkflows(options) {
         if (!controller.signal.aborted) error(failure.message);
       }
     });
+    // Back to the file of the settings' folder, for a component that had one chosen here.
+    const back = button('Automatique', () => choose(''));
+    back.title = 'Ne plus fixer ce fichier : prendre celui qui convient dans le dossier des réglages';
     const row = node('div', 'path-input');
-    row.append(field, browseButton, control, list);
-    container.append(row);
+    row.append(field, browseButton, back, control, list);
+    container.append(row, replaced);
     show();
     return {
       container,
       control,
       adopt,
+      // Whether the folders of the settings can answer for this component (see `unset`).
+      automatic,
       selected() {
         const text = field.value.trim();
         if (text && text !== shown)
@@ -722,7 +755,15 @@ export function setupNativeWorkflows(options) {
       picker,
       read() {
         if (optional && !active.checked) return null;
-        if (ownershipSelect.value === 'fixed') return { policy: 'fixed', asset: picker.selected() };
+        // Left without a file, where the folders of the settings can answer: a required
+        // component is not sent at all, an optional one that is used says so; the server takes
+        // the file from the folders. A model folder cannot be told from another: it is asked for.
+        if (ownershipSelect.value === 'fixed')
+          return picker.selected() || !picker.automatic
+            ? { policy: 'fixed', asset: picker.selected() }
+            : optional
+              ? { policy: 'fixed', asset: AUTOMATIC }
+              : null;
         const choices = checks.filter(([, check]) => check.checked).map(([id]) => id);
         if (picker.selected() && !choices.includes(picker.selected()))
           throw Error(
@@ -1171,6 +1212,8 @@ export function setupNativeWorkflows(options) {
       loras: readLoras.map(control => control.read()),
       references: readReferences.map(control => control.read()),
     };
+    // What the server found in the folders is its answer, not a part of the workflow.
+    delete record.automatic;
     if (readProfiles.length) record.profiles = Object.fromEntries(readProfiles.map(([stage, read]) => [stage, read()]));
     if (readEnhance) {
       const { parameter, expansion } = readEnhance();

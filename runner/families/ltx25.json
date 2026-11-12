@@ -67,7 +67,7 @@
     },
     "upscaler": {
       "label": "Agrandisseur de latents ×2",
-      "folder": "upscale_models",
+      "folder": "latent_upscale_models",
       "required": false,
       "note": "Facultatif. Avec lui, une grande vidéo est d'abord générée à mi-taille, agrandie, puis affinée en 3 étapes : bien plus rapide.",
       "signature": [

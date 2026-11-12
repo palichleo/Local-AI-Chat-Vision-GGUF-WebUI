@@ -1983,6 +1983,10 @@ fieldset {
   color: var(--danger);
   opacity: 1;
 }
+/* A component left to the folders of the settings is not something missing. */
+.path-input input[data-automatic='true']::placeholder {
+  color: var(--muted);
+}
 #generation-python::placeholder {
   color: var(--muted);
 }

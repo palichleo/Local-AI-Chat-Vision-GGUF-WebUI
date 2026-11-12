@@ -285,6 +285,10 @@ test('settings read native generation values and descriptions come from workflow
     modelRoot: '',
     vaeRoot: '',
     loraRoot: '',
+    textEncoderRoot: '',
+    tokenizerRoot: '',
+    upscaleRoot: '',
+    latentUpscaleRoot: '',
   });
   assert.equal(
     f.calls.some(call => call.route === 'comfy'),
@@ -319,7 +323,7 @@ test('LoRA model strength starts with supported limits', async t => {
   await f.ui.saveEditor();
   assert.doesNotThrow(() => validateNativeWorkflow(f.calls.find(call => call.route === 'generation/workflows').body));
 });
-test('video editor requires the coupled audio VAE without inventing selections or offering unsupported enhancement', async t => {
+test('video editor shows the coupled audio VAE without inventing a selection or offering unsupported enhancement', async t => {
   const f = await setup(t),
     record = structuredClone(f.template);
   record.pipeline = 'ltx25';
@@ -327,8 +331,9 @@ test('video editor requires the coupled audio VAE without inventing selections o
   await f.ui.edit(record);
   assert.equal(f.$('native-component-audioVae').value, '');
   assert.equal(f.$('native-component-enhancer'), null);
-  assert.equal(await f.ui.saveEditor(), false);
-  assert.match(f.$('native-workflow-error').textContent, /VAE audio/);
+  // Left without a file it is not something missing: the folders of the settings answer for it.
+  assert.match(f.$('native-component-audioVae-file').placeholder, /^Automatique · ou choisir un fichier/);
+  assert.equal(f.$('native-component-audioVae-file').dataset.automatic, 'true');
 });
 test('a role shared by several families is named by the family of the open workflow', async t => {
   const { families, familyTemplate } = await import('../lib/families.mjs');
@@ -440,6 +445,10 @@ test('unified import accepts Comfy JSON and opens a fresh prefilled editor witho
     modelRoot: 'C:/atelier/models/checkpoints',
     vaeRoot: 'C:/atelier/models/VAE',
     loraRoot: 'C:/atelier/models/LoRa',
+    textEncoderRoot: 'C:/atelier/models/LLMs',
+    tokenizerRoot: '',
+    upscaleRoot: '',
+    latentUpscaleRoot: '',
     name: 'Custom.json',
   });
   assert.equal(f.ui.isEditing(), true);
@@ -529,16 +538,16 @@ test('model-owned components and parameters can require a model choice without i
   assert.equal(saved.components.model.description, 'Choose the portrait checkpoint');
 });
 
-test('blank creation opens, uses the checkpoint folder and rejects incomplete components without losing fields', async t => {
+test('blank creation opens, uses the checkpoint folder and leaves the files not chosen to the folders of the settings', async t => {
   const f = await setup(t);
   await f.ui.edit();
   assert.equal(f.ui.isEditing(), true);
   assert.equal(f.$('native-workflow-name').value, '');
   assert.equal(f.$('native-component-model').value, '');
+  // Without its name and description nothing is sent.
+  assert.equal(await f.ui.saveEditor(), false);
   f.$('native-workflow-name').value = 'Personal workflow';
   f.$('native-workflow-description').value = 'Portraits';
-  assert.equal(await f.ui.saveEditor(), false);
-  assert.match(f.$('native-workflow-error').textContent, /Choisissez un fichier/);
   await f.$('native-component-model').parent.children[1].onclick();
   assert.equal(f.calls.find(call => call.route === 'files/choose').body.initialPath, 'C:/atelier/models/checkpoints');
   assert.equal(f.$('native-workflow-name').value, 'Personal workflow');
@@ -850,4 +859,51 @@ test('every shipped workflow comes out of the editor unchanged when saved untouc
     };
     assert.deepEqual(diff(strip(saved), strip(stored)), [], name);
   }
+});
+
+test('a component left without a file is sent as such, and the file found for it is named', async t => {
+  const f = await setup(t),
+    record = { ...structuredClone(f.template), automatic: { textEncoder: 'qwen3vl_4b_int8_convrot.safetensors' } };
+  // As the server lists a workflow that fixes none of its files.
+  record.components = {};
+  await f.ui.edit(record);
+  const field = role => f.$('native-component-' + role + '-file'),
+    back = role => field(role).parent.children[2];
+  // The text encoder was chosen by nobody: the server took it from the folder, and says which.
+  assert.match(
+    field('textEncoder').placeholder,
+    /^Automatique : qwen3vl_4b_int8_convrot\.safetensors · ou choisir un fichier/,
+  );
+  assert.equal(field('textEncoder').dataset.automatic, 'true');
+  assert.equal(back('textEncoder').textContent, 'Automatique');
+  assert.equal(back('textEncoder').hidden, true, 'nothing to go back from');
+
+  // A file chosen here overrides the folder; « Automatique » gives the choice back to it.
+  await field('model').parent.children[1].onclick();
+  assert.notEqual(f.$('native-component-model').value, '');
+  assert.equal(field('model').dataset.automatic, 'false');
+  assert.equal(back('model').hidden, false);
+  back('model').onclick();
+  assert.equal(f.$('native-component-model').value, '');
+  assert.equal(field('model').dataset.automatic, 'true');
+
+  f.$('native-workflow-name').value = 'Personal workflow';
+  f.$('native-workflow-description').value = 'Portraits';
+  await field('vae').parent.children[1].onclick();
+  assert.equal(await f.ui.saveEditor(), true, f.$('native-workflow-error').textContent);
+  const saved = f.calls.find(call => call.route === 'generation/workflows').body;
+  // Only what was chosen here is fixed in the workflow; the rest is left to the folders.
+  assert.deepEqual(Object.keys(saved.components), ['vae']);
+  assert.equal(saved.automatic, undefined, 'what the server found is not part of the workflow');
+});
+
+test('a model folder cannot be told from another: without one, the workflow is not saved', async t => {
+  const { families, familyTemplate } = await import('../lib/families.mjs');
+  const f = await setup(t);
+  await f.ui.edit({ ...familyTemplate(families().acestep15), components: {} });
+  f.$('native-workflow-name').value = 'Musique';
+  f.$('native-workflow-description').value = 'Chansons';
+  assert.match(f.$('native-component-musicModel-file').placeholder, /^Choisir un dossier/);
+  assert.equal(await f.ui.saveEditor(), false);
+  assert.match(f.$('native-workflow-error').textContent, /Choisissez un fichier pour « Modèle de musique/);
 });
