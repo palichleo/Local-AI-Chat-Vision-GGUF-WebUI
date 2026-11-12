@@ -115,7 +115,9 @@ class GatesTest(unittest.TestCase):
     @unittest.skipUnless(torch.cuda.is_available(), 'no GPU')
     def test_a_short_sequence_stays_dense(self):
         sparse = minimax_h3.Sparse(0.1)
-        self.assertIsNone(sparse.prepare(sequence((37, 14, 24)), (37, 14, 24)))
+        # 768 x 448 for 3 s stays dense; 5 s, the draft, no longer (see MIN_ROWS).
+        self.assertIsNone(sparse.prepare(sequence((17, 14, 24)), (17, 14, 24)))
+        self.assertIsNotNone(sparse.prepare(sequence((37, 14, 24)), (37, 14, 24)))
         grid = (40, 24, 24)
         plan = sparse.prepare(sequence(grid), grid)
         self.assertEqual(plan.rows, 70 + 40 + 40 * 24 * 24)
@@ -288,35 +290,80 @@ class DecoderAttentionTest(unittest.TestCase):
         self.assertGreater(float(cosine), 0.999)
 
 
-@unittest.skipUnless(sparse_attention.ready(), 'no sparse attention kernel on this machine')
+@unittest.skipUnless(
+    sparse_attention.ready() and minimax_h3.int8_attention_ready(), 'no sparse attention kernel on this machine'
+)
 class KernelTest(unittest.TestCase):
-    def inputs(self):
+    """A layer's sparse attention through comfy-kitchen's chunked kernel (the fused projection
+    of the rows laid out in blocks, piece by piece) against `reference` on the queries, keys
+    and values of the dense attention."""
+
+    def layer(self):
+        from diffusers.models.transformers.transformer_minimax_h3 import MiniMaxH3Attention
+
         torch.manual_seed(5)
-        plan = layout([130, 60, (8, 12, 16)]).to('cuda')
-        heads, width = 4, 128
-        q, k, v = (torch.randn(1, plan.rows, heads, width, device='cuda', dtype=torch.bfloat16) for _ in range(3))
-        g = torch.rand(1, plan.rows, heads, width, device='cuda', dtype=torch.bfloat16)
-        return plan, q, k, v, g
+        heads = 4
+        attn = MiniMaxH3Attention(256, heads, 128, 1e-5).to('cuda', torch.bfloat16)
+        for parameter in attn.parameters():
+            parameter.data.normal_(0, 0.05)
+        attn.norm_q.weight.data.uniform_(0.5, 1.5)
+        attn.norm_k.weight.data.uniform_(0.5, 1.5)
+        attn.to_qkv = torch.nn.Linear(256, 3 * heads * 128, bias=False).to('cuda', torch.bfloat16)
+        attn.to_qkv.weight.data = torch.cat([attn.to_q.weight, attn.to_k.weight, attn.to_v.weight]).data
+        attn.to_gate_compress = torch.nn.Linear(256, heads * 128, bias=False).to('cuda', torch.bfloat16)
+        attn.to_gate_compress.weight.data.normal_(0, 0.05)
+        # Text, sound, and a video whose far cubes are cut: 1450 rows in 28 blocks.
+        plan = layout([130, 60, (7, 12, 15)]).to('cuda')
+        hidden = torch.randn(1, plan.rows, 256, device='cuda', dtype=torch.bfloat16)
+        angles = torch.randn(plan.rows, 48, device='cuda')
+        rotary = (torch.cat([angles, angles], -1).cos(), torch.cat([angles, angles], -1).sin())
+        return attn, plan, hidden, rotary
 
-    def sparse(self, plan, q, k, v, g):
-        q, k, v = plan.tile(q), plan.tile(k), plan.tile(v)
-        answer = sparse_attention.coarse(q, k, v, plan)
-        return sparse_attention.add_coarse(sparse_attention.attend(q, k, v, plan, 0.1), g, answer, plan)
+    def processor(self, plan=None):
+        sparse = minimax_h3.Sparse(0.1)
+        sparse.plan = plan
+        return sparse, minimax_h3.SparseAttention(sparse, minimax_h3.Int8Attention(), 7)
 
-    def test_the_kernel_matches_the_reference(self):
-        plan, q, k, v, g = self.inputs()
-        expected = sparse_attention.reference(q, k, v, g, plan, 0.1).float()
-        found = self.sparse(plan, q, k, v, g)
-        cosine = torch.nn.functional.cosine_similarity(found.float().flatten(), expected.flatten(), dim=0)
-        self.assertGreater(float(cosine), 0.99)
+    def test_the_chunked_kernel_matches_the_reference(self):
+        with torch.inference_mode():
+            attn, plan, hidden, rotary = self.layer()
+            # PyTorch's norm and rotation, the attention in full precision.
+            with unittest.mock.patch.object(minimax_h3, 'FUSED_ROPE', False):
+                q, k, v = minimax_h3.project(attn, hidden, rotary)
+            gate = attn.to_gate_compress(hidden).unflatten(-1, (attn.heads, -1))
+            expected = attn.to_out[0](sparse_attention.reference(q, k, v, gate, plan, 0.1).flatten(2, 3)).float()
+            sparse, processor = self.processor(plan)
+            with unittest.mock.patch.object(sparse_attention, 'CHUNK', 256):
+                # Without statistics, the kernel measures them first; then with those it returned.
+                first = processor(attn, hidden, rotary)
+                self.assertEqual(list(sparse.statistics), [7])
+                second = processor(attn, hidden, rotary)
+        # What comfy-kitchen keeps of the rotation table goes once the generation is over.
+        from comfy_kitchen.backends import cuda as kernels
 
-    def test_heads_by_packs_give_the_same_result(self):
-        plan, q, k, v, g = self.inputs()
-        whole = self.sparse(plan, q, k, v, g)
-        with unittest.mock.patch.object(sparse_attention, 'HEAD_BYTES', 1):
-            self.assertEqual(len(sparse_attention.packs(4, plan.blocks * 64)), 4)
-            single = self.sparse(plan, q, k, v, g)
-        torch.testing.assert_close(single, whole, atol=0, rtol=0)
+        self.assertTrue(kernels._ROPE_FAB_CACHE)
+        sparse_attention.release()
+        self.assertFalse(kernels._ROPE_FAB_CACHE)
+        for found in (first, second):
+            self.assertEqual(found.shape, hidden.shape)
+            cosine = torch.nn.functional.cosine_similarity(found.float().flatten(), expected.flatten(), dim=0)
+            self.assertGreater(float(cosine), 0.99)
+
+    def test_a_dense_step_measures_what_the_kernel_measures(self):
+        with torch.inference_mode():
+            attn, plan, hidden, rotary = self.layer()
+            sparse, processor = self.processor()
+            sparse.measure = True
+            dense = processor(attn, hidden, rotary)
+            mean, scale = sparse.statistics.pop(7)
+            sparse.measure, sparse.plan = False, plan
+            processor(attn, hidden, rotary)
+            kernel_mean, kernel_scale = sparse.statistics[7]
+            self.assertEqual(dense.shape, hidden.shape)
+        self.assertEqual(mean.shape, (attn.heads, 128))
+        # Measured: 3e-6 apart for means up to 0.14, the same scales.
+        torch.testing.assert_close(mean, kernel_mean, atol=1e-4, rtol=1e-3)
+        torch.testing.assert_close(scale, kernel_scale, atol=1e-7, rtol=1e-5)
 
 
 if __name__ == '__main__':

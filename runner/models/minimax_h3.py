@@ -201,10 +201,13 @@ class Int8Attention:
     Attention is the one cost of the model that grows with the square of the video's length and
     size; this kernel runs it two to three times faster than PyTorch's."""
 
-    def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None):
+    def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None, measure=None):
+        """`measure`, when given, is shown the keys and values (see SparseAttention)."""
         import comfy_kitchen
 
         query, key, value = project(attn, hidden_states, rotary_emb)
+        if measure is not None:
+            measure(key, value)
         # The kernel reads [batch, heads, sequence, head]; the model keeps heads third.
         result = comfy_kitchen.int8_attention(
             query.transpose(1, 2),
@@ -237,16 +240,24 @@ def rotation_table(cos, sin):
     return found
 
 
-def project(attn, hidden_states, rotary_emb, count=3):
-    """The first `count` of the queries, keys and values, (batch, rows, heads, 128): views of one
-    INT8 projection (the file's fused q, k, v: the rows are quantized once, not three times),
-    the queries and keys normalised and turned in place."""
+def tiled_rotation(cos, sin, plan):
+    """rotation_table laid out in the plan's blocks (zeros in the padding), built once per
+    forward: the kernel keeps what it derives from it as long as it gets the same tensor."""
+    found = getattr(cos, '_tiled', None)
+    if found is None or found[0] is not plan:
+        found = (plan, plan.tile(rotation_table(cos, sin)))
+        cos._tiled = found
+    return found[1]
+
+
+def project(attn, hidden_states, rotary_emb):
+    """The queries, keys and values, (batch, rows, heads, 128): views of one INT8 projection
+    (the file's fused q, k, v: the rows are quantized once, not three times), the queries and
+    keys normalised and turned in place."""
     import comfy_kitchen
 
-    width = attn.heads * attn.head_dim
-    projected = attn.to_qkv(hidden_states, rows=slice(0, count * width)) if count < 3 else attn.to_qkv(hidden_states)
-    parts = projected.unflatten(-1, (count, attn.heads, attn.head_dim)).unbind(2)
-    query, key = parts[0], parts[1]
+    projected = attn.to_qkv(hidden_states)
+    query, key, value = projected.unflatten(-1, (3, attn.heads, attn.head_dim)).unbind(2)
     if rotary_emb is not None and FUSED_ROPE:
         comfy_kitchen.rms_rope_split_half_(
             query,
@@ -264,7 +275,7 @@ def project(attn, hidden_states, rotary_emb, count=3):
             # Turned in place (same result as diffusers): four tensors of temporaries less.
             rotate_(query, *rotary_emb)
             rotate_(key, *rotary_emb)
-    return (query, key, *parts[2:])
+    return query, key, value
 
 
 def has_gates(header):
@@ -275,12 +286,19 @@ def has_gates(header):
 class Sparse:
     """The sparse attention of one generation (see runner.models.sparse_attention): the share of
     the video's cubes each cube reads, and the plan of the step under way, None while the
-    attention is dense. The pipeline sets `plan` before each step."""
+    attention is dense. The pipeline sets `plan` before each step.
+
+    The kernel quantizes a step with what the step before measured, layer by layer: the mean
+    key and the scale of the values (`statistics`, by layer). `measure` asks a dense step for
+    them, the one before the first sparse step: without them, that step would read each
+    projection twice."""
 
     def __init__(self, keep):
         self.keep = keep
         self.plan = None
         self.plans = {}
+        self.statistics = {}
+        self.measure = False
 
     def prepare(self, values, grid):
         """The plan of the packed sequence this forward receives (kept for the next steps), or
@@ -341,36 +359,56 @@ def rotate_(value, cos, sin):
 class SparseAttention:
     """Video sparse attention on the steps that have a plan, `dense` on the others.
 
-    Queries, keys and values are those of the dense attention; the gate of the coarse branch
+    The layer's input is laid out in blocks first: its fused q, k, v projection then comes
+    out in the kernel's order, piece by piece, and the kernel normalises, turns and quantizes
+    each piece as it comes (see sparse_attention.attend). The gate of the coarse branch
     (`to_gate_compress`) is one more INT8 projection of the same rows, computed only on the
-    sparse steps."""
+    sparse steps. `index` is the layer's, for the statistics kept from one step to the next."""
 
-    def __init__(self, sparse, dense):
+    def __init__(self, sparse, dense, index):
         self.sparse = sparse
         self.dense = dense
+        self.index = index
+
+    def measure(self, key, value):
+        from runner.models import sparse_attention
+
+        self.sparse.statistics[self.index] = sparse_attention.statistics(key, value)
 
     def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None):
         from runner.models import sparse_attention
 
-        plan = self.sparse.plan
-        if plan is None or attention_mask is not None or hidden_states.shape[1] != plan.rows:
+        sparse = self.sparse
+        plan = sparse.plan
+        if (
+            plan is None
+            or attention_mask is not None
+            or rotary_emb is None
+            or hidden_states.shape[:2] != (1, plan.rows)
+            or hidden_states.dtype != torch.bfloat16
+            or attn.head_dim != sparse_attention.WIDTH
+        ):
+            if sparse.measure and isinstance(self.dense, Int8Attention) and attention_mask is None:
+                return self.dense(attn, hidden_states, rotary_emb, attention_mask, measure=self.measure)
             return self.dense(attn, hidden_states, rotary_emb, attention_mask)
-        heads = (attn.heads, -1)
-        # Each tensor is laid out in blocks as soon as it is computed: queries and keys first,
-        # the values after (a 1344 x 768 video has 38 000 rows, 0.5 GiB for each of them).
-        query, key = project(attn, hidden_states, rotary_emb, count=2)
-        query, key = plan.tile(query), plan.tile(key)
-        width = attn.heads * attn.head_dim
-        value = plan.tile(attn.to_qkv(hidden_states, rows=slice(2 * width, 3 * width)).unflatten(-1, heads))
-        gate = getattr(attn, 'to_gate_compress', None)
-        answer = sparse_attention.coarse(query, key, value, plan) if gate is not None else None
-        result = sparse_attention.attend(query, key, value, plan, self.sparse.keep)
-        del query, key, value
-        if answer is not None:
-            # The gate once the queries, keys and values are gone.
-            sparse_attention.add_coarse(result, gate(hidden_states).unflatten(-1, heads), answer, plan)
-        result = result.flatten(2, 3).type_as(hidden_states)
-        return attn.to_out[1](attn.to_out[0](result))
+        rope = (
+            tiled_rotation(*rotary_emb, plan),
+            # Detached: the kernel refuses tensors that keep a gradient, parameters included.
+            attn.norm_q.weight.detach(),
+            attn.norm_k.weight.detach(),
+            attn.norm_q.eps if attn.norm_q.eps is not None else 1e-6,
+        )
+        result, sparse.statistics[self.index] = sparse_attention.attend(
+            plan.tile(hidden_states),
+            attn.to_qkv,
+            getattr(attn, 'to_gate_compress', None),
+            plan,
+            sparse.keep,
+            attn.heads,
+            rope,
+            sparse.statistics.get(self.index),
+        )
+        return attn.to_out[1](attn.to_out[0](result.flatten(2, 3)))
 
 
 def int8_attention_ready():
@@ -416,14 +454,14 @@ def architecture(header, int8_attention=False, sparse=None):
             if int8_attention:
                 module.processor = Int8Attention()
     if sparse is not None:
-        for block in model.transformer_blocks:
+        for index, block in enumerate(model.transformer_blocks):
             attn = block.attn
             if has_gates(header):
                 with init_empty_weights():
                     attn.to_gate_compress = torch.nn.Linear(
                         attn.to_qkv.in_features, attn.heads * attn.head_dim, bias=False
                     )
-            attn.processor = SparseAttention(sparse, attn.processor)
+            attn.processor = SparseAttention(sparse, attn.processor, index)
     return model, pdd_heads(header)
 
 

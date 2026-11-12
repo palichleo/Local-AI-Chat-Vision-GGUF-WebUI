@@ -19,25 +19,31 @@ The attention (`attend`):
 
 Method and layout are those of FastVideo's VSA-H3 (Apache-2.0,
 fastvideo/attention/backends/video_sparse_attn_h3.py), written here from its description.
-The attention itself is comfy-kitchen's `sol_attn` kernel (Apache-2.0), which quantizes
-queries, keys and values to 8 bits for the tensor cores.
+The attention itself is comfy-kitchen's `sol_attn_chunked` kernel (Apache-2.0). It takes the
+fused q, k, v projection of the rows already laid out in blocks, CHUNK rows at a time, and
+normalises, turns and quantizes them to 8 bits for the tensor cores as they come: the
+queries, keys and values are never written out whole, nor read again to be laid out,
+normalised, quantized or averaged.
 """
 
+import functools
 import math
 
 BLOCK = 64
 CUBE = (4, 4, 4)
-# Shorter sequences stay on full attention. Measured on an RTX 4070 Super for MiniMax-H3, one
-# layer, the gate's projection and copy included: 13 358 rows (768 x 448, 5 s) lose 0.07 s a
-# step, 19 796 (960 x 544) gain 0.36 s, 27 566 (1152 x 640) 2.3 s, 38 222 (1344 x 768) 5.5 s.
-# (comfy-kitchen's note and ComfyUI's node say 12 288: too low here.)
-MIN_ROWS = 20000
-# For each head and each padded row, the kernel holds about 700 bytes: its output, and its
-# workspace (8-bit copies of the queries, keys and values, 442 bytes). All 56 heads of a
-# 1344 x 768 video at once: 1.6 GiB, one GiB of it in a single allocation, which a 12 GiB
-# card short of memory refused. The heads go by packs of HEAD_BYTES.
-BYTES_PER_HEAD_ROW = 700
-HEAD_BYTES = 256 * 1024**2
+# The kernel's width of a head.
+WIDTH = 128
+# Shorter sequences stay on full attention. Measured on an RTX 4070 Super for MiniMax-H3, a
+# whole step, 10 % of the cubes kept: 13 358 rows (768 x 448, 5 s, the draft) 4.02 s instead
+# of 4.29 dense, 19 796 (960 x 544) 6.1 to 6.7 s instead of 7.3, 38 222 (1344 x 768) 11.9 to
+# 12.1 s instead of 19.1. Below the draft, not measured: comfy-kitchen's own threshold.
+MIN_ROWS = 12288
+# Rows of the fused projection per piece handed to the kernel (a multiple of 64): 168 MiB
+# each for MiniMax-H3 (56 heads), however long the video.
+CHUNK = 4096
+# The values are quantized with the scale of the step before, this much wider (as the
+# kernel's own measure of it): a value a little larger than the last step's still fits.
+VALUE_MARGIN = 1.1
 
 
 class Plan:
@@ -49,7 +55,6 @@ class Plan:
         self.exact = exact  # leading blocks that hold the rows kept exact
         self.rows = int(slots.numel())
         self.blocks = int(lengths.numel())
-        self.block = slots // BLOCK  # (rows,) the block of each row
         import torch
 
         live = torch.zeros(self.blocks * BLOCK, dtype=torch.bool, device=slots.device)
@@ -60,8 +65,8 @@ class Plan:
         return Plan(self.slots.to(device), self.lengths.to(device), self.exact)
 
     def tile(self, value):
-        """(batch, rows, heads, width) -> (batch, blocks * 64, heads, width), zeros in the padding
-        (only the padded slots are cleared: the rows fill the others)."""
+        """(batch, rows, ...) -> (batch, blocks * 64, ...), zeros in the padding (only the padded
+        slots are cleared: the rows fill the others)."""
         tiled = value.new_empty(value.shape[0], self.blocks * BLOCK, *value.shape[2:])
         tiled.index_fill_(1, self.padding, 0)
         return tiled.index_copy_(1, self.slots, value)
@@ -121,63 +126,79 @@ def ready():
         return False
 
 
-def packs(heads, length, batch=1):
-    """The heads by packs whose kernel memory stays near HEAD_BYTES: each head is computed on
-    its own, so the result is the same as all at once."""
-    step = max(1, HEAD_BYTES // (batch * length * BYTES_PER_HEAD_ROW))
-    return [slice(first, min(first + step, heads)) for first in range(0, heads, step)]
+def release():
+    """Let go of what the kernel keeps between calls: the last rotation table it derived (a
+    dozen MiB at 768 x 448), held by comfy-kitchen after the generation is over, where the
+    engine wants the card empty. Not public in comfy-kitchen, so looked for, not assumed."""
+    import sys
+
+    for name in ('comfy_kitchen.backends.cuda', 'comfy_kitchen.backends.hip'):
+        cache = getattr(sys.modules.get(name), '_ROPE_FAB_CACHE', None)
+        if cache is not None:
+            cache.clear()
 
 
-def attend(query, key, value, plan, keep):
-    """The fine stage of sparse attention over tiled (batch, blocks * 64, heads, 128)
-    half-precision tensors. Returns the rows of the sequence, in its own order:
-    (batch, rows, heads, 128). The coarse branch is apart (see coarse, add_coarse), so that
-    the gate is computed once the queries, keys and values are gone."""
-    import comfy_kitchen
-
-    batch, length, heads, width = query.shape
-    result = query.new_empty(batch, plan.rows, heads, width)
-    for part in packs(heads, length, batch):
-        found = comfy_kitchen.sol_attn(
-            query[:, :, part],
-            key[:, :, part],
-            value[:, :, part],
-            sink_blocks=[0, plan.exact],
-            sink_q=[0, plan.exact],
-            topk_ratio=float(keep),
-            tail=False,
-            block_len=plan.lengths,
-        )
-        result[:, :, part] = plan.untile(found)
-        del found
-    return result
+def pieces(project, rows, chunk):
+    """The fused q, k, v projection of tiled rows (1, blocks * 64, width), `chunk` rows at a
+    time: (chunk, 3 * heads * 128) each. Once the last piece is out, the generator lets go of
+    `rows`."""
+    for first in range(0, rows.shape[1], chunk):
+        yield project(rows[0, first : first + chunk])
 
 
-def coarse(query, key, value, plan):
-    """VSA's coarse branch: attention between the means of the blocks, from tiled tensors
-    (their padding is zero). Returns (batch, heads, blocks, width) in float32, a few MiB."""
+def statistics(key, value):
+    """What the kernel takes from the step before, measured on a dense step: the mean of the
+    keys (normalised and turned) and the scale that quantizes the values, from (1, rows,
+    heads, 128) tensors. (heads, 128) float32 each, as `attend` returns them."""
     import torch
 
-    batch, length, heads, width = query.shape
-    lengths = plan.lengths.to(torch.float32).view(1, -1, 1, 1)
-
-    def means(x):
-        total = x.view(batch, plan.blocks, BLOCK, heads, width).sum(2, dtype=torch.float32)
-        return (total / lengths).permute(0, 2, 1, 3)
-
-    scores = means(query) @ means(key).transpose(-1, -2) * width**-0.5
-    return torch.softmax(scores, dim=-1) @ means(value)
+    # As (rows, heads * 128) views, the extremes of the values in one pass: 2.7 ms a layer at
+    # 1344 x 768 (4.1 ms over the four dimensions, with a pass for each).
+    shape, rows = key.shape[-2:], key.shape[0] * key.shape[1]
+    mean = key.reshape(rows, -1).sum(0, dtype=torch.float32) / rows
+    low, high = torch.aminmax(value.reshape(rows, -1), dim=0)
+    peak = torch.maximum(high, low.neg()).float()
+    return mean.view(shape), (peak / 127 * VALUE_MARGIN).clamp_min(1e-8).view(shape)
 
 
-def add_coarse(result, gate, answer, plan):
-    """result += gate * the coarse answer of each row's block, in place, a pack of heads at a
-    time, in one fused product and sum per pack. result and gate are (batch, rows, heads,
-    width), answer comes from coarse."""
-    answer = answer.to(result.dtype)
-    for part in packs(result.shape[2], plan.rows, result.shape[0]):
-        rows = answer[:, part].index_select(2, plan.block).permute(0, 2, 1, 3)
-        result[:, :, part].addcmul_(gate[:, :, part], rows)
-    return result
+def attend(rows, project, gate, plan, keep, heads, rope, known=None):
+    """Sparse attention of one layer over its input laid out in blocks, `rows` (1, blocks * 64,
+    width), zeros in the padding (Plan.tile).
+
+    `project` is the fused q, k, v projection, `gate` the coarse branch's (to_gate_compress)
+    or None, for `heads` heads of 128. `rope` is (rotation table laid out in blocks, query
+    norm weight, key norm weight, norm epsilon), `known` the statistics of the step before
+    (from here or `statistics`): without them the kernel reads the projection twice, to
+    measure them first.
+
+    Returns the rows of the sequence in its own order (1, rows, heads, 128), and the
+    statistics for the next step."""
+    import comfy_kitchen
+
+    rotation, query_norm, key_norm, eps = rope
+    coarse = None if gate is None else gate(rows).unflatten(-1, (heads, WIDTH))
+    # Once the statistics are known, one reading: the rows go as soon as the last piece is
+    # projected, before the kernel's output is allocated.
+    chunks = pieces(project, rows, CHUNK) if known else functools.partial(pieces, project, rows, CHUNK)
+    del rows
+    found, mean, scale = comfy_kitchen.sol_attn_chunked(
+        chunks,
+        plan.blocks * BLOCK,
+        heads,
+        rotation,
+        (query_norm, key_norm),
+        kmean=known[0] if known else None,
+        vscale=known[1] if known else None,
+        topk_ratio=float(keep),
+        sink_blocks=[0, plan.exact],
+        sink_q=[0, plan.exact],
+        rope_eps=eps,
+        tail=False,
+        block_len=plan.lengths,
+        coarse_gate=coarse,
+    )
+    del chunks, coarse
+    return plan.untile(found), (mean, scale)
 
 
 def reference(query, key, value, gate, plan, keep):

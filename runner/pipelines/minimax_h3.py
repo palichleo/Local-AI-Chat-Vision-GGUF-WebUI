@@ -396,6 +396,8 @@ def generate(job, config, progress):
                 if sparse is not None:
                     # The first steps lay the video out: they stay dense, as the model was trained.
                     sparse.plan = sparse.prepare(values, grid) if i >= sparse_start * STEPS else None
+                    # The last of them measures what the first sparse step quantizes with.
+                    sparse.measure = i < sparse_start * STEPS <= i + 1
                 return args, values
 
             def after(_module, _args, _values, output):
@@ -455,6 +457,8 @@ def generate(job, config, progress):
             if ahead:
                 ahead.stop()
             pool.clear()
+            if sparse is not None:
+                sparse_attention.release()
     del pool
     state.set('prompt_embeds', None)
     _free(scope={})

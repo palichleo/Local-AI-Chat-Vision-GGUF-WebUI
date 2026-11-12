@@ -333,17 +333,12 @@ def load_streamed(model, names, pool):
             if self.adapters:
                 pool.adapted[self.location] = self.adapters
 
-        def forward(self, value, rows=None, act=None):
-            """`rows` (a slice) computes only those outputs: a part of a fused projection, as
-            the queries and keys of a fused q, k, v. `act='swiglu'` takes [gate | up] rows and
-            computes silu(gate) * up on the way in: in comfy-kitchen's INT8 quantizer, so a
-            feed-forward's wide intermediate is never written out."""
+        def forward(self, value, act=None):
+            """`act='swiglu'` takes [gate | up] rows and computes silu(gate) * up on the way in:
+            in comfy-kitchen's INT8 quantizer, so a feed-forward's wide intermediate is never
+            written out."""
             bundle = pool.bundle(self.location)
             weight, scale, bias = bundle['weight'], bundle.get('scale'), bundle.get('bias')
-            if rows is not None:
-                weight = weight[rows]
-                scale = scale[rows] if scale is not None and scale.ndim else scale
-                bias = None if bias is None else bias[rows]
             if act is not None and (weight.dtype != torch.int8 or self.adapters):
                 gate, up = value.chunk(2, dim=-1)
                 value, act = F.silu(gate) * up, None
@@ -376,7 +371,7 @@ def load_streamed(model, names, pool):
                 result = F.linear(value, weight, None if bias is None else bias.to(value.dtype))
             if self.adapters:
                 down, up = pool.adapter(self.location, self.adapters, value.dtype)
-                result = result + F.linear(F.linear(value, down), up if rows is None else up[rows])
+                result = result + F.linear(F.linear(value, down), up)
             return result
 
     class Embedding(torch.nn.Module):
