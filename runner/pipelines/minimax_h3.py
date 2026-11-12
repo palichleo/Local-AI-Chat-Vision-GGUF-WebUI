@@ -11,6 +11,8 @@ import math
 import sys
 import time
 
+from runner import preview
+
 STEPS = 8
 FRAME_CHOICES = tuple(17 * n + 5 for n in range(7, 21))  # 5 to 15 seconds at 24 fps
 # A continuation overlap must cover whole VAE chunks (17n+5 frames -> 5n+2 latent frames),
@@ -98,6 +100,18 @@ def _patchify(latents):
     _, channels, frames, height, width = latents.shape
     rows = latents.reshape(1, channels, frames, 1, height // 2, 2, width // 2, 2)
     return rows.permute(0, 2, 4, 6, 1, 3, 5, 7).reshape(frames * (height // 2) * (width // 2), channels * 4)
+
+
+def middle_frame(rows, velocity, sigma, grid):
+    """The generated video's middle latent frame (C, H, W) as a step sees it finished, from the
+    DiT's video rows and their velocity (1, rows, C * 4): the video's `grid` of tokens comes
+    last, laid out as `_patchify` does. MiniMax-H3 predicts a data-ward velocity: x0 = x + sigma * v."""
+    frames, height, width = grid
+    count = height * width
+    first = rows.shape[1] - (frames - frames // 2) * count
+    finished = rows[0, first : first + count].float() + float(sigma) * velocity[0, first : first + count].float()
+    finished = finished.reshape(height, width, -1, 2, 2)
+    return finished.permute(2, 0, 3, 1, 4).reshape(finished.shape[2], height * 2, width * 2)
 
 
 def protect_head(dit, schedulers, calls, video_head, audio_head, target_video_rows, target_audio_latents):
@@ -400,7 +414,7 @@ def generate(job, config, progress):
                     sparse.measure = i < sparse_start * STEPS <= i + 1
                 return args, values
 
-            def after(_module, _args, _values, output):
+            def after(_module, _args, values, output):
                 calls['step'] += 1
                 read = {'prefetch': ahead.stop()} if ahead and calls['step'] == 1 else {}
                 mode = {}
@@ -409,6 +423,8 @@ def generate(job, config, progress):
                 progress(
                     stage='generating video', step=calls['step'], total=STEPS, weights=pool.summary(), **read, **mode
                 )
+                sigma = scheduler.sigmas[calls['step'] - 1]
+                preview.send(report, preview.MINIMAX_H3, middle_frame, values['hidden_states'], output[0], sigma, grid)
                 return output
 
             dit.register_forward_pre_hook(before, with_kwargs=True)

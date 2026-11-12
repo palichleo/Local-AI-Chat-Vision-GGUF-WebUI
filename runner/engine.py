@@ -77,7 +77,9 @@ def generate(job, config, progress):
     journal = Journal(config, job)
 
     def report(**data):
-        journal.write(**data)
+        # The picture so far is for the page: kilobytes at every step, nothing to diagnose.
+        if 'preview' not in data:
+            journal.write(**data)
         progress(**data)
 
     try:

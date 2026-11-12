@@ -713,9 +713,14 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
       busy: false,
       capabilities: { ltx25: { ...ready, mediaType: 'video' }, rife: { ...ready, mediaType: 'video' } },
     }),
-    request: async (method, payload) => {
+    request: async (method, payload, { onProgress } = {}) => {
       calls.push(method);
-      return method === 'generate' ? { jobId: payload.id, outputs: [], metadata: {} } : {};
+      if (method !== 'generate') return {};
+      // The picture so far comes as a JPEG in base64; anything else of that name is dropped.
+      onProgress?.({ preview: { mime: 'image/jpeg', data: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1]).toString('base64') } });
+      onProgress?.({ preview: { mime: 'image/png', data: png().toString('base64') } });
+      onProgress?.({ stage: 'denoising', step: 1, total: 4 });
+      return { jobId: payload.id, outputs: [], metadata: {} };
     },
     unload: async () => calls.push('unload'),
     release: async () => (calls.push('release'), { released: true }),
@@ -744,7 +749,12 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
   assert.match(service.catalog.capabilities.moss.reason, /ComfyUI n’est pas configuré/);
   let client = service.client();
   await client.preflight(ltx());
-  assert.deepEqual((await client.run(ltx())).outputs, []);
+  const progress = [];
+  assert.deepEqual((await client.run(ltx(), { onProgress: value => progress.push(value) })).outputs, []);
+  assert.deepEqual(progress, [
+    { preview: { bytes: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1]), mime: 'image/jpeg' } },
+    { stage: 'denoising', step: 1, total: 4 },
+  ]);
   await client.free();
   assert.deepEqual(calls, ['preflight', 'generate', 'release']);
   await assert.rejects(service.client().preflight(moss()), /ComfyUI n’est pas configuré/);

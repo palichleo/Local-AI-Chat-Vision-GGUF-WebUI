@@ -13,6 +13,7 @@ import sys
 import time
 from types import SimpleNamespace
 
+from runner import preview
 from runner.media import save_image
 from runner.models.headers import header
 from runner.pipelines.sampling import simple_sigmas
@@ -112,6 +113,12 @@ def generate(job, config, progress):
     )
     with ExitStack() as cleanup:
         return _generate(args, plan, files, job, config, progress, cleanup)
+
+
+def finished(latents, velocity, sigma):
+    """The finished latent (16, H, W) as a step sees it, for the page: the velocity points from
+    it to the noise."""
+    return (latents - velocity.float() * sigma)[0]
 
 
 def _generate(args, plan, files, job, config, progress_callback, cleanup):
@@ -294,6 +301,7 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
                 .permute(0, 3, 1, 4, 2, 5)
                 .reshape(1, 16, gh * 2, gw * 2)[:, :, :height, :width]
             )
+            preview.send(progress_callback, preview.KREA2, finished, latents, prediction, sigmas[i])
             latents = latents + prediction.float() * (sigmas[i + 1] - sigmas[i])
             if not torch.isfinite(latents).all():
                 raise RuntimeError('Non-finite latent values; refusing to save a corrupt result')
