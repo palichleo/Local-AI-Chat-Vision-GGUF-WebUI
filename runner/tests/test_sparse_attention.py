@@ -2,6 +2,7 @@
 over it, checked against comfy-kitchen's own full-precision reference and, on a GPU, its kernel."""
 
 import unittest
+import unittest.mock
 
 import torch
 
@@ -155,18 +156,47 @@ class ReferenceTest(unittest.TestCase):
         self.check(gate=True, keep=0.1)
 
 
+class RotationTest(unittest.TestCase):
+    def test_turned_in_place_as_diffusers_turns_it(self):
+        from diffusers.models.transformers.transformer_minimax_h3 import _apply_rotary_emb
+
+        torch.manual_seed(2)
+        value = torch.randn(1, 50, 3, 128, dtype=torch.bfloat16)
+        angles = torch.randn(50, 48)
+        cos, sin = torch.cat([angles, angles], -1).cos(), torch.cat([angles, angles], -1).sin()
+        expected = _apply_rotary_emb(value, cos, sin)
+        self.assertTrue(torch.equal(minimax_h3.rotate_(value.clone(), cos, sin), expected))
+
+
 @unittest.skipUnless(sparse_attention.ready(), 'no sparse attention kernel on this machine')
 class KernelTest(unittest.TestCase):
-    def test_the_kernel_matches_the_reference(self):
+    def inputs(self):
         torch.manual_seed(5)
         plan = layout([130, 60, (8, 12, 16)]).to('cuda')
         heads, width = 4, 128
         q, k, v = (torch.randn(1, plan.rows, heads, width, device='cuda', dtype=torch.bfloat16) for _ in range(3))
         g = torch.rand(1, plan.rows, heads, width, device='cuda', dtype=torch.bfloat16)
+        return plan, q, k, v, g
+
+    def sparse(self, plan, q, k, v, g):
+        q, k, v = plan.tile(q), plan.tile(k), plan.tile(v)
+        answer = sparse_attention.coarse(q, k, v, plan)
+        return sparse_attention.add_coarse(sparse_attention.attend(q, k, v, plan, 0.1), g, answer, plan)
+
+    def test_the_kernel_matches_the_reference(self):
+        plan, q, k, v, g = self.inputs()
         expected = sparse_attention.reference(q, k, v, g, plan, 0.1).float()
-        found = plan.untile(sparse_attention.attend(plan.tile(q), plan.tile(k), plan.tile(v), plan.tile(g), plan, 0.1))
+        found = self.sparse(plan, q, k, v, g)
         cosine = torch.nn.functional.cosine_similarity(found.float().flatten(), expected.flatten(), dim=0)
         self.assertGreater(float(cosine), 0.99)
+
+    def test_heads_by_packs_give_the_same_result(self):
+        plan, q, k, v, g = self.inputs()
+        whole = self.sparse(plan, q, k, v, g)
+        with unittest.mock.patch.object(sparse_attention, 'HEAD_BYTES', 1):
+            self.assertEqual(len(sparse_attention.packs(4, plan.blocks * 64)), 4)
+            single = self.sparse(plan, q, k, v, g)
+        torch.testing.assert_close(single, whole, atol=0, rtol=0)
 
 
 if __name__ == '__main__':

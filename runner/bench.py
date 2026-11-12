@@ -158,24 +158,32 @@ def main(argv=None):
         started = time.perf_counter()
 
         def progress(**data):
-            marks.append((time.perf_counter() - started, data.get('stage'), data.get('step'), data.get('free_gib')))
+            memory = torch.cuda.memory_allocated() / 1024**3, torch.cuda.memory_reserved() / 1024**3
+            marks.append((time.perf_counter() - started, data.get('stage'), data.get('step'), memory))
+
+        def timeline():
+            previous = 0.0
+            for at, stage, step, (allocated, reserved) in marks:
+                label = f'{stage} {step}' if step else stage
+                print(f'  {at:7.2f} s  +{at - previous:6.2f}  {label:<34} {allocated:5.2f} / {reserved:5.2f} GiB')
+                previous = at
 
         # As the worker does: PyTorch kept inside the video memory that is free now.
         ceiling = worker._vram_ceiling(torch)
         try:
             result = module.generate(job, config, progress)
+        except BaseException:
+            # What the run held, allocated / reserved, up to the failure.
+            print(f'\nrun {run} failed after {time.perf_counter() - started:.1f} s', flush=True)
+            timeline()
+            raise
         finally:
             if ceiling:
                 torch.cuda.set_per_process_memory_fraction(1.0)
         seconds = time.perf_counter() - started
         worker.release()
         print(f'\nrun {run}: {seconds:.1f} s  (seed {job["parameters"]["seed"]})', flush=True)
-        previous = 0.0
-        for at, stage, step, free_gib in marks:
-            label = f'{stage} {step}' if step else stage
-            room = '' if free_gib is None else f' free {free_gib} GiB'
-            print(f'  {at:7.2f} s  +{at - previous:6.2f}  {label:<34}{room}')
-            previous = at
+        timeline()
         metadata = result.get('metadata', {})
         timeline = metadata.get('timeline', [])
         steps = [mark for mark in timeline if mark.get('step')]

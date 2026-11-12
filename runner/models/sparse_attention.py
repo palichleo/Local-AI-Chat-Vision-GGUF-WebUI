@@ -32,6 +32,12 @@ CUBE = (4, 4, 4)
 # step, 19 796 (960 x 544) gain 0.36 s, 27 566 (1152 x 640) 2.3 s, 38 222 (1344 x 768) 5.5 s.
 # (comfy-kitchen's note and ComfyUI's node say 12 288: too low here.)
 MIN_ROWS = 20000
+# For each head and each padded row, the kernel holds about 700 bytes: its output, and its
+# workspace (8-bit copies of the queries, keys and values, 442 bytes). All 56 heads of a
+# 1344 x 768 video at once: 1.6 GiB, one GiB of it in a single allocation, which a 12 GiB
+# card short of memory refused. The heads go by packs of HEAD_BYTES.
+BYTES_PER_HEAD_ROW = 700
+HEAD_BYTES = 256 * 1024**2
 
 
 class Plan:
@@ -43,6 +49,7 @@ class Plan:
         self.exact = exact  # leading blocks that hold the rows kept exact
         self.rows = int(slots.numel())
         self.blocks = int(lengths.numel())
+        self.block = slots // BLOCK  # (rows,) the block of each row
 
     def to(self, device):
         return Plan(self.slots.to(device), self.lengths.to(device), self.exact)
@@ -107,24 +114,61 @@ def ready():
         return False
 
 
-def attend(query, key, value, gate, plan, keep):
-    """Sparse attention over tiled (batch, blocks * 64, heads, 128) half-precision tensors.
+def packs(heads, length, batch=1):
+    """The heads by packs whose kernel memory stays near HEAD_BYTES: each head is computed on
+    its own, so the result is the same as all at once."""
+    step = max(1, HEAD_BYTES // (batch * length * BYTES_PER_HEAD_ROW))
+    return [slice(first, min(first + step, heads)) for first in range(0, heads, step)]
 
-    Returns the tiled result; the padded rows of it mean nothing (see Plan.untile).
-    """
+
+def attend(query, key, value, plan, keep):
+    """The fine stage of sparse attention over tiled (batch, blocks * 64, heads, 128)
+    half-precision tensors. Returns the rows of the sequence, in its own order:
+    (batch, rows, heads, 128). The coarse branch is apart (see coarse, add_coarse), so that
+    the gate is computed once the queries, keys and values are gone."""
     import comfy_kitchen
 
-    return comfy_kitchen.sol_attn(
-        query,
-        key,
-        value,
-        sink_blocks=[0, plan.exact],
-        sink_q=[0, plan.exact],
-        topk_ratio=float(keep),
-        tail=False,
-        block_len=plan.lengths,
-        coarse_gate=gate,
-    )
+    batch, length, heads, width = query.shape
+    result = query.new_empty(batch, plan.rows, heads, width)
+    for part in packs(heads, length, batch):
+        found = comfy_kitchen.sol_attn(
+            query[:, :, part],
+            key[:, :, part],
+            value[:, :, part],
+            sink_blocks=[0, plan.exact],
+            sink_q=[0, plan.exact],
+            topk_ratio=float(keep),
+            tail=False,
+            block_len=plan.lengths,
+        )
+        result[:, :, part] = plan.untile(found)
+        del found
+    return result
+
+
+def coarse(query, key, value, plan):
+    """VSA's coarse branch: attention between the means of the blocks, from tiled tensors
+    (their padding is zero). Returns (batch, heads, blocks, width) in float32, a few MiB."""
+    import torch
+
+    batch, length, heads, width = query.shape
+    lengths = plan.lengths.to(torch.float32).view(1, -1, 1, 1)
+
+    def means(x):
+        total = x.view(batch, plan.blocks, BLOCK, heads, width).sum(2, dtype=torch.float32)
+        return (total / lengths).permute(0, 2, 1, 3)
+
+    scores = means(query) @ means(key).transpose(-1, -2) * width**-0.5
+    return torch.softmax(scores, dim=-1) @ means(value)
+
+
+def add_coarse(result, gate, answer, plan):
+    """result += gate * the coarse answer of each row's block, in place, a pack of heads at a
+    time. result and gate are (batch, rows, heads, width), answer comes from coarse."""
+    for part in packs(result.shape[2], plan.rows, result.shape[0]):
+        rows = answer[:, part].index_select(2, plan.block).permute(0, 2, 1, 3)
+        result[:, :, part] += gate[:, :, part] * rows
+    return result
 
 
 def reference(query, key, value, gate, plan, keep):

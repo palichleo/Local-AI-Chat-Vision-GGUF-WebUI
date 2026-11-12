@@ -150,15 +150,17 @@ class Int8Attention:
 
     def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None):
         import comfy_kitchen
-        from diffusers.models.transformers.transformer_minimax_h3 import _apply_rotary_emb
 
         heads = (attn.heads, -1)
         query = attn.norm_q(attn.to_q(hidden_states).unflatten(-1, heads))
-        key = attn.norm_k(attn.to_k(hidden_states).unflatten(-1, heads))
-        value = attn.to_v(hidden_states).unflatten(-1, heads)
         if rotary_emb is not None:
-            query = _apply_rotary_emb(query, *rotary_emb)
-            key = _apply_rotary_emb(key, *rotary_emb)
+            # Turned in place (same result as diffusers): four tensors of temporaries less, 2 GiB
+            # at 1344 x 768, where a video ran out of memory there.
+            rotate_(query, *rotary_emb)
+        key = attn.norm_k(attn.to_k(hidden_states).unflatten(-1, heads))
+        if rotary_emb is not None:
+            rotate_(key, *rotary_emb)
+        value = attn.to_v(hidden_states).unflatten(-1, heads)
         # The kernel reads [batch, heads, sequence, head]; the model keeps heads third.
         result = comfy_kitchen.int8_attention(
             query.transpose(1, 2),
@@ -224,6 +226,23 @@ def segments(values, grid):
     return [b - a for a, b in zip(cuts, cuts[1:]) if b > a] + [tuple(grid)]
 
 
+def rotate_(value, cos, sin):
+    """diffusers' _apply_rotary_emb (rotate_half over the first channels), in place, on a tensor
+    nobody else holds: the same products and sums in the same precision, so the same result,
+    with a third of a tensor of temporaries instead of four (0.5 GiB each at 1344 x 768)."""
+    span = cos.shape[-1]
+    half = span // 2
+    cos = cos.to(value.dtype)[None, :, None, :]
+    sin = sin.to(value.dtype)[None, :, None, :]
+    first, second = value[..., :half], value[..., half:span]
+    turned = first * cos[..., :half]
+    turned -= second * sin[..., :half]
+    crossed = first * sin[..., half:]
+    second.mul_(cos[..., half:]).add_(crossed)
+    first.copy_(turned)
+    return value
+
+
 class SparseAttention:
     """Video sparse attention on the steps that have a plan, `dense` on the others.
 
@@ -236,7 +255,6 @@ class SparseAttention:
         self.dense = dense
 
     def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None):
-        from diffusers.models.transformers.transformer_minimax_h3 import _apply_rotary_emb
         from runner.models import sparse_attention
 
         plan = self.sparse.plan
@@ -245,22 +263,26 @@ class SparseAttention:
         heads = (attn.heads, -1)
 
         def tiled(projection, norm=None):
-            # Each tensor is laid out in blocks as soon as it is computed: never two copies of
-            # all four at once (2.6 GiB each for a 1344 x 768 video).
+            # Each tensor is laid out in blocks as soon as it is computed, and turned in place:
+            # a 1344 x 768 video has 38 000 rows, 0.5 GiB for each of these tensors.
             value = projection(hidden_states).unflatten(-1, heads)
             if norm is not None:
                 value = norm(value)
                 if rotary_emb is not None:
-                    value = _apply_rotary_emb(value, *rotary_emb)
+                    rotate_(value, *rotary_emb)
             return plan.tile(value.to(torch.bfloat16))
 
         query = tiled(attn.to_q, attn.norm_q)
         key = tiled(attn.to_k, attn.norm_k)
         value = tiled(attn.to_v)
-        gate = tiled(attn.to_gate_compress) if getattr(attn, 'to_gate_compress', None) is not None else None
-        result = sparse_attention.attend(query, key, value, gate, plan, self.sparse.keep)
-        del query, key, value, gate
-        result = plan.untile(result).flatten(2, 3).type_as(hidden_states)
+        gate = getattr(attn, 'to_gate_compress', None)
+        answer = sparse_attention.coarse(query, key, value, plan) if gate is not None else None
+        result = sparse_attention.attend(query, key, value, plan, self.sparse.keep)
+        del query, key, value
+        if answer is not None:
+            # The gate once the queries, keys and values are gone.
+            sparse_attention.add_coarse(result, gate(hidden_states).unflatten(-1, heads), answer, plan)
+        result = result.flatten(2, 3).type_as(hidden_states)
         return attn.to_out[1](attn.to_out[0](result))
 
 

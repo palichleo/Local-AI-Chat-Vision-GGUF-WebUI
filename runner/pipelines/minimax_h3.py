@@ -358,10 +358,8 @@ def generate(job, config, progress):
         # chunk, the allocator's slack, the engine's margin) plus the activations, which grow
         # with the video (1 GiB for a 5 s draft). Video memory that runs out halves the speed,
         # a smaller share costs a second per step at most.
-        # Sparse attention holds its queries, keys, values and gates laid out in blocks, a
-        # quarter longer with the padding of the cubes: three widths more.
-        widths = 6 + (3 if sparse is not None else 0)
-        room = torch.cuda.mem_get_info()[0] / 1024**3 - 5 - tokens * 7168 * 2 * widths / 1024**3
+        # (Sparse attention needs less at its peak: 5 widths instead of 6, measured at 1344 x 768.)
+        room = torch.cuda.mem_get_info()[0] / 1024**3 - 5 - tokens * 7168 * 2 * 6 / 1024**3
         budget = min(config.get('cacheGiB', 6), max(0, room))
         pool = WeightPool({'model': store}, budget)
         if ahead:
