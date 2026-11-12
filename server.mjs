@@ -13,6 +13,7 @@ import { countContext } from './lib/context-count.mjs';
 import http from 'node:http';
 import { compactSession } from './public/update-ui.mjs';
 import { checkForUpdates } from './lib/updates.mjs';
+import { componentVersions, runVersion } from './lib/components.mjs';
 import { prepareUpdate, launchInstaller } from './lib/update-install.mjs';
 import { atomicJson } from './lib/update-files.mjs';
 import { updateSession, readUpdateSession } from './lib/update-session.mjs';
@@ -55,6 +56,7 @@ const staticFiles = new Map([
   ['/workspace.css', ['workspace.css', 'text/css; charset=utf-8']],
   ['/assets/metallic-surface.svg', ['assets/metallic-surface.svg', 'image/svg+xml']],
   ['/settings-search.mjs', ['settings-search.mjs', 'text/javascript; charset=utf-8']],
+  ['/settings-tabs.mjs', ['settings-tabs.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-ui.mjs', ['generation-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/assets-ui.mjs', ['assets-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/resource-preparation.mjs', ['resource-preparation.mjs', 'text/javascript; charset=utf-8']],
@@ -297,6 +299,7 @@ export async function createApplication({
   });
   const token = randomBytes(32).toString('hex');
   const engine = new Engine({ spawnProcess, cacheDir: join(dataDir, 'model-cache') });
+  let componentsCheck = null;
   let savingSettings = false;
   let modelOperation = Promise.resolve();
   let pickingFile = false;
@@ -717,6 +720,20 @@ export async function createApplication({
           if (fresh.available || !(await updates).available) updates = Promise.resolve(fresh);
         }
         return send(200, await updates);
+      }
+      if (path === '/api/components' && req.method === 'GET') {
+        // The Update tab asks once when it opens and again on its button: two at once share one answer.
+        componentsCheck ||= (async () =>
+          componentVersions({
+            config,
+            pythonPath: generation.config.pythonPath || '',
+            runtimeDir: generation.environment.directory,
+            comfy: await generation.comfyState(),
+            ...(spawnProcess ? { run: (command, args, options) => runVersion(command, args, { ...options, spawnProcess }) } : {}),
+          }))().finally(() => {
+          componentsCheck = null;
+        });
+        return send(200, { version: applicationVersion, components: await componentsCheck });
       }
       if (path === '/api/models' && req.method === 'GET')
         return send(200, { models: await models.list(), ...(await models.scan()) });

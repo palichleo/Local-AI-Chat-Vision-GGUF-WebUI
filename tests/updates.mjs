@@ -118,8 +118,10 @@ test('background check never blocks startup or chat status and repeated reads re
       assert.deepEqual(await (await pending).json(), { available: true, version: '0.2.1' });
     assert.equal(calls, 1);
     const html = await (await fetch(app.url)).text();
-    assert.ok(html.indexOf('id="settings-open"') < html.indexOf('id="update-available"'));
-    assert.doesNotMatch(html, /id="update-available"[^>]+hidden/, 'the update button is always shown');
+    assert.doesNotMatch(html, /id="update-available"/, 'updates live in the settings, not in the sidebar');
+    assert.match(html, /id="settings-tab-update"[^>]*aria-selected="true"/, 'the update tab comes first');
+    assert.ok(html.indexOf('data-settings-tab="update"') < html.indexOf('data-settings-tab="llm"'));
+    assert.match(html, /id="settings-update-install"[^>]+hidden/, 'install shows once an update is found');
     assert.ok(html.indexOf('id="toggle-engine"') < html.indexOf('id="settings-open"'), 'start/stop sits left of the settings');
     assert.doesNotMatch(html, /id="model-select"|id="model-card"/, 'the LLM is chosen in the settings only');
   } finally {

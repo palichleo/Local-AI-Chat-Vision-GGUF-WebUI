@@ -1283,7 +1283,8 @@ export function setupNativeWorkflows(options) {
       isNew = fresh;
       draft = structuredClone(record);
       returnFocus = document.activeElement || $('workflow-add');
-      parentScroll = $('settings').scrollTop || 0;
+      // The settings scroll inside their tab's area; the editor scrolls the whole dialog.
+      parentScroll = $('settings-body')?.scrollTop || 0;
       renderEditor();
       baseline = JSON.stringify(readEditor());
       $('settings-form').hidden = true;
@@ -1308,7 +1309,8 @@ export function setupNativeWorkflows(options) {
     $('settings-form').hidden = false;
     $('settings').setAttribute('aria-labelledby', 'settings-title');
     $('native-workflow-unsaved').hidden = true;
-    $('settings').scrollTop = parentScroll;
+    $('settings').scrollTop = 0;
+    if ($('settings-body')) $('settings-body').scrollTop = parentScroll;
     (returnFocus?.isConnected === false ? $('workflow-add') : returnFocus)?.focus();
   }
   function requestBack(after) {

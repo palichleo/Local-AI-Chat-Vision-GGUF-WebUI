@@ -101,6 +101,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
     setupStudio: () => ({ open: async () => {}, render() {}, busy: () => false }),
     confirm,
     setupSettingsSearch: () => ({ reset() {}, refresh() {} }),
+    setupSettingsTabs: () => ({ select() {}, matches() {}, mark() {}, opened() {}, current: () => 'update' }),
     setupSettingsGuard,
     setupCopy() {},
     setupContextMeter: options => {
@@ -292,7 +293,7 @@ test('a generation settings operation locks settings saving, model fields and en
   await ui.open();
   assert.equal(typeof ui.workflowOptions.onSettingsBusyChange, 'function');
   ui.workflowOptions.onSettingsBusyChange(true);
-  for (const id of ['save-config', 'config-fields', 'toggle-engine', 'update-available'])
+  for (const id of ['save-config', 'config-fields', 'toggle-engine', 'settings-update-install'])
     assert.equal(ui.$(id).disabled, true, id);
   await ui.saveConfiguration();
   assert.equal(

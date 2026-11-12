@@ -40,6 +40,7 @@ async function pickerUI() {
       $('model-path').value = state.config.modelPath;
     },
     settingsSearch: { reset() {}, refresh() {} },
+    settingsTabs: { opened() {} },
     AbortController,
     tokenControls: { setValues() {} },
     workflowsUI: { refresh: async () => {}, cancelSettings() {} },

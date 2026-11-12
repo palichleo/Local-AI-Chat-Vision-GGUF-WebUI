@@ -398,8 +398,7 @@ dialog,
   box-shadow: inset 0 1px 0 var(--metal-edge);
 }
 .sidebar-actions .settings-button,
-.sidebar-actions .files-button,
-.sidebar-actions .update-button {
+.sidebar-actions .files-button {
   display: grid;
   place-items: center;
   flex: 0 0 40px;
@@ -415,8 +414,7 @@ dialog,
   color: var(--muted);
 }
 .sidebar-actions .settings-button svg,
-.sidebar-actions .files-button svg,
-.sidebar-actions .update-button svg {
+.sidebar-actions .files-button svg {
   width: 22px;
   height: 22px;
   flex-shrink: 0;
@@ -428,11 +426,6 @@ dialog,
   background: var(--surface-raised);
   color: var(--ink);
   border-color: var(--line);
-}
-.sidebar-actions .update-button {
-  color: var(--update-ink);
-  background: var(--update-tint);
-  border-color: var(--update-line);
 }
 #navigation-open {
   display: none;
@@ -2022,8 +2015,7 @@ body:not([data-files='open']) .assets-panel {
     height: 36px;
   }
   .sidebar-actions .settings-button,
-  .sidebar-actions .files-button,
-  .sidebar-actions .update-button {
+  .sidebar-actions .files-button {
     width: 36px;
     height: 36px;
     min-width: 36px;
@@ -2031,8 +2023,7 @@ body:not([data-files='open']) .assets-panel {
     flex: 0 0 36px;
   }
   .sidebar-actions .settings-button svg,
-  .sidebar-actions .files-button svg,
-  .sidebar-actions .update-button svg {
+  .sidebar-actions .files-button svg {
     width: 20px;
     height: 20px;
   }
@@ -2157,7 +2148,6 @@ body:not([data-files='open']) .assets-panel {
   .sidebar-actions .mobile-new,
   .sidebar-actions .settings-button,
   .sidebar-actions .files-button,
-  .sidebar-actions .update-button,
   #navigation-open {
     width: 32px;
     height: 32px;
@@ -2229,28 +2219,23 @@ body:not([data-files='open']) .assets-panel {
   outline-offset: 2px;
 }
 
-/* The update button is always shown: neutral like its neighbours, blue when an update exists. */
-.sidebar-actions .update-button:not(.has-update) {
-  color: var(--muted);
-  background: transparent;
-  border-color: transparent;
+/* An update ready to install: a dot on the settings button (installed from the settings' first tab). */
+.sidebar-actions .settings-button {
+  position: relative;
 }
-.sidebar-actions .update-button:not(.has-update):hover:enabled {
-  background: var(--surface-raised);
-  color: var(--ink);
-  border-color: var(--line);
-}
-.sidebar-actions .update-button.is-checking svg {
-  animation: update-checking 0.9s linear infinite;
-}
-@keyframes update-checking {
-  to {
-    rotate: 360deg;
-  }
+.sidebar-actions .settings-button.has-update::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--update-light);
+  box-shadow: 0 0 0 2px var(--surface);
 }
 @media (prefers-reduced-motion: reduce) {
-  .engine-button.is-busy svg,
-  .sidebar-actions .update-button.is-checking svg {
+  .engine-button.is-busy svg {
     animation: none;
   }
 }

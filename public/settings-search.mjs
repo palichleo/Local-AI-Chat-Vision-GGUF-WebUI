@@ -3,7 +3,8 @@ const normalized = value =>
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
-export function setupSettingsSearch({ dialog, input, empty }) {
+/** scroller: the part of the settings that scrolls; onRefresh(searching): told after each filtering. */
+export function setupSettingsSearch({ dialog, input, empty, scroller = dialog, onRefresh = () => {} }) {
   const opened = new Map();
   function restore() {
     for (const [details, open] of opened) details.open = open;
@@ -33,7 +34,8 @@ export function setupSettingsSearch({ dialog, input, empty }) {
     for (const section of dialog.querySelectorAll('[data-settings-section]'))
       section.hidden = ![...section.querySelectorAll('[data-settings-item]')].some(item => !item.hidden);
     empty.hidden = count > 0 || !terms.length;
-    dialog.scrollTop = 0;
+    scroller.scrollTop = 0;
+    onRefresh(terms.length > 0);
   }
   function reset() {
     input.value = '';

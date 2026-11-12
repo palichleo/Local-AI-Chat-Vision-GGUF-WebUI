@@ -1,5 +1,6 @@
 import { setupProjectNavigation } from './project-navigation.mjs';
 import { setupSettingsSearch } from './settings-search.mjs';
+import { setupSettingsTabs } from './settings-tabs.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
@@ -425,7 +426,7 @@ async function restoreUpdate() {
 
 async function installUpdate() {
   if (settingsGuard.isDirty()) return requestSettingsClose(() => installUpdate());
-  if ($('update-available').disabled) return;
+  if ($('settings-update-install').disabled) return;
   state.updating = true;
   updateControls();
   $('settings').close();
@@ -481,7 +482,8 @@ async function toggleTheme() {
 function updateControls() {
   const s = state.status;
   projectUI.sync();
-  $('update-available').disabled =
+  $('settings-update-check').disabled = state.updating || !!state.checkingUpdates;
+  $('settings-update-install').disabled =
     state.projectWorking ||
     state.resourceWorking ||
     state.generationSettingsWorking ||
@@ -650,38 +652,84 @@ function updateControls() {
 }
 
 /**
- * The update button is always there: blue when an update is available (checked at launch),
- * like the other sidebar icons otherwise. A click on it then checks again.
+ * Updates live in the first tab of the settings. The server looks for one at launch; when it
+ * finds one, the settings button and the tab wear a dot, and the tab offers to install it.
  */
 async function checkUpdates({ refresh = false } = {}) {
-  const button = $('update-available');
   try {
     const update = await (await api(refresh ? 'updates?refresh=1' : 'updates')).json();
     state.updateAvailable = update.available === true;
-    button.classList.toggle('has-update', state.updateAvailable);
-    const label = state.updateAvailable
-      ? 'Installer la mise à jour · v' + update.version
+    const at = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    $('settings-update-status').textContent = state.updateAvailable
+      ? 'La version ' + update.version + ' est disponible.'
       : refresh
-        ? 'Atelier est à jour · cliquer pour vérifier à nouveau'
-        : 'Rechercher une mise à jour';
-    button.title = label;
-    button.setAttribute('aria-label', label);
-    if (refresh) $('live-status').textContent = state.updateAvailable ? 'Mise à jour disponible.' : 'Atelier est à jour.';
+        ? 'Aucune mise à jour trouvée (recherche faite à ' + at + ').'
+        : 'Aucune mise à jour trouvée au lancement.';
+    $('settings-update-install').hidden = !state.updateAvailable;
+    $('settings-update-install').textContent = state.updateAvailable
+      ? 'Installer la version ' + update.version
+      : 'Installer la mise à jour';
+    const opener = $('settings-open');
+    opener.classList.toggle('has-update', state.updateAvailable);
+    const label = state.updateAvailable ? 'Configuration · mise à jour disponible' : 'Configuration';
+    opener.setAttribute('aria-label', label);
+    opener.title = label;
+    settingsTabs.mark('update', state.updateAvailable);
+    if (refresh) $('live-status').textContent = state.updateAvailable ? 'Mise à jour disponible.' : 'Aucune mise à jour trouvée.';
   } catch {
     /* Offline checks stay silent. */
   }
 }
 
-async function updateButton() {
-  if (state.updateAvailable) return installUpdate();
+async function searchUpdate() {
   if (state.checkingUpdates) return;
   state.checkingUpdates = true;
-  $('update-available').classList.add('is-checking');
+  $('settings-update-check').textContent = 'Recherche…';
+  updateControls();
   try {
     await checkUpdates({ refresh: true });
   } finally {
     state.checkingUpdates = false;
-    $('update-available').classList.remove('is-checking');
+    $('settings-update-check').textContent = 'Rechercher une mise à jour';
+    updateControls();
+  }
+}
+
+const COMPONENT_STATES = { missing: 'Manquant', error: 'Problème', off: 'Non utilisé' };
+/** The versions of the programs Atelier runs on (GET /api/components), once per opening of the tab. */
+async function checkComponents({ again = false } = {}) {
+  if (state.checkingComponents || (!again && state.componentsSession === state.settingsSession)) return;
+  state.componentsSession = state.settingsSession;
+  state.checkingComponents = true;
+  $('components-check').disabled = true;
+  $('components-status').textContent = 'Lecture des versions…';
+  try {
+    // Versions read for an earlier opening are still true: they are shown all the same.
+    const result = await (await api('components')).json();
+    $('settings-version').textContent = 'Atelier ' + result.version;
+    $('components-list').replaceChildren(
+      ...result.components.map(component => {
+        const row = node('li', 'component-row');
+        row.dataset.state = component.state;
+        const name = node('div', 'component-name');
+        name.append(node('strong', '', component.name));
+        if (component.detail) name.append(node('span', 'component-detail', component.detail));
+        const version = node('span', 'component-version', component.version || '—');
+        row.append(name, version);
+        if (COMPONENT_STATES[component.state])
+          row.append(node('span', 'component-state', COMPONENT_STATES[component.state]));
+        return row;
+      }),
+    );
+    const problems = result.components.filter(component => ['missing', 'error'].includes(component.state)).length;
+    $('components-status').textContent = problems
+      ? problems + (problems > 1 ? ' composants demandent' : ' composant demande') + ' votre attention.'
+      : '';
+  } catch (error) {
+    $('components-status').textContent = error.message;
+  } finally {
+    state.checkingComponents = false;
+    $('components-check').disabled = false;
   }
 }
 
@@ -932,6 +980,8 @@ function openSettings() {
   settingsSearch.reset();
   $('settings').showModal();
   $('settings').scrollTop = 0;
+  $('settings-body').scrollTop = 0;
+  settingsTabs.opened();
   updateControls();
   Promise.all([
     api('bootstrap').then(response => response.json()),
@@ -2020,10 +2070,19 @@ alignConversation();
 setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 const tokenControls = setupTokenControls($);
 const computeControls = setupComputeControls($);
+const settingsTabs = setupSettingsTabs({
+  list: $('settings-tabs'),
+  onShow: name => {
+    $('settings-body').scrollTop = 0;
+    if (name === 'update' && $('settings').open) void checkComponents();
+  },
+});
 const settingsSearch = setupSettingsSearch({
   dialog: $('settings'),
   input: $('settings-search'),
   empty: $('settings-empty'),
+  scroller: $('settings-body'),
+  onRefresh: searching => settingsTabs.matches(searching),
 });
 dismissSettingsOnOutsideClick($('settings'), () => requestSettingsClose());
 const projectUI = setupProjectNavigation({
@@ -2239,7 +2298,9 @@ $('add-llm').onclick = addLLM;
 $('save-llm').onclick = () => saveLLM();
 $('cancel-llm').onclick = cancelLLM;
 $('remove-llm').onclick = removeLLM;
-$('update-available').onclick = updateButton;
+$('settings-update-check').onclick = searchUpdate;
+$('settings-update-install').onclick = installUpdate;
+$('components-check').onclick = () => checkComponents({ again: true });
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('shutdown-app').onclick = shutdownApplication;
 $('settings-close').onclick = () => requestSettingsClose();
@@ -2482,6 +2543,7 @@ try {
     connected: true,
   });
   tokenKnown();
+  if (initial.version) $('settings-version').textContent = 'Atelier ' + initial.version;
   void checkUpdates();
   applyTheme(initial.preferences?.theme);
   state.saveHistory = initial.preferences?.saveHistory === true;
