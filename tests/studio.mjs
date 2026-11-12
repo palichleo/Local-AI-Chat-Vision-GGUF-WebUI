@@ -331,7 +331,7 @@ test('leaving a mode stops following the size of its frame', async () => {
 });
 
 /** A runtime with one image workflow, a chat model and a generator that only note what they are asked. */
-function handover({ keepMs, fails = false, onRun } = {}) {
+function handover({ keepMs, fails = false, tight = false, onRun } = {}) {
   const turn = 'a1111111-1111-4111-8111-111111111111';
   const workflow = {
     schemaVersion: 1,
@@ -394,7 +394,12 @@ function handover({ keepMs, fails = false, onRun } = {}) {
         if (fails) throw Error('Mémoire vidéo insuffisante.');
         return { outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] };
       },
-      free: async options => events.push(options?.keep ? 'sources removed' : 'gpu released'),
+      // Asked to stay loaded, the generator does so unless main memory is short with its models in it.
+      free: async options => {
+        const kept = Boolean(options?.keep) && !tight;
+        events.push(kept ? 'sources removed' : 'gpu released');
+        return kept ? { kept: true } : {};
+      },
     }),
   });
   /** One image asked from this conversation, run to its end. */
@@ -441,6 +446,18 @@ test('the generator a Studio creation left loaded gives the card back by itself 
   await new Promise(resolve => setTimeout(resolve, 120));
   assert.deepEqual(events, ['gpu released']);
   assert.equal(await runtime.yieldGpu(), false);
+  await runtime.close();
+});
+
+test('a generator that leaves the machine short of main memory is not kept loaded', async () => {
+  // A video model: seventeen gigabytes of main memory beside the card, three left out of thirty-two.
+  const { runtime, events, create } = handover({ tight: true });
+  const status = await create(STUDIO_ID);
+  assert.equal(status.state, 'done', status.error);
+  assert.deepEqual(events, ['llm stopped', 'generate', 'gpu released']);
+  // Nothing is left to give back later, and the chat model still stays away.
+  assert.equal(await runtime.yieldGpu(), false);
+  assert.deepEqual(events, ['llm stopped', 'generate', 'gpu released']);
   await runtime.close();
 });
 
