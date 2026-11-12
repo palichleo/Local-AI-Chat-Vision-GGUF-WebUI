@@ -312,7 +312,11 @@ function derivedConversation({ stage = 'draft', fps = 24, mode = 'smooth' } = {}
     },
     getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5 }),
     engineConfig: () => ({}),
-    sourceMedia: async () => ({ mime: 'video/mp4', name: 'clip', handle: { close: async () => {} } }),
+    sourceMedia: async source => ({
+      mime: records[source.output_id]?.mediaType === 'image' ? 'image/png' : 'video/mp4',
+      name: 'clip',
+      handle: { close: async () => {} },
+    }),
     clientFactory: () => ({}),
   });
   const conversationId = '11111111-1111-4111-8111-111111111111';
@@ -330,7 +334,7 @@ function derivedConversation({ stage = 'draft', fps = 24, mode = 'smooth' } = {}
       ],
       { conversationId, turnId: conversationId, messages: [] },
     );
-  return { ids, records, extend };
+  return { ids, records, extend, runtime };
 }
 
 test('extending an upscaled then smoothed video continues the clip it was made from', async () => {
@@ -355,6 +359,33 @@ test('a slow-motion video is its own source; a frame rate the model cannot join 
   assert.deepEqual(request.resolution, { width: 1536, height: 896 });
   const odd = derivedConversation({ fps: 30 });
   await assert.rejects(odd.extend(odd.ids.clip), /30 images\/s.*24 images\/s/);
+});
+
+test('a continuation also takes subject references, never a first or last frame', async () => {
+  const { ids, records, extend, runtime } = derivedConversation();
+  const imageId = '55555555-5555-4555-8555-555555555555';
+  records[imageId] = {
+    provider: 'native',
+    mediaType: 'image',
+    workflowId: 'krea',
+    parameters: { pipeline: 'krea2', width: 1024, height: 1024 },
+    outputs: [{ source: { filename: 'fox.png' }, width: 1024, height: 1024 }],
+  };
+  const request = await extend(ids.clip, { reference: [{ output: imageId }] });
+  assert.equal(request.workflowName, 'MiniMax H3');
+  assert.deepEqual(request.plan.references.map(ref => ref.role), ['source_video', 'reference_image']);
+  assert.deepEqual(request.resolution, { width: 768, height: 448 }, 'still at the size of its source');
+  // In the confirmation window the reference stays a reference: the clip already gives the start.
+  assert.deepEqual(request.plan.editable.references[0], [], 'the source stays the source');
+  assert.deepEqual(request.plan.editable.references[1].map(option => option.role), ['reference_image']);
+  await assert.rejects(
+    runtime.revise({
+      requestId: request.requestId,
+      approvalToken: request.approvalToken,
+      edits: { references: [{ index: 1, role: 'start_image' }] },
+    }),
+    /ne peut pas prendre ce rôle/,
+  );
 });
 
 test('the next shot of a final video is final too, unless the model says otherwise', async () => {

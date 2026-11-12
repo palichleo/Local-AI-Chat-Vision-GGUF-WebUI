@@ -40,7 +40,12 @@
     "guidance": "Every video is shown to the user, who can edit it before it runs. Before generating, agree with the user in one short spoken message, without a tool (five lines at most, plain sentences, no lists), on what happens next and for how many seconds; call this tool once they answered.",
     "prompt": "What happens next, written for a video model that only sees the last frames of the source: three to six sentences in English, present tense. Say who or what is on screen in a few words, then the new action beat by beat, how the camera moves and ends, and the sound (ambience, noises, spoken words in quotes, in the language they are spoken). Only concrete, visible or audible things.",
     "roles": {
-      "source": { "media": ["video"], "required": true, "description": "Video to continue." }
+      "source": { "media": ["video"], "required": true, "description": "Video to continue." },
+      "reference": {
+        "media": ["image"],
+        "many": true,
+        "description": "Images of a person, a character, an object or a place that must appear in the continuation, kept as they look: someone who enters the shot, or what the camera turns to. Not frames of the clip."
+      }
     }
   },
   "create_audio": {

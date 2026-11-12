@@ -351,5 +351,6 @@
         "name": "Sujet 2"
       }
     ]
-  }
+  },
+  "exclusive": [["source"], ["reference"]]
 }

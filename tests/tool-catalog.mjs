@@ -133,6 +133,42 @@ test('MiniMax does not get a start image together with references, even when the
   assert.equal((await tools.route('create_video', refs, media)).workflow.id, 'minimax');
 });
 
+test('a MiniMax continuation takes subject references; an LTX one does not yet', async () => {
+  const minimax = {
+    ...video('minimax-next', [
+      slot('clip', 'source_video', true),
+      slot('s', 'start_image'),
+      slot('r1', 'reference_image'),
+      slot('r2', 'reference_image'),
+    ]),
+    pipeline: 'minimax_h3',
+  };
+  const ltx = video('ltx-next', [slot('clip', 'source_video', true), slot('a', 'msr_image')]);
+  const extendTool = async list =>
+    (await catalogOf(list).definitions()).find(tool => tool.function.name === 'extend_video').function.parameters;
+  const both = await extendTool([minimax, ltx]);
+  assert.equal(both.properties.reference.maxItems, 2);
+  assert.equal(both.properties.start_image, undefined, 'a continuation starts on its clip, not on an image');
+  const args = () => ({ prompt: 'x', intention: 'y', source: { output: 'video-run' }, reference: [{ image: 0 }] });
+  const routed = await catalogOf([minimax, ltx]).route('extend_video', args(), media);
+  assert.equal(routed.workflow.id, 'minimax-next');
+  assert.deepEqual(routed.args.references, [
+    { input: 'clip', output_id: 'video-run' },
+    { input: 'r1', image: 0 },
+  ]);
+  // LTX 2.5 alone: its subject references are not offered beside a continuation, nor accepted.
+  assert.equal((await extendTool([ltx])).properties.reference, undefined);
+  await assert.rejects(catalogOf([ltx]).route('extend_video', args(), media), /Aucun workflow/);
+  // The Studio shows the reference slots of the MiniMax continuation only.
+  const studio = (await catalogOf([minimax, ltx]).studio()).extend_video;
+  const roles = Object.fromEntries(studio.map(item => [item.id, item.roles.reference.count]));
+  assert.deepEqual(roles, { 'minimax-next': 2, 'ltx-next': 0 });
+  // Creating a video with LTX still takes its subject references.
+  const subject = video('subject', [slot('a', 'msr_image'), slot('b', 'msr_image')]);
+  const create = (await catalogOf([subject]).definitions()).find(tool => tool.function.name === 'create_video');
+  assert.equal(create.function.parameters.properties.reference.maxItems, 2);
+});
+
 test('arguments are checked against the chosen workflow, never forwarded blindly', async () => {
   const tools = catalogOf(workflows);
   const routed = await tools.route('create_video', { prompt: 'x', intention: 'y', fps: 12, stage: 'final' }, media);

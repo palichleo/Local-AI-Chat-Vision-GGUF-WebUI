@@ -206,10 +206,12 @@ export function setupStudio({
     const groups = workflow.exclusive ?? [],
       own = groups.find(group => group.includes(role));
     if (!own) return [];
+    // Only the inputs this request sends: a start image chosen for a new clip is not part of
+    // its continuation.
     return groups
       .filter(group => group !== own)
       .flat()
-      .filter(other => drafts[mode].inputs[other]?.some(Boolean));
+      .filter(other => workflow.roles[other]?.count && drafts[mode].inputs[other]?.some(Boolean));
   }
   async function fill(role, index, file) {
     if (!file) return;
@@ -630,13 +632,14 @@ export function setupStudio({
     if (offered().length > 1 && !extending) args.workflow = workflow.id;
     if (mode === 'video')
       args.intention = extending ? 'Suite demandée dans le Studio.' : 'Création demandée dans le Studio.';
+    // A continuation starts from its clip; the inputs it also takes (subject references) follow.
     if (extending) args.source = { output: extending.id };
-    else
-      for (const [role, spec] of Object.entries(workflow.roles)) {
-        const chosen = (draft.inputs[role] ?? []).filter(Boolean).map(item => item.source);
-        if (!chosen.length || !spec.count) continue;
-        args[role] = role === 'reference' ? chosen : chosen[0];
-      }
+    for (const [role, spec] of Object.entries(workflow.roles)) {
+      if (extending && role === 'source') continue;
+      const chosen = (draft.inputs[role] ?? []).filter(Boolean).map(item => item.source);
+      if (!chosen.length || !spec.count) continue;
+      args[role] = role === 'reference' ? chosen : chosen[0];
+    }
     if (workflow.lengths?.seconds.length) args.duration = draft[extending ? 'extension' : 'length'];
     if (workflow.limits && draft.size && !extending) {
       const [width, height] = draft.size.split('x').map(Number);
@@ -1022,10 +1025,9 @@ export function setupStudio({
     prompt.title = MODIFIER + ' + Entrée pour générer';
     write.append(field('Prompt', prompt, { wide: true }));
     if (mode !== 'audio') write.append(enrichRow());
-    if (!extending) {
-      const row = inputs(workflow);
-      if (row) write.append(row);
-    }
+    // A continuation shows only the inputs it takes (subject references, for MiniMax H3).
+    const row = inputs(workflow);
+    if (row) write.append(row);
 
     // Right: the settings, two to a row.
     if (list.length > 1 && !extending && mode !== 'audio') {
