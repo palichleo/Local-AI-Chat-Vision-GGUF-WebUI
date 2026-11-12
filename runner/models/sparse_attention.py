@@ -50,13 +50,20 @@ class Plan:
         self.rows = int(slots.numel())
         self.blocks = int(lengths.numel())
         self.block = slots // BLOCK  # (rows,) the block of each row
+        import torch
+
+        live = torch.zeros(self.blocks * BLOCK, dtype=torch.bool, device=slots.device)
+        live[slots] = True
+        self.padding = (~live).nonzero().flatten()  # the padded slots, zero in every tile
 
     def to(self, device):
         return Plan(self.slots.to(device), self.lengths.to(device), self.exact)
 
     def tile(self, value):
-        """(batch, rows, heads, width) -> (batch, blocks * 64, heads, width), zeros in the padding."""
-        tiled = value.new_zeros(value.shape[0], self.blocks * BLOCK, *value.shape[2:])
+        """(batch, rows, heads, width) -> (batch, blocks * 64, heads, width), zeros in the padding
+        (only the padded slots are cleared: the rows fill the others)."""
+        tiled = value.new_empty(value.shape[0], self.blocks * BLOCK, *value.shape[2:])
+        tiled.index_fill_(1, self.padding, 0)
         return tiled.index_copy_(1, self.slots, value)
 
     def untile(self, value):
@@ -164,10 +171,12 @@ def coarse(query, key, value, plan):
 
 def add_coarse(result, gate, answer, plan):
     """result += gate * the coarse answer of each row's block, in place, a pack of heads at a
-    time. result and gate are (batch, rows, heads, width), answer comes from coarse."""
+    time, in one fused product and sum per pack. result and gate are (batch, rows, heads,
+    width), answer comes from coarse."""
+    answer = answer.to(result.dtype)
     for part in packs(result.shape[2], plan.rows, result.shape[0]):
         rows = answer[:, part].index_select(2, plan.block).permute(0, 2, 1, 3)
-        result[:, :, part] += gate[:, :, part] * rows
+        result[:, :, part].addcmul_(gate[:, :, part], rows)
     return result
 
 

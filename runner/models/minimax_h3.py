@@ -175,11 +175,18 @@ def _chunked_feed_forward(self, hidden_states, chunk=8192):
     # once; each chunk's result is written straight into its place (a concatenation copied the
     # whole output again, twice for a single chunk: 0.1 s a step on a 5 s draft).
     flat = hidden_states.reshape(-1, hidden_states.shape[-1])
+
+    def run(rows):
+        # Streamed INT8 layers take the gated activation into their quantizer (pool, act).
+        if hasattr(self.net[2], 'location'):
+            return self.net[2](self.net[0].proj(rows), act='swiglu')
+        return self.net[2](_gate_first_swiglu(self.net[0], rows))
+
     if flat.shape[0] <= chunk:
-        return self.net[2](_gate_first_swiglu(self.net[0], flat)).reshape(*hidden_states.shape[:-1], -1)
+        return run(flat).reshape(*hidden_states.shape[:-1], -1)
     out = None
     for start in range(0, flat.shape[0], chunk):
-        piece = self.net[2](_gate_first_swiglu(self.net[0], flat[start : start + chunk]))
+        piece = run(flat[start : start + chunk])
         if out is None:
             out = piece.new_empty(flat.shape[0], piece.shape[-1])
         out[start : start + piece.shape[0]] = piece

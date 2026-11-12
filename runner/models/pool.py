@@ -333,16 +333,32 @@ def load_streamed(model, names, pool):
             if self.adapters:
                 pool.adapted[self.location] = self.adapters
 
-        def forward(self, value, rows=None):
+        def forward(self, value, rows=None, act=None):
             """`rows` (a slice) computes only those outputs: a part of a fused projection, as
-            the queries and keys of a fused q, k, v."""
+            the queries and keys of a fused q, k, v. `act='swiglu'` takes [gate | up] rows and
+            computes silu(gate) * up on the way in: in comfy-kitchen's INT8 quantizer, so a
+            feed-forward's wide intermediate is never written out."""
             bundle = pool.bundle(self.location)
             weight, scale, bias = bundle['weight'], bundle.get('scale'), bundle.get('bias')
             if rows is not None:
                 weight = weight[rows]
                 scale = scale[rows] if scale is not None and scale.ndim else scale
                 bias = None if bias is None else bias[rows]
-            if weight.dtype == torch.int8:
+            if act is not None and (weight.dtype != torch.int8 or self.adapters):
+                gate, up = value.chunk(2, dim=-1)
+                value, act = F.silu(gate) * up, None
+            if weight.dtype == torch.int8 and act is not None:
+                result = pool.kernels.int8_linear(
+                    value,
+                    weight,
+                    scale,
+                    bias,
+                    value.dtype,
+                    bool(self.rotation),
+                    self.rotation or 256,
+                    input_act=act,
+                )
+            elif weight.dtype == torch.int8:
                 result = torch.ops.comfy_kitchen.int8_linear(
                     value,
                     weight,

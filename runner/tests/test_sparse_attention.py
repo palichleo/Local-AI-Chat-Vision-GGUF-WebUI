@@ -238,6 +238,25 @@ class FusedAttentionTest(unittest.TestCase):
         torch.testing.assert_close(key, reference[1], atol=0.05, rtol=0.02)
 
 
+@unittest.skipUnless(minimax_h3.int8_attention_ready(), 'no comfy-kitchen CUDA kernels on this machine')
+class GatedProjectionTest(unittest.TestCase):
+    def test_the_gated_activation_taken_in_by_the_quantizer_gives_the_same_projection(self):
+        import comfy_kitchen
+
+        torch.manual_seed(8)
+        rows = torch.randn(300, 2 * 512, device='cuda', dtype=torch.bfloat16)
+        weight = torch.randint(-127, 128, (256, 512), device='cuda', dtype=torch.int8)
+        scale = torch.rand(256, 1, device='cuda') / 500
+        with torch.inference_mode():
+            fused = comfy_kitchen.int8_linear(rows, weight, scale, None, torch.bfloat16, True, 256, input_act='swiglu')
+            gate, up = rows.chunk(2, dim=-1)
+            apart = comfy_kitchen.int8_linear(
+                torch.nn.functional.silu(gate) * up, weight, scale, None, torch.bfloat16, True, 256
+            )
+        cosine = torch.nn.functional.cosine_similarity(fused.float().flatten(), apart.float().flatten(), dim=0)
+        self.assertGreater(float(cosine), 0.999)
+
+
 @unittest.skipUnless(torch.cuda.is_available(), 'no GPU')
 class DecoderAttentionTest(unittest.TestCase):
     def test_one_projection_and_the_fused_rotation_give_the_decoder_attention_of_diffusers(self):
