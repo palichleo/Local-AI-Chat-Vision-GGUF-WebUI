@@ -777,6 +777,11 @@ test('the last creation stays on the screen; another conversation starts from an
     // In the Sortie, with its count; on the screen still after a visit of the chat.
     assert.equal(body.find('studio-item').length, 1);
     assert.equal(body.find('studio-count')[0].textContent, '1 RÉSULTAT');
+    // A creation is shown as it is, with no grain over it; its actions sit on its picture, so the
+    // Sortie keeps its height. No title on the blocks: their colour says what they are for.
+    assert.deepEqual(body.find('picture-grain'), []);
+    assert.equal(body.find('studio-thumb')[0].find('studio-actions').length, 1);
+    assert.deepEqual(body.find('studio-block-title'), []);
     await studio.open();
     assert.equal(body.find('studio-frame-result').length, 1);
     // Another conversation: its own Studio, an empty screen.
@@ -1155,13 +1160,16 @@ test('Moodix AI sets its proposal in the Studio and waits: « Générer » is th
     assert.equal(revealed.length, 1);
     assert.equal(body.dataset.mode, 'video');
     assert.equal(studio.prompt().value, 'Un renard se lève');
-    assert.equal(body.find('studio-stepper')[0].children[1].textContent, '05 S');
+    // The lengths of the model, in a list like the other settings: the one proposed is chosen.
+    assert.equal(body.find('studio-length')[0].value, String(121 / 24));
     assert.equal(studio.studio.proposing(), true);
     // Nothing starts by itself: the pointer stops on « Générer », beside a way to decline.
     assert.equal(asked.filter(([route]) => route.startsWith('tools/')).length, 0);
     assert.equal(body.find('studio-decline').length, 1);
     // The user lengthens it, then generates: the change goes first, then the answer.
-    body.find('studio-stepper')[0].children[2].onclick();
+    const length = body.find('studio-length')[0];
+    length.value = String(193 / 24);
+    length.onchange();
     await body.find('studio-go')[0].onclick();
     assert.equal(await answer, 'once');
     assert.deepEqual(asked.find(([route]) => route === 'tools/revise')[1], {
@@ -1234,7 +1242,7 @@ test('the pointer only sets what the workflow leaves to the assistant', async ()
     const answer = studio.studio.propose(request, new AbortController().signal);
     await settle();
     // No length to set: none is shown, none is sent.
-    assert.deepEqual(body.find('studio-stepper'), []);
+    assert.deepEqual(body.find('studio-length'), []);
     await body.find('studio-go')[0].onclick();
     assert.equal(await answer, 'once');
   } finally {

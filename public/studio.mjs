@@ -282,11 +282,10 @@ export function setupStudio({
     control.oninput = () => oninput(control.value);
     return control;
   }
-  function blockHead(title, { id, extra } = {}) {
-    const head = node('div', 'studio-block-head'),
-      name = node(id ? 'label' : 'h2', 'studio-block-title', title);
-    if (id) name.htmlFor = id;
-    head.append(name);
+  /** The head of a block: no title (the colour says the function), only what it holds. */
+  function blockHead(title, { extra } = {}) {
+    const head = node('div', 'studio-block-head');
+    if (title) head.append(node('h2', 'sr-only', title));
     if (extra) head.append(extra);
     return head;
   }
@@ -510,44 +509,25 @@ export function setupStudio({
     if (!lengths.seconds.includes(draft[key])) draft[key] = nearest(draft[key] ?? lengths.standard ?? 5);
     return { key, list: lengths.seconds, value: draft[key], nearest };
   }
-  /** The length as a stepper: one step to the next length the workflow allows. */
+  /**
+   * The length, in a list like the other settings: the lengths the model allows, from its
+   * counts of frames (MiniMax H3: 17n + 5 frames at 24 a second, from 5,2 s; LTX 2.5 from 0,7 s).
+   */
   function lengthField(workflow) {
     const length = lengthOf(workflow);
     if (!length) return null;
     const draft = drafts[mode],
-      stepper = aiTarget(node('div', 'studio-stepper'), 'duration'),
-      value = node('output', '', figures(length.value)),
-      step = by => {
-        const index = length.list.indexOf(draft[length.key]),
-          next = length.list[Math.min(length.list.length - 1, Math.max(0, index + by))];
-        draft[length.key] = next;
-        value.textContent = figures(next);
-        less.disabled = Boolean(working) || next === length.list[0];
-        more.disabled = Boolean(working) || next === length.list.at(-1);
-        readout();
-      },
-      less = button('', '', () => step(-1)),
-      more = button('', '', () => step(1));
-    less.textContent = '−';
-    more.textContent = '+';
-    less.setAttribute('aria-label', 'Plus court');
-    more.setAttribute('aria-label', 'Plus long');
-    less.disabled = Boolean(working) || length.value === length.list[0];
-    more.disabled = Boolean(working) || length.value === length.list.at(-1);
-    value.setAttribute('aria-live', 'polite');
-    stepper.setAttribute('role', 'group');
-    stepper.setAttribute('aria-label', extending ? 'Durée ajoutée' : 'Durée');
-    stepper.append(less, value, more);
-    const wrapper = node('div', 'studio-field');
-    const title = node('span', 'studio-label', extending ? 'Durée ajoutée' : 'Durée');
-    if (workflow.lengths) {
-      const dot = node('span', 'ai-mark');
-      dot.setAttribute('role', 'img');
-      dot.setAttribute('aria-label', 'Moodix AI peut régler ce paramètre');
-      title.append(dot);
-    }
-    wrapper.append(title, stepper);
-    return wrapper;
+      control = select(
+        length.list.map(value => [value, seconds(value)]),
+        length.value,
+        value => {
+          draft[length.key] = Number(value);
+          readout();
+        },
+      );
+    control.className = 'studio-length';
+    aiTarget(control, 'duration');
+    return field(extending ? 'Durée ajoutée' : 'Durée', control, { mark: true });
   }
 
   // ------------------------------------------------------------------ the screen
@@ -587,7 +567,8 @@ export function setupStudio({
     const box = frame.parentElement,
       width = box?.clientWidth ?? 0,
       height = box?.clientHeight ?? 0;
-    return width > 40 && height > 40 ? { width: Math.min(width, 900), height: Math.min(height, 460) } : FRAME;
+    // As large as the stage: the Studio fills the window, the screen with it.
+    return width > 40 && height > 40 ? { width: Math.min(width, 1600), height: Math.min(height, 1000) } : FRAME;
   }
   function reshape(frame, { ratio }) {
     const size = frameSize(ratio, room(frame));
@@ -627,13 +608,6 @@ export function setupStudio({
     }
     if (last) frame.append(result(last));
     else frame.setAttribute('aria-hidden', 'true');
-    if (mode !== 'audio') {
-      const grain = node('span', 'picture-grain'),
-        vignette = node('span', 'studio-frame-vignette');
-      grain.setAttribute('aria-hidden', 'true');
-      vignette.setAttribute('aria-hidden', 'true');
-      frame.append(grain, vignette);
-    }
     const shown = node('span', 'studio-readout', readoutText());
     shown.setAttribute('aria-hidden', 'true');
     frame.append(shown);
@@ -828,12 +802,7 @@ export function setupStudio({
   function enrichRow() {
     const draft = drafts[mode],
       row = node('div', 'studio-enrich'),
-      make = button(
-        'secondary studio-enrich-go',
-        enriching ? 'Enrichissement…' : 'Enrichir le prompt',
-        enrich,
-        'spark',
-      );
+      make = button('studio-enrich-go', enriching ? 'Enrichissement…' : 'Enrichir le prompt', enrich, 'spark');
     make.title = 'Le modèle de chat réécrit votre texte en un prompt complet';
     make.disabled = enriching || Boolean(working);
     row.append(make);
@@ -1431,9 +1400,11 @@ export function setupStudio({
           : 'Retirer de cette conversation (le fichier reste dans le dossier output)',
       ],
     ]) {
-      const control = button('output-action', label, onclick, glyph);
-      control.title = title;
-      if (!label) control.setAttribute('aria-label', title);
+      // An icon on the picture; its name for screen readers and in its tooltip.
+      const control = button('output-action', '', onclick, glyph);
+      if (label) control.append(node('span', 'sr-only', label));
+      control.title = label ? label + ' · ' + title : title;
+      control.setAttribute('aria-label', label || title);
       control.disabled = Boolean(working);
       row.append(control);
     }
@@ -1506,9 +1477,7 @@ export function setupStudio({
       }
       picture.title = 'Afficher sur l’écran du Studio';
       picture.onclick = () => onScreen(record);
-      const grain = node('span', 'picture-grain');
-      grain.setAttribute('aria-hidden', 'true');
-      thumb.append(picture, grain);
+      thumb.append(picture);
     }
     if (media !== 'image') {
       const play = button('studio-play', '', () => onScreen(record, true), 'play');
@@ -1565,7 +1534,8 @@ export function setupStudio({
                 : []),
             ]
           : [];
-    card.append(thumb, title, meta, actions(record, extra));
+    thumb.append(actions(record, extra));
+    card.append(thumb, title, meta);
     return card;
   }
   function outputs() {
@@ -1594,7 +1564,7 @@ export function setupStudio({
       extra.append(where);
     }
     extra.append(node('span', 'studio-count', resultCount(mine.length)));
-    section.append(blockHead(about.output, { extra }));
+    section.append(blockHead('', { extra }));
     if (!mine.length) {
       section.append(node('p', 'studio-empty asset-empty', about.none));
       return section;
@@ -1684,7 +1654,9 @@ export function setupStudio({
     settings.setAttribute('aria-label', 'Réglages');
 
     // Entrée: what the user writes and hands over.
-    write.append(blockHead('Entrée', { id: 'studio-prompt' }));
+    const named = node('label', 'sr-only', 'Prompt');
+    named.htmlFor = 'studio-prompt';
+    write.append(named);
     if (mode === 'video' && extending) {
       const banner = node('div', 'studio-extending');
       banner.append(icon('forward'), node('span', '', 'Suite du clip : ' + (extending.prompt || '').slice(0, 90)));
@@ -1715,10 +1687,13 @@ export function setupStudio({
     prompt.maxLength = 4000;
     prompt.title = MODIFIER + ' + Entrée pour générer';
     aiTarget(prompt, 'prompt');
-    const promptField = node('div', 'studio-field studio-prompt-field is-wide');
+    const promptField = node(
+      'div',
+      'studio-field studio-prompt-field is-wide' + (mode !== 'audio' ? ' has-enrich' : ''),
+    );
     promptField.append(prompt);
+    if (mode !== 'audio') promptField.append(enrichRow());
     write.append(promptField);
-    if (mode !== 'audio') write.append(enrichRow());
     // A song's lyrics are words handed over too: under the prompt, opened on demand.
     const lyrics = workflow.settings.find(setting => setting.key === 'lyrics' && setting.type === 'string');
     if (lyrics) {
@@ -1745,7 +1720,6 @@ export function setupStudio({
     if (row) write.append(row);
 
     // Réglages: the model, the length, the size, the workflow's own settings; the rare ones under « Plus de réglages ».
-    settings.append(blockHead('Réglages'));
     if (list.length > 1 && !extending) {
       const model = select(
         list.map(item => [item.id, item.name]),
@@ -1875,6 +1849,7 @@ export function setupStudio({
     }
 
     desk.append(write, preview, settings, outputs());
+    desk.classList.toggle('is-generating', Boolean(working));
     if (working) for (const control of desk.querySelectorAll('textarea, select, input')) control.disabled = true;
     return desk;
   }

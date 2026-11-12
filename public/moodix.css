@@ -561,7 +561,7 @@ body[data-view='studio'] .mode-switch .mode-dot {
 body[data-view='home'] .mode-switch {
   display: none;
 }
-/* The signature: three rounded strokes under the top bar, blue, green and yellow. */
+/* The signature: three rounded strokes under the top bar, blue, yellow and red. */
 .signature {
   display: flex;
   flex-direction: column;
@@ -576,11 +576,11 @@ body[data-view='home'] .mode-switch {
 }
 .signature span:nth-child(2) {
   width: 68%;
-  background: var(--fn-settings);
+  background: var(--fn-output);
 }
 .signature span:nth-child(3) {
   width: 44%;
-  background: var(--fn-output);
+  background: var(--fn-action);
 }
 #chat-header {
   display: flex;
@@ -987,7 +987,7 @@ body[data-view='studio'] .composer-region {
     grid-template-areas: 'prev prev' 'in set' 'out out';
   }
 }
-@container studio (min-width: 992px) {
+@container studio (min-width: 900px) {
   .studio-desk {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) minmax(0, 1fr);
     grid-template-areas: 'in prev set' 'out out out';
@@ -1289,7 +1289,7 @@ body[data-view='studio'] .composer-region {
   padding: 0;
   margin: 0;
 }
-@container studio (min-width: 640px) and (max-width: 991px) {
+@container studio (min-width: 640px) and (max-width: 899px) {
   #studio-view .studio-stage {
     height: 340px;
   }
@@ -1556,37 +1556,7 @@ video.studio-frame-result {
   }
 }
 
-/* Settings: length as a stepper, the rest in wells. */
-.studio-stepper {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 5px;
-  border-radius: 14px;
-  background: var(--field);
-  border: 1px solid var(--field-line);
-  transition: box-shadow 0.4s ease;
-}
-.studio-stepper button {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  border: 0;
-  background: var(--surface-raised);
-  color: var(--ink);
-  font-size: 20px;
-  line-height: 1;
-}
-.studio-stepper button:hover:enabled {
-  background: var(--hover);
-}
-.studio-stepper output {
-  font-family: var(--font-mono);
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--fn-settings-text);
-}
+/* Settings: in wells. */
 .studio-more {
   min-height: 42px;
   border-radius: 12px;
@@ -1701,7 +1671,7 @@ video.studio-frame-result {
   flex-direction: column;
   gap: 6px;
 }
-@container studio (min-width: 640px) and (max-width: 991px) {
+@container studio (min-width: 640px) and (max-width: 899px) {
   .studio-item {
     flex-basis: 180px;
   }
@@ -1815,67 +1785,84 @@ video.studio-frame-result {
   padding: 0 8px;
 }
 
-/* ------------------------------------------------------------------ film grain, on pictures only */
-/* Finer and harder than before: fractal noise of one octave, grey, contrast raised, laid over
-   the picture. Still at rest; it moves only while a creation is being made. */
-.picture-grain,
-.film-grain {
+/* ------------------------------------------------------------------ film grain, of the interface */
+/* Part of the look, never of a creation: the grain lies in the background of the surfaces (the
+   blocks of the Studio, the screen around the picture, the message box, the cards), under what
+   they hold. Fine and hard: fractal noise of one octave, grey, contrast raised. Still at rest;
+   while a creation is being made, the grain of the preview moves. */
+:root {
+  --grain-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='1' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncG type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncB type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23g)'/%3E%3C/svg%3E");
+  --grain-strength: 0.42;
+}
+:root[data-theme='light'] {
+  --grain-strength: 0.3;
+}
+.studio-block,
+.studio-screen,
+#chat-form.composer,
+.studio-context,
+.generation-card.is-compact {
+  position: relative;
+  isolation: isolate;
+}
+.studio-block::before,
+.studio-screen::before,
+#chat-form.composer::before,
+.studio-context::before,
+.generation-card.is-compact::before {
+  content: '';
   position: absolute;
-  inset: -12px;
-  z-index: 2;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
   pointer-events: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='1' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncG type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncB type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-image: var(--grain-tile);
   background-size: 240px 240px;
   mix-blend-mode: overlay;
-  opacity: 0.42;
-  animation: none;
+  opacity: var(--grain-strength);
   transition: opacity 0.6s ease;
 }
-.film-grain {
-  opacity: 0;
-}
-.has-preview > .film-grain,
-.is-busy > .picture-grain,
-.is-generating > .picture-grain {
+.studio-desk.is-generating .studio-block.is-preview::before,
+.studio-desk.is-generating .studio-screen::before {
   opacity: 0.75;
-  animation: picture-grain 1s steps(1) infinite;
+  animation: interface-grain 1s steps(1) infinite;
 }
-/* The Studio's screen has its own grain: the one of the picture so far would double it. */
-.studio-frame > .film-grain {
-  display: none;
-}
-@keyframes picture-grain {
+@keyframes interface-grain {
   0% {
-    transform: translate(0, 0);
+    background-position: 0 0;
   }
   12.5% {
-    transform: translate(-9px, 6px);
+    background-position: -9px 6px;
   }
   25% {
-    transform: translate(7px, -10px);
+    background-position: 7px -10px;
   }
   37.5% {
-    transform: translate(-4px, 10px);
+    background-position: -4px 10px;
   }
   50% {
-    transform: translate(10px, 3px);
+    background-position: 10px 3px;
   }
   62.5% {
-    transform: translate(-10px, -5px);
+    background-position: -10px -5px;
   }
   75% {
-    transform: translate(5px, 8px);
+    background-position: 5px 8px;
   }
   87.5% {
-    transform: translate(-6px, -9px);
+    background-position: -6px -9px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .has-preview > .film-grain,
-  .is-busy > .picture-grain,
-  .is-generating > .picture-grain {
+  .studio-desk.is-generating .studio-block.is-preview::before,
+  .studio-desk.is-generating .studio-screen::before {
     animation: none;
   }
+}
+/* Never over a picture, a clip or a sound. */
+.film-grain,
+.picture-grain {
+  display: none;
 }
 .studio-frame.is-busy .studio-frame-result {
   opacity: 0.55;
@@ -2016,9 +2003,6 @@ video.studio-frame-result {
 .generation-card.is-compact .output-action svg {
   width: 14px;
   height: 14px;
-}
-.generation-card.is-compact > .generation-frame > .picture-grain {
-  z-index: 3;
 }
 
 /* ------------------------------------------------------------------ the pointer of Moodix AI */
@@ -2187,4 +2171,333 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
 }
 .send-tools {
   flex: none;
+}
+
+/* ------------------------------------------------------------------ the Studio fits the window */
+/* Everything in view without scrolling, on a wide or a middle window: the blocks share the height
+   the window leaves, the preview takes what is left in its block, the settings scroll inside
+   theirs, and the Sortie keeps one height, empty or full. A window too low (or a phone) scrolls. */
+#studio-view {
+  display: flex;
+  flex-direction: column;
+}
+#studio-view .studio-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* One column (a phone): the blocks keep their own heights and the Studio scrolls. */
+.studio-desk {
+  --out-h: 172px;
+  flex: none;
+  grid-template-rows: auto auto auto var(--out-h);
+}
+.studio-block.is-output {
+  height: var(--out-h);
+  overflow: hidden;
+  padding: 10px 14px 12px;
+  gap: 8px;
+}
+@container studio (min-width: 640px) {
+  .studio-desk {
+    --out-h: 182px;
+    flex: 1 1 auto;
+    min-height: 560px;
+    grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr) var(--out-h);
+  }
+  .studio-desk.is-empty {
+    flex: none;
+    min-height: 0;
+  }
+  .studio-block {
+    min-height: 0;
+  }
+  .studio-block.is-input,
+  .studio-block.is-preview {
+    overflow: hidden;
+  }
+  .studio-block.is-settings {
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  .studio-block.is-preview .studio-screen {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+  }
+  #studio-view .studio-stage {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 100px;
+    overflow: hidden;
+  }
+  .studio-block.is-input .studio-prompt-field {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .studio-block.is-input .studio-prompt-field textarea {
+    flex: 1 1 auto;
+    min-height: 110px;
+    height: 100%;
+    resize: none;
+  }
+}
+@container studio (min-width: 900px) {
+  .studio-desk {
+    min-height: 460px;
+    grid-template-rows: minmax(0, 1fr) var(--out-h);
+  }
+}
+.studio-block.is-preview .studio-screen {
+  align-self: stretch;
+}
+
+/* No title on the blocks: the colour of their top line says what they are for. */
+.studio-block-head {
+  justify-content: flex-end;
+  min-height: 18px;
+}
+
+/* The prompt, and « Enrichir le prompt » at its bottom right, in it. */
+.studio-prompt-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.studio-prompt-field.has-enrich textarea {
+  padding-bottom: 52px;
+}
+.studio-prompt-field .studio-enrich {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  justify-content: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+.studio-prompt-field .studio-enrich > * {
+  pointer-events: auto;
+}
+.studio-enrich-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(157, 180, 255, 0.32);
+  background: rgba(61, 107, 245, 0.16);
+  color: var(--fn-input-text);
+  font-size: 12.5px;
+  font-weight: 700;
+  backdrop-filter: blur(6px);
+}
+.studio-enrich-go svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+}
+.studio-enrich-go:hover:enabled {
+  background: rgba(61, 107, 245, 0.28);
+  border-color: rgba(157, 180, 255, 0.55);
+}
+:root[data-theme='light'] .studio-enrich-go {
+  border-color: rgba(47, 94, 232, 0.35);
+  background: rgba(47, 94, 232, 0.1);
+}
+.studio-prompt-field .studio-enrich .studio-link {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--field);
+  font-size: 12.5px;
+}
+
+/* Settings: the size of a field, all of them; the rare ones under « Plus de réglages », in the block. */
+.studio-block.is-settings {
+  gap: 10px;
+}
+.studio-block.is-settings select,
+.studio-block.is-settings input[type='number'],
+.studio-block.is-settings input[type='text'] {
+  min-height: 40px;
+}
+.studio-more {
+  min-height: 38px;
+  flex: none;
+}
+.studio-advanced {
+  gap: 10px;
+}
+.studio-loras {
+  gap: 6px;
+}
+.studio-lora {
+  grid-template-columns: minmax(0, 1fr) 64px 34px 30px;
+  grid-template-areas: 'name slider amount remove';
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 6px;
+}
+.studio-desk .studio-lora select {
+  min-height: 32px;
+  padding: 0 6px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+.studio-lora input[type='range'] {
+  width: 100%;
+  min-width: 0;
+}
+.studio-lora-remove {
+  width: 30px;
+  height: 30px;
+}
+.studio-lora-remove svg {
+  width: 14px;
+  height: 14px;
+}
+.studio-lora-add {
+  min-height: 36px;
+}
+
+/* The Sortie: one height, a row of pictures; their actions on the picture. */
+.studio-output-tools {
+  gap: 6px;
+}
+.studio-desk .studio-source-pick {
+  min-height: 24px;
+  width: auto;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  cursor: pointer;
+}
+.studio-desk .studio-source-pick:hover:enabled {
+  color: var(--soft);
+}
+.studio-block.is-output .studio-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.studio-strip {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+}
+.studio-item {
+  flex-basis: 180px;
+  gap: 4px;
+}
+.studio-thumb {
+  height: 80px;
+  flex: none;
+}
+@container studio (max-width: 639px) {
+  .studio-item {
+    flex-basis: 140px;
+  }
+  .studio-thumb {
+    height: 78px;
+  }
+}
+.studio-item .studio-actions {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  right: 6px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.studio-thumb:hover .studio-actions,
+.studio-thumb:focus-within .studio-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .studio-item .studio-actions {
+    opacity: 1;
+  }
+}
+.studio-item .output-action {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(11, 12, 15, 0.82);
+  color: #eceef2;
+}
+.studio-item .output-action:hover:enabled {
+  background: rgba(11, 12, 15, 0.95);
+  color: #ffffff;
+}
+.studio-item .output-action svg {
+  width: 14px;
+  height: 14px;
+}
+.studio-play {
+  width: 40px;
+  height: 40px;
+}
+
+/* The last answer of Moodix AI shows once there is one; before, the room goes to the Studio. */
+.studio-context[data-empty='true'] {
+  display: none;
+}
+
+/* In the Studio, the message box is one line (on a window wide enough for it): the room goes to the blocks. */
+@media (min-width: 700px) {
+  body[data-view='studio'] #chat-form.composer {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: 'files files files' 'tools text send';
+    align-items: end;
+    column-gap: 8px;
+    padding: 6px 6px 6px 10px;
+  }
+  body[data-view='studio'] #chat-form .attachments {
+    grid-area: files;
+  }
+  body[data-view='studio'] #chat-form textarea {
+    grid-area: text;
+    min-height: 44px;
+    padding: 11px 4px;
+  }
+  body[data-view='studio'] #chat-form .composer-tools {
+    display: contents;
+  }
+  body[data-view='studio'] #chat-form .composer-options {
+    grid-area: tools;
+    align-self: center;
+    flex-wrap: nowrap;
+  }
+  body[data-view='studio'] #chat-form .send-tools {
+    grid-area: send;
+  }
+}
+/* One column: a prompt of a few lines, the page scrolls for the rest. */
+@container studio (max-width: 639px) {
+  .studio-desk .studio-prompt-field textarea {
+    height: 150px;
+    min-height: 150px;
+  }
 }

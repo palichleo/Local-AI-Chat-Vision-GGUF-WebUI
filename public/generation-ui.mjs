@@ -41,7 +41,7 @@ const requestMeta = request => {
 
 /**
  * The creations of a conversation. A creation of the Studio (`compact`) is a card: its picture
- * with a grain, what it is (« VIDÉO · 16:9 · 05 S ») and « Ouvrir », which shows it on the
+ * as it is, what it is (« VIDÉO · 16:9 · 05 S ») and « Ouvrir », which shows it on the
  * Studio's screen (`onOpen`); its output buttons stay under it.
  */
 export function setupGenerationUI({ api, node, openOutput, actions = null, onResize = () => {}, onOpen = null }) {
@@ -269,13 +269,6 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       const shown = record;
       target.open.onclick = () => onOpen?.(shown);
     }
-    /** The grain of a card's picture: on pictures only, still once the creation is there. */
-    function grainOver(frame) {
-      if (!compact) return;
-      const grain = node('span', 'picture-grain');
-      grain.setAttribute('aria-hidden', 'true');
-      frame.append(grain);
-    }
     function image({ record: outputRecord, index, blob }) {
       if (disposed || slots.has(index)) return;
       record = outputRecord;
@@ -327,7 +320,6 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
         target.figure.append(buttons(record, index));
         slots.set(index, { index, button: shown, img: shown, isVideo: true, tile: target });
         frame.replaceChildren(shown);
-        grainOver(frame);
         frame.classList.add('has-image');
         frame.setAttribute('aria-busy', 'false');
         onResize();
@@ -388,7 +380,6 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       }
       button.onclick = () => openOutput(record, index, slot.blob || undefined);
       frame.replaceChildren(button);
-      grainOver(frame);
       target.figure.append(buttons(record, index));
       // While the original loads: the copy the model saw, or the thumbnail kept by the server.
       const small = output?.analysisDataUrl || output?.thumbUrl;

@@ -2163,8 +2163,10 @@ function showLastReply(streaming = '') {
     const message = state.messages[index];
     if (message.role === 'assistant' && !message.internal) text = plainLine(spokenText(message.content));
   }
-  $('studio-last-reply').textContent = text || 'Moodix AI vous répondra ici.';
+  $('studio-last-reply').textContent = text;
   $('studio-last-reply').title = text;
+  // Nothing said yet: no line, the room goes to the Studio.
+  $('studio-context').dataset.empty = String(!text);
 }
 /** What depends on the view: the switch between Chat and Studio, the context of the message box. */
 function syncViews() {
