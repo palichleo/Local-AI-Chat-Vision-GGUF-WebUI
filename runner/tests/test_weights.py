@@ -36,14 +36,14 @@ class Store:
 
 class WeightPoolTest(unittest.TestCase):
     def pool(self, sizes, limit):
-        from runner.models import ltx25
+        from runner.models import pool as module
 
         torch = SimpleNamespace(cuda=SimpleNamespace(synchronize=lambda: None))
         with patch.dict(sys.modules, torch=torch, comfy_kitchen=SimpleNamespace()):
-            pool = ltx25.WeightPool({'model': Store(sizes)}, limit / 1024**3)
+            pool = module.WeightPool({'model': Store(sizes)}, limit / 1024**3)
         pool.order = [('model', key, None) for key in sizes]
         Tensor.copies = 0
-        return pool, ltx25
+        return pool, module
 
     def test_the_gpu_share_is_filled_before_the_model_runs(self):
         pool, _ = self.pool({'a.weight': 60, 'b.weight': 30, 'c.weight': 50, 'd.weight': 10}, limit=100)
@@ -55,8 +55,8 @@ class WeightPoolTest(unittest.TestCase):
         self.assertIs(pool.bundle(('model', 'a.weight', None)), kept)
 
     def test_a_layer_run_in_chunks_copies_its_weights_once(self):
-        pool, ltx25 = self.pool({'fc1.weight': 200, 'fc2.weight': 100, 'next.weight': 150}, limit=0)
-        with patch.object(ltx25, 'RECENT', 320):
+        pool, module = self.pool({'fc1.weight': 200, 'fc2.weight': 100, 'next.weight': 150}, limit=0)
+        with patch.object(module, 'RECENT', 320):
             for _chunk in range(3):
                 first = pool.bundle(('model', 'fc1.weight', None))
                 second = pool.bundle(('model', 'fc2.weight', None))
@@ -71,6 +71,30 @@ class WeightPoolTest(unittest.TestCase):
         self.assertEqual(pool.summary()['again_gib'], round(200 / 1024**3, 2))
         pool.clear()
         self.assertEqual((pool.recent, pool.recent_bytes, pool.gpu), ({}, 0, {}))
+
+
+class RoomTest(unittest.TestCase):
+    def test_the_gpu_share_follows_what_the_card_has_free(self):
+        from runner.models import pool as module
+
+        def card(free_gib):
+            return SimpleNamespace(cuda=SimpleNamespace(mem_get_info=lambda: (int(free_gib * 1024**3), 0)))
+
+        # The same code on a 12, a 24 and an 8 GiB card: what is free, less what a step needs.
+        with patch.dict(sys.modules, torch=card(10.74)):
+            self.assertAlmostEqual(module.room(2.9), 7.84, places=2)
+        with patch.dict(sys.modules, torch=card(22.5)):
+            self.assertAlmostEqual(module.room(2.9), 19.6, places=2)
+        # Nothing to keep there: every weight is then copied as its layer runs.
+        with patch.dict(sys.modules, torch=card(2.0)):
+            self.assertEqual(module.room(2.9), 0.0)
+
+    def test_the_pool_is_still_found_where_the_families_import_it(self):
+        from runner.models import ltx25
+        from runner.models import pool as module
+
+        self.assertIs(ltx25.WeightPool, module.WeightPool)
+        self.assertIs(ltx25.load_streamed, module.load_streamed)
 
 
 if __name__ == '__main__':
