@@ -40,14 +40,17 @@ VIDEO_SHIFT = 12.0
 AUDIO_SHIFT = 3.0
 
 
-def names(header):
-    """{diffusers parameter name: (role, checkpoint key, qkv part or None)}."""
+def names(header, gate=False):
+    """{diffusers parameter name: (role, checkpoint key, qkv part or None)}.
+
+    `gate` adds the sparse attention's gates (`to_gate_compress`, 1.9 GiB in INT8): only the
+    sparse attention reads them, so a dense generation neither loads nor reads ahead them."""
     result = {}
     for key in header:
         if key == '__metadata__' or not key.endswith(('.weight', '.bias')):
             continue
-        if '.to_gate_compress.' in key or key.startswith('rope.'):
-            # Video-sparse-attention gate, unused by dense attention; RoPE is recomputed.
+        if (not gate and '.to_gate_compress.' in key) or key.startswith('rope.'):
+            # RoPE is recomputed.
             continue
         name = 'transformer_blocks.' + key[len('blocks.') :] if key.startswith('blocks.') else key
         for old, new in RENAMES:
@@ -167,6 +170,100 @@ class Int8Attention:
         return attn.to_out[1](attn.to_out[0](result))
 
 
+def has_gates(header):
+    """Whether the file carries the gates of a model trained with sparse attention (FastH3)."""
+    return 'blocks.0.attn.to_gate_compress.weight' in header
+
+
+class Sparse:
+    """The sparse attention of one generation (see runner.models.sparse_attention): the share of
+    the video's cubes each cube reads, and the plan of the step under way, None while the
+    attention is dense. The pipeline sets `plan` before each step."""
+
+    def __init__(self, keep):
+        self.keep = keep
+        self.plan = None
+        self.plans = {}
+
+    def prepare(self, values, grid):
+        """The plan of the packed sequence this forward receives (kept for the next steps), or
+        None when it is too short to gain from sparse attention or not laid out as expected."""
+        from runner.models import sparse_attention
+
+        rows = int(values['position_ids'].shape[0])
+        if rows < sparse_attention.MIN_ROWS:
+            return None
+        if rows not in self.plans:
+            found = segments(values, grid)
+            self.plans[rows] = sparse_attention.layout(found).to('cuda') if found else None
+        return self.plans[rows]
+
+
+def segments(values, grid):
+    """The packed sequence of a MiniMax-H3 forward as runs kept exact and the generated video's
+    token grid, last: [text, conditions…, audio, (frames, height, width)]. A run never mixes
+    two modalities, and two images or key frames (another rotary time) are two runs. None when
+    the sequence does not end with that video."""
+    import torch
+
+    rows = int(values['position_ids'].shape[0])
+    target = math.prod(grid)
+    kind = torch.zeros(rows, dtype=torch.int8)
+    kind[values['text_indices'].cpu()] = 1
+    kind[values['audio_indices'].cpu()] = 2
+    video = values['video_indices'].cpu()
+    if target > rows or video.numel() < target or not torch.equal(video[-target:], torch.arange(rows - target, rows)):
+        return None
+    time = values['position_ids'][: rows - target, 0].cpu()
+    head = kind[: rows - target]
+    cuts = [0]
+    if head.numel() > 1:
+        change = (head[1:] != head[:-1]) | ((head[1:] == 0) & (time[1:] != time[:-1]))
+        cuts += (torch.nonzero(change).flatten() + 1).tolist()
+    cuts.append(rows - target)
+    return [b - a for a, b in zip(cuts, cuts[1:]) if b > a] + [tuple(grid)]
+
+
+class SparseAttention:
+    """Video sparse attention on the steps that have a plan, `dense` on the others.
+
+    Queries, keys and values are those of the dense attention; the gate of the coarse branch
+    (`to_gate_compress`) is one more INT8 projection of the same rows, computed only on the
+    sparse steps."""
+
+    def __init__(self, sparse, dense):
+        self.sparse = sparse
+        self.dense = dense
+
+    def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None):
+        from diffusers.models.transformers.transformer_minimax_h3 import _apply_rotary_emb
+        from runner.models import sparse_attention
+
+        plan = self.sparse.plan
+        if plan is None or attention_mask is not None or hidden_states.shape[1] != plan.rows:
+            return self.dense(attn, hidden_states, rotary_emb, attention_mask)
+        heads = (attn.heads, -1)
+
+        def tiled(projection, norm=None):
+            # Each tensor is laid out in blocks as soon as it is computed: never two copies of
+            # all four at once (2.6 GiB each for a 1344 x 768 video).
+            value = projection(hidden_states).unflatten(-1, heads)
+            if norm is not None:
+                value = norm(value)
+                if rotary_emb is not None:
+                    value = _apply_rotary_emb(value, *rotary_emb)
+            return plan.tile(value.to(torch.bfloat16))
+
+        query = tiled(attn.to_q, attn.norm_q)
+        key = tiled(attn.to_k, attn.norm_k)
+        value = tiled(attn.to_v)
+        gate = tiled(attn.to_gate_compress) if getattr(attn, 'to_gate_compress', None) is not None else None
+        result = sparse_attention.attend(query, key, value, gate, plan, self.sparse.keep)
+        del query, key, value, gate
+        result = plan.untile(result).flatten(2, 3).type_as(hidden_states)
+        return attn.to_out[1](attn.to_out[0](result))
+
+
 def int8_attention_ready():
     try:
         import comfy_kitchen
@@ -176,8 +273,11 @@ def int8_attention_ready():
         return False
 
 
-def architecture(header, int8_attention=False):
-    """Empty diffusers model adapted to the pruned checkpoint, and its PDD head count."""
+def architecture(header, int8_attention=False, sparse=None):
+    """Empty diffusers model adapted to the pruned checkpoint, and its PDD head count.
+
+    With `sparse` (a Sparse), the attention of the 50 blocks becomes SparseAttention, with
+    the file's gates when it has them (the text refiner stays dense)."""
     from accelerate import init_empty_weights
     from diffusers import MiniMaxH3Transformer3DModel
     from diffusers.models.attention import FeedForward
@@ -197,6 +297,15 @@ def architecture(header, int8_attention=False):
             module.forward = _chunked_feed_forward.__get__(module)
         elif int8_attention and isinstance(module, reference.MiniMaxH3Attention):
             module.processor = Int8Attention()
+    if sparse is not None:
+        for block in model.transformer_blocks:
+            attn = block.attn
+            if has_gates(header):
+                with init_empty_weights():
+                    attn.to_gate_compress = torch.nn.Linear(
+                        attn.to_q.in_features, attn.heads * attn.head_dim, bias=False
+                    )
+            attn.processor = SparseAttention(sparse, attn.processor)
     return model, pdd_heads(header)
 
 
@@ -255,12 +364,12 @@ class PDDHead(torch.nn.Module):
         return F.linear(hidden_states.float(), weight, bias)
 
 
-def load(header, store_path, pool, int8_attention=False):
+def load(header, store_path, pool, int8_attention=False, sparse=None):
     """Build the DiT on CUDA: int8 linears streamed through `pool`, small tensors resident."""
     from runner.models.ltx25 import load_streamed
 
-    model, heads = architecture(header, int8_attention)
-    mapping = names(header)
+    model, heads = architecture(header, int8_attention, sparse)
+    mapping = names(header, gate=sparse is not None)
     store = pool.stores['model']
 
     def tensor(key, dtype=None):

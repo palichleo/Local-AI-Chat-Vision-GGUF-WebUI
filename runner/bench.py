@@ -86,6 +86,9 @@ def minimax_h3_job(args, run):
             audio=True,
             overlap_frames=22,
             attention='comfy_kitchen',
+            sparse_attention='vsa' if args.sparse_keep else 'off',
+            sparse_keep=args.sparse_keep or 10,
+            sparse_start=args.sparse_start,
         ),
         components=dict(
             model=args.model,
@@ -122,6 +125,8 @@ def main(argv=None):
     parser.add_argument('--lora', action='append', default=[], metavar='FILE:STRENGTH')
     parser.add_argument('--gpu-gib', type=float, help='ceiling on the weights kept on the GPU')
     parser.add_argument('--ram-reserve-gib', type=float, help='RAM the resident files must leave free')
+    parser.add_argument('--sparse-keep', type=float, help='MiniMax-H3: video sparse attention, percent of cubes kept')
+    parser.add_argument('--sparse-start', type=float, default=0.2, help='MiniMax-H3: share of the steps kept dense')
     args = parser.parse_args(argv)
     if args.same_prompt:
         args.new_prompts = 1

@@ -7,6 +7,7 @@ denoise with the streamed DiT, then video and audio decoding.
 """
 
 import gc
+import math
 import sys
 import time
 
@@ -317,7 +318,22 @@ def generate(job, config, progress):
         conditioning=kept,
         **({'prefetch': read} if read else {}),
     )
-    ahead = prefetch(paths, {}, use_order(minimax_h3.names(dit_header)))
+    # The workflow's « attention creuse » (VSA), for the FastH3 models trained with it, decided
+    # before the model is read: a dense generation neither loads nor reads ahead the gates. It
+    # needs comfy-kitchen's sparse kernel, and a video large enough to gain from it.
+    grid = ((p['frames'] - 5) // 17 * 5 + 2, p['height'] // 32, p['width'] // 32)
+    tokens = math.prod(grid) + 512
+    sparse, dense_why = None, None
+    if p.get('sparse_attention', 'off') == 'vsa':
+        from runner.models import sparse_attention
+
+        if not sparse_attention.ready():
+            dense_why = 'no sparse attention kernel on this GPU'
+        elif tokens < sparse_attention.MIN_ROWS:
+            dense_why = f'about {tokens} rows, faster dense below {sparse_attention.MIN_ROWS}'
+        else:
+            sparse = minimax_h3.Sparse(float(p.get('sparse_keep', 10)) / 100)
+    ahead = prefetch(paths, {}, use_order(minimax_h3.names(dit_header, gate=sparse is not None)))
 
     # 2. Conditions through the VAE encoders (only when there are any).
     video_head = audio_head = None
@@ -342,8 +358,10 @@ def generate(job, config, progress):
         # chunk, the allocator's slack, the engine's margin) plus the activations, which grow
         # with the video (1 GiB for a 5 s draft). Video memory that runs out halves the speed,
         # a smaller share costs a second per step at most.
-        tokens = ((p['frames'] - 5) // 17 * 5 + 2) * (p['height'] // 32) * (p['width'] // 32) + 512
-        room = torch.cuda.mem_get_info()[0] / 1024**3 - 5 - tokens * 7168 * 2 * 6 / 1024**3
+        # Sparse attention holds its queries, keys, values and gates laid out in blocks, a
+        # quarter longer with the padding of the cubes: three widths more.
+        widths = 6 + (3 if sparse is not None else 0)
+        room = torch.cuda.mem_get_info()[0] / 1024**3 - 5 - tokens * 7168 * 2 * widths / 1024**3
         budget = min(config.get('cacheGiB', 6), max(0, room))
         pool = WeightPool({'model': store}, budget)
         if ahead:
@@ -355,7 +373,7 @@ def generate(job, config, progress):
                 and minimax_h3.INT8_ATTENTION
                 and minimax_h3.int8_attention_ready()
             )
-            dit, _heads = minimax_h3.load(dit_header, paths['model'], pool, fast_attention)
+            dit, _heads = minimax_h3.load(dit_header, paths['model'], pool, fast_attention, sparse)
             # What will not stay on the GPU goes to page-locked RAM once, for every step and
             # the next videos; what stays is read from the file as it is loaded.
             locked = store.keep(
@@ -366,6 +384,7 @@ def generate(job, config, progress):
             pool.preload()
             scheduler, audio_scheduler = MiniMaxH3Scheduler(shift=12.0), MiniMaxH3Scheduler(shift=3.0)
             calls = {'step': 0}
+            sparse_start = float(p.get('sparse_start', 0.2))
 
             def before(_module, args, values):
                 i = calls['step']
@@ -374,12 +393,20 @@ def generate(job, config, progress):
                     (scheduler.sigmas[i], scheduler.sigmas[i + 1]),
                     (audio_scheduler.sigmas[i], audio_scheduler.sigmas[i + 1]),
                 )
+                if sparse is not None:
+                    # The first steps lay the video out: they stay dense, as the model was trained.
+                    sparse.plan = sparse.prepare(values, grid) if i >= sparse_start * STEPS else None
                 return args, values
 
             def after(_module, _args, _values, output):
                 calls['step'] += 1
                 read = {'prefetch': ahead.stop()} if ahead and calls['step'] == 1 else {}
-                progress(stage='generating video', step=calls['step'], total=STEPS, weights=pool.summary(), **read)
+                mode = {}
+                if sparse is not None:
+                    mode['attention'] = 'sparse' if sparse.plan is not None else 'dense'
+                progress(
+                    stage='generating video', step=calls['step'], total=STEPS, weights=pool.summary(), **read, **mode
+                )
                 return output
 
             dit.register_forward_pre_hook(before, with_kwargs=True)
@@ -396,7 +423,14 @@ def generate(job, config, progress):
                     latent_frames * (p['height'] // 32) * (p['width'] // 32),
                     round(p['frames'] / 24 * AUDIO_LATENTS_PER_SECOND),
                 )
-            progress(stage='sampling video', attention='int8' if fast_attention else 'pytorch')
+            label = 'int8' if fast_attention else 'pytorch'
+            if sparse is not None:
+                first = math.ceil(sparse_start * STEPS) + 1
+                gates = 'with gates' if minimax_h3.has_gates(dit_header) else 'without gates'
+                label += f', then vsa {round(sparse.keep * 100, 1)} % from step {first}, {gates}'
+            elif dense_why:
+                label += f' (vsa asked, dense: {dense_why})'
+            progress(stage='sampling video', attention=label)
             # The diffusers blocks name the DiT by workflow: ref2va reads `transformer_ref`.
             name = 'transformer_ref' if references else 'transformer'
             state = _stage(
