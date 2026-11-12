@@ -359,7 +359,7 @@ test('Home locks navigation while pending descriptions and saves complete', asyn
       release = resolve;
     }),
     context = {
-    ...sessionCopies,
+      ...sessionCopies,
       requestSettingsClose: action => context.settingsGuard.requestClose(action),
       state,
       document,
@@ -527,7 +527,7 @@ test('failed Home preparation keeps the chat visible and releases navigation con
       renders = 0,
       notices = [];
     const context = {
-    ...sessionCopies,
+      ...sessionCopies,
       requestSettingsClose: action => context.settingsGuard.requestClose(action),
       state,
       document: { body: { dataset: {} } },
@@ -594,6 +594,9 @@ test('a project is deleted with its bin, renamed by double click, and both are i
   label('Supprimer A project').onclick();
   await $('project-delete-confirm').onclick();
   assert.deepEqual(calls.at(-1), ['projects/delete', { id: 'project', confirm: true }]);
-  assert.deepEqual(state.projects.map(project => project.id), ['inbox']);
+  assert.deepEqual(
+    state.projects.map(project => project.id),
+    ['inbox'],
+  );
   assert.equal(state.projectId, 'inbox');
 });

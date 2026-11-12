@@ -95,6 +95,10 @@ textarea,
 select {
   font: inherit;
 }
+/* The browser's own « smaller » would go under the smallest size of the interface. */
+small {
+  font-size: 12px;
+}
 button {
   cursor: pointer;
   transition:
@@ -537,7 +541,7 @@ button svg {
 .code-label {
   display: block;
   font:
-    9px 'Segoe UI',
+    12px 'Segoe UI',
     sans-serif;
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -1016,7 +1020,7 @@ fieldset {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font:
-    10px/1.6 ui-monospace,
+    12px/1.6 ui-monospace,
     Consolas,
     monospace;
   color: var(--muted);
@@ -4428,7 +4432,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 }
 .native-source-value {
   font:
-    11px/1.6 ui-monospace,
+    12px/1.6 ui-monospace,
     monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
