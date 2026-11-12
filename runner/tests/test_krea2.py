@@ -96,8 +96,10 @@ assert 'sageattention' not in sys.modules
             self.assertNotIn(gone, source)
         self.assertIn('open_store(str(files[\'transformer\']), reserve=ram_reserve)', source)
         self.assertIn('Unexpected Comfy runtime import', source)
-        # What the card has free decides the share of the model that stays on it.
-        self.assertIn('budget = room(reserve)', source)
+        # What the card has free decides the share of the model that stays on it, less what is
+        # copied in advance of the layers that do not stay.
+        self.assertIn('budget = room(reserve + AHEAD_GIB)', source)
+        self.assertIn('ahead_gib=AHEAD_GIB', source)
         self.assertGreaterEqual(krea2.RESERVE_GIB, 2)
 
 

@@ -30,6 +30,8 @@ RESERVE_PER_MEGAPIXEL_GIB = 0.5
 # model and the chat model together: with it, a 32 GiB machine never kept this model in RAM,
 # and each step paid for copies from unlocked memory (15.7 s a picture instead of 10.7 s).
 RAM_RESERVE_GIB = 4
+# Weights copied to the GPU in advance, while it computes the layers before them (WeightPool).
+AHEAD_GIB = 0.5
 
 EXPANSION_LIMITS = (
     ('maxTokens', 1, 4096, True),
@@ -234,10 +236,10 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
         # tensors grow with the picture, and the weights that do not stay pass through).
         megapixels = plan['width'] * plan['height'] / 1024**2
         reserve = RESERVE_GIB + RESERVE_PER_MEGAPIXEL_GIB * megapixels
-        budget = room(reserve)
+        budget = room(reserve + AHEAD_GIB)
         if args.cache_gib is not None:
             budget = min(budget, args.cache_gib)
-        pool = WeightPool(stores, budget, adapters=adapters)
+        pool = WeightPool(stores, budget, adapters=adapters, ahead_gib=AHEAD_GIB)
         cleanup.callback(pool.clear)
         with init_empty_weights():
             transformer = Krea2Transformer2DModel()
