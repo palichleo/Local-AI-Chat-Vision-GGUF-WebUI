@@ -233,13 +233,6 @@ class Residency:
         reserve = RESERVE if reserve is None else reserve
         if size + reserve > psutil.virtual_memory().total:
             return False
-        # Nothing leaves when even every idle arena gone would not make room: the file is then
-        # read from its mapping all the same, and what was sent away is read from the disk again.
-        # (MiniMax-H3: its 14.6 GiB text encoder pushed out the 14.9 GiB kept of the video model
-        # at every video and was not loaded after, with 24 GiB available at most; 8.6 s lost.)
-        idle = sum(arena.size for arena in self.arenas.values() if not arena.users)
-        if evict and psutil.virtual_memory().available + idle - size < reserve:
-            return False
         # Evict the least recently used arenas until this file fits above the reserve. Never one
         # a store of the running generation reads from: when memory is short (another program
         # holding its own models), this file is read from its mapping instead.

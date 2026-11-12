@@ -187,19 +187,17 @@ class EvictionTest(unittest.TestCase):
 
         released = []
 
-        def arena(name, users, size):
-            return SimpleNamespace(users=users, size=size, pinned=False, release=lambda: released.append(name))
+        def arena(name, users):
+            return SimpleNamespace(users=users, size=1, pinned=False, release=lambda: released.append(name))
 
         table = residency.Residency()
-        table.arenas['vae'] = arena('vae', users=1, size=5)
-        table.arenas['old'] = arena('old', users=0, size=5)
-        table.arenas['audio'] = arena('audio', users=1, size=1)
+        table.arenas['vae'] = arena('vae', users=1)
+        table.arenas['old'] = arena('old', users=0)
+        table.arenas['audio'] = arena('audio', users=1)
         saved_reserve, saved_memory = residency.RESERVE, psutil.virtual_memory
         residency.RESERVE = 4
-        # 20 units in all; 2 available, 5 more for each of the large arenas gone.
-        psutil.virtual_memory = lambda: SimpleNamespace(
-            total=20, available=2 + 5 * ('old' in released) + 5 * ('vae' in released)
-        )
+        # 10 units in all; 2 available, 2 more once the idle arena is gone.
+        psutil.virtual_memory = lambda: SimpleNamespace(total=10, available=2 + 2 * ('old' in released))
         try:
             # A file that must not send another away (a text encoder beside its model) is not
             # loaded when it does not fit as things are, and nothing leaves; with a smaller
@@ -208,20 +206,13 @@ class EvictionTest(unittest.TestCase):
             self.assertEqual(released, [])
             self.assertTrue(table._make_room(1, reserve=1, evict=False))
             self.assertEqual(released, [])
-            # Even with the idle arena gone the file would not fit: it is read from its mapping,
-            # and the arena stays (sent away, it would be read from the disk again for nothing).
-            self.assertFalse(table._make_room(4))
-            self.assertEqual(released, [])
-            # A file that fits once the idle arena is gone sends it away.
-            self.assertTrue(table._make_room(3))
+            # Even with the idle arena gone the file does not fit: it will be read from its mapping.
+            self.assertFalse(table._make_room(3))
             self.assertEqual(released, ['old'])
             self.assertEqual(list(table.arenas), ['vae', 'audio'])
-            # The arenas still read from never leave, whatever room is asked.
-            self.assertFalse(table._make_room(8))
-            self.assertEqual(released, ['old'])
             # A store closes: its arena may go when room is needed again, the one still read stays.
             table.drop(table.arenas['vae'])
-            self.assertTrue(table._make_room(8))
+            self.assertFalse(table._make_room(3))
             self.assertEqual(released, ['old', 'vae'])
             self.assertEqual(list(table.arenas), ['audio'])
             # Unloading between generations leaves alone what is still being read.

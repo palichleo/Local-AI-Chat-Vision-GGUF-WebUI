@@ -158,6 +158,9 @@ def main(argv=None):
         started = time.perf_counter()
 
         def progress(**data):
+            # A picture of the step (the preview the application shows) is not a phase.
+            if not data.get('stage') and not data.get('step'):
+                return
             memory = torch.cuda.memory_allocated() / 1024**3, torch.cuda.memory_reserved() / 1024**3
             marks.append((time.perf_counter() - started, data.get('stage'), data.get('step'), memory))
 
