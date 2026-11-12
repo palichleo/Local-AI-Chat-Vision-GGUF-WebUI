@@ -22,6 +22,7 @@ import { fillCopies, forgetCopies, needsCopies, rememberCopy, remakeOutputCopy, 
 const $ = id => document.getElementById(id);
 const state = {
   view: 'home',
+  studioId: null,
   projectId: 'inbox',
   projects: [{ id: 'inbox', name: 'Conversations' }],
   projectWorking: false,
@@ -235,7 +236,7 @@ async function clearHistory() {
       state.conversationInstructions = null;
       state.archiveSnapshot = null;
       state.historyDirty = false;
-      workflowsUI.reset();
+      void showCreations();
       generationUI.clear();
       $('messages').replaceChildren();
       $('welcome').hidden = false;
@@ -2073,6 +2074,10 @@ const studioUI = setupStudio({
         ? 'Attends la fin de l’opération en cours.'
         : '',
   onChange: () => refreshStatus(),
+  onRuns: id => {
+    state.studioId = id;
+    if (state.view === 'studio') void showCreations();
+  },
 });
 const generationUI = setupGenerationUI({
   api,
@@ -2266,6 +2271,11 @@ function closeNavigation() {
   document.body.dataset.navOpen = 'false';
   $('navigation-open').setAttribute('aria-expanded', 'false');
 }
+/** The « Créations » tab of the files panel follows the view: the Studio's creations in the Studio, the open conversation's elsewhere. */
+function showCreations() {
+  const id = state.view === 'studio' ? state.studioId : state.conversationId;
+  return workflowsUI.renderGallery(id ?? null).catch(error => notice(`Galerie indisponible : ${error.message}`));
+}
 function openFiles(open = true) {
   if (!open) assetsUI.pause();
   document.body.dataset.files = open ? 'open' : 'closed';
@@ -2291,6 +2301,7 @@ function showHome() {
     try {
       if (!(await assetsUI.flush()) || !(await persistConversation())) return;
       state.view = 'home';
+      void showCreations();
       closeNavigation();
       projectUI.render();
     } catch (error) {
@@ -2320,6 +2331,7 @@ function showStudio() {
     try {
       if (!(await assetsUI.flush()) || !(await persistConversation())) return;
       state.view = 'studio';
+      void showCreations();
       closeNavigation();
       projectUI.render();
     } catch (error) {

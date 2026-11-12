@@ -268,14 +268,23 @@ test('a new unsaved conversation is first under its project and stays first afte
 
 test('logo navigation keeps the current messages and draft and closes the mobile tree', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
-    state = { projectWorking: false, status: {}, view: 'chat', messages: [{ role: 'user', content: 'Keep' }] },
+    state = {
+      projectWorking: false,
+      status: {},
+      view: 'chat',
+      conversationId: 'kept',
+      studioId: 'studio',
+      messages: [{ role: 'user', content: 'Keep' }],
+    },
     prompt = { value: 'An unsent draft' },
     attributes = {},
-    document = { body: { dataset: { navOpen: 'true' } } };
+    document = { body: { dataset: { navOpen: 'true' } } },
+    listed = [];
   let pending,
     saves = 0,
     renders = 0;
   const context = {
+    workflowsUI: { renderGallery: async id => listed.push(id) },
     ...sessionCopies,
     requestSettingsClose: action => context.settingsGuard.requestClose(action),
     updateControls() {},
@@ -308,6 +317,8 @@ test('logo navigation keeps the current messages and draft and closes the mobile
   assert.equal(document.body.dataset.navOpen, 'false');
   assert.equal(saves, 1);
   assert.equal(renders, 1);
+  // Outside the Studio the « Créations » tab lists the open conversation's creations.
+  assert.deepEqual(listed, ['kept']);
 });
 
 test('home keeps an unsaved conversation reachable without adding it to saved project cards', t => {
@@ -406,8 +417,9 @@ test('an action clicked before the page knows its token waits for it instead of 
 });
 test('the Studio is unlocked while its tools load: a mode opened at once is not refused', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
-    state = { status: {}, view: 'chat' },
-    document = { body: { dataset: {} } };
+    state = { status: {}, view: 'chat', conversationId: 'kept', studioId: 'studio' },
+    document = { body: { dataset: {} } },
+    listed = [];
   let loaded, pending, lockedWhileLoading;
   const tools = new Promise(resolve => {
       loaded = resolve;
@@ -425,6 +437,7 @@ test('the Studio is unlocked while its tools load: a mode opened at once is not 
       assetsUI: { flush: async () => true },
       persistConversation: async () => true,
       projectUI: { render() {} },
+      workflowsUI: { renderGallery: async id => listed.push(id) },
       // GET /api/studio takes seconds; the banners are on screen meanwhile.
       studioUI: {
         open() {
@@ -446,6 +459,8 @@ test('the Studio is unlocked while its tools load: a mode opened at once is not 
     // What the Studio asks before it unloads the chat model or starts a generation.
     assert.equal(lockedWhileLoading, false);
     assert.equal(state.loadingHistory, false);
+    // In the Studio the « Créations » tab lists the Studio's creations, not the conversation left behind.
+    assert.deepEqual(listed, ['studio']);
   } finally {
     loaded();
     await pending;

@@ -427,7 +427,9 @@ const videoProposal = () => ({
     intention: 'Continuer.',
     prompt: 'dives',
     parameters: { frames: 124, fps: 24, width: 768, height: 448, seed: 7, audio: true },
-    references: [{ input: 'source', label: 'Résultat précédent', role: 'source_video', roleLabel: 'Vidéo à prolonger' }],
+    references: [
+      { input: 'source', label: 'Résultat précédent', role: 'source_video', roleLabel: 'Vidéo à prolonger' },
+    ],
     editable: {
       prompt: true,
       stages: ['draft', 'final'],
@@ -670,7 +672,12 @@ test('an image proposal is the same form, never starts by itself, and keeps « T
     async ({ ui, nodes, all, calls, setIntercept }) => {
       setIntercept((route, body) => {
         if (route === 'tools/revise')
-          return Response.json({ requestId: 'image-revised', approvalToken: 'image-token-2', workflowName: 'Krea 2', plan: { parameters: {} } });
+          return Response.json({
+            requestId: 'image-revised',
+            approvalToken: 'image-token-2',
+            workflowName: 'Krea 2',
+            plan: { parameters: {} },
+          });
         if (route === 'tools/execute') return Response.json({ id: 'job', state: 'error', error: 'test boundary' });
       });
       const pending = ui.requestTool(
@@ -728,7 +735,13 @@ test('an action the user started with a button runs without a second confirmatio
       plan: { parameters: {}, references: [] },
     };
     await assert.rejects(
-      ui.requestTool(request, new AbortController().signal, () => {}, () => {}, { confirmed: true }),
+      ui.requestTool(
+        request,
+        new AbortController().signal,
+        () => {},
+        () => {},
+        { confirmed: true },
+      ),
       /stop here/,
     );
     assert.notEqual(nodes.get('tool-dialog')?.open, true, 'no dialog was shown');
@@ -737,4 +750,50 @@ test('an action the user started with a button runs without a second confirmatio
       permission: 'once',
       approvalToken: 'one-use',
     });
+  }));
+
+test('in the Studio the « Créations » tab lists the Studio creations, with their details only', async () =>
+  fixture(async ({ ui, state, nodes, calls, setIntercept }) => {
+    const run = (id, conversationId) => ({
+      id,
+      conversationId,
+      workflowName: 'Portrait',
+      prompt: 'A portrait',
+      createdAt: '2026-11-12T00:00:00Z',
+      parameters: {},
+      outputs: [{ source: { filename: id + '.png' } }],
+    });
+    setIntercept(route =>
+      route === 'gallery/studio'
+        ? Response.json({ runs: [run('a', 'studio'), run('b', 'studio')] })
+        : route === 'gallery/conversation'
+          ? Response.json({ runs: [run('c', 'conversation')] })
+          : undefined,
+    );
+    const list = nodes.get('gallery-list'),
+      texts = () => list.children.map(child => child.textContent);
+    // A conversation is open, then the Studio is the view on screen: its id is not known yet.
+    state.conversationId = 'conversation';
+    state.view = 'studio';
+    await ui.renderGallery(null);
+    assert.deepEqual(texts(), ['Aucune création dans le Studio pour l’instant.']);
+    // The conversation left behind is not what the tab shows there.
+    await ui.renderGallery('conversation');
+    assert.equal(
+      calls.some(call => call.route === 'gallery/conversation'),
+      false,
+    );
+    state.studioId = 'studio';
+    await ui.renderGallery('studio');
+    assert.equal(list.children.length, 2);
+    // No action that would write to the conversation: « Détails » alone.
+    for (const card of list.children) assert.equal(card.children.at(-1).textContent, 'Détails');
+    // Back in the conversation, its own creations.
+    state.view = 'chat';
+    await ui.renderGallery('studio');
+    assert.equal(list.children.length, 2, 'a late answer of the Studio changes nothing');
+    await ui.renderGallery('conversation');
+    assert.equal(list.children.length, 1);
+    await ui.renderGallery(null);
+    assert.deepEqual(texts(), ['Aucune génération dans cette conversation.']);
   }));

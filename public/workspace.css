@@ -1669,6 +1669,16 @@ body[data-view='studio'] .chat-header {
 body:not([data-files='open']) .assets-panel {
   display: none !important;
 }
+/* With room for both, the panel takes its place beside the page, which narrows: nothing of the
+   page is left under it (the Studio's « Retour » was). On a narrower window it stays a sheet
+   over the page. */
+@media (min-width: 1180px) {
+  .assets-panel {
+    position: relative;
+    z-index: auto;
+    box-shadow: none;
+  }
+}
 .assets-panel-header {
   position: relative;
   padding-right: 29px;

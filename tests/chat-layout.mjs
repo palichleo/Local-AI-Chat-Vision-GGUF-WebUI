@@ -113,3 +113,18 @@ test('the interface names its places in French: Accueil, Fichiers, Créations, J
   assert.doesNotMatch(html, />Home<|All files|>Output</);
   assert.doesNotMatch(app, /'Day'|'Night'/);
 });
+
+test('the files panel takes its place beside the page on a wide window, and its tab follows the view', async () => {
+  const css = await readFile(new URL('../public/workspace.css', import.meta.url), 'utf8'),
+    app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  // A sheet over the page by default (narrow windows), in the flow of the page with room for both.
+  assert.match(css, /\.assets-panel \{\s+position: fixed;/);
+  assert.match(css, /@media \(min-width: 1180px\) \{\s+\.assets-panel \{\s+position: relative;/);
+  // Entering the Studio, leaving it for the home page, and each new Studio creation refresh the tab.
+  assert.match(app, /state\.view = 'studio';\s+void showCreations\(\);/);
+  assert.match(app, /state\.view = 'home';\s+void showCreations\(\);/);
+  assert.match(
+    app,
+    /onRuns: id => \{\s+state\.studioId = id;\s+if \(state\.view === 'studio'\) void showCreations\(\);/,
+  );
+});

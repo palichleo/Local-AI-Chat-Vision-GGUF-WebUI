@@ -94,7 +94,19 @@ export function sizeChoices(workflow, formatId, pixels) {
   return { sizes, nearest: nearestSize(sizes, pixels) };
 }
 
-export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitForModel, blocked, onChange }) {
+export function setupStudio({
+  api,
+  node,
+  icon,
+  notice,
+  assets,
+  viewOutput,
+  waitForModel,
+  blocked,
+  onChange,
+  // Called with the Studio's conversation each time its creations are read again.
+  onRuns = () => {},
+}) {
   const $ = id => document.getElementById(id);
   let info = null,
     mode = null,
@@ -417,8 +429,14 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     const output = record.outputs[0],
       clip = mediaOf(record) === 'video',
       media = node(clip ? 'video' : 'img', 'studio-frame-result');
-    if (clip) Object.assign(media, { muted: true, preload: 'metadata', playsInline: true, src: output.originalUrl + '#t=0.1' });
-    else Object.assign(media, { alt: record.prompt || 'Dernière image créée', decoding: 'async', src: output.originalUrl });
+    if (clip)
+      Object.assign(media, { muted: true, preload: 'metadata', playsInline: true, src: output.originalUrl + '#t=0.1' });
+    else
+      Object.assign(media, {
+        alt: record.prompt || 'Dernière image créée',
+        decoding: 'async',
+        src: output.originalUrl,
+      });
     media.title = 'Voir l’original et ses paramètres';
     media.onclick = () => viewOutput(record, 0);
     return media;
@@ -512,7 +530,9 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
       section.append(card);
     });
     if (!info.styles.length)
-      section.append(node('small', 'field-help', 'Aucun LoRA listé : ComfyUI est arrêté ou son dossier loras est vide.'));
+      section.append(
+        node('small', 'field-help', 'Aucun LoRA listé : ComfyUI est arrêté ou son dossier loras est vide.'),
+      );
     else if (draft.styles.length < MAX_STYLES)
       section.append(
         button(
@@ -563,7 +583,12 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
   function enrichRow() {
     const draft = drafts[mode],
       row = node('div', 'studio-enrich'),
-      make = button('secondary studio-enrich-go', enriching ? 'Enrichissement…' : 'Enrichir le prompt', enrich, 'spark');
+      make = button(
+        'secondary studio-enrich-go',
+        enriching ? 'Enrichissement…' : 'Enrichir le prompt',
+        enrich,
+        'spark',
+      );
     make.title = 'Le modèle de chat réécrit votre texte en un prompt complet';
     make.disabled = enriching || Boolean(working);
     row.append(make);
@@ -1164,6 +1189,7 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
     if (!info) return;
     runs = (await (await api(`gallery/${info.conversationId}`)).json()).runs;
     showcase();
+    onRuns(info.conversationId);
   }
   async function open() {
     // Entering the Studio: nothing from an earlier visit stays in the frames.

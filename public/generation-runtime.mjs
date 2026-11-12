@@ -21,23 +21,40 @@ export function setupGenerationRuntime({
   const $ = id => document.getElementById(id);
   let urls = [],
     galleryVersion = 0;
+  // The place whose creations the « Créations » tab lists: the open conversation, or the Studio
+  // while it is the view on screen (the last conversation opened has nothing to do there).
+  const place = () =>
+    state.view === 'studio'
+      ? { id: state.studioId ?? null, studio: true }
+      : { id: state.conversationId, studio: false };
   function reset() {
     for (const media of $('gallery-list').querySelectorAll('video, audio')) media.pause();
     galleryVersion++;
     for (const url of urls) URL.revokeObjectURL(url);
     urls = [];
-    $('gallery-list').replaceChildren(node('p', 'asset-empty', 'Aucune génération dans cette conversation.'));
+    $('gallery-list').replaceChildren(
+      node(
+        'p',
+        'asset-empty',
+        place().studio
+          ? 'Aucune création dans le Studio pour l’instant.'
+          : 'Aucune génération dans cette conversation.',
+      ),
+    );
   }
   async function original(record, index, signal) {
     return (await api(`gallery/${record.conversationId}/${record.id}/${index}`, undefined, { signal })).blob();
   }
   async function renderGallery(conversationId) {
-    if (conversationId && conversationId !== state.conversationId) return;
+    if (conversationId && conversationId !== place().id) return;
     reset();
     const version = galleryVersion;
     if (!conversationId) return;
     const result = await (await api(`gallery/${conversationId}`)).json();
-    if (version !== galleryVersion || conversationId !== state.conversationId) return;
+    if (version !== galleryVersion || conversationId !== place().id) return;
+    // Upscale, Interpoler and Prolonger are written to the open conversation: a creation of the
+    // Studio, which has its own buttons in its view, only shows its details from here.
+    const actions = place().studio ? null : outputActions;
     if (result.runs.length) $('gallery-list').replaceChildren();
     for (const record of result.runs) {
       for (const [index, output] of record.outputs.entries()) {
@@ -104,7 +121,7 @@ export function setupGenerationRuntime({
           details.append(node('summary', '', 'Analyse du modèle'), node('p', '', record.analysis.text));
           card.append(details);
         }
-        if (outputActions) card.append(outputActions(record, index));
+        if (actions) card.append(actions(record, index));
         else {
           const details = node('button', 'secondary', 'Détails');
           details.type = 'button';
