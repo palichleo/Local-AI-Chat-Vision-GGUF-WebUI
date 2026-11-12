@@ -48,6 +48,88 @@ class ResidencyTest(unittest.TestCase):
             residency.RESIDENCY.clear()
 
 
+class PartialArenaTest(unittest.TestCase):
+    def test_only_the_weights_asked_for_are_kept_in_ram_the_others_are_read_from_the_file(self):
+        try:
+            import torch
+            import psutil  # noqa: F401
+            from safetensors.torch import save_file
+        except ImportError:
+            self.skipTest('torch, psutil and safetensors are required')
+        from runner.models import residency
+
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                path = os.path.join(folder, 'model.safetensors')
+                tensors = {
+                    'first.weight': torch.arange(12, dtype=torch.int8).reshape(3, 4),
+                    'odd': torch.tensor([1, 2, 3], dtype=torch.uint8),  # misaligns what follows
+                    'second.weight': torch.randn(5, 7).to(torch.bfloat16),
+                    'second.weight_scale': torch.randn(5, 1),
+                    'third.weight': torch.randn(2, 2),
+                }
+                save_file(tensors, path)
+                # The whole file is not kept (a model too large for that): it is read as mapped.
+                store = residency.open_store(path, resident=False)
+                self.assertIsNone(store.arena)
+                asked = ['second.weight', 'second.weight_scale', 'third.weight', 'not in the file']
+                kept = store.keep(asked, reserve=0)
+                self.assertGreaterEqual(kept, 5 * 7 * 2 + 5 * 4 + 4 * 4)
+                self.assertLess(kept, os.path.getsize(path))
+                arena = store.part
+                self.assertEqual(arena.keys, {'second.weight', 'second.weight_scale', 'third.weight'})
+                # Every tensor reads the same wherever it comes from.
+                for key, value in tensors.items():
+                    read = store.get_tensor(key)
+                    self.assertEqual((read.dtype, read.shape), (value.dtype, value.shape), key)
+                    self.assertTrue(torch.equal(read.float(), value.float()), key)
+                self.assertEqual(set(store.keys()), set(tensors))
+                # The kept ones come from the arena, packed and aligned; the others from the file.
+                held = arena.data.data_ptr()
+                inside = lambda tensor: held <= tensor.data_ptr() < held + arena.size  # noqa: E731
+                self.assertTrue(inside(store.get_tensor('second.weight')))
+                self.assertFalse(inside(store.get_tensor('first.weight')))
+                self.assertTrue(all(arena.header[key]['data_offsets'][0] % 64 == 0 for key in arena.keys))
+                # Asked again for a part of what is held (the next video): the same arena.
+                again = residency.open_store(path, resident=False)
+                again.keep(['third.weight'], reserve=0)
+                self.assertIs(again.part, arena)
+                self.assertEqual(arena.users, 2)
+                # Built with a little to spare, it serves a need that grows by that much.
+                spared = residency.open_store(path, resident=False)
+                spared.keep(['first.weight'], reserve=0, spare=['first.weight', 'second.weight'])
+                wide = spared.part
+                self.assertEqual(wide.keys, {'first.weight', 'second.weight'})
+                spared.keep(['first.weight', 'second.weight'], reserve=0, spare=['third.weight'])
+                self.assertIs(spared.part, wide)
+                spared.close()
+                # Asked for more (a larger video keeps less on the GPU): built again.
+                again.keep(['first.weight', 'third.weight'], reserve=0)
+                self.assertIsNot(again.part, arena)
+                self.assertEqual(again.part.keys, {'first.weight', 'third.weight'})
+                self.assertEqual(arena.users, 1)
+                # The arena that was replaced is released when its last reader is done with it,
+                # not left page-locked behind.
+                self.assertIsNotNone(arena.data)
+                store.close()
+                self.assertIsNone(arena.data)
+                self.assertFalse(arena.pinned)
+                again.close()
+                self.assertEqual(again.part, None)
+                # A file that is resident whole needs no part of it kept again.
+                saved = residency.RESERVE
+                residency.RESERVE = 0
+                try:
+                    whole = residency.open_store(path)
+                    self.assertIsNotNone(whole.arena)
+                    self.assertEqual(whole.keep(['third.weight'], reserve=0), 0)
+                    whole.close()
+                finally:
+                    residency.RESERVE = saved
+        finally:
+            residency.RESIDENCY.clear()
+
+
 class EvictionTest(unittest.TestCase):
     """Memory short while a generation runs: the arenas it reads from stay, the others go."""
 

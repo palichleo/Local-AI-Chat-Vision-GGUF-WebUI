@@ -23,6 +23,7 @@ from collections import OrderedDict
 GiB = 1024**3
 RESERVE = 12 * GiB  # never let arenas push free RAM below this
 PIN_SHARE = 0.5  # never page-lock more than half the physical RAM
+MIN_PINNED = 1024**2  # nor a buffer this small
 CHUNK = 64 * 1024**2
 
 _DTYPES = {
@@ -55,6 +56,8 @@ class Arena:
         self.size = data.numel()
         # Open stores reading from this arena: it is not released under them (see Residency.hold).
         self.users = 0
+        # The tensors held when the arena is a part of the file only (see Residency.partial).
+        self.keys = None
 
     def tensor(self, key):
         import torch
@@ -76,6 +79,10 @@ class Arena:
             torch.cuda.cudart().cudaHostUnregister(self.data.data_ptr())
             self.pinned = False
         self.data = None
+
+
+# How the table names the arena that holds a part of a file, beside the one that holds it whole.
+PARTIAL = '|part'
 
 
 class Residency:
@@ -133,6 +140,66 @@ class Residency:
             self.stats['load_seconds'] += time.perf_counter() - started
             return arena
 
+    def partial(self, path, keys, reserve=None, spare=()):
+        """An arena that holds only `keys` of the file, packed and page-locked when allowed.
+
+        For a model too large to keep whole beside everything else (a 19 GiB video model in
+        32 GiB of RAM): the weights that stay on the GPU are read once per generation, those
+        that do not are copied there at every step, and only these need to sit in locked
+        memory for the copies to be fast. Reused while it holds every key asked for; None when
+        RAM does not allow it (the file is then read through its mapping, as before).
+
+        `spare` names keys to hold as well when the arena has to be built: what the next
+        generations may need beyond `keys`, so that it is not built again for a few megabytes.
+        """
+        import time
+        import torch
+
+        path = os.path.abspath(path)
+        stamp = self._stamp(path)
+        name = path + PARTIAL
+        wanted = set(keys)
+        with self.lock:
+            found = self.arenas.get(name)
+            if found and found.stamp == stamp and wanted <= found.keys:
+                self.arenas.move_to_end(name)
+                self.stats['hits'] += 1
+                return found
+            if found:
+                self._discard(self.arenas.pop(name))
+            wanted |= set(spare)
+            header, base = _header(path)
+            ordered = sorted((header[key]['data_offsets'][0], key) for key in wanted if key in header)
+            packed, size = {}, 0
+            for _, key in ordered:
+                start, end = header[key]['data_offsets']
+                size = -(-size // 64) * 64  # every tensor starts aligned, whatever came before
+                packed[key] = dict(header[key], data_offsets=[size, size + end - start])
+                size += end - start
+            if not size or not self._make_room(size, reserve, True):
+                self.stats['skipped'] += 1
+                return None
+            started = time.perf_counter()
+            data = torch.empty(size, dtype=torch.uint8)
+            view = memoryview(data.numpy())
+            with open(path, 'rb', buffering=0) as handle:
+                for _, key in ordered:
+                    start, end = header[key]['data_offsets']
+                    to = packed[key]['data_offsets'][0]
+                    handle.seek(base + start)
+                    done = 0
+                    while done < end - start:
+                        read = handle.readinto(view[to + done : to + min(end - start, done + CHUNK)])
+                        if not read:
+                            raise OSError('Unexpected end of ' + path)
+                        done += read
+            arena = Arena(path, stamp, packed, base, data, self._pin(data))
+            arena.keys = frozenset(packed)
+            self.arenas[name] = arena
+            self.stats['loads'] += 1
+            self.stats['load_seconds'] += time.perf_counter() - started
+            return arena
+
     def present(self, path):
         path = os.path.abspath(path)
         with self.lock:
@@ -163,8 +230,8 @@ class Residency:
 
     @staticmethod
     def _discard(arena):
-        """Releases an arena that left the table, unless a store still reads from it: its memory
-        then goes with the last tensor taken from it."""
+        """Releases an arena that left the table, unless a store still reads from it: it is then
+        released when that store is done (see drop)."""
         if not arena.users:
             arena.release()
 
@@ -174,9 +241,15 @@ class Residency:
             arena.users += 1
 
     def drop(self, arena):
-        """A store is done with this arena."""
+        """A store is done with this arena. One that left the table while it was read (replaced,
+        or sent away by `clear`) is released now: left page-locked, its memory would be handed
+        to something else still registered with CUDA, and a later copy from there would fail
+        (« Copy is larger than memobj size »)."""
         with self.lock:
             arena.users = max(0, arena.users - 1)
+            gone = all(kept is not arena for kept in self.arenas.values())
+            if not arena.users and gone and getattr(arena, 'data', None) is not None:
+                arena.release()
 
     def _pin(self, data):
         import torch
@@ -184,6 +257,11 @@ class Residency:
         try:
             import psutil
 
+            # A buffer smaller than a few pages shares its pages with other allocations: locking
+            # it gains nothing, and two of them on one page confuse the driver's bookkeeping
+            # (a later copy from that page then fails with « Copy is larger than memobj size »).
+            if data.numel() < MIN_PINNED:
+                return False
             pinned = sum(arena.size for arena in self.arenas.values() if arena.pinned)
             if not torch.cuda.is_available() or pinned + data.numel() > psutil.virtual_memory().total * PIN_SHARE:
                 return False
@@ -253,12 +331,28 @@ class Store:
         else:
             self.arena = RESIDENCY.arena(path, reserve=reserve, evict=evict) if resident else None
         self.mapping = None
+        # A part of the file kept in locked RAM beside the mapping (see `keep`).
+        self.part = None
         if self.arena is not None:
             RESIDENCY.hold(self.arena)
         if self.arena is None:
             from safetensors import safe_open
 
             self.mapping = safe_open(path, framework='pt')
+
+    def keep(self, keys, reserve=None, spare=()):
+        """From now on these tensors are read from page-locked RAM (Residency.partial), the
+        others from the mapping as before. Returns the bytes kept: 0 when the whole file is
+        resident already, or when RAM does not allow it."""
+        if self.arena is not None:
+            return 0
+        arena = RESIDENCY.partial(self.path, keys, reserve, spare)
+        if self.part is not None and self.part is not arena:
+            RESIDENCY.drop(self.part)
+        if arena is not None and arena is not self.part:
+            RESIDENCY.hold(arena)
+        self.part = arena
+        return arena.size if arena else 0
 
     def __enter__(self):
         return self
@@ -273,6 +367,9 @@ class Store:
         if self.arena is not None:
             RESIDENCY.drop(self.arena)
         self.arena = None
+        if self.part is not None:
+            RESIDENCY.drop(self.part)
+        self.part = None
 
     def keys(self):
         if self.arena:
@@ -287,6 +384,8 @@ class Store:
     def get_tensor(self, key):
         if self.arena:
             return self.arena.tensor(key)
+        if self.part and key in self.part.header:
+            return self.part.tensor(key)
         return self.mapping.get_tensor(key)
 
     def get_slice(self, key):
@@ -296,7 +395,7 @@ class Store:
 
     @property
     def pinned(self):
-        return bool(self.arena and self.arena.pinned)
+        return bool((self.arena and self.arena.pinned) or (self.part and self.part.pinned))
 
 
 def open_store(path, resident=True, reserve=None, evict=True):

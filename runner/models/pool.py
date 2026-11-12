@@ -73,6 +73,50 @@ class WeightPool:
     def summary(self):
         return {key: round(value, 2) for key, value in self.stats.items()}
 
+    def parts(self, location):
+        """What a layer reads from its file: its weight, with its scale and bias when it has them,
+        and the file keys they come from."""
+        source, key, part = location
+        store = self.stores[source]
+        values, keys = {'weight': self.read(location)}, [key]
+        for suffix, label in (('.weight_scale', 'scale'), ('.bias', 'bias')):
+            candidate = key.removesuffix('.weight') + suffix
+            if candidate in store.keys():
+                value = store.get_tensor(candidate)
+                if part is not None and value.ndim:
+                    value = value.chunk(3, dim=0)[part]
+                values[label] = value
+                keys.append(candidate)
+        return values, keys
+
+    def streamed(self, margin_gib=0, onward=False):
+        """The file keys of the weights that will not stay on the GPU with the present limit,
+        by store: what every step copies there again. Follows `bundle` in layer order: each
+        layer stays if it still fits. Asked before the model runs, to keep these in
+        page-locked RAM (Store.keep).
+
+        `margin_gib` answers for a limit that much lower, and `onward` names every layer from
+        the first that does not fit, whether a later one would or not. Together they give what
+        to lock beyond the need of the moment: the free video memory differs by a few dozen
+        megabytes from one generation to the next, a later small layer then fits or not, and
+        what was locked for the last generation must still cover this one (measured: a share
+        47 MiB smaller meant 14 GiB locked again, 11 s). Whatever a limit at least that high
+        streams lies from that first layer onward.
+        """
+        limit = max(0, self.limit - int(margin_gib * GiB))
+        held, keys, cut = self.bytes, {}, False
+        for location in self.order:
+            if location in self.gpu:
+                continue
+            values, names = self.parts(location)
+            size = sum(value.numel() * value.element_size() for value in values.values())
+            if not (cut and onward) and held + size <= limit:
+                held += size
+            else:
+                cut = True
+                keys.setdefault(location[0], set()).update(names)
+        return keys
+
     def bundle(self, location):
         if location in self.gpu:
             return self.gpu[location]
@@ -81,17 +125,7 @@ class WeightPool:
         started = time.perf_counter()
         first = location not in self.host
         if first:
-            source, key, part = location
-            store = self.stores[source]
-            values = {'weight': self.read(location)}
-            for suffix, label in (('.weight_scale', 'scale'), ('.bias', 'bias')):
-                candidate = key.removesuffix('.weight') + suffix
-                if candidate in store.keys():
-                    value = store.get_tensor(candidate)
-                    if part is not None and value.ndim:
-                        value = value.chunk(3, dim=0)[part]
-                    values[label] = value
-            self.host[location] = values
+            self.host[location] = self.parts(location)[0]
         result = {key: value.to('cuda', non_blocking=True) for key, value in self.host[location].items()}
         size = sum(value.numel() * value.element_size() for value in result.values())
         if first:

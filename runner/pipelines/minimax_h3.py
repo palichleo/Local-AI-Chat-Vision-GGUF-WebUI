@@ -16,6 +16,13 @@ FRAME_CHOICES = tuple(17 * n + 5 for n in range(7, 21))  # 5 to 15 seconds at 24
 # so the source tail encodes onto exactly the latent frames that open the new window.
 OVERLAPS = (22, 39, 56)
 AUDIO_LATENTS_PER_SECOND = 40
+# RAM the weights kept between two videos leave free, in GiB. The model (19 GiB) does not fit
+# whole beside everything else in 32 GiB: only the share of it that every step copies to the GPU
+# is kept, page-locked (14 GiB with 4.7 GiB of the model on a 12 GiB card). Read from unlocked
+# memory, those copies took a third of each step.
+RAM_RESERVE_GIB = 4
+# Locked a little beyond what is copied, so the next video finds its weights there (see streamed).
+LOCK_MARGIN_GIB = 0.5
 
 
 def check(job, family):
@@ -349,6 +356,13 @@ def generate(job, config, progress):
                 and minimax_h3.int8_attention_ready()
             )
             dit, _heads = minimax_h3.load(dit_header, paths['model'], pool, fast_attention)
+            # What will not stay on the GPU goes to page-locked RAM once, for every step and
+            # the next videos; what stays is read from the file as it is loaded.
+            locked = store.keep(
+                pool.streamed().get('model', ()),
+                int(RAM_RESERVE_GIB * 1024**3),
+                spare=pool.streamed(LOCK_MARGIN_GIB, onward=True).get('model', ()),
+            )
             pool.preload()
             scheduler, audio_scheduler = MiniMaxH3Scheduler(shift=12.0), MiniMaxH3Scheduler(shift=3.0)
             calls = {'step': 0}
@@ -398,6 +412,7 @@ def generate(job, config, progress):
                 gpu_cache_gib=round(pool.bytes / 1024**3, 3),
                 gpu_cache_limit_gib=round(budget, 3),
                 pinned_model=store.pinned,
+                locked_ram_gib=round(locked / 1024**3, 3),
                 residency=RESIDENCY.summary(),
             )
             progress(stage='video sampled', **cache)

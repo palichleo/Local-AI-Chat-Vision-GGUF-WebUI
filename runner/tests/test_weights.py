@@ -73,6 +73,45 @@ class WeightPoolTest(unittest.TestCase):
         self.assertEqual((pool.recent, pool.recent_bytes, pool.gpu), ({}, 0, {}))
 
 
+class StreamedShareTest(unittest.TestCase):
+    def test_the_weights_that_will_not_stay_on_the_gpu_are_named_before_the_model_runs(self):
+        sizes = {
+            'a.weight': 60,
+            'a.weight_scale': 5,
+            'b.weight': 50,
+            'b.bias': 5,
+            'c.weight': 20,
+            'd.weight': 40,
+            'd.weight_scale': 5,
+        }
+        pool, _ = WeightPoolTest.pool(self, sizes, limit=100)
+        pool.order = [('model', key, None) for key in sizes if key.endswith('.weight')]
+        # In layer order each layer stays if it still fits: a (65) stays, b (55) does not, c (20)
+        # does, d (45) does not. What does not stay is named with its scale and bias.
+        self.assertEqual(pool.streamed(), {'model': {'b.weight', 'b.bias', 'd.weight', 'd.weight_scale'}})
+        # What to lock with something to spare: every layer from the first that does not fit a
+        # GPU share a little smaller. Whatever a share at least that large streams is in there:
+        # with 100 it streams b and d, with 90 (c fits, d does not) too, with 80 the same.
+        spare = pool.streamed(margin_gib=20 / 1024**3, onward=True)['model']
+        self.assertEqual(spare, {'b.weight', 'b.bias', 'c.weight', 'd.weight', 'd.weight_scale'})
+        for limit in (80, 90, 100, 120):
+            other, _ = WeightPoolTest.pool(self, sizes, limit=limit)
+            other.order = pool.order
+            self.assertLessEqual(other.streamed().get('model', set()), spare, limit)
+        # Nothing was copied to find out, and the model then fills the GPU the same way.
+        self.assertEqual(Tensor.copies, 0)
+        for location in pool.order:
+            pool.bundle(location)
+        self.assertEqual([key for _, key, _ in pool.gpu], ['a.weight', 'c.weight'])
+        # With no room at all every layer is streamed; with room for all, none.
+        pool, _ = WeightPoolTest.pool(self, sizes, limit=0)
+        pool.order = [('model', key, None) for key in sizes if key.endswith('.weight')]
+        self.assertEqual(pool.streamed(), {'model': set(sizes)})
+        pool, _ = WeightPoolTest.pool(self, sizes, limit=1000)
+        pool.order = [('model', key, None) for key in sizes if key.endswith('.weight')]
+        self.assertEqual(pool.streamed(), {})
+
+
 class MergedAdaptersTest(unittest.TestCase):
     def test_the_loras_of_a_layer_are_one_pair_of_matrices_that_stays_on_the_gpu(self):
         try:
