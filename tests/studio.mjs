@@ -28,7 +28,10 @@ test('a prompt is enriched from what the user typed, for the creation it is for'
   assert.match(enrichMessages('x', { verb: 'nope' })[0].content, /the prompt of an image/);
   assert.doesNotMatch(system.content, /standing instructions/);
   const [wished] = enrichMessages('un renard', { preferences: ' 500 caractères, en anglais ' });
-  assert.match(wished.content, /standing instructions, which come first where they differ: 500 caractères, en anglais$/);
+  assert.match(
+    wished.content,
+    /standing instructions, which come first where they differ: 500 caractères, en anglais$/,
+  );
 });
 
 test('the answer is kept as the prompt alone', () => {
@@ -110,6 +113,9 @@ test('the Studio is told, per verb, the ready workflows with their inputs, sizes
 
   const krea = named('create_image', 'Krea 2');
   assert.deepEqual(krea.size, { width: 1024, height: 1024 });
+  // Each model with its family: the page keeps a family's LoRAs to itself.
+  assert.equal(krea.family, 'krea2');
+  assert.equal(named('create_image', 'MOSS').family, 'moss');
   assert.equal(krea.limits.width.max, 4096);
   assert.equal(krea.roles.source.count, 1);
 
@@ -162,7 +168,11 @@ test('a style the model does not write in time is said as such, and the model is
     dataDir: directory,
     enrichTimeoutMs: 400,
     spawnProcess: (_command, args, options) =>
-      spawn(process.execPath, [fileURLToPath(new URL('./fixtures/fake-engine.mjs', import.meta.url)), ...args], options),
+      spawn(
+        process.execPath,
+        [fileURLToPath(new URL('./fixtures/fake-engine.mjs', import.meta.url)), ...args],
+        options,
+      ),
   });
   t.after(async () => {
     await app.close();
@@ -300,7 +310,15 @@ test('leaving a mode stops following the size of its frame', async () => {
       styles: [],
       tools: {
         create_image: [
-          { id: 'w', name: 'Image', roles: {}, limits, size: { width: 1024, height: 1024 }, settings: [], seeded: true },
+          {
+            id: 'w',
+            name: 'Image',
+            roles: {},
+            limits,
+            size: { width: 1024, height: 1024 },
+            settings: [],
+            seeded: true,
+          },
         ],
       },
     };
@@ -441,7 +459,14 @@ test('the generator a Studio creation left loaded gives the card back by itself 
   await create(STUDIO_ID);
   await create(STUDIO_ID);
   // Two creations in a row: nothing was unloaded between them.
-  assert.deepEqual(events, ['llm stopped', 'generate', 'sources removed', 'llm stopped', 'generate', 'sources removed']);
+  assert.deepEqual(events, [
+    'llm stopped',
+    'generate',
+    'sources removed',
+    'llm stopped',
+    'generate',
+    'sources removed',
+  ]);
   events.length = 0;
   await new Promise(resolve => setTimeout(resolve, 120));
   assert.deepEqual(events, ['gpu released']);
@@ -882,7 +907,10 @@ test('« Enrichir le prompt » rewrites what is typed, which can be taken back; 
     typed.value = 'un phare';
     typed.oninput();
     await body.find('studio-enrich-go')[0].onclick();
-    assert.deepEqual(asked.find(([route]) => route === 'studio/enrich')[1], { prompt: 'un phare', verb: 'create_image' });
+    assert.deepEqual(asked.find(([route]) => route === 'studio/enrich')[1], {
+      prompt: 'un phare',
+      verb: 'create_image',
+    });
     assert.equal(prompt().value, 'A lighthouse at dusk. (un phare)');
     // What was typed is one click away.
     const back = body.find('studio-enrich')[0].children.find(child => child.className === 'studio-link');
@@ -898,6 +926,75 @@ test('« Enrichir le prompt » rewrites what is typed, which can be taken back; 
     body.find('studio-lora-remove')[0].onclick();
     assert.equal(body.find('studio-lora').length, 2);
     assert.equal(body.find('studio-lora-add').length, 1);
+  } finally {
+    restore();
+  }
+});
+
+test('the LoRAs of a model do not follow to a model of another family, and come back with theirs', async () => {
+  const image = (id, name, family) => ({
+    id,
+    name,
+    family,
+    external: true,
+    roles: {},
+    limits: sizes,
+    direct: true,
+    size: { width: 1024, height: 1024 },
+    settings: [],
+    seeded: true,
+  });
+  const { body, asked, restore, mode } = await studioPage(
+    {
+      create_image: [
+        image('k', 'Krea 2', 'krea2'),
+        image('k2', 'Krea 2 rétro', 'krea2'),
+        image('m', 'MOSS Image', 'moss'),
+      ],
+    },
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+    },
+  );
+  try {
+    mode(0);
+    const model = to => {
+        const control = body.find('studio-field').find(field => field.children[0].textContent === 'Modèle').children[1];
+        control.value = to;
+        control.onchange();
+      },
+      generate = async () => {
+        const prompt = body.find('studio-write')[0].children[0].children.find(child => child.tag === 'textarea');
+        prompt.value = 'une affiche';
+        prompt.oninput();
+        await body.find('studio-go')[0].onclick();
+        await new Promise(resolve => setTimeout(resolve, 10));
+        return asked.filter(([route]) => route === 'tools/action').at(-1)[1];
+      };
+    body.find('studio-lora-add')[0].onclick();
+    body.find('studio-lora-add')[0].onclick();
+    assert.equal(body.find('studio-lora').length, 2);
+
+    // Another workflow of the same family keeps them.
+    model('k2');
+    assert.equal(body.find('studio-lora').length, 2);
+
+    // MOSS Image: none of Krea 2's LoRAs is shown, and none is sent.
+    model('m');
+    assert.equal(body.find('studio-lora').length, 0);
+    assert.equal(body.find('studio-loras-count')[0].textContent, '0 / 3');
+    const sent = await generate();
+    assert.equal(sent.arguments.workflow ?? 'm', 'm');
+    assert.equal(sent.styles, undefined);
+
+    // One of its own, then back to Krea 2: each family finds its own again.
+    body.find('studio-lora-add')[0].onclick();
+    model('k');
+    assert.equal(body.find('studio-lora').length, 2);
+    assert.equal((await generate()).styles.length, 2);
+    model('m');
+    assert.equal(body.find('studio-lora').length, 1);
   } finally {
     restore();
   }

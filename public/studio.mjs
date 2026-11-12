@@ -130,6 +130,7 @@ export function setupStudio({
         prompt: '',
         before: null, // what was typed before « Enrichir le prompt », to come back to
         styles: [],
+        shelved: {}, // the LoRAs of the other families of models, for the way back
         format: null,
         size: null,
         seed: '',
@@ -153,6 +154,21 @@ export function setupStudio({
     // A continuation stays with the workflow that made the clip when it can.
     if (mode === 'video' && extending) return list.find(item => item.id === extending.workflowId) ?? list[0] ?? null;
     return list.find(item => item.id === draft.workflow) ?? list[0] ?? null;
+  }
+  /**
+   * Another model for this mode. A LoRA is made for one family of models: those chosen for
+   * Krea 2 do not follow to MOSS Image (they were sent with it), and come back with Krea 2.
+   */
+  function choose(id) {
+    const draft = drafts[mode],
+      from = current()?.family,
+      to = offered().find(item => item.id === id)?.family;
+    if (from !== to) {
+      draft.shelved[from] = draft.styles;
+      draft.styles = draft.shelved[to] ?? [];
+    }
+    draft.workflow = id;
+    render();
   }
   const button = (className, text, onclick, glyph) => {
     const control = node('button', className);
@@ -981,10 +997,7 @@ export function setupStudio({
       kinds.setAttribute('role', 'radiogroup');
       kinds.setAttribute('aria-label', 'Type de son');
       for (const item of list) {
-        const kind = button('studio-kind', '', () => {
-          draft.workflow = item.id;
-          render();
-        });
+        const kind = button('studio-kind', '', () => choose(item.id));
         kind.title = item.description;
         kind.setAttribute('role', 'radio');
         kind.setAttribute('aria-checked', String(item.id === workflow.id));
@@ -1023,10 +1036,7 @@ export function setupStudio({
         select(
           list.map(item => [item.id, item.name]),
           workflow.id,
-          value => {
-            draft.workflow = value;
-            render();
-          },
+          choose,
         ),
       );
       model.title = workflow.description;
