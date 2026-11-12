@@ -238,6 +238,37 @@ class FusedAttentionTest(unittest.TestCase):
         torch.testing.assert_close(key, reference[1], atol=0.05, rtol=0.02)
 
 
+@unittest.skipUnless(torch.cuda.is_available(), 'no GPU')
+class DecoderAttentionTest(unittest.TestCase):
+    def test_one_projection_and_the_fused_rotation_give_the_decoder_attention_of_diffusers(self):
+        with torch.inference_mode():
+            self.check()
+
+    def check(self):
+        from diffusers.models.autoencoders.autoencoder_kl_minimax_h3 import MiniMaxH3VideoAttention
+        from runner.models import minimax_h3_vae
+
+        torch.manual_seed(7)
+        heads, width = 2, 64
+        attn = MiniMaxH3VideoAttention(heads * width, heads, width).to('cuda', torch.bfloat16)
+        for parameter in attn.parameters():
+            parameter.data.normal_(0, 0.1)
+        rows = 300
+        hidden = torch.randn(1, rows, heads * width, device='cuda', dtype=torch.bfloat16)
+        angles = torch.randn(1, rows, 1, 24, device='cuda')
+        rotary = (torch.cat([angles, angles], -1).cos(), torch.cat([angles, angles], -1).sin())
+        expected = attn(hidden, rotary).float()
+        # The file's layout: per head, q then k then v.
+        weight = torch.stack([part.weight.view(heads, width, -1) for part in (attn.to_q, attn.to_k, attn.to_v)], 1)
+        bias = torch.stack([part.bias.view(heads, width) for part in (attn.to_q, attn.to_k, attn.to_v)], 1)
+        attn.to_qkv = torch.nn.Linear(heads * width, 3 * heads * width).to('cuda', torch.bfloat16)
+        attn.to_qkv.weight.data = weight.reshape(3 * heads * width, -1).clone()
+        attn.to_qkv.bias.data = bias.reshape(-1).clone()
+        found = minimax_h3_vae.DecoderAttention()(attn, hidden, rotary).float()
+        cosine = torch.nn.functional.cosine_similarity(found.flatten(), expected.flatten(), dim=0)
+        self.assertGreater(float(cosine), 0.999)
+
+
 @unittest.skipUnless(sparse_attention.ready(), 'no sparse attention kernel on this machine')
 class KernelTest(unittest.TestCase):
     def inputs(self):

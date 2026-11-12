@@ -216,15 +216,16 @@ FUSED_ROPE = True
 
 
 def rotation_table(cos, sin):
-    """diffusers' rotary cos/sin, (rows, span), as comfy-kitchen's split-half rotation table
-    (1, rows, 1, span/2, 2, 2) in float32: [[cos, -sin], [sin, cos]] per pair of channels.
-    Built once per forward: the 50 blocks share `cos`."""
+    """diffusers' rotary cos/sin, (rows, span) or (batch, rows, 1, span), as comfy-kitchen's
+    split-half rotation table (batch, rows, 1, span/2, 2, 2) in float32: [[cos, -sin],
+    [sin, cos]] per pair of channels. Built once per forward: the blocks share `cos`."""
     found = getattr(cos, '_table', None)
     if found is None:
-        half = cos.shape[-1] // 2
-        first = torch.stack([cos[:, :half], -sin[:, :half]], dim=-1)
-        second = torch.stack([sin[:, half:], cos[:, half:]], dim=-1)
-        found = torch.stack([first, second], dim=-2).float()[None, :, None]
+        c, s = (cos[:, :, 0], sin[:, :, 0]) if cos.ndim == 4 else (cos[None], sin[None])
+        half = c.shape[-1] // 2
+        first = torch.stack([c[..., :half], -s[..., :half]], dim=-1)
+        second = torch.stack([s[..., half:], c[..., half:]], dim=-1)
+        found = torch.stack([first, second], dim=-2).float().unsqueeze(2)
         cos._table = found
     return found
 
