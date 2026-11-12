@@ -10,19 +10,41 @@
       "label": "Modèle",
       "folder": "checkpoints",
       "required": true,
-      "note": "MOSS Image SFT, par exemple mossImage_sft_pruned_int8.safetensors."
+      "note": "MOSS Image SFT, par exemple mossImage_sft_pruned_int8.safetensors.",
+      "signature": [
+        {
+          "key": "^(?:model\\.diffusion_model\\.|diffusion_model\\.)?text_embedder\\.proj\\.weight$",
+          "shape": [null, 4096]
+        }
+      ]
     },
     "textEncoder": {
       "label": "Encodeur de texte",
       "folder": "LLMs",
       "required": true,
-      "note": "L’encodeur de MOSS Image, par exemple mossImage_sft_txt_int8.safetensors."
+      "note": "L’encodeur de MOSS Image, un Qwen3.5-9B (par exemple mossImage_sft_txt_int8.safetensors), et non le modèle MOSS Image lui-même.",
+      "signature": [
+        {
+          "key": "(?:^|\\.)embed_tokens\\.weight$",
+          "shape": [null, 4096]
+        }
+      ]
     },
     "vae": {
       "label": "VAE",
       "folder": "VAE",
       "required": true,
-      "note": "flux2-vae.safetensors"
+      "note": "flux2-vae.safetensors",
+      "signature": [
+        {
+          "key": "^encoder\\.conv_in\\.weight$",
+          "shape": [null, 3, 3, 3]
+        },
+        {
+          "key": "^decoder\\.conv_in\\.weight$",
+          "shape": [null, 32, 3, 3]
+        }
+      ]
     }
   },
   "parameters": {

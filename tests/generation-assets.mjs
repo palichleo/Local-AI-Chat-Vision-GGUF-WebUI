@@ -68,7 +68,10 @@ test('invalid header and incompatible layouts cannot overwrite a registered asse
       assets.register({ id: 'encoder', path: bad, kind: 'textEncoder', family: 'krea2' }),
       /header|safetensors/i,
     );
-    await assert.rejects(assets.register({ id: 'encoder', path, kind: 'vae', family: 'krea2' }), /layout|compatible/i);
+    await assert.rejects(
+      assets.register({ id: 'encoder', path, kind: 'vae', family: 'krea2' }),
+      /structure de ce fichier/,
+    );
     assert.equal(await readFile(assets.file, 'utf8'), before);
     await weights(bad, { 'model.embed_tokens.weight': { ...tensor, data_offsets: [0, 400] } });
     await assert.rejects(assets.register({ path: bad, kind: 'textEncoder', family: 'krea2' }), /offset|size|header/i);
@@ -95,7 +98,43 @@ test('checkpoint role checks reject tensor names with the wrong basic shape', as
     await weights(path, { 'model.embed_tokens.weight': tensor });
     await assert.rejects(
       assets.register({ id: 'wrong', path, kind: 'textEncoder', family: 'krea2' }),
-      /layout|shape|compatible/i,
+      /structure de ce fichier/,
     );
+  });
+});
+
+test('MOSS Image: the model itself is refused as its text encoder, and each file only in its own role', async () => {
+  await fixture(async (directory, assets) => {
+    const wide = { dtype: 'F16', shape: [1, 4096], data_offsets: [0, 8192] };
+    // The diffusion model, as its file is laid out: the projection of the text encoder's 4096 values.
+    const model = join(directory, 'MOSS-Image-SFT-INT8.safetensors');
+    await weights(model, {
+      'text_embedder.proj.weight': wide,
+      'layers.0.proj.qkv.weight': { dtype: 'I8', shape: [4], data_offsets: [8192, 8196] },
+    });
+    // Its text encoder, a Qwen3.5-9B: a table of token embeddings 4096 wide.
+    const encoder = join(directory, 'qwen3.5_9b.safetensors');
+    await weights(encoder, { 'model.language_model.embed_tokens.weight': wide });
+    // A smaller Qwen (2560 wide) is another model's encoder.
+    const small = join(directory, 'qwen_4b.safetensors');
+    await weights(small, { 'model.embed_tokens.weight': encoderTensor });
+    const vae = join(directory, 'flux2-vae.safetensors');
+    await weights(vae, {
+      'encoder.conv_in.weight': { dtype: 'F32', shape: [1, 3, 3, 3], data_offsets: [0, 108] },
+      'decoder.conv_in.weight': { dtype: 'F32', shape: [1, 32, 3, 3], data_offsets: [108, 1260] },
+    });
+    const register = (path, kind) => assets.register({ path, kind, family: 'moss' });
+
+    // What happened: the model picked in the text encoder's place. It is said in the user's words.
+    await assert.rejects(
+      register(model, 'textEncoder'),
+      /La structure de ce fichier n’est pas celle attendue pour « Encodeur de texte » \(MOSS Image\)\. Attendu : .*Qwen3\.5-9B.*non le modèle/,
+    );
+    await assert.rejects(register(small, 'textEncoder'), /structure de ce fichier/);
+    await assert.rejects(register(encoder, 'model'), /structure de ce fichier/);
+    await assert.rejects(register(model, 'vae'), /structure de ce fichier/);
+    assert.equal((await register(model, 'model')).kind, 'model');
+    assert.equal((await register(encoder, 'textEncoder')).kind, 'textEncoder');
+    assert.equal((await register(vae, 'vae')).kind, 'vae');
   });
 });
