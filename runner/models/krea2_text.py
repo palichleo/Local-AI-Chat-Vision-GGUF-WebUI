@@ -51,10 +51,11 @@ def encode_prompt(plan, files, tokenizer_path, tensor, device, dtype, progress, 
         config._attn_implementation = 'sdpa'
         with init_empty_weights():
             text_model = Qwen3ForCausalLM(config)
-        # The file stays in RAM between images when it fits beside the model (page-locked when
-        # the system allows it), never in its place: the model is read at every step, the
-        # encoder once per prompt.
-        with open_store(str(files['encoder']), reserve=ram_reserve, evict=False) as store:
+        # The file stays in RAM between images when it fits beside the model, never in its
+        # place: the model is read at every step, the encoder once per prompt. Unlocked, for the
+        # same reason: the share of locked RAM goes to the model (4.9 GiB of it held the 12.6 of
+        # the model out).
+        with open_store(str(files['encoder']), reserve=ram_reserve, evict=False, pin=False) as store:
             for key, parameter in list(text_model.named_parameters()):
                 if key == 'lm_head.weight':
                     continue

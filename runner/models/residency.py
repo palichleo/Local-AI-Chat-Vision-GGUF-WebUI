@@ -100,13 +100,14 @@ class Residency:
         status = os.stat(path)
         return status.st_size, status.st_mtime_ns
 
-    def arena(self, path, reserve=None, evict=True):
+    def arena(self, path, reserve=None, evict=True, pin=True):
         """The file's arena, loading it if RAM allows; None to fall back to the mapping.
 
         `reserve` (bytes) is the RAM this file must leave free, RESERVE when not given: a family
         whose files are small beside the machine's memory keeps them with less. `evict` False
         loads the file only if it fits as things are, without sending another one away (a text
-        encoder must not push out the model that every step reads).
+        encoder must not push out the model that every step reads). `pin` False leaves it
+        unlocked: a file read once per prompt leaves the share of locked RAM to the model.
         """
         import time
         import torch
@@ -137,7 +138,7 @@ class Residency:
                     if not read:
                         raise OSError('Unexpected end of ' + path)
                     done += read
-            pinned = self._pin(data)
+            pinned = self._pin(data) if pin else 0
             arena = Arena(path, stamp, header, base, data, pinned)
             self.arenas[path] = arena
             self.stats['loads'] += 1
@@ -346,14 +347,14 @@ class _Slice:
 class Store:
     """`safe_open`-compatible reader over a resident arena (or the file mapping as fallback)."""
 
-    def __init__(self, path, resident=True, reserve=None, evict=True):
+    def __init__(self, path, resident=True, reserve=None, evict=True, pin=True):
         """`resident`: True loads the file into RAM if it fits, 'if-present' only reuses an arena.
-        `reserve` and `evict`: see Residency.arena."""
+        `reserve`, `evict` and `pin`: see Residency.arena."""
         self.path = path
         if resident == 'if-present':
             self.arena = RESIDENCY.present(path)
         else:
-            self.arena = RESIDENCY.arena(path, reserve=reserve, evict=evict) if resident else None
+            self.arena = RESIDENCY.arena(path, reserve=reserve, evict=evict, pin=pin) if resident else None
         self.mapping = None
         # A part of the file kept in locked RAM beside the mapping (see `keep`).
         self.part = None
@@ -422,8 +423,8 @@ class Store:
         return bool((self.arena and self.arena.pinned) or (self.part and self.part.pinned))
 
 
-def open_store(path, resident=True, reserve=None, evict=True):
-    return Store(path, resident=resident, reserve=reserve, evict=evict)
+def open_store(path, resident=True, reserve=None, evict=True, pin=True):
+    return Store(path, resident=resident, reserve=reserve, evict=evict, pin=pin)
 
 
 WINDOW = 4 * GiB
