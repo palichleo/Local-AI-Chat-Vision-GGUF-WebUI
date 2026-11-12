@@ -4,7 +4,8 @@
   "mediaType": "image",
   "tasks": ["create_image"],
   "engine": "external",
-  "native": false,
+  "selectable": true,
+  "requires": ["torch", "diffusers", "transformers", "accelerate", "safetensors", "PIL", "comfy_kitchen"],
   "components": {
     "model": {
       "label": "Modèle",

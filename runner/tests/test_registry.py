@@ -34,7 +34,9 @@ class RegistryTests(unittest.TestCase):
         own = {name for name, manifest in families().items() if manifest.get('native', True)}
         self.assertEqual(set(capabilities()), own)
         self.assertIn(families()['krea2']['engine'], ('external',))
-        self.assertNotIn('krea2', own)
+        # Krea 2 runs on either engine; MOSS Image is ComfyUI's only.
+        self.assertIn('krea2', own)
+        self.assertNotIn('moss', own)
         for name, manifest in families().items():
             with self.subTest(family=name):
                 self.assertIn(manifest['engine'], ('internal', 'external'))

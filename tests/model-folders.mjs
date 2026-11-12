@@ -319,3 +319,37 @@ test('a library moved to another place is found again under the same names, with
     assert.equal(found.automatic, true);
   }
 });
+
+test('without ComfyUI the Studio lists the LoRAs of the folder, and Atelier’s engine is given their files', async t => {
+  const root = await directory(t),
+    made = service(t, root),
+    loras = join(root, 'models', 'loras');
+  await mkdir(join(loras, 'krea'), { recursive: true });
+  await writeFile(join(loras, 'retro.safetensors'), 'x');
+  await writeFile(join(loras, 'krea', 'detail.safetensors'), 'x');
+  await writeFile(join(loras, 'notes.txt'), 'x');
+  // No ComfyUI to ask: the files themselves, named from the folder as ComfyUI names them.
+  assert.deepEqual(await made.styles(), [join('krea', 'detail.safetensors'), 'retro.safetensors']);
+
+  const job = { id: 'j', pipeline: 'krea2', loras: [], parameters: {} };
+  const styles = [
+    { name: 'retro.safetensors', strength: 1 },
+    { name: join('krea', 'detail.safetensors'), strength: 1.4 },
+  ];
+  // Krea 2 takes its LoRAs on Atelier's engine: the styles of the Studio become LoRAs of the job.
+  const own = await made.ownJob({ ...job, styles });
+  assert.equal(own.styles, undefined);
+  assert.deepEqual(own.loras, [
+    { id: 'style-0', path: join(loras, 'retro.safetensors'), strength: 1 },
+    { id: 'style-1', path: join(loras, 'krea', 'detail.safetensors'), strength: 1.4 },
+  ]);
+  // A LoRA that is not there, or a name that leaves the folder, is refused in plain words.
+  for (const name of ['absent.safetensors', join('..', '..', 'data', 'secret.safetensors')])
+    await assert.rejects(
+      made.ownJob({ ...job, styles: [{ name, strength: 1 }] }),
+      /LoRA introuvable dans le dossier loras/,
+    );
+  // A family whose LoRAs are ComfyUI's only: the styles are left out, as before.
+  const video = await made.ownJob({ id: 'v', pipeline: 'ltx25', loras: [], styles });
+  assert.deepEqual([video.styles, video.loras], [undefined, []]);
+});

@@ -72,8 +72,13 @@ def preflight(job, config):
     from runner.models.krea2_headers import validate_krea2_components
     from runner.models.krea2_shapes import validate_shapes
 
-    if not Path(job['components']['tokenizer']).is_dir():
-        raise ValueError('The workflow tokenizer folder does not exist')
+    # ComfyUI brings its own tokenizer; this engine reads the one the workflow names.
+    tokenizer = job['components'].get('tokenizer')
+    if not tokenizer or not Path(tokenizer).is_dir():
+        raise ValueError(
+            'Le moteur d’Atelier a besoin du tokenizer de Krea 2 (dossier qwen25_tokenizer) : '
+            'choisissez-le dans le workflow.'
+        )
     if importlib.util.find_spec('comfy_kitchen') is None:
         raise RuntimeError('Missing installed comfy-kitchen INT8 kernels')
     if config['tuned'] and importlib.util.find_spec('triton') is None:

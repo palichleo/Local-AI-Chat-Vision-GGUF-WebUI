@@ -306,13 +306,32 @@ export function setupNativeWorkflows(options) {
       toggle = node('label', 'history-toggle'),
       address = input('comfy-url', comfy.baseUrl);
     toggle.append(use, node('span', '', 'Utiliser ComfyUI'));
+    // The families that also run on Atelier's own engine: ticked, they stay there with ComfyUI on.
+    const kept = (comfy.choices ?? []).map(choice => {
+      const check = input('comfy-own-' + choice.family, (comfy.own ?? []).includes(choice.family), 'checkbox'),
+        label = node('label', 'history-toggle');
+      label.append(check, node('span', '', choice.label + ' : créer avec le moteur d’Atelier'));
+      label.title = 'Sans ComfyUI, cette famille passe de toute façon par le moteur d’Atelier.';
+      check.dataset.nativeControl = 'true';
+      return { family: choice.family, check, label };
+    });
     address.spellcheck = false;
     address.placeholder = 'http://127.0.0.1:8188';
     address.setAttribute('aria-label', 'Adresse de ComfyUI');
     const save = button('Enregistrer', async () => {
       try {
         const result = await run(async signal =>
-          (await api('generation/comfy', { enabled: use.checked, baseUrl: address.value.trim() }, { signal })).json(),
+          (
+            await api(
+              'generation/comfy',
+              {
+                enabled: use.checked,
+                baseUrl: address.value.trim(),
+                own: kept.filter(item => item.check.checked).map(item => item.family),
+              },
+              { signal },
+            )
+          ).json(),
         );
         if (result) apply(result, { settings: false });
       } catch (failure) {
@@ -322,7 +341,7 @@ export function setupNativeWorkflows(options) {
     for (const control of [use, address, save]) control.dataset.nativeControl = 'true';
     const row = node('div', 'path-input');
     row.append(address, save);
-    panel.append(toggle, status, row);
+    panel.append(toggle, status, row, ...kept.map(item => item.label));
     return panel;
   }
   function workflowCard(record) {

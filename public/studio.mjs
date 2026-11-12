@@ -546,9 +546,7 @@ export function setupStudio({
       section.append(card);
     });
     if (!info.styles.length)
-      section.append(
-        node('small', 'field-help', 'Aucun LoRA listé : ComfyUI est arrêté ou son dossier loras est vide.'),
-      );
+      section.append(node('small', 'field-help', 'Aucun LoRA listé : le dossier loras est vide.'));
     else if (draft.styles.length < MAX_STYLES)
       section.append(
         button(

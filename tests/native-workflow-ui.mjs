@@ -768,7 +768,7 @@ test('workflows are listed by engine: the built-in one, then ComfyUI with its ad
   await panel.children.at(-1).children.at(-1).onclick();
   assert.deepEqual(f.calls.at(-1), {
     route: 'generation/comfy',
-    body: { enabled: true, baseUrl: 'http://127.0.0.1:7821' },
+    body: { enabled: true, baseUrl: 'http://127.0.0.1:7821', own: [] },
   });
 });
 
