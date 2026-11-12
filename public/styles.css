@@ -270,7 +270,7 @@ button svg {
   height: 18px;
 }
 .quant-tag {
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 0.7px;
   background: var(--surface-raised);
   color: var(--muted);
@@ -285,7 +285,7 @@ button svg {
   text-overflow: ellipsis;
 }
 .model-card p {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin: 6px 0 16px;
   line-height: 1.5;
@@ -320,7 +320,7 @@ button svg {
   border-radius: 6px;
   background: none;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
   margin-top: 10px;
   padding: 7px 0;
@@ -355,7 +355,7 @@ button svg {
   background: var(--surface);
   border: 1px solid var(--line);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   border-radius: 7px;
   padding: 8px 11px;
 }
@@ -452,13 +452,13 @@ button svg {
 .suggestions strong {
   display: block;
   font-weight: 550;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--ink);
   margin-bottom: 6px;
 }
 .suggestions span {
   display: block;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--muted);
 }
@@ -554,7 +554,7 @@ button svg {
 .reasoning summary {
   cursor: pointer;
   margin-bottom: 6px;
-  font-size: 11px;
+  font-size: 12px;
   user-select: none;
 }
 .reasoning-content {
@@ -564,7 +564,7 @@ button svg {
   overflow: auto;
 }
 .message-note {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 10px;
 }
@@ -597,7 +597,7 @@ button svg {
   border-radius: 7px;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .message-action:hover {
   background: var(--hover);
@@ -710,7 +710,7 @@ button svg {
   border-radius: 6px;
   padding: 5px 8px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 .thinking-button[aria-pressed='false'] {
   background: transparent;
@@ -725,7 +725,7 @@ button svg {
   gap: 13px;
 }
 .compose-state {
-  font-size: 9px;
+  font-size: 12px;
   color: var(--muted);
 }
 .send-button {
@@ -807,7 +807,7 @@ button svg {
   border-radius: 6px;
   background: rgb(0 0 0 / 0.62);
   color: #fff;
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.5;
   white-space: nowrap;
 }
@@ -930,7 +930,7 @@ fieldset {
 }
 
 .field-tag {
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--muted);
   margin-left: auto;
@@ -943,7 +943,7 @@ fieldset {
   border-radius: 7px;
   width: 100%;
   padding: 11px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink);
   min-height: 40px;
 }
@@ -956,7 +956,7 @@ fieldset {
   background: var(--surface-raised);
 }
 .field-group p {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--muted);
   margin: 7px 0 0;
@@ -988,7 +988,7 @@ fieldset {
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 6px;
 }
@@ -997,7 +997,7 @@ fieldset {
   border: 0;
   color: var(--danger);
   padding: 3px;
-  font-size: 11px;
+  font-size: 12px;
   margin-left: auto;
 }
 .logs-panel {
@@ -1009,7 +1009,7 @@ fieldset {
 .logs-panel summary {
   cursor: pointer;
   padding: 11px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .logs-panel pre {
@@ -1034,7 +1034,7 @@ fieldset {
   padding-top: 13px;
 }
 .settings-footer button {
-  font-size: 11px;
+  font-size: 12px;
 }
 .settings-footer svg {
   width: 14px;
@@ -1086,7 +1086,7 @@ fieldset {
     height: 28px;
   }
   .new-chat {
-    font-size: 11px;
+    font-size: 12px;
     padding: 9px;
     gap: 5px;
   }
@@ -1120,10 +1120,10 @@ fieldset {
     min-height: 105px;
   }
   .suggestions strong {
-    font-size: 10px;
+    font-size: 12px;
   }
   .suggestions span {
-    font-size: 8px;
+    font-size: 12px;
   }
   .composer-region {
     padding: 0 20px 14px;
@@ -1162,7 +1162,7 @@ fieldset {
     height: 16px;
   }
   .suggestions span {
-    font-size: 8px;
+    font-size: 12px;
   }
   .composer-region {
     padding: 0 13px 13px;
@@ -1191,7 +1191,7 @@ fieldset {
     gap: 8px;
   }
   .settings-footer button {
-    font-size: 10px;
+    font-size: 12px;
     padding: 10px;
   }
   .message-images img {
@@ -1381,14 +1381,14 @@ fieldset {
   border-color: var(--line);
 }
 .history-item span {
-  font-size: 11px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   width: 100%;
 }
 .history-item small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -1410,7 +1410,7 @@ fieldset {
 }
 .history-settings p {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.7;
 }
 .history-mobile {
@@ -1441,7 +1441,7 @@ fieldset {
   color: var(--danger);
   border-radius: 7px;
   padding: 8px 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .history-clear-button:hover:enabled {
   background: var(--danger-bg);
@@ -1476,7 +1476,7 @@ fieldset {
   margin-top: 24px;
 }
 .history-delete-actions .secondary {
-  font-size: 11px;
+  font-size: 12px;
   min-height: 36px;
   padding: 8px 12px;
 }
@@ -1497,7 +1497,7 @@ fieldset {
 }
 .gallery header span,
 .gallery small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .gallery-card {
@@ -1517,7 +1517,7 @@ fieldset {
   margin-top: 10px;
 }
 .gallery-card p {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
   max-height: 100px;
   overflow: auto;
@@ -1529,13 +1529,13 @@ fieldset {
   margin-top: 10px;
 }
 .gallery-actions button {
-  font-size: 10px;
+  font-size: 12px;
   padding: 7px;
   min-height: 32px;
 }
 
 .field-help {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--muted);
 }
@@ -1653,7 +1653,7 @@ fieldset {
 .gallery-review {
   margin-top: 10px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .gallery-review summary {
   cursor: pointer;
@@ -1672,7 +1672,7 @@ fieldset {
   flex: 1;
 }
 .path-input button {
-  font-size: 10px;
+  font-size: 12px;
   flex-shrink: 0;
   padding: 8px 12px;
 }
@@ -1700,7 +1700,7 @@ fieldset {
   font-weight: 550;
 }
 .iteration-setting p {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--muted);
   margin: 7px 0 15px;
@@ -1768,7 +1768,7 @@ fieldset {
   border-color: var(--accent);
 }
 .iteration-caption {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin-left: 3px;
 }
@@ -1804,7 +1804,7 @@ fieldset {
   overflow-wrap: anywhere;
 }
 .workflow-card .text-button {
-  font-size: 10px;
+  font-size: 12px;
 }
 .workflow-description,
 .field-group textarea {
@@ -1816,7 +1816,7 @@ fieldset {
   border-radius: 7px;
   background: var(--bg);
   color: var(--ink);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
   padding: 9px;
   min-height: 65px;
@@ -1832,7 +1832,7 @@ fieldset {
   }
   .path-input button {
     padding: 8px;
-    font-size: 9px;
+    font-size: 12px;
   }
 
   .workflow-heading {
@@ -1855,11 +1855,11 @@ fieldset {
   flex: 1;
   justify-content: center;
   padding: 8px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .sidebar-actions .theme-button {
   min-width: 68px;
-  font-size: 10px;
+  font-size: 12px;
   padding: 8px;
 }
 .sidebar-actions .mobile-new {
@@ -2040,7 +2040,7 @@ fieldset {
   display: flex;
   justify-content: space-between;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   margin-top: 13px;
   font-variant-numeric: tabular-nums;
 }
@@ -2052,7 +2052,7 @@ fieldset {
     display: inline;
   }
   .sidebar-actions .settings-button {
-    font-size: 9px;
+    font-size: 12px;
     padding: 8px 6px;
   }
   .sidebar-actions .theme-button {
@@ -2111,13 +2111,13 @@ fieldset {
     display: none;
   }
   .sidebar-bottom .model-card strong {
-    font-size: 10px;
+    font-size: 12px;
     white-space: nowrap;
   }
   .sidebar-bottom .engine-action {
     margin-top: 5px;
     padding: 3px 0;
-    font-size: 10px;
+    font-size: 12px;
   }
   .sidebar-actions {
     margin-top: 8px;
@@ -2127,12 +2127,12 @@ fieldset {
     display: inline;
   }
   .sidebar-actions .settings-button {
-    font-size: 9px;
+    font-size: 12px;
     padding: 7px 5px;
   }
   .sidebar-actions .theme-button {
     min-width: 51px;
-    font-size: 9px;
+    font-size: 12px;
     padding: 7px 5px;
   }
   .sidebar-actions .theme-button svg,
@@ -2159,10 +2159,10 @@ fieldset {
     min-height: 94px;
   }
   .composer-region .suggestions strong {
-    font-size: 10px;
+    font-size: 12px;
   }
   .composer-region .suggestions span {
-    font-size: 8px;
+    font-size: 12px;
   }
   #settings {
     max-width: calc(100% - 20px);
@@ -2605,7 +2605,7 @@ dialog::backdrop {
 @media (max-width: 850px) {
   .sidebar-actions .settings-button {
     padding: 11px 9px;
-    font-size: 11px;
+    font-size: 12px;
     gap: 7px;
   }
 }
@@ -2613,7 +2613,7 @@ dialog::backdrop {
   .sidebar-actions .settings-button {
     min-height: 40px;
     padding: 9px 7px;
-    font-size: 11px;
+    font-size: 12px;
     gap: 6px;
   }
   .sidebar-actions .settings-button svg {
@@ -2783,7 +2783,7 @@ dialog::backdrop {
   background: none;
   border: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .settings-footer .app-shutdown:hover:enabled {
   color: var(--danger);
@@ -2820,6 +2820,24 @@ dialog::backdrop {
 .context-meter[data-warning='full'] .context-track::before {
   background: var(--danger);
 }
+/* The share of the context in use, in figures: the bar alone was too small to be read. */
+.context-figure {
+  margin-left: 8px;
+  font-size: 12px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.context-figure:empty {
+  display: none;
+}
+.context-meter[data-warning='near'] .context-figure {
+  color: var(--warning);
+}
+.context-meter[data-warning='full'] .context-figure {
+  color: var(--danger);
+}
 #settings-unsaved {
   position: fixed;
   inset: 0;
@@ -2853,7 +2871,7 @@ dialog::backdrop {
   gap: 8px;
 }
 .unsaved-actions button {
-  font-size: 11px;
+  font-size: 12px;
   min-height: 36px;
   padding: 8px 10px;
 }
@@ -3072,7 +3090,7 @@ dialog::backdrop {
   border-radius: 11px;
   padding: 17px 10px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
   cursor: pointer;
   background: var(--surface);
@@ -3084,7 +3102,7 @@ dialog::backdrop {
   font-size: 12px;
 }
 .resource-drop small {
-  font-size: 9px;
+  font-size: 12px;
 }
 .assets-panel.dragging {
   outline: 2px solid var(--accent);
@@ -3098,7 +3116,7 @@ dialog::backdrop {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   line-height: 1.5;
   margin: 10px 0;
@@ -3108,11 +3126,11 @@ dialog::backdrop {
   overflow-wrap: anywhere;
 }
 .resource-status button {
-  font-size: 10px;
+  font-size: 12px;
 }
 #resource-count {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   margin: 12px 1px;
 }
 .resources-grid {
@@ -3164,14 +3182,14 @@ dialog::backdrop {
   border-radius: 4px;
   background: #000b;
   color: #fff;
-  font-size: 9px;
+  font-size: 12px;
 }
 .resource-name {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   margin: 9px 1px 7px;
 }
@@ -3179,7 +3197,7 @@ dialog::backdrop {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin: 0 0 8px;
 }
@@ -3202,7 +3220,7 @@ dialog::backdrop {
   color: var(--ink);
   font-family: inherit;
   line-height: 1.6;
-  font-size: 10px;
+  font-size: 12px;
 }
 .resource-description::placeholder {
   color: var(--muted);
@@ -3231,13 +3249,13 @@ dialog::backdrop {
 }
 .asset-empty {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.8;
   padding: 20px 7px;
   text-align: center;
 }
 .resource-help {
-  font-size: 9px;
+  font-size: 12px;
   color: var(--muted);
   line-height: 1.7;
   margin: 13px 1px 2px;
@@ -3261,12 +3279,12 @@ dialog::backdrop {
   cursor: zoom-in;
 }
 .assets-panel .gallery-card strong {
-  font-size: 11px;
+  font-size: 12px;
   overflow-wrap: anywhere;
   margin-top: 10px;
 }
 .output-prompt {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.65;
   color: var(--muted);
   margin: 8px 0;
@@ -3301,7 +3319,7 @@ dialog::backdrop {
 }
 .assets-panel .gallery-actions button {
   flex: 1;
-  font-size: 10px;
+  font-size: 12px;
   padding: 7px;
   min-height: 32px;
   border-radius: 7px;
@@ -3366,7 +3384,7 @@ dialog::backdrop {
   margin: 0;
 }
 #media-metadata dt {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   margin: 14px 0 6px;
   font-weight: 550;
@@ -3383,7 +3401,7 @@ dialog::backdrop {
   color: var(--ink);
 }
 #media-error {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--warning);
   line-height: 1.7;
 }
@@ -3392,7 +3410,7 @@ dialog::backdrop {
 }
 #media-download {
   margin-top: 18px;
-  font-size: 11px;
+  font-size: 12px;
 }
 @media (max-width: 1200px) {
   .assets-panel {
@@ -3662,7 +3680,7 @@ dialog::backdrop {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--muted);
   padding: 7px 1px 0;
@@ -3792,7 +3810,7 @@ html[data-page-hidden='true'] .generation-frame::after,
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
@@ -4038,7 +4056,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 }
 .model-library-row button {
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 .model-library-row svg {
@@ -4052,7 +4070,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 .model-paths > summary {
   padding: 14px 0 0;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .model-paths[open] > summary {
@@ -4065,7 +4083,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   margin-top: 16px;
 }
 .llm-editor-actions button {
-  font-size: 11px;
+  font-size: 12px;
   min-height: 36px;
 }
 .preference-row {
@@ -4125,7 +4143,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 }
 .settings-hint {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   margin: 9px 0 0;
 }
 @media (max-width: 640px) {
@@ -4217,7 +4235,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   font-size: 13px;
 }
 .workflow-settings .secondary {
-  font-size: 11px;
+  font-size: 12px;
   min-height: 38px;
 }
 .workflow-heading svg {
@@ -4259,7 +4277,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 11px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink);
   min-height: 40px;
 }
@@ -4319,8 +4337,9 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 }
 .workflow-settings .workflow-card-title {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 2px 8px;
   min-width: 0;
 }
 .workflow-settings .workflow-card-title strong {
@@ -4356,7 +4375,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   margin: 0;
 }
 .native-status {
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
   padding: 4px 8px;
   flex-shrink: 0;
@@ -4405,7 +4424,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 #native-source-settings .field-group label {
   overflow-wrap: anywhere;
   font-weight: 400;
-  font-size: 11px;
+  font-size: 12px;
 }
 .native-source-value {
   font:
@@ -4478,7 +4497,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   margin-bottom: 20px;
 }
 .native-count {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--muted);
   margin-left: 6px;
@@ -4526,7 +4545,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   margin: 0 !important;
 }
 .native-parameter .history-toggle {
-  font-size: 11px !important;
+  font-size: 12px !important;
   color: var(--muted);
 }
 .native-policy-bounds {
@@ -4538,7 +4557,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   margin: 0;
 }
 .native-policy-bounds label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .native-parameter > input {
@@ -4549,7 +4568,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   padding: 11px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .native-policy-switch {
   display: flex;
@@ -4567,7 +4586,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   min-height: 32px;
   padding: 7px 12px;
   flex: 1;
@@ -4597,7 +4616,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 11px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink);
   min-height: 42px;
 }
@@ -4606,14 +4625,14 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--ink);
-  font-size: 11px;
+  font-size: 12px;
   padding: 11px;
 }
 .native-asset-picker .path-input input::placeholder {
   color: var(--muted);
 }
 .native-manual-path > summary {
-  font-size: 10px;
+  font-size: 12px;
 }
 .native-manual-path[open] > summary {
   margin-bottom: 10px;
@@ -4625,7 +4644,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 }
 .native-asset-choices .history-toggle {
   margin: 0;
-  font-size: 11px !important;
+  font-size: 12px !important;
   overflow-wrap: anywhere;
 }
 .native-asset-choices .history-toggle span {
@@ -4648,7 +4667,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   flex-wrap: wrap;
 }
 .native-unsaved button {
-  font-size: 11px;
+  font-size: 12px;
   min-height: 38px;
   padding: 9px 12px;
 }
@@ -4667,7 +4686,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 }
 .native-add {
   margin-top: 18px;
-  font-size: 11px;
+  font-size: 12px;
   min-height: 38px;
 }
 .native-parameter input[type='checkbox'] {
@@ -4760,7 +4779,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 .proposal-field > .field-help {
   grid-column: 1 / -1;
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .proposal-input-name {
@@ -4972,7 +4991,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-raised) 70%, transparent);
   color: var(--ink);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 560;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -5021,7 +5040,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 .assets-panel .output-action {
   min-height: 30px;
   padding: 5px 8px;
-  font-size: 10.5px;
+  font-size: 12px;
 }
 .generation-card .output-actions {
   margin: 10px 0 2px;
@@ -5097,7 +5116,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   top: 10px;
   padding: 3px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: #fff;
@@ -5138,7 +5157,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 .workflow-settings .native-card-actions button {
   min-height: 30px;
   padding: 5px 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* Compact settings: the same content, tighter spacing and smaller controls, so most of a section

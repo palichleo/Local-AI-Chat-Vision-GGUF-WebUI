@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setupSettingsGuard } from '../public/settings-guard.mjs';
 import { setupCopy } from '../public/copy.mjs';
-import { contextBudget, setupContextMeter } from '../public/context-meter.mjs';
+import { contextBudget, contextFigure, setupContextMeter } from '../public/context-meter.mjs';
 import { countContext } from '../lib/context-count.mjs';
 import { createApplication } from '../server.mjs';
 function element() {
@@ -198,7 +198,32 @@ test('context gauge fills only with used tokens, regardless of response reservat
   assert.equal(unknown.warning, '');
 });
 
-test('the context meter ignores stale counts and exposes all details only through its tooltip and accessibility', async () => {
+test('the context gauge writes its share in figures beside the bar', () => {
+  const figure = (used, precision = 'exact') => contextFigure(contextBudget({ used, capacity: 10000, precision }));
+  assert.equal(figure(0), '0 %');
+  // Something is used: never « 0 % ».
+  assert.equal(figure(40), '< 1 %');
+  assert.equal(figure(1249), '12 %');
+  assert.equal(figure(4000, 'estimated'), '≈ 40 %');
+  assert.equal(figure(6000, 'text-only'), '≥ 60 %');
+  assert.equal(figure(12000), '100 %');
+  // Not counted (engine stopped): no figure rather than a wrong one.
+  assert.equal(figure(null), '');
+});
+
+test('no text of the interface is smaller than 12 px', async () => {
+  for (const sheet of ['styles.css', 'workspace.css']) {
+    const css = await readFile(new URL('../public/' + sheet, import.meta.url), 'utf8');
+    const small = [...css.matchAll(/font-size:\s*(?:clamp\()?([\d.]+)px/g)].filter(([, size]) => Number(size) < 12);
+    assert.deepEqual(
+      small.map(([found]) => found),
+      [],
+      sheet,
+    );
+  }
+});
+
+test('the context meter ignores stale counts; its details are in its tooltip, its share beside the bar', async () => {
   const nodes = new Map(),
     $ = id => {
       if (!nodes.has(id)) nodes.set(id, element());
@@ -226,7 +251,7 @@ test('the context meter ignores stale counts and exposes all details only throug
   assert.match($('context-meter').title, /≥.*6/);
   assert.equal($('context-meter').dataset.warning, '');
   assert.equal($('context-meter').attributes['aria-valuenow'], '6000');
-  assert.equal($('context-meter').textContent, '');
+  assert.equal($('context-figure').textContent, '≥ 73 %');
   calls[0].resolve(Response.json({ used: 1, precision: 'exact' }));
   await tick();
   assert.match($('context-meter').title, /6/);
