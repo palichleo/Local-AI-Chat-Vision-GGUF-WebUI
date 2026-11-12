@@ -278,3 +278,44 @@ test('Atelier’s own models directory holds the folders of ComfyUI, and files l
   assert.equal(await picked('textEncoder'), 'qwen3.5_9b_w4a8.safetensors');
   assert.equal(await picked('model'), 'moss.safetensors');
 });
+
+test('a library moved to another place is found again under the same names, without choosing each file anew', async t => {
+  const root = await directory(t),
+    before = join(root, 'SwarmUI', 'models'),
+    after = join(root, 'Comfy-Desktop', 'models');
+  await mkdir(join(before, 'upscale_models'), { recursive: true });
+  await mkdir(join(before, 'vae'), { recursive: true });
+  // A pickled upscaler, which nothing but its name tells from another, and a VAE.
+  const upscaler = join(before, 'upscale_models', 'RealESRGAN_x4plus.pth'),
+    vae = await checkpoint(join(before, 'vae', 'flux2-vae.safetensors'), MOSS.vae);
+  await writeFile(upscaler, Buffer.alloc(64));
+  let models = before;
+  const assets = new GenerationAssets(join(root, 'assets.json'), {
+    roots: () => [join(models, 'upscale_models'), join(models, 'vae')],
+    folder: (family, kind) => (kind === 'vae' ? join(models, 'vae') : join(models, 'upscale_models')),
+  });
+  const chosen = {
+    upscaler: await assets.register({ path: upscaler, kind: 'upscaler', family: 'realesrgan_image' }),
+    vae: await assets.register({ path: vae, kind: 'vae', family: 'moss' }),
+  };
+
+  // The whole library goes to another installation; the settings follow with one path.
+  await mkdir(join(root, 'Comfy-Desktop'));
+  const { rename } = await import('node:fs/promises');
+  await rename(before, after);
+  await assert.rejects(
+    assets.resolve(chosen.vae.id, { kind: 'vae', family: 'moss' }),
+    error => error.code === 'ENOENT',
+  );
+  models = after;
+  for (const [kind, family] of [
+    ['upscaler', 'realesrgan_image'],
+    ['vae', 'moss'],
+  ]) {
+    const found = await assets.resolve(chosen[kind].id, { kind, family });
+    assert.equal(found.path.startsWith(after), true, found.path);
+    assert.equal(basename(found.path), basename(chosen[kind].path));
+    assert.equal(found.id, chosen[kind].id);
+    assert.equal(found.automatic, true);
+  }
+});
