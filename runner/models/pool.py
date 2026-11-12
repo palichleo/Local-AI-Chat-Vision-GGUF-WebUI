@@ -51,6 +51,12 @@ class WeightPool:
         self.order = []
         self.host = {}
         self.adapters = adapters
+        # The LoRAs of each layer: which ones (`adapted`, said by the layer when it is built),
+        # and their matrices once on the GPU (`merged`), where they stay.
+        self.adapted = {}
+        self.merged = {}
+        self.merged_bytes = 0
+        self.device = 'cuda'
         # What streaming costs: `first` is the first copy of each tensor, whose pages come from
         # the disk or the file cache (timed); `again` is every later copy, from RAM.
         self.stats = dict(first_gib=0.0, first_seconds=0.0, again_gib=0.0)
@@ -105,6 +111,30 @@ class WeightPool:
                 self.recent_bytes -= self.recent.pop(next(iter(self.recent)))[1]
         return result
 
+    def adapter(self, location, adapters, dtype=None):
+        """The LoRAs of one layer as a single pair (down, up), on the GPU for good.
+
+        Their down matrices are stacked and their up matrices set side by side, each scaled by
+        its strength: the layer then pays two small products whatever the number of LoRAs,
+        instead of two per LoRA with their matrices copied from RAM at every step (three LoRAs
+        cost a Krea 2 step 0.77 s that way, more than ComfyUI's patched weights).
+        """
+        found = self.merged.get(location)
+        if found is None:
+            torch = self.torch
+            dtype = dtype or torch.bfloat16
+            downs, ups = [], []
+            for source, key, strength in adapters:
+                store = self.stores[source]
+                downs.append(store.get_tensor(key + '.lora_A.weight').to(self.device, dtype=dtype))
+                ups.append(store.get_tensor(key + '.lora_B.weight').to(self.device, dtype=dtype) * strength)
+            found = (torch.cat(downs, dim=0), torch.cat(ups, dim=1))
+            size = sum(value.numel() * value.element_size() for value in found)
+            self.merged[location] = found
+            self.merged_bytes += size
+            self.bytes += size
+        return found
+
     def preload(self):
         """Fill the GPU share now, in layer order, before the model runs.
 
@@ -112,6 +142,9 @@ class WeightPool:
         tensors of the first step: PyTorch then held up to 2 GiB of video memory it could not
         reuse, enough to push a 12 GiB card past its own memory.
         """
+        # The LoRAs first: they are small and every step needs them; the model takes what is left.
+        for location, adapters in self.adapted.items():
+            self.adapter(location, adapters)
         for location in self.order:
             self.bundle(location)
             if location not in self.gpu:
@@ -124,7 +157,7 @@ class WeightPool:
         self.torch.cuda.synchronize()
         self.gpu.clear()
         self.recent.clear()
-        self.bytes = self.recent_bytes = 0
+        self.bytes, self.recent_bytes = self.merged_bytes, 0
         self.torch.cuda.empty_cache()
         self.limit = int(limit_gib * 1024**3)
         if self.limit:
@@ -135,7 +168,8 @@ class WeightPool:
         self.gpu.clear()
         self.recent.clear()
         self.host.clear()
-        self.bytes = self.recent_bytes = 0
+        self.merged.clear()
+        self.bytes = self.recent_bytes = self.merged_bytes = 0
 
 
 def load_streamed(model, names, pool):
@@ -171,6 +205,9 @@ def load_streamed(model, names, pool):
                             self.adapters.append((source, key, strength * alpha))
                             break
 
+            if self.adapters:
+                pool.adapted[self.location] = self.adapters
+
         def forward(self, value):
             bundle = pool.bundle(self.location)
             if bundle['weight'].dtype == torch.int8:
@@ -190,10 +227,9 @@ def load_streamed(model, names, pool):
                 if 'scale' in bundle:
                     weight = weight * bundle['scale'].to(value.dtype)
                 result = F.linear(value, weight, None if bias is None else bias.to(value.dtype))
-            for source, key, strength in self.adapters:
-                a = pool.bundle((source, key + '.lora_A.weight', None))['weight'].to(value.dtype)
-                b = pool.bundle((source, key + '.lora_B.weight', None))['weight'].to(value.dtype)
-                result = result + F.linear(F.linear(value, a), b) * strength
+            if self.adapters:
+                down, up = pool.adapter(self.location, self.adapters, value.dtype)
+                result = result + F.linear(F.linear(value, down), up)
             return result
 
     class Embedding(torch.nn.Module):

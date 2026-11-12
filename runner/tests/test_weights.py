@@ -73,6 +73,54 @@ class WeightPoolTest(unittest.TestCase):
         self.assertEqual((pool.recent, pool.recent_bytes, pool.gpu), ({}, 0, {}))
 
 
+class MergedAdaptersTest(unittest.TestCase):
+    def test_the_loras_of_a_layer_are_one_pair_of_matrices_that_stays_on_the_gpu(self):
+        try:
+            import torch
+            import torch.nn.functional as F
+        except ImportError:
+            self.skipTest('torch is required')
+        from runner.models import pool as module
+
+        torch.manual_seed(0)
+        # Three LoRAs of different ranks on one layer of 12 inputs and 8 outputs.
+        ranks, strengths = (2, 4, 3), (1.0, 0.5, 1.4)
+        tensors, adapters = {}, []
+        for index, (rank, strength) in enumerate(zip(ranks, strengths)):
+            key = f'lora{index}.layer'
+            tensors[key + '.lora_A.weight'] = torch.randn(rank, 12)
+            tensors[key + '.lora_B.weight'] = torch.randn(8, rank)
+            adapters.append(('loras', key, strength))
+        reads = []
+
+        class Loras:
+            def get_tensor(self, key):
+                reads.append(key)
+                return tensors[key]
+
+        with patch.dict(sys.modules, comfy_kitchen=SimpleNamespace()):
+            pool = module.WeightPool({'loras': Loras()}, 0)
+        pool.device = 'cpu'
+        location = ('model', 'layer.weight', None)
+        down, up = pool.adapter(location, adapters, torch.float32)
+        self.assertEqual((tuple(down.shape), tuple(up.shape)), ((9, 12), (8, 9)))
+        # The same sum as each LoRA applied in turn with its strength.
+        value = torch.randn(5, 12)
+        expected = sum(
+            F.linear(F.linear(value, tensors[key + '.lora_A.weight']), tensors[key + '.lora_B.weight']) * strength
+            for _, key, strength in adapters
+        )
+        self.assertTrue(torch.allclose(F.linear(F.linear(value, down), up), expected, atol=1e-5))
+        # Read once: the next step finds the pair where it is, and it counts in what the GPU holds.
+        self.assertIs(pool.adapter(location, adapters, torch.float32)[0], down)
+        self.assertEqual(len(reads), 6)
+        self.assertEqual(pool.bytes, (9 * 12 + 8 * 9) * 4)
+        self.assertEqual(pool.merged_bytes, pool.bytes)
+        pool.torch = SimpleNamespace(cuda=SimpleNamespace(synchronize=lambda: None))
+        pool.clear()
+        self.assertEqual((pool.merged, pool.bytes, pool.merged_bytes), ({}, 0, 0))
+
+
 class RoomTest(unittest.TestCase):
     def test_the_gpu_share_follows_what_the_card_has_free(self):
         from runner.models import pool as module
