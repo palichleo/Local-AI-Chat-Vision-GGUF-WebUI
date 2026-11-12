@@ -22,8 +22,12 @@ from collections import OrderedDict
 
 GiB = 1024**3
 RESERVE = 12 * GiB  # never let arenas push free RAM below this
-PIN_SHARE = 0.5  # never page-lock more than half the physical RAM
+# Never page-lock more than this share of the physical RAM. On Windows, locked memory is mapped
+# into the GPU's shared memory, half the RAM at most: 15.9 of 31.8 GiB locked left the driver
+# nothing (« CUDA error: out of memory » at the first copy), 14.5 GiB ran well.
+PIN_SHARE = 0.45
 MIN_PINNED = 1024**2  # nor a buffer this small
+PAGE = 4096  # where a partial arena's tensors start (see Residency.partial, _pin)
 CHUNK = 64 * 1024**2
 
 _DTYPES = {
@@ -167,23 +171,33 @@ class Residency:
                 return found
             if found:
                 self._discard(self.arenas.pop(name))
+            first = set(keys)
             wanted |= set(spare)
             header, base = _header(path)
-            ordered = sorted((header[key]['data_offsets'][0], key) for key in wanted if key in header)
-            packed, size = {}, 0
-            for _, key in ordered:
+            # What is asked for now comes first, what is held to spare after: when RAM allows to
+            # lock only a part of the arena (see _pin), the part locked is the one in use.
+            ordered = sorted((key not in first, header[key]['data_offsets'][0], key) for key in wanted if key in header)
+            packed, size, cuts = {}, 0, []
+            for _, _, key in ordered:
                 start, end = header[key]['data_offsets']
-                size = -(-size // 64) * 64  # every tensor starts aligned, whatever came before
+                # Every tensor starts on a page of its own: the arena can be locked up to any of
+                # them without a page shared by locked and unlocked tensors.
+                size = -(-size // PAGE) * PAGE
+                cuts.append(size)
                 packed[key] = dict(header[key], data_offsets=[size, size + end - start])
                 size += end - start
+            cuts.append(size)
             if not size or not self._make_room(size, reserve, True):
                 self.stats['skipped'] += 1
                 return None
             started = time.perf_counter()
-            data = torch.empty(size, dtype=torch.uint8)
+            # Starting on a page boundary, so that its tensors do too (torch aligns on 64 bytes).
+            block = torch.empty(size + PAGE, dtype=torch.uint8)
+            skip = -block.data_ptr() % PAGE
+            data = block[skip : skip + size]
             view = memoryview(data.numpy())
             with open(path, 'rb', buffering=0) as handle:
-                for _, key in ordered:
+                for _, _, key in ordered:
                     start, end = header[key]['data_offsets']
                     to = packed[key]['data_offsets'][0]
                     handle.seek(base + start)
@@ -193,7 +207,7 @@ class Residency:
                         if not read:
                             raise OSError('Unexpected end of ' + path)
                         done += read
-            arena = Arena(path, stamp, packed, base, data, self._pin(data))
+            arena = Arena(path, stamp, packed, base, data, self._pin(data, cuts))
             arena.keys = frozenset(packed)
             self.arenas[name] = arena
             self.stats['loads'] += 1
@@ -251,7 +265,10 @@ class Residency:
             if not arena.users and gone and getattr(arena, 'data', None) is not None:
                 arena.release()
 
-    def _pin(self, data):
+    def _pin(self, data, cuts=()):
+        """Page-lock `data`, or the part of it that the share of RAM allowed still holds: up to
+        the last of `cuts` (offsets where a tensor starts on a page of its own) under that share.
+        Returns the bytes locked, 0 for none."""
         import torch
 
         try:
@@ -260,14 +277,21 @@ class Residency:
             # A buffer smaller than a few pages shares its pages with other allocations: locking
             # it gains nothing, and two of them on one page confuse the driver's bookkeeping
             # (a later copy from that page then fails with « Copy is larger than memobj size »).
-            if data.numel() < MIN_PINNED:
-                return False
-            pinned = sum(arena.size for arena in self.arenas.values() if arena.pinned)
-            if not torch.cuda.is_available() or pinned + data.numel() > psutil.virtual_memory().total * PIN_SHARE:
-                return False
-            return torch.cuda.cudart().cudaHostRegister(data.data_ptr(), data.numel(), 0) == 0
+            if data.numel() < MIN_PINNED or not torch.cuda.is_available():
+                return 0
+            room = psutil.virtual_memory().total * PIN_SHARE - sum(int(arena.pinned) for arena in self.arenas.values())
+            length = data.numel()
+            if length > room:
+                # Measured: 18.9 GiB asked at 1344 x 768, 15.9 allowed; all of it then stayed
+                # unlocked. A part is locked instead, cut between two tensors on a page boundary.
+                if data.data_ptr() % PAGE:
+                    return 0
+                length = max((cut for cut in cuts if cut <= room), default=0)
+                if length < MIN_PINNED:
+                    return 0
+            return length if torch.cuda.cudart().cudaHostRegister(data.data_ptr(), length, 0) == 0 else 0
         except Exception:
-            return False
+            return 0
 
     def resident_soon(self, path):
         """Whether `arena(path)` holds or will load this file: it is then read in sequence anyway."""
@@ -300,7 +324,7 @@ class Residency:
             **ram,
             load_seconds=round(self.stats['load_seconds'], 2),
             resident_gib=round(sum(arena.size for arena in self.arenas.values()) / GiB, 2),
-            pinned_gib=round(sum(arena.size for arena in self.arenas.values() if arena.pinned) / GiB, 2),
+            pinned_gib=round(sum(int(arena.pinned) for arena in self.arenas.values()) / GiB, 2),
             files=[os.path.basename(path) for path in self.arenas],
         )
 

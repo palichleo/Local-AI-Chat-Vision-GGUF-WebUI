@@ -48,6 +48,50 @@ class ResidencyTest(unittest.TestCase):
             residency.RESIDENCY.clear()
 
 
+class PartlyLockedArenaTest(unittest.TestCase):
+    def test_an_arena_larger_than_the_share_allowed_is_locked_up_to_a_tensor_boundary(self):
+        try:
+            import torch
+            import psutil
+            from safetensors.torch import save_file
+        except ImportError:
+            self.skipTest('torch, psutil and safetensors are required')
+        if not torch.cuda.is_available():
+            self.skipTest('no GPU')
+        from unittest.mock import patch
+
+        from runner.models import residency
+
+        megabyte = 1024**2
+        size = 3 * megabyte + 7
+        tensors = {f'layer{index}.weight': torch.randint(-127, 128, (size,), dtype=torch.int8) for index in range(4)}
+        tensors['small.scale'] = torch.randn(5)
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'model.safetensors')
+            save_file(tensors, path)
+            # Room for two of the four layers: those asked for first are the ones locked.
+            share = (2 * (3 * megabyte + 7) + 3 * residency.PAGE) / psutil.virtual_memory().total
+            store = residency.open_store(path, resident=False)
+            try:
+                with patch.object(residency, 'PIN_SHARE', share):
+                    store.keep(['layer2.weight', 'layer3.weight'], reserve=0, spare=['layer0.weight', 'layer1.weight'])
+                arena = store.part
+                self.assertGreater(arena.pinned, 2 * 3 * megabyte)
+                self.assertLess(arena.pinned, arena.size)
+                self.assertEqual(arena.pinned % residency.PAGE, 0)
+                self.assertEqual(arena.data.data_ptr() % residency.PAGE, 0)
+                locked = {key for key in arena.keys if arena.header[key]['data_offsets'][1] <= arena.pinned}
+                self.assertEqual(locked, {'layer2.weight', 'layer3.weight'})
+                # Every tensor, locked or not, copies to the GPU and reads back the same.
+                for key, value in tensors.items():
+                    copied = store.get_tensor(key).to('cuda', non_blocking=True)
+                    torch.cuda.synchronize()
+                    self.assertTrue(torch.equal(copied.cpu(), value), key)
+            finally:
+                store.close()
+                residency.RESIDENCY.clear()
+
+
 class PartialArenaTest(unittest.TestCase):
     def test_only_the_weights_asked_for_are_kept_in_ram_the_others_are_read_from_the_file(self):
         try:
@@ -75,7 +119,8 @@ class PartialArenaTest(unittest.TestCase):
                 asked = ['second.weight', 'second.weight_scale', 'third.weight', 'not in the file']
                 kept = store.keep(asked, reserve=0)
                 self.assertGreaterEqual(kept, 5 * 7 * 2 + 5 * 4 + 4 * 4)
-                self.assertLess(kept, os.path.getsize(path))
+                # At most a page of padding per tensor (each starts on a page of its own).
+                self.assertLessEqual(kept, 5 * 7 * 2 + 5 * 4 + 4 * 4 + 3 * residency.PAGE)
                 arena = store.part
                 self.assertEqual(arena.keys, {'second.weight', 'second.weight_scale', 'third.weight'})
                 # Every tensor reads the same wherever it comes from.
@@ -89,7 +134,7 @@ class PartialArenaTest(unittest.TestCase):
                 inside = lambda tensor: held <= tensor.data_ptr() < held + arena.size  # noqa: E731
                 self.assertTrue(inside(store.get_tensor('second.weight')))
                 self.assertFalse(inside(store.get_tensor('first.weight')))
-                self.assertTrue(all(arena.header[key]['data_offsets'][0] % 64 == 0 for key in arena.keys))
+                self.assertTrue(all(arena.header[key]["data_offsets"][0] % residency.PAGE == 0 for key in arena.keys))
                 # Asked again for a part of what is held (the next video): the same arena.
                 again = residency.open_store(path, resident=False)
                 again.keep(['third.weight'], reserve=0)

@@ -162,7 +162,9 @@ def _fill(model, tensors, dtype, skip=()):
                 continue
             raise ValueError('Missing MiniMax-H3 VAE tensor ' + name)
         target = torch.float32 if any(part in name.split('.') for part in keep) else dtype
-        set_module_tensor_to_device(model, name, 'cuda', value=tensors[name], dtype=target)
+        # Converted on the GPU: the processor took 1.5 s for the decoder's fp16 to bf16.
+        value = tensors[name].to('cuda', non_blocking=True).to(target)
+        set_module_tensor_to_device(model, name, 'cuda', value=value, dtype=target)
 
 
 def video_vae(path, part):
