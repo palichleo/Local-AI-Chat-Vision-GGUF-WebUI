@@ -656,8 +656,15 @@ async function studioPage(tools, routes = {}) {
       new Element(),
     ]),
   );
+  // What the page itself listens to: keys pressed with the focus on no field.
+  const pageKeys = [];
   const globals = {
-    document: { getElementById: id => page[id] ?? null, querySelector: () => null },
+    document: {
+      getElementById: id => page[id] ?? null,
+      querySelector: () => null,
+      body: {},
+      addEventListener: (type, listener) => type === 'keydown' && pageKeys.push(listener),
+    },
     Option: class {},
     ResizeObserver: undefined,
   };
@@ -705,6 +712,7 @@ async function studioPage(tools, routes = {}) {
     body: page['studio-body'],
     asked,
     notices,
+    pageKeys,
     restore: () => Object.assign(globalThis, before),
     /** Opens a mode by its place among the three banners. */
     mode: index => page['studio-modes'].children[index].onclick(),
@@ -781,7 +789,7 @@ test('Ctrl + Entrée generates from anywhere in a mode, and the button says so i
     settings: [],
     seeded: true,
   };
-  const { page, body, asked, restore, mode } = await studioPage(
+  const { page, body, asked, pageKeys, restore, mode } = await studioPage(
     { create_image: [image] },
     {
       'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
@@ -805,6 +813,21 @@ test('Ctrl + Entrée generates from anywhere in a mode, and the button says so i
     const [, sent] = asked.find(([route]) => route === 'tools/action');
     // What is typed is what is sent: no style line is added any more.
     assert.equal(sent.arguments.prompt, 'un phare');
+
+    // After a click beside the fields the focus is on none: the key reaches the page itself, and
+    // generates too, but only while the Studio is the view on screen.
+    const started = () => asked.filter(([route]) => route === 'tools/action').length,
+      onPage = () => pageKeys.forEach(listener => listener({ ...key(), target: document.body }));
+    assert.equal(started(), 1);
+    onPage();
+    assert.equal(started(), 1, 'the Studio is not on screen');
+    page['studio-view'].offsetParent = {};
+    onPage();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(started(), 2);
+    // A key pressed in a field of another view is not the Studio's.
+    pageKeys.forEach(listener => listener({ ...key(), target: {} }));
+    assert.equal(started(), 2);
   } finally {
     restore();
   }

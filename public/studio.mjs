@@ -1179,11 +1179,18 @@ export function setupStudio({ api, node, icon, notice, assets, viewOutput, waitF
   }
 
   // Ctrl + Entrée (⌘ on a Mac) generates from anywhere in an open mode, not only from the prompt.
-  $('studio-view').onkeydown = event => {
+  const shortcut = event => {
     if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || !mode || working || enriching) return;
     event.preventDefault();
     void generate();
   };
+  $('studio-view').onkeydown = shortcut;
+  // With the focus on no field (after a click beside them) the key goes to the page itself: it
+  // is taken there too, while the Studio is the view on screen and no window is open over it.
+  document.addEventListener?.('keydown', event => {
+    if (event.target !== document.body || $('studio-view').offsetParent == null) return;
+    if (!document.querySelector('dialog[open]')) shortcut(event);
+  });
   // The three choices: wide banners, each with the outline of what it makes.
   const banners = {};
   for (const item of MODES) {
