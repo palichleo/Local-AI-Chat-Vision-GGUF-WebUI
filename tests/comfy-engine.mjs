@@ -758,8 +758,12 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
     baseUrl: fake.baseUrl + '/',
     reachable: true,
     version: '',
-    // Krea 2 also runs on Atelier's own engine; nothing is kept there until the user says so.
-    choices: [{ family: 'krea2', label: 'Krea2' }],
+    // Krea 2 and MiniMax H3 also run on Atelier's own engine; nothing is kept there until the
+    // user says so.
+    choices: [
+      { family: 'krea2', label: 'Krea2' },
+      { family: 'minimax_h3', label: 'MiniMax H3' },
+    ],
     own: [],
   });
   assert.deepEqual(await available(), { ltx25: true, rife: true, krea2: true, minimax_h3: true, moss: true });
@@ -854,10 +858,11 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
   const stopped = await service.saveComfy({ enabled: true, baseUrl: 'http://127.0.0.1:9' });
   assert.equal(stopped.comfy.reachable, false);
   await assert.rejects(service.client().preflight(ltx()), /ComfyUI ne répond pas/);
-  // Krea 2 also runs on Atelier's engine: it goes there instead of waiting for ComfyUI.
+  // Krea 2 and MiniMax H3 also run on Atelier's engine: they go there instead of waiting for ComfyUI.
   calls.length = 0;
   await service.client().preflight(krea());
-  assert.deepEqual(calls, ['preflight']);
+  await service.client().preflight(h3());
+  assert.deepEqual(calls, ['preflight', 'preflight']);
   // Switched off: the address is kept, the families are ComfyUI's no more.
   const off = await service.saveComfy({ enabled: false, baseUrl: 'http://127.0.0.1:9' });
   assert.deepEqual([off.comfy.enabled, off.comfy.baseUrl], [false, 'http://127.0.0.1:9']);
