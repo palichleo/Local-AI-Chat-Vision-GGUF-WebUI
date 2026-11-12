@@ -101,3 +101,15 @@ test('under a message, only the last exchange can be taken back: nothing copies 
   );
   assert.doesNotMatch(actions, /clipboard|Copier/);
 });
+
+test('the interface names its places in French: Accueil, Fichiers, Créations, Jour and Nuit', async () => {
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(html, /id="home-open"[^>]*>.*?<span>Accueil<\/span>/);
+  assert.match(html, /id="all-files"[^>]*aria-label="Fichiers" title="Fichiers"/);
+  assert.match(html, /id="assets-output-tab"[^>]*>Créations</);
+  assert.match(app, /dark \? 'Jour' : 'Nuit'/);
+  // The English names they replace are gone from what the user reads.
+  assert.doesNotMatch(html, />Home<|All files|>Output</);
+  assert.doesNotMatch(app, /'Day'|'Night'/);
+});

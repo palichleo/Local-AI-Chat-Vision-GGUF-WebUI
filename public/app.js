@@ -468,7 +468,7 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = state.theme;
   const dark = state.theme === 'dark';
   const label = dark ? 'Passer en mode jour' : 'Passer en mode nuit';
-  $('theme-toggle').replaceChildren(icon(dark ? 'sun' : 'moon'), node('span', '', dark ? 'Day' : 'Night'));
+  $('theme-toggle').replaceChildren(icon(dark ? 'sun' : 'moon'), node('span', '', dark ? 'Jour' : 'Nuit'));
   $('theme-toggle').setAttribute('aria-label', label);
   $('theme-toggle').title = label;
 }
