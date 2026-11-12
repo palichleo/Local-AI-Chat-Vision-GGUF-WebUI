@@ -26,13 +26,20 @@ Open **http://127.0.0.1:8787** if the browser does not open by itself. Keep the 
 
 Weights are never downloaded or moved by the app, and Git ignores them. Each folder under `models/` contains a short placement guide.
 
-| Folder                  | Contents                                                                                           |
-| ----------------------- | -------------------------------------------------------------------------------------------------- |
-| `models/LLMs/<name>/`   | One chat GGUF per folder (the folder name becomes its display name), plus generation text encoders |
-| `models/vision/<name>/` | Matching `mmproj` vision projector for the chat model, plus generation projection files            |
-| `models/checkpoints/`   | Image and video generation models                                                                  |
-| `models/VAE/`           | Image, video and audio VAEs                                                                        |
-| `models/LoRa/`          | LoRAs                                                                                              |
+| Folder                          | Contents                                                            |
+| ------------------------------- | ------------------------------------------------------------------- |
+| `models/LLMs/<name>/`           | One chat GGUF per folder (the folder name becomes its display name) |
+| `models/vision/<name>/`         | Matching `mmproj` vision projector for the chat model               |
+| `models/diffusion_models/`      | Image and video generation models                                   |
+| `models/text_encoders/`         | Generation text encoders, and their tokenizer folders               |
+| `models/vae/`                   | Image, video and audio VAEs                                         |
+| `models/loras/`                 | LoRAs                                                               |
+| `models/upscale_models/`        | Image and video upscalers (Real-ESRGAN)                             |
+| `models/latent_upscale_models/` | Latent upscalers (LTX 2.5)                                          |
+| `models/frame_interpolation/`   | Frame interpolation models (RIFE)                                   |
+| `models/diffusers/`             | Model folders (ACE-Step, MOSS-SoundEffect)                          |
+
+The generation folders carry the names ComfyUI gives its own. **Configuration > Workflows > Dossier des modèles de génération** takes one path: leave it empty for this `models/` folder, or point it to the `models` folder of a ComfyUI, which is read the same way. A workflow that fixes no file for a component takes, in the folder of that kind, the file that fits its model, whatever its name; a file chosen in the workflow editor always comes first. Files left under the former names (`checkpoints`, `VAE`, `LoRa`, text encoders in `LLMs`) are still found.
 
 Open **Configuration** to pick the llama.cpp engine and the chat model. Detected folders are listed; **Ajouter un LLM** adds one by path. Use a model and chat template that support **native tool calls**: generation is only possible through real tool calls, never through text that imitates one. The engine starts with `--jinja`, in offline mode.
 

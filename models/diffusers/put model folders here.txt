@@ -1,0 +1,6 @@
+Put MODEL FOLDERS here, one folder per model (Hugging Face / diffusers layout):
+ACE-Step 1.5 (music), MOSS-SoundEffect (sound effects)...
+A model folder is found by its name, or chosen in the workflow editor.
+This folder has the same name as in ComfyUI: Configuration > Workflows > "Dossier des modèles de génération"
+can point to ComfyUI's own models folder instead, and both are read the same way.
+Weights are local only and ignored by Git.

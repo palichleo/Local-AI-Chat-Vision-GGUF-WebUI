@@ -1,5 +1,3 @@
-Put image and video GENERATION MODEL files here (.safetensors).
-Subfolders are allowed. This is the default checkpoint folder in Configuration > Workflows.
-You can choose another folder with Browse; files stay where they are.
-Select each file in the workflow editor. Compatibility is checked before it is registered.
+All-in-one checkpoints, as in ComfyUI. Atelier does not use any yet.
+Generation models (Krea 2, LTX 2.5, MiniMax H3...) go in models/diffusion_models; those already here are still found.
 Weights are local only and ignored by Git.

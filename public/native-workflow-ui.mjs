@@ -28,7 +28,10 @@ const labels = {
 };
 const choiceLabels = { draft: 'Brouillon', final: 'Vidéo finale', smooth: 'Fluide', slow_motion: 'Ralenti' };
 const ownership = { fixed: 'Fixe', model: 'Assistant', random: 'Aléatoire' };
+// Each folder setting: its field, and the folder it shows when nothing is set (`folders` of
+// the server). The first is the models directory; the others, a folder apart for one kind of file.
 const folderControls = {
+  modelsDir: ['generation-models-dir', 'models'],
   modelRoot: ['native-convert-root', 'model'],
   vaeRoot: ['generation-vae-root', 'vae'],
   loraRoot: ['generation-lora-root', 'lora'],

@@ -206,6 +206,7 @@ test('the former application-wide tokenizer moves into existing workflows and le
   // Rewritten with the folders added since, empty.
   assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'generation.json'), 'utf8')), {
     ...settings,
+    modelsDir: '',
     textEncoderRoot: '',
     tokenizerRoot: '',
     upscaleRoot: '',

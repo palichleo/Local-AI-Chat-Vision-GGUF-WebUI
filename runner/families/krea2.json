@@ -8,7 +8,7 @@
   "components": {
     "model": {
       "label": "Modèle",
-      "folder": "checkpoints",
+      "folder": "diffusion_models",
       "required": true,
       "signature": [
         {
@@ -23,7 +23,7 @@
     },
     "textEncoder": {
       "label": "Encodeur de texte",
-      "folder": "LLMs",
+      "folder": "text_encoders",
       "required": true,
       "signature": [
         {
@@ -34,7 +34,7 @@
     },
     "tokenizer": {
       "label": "Tokenizer",
-      "folder": "LLMs",
+      "folder": "text_encoders",
       "required": false,
       "format": "tokenizer",
       "policies": ["fixed"],
@@ -44,7 +44,7 @@
     },
     "vae": {
       "label": "VAE",
-      "folder": "VAE",
+      "folder": "vae",
       "required": true,
       "signature": [
         {

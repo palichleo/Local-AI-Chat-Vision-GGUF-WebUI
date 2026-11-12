@@ -20,7 +20,7 @@
   "components": {
     "model": {
       "label": "Modèle",
-      "folder": "checkpoints",
+      "folder": "diffusion_models",
       "required": true,
       "signature": [
         {
@@ -30,7 +30,7 @@
     },
     "textEncoder": {
       "label": "Encodeur de texte",
-      "folder": "LLMs",
+      "folder": "text_encoders",
       "required": true,
       "signature": [
         {
@@ -40,7 +40,7 @@
     },
     "vae": {
       "label": "VAE vidéo",
-      "folder": "VAE",
+      "folder": "vae",
       "required": true,
       "signature": [
         {
@@ -53,7 +53,7 @@
     },
     "audioVae": {
       "label": "VAE audio",
-      "folder": "VAE",
+      "folder": "vae",
       "required": true,
       "note": "Requis par l'échantillonneur couplé même pour une vidéo muette.",
       "signature": [

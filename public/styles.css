@@ -4224,7 +4224,14 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   border-top: 1px solid var(--line);
   padding-top: 16px;
 }
+.native-folders-apart {
+  margin-top: 4px;
+}
+.native-folders-apart[open] > summary {
+  margin-bottom: 14px;
+}
 .native-environment > summary,
+.native-folders-apart > summary,
 .native-manual-path > summary {
   font-size: 12px;
   color: var(--muted);

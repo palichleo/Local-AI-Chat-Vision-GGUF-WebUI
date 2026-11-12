@@ -9,7 +9,7 @@
   "components": {
     "musicModel": {
       "label": "Modèle de musique (dossier diffusers)",
-      "folder": "audio",
+      "folder": "diffusers",
       "required": true,
       "format": "pipeline",
       "pipelineClass": "AceStepPipeline",

@@ -8,7 +8,7 @@
   "components": {
     "model": {
       "label": "Modèle",
-      "folder": "checkpoints",
+      "folder": "diffusion_models",
       "required": true,
       "note": "MOSS Image SFT, par exemple mossImage_sft_pruned_int8.safetensors.",
       "signature": [
@@ -20,7 +20,7 @@
     },
     "textEncoder": {
       "label": "Encodeur de texte",
-      "folder": "LLMs",
+      "folder": "text_encoders",
       "required": true,
       "note": "L’encodeur de MOSS Image, un Qwen3.5-9B (par exemple mossImage_sft_txt_int8.safetensors), et non le modèle MOSS Image lui-même.",
       "signature": [
@@ -32,7 +32,7 @@
     },
     "vae": {
       "label": "VAE",
-      "folder": "VAE",
+      "folder": "vae",
       "required": true,
       "note": "flux2-vae.safetensors",
       "signature": [

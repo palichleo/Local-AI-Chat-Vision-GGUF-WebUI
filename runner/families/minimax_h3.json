@@ -20,7 +20,7 @@
   "components": {
     "model": {
       "label": "Modèle",
-      "folder": "checkpoints",
+      "folder": "diffusion_models",
       "required": true,
       "note": "Checkpoints élagués 8 étapes : FastH3 Omni (références) ou FastH3 v2 (texte, image de début/fin).",
       "signature": [
@@ -36,7 +36,7 @@
     },
     "textEncoder": {
       "label": "Encodeur de texte",
-      "folder": "LLMs",
+      "folder": "text_encoders",
       "required": true,
       "note": "Qwen3-VL-32B tronqué à 50 couches (NVFP4 AWQ ou int8 ConvRot).",
       "signature": [
@@ -52,7 +52,7 @@
     },
     "tokenizer": {
       "label": "Tokenizer",
-      "folder": "LLMs",
+      "folder": "text_encoders",
       "required": true,
       "format": "tokenizer",
       "policies": ["fixed"],
@@ -62,7 +62,7 @@
     },
     "vae": {
       "label": "VAE vidéo",
-      "folder": "VAE",
+      "folder": "vae",
       "required": true,
       "signature": [
         {
@@ -76,7 +76,7 @@
     },
     "audioVae": {
       "label": "VAE audio",
-      "folder": "VAE",
+      "folder": "vae",
       "required": true,
       "signature": [
         {

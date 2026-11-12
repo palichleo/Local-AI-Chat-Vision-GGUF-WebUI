@@ -1,0 +1,6 @@
+Put image and video GENERATION MODEL files here (.safetensors): Krea 2, LTX 2.5, MiniMax H3, MOSS Image, SeedVR2...
+Subfolders are allowed. A workflow that fixes no file takes the one here that fits its model, whatever its name;
+a file chosen in the workflow editor always comes first.
+This folder has the same name as in ComfyUI: Configuration > Workflows > "Dossier des modèles de génération"
+can point to ComfyUI's own models folder instead, and both are read the same way.
+Weights are local only and ignored by Git.

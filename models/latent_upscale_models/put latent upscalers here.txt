@@ -1,0 +1,5 @@
+Put LATENT upscalers here (.safetensors), such as the LTX 2.5 spatial upscaler x2.
+Image and video upscalers (Real-ESRGAN) go in models/upscale_models.
+This folder has the same name as in ComfyUI: Configuration > Workflows > "Dossier des modèles de génération"
+can point to ComfyUI's own models folder instead, and both are read the same way.
+Weights are local only and ignored by Git.

@@ -69,8 +69,10 @@ test('a component no workflow fixes takes the file of its folder that fits, what
     moss = { kind: 'textEncoder', family: 'moss' },
     named = async options => basename((await assets.pick('textEncoder', 'moss', options)).path);
 
-  // Neither the model nor the smaller encoder: the files laid out as this component is.
-  assert.equal(await named(), 'qwen3.5_9b_int8.safetensors');
+  // Neither the model nor the smaller encoder: the files laid out as this component is, the
+  // one in the folder itself before the one in a sub-folder.
+  assert.equal(await named(), 'qwen3.5_9b_w4a8.safetensors');
+  assert.equal(await named({ file: 'mossImage_sft_txt_int8.safetensors' }), 'qwen3.5_9b_int8.safetensors');
   // Among several, the one named most like what the workflow asks for.
   assert.equal(await named({ file: 'mossImage_sft_txt_w4a8.safetensors' }), 'qwen3.5_9b_w4a8.safetensors');
   // The same folder answers for another family with its own encoder.
@@ -185,53 +187,94 @@ test('a workflow runs on the folders of the settings; a file it fixes overrides 
   );
 });
 
-test('each kind of file has its folder in the settings', async t => {
-  const root = await directory(t),
-    service = new GenerationService({
-      root,
-      dataDir: join(root, 'data'),
-      workflowDir: join(root, 'workflow'),
-      outputDir: join(root, 'output'),
-    }),
-    models = join(root, 'models'),
-    base = { enabled: false, autoAllow: false, maxIterations: 5, pythonPath: '' };
-  t.after(() => service.close?.());
-  // Settings saved before these folders existed.
-  assert.deepEqual(
-    ['textEncoderRoot', 'tokenizerRoot', 'upscaleRoot', 'latentUpscaleRoot'].map(key => generationConfig(base)[key]),
-    ['', '', '', ''],
-  );
-  assert.throws(() => generationConfig({ ...base, textEncoderRoot: 'relatif/encodeurs' }), /absolu/);
-
-  // Nothing set: the folders under models/, the tokenizers with the text encoders.
-  assert.equal(service.folderOf('krea2', 'textEncoder'), join(models, 'LLMs'));
-  assert.equal(service.folderOf('krea2', 'tokenizer'), join(models, 'LLMs'));
-  // « upscaler » is an image model for Real-ESRGAN and a latent one for LTX: two folders.
-  assert.equal(service.folderOf('realesrgan_image', 'upscaler'), join(models, 'upscale_models'));
-  assert.equal(service.folderOf('ltx25', 'upscaler'), join(models, 'latent_upscale_models'));
-  assert.equal(service.folderOf('krea2', 'unknown'), null);
-
-  const comfy = name => join(root, 'ComfyUI', 'models', name);
-  service.config = generationConfig({
-    ...base,
-    textEncoderRoot: comfy('text_encoders'),
-    upscaleRoot: comfy('upscale_models'),
-    latentUpscaleRoot: comfy('latent_upscale_models'),
+function service(t, root) {
+  const made = new GenerationService({
+    root,
+    dataDir: join(root, 'data'),
+    workflowDir: join(root, 'workflow'),
+    outputDir: join(root, 'output'),
   });
-  assert.equal(service.folderOf('moss', 'textEncoder'), comfy('text_encoders'));
-  assert.equal(service.folderOf('minimax_h3', 'tokenizer'), comfy('text_encoders'));
-  assert.equal(service.folderOf('realesrgan_video', 'upscaler'), comfy('upscale_models'));
-  assert.equal(service.folderOf('ltx25', 'upscaler'), comfy('latent_upscale_models'));
-  assert.equal(service.folderOf('moss', 'vae'), join(models, 'VAE'));
-  // What the page shows as defaults, by role.
-  const folders = service.folders();
-  assert.equal(folders.upscaler, comfy('upscale_models'));
-  assert.equal(folders.latentUpscaler, comfy('latent_upscale_models'));
-  assert.equal(folders.tokenizer, comfy('text_encoders'));
+  t.after(() => made.close?.());
+  return made;
+}
+const base = { enabled: false, autoAllow: false, maxIterations: 5, pythonPath: '' };
 
-  service.config = generationConfig({ ...service.config, tokenizerRoot: join(root, 'tokenizers') });
-  assert.equal(service.folderOf('krea2', 'tokenizer'), join(root, 'tokenizers'));
-  assert.equal(service.folders().tokenizer, join(root, 'tokenizers'));
+test('one models directory, sorted as ComfyUI sorts its own, serves every kind of file', async t => {
+  const root = await directory(t),
+    made = service(t, root),
+    own = name => join(root, 'models', name),
+    comfy = name => join(root, 'ComfyUI', 'models', name);
+  // Settings saved before the directory could be chosen.
+  assert.equal(generationConfig(base).modelsDir, '');
+  assert.throws(() => generationConfig({ ...base, modelsDir: 'ComfyUI/models' }), /absolu/);
+
+  // Nothing set: Atelier's own directory, under the names ComfyUI gives its folders.
+  assert.equal(made.modelsDir(), join(root, 'models'));
+  assert.equal(made.folderOf('krea2', 'model'), own('diffusion_models'));
+  assert.equal(made.folderOf('krea2', 'textEncoder'), own('text_encoders'));
+  assert.equal(made.folderOf('krea2', 'tokenizer'), own('text_encoders'));
+  assert.equal(made.folderOf('moss', 'vae'), own('vae'));
+  assert.equal(made.folderOf('', 'lora'), own('loras'));
+  assert.equal(made.folderOf('acestep15', 'musicModel'), own('diffusers'));
+  assert.equal(made.folderOf('rife', 'interpolator'), own('frame_interpolation'));
+  // « upscaler » is an image model for Real-ESRGAN and a latent one for LTX: two folders.
+  assert.equal(made.folderOf('realesrgan_image', 'upscaler'), own('upscale_models'));
+  assert.equal(made.folderOf('ltx25', 'upscaler'), own('latent_upscale_models'));
+  assert.equal(made.folderOf('krea2', 'unknown'), null);
+  // What was filed under Atelier's former names, or ComfyUI's other ones, is still found.
+  assert.deepEqual(made.foldersOf('krea2', 'model'), [own('diffusion_models'), own('unet'), own('checkpoints')]);
+  assert.deepEqual(made.foldersOf('krea2', 'textEncoder'), [own('text_encoders'), own('clip'), own('LLMs')]);
+  assert.deepEqual(made.foldersOf('', 'lora'), [own('loras'), own('LoRa')]);
+
+  // The single path of the settings: ComfyUI's directory. Every kind of file follows.
+  made.config = generationConfig({ ...base, modelsDir: join(root, 'ComfyUI', 'models') });
+  assert.equal(made.folderOf('krea2', 'model'), comfy('diffusion_models'));
+  assert.equal(made.folderOf('minimax_h3', 'textEncoder'), comfy('text_encoders'));
+  assert.equal(made.folderOf('minimax_h3', 'tokenizer'), comfy('text_encoders'));
+  assert.equal(made.folderOf('seedvr2', 'vae'), comfy('vae'));
+  assert.equal(made.folderOf('', 'lora'), comfy('loras'));
+  assert.equal(made.folderOf('ltx25', 'upscaler'), comfy('latent_upscale_models'));
+  const shown = made.folders();
+  assert.equal(shown.models, join(root, 'ComfyUI', 'models'));
+  assert.equal(shown.model, comfy('diffusion_models'));
+  assert.equal(shown.upscaler, comfy('upscale_models'));
+  assert.equal(shown.latentUpscaler, comfy('latent_upscale_models'));
+  // Atelier's own directory stays a place to look, after ComfyUI's.
+  assert.deepEqual(made.foldersOf('moss', 'vae'), [comfy('vae'), comfy('VAE'), own('vae'), own('VAE')]);
   // The registry of files asks the service where a component takes its default.
-  assert.equal(service.assets.folder('ltx25', 'upscaler'), comfy('latent_upscale_models'));
+  assert.equal(made.assets.folder('ltx25', 'upscaler')[0], comfy('latent_upscale_models'));
+
+  // The details: a folder apart for one kind of file wins over the directory, for that kind only.
+  made.config = generationConfig({ ...made.config, vaeRoot: join(root, 'mes vae'), tokenizerRoot: join(root, 'tok') });
+  assert.equal(made.folderOf('moss', 'vae'), join(root, 'mes vae'));
+  assert.equal(made.folderOf('krea2', 'tokenizer'), join(root, 'tok'));
+  assert.equal(made.folderOf('krea2', 'textEncoder'), comfy('text_encoders'));
+  assert.equal(made.folders().tokenizer, join(root, 'tok'));
+});
+
+test('Atelier’s own models directory holds the folders of ComfyUI, and files left under the former names still serve', async t => {
+  const root = await directory(t),
+    made = await service(t, root).init(),
+    { stat } = await import('node:fs/promises');
+  for (const name of ['diffusion_models', 'text_encoders', 'vae', 'loras', 'upscale_models', 'latent_upscale_models'])
+    assert.equal((await stat(join(root, 'models', name))).isDirectory(), true, name);
+
+  // An installation of before: its files are where Atelier used to ask for them.
+  await mkdir(join(root, 'models', 'LLMs'), { recursive: true });
+  await mkdir(join(root, 'models', 'checkpoints'), { recursive: true });
+  await checkpoint(join(root, 'models', 'LLMs', 'qwen3.5_9b_int8.safetensors'), MOSS.textEncoder);
+  await checkpoint(join(root, 'models', 'checkpoints', 'moss.safetensors'), MOSS.model);
+  await checkpoint(join(root, 'models', 'vae', 'flux2-vae.safetensors'), MOSS.vae);
+  const picked = async role => basename((await made.assets.pick(role, 'moss')).path);
+  assert.equal(await picked('textEncoder'), 'qwen3.5_9b_int8.safetensors');
+  assert.equal(await picked('model'), 'moss.safetensors');
+  assert.equal(await picked('vae'), 'flux2-vae.safetensors');
+
+  // A ComfyUI chosen in the settings: its files first, Atelier's own after.
+  const comfy = join(root, 'ComfyUI', 'models');
+  await mkdir(join(comfy, 'text_encoders'), { recursive: true });
+  await checkpoint(join(comfy, 'text_encoders', 'qwen3.5_9b_w4a8.safetensors'), MOSS.textEncoder);
+  await made.save({ ...made.config, modelsDir: comfy });
+  assert.equal(await picked('textEncoder'), 'qwen3.5_9b_w4a8.safetensors');
+  assert.equal(await picked('model'), 'moss.safetensors');
 });

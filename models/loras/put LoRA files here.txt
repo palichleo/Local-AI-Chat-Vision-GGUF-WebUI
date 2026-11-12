@@ -1,4 +1,6 @@
 Put LoRA files here (.safetensors), optionally in subfolders.
 Choose them in a workflow's LoRAs section, then set their activation and strength.
 Only LoRAs compatible with the selected generation engine can be used.
+This folder has the same name as in ComfyUI: Configuration > Workflows > "Dossier des modèles de génération"
+can point to ComfyUI's own models folder instead, and both are read the same way.
 Weights are local only and ignored by Git.

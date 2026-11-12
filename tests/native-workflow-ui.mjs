@@ -282,6 +282,7 @@ test('settings read native generation values and descriptions come from workflow
     maxIterations: 5,
     reviewVideos: false,
     pythonPath: '',
+    modelsDir: '',
     modelRoot: '',
     vaeRoot: '',
     loraRoot: '',
@@ -442,6 +443,7 @@ test('unified import accepts Comfy JSON and opens a fresh prefilled editor witho
   assert.equal(target.value, '');
   assert.deepEqual(f.calls.find(call => call.route === 'generation/import').body, {
     sourceText,
+    modelsDir: '',
     modelRoot: 'C:/atelier/models/checkpoints',
     vaeRoot: 'C:/atelier/models/VAE',
     loraRoot: 'C:/atelier/models/LoRa',

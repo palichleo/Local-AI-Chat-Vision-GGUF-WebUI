@@ -30,7 +30,7 @@ import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
 import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
 import { relocate } from './lib/relocate.mjs';
-import { GenerationService, generationConfig } from './lib/generation-service.mjs';
+import { FOLDER_KEYS, GenerationService, generationConfig } from './lib/generation-service.mjs';
 import { convertLongForge } from './lib/longforge-conversion.mjs';
 import { generatedMedia } from './lib/generated-media.mjs';
 import { validateNativeWorkflow } from './lib/native-workflows.mjs';
@@ -849,9 +849,7 @@ export async function createApplication({
           if (path === '/api/generation/import') {
             const importConfig = generationConfig({
               ...generation.config,
-              modelRoot: body.modelRoot ?? generation.config.modelRoot,
-              vaeRoot: body.vaeRoot ?? generation.config.vaeRoot,
-              loraRoot: body.loraRoot ?? generation.config.loraRoot,
+              ...Object.fromEntries(FOLDER_KEYS.map(key => [key, body[key] ?? generation.config[key]])),
             });
             const importFolders = generation.folders(importConfig);
             return send(
@@ -871,7 +869,7 @@ export async function createApplication({
                 assets: generation.assets,
                 catalog: generation.catalog,
                 modelRoot: body.modelRoot || generation.folders().model,
-                additionalRoots: Object.values(generation.folders()).filter(
+                additionalRoots: generation.searchFolders().filter(
                   path => path !== generation.folders().model,
                 ),
                 backupDir: join(dataDir, 'migration'),
@@ -885,7 +883,7 @@ export async function createApplication({
                 assets: generation.assets,
                 catalog: generation.catalog,
                 modelRoot: body.modelRoot || generation.folders().model,
-                additionalRoots: Object.values(generation.folders()).filter(
+                additionalRoots: generation.searchFolders().filter(
                   path => path !== generation.folders().model,
                 ),
                 backupDir: join(dataDir, 'migration'),
@@ -900,7 +898,7 @@ export async function createApplication({
                 assets: generation.assets,
                 catalog: generation.catalog,
                 modelRoot: body.modelRoot || generation.folders().model,
-                additionalRoots: Object.values(generation.folders()).filter(
+                additionalRoots: generation.searchFolders().filter(
                   path => path !== generation.folders().model,
                 ),
                 backupDir: join(dataDir, 'migration'),

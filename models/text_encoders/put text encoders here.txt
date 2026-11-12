@@ -1,0 +1,6 @@
+Put generation TEXT ENCODERS here (.safetensors), and their tokenizer folders beside them.
+A workflow that fixes no file takes the encoder here that fits its model, and the tokenizer that matches it.
+Chat models (GGUF) do not go here: they stay in models/LLMs.
+This folder has the same name as in ComfyUI: Configuration > Workflows > "Dossier des modèles de génération"
+can point to ComfyUI's own models folder instead, and both are read the same way.
+Weights are local only and ignored by Git.

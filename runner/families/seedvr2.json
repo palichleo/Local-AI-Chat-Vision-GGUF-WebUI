@@ -8,7 +8,7 @@
   "components": {
     "model": {
       "label": "Modèle SeedVR2 (DiT 7B)",
-      "folder": "checkpoints",
+      "folder": "diffusion_models",
       "required": true,
       "note": "DiT SeedVR2 7B en fp8 ou int8 ConvRot (Comfy-Org ou numz), par exemple seedvr2_7b_sharp_fp8_e4m3fn.",
       "signature": [
@@ -24,7 +24,7 @@
     },
     "vae": {
       "label": "VAE SeedVR2",
-      "folder": "VAE",
+      "folder": "vae",
       "required": true,
       "note": "ema_vae_fp16.safetensors",
       "signature": [

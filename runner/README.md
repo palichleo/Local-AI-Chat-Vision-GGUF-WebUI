@@ -2,7 +2,7 @@
 
 This runner uses local PyTorch/Diffusers pipelines. It never imports the ComfyUI runtime. The separate `comfy-kitchen` package supplies CUDA INT8 kernels.
 
-Since 0.4.14 it is Atelier's *internal* engine: it upscales (Real-ESRGAN, SeedVR2), interpolates (RIFE) and continues LTX 2.5 and MiniMax H3 videos. New images and videos are made by ComfyUI, the *external* engine, which the Node server calls over HTTP (`lib/comfy-engine.mjs`, `lib/comfy-graphs.mjs`); a family whose manifest says `"native": false` (Krea 2, MOSS Image) has no pipeline here. The Krea 2 pipeline this runner had is kept out of the repository in `experiment_keep_engine/`; what this page says of Krea 2 below describes that pipeline.
+Since 0.4.14 it is Atelier's _internal_ engine: it upscales (Real-ESRGAN, SeedVR2), interpolates (RIFE) and continues LTX 2.5 and MiniMax H3 videos. New images and videos are made by ComfyUI, the _external_ engine, which the Node server calls over HTTP (`lib/comfy-engine.mjs`, `lib/comfy-graphs.mjs`); a family whose manifest says `"native": false` (Krea 2, MOSS Image) has no pipeline here. The Krea 2 pipeline this runner had is kept out of the repository in `experiment_keep_engine/`; what this page says of Krea 2 below describes that pipeline.
 
 The Node server owns one CPU-idle Python worker. Before generation it validates the resolved job, unloads llama.cpp and its vision projector, runs the pipeline, verifies GPU release, then reloads the LLM. Cancellation terminates and reaps the owned worker. A worker failure does not close the chat server.
 
@@ -20,7 +20,7 @@ In **Configuration → Génération → Environnement de génération**, leave *
 
 The separate **Workflows** settings block lists workflows and their activation state. **Créer un workflow** opens the editor in the existing dialog. Select image or video generation, name the workflow and describe when the assistant should use it. Select local files, expand the sections you need and save. **Fixe** locks your value; **Assistant** lets the model choose within your limits; **Aléatoire** draws the seed once before approval. LoRA activation and strength have separate policies. The LTX runner requires an audio VAE even for silent output. Changing generation engines asks before replacing component choices and settings. Disabled or incompatible workflows are not advertised as tools.
 
-In **Dossiers des modèles de génération**, the Checkpoints, VAE and LoRA folders default to `models/checkpoints/`, `models/VAE/` and `models/LoRa/`. Each can be edited or chosen with **Parcourir…** and saved with the main Configuration button. The VAE choice covers image, video and audio VAEs. Edited folders are used immediately for workflow import and selecting new component files; saving keeps them after restart. Clearing a folder restores its default. Existing registered model files stay at their current paths. Text encoders and other component folders keep their existing settings. Manual file paths remain available under **Saisir un chemin**. Selecting the same file again reuses its registry identity. Conversion searches the selected component folders, rejecting ambiguous matches.
+In **Dossier des modèles de génération**, one path names the models directory: empty, it is `models/` of this installation; it can be the `models` folder of a ComfyUI, sorted the same way (`diffusion_models`, `text_encoders`, `vae`, `loras`, `upscale_models`, `latent_upscale_models`…). Under **Détails**, a folder apart can be set for one kind of file (diffusion models, VAE, LoRA, text encoders, tokenizers, upscalers, latent upscalers); each can be edited or chosen with **Parcourir…** and saved with the main Configuration button. Edited folders are used immediately for workflow import and selecting new component files; saving keeps them after restart. Clearing a folder restores its default. A component a workflow does not fix takes, in the folder of its kind, the file whose layout is the one its model expects. Existing registered model files stay at their current paths. Text encoders and other component folders keep their existing settings. Manual file paths remain available under **Saisir un chemin**. Selecting the same file again reuses its registry identity. Conversion searches the selected component folders, rejecting ambiguous matches.
 
 **Importer un workflow**, to the left of **Créer un workflow**, accepts Atelier JSON, ComfyUI API exports and ComfyUI editor files through one file chooser. It opens the same creation editor with the recognized parameters, component filenames, LoRAs and reference slots filled in. Import does not save a workflow or generate media. Click **Enregistrer le workflow** to keep the draft; it receives a new identity and cannot overwrite the source workflow.
 
@@ -36,17 +36,17 @@ After image generation, the LLM receives the result metadata, without automatic 
 
 Measured on the development RTX 4070 Super, using existing local INT8 ConvRot checkpoints:
 
-| Pipeline | Case | Pipeline time | Peak torch VRAM |
-| --- | --- | --- | --- |
-| Krea2 | 512², 8 steps, three LoRAs | 16.68 s | 7.597 GiB |
-| Krea2 | 1448², 8 steps, three LoRAs | 36.45 s | 8.199 GiB |
-| LTX2.5 distilled | 384×256, 25 frames, 24 fps, 8 steps | 65.99 s | 6.634 GiB |
-| LTX2.5 distilled | Same size, start + end image conditions | 65.14 s | 7.308 GiB |
-| LTX2.5 distilled | Two learned MSR image slots and LoRA, 384×256 | 68.93 s | 7.597 GiB |
-| LTX2.5 distilled | Silent continuation, 9 context + 16 new frames | 64.56 s | 7.288 GiB |
-| LTX2.5 distilled | Video with 48 kHz stereo audio, 384×256 | 68.14 s | 6.634 GiB |
-| LTX2.5 distilled | Final profile, 768×512, 25 frames | 108.22 s | 6.779 GiB |
-| LTX2.5 distilled | 896×1600, 121 frames with audio, start image, two passes (10 Nov 2026) | 192 s | under the 12 GB card |
+| Pipeline         | Case                                                                   | Pipeline time | Peak torch VRAM      |
+| ---------------- | ---------------------------------------------------------------------- | ------------- | -------------------- |
+| Krea2            | 512², 8 steps, three LoRAs                                             | 16.68 s       | 7.597 GiB            |
+| Krea2            | 1448², 8 steps, three LoRAs                                            | 36.45 s       | 8.199 GiB            |
+| LTX2.5 distilled | 384×256, 25 frames, 24 fps, 8 steps                                    | 65.99 s       | 6.634 GiB            |
+| LTX2.5 distilled | Same size, start + end image conditions                                | 65.14 s       | 7.308 GiB            |
+| LTX2.5 distilled | Two learned MSR image slots and LoRA, 384×256                          | 68.93 s       | 7.597 GiB            |
+| LTX2.5 distilled | Silent continuation, 9 context + 16 new frames                         | 64.56 s       | 7.288 GiB            |
+| LTX2.5 distilled | Video with 48 kHz stereo audio, 384×256                                | 68.14 s       | 6.634 GiB            |
+| LTX2.5 distilled | Final profile, 768×512, 25 frames                                      | 108.22 s      | 6.779 GiB            |
+| LTX2.5 distilled | 896×1600, 121 frames with audio, start image, two passes (10 Nov 2026) | 192 s         | under the 12 GB card |
 
 Startup/imports, disk cache state and first kernel compilation affect total latency. These are local measurements, not guarantees or a video comparison against ComfyUI. All successful smoke runs acknowledged zero remaining torch GPU allocation after cleanup.
 
