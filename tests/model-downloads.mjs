@@ -118,6 +118,41 @@ test('a download resumes from its .part file and checks the whole file', async t
   assert.deepEqual(await readFile(join(folder, 'krea2_turbo.safetensors')), MODEL);
 });
 
+test('a folder stopped after one of its files fetches only the others when it starts again', async t => {
+  const f = await fixture(t, {
+    catalog: {
+      tokenizer: {
+        repo: 'Org/Tokenizer',
+        revision: 'def',
+        folder: true,
+        size: MODEL.length + VOCAB.length,
+        files: [
+          { path: 'krea2_turbo.safetensors', size: MODEL.length, sha256: sha(MODEL) },
+          { path: 'vocab.json', size: VOCAB.length },
+        ],
+      },
+    },
+  });
+  const staging = join(f.models, 'text_encoders', 'tokenizer.download');
+  await mkdir(staging, { recursive: true });
+  await writeFile(join(staging, 'krea2_turbo.safetensors'), MODEL);
+  await writeFile(join(staging, 'vocab.json.part'), VOCAB.subarray(0, 3));
+  const workflow = { ...f.workflow, components: { tokenizer: f.workflow.components.tokenizer } };
+  const offer = (await f.downloads.offers([workflow])).krea;
+  assert.equal(offer.bytes, MODEL.length + VOCAB.length);
+  assert.equal(offer.left, VOCAB.length - 3, 'what a stopped download holds is not counted again');
+  const started = await f.downloads.start({ ...f.workflow, components: { tokenizer: f.workflow.components.tokenizer } });
+  assert.equal(started.received, MODEL.length + 3);
+  const done = await f.finish();
+  assert.equal(done.state, 'done', done.error);
+  assert.deepEqual(
+    f.requests.map(request => [request.url.split('/').at(-1), request.headers.Range]),
+    [['vocab.json', 'bytes=3-']],
+  );
+  assert.deepEqual(await readFile(join(f.models, 'text_encoders', 'tokenizer', 'krea2_turbo.safetensors')), MODEL);
+  assert.deepEqual(await readFile(join(f.models, 'text_encoders', 'tokenizer', 'vocab.json')), VOCAB);
+});
+
 test('a file that is not the original is deleted, and the download says so', async t => {
   const f = await fixture(t);
   f.bodies['krea2_turbo.safetensors'] = Buffer.from('x'.repeat(MODEL.length));

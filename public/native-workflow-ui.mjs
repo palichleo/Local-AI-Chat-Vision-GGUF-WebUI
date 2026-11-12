@@ -445,8 +445,13 @@ export function setupNativeWorkflows(options) {
       }
     });
     start.className = 'secondary workflow-download';
-    start.append(icon('download'), node('span', '', formatSize(offer.bytes)));
-    const label = `Télécharger les fichiers manquants (${formatSize(offer.bytes)})`;
+    // A download stopped earlier starts again from where it was: what is left is shown.
+    const left = offer.left ?? offer.bytes,
+      resumed = left < offer.bytes;
+    start.append(icon('download'), node('span', '', formatSize(left)));
+    const label = resumed
+      ? `Reprendre le téléchargement (${formatSize(left)} restants sur ${formatSize(offer.bytes)})`
+      : `Télécharger les fichiers manquants (${formatSize(offer.bytes)})`;
     start.setAttribute('aria-label', label);
     start.title = label;
     start.dataset.nativeControl = 'true';
