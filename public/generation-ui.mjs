@@ -1,8 +1,50 @@
 import { comparedSource, imageCompare, loadSource } from './image-compare.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
 import { livePreview } from './live-preview.mjs';
+import { formatOf } from './formats.mjs';
 
-export function setupGenerationUI({ api, node, openOutput, actions = null, onResize = () => {} }) {
+const KINDS = { image: 'IMAGE', video: 'VIDÉO', audio: 'SON' };
+/** A length as the cards write it: two figures, in capitals (« 05 S »). */
+const figures = value => {
+  const rounded = Math.round(value * 10) / 10;
+  return (rounded < 10 ? '0' : '') + String(rounded).replace('.', ',') + ' S';
+};
+/** What a card says of a creation: its kind, its format and its length (« VIDÉO · 16:9 · 05 S »). */
+export function cardMeta({ media = 'image', width, height, seconds } = {}) {
+  const format =
+    media === 'audio' ? '' : (formatOf(width, height)?.id ?? (width && height ? width + '×' + height : ''));
+  return [KINDS[media] ?? KINDS.image, format, Number.isFinite(seconds) && seconds > 0 ? figures(seconds) : '']
+    .filter(Boolean)
+    .join(' · ');
+}
+const recordMeta = record => {
+  const p = record.parameters ?? {},
+    output = record.outputs?.[0] ?? {},
+    media = record.mediaType || 'image';
+  return cardMeta({
+    media,
+    width: p.width ?? output.width,
+    height: p.height ?? output.height,
+    seconds: media === 'audio' ? p.seconds : p.frames && p.fps ? p.frames / p.fps : null,
+  });
+};
+const requestMeta = request => {
+  const p = request.plan?.parameters ?? {},
+    media = request.mediaType || 'image';
+  return cardMeta({
+    media,
+    width: request.resolution?.width ?? p.width,
+    height: request.resolution?.height ?? p.height,
+    seconds: media === 'audio' ? p.seconds : p.frames && p.fps ? p.frames / p.fps : null,
+  });
+};
+
+/**
+ * The creations of a conversation. A creation of the Studio (`compact`) is a card: its picture
+ * with a grain, what it is (« VIDÉO · 16:9 · 05 S ») and « Ouvrir », which shows it on the
+ * Studio's screen (`onOpen`); its output buttons stay under it.
+ */
+export function setupGenerationUI({ api, node, openOutput, actions = null, onResize = () => {}, onOpen = null }) {
   const cards = new Set(),
     watched = new Map();
   let downloads = Promise.resolve();
@@ -24,8 +66,8 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
     observer?.unobserve(element);
     watched.delete(element);
   }
-  function tile(container, request) {
-    const figure = node('figure', 'generation-card'),
+  function tile(container, request, compact = false) {
+    const figure = node('figure', 'generation-card' + (compact ? ' is-compact' : '')),
       frame = node('div', 'generation-frame'),
       caption = node('figcaption', 'generation-caption'),
       label = node('span', 'sr-only', 'Préparation de la génération…'),
@@ -50,13 +92,28 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
           : 'Génération d’image en cours',
     );
     caption.append(progress, label);
-    figure.append(frame, caption);
+    figure.append(frame);
+    let title = null,
+      meta = null,
+      open = null;
+    if (compact) {
+      const text = node('div', 'card-text');
+      title = node('span', 'card-title', request.plan?.prompt || request.args?.prompt || 'Création du Studio');
+      meta = node('span', 'card-meta', requestMeta(request));
+      text.append(title, meta);
+      open = node('button', 'card-open', 'Ouvrir');
+      open.type = 'button';
+      open.title = 'Afficher dans le Studio';
+      open.disabled = true;
+      figure.append(text, open);
+    }
+    figure.append(caption);
     container.append(figure);
-    return { figure, frame, label, progress };
+    return { figure, frame, label, progress, title, meta, open };
   }
-  function mount(container, request = {}) {
+  function mount(container, request = {}, { compact = false } = {}) {
     container.classList.add('generation-grid');
-    const first = tile(container, request),
+    const first = tile(container, request, compact),
       { figure, frame, label } = first,
       tiles = [first];
     let disposed = false,
@@ -202,14 +259,32 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
           if (!disposed && slot.visible && !slot.url && slot.controller?.signal.aborted) loadOriginal(slot);
         });
     }
+    /** A card names its creation and opens it in the Studio. */
+    function describe(target) {
+      if (!compact || !record) return;
+      target.title.textContent = record.prompt || 'Création du Studio';
+      target.title.title = record.prompt || '';
+      target.meta.textContent = recordMeta(record);
+      target.open.disabled = !onOpen;
+      const shown = record;
+      target.open.onclick = () => onOpen?.(shown);
+    }
+    /** The grain of a card's picture: on pictures only, still once the creation is there. */
+    function grainOver(frame) {
+      if (!compact) return;
+      const grain = node('span', 'picture-grain');
+      grain.setAttribute('aria-hidden', 'true');
+      frame.append(grain);
+    }
     function image({ record: outputRecord, index, blob }) {
       if (disposed || slots.has(index)) return;
       record = outputRecord;
       live.clear();
-      const target = slots.size ? tile(container, request) : first,
+      const target = slots.size ? tile(container, request, compact) : first,
         { frame } = target;
       if (target !== first) tiles.push(target);
       unwatch(target.figure);
+      describe(target);
       if (record.mediaType === 'video') target.figure.classList.add('is-video');
       if (record.mediaType === 'audio') {
         // A sound: its player, and the actions on the output beside it.
@@ -223,7 +298,36 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
         slots.set(index, slot);
         target.figure.classList.add('is-audio');
         target.figure.append(buttons(record, index));
-        frame.replaceChildren(audio);
+        if (compact) {
+          // A card shows a strip of sound; its player goes under the words.
+          const wave = node('span', 'studio-thumb-wave');
+          wave.setAttribute('aria-hidden', 'true');
+          frame.replaceChildren(wave);
+          target.figure.append(audio);
+        } else frame.replaceChildren(audio);
+        frame.classList.add('has-image');
+        frame.setAttribute('aria-busy', 'false');
+        onResize();
+        return;
+      }
+      if (record.mediaType === 'video' && compact) {
+        // A card shows the first picture of the clip; « Ouvrir » plays it on the Studio's screen.
+        const output = record.outputs?.[index] ?? {},
+          poster = output.analysisDataUrl || output.thumbUrl,
+          shown = node(poster ? 'img' : 'video');
+        if (poster) Object.assign(shown, { src: poster, alt: record.prompt || '', decoding: 'async' });
+        else {
+          Object.assign(shown, { muted: true, preload: 'metadata', playsInline: true });
+          shown.onloadeddata = () => void thumbnailOf(api, record, index, shown);
+          shown.src = (output.originalUrl || '') + '#t=0.1';
+        }
+        shown.title = 'Voir l’original et ses paramètres';
+        shown.onclick = () => openOutput(record, index);
+        target.figure.classList.add('is-video');
+        target.figure.append(buttons(record, index));
+        slots.set(index, { index, button: shown, img: shown, isVideo: true, tile: target });
+        frame.replaceChildren(shown);
+        grainOver(frame);
         frame.classList.add('has-image');
         frame.setAttribute('aria-busy', 'false');
         onResize();
@@ -276,13 +380,15 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       } else dimensions(request.resolution?.width, request.resolution?.height, target);
       button.append(img);
       // An upscale shows its source under the pointer; the upscaled image stays the one clicked and dragged.
-      const source = comparedSource(record);
+      // A card is too small for that: « Détails » shows the image whole.
+      const source = compact ? null : comparedSource(record);
       if (source) {
         const owner = record;
         slot.compare = imageCompare({ node, host: button, load: signal => loadSource(api, owner, source, signal) });
       }
       button.onclick = () => openOutput(record, index, slot.blob || undefined);
       frame.replaceChildren(button);
+      grainOver(frame);
       target.figure.append(buttons(record, index));
       // While the original loads: the copy the model saw, or the thumbnail kept by the server.
       const small = output?.analysisDataUrl || output?.thumbUrl;
@@ -320,6 +426,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       finished = true;
       settle();
       if (result.record) record = result.record;
+      for (const target of tiles) describe(target);
       for (const slot of slots.values())
         if (slot.isVideo && record.outputs?.[slot.index]?.analysisDataUrl)
           slot.img.poster = record.outputs[slot.index].analysisDataUrl;
@@ -377,11 +484,11 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
     return { card, figure, frame, label, progress: first.progress };
   }
   return {
-    mount(container, request) {
-      return mount(container, request).card;
+    mount(container, request, options) {
+      return mount(container, request, options).card;
     },
-    restore(container, conversationId, runId) {
-      const { card, figure, frame, label, progress } = mount(container);
+    restore(container, conversationId, runId, options) {
+      const { card, figure, frame, label, progress } = mount(container, {}, options);
       frame.classList.add('is-finished');
       frame.setAttribute('aria-busy', 'false');
       progress.hidden = true;

@@ -239,6 +239,7 @@ export function setupProjectNavigation({
     const result = state.saveHistory ? [...state.historyItems] : [];
     const currentOpen =
       state.view === 'chat' ||
+      state.view === 'studio' ||
       state.conversationId ||
       state.messages?.length ||
       state.images?.length ||
@@ -253,7 +254,8 @@ export function setupProjectNavigation({
     return result;
   }
   function conversationRow(item) {
-    const active = state.view === 'chat' && item.id === state.conversationId,
+    // Chat and Studio are two views of the same conversation: it is the one open in both.
+    const active = (state.view === 'chat' || state.view === 'studio') && item.id === state.conversationId,
       row = node('div', 'history-row');
     const open = button(
       item.title,
@@ -439,6 +441,7 @@ export function setupProjectNavigation({
     }
     select.value = state.projectId || 'inbox';
     $('home-open').setAttribute('aria-current', state.view === 'home' ? 'page' : 'false');
+    $('chat-open')?.setAttribute('aria-current', state.view === 'chat' ? 'page' : 'false');
     $('studio-open').setAttribute('aria-current', state.view === 'studio' ? 'page' : 'false');
     $('home-view').hidden = state.view !== 'home';
     $('studio-view').hidden = state.view !== 'studio';
@@ -448,7 +451,7 @@ export function setupProjectNavigation({
   }
   function sync() {
     for (const control of document.querySelectorAll(
-      '.project-group button,.project-card button,#project-create,#home-create-project,#conversation-project,#home-open,#studio-open',
+      '.project-group button,.project-card button,#project-create,#home-create-project,#conversation-project,#home-open,#chat-open,#studio-open',
     ))
       control.disabled = !!busy();
   }

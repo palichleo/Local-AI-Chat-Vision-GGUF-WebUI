@@ -49,6 +49,8 @@ export function callNote(call, result) {
 
 // What the application writes for the user when a button under a creation is pressed.
 const DIRECT_ACTION = /^(?:Upscale|Interpolation) de la sortie [0-9a-f]{8}-/;
+// What it writes for the model when the user makes something in the Studio.
+export const STUDIO_LINE = /^Studio · (?:Image|Vidéo|Son) : /;
 const written = message =>
   typeof message.content === 'string'
     ? message.content
@@ -64,6 +66,8 @@ const written = message =>
 export function lastExchange(messages) {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
+    // A creation of the Studio came after it: taking the message back would take that away too.
+    if (message.role === 'user' && message.internal && STUDIO_LINE.test(written(message))) return -1;
     if (message.role !== 'user' || message.internal) continue;
     return DIRECT_ACTION.test(written(message)) ? -1 : index;
   }

@@ -235,30 +235,90 @@ test('the workflows are listed once for a whole answer, whatever the number of v
   assert.equal(listed, 1, 'the buttons under a creation');
 });
 
-test('each banner shows the last creation of its mode and how many there are', async () => {
-  const { showcased } = await import('../public/studio.mjs');
-  const run = (mediaType, url) => ({ ...(mediaType ? { mediaType } : {}), outputs: [{ originalUrl: url }] });
-  const nothing = { count: '', latest: null, small: null, record: null };
-  assert.deepEqual(showcased([]), { image: nothing, video: nothing, audio: nothing });
-  // Newest first, as the gallery gives them; a record without a type is an image.
-  const clip = { mediaType: 'video', outputs: [{ originalUrl: '/v2', thumbUrl: '/v2.jpg' }] },
-    picture = run(undefined, '/i3');
-  const shown = showcased([clip, picture, run('image', '/i2'), run('video', '/v1'), run('audio', '/a1')]);
-  // Without a thumbnail the original is shown, and its record is there to make one from.
-  assert.deepEqual(shown.image, { count: '2 images', latest: '/i3', small: null, record: picture });
-  // With one, a clip is shown as a picture too: nothing of the video is loaded.
-  assert.deepEqual(shown.video, { count: '2 clips', latest: '/v2', small: '/v2.jpg', record: clip });
-  // A sound has no picture: its number only.
-  assert.deepEqual(shown.audio, { count: '1 son', latest: null, small: null, record: null });
+test('under the preview: 1:1, 16:9 and 9:16, and a fourth format takes the place of « ··· »', async () => {
+  const { shownFormats, resultCount } = await import('../public/studio.mjs');
+  const all = ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9'];
+  assert.deepEqual(shownFormats(all, '16:9'), { main: ['1:1', '16:9', '9:16'], extra: null });
+  assert.deepEqual(shownFormats(all, '4:3'), { main: ['1:1', '16:9', '9:16'], extra: '4:3' });
+  // A model that cannot make a square shows the two others.
+  assert.deepEqual(shownFormats(['16:9', '9:16', '21:9'], '21:9'), { main: ['16:9', '9:16'], extra: '21:9' });
+  // The count of the Sortie, in capitals.
+  assert.equal(resultCount(0), '');
+  assert.equal(resultCount(1), '1 RÉSULTAT');
+  assert.equal(resultCount(3), '3 RÉSULTATS');
 });
 
-test('leaving a mode stops following the size of its frame', async () => {
+test('a proposal of Moodix AI read in the Studio’s terms, with what the assistant may change', async () => {
+  const { proposedValues } = await import('../public/studio.mjs');
+  const offered = [
+    { id: 'ltx', name: 'LTX 2.5', settings: [] },
+    { id: 'minimax', name: 'MiniMax H3 Omni', settings: [{ key: 'language' }] },
+  ];
+  const values = proposedValues(
+    {
+      tool: 'create_video',
+      workflowName: 'MiniMax H3 Omni',
+      resolution: { width: 768, height: 448 },
+      plan: {
+        prompt: 'Un renard se lève',
+        stage: 'draft',
+        parameters: { width: 768, height: 448, frames: 125, fps: 24, seed: 42, language: 'fr' },
+        editable: {
+          prompt: true,
+          parameters: [
+            { key: 'frames', type: 'integer', value: 125, choices: [125, 193] },
+            // « Fixe » in the workflow: shown, never changed by the pointer.
+            { key: 'width', type: 'integer', value: 768, locked: 'Fixé par le workflow' },
+            { key: 'height', type: 'integer', value: 448, locked: 'Fixé par le workflow' },
+            { key: 'seed', type: 'integer', value: 42 },
+          ],
+          references: [[{ role: 'start_image' }, { role: 'reference' }]],
+        },
+        references: [{ role: 'start_image', resource_id: 'r1', label: 'Renard' }],
+      },
+    },
+    offered,
+  );
+  assert.equal(values.workflow, 'minimax');
+  assert.equal(values.prompt, 'Un renard se lève');
+  assert.equal(values.promptFree, true);
+  assert.equal(values.format, '16:9');
+  assert.equal(values.size, '768x448');
+  assert.equal(values.sizeFree, false);
+  assert.ok(Math.abs(values.seconds - 125 / 24) < 1e-9);
+  assert.equal(values.framesFree, true);
+  assert.deepEqual(values.framesChoices, [125, 193]);
+  assert.equal(values.seed, 42);
+  assert.deepEqual(values.settings, { language: 'fr' });
+  assert.deepEqual(values.settingsFree, { language: false });
+  assert.equal(values.references.length, 1);
+  assert.equal(values.source, null);
+  // A continuation: its added length is counted after the overlap with its clip.
+  const more = proposedValues(
+    {
+      tool: 'extend_video',
+      workflowName: 'LTX 2.5',
+      plan: {
+        prompt: 'La suite',
+        parameters: { width: 512, height: 288, frames: 73, fps: 24, overlap_frames: 25 },
+        editable: { prompt: true, parameters: [] },
+        references: [{ role: 'source_video', output_id: 'clip' }],
+      },
+    },
+    offered,
+  );
+  assert.equal(more.source, 'clip');
+  assert.equal(more.seconds, 2);
+  assert.deepEqual(more.references, []);
+});
+
+test('another mode stops following the size of the frame it leaves', async () => {
   // Just enough of a page for the Studio to draw itself.
   class Element {
     children = [];
     style = {};
     dataset = {};
-    classList = { toggle() {}, add() {} };
+    classList = { toggle() {}, add() {}, remove() {} };
     append(...nodes) {
       this.children.push(...nodes);
     }
@@ -269,6 +329,7 @@ test('leaving a mode stops following the size of its frame', async () => {
       this.children.push(option);
     }
     setAttribute() {}
+    removeAttribute() {}
     querySelector() {
       return new Element();
     }
@@ -276,12 +337,7 @@ test('leaving a mode stops following the size of its frame', async () => {
       return [];
     }
   }
-  const page = Object.fromEntries(
-    ['studio-view', 'studio-modes', 'studio-back', 'studio-title', 'studio-summary', 'studio-body'].map(id => [
-      id,
-      new Element(),
-    ]),
-  );
+  const page = Object.fromEntries(['studio-view', 'studio-kinds', 'studio-body'].map(id => [id, new Element()]));
   const observers = [];
   const globals = {
     document: { getElementById: id => page[id] ?? null, querySelector: () => null },
@@ -304,23 +360,21 @@ test('leaving a mode stops following the size of its frame', async () => {
   try {
     const { setupStudio } = await import('../public/studio.mjs');
     const limits = { width: { min: 256, max: 2048, multipleOf: 32 }, height: { min: 256, max: 2048, multipleOf: 32 } };
+    const workflow = (id, media) => ({
+      id,
+      name: id,
+      roles: {},
+      limits,
+      size: { width: 1024, height: 576 },
+      settings: [],
+      seeded: true,
+      media,
+    });
     const info = {
       enabled: true,
-      conversationId: STUDIO_ID,
+      legacyId: STUDIO_ID,
       styles: [],
-      tools: {
-        create_image: [
-          {
-            id: 'w',
-            name: 'Image',
-            roles: {},
-            limits,
-            size: { width: 1024, height: 1024 },
-            settings: [],
-            seeded: true,
-          },
-        ],
-      },
+      tools: { create_image: [workflow('i', 'image')], create_video: [workflow('v', 'video')] },
     };
     const studio = setupStudio({
       api: async route => ({ json: async () => (route === 'studio' ? info : { runs: [] }) }),
@@ -332,17 +386,22 @@ test('leaving a mode stops following the size of its frame', async () => {
       waitForModel: async () => {},
       blocked: () => '',
       onChange() {},
+      conversation: () => 'c1',
     });
     await studio.open();
-    const [image] = page['studio-modes'].children;
-    image.onclick();
+    // No page of three choices any more: the Studio opens on a mode, Image first.
+    assert.equal(page['studio-body'].dataset.mode, 'image');
+    assert.deepEqual(
+      page['studio-kinds'].children.map(tab => tab.dataset.mode),
+      ['image', 'video', 'audio'],
+    );
     const following = observers.at(-1);
-    assert.ok(following.watched, 'the frame follows its stage while the mode is open');
-    page['studio-back'].onclick();
-    assert.equal(page['studio-body'].dataset.mode, '');
-    // Still watched, the stage was reported once more as it left, and no mode had a format to read.
+    assert.ok(following.watched, 'the frame follows its stage');
+    page['studio-kinds'].children[1].onclick();
+    assert.equal(page['studio-body'].dataset.mode, 'video');
+    // Still watched, the stage left was reported once more as it went.
     assert.equal(following.watched, null);
-    assert.ok(observers.every(observer => !observer.watched));
+    assert.equal(observers.filter(observer => observer.watched).length, 1);
   } finally {
     Object.assign(globalThis, before);
   }
@@ -420,13 +479,13 @@ function handover({ keepMs, fails = false, tight = false, onRun } = {}) {
       },
     }),
   });
-  /** One image asked from this conversation, run to its end. */
-  async function create(conversationId) {
+  /** One image asked from this conversation, run to its end; `studio`: started in its Studio. */
+  async function create(conversationId, { studio = false } = {}) {
     const request = await runtime.request(
       [{ id: 'call', type: 'function', function: { name: 'create_image', arguments: '{"prompt":"boat"}' } }],
       { conversationId, turnId: turn, messages: [] },
     );
-    await runtime.execute({ requestId: request.requestId, permission: 'once' });
+    await runtime.execute({ requestId: request.requestId, permission: 'once', ...(studio ? { studio } : {}) });
     await runtime.finished;
     return runtime.status();
   }
@@ -452,6 +511,19 @@ test('a Studio generation unloads the chat model and leaves it unloaded; a conve
     assert.equal(await runtime.yieldGpu(), false);
     await runtime.close();
   }
+});
+
+test('in a conversation, a creation started from its Studio keeps the generator and leaves the chat model unloaded', async () => {
+  const { runtime, events, create, turn } = handover();
+  const status = await create(turn, { studio: true });
+  assert.equal(status.state, 'done', status.error);
+  // The user may well make another one at once: nothing reloads, only the copies of the sources go.
+  assert.deepEqual(events, ['llm stopped', 'generate', 'sources removed']);
+  // The next message of the chat gives the card back first.
+  events.length = 0;
+  assert.equal(await runtime.yieldGpu(), true);
+  assert.deepEqual(events, ['gpu released']);
+  await runtime.close();
 });
 
 test('the generator a Studio creation left loaded gives the card back by itself after a while', async () => {
@@ -540,128 +612,8 @@ test('the picture the generator has so far is kept one at a time, and dropped wi
   await runtime.close();
 });
 
-test('the last creation of a visit stays in the frame, and a new visit starts from an empty frame', async () => {
-  // A page that remembers what each element is, so the frame can be looked into.
-  class Element {
-    constructor(tag = '', className = '') {
-      Object.assign(this, { tag, className, children: [], style: {}, dataset: {} });
-      this.classList = { toggle() {}, add() {}, remove() {} };
-    }
-    append(...nodes) {
-      this.children.push(...nodes);
-    }
-    replaceChildren(...nodes) {
-      this.children = nodes;
-    }
-    add(option) {
-      this.children.push(option);
-    }
-    setAttribute() {}
-    querySelector() {
-      return new Element();
-    }
-    querySelectorAll() {
-      return [];
-    }
-    /** Every element under this one whose classes include `name`. */
-    find(name) {
-      return this.children.flatMap(child =>
-        child instanceof Element
-          ? [...(child.className.split(' ').includes(name) ? [child] : []), ...child.find(name)]
-          : [],
-      );
-    }
-  }
-  const page = Object.fromEntries(
-    ['studio-view', 'studio-modes', 'studio-back', 'studio-title', 'studio-summary', 'studio-body'].map(id => [
-      id,
-      new Element(),
-    ]),
-  );
-  const globals = {
-    document: { getElementById: id => page[id] ?? null, querySelector: () => null },
-    Option: class {},
-    ResizeObserver: undefined,
-  };
-  const before = Object.fromEntries(Object.keys(globals).map(key => [key, globalThis[key]]));
-  Object.assign(globalThis, globals);
-  try {
-    const { setupStudio } = await import('../public/studio.mjs');
-    const limits = { width: { min: 256, max: 2048, multipleOf: 32 }, height: { min: 256, max: 2048, multipleOf: 32 } };
-    const workflow = {
-      id: 'w',
-      name: 'Image',
-      roles: {},
-      limits,
-      direct: true,
-      size: { width: 1024, height: 1024 },
-      settings: [],
-      seeded: true,
-    };
-    const info = { enabled: true, conversationId: STUDIO_ID, styles: [], tools: { create_image: [workflow] } };
-    const made = { id: 'r1', prompt: 'un phare', outputs: [{ originalUrl: '/media/generated/phare' }] };
-    const runs = [];
-    const opened = [];
-    const studio = setupStudio({
-      api: async route => ({
-        json: async () => {
-          if (route === 'studio') return info;
-          if (route.startsWith('gallery/')) return { runs };
-          if (route === 'tools/action') return { requestId: 'q', plan: { parameters: {} } };
-          if (route === 'tools/execute') {
-            // The creation is made at once, and listed by the gallery from then on.
-            runs.unshift(made);
-            return { id: 'j', state: 'done', record: made };
-          }
-          return {};
-        },
-      }),
-      node: (tag, className) => new Element(tag, className),
-      icon: () => new Element('svg'),
-      notice() {},
-      assets: {},
-      viewOutput: record => opened.push(record.id),
-      waitForModel: async () => {},
-      blocked: () => '',
-      onChange() {},
-    });
-    const body = page['studio-body'],
-      enter = async () => {
-        await studio.open();
-        page['studio-modes'].children[0].onclick();
-      };
-    await enter();
-    assert.deepEqual(body.find('studio-frame-result'), [], 'an empty frame to begin with');
-
-    const [prompt] = body.find('studio-write')[0].children[0].children.filter(child => child.tag === 'textarea');
-    prompt.value = 'un phare';
-    prompt.oninput();
-    await body.find('studio-go')[0].onclick();
-    const [kept] = body.find('studio-frame-result');
-    assert.equal(kept.tag, 'img');
-    assert.equal(kept.src, '/media/generated/phare');
-    assert.match(body.find('studio-frame')[0].className, /has-result/);
-    // A click shows it whole, with its settings.
-    kept.onclick();
-    assert.deepEqual(opened, ['r1']);
-
-    // Back to the three choices and in again: still the same visit.
-    page['studio-back'].onclick();
-    page['studio-modes'].children[0].onclick();
-    assert.equal(body.find('studio-frame-result').length, 1);
-
-    // The Studio is left and entered again: the frame is empty, the creation is in the list below.
-    await enter();
-    assert.deepEqual(body.find('studio-frame-result'), []);
-    assert.doesNotMatch(body.find('studio-frame')[0].className, /has-result/);
-    assert.equal(body.find('studio-card').length, 1);
-  } finally {
-    Object.assign(globalThis, before);
-  }
-});
-
 /** A page that remembers what each element is, with the Studio set up in it; `routes` answers its requests. */
-async function studioPage(tools, routes = {}) {
+async function studioPage(tools, routes = {}, options = {}) {
   class Element {
     constructor(tag = '', className = '', textContent = '') {
       Object.assign(this, { tag, className, textContent, children: [], style: {}, dataset: {} });
@@ -676,7 +628,12 @@ async function studioPage(tools, routes = {}) {
     add(option) {
       this.children.push(option);
     }
-    setAttribute() {}
+    setAttribute(name, value) {
+      (this.attributes ??= {})[name] = value;
+    }
+    removeAttribute(name) {
+      delete this.attributes?.[name];
+    }
     querySelector() {
       return new Element();
     }
@@ -693,10 +650,7 @@ async function studioPage(tools, routes = {}) {
     }
   }
   const page = Object.fromEntries(
-    ['studio-view', 'studio-modes', 'studio-back', 'studio-title', 'studio-summary', 'studio-body'].map(id => [
-      id,
-      new Element(),
-    ]),
+    ['studio-view', 'studio-kinds', 'studio-body', 'ai-status', 'ai-takeover'].map(id => [id, new Element()]),
   );
   // What the page itself listens to: keys pressed with the focus on no field.
   const pageKeys = [];
@@ -714,17 +668,19 @@ async function studioPage(tools, routes = {}) {
   Object.assign(globalThis, globals);
   const { setupStudio } = await import('../public/studio.mjs');
   const asked = [],
-    notices = [];
+    notices = [],
+    revealed = [];
   let imported = 0;
+  const runs = options.runs ?? [];
   const studio = setupStudio({
     api: async (route, body) => {
       asked.push([route, body]);
       return {
         json: async () =>
           route === 'studio'
-            ? { enabled: true, conversationId: STUDIO_ID, styles: ['a.safetensors', 'b.safetensors'], tools }
+            ? { enabled: true, legacyId: STUDIO_ID, styles: ['a.safetensors', 'b.safetensors'], tools }
             : route.startsWith('gallery/')
-              ? { runs: [] }
+              ? { runs: route.endsWith(STUDIO_ID) ? (options.legacy ?? []) : runs }
               : (routes[route]?.(body) ?? {}),
       };
     },
@@ -742,25 +698,159 @@ async function studioPage(tools, routes = {}) {
           width: 1280,
           height: 720,
         })),
+      resource: id => ({ previewUrl: '/preview/' + id }),
     },
-    viewOutput() {},
+    viewOutput: options.viewOutput ?? (() => {}),
     waitForModel: async () => {},
     blocked: () => '',
     onChange() {},
+    conversation: () => options.conversation?.() ?? 'c1',
+    ensureConversation: async () => options.conversation?.() ?? 'c1',
+    reveal: () => revealed.push(true),
+    pace: 0,
+    ...(options.run ? { run: options.run } : {}),
   });
   await studio.open();
   return {
+    studio,
     page,
     body: page['studio-body'],
     asked,
     notices,
+    revealed,
     pageKeys,
+    runs,
     restore: () => Object.assign(globalThis, before),
-    /** Opens a mode by its place among the three banners. */
-    mode: index => page['studio-modes'].children[index].onclick(),
+    /** Opens a mode by its place among Image, Vidéo and Son. */
+    mode: index => page['studio-kinds'].children[index].onclick(),
+    /** The prompt of the Entrée block. */
+    prompt: () => page['studio-body'].find('studio-prompt-field')[0].children[0],
   };
 }
 const sizes = { width: { min: 256, max: 2048, multipleOf: 32 }, height: { min: 256, max: 2048, multipleOf: 32 } };
+const settle = () => new Promise(resolve => setTimeout(resolve, 15));
+
+test('the last creation stays on the screen; another conversation starts from an empty screen', async () => {
+  const workflow = {
+    id: 'w',
+    name: 'Image',
+    roles: {},
+    limits: sizes,
+    direct: true,
+    size: { width: 1024, height: 1024 },
+    settings: [],
+    seeded: true,
+  };
+  const made = { id: 'r1', prompt: 'un phare', outputs: [{ originalUrl: '/media/generated/phare' }] };
+  const opened = [];
+  let conversation = 'c1';
+  const page = await studioPage(
+    { create_image: [workflow] },
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => {
+        // The creation is made at once, and listed by the gallery from then on.
+        page.runs.unshift(made);
+        return { id: 'j', state: 'done', record: made };
+      },
+    },
+    { viewOutput: record => opened.push(record.id), conversation: () => conversation },
+  );
+  const { body, studio, asked, restore } = page;
+  try {
+    assert.deepEqual(body.find('studio-frame-result'), [], 'an empty screen to begin with');
+    page.prompt().value = 'un phare';
+    page.prompt().oninput();
+    await body.find('studio-go')[0].onclick();
+    // Made in the conversation, as a creation of its Studio.
+    const [, action] = asked.find(([route]) => route === 'tools/action');
+    assert.equal(action.conversationId, 'c1');
+    assert.equal(action.studio, true);
+    assert.equal(asked.find(([route]) => route === 'tools/execute')[1].studio, true);
+    const [kept] = body.find('studio-frame-result');
+    assert.equal(kept.tag, 'img');
+    assert.equal(kept.src, '/media/generated/phare');
+    assert.match(body.find('studio-frame')[0].className, /has-result/);
+    // A click shows it whole, with its settings.
+    kept.onclick();
+    assert.deepEqual(opened, ['r1']);
+    // In the Sortie, with its count; on the screen still after a visit of the chat.
+    assert.equal(body.find('studio-item').length, 1);
+    assert.equal(body.find('studio-count')[0].textContent, '1 RÉSULTAT');
+    await studio.open();
+    assert.equal(body.find('studio-frame-result').length, 1);
+    // Another conversation: its own Studio, an empty screen.
+    conversation = 'c2';
+    page.runs.length = 0;
+    await studio.open();
+    assert.deepEqual(body.find('studio-frame-result'), []);
+    assert.equal(body.find('studio-item').length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test('« Ouvrir » on a card puts the creation on the screen of its mode', async () => {
+  const video = {
+    id: 'v',
+    name: 'Clip',
+    roles: {},
+    limits: sizes,
+    size: { width: 768, height: 448 },
+    settings: [],
+    seeded: true,
+  };
+  const clip = { id: 'c', mediaType: 'video', prompt: 'un renard', outputs: [{ originalUrl: '/clip.mp4' }] };
+  const { studio, body, restore } = await studioPage({ create_video: [video] }, {}, { runs: [clip] });
+  try {
+    assert.equal(body.dataset.mode, 'image');
+    studio.show(clip);
+    assert.equal(body.dataset.mode, 'video');
+    const [shown] = body.find('studio-frame-result');
+    assert.equal(shown.tag, 'video');
+    assert.equal(shown.controls, true, 'a clip plays on the screen');
+    assert.match(body.find('studio-item')[0].className, /is-shown/);
+  } finally {
+    restore();
+  }
+});
+
+test('the creations of the former Studio stay listed apart, and are made there', async () => {
+  const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] };
+  const old = { id: 'o', prompt: 'avant', outputs: [{ originalUrl: '/old.png' }] };
+  const { body, asked, restore } = await studioPage(
+    { create_image: [image] },
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+    },
+    { legacy: [old] },
+  );
+  try {
+    const [where] = body.find('studio-source-pick');
+    assert.ok(where, 'a choice appears once the former Studio holds something');
+    assert.equal(body.find('studio-item').length, 0);
+    where.value = 'legacy';
+    where.onchange();
+    await settle();
+    assert.equal(body.find('studio-item').length, 1);
+    // Its creations stay where they were: Détails and Retirer, no action written to a conversation.
+    assert.deepEqual(
+      body
+        .find('studio-item')[0]
+        .find('output-action')
+        .map(action => action.children.at(-1)?.textContent ?? ''),
+      ['Détails', ''],
+    );
+    const prompt = body.find('studio-prompt-field')[0].children[0];
+    prompt.value = 'encore';
+    prompt.oninput();
+    await body.find('studio-go')[0].onclick();
+    assert.equal(asked.find(([route]) => route === 'tools/action')[1].conversationId, STUDIO_ID);
+  } finally {
+    restore();
+  }
+});
 
 test('an image dragged to another slot changes role; a move that would not combine is refused', async () => {
   const video = {
@@ -820,7 +910,7 @@ test('an image dragged to another slot changes role; a move that would not combi
   }
 });
 
-test('Ctrl + Entrée generates from anywhere in a mode, and the button says so in its corner', async () => {
+test('Ctrl + Entrée generates from anywhere in the Studio, and the button says so in its corner', async () => {
   const image = {
     id: 'w',
     name: 'Image',
@@ -831,41 +921,46 @@ test('Ctrl + Entrée generates from anywhere in a mode, and the button says so i
     settings: [],
     seeded: true,
   };
-  const { page, body, asked, pageKeys, restore, mode } = await studioPage(
+  const studio = await studioPage(
     { create_image: [image] },
     {
       'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
       'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
     },
   );
+  const { page, body, asked, pageKeys, restore } = studio;
   try {
-    const key = (overrides = {}) => ({ key: 'Enter', ctrlKey: true, preventDefault() {}, ...overrides });
-    // On the three banners there is nothing to generate.
+    const key = (overrides = {}) => ({ key: 'Enter', ctrlKey: true, preventDefault() {}, ...overrides }),
+      started = () => asked.filter(([route]) => route === 'tools/action').length;
+    assert.match(body.find('studio-go-key')[0].textContent, /^(Ctrl|⌘) ↵$/);
+    // Nothing typed: a prompt is asked for, nothing starts.
     page['studio-view'].onkeydown(key());
-    mode(0);
-    assert.match(body.find('studio-go-key')[0].textContent, /^(Ctrl|⌘) \+ Entrée$/);
-    const prompt = body.find('studio-write')[0].children[0].children.find(child => child.tag === 'textarea');
-    prompt.value = 'un phare';
-    prompt.oninput();
+    await settle();
+    assert.equal(started(), 0);
+    assert.match(body.find('studio-error')[0].textContent, /Écrivez un prompt/);
+    studio.prompt().value = 'un phare';
+    studio.prompt().oninput();
     // Entrée alone is a line in the prompt.
     page['studio-view'].onkeydown(key({ ctrlKey: false }));
-    assert.equal(asked.filter(([route]) => route === 'tools/action').length, 0);
+    assert.equal(started(), 0);
+    // The message box of the chat sends with Entrée: the key is not the Studio's there.
+    page['studio-view'].onkeydown(key({ target: { id: 'prompt' } }));
+    assert.equal(started(), 0);
     page['studio-view'].onkeydown(key());
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await settle();
     const [, sent] = asked.find(([route]) => route === 'tools/action');
     // What is typed is what is sent: no style line is added any more.
     assert.equal(sent.arguments.prompt, 'un phare');
 
     // After a click beside the fields the focus is on none: the key reaches the page itself, and
     // generates too, but only while the Studio is the view on screen.
-    const started = () => asked.filter(([route]) => route === 'tools/action').length,
-      onPage = () => pageKeys.forEach(listener => listener({ ...key(), target: document.body }));
+    const onPage = () => pageKeys.forEach(listener => listener({ ...key(), target: document.body }));
     assert.equal(started(), 1);
     onPage();
     assert.equal(started(), 1, 'the Studio is not on screen');
     page['studio-view'].offsetParent = {};
     onPage();
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await settle();
     assert.equal(started(), 2);
     // A key pressed in a field of another view is not the Studio's.
     pageKeys.forEach(listener => listener({ ...key(), target: {} }));
@@ -887,15 +982,12 @@ test('« Enrichir le prompt » rewrites what is typed, which can be taken back; 
     settings: [],
     seeded: true,
   };
-  const { body, asked, restore, mode } = await studioPage(
+  const studio = await studioPage(
     { create_image: [image] },
     { 'studio/enrich': ({ prompt }) => ({ prompt: 'A lighthouse at dusk. (' + prompt + ')' }) },
   );
+  const { body, asked, restore } = studio;
   try {
-    mode(0);
-    const prompt = () => body.find('studio-write')[0].children[0].children.find(child => child.tag === 'textarea');
-    // The old style box and its button are gone.
-    assert.deepEqual(body.find('studio-make-style'), []);
     assert.equal(body.find('studio-enrich-go')[0].children.at(-1).textContent, 'Enrichir le prompt');
 
     // Nothing typed: nothing is asked of the model.
@@ -903,21 +995,26 @@ test('« Enrichir le prompt » rewrites what is typed, which can be taken back; 
     assert.equal(asked.filter(([route]) => route === 'studio/enrich').length, 0);
     assert.match(body.find('studio-error')[0].textContent, /quelques mots/);
 
-    const typed = prompt();
-    typed.value = 'un phare';
-    typed.oninput();
+    studio.prompt().value = 'un phare';
+    studio.prompt().oninput();
     await body.find('studio-enrich-go')[0].onclick();
     assert.deepEqual(asked.find(([route]) => route === 'studio/enrich')[1], {
       prompt: 'un phare',
       verb: 'create_image',
     });
-    assert.equal(prompt().value, 'A lighthouse at dusk. (un phare)');
+    assert.equal(studio.prompt().value, 'A lighthouse at dusk. (un phare)');
     // What was typed is one click away.
     const back = body.find('studio-enrich')[0].children.find(child => child.className === 'studio-link');
     back.onclick();
-    assert.equal(prompt().value, 'un phare');
+    assert.equal(studio.prompt().value, 'un phare');
     assert.equal(body.find('studio-enrich')[0].children.length, 1);
 
+    // The seed and the LoRAs are rare: under « Plus de réglages ».
+    const [more] = body.find('studio-more');
+    assert.equal(more.children.at(-1).textContent, '+ Plus de réglages');
+    assert.equal(body.find('studio-advanced')[0].hidden, true);
+    more.onclick();
+    assert.equal(body.find('studio-advanced')[0].hidden, false);
     // LoRAs: a card each, the count shown, and no fourth.
     for (let added = 0; added < 3; added++) body.find('studio-lora-add')[0].onclick();
     assert.equal(body.find('studio-lora').length, 3);
@@ -944,7 +1041,7 @@ test('the LoRAs of a model do not follow to a model of another family, and come 
     settings: [],
     seeded: true,
   });
-  const { body, asked, restore, mode } = await studioPage(
+  const studio = await studioPage(
     {
       create_image: [
         image('k', 'Krea 2', 'krea2'),
@@ -957,19 +1054,18 @@ test('the LoRAs of a model do not follow to a model of another family, and come 
       'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
     },
   );
+  const { body, asked, restore } = studio;
   try {
-    mode(0);
     const model = to => {
         const control = body.find('studio-field').find(field => field.children[0].textContent === 'Modèle').children[1];
         control.value = to;
         control.onchange();
       },
       generate = async () => {
-        const prompt = body.find('studio-write')[0].children[0].children.find(child => child.tag === 'textarea');
-        prompt.value = 'une affiche';
-        prompt.oninput();
+        studio.prompt().value = 'une affiche';
+        studio.prompt().oninput();
         await body.find('studio-go')[0].onclick();
-        await new Promise(resolve => setTimeout(resolve, 10));
+        await settle();
         return asked.filter(([route]) => route === 'tools/action').at(-1)[1];
       };
     body.find('studio-lora-add')[0].onclick();
@@ -995,6 +1091,152 @@ test('the LoRAs of a model do not follow to a model of another family, and come 
     assert.equal((await generate()).styles.length, 2);
     model('m');
     assert.equal(body.find('studio-lora').length, 1);
+  } finally {
+    restore();
+  }
+});
+
+/** A video workflow with three lengths and a proposal of Moodix AI for it. */
+function proposalOf({ prompt = 'Un renard se lève', frames = 121 } = {}) {
+  const clip = {
+    id: 'v',
+    name: 'Clip',
+    roles: { start_image: { count: 1, media: ['image'] } },
+    limits: sizes,
+    size: { width: 768, height: 448 },
+    final: { width: 1344, height: 768 },
+    stages: true,
+    seeded: true,
+    lengths: { seconds: [121 / 24, 193 / 24, 241 / 24], standard: 121 / 24 },
+    settings: [],
+  };
+  const request = {
+    requestId: 'q',
+    approvalToken: 't',
+    tool: 'create_video',
+    mediaType: 'video',
+    workflowName: 'Clip',
+    resolution: { width: 768, height: 448 },
+    call: { id: 'call', type: 'function', function: { name: 'create_video', arguments: '{}' } },
+    plan: {
+      prompt,
+      stage: 'draft',
+      parameters: { prompt, width: 768, height: 448, frames, fps: 24, seed: 7 },
+      editable: {
+        prompt: true,
+        stages: ['draft', 'final'],
+        parameters: [
+          { key: 'frames', type: 'integer', value: frames, choices: [121, 193, 241] },
+          { key: 'width', type: 'integer', value: 768 },
+          { key: 'height', type: 'integer', value: 448 },
+          { key: 'seed', type: 'integer', value: 7 },
+        ],
+        references: [],
+      },
+      references: [],
+    },
+  };
+  return { clip, request };
+}
+
+test('Moodix AI sets its proposal in the Studio and waits: « Générer » is the answer, with the user’s changes', async () => {
+  const { clip, request } = proposalOf();
+  const studio = await studioPage(
+    { create_video: [clip] },
+    { 'tools/revise': ({ edits }) => ({ requestId: 'q2', approvalToken: 't2', revised: edits }) },
+  );
+  const { body, asked, revealed, restore } = studio;
+  try {
+    assert.equal(studio.studio.accepts('create_video'), true);
+    assert.equal(studio.studio.accepts('upscale'), false);
+    const answer = studio.studio.propose(request, new AbortController().signal);
+    await settle();
+    // The Studio came on screen, in Vidéo, with what the pointer set.
+    assert.equal(revealed.length, 1);
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(studio.prompt().value, 'Un renard se lève');
+    assert.equal(body.find('studio-stepper')[0].children[1].textContent, '05 S');
+    assert.equal(studio.studio.proposing(), true);
+    // Nothing starts by itself: the pointer stops on « Générer », beside a way to decline.
+    assert.equal(asked.filter(([route]) => route.startsWith('tools/')).length, 0);
+    assert.equal(body.find('studio-decline').length, 1);
+    // The user lengthens it, then generates: the change goes first, then the answer.
+    body.find('studio-stepper')[0].children[2].onclick();
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    assert.deepEqual(asked.find(([route]) => route === 'tools/revise')[1], {
+      requestId: 'q',
+      approvalToken: 't',
+      edits: { frames: 193 },
+    });
+    // The proposal now is the revised one, and the generation is followed by the chat turn.
+    assert.equal(request.requestId, 'q2');
+    assert.equal(studio.studio.proposing(), false);
+    assert.equal(studio.studio.busy(), true);
+    studio.studio.follow('Génération…', 0.42);
+    assert.equal(body.find('studio-progress')[0].hidden, false);
+    await studio.studio.settled({ record: null, error: 'Mémoire insuffisante.' });
+    assert.equal(studio.studio.busy(), false);
+    assert.match(body.find('studio-error')[0].textContent, /Mémoire insuffisante/);
+    // The seed drawn for the proposal was its own: a creation by hand draws again.
+    assert.equal(body.find('studio-advanced')[0].find('studio-field')[0].children[1].value, '');
+  } finally {
+    restore();
+  }
+});
+
+test('a proposal left as it is goes as it is; declined, it is answered « deny »', async () => {
+  const { clip, request } = proposalOf();
+  const studio = await studioPage({ create_video: [clip] });
+  const { body, asked, restore } = studio;
+  try {
+    let answer = studio.studio.propose(request, new AbortController().signal);
+    await settle();
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    assert.equal(asked.filter(([route]) => route === 'tools/revise').length, 0, 'nothing changed: nothing revised');
+    await studio.studio.settled({ record: null });
+
+    const second = proposalOf({ prompt: 'Un phare la nuit' });
+    answer = studio.studio.propose(second.request, new AbortController().signal);
+    await settle();
+    assert.equal(studio.prompt().value, 'Un phare la nuit');
+    body.find('studio-decline')[0].onclick();
+    assert.equal(await answer, 'deny');
+    assert.equal(studio.studio.proposing(), false);
+    assert.deepEqual(body.find('studio-decline'), []);
+
+    // A new message in the chat declines it too; a stopped turn takes it away.
+    const third = proposalOf();
+    answer = studio.studio.propose(third.request, new AbortController().signal);
+    await settle();
+    assert.equal(studio.studio.decline(), true);
+    assert.equal(await answer, 'deny');
+    const stopped = new AbortController();
+    answer = studio.studio.propose(proposalOf().request, stopped.signal);
+    await settle();
+    stopped.abort();
+    await assert.rejects(answer);
+    assert.equal(studio.studio.proposing(), false);
+  } finally {
+    restore();
+  }
+});
+
+test('the pointer only sets what the workflow leaves to the assistant', async () => {
+  const { clip, request } = proposalOf({ frames: 193 });
+  // « Fixe » in the workflow: the length is not the assistant's.
+  request.plan.editable.parameters = request.plan.editable.parameters.filter(item => item.key !== 'frames');
+  clip.lengths = null;
+  const studio = await studioPage({ create_video: [clip] });
+  const { body, restore } = studio;
+  try {
+    const answer = studio.studio.propose(request, new AbortController().signal);
+    await settle();
+    // No length to set: none is shown, none is sent.
+    assert.deepEqual(body.find('studio-stepper'), []);
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
   } finally {
     restore();
   }

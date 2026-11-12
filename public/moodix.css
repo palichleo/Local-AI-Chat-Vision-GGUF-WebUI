@@ -1,0 +1,2178 @@
+/*
+ * Moodix — rétro-futur moderne. Loaded after styles.css and workspace.css, which it overrides.
+ * A modern base (flat surfaces, thin borders, room to breathe) with a few retro touches: a wide
+ * face for the logo and the block titles, figures in a fixed-width face, a preview screen with
+ * the rounded corners of a television. No relief, no scan lines, no glow behind the page.
+ *
+ * One colour, one function, like the pipes of the Centre Pompidou: blue for what goes in
+ * (prompt, input images), red for the action (preview, Générer), green for the settings
+ * (model, length, style), yellow for what comes out (timeline, results).
+ */
+@font-face {
+  font-family: 'Michroma';
+  src: url('/fonts/Michroma-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Manrope';
+  src: url('/fonts/Manrope-Variable.ttf') format('truetype');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Variable.ttf') format('truetype');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ------------------------------------------------------------------ tokens */
+:root {
+  color-scheme: dark;
+  /* Palette « Beaubourg ». « Aube » and « Signal » are the two alternatives of the prototype. */
+  --fn-input: #3d6bf5;
+  --fn-action: #e8402f;
+  --fn-settings: #22a060;
+  --fn-output: #f6c343;
+  /* The same functions as text on a dark ground: lighter, for 4.5:1 on a block. */
+  --fn-input-text: #9db4ff;
+  --fn-settings-text: #6fd39c;
+  --fn-output-text: #f6c343;
+  --fn-action-text: #ff8a7d;
+  --on-action: #0b0c0f;
+
+  --bg: #0b0c0f;
+  --sidebar: #0e0f13;
+  --surface: #13151a;
+  --surface-raised: #1a1d23;
+  --field: #0b0c0f;
+  --input: #0b0c0f;
+  --screen: #08090b;
+  --tint: #1a1d23;
+  --hover: #1c1f26;
+  --chip: #1c1f26;
+  --line: #1e2129;
+  --line-strong: #2a2e37;
+  --field-line: #23262e;
+  --ink: #eceef2;
+  --soft: #c3c8d0;
+  --muted: #9aa0ab;
+  --accent: #eceef2;
+  --accent-hover: #ffffff;
+  --link: #9db4ff;
+  --button: #eceef2;
+  --button-hover: #ffffff;
+  --on-accent: #0b0c0f;
+  --selected: #eceef2;
+  --on-selected: #0b0c0f;
+  --ai: #ffffff;
+  --ai-soft: rgba(255, 255, 255, 0.18);
+  --shadow: #00000059;
+
+  /* The metal of the former interface is gone: flat surfaces, no grain, no light. */
+  --grain: none;
+  --glints: none;
+  --metal-sheen: transparent;
+  --metal-edge: transparent;
+  --ambient-reflection: transparent;
+  --raking-light: transparent;
+  --light-reflection: transparent;
+  --edge: transparent;
+  --grain-veil: transparent;
+  --side-veil: transparent;
+  --surface-veil: transparent;
+  --dialog-veil: transparent;
+
+  --font-ui: 'Manrope', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Michroma', 'Manrope', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --pad: 24px;
+  --sidebar-width: 248px;
+  font-family: var(--font-ui);
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --fn-input: #2f5ee8;
+  --fn-action: #e8402f;
+  --fn-settings: #1d8f55;
+  --fn-output: #e0a91c;
+  --fn-input-text: #2449c4;
+  --fn-settings-text: #17723f;
+  --fn-output-text: #8a6200;
+  --fn-action-text: #b52a1c;
+  --on-action: #0b0c0f;
+
+  --bg: #f3f4f7;
+  --sidebar: #ebedf1;
+  --surface: #ffffff;
+  --surface-raised: #e9ecf1;
+  --field: #f6f7f9;
+  --input: #f6f7f9;
+  --screen: #e4e7ec;
+  --tint: #e9ecf1;
+  --hover: #e2e6ec;
+  --chip: #e2e6ec;
+  --line: #dde1e8;
+  --line-strong: #c6ccd6;
+  --field-line: #d3d8e0;
+  --ink: #12141a;
+  --soft: #363b45;
+  --muted: #5a616d;
+  --accent: #12141a;
+  --accent-hover: #000000;
+  --link: #2449c4;
+  --button: #12141a;
+  --button-hover: #000000;
+  --on-accent: #ffffff;
+  --selected: #12141a;
+  --on-selected: #ffffff;
+  --ai: #12141a;
+  --ai-soft: rgba(18, 20, 26, 0.16);
+  --shadow: #1d2a3722;
+}
+
+/* ------------------------------------------------------------------ base */
+html,
+body {
+  font-family: var(--font-ui);
+}
+body {
+  background: var(--bg);
+  background-image: none;
+  color: var(--ink);
+  flex-direction: row;
+}
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+.mono,
+output,
+kbd {
+  font-family: var(--font-mono);
+}
+.composer,
+.model-card,
+.secondary,
+.settings-button,
+.theme-button,
+.suggestions button,
+.workflow-card,
+.iteration-setting,
+.sidebar,
+.gallery,
+.assets-panel,
+dialog {
+  background-image: none;
+  box-shadow: none;
+}
+.composer::after,
+.model-card::after {
+  display: none;
+}
+dialog {
+  background-color: var(--sidebar);
+  border-color: var(--line-strong);
+}
+.primary {
+  background: var(--button);
+  border-color: var(--button);
+  color: var(--on-accent);
+  background-image: none;
+  box-shadow: none;
+  font-weight: 700;
+  border-radius: 12px;
+}
+.primary:hover:enabled {
+  background: var(--button-hover);
+}
+.secondary {
+  background-color: transparent;
+  border-color: var(--line-strong);
+  border-radius: 12px;
+  font-weight: 650;
+}
+.secondary:hover:enabled {
+  background-color: var(--hover);
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+/* ------------------------------------------------------------------ sidebar */
+#sidebar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 18px;
+  flex: 0 0 var(--sidebar-width);
+  width: var(--sidebar-width);
+  height: 100dvh;
+  min-height: 0;
+  padding: 20px 14px 14px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  background: var(--sidebar);
+  border-right: 1px solid var(--line);
+  border-bottom: 0;
+  box-shadow: none;
+}
+#sidebar .sidebar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+}
+#sidebar .brand {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 4px;
+  border-radius: 8px;
+  font-size: 0;
+}
+.brand-logo {
+  display: block;
+  height: 30px;
+  width: auto;
+}
+#sidebar .nav-close {
+  display: none;
+}
+#sidebar > .new-chat {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 46px;
+  margin: 0;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid #262a33;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+:root[data-theme='light'] #sidebar > .new-chat {
+  border-color: var(--line-strong);
+}
+#sidebar > .new-chat:hover:enabled {
+  background: var(--surface-raised);
+}
+#sidebar > .new-chat svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2.2;
+}
+#sidebar > .sidebar-section {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  width: auto;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  overflow: visible;
+}
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 18px;
+}
+#sidebar .home-button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--soft);
+  font-size: 14px;
+  font-weight: 600;
+}
+#sidebar .home-button svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+}
+#sidebar .home-button:hover:enabled {
+  background: var(--hover);
+  color: var(--ink);
+}
+#sidebar .home-button[aria-current='page'] {
+  background: var(--chip);
+  color: var(--ink);
+  font-weight: 800;
+  border: 0;
+  box-shadow: none;
+}
+#sidebar .project-nav-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 4px 12px;
+  margin: 0;
+  min-height: 40px;
+}
+#sidebar .project-nav-heading > span {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#sidebar .project-nav-heading .icon-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+#sidebar .history-item {
+  border-radius: 10px;
+  min-height: 38px;
+  font-size: 13.5px;
+}
+#sidebar .history-item.active {
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-weight: 700;
+}
+#sidebar .sidebar-bottom {
+  display: block;
+  flex: none;
+  margin: 0;
+  padding: 0;
+}
+#sidebar .sidebar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 4px;
+  min-height: 0;
+  margin: 0;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+#sidebar .sidebar-actions .engine-button,
+#sidebar .sidebar-actions .settings-button,
+#sidebar .sidebar-actions .files-button {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+}
+#sidebar .sidebar-actions .settings-button svg,
+#sidebar .sidebar-actions .files-button svg {
+  width: 19px;
+  height: 19px;
+}
+#sidebar .sidebar-actions .settings-button svg {
+  stroke-width: 1.5;
+}
+#sidebar .sidebar-actions .settings-button:hover:enabled,
+#sidebar .sidebar-actions .files-button:hover:enabled,
+#sidebar .sidebar-actions .files-button[aria-pressed='true'] {
+  background: var(--hover);
+}
+#sidebar .sidebar-actions .mobile-new {
+  display: none;
+}
+.nav-scrim {
+  display: none;
+}
+
+/* Narrower than 1100 px: the sidebar is a drawer, opened by the menu button of the top bar. */
+@media (max-width: 1099px) {
+  #sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 60;
+    width: min(300px, 86vw);
+    flex: none;
+    transform: translateX(-102%);
+    visibility: hidden;
+    transition:
+      transform 0.4s ease,
+      visibility 0s linear 0.4s;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+  }
+  body[data-nav-open='true'] #sidebar {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.4s ease;
+  }
+  #sidebar .nav-close {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+  body[data-nav-open='true'] .nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 59;
+    border: 0;
+    background: rgba(0, 0, 0, 0.55);
+    cursor: pointer;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #sidebar,
+  body[data-nav-open='true'] #sidebar {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------ workspace and top bar */
+.workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: auto;
+  height: 100dvh;
+  background: transparent;
+}
+#topbar {
+  flex: none;
+  position: relative;
+  z-index: 6;
+  background: var(--bg);
+}
+.topbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 64px;
+  padding: 10px var(--pad) 8px;
+}
+.topbar-start,
+.topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.topbar-end {
+  gap: 8px;
+  flex: none;
+}
+.topbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid #262a33;
+  background: #14161b;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 14px;
+}
+:root[data-theme='light'] .topbar-button {
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
+.topbar-button:hover:enabled {
+  background: var(--hover);
+}
+.topbar-button svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2;
+}
+#navigation-open {
+  display: none;
+  flex: 0 0 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 14px;
+  background: transparent;
+}
+@media (max-width: 1099px) {
+  #navigation-open {
+    display: inline-flex;
+  }
+}
+/* The mode the switch goes to: « Studio » with the action colour from the chat, « Chat » from the Studio. */
+.mode-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--fn-action);
+  flex: none;
+}
+.mode-switch svg {
+  display: none;
+}
+body[data-view='studio'] .mode-switch svg {
+  display: block;
+}
+body[data-view='studio'] .mode-switch .mode-dot {
+  display: none;
+}
+body[data-view='home'] .mode-switch {
+  display: none;
+}
+/* The signature: three rounded strokes under the top bar, blue, green and yellow. */
+.signature {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 2px var(--pad) 12px;
+}
+.signature span {
+  display: block;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--fn-input);
+}
+.signature span:nth-child(2) {
+  width: 68%;
+  background: var(--fn-settings);
+}
+.signature span:nth-child(3) {
+  width: 44%;
+  background: var(--fn-output);
+}
+#chat-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: none;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+#chat-header[hidden] {
+  display: none;
+}
+#chat-header #chat-heading {
+  color: var(--ink);
+  opacity: 1;
+  font-weight: 700;
+  font-size: 16px;
+}
+#chat-header select {
+  color: var(--muted);
+  font-size: 13px;
+}
+/* Image / Vidéo / Son, at the top left of the Studio. */
+.kind-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #14161b;
+  border: 1px solid var(--line);
+}
+:root[data-theme='light'] .kind-tabs {
+  background: var(--surface);
+}
+.kind-tabs:empty,
+body:not([data-view='studio']) .kind-tabs {
+  display: none;
+}
+.kind-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  min-width: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #aeb4bf;
+  font-size: 14px;
+  font-weight: 600;
+}
+:root[data-theme='light'] .kind-tab {
+  color: var(--muted);
+}
+.kind-tab svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2;
+}
+.kind-tab[aria-selected='true'] {
+  background: var(--selected);
+  color: var(--on-selected);
+  font-weight: 800;
+}
+.kind-tab:hover:enabled:not([aria-selected='true']) {
+  color: var(--ink);
+}
+/* While Moodix AI sets the Studio: what it does, and the way to take over. */
+.ai-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 4px 4px 12px;
+  border-radius: 999px;
+  background: #15171c;
+  box-shadow: 0 0 0 1px var(--ai-soft);
+}
+:root[data-theme='light'] .ai-status {
+  background: var(--surface);
+}
+.ai-status[hidden] {
+  display: none;
+}
+.ai-dot {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--ai);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.6);
+}
+:root[data-theme='light'] .ai-dot {
+  box-shadow: 0 0 0 3px var(--ai-soft);
+}
+.ai-status-text {
+  font-size: 13px;
+  color: var(--soft);
+  white-space: nowrap;
+}
+.ai-takeover {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--selected);
+  color: var(--on-selected);
+  font-weight: 800;
+  white-space: nowrap;
+}
+@media (max-width: 999px) {
+  .ai-status-text {
+    display: none;
+  }
+}
+@media (max-width: 519px) {
+  .mode-switch-label {
+    display: none;
+  }
+  .mode-switch {
+    padding: 0;
+    width: 44px;
+  }
+  body:not([data-view='studio']) .mode-switch .mode-dot {
+    width: 10px;
+    height: 10px;
+  }
+  .kind-tab {
+    padding: 0 10px;
+  }
+  .kind-tab span {
+    display: none;
+  }
+}
+@media (max-width: 1039px) {
+  :root {
+    --pad: 20px;
+  }
+}
+@media (max-width: 679px) {
+  :root {
+    --pad: 14px;
+  }
+}
+
+/* ------------------------------------------------------------------ views */
+body[data-view='home'] .chat-area,
+body[data-view='home'] .composer-region,
+body[data-view='studio'] .chat-area {
+  display: none !important;
+}
+body[data-view='studio'] .composer-region {
+  display: flex !important;
+}
+body[data-view='studio'] #welcome,
+body[data-view='studio'] .suggestions {
+  display: none !important;
+}
+.workspace > .notice {
+  top: 76px;
+}
+
+/* ------------------------------------------------------------------ chat */
+:root {
+  --chat-column: 808px;
+  --chat-side: var(--pad);
+}
+.chat-area {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 14px, #000 calc(100% - 14px), transparent);
+}
+.messages {
+  max-width: var(--chat-column);
+  padding-top: 16px;
+  padding-bottom: 24px;
+}
+.message.user .message-body {
+  background: var(--surface-raised);
+  border: 0;
+  border-radius: 20px 20px 6px 20px;
+  padding: 12px 16px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.message.assistant .message-body {
+  font-size: 15px;
+  line-height: 1.6;
+}
+.message-header {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+/* Moodix AI is a white dot, the same as its pointer in the Studio. */
+.message-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--ai);
+  box-shadow:
+    0 0 0 4px rgba(255, 255, 255, 0.08),
+    0 0 14px rgba(255, 255, 255, 0.35);
+}
+:root[data-theme='light'] .message-avatar {
+  box-shadow: 0 0 0 4px var(--ai-soft);
+}
+.message-avatar svg {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ composer */
+#chat-form.composer,
+.composer {
+  border: 1px solid #262a33;
+  border-radius: 22px;
+  background: #15171c;
+  padding: 10px 10px 8px 14px;
+  box-shadow: none;
+}
+:root[data-theme='light'] .composer {
+  background: var(--surface);
+  border-color: var(--line-strong);
+}
+.composer:focus-within {
+  border-color: #3a3f4a;
+  box-shadow: none;
+}
+.composer textarea {
+  font-size: 15px;
+  line-height: 1.45;
+  padding: 6px 2px 6px;
+  min-height: 34px;
+}
+.send-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--button);
+  color: var(--on-accent);
+  background-image: none;
+  box-shadow: none;
+}
+.send-button svg {
+  stroke-width: 2.4;
+}
+.send-button:disabled {
+  background: var(--tint);
+  color: var(--muted);
+}
+.attach-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+}
+.thinking-button {
+  border-radius: 999px;
+  min-height: 30px;
+  padding: 0 10px;
+  font-weight: 700;
+}
+.composer-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--chip);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--soft);
+  white-space: nowrap;
+}
+.composer-context[hidden] {
+  display: none;
+}
+.composer-context .mode-dot {
+  width: 7px;
+  height: 7px;
+}
+.composer-region {
+  flex-direction: column;
+  gap: 8px;
+}
+body[data-view='studio'] .composer-region {
+  max-width: calc(1180px + 2 * var(--pad));
+  width: 100%;
+  margin: 0 auto;
+  padding: 8px var(--pad) 14px;
+  transform: none;
+}
+/* In the Studio: the last answer of Moodix AI, just above the message box. */
+.studio-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 4px 4px 4px 12px;
+  border-radius: 14px;
+  background: #111317;
+  border: 1px solid #1a1d24;
+}
+:root[data-theme='light'] .studio-context {
+  background: var(--surface);
+  border-color: var(--line);
+}
+.studio-context[hidden] {
+  display: none;
+}
+.studio-context .ai-dot {
+  width: 10px;
+  height: 10px;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+}
+.studio-last-reply {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-to-chat {
+  flex: none;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+.studio-to-chat:hover:enabled {
+  background: var(--hover);
+}
+.welcome-logo {
+  display: block;
+  height: 44px;
+  width: auto;
+}
+.composer-region .welcome-mark {
+  width: auto;
+  height: auto;
+  margin-bottom: 18px;
+}
+.welcome h1 {
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+.welcome h1 span {
+  color: var(--muted);
+  font-weight: 500;
+}
+.suggestions button {
+  border-radius: 16px;
+  background: var(--surface);
+  border-color: var(--line);
+}
+.suggestions button:nth-child(1) {
+  border-top: 2px solid var(--fn-action);
+}
+.suggestions button:nth-child(2) {
+  border-top: 2px solid var(--fn-output);
+}
+.suggestions button:nth-child(3) {
+  border-top: 2px solid var(--fn-input);
+}
+
+/* ------------------------------------------------------------------ Studio: four blocks */
+#studio-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px var(--pad) 8px;
+  scrollbar-width: thin;
+  container: studio / inline-size;
+}
+#studio-view[hidden] {
+  display: none;
+}
+#studio-view .studio-body {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+}
+.studio-desk {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'prev' 'in' 'set' 'out';
+}
+@container studio (min-width: 640px) {
+  .studio-desk {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: 'prev prev' 'in set' 'out out';
+  }
+}
+@container studio (min-width: 992px) {
+  .studio-desk {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) minmax(0, 1fr);
+    grid-template-areas: 'in prev set' 'out out out';
+  }
+}
+.studio-block {
+  --block: var(--line-strong);
+  --block-text: var(--muted);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 2px solid var(--block);
+}
+.studio-block.is-input {
+  --block: var(--fn-input);
+  --block-text: var(--fn-input-text);
+  grid-area: in;
+}
+.studio-block.is-preview {
+  --block: var(--fn-action);
+  --block-text: var(--fn-action-text);
+  grid-area: prev;
+  align-items: center;
+  gap: 14px;
+}
+.studio-block.is-settings {
+  --block: var(--fn-settings);
+  --block-text: var(--fn-settings-text);
+  grid-area: set;
+  gap: 14px;
+}
+.studio-block.is-output {
+  --block: var(--fn-output);
+  --block-text: var(--fn-output-text);
+  grid-area: out;
+  padding: 14px 16px;
+}
+.studio-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 18px;
+}
+.studio-block-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--block-text);
+}
+.studio-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.studio-desk.is-empty {
+  display: block;
+  padding: 40px 0;
+}
+/* Fields: dark wells with fine borders. */
+.studio-desk textarea,
+.studio-desk select,
+.studio-desk input[type='number'],
+.studio-desk input[type='text'] {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--field-line);
+  border-radius: 12px;
+  background: var(--field);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  min-height: 44px;
+  padding: 0 12px;
+  transition: box-shadow 0.4s ease;
+}
+.studio-desk textarea {
+  min-height: 120px;
+  padding: 14px;
+  border-radius: 14px;
+  font-size: 15px;
+  line-height: 1.55;
+  resize: vertical;
+}
+.studio-desk .studio-prompt-field textarea {
+  flex: 1;
+}
+.studio-desk input[type='number'] {
+  font-family: var(--font-mono);
+}
+.studio-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.studio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* A setting Moodix AI may change (« Assistant » in its workflow) wears a small white dot. */
+.ai-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ai);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}
+:root[data-theme='light'] .ai-mark {
+  box-shadow: 0 0 0 2px var(--ai-soft);
+}
+.studio-prompt-field {
+  flex: 1;
+}
+.studio-enrich {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.studio-enrich .secondary {
+  min-height: 40px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.studio-link {
+  border: 0;
+  background: none;
+  color: var(--link);
+  font-weight: 650;
+  min-height: 40px;
+  padding: 0 8px;
+}
+/* Input images: 60 px squares, the one given ringed in blue. */
+.studio-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.studio-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.studio-slot-pick {
+  width: 60px;
+  height: 60px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px dashed #343944;
+  background: transparent;
+  color: #aeb4bf;
+}
+:root[data-theme='light'] .studio-slot-pick {
+  border-color: var(--line-strong);
+  color: var(--muted);
+}
+.studio-slot.is-filled .studio-slot-pick {
+  border: 0;
+  box-shadow: 0 0 0 1.5px var(--fn-input);
+}
+.studio-slot-pick img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.studio-slot.is-target .studio-slot-pick {
+  border-color: var(--fn-input);
+  border-style: solid;
+}
+.studio-slot.is-blocked .studio-slot-pick {
+  opacity: 0.4;
+}
+.studio-slot-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.studio-slot-remove {
+  position: absolute;
+  top: -8px;
+  left: 46px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+.studio-slot-remove svg {
+  width: 12px;
+  height: 12px;
+}
+.studio-lyrics-toggle {
+  align-self: flex-start;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px dashed #343944;
+  background: transparent;
+  color: #aeb4bf;
+  font-weight: 600;
+}
+:root[data-theme='light'] .studio-lyrics-toggle {
+  border-color: var(--line-strong);
+  color: var(--muted);
+}
+.studio-extending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--surface-raised);
+  font-size: 13px;
+  color: var(--soft);
+}
+.studio-extending > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-extending svg {
+  width: 16px;
+  height: 16px;
+  color: var(--fn-output);
+}
+/* The kind of sound, in the settings. */
+.studio-kinds {
+  display: grid;
+  gap: 6px;
+}
+.studio-kind {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--field-line);
+  background: var(--field);
+  color: var(--ink);
+  text-align: left;
+}
+.studio-kind span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.studio-kind[aria-checked='true'] {
+  border-color: var(--fn-settings);
+  box-shadow: 0 0 0 1px var(--fn-settings);
+}
+
+/* The preview: a screen with the corners of a television. */
+.studio-screen {
+  width: 100%;
+  padding: 10px;
+  border-radius: 28px;
+  background: var(--screen);
+  box-shadow: inset 0 0 0 1px #20232b;
+}
+:root[data-theme='light'] .studio-screen {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+#studio-view .studio-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+}
+@container studio (min-width: 640px) and (max-width: 991px) {
+  #studio-view .studio-stage {
+    height: 340px;
+  }
+}
+@container studio (max-width: 639px) {
+  #studio-view .studio-stage {
+    height: 230px;
+  }
+}
+#studio-view .studio-frame {
+  position: relative;
+  flex: none;
+  max-width: 100%;
+  border: 0;
+  border-radius: 22px / 18px;
+  background: #000;
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    width 0.55s ease,
+    height 0.55s ease;
+}
+:root[data-theme='light'] #studio-view .studio-frame {
+  background: #1a1d23;
+}
+#studio-view .studio-frame.is-audio {
+  background: transparent;
+  border-radius: 14px;
+}
+.studio-frame-result {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: zoom-in;
+  z-index: 0;
+}
+video.studio-frame-result {
+  object-fit: contain;
+  background: #000;
+  cursor: default;
+}
+.studio-frame-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.55);
+}
+/* What will be made, in figures, at the top left of the screen. */
+.studio-readout {
+  position: absolute;
+  left: 14px;
+  top: 12px;
+  z-index: 3;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.studio-frame.is-audio .studio-readout {
+  top: -2px;
+  left: 18px;
+}
+#studio-view .studio-frame-label {
+  display: none;
+}
+/* A sound: its bars, lit in the action colour as the generation goes. */
+.studio-bars {
+  position: absolute;
+  inset: 18% 18px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.studio-bars span {
+  flex: 1;
+  border-radius: 999px;
+  background: var(--fn-action);
+  transition: background 0.4s ease;
+}
+.studio-frame.is-busy .studio-bars span {
+  background: #2a2e37;
+}
+.studio-frame.is-busy .studio-bars span.is-lit {
+  background: var(--fn-action);
+}
+/* The row under the preview: formats on the left, Générer on the right. */
+.studio-actionbar {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.studio-formats-wrap {
+  position: relative;
+}
+#studio-view .studio-formats {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin: 0;
+  border-radius: 14px;
+  background: var(--field);
+  transition: box-shadow 0.4s ease;
+}
+#studio-view .studio-format {
+  min-height: 40px;
+  min-width: 52px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--soft);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+}
+#studio-view .studio-format[aria-checked='true'],
+#studio-view .studio-format.is-on {
+  background: var(--selected);
+  color: var(--on-selected);
+  font-weight: 600;
+}
+#studio-view .studio-format.is-more {
+  min-width: 44px;
+}
+.studio-format-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 8;
+  width: 272px;
+  padding: 6px;
+  border-radius: 14px;
+  background: #15171c;
+  border: 1px solid #262a33;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+:root[data-theme='light'] .studio-format-menu {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.studio-format-menu[hidden] {
+  display: none;
+}
+.studio-format-menu button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--chip);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.studio-format-menu button[aria-pressed='true'] {
+  background: var(--selected);
+  color: var(--on-selected);
+}
+/* Générer: full in the action colour, 14 px corners, a thin progress bar along its foot. */
+#studio-view .studio-go {
+  position: relative;
+  overflow: hidden;
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-width: 200px;
+  min-height: 52px;
+  padding: 0 18px 0 20px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--fn-action);
+  background-image: none;
+  color: var(--on-action);
+  font-family: var(--font-ui);
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 0;
+  text-transform: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  box-shadow: none;
+  transition: box-shadow 0.4s ease;
+}
+#studio-view .studio-go:hover:enabled {
+  filter: brightness(1.06);
+}
+#studio-view .studio-go:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+#studio-view .studio-go svg {
+  display: none;
+}
+#studio-view .studio-go-key {
+  position: static;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.7;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+.studio-go-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: calc(var(--studio-progress, 0) * 100%);
+  background: rgba(11, 12, 15, 0.6);
+  transition: width 0.2s linear;
+}
+.studio-go.is-indeterminate .studio-go-bar {
+  width: 30%;
+  animation: studio-go-wait 1.6s ease-in-out infinite alternate;
+}
+@keyframes studio-go-wait {
+  from {
+    transform: translateX(-10%);
+  }
+  to {
+    transform: translateX(240%);
+  }
+}
+.studio-stop {
+  min-height: 52px;
+  min-width: 52px;
+  border-radius: 14px;
+}
+.studio-progress {
+  width: 100%;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 18px;
+}
+.studio-progress[hidden] {
+  display: none;
+}
+.studio-error {
+  width: 100%;
+  margin: 0;
+  color: var(--fn-action-text);
+  font-size: 13px;
+}
+@container studio (max-width: 719px) {
+  #studio-view .studio-go {
+    flex: 1 1 100%;
+  }
+  #studio-view .studio-go-key {
+    display: none;
+  }
+}
+
+/* Settings: length as a stepper, the rest in wells. */
+.studio-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px;
+  border-radius: 14px;
+  background: var(--field);
+  border: 1px solid var(--field-line);
+  transition: box-shadow 0.4s ease;
+}
+.studio-stepper button {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1;
+}
+.studio-stepper button:hover:enabled {
+  background: var(--hover);
+}
+.studio-stepper output {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--fn-settings-text);
+}
+.studio-more {
+  min-height: 42px;
+  border-radius: 12px;
+  border: 0;
+  background: #181b21;
+  color: var(--soft);
+  text-align: left;
+  padding: 0 14px;
+  font-weight: 600;
+}
+:root[data-theme='light'] .studio-more {
+  background: var(--surface-raised);
+}
+.studio-more:hover:enabled {
+  background: var(--hover);
+}
+.studio-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.studio-advanced[hidden] {
+  display: none;
+}
+.studio-loras {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.studio-loras-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.studio-loras-head h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.studio-loras-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.studio-lora {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  grid-template-areas: 'name remove' 'slider amount';
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--field);
+  border: 1px solid var(--field-line);
+}
+.studio-lora select {
+  grid-area: name;
+  min-height: 40px;
+}
+.studio-lora-remove {
+  grid-area: remove;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+}
+.studio-lora input[type='range'] {
+  grid-area: slider;
+  accent-color: var(--fn-settings);
+}
+.studio-lora-strength {
+  grid-area: amount;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fn-settings-text);
+  align-self: center;
+}
+.studio-lora-add {
+  min-height: 42px;
+  border-radius: 12px;
+  border: 1px dashed var(--fn-settings);
+  background: transparent;
+  color: var(--fn-settings-text);
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.studio-lora-add svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* The output: a row of results, newest last for a timeline. */
+.studio-strip {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+.studio-item {
+  flex: 0 0 200px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+@container studio (min-width: 640px) and (max-width: 991px) {
+  .studio-item {
+    flex-basis: 180px;
+  }
+}
+@container studio (max-width: 639px) {
+  .studio-item {
+    flex-basis: 150px;
+  }
+}
+.studio-thumb {
+  position: relative;
+  height: 96px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface-raised);
+  isolation: isolate;
+}
+@container studio (max-width: 639px) {
+  .studio-thumb {
+    height: 84px;
+  }
+}
+.studio-item.is-selected .studio-thumb,
+.studio-item.is-shown .studio-thumb {
+  box-shadow: 0 0 0 2px var(--fn-output);
+}
+.studio-thumb > img,
+.studio-thumb > video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  cursor: pointer;
+}
+.studio-thumb-wave {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 30%;
+  bottom: 30%;
+  border-radius: 4px;
+  opacity: 0.8;
+  background: repeating-linear-gradient(90deg, var(--fn-output) 0 3px, transparent 3px 7px);
+}
+.studio-play {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 3;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(11, 12, 15, 0.82);
+  color: var(--fn-output);
+}
+.studio-play svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  stroke: none;
+}
+.studio-item-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-item-meta {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-item .studio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.studio-item .output-action {
+  min-height: 34px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  gap: 5px;
+}
+.studio-item .output-action svg {
+  width: 14px;
+  height: 14px;
+}
+.studio-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.studio-source-pick {
+  min-height: 32px;
+  border-radius: 10px;
+  border: 1px solid var(--field-line);
+  background: var(--field);
+  color: var(--soft);
+  font-size: 12px;
+  padding: 0 8px;
+}
+
+/* ------------------------------------------------------------------ film grain, on pictures only */
+/* Finer and harder than before: fractal noise of one octave, grey, contrast raised, laid over
+   the picture. Still at rest; it moves only while a creation is being made. */
+.picture-grain,
+.film-grain {
+  position: absolute;
+  inset: -12px;
+  z-index: 2;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='1' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncG type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncB type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size: 240px 240px;
+  mix-blend-mode: overlay;
+  opacity: 0.42;
+  animation: none;
+  transition: opacity 0.6s ease;
+}
+.film-grain {
+  opacity: 0;
+}
+.has-preview > .film-grain,
+.is-busy > .picture-grain,
+.is-generating > .picture-grain {
+  opacity: 0.75;
+  animation: picture-grain 1s steps(1) infinite;
+}
+/* The Studio's screen has its own grain: the one of the picture so far would double it. */
+.studio-frame > .film-grain {
+  display: none;
+}
+@keyframes picture-grain {
+  0% {
+    transform: translate(0, 0);
+  }
+  12.5% {
+    transform: translate(-9px, 6px);
+  }
+  25% {
+    transform: translate(7px, -10px);
+  }
+  37.5% {
+    transform: translate(-4px, 10px);
+  }
+  50% {
+    transform: translate(10px, 3px);
+  }
+  62.5% {
+    transform: translate(-10px, -5px);
+  }
+  75% {
+    transform: translate(5px, 8px);
+  }
+  87.5% {
+    transform: translate(-6px, -9px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .has-preview > .film-grain,
+  .is-busy > .picture-grain,
+  .is-generating > .picture-grain {
+    animation: none;
+  }
+}
+.studio-frame.is-busy .studio-frame-result {
+  opacity: 0.55;
+  transition: opacity 0.6s ease;
+}
+
+/* ------------------------------------------------------------------ cards in the chat */
+/* What is made in the Studio shows in the conversation as a card: its picture, what it is,
+   and « Ouvrir », which shows it on the Studio's screen. */
+.generation-card.is-compact {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'thumb text open' 'thumb actions actions';
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 4px;
+  width: 100%;
+  max-width: 460px;
+  margin: 0;
+  padding: 8px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.generation-grid:has(.is-compact) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  grid-template-columns: none;
+}
+.generation-card.is-compact > .generation-frame {
+  grid-area: thumb;
+  position: relative;
+  width: auto;
+  height: 56px;
+  min-width: 56px;
+  max-width: 100px;
+  aspect-ratio: 3 / 2;
+  border-radius: 10px;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--surface-raised);
+}
+.generation-card.is-compact.is-audio > .generation-frame {
+  aspect-ratio: 3 / 2;
+}
+.generation-card.is-compact > .generation-frame img,
+.generation-card.is-compact > .generation-frame video,
+.generation-card.is-compact .generation-original {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 0;
+}
+.generation-card.is-compact .generation-original {
+  padding: 0;
+  border: 0;
+  background: none;
+  aspect-ratio: auto !important;
+}
+.generation-card.is-compact .video-original,
+.generation-card.is-compact .video-original video {
+  width: 100%;
+  height: 100%;
+}
+.generation-card.is-compact .card-text {
+  grid-area: text;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.card-title {
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-meta {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-open {
+  grid-area: open;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid #2a2e37;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 700;
+  white-space: nowrap;
+}
+:root[data-theme='light'] .card-open {
+  border-color: var(--line-strong);
+}
+.card-open:hover:enabled {
+  background: var(--hover);
+}
+.generation-card.is-compact > .generation-caption {
+  grid-area: actions;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  min-width: 0;
+}
+.generation-card.is-compact > .generation-caption > span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.generation-card.is-compact > .output-actions,
+.generation-card.is-compact > audio,
+.generation-card.is-compact > .secondary {
+  grid-column: 2 / 4;
+}
+.generation-card.is-compact .output-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+}
+.generation-card.is-compact .output-action {
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 10px;
+}
+.generation-card.is-compact .output-action svg {
+  width: 14px;
+  height: 14px;
+}
+.generation-card.is-compact > .generation-frame > .picture-grain {
+  z-index: 3;
+}
+
+/* ------------------------------------------------------------------ the pointer of Moodix AI */
+/* A white pointer in a soft halo, with a label of what it does; it moves slowly (0.9 s). */
+.ai-cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 70;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(var(--ai-x, 50vw), var(--ai-y, 50vh));
+  transition:
+    transform 0.9s cubic-bezier(0.45, 0, 0.2, 1),
+    opacity 0.5s ease;
+}
+.ai-cursor[hidden] {
+  display: none;
+}
+.ai-cursor.is-visible {
+  opacity: 1;
+}
+.ai-cursor-halo {
+  position: absolute;
+  left: -32px;
+  top: -32px;
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.08) 45%, transparent 70%);
+}
+.ai-cursor-ring {
+  position: absolute;
+  left: -14px;
+  top: -14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+}
+.ai-cursor-arrow {
+  position: absolute;
+  left: -3px;
+  top: -3px;
+  width: 22px;
+  height: 22px;
+}
+.ai-cursor-arrow path {
+  fill: #ffffff;
+  stroke: #0b0c0f;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.ai-cursor-label {
+  position: absolute;
+  left: 22px;
+  top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #0b0c0f;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.ai-cursor-label strong {
+  font-weight: 800;
+}
+.ai-cursor-label span::before {
+  content: '· ';
+}
+.ai-cursor-label span:empty {
+  display: none;
+}
+/* The setting being changed has a clear ring; once set, a fine trace stays. */
+[data-ai-active] {
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.85),
+    0 0 24px rgba(255, 255, 255, 0.25) !important;
+}
+[data-ai-touched]:not([data-ai-active]) {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28) !important;
+}
+:root[data-theme='light'] [data-ai-active] {
+  box-shadow:
+    0 0 0 2px var(--ai),
+    0 0 0 6px var(--ai-soft) !important;
+}
+:root[data-theme='light'] [data-ai-touched]:not([data-ai-active]) {
+  box-shadow: 0 0 0 1px var(--ai-soft) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-cursor {
+    transition: opacity 0.5s ease;
+  }
+}
+
+/* ------------------------------------------------------------------ home */
+.home-header h1 {
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+.project-card {
+  border-radius: 20px;
+}
+.ai-cursor.is-placing {
+  transition: none;
+}
+.studio-frame-sound {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 6px;
+  width: auto;
+  height: 40px;
+  z-index: 4;
+}
+.studio-output-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.studio-decline {
+  min-height: 52px;
+  border-radius: 14px;
+}
+/* The ring of the focused message box: visible (3:1 and more), without the glare of white. */
+:root {
+  --focus: #6b7280;
+}
+:root[data-theme='light'] {
+  --focus: #5a616d;
+}
+.composer:has(textarea:focus-visible) {
+  outline-color: var(--focus);
+}
+/* An empty conversation centres its message box in the chat (the welcome); in the Studio it stays
+   at the bottom, whole, whatever the conversation holds. */
+body[data-view='studio'] .workspace:has(#messages) .composer-region {
+  margin: 0 auto;
+  flex-shrink: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 8px var(--pad) 14px;
+}
+.ai-cursor.is-left .ai-cursor-label {
+  left: auto;
+  right: 18px;
+}
+:root[data-theme='light'] #chat-form.composer {
+  background: var(--surface);
+  border-color: var(--line-strong);
+}

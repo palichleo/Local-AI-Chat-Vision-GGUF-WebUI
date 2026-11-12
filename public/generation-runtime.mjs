@@ -21,10 +21,10 @@ export function setupGenerationRuntime({
   const $ = id => document.getElementById(id);
   let urls = [],
     galleryVersion = 0;
-  // The place whose creations the « Créations » tab lists: the open conversation, or the Studio
-  // while it is the view on screen (the last conversation opened has nothing to do there).
+  // The place whose creations the « Créations » tab lists: the open conversation, in the chat as
+  // in its Studio; or the former Studio, which had no conversation, while its Sortie shows it.
   const place = () =>
-    state.view === 'studio'
+    state.view === 'studio' && state.studioLegacy
       ? { id: state.studioId ?? null, studio: true }
       : { id: state.conversationId, studio: false };
   function reset() {
@@ -264,8 +264,10 @@ export function setupGenerationRuntime({
     await renderGallery(record.conversationId);
   }
   /**
-   * `confirmed`: the user started this very action with a button (Upscale, Interpoler), which
-   * is their confirmation; a proposal coming from the model always asks.
+   * `confirmed`: the user started this very action with a button (Upscale, Interpoler, or
+   * « Générer » in the Studio), which is their confirmation; a proposal coming from the model
+   * asks, in the window of confirmation or, with `approve`, in the Studio (the answer:
+   * 'once' or 'deny'). `studio`: started from the Studio, whose generator stays loaded after it.
    */
   async function requestTool(
     request,
@@ -273,12 +275,12 @@ export function setupGenerationRuntime({
     onProgress,
     onImage = () => {},
     // `review`: the storyboard of a generated video is handed to the model with the result.
-    { confirmed = false, review = true } = {},
+    { confirmed = false, review = true, approve = null, studio = false } = {},
   ) {
     const cancel = () => api('tools/cancel', { requestId: request.requestId }).catch(() => {});
     let decision;
     try {
-      decision = confirmed ? 'once' : await permission(request, signal);
+      decision = confirmed ? 'once' : approve ? await approve(request, signal) : await permission(request, signal);
       signal.throwIfAborted();
     } catch (error) {
       await cancel();
@@ -353,6 +355,7 @@ export function setupGenerationRuntime({
           requestId: request.requestId,
           permission: decision,
           ...(['video', 'audio'].includes(request.mediaType) ? { approvalToken: request.approvalToken } : {}),
+          ...(studio ? { studio: true } : {}),
         })
       ).json();
       if (signal.aborted) {
@@ -397,7 +400,8 @@ export function setupGenerationRuntime({
       const showGallery = () =>
         renderGallery(record.conversationId).catch(error => notice(`Galerie indisponible : ${error.message}`));
       await showGallery();
-      onOutput();
+      // The Studio shows its creation on its own screen: the files panel stays as it is.
+      if (!studio) onOutput();
       if (job.warning) notice(job.warning);
       let images = [],
         dimensions = record.outputs.map(() => null),
@@ -464,6 +468,8 @@ export function setupGenerationRuntime({
         content: JSON.stringify({
           status: error ? 'generated' : 'success',
           run_id: record.id,
+          // Made in the Studio: the conversation shows it as a card.
+          ...(studio ? { studio: true } : {}),
           use_as_source: { output: record.id },
           workflow: record.workflowName,
           prompt: record.prompt,

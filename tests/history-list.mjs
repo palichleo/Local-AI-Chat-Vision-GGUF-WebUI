@@ -415,55 +415,60 @@ test('an action clicked before the page knows its token waits for it instead of 
   await clicked;
   assert.deepEqual(sent, [['/api/studio', 'Bearer abc']]);
 });
-test('the Studio is unlocked while its tools load: a mode opened at once is not refused', async () => {
+test('Chat and Studio are two views of one conversation: switching is immediate, even during an answer', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
-    state = { status: {}, view: 'chat', conversationId: 'kept', studioId: 'studio' },
+    state = { status: {}, view: 'chat', conversationId: 'kept', studioId: 'studio', generating: true },
     document = { body: { dataset: {} } },
     listed = [];
-  let loaded, pending, lockedWhileLoading;
+  let loaded,
+    opened,
+    synced = 0;
   const tools = new Promise(resolve => {
       loaded = resolve;
     }),
     context = {
       ...sessionCopies,
-      requestSettingsClose: action => {
-        pending = action();
-      },
+      requestSettingsClose: action => action(),
       state,
       document,
-      $: () => ({ setAttribute() {} }),
+      $: () => ({ setAttribute() {}, focus() {} }),
       updateControls() {},
+      syncViews: () => synced++,
+      showLastReply() {},
+      scrollToBottom() {},
       notice() {},
       assetsUI: { flush: async () => true },
-      persistConversation: async () => true,
+      persistConversation: async () => assert.fail('nothing to save: it is the same conversation'),
       projectUI: { render() {} },
       workflowsUI: { renderGallery: async id => listed.push(id) },
-      // GET /api/studio takes seconds; the banners are on screen meanwhile.
+      // GET /api/studio takes seconds; the Studio is on screen meanwhile.
       studioUI: {
         open() {
-          lockedWhileLoading = state.loadingHistory;
+          opened = state.loadingHistory;
           return tools;
         },
       },
     };
   runInNewContext(
     source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
-      ';this.studio=showStudio;',
+      ';this.studio=showStudio;this.chat=showChat;',
     context,
   );
   try {
+    // An answer is being written: the Studio still opens, nothing is locked.
     context.studio();
-    assert.equal(state.loadingHistory, true, 'locked while the conversation is saved');
-    await new Promise(resolve => setTimeout(resolve, 20));
     assert.equal(state.view, 'studio');
-    // What the Studio asks before it unloads the chat model or starts a generation.
-    assert.equal(lockedWhileLoading, false);
-    assert.equal(state.loadingHistory, false);
-    // In the Studio the « Créations » tab lists the Studio's creations, not the conversation left behind.
-    assert.deepEqual(listed, ['studio']);
+    assert.equal(opened, undefined, 'the tools load without locking the page');
+    assert.equal(synced, 1);
+    // The « Créations » tab lists the open conversation, in its Studio as in its chat.
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(listed, ['kept']);
+    context.chat();
+    assert.equal(state.view, 'chat');
+    assert.equal(synced, 2);
+    assert.deepEqual(listed, ['kept', 'kept']);
   } finally {
     loaded();
-    await pending;
   }
 });
 test('a deferred Home action never hides a response that started while settings confirmation was pending', async () => {

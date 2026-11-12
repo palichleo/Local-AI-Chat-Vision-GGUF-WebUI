@@ -29,7 +29,10 @@ test('a generation that left no media is told in the user’s words, not the mod
   assert.equal(
     callNote(
       call('create_image'),
-      result({ status: 'denied', message: 'L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.' }),
+      result({
+        status: 'denied',
+        message: 'L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.',
+      }),
     ),
     'Image : génération refusée dans la fenêtre de confirmation.',
   );
@@ -39,7 +42,10 @@ test('a generation that left no media is told in the user’s words, not the mod
   );
   // Stopped before any result was kept, or a result that belongs to another call.
   assert.equal(callNote(call('create_audio'), undefined), 'Son : génération interrompue.');
-  assert.equal(callNote(call('extend_video'), result({ status: 'success' }, 'other')), 'Suite de la vidéo : génération interrompue.');
+  assert.equal(
+    callNote(call('extend_video'), result({ status: 'success' }, 'other')),
+    'Suite de la vidéo : génération interrompue.',
+  );
   assert.equal(callNote(call('old_verb'), result({ status: 'error' })), 'Génération : génération non aboutie.');
 });
 
@@ -78,11 +84,23 @@ test('the last message the user wrote can be taken back, not one the application
   // What the model is told between two tools is not a message of the user.
   assert.equal(lastExchange([user('un'), reply, { role: 'user', internal: true, content: 'note' }]), 0);
   // A message with an image: its text parts are read.
-  assert.equal(lastExchange([user([{ type: 'text', text: 'anime-la' }, { type: 'image_url', file: 'a.png' }])]), 0);
+  assert.equal(
+    lastExchange([
+      user([
+        { type: 'text', text: 'anime-la' },
+        { type: 'image_url', file: 'a.png' },
+      ]),
+    ]),
+    0,
+  );
   // The buttons under a creation write their own message: nothing to edit or to send again.
   const id = 'e7e4ac1a-2bef-4c7f-adf8-fce2835dcdd6';
   assert.equal(lastExchange([user('un'), reply, user(`Upscale de la sortie ${id}.`), reply]), -1);
   assert.equal(lastExchange([user(`Interpolation de la sortie ${id} pour une vidéo plus fluide.`)]), -1);
+  // A creation of the Studio came after it: taking the message back would take that away too.
+  const studio = { role: 'user', internal: true, content: 'Studio · Vidéo : un renard\n\n(Créée dans le Studio.)' };
+  assert.equal(lastExchange([user('un'), reply, studio, { role: 'assistant', content: '' }]), -1);
+  assert.equal(lastExchange([studio, { role: 'assistant', content: '' }, user('plus long'), reply]), 2);
 });
 
 async function page(messages, { prompt = '', busy = false } = {}) {
@@ -117,7 +135,13 @@ async function page(messages, { prompt = '', busy = false } = {}) {
 const exchange = () => [
   { role: 'user', content: 'premier' },
   { role: 'assistant', content: 'un' },
-  { role: 'user', content: [{ type: 'text', text: 'second' }, { type: 'image_url', file: 'a.png', view: '/a' }] },
+  {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'second' },
+      { type: 'image_url', file: 'a.png', view: '/a' },
+    ],
+  },
   { role: 'assistant', content: '', tool_calls: [{ id: 'c', function: { name: 'create_image' } }] },
   { role: 'tool', tool_call_id: 'c', content: '{"run_id":"r"}' },
 ];
@@ -127,7 +151,9 @@ test('« Modifier » puts the last message back in the message box and removes i
   await takeBack(false);
   assert.equal(state.messages.length, 2);
   assert.equal(fields.prompt.value, 'second\n\ndéjà écrit');
-  assert.deepEqual(JSON.parse(JSON.stringify(state.images)), [{ name: 'Image enregistrée 1', file: 'a.png', view: '/a' }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(state.images)), [
+    { name: 'Image enregistrée 1', file: 'a.png', view: '/a' },
+  ]);
   // Saved as a message still being written: reopened, it comes back as a draft.
   assert.equal(state.archiveSnapshot.incomplete, true);
   assert.equal(state.archiveSnapshot.messages.length, 3);

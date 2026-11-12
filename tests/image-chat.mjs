@@ -74,6 +74,7 @@ async function exchange({
     ...chatVideos,
     ...transcript,
     turnActions() {},
+    showLastReply() {},
     views,
     generationUI: {
       mount: container => {
@@ -304,7 +305,8 @@ test('by default a video ends the turn like an image: no frames sent, no thinkin
 });
 
 test('a tool call written as text once tools are withdrawn is never shown or stored', async () => {
-  const leak = '<tool_call>\n<function=create_video>\n<parameter=prompt>\nA boat\n</parameter>\n</function>\n</tool_call>';
+  const leak =
+    '<tool_call>\n<function=create_video>\n<parameter=prompt>\nA boat\n</parameter>\n</function>\n</tool_call>';
   const only = await exchange({ failed: true, images: [], finalText: leak });
   assert.equal(only.requests[1].tools, false);
   assert.doesNotMatch(JSON.stringify(only.state.messages.at(-1)), /tool_call|function=/);
@@ -326,10 +328,11 @@ test('restoring repeated model call IDs associates each generation with its foll
     restored = [];
   const element = () => ({ textContent: '', hidden: false, replaceChildren() {} }),
     context = {
-    ...sessionCopies,
-    ...chatVideos,
-    ...transcript,
-    turnActions() {},
+      ...sessionCopies,
+      ...chatVideos,
+      ...transcript,
+      turnActions() {},
+      showLastReply() {},
       state: { conversationId: 'selected' },
       generationUI: { restore: (_body, _conversation, run) => restored.push(run) },
       assistantMessage: () => ({ body: element(), reasoning: element(), thoughts: element(), note: element() }),
@@ -393,6 +396,7 @@ test('restored generations share a response until the next real user message', a
     ...chatVideos,
     ...transcript,
     turnActions() {},
+    showLastReply() {},
     state: { conversationId: 'saved' },
     node,
     icon: () => node('svg'),

@@ -1,11 +1,16 @@
 import { FORMATS, formatOf, nearestSize, sizesFor } from './formats.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
 import { livePreview } from './live-preview.mjs';
+import { setupPointer } from './studio-pointer.mjs';
 
 /**
- * The Studio: the creation tools used by hand. The user picks Image, Vidéo or Son, writes the
- * prompt and sets everything; « Générer » is the confirmation, no model reads the request.
- * Videos line up in a timeline, where each can be continued.
+ * The Studio: the creation tools of the conversation, beside the chat. Four blocks that never
+ * move, each in the colour of its function: Entrée (blue), the preview and « Générer » (red),
+ * Réglages (green), Sortie (yellow). Image, Vidéo or Son is chosen at the top left.
+ *
+ * The user sets everything and « Générer » is the confirmation. Moodix AI may set the Studio
+ * too: a creation it proposes in the chat comes here, its pointer sets what its workflow leaves
+ * to the assistant, and it stops on « Générer »: the user's click is the answer.
  */
 const MODES = [
   {
@@ -13,23 +18,20 @@ const MODES = [
     verb: 'create_image',
     label: 'Image',
     icon: 'image',
-    hint: 'Une image à partir de votre prompt, ou une image à retoucher.',
+    output: 'Images',
+    none: 'Vos images apparaîtront ici.',
   },
   {
     id: 'video',
     verb: 'create_video',
     label: 'Vidéo',
     icon: 'video',
-    hint: 'Un clip à partir d’un prompt et de vos images, puis sa suite dans la timeline.',
+    output: 'Timeline',
+    none: 'Vos vidéos s’aligneront ici, dans l’ordre de création.',
   },
-  {
-    id: 'audio',
-    verb: 'create_audio',
-    label: 'Son',
-    icon: 'sound',
-    hint: 'Une musique, chantée ou instrumentale, ou des bruitages.',
-  },
+  { id: 'audio', verb: 'create_audio', label: 'Son', icon: 'wave', output: 'Sons', none: 'Vos sons apparaîtront ici.' },
 ];
+const MODE_OF_VERB = { create_image: 'image', create_video: 'video', extend_video: 'video', create_audio: 'audio' };
 const ROLES = {
   source: 'Image à modifier',
   start_image: 'Image de début',
@@ -41,6 +43,8 @@ const SHORT = { source: 'À modifier', start_image: 'Début', end_image: 'Fin', 
 const SETTINGS = { lyrics: 'Paroles', seconds: 'Durée (s)', language: 'Langue' };
 const SETTING_HELP = { lyrics: 'Vide pour un morceau instrumental. Balises : [Verse], [Chorus], [Bridge]…' };
 const MAX_STYLES = 3;
+// The three formats shown under the preview; « ··· » opens all of them.
+const MAIN_FORMATS = ['1:1', '16:9', '9:16'];
 // The key that goes with Entrée to generate, as the keyboard names it.
 const MODIFIER = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘' : 'Ctrl';
 const strengthText = value => (Math.round(value * 100) / 100).toFixed(2).replace('.', ',');
@@ -50,8 +54,13 @@ const leaf = name =>
     .pop()
     .replace(/\.safetensors$/i, '');
 const seconds = value => (Math.round(value * 10) / 10).toString().replace('.', ',') + ' s';
+// A length as the screen and the cards write it: two figures, in capitals (« 05 S »).
+const figures = value => {
+  const rounded = Math.round(value * 10) / 10;
+  return (rounded < 10 ? '0' : '') + String(rounded).replace('.', ',') + ' S';
+};
 const sizeKey = size => size.width + 'x' + size.height;
-// The box the format frame fits in: the widest and the tallest it gets.
+// The box the format frame fits in before its stage is laid out.
 const FRAME = { width: 264, height: 176 };
 
 /** The frame of a ratio, as large as its box allows. */
@@ -61,37 +70,68 @@ export function frameSize(ratio, box = FRAME) {
     : { width: Math.round(box.height * ratio), height: box.height };
 }
 
-const COUNTED = { image: 'image', video: 'clip', audio: 'son' };
-
-/**
- * What each banner shows of its mode: how many were made and, for a picture or a clip, the last
- * one (the runs come newest first), as its thumbnail when the server keeps one (`small`),
- * else as the original. A sound has nothing to show but its number.
- */
-export function showcased(runs) {
-  return Object.fromEntries(
-    MODES.map(item => {
-      const mine = runs.filter(record => (record.mediaType || 'image') === item.id),
-        last = item.id === 'audio' ? null : (mine[0] ?? null),
-        output = last?.outputs?.[0];
-      return [
-        item.id,
-        {
-          count: mine.length ? `${mine.length} ${COUNTED[item.id]}${mine.length > 1 ? 's' : ''}` : '',
-          latest: output?.originalUrl ?? null,
-          small: output?.thumbUrl ?? null,
-          record: output?.originalUrl ? last : null,
-        },
-      ];
-    }),
-  );
-}
-
 /** The sizes offered for a workflow in a format, and the one closest to `pixels`. */
 export function sizeChoices(workflow, formatId, pixels) {
   const format = FORMATS.find(item => item.id === formatId),
     sizes = format ? sizesFor(format, workflow.limits) : [];
   return { sizes, nearest: nearestSize(sizes, pixels) };
+}
+
+/** The formats under the preview: the three main ones, and the one chosen when it is another (it takes the place of « ··· »). */
+export function shownFormats(available, chosen) {
+  const main = MAIN_FORMATS.filter(id => available.includes(id));
+  return { main, extra: chosen && !main.includes(chosen) && available.includes(chosen) ? chosen : null };
+}
+
+/**
+ * What a proposal of Moodix AI sets, in the Studio's terms: the workflow, the prompt, the size,
+ * the length, the seed, the settings and the inputs; and what of it the assistant may change
+ * (the parameters its workflow leaves to « Assistant »). The rest is shown as it will be made.
+ */
+export function proposedValues(request, offered = []) {
+  const plan = request.plan || {},
+    parameters = plan.parameters || {},
+    editable = plan.editable || {},
+    items = new Map((editable.parameters || []).map(item => [item.key, item])),
+    free = key => items.has(key) && !items.get(key).locked,
+    workflow = offered.find(item => item.name === request.workflowName) ?? offered[0] ?? null,
+    references = plan.references || [],
+    source = references.find(ref => ref.role === 'source_video'),
+    fps = parameters.fps > 0 ? parameters.fps : null,
+    overlap = source && Number.isFinite(parameters.overlap_frames) ? parameters.overlap_frames : 0,
+    width = parameters.width ?? request.resolution?.width,
+    height = parameters.height ?? request.resolution?.height;
+  const settings = {};
+  for (const setting of workflow?.settings ?? [])
+    if (parameters[setting.key] !== undefined) settings[setting.key] = parameters[setting.key];
+  return {
+    verb: request.tool || request.call?.function?.name || 'create_image',
+    workflow: workflow?.id ?? null,
+    prompt: String(plan.prompt ?? request.args?.prompt ?? ''),
+    promptFree: Boolean(editable.prompt),
+    size: width > 0 && height > 0 ? sizeKey({ width, height }) : null,
+    format: formatOf(width, height)?.id ?? null,
+    sizeFree: free('width') && free('height'),
+    seconds: fps && Number.isFinite(parameters.frames) ? Math.max(0, parameters.frames - overlap) / fps : null,
+    frames: parameters.frames ?? null,
+    fps,
+    overlap,
+    framesFree: free('frames'),
+    framesChoices: items.get('frames')?.choices ?? null,
+    seed: Number.isFinite(parameters.seed) ? parameters.seed : null,
+    seedFree: free('seed'),
+    stage: plan.stage ?? null,
+    settings,
+    settingsFree: Object.fromEntries(Object.keys(settings).map(key => [key, free(key)])),
+    references: references.filter(ref => ref.role !== 'source_video'),
+    roleChoices: editable.references || [],
+    source: source?.output_id ?? null,
+  };
+}
+
+/** A count of results, in capitals: « 1 RÉSULTAT », « 3 RÉSULTATS ». */
+export function resultCount(count) {
+  return count ? `${count} RÉSULTAT${count > 1 ? 'S' : ''}` : '';
 }
 
 export function setupStudio({
@@ -104,57 +144,85 @@ export function setupStudio({
   waitForModel,
   blocked,
   onChange,
-  // Called with the Studio's conversation each time its creations are read again.
+  // Called with the place whose creations were read again (the conversation, or the former Studio).
   onRuns = () => {},
+  // The conversation the Studio works in: its id, or null before its first message or creation.
+  conversation = () => null,
+  // An id for the conversation, created when it has none yet: a creation belongs to it.
+  ensureConversation = async () => conversation(),
+  // Runs an approved proposal in the conversation and writes it there; the result of the
+  // generation. Without it, the Studio follows the job itself and nothing is written.
+  run = null,
+  // Brings the Studio on screen: a proposal of Moodix AI arrives.
+  reveal = () => {},
+  // Stops the turn of the chat that a generation approved here belongs to.
+  stopTurn = () => {},
+  // Another conversation is open.
+  onConversation = () => {},
+  // The pace of the pointer: 1 as it is seen, 0 at once (the tests).
+  pace = 1,
 }) {
   const $ = id => document.getElementById(id);
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms * pace));
   let info = null,
-    mode = null,
+    mode = 'image',
     runs = [],
-    working = null, // { label, fraction, requestId, controller } while a generation runs
-    releasing = null, // the chat model leaving the GPU, asked when a mode is opened
+    legacyRuns = [],
+    legacy = false, // the Sortie shows, and the Studio works in, the Studio of before Moodix
+    working = null, // { label, fraction, preview, controller | external } while a generation runs
+    releasing = null, // the chat model leaving the GPU, asked once the user sets the Studio
+    released = false,
     enriching = false,
     extending = null, // the clip being continued
     failure = '',
+    advanced = false, // « Plus de réglages » is open
+    formatsOpen = false, // « ··· » is open
     drawn = null, // the size the frame was last drawn at, to ease from
     watching = null, // follows the size of the stage
-    live = null; // { frame, preview } : the picture so far, in the frame now on the page
-  // The last creation of each mode since the Studio was entered: it stays in the frame until the
-  // next one. Forgotten when the Studio is left: coming back starts from an empty frame.
+    live = null, // { frame, preview } : the picture so far, in the frame now on the page
+    proposal = null, // a proposal of Moodix AI waiting for « Générer »
+    ai = null, // { stopped, active, touched } while the pointer sets the Studio
+    seenConversation; // the conversation the creations were read for
+  // What is shown on the screen for each mode: the last creation, or one opened from the chat.
   const kept = {};
-  const drafts = Object.fromEntries(
-    MODES.map(item => [
-      item.id,
-      {
-        workflow: null,
-        prompt: '',
-        before: null, // what was typed before « Enrichir le prompt », to come back to
-        styles: [],
-        shelved: {}, // the LoRAs of the other families of models, for the way back
-        format: null,
-        size: null,
-        seed: '',
-        length: null,
-        inputs: {},
-        settings: {},
-      },
-    ]),
-  );
+  const blank = () => ({
+    workflow: null,
+    prompt: '',
+    before: null, // what was typed before « Enrichir le prompt », to come back to
+    styles: [],
+    shelved: {}, // the LoRAs of the other families of models, for the way back
+    format: null,
+    size: null,
+    seed: '',
+    length: null,
+    extension: null,
+    inputs: {},
+    settings: {},
+    lyrics: false, // the lyrics are shown (« + Paroles »)
+  });
+  const drafts = Object.fromEntries(MODES.map(item => [item.id, blank()]));
   const picker = node('input');
   picker.type = 'file';
   picker.accept = 'image/png,image/jpeg,image/webp';
   picker.hidden = true;
-  $('studio-view').append(picker);
+  $('studio-view')?.append(picker);
+  const cursor = $('ai-cursor'),
+    pointer = cursor ? setupPointer({ cursor, text: $('ai-cursor-text') ?? cursor }) : null;
 
-  const verbOf = () => (mode === 'video' && extending ? 'extend_video' : MODES.find(item => item.id === mode).verb);
-  const offered = () => info?.tools?.[verbOf()] ?? [];
+  const modeOf = id => MODES.find(item => item.id === id);
+  const verbOf = () => (mode === 'video' && extending ? 'extend_video' : modeOf(mode).verb);
+  const offered = (verb = verbOf()) => info?.tools?.[verb] ?? [];
+  const place = () => (legacy ? (info?.legacyId ?? null) : conversation());
   function current() {
     const draft = drafts[mode],
       list = offered();
     // A continuation stays with the workflow that made the clip when it can.
-    if (mode === 'video' && extending) return list.find(item => item.id === extending.workflowId) ?? list[0] ?? null;
+    if (mode === 'video' && extending && !proposal)
+      return list.find(item => item.id === extending.workflowId) ?? list[0] ?? null;
     return list.find(item => item.id === draft.workflow) ?? list[0] ?? null;
   }
+  // A proposal of Moodix AI is answered from its own mode: the others still work by hand.
+  const answering = () => Boolean(proposal && proposal.mode === mode && !working);
   /**
    * Another model for this mode. A LoRA is made for one family of models: those chosen for
    * Krea 2 do not follow to MOSS Image (they were sent with it), and come back with Krea 2.
@@ -178,9 +246,24 @@ export function setupStudio({
     control.onclick = onclick;
     return control;
   };
-  function field(label, control, { help, wide = false } = {}) {
-    const wrapper = node('label', 'studio-field' + (wide ? ' is-wide' : ''));
-    wrapper.append(node('span', 'studio-label', label), control);
+  // The settings Moodix AI may change wear a white dot; the one it is changing, a ring.
+  function aiTarget(element, key) {
+    element.dataset.ai = key;
+    if (ai?.active === key) element.setAttribute('data-ai-active', '');
+    if (ai?.touched.has(key) || proposal?.touched?.has(key)) element.setAttribute('data-ai-touched', '');
+    return element;
+  }
+  function field(label, control, { help, wide = false, mark = false } = {}) {
+    const wrapper = node('label', 'studio-field' + (wide ? ' is-wide' : '')),
+      title = node('span', 'studio-label', label);
+    if (mark) {
+      const dot = node('span', 'ai-mark');
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', 'Moodix AI peut régler ce paramètre');
+      dot.title = 'Moodix AI peut régler ce paramètre';
+      title.append(dot);
+    }
+    wrapper.append(title, control);
     if (help) wrapper.append(node('small', 'field-help', help));
     return wrapper;
   }
@@ -198,6 +281,14 @@ export function setupStudio({
     control.placeholder = placeholder;
     control.oninput = () => oninput(control.value);
     return control;
+  }
+  function blockHead(title, { id, extra } = {}) {
+    const head = node('div', 'studio-block-head'),
+      name = node(id ? 'label' : 'h2', 'studio-block-title', title);
+    if (id) name.htmlFor = id;
+    head.append(name);
+    if (extra) head.append(extra);
+    return head;
   }
 
   // ------------------------------------------------------------------ inputs (images)
@@ -251,10 +342,20 @@ export function setupStudio({
     (draft.inputs[to.role] ??= [])[to.index] = image;
     draft.inputs[from.role][from.index] = other;
     const clash = [...exclusiveWith(workflow, to.role), ...(other ? exclusiveWith(workflow, from.role) : [])];
-    if (clash.length) {
+    // An input of a proposal takes only the roles its workflow offers it.
+    const refused = [image, other].some(
+      item =>
+        item?.ref !== undefined &&
+        !(proposal?.values.roleChoices[item.ref] ?? []).some(
+          choice => choice.role === (item === image ? to.role : from.role),
+        ),
+    );
+    if (clash.length || refused) {
       draft.inputs[to.role][to.index] = other;
       draft.inputs[from.role][from.index] = image;
-      failure = `${ROLES[to.role]} ne se combine pas avec : ${[...new Set(clash)].map(role => ROLES[role]).join(', ')}.`;
+      failure = refused
+        ? `${ROLES[to.role]} : ce rôle n’est pas possible pour cette image avec ce workflow.`
+        : `${ROLES[to.role]} ne se combine pas avec : ${[...new Set(clash)].map(role => ROLES[role]).join(', ')}.`;
     } else {
       failure = '';
       followFormat(to.role);
@@ -266,11 +367,17 @@ export function setupStudio({
       value = draft.inputs[role]?.[index],
       clash = exclusiveWith(workflow, role),
       refused = clash.length ? `Ne se combine pas avec : ${clash.map(other => ROLES[other]).join(', ')}` : '',
+      // The inputs of a proposal are those Moodix AI chose: they change role, not image.
+      chosenByAi = answering(),
       tile = node('div', 'studio-slot' + (value ? ' is-filled' : '') + (refused ? ' is-blocked' : ''));
-    const choose = button('studio-slot-pick', '', () => {
+    const pick = button('studio-slot-pick', '', () => {
       // An input that does not combine with those given says why. It still takes the image of
       // one of them, dragged here: that is how a role is changed.
       if (refused) return notice(refused);
+      if (chosenByAi)
+        return notice(
+          'Les images de cette proposition sont celles de Moodix AI : demandez-lui dans le chat pour en changer.',
+        );
       picker.onchange = () => {
         const [file] = picker.files;
         picker.value = '';
@@ -278,28 +385,29 @@ export function setupStudio({
       };
       picker.click();
     });
-    choose.title = refused || (value ? label + ' · glissez-la vers un autre emplacement pour changer son rôle' : label);
-    choose.disabled = Boolean(working);
-    if (refused) choose.setAttribute('aria-disabled', 'true');
+    pick.title = refused || (value ? label + ' · glissez-la vers un autre emplacement pour changer son rôle' : label);
+    pick.disabled = Boolean(working);
+    if (refused) pick.setAttribute('aria-disabled', 'true');
     if (value) {
       const preview = node('img');
-      preview.src = value.preview;
+      preview.src = value.preview || '';
       preview.alt = value.name;
       // The tile is what is dragged, not the picture as a file of the browser.
       preview.draggable = false;
-      choose.append(preview);
-      choose.draggable = !working;
-      choose.ondragstart = event => {
+      if (value.preview) pick.append(preview);
+      else pick.append(icon('image'));
+      pick.draggable = !working;
+      pick.ondragstart = event => {
         dragged = { role, index };
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', label);
         tile.classList.add('is-dragged');
       };
-      choose.ondragend = () => {
+      pick.ondragend = () => {
         dragged = null;
         tile.classList.remove('is-dragged');
       };
-    } else choose.append(icon('plus'));
+    } else pick.append(icon('plus'));
     // The whole tile takes a drop: a file from the computer, or the image of another slot.
     tile.ondragover = event => {
       event.preventDefault();
@@ -318,10 +426,11 @@ export function setupStudio({
         return move(workflow, from, { role, index });
       }
       if (refused) return notice(refused);
+      if (chosenByAi) return;
       void fill(role, index, event.dataTransfer.files[0]);
     };
-    tile.append(choose, node('span', 'studio-slot-label', short));
-    if (value) {
+    tile.append(pick, node('span', 'studio-slot-label', short));
+    if (value && !chosenByAi) {
       const remove = button(
         'studio-slot-remove',
         '',
@@ -351,7 +460,7 @@ export function setupStudio({
           ),
         );
     }
-    return row.children.length ? row : null;
+    return row.children.length ? aiTarget(row, 'inputs') : null;
   }
 
   // ------------------------------------------------------------------ size, length
@@ -363,23 +472,87 @@ export function setupStudio({
     if (!formats.some(format => format.id === draft.format))
       draft.format = (formatOf(base.width, base.height) ?? formats[0])?.id ?? null;
     const { sizes, nearest } = sizeChoices(workflow, draft.format, base.width * base.height);
-    if (!sizes.some(size => sizeKey(size) === draft.size)) draft.size = nearest ? sizeKey(nearest) : null;
+    const proposed = proposal?.mode === mode && proposal.values?.size === draft.size;
+    if (!proposed && !sizes.some(size => sizeKey(size) === draft.size)) draft.size = nearest ? sizeKey(nearest) : null;
     return { formats, sizes, final: workflow.final && sizeKey(workflow.final) };
   }
   /** Fills the resolution list for the draft's format. */
   function listSizes(control, workflow) {
-    const { sizes, final } = sizing(workflow);
+    const { sizes, final } = sizing(workflow),
+      draft = drafts[mode],
+      list = [...sizes];
+    // A size of a proposal outside the list (kept from a source) is shown as it is.
+    if (draft.size && !list.some(size => sizeKey(size) === draft.size)) {
+      const [width, height] = draft.size.split('x').map(Number);
+      list.push({ width, height });
+    }
     control.replaceChildren();
-    for (const size of sizes)
+    for (const size of list)
       control.add(
         new Option(`${size.width} × ${size.height}` + (sizeKey(size) === final ? ' · finale' : ''), sizeKey(size)),
       );
-    control.value = drafts[mode].size ?? '';
+    control.value = draft.size ?? '';
+  }
+  /** Draft or final, from the size: a large picture is a final, a small one a draft. */
+  function stageOf(workflow, size = drafts[mode].size) {
+    if (!workflow?.stages || !size) return null;
+    const [width, height] = size.split('x').map(Number),
+      small = workflow.size ? workflow.size.width * workflow.size.height : 0;
+    return width * height > small * 1.5 ? 'final' : 'draft';
+  }
+  function lengthOf(workflow) {
+    const lengths = workflow.lengths;
+    if (!lengths?.seconds.length) return null;
+    const draft = drafts[mode],
+      key = extending ? 'extension' : 'length',
+      nearest = wanted =>
+        lengths.seconds.reduce((best, value) => (Math.abs(value - wanted) < Math.abs(best - wanted) ? value : best));
+    if (!lengths.seconds.includes(draft[key])) draft[key] = nearest(draft[key] ?? lengths.standard ?? 5);
+    return { key, list: lengths.seconds, value: draft[key], nearest };
+  }
+  /** The length as a stepper: one step to the next length the workflow allows. */
+  function lengthField(workflow) {
+    const length = lengthOf(workflow);
+    if (!length) return null;
+    const draft = drafts[mode],
+      stepper = aiTarget(node('div', 'studio-stepper'), 'duration'),
+      value = node('output', '', figures(length.value)),
+      step = by => {
+        const index = length.list.indexOf(draft[length.key]),
+          next = length.list[Math.min(length.list.length - 1, Math.max(0, index + by))];
+        draft[length.key] = next;
+        value.textContent = figures(next);
+        less.disabled = Boolean(working) || next === length.list[0];
+        more.disabled = Boolean(working) || next === length.list.at(-1);
+        readout();
+      },
+      less = button('', '', () => step(-1)),
+      more = button('', '', () => step(1));
+    less.textContent = '−';
+    more.textContent = '+';
+    less.setAttribute('aria-label', 'Plus court');
+    more.setAttribute('aria-label', 'Plus long');
+    less.disabled = Boolean(working) || length.value === length.list[0];
+    more.disabled = Boolean(working) || length.value === length.list.at(-1);
+    value.setAttribute('aria-live', 'polite');
+    stepper.setAttribute('role', 'group');
+    stepper.setAttribute('aria-label', extending ? 'Durée ajoutée' : 'Durée');
+    stepper.append(less, value, more);
+    const wrapper = node('div', 'studio-field');
+    const title = node('span', 'studio-label', extending ? 'Durée ajoutée' : 'Durée');
+    if (workflow.lengths) {
+      const dot = node('span', 'ai-mark');
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', 'Moodix AI peut régler ce paramètre');
+      title.append(dot);
+    }
+    wrapper.append(title, stepper);
+    return wrapper;
   }
 
-  // ------------------------------------------------------------------ the stage
-  /** The shape of what will be made: a ratio and the few words written in the frame. */
-  function shapeOf(workflow) {
+  // ------------------------------------------------------------------ the screen
+  /** The shape of what will be made: a ratio, and the format it is. */
+  function shapeOf() {
     if (mode === 'audio') return { ratio: 3.4, label: '' };
     if (extending) {
       const { width, height } = extending.parameters ?? {},
@@ -389,35 +562,50 @@ export function setupStudio({
     const format = FORMATS.find(item => item.id === drafts[mode].format);
     return { ratio: format?.ratio ?? 1, label: format?.id ?? '' };
   }
+  /** What will be made, in figures, at the top left of the screen. */
+  function readoutText(workflow = current()) {
+    if (!workflow) return '';
+    const shape = shapeOf(),
+      length = lengthOf(workflow);
+    if (mode === 'audio') {
+      const sound =
+        drafts.audio.settings[workflow.id]?.seconds ?? workflow.settings.find(s => s.key === 'seconds')?.default;
+      return [(workflow.for || workflow.name || 'Son').toUpperCase(), sound ? figures(Number(sound)) : '']
+        .filter(Boolean)
+        .join(' · ');
+    }
+    if (mode === 'image') return [shape.label, 'IMAGE'].filter(Boolean).join(' · ');
+    const stage = extending ? 'SUITE' : { draft: 'BROUILLON', final: 'FINALE' }[stageOf(workflow)];
+    return [shape.label, length ? figures(length.value) : '', stage].filter(Boolean).join(' · ');
+  }
+  function readout() {
+    const text = document.querySelector?.('.studio-readout');
+    if (text) text.textContent = readoutText();
+  }
   /** The room the frame has: its stage, less a margin; a default before the stage is laid out. */
   function room(frame) {
     const box = frame.parentElement,
-      chips = box?.querySelector('.studio-formats'),
-      // The stage has a padding of its own when the middle column dissolves (narrow windows).
-      style = box && typeof getComputedStyle === 'function' ? getComputedStyle(box) : null,
-      pad = side => parseFloat(style?.[side]) || 0,
-      width = (box?.clientWidth ?? 0) - pad('paddingLeft') - pad('paddingRight'),
-      // The formats sit under the frame, in the same stage.
-      height =
-        (box?.clientHeight ?? 0) - pad('paddingTop') - pad('paddingBottom') - (chips ? chips.offsetHeight + 12 : 0) - 4;
-    return width > 40 && height > 40 ? { width: Math.min(width - 20, 560), height: Math.min(height, 440) } : FRAME;
+      width = box?.clientWidth ?? 0,
+      height = box?.clientHeight ?? 0;
+    return width > 40 && height > 40 ? { width: Math.min(width, 900), height: Math.min(height, 460) } : FRAME;
   }
-  function reshape(frame, { ratio, label }) {
+  function reshape(frame, { ratio }) {
     const size = frameSize(ratio, room(frame));
     frame.style.width = size.width + 'px';
     frame.style.height = size.height + 'px';
-    frame.querySelector('.studio-frame-label').textContent = label;
     drawn = size;
+    readout();
   }
   /**
-   * An empty frame in the format of the image or the video to come (its shape only, not its
-   * size), as large as the stage allows. It eases from the shape it had to the new one, across
-   * formats and across modes, and follows the window when it is resized.
+   * The screen: a frame in the format of what will be made, as large as the stage allows, with
+   * the last creation in it. It eases from the shape it had to the new one, across formats and
+   * across modes, and follows the window when it is resized.
    */
-  function stage(workflow) {
-    const box = node('div', 'studio-stage'),
+  function stage() {
+    const screen = node('div', 'studio-screen'),
+      box = node('div', 'studio-stage'),
       // While a creation is being made the frame is its own (the picture so far).
-      last = working || mode === 'audio' ? null : (kept[mode] ?? null),
+      last = working ? null : (kept[mode] ?? null),
       frame = node(
         'div',
         'studio-frame' +
@@ -425,81 +613,119 @@ export function setupStudio({
           (working ? ' is-busy' : '') +
           (last ? ' has-result' : ''),
       ),
-      next = shapeOf(workflow);
+      next = shapeOf();
     frame.append(node('span', 'studio-frame-fill'), node('span', 'studio-frame-label', next.label));
+    if (mode === 'audio') {
+      const bars = node('div', 'studio-bars');
+      bars.setAttribute('aria-hidden', 'true');
+      for (let index = 0; index < 48; index++) {
+        const bar = node('span');
+        bar.style.height = 16 + Math.round(76 * Math.abs(Math.sin(index * 0.41) * Math.cos(index * 0.13))) + '%';
+        bars.append(bar);
+      }
+      frame.append(bars);
+    }
     if (last) frame.append(result(last));
     else frame.setAttribute('aria-hidden', 'true');
+    if (mode !== 'audio') {
+      const grain = node('span', 'picture-grain'),
+        vignette = node('span', 'studio-frame-vignette');
+      grain.setAttribute('aria-hidden', 'true');
+      vignette.setAttribute('aria-hidden', 'true');
+      frame.append(grain, vignette);
+    }
+    const shown = node('span', 'studio-readout', readoutText());
+    shown.setAttribute('aria-hidden', 'true');
+    frame.append(shown);
     // Drawn at the previous shape first, so the browser has something to ease from.
     const from = drawn ?? frameSize(next.ratio);
     frame.style.width = from.width + 'px';
     frame.style.height = from.height + 'px';
     box.append(frame);
+    screen.append(box);
     watching?.disconnect();
     if (typeof ResizeObserver === 'function') {
       // Called once the stage is laid out, then at every change of its size.
-      watching = new ResizeObserver(() => reshape(frame, shapeOf(workflow)));
+      watching = new ResizeObserver(() => reshape(frame, shapeOf()));
       watching.observe(box);
     }
-    return { box, frame };
+    return { screen, box, frame };
   }
-  /** The creation kept in the frame: the image, or the first picture of the clip; a click shows it whole. */
+  /** The creation on the screen: the image (a click shows it whole), the clip to play, or the sound. */
   function result(record) {
     const output = record.outputs[0],
-      clip = mediaOf(record) === 'video',
-      media = node(clip ? 'video' : 'img', 'studio-frame-result');
-    if (clip)
-      Object.assign(media, { muted: true, preload: 'metadata', playsInline: true, src: output.originalUrl + '#t=0.1' });
-    else
-      Object.assign(media, {
+      media = mediaOf(record);
+    if (media === 'audio') {
+      const player = node('audio', 'studio-frame-result studio-frame-sound');
+      Object.assign(player, { controls: true, preload: 'metadata', src: output.originalUrl || '' });
+      return player;
+    }
+    const clip = media === 'video',
+      element = node(clip ? 'video' : 'img', 'studio-frame-result');
+    if (clip) {
+      Object.assign(element, { controls: true, preload: 'metadata', playsInline: true, src: output.originalUrl || '' });
+      if (output.thumbUrl) element.poster = output.thumbUrl;
+    } else {
+      Object.assign(element, {
         alt: record.prompt || 'Dernière image créée',
         decoding: 'async',
         src: output.originalUrl,
       });
-    media.title = 'Voir l’original et ses paramètres';
-    media.onclick = () => viewOutput(record, 0);
-    return media;
+      element.title = 'Voir l’original et ses paramètres';
+      element.onclick = () => viewOutput(record, 0);
+    }
+    return element;
   }
-  /** The formats as a row of chips under the frame: choosing one reshapes it in place. */
+  /** The formats under the preview: 1:1, 16:9, 9:16, and « ··· » for all of them. */
   function formatChips(workflow, frame, resolution) {
     const draft = drafts[mode],
-      row = node('div', 'studio-formats');
+      wrap = node('div', 'studio-formats-wrap'),
+      row = aiTarget(node('div', 'studio-formats'), 'ratio'),
+      available = sizing(workflow).formats.map(format => format.id),
+      { main, extra } = shownFormats(available, draft.format),
+      menu = node('div', 'studio-format-menu');
     row.setAttribute('role', 'radiogroup');
     row.setAttribute('aria-label', 'Format');
-    for (const format of sizing(workflow).formats) {
-      const chip = button('studio-format', format.id, () => {
-        Object.assign(draft, { format: format.id, size: null, formatChosen: true });
-        for (const other of row.children) other.setAttribute('aria-checked', String(other === chip));
-        listSizes(resolution, workflow);
-        reshape(frame, shapeOf(workflow));
-      });
+    const pick = id => {
+      Object.assign(draft, { format: id, size: null, formatChosen: true });
+      formatsOpen = false;
+      listSizes(resolution, workflow);
+      // The chips change with the format (another one may take the place of « ··· »).
+      render();
+    };
+    for (const id of main) {
+      const format = FORMATS.find(item => item.id === id),
+        chip = button('studio-format', id, () => pick(id));
       chip.title = format.label;
       chip.setAttribute('role', 'radio');
-      chip.setAttribute('aria-checked', String(format.id === draft.format));
+      chip.setAttribute('aria-checked', String(id === draft.format));
       chip.disabled = Boolean(working);
       row.append(chip);
     }
-    return row;
-  }
-  function lengthField(workflow, grid) {
-    const lengths = workflow.lengths;
-    if (!lengths?.seconds.length) return;
-    const draft = drafts[mode],
-      key = extending ? 'extension' : 'length',
-      nearest = wanted =>
-        lengths.seconds.reduce((best, value) => (Math.abs(value - wanted) < Math.abs(best - wanted) ? value : best));
-    if (!lengths.seconds.includes(draft[key])) draft[key] = nearest(draft[key] ?? lengths.standard ?? 5);
-    grid.append(
-      field(
-        extending ? 'Durée ajoutée' : 'Durée',
-        select(
-          lengths.seconds.map(value => [value, seconds(value)]),
-          draft[key],
-          value => {
-            draft[key] = Number(value);
-          },
-        ),
-      ),
-    );
+    const more = button('studio-format is-more' + (extra ? ' is-on' : ''), extra ? extra + ' ···' : '···', () => {
+      formatsOpen = !formatsOpen;
+      menu.hidden = !formatsOpen;
+      more.setAttribute('aria-expanded', String(formatsOpen));
+    });
+    more.setAttribute('aria-label', extra ? `Format ${extra} · tous les formats` : 'Tous les formats');
+    more.setAttribute('aria-expanded', String(formatsOpen));
+    more.disabled = Boolean(working);
+    if (extra) {
+      more.setAttribute('role', 'radio');
+      more.setAttribute('aria-checked', 'true');
+    }
+    row.append(more);
+    menu.setAttribute('role', 'group');
+    menu.setAttribute('aria-label', 'Tous les formats');
+    menu.hidden = !formatsOpen;
+    for (const id of available) {
+      const choice = button('', id, () => pick(id));
+      choice.title = FORMATS.find(item => item.id === id).label;
+      choice.setAttribute('aria-pressed', String(id === draft.format));
+      menu.append(choice);
+    }
+    wrap.append(row, menu);
+    return wrap;
   }
 
   // ------------------------------------------------------------------ LoRA
@@ -508,7 +734,10 @@ export function setupStudio({
     const draft = drafts[mode],
       section = node('section', 'studio-loras'),
       head = node('div', 'studio-loras-head');
-    head.append(node('h3', '', 'LoRA'), node('span', 'studio-loras-count', `${draft.styles.length} / ${MAX_STYLES}`));
+    head.append(
+      node('h3', '', 'Style (LoRA)'),
+      node('span', 'studio-loras-count', `${draft.styles.length} / ${MAX_STYLES}`),
+    );
     section.append(head);
     draft.styles.forEach((style, index) => {
       const card = node('div', 'studio-lora'),
@@ -646,10 +875,7 @@ export function setupStudio({
       if (workflow.direct) Object.assign(args, { width, height });
       else Object.assign(edits, { width, height });
       // A large picture is a final, a small one a draft: the profile only names it here.
-      if (workflow.stages) {
-        const small = workflow.size ? workflow.size.width * workflow.size.height : 0;
-        args.stage = width * height > small * 1.5 ? 'final' : 'draft';
-      }
+      if (workflow.stages) args.stage = stageOf(workflow);
     }
     if (draft.seed.trim() && workflow.seeded) {
       const seed = Number(draft.seed);
@@ -664,11 +890,12 @@ export function setupStudio({
     const styles = workflow.external && mode !== 'audio' && !extending ? draft.styles.filter(style => style.name) : [];
     return { verb, args, edits, styles };
   }
-  // A mode is opened to generate: the chat model leaves the GPU now, not at the first « Générer ».
-  // Asked in the background, never under an answer or a message waiting for the model; a refusal
-  // changes nothing, the generation unloads the model itself anyway.
+  // The user sets the Studio to make something: the chat model leaves the GPU now, not at the
+  // first « Générer ». Asked in the background, never under an answer, a message waiting for the
+  // model or a proposal of Moodix AI; a refusal changes nothing, a generation unloads it anyway.
   function release() {
-    if (releasing || working || enriching || blocked()) return;
+    if (released || releasing || working || enriching || proposal || ai || blocked()) return;
+    released = true;
     releasing = api('studio/release', {})
       .then(() => onChange())
       .catch(() => {})
@@ -678,6 +905,7 @@ export function setupStudio({
   }
   async function generate() {
     if (working) return;
+    if (answering()) return approve();
     const reason = blocked();
     if (reason) return notice(reason);
     let wanted;
@@ -690,7 +918,8 @@ export function setupStudio({
     failure = '';
     const controller = new AbortController(),
       // Where the creation will be kept once made: the mode it was asked in.
-      asked = mode;
+      asked = mode,
+      former = legacy;
     let made = null;
     working = { label: 'Préparation…', fraction: null, controller };
     render();
@@ -698,93 +927,466 @@ export function setupStudio({
     const pause = () => new Promise(resolve => setTimeout(resolve, 700));
     try {
       await releasing;
-      let proposal = await (
+      const conversationId = former ? info.legacyId : await ensureConversation();
+      let proposed = await (
         await api('tools/action', {
-          conversationId: info.conversationId,
+          conversationId,
+          studio: true,
           name: wanted.verb,
           arguments: wanted.args,
           ...(wanted.styles.length ? { styles: wanted.styles } : {}),
         })
       ).json();
-      working.requestId = proposal.requestId;
+      working.requestId = proposed.requestId;
       // The size chosen here, where the workflow sets its own.
-      const shown = proposal.plan?.parameters ?? {},
+      const shown = proposed.plan?.parameters ?? {},
         edits = Object.fromEntries(Object.entries(wanted.edits).filter(([key, value]) => shown[key] !== value));
       if (Object.keys(edits).length) {
-        proposal = await (
-          await api('tools/revise', { requestId: proposal.requestId, approvalToken: proposal.approvalToken, edits })
+        proposed = await (
+          await api('tools/revise', { requestId: proposed.requestId, approvalToken: proposed.approvalToken, edits })
         ).json();
-        working.requestId = proposal.requestId;
+        working.requestId = proposed.requestId;
       }
       controller.signal.throwIfAborted();
-      let job = await (
-        await api('tools/execute', {
-          requestId: proposal.requestId,
-          permission: 'once',
-          ...(proposal.mediaType ? { approvalToken: proposal.approvalToken } : {}),
-        })
-      ).json();
-      const jobId = job.id;
-      let listed = false;
-      while (!['done', 'error', 'cancelled'].includes(job.state)) {
-        Object.assign(working, {
-          label: job.progress || 'Génération…',
-          fraction: job.fraction ?? null,
-          preview: job.previewUrl ?? working.preview,
+      if (run && !former) {
+        // In the conversation: followed and written there like a creation of the chat.
+        const done = await run(proposed, {
+          signal: controller.signal,
+          onProgress: (label, fraction, preview) => {
+            if (!working) return;
+            Object.assign(working, {
+              label: typeof label === 'string' && label ? label : working.label,
+              fraction: Number.isFinite(fraction) ? fraction : working.fraction,
+              preview: preview ?? working.preview,
+            });
+            progress();
+          },
         });
-        // The result is shown as soon as it exists, while the chat model reloads.
-        if (job.record && !listed) {
-          listed = true;
-          await refresh().catch(() => {});
-          render();
+        if (!done.record)
+          throw Error(controller.signal.aborted ? 'Génération arrêtée.' : done.error || 'La génération a échoué.');
+        made = done.record.id;
+      } else {
+        let job = await (
+          await api('tools/execute', {
+            requestId: proposed.requestId,
+            permission: 'once',
+            studio: true,
+            ...(proposed.mediaType ? { approvalToken: proposed.approvalToken } : {}),
+          })
+        ).json();
+        const jobId = job.id;
+        let listed = false;
+        while (!['done', 'error', 'cancelled'].includes(job.state)) {
+          Object.assign(working, {
+            label: job.progress || 'Génération…',
+            fraction: job.fraction ?? null,
+            preview: job.previewUrl ?? working.preview,
+          });
+          // The result is shown as soon as it exists.
+          if (job.record && !listed) {
+            listed = true;
+            await refresh().catch(() => {});
+            render();
+          }
+          progress();
+          await pause();
+          job = await (await api('tools/job')).json();
+          if (job?.id !== jobId) throw Error('La génération suivie a été remplacée par une autre tâche.');
         }
-        progress();
-        await pause();
-        job = await (await api('tools/job')).json();
-        if (job?.id !== jobId) throw Error('La génération suivie a été remplacée par une autre tâche.');
+        if (!job.record)
+          throw Error(controller.signal.aborted ? 'Génération arrêtée.' : job.error || 'La génération a échoué.');
+        made = job.record.id;
       }
-      if (!job.record)
-        throw Error(controller.signal.aborted ? 'Génération arrêtée.' : job.error || 'La génération a échoué.');
-      made = job.record.id;
       if (extending) extending = null;
     } catch (error) {
       failure = controller.signal.aborted ? 'Génération arrêtée.' : error.message;
     } finally {
       working = null;
       await refresh().catch(() => {});
-      // It stays in the frame, as the gallery lists it (with the addresses it is shown from).
+      // It stays on the screen, as the gallery lists it (with the addresses it is shown from).
       const record = made && runs.find(item => item.id === made);
       if (record) kept[asked] = record;
       onChange();
       render();
+      scrollStrip();
     }
   }
   function stop() {
     if (!working) return;
+    if (working.external) return stopTurn();
     working.controller.abort();
     if (working.requestId) api('tools/cancel', { requestId: working.requestId }).catch(() => {});
   }
-  /** Updates the progress line alone: the form keeps its focus while a generation runs. */
+  /** Updates the button and the screen alone: the form keeps its focus while a generation runs. */
   function progress() {
-    const line = $('studio-progress');
-    if (!line || !working) return;
-    line.querySelector('.studio-progress-label').textContent = working.label;
-    // The bar of a generation in a conversation: indeterminate until the job gives a fraction.
-    const bar = line.querySelector('.generation-progress'),
-      known = working.fraction !== null;
-    bar.classList.toggle('is-determinate', known);
-    if (known) {
-      const percent = Math.round(Math.min(1, Math.max(0, working.fraction)) * 1000) / 10;
-      bar.style.setProperty('--generation-progress', String(percent / 100));
-      bar.style.setProperty('--generation-percent', String(Math.floor(percent)));
-      bar.setAttribute('aria-valuenow', String(Math.round(percent)));
+    if (!working) return;
+    const go = document.querySelector?.('#studio-view .studio-go'),
+      line = $('studio-progress');
+    const known = Number.isFinite(working.fraction) && working.fraction !== null,
+      percent = known ? Math.round(Math.min(1, Math.max(0, working.fraction)) * 100) : null;
+    if (go) {
+      go.classList.toggle('is-indeterminate', !known);
+      go.style.setProperty('--studio-progress', known ? String(percent / 100) : '0');
+      const label = go.querySelector('.studio-go-label');
+      if (label) label.textContent = known ? `Génération · ${percent} %` : 'Génération…';
+      go.setAttribute('aria-valuenow', known ? String(percent) : '');
     }
-    // What the generator has so far, in the frame; the frame is rebuilt with the page.
-    const frame = document.querySelector('.studio-frame');
+    if (line) {
+      line.hidden = false;
+      line.textContent = working.label || '';
+    }
+    // A sound lights its bars as it goes.
+    const bars = document.querySelectorAll?.('#studio-view .studio-bars span') ?? [];
+    bars.forEach((bar, index) => bar.classList.toggle('is-lit', known && index < (percent * bars.length) / 100));
+    // What the generator has so far, on the screen; the frame is rebuilt with the page.
+    const frame = document.querySelector?.('#studio-view .studio-frame');
     if (frame && working.preview) {
       if (live?.frame !== frame) live = { frame, preview: livePreview(node, frame) };
       live.preview.show(working.preview);
     }
+  }
+
+  // ------------------------------------------------------------------ Moodix AI sets the Studio
+  /** The top bar says it while the pointer works, with the way to take over. */
+  function status(on) {
+    const pill = $('ai-status');
+    if (pill) pill.hidden = !on;
+    const take = $('ai-takeover');
+    if (take) take.onclick = on ? () => takeOver() : null;
+  }
+  /** Where the pointer goes for a setting: the element that wears its key. */
+  const targetOf = key =>
+    key === 'kind'
+      ? document.querySelector?.(`#studio-kinds [data-mode="${proposal?.mode ?? mode}"]`)
+      : document.querySelector?.(`#studio-view [data-ai="${key}"]`);
+  /** One step of the pointer: it goes, it rings, it sets, it leaves a trace. Stops when the user takes over. */
+  async function stepTo(key, label, apply, { anchor } = {}) {
+    if (!ai || ai.stopped) return false;
+    ai.active = key;
+    render();
+    pointer?.move(targetOf(key), label, anchor);
+    await wait(pointer?.reduced() ? 400 : 950);
+    if (!ai || ai.stopped) return false;
+    await apply();
+    if (!ai || ai.stopped) return false;
+    ai.touched.add(key);
+    ai.active = null;
+    render();
+    pointer?.follow(targetOf(key), anchor);
+    await wait(pointer?.reduced() ? 400 : 550);
+    return Boolean(ai && !ai.stopped);
+  }
+  /** The prompt written as it is typed: fast, the whole of it in about two seconds and a half. */
+  async function typePrompt(draft, text) {
+    const box = document.querySelector?.('#studio-view [data-ai="prompt"]');
+    if (pointer?.reduced() || !box) {
+      draft.prompt = text;
+      return;
+    }
+    const step = Math.max(2, Math.ceil(text.length / 80));
+    for (let index = step; index < text.length + step; index += step) {
+      if (!ai || ai.stopped) return;
+      draft.prompt = text.slice(0, index);
+      box.value = draft.prompt;
+      box.scrollTop = box.scrollHeight;
+      await wait(30);
+    }
+    draft.prompt = text;
+  }
+  /**
+   * Shows a proposal of Moodix AI in the Studio. What its workflow leaves to the assistant is
+   * set by the pointer, the rest is shown as it will be made; the pointer stops on « Générer »
+   * and waits. Resolves 'once' when the user generates (their changes sent first), 'deny' when
+   * they decline; rejects when the turn is stopped.
+   */
+  function propose(request, signal) {
+    const target = MODE_OF_VERB[request.tool || request.call?.function?.name] ?? request.mediaType ?? 'image';
+    return new Promise((resolve, reject) => {
+      const settle = () => {
+        signal?.removeEventListener('abort', abort);
+        endPointer();
+      };
+      const abort = () => {
+        settle();
+        proposal = null;
+        failure = '';
+        render();
+        reject(signal.reason || new DOMException('Annulé', 'AbortError'));
+      };
+      proposal = {
+        request,
+        mode: target,
+        values: null,
+        touched: new Set(),
+        resolve: decision => {
+          settle();
+          resolve(decision);
+        },
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      legacy = false;
+      failure = '';
+      reveal();
+      void (async () => {
+        if (!info) await load().catch(() => {});
+        if (!proposal || proposal.request !== request) return;
+        proposal.values = proposedValues(request, offered(request.tool || request.call?.function?.name));
+        await animate(proposal);
+      })();
+    });
+  }
+  async function animate(current) {
+    const { values, request } = current,
+      target = current.mode,
+      list = offered(values.verb),
+      workflow = list.find(item => item.id === values.workflow) ?? list[0],
+      draft = drafts[target];
+    if (!workflow) return render();
+    ai = { stopped: false, active: null, touched: new Set() };
+    status(true);
+    // What the assistant may not change is shown at once, as it will be made.
+    if (values.source)
+      extending = runs.find(item => item.id === values.source) ?? { id: values.source, prompt: '', parameters: {} };
+    else if (target === 'video') extending = null;
+    if (!values.sizeFree && values.size && !extending) {
+      draft.format = values.format ?? draft.format;
+      draft.size = values.size;
+    }
+    current.seedBefore = draft.seed;
+    if (values.seed !== null) draft.seed = String(values.seed);
+    if (!values.promptFree) draft.prompt = values.prompt;
+    for (const [key, value] of Object.entries(values.settings))
+      if (!values.settingsFree[key]) (draft.settings[workflow.id] ??= {})[key] = value;
+    const steps = [];
+    if (mode !== target) steps.push(['kind', 'passe en ' + modeOf(target).label, () => setMode(target)]);
+    if (draft.workflow !== workflow.id && list.length > 1)
+      steps.push(['model', 'choisit ' + workflow.name, () => (drafts[target].workflow = workflow.id)]);
+    else draft.workflow = workflow.id;
+    if (values.promptFree)
+      steps.push(['prompt', 'écrit le prompt', () => typePrompt(draft, values.prompt), { anchor: { ax: 34, ay: 30 } }]);
+    if (values.references.length)
+      steps.push([
+        'inputs',
+        values.references.length > 1 ? 'place les images' : 'place l’image',
+        () => placeReferences(draft, values.references),
+      ]);
+    if (values.sizeFree && values.format && values.format !== draft.format && !extending)
+      steps.push([
+        'ratio',
+        'passe en ' + values.format,
+        () => Object.assign(draft, { format: values.format, size: values.size }),
+      ]);
+    else if (values.sizeFree && values.size)
+      Object.assign(draft, { format: values.format ?? draft.format, size: values.size });
+    if (values.framesFree && values.seconds !== null && workflow.lengths)
+      steps.push([
+        'duration',
+        'règle la durée',
+        () => {
+          const key = extending ? 'extension' : 'length',
+            near = workflow.lengths.seconds.reduce((best, value) =>
+              Math.abs(value - values.seconds) < Math.abs(best - values.seconds) ? value : best,
+            );
+          draft[key] = near;
+          values.lengthShown = near;
+        },
+      ]);
+    for (const [key, value] of Object.entries(values.settings))
+      if (values.settingsFree[key] && String(draft.settings[workflow.id]?.[key] ?? '') !== String(value))
+        steps.push([
+          'setting-' + key,
+          'règle ' + (SETTINGS[key] || key).toLowerCase(),
+          () => {
+            (draft.settings[workflow.id] ??= {})[key] = value;
+            if (key === 'lyrics' && value) draft.lyrics = true;
+          },
+        ]);
+    for (const [key, label, apply, options] of steps) if (!(await stepTo(key, label, apply, options))) return;
+    if (!ai || ai.stopped || proposal !== current) return;
+    // The values it reached are those of the proposal: what changes after that is the user's.
+    current.touched = new Set(ai.touched);
+    ai.active = 'generate';
+    render();
+    const auto = request.autoAllow === true;
+    pointer?.move(
+      targetOf('generate'),
+      auto ? 'lance la génération (autorisé dans la configuration)' : 'attend ton accord',
+    );
+    await wait(1100);
+    if (!ai || ai.stopped || proposal !== current) return;
+    status(false);
+    if (auto) {
+      endPointer();
+      return approve();
+    }
+    await wait(1300);
+    if (ai && !ai.stopped && proposal === current) endPointer();
+  }
+  /** The images of a proposal, in the slots of their roles. */
+  function placeReferences(draft, references) {
+    const inputs = {};
+    references.forEach((ref, index) => {
+      const resource = ref.resource_id ? assets.resource?.(ref.resource_id) : null,
+        output = ref.output_id ? runs.find(item => item.id === ref.output_id)?.outputs?.[ref.output_index ?? 0] : null,
+        role = ref.role in ROLES ? ref.role : ref.role === 'msr_image' ? 'reference' : ref.role;
+      (inputs[role] ??= []).push({
+        source: ref.resource_id ? { resource: ref.resource_id } : ref.output_id ? { output: ref.output_id } : null,
+        preview: resource?.previewUrl || resource?.originalUrl || output?.thumbUrl || output?.originalUrl || '',
+        name: ref.label || ref.roleLabel || ROLES[role] || 'Entrée',
+        ref: index,
+        role,
+      });
+    });
+    draft.inputs = inputs;
+  }
+  function endPointer() {
+    if (ai) ai.stopped = true;
+    ai = null;
+    status(false);
+    pointer?.hide();
+    render();
+  }
+  /** « Reprendre la main », or a touch of the user while the pointer works: it stops, what it set stays. */
+  function takeOver() {
+    if (!ai) return;
+    if (proposal && !proposal.values) return;
+    if (proposal) proposal.touched = new Set(ai.touched);
+    endPointer();
+    $('live-status') &&
+      ($('live-status').textContent = 'Vous avez repris la main ; ce que Moodix AI a réglé reste en place.');
+  }
+  /** What the user changed in the Studio from the proposal, as the server takes it. */
+  function edits() {
+    const { values, request } = proposal,
+      plan = request.plan || {},
+      items = new Map((plan.editable?.parameters || []).map(item => [item.key, item])),
+      draft = drafts[proposal.mode],
+      workflow = offered(values.verb).find(item => item.id === values.workflow) ?? current(),
+      changes = {};
+    const prompt = draft.prompt.trim();
+    if (!prompt) throw Error('Écrivez un prompt.');
+    if (plan.editable?.prompt && prompt !== values.prompt.trim()) changes.prompt = prompt;
+    if (
+      values.size &&
+      draft.size &&
+      draft.size !== values.size &&
+      items.has('width') &&
+      items.has('height') &&
+      !extending
+    ) {
+      const stage = workflow?.stages ? stageOf(workflow, draft.size) : null;
+      if (stage && values.stage && stage !== values.stage && plan.editable?.stages?.includes(stage))
+        changes.stage = stage;
+      else {
+        const [width, height] = draft.size.split('x').map(Number);
+        Object.assign(changes, { width, height });
+      }
+    }
+    if (values.seconds !== null && items.has('frames') && values.fps) {
+      const wanted = draft[extending ? 'extension' : 'length'];
+      if (Number.isFinite(wanted) && wanted !== values.lengthShown && Math.abs(wanted - values.seconds) > 0.01) {
+        let frames = Math.round(wanted * values.fps) + values.overlap;
+        const choices = values.framesChoices;
+        if (choices?.length)
+          frames = choices.reduce((best, value) => (Math.abs(value - frames) < Math.abs(best - frames) ? value : best));
+        if (frames !== values.frames) changes.frames = frames;
+      }
+    }
+    const seed = draft.seed.trim();
+    if (seed && values.seed !== null && Number(seed) !== values.seed && items.has('seed')) {
+      const number = Number(seed);
+      if (!Number.isSafeInteger(number) || number < 0) throw Error('Seed : un entier positif.');
+      changes.seed = number;
+    }
+    for (const key of Object.keys(values.settings)) {
+      const item = items.get(key),
+        value = draft.settings[workflow?.id]?.[key];
+      if (!item || item.locked || value === undefined || String(value) === String(values.settings[key])) continue;
+      changes[key] = item.type === 'string' ? String(value) : Number(value);
+    }
+    // An image dragged to another slot changes role.
+    const roles = [];
+    for (const [role, list] of Object.entries(draft.inputs))
+      for (const item of list ?? [])
+        if (item?.ref !== undefined && item.role !== role) roles.push({ index: item.ref, role });
+    if (roles.length) changes.references = roles;
+    return changes;
+  }
+  /** « Générer » on a proposal: the user's changes are sent, then the generation is theirs to watch. */
+  async function approve() {
+    if (!proposal || working) return;
+    if (ai) takeOver();
+    const current = proposal,
+      { request } = current;
+    let changes;
+    try {
+      changes = edits();
+    } catch (error) {
+      failure = error.message;
+      return render();
+    }
+    failure = '';
+    working = { label: 'Préparation…', fraction: null, external: true };
+    render();
+    if (Object.keys(changes).length)
+      try {
+        const revised = await (
+          await api('tools/revise', {
+            requestId: request.requestId,
+            approvalToken: request.approvalToken,
+            edits: changes,
+          })
+        ).json();
+        Object.assign(request, revised);
+      } catch (error) {
+        working = null;
+        failure = error.message;
+        return render();
+      }
+    if (proposal !== current) return;
+    proposal = null;
+    if (extending) extending = null;
+    giveBackSeed(current);
+    current.resolve('once');
+  }
+  /** The proposal is declined: from its « Annuler », or by a new message in the chat. */
+  function decline() {
+    if (!proposal || working) return false;
+    const current = proposal;
+    proposal = null;
+    extending = null;
+    failure = '';
+    giveBackSeed(current);
+    current.resolve('deny');
+    render();
+    return true;
+  }
+  /** The seed drawn for a proposal was its own: the next creation by hand draws again, unless the user typed one. */
+  function giveBackSeed(answered) {
+    const draft = drafts[answered.mode];
+    if (answered.values && draft.seed === String(answered.values.seed)) draft.seed = answered.seedBefore ?? '';
+  }
+  /** A generation approved here, run by the chat turn: its progress comes from there. */
+  function follow(label, fraction, preview) {
+    if (!working?.external) return;
+    Object.assign(working, {
+      label: typeof label === 'string' && label ? label : working.label,
+      fraction: Number.isFinite(fraction) ? fraction : working.fraction,
+      preview: preview ?? working.preview,
+    });
+    progress();
+  }
+  /** The end of a generation approved here: its creation is shown on the screen. */
+  async function settled(result) {
+    const external = working?.external;
+    if (external) working = null;
+    await refresh().catch(() => {});
+    if (result?.record) {
+      const record = runs.find(item => item.id === result.record.id) ?? result.record;
+      kept[mediaOf(record)] = record;
+    } else if (external && result?.error) failure = result.error;
+    render();
+    scrollStrip();
   }
 
   // ------------------------------------------------------------------ results
@@ -794,12 +1396,19 @@ export function setupStudio({
   const sourceOf = record => record.parameters?.references?.find(ref => ref.role === 'source_video')?.output_id;
   function length(record) {
     const p = record.parameters ?? {};
-    if (mediaOf(record) === 'audio') return p.seconds ? seconds(p.seconds) : '';
-    return p.frames && p.fps ? seconds(p.frames / p.fps) : '';
+    if (mediaOf(record) === 'audio') return p.seconds ? figures(p.seconds) : '';
+    return p.frames && p.fps ? figures(p.frames / p.fps) : '';
+  }
+  function formatText(record) {
+    const p = record.parameters ?? {},
+      output = { ...record.outputs?.[0], ...measured.get(record.id) },
+      width = p.width ?? output.width,
+      height = p.height ?? output.height;
+    return width && height ? (formatOf(width, height)?.id ?? `${width}×${height}`) : '';
   }
   async function remove(record) {
     try {
-      await api('studio/delete', { id: record.id });
+      await api('studio/delete', { id: record.id, conversationId: place() });
       if (extending?.id === record.id) extending = null;
       for (const key of Object.keys(kept)) if (kept[key].id === record.id) delete kept[key];
       await refresh();
@@ -813,7 +1422,14 @@ export function setupStudio({
     for (const [label, glyph, onclick, title] of [
       ...extra,
       ['Détails', 'info', () => viewOutput(record, 0), 'Voir l’original et ses paramètres'],
-      ['', 'trash', () => remove(record), 'Retirer du Studio (le fichier reste dans le dossier output)'],
+      [
+        '',
+        'trash',
+        () => remove(record),
+        legacy
+          ? 'Retirer de l’ancien Studio (le fichier reste dans le dossier output)'
+          : 'Retirer de cette conversation (le fichier reste dans le dossier output)',
+      ],
     ]) {
       const control = button('output-action', label, onclick, glyph);
       control.title = title;
@@ -827,52 +1443,99 @@ export function setupStudio({
   const measured = new Map();
   function useImage(record, target, role) {
     const output = { ...record.outputs[0], ...measured.get(record.id) };
-    mode = target;
+    setMode(target);
     extending = null;
     (drafts[target].inputs[role] ??= [])[0] = {
       source: { output: record.id },
-      preview: output.originalUrl,
+      preview: output.thumbUrl || output.originalUrl,
       name: record.prompt,
-      width: output.width,
-      height: output.height,
+      width: output.width ?? record.parameters?.width,
+      height: output.height ?? record.parameters?.height,
     };
     followFormat(role);
     render();
-    $('studio-view').scrollTo?.({ top: 0, behavior: 'smooth' });
+    $('studio-view')?.scrollTo?.({ top: 0, behavior: 'smooth' });
   }
-  function results() {
-    const mine = runs.filter(record => mediaOf(record) === mode),
-      section = node('section', 'studio-results');
-    if (mode === 'video') {
-      // Oldest first: the timeline reads from left to right.
-      const clips = [...mine].reverse(),
-        numbers = new Map(clips.map((record, index) => [record.id, index + 1]));
-      section.append(node('h3', '', 'Timeline'));
-      if (!clips.length)
-        section.append(node('p', 'asset-empty', 'Vos vidéos s’aligneront ici, dans l’ordre de création.'));
-      const strip = node('div', 'studio-timeline');
-      for (const record of clips) {
-        const clip = node('article', 'studio-clip' + (extending?.id === record.id ? ' is-selected' : '')),
-          player = node('video'),
-          from = numbers.get(sourceOf(record));
-        player.controls = true;
-        player.preload = 'metadata';
-        player.playsInline = true;
-        if (record.outputs[0].thumbUrl) player.poster = record.outputs[0].thumbUrl;
-        player.onloadeddata = () => void thumbnailOf(api, record, 0, player);
-        player.src = record.outputs[0].originalUrl || '';
-        const caption = node(
-          'p',
-          'studio-caption',
-          `#${numbers.get(record.id)} · ${[length(record), record.workflowName].filter(Boolean).join(' · ')}`,
-        );
-        const text = node('p', 'studio-prompt', (from ? `↳ Suite de #${from} · ` : '') + record.prompt);
-        text.title = record.prompt;
-        clip.append(
-          player,
-          caption,
-          text,
-          actions(record, [
+  /** Puts a creation on the screen; a clip starts playing. */
+  function onScreen(record, play = false) {
+    kept[mediaOf(record)] = record;
+    render();
+    if (play)
+      document
+        .querySelector?.('#studio-view .studio-frame video, #studio-view .studio-frame audio')
+        ?.play?.()
+        ?.catch?.(() => {});
+  }
+  function item(record, number, from) {
+    const media = mediaOf(record),
+      output = record.outputs[0] ?? {},
+      card = node(
+        'article',
+        'studio-item studio-card' +
+          (extending?.id === record.id ? ' is-selected' : '') +
+          (kept[mode]?.id === record.id ? ' is-shown' : ''),
+      ),
+      thumb = node('div', 'studio-thumb');
+    if (media === 'audio') {
+      const wave = node('span', 'studio-thumb-wave');
+      wave.setAttribute('aria-hidden', 'true');
+      thumb.append(wave);
+    } else {
+      const small = output.thumbUrl;
+      let picture;
+      if (small || media === 'image') {
+        picture = node('img');
+        Object.assign(picture, { alt: record.prompt || '', loading: 'lazy', decoding: 'async' });
+        picture.src = small || output.originalUrl || '';
+        picture.onload = () => {
+          if (media === 'image' && !small) {
+            measured.set(record.id, { width: picture.naturalWidth, height: picture.naturalHeight });
+            void thumbnailOf(api, record, 0, picture);
+          }
+        };
+      } else {
+        // Its first picture only, of which a thumbnail is made for the next time.
+        picture = node('video');
+        Object.assign(picture, {
+          muted: true,
+          preload: 'metadata',
+          playsInline: true,
+          src: (output.originalUrl || '') + '#t=0.1',
+        });
+        picture.onloadeddata = () => void thumbnailOf(api, record, 0, picture);
+      }
+      picture.title = 'Afficher sur l’écran du Studio';
+      picture.onclick = () => onScreen(record);
+      const grain = node('span', 'picture-grain');
+      grain.setAttribute('aria-hidden', 'true');
+      thumb.append(picture, grain);
+    }
+    if (media !== 'image') {
+      const play = button('studio-play', '', () => onScreen(record, true), 'play');
+      play.setAttribute('aria-label', 'Lire sur l’écran du Studio');
+      play.title = 'Lire sur l’écran du Studio';
+      thumb.append(play);
+    }
+    const title = node('p', 'studio-item-title studio-prompt', (from ? `↳ #${from} · ` : '') + (record.prompt || ''));
+    title.title = record.prompt || '';
+    const meta = node(
+      'p',
+      'studio-item-meta studio-caption',
+      [
+        number ? '#' + number : '',
+        media === 'audio' ? length(record) : '',
+        media === 'video' ? length(record) : '',
+        media !== 'audio' ? formatText(record) : '',
+        media === 'audio' ? (record.workflowName || '').toUpperCase() : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    );
+    meta.title = record.workflowName || '';
+    const extra = legacy
+      ? []
+      : media === 'video'
+        ? [
             [
               'Prolonger',
               'forward',
@@ -880,76 +1543,79 @@ export function setupStudio({
                 extending = record;
                 failure = '';
                 render();
-                $('studio-view').scrollTo?.({ top: 0, behavior: 'smooth' });
+                $('studio-view')?.scrollTo?.({ top: 0, behavior: 'smooth' });
               },
               'Écrire la suite de ce clip',
             ],
-          ]),
-        );
-        strip.append(clip);
-      }
-      if (clips.length) section.append(strip);
+          ]
+        : media === 'image'
+          ? [
+              ...(takes('create_image', 'source')
+                ? [['Modifier', 'edit', () => useImage(record, 'image', 'source'), 'Repartir de cette image']]
+                : []),
+              ...(takes('create_video', 'start_image')
+                ? [
+                    [
+                      'Animer',
+                      'video',
+                      () => useImage(record, 'video', 'start_image'),
+                      'En faire l’image de début d’une vidéo',
+                    ],
+                  ]
+                : []),
+            ]
+          : [];
+    card.append(thumb, title, meta, actions(record, extra));
+    return card;
+  }
+  function outputs() {
+    const mine = runs.filter(record => mediaOf(record) === mode),
+      section = node('section', 'studio-block is-output studio-results'),
+      about = modeOf(mode);
+    section.setAttribute('aria-label', 'Sortie');
+    const extra = node('div', 'studio-output-tools');
+    if (legacyRuns.length) {
+      // The creations of the Studio of before, which had no conversation: still there, apart.
+      const where = select(
+        [
+          ['conversation', 'Cette conversation'],
+          ['legacy', `Ancien Studio (${legacyRuns.length})`],
+        ],
+        legacy ? 'legacy' : 'conversation',
+        value => {
+          legacy = value === 'legacy';
+          extending = null;
+          void refresh().then(render);
+        },
+      );
+      where.className = 'studio-source-pick';
+      where.setAttribute('aria-label', 'Créations affichées');
+      where.disabled = Boolean(working || proposal);
+      extra.append(where);
+    }
+    extra.append(node('span', 'studio-count', resultCount(mine.length)));
+    section.append(blockHead(about.output, { extra }));
+    if (!mine.length) {
+      section.append(node('p', 'studio-empty asset-empty', about.none));
       return section;
     }
-    section.append(node('h3', '', mode === 'image' ? 'Images' : 'Sons'));
-    if (!mine.length)
-      section.append(
-        node('p', 'asset-empty', mode === 'image' ? 'Vos images apparaîtront ici.' : 'Vos sons apparaîtront ici.'),
-      );
-    const grid = node('div', 'studio-timeline ' + (mode === 'image' ? 'is-images' : 'is-sounds'));
-    for (const record of mine) {
-      const card = node('article', 'studio-card');
-      if (mode === 'image') {
-        const picture = node('img');
-        // A card is small: the thumbnail when the server keeps one. « Détails » shows the original.
-        picture.src = record.outputs[0].thumbUrl || record.outputs[0].originalUrl || '';
-        picture.alt = record.prompt;
-        picture.loading = 'lazy';
-        picture.onclick = () => viewOutput(record, 0);
-        picture.onload = () => {
-          measured.set(record.id, { width: picture.naturalWidth, height: picture.naturalHeight });
-          void thumbnailOf(api, record, 0, picture);
-        };
-        card.append(picture);
-      } else {
-        const player = node('audio');
-        player.controls = true;
-        player.preload = 'metadata';
-        player.src = record.outputs[0].originalUrl || '';
-        card.append(
-          player,
-          node('p', 'studio-caption', [length(record), record.workflowName].filter(Boolean).join(' · ')),
-        );
-      }
-      const text = node('p', 'studio-prompt', record.prompt);
-      text.title = record.prompt;
-      card.append(
-        text,
-        actions(
-          record,
-          mode === 'image'
-            ? [
-                ...(takes('create_image', 'source')
-                  ? [['Modifier', 'edit', () => useImage(record, 'image', 'source'), 'Repartir de cette image']]
-                  : []),
-                ...(takes('create_video', 'start_image')
-                  ? [
-                      [
-                        'Animer',
-                        'video',
-                        () => useImage(record, 'video', 'start_image'),
-                        'En faire l’image de début d’une vidéo',
-                      ],
-                    ]
-                  : []),
-              ]
-            : [],
-        ),
-      );
-      grid.append(card);
-    }
-    if (mine.length) section.append(grid);
+    const strip = node(
+      'div',
+      'studio-strip studio-timeline' + (mode === 'image' ? ' is-images' : mode === 'audio' ? ' is-sounds' : ''),
+    );
+    if (mode === 'video') {
+      // Oldest first: the timeline reads from left to right.
+      const clips = [...mine].reverse(),
+        numbers = new Map(clips.map((record, index) => [record.id, index + 1]));
+      for (const record of clips) strip.append(item(record, numbers.get(record.id), numbers.get(sourceOf(record))));
+    } else for (const record of mine) strip.append(item(record));
+    section.append(strip);
     return section;
+  }
+  /** A new clip goes at the end of the timeline: the strip shows it. */
+  function scrollStrip() {
+    const strip = document.querySelector?.('#studio-view .studio-strip');
+    if (strip && mode === 'video') strip.scrollLeft = strip.scrollWidth;
   }
 
   // ------------------------------------------------------------------ the page
@@ -958,9 +1624,45 @@ export function setupStudio({
     panel.append(node('p', 'asset-empty', text));
     return panel;
   }
+  /** Image / Vidéo / Son, at the top left. */
+  function kinds() {
+    const bar = $('studio-kinds');
+    if (!bar) return;
+    bar.replaceChildren();
+    bar.removeAttribute('data-ai-active');
+    bar.removeAttribute('data-ai-touched');
+    aiTarget(bar, 'kind');
+    for (const item of MODES) {
+      const tab = button(
+        'kind-tab',
+        item.label,
+        () => {
+          if (working || mode === item.id) return;
+          if (ai) takeOver();
+          setMode(item.id);
+          release();
+        },
+        item.icon,
+      );
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', String(item.id === mode));
+      tab.setAttribute('aria-label', item.label);
+      tab.title = item.label;
+      tab.dataset.mode = item.id;
+      tab.disabled = Boolean(working);
+      bar.append(tab);
+    }
+  }
+  function setMode(next) {
+    mode = next;
+    failure = '';
+    formatsOpen = false;
+    if (next !== 'video') extending = null;
+    render();
+  }
   /**
-   * The desk: what is written on the left, the frame and « Générer » in the middle, the
-   * settings on the right. Wide rather than tall: everything stays in view.
+   * The four blocks: Entrée, the preview with « Générer », Réglages, Sortie. Their places
+   * depend on the width only: three columns and the output under them when wide.
    */
   function form() {
     const draft = drafts[mode],
@@ -973,43 +1675,31 @@ export function setupStudio({
           ? 'Aucun workflow de son prêt : téléchargez les modèles de musique et de bruitages dans models\\audio.'
           : 'Aucun workflow prêt pour cette création : vérifiez Configuration, Workflows.',
       );
-    const desk = node('section', 'studio-desk'),
-      write = node('div', 'studio-col studio-write'),
-      center = node('div', 'studio-col studio-center'),
-      settings = node('div', 'studio-col studio-settings'),
-      grid = node('div', 'studio-grid-fields');
+    const desk = node('div', 'studio-desk'),
+      write = node('section', 'studio-block is-input studio-write'),
+      preview = node('section', 'studio-block is-preview studio-center'),
+      settings = node('section', 'studio-block is-settings studio-settings');
+    write.setAttribute('aria-label', 'Entrée');
+    preview.setAttribute('aria-label', 'Aperçu et génération');
+    settings.setAttribute('aria-label', 'Réglages');
 
-    // Left: what the user writes and hands over.
+    // Entrée: what the user writes and hands over.
+    write.append(blockHead('Entrée', { id: 'studio-prompt' }));
     if (mode === 'video' && extending) {
       const banner = node('div', 'studio-extending');
-      banner.append(
-        icon('forward'),
-        node('span', '', 'Suite du clip : ' + extending.prompt.slice(0, 90)),
-        button('studio-link', 'Annuler', () => {
-          extending = null;
-          render();
-        }),
-      );
+      banner.append(icon('forward'), node('span', '', 'Suite du clip : ' + (extending.prompt || '').slice(0, 90)));
+      if (!answering())
+        banner.append(
+          button('studio-link', 'Annuler', () => {
+            extending = null;
+            render();
+          }),
+        );
       write.append(banner);
-    }
-    if (mode === 'audio' && list.length > 1) {
-      // The kind of sound is the first choice: music, or sound effects.
-      const kinds = node('div', 'studio-kinds');
-      kinds.setAttribute('role', 'radiogroup');
-      kinds.setAttribute('aria-label', 'Type de son');
-      for (const item of list) {
-        const kind = button('studio-kind', '', () => choose(item.id));
-        kind.title = item.description;
-        kind.setAttribute('role', 'radio');
-        kind.setAttribute('aria-checked', String(item.id === workflow.id));
-        kind.append(node('strong', '', item.name), node('span', '', item.description));
-        kinds.append(kind);
-      }
-      write.append(kinds);
     }
     const prompt = textarea(
       draft.prompt,
-      4,
+      8,
       extending
         ? 'Ce qui se passe ensuite…'
         : mode === 'image'
@@ -1021,243 +1711,287 @@ export function setupStudio({
         draft.prompt = value;
       },
     );
+    prompt.id = 'studio-prompt';
     prompt.maxLength = 4000;
     prompt.title = MODIFIER + ' + Entrée pour générer';
-    write.append(field('Prompt', prompt, { wide: true }));
+    aiTarget(prompt, 'prompt');
+    const promptField = node('div', 'studio-field studio-prompt-field is-wide');
+    promptField.append(prompt);
+    write.append(promptField);
     if (mode !== 'audio') write.append(enrichRow());
+    // A song's lyrics are words handed over too: under the prompt, opened on demand.
+    const lyrics = workflow.settings.find(setting => setting.key === 'lyrics' && setting.type === 'string');
+    if (lyrics) {
+      const store = (draft.settings[workflow.id] ??= {}),
+        value = store.lyrics ?? lyrics.default ?? '';
+      if (draft.lyrics || String(value).trim()) {
+        const box = textarea(String(value), 4, SETTING_HELP.lyrics, next => {
+          store.lyrics = next;
+        });
+        if (lyrics.maxLength) box.maxLength = lyrics.maxLength;
+        aiTarget(box, 'setting-lyrics');
+        write.append(field(SETTINGS.lyrics, box, { wide: true, mark: true }));
+      } else
+        write.append(
+          button('studio-lyrics-toggle', '+ Paroles (facultatif)', () => {
+            draft.lyrics = true;
+            render();
+            document.querySelector?.('#studio-view [data-ai="setting-lyrics"]')?.focus?.();
+          }),
+        );
+    }
     // A continuation shows only the inputs it takes (subject references, for MiniMax H3).
     const row = inputs(workflow);
     if (row) write.append(row);
 
-    // Right: the settings, two to a row.
-    if (list.length > 1 && !extending && mode !== 'audio') {
-      const model = field(
-        'Modèle',
-        select(
-          list.map(item => [item.id, item.name]),
-          workflow.id,
-          choose,
-        ),
+    // Réglages: the model, the length, the size, the workflow's own settings; the rare ones under « Plus de réglages ».
+    settings.append(blockHead('Réglages'));
+    if (list.length > 1 && !extending) {
+      const model = select(
+        list.map(item => [item.id, item.name]),
+        workflow.id,
+        choose,
       );
       model.title = workflow.description;
-      grid.append(model);
+      model.disabled = answering();
+      if (answering()) model.title = 'Modèle choisi par Moodix AI pour cette proposition';
+      aiTarget(model, 'model');
+      settings.append(field(mode === 'audio' ? 'Type' : 'Modèle', model));
     }
+    const length = lengthField(workflow);
+    if (length) settings.append(length);
     const resolution = node('select');
     if (workflow.limits && !extending) {
       listSizes(resolution, workflow);
       resolution.onchange = () => {
         draft.size = resolution.value;
+        readout();
       };
-      const sized = field('Résolution', resolution);
-      if (mode === 'video') sized.title = 'Plus grand : plus long à générer.';
-      grid.append(sized);
+      aiTarget(resolution, 'size');
+      const sized = field('Taille', resolution, { mark: workflow.direct });
+      sized.title = mode === 'video' ? 'Plus grand : plus long à générer. La taille finale est marquée.' : '';
+      settings.append(sized);
     }
-    lengthField(workflow, grid);
-    const texts = [];
     for (const setting of workflow.settings) {
+      if (setting.key === 'lyrics' && setting.type === 'string') continue;
       // Kept per workflow: a song's length is not a sound effect's.
       const store = (draft.settings[workflow.id] ??= {}),
         value = store[setting.key] ?? setting.default ?? '',
         label = SETTINGS[setting.key] || setting.key,
         set = next => {
           store[setting.key] = next;
+          readout();
         };
+      let control;
       if (setting.type === 'string' && !setting.choices) {
-        const box = textarea(String(value), 4, SETTING_HELP[setting.key] ?? '', set);
-        if (setting.maxLength) box.maxLength = setting.maxLength;
-        texts.push(field(label, box, { wide: true }));
+        control = textarea(String(value), 4, SETTING_HELP[setting.key] ?? '', set);
+        if (setting.maxLength) control.maxLength = setting.maxLength;
       } else if (setting.choices)
-        grid.append(
-          field(
-            label,
-            select(
-              setting.choices.map(choice => [choice, String(choice)]),
-              value,
-              set,
-            ),
-          ),
+        control = select(
+          setting.choices.map(choice => [choice, String(choice)]),
+          value,
+          set,
         );
       else {
-        const input = node('input');
-        input.type = 'number';
-        input.value = String(value);
-        if (setting.min !== undefined) input.min = String(setting.min);
-        if (setting.max !== undefined) input.max = String(setting.max);
-        input.oninput = () => set(input.value);
-        const wrapper = field(label, input);
-        if (setting.max !== undefined) wrapper.title = `De ${setting.min ?? 0} à ${setting.max}.`;
-        grid.append(wrapper);
+        control = node('input');
+        control.type = 'number';
+        control.value = String(value);
+        if (setting.min !== undefined) control.min = String(setting.min);
+        if (setting.max !== undefined) control.max = String(setting.max);
+        control.oninput = () => set(control.value);
       }
+      aiTarget(control, 'setting-' + setting.key);
+      const wrapper = field(label, control, { mark: true, wide: setting.type === 'string' && !setting.choices });
+      if (setting.max !== undefined) wrapper.title = `De ${setting.min ?? 0} à ${setting.max}.`;
+      settings.append(wrapper);
     }
-    if (workflow.seeded) {
-      const seed = node('input');
-      seed.type = 'number';
-      seed.min = '0';
-      seed.placeholder = 'au hasard';
-      seed.value = draft.seed;
-      seed.oninput = () => {
-        draft.seed = seed.value;
-      };
-      grid.append(field('Seed', seed));
+    const lora = workflow.external && mode !== 'audio' && !extending && !answering();
+    if (workflow.seeded || lora) {
+      const more = button('studio-more', advanced ? '− Moins de réglages' : '+ Plus de réglages', () => {
+        advanced = !advanced;
+        render();
+      });
+      more.setAttribute('aria-expanded', String(advanced));
+      settings.append(more);
+      const rare = node('div', 'studio-advanced');
+      rare.hidden = !advanced;
+      if (workflow.seeded) {
+        const seed = node('input');
+        seed.type = 'number';
+        seed.min = '0';
+        seed.placeholder = 'au hasard';
+        seed.value = draft.seed;
+        seed.oninput = () => {
+          draft.seed = seed.value;
+        };
+        aiTarget(seed, 'seed');
+        rare.append(field('Seed', seed));
+      }
+      if (lora) rare.append(loraSection());
+      settings.append(rare);
     }
-    if (grid.children.length) settings.append(grid);
-    settings.append(...texts);
-    if (workflow.external && mode !== 'audio' && !extending) settings.append(loraSection());
 
-    // Middle: the frame in the format to come, its formats, and the button.
-    const { box, frame } = stage(workflow);
-    center.append(box);
-    if (workflow.limits && !extending) box.append(formatChips(workflow, frame, resolution));
-    const footer = node('div', 'studio-footer');
+    // The preview, its formats and the button.
+    const { screen, frame } = stage();
+    preview.append(screen);
+    const bar = node('div', 'studio-actionbar');
+    if (workflow.limits && !extending && mode !== 'audio') bar.append(formatChips(workflow, frame, resolution));
+    const go = aiTarget(button('primary studio-go', '', generate, 'spark'), 'generate'),
+      label = node('span', 'studio-go-label', working ? 'Génération…' : extending ? 'Générer la suite' : 'Générer'),
+      key = node('kbd', 'studio-go-key', MODIFIER + ' ↵'),
+      fill = node('span', 'studio-go-bar');
+    key.setAttribute('aria-hidden', 'true');
+    fill.setAttribute('aria-hidden', 'true');
+    go.append(label, key, fill);
+    go.title = answering() ? 'Générer la proposition de Moodix AI · ' + MODIFIER + ' + Entrée' : MODIFIER + ' + Entrée';
+    go.disabled = enriching || Boolean(working);
     if (working) {
-      const line = node('div', 'studio-progress');
-      line.id = 'studio-progress';
-      const bar = node('div', 'generation-progress');
-      bar.setAttribute('role', 'progressbar');
-      bar.setAttribute('aria-valuemin', '0');
-      bar.setAttribute('aria-valuemax', '100');
-      bar.append(node('span'));
-      line.append(
-        node('span', 'studio-progress-label', working.label),
-        bar,
-        button('secondary', 'Arrêter', stop, 'stop'),
-      );
-      footer.append(line);
-    } else {
-      const go = button('primary studio-go', extending ? 'Générer la suite' : 'Générer', generate, 'spark'),
-        // How to start it from the keyboard, in the corner of the button.
-        key = node('kbd', 'studio-go-key', MODIFIER + ' + Entrée');
-      key.setAttribute('aria-hidden', 'true');
-      go.append(key);
-      go.title = MODIFIER + ' + Entrée';
-      go.disabled = enriching;
-      footer.append(go);
+      go.setAttribute('role', 'progressbar');
+      go.setAttribute('aria-valuemin', '0');
+      go.setAttribute('aria-valuemax', '100');
+      go.setAttribute('aria-label', 'Génération en cours');
     }
+    bar.append(go);
+    if (working) {
+      const halt = button('secondary studio-stop', '', stop, 'stop');
+      halt.setAttribute('aria-label', 'Arrêter la génération');
+      halt.title = 'Arrêter la génération';
+      bar.append(halt);
+    } else if (answering()) {
+      const no = button('secondary studio-decline', 'Annuler', () => decline());
+      no.title = 'Refuser cette proposition de Moodix AI';
+      bar.append(no);
+    }
+    preview.append(bar);
+    const line = node('p', 'studio-progress', working?.label ?? '');
+    line.id = 'studio-progress';
+    line.setAttribute('role', 'status');
+    line.hidden = !working;
+    preview.append(line);
     if (failure) {
       const alert = node('p', 'studio-error', failure);
       alert.setAttribute('role', 'alert');
-      footer.append(alert);
+      preview.append(alert);
     }
-    center.append(footer);
 
-    desk.append(write, center, ...(settings.children.length ? [settings] : []));
-    if (!settings.children.length) desk.classList.add('is-two');
+    desk.append(write, preview, settings, outputs());
     if (working) for (const control of desk.querySelectorAll('textarea, select, input')) control.disabled = true;
     return desk;
   }
   function render() {
-    const chosen = MODES.find(item => item.id === mode);
-    // One mode at a time: the three choices leave once one is taken, « Retour » brings them back.
-    $('studio-modes').hidden = Boolean(chosen);
-    $('studio-back').hidden = !chosen;
-    $('studio-back').disabled = Boolean(working) || enriching;
-    $('studio-title').textContent = chosen ? chosen.label : 'Studio';
-    $('studio-summary').textContent = chosen ? 'Studio' : 'Créez directement, avec vos propres prompts.';
-    $('studio-view').classList.toggle('is-open', Boolean(chosen));
+    kinds();
     const body = $('studio-body');
-    body.dataset.mode = mode ?? '';
+    if (!body) return;
+    body.dataset.mode = mode;
     // The stage leaves with the form it is in, and nothing follows its size any longer: still
     // watched, it was reported once more as it went, with no mode left to read a format from.
     watching?.disconnect();
     watching = null;
-    // Nothing under the banners: they keep the whole height, also while the tools load.
-    if (!mode) return body.replaceChildren();
     if (!info) return body.replaceChildren(node('p', 'asset-empty', 'Chargement…'));
-    body.replaceChildren(form(), results());
-    progress();
-  }
-  /** Each banner shows the last creation of its mode in its outline, and how many there are. */
-  function showcase() {
-    for (const [id, { count, latest, small, record }] of Object.entries(showcased(runs))) {
-      const banner = banners[id];
-      banner.count.textContent = count;
-      banner.count.hidden = !count;
-      banner.shape.replaceChildren();
-      banner.shape.classList.toggle('is-filled', Boolean(latest));
-      if (!latest) continue;
-      // The thumbnail when there is one, for a clip as for a picture; else the original, of
-      // which a thumbnail is made for the next time.
-      const media = node(id === 'video' && !small ? 'video' : 'img');
-      if (small) Object.assign(media, { alt: '', decoding: 'async', src: small });
-      else if (id === 'video') {
-        // Its first picture only: nothing plays on the banner.
-        Object.assign(media, { muted: true, preload: 'metadata', playsInline: true, src: latest + '#t=0.1' });
-        media.onloadeddata = () => void thumbnailOf(api, record, 0, media);
-      } else {
-        Object.assign(media, { alt: '', loading: 'lazy', decoding: 'async', src: latest });
-        media.onload = () => void thumbnailOf(api, record, 0, media);
-      }
-      // A file that cannot be shown leaves the empty outline.
-      media.onerror = () => {
-        banner.shape.replaceChildren();
-        banner.shape.classList.toggle('is-filled', false);
-      };
-      banner.shape.append(media);
-    }
+    body.replaceChildren(form());
+    if (working) progress();
   }
   async function refresh() {
     if (!info) return;
-    runs = (await (await api(`gallery/${info.conversationId}`)).json()).runs;
-    showcase();
-    onRuns(info.conversationId);
+    const id = place();
+    seenConversation = conversation();
+    runs = id ? (await (await api(`gallery/${id}`)).json()).runs : [];
+    if (info.legacyId && !legacyRuns.loaded) {
+      try {
+        legacyRuns = (await (await api(`gallery/${info.legacyId}`)).json()).runs ?? [];
+      } catch {
+        legacyRuns = [];
+      }
+      legacyRuns.loaded = true;
+    } else if (legacy) {
+      legacyRuns = Object.assign([...runs], { loaded: true });
+    }
+    onRuns(id, legacy);
   }
+  async function load() {
+    info = await (await api('studio')).json();
+  }
+  /** The Studio comes on screen: its tools are read once, the creations of the conversation each time. */
   async function open() {
-    // Entering the Studio: nothing from an earlier visit stays in the frames.
-    for (const key of Object.keys(kept)) delete kept[key];
+    // Another conversation: what was on the screen belonged to the one before.
+    if (seenConversation !== undefined && seenConversation !== conversation()) forget();
     render();
     try {
-      info = await (await api('studio')).json();
+      if (!info) await load();
       await refresh();
     } catch (error) {
       notice('Studio indisponible : ' + error.message);
     }
     render();
   }
+  function forget() {
+    for (const key of Object.keys(kept)) delete kept[key];
+    extending = null;
+    failure = '';
+    legacy = false;
+  }
+  /** Another conversation is open: the Studio shows its creations. */
+  function conversationChanged() {
+    forget();
+    onConversation();
+    if (info) void refresh().then(render, () => render());
+  }
+  /** « Ouvrir » on a card of the chat: the creation on the screen of its mode. */
+  function show(record) {
+    legacy = false;
+    mode = mediaOf(record);
+    kept[mode] = record;
+    render();
+  }
 
-  // Ctrl + Entrée (⌘ on a Mac) generates from anywhere in an open mode, not only from the prompt.
+  // Ctrl + Entrée (⌘ on a Mac) generates from anywhere in the Studio, not only from the prompt.
   const shortcut = event => {
-    if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || !mode || working || enriching) return;
+    if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || working || enriching) return;
+    // The message box of the chat sends with Entrée: the shortcut is the Studio's.
+    if (event.target?.id === 'prompt') return;
     event.preventDefault();
     void generate();
   };
-  $('studio-view').onkeydown = shortcut;
+  const view = $('studio-view');
+  if (view) {
+    view.onkeydown = shortcut;
+    // A touch of the user while the pointer works: it stops, and leaves what it set.
+    const touched = event => {
+      if (event.isTrusted !== false && ai) takeOver();
+      else if (event.type === 'input' && !proposal) release();
+    };
+    view.addEventListener?.('input', touched, true);
+    view.addEventListener?.('pointerdown', event => event.isTrusted !== false && ai && takeOver(), true);
+    // Pointer and rings follow their setting when the page scrolls under them.
+    view.addEventListener?.('scroll', () => ai?.active && pointer?.follow(targetOf(ai.active)), { passive: true });
+  }
   // With the focus on no field (after a click beside them) the key goes to the page itself: it
   // is taken there too, while the Studio is the view on screen and no window is open over it.
   document.addEventListener?.('keydown', event => {
-    if (event.target !== document.body || $('studio-view').offsetParent == null) return;
+    if (event.target !== document.body || $('studio-view')?.offsetParent == null) return;
     if (!document.querySelector('dialog[open]')) shortcut(event);
   });
-  // The three choices: wide banners, each with the outline of what it makes.
-  const banners = {};
-  for (const item of MODES) {
-    const banner = button(
-      'studio-mode',
-      '',
-      () => {
-        mode = item.id;
-        failure = '';
-        render();
-        release();
-      },
-      item.icon,
-    );
-    banner.dataset.mode = item.id;
-    const words = node('span', 'studio-mode-words'),
-      count = node('span', 'studio-mode-count');
-    count.hidden = true;
-    words.append(node('strong', '', item.label), node('span', '', item.hint), count);
-    const shape = node('span', 'studio-mode-shape');
-    shape.setAttribute('aria-hidden', 'true');
-    banners[item.id] = { shape, count };
-    banner.append(words, shape, icon('chevron'));
-    $('studio-modes').append(banner);
-  }
-  $('studio-back').onclick = () => {
-    if (working || enriching) return;
-    mode = null;
-    extending = null;
-    failure = '';
-    render();
+  // A click outside « ··· » closes it.
+  document.addEventListener?.('pointerdown', event => {
+    if (!formatsOpen || event.target?.closest?.('.studio-formats-wrap')) return;
+    formatsOpen = false;
+    const menu = document.querySelector?.('#studio-view .studio-format-menu');
+    if (menu) menu.hidden = true;
+  });
+  return {
+    open,
+    render,
+    busy: () => Boolean(working) || enriching,
+    propose,
+    decline,
+    follow,
+    settled,
+    show,
+    takeOver,
+    conversationChanged,
+    /** Whether a proposal of Moodix AI waits for « Générer ». */
+    proposing: () => Boolean(proposal),
+    /** The verbs the Studio answers for Moodix AI. */
+    accepts: name => name in MODE_OF_VERB,
   };
-  return { open, render, busy: () => Boolean(working) || enriching };
 }

@@ -54,6 +54,12 @@ const staticFiles = new Map([
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/project-navigation.mjs', ['project-navigation.mjs', 'text/javascript; charset=utf-8']],
   ['/workspace.css', ['workspace.css', 'text/css; charset=utf-8']],
+  ['/moodix.css', ['moodix.css', 'text/css; charset=utf-8']],
+  ['/moodix-logo.png', ['moodix-logo.png', 'image/png']],
+  ['/fonts/Michroma-Regular.ttf', ['fonts/Michroma-Regular.ttf', 'font/ttf']],
+  ['/fonts/Manrope-Variable.ttf', ['fonts/Manrope-Variable.ttf', 'font/ttf']],
+  ['/fonts/JetBrainsMono-Variable.ttf', ['fonts/JetBrainsMono-Variable.ttf', 'font/ttf']],
+  ['/studio-pointer.mjs', ['studio-pointer.mjs', 'text/javascript; charset=utf-8']],
   ['/assets/metallic-surface.svg', ['assets/metallic-surface.svg', 'image/svg+xml']],
   ['/settings-search.mjs', ['settings-search.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-tabs.mjs', ['settings-tabs.mjs', 'text/javascript; charset=utf-8']],
@@ -801,7 +807,8 @@ export async function createApplication({
       if (req.method === 'GET' && path === '/api/studio') {
         // Asked together: the workflows are read from the disk, the LoRAs from ComfyUI.
         const [tools, styles] = await Promise.all([runtime.tools.studio(), generation.styles()]);
-        return send(200, { conversationId: STUDIO_ID, enabled: generation.config.enabled === true, tools, styles });
+        // `legacyId`: the Studio of before, whose creations had no conversation, still listed apart.
+        return send(200, { legacyId: STUDIO_ID, enabled: generation.config.enabled === true, tools, styles });
       }
       if (req.method === 'GET' && path === '/api/tools/job') {
         const job = runtime.status();
@@ -1285,10 +1292,12 @@ export async function createApplication({
         if (clearingHistory || savingGeneration || savingSettings || pickingFile)
           throw problem('Une opération est en cours.', 409);
         if (engine.busy) throw problem('Une réponse est en cours. Attends sa fin.', 409);
-        // In a conversation only the output buttons; the Studio starts every creation itself.
-        const allowed = body.conversationId === STUDIO_ID ? STUDIO_VERBS : ['upscale', 'interpolate'];
+        // In a conversation the output buttons, and every creation of its Studio (`studio`); the
+        // former Studio, which had no conversation, keeps its own identifier.
+        const studio = body.studio === true || body.conversationId === STUDIO_ID;
+        const allowed = studio ? STUDIO_VERBS : ['upscale', 'interpolate'];
         if (!allowed.includes(body.name)) throw problem('Action inconnue.');
-        if (body.styles !== undefined && body.conversationId !== STUDIO_ID) throw problem('Action invalide.');
+        if (body.styles !== undefined && !studio) throw problem('Action invalide.');
         if (!body.arguments || typeof body.arguments !== 'object' || Array.isArray(body.arguments))
           throw problem('Action invalide.');
         const call = {
@@ -1315,9 +1324,10 @@ export async function createApplication({
         if (released) await engine.stop();
         return send(200, { released, status: status() });
       }
+      // A creation leaves the Studio of its conversation (or the former Studio); its file stays in output.
       if (path === '/api/studio/delete') {
         if (runtime.active || clearingHistory || persistingGallery) throw problem('Une opération est en cours.', 409);
-        await gallery.remove(STUDIO_ID, body.id);
+        await gallery.remove(body.conversationId ?? STUDIO_ID, body.id);
         return send(200, { removed: body.id });
       }
       // What the user typed in the Studio, rewritten by the chat model as a full prompt.

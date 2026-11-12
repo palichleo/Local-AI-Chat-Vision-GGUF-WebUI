@@ -64,6 +64,10 @@ const state = {
   historyDirty: false,
   loadingHistory: false,
   clearingHistory: false,
+  // The Studio's controls, once set up: the message box asks it whether a proposal waits there.
+  studio: null,
+  // The end of the turn in progress: a message sent over a proposal of the Studio waits for it.
+  turnEnded: Promise.resolve(),
 };
 const labels = {
   stopped: 'Moteur arrêté',
@@ -243,6 +247,7 @@ async function clearHistory() {
       $('messages').replaceChildren();
       $('welcome').hidden = false;
       setConversationTitle('Nouvelle conversation');
+      state.studio?.conversationChanged?.();
     }
     renderHistory();
     notice('');
@@ -288,7 +293,7 @@ async function loadConversation(id) {
     !state.status.toolJob &&
     id === state.conversationId
   ) {
-    state.view = 'chat';
+    if (state.view !== 'studio') state.view = 'chat';
     closeNavigation();
     projectUI.render();
     $('prompt').focus();
@@ -316,7 +321,8 @@ async function loadConversation(id) {
     state.conversationInstructions = record.instructions || '';
     state.messages = messages;
     state.projectId = record.projectId || 'inbox';
-    state.view = 'chat';
+    // Chat and Studio are two views of the same conversation: the one on screen stays.
+    if (state.view !== 'studio') state.view = 'chat';
     closeNavigation();
     state.archiveSnapshot = { messages: record.messages, incomplete: record.incomplete };
     state.historyDirty = false;
@@ -334,6 +340,7 @@ async function loadConversation(id) {
     resizePrompt();
     state.stickToBottom = true;
     scrollToBottom();
+    state.studio?.conversationChanged?.();
     try {
       await workflowsUI.renderGallery(id);
     } catch (error) {
@@ -381,7 +388,7 @@ function renderTranscript(messages, incomplete = false) {
           const data = result?.role === 'tool' && result.tool_call_id === call.id ? JSON.parse(result.content) : null;
           if (data?.run_id) {
             if (!text) view.body.replaceChildren();
-            generationUI.restore(view.generations, state.conversationId, data.run_id);
+            generationUI.restore(view.generations, state.conversationId, data.run_id, { compact: data.studio === true });
           }
         } catch {}
       }
@@ -578,19 +585,21 @@ function updateControls() {
   $('toggle-engine').setAttribute('aria-label', engineLabel);
   $('toggle-engine').title = engineLabel;
   $('toggle-engine').replaceChildren(icon(paused || running ? 'stop' : 'play'));
+  const proposing = Boolean(state.studio?.proposing?.());
   $('send').disabled =
     state.projectWorking ||
     toolBusy ||
     !state.connected ||
     s.state === 'stopping' ||
-    s.busy ||
-    state.generating ||
+    (s.busy && !proposing) ||
+    (state.generating && !proposing) ||
     state.preparing ||
     state.operation ||
     state.loadingHistory ||
     (!$('prompt').value.trim() && !state.images.length && !state.videos.length);
-  $('send').hidden = state.generating || toolBusy;
-  $('cancel').hidden = !state.generating && (!toolBusy || s.toolJob.blocked);
+  $('send').hidden = (state.generating && !proposing) || toolBusy;
+  // A proposal waits in the Studio: its « Annuler » is there, and a new message declines it.
+  $('cancel').hidden = proposing || (!state.generating && (!toolBusy || s.toolJob.blocked));
   $('cancel').setAttribute(
     'aria-label',
     state.waitingForModel ? 'Annuler le message en attente' : 'Interrompre la réponse',
@@ -611,7 +620,9 @@ function updateControls() {
     if (button.classList.contains('history-item')) button.classList.toggle('active', button.dataset.current === 'true');
   }
   $('prompt').disabled = state.loadingHistory;
-  $('compose-state').textContent = toolBusy
+  $('compose-state').textContent = proposing
+    ? 'Proposition dans le Studio · un message la refuse'
+    : toolBusy
     ? s.toolJob.progress || 'Génération en cours…'
     : state.preparing
       ? 'Préparation des images…'
@@ -1366,7 +1377,7 @@ function assistantMessage(parent = null) {
     const header = node('div', 'message-header');
     const avatar = node('span', 'message-avatar');
     avatar.append(icon('spark'));
-    header.append(avatar, node('span', '', 'Atelier'));
+    header.append(avatar, node('span', '', 'Moodix AI'));
     article.append(header);
   }
   const reasoning = node('details', 'reasoning');
@@ -1551,7 +1562,13 @@ async function storeAttachments(images, conversationId) {
 
 async function sendMessage(event) {
   event.preventDefault();
-  if ($('send').disabled || state.generating) return;
+  if ($('send').disabled) return;
+  if (state.generating) {
+    // A proposal of Moodix AI waits in the Studio: this message answers it instead.
+    if (!state.studio?.decline?.()) return;
+    await state.turnEnded;
+    if (state.generating) return;
+  }
   if (!state.config.enginePath || !state.config.modelPath) {
     notice('Renseignez les chemins du moteur et du modèle dans Configuration avant le premier envoi.');
     return openSettings();
@@ -1600,6 +1617,10 @@ async function sendMessage(event) {
     // analysis), it may only chain another tool: any text is withheld.
     silent = false;
   state.generating = true;
+  let endTurn;
+  state.turnEnded = new Promise(resolve => {
+    endTurn = resolve;
+  });
   turnActions();
   $('welcome').hidden = true;
   $('prompt').value = '';
@@ -1631,6 +1652,7 @@ async function sendMessage(event) {
     view.thoughts.textContent = reasoning;
     if (output) renderText(view.body, output);
     else if (reasoning) view.body.replaceChildren(node('span', 'pending-dot', 'Réflexion en cours…'));
+    if (output) showLastReply(output);
     scrollToBottom();
     lastRender = performance.now();
     state.archiveSnapshot = snapshot();
@@ -1959,10 +1981,16 @@ async function sendMessage(event) {
       }
       iterations++;
       view.generation = true;
-      const generation = generationUI.mount(view.generations, request);
+      // A creation is set in the Studio: the pointer of Moodix AI sets it there and « Générer »
+      // is the user's answer. Its card stays in the conversation.
+      const viaStudio = Boolean(state.studio?.accepts?.(request.tool || request.call?.function?.name));
+      const generation = generationUI.mount(view.generations, request, { compact: viaStudio });
       // A video is commented by the model only when the user chose it in the settings: the
       // reload and the analysis take about a minute. Otherwise it ends the turn, like an image.
       const review = state.generation?.reviewVideos === true;
+      // Made from the Studio, the generator keeps its models for the next creation, and the chat
+      // model comes back with the next message: unless it has a video to look at.
+      const kept = viaStudio && !(review && request.mediaType === 'video');
       let result;
       try {
         result = await workflowsUI.requestTool(
@@ -1970,13 +1998,31 @@ async function sendMessage(event) {
           signal,
           (progress, fraction, preview) => {
             generation.progress(progress, fraction, preview);
+            if (viaStudio) state.studio.follow(progress, fraction, preview);
             scrollToBottom();
           },
           image => generation.image(image),
-          { review },
+          {
+            review,
+            ...(viaStudio
+              ? {
+                  approve: async (proposal, abort) => {
+                    updateControls();
+                    try {
+                      return await state.studio.propose(proposal, abort);
+                    } finally {
+                      updateControls();
+                    }
+                  },
+                  studio: kept,
+                }
+              : {}),
+          },
         );
         generation.finish(result);
+        if (viaStudio) void state.studio.settled(result);
       } catch (error) {
+        if (viaStudio) void state.studio.settled({ error: signal.aborted ? 'Génération arrêtée.' : error.message });
         generation.fail(error.message);
         history.push({
           role: 'tool',
@@ -1995,6 +2041,11 @@ async function sendMessage(event) {
       }
       history.push({ role: 'tool', tool_call_id: request.call.id, content: result.content });
       if (result.record || result.failed) state.status = await (await api('status')).json();
+      if (kept && !result.denied) {
+        // The creation is on the Studio's screen; the chat model stays unloaded until the next message.
+        complete = true;
+        break;
+      }
       const reviewImages =
         review && result.record?.mediaType === 'video' && state.status.state === 'ready' && state.status.vision
           ? result.images
@@ -2071,10 +2122,12 @@ async function sendMessage(event) {
     state.generating = false;
     state.waitingForModel = false;
     state.controller = null;
+    endTurn();
     turnActions();
     resizePrompt();
     await refreshStatus();
     contextMeter.schedule();
+    showLastReply();
     $('prompt').focus();
   }
 }
@@ -2093,6 +2146,93 @@ function alignConversation() {
 
 alignConversation();
 setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
+
+/** Markdown read as one line: what the Studio shows of the last answer. */
+function plainLine(text) {
+  return String(text ?? '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*_`~|]+/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+/** The last answer of Moodix AI, just above the message box of the Studio. */
+function showLastReply(streaming = '') {
+  let text = plainLine(streaming);
+  for (let index = state.messages.length - 1; !text && index >= 0; index--) {
+    const message = state.messages[index];
+    if (message.role === 'assistant' && !message.internal) text = plainLine(spokenText(message.content));
+  }
+  $('studio-last-reply').textContent = text || 'Moodix AI vous répondra ici.';
+  $('studio-last-reply').title = text;
+}
+/** What depends on the view: the switch between Chat and Studio, the context of the message box. */
+function syncViews() {
+  const studio = state.view === 'studio';
+  $('composer-context').hidden = !studio;
+  $('studio-context').hidden = !studio;
+  const label = studio ? 'Chat' : 'Studio';
+  $('mode-switch').querySelector('.mode-switch-label').textContent = label;
+  $('mode-switch').setAttribute('aria-label', studio ? 'Revenir au chat' : 'Passer au Studio');
+  $('mode-switch').title = studio ? 'Revenir au chat' : 'Passer au Studio';
+}
+
+/**
+ * A creation made in the Studio, followed like those of the chat and written in the
+ * conversation: a line for the model (the user made it by hand), its call and its result. The
+ * conversation shows it as a card.
+ */
+async function runInStudio(proposal, { signal, onProgress }) {
+  $('welcome').hidden = true;
+  const view = assistantMessage();
+  view.body.replaceChildren();
+  view.generation = true;
+  const generation = generationUI.mount(view.generations, proposal, { compact: true });
+  let result;
+  try {
+    result = await workflowsUI.requestTool(
+      proposal,
+      signal,
+      (progress, fraction, preview) => {
+        generation.progress(progress, fraction, preview);
+        onProgress(progress, fraction, preview);
+      },
+      image => generation.image(image),
+      { confirmed: true, review: false, studio: true },
+    );
+    generation.finish(result);
+  } catch (error) {
+    view.article.remove();
+    throw error;
+  }
+  // Nothing made, nothing to tell: the Studio says why.
+  if (!result.record) {
+    view.article.remove();
+    return result;
+  }
+  const kinds = { image: 'Image', video: 'Vidéo', audio: 'Son' },
+    prompt = String(proposal.plan?.prompt || proposal.args?.prompt || result.record.prompt || ''),
+    said = `Studio · ${kinds[result.record.mediaType || 'image'] ?? 'Image'} : ${prompt}`.slice(0, 4000);
+  // A conversation begun in the Studio still gets the global instructions with its first message.
+  if (!state.messages.length) state.conversationInstructions ??= state.globalInstructions || '';
+  state.messages = archiveMessages([
+    ...state.messages,
+    {
+      role: 'user',
+      internal: true,
+      content: said + '\n\n(Créée dans le Studio : l’utilisateur a réglé et lancé cette génération lui-même.)',
+    },
+    { role: 'assistant', content: '', tool_calls: [proposal.call] },
+    { role: 'tool', tool_call_id: proposal.call.id, content: result.content },
+  ]);
+  state.archiveSnapshot = { messages: [...state.messages], incomplete: false };
+  if ($('conversation-title').textContent === 'Nouvelle conversation') setConversationTitle(said.slice(0, 120));
+  turnActions();
+  await persistConversation();
+  contextMeter.schedule();
+  return result;
+}
+
 const tokenControls = setupTokenControls($);
 const computeControls = setupComputeControls($);
 const helpTips = setupHelpTips($('settings'));
@@ -2163,17 +2303,30 @@ const studioUI = setupStudio({
         ? 'Attends la fin de l’opération en cours.'
         : '',
   onChange: () => refreshStatus(),
-  onRuns: id => {
+  onRuns: (id, legacy) => {
     state.studioId = id;
+    state.studioLegacy = legacy;
     if (state.view === 'studio') void showCreations();
   },
+  conversation: () => state.conversationId,
+  ensureConversation: async () => (state.conversationId ||= crypto.randomUUID()),
+  run: runInStudio,
+  reveal: () => revealStudio(),
+  stopTurn: () => state.controller?.abort(),
+  onConversation: () => showLastReply(),
 });
+state.studio = studioUI;
 const generationUI = setupGenerationUI({
   api,
   node,
   actions: actionButtons,
   openOutput: (record, index, blob) => assetsUI.viewOutput(record, index, blob),
   onResize: scrollToBottom,
+  // « Ouvrir » on a card: the creation on the Studio's screen.
+  onOpen: record => {
+    revealStudio();
+    studioUI.show(record);
+  },
 });
 const workflowsUI = setupNativeWorkflows({
   api,
@@ -2377,12 +2530,15 @@ $('thinking').onclick = () => {
   contextMeter.schedule();
 };
 function closeNavigation() {
+  const open = document.body.dataset.navOpen === 'true';
   document.body.dataset.navOpen = 'false';
   $('navigation-open').setAttribute('aria-expanded', 'false');
+  // The focus left in the closed drawer goes back to the button that opens it.
+  if (open && $('sidebar').contains?.(document.activeElement)) $('navigation-open').focus?.();
 }
-/** The « Créations » tab of the files panel follows the view: the Studio's creations in the Studio, the open conversation's elsewhere. */
+/** The « Créations » tab of the files panel follows the conversation, in the chat as in its Studio; the former Studio while its Sortie shows it. */
 function showCreations() {
-  const id = state.view === 'studio' ? state.studioId : state.conversationId;
+  const id = state.view === 'studio' && state.studioLegacy ? state.studioId : state.conversationId;
   return workflowsUI.renderGallery(id ?? null).catch(error => notice(`Galerie indisponible : ${error.message}`));
 }
 function openFiles(open = true) {
@@ -2421,44 +2577,47 @@ function showHome() {
     }
   });
 }
-/** The Studio: the creation tools used by hand, beside the conversations. */
+/**
+ * The Studio of the open conversation: its creation tools, beside its chat. Switching between
+ * the two changes nothing of the conversation, so it is allowed even while an answer is written.
+ */
+function revealStudio() {
+  const coming = state.view !== 'studio';
+  state.view = 'studio';
+  closeNavigation();
+  projectUI.render();
+  syncViews();
+  updateControls();
+  showLastReply();
+  if (coming) {
+    void showCreations();
+    void studioUI.open().catch(error => notice(error.message));
+  }
+}
 function showStudio() {
-  const blocked = () =>
-    state.projectWorking ||
-    state.generating ||
-    state.preparing ||
-    state.loadingHistory ||
-    state.savingPreferences ||
-    state.operation ||
-    state.updating ||
-    state.closingApp;
-  if (blocked()) return;
-  requestSettingsClose(async () => {
-    if (blocked()) return;
-    state.loadingHistory = true;
+  if (state.updating || state.closingApp || state.loadingHistory) return;
+  requestSettingsClose(() => revealStudio());
+}
+/** The chat of the open conversation (or of a new one). */
+function showChat() {
+  if (state.updating || state.closingApp || state.loadingHistory) return;
+  requestSettingsClose(() => {
+    const coming = state.view !== 'chat';
+    state.view = 'chat';
+    closeNavigation();
+    projectUI.render();
+    syncViews();
     updateControls();
-    try {
-      if (!(await assetsUI.flush()) || !(await persistConversation())) return;
-      state.view = 'studio';
-      void showCreations();
-      closeNavigation();
-      projectUI.render();
-    } catch (error) {
-      return notice(error.message);
-    } finally {
-      state.loadingHistory = false;
-      updateControls();
-    }
-    // The tools load once the view is shown, outside the lock: the banners are already there,
-    // and a mode opened at once must free the GPU at once (the Studio asks `blocked` first).
-    try {
-      await studioUI.open();
-    } catch (error) {
-      notice(error.message);
-    }
+    if (coming) void showCreations();
+    state.stickToBottom = true;
+    scrollToBottom();
+    $('prompt').focus();
   });
 }
 $('studio-open').onclick = () => showStudio();
+$('chat-open').onclick = () => showChat();
+$('studio-to-chat').onclick = () => showChat();
+$('mode-switch').onclick = () => (state.view === 'studio' ? showChat() : showStudio());
 async function newConversation(projectId = state.projectId || 'inbox') {
   if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)
     return;
@@ -2478,7 +2637,7 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     )
       return;
     state.projectId = typeof projectId === 'string' ? projectId : 'inbox';
-    state.view = 'chat';
+    if (state.view !== 'studio') state.view = 'chat';
     closeNavigation();
     state.messages = [];
     state.images = [];
@@ -2496,6 +2655,8 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     renderAttachments();
     notice('');
     resizePrompt();
+    state.studio?.conversationChanged?.();
+    showLastReply();
   } finally {
     state.loadingHistory = false;
     updateControls();
@@ -2511,7 +2672,14 @@ $('navigation-open').onclick = () => {
   const open = document.body.dataset.navOpen !== 'true';
   document.body.dataset.navOpen = String(open);
   $('navigation-open').setAttribute('aria-expanded', String(open));
+  if (open) $('navigation-close').focus();
 };
+$('navigation-close').onclick = () => closeNavigation();
+$('navigation-scrim').onclick = () => closeNavigation();
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && document.body.dataset.navOpen === 'true' && !document.querySelector('dialog[open]'))
+    closeNavigation();
+});
 document.querySelectorAll('[data-prompt]').forEach(button => {
   button.onclick = () => {
     $('prompt').value = button.dataset.prompt;
@@ -2600,6 +2768,8 @@ try {
   await assetsUI.refresh().catch(error => notice('Bibliothèque indisponible : ' + error.message));
   await workflowsUI.refresh();
   await restoreUpdate();
+  syncViews();
+  showLastReply();
   if (initial.warning) notice(initial.warning);
   contextMeter.schedule();
   updateControls();

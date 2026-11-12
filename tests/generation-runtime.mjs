@@ -752,7 +752,7 @@ test('an action the user started with a button runs without a second confirmatio
     });
   }));
 
-test('in the Studio the « Créations » tab lists the Studio creations, with their details only', async () =>
+test('in the Studio the « Créations » tab lists the conversation, or the former Studio with its details only', async () =>
   fixture(async ({ ui, state, nodes, calls, setIntercept }) => {
     const run = (id, conversationId) => ({
       id,
@@ -772,17 +772,19 @@ test('in the Studio the « Créations » tab lists the Studio creations, with th
     );
     const list = nodes.get('gallery-list'),
       texts = () => list.children.map(child => child.textContent);
-    // A conversation is open, then the Studio is the view on screen: its id is not known yet.
+    // The Studio is a view of the open conversation: the tab shows its creations there too.
     state.conversationId = 'conversation';
     state.view = 'studio';
+    await ui.renderGallery('conversation');
+    assert.equal(list.children.length, 1);
+    // The Sortie shows the former Studio, which had no conversation: the tab follows, its id not known yet.
+    state.studioLegacy = true;
     await ui.renderGallery(null);
     assert.deepEqual(texts(), ['Aucune création dans le Studio pour l’instant.']);
-    // The conversation left behind is not what the tab shows there.
+    // The conversation is not what the tab shows then.
+    const asked = calls.filter(call => call.route === 'gallery/conversation').length;
     await ui.renderGallery('conversation');
-    assert.equal(
-      calls.some(call => call.route === 'gallery/conversation'),
-      false,
-    );
+    assert.equal(calls.filter(call => call.route === 'gallery/conversation').length, asked);
     state.studioId = 'studio';
     await ui.renderGallery('studio');
     assert.equal(list.children.length, 2);
@@ -790,6 +792,7 @@ test('in the Studio the « Créations » tab lists the Studio creations, with th
     for (const card of list.children) assert.equal(card.children.at(-1).textContent, 'Détails');
     // Back in the conversation, its own creations.
     state.view = 'chat';
+    state.studioLegacy = false;
     await ui.renderGallery('studio');
     assert.equal(list.children.length, 2, 'a late answer of the Studio changes nothing');
     await ui.renderGallery('conversation');
