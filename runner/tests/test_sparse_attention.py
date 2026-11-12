@@ -103,7 +103,7 @@ class GatesTest(unittest.TestCase):
         }
         dense = minimax_h3.names(header)
         self.assertNotIn('transformer_blocks.0.attn.to_gate_compress.weight', dense)
-        self.assertIn('transformer_blocks.0.attn.to_q.weight', dense)
+        self.assertIn('transformer_blocks.0.attn.to_qkv.weight', dense)
         sparse = minimax_h3.names(header, gate=True)
         self.assertEqual(
             sparse['transformer_blocks.0.attn.to_gate_compress.weight'],
@@ -156,6 +156,30 @@ class ReferenceTest(unittest.TestCase):
         self.check(gate=True, keep=0.1)
 
 
+class BlockTest(unittest.TestCase):
+    def test_modulated_by_runs_as_diffusers_does_row_by_row(self):
+        from diffusers.models.transformers.transformer_minimax_h3 import MiniMaxH3TransformerBlock
+
+        torch.manual_seed(4)
+        block = MiniMaxH3TransformerBlock(64, 2, 32, 96, 16, 1e-6, 1e-6).to(torch.bfloat16)
+        for parameter in block.parameters():
+            parameter.data.normal_(0, 0.2)
+        rows = 40
+        hidden = torch.randn(1, rows, 64, dtype=torch.bfloat16)
+        temb = torch.randn(2, 16)
+        # Two timesteps x three modalities: text, sound, video rows, then conditions.
+        indices = torch.tensor([1] * 7 + [2] * 5 + [0] * 20 + [3] * 8)
+        angles = torch.randn(rows, 12)
+        rotary = (torch.cat([angles, angles], -1).cos(), torch.cat([angles, angles], -1).sin())
+        expected = block(hidden.clone(), temb, indices, rotary)
+        block._reference_forward = block.forward
+        block.forward = minimax_h3._block_forward.__get__(block)
+        found = block(hidden.clone(), temb, indices.clone(), rotary)
+        self.assertTrue(torch.equal(found, expected))
+        self.assertEqual(minimax_h3.runs(torch.tensor([5, 5, 6, 6, 6, 5])), [(0, 2, 5), (2, 5, 6), (5, 6, 5)])
+        self.assertIsNone(minimax_h3.runs(torch.arange(100)))
+
+
 class RotationTest(unittest.TestCase):
     def test_turned_in_place_as_diffusers_turns_it(self):
         from diffusers.models.transformers.transformer_minimax_h3 import _apply_rotary_emb
@@ -166,6 +190,52 @@ class RotationTest(unittest.TestCase):
         cos, sin = torch.cat([angles, angles], -1).cos(), torch.cat([angles, angles], -1).sin()
         expected = _apply_rotary_emb(value, cos, sin)
         self.assertTrue(torch.equal(minimax_h3.rotate_(value.clone(), cos, sin), expected))
+
+
+@unittest.skipUnless(minimax_h3.int8_attention_ready(), 'no INT8 attention kernel on this machine')
+class FusedAttentionTest(unittest.TestCase):
+    def test_one_projection_and_the_fused_rotation_give_diffusers_attention(self):
+        with torch.inference_mode():
+            self.check()
+
+    def check(self):
+        from diffusers.models.transformers.transformer_minimax_h3 import MiniMaxH3Attention
+
+        torch.manual_seed(6)
+        attn = MiniMaxH3Attention(256, 4, 128, 1e-5).to('cuda', torch.bfloat16)
+        for parameter in attn.parameters():
+            parameter.data.normal_(0, 0.05)
+        attn.norm_q.weight.data.uniform_(0.5, 1.5)
+        attn.norm_k.weight.data.uniform_(0.5, 1.5)
+        rows = 700
+        hidden = torch.randn(1, rows, 256, device='cuda', dtype=torch.bfloat16)
+        angles = torch.randn(rows, 48, device='cuda')
+        rotary = (torch.cat([angles, angles], -1).cos(), torch.cat([angles, angles], -1).sin())
+        expected = attn(hidden, rotary).float()
+        attn.to_qkv = torch.nn.Linear(256, 3 * 512, bias=False).to('cuda', torch.bfloat16)
+        attn.to_qkv.weight.data = torch.cat([attn.to_q.weight, attn.to_k.weight, attn.to_v.weight]).data
+        found = minimax_h3.Int8Attention()(attn, hidden, rotary).float()
+        cosine = torch.nn.functional.cosine_similarity(found.flatten(), expected.flatten(), dim=0)
+        self.assertGreater(float(cosine), 0.995)
+        # The rotation alone: comfy-kitchen's kernel against PyTorch's norm and rotate_.
+        query = torch.randn(1, rows, 4, 128, device='cuda', dtype=torch.bfloat16)
+        key = torch.randn(1, rows, 4, 128, device='cuda', dtype=torch.bfloat16)
+        reference = [
+            minimax_h3.rotate_(norm(value), *rotary) for norm, value in ((attn.norm_q, query), (attn.norm_k, key))
+        ]
+        import comfy_kitchen
+
+        comfy_kitchen.rms_rope_split_half_(
+            query,
+            key,
+            minimax_h3.rotation_table(*rotary),
+            attn.norm_q.weight.detach(),
+            attn.norm_k.weight.detach(),
+            1e-5,
+            rot_dim=96,
+        )
+        torch.testing.assert_close(query, reference[0], atol=0.05, rtol=0.02)
+        torch.testing.assert_close(key, reference[1], atol=0.05, rtol=0.02)
 
 
 @unittest.skipUnless(sparse_attention.ready(), 'no sparse attention kernel on this machine')

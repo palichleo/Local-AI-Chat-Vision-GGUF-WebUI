@@ -24,6 +24,8 @@ AUDIO_LATENTS_PER_SECOND = 40
 RAM_RESERVE_GIB = 4
 # Locked a little beyond what is copied, so the next video finds its weights there (see streamed).
 LOCK_MARGIN_GIB = 0.5
+# Weights copied to the GPU in advance, while it computes the layers before them (WeightPool).
+AHEAD_GIB = 0.5
 
 
 def check(job, family):
@@ -360,8 +362,8 @@ def generate(job, config, progress):
         # a smaller share costs a second per step at most.
         # (Sparse attention needs less at its peak: 5 widths instead of 6, measured at 1344 x 768.)
         room = torch.cuda.mem_get_info()[0] / 1024**3 - 5 - tokens * 7168 * 2 * 6 / 1024**3
-        budget = min(config.get('cacheGiB', 6), max(0, room))
-        pool = WeightPool({'model': store}, budget)
+        budget = min(config.get('cacheGiB', 6), max(0, room - AHEAD_GIB))
+        pool = WeightPool({'model': store}, budget, ahead_gib=AHEAD_GIB)
         if ahead:
             ahead.lead = pool.used
         try:

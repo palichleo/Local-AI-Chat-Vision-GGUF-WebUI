@@ -35,9 +35,14 @@ class WeightPool:
     The other weights are copied to the GPU each time a layer runs. The last ones copied stay
     for a moment (`RECENT` bytes): a layer that runs its rows in chunks, as the wide
     feed-forwards do, then copies its weights once per step instead of once per chunk.
+
+    With `ahead_gib`, those copies are made in advance: the pool notes, the first time through,
+    the order in which the model asks for its streamed layers, and from then on copies the next
+    ones on a stream of their own while the GPU computes, up to that many GiB ahead. Copied from
+    page-locked RAM, they then cost nothing; without it the GPU waited for each.
     """
 
-    def __init__(self, stores, limit_gib=0, adapters=()):
+    def __init__(self, stores, limit_gib=0, adapters=(), ahead_gib=0):
         import torch, comfy_kitchen
 
         self.torch = torch
@@ -60,6 +65,19 @@ class WeightPool:
         # What streaming costs: `first` is the first copy of each tensor, whose pages come from
         # the disk or the file cache (timed); `again` is every later copy, from RAM.
         self.stats = dict(first_gib=0.0, first_seconds=0.0, again_gib=0.0)
+        # Copies in advance (see the class note): what is on its way, and the order of the
+        # streamed layers as the model asks for them (`sequence`, `place`), known once a layer
+        # comes back (`known`).
+        self.ahead_limit = int(ahead_gib * GiB)
+        self.ahead = {}
+        self.ahead_bytes = 0
+        self.sequence = []
+        self.place = {}
+        self.known = False
+        self.last = None
+        self.stream = None
+        if self.ahead_limit:
+            self.stats['ahead_gib'] = 0.0
 
     def used(self):
         """Bytes of weights read so far from the files, for a read-ahead to keep its distance."""
@@ -122,17 +140,30 @@ class WeightPool:
             return self.gpu[location]
         if location in self.recent:
             return self.recent[location][0]
-        started = time.perf_counter()
-        first = location not in self.host
-        if first:
-            self.host[location] = self.parts(location)[0]
-        result = {key: value.to('cuda', non_blocking=True) for key, value in self.host[location].items()}
-        size = sum(value.numel() * value.element_size() for value in result.values())
-        if first:
-            self.stats['first_gib'] += size / 1024**3
-            self.stats['first_seconds'] += time.perf_counter() - started
+        if location in self.ahead:
+            # Copied in advance: the GPU waits for that copy only, if it is not done yet.
+            result, done, size = self.ahead.pop(location)
+            self.ahead_bytes -= size
+            current = self.torch.cuda.current_stream()
+            current.wait_event(done)
+            for value in result.values():
+                value.record_stream(current)
+            self.stats['again_gib'] += size / GiB
+            self.stats['ahead_gib'] += size / GiB
         else:
-            self.stats['again_gib'] += size / 1024**3
+            started = time.perf_counter()
+            first = location not in self.host
+            if first:
+                self.host[location] = self.parts(location)[0]
+            result = {key: value.to('cuda', non_blocking=True) for key, value in self.host[location].items()}
+            size = sum(value.numel() * value.element_size() for value in result.values())
+            if first:
+                self.stats['first_gib'] += size / 1024**3
+                self.stats['first_seconds'] += time.perf_counter() - started
+            else:
+                self.stats['again_gib'] += size / 1024**3
+        if self.ahead_limit:
+            self._note(location)
         if self.bytes + size <= self.limit:
             self.gpu[location] = result
             self.bytes += size
@@ -143,7 +174,65 @@ class WeightPool:
             self.recent_bytes += size
             while self.recent_bytes > RECENT:
                 self.recent_bytes -= self.recent.pop(next(iter(self.recent)))[1]
+        if self.ahead_limit and self.known:
+            self._send_ahead(location)
         return result
+
+    def _note(self, location):
+        """Learn the order of the streamed layers: the first pass writes it down; a layer asked
+        for again closes it; a layer seen for the first time later (one some steps only use)
+        takes its place after the one asked for before it."""
+        if location not in self.place:
+            if self.known and self.last in self.place:
+                self.sequence.insert(self.place[self.last] + 1, location)
+                self.place = {item: index for index, item in enumerate(self.sequence)}
+            else:
+                self.place[location] = len(self.sequence)
+                self.sequence.append(location)
+        elif not self.known:
+            self.known = True
+        self.last = location
+
+    def _send_ahead(self, location):
+        """Copy the streamed layers that follow `location`, on the pool's own stream, until
+        `ahead_limit` bytes are on their way."""
+        torch = self.torch
+        if self.stream is None:
+            self.stream = torch.cuda.Stream()
+        count = len(self.sequence)
+        index = self.place.get(location)
+        if index is None:
+            return
+        upcoming, budget = [], 0
+        for offset in range(1, count):
+            following = self.sequence[(index + offset) % count]
+            if following == location:
+                break
+            if following in self.gpu or following in self.recent:
+                continue
+            host = self.host.get(following)
+            if host is None:
+                continue
+            size = sum(value.numel() * value.element_size() for value in host.values())
+            if upcoming and budget + size > self.ahead_limit:
+                break
+            upcoming.append((following, host, size))
+            budget += size
+        # What was sent ahead and is no longer next (a layer some steps skip) goes away.
+        wanted = {following for following, _, _ in upcoming}
+        for stale in [item for item in self.ahead if item not in wanted]:
+            self.ahead_bytes -= self.ahead.pop(stale)[2]
+        for following, host, size in upcoming:
+            if following in self.ahead:
+                continue
+            # Allocated and copied on the pool's stream: its memory is never one the GPU still
+            # reads for a layer before (see bundle, record_stream).
+            with torch.cuda.stream(self.stream):
+                result = {key: value.to('cuda', non_blocking=True) for key, value in host.items()}
+                done = torch.cuda.Event()
+                done.record(self.stream)
+            self.ahead[following] = (result, done, size)
+            self.ahead_bytes += size
 
     def adapter(self, location, adapters, dtype=None):
         """The LoRAs of one layer as a single pair (down, up), on the GPU for good.
@@ -191,7 +280,8 @@ class WeightPool:
         self.torch.cuda.synchronize()
         self.gpu.clear()
         self.recent.clear()
-        self.bytes, self.recent_bytes = self.merged_bytes, 0
+        self.ahead.clear()
+        self.bytes, self.recent_bytes, self.ahead_bytes = self.merged_bytes, 0, 0
         self.torch.cuda.empty_cache()
         self.limit = int(limit_gib * 1024**3)
         if self.limit:
@@ -201,9 +291,10 @@ class WeightPool:
         self.torch.cuda.synchronize()
         self.gpu.clear()
         self.recent.clear()
+        self.ahead.clear()
         self.host.clear()
         self.merged.clear()
-        self.bytes = self.recent_bytes = self.merged_bytes = 0
+        self.bytes = self.recent_bytes = self.merged_bytes = self.ahead_bytes = 0
 
 
 def load_streamed(model, names, pool):
@@ -242,28 +333,34 @@ def load_streamed(model, names, pool):
             if self.adapters:
                 pool.adapted[self.location] = self.adapters
 
-        def forward(self, value):
+        def forward(self, value, rows=None):
+            """`rows` (a slice) computes only those outputs: a part of a fused projection, as
+            the queries and keys of a fused q, k, v."""
             bundle = pool.bundle(self.location)
-            if bundle['weight'].dtype == torch.int8:
+            weight, scale, bias = bundle['weight'], bundle.get('scale'), bundle.get('bias')
+            if rows is not None:
+                weight = weight[rows]
+                scale = scale[rows] if scale is not None and scale.ndim else scale
+                bias = None if bias is None else bias[rows]
+            if weight.dtype == torch.int8:
                 result = torch.ops.comfy_kitchen.int8_linear(
                     value,
-                    bundle['weight'],
-                    bundle['scale'],
-                    bundle.get('bias'),
+                    weight,
+                    scale,
+                    bias,
                     pool.kernels.DTYPE_TO_CODE[value.dtype],
                     bool(self.rotation),
                     self.rotation or 256,
                 )
             else:
-                bias = bundle.get('bias')
-                weight = bundle['weight'].to(value.dtype)
+                weight = weight.to(value.dtype)
                 # An 8-bit float weight is stored divided by its scale (« fp8 scaled » files).
-                if 'scale' in bundle:
-                    weight = weight * bundle['scale'].to(value.dtype)
+                if scale is not None:
+                    weight = weight * scale.to(value.dtype)
                 result = F.linear(value, weight, None if bias is None else bias.to(value.dtype))
             if self.adapters:
                 down, up = pool.adapter(self.location, self.adapters, value.dtype)
-                result = result + F.linear(F.linear(value, down), up)
+                result = result + F.linear(F.linear(value, down), up if rows is None else up[rows])
             return result
 
     class Embedding(torch.nn.Module):

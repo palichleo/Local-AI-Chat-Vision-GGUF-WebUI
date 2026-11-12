@@ -54,6 +54,58 @@ class WeightPoolTest(unittest.TestCase):
         kept = pool.bundle(('model', 'a.weight', None))
         self.assertIs(pool.bundle(('model', 'a.weight', None)), kept)
 
+    def test_streamed_layers_are_copied_ahead_once_their_order_is_known(self):
+        from contextlib import contextmanager
+
+        from runner.models import pool as module
+
+        side = {'on': False, 'copies': 0}
+
+        @contextmanager
+        def stream(_stream):
+            side['on'] = True
+            yield
+            side['on'] = False
+
+        class Event:
+            def record(self, _stream):
+                pass
+
+        current = SimpleNamespace(wait_event=lambda _event: None)
+        cuda = SimpleNamespace(
+            synchronize=lambda: None, Stream=object, Event=Event, stream=stream, current_stream=lambda: current
+        )
+        sizes = {'a.weight': 60, 'b.weight': 30, 'c.weight': 50, 'd.weight': 10}
+        original = Tensor.to
+
+        def to(tensor, device, non_blocking=False):
+            side['copies'] += side['on']
+            return original(tensor, device, non_blocking)
+
+        with patch.dict(sys.modules, torch=SimpleNamespace(cuda=cuda), comfy_kitchen=SimpleNamespace()):
+            pool = module.WeightPool({'model': Store(sizes)}, 0, ahead_gib=100 / 1024**3)
+        layers = [('model', key, None) for key in sizes]
+        Tensor.copies = 0
+        with patch.object(module, 'RECENT', 0), patch.object(Tensor, 'to', to), patch.object(
+            Tensor, 'record_stream', lambda self, _stream: None, create=True
+        ):
+            # The first step only learns the order: every layer is copied when it runs.
+            for layer in layers:
+                pool.bundle(layer)
+            self.assertEqual((Tensor.copies, side['copies']), (4, 0))
+            # From the second, the next layers are on their way, up to 100 bytes ahead.
+            pool.bundle(layers[0])
+            self.assertEqual(set(pool.ahead), set(layers[1:]))
+            for layer in layers[1:]:
+                pool.bundle(layer)
+            self.assertEqual(round(pool.stats['ahead_gib'] * 1024**3), 90)
+            # Each layer is copied once a step: b, c and d ahead, then a and b for the next step.
+            self.assertEqual((Tensor.copies, side['copies']), (10, 5))
+            self.assertEqual(set(pool.ahead), set(layers[:2]))
+            self.assertEqual(pool.ahead_bytes, 90)
+        pool.clear()
+        self.assertEqual((pool.ahead, pool.ahead_bytes), ({}, 0))
+
     def test_a_layer_run_in_chunks_copies_its_weights_once(self):
         pool, module = self.pool({'fc1.weight': 200, 'fc2.weight': 100, 'next.weight': 150}, limit=0)
         with patch.object(module, 'RECENT', 320):

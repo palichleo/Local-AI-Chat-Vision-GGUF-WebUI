@@ -55,11 +55,8 @@ def names(header, gate=False):
         name = 'transformer_blocks.' + key[len('blocks.') :] if key.startswith('blocks.') else key
         for old, new in RENAMES:
             name = name.replace(old, new)
-        if '.attn.qkv_proj.' in name:
-            for index, part in enumerate('qkv'):
-                result[name.replace('.qkv_proj.', '.to_' + part + '.')] = ('model', key, index)
-        else:
-            result[name] = ('model', key, None)
+        # The file's fused [q; k; v] stays one projection (see architecture).
+        result[name.replace('.attn.qkv_proj.', '.attn.to_qkv.')] = ('model', key, None)
     return result
 
 
@@ -121,24 +118,73 @@ def _curve_norm_out(self, hidden_states, temb, timestep_indices):
     return hidden_states * (1.0 + scale.index_select(0, timestep_indices)) + shift.index_select(0, timestep_indices)
 
 
-def _gate_first_swiglu(self, hidden_states, chunk=8192):
-    # The checkpoint's fc1 holds [gate; value]. Rows are processed in chunks so the
-    # 28672-wide intermediate of a ~50k-row sequence never materializes at once.
-    flat = hidden_states.reshape(-1, hidden_states.shape[-1])
-    parts = []
-    for start in range(0, flat.shape[0], chunk):
-        gate, value = self.proj(flat[start : start + chunk]).chunk(2, dim=-1)
-        parts.append(F.silu(gate) * value)
-    return torch.cat(parts).reshape(*hidden_states.shape[:-1], -1)
+def runs(indices, limit=64):
+    """The rows of the packed sequence as runs sharing one modulation row: [(start, stop, row)],
+    computed once per forward (the 50 blocks share `indices`). None past `limit` runs."""
+    found = getattr(indices, '_runs', False)
+    if found is False:
+        flat = indices.reshape(-1)
+        cuts = (torch.nonzero(flat[1:] != flat[:-1]).flatten() + 1).tolist()
+        found = None
+        if len(cuts) < limit:
+            bounds = [0, *cuts, flat.numel()]
+            rows = flat[torch.tensor(bounds[:-1], device=flat.device)].tolist()
+            found = list(zip(bounds[:-1], bounds[1:], rows))
+        indices._runs = found
+    return found
+
+
+def _block_forward(self, hidden_states, temb, adaln_indices, rotary_emb, attention_mask=None):
+    """diffusers' MiniMaxH3TransformerBlock.forward, modulated run by run in place.
+
+    diffusers picks the six modulation vectors row by row (`index_select`): six tensors as
+    large as the sequence per block (0.4 GiB each at 1344 x 768), read and written again
+    by every product. The rows come in a handful of runs (text, sound, video, conditions),
+    each with one vector: the same products in the same precision, on the runs in place.
+    """
+    found = runs(adaln_indices)
+    if found is None:
+        return self._reference_forward(hidden_states, temb, adaln_indices, rotary_emb, attention_mask)
+    shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaln_proj(temb)
+
+    def modulate_(value, scale, shift):
+        for start, stop, row in found:
+            value[:, start:stop].mul_(1.0 + scale[row]).add_(shift[row])
+        return value
+
+    def gate_(value, gate):
+        for start, stop, row in found:
+            value[:, start:stop].mul_(gate[row])
+        return value
+
+    attn_output = self.attn(modulate_(self.norm1(hidden_states), scale_msa, shift_msa), rotary_emb, attention_mask)
+    hidden_states = hidden_states + gate_(attn_output, gate_msa)
+    del attn_output
+    ff_output = self.ff(modulate_(self.norm2(hidden_states), scale_mlp, shift_mlp))
+    return hidden_states.add_(gate_(ff_output, gate_mlp))
+
+
+def _gate_first_swiglu(self, rows):
+    # The checkpoint's fc1 holds [gate; value].
+    gate, value = self.proj(rows).chunk(2, dim=-1)
+    return F.silu(gate) * value
 
 
 def _chunked_feed_forward(self, hidden_states, chunk=8192):
+    # Rows go in chunks, so the 28672-wide intermediate of a ~50k-row sequence never exists at
+    # once; each chunk's result is written straight into its place (a concatenation copied the
+    # whole output again, twice for a single chunk: 0.1 s a step on a 5 s draft).
     flat = hidden_states.reshape(-1, hidden_states.shape[-1])
-    out = []
+    if flat.shape[0] <= chunk:
+        return self.net[2](_gate_first_swiglu(self.net[0], flat)).reshape(*hidden_states.shape[:-1], -1)
+    out = None
     for start in range(0, flat.shape[0], chunk):
-        piece = _gate_first_swiglu(self.net[0], flat[start : start + chunk])
-        out.append(self.net[2](piece))
-    return torch.cat(out).reshape(*hidden_states.shape[:-1], -1)
+        piece = self.net[2](_gate_first_swiglu(self.net[0], flat[start : start + chunk]))
+        if out is None:
+            out = piece.new_empty(flat.shape[0], piece.shape[-1])
+        out[start : start + piece.shape[0]] = piece
+        del piece
+    return out.reshape(*hidden_states.shape[:-1], -1)
 
 
 class Int8Attention:
@@ -151,25 +197,66 @@ class Int8Attention:
     def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None):
         import comfy_kitchen
 
-        heads = (attn.heads, -1)
-        query = attn.norm_q(attn.to_q(hidden_states).unflatten(-1, heads))
-        if rotary_emb is not None:
-            # Turned in place (same result as diffusers): four tensors of temporaries less, 2 GiB
-            # at 1344 x 768, where a video ran out of memory there.
-            rotate_(query, *rotary_emb)
-        key = attn.norm_k(attn.to_k(hidden_states).unflatten(-1, heads))
-        if rotary_emb is not None:
-            rotate_(key, *rotary_emb)
-        value = attn.to_v(hidden_states).unflatten(-1, heads)
+        query, key, value = project(attn, hidden_states, rotary_emb)
         # The kernel reads [batch, heads, sequence, head]; the model keeps heads third.
         result = comfy_kitchen.int8_attention(
             query.transpose(1, 2),
-            key.to(query.dtype).transpose(1, 2),
-            value.to(query.dtype).transpose(1, 2),
+            key.transpose(1, 2),
+            value.transpose(1, 2),
             attn_mask=attention_mask,
         )
-        result = result.transpose(1, 2).flatten(2, 3).type_as(query)
+        del query, key, value
+        result = result.transpose(1, 2).flatten(2, 3).type_as(hidden_states)
         return attn.to_out[1](attn.to_out[0](result))
+
+
+# Queries and keys normalised and turned by one comfy-kitchen kernel, in place in the fused
+# projection (False: PyTorch's norm, then rotate_).
+FUSED_ROPE = True
+
+
+def rotation_table(cos, sin):
+    """diffusers' rotary cos/sin, (rows, span), as comfy-kitchen's split-half rotation table
+    (1, rows, 1, span/2, 2, 2) in float32: [[cos, -sin], [sin, cos]] per pair of channels.
+    Built once per forward: the 50 blocks share `cos`."""
+    found = getattr(cos, '_table', None)
+    if found is None:
+        half = cos.shape[-1] // 2
+        first = torch.stack([cos[:, :half], -sin[:, :half]], dim=-1)
+        second = torch.stack([sin[:, half:], cos[:, half:]], dim=-1)
+        found = torch.stack([first, second], dim=-2).float()[None, :, None]
+        cos._table = found
+    return found
+
+
+def project(attn, hidden_states, rotary_emb, count=3):
+    """The first `count` of the queries, keys and values, (batch, rows, heads, 128): views of one
+    INT8 projection (the file's fused q, k, v: the rows are quantized once, not three times),
+    the queries and keys normalised and turned in place."""
+    import comfy_kitchen
+
+    width = attn.heads * attn.head_dim
+    projected = attn.to_qkv(hidden_states, rows=slice(0, count * width)) if count < 3 else attn.to_qkv(hidden_states)
+    parts = projected.unflatten(-1, (count, attn.heads, attn.head_dim)).unbind(2)
+    query, key = parts[0], parts[1]
+    if rotary_emb is not None and FUSED_ROPE:
+        comfy_kitchen.rms_rope_split_half_(
+            query,
+            key,
+            rotation_table(*rotary_emb),
+            # Detached: the kernel refuses tensors that keep a gradient, parameters included.
+            attn.norm_q.weight.detach(),
+            attn.norm_k.weight.detach(),
+            attn.norm_q.eps if attn.norm_q.eps is not None else 1e-6,
+            rot_dim=rotary_emb[0].shape[-1],
+        )
+    else:
+        query, key = attn.norm_q(query), attn.norm_k(key)
+        if rotary_emb is not None:
+            # Turned in place (same result as diffusers): four tensors of temporaries less.
+            rotate_(query, *rotary_emb)
+            rotate_(key, *rotary_emb)
+    return (query, key, *parts[2:])
 
 
 def has_gates(header):
@@ -261,20 +348,12 @@ class SparseAttention:
         if plan is None or attention_mask is not None or hidden_states.shape[1] != plan.rows:
             return self.dense(attn, hidden_states, rotary_emb, attention_mask)
         heads = (attn.heads, -1)
-
-        def tiled(projection, norm=None):
-            # Each tensor is laid out in blocks as soon as it is computed, and turned in place:
-            # a 1344 x 768 video has 38 000 rows, 0.5 GiB for each of these tensors.
-            value = projection(hidden_states).unflatten(-1, heads)
-            if norm is not None:
-                value = norm(value)
-                if rotary_emb is not None:
-                    rotate_(value, *rotary_emb)
-            return plan.tile(value.to(torch.bfloat16))
-
-        query = tiled(attn.to_q, attn.norm_q)
-        key = tiled(attn.to_k, attn.norm_k)
-        value = tiled(attn.to_v)
+        # Each tensor is laid out in blocks as soon as it is computed: queries and keys first,
+        # the values after (a 1344 x 768 video has 38 000 rows, 0.5 GiB for each of them).
+        query, key = project(attn, hidden_states, rotary_emb, count=2)
+        query, key = plan.tile(query), plan.tile(key)
+        width = attn.heads * attn.head_dim
+        value = plan.tile(attn.to_qkv(hidden_states, rows=slice(2 * width, 3 * width)).unflatten(-1, heads))
         gate = getattr(attn, 'to_gate_compress', None)
         answer = sparse_attention.coarse(query, key, value, plan) if gate is not None else None
         result = sparse_attention.attend(query, key, value, plan, self.sparse.keep)
@@ -310,22 +389,31 @@ def architecture(header, int8_attention=False, sparse=None):
         model = MiniMaxH3Transformer3DModel(time_embed_dim=width)
         model.time_proj = torch.nn.Identity()
         model.time_embedder = CurveEmbedding(points, width)
-    for module in model.modules():
+    for module in list(model.modules()):
         if isinstance(module, reference.MiniMaxH3AdaLayerNormModulation):
             module.forward = _curve_modulation.__get__(module)
         elif isinstance(module, reference.MiniMaxH3AdaLayerNormOut):
             module.forward = _curve_norm_out.__get__(module)
         elif isinstance(module, FeedForward):
             module.forward = _chunked_feed_forward.__get__(module)
-        elif int8_attention and isinstance(module, reference.MiniMaxH3Attention):
-            module.processor = Int8Attention()
+        elif isinstance(module, reference.MiniMaxH3TransformerBlock):
+            module._reference_forward = module.forward
+            module.forward = _block_forward.__get__(module)
+        elif isinstance(module, reference.MiniMaxH3Attention):
+            # The file's fused [q; k; v] stays one projection: one quantization of the rows.
+            with init_empty_weights():
+                module.to_qkv = torch.nn.Linear(module.to_q.in_features, 3 * module.inner_dim, bias=False)
+            del module.to_q, module.to_k, module.to_v
+            module.fused_projections = True
+            if int8_attention:
+                module.processor = Int8Attention()
     if sparse is not None:
         for block in model.transformer_blocks:
             attn = block.attn
             if has_gates(header):
                 with init_empty_weights():
                     attn.to_gate_compress = torch.nn.Linear(
-                        attn.to_q.in_features, attn.heads * attn.head_dim, bias=False
+                        attn.to_qkv.in_features, attn.heads * attn.head_dim, bias=False
                     )
             attn.processor = SparseAttention(sparse, attn.processor)
     return model, pdd_heads(header)
