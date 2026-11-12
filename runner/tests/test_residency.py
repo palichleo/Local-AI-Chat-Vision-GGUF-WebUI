@@ -72,6 +72,13 @@ class EvictionTest(unittest.TestCase):
         # 10 units in all; 2 available, 2 more once the idle arena is gone.
         psutil.virtual_memory = lambda: SimpleNamespace(total=10, available=2 + 2 * ('old' in released))
         try:
+            # A file that must not send another away (a text encoder beside its model) is not
+            # loaded when it does not fit as things are, and nothing leaves; with a smaller
+            # reserve of its own it fits without anyone leaving.
+            self.assertFalse(table._make_room(3, evict=False))
+            self.assertEqual(released, [])
+            self.assertTrue(table._make_room(1, reserve=1, evict=False))
+            self.assertEqual(released, [])
             # Even with the idle arena gone the file does not fit: it will be read from its mapping.
             self.assertFalse(table._make_room(3))
             self.assertEqual(released, ['old'])

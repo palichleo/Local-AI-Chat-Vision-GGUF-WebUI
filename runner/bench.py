@@ -82,6 +82,9 @@ def main(argv=None):
         residency.RESERVE = int(args.ram_reserve_gib * 1024**3)
     module_name, build = FAMILIES[args.family]
     module = importlib.import_module(module_name)
+    # A family that sets its own reserve (Krea 2) is given the one asked for here.
+    if args.ram_reserve_gib is not None and hasattr(module, 'RAM_RESERVE_GIB'):
+        module.RAM_RESERVE_GIB = args.ram_reserve_gib
     config = dict(cacheRoot=args.out, outputRoot=args.out, engine='int8', tuned=True)
     if args.gpu_gib is not None:
         config['cacheGiB'] = args.gpu_gib

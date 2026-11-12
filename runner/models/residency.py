@@ -89,8 +89,14 @@ class Residency:
         status = os.stat(path)
         return status.st_size, status.st_mtime_ns
 
-    def arena(self, path):
-        """The file's arena, loading it if RAM allows; None to fall back to the mapping."""
+    def arena(self, path, reserve=None, evict=True):
+        """The file's arena, loading it if RAM allows; None to fall back to the mapping.
+
+        `reserve` (bytes) is the RAM this file must leave free, RESERVE when not given: a family
+        whose files are small beside the machine's memory keeps them with less. `evict` False
+        loads the file only if it fits as things are, without sending another one away (a text
+        encoder must not push out the model that every step reads).
+        """
         import time
         import torch
 
@@ -106,7 +112,7 @@ class Residency:
                 self._discard(self.arenas.pop(path))
             header, base = _header(path)
             size = stamp[0] - base
-            if not self._make_room(size):
+            if not self._make_room(size, reserve, evict):
                 self.stats['skipped'] += 1
                 return None
             started = time.perf_counter()
@@ -137,22 +143,23 @@ class Residency:
                 return found
         return None
 
-    def _make_room(self, size):
+    def _make_room(self, size, reserve=None, evict=True):
         try:
             import psutil
         except ImportError:
             return False
-        if size + RESERVE > psutil.virtual_memory().total:
+        reserve = RESERVE if reserve is None else reserve
+        if size + reserve > psutil.virtual_memory().total:
             return False
         # Evict the least recently used arenas until this file fits above the reserve. Never one
         # a store of the running generation reads from: when memory is short (another program
         # holding its own models), this file is read from its mapping instead.
-        while psutil.virtual_memory().available - size < RESERVE:
+        while evict and psutil.virtual_memory().available - size < reserve:
             idle = next((path for path, arena in self.arenas.items() if not arena.users), None)
             if idle is None:
                 break
             self.arenas.pop(idle).release()
-        return psutil.virtual_memory().available - size >= RESERVE
+        return psutil.virtual_memory().available - size >= reserve
 
     @staticmethod
     def _discard(arena):
@@ -237,13 +244,14 @@ class _Slice:
 class Store:
     """`safe_open`-compatible reader over a resident arena (or the file mapping as fallback)."""
 
-    def __init__(self, path, resident=True):
-        """`resident`: True loads the file into RAM if it fits, 'if-present' only reuses an arena."""
+    def __init__(self, path, resident=True, reserve=None, evict=True):
+        """`resident`: True loads the file into RAM if it fits, 'if-present' only reuses an arena.
+        `reserve` and `evict`: see Residency.arena."""
         self.path = path
         if resident == 'if-present':
             self.arena = RESIDENCY.present(path)
         else:
-            self.arena = RESIDENCY.arena(path) if resident else None
+            self.arena = RESIDENCY.arena(path, reserve=reserve, evict=evict) if resident else None
         self.mapping = None
         if self.arena is not None:
             RESIDENCY.hold(self.arena)
@@ -291,8 +299,8 @@ class Store:
         return bool(self.arena and self.arena.pinned)
 
 
-def open_store(path, resident=True):
-    return Store(path, resident=resident)
+def open_store(path, resident=True, reserve=None, evict=True):
+    return Store(path, resident=resident, reserve=reserve, evict=evict)
 
 
 WINDOW = 4 * GiB

@@ -16,7 +16,7 @@ def _identity(path):
     return (str(path), stat.st_size, stat.st_mtime_ns)
 
 
-def encode_prompt(plan, files, tokenizer_path, tensor, device, dtype, progress):
+def encode_prompt(plan, files, tokenizer_path, tensor, device, dtype, progress, ram_reserve=None):
     # A prompt the model rewrites first is drawn each time: only a prompt taken as written is kept.
     kept = None
     if not plan['refine_enabled']:
@@ -51,9 +51,10 @@ def encode_prompt(plan, files, tokenizer_path, tensor, device, dtype, progress):
         config._attn_implementation = 'sdpa'
         with init_empty_weights():
             text_model = Qwen3ForCausalLM(config)
-        # The file stays in RAM between images (page-locked when the system allows it): its
-        # weights are back on the GPU in a second instead of being read again.
-        with open_store(str(files['encoder'])) as store:
+        # The file stays in RAM between images when it fits beside the model (page-locked when
+        # the system allows it), never in its place: the model is read at every step, the
+        # encoder once per prompt.
+        with open_store(str(files['encoder']), reserve=ram_reserve, evict=False) as store:
             for key, parameter in list(text_model.named_parameters()):
                 if key == 'lm_head.weight':
                     continue

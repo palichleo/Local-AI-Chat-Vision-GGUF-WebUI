@@ -94,7 +94,7 @@ assert 'sageattention' not in sys.modules
         # No second copy of the model on disk, and nothing of ComfyUI in the process.
         for gone in ('PreparedWeights', 'cache_root', 'save_file'):
             self.assertNotIn(gone, source)
-        self.assertIn('open_store(str(files[\'transformer\']))', source)
+        self.assertIn('open_store(str(files[\'transformer\']), reserve=ram_reserve)', source)
         self.assertIn('Unexpected Comfy runtime import', source)
         # What the card has free decides the share of the model that stays on it.
         self.assertIn('budget = room(reserve)', source)

@@ -25,6 +25,11 @@ from runner.pipelines.sampling import simple_sigmas
 # PyTorch, and the card was then full to the last megabyte. Half a gibibyte more is left free.
 RESERVE_GIB = 2.4
 RESERVE_PER_MEGAPIXEL_GIB = 0.5
+# RAM the files kept between two pictures leave free, in GiB. The model (12.6 GiB in INT8) and
+# its text encoder (4.9 GiB) are small beside the general reserve, which is sized for a video
+# model and the chat model together: with it, a 32 GiB machine never kept this model in RAM,
+# and each step paid for copies from unlocked memory (15.7 s a picture instead of 10.7 s).
+RAM_RESERVE_GIB = 4
 
 EXPANSION_LIMITS = (
     ('maxTokens', 1, 4096, True),
@@ -162,7 +167,8 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
     from runner.models.pool import WeightPool, load_streamed, room
     from runner.models.residency import open_store
 
-    conditioning = encode_prompt(plan, files, args.tokenizer, tensor, device, dtype, progress)
+    ram_reserve = int(RAM_RESERVE_GIB * 1024**3)
+    conditioning = encode_prompt(plan, files, args.tokenizer, tensor, device, dtype, progress, ram_reserve)
     with torch.inference_mode():
         progress('loading VAE')
         with init_empty_weights():
@@ -214,7 +220,7 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
             rename.update({dest: key for dest in converted})
         progress('transformer header mapped')
         # The model file stays in RAM between images; LoRAs are small and read as they are.
-        stores = {'model': cleanup.enter_context(open_store(str(files['transformer'])))}
+        stores = {'model': cleanup.enter_context(open_store(str(files['transformer']), reserve=ram_reserve))}
         adapters = []
         for index, (item, path) in enumerate(files['loras']):
             stores['lora' + str(index)] = cleanup.enter_context(open_store(str(path)))
