@@ -45,7 +45,17 @@ const folderControls = {
 const AUTOMATIC = 'automatic';
 export const parameterPolicies = name => (name === 'seed' ? ['fixed', 'model', 'random'] : ['fixed', 'model']);
 export function setupNativeWorkflows(options) {
-  const { api, state, node, notice, onSettingsBusyChange = () => {} } = options,
+  const {
+      api,
+      state,
+      node,
+      notice,
+      onSettingsBusyChange = () => {},
+      // Brings the Hugging Face token field into view, with a message saying why.
+      showTokenField: askToken = () => {},
+      // A help bubble whose text changed while it may be shown.
+      onHelpChange = () => {},
+    } = options,
     $ = id => document.getElementById(id);
   const runtime = setupGenerationRuntime(options);
   let families = [];
@@ -103,6 +113,9 @@ export function setupNativeWorkflows(options) {
     readEnhance = null,
     // Shipped workflows the user deleted (hidden until an update changes them).
     hiddenWorkflows = 0,
+    // What the shipped workflows can download, the download in progress, whether a token is kept.
+    downloads = { offers: {}, job: { state: 'idle' }, hasToken: false },
+    following = false,
     // Where ComfyUI, the external engine, is and whether it answers.
     comfy = { enabled: false, baseUrl: '', reachable: false, version: '' };
   // Paths being registered from a file field: Save waits for them.
@@ -112,6 +125,18 @@ export function setupNativeWorkflows(options) {
     if (id) value.id = id;
     return value;
   };
+  const icon = name => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'),
+      use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    svg.setAttribute('aria-hidden', 'true');
+    use.setAttribute('href', '#i-' + name);
+    svg.append(use);
+    return svg;
+  };
+  const formatSize = bytes =>
+    bytes >= 1024 ** 3
+      ? (bytes / 1024 ** 3).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' Go'
+      : Math.max(1, Math.round(bytes / 1024 ** 2)).toLocaleString('fr-FR') + ' Mo';
   const button = (text, action, className = 'secondary') => {
     const value = node('button', className, text);
     value.type = 'button';
@@ -286,8 +311,8 @@ export function setupNativeWorkflows(options) {
   /** Internal: Atelier's own engine runs the family. External: ComfyUI does. */
   const engineOf = record => families.find(item => item.family === record.pipeline)?.engine || 'internal';
   const ENGINES = [
-    ['internal', 'Moteur interne', 'Agrandissement et interpolation : Atelier les exécute lui-même.'],
-    ['external', 'Moteur externe · ComfyUI', 'Images et vidéos générées par ComfyUI, lancé à côté d’Atelier.'],
+    ['internal', 'Moteur interne'],
+    ['external', 'Moteur externe · ComfyUI'],
   ];
   /** The address of ComfyUI and whether it answers, at the top of the external section. */
   function comfyPanel() {
@@ -344,65 +369,118 @@ export function setupNativeWorkflows(options) {
     panel.append(toggle, status, row, ...kept.map(item => item.label));
     return panel;
   }
-  function workflowCard(record) {
-    const card = node('article', 'workflow-card'),
-      heading = node('div', 'workflow-card-header'),
-      title = node('div', 'workflow-card-title');
-    // Where it comes from: shipped with Atelier (and followed by updates) or the user's own.
-    const origin = record.update
-      ? ' · nouvelle version fournie'
+  /** What a workflow is, at a glance: a colour, and under the pointer what it means. */
+  function workflowState(record) {
+    const offer = downloads.offers[record.id],
+      job = downloads.job;
+    if (job.state === 'running' && job.workflowId === record.id) {
+      const share = job.total ? Math.floor((job.received / job.total) * 100) : 0;
+      return [
+        'downloading',
+        `Téléchargement : ${share} % (${formatSize(job.received)} sur ${formatSize(job.total)})` +
+          (job.current ? ` · ${job.current}` : '') +
+          '.',
+      ];
+    }
+    if (record.importDraft) return ['off', 'Brouillon importé : à vérifier avant de l’activer.'];
+    if (!record.enabled) return ['off', 'Désactivé : l’assistant ne s’en sert pas.'];
+    if (record.ready !== false) return ['ready', 'Prêt : l’assistant peut s’en servir.'];
+    if (offer) {
+      const names = offer.files.map(file => file.file).join(', '),
+        several = offer.files.length > 1,
+        them = several ? 'les' : 'le';
+      const what = `Il manque ${several ? offer.files.length + ' fichiers' : 'un fichier'} : ${names}.`;
+      return [
+        'missing',
+        what +
+          (offer.complete
+            ? offer.needsToken
+              ? ` ${several ? 'Ils demandent' : 'Il demande'} un compte Hugging Face : enregistrez votre jeton dans l’onglet Mise à jour, puis téléchargez-${them}.`
+              : ` Le bouton de téléchargement ${them} place au bon endroit (${formatSize(offer.bytes)}).`
+            : ` Placez-${them} dans le dossier de ${several ? 'leur' : 'son'} type (onglet Génération, Dossier des modèles).`),
+      ];
+    }
+    const reason = record.unavailableReason || 'Indisponible.';
+    // Not the workflow's fault: its engine is stopped, starting, or ComfyUI does not answer.
+    if (!/^Fichier|^Aucun fichier|Choisissez/.test(reason)) return ['waiting', reason];
+    return [/^Fichier introuvable|^Aucun fichier/.test(reason) ? 'missing' : 'problem', reason];
+  }
+  /** Shipped with Atelier, or the user's own (created or imported): the latter wear another colour. */
+  const originOf = record =>
+    record.update
+      ? 'Fourni avec Atelier · nouvelle version.'
       : record.customized
-        ? ' · fourni, modifié par vous'
+        ? 'Fourni avec Atelier, modifié par vous.'
         : record.builtin
-          ? ' · fourni avec Atelier'
-          : '';
-    title.append(node('strong', '', record.name), node('small', 'field-help', familyLabel(record.pipeline) + origin));
-    // « Actif » only when the assistant can really use it now.
-    const usable = !record.importDraft && record.enabled && record.ready !== false;
-    const status = node(
-      'span',
-      'native-status',
-      record.importDraft ? 'Brouillon' : !record.enabled ? 'Désactivé' : usable ? 'Actif' : 'Indisponible',
-    );
-    status.dataset.active = String(usable);
-    heading.append(title, status);
-    const editButton = button('Modifier', () => edit(record));
-    editButton.dataset.nativeControl = 'true';
-    let confirming = false;
-    const cancel = button('Annuler', () => {
-      confirming = false;
-      remove.textContent = 'Supprimer';
-      cancel.hidden = true;
-    });
-    cancel.hidden = true;
-    cancel.dataset.nativeControl = 'true';
-    const remove = button(
-      'Supprimer',
-      async () => {
-        if (!confirming) {
-          confirming = true;
-          remove.textContent = 'Confirmer';
-          cancel.hidden = false;
-          return;
-        }
+          ? 'Fourni avec Atelier.'
+          : 'Créé ou importé par vous.';
+  function downloadButton(record, offer) {
+    const job = downloads.job,
+      mine = job.state === 'running' && job.workflowId === record.id;
+    if (mine) {
+      const stop = button('Arrêter', async () => {
         try {
-          await run(async signal => {
-            await api('generation/remove', { id: record.id }, { signal });
-            workflows = workflows.filter(item => item.id !== record.id);
-            if (record.builtin) hiddenWorkflows++;
-            renderList();
-          });
-          // A deleted edit of a shipped workflow hides that one too; the list is the server's.
-          if (record.builtin) await refresh({ settings: false });
+          downloads.job = await (await api('downloads/cancel', {})).json();
         } catch (failure) {
           importStatus(failure.message, true);
         }
-      },
-      'text-button native-remove',
-    );
-    remove.dataset.nativeControl = 'true';
+      });
+      stop.title = 'Arrêter le téléchargement ; il reprendra où il en était.';
+      return stop;
+    }
+    const start = button('', async () => {
+      if (offer.needsToken) {
+        askToken(
+          `${record.name} demande un compte Hugging Face : acceptez la licence sur ${offer.page} avec ce compte, puis collez ici un jeton de lecture et relancez le téléchargement.`,
+        );
+        return;
+      }
+      try {
+        importStatus('');
+        downloads.job = await (await api('downloads/start', { id: record.id })).json();
+        renderList();
+        followDownload();
+      } catch (failure) {
+        importStatus(failure.message, true);
+      }
+    });
+    start.className = 'secondary workflow-download';
+    start.append(icon('download'), node('span', '', formatSize(offer.bytes)));
+    const label = `Télécharger les fichiers manquants (${formatSize(offer.bytes)})`;
+    start.setAttribute('aria-label', label);
+    start.title = label;
+    start.dataset.nativeControl = 'true';
+    if (job.state === 'running') {
+      start.disabled = true;
+      start.dataset.unavailable = 'true';
+      start.title = 'Un autre téléchargement est en cours.';
+    }
+    return start;
+  }
+  function workflowCard(record) {
+    const card = node('article', 'workflow-card'),
+      [stateName, stateText] = workflowState(record),
+      offer = downloads.offers[record.id];
+    card.dataset.state = stateName;
+    card.dataset.origin = record.builtin ? 'atelier' : 'user';
+    const dot = node('span', 'workflow-state');
+    dot.tabIndex = 0;
+    dot.setAttribute('role', 'img');
+    dot.setAttribute('aria-label', 'État : ' + stateText);
+    dot.dataset.help = stateText;
+    dot.dataset.helpAlign = 'start';
+    const name = node('strong', 'workflow-name', record.name);
+    const details = [record.description, originOf(record)].filter(Boolean).join('\n');
+    // The name says the details too, for a pointer that passes over it.
+    name.dataset.help = details;
+    name.dataset.helpAlign = 'start';
+    const tip = node('span', 'help-tip workflow-help', '?');
+    tip.tabIndex = 0;
+    tip.setAttribute('role', 'img');
+    tip.setAttribute('aria-label', 'Détails : ' + details);
+    tip.dataset.help = details;
     const actions = node('div', 'native-card-actions');
-    actions.append(remove, cancel);
+    if (offer?.complete) actions.append(downloadButton(record, offer));
     if (record.customized) {
       const reset = button(
         'Rétablir',
@@ -422,22 +500,99 @@ export function setupNativeWorkflows(options) {
       reset.dataset.nativeControl = 'true';
       actions.append(reset);
     }
+    // Only the user's own workflows can be deleted; the shipped ones stay (an edit is restored).
+    if (!record.builtin) {
+      let confirming = false;
+      const cancel = button('Annuler', () => {
+        confirming = false;
+        remove.textContent = 'Supprimer';
+        cancel.hidden = true;
+      });
+      cancel.hidden = true;
+      cancel.dataset.nativeControl = 'true';
+      const remove = button(
+        'Supprimer',
+        async () => {
+          if (!confirming) {
+            confirming = true;
+            remove.textContent = 'Confirmer';
+            cancel.hidden = false;
+            return;
+          }
+          try {
+            await run(async signal => {
+              await api('generation/remove', { id: record.id }, { signal });
+              workflows = workflows.filter(item => item.id !== record.id);
+              renderList();
+            });
+          } catch (failure) {
+            importStatus(failure.message, true);
+          }
+        },
+        'text-button native-remove',
+      );
+      remove.dataset.nativeControl = 'true';
+      actions.append(remove, cancel);
+    }
+    const editButton = button('Modifier', () => edit(record));
+    editButton.dataset.nativeControl = 'true';
     actions.append(editButton);
-    const description = node('p', 'field-help workflow-card-description', record.description);
-    description.title = record.description;
-    card.append(
-      heading,
-      description,
-      ...(record.unavailableReason ? [node('p', 'field-help workflow-card-problem', record.unavailableReason)] : []),
-      actions,
-    );
+    card.append(dot, name, tip, actions);
+    if (stateName === 'downloading') {
+      const bar = node('span', 'workflow-progress'),
+        fill = node('span');
+      fill.style.width = (downloads.job.total ? (downloads.job.received / downloads.job.total) * 100 : 0) + '%';
+      bar.append(fill);
+      card.append(bar);
+    }
     return card;
+  }
+  /** Follows a download while it runs; at its end, the list says again what each workflow lacks. */
+  function followDownload() {
+    if (following) return;
+    following = true;
+    const step = async () => {
+      try {
+        const next = (await (await api('downloads')).json()).job;
+        const ended = downloads.job.state === 'running' && next.state !== 'running';
+        downloads.job = next;
+        if (ended) {
+          following = false;
+          if (next.state === 'error') importStatus(next.error, true);
+          else if (next.state === 'done') importStatus(`${next.name} : fichiers téléchargés et rangés.`);
+          if ($('settings').open) await refresh({ settings: false }).catch(() => renderList());
+          else renderList();
+          return;
+        }
+        if ($('settings').open && !draft) updateProgress();
+      } catch {
+        /* The next step tries again. */
+      }
+      if (following) setTimeout(step, 1000);
+    };
+    setTimeout(step, 1000);
+  }
+  /** The card of the download in progress, without drawing the list again (the bubble stays open). */
+  function updateProgress() {
+    const job = downloads.job;
+    for (const card of $('workflow-list').querySelectorAll('.workflow-card[data-state="downloading"]')) {
+      const fill = card.querySelector('.workflow-progress > span');
+      if (fill) fill.style.width = (job.total ? (job.received / job.total) * 100 : 0) + '%';
+      const dot = card.querySelector('.workflow-state'),
+        record = workflows.find(item => item.id === job.workflowId);
+      if (dot && record) {
+        const [, text] = workflowState(record);
+        dot.dataset.help = text;
+        dot.setAttribute('aria-label', 'État : ' + text);
+        onHelpChange(dot);
+      }
+    }
   }
   function renderList() {
     $('workflow-list').replaceChildren();
-    for (const [engine, title, help] of ENGINES) {
+    for (const [engine, title] of ENGINES) {
       const heading = node('div', 'workflow-section');
-      heading.append(node('h4', '', title), node('p', 'field-help', help));
+      heading.append(node('h4', '', title));
       if (engine === 'external') heading.append(comfyPanel());
       $('workflow-list').append(heading);
       const own = workflows.filter(record => engineOf(record) === engine);
@@ -466,6 +621,8 @@ export function setupNativeWorkflows(options) {
     workflows = result.workflows || [];
     comfy = result.comfy || comfy;
     hiddenWorkflows = result.hiddenWorkflows ?? hiddenWorkflows;
+    downloads = result.downloads || downloads;
+    if (downloads.job?.state === 'running') followDownload();
     assets = result.assets || assets;
     folders = result.folders || folders;
     if (result.families) {

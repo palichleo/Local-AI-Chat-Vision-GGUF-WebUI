@@ -1,6 +1,7 @@
 import { setupProjectNavigation } from './project-navigation.mjs';
 import { setupSettingsSearch } from './settings-search.mjs';
 import { setupSettingsTabs } from './settings-tabs.mjs';
+import { setupHelpTips } from './help-tips.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
@@ -692,6 +693,30 @@ async function searchUpdate() {
     state.checkingUpdates = false;
     $('settings-update-check').textContent = 'Rechercher une mise à jour';
     updateControls();
+  }
+}
+
+/** The Hugging Face token: kept by the server on this computer, never sent back to the page. */
+function renderToken(hasToken, message) {
+  $('hf-token-remove').hidden = !hasToken;
+  $('hf-token').placeholder = hasToken ? 'Jeton enregistré · collez-en un autre pour le remplacer' : 'hf_…';
+  $('hf-token-status').textContent = message ?? (hasToken ? 'Un jeton est enregistré sur cet ordinateur.' : '');
+}
+async function refreshToken() {
+  try {
+    renderToken((await (await api('downloads')).json()).hasToken);
+  } catch {
+    /* Said again at the next opening. */
+  }
+}
+async function saveToken(token) {
+  try {
+    const { hasToken } = await (await api('downloads/token', { token })).json();
+    $('hf-token').value = '';
+    renderToken(hasToken, hasToken ? 'Jeton enregistré sur cet ordinateur.' : 'Jeton retiré.');
+    void workflowsUI.refresh({ settings: false }).catch(() => {});
+  } catch (error) {
+    $('hf-token-status').textContent = error.message;
   }
 }
 
@@ -2070,11 +2095,16 @@ alignConversation();
 setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 const tokenControls = setupTokenControls($);
 const computeControls = setupComputeControls($);
+const helpTips = setupHelpTips($('settings'));
 const settingsTabs = setupSettingsTabs({
   list: $('settings-tabs'),
   onShow: name => {
+    helpTips.hide();
     $('settings-body').scrollTop = 0;
-    if (name === 'update' && $('settings').open) void checkComponents();
+    if (name === 'update' && $('settings').open) {
+      void checkComponents();
+      void refreshToken();
+    }
   },
 });
 const settingsSearch = setupSettingsSearch({
@@ -2162,6 +2192,12 @@ const workflowsUI = setupNativeWorkflows({
     state.generationSettingsWorking = busy;
     updateControls();
   },
+  showTokenField: message => {
+    settingsTabs.select('update');
+    $('hf-token-status').textContent = message;
+    $('hf-token').focus();
+  },
+  onHelpChange: target => helpTips.refresh(target),
 });
 
 const settingsGuard = setupSettingsGuard({
@@ -2301,6 +2337,18 @@ $('remove-llm').onclick = removeLLM;
 $('settings-update-check').onclick = searchUpdate;
 $('settings-update-install').onclick = installUpdate;
 $('components-check').onclick = () => checkComponents({ again: true });
+$('hf-token-save').onclick = () => {
+  const token = $('hf-token').value.trim();
+  if (token) void saveToken(token);
+  else $('hf-token-status').textContent = 'Collez d’abord un jeton.';
+};
+$('hf-token-remove').onclick = () => void saveToken('');
+// Enter saves the token, not the whole settings form.
+$('hf-token').addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  $('hf-token-save').click();
+});
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('shutdown-app').onclick = shutdownApplication;
 $('settings-close').onclick = () => requestSettingsClose();

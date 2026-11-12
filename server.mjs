@@ -57,6 +57,7 @@ const staticFiles = new Map([
   ['/assets/metallic-surface.svg', ['assets/metallic-surface.svg', 'image/svg+xml']],
   ['/settings-search.mjs', ['settings-search.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-tabs.mjs', ['settings-tabs.mjs', 'text/javascript; charset=utf-8']],
+  ['/help-tips.mjs', ['help-tips.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-ui.mjs', ['generation-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/assets-ui.mjs', ['assets-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/resource-preparation.mjs', ['resource-preparation.mjs', 'text/javascript; charset=utf-8']],
@@ -735,6 +736,8 @@ export async function createApplication({
         });
         return send(200, { version: applicationVersion, components: await componentsCheck });
       }
+      if (path === '/api/downloads' && req.method === 'GET')
+        return send(200, { job: generation.downloads.status(), hasToken: await generation.downloads.hasToken() });
       if (path === '/api/models' && req.method === 'GET')
         return send(200, { models: await models.list(), ...(await models.scan()) });
       if (path === '/api/status' && req.method === 'GET') return send(200, status());
@@ -841,6 +844,18 @@ export async function createApplication({
       }
       if (req.method !== 'POST') throw problem('Méthode non prise en charge.', 405);
       const body = await jsonBody(req, path === '/api/updates/install' ? 40 * 1024 * 1024 : maxBody);
+      // The files of a shipped workflow: downloaded in the background, followed with GET /api/downloads.
+      if (path === '/api/downloads/start') {
+        if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
+        const record = (await generation.catalog.list()).find(item => item.id === body.id);
+        if (!record) throw problem('Workflow introuvable.', 404);
+        return send(200, await generation.downloads.start(record));
+      }
+      if (path === '/api/downloads/cancel') {
+        generation.downloads.cancel();
+        return send(200, generation.downloads.status());
+      }
+      if (path === '/api/downloads/token') return send(200, { hasToken: await generation.downloads.setToken(body.token) });
       if (path.startsWith('/api/generation/')) {
         if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
         if (runtime.active || engine.busy || clearingHistory || savingSettings || savingGeneration || pickingFile)
@@ -924,6 +939,9 @@ export async function createApplication({
               }),
             );
           if (path === '/api/generation/remove') {
+            // The workflows shipped with Atelier stay: an edited one can only be restored.
+            if ((await generation.catalog.list()).find(item => item.id === body.id)?.builtin)
+              throw problem('Les workflows fournis avec Atelier ne se suppriment pas.');
             await generation.catalog.remove(body.id);
             return send(200, { removed: true });
           }
