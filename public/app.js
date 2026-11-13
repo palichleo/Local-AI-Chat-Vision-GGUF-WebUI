@@ -751,10 +751,19 @@ function llamaLine() {
   if (!line) {
     line = node('div', 'llama-install');
     const text = node('span', 'llama-install-text'),
-      go = node('button', 'secondary llama-install-go');
+      go = node('button', 'secondary llama-install-go'),
+      own = node('button', 'text-button llama-install-own', 'Choisir le mien…');
     go.type = 'button';
     go.hidden = true;
-    line.append(text, go);
+    // Their own llama-server stays theirs to choose: the field of the engine, in Génération.
+    own.type = 'button';
+    own.title = 'Utiliser votre propre llama-server : Réglages › Génération › Moteur llama.cpp';
+    own.onclick = () => {
+      $('settings-tab-generation').click();
+      $('engine-path').scrollIntoView({ block: 'center' });
+      $('engine-path').focus();
+    };
+    line.append(text, go, own);
     row.append(line);
   }
   return { line, text: line.querySelector('.llama-install-text'), go: line.querySelector('.llama-install-go') };
@@ -783,8 +792,9 @@ async function showLlama() {
     const upToDate = job.ours && current === offer.tag;
     text.textContent = upToDate
       ? `À jour : version officielle ${offer.tag}.`
-      : `Version officielle pour cet ordinateur : ${offer.tag} · ${best.label} (${megabytes(best.size)}).` +
-        (job.ours ? '' : ' Elle remplacera le moteur actuel.');
+      : job.ours
+        ? `Version officielle plus récente : ${offer.tag} · ${best.label} (${megabytes(best.size)}).`
+        : `Version officielle pour cet ordinateur : ${offer.tag} · ${best.label} (${megabytes(best.size)}). « Installer » la met à la place du moteur actuel.`;
     go.textContent = job.ours ? 'Mettre à jour' : 'Installer';
     go.hidden = upToDate;
     go.onclick = () => void installLlama();

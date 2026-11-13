@@ -2659,6 +2659,19 @@ video.studio-frame-result {
 .llama-install-go[hidden] {
   display: none;
 }
+.llama-install-own {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.llama-install-own:hover {
+  color: var(--ink);
+}
 /* The llama.cpp row takes the whole width: its line under it has room. */
 .component-row[data-id='llama'] {
   grid-column: 1 / -1;
