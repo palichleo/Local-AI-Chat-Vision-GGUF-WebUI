@@ -58,9 +58,39 @@ def _free(torch, device):
         torch.cuda.empty_cache()
 
 
+# What Qwen3-1.7B takes on the card in float32, with its activations over 512 tokens.
+TEXT_GIB = 8
+
+
+def _read_prompts(folder, tokenizer, prompts, device):
+    """Qwen3 reads the prompts in float32. In bfloat16 its first token comes out several units
+    off (the large activations of that token lose their precision) and the transformer then
+    makes silence: measured on « sons de pistolet », peak 0.0004 in bfloat16 against 0.82 in
+    float32, the same transformer and seed. On the card when it has the room, else on the
+    processor (a few seconds)."""
+    import torch
+    from transformers import AutoModel
+
+    from runner.models import moss_sfx
+
+    encoder = AutoModel.from_pretrained(str(folder / 'text_encoder'), dtype=torch.float32).eval()
+    place = 'cpu'
+    if device == 'cuda' and torch.cuda.mem_get_info()[0] >= TEXT_GIB * 1024**3:
+        try:
+            encoder, place = encoder.to('cuda'), 'cuda'
+        except torch.cuda.OutOfMemoryError:
+            encoder, place = encoder.to('cpu'), 'cpu'
+            torch.cuda.empty_cache()
+    with torch.inference_mode():
+        read = [moss_sfx.encode_text(encoder, tokenizer, [prompt], place).to(device) for prompt in prompts]
+    del encoder
+    _free(torch, device)
+    return read
+
+
 def generate(job, config, progress):
     import torch
-    from transformers import AutoModel, AutoTokenizer
+    from transformers import AutoTokenizer
 
     from runner.media import save_audio
     from runner.models import moss_sfx
@@ -83,12 +113,7 @@ def generate(job, config, progress):
     progress(stage='encoding sound prompt')
     prompt = f'{parameters["prompt"].strip()} duration: {seconds:.1f}s'
     tokenizer = AutoTokenizer.from_pretrained(str(folder / 'tokenizer'))
-    encoder = AutoModel.from_pretrained(str(folder / 'text_encoder'), dtype=torch.bfloat16).to(device).eval()
-    with torch.inference_mode(), torch.autocast(device, dtype=torch.bfloat16):
-        context = moss_sfx.encode_text(encoder, tokenizer, [prompt], device)
-        empty = moss_sfx.encode_text(encoder, tokenizer, [parameters.get('negative_prompt', '')], device)
-    del encoder
-    _free(torch, device)
+    context, empty = _read_prompts(folder, tokenizer, [prompt, parameters.get('negative_prompt', '')], device)
 
     progress(stage='loading sound model')
     model = moss_sfx.load_transformer(folder / 'transformer').to(device)

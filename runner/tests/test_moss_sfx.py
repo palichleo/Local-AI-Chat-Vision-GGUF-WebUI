@@ -76,6 +76,47 @@ class MossSoundEffectTests(unittest.TestCase):
         self.assertTrue(all(a > b for a, b in zip(levels, levels[1:], strict=False)))
         self.assertAlmostEqual(levels[-1], 5 * 0.25 / (1 + 4 * 0.25))
 
+    @unittest.skipUnless(TORCH, 'torch is not installed')
+    def test_the_prompt_is_read_in_float32_on_the_card_when_it_has_room_else_on_the_processor(self):
+        # In bfloat16 the sound came out silent (peak 0.0004 against 0.82 in float32).
+        from unittest.mock import patch
+
+        import torch
+        import transformers
+
+        loaded, read = [], []
+
+        class Encoder:
+            def eval(self):
+                return self
+
+            def to(self, place):
+                loaded.append(place)
+                return self
+
+        def from_pretrained(path, dtype=None):
+            loaded.append(dtype)
+            return Encoder()
+
+        def encode(encoder, tokenizer, prompts, place):
+            read.append((prompts[0], place))
+            return torch.zeros(1, 2, 3)
+
+        for free, place in ((12, 'cuda'), (4, 'cpu')):
+            loaded.clear()
+            read.clear()
+            with (
+                patch.object(transformers.AutoModel, 'from_pretrained', from_pretrained),
+                patch('runner.models.moss_sfx.encode_text', encode),
+                patch('torch.cuda.mem_get_info', lambda: (free * 1024**3, 12 * 1024**3)),
+                patch('torch.cuda.empty_cache', lambda: None),
+                patch('torch.Tensor.to', lambda self, *args, **kwargs: self),
+            ):
+                context, empty = moss_sfx._read_prompts(Path('m'), None, ['bang duration: 3.0s', ''], 'cuda')
+            self.assertEqual(loaded[0], torch.float32)
+            self.assertEqual(read, [('bang duration: 3.0s', place), ('', place)])
+            self.assertEqual(tuple(context.shape), (1, 2, 3))
+
 
 if __name__ == '__main__':
     unittest.main()

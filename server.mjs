@@ -448,7 +448,10 @@ export async function createApplication({
         const deadline = Date.now() + 330000;
         while (engine.state === 'loading' && !closing && Date.now() < deadline)
           await new Promise(resolve => setTimeout(resolve, 250));
-        if (engine.state !== 'ready') {
+        // Stopped meanwhile on purpose (the Studio took the card): nothing said against the build,
+        // which stays and is tried at the next start. A failure is the engine's error, or a load
+        // that never ends.
+        if (engine.state === 'error' || engine.state === 'loading') {
           const said = engine.logs.findLast(line => /error|failed|unknown|invalid/i.test(line));
           failure = (engine.error || 'le modèle n’a pas fini de charger.') + (said ? ` (${said.slice(0, 300)})` : '');
         }
