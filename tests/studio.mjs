@@ -161,6 +161,55 @@ test('the format frame keeps the ratio and fits its box, wide or tall', async ()
   }
 });
 
+test('« Enregistrer » keeps the settings of a model in a file of its own, and gives them with the tools of the Studio', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'atelier-preset-'));
+  const app = await createApplication({ port: 0, dataDir: directory });
+  t.after(async () => {
+    await app.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const { readdir } = await import('node:fs/promises');
+  const before = await readdir(directory);
+  const { token } = await (await fetch(app.url + '/api/bootstrap?brief=1')).json();
+  const api = (route, body) =>
+    fetch(app.url + '/api/' + route, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  const preset = {
+    length: 193 / 24,
+    format: '16:9',
+    size: '768x448',
+    seed: '42',
+    styles: [{ name: 'grain.safetensors', strength: 0.8 }],
+    loras: { msr: { on: true, strength: 1.2 } },
+  };
+  const saved = await api('studio/preset', { workflow: 'h3', preset });
+  assert.equal(saved.status, 200);
+  const kept = (await saved.json()).preset;
+  assert.equal(kept.seed, '42');
+  assert.ok(kept.savedAt);
+  // Given with the tools of the Studio, as kept.
+  const studio = await (await api('studio')).json();
+  assert.deepEqual(studio.presets.h3.loras, { msr: { on: true, strength: 1.2 } });
+  assert.equal(studio.presets.h3.size, '768x448');
+  // What is not a setting of the Studio is left out; what is wrong is refused, nothing kept.
+  const other = await (
+    await api('studio/preset', { workflow: 'ltx', preset: { length: 5, prompt: 'non', steps: 99 } })
+  ).json();
+  assert.deepEqual(Object.keys(other.preset).sort(), ['length', 'savedAt']);
+  assert.equal((await api('studio/preset', { workflow: 'h3', preset: { seed: 'abc' } })).status, 400);
+  assert.equal((await api('studio/preset', { workflow: '../x', preset: {} })).status, 400);
+  assert.equal((await api('studio/preset', { workflow: 'h3', preset: { size: '768x448' } })).status, 400);
+  assert.equal((await (await api('studio')).json()).presets.h3.seed, '42');
+  // A file of its own, beside the others (the workflows are not written): both models in it.
+  assert.ok(!before.includes('studio-presets.json'));
+  const { readFile } = await import('node:fs/promises');
+  const file = JSON.parse(await readFile(join(directory, 'studio-presets.json'), 'utf8'));
+  assert.deepEqual(Object.keys(file.models).sort(), ['h3', 'ltx']);
+});
+
 test('a style the model does not write in time is said as such, and the model is free again', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'atelier-style-'));
   const app = await createApplication({
@@ -678,7 +727,13 @@ async function studioPage(tools, routes = {}, options = {}) {
       return {
         json: async () =>
           route === 'studio'
-            ? { enabled: true, legacyId: STUDIO_ID, styles: ['a.safetensors', 'b.safetensors'], tools }
+            ? {
+                enabled: true,
+                legacyId: STUDIO_ID,
+                styles: ['a.safetensors', 'b.safetensors'],
+                tools,
+                presets: options.presets ?? {},
+              }
             : route.startsWith('gallery/')
               ? { runs: route.includes(STUDIO_ID) ? (options.legacy ?? []) : runs }
               : (routes[route]?.(body) ?? {}),
@@ -1235,6 +1290,136 @@ test('the screen: its format and length at the top left, « Détails » at the t
     assert.equal(stopped, 1);
     assert.deepEqual(body.find('studio-details'), []);
     assert.equal(go().attributes['aria-expanded'], 'false');
+  } finally {
+    restore();
+  }
+});
+
+test('the floppy disk keeps the settings of the model, given back each time it is chosen; nothing « Fixe » is kept', async () => {
+  const lengths = { seconds: [121 / 24, 193 / 24, 241 / 24], standard: 121 / 24 },
+    free = {
+      id: 'h',
+      name: 'H3',
+      external: true,
+      direct: true,
+      seeded: true,
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      settings: [],
+      lengths,
+      roles: {},
+      loras: [
+        { id: 'msr', name: 'MSR', assistant: true, on: false, strength: { min: 0, max: 2, default: 1 } },
+        { id: 'net', name: 'Net', assistant: false, on: true, strength: { value: 0.7 } },
+      ],
+    },
+    // Length, size and seed fixed in Workflows: no bar, no seed, nothing of them kept.
+    fixed = {
+      id: 'f',
+      name: 'Fixe',
+      external: true,
+      direct: false,
+      seeded: false,
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      settings: [],
+      roles: {},
+    };
+  const posted = [];
+  const { body, restore, mode } = await studioPage(
+    { create_video: [free, fixed] },
+    {
+      'studio/preset': request => {
+        posted.push(request);
+        return { workflow: request.workflow, preset: { ...request.preset, savedAt: 'maintenant' } };
+      },
+    },
+  );
+  try {
+    mode(1);
+    const disk = () => body.find('studio-save')[0],
+      duration = () => body.find('studio-bar').find(bar => bar.dataset.ai === 'duration'),
+      model = id => {
+        const pick = body.find('studio-model-pick')[0];
+        pick.value = id;
+        pick.onchange();
+      };
+    // In the Modèle block, its name for screen readers and in its tooltip; quiet at first.
+    assert.equal(body.find('studio-set-model')[0].find('studio-save').length, 1);
+    assert.equal(disk().dataset.state, 'still');
+    assert.match(disk().attributes['aria-label'], /^Enregistrer ces réglages pour H3/);
+    // A setting moved: a light pill.
+    duration().value = '1';
+    duration().oninput();
+    assert.equal(disk().dataset.state, 'changed');
+    // A seed and the LoRA left to the assistant, then saved: what is free, nothing else.
+    body.find('studio-more-pill')[0].onclick();
+    const seed = body.find('studio-seed')[0].children[1];
+    seed.value = '42';
+    seed.oninput();
+    body.find('studio-lora-switch')[0].checked = true;
+    body.find('studio-lora-switch')[0].onchange();
+    await disk().onclick();
+    await settle();
+    const [first] = posted;
+    assert.equal(first.workflow, 'h');
+    assert.equal(first.preset.length, 193 / 24);
+    assert.equal(first.preset.seed, '42');
+    assert.equal(first.preset.format, '16:9');
+    assert.deepEqual(first.preset.styles, []);
+    assert.deepEqual(first.preset.loras, { msr: { on: true, strength: 1 } }, 'the LoRA fixed in Workflows is not kept');
+    // Just saved: the green check.
+    assert.equal(disk().dataset.state, 'saved');
+    assert.match(disk().attributes['aria-label'], /^Réglages enregistrés pour H3/);
+
+    // Changed again, then another model: its own, nothing saved for it yet.
+    duration().value = '2';
+    duration().oninput();
+    model('f');
+    assert.equal(disk().dataset.state, 'still');
+    await disk().onclick();
+    await settle();
+    assert.deepEqual(Object.keys(posted[1].preset), ['styles'], 'length, size and seed fixed: none of them kept');
+    // Back to H3: its saved settings come back.
+    model('h');
+    assert.equal(duration().value, '1');
+    assert.equal(duration().attributes['aria-valuetext'], '08.04 s');
+    assert.equal(body.find('studio-seed')[0].children[1].value, '42');
+    assert.equal(body.find('studio-lora-switch')[0].checked, true);
+    assert.equal(disk().dataset.state, 'still');
+  } finally {
+    restore();
+  }
+});
+
+test('the settings saved for a model come back the first time the Studio shows it', async () => {
+  const video = {
+    id: 'h',
+    name: 'H3',
+    external: true,
+    direct: true,
+    seeded: true,
+    limits: sizes,
+    size: { width: 768, height: 448 },
+    settings: [],
+    lengths: { seconds: [121 / 24, 193 / 24, 241 / 24], standard: 121 / 24 },
+    roles: {},
+  };
+  const { body, restore, mode } = await studioPage(
+    { create_video: [video] },
+    {},
+    {
+      presets: {
+        h: { length: 241 / 24, seed: '7', styles: [{ name: 'b.safetensors', strength: 0.5 }], savedAt: 'hier' },
+      },
+    },
+  );
+  try {
+    mode(1);
+    const duration = body.find('studio-bar').find(bar => bar.dataset.ai === 'duration');
+    assert.equal(duration.attributes['aria-valuetext'], '10.04 s');
+    assert.equal(body.find('studio-seed')[0].children[1].value, '7');
+    assert.equal(body.find('studio-lora-row').length, 1);
   } finally {
     restore();
   }

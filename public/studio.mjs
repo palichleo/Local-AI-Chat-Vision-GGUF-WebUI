@@ -261,6 +261,9 @@ export function setupStudio({
       draft.styles = draft.shelved[to] ?? [];
     }
     draft.workflow = id;
+    // Its saved settings come back with it (« Enregistrer »), those its workflow leaves free.
+    const chosen = current();
+    if (chosen) applyPreset(chosen);
     render();
   }
   const button = (className, text, onclick, glyph) => {
@@ -375,6 +378,12 @@ export function setupStudio({
   // The model each mode showed last: another one, and the blocks of the images say so for a
   // moment (moodix-design.md 21).
   const shownModel = {};
+  // « Enregistrer »: the modes whose model showed its saved settings already, what each model
+  // showed first (compared with, until it is saved), the floppy disk drawn, and the last saving.
+  const presetShown = {},
+    baselines = {};
+  let saveButton = null,
+    savedJust = null;
   let flashUntil = 0,
     flashTimer = null,
     // The line from the start to the end: its colour and its figure follow the duration bar.
@@ -774,6 +783,7 @@ export function setupStudio({
       const place = Number(bar.value);
       show(place);
       onInput(place);
+      paintSave();
     };
     track.append(bar, ...marks);
     return { track, value };
@@ -790,6 +800,143 @@ export function setupStudio({
     const list = [];
     for (let step = 0; min + step * 0.05 <= max + 1e-9; step++) list.push(Math.round((min + step * 0.05) * 100) / 100);
     return list;
+  }
+  // ------------------------------------------------------------------ « Enregistrer »
+  /** A value written the same way whatever the order of its keys: settings compared as text. */
+  const canonical = value =>
+    JSON.stringify(value, (key, item) =>
+      item && typeof item === 'object' && !Array.isArray(item)
+        ? Object.fromEntries(
+            Object.keys(item)
+              .sort()
+              .map(name => [name, item[name]]),
+          )
+        : item,
+    );
+  /**
+   * What « Enregistrer » keeps for a model (moodix-design.md 7; 7 bis 1): its length, its format
+   * and size, its seed, its LoRAs and their strength, as the Studio has them now. Only what the
+   * workflow leaves free: a value « Fixe » in Configuration › Workflows is neither kept nor given
+   * back (no bar of length, of size or seed is offered for it; its LoRAs keep their switch and
+   * strength).
+   */
+  function snapshot(workflow) {
+    const draft = drafts[mode],
+      values = {};
+    if (workflow.lengths?.seconds.length) values.length = draft[extending ? 'extension' : 'length'];
+    if (workflow.limits && workflow.direct && !extending && draft.size)
+      Object.assign(values, { format: draft.format, size: draft.size });
+    if (workflow.seeded) values.seed = draft.seed.trim();
+    if (workflow.external && mode !== 'audio' && !extending)
+      values.styles = draft.styles.filter(style => style.name).map(({ name, strength }) => ({ name, strength }));
+    const loras = {};
+    for (const lora of workflow.loras ?? []) {
+      const free = freeStrength(lora);
+      if (!lora.assistant && !free) continue;
+      const choice = loraChoice(workflow, lora),
+        entry = {};
+      if (lora.assistant) entry.on = choice.on;
+      if (free) entry.strength = choice.strength;
+      loras[lora.id] = entry;
+    }
+    if (Object.keys(loras).length) values.loras = loras;
+    const sound = workflow.settings.find(setting => setting.key === 'seconds' && setting.type === 'number');
+    if (sound && !workflow.lengths) {
+      const value = Number(draft.settings[workflow.id]?.seconds ?? sound.default);
+      if (value > 0) values.settings = { seconds: value };
+    }
+    return values;
+  }
+  /** Gives a model its saved settings back: those its workflow leaves free, as they still fit. */
+  function applyPreset(workflow) {
+    const saved = info?.presets?.[workflow.id],
+      draft = drafts[mode];
+    if (!saved || extending) return;
+    const lengths = workflow.lengths?.seconds ?? [];
+    if (Number.isFinite(saved.length) && lengths.length)
+      draft.length = lengths.reduce((best, value) =>
+        Math.abs(value - saved.length) < Math.abs(best - saved.length) ? value : best,
+      );
+    if (saved.format && saved.size && workflow.limits && workflow.direct) {
+      const { sizes } = sizeChoices(workflow, saved.format, 0);
+      if (sizes.some(size => sizeKey(size) === saved.size))
+        Object.assign(draft, { format: saved.format, size: saved.size });
+    }
+    if (typeof saved.seed === 'string' && workflow.seeded) draft.seed = saved.seed;
+    if (Array.isArray(saved.styles) && workflow.external && mode !== 'audio')
+      draft.styles = saved.styles
+        .filter(style => info.styles.includes(style.name))
+        .slice(0, MAX_STYLES)
+        .map(({ name, strength }) => ({ name, strength }));
+    for (const lora of workflow.loras ?? []) {
+      const entry = saved.loras?.[lora.id];
+      if (!entry) continue;
+      const choice = loraChoice(workflow, lora);
+      if (lora.assistant && typeof entry.on === 'boolean') choice.on = entry.on;
+      if (freeStrength(lora) && Number.isFinite(entry.strength)) choice.strength = entry.strength;
+      // Within the bounds the workflow gives today.
+      loraChoice(workflow, lora);
+    }
+    const sound = workflow.settings.find(setting => setting.key === 'seconds' && setting.type === 'number');
+    if (sound && Number(saved.settings?.seconds) > 0)
+      (draft.settings[workflow.id] ??= {}).seconds = Math.min(
+        Number(sound.max ?? Infinity),
+        Math.max(Number(sound.min ?? 0), saved.settings.seconds),
+      );
+  }
+  /**
+   * The floppy disk (moodix-design.md 7, 15 ter): 32 px at the right of the model's name, its
+   * name only in its tooltip; quiet while nothing changed, a light pill once something did since
+   * the last saving, a green check just after one.
+   */
+  function saveButtonFor(workflow) {
+    const disk = button('studio-save', '', () => void savePreset(workflow)),
+      floppy = icon('save'),
+      check = icon('check');
+    floppy.classList?.add?.('studio-save-disk');
+    check.classList?.add?.('studio-save-check');
+    disk.append(floppy, check);
+    disk.dataset.workflow = workflow.id;
+    disk.dataset.state = 'still';
+    disk.disabled = Boolean(working) || answering();
+    saveButton = disk;
+    return disk;
+  }
+  /** The floppy disk says whether the settings changed since they were saved (or first shown). */
+  function paintSave() {
+    const disk = saveButton,
+      workflow = current();
+    if (!disk || !workflow || disk.dataset.workflow !== workflow.id) return;
+    const saved = info?.presets?.[workflow.id],
+      { savedAt, ...values } = saved ?? {},
+      against = saved ? canonical(values) : baselines[workflow.id],
+      changed = against !== undefined && canonical(snapshot(workflow)) !== against,
+      done = savedJust?.id === workflow.id && Date.now() < savedJust.until;
+    disk.dataset.state = done ? 'saved' : changed ? 'changed' : 'still';
+    disk.title = done
+      ? 'Réglages enregistrés pour ' + workflow.name
+      : changed
+        ? 'Enregistrer ces réglages pour ' + workflow.name + ' : ils reviendront à chaque fois que tu le choisis'
+        : saved
+          ? 'Réglages de ' + workflow.name + ' enregistrés · ils reviennent à chaque fois que tu le choisis'
+          : 'Enregistrer ces réglages pour ' + workflow.name;
+    disk.setAttribute('aria-label', disk.title);
+  }
+  /** Keeps the settings of the model on the server, apart from its workflow, in place of the last. */
+  async function savePreset(workflow) {
+    if (working || answering()) return;
+    const values = snapshot(workflow);
+    try {
+      const answer = await (await api('studio/preset', { workflow: workflow.id, preset: values })).json();
+      (info.presets ??= {})[workflow.id] = answer.preset ?? values;
+      savedJust = { id: workflow.id, until: Date.now() + 1600 };
+      paintSave();
+      setTimeout(paintSave, 1650);
+      const said = $('live-status');
+      if (said) said.textContent = 'Réglages enregistrés pour ' + workflow.name + '.';
+    } catch (error) {
+      notice(error.message);
+    }
   }
   /** Bloc Modèle: the model chosen (a list when there are several), its own block. */
   function modelBlock(workflow, list) {
@@ -812,6 +959,9 @@ export function setupStudio({
       name.title = workflow.description || workflow.name;
       block.append(name);
     }
+    // Not for a continuation: what it would keep would never come back (a clip is continued with
+    // the model that made it, never chosen).
+    if (!extending) block.append(saveButtonFor(workflow));
     return block;
   }
   /**
@@ -1007,6 +1157,7 @@ export function setupStudio({
         value => {
           style.name = value;
           name.title = leaf(value);
+          paintSave();
         },
       ),
       { track, value } = slider({
@@ -1053,6 +1204,7 @@ export function setupStudio({
           '',
           () => {
             seed.value = draft.seed = String(Math.floor(Math.random() * 2 ** 32));
+            paintSave();
           },
           'dice',
         );
@@ -1064,6 +1216,7 @@ export function setupStudio({
       seed.setAttribute('aria-label', 'Seed');
       seed.oninput = () => {
         draft.seed = seed.value;
+        paintSave();
       };
       aiTarget(seed, 'seed');
       dice.title = 'Tirer une seed au hasard';
@@ -1148,6 +1301,7 @@ export function setupStudio({
   function readout() {
     const text = document.querySelector?.('.studio-readout');
     if (text) text.textContent = readoutText();
+    paintSave();
   }
   /** The room the frame has: its stage, less a margin; a default before the stage is laid out. */
   function room(frame) {
@@ -2632,6 +2786,12 @@ export function setupStudio({
           ? 'Aucun workflow de son prêt : téléchargez les modèles de musique et de bruitages dans models\\audio.'
           : 'Aucun workflow prêt pour cette création : vérifiez Configuration, Workflows.',
       );
+    // The first time a mode shows its model, the settings saved for it come back (not over a
+    // proposal of Moodix AI, which sets its own).
+    if (!presetShown[mode]) {
+      presetShown[mode] = true;
+      if (!answering() && !extending) applyPreset(workflow);
+    }
     const desk = node('div', 'studio-desk'),
       write = node('section', 'studio-block is-input studio-write'),
       preview = node('section', 'studio-block is-preview studio-center'),
@@ -2802,6 +2962,9 @@ export function setupStudio({
     desk.append(...[write, preview, settings].map(grained), ruled(grained(outputs())));
     desk.classList.toggle('is-generating', Boolean(working));
     if (working) for (const control of desk.querySelectorAll('textarea, select, input')) control.disabled = true;
+    // What « Enregistrer » compares with, until the model is saved: the settings it showed first.
+    baselines[workflow.id] ??= canonical(snapshot(workflow));
+    paintSave();
     return desk;
   }
   function render() {

@@ -4071,3 +4071,54 @@ html[data-switch='chat']::view-transition-old(studio) {
   width: 18px;
   height: 18px;
 }
+
+/* ------------------------------------------------------------------ « Enregistrer » */
+/* moodix-design.md 7, 15 ter: a floppy disk of 32 px at the right of the model's name, no word
+   (its name in its tooltip); quiet while nothing changed, a light pill once something did since
+   the last saving, a green check just after one. */
+#studio-view .studio-save {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #6e7480;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+#studio-view .studio-save:hover:enabled,
+#studio-view .studio-save:focus-visible {
+  background: #1c1f26;
+  color: #eceef2;
+}
+#studio-view .studio-save[data-state='changed'] {
+  background: #eceef2;
+  color: #0b0c0f;
+}
+#studio-view .studio-save[data-state='saved'] {
+  background: transparent;
+  color: #22a060;
+}
+:root[data-theme='light'] #studio-view .studio-save[data-state='changed'] {
+  background: #12141a;
+  color: #eceef2;
+}
+#studio-view .studio-save svg {
+  width: 16px;
+  height: 16px;
+}
+#studio-view .studio-save[data-state='saved'] .studio-save-disk,
+#studio-view .studio-save:not([data-state='saved']) .studio-save-check {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  #studio-view .studio-save {
+    transition: none;
+  }
+}

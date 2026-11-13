@@ -37,6 +37,7 @@ import { generatedMedia } from './lib/generated-media.mjs';
 import { validateNativeWorkflow } from './lib/native-workflows.mjs';
 import { families, familyTemplate } from './lib/families.mjs';
 import { ProgressHistory } from './lib/generation-progress.mjs';
+import { StudioPresets } from './lib/studio-presets.mjs';
 import { convertKreaWorkflow } from './lib/native-workflow-conversion.mjs';
 import { importComfyWorkflow } from './lib/comfy-import.mjs';
 import { previewWorkflowImport } from './lib/workflow-import.mjs';
@@ -286,6 +287,8 @@ export async function createApplication({
   const history = new History(historyDir);
   let historySaves = Promise.resolve();
   const projects = new Projects(join(dataDir, 'projects.json'));
+  // « Enregistrer » of the Studio: the settings kept per model, apart from the workflows.
+  const studioPresets = new StudioPresets(join(dataDir, 'studio-presets.json'));
   const attachmentUrl = (conversationId, file) =>
     `/media/attachments/${conversationId}/${file}?key=${mediaKey(conversationId + '/' + file, 'attachment')}`;
   const historyView = record => ({
@@ -872,9 +875,14 @@ export async function createApplication({
       // The Studio: where its results are kept, and the style LoRAs ComfyUI offers.
       if (req.method === 'GET' && path === '/api/studio') {
         // Asked together: the workflows are read from the disk, the LoRAs from ComfyUI.
-        const [tools, styles] = await Promise.all([runtime.tools.studio(), generation.styles()]);
+        const [tools, styles, presets] = await Promise.all([
+          runtime.tools.studio(),
+          generation.styles(),
+          studioPresets.all(),
+        ]);
         // `legacyId`: the Studio of before, whose creations had no conversation, still listed apart.
-        return send(200, { legacyId: STUDIO_ID, enabled: generation.config.enabled === true, tools, styles });
+        // `presets`: the settings saved for each model (« Enregistrer »).
+        return send(200, { legacyId: STUDIO_ID, enabled: generation.config.enabled === true, tools, styles, presets });
       }
       if (req.method === 'GET' && path === '/api/tools/job') {
         const job = runtime.status();
@@ -1443,6 +1451,10 @@ export async function createApplication({
         await gallery.remove(body.conversationId ?? STUDIO_ID, body.id);
         return send(200, { removed: body.id });
       }
+      // « Enregistrer » of the Studio: the settings of a model as the Studio has them, kept apart
+      // from its workflow (Configuration › Workflows is never touched), given back when it is chosen.
+      if (req.method === 'POST' && path === '/api/studio/preset')
+        return send(200, { workflow: body.workflow, preset: await studioPresets.save(body.workflow, body.preset) });
       // What the user typed in the Studio, rewritten by the chat model as a full prompt.
       if (path === '/api/studio/enrich') {
         if (typeof body.prompt !== 'string' || !body.prompt.trim()) throw problem('Écrivez d’abord quelques mots à enrichir.');
