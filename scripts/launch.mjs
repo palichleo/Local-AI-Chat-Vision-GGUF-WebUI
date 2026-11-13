@@ -13,6 +13,8 @@ export async function runLauncher({
   // Started by the application itself (/api/relaunch): a moment of activity in the page (a
   // conversation saved, the context counted) is waited out instead of ending the relaunch.
   waitIdle = 0,
+  // « Redémarrer »: the running instance is replaced even when its files are those of the folder.
+  restart = false,
   // How long an instance may take to say who it is. An instance of an earlier version reads its
   // whole workflow catalog to answer, seconds of it while its model loads.
   answerTimeout = 10000,
@@ -77,7 +79,7 @@ export async function runLauncher({
         );
       if (boot.installationId !== sources.installationId)
         throw Error('Le port est utilisé par Atelier local dans un autre dossier. Aucun processus n’a été arrêté.');
-      if (boot.sourceRevision !== sources.sourceRevision || boot.version !== local.version) {
+      if (restart || boot.sourceRevision !== sources.sourceRevision || boot.version !== local.version) {
         const busy = value =>
           value.updating ||
           value.status?.busy ||
@@ -87,7 +89,7 @@ export async function runLauncher({
         let response;
         while (true) {
           if (!busy(boot)) {
-            console.log('Chargement des derniers fichiers de ce dossier…');
+            console.log(restart ? 'Redémarrage de l’application…' : 'Chargement des derniers fichiers de ce dossier…');
             response = await fetch(url + '/api/shutdown', {
               method: 'POST',
               headers: { Authorization: 'Bearer ' + boot.token, 'Content-Type': 'application/json' },
@@ -242,6 +244,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       port: portArg ? Number(portArg.split('=')[1]) : 8787,
       open: process.argv.includes('--open') && !process.argv.includes('--no-open'),
       waitIdle: process.argv.includes('--wait-idle') ? 60000 : 0,
+      restart: process.argv.includes('--restart'),
       signal: controller.signal,
     });
   } catch (error) {

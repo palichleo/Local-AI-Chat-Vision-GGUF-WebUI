@@ -2634,6 +2634,22 @@ video.studio-frame-result {
   opacity: 0.8;
 }
 
+/* « Redémarrer », beside « Fermer l'application », in the same quiet words. */
+.settings-footer .app-restart {
+  margin-right: auto;
+  padding: 8px 0;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-footer .app-restart:hover:enabled {
+  color: var(--ink);
+}
+#settings .settings-footer .app-shutdown {
+  margin-right: 18px;
+}
+
 /* ------------------------------------------------------------------ Chat ⇄ Studio */
 /* One movement, all at once and as quick as the screen of the Studio taking a new format: going
    to the Studio, the chat folds into its bar at the bottom while the Studio comes in; opening the

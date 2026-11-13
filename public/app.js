@@ -427,6 +427,10 @@ async function restoreUpdate() {
   contextMeter.schedule();
   if (state.conversationId) await workflowsUI.renderGallery(state.conversationId);
   await api('updates/session/clear', {});
+  if (saved.restarted) {
+    $('live-status').textContent = 'Application redémarrée. Conversation restaurée.';
+    return;
+  }
   const result = await (await api('updates/install')).json();
   if (result.state === 'rolled-back' || result.state === 'error') notice(result.error);
   else $('live-status').textContent = 'Mise à jour installée. Conversation restaurée.';
@@ -551,6 +555,7 @@ function updateControls() {
     state.clearingHistory ||
     state.generationSettingsWorking ||
     !state.connected;
+  $('restart-app').disabled = $('shutdown-app').disabled;
   $('save-config').disabled =
     state.settingsReady === false ||
     state.generationSettingsWorking ||
@@ -1142,6 +1147,66 @@ async function shutdownApplication() {
   } catch (error) {
     state.closingApp = false;
     for (const [control, disabled] of controls) control.disabled = disabled;
+    notice(error.message);
+  } finally {
+    updateControls();
+  }
+}
+
+/**
+ * « Redémarrer » (Settings, beside « Fermer l'application »): the application starts again by
+ * itself, its server and its model, from the files of its folder. The open conversation, its draft
+ * and its images are kept for the page to take back, as after an update; the page loads again
+ * from the new instance once it answers.
+ */
+async function restartApplication() {
+  if ($('restart-app').disabled) return;
+  if (settingsGuard.isDirty()) return requestSettingsClose(() => restartApplication());
+  const token = state.token;
+  state.closingApp = true;
+  updateControls();
+  try {
+    if (!(await persistConversation()))
+      throw Error('La conversation n’a pas été sauvegardée. L’application reste ouverte.');
+    await historyWrite;
+    $('settings').close();
+    $('update-title').textContent = 'Redémarrage';
+    $('update-progress').textContent = 'Redémarrage de l’application…';
+    $('update-dialog').showModal();
+    await api('relaunch', {
+      always: true,
+      session: compactSession({
+        messages: state.messages,
+        archiveSnapshot: state.archiveSnapshot,
+        conversationId: state.conversationId,
+        conversationInstructions: state.conversationInstructions,
+        prompt: $('prompt').value,
+        images: state.images,
+        thinking: state.thinking,
+        title: $('conversation-title').textContent,
+      }),
+    });
+    const deadline = Date.now() + 120000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 750));
+      try {
+        const next = await (
+          await fetch('/api/bootstrap?brief=1', { cache: 'no-store', signal: AbortSignal.timeout(2000) })
+        ).json();
+        if (next?.token && next.token !== token) {
+          state.updateReload = true;
+          location.reload();
+          return;
+        }
+      } catch {
+        // Between the two instances: nothing answers for a moment.
+      }
+    }
+    throw Error('Redémarrage non confirmé. Si l’application ne revient pas, relance-la avec Lancer-Windows.cmd.');
+  } catch (error) {
+    state.closingApp = false;
+    $('update-dialog').close();
+    $('update-title').textContent = 'Mise à jour';
     notice(error.message);
   } finally {
     updateControls();
@@ -2509,6 +2574,7 @@ $('hf-token').addEventListener('keydown', event => {
 });
 $('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('shutdown-app').onclick = shutdownApplication;
+$('restart-app').onclick = restartApplication;
 $('settings-close').onclick = () => requestSettingsClose();
 $('settings-form').onsubmit = event => {
   event.preventDefault();

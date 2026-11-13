@@ -988,11 +988,32 @@ export async function createApplication({
         // Loads the files of this folder as they are now, without a hand on the launcher: the
         // launcher is started again in its own window, stops this instance (only if idle, see
         // /api/shutdown below) and starts the new one. For changes made from another program.
+        // `always` (« Redémarrer » in the settings): even when nothing changed; the open
+        // conversation, its draft and its images are kept for the page to take back, as after an
+        // update (a session too large or too long is left: the conversation is in the history).
         if (occupied())
           throw problem('Termine l’opération en cours avant de relancer l’application.', 409);
-        if ((await currentSources(root)).sourceRevision === sources.sourceRevision)
+        const always = body.always === true;
+        if (!always && (await currentSources(root)).sourceRevision === sources.sourceRevision)
           throw problem('Les fichiers de ce dossier n’ont pas changé depuis le lancement : rien à recharger.', 409);
-        launcher({ root, port: server.address().port });
+        if (always && body.session) {
+          let snapshot = null;
+          try {
+            snapshot = updateSession(body.session);
+          } catch {
+            // Not kept: the page starts on the history.
+          }
+          if (snapshot) {
+            await historySaves;
+            await history.flush();
+            await gallery.pending;
+            snapshot.gallery = snapshot.conversationId ? (await gallery.list(snapshot.conversationId)).runs : [];
+            snapshot = { ...compactSession(snapshot), restarted: true };
+            if (Buffer.byteLength(JSON.stringify(snapshot)) <= 40 * 1024 * 1024)
+              await atomicJson(join(dataDir, 'update-session.json'), snapshot);
+          }
+        }
+        launcher({ root, port: server.address().port, restart: always });
         return send(202, { relaunching: true });
       }
       if (path === '/api/shutdown') {
@@ -1927,10 +1948,17 @@ export async function createApplication({
 /**
  * Starts the launcher of this folder again, as a double click on it would: in a console window
  * of its own on Windows, in the background elsewhere. It finds the running instance, stops it
- * and starts the new one; if it cannot, the running instance simply stays.
+ * and starts the new one; if it cannot, the running instance simply stays. `restart`: the
+ * instance is replaced even when the files of the folder have not changed.
  */
-export function startLauncher({ root, port }, { platform = process.platform, spawnProcess = spawn } = {}) {
-  const script = [process.execPath, join(root, 'scripts', 'launch.mjs'), `--port=${port}`, '--wait-idle'];
+export function startLauncher({ root, port, restart = false }, { platform = process.platform, spawnProcess = spawn } = {}) {
+  const script = [
+    process.execPath,
+    join(root, 'scripts', 'launch.mjs'),
+    `--port=${port}`,
+    '--wait-idle',
+    ...(restart ? ['--restart'] : []),
+  ];
   const [command, ...args] =
     platform === 'win32' ? ['cmd.exe', '/c', 'start', 'Atelier local', '/D', root, ...script] : script;
   const child = spawnProcess(command, args, { cwd: root, stdio: 'ignore', detached: true, windowsHide: true });
