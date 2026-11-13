@@ -9,6 +9,8 @@ an optional scalar alpha (the pair is scaled by alpha / rank). Tools name them d
   found again from the names of the model's own layers;
 
 the layer prefixed or not (``diffusion_model.``, ``model.diffusion_model.``, ``transformer.``).
+A pair may also move a vector of the model, such as a norm's scale (``<norm>.scale.lora_down.weight``,
+written with dots): its product, of the vector's size, is added to it.
 LoKr, LoHa and DoRA are other kinds of adapters, not pairs: they are named as such.
 """
 
@@ -59,8 +61,15 @@ def lora_pairs(keys, targets):
             target = kohya.get(stem)
             if target is None:
                 for prefix in PREFIXES:
-                    if stem.startswith(prefix) and stem[len(prefix) :] + '.weight' in targets:
-                        target = stem[len(prefix) :] + '.weight'
+                    if not stem.startswith(prefix):
+                        continue
+                    name = stem[len(prefix) :]
+                    if name + '.weight' in targets:
+                        target = name + '.weight'
+                        break
+                    # A vector of the model named whole (a norm's scale), not a layer.
+                    if name in targets and not name.endswith('.weight'):
+                        target = name
                         break
             up = stem + up_end
             if target is None or up not in keys or target in pairs:

@@ -265,7 +265,18 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
             value = tensor(stores['model'], rename[key])
             if value.numel() != parameter.numel():
                 raise ValueError('Transformer shape mismatch: ' + key)
-            set_module_tensor_to_device(transformer, key, device, value=value.reshape(parameter.shape), dtype=dtype)
+            value = value.reshape(parameter.shape)
+            # A LoRA may move a norm's scale too: its product is added here, once.
+            # Names of their own: `source`, `scale` and others name the picture further on.
+            for lora, lora_strength in adapters:
+                moved = pool.lora_layers(lora).get(rename[key].removeprefix('model.diffusion_model.'))
+                if moved:
+                    lora_down, lora_up, lora_alpha = (
+                        stores[lora].get_tensor(name).to(device).float() if name else None for name in moved
+                    )
+                    rate = lora_alpha.item() / lora_down.shape[0] if lora_alpha is not None else 1
+                    value = value.float() + lora_strength * rate * (lora_up @ lora_down).reshape(parameter.shape)
+            set_module_tensor_to_device(transformer, key, device, value=value, dtype=dtype)
         transformer = load_streamed(transformer, names, pool)
         progress('transformer layers prepared', budget_gib=round(budget, 2))
         # The share that stays goes to the GPU now, in layer order, before the first step.

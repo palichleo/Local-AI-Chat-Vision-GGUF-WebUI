@@ -97,6 +97,24 @@ class Krea2Tests(unittest.TestCase):
             pairs, left = lora_pairs(entries, {key for key in base})
             self.assertFalse(left)
             self.assertIn('blocks.0.attn.wq.weight', pairs)
+        # A pair that moves a norm's scale (a vector), beside a layer's: read and checked by size.
+        norm = {'txtfusion.blocks.0.prenorm.scale': {'shape': [4]}}
+        moved = {
+            'diffusion_model.blocks.0.attn.wq.lora_A.weight': down,
+            'diffusion_model.blocks.0.attn.wq.lora_B.weight': up,
+            'diffusion_model.txtfusion.blocks.0.prenorm.scale.lora_down.weight': {'shape': [1, 1]},
+            'diffusion_model.txtfusion.blocks.0.prenorm.scale.lora_up.weight': {'shape': [4, 1]},
+            'diffusion_model.txtfusion.blocks.0.prenorm.scale.alpha': alpha,
+        }
+        validate_lora(moved, base | norm)
+        pairs, left = lora_pairs(moved, set(base | norm))
+        self.assertFalse(left)
+        self.assertEqual(
+            pairs['txtfusion.blocks.0.prenorm.scale'][0],
+            'diffusion_model.txtfusion.blocks.0.prenorm.scale.lora_down.weight',
+        )
+        with self.assertRaisesRegex(ValueError, 'target/pair'):
+            validate_lora(moved, base | {'txtfusion.blocks.0.prenorm.scale': {'shape': [5]}})
         # Another kind of adapter, or a LoRA of another model: said as such.
         with self.assertRaisesRegex(ValueError, 'LoKr'):
             validate_lora({'blocks.0.attn.wq.lokr_w1': down, 'blocks.0.attn.wq.lokr_w2': up}, base)

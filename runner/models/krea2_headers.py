@@ -57,14 +57,13 @@ def validate_lora(entries, model):
     for target, (down, up, alpha) in pairs.items():
         shape, pair = entries[down]['shape'], entries[up]['shape']
         base = model.get(target, model.get('model.diffusion_model.' + target, {})).get('shape', [])
-        if (
-            len(base) != 2
-            or len(shape) != 2
-            or len(pair) != 2
-            or shape[0] <= 0
-            or shape[0] != pair[1]
-            or [pair[0], shape[1]] != base
-        ):
+        # A layer takes a pair of its own shape; a vector (a norm's scale), a product of its size.
+        fits = (
+            [pair[0], shape[1]] == base
+            if target.endswith('.weight')
+            else len(base) == 1 and pair[0] * shape[1] == base[0]
+        )
+        if len(shape) != 2 or len(pair) != 2 or shape[0] <= 0 or shape[0] != pair[1] or not fits:
             raise ValueError('Incompatible LoRA target/pair: ' + down)
         if alpha and math.prod(entries[alpha]['shape']) != 1:
             raise ValueError('Invalid LoRA alpha')
