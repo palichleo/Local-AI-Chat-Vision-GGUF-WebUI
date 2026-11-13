@@ -1788,8 +1788,8 @@ video.studio-frame-result {
 /* ------------------------------------------------------------------ film grain, of the interface */
 /* Part of the look, never of a creation: the grain lies in the background of the surfaces (the
    blocks of the Studio, the screen around the picture, the message box, the cards), under what
-   they hold. Fine and hard: fractal noise of one octave, grey, contrast raised. Still at rest;
-   while a creation is being made, the grain of the preview moves. */
+   they hold. Fine and hard: fractal noise of one octave, grey, contrast raised. Still: a generation
+   running or not, it does not move. */
 :root {
   --grain-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='1' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncG type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncB type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23g)'/%3E%3C/svg%3E");
   --grain-strength: 0.42;
@@ -1822,43 +1822,7 @@ video.studio-frame-result {
   opacity: var(--grain-strength);
   transition: opacity 0.6s ease;
 }
-.studio-desk.is-generating .studio-block.is-preview::before,
-.studio-desk.is-generating .studio-screen::before {
-  opacity: 0.75;
-  animation: interface-grain 1s steps(1) infinite;
-}
-@keyframes interface-grain {
-  0% {
-    background-position: 0 0;
-  }
-  12.5% {
-    background-position: -9px 6px;
-  }
-  25% {
-    background-position: 7px -10px;
-  }
-  37.5% {
-    background-position: -4px 10px;
-  }
-  50% {
-    background-position: 10px 3px;
-  }
-  62.5% {
-    background-position: -10px -5px;
-  }
-  75% {
-    background-position: 5px 8px;
-  }
-  87.5% {
-    background-position: -6px -9px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .studio-desk.is-generating .studio-block.is-preview::before,
-  .studio-desk.is-generating .studio-screen::before {
-    animation: none;
-  }
-}
+/* The grain stays still, a generation running or not: it is of the surfaces, not of what moves. */
 /* Never over a picture, a clip or a sound. */
 .film-grain,
 .picture-grain {
@@ -2245,7 +2209,7 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
 }
 @container studio (min-width: 900px) {
   .studio-desk {
-    min-height: 460px;
+    min-height: 400px;
     grid-template-rows: minmax(0, 1fr) var(--out-h);
   }
 }
@@ -2500,4 +2464,107 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
     height: 150px;
     min-height: 150px;
   }
+}
+
+/* While a creation is made, the screen of the Studio shows the waiting animation until the first
+   picture comes; then the picture so far shows as it is, with no veil moving over it. */
+#studio-view .studio-frame.is-busy.has-preview::before,
+#studio-view .studio-frame.is-busy.has-preview::after {
+  opacity: 0;
+  animation: none;
+}
+
+/* The message box of the Studio, on one line: the attachment, thinking and the Studio label on the
+   left, the text, the send button. It does not grow: past two lines its text scrolls in it, so the
+   Studio keeps its height (that is the rule: the message box scrolls, not the page). The share of
+   the context sits under its right end, in the margin, without a line of its own. */
+body[data-view='studio'] .composer-region {
+  position: relative;
+}
+body[data-view='studio'] #prompt {
+  max-height: 66px;
+  overflow-y: auto;
+}
+body[data-view='studio'] #chat-form .tool-separator {
+  display: none;
+}
+body[data-view='studio'] #chat-form .composer-options {
+  gap: 4px;
+}
+body[data-view='studio'] #thinking {
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+  font-size: 0;
+}
+body[data-view='studio'] #thinking svg {
+  width: 15px;
+  height: 15px;
+}
+body[data-view='studio'] .context-meter {
+  position: absolute;
+  right: calc(var(--pad) + 8px);
+  bottom: 0;
+  margin: 0;
+  padding: 0 0 2px;
+}
+body[data-view='studio'] .workspace:has(#messages) .composer-region {
+  padding-bottom: 18px;
+}
+
+/* Scroll bars: thin and quiet, a thumb that shows without a track. */
+:root {
+  --scroll-thumb: rgba(255, 255, 255, 0.13);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.26);
+}
+:root[data-theme='light'] {
+  --scroll-thumb: rgba(18, 20, 26, 0.16);
+  --scroll-thumb-hover: rgba(18, 20, 26, 0.3);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+.chat-area,
+.asset-pane {
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+*:hover,
+.chat-area:hover,
+.asset-pane:hover {
+  scrollbar-color: var(--scroll-thumb-hover) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scroll-thumb) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover) padding-box;
+}
+/* The head of the Sortie, at its top left: how many, then where from, in the same quiet words. */
+.studio-block.is-output .studio-block-head {
+  justify-content: flex-start;
+}
+.studio-block.is-output .studio-count {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.studio-block.is-output .studio-count:not(:empty) + .studio-source-pick::before {
+  content: none;
+}
+.studio-output-tools {
+  gap: 10px;
 }

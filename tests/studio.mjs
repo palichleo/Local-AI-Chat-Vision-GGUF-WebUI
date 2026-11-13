@@ -242,10 +242,10 @@ test('under the preview: 1:1, 16:9 and 9:16, and a fourth format takes the place
   assert.deepEqual(shownFormats(all, '4:3'), { main: ['1:1', '16:9', '9:16'], extra: '4:3' });
   // A model that cannot make a square shows the two others.
   assert.deepEqual(shownFormats(['16:9', '9:16', '21:9'], '21:9'), { main: ['16:9', '9:16'], extra: '21:9' });
-  // The count of the Sortie, in capitals.
+  // The count of the Sortie, in the words of the choice beside it.
   assert.equal(resultCount(0), '');
-  assert.equal(resultCount(1), '1 RÉSULTAT');
-  assert.equal(resultCount(3), '3 RÉSULTATS');
+  assert.equal(resultCount(1), '1 résultat');
+  assert.equal(resultCount(3), '3 résultats');
 });
 
 test('a proposal of Moodix AI read in the Studio’s terms, with what the assistant may change', async () => {
@@ -776,7 +776,7 @@ test('the last creation stays on the screen; another conversation starts from an
     assert.deepEqual(opened, ['r1']);
     // In the Sortie, with its count; on the screen still after a visit of the chat.
     assert.equal(body.find('studio-item').length, 1);
-    assert.equal(body.find('studio-count')[0].textContent, '1 RÉSULTAT');
+    assert.equal(body.find('studio-count')[0].textContent, '1 résultat');
     // A creation is shown as it is, with no grain over it; its actions sit on its picture, so the
     // Sortie keeps its height. No title on the blocks: their colour says what they are for.
     assert.deepEqual(body.find('picture-grain'), []);

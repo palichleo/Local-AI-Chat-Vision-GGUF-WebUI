@@ -129,9 +129,9 @@ export function proposedValues(request, offered = []) {
   };
 }
 
-/** A count of results, in capitals: « 1 RÉSULTAT », « 3 RÉSULTATS ». */
+/** A count of results, written like the choice beside it: « 1 résultat », « 3 résultats ». */
 export function resultCount(count) {
-  return count ? `${count} RÉSULTAT${count > 1 ? 'S' : ''}` : '';
+  return count ? `${count} résultat${count > 1 ? 's' : ''}` : '';
 }
 
 export function setupStudio({
@@ -1368,13 +1368,6 @@ export function setupStudio({
     if (mediaOf(record) === 'audio') return p.seconds ? figures(p.seconds) : '';
     return p.frames && p.fps ? figures(p.frames / p.fps) : '';
   }
-  function formatText(record) {
-    const p = record.parameters ?? {},
-      output = { ...record.outputs?.[0], ...measured.get(record.id) },
-      width = p.width ?? output.width,
-      height = p.height ?? output.height;
-    return width && height ? (formatOf(width, height)?.id ?? `${width}×${height}`) : '';
-  }
   async function remove(record) {
     try {
       await api('studio/delete', { id: record.id, conversationId: place() });
@@ -1494,7 +1487,6 @@ export function setupStudio({
         number ? '#' + number : '',
         media === 'audio' ? length(record) : '',
         media === 'video' ? length(record) : '',
-        media !== 'audio' ? formatText(record) : '',
         media === 'audio' ? (record.workflowName || '').toUpperCase() : '',
       ]
         .filter(Boolean)
@@ -1535,7 +1527,8 @@ export function setupStudio({
             ]
           : [];
     thumb.append(actions(record, extra));
-    card.append(thumb, title, meta);
+    card.append(thumb, title);
+    if (meta.textContent) card.append(meta);
     return card;
   }
   function outputs() {
@@ -1544,12 +1537,13 @@ export function setupStudio({
       about = modeOf(mode);
     section.setAttribute('aria-label', 'Sortie');
     const extra = node('div', 'studio-output-tools');
+    extra.append(node('span', 'studio-count', resultCount(mine.length)));
     if (legacyRuns.length) {
       // The creations of the Studio of before, which had no conversation: still there, apart.
       const where = select(
         [
           ['conversation', 'Cette conversation'],
-          ['legacy', `Ancien Studio (${legacyRuns.length})`],
+          ['legacy', 'Ancien Studio'],
         ],
         legacy ? 'legacy' : 'conversation',
         value => {
@@ -1563,7 +1557,6 @@ export function setupStudio({
       where.disabled = Boolean(working || proposal);
       extra.append(where);
     }
-    extra.append(node('span', 'studio-count', resultCount(mine.length)));
     section.append(blockHead('', { extra }));
     if (!mine.length) {
       section.append(node('p', 'studio-empty asset-empty', about.none));
