@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { GenerationAssets } from '../lib/generation-assets.mjs';
@@ -153,4 +153,30 @@ test('a model file is inspected again once it changed, never taken from what was
       /structure|signature|attendu/i,
     );
   });
+});
+
+test('a model found again by its name is remembered while it stays there, searched again once gone', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'assets-locate-'));
+  const first = join(root, 'first'),
+    second = join(root, 'second');
+  await mkdir(join(first, 'sub'), { recursive: true });
+  await mkdir(second, { recursive: true });
+  await writeFile(join(first, 'sub', 'model.safetensors'), 'x');
+  let roots = [first, second];
+  const assets = new GenerationAssets(join(root, 'registry.json'), { roots: () => roots });
+  try {
+    assert.equal(await assets.locate('model.safetensors'), join(first, 'sub', 'model.safetensors'));
+    // A namesake appears where it would be found first: the file found stays while it is there
+    // (the folders are not read again at each call)...
+    await writeFile(join(first, 'model.safetensors'), 'y');
+    assert.equal(await assets.locate('model.safetensors'), join(first, 'sub', 'model.safetensors'));
+    // ...and once gone, the folders are searched again.
+    await rm(join(first, 'sub', 'model.safetensors'));
+    assert.equal(await assets.locate('model.safetensors'), join(first, 'model.safetensors'));
+    // Other folders: searched in them alone.
+    roots = [second];
+    assert.equal(await assets.locate('model.safetensors'), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
