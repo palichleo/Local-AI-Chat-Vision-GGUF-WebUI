@@ -745,25 +745,8 @@ body:not([data-view='studio']) .kind-tabs {
   background: var(--hover);
   color: var(--ink);
 }
-/* While Moodix AI sets the Studio: what it does, and the way to take over. */
-.ai-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 4px 4px 12px;
-  border-radius: 999px;
-  background: #15171c;
-  box-shadow: 0 0 0 1px var(--ai-soft);
-}
-:root[data-theme='light'] .ai-status {
-  background: var(--surface);
-}
-.ai-status[hidden] {
-  display: none;
-}
 /* Moodix AI is a small tile with cut corners, as the letters of MDX are, in their three
    colours: blue, yellow, red, in bands across it. No glow. */
-.ai-dot,
 .ai-mark,
 .message-avatar {
   flex: none;
@@ -771,30 +754,6 @@ body:not([data-view='studio']) .kind-tabs {
   clip-path: polygon(30% 0, 100% 0, 100% 70%, 70% 100%, 0 100%, 0 30%);
   background: linear-gradient(135deg, var(--fn-input) 0 34%, var(--fn-output) 37% 63%, var(--fn-action) 66% 100%);
   box-shadow: none;
-}
-.ai-dot {
-  width: 10px;
-  height: 10px;
-}
-.ai-status-text {
-  font-size: 13px;
-  color: var(--soft);
-  white-space: nowrap;
-}
-.ai-takeover {
-  min-height: 36px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 0;
-  background: var(--selected);
-  color: var(--on-selected);
-  font-weight: 800;
-  white-space: nowrap;
-}
-@media (max-width: 999px) {
-  .ai-status-text {
-    display: none;
-  }
 }
 @media (max-width: 519px) {
   #mode-switch {
@@ -1332,7 +1291,7 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   text-transform: none;
 }
 /* A setting Moodix AI may change (« Assistant » in its workflow) wears its tile, small (see
-   .ai-dot). */
+   .message-avatar). */
 .ai-mark {
   width: 7px;
   height: 7px;
@@ -2294,7 +2253,7 @@ video.studio-frame-result {
   opacity: 0;
   transform: translate(var(--ai-x, 50vw), var(--ai-y, 50vh));
   transition:
-    transform 0.45s cubic-bezier(0.45, 0, 0.2, 1),
+    transform 0.25s cubic-bezier(0.45, 0, 0.2, 1),
     opacity 0.25s ease;
 }
 .ai-cursor[hidden] {
@@ -2983,6 +2942,11 @@ html[data-switch='chat']::view-transition-old(studio) {
   ::view-transition-new(*) {
     animation: none !important;
   }
+}
+
+/* « ∞ » of « Générations par message » in the middle of its box, level with − and +. */
+#settings .iteration-stepper span {
+  line-height: 30px;
 }
 
 /* Scroll bars: thin and quiet, a thumb without track nor arrows. */

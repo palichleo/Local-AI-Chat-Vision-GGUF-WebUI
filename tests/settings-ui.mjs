@@ -294,8 +294,9 @@ test('a generation settings operation locks settings saving, model fields and en
   await ui.open();
   assert.equal(typeof ui.workflowOptions.onSettingsBusyChange, 'function');
   ui.workflowOptions.onSettingsBusyChange(true);
-  for (const id of ['save-config', 'config-fields', 'toggle-engine', 'settings-update-install'])
-    assert.equal(ui.$(id).disabled, true, id);
+  for (const id of ['save-config', 'config-fields', 'toggle-engine']) assert.equal(ui.$(id).disabled, true, id);
+  // An update is never held by the page: the server refuses while busy, and the page asks again.
+  assert.equal(ui.$('settings-update-install').disabled, false);
   await ui.saveConfiguration();
   assert.equal(
     ui.calls.some(call => call.route === 'settings'),

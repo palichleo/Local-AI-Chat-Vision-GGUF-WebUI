@@ -115,7 +115,7 @@ for (const mode of ['unresponsive', 'status-write-failure'])
           ['scripts/apply-update.mjs', 'worker.mjs'],
         ])
           await cp(join(project, from), join(workspace, to));
-        const plan = { root, workspace, port, version: '0.3.0', previousVersion: '0.2.0' };
+        const plan = { root, workspace, port, version: '0.3.0', previousVersion: '0.2.0', confirmTimeout: 20000 };
         await writeFile(join(workspace, 'plan.json'), JSON.stringify(plan));
         let workerExit;
         if (mode === 'status-write-failure') {

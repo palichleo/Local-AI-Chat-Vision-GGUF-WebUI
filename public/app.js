@@ -122,6 +122,8 @@ async function api(route, body, options = {}) {
     const data = await response.json().catch(() => ({}));
     throw Object.assign(new Error(data.error || `La requête a échoué (${response.status}).`), {
       status: response.status,
+      // Busy for a moment: worth asking again (see installFromButton).
+      busy: data.busy === true,
     });
   }
   return response;
@@ -436,9 +438,10 @@ async function restoreUpdate() {
   else $('live-status').textContent = 'Mise à jour installée. Conversation restaurée.';
 }
 
-async function installUpdate() {
-  if (settingsGuard.isDirty()) return requestSettingsClose(() => installUpdate());
-  if ($('settings-update-install').disabled) return;
+async function installUpdate({ confirmed = false } = {}) {
+  // Unsaved settings are saved or let go first; then the update goes on, never dropped in silence.
+  if (settingsGuard.isDirty()) return requestSettingsClose(() => installUpdate({ confirmed: true }));
+  if (state.updating || state.closingApp || (!confirmed && $('settings-update-install').disabled)) return;
   state.updating = true;
   updateControls();
   $('settings').close();
@@ -495,22 +498,9 @@ function updateControls() {
   const s = state.status;
   projectUI.sync();
   $('settings-update-check').disabled = state.updating || !!state.checkingUpdates;
-  $('settings-update-install').disabled =
-    state.projectWorking ||
-    state.resourceWorking ||
-    state.generationSettingsWorking ||
-    state.updating ||
-    state.generating ||
-    state.preparing ||
-    state.operation ||
-    state.settingsLoading ||
-    state.loadingHistory ||
-    state.savingHistory ||
-    state.savingPreferences ||
-    !state.connected ||
-    s.busy ||
-    !!s.toolJob ||
-    ['loading', 'stopping'].includes(s.state);
+  // Never held by what the page believes: a flag left set by mistake must not lock updates for
+  // good. The server refuses while it is busy, and the page asks again (installFromButton).
+  $('settings-update-install').disabled = state.updating || state.closingApp || !state.connected;
   const toolBusy = !!s.toolJob;
   $('generation-recover').hidden = !s.toolJob?.blocked;
   const running = ['loading', 'ready', 'stopping'].includes(s.state);
@@ -1246,9 +1236,10 @@ async function saveConfiguration() {
   }
 }
 
-async function shutdownApplication() {
-  if ($('shutdown-app').disabled) return;
-  if (settingsGuard.isDirty()) return requestSettingsClose(() => shutdownApplication());
+async function shutdownApplication({ confirmed = false } = {}) {
+  if (state.closingApp || (!confirmed && $('shutdown-app').disabled)) return;
+  // After the question about unsaved settings it goes on: the server says if it cannot.
+  if (settingsGuard.isDirty()) return requestSettingsClose(() => shutdownApplication({ confirmed: true }));
   const controls = [...document.querySelectorAll('button,input,textarea,select')].map(control => [
     control,
     control.disabled,
@@ -1278,9 +1269,10 @@ async function shutdownApplication() {
  * and its images are kept for the page to take back, as after an update; the page loads again
  * from the new instance once it answers.
  */
-async function restartApplication() {
-  if ($('restart-app').disabled) return;
-  if (settingsGuard.isDirty()) return requestSettingsClose(() => restartApplication());
+async function restartApplication({ confirmed = false } = {}) {
+  if (state.closingApp || (!confirmed && $('restart-app').disabled)) return;
+  // After the question about unsaved settings it goes on: the server says if it cannot.
+  if (settingsGuard.isDirty()) return requestSettingsClose(() => restartApplication({ confirmed: true }));
   const token = state.token;
   state.closingApp = true;
   updateControls();
@@ -2273,7 +2265,7 @@ async function sendMessage(event) {
       if (result.failed && state.status.state !== 'ready')
         throw Error(result.error || 'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
       view.note.textContent = result.failed ? result.error || 'Analyse indisponible.' : '';
-      if (result.denied || result.failed || iterations >= (state.generation?.maxIterations || 5)) allowTools = false;
+      if (result.denied || result.failed || iterations >= (state.generation?.maxIterations || 10)) allowTools = false;
       // After a refusal or a failure the model explains it: it does not go on inspecting outputs.
       if (result.denied || result.failed) resourceReads = 8;
       // Not seen (no analysis chosen for it): its text would only repeat what the user sees.

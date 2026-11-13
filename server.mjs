@@ -1225,7 +1225,10 @@ export async function createApplication({
           pickingFile ||
           ['loading', 'stopping'].includes(engine.state)
         )
-          throw problem('Attends la fin de l’opération en cours avant la mise à jour.', 409);
+          // Busy: the page asks again (installFromButton) instead of dropping the click.
+          throw Object.assign(problem('Attends la fin de l’opération en cours avant la mise à jour.', 409), {
+            busy: true,
+          });
         let snapshot;
         try {
           snapshot = updateSession(body.session);
@@ -1949,6 +1952,7 @@ export async function createApplication({
       }
       send(error.status || 500, {
         error: error.status ? error.message : 'Erreur locale inattendue. Consulte le terminal de l’application.',
+        ...(error.busy ? { busy: true } : {}),
       });
       if (!error.status && error.name !== 'AbortError') console.error(error);
     }

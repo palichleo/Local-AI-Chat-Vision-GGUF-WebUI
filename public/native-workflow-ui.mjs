@@ -94,7 +94,7 @@ export function setupNativeWorkflows(options) {
     busy = false,
     working = false,
     unlimited = false,
-    lastLimited = 5,
+    lastLimited = 10,
     version = 0,
     refreshVersion = 0,
     controller = new AbortController(),
@@ -653,7 +653,7 @@ export function setupNativeWorkflows(options) {
         $('generation-review-images').checked = config.reviewImages === true;
         $('generation-review').checked = config.reviewVideos === true;
         unlimited = config.maxIterations === 10000;
-        if (!unlimited) lastLimited = config.maxIterations || 5;
+        if (!unlimited) lastLimited = config.maxIterations || 10;
         $('generation-iterations').value = lastLimited;
         $('generation-python').value = config.pythonPath || '';
         for (const [key, [id, role]] of Object.entries(folderControls))
@@ -1547,7 +1547,7 @@ export function setupNativeWorkflows(options) {
     importStatus('');
   }
   $('generation-iterations').oninput = () => {
-    lastLimited = Number($('generation-iterations').value) || 5;
+    lastLimited = Number($('generation-iterations').value) || 10;
     syncLimit();
   };
   $('generation-minus').onclick = () => {

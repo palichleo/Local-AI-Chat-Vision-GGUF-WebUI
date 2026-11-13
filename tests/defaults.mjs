@@ -5,14 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApplication } from '../server.mjs';
 
-test('new installs save conversations by default and use five generation attempts, while choices survive restart', async () => {
+test('new installs save conversations by default and use ten generation attempts, while choices survive restart', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'atelier-defaults-'));
   let app;
   try {
     app = await createApplication({ port: 0, dataDir });
     let initial = await (await fetch(app.url + '/api/bootstrap')).json();
     assert.equal(initial.preferences.saveHistory, true);
-    assert.equal(initial.generation.maxIterations, 5);
+    assert.equal(initial.generation.maxIterations, 10);
     assert.equal(initial.generation.reviewVideos, false, 'A video is not analysed by the model unless asked.');
     assert.equal(initial.generation.reviewImages, false, 'An image is not analysed by the model unless asked.');
     assert.equal(initial.generation.enabled, true, 'Local generation is on from the start.');

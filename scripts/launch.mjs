@@ -220,7 +220,8 @@ export async function runLauncher({
       }
       restarting = true;
       console.log('Mise à jour en cours… Cette fenêtre reste active.');
-      boot = await ready(boot.token, 90000);
+      // Long enough for the new version to start and, if it cannot, the previous one to come back.
+      boot = await ready(boot.token, 180000);
       restarting = false;
     }
   } catch (error) {

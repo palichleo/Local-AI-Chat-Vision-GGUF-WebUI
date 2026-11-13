@@ -1152,12 +1152,10 @@ export function setupStudio({
   }
 
   // ------------------------------------------------------------------ Moodix AI sets the Studio
-  /** The top bar says it while the pointer works, with the way to take over. */
+  /** Said to screen readers while the pointer works; nothing shown: a touch of the user takes over. */
   function status(on) {
-    const pill = $('ai-status');
-    if (pill) pill.hidden = !on;
-    const take = $('ai-takeover');
-    if (take) take.onclick = on ? () => takeOver() : null;
+    const live = $('live-status');
+    if (live && on) live.textContent = 'Moodix AI règle le Studio.';
   }
   /** Where the pointer goes for a setting: the element that wears its key. */
   const targetOf = key =>
@@ -1165,15 +1163,15 @@ export function setupStudio({
       ? document.querySelector?.(`#studio-kinds [data-mode="${proposal?.mode ?? mode}"]`)
       : document.querySelector?.(`#studio-view [data-ai="${key}"]`);
   /**
-   * One step of the pointer: it goes (its glide, 0.45 s), it rings, it sets, it leaves a trace:
-   * about 0.75 s. Stops when the user takes over.
+   * One step of the pointer: it goes (its glide, 0.25 s), it rings, it sets, it leaves a trace:
+   * about 0.4 s. Stops when the user takes over.
    */
   async function stepTo(key, label, apply, { anchor } = {}) {
     if (!ai || ai.stopped) return false;
     ai.active = key;
     render();
     pointer?.move(targetOf(key), label, anchor);
-    await wait(pointer?.reduced() ? 200 : 475);
+    await wait(pointer?.reduced() ? 200 : 260);
     if (!ai || ai.stopped) return false;
     await apply();
     if (!ai || ai.stopped) return false;
@@ -1181,23 +1179,23 @@ export function setupStudio({
     ai.active = null;
     render();
     pointer?.follow(targetOf(key), anchor);
-    await wait(pointer?.reduced() ? 200 : 275);
+    await wait(pointer?.reduced() ? 200 : 140);
     return Boolean(ai && !ai.stopped);
   }
-  /** The prompt written as it is typed: fast, the whole of it in about a second and a quarter. */
+  /** The prompt written as it is typed: fast, the whole of it in about half a second. */
   async function typePrompt(draft, text) {
     const box = document.querySelector?.('#studio-view [data-ai="prompt"]');
     if (pointer?.reduced() || !box) {
       draft.prompt = text;
       return;
     }
-    const step = Math.max(2, Math.ceil(text.length / 80));
+    const step = Math.max(2, Math.ceil(text.length / 36));
     for (let index = step; index < text.length + step; index += step) {
       if (!ai || ai.stopped) return;
       draft.prompt = text.slice(0, index);
       box.value = draft.prompt;
       box.scrollTop = box.scrollHeight;
-      await wait(15);
+      await wait(14);
     }
     draft.prompt = text;
   }
@@ -1242,9 +1240,22 @@ export function setupStudio({
         } catch {
           // The view changed anyway, or did not: the proposal is shown where it is.
         }
-        if (!info) await load().catch(() => {});
+        const verb = request.tool || request.call?.function?.name;
+        // The tools read ahead may predate the workflow it proposes (the engine just ready, a
+        // workflow switched on): read again, rather than wait for a « Générer » with nothing to set.
+        if (!info || !offered(verb).some(item => item.name === request.workflowName)) await load().catch(() => {});
         if (!proposal || proposal.request !== request) return;
-        proposal.values = proposedValues(request, offered(request.tool || request.call?.function?.name));
+        if (!offered(verb).length) {
+          // Still nothing to set it with: said to the chat, which would otherwise wait for good.
+          settle();
+          proposal = null;
+          render();
+          reject(
+            new Error('Le Studio n’a aucun workflow prêt pour cette création : vérifiez Configuration, Workflows.'),
+          );
+          return;
+        }
+        proposal.values = proposedValues(request, offered(verb));
         await animate(proposal);
       })();
     });
@@ -1336,14 +1347,14 @@ export function setupStudio({
       targetOf('generate'),
       auto ? 'lance la génération (autorisé dans la configuration)' : 'attend ton accord',
     );
-    await wait(550);
+    await wait(300);
     if (!ai || ai.stopped || proposal !== current) return;
     status(false);
     if (auto) {
       endPointer();
       return approve();
     }
-    await wait(650);
+    await wait(350);
     if (ai && !ai.stopped && proposal === current) endPointer();
   }
   /** The images of a proposal, in the slots of their roles. */

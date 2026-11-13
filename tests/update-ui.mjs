@@ -35,6 +35,50 @@ test('install click sends the session once and reloads only when a replacement s
   assert.equal(reads, 2);
   assert.ok(progress.length > 0);
 });
+test('a busy server keeps the click: the install is asked again until it can start', async () => {
+  let asked = 0,
+    reloaded = 0;
+  const progress = [];
+  await module.installFromButton({
+    token: 'old',
+    session: { prompt: 'draft' },
+    api: async (route, body) => {
+      if (body) {
+        asked++;
+        if (asked < 3)
+          throw Object.assign(new Error('Attends la fin de l’opération en cours avant la mise à jour.'), {
+            status: 409,
+            busy: true,
+          });
+        return Response.json({ state: 'preparing' });
+      }
+      return Response.json({ state: 'restarting' });
+    },
+    bootstrap: async () => ({ token: 'new', updating: false }),
+    pause: async () => {},
+    onProgress: message => progress.push(message),
+    reload: () => {
+      reloaded++;
+    },
+  });
+  assert.equal(asked, 3);
+  assert.equal(reloaded, 1);
+  assert.ok(progress.some(message => /démarrera ensuite/.test(message)));
+  // Another refusal (no update to install) is said at once.
+  await assert.rejects(
+    module.installFromButton({
+      token: 'old',
+      session: {},
+      api: async () => {
+        throw Object.assign(new Error('Aucune mise à jour installable.'), { status: 409 });
+      },
+      bootstrap: async () => ({ token: 'old' }),
+      pause: async () => {},
+      onProgress() {},
+    }),
+    /Aucune mise à jour installable/,
+  );
+});
 test('a failed install surfaces its error and leaves the current page and draft intact', async () => {
   assert.equal(typeof module.installFromButton, 'function');
   let reloaded = false;
@@ -64,10 +108,7 @@ test('download failure keeps configuration, file selection and composer controls
     source.indexOf('function updateControls()'),
     source.indexOf('async function checkUpdates('),
   );
-  const install = source.slice(
-    source.indexOf('async function installUpdate()'),
-    source.indexOf('function applyTheme('),
-  );
+  const install = source.slice(source.indexOf('async function installUpdate('), source.indexOf('function applyTheme('));
   const nodes = new Map();
   const get = id => {
     if (!nodes.has(id))

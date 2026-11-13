@@ -11,8 +11,20 @@ export async function installFromButton({
   },
   pause = () => new Promise(resolve => setTimeout(resolve, 750)),
 }) {
-  await api('updates/install', { session });
-  const deadline = Date.now() + 180000;
+  // Busy for a moment (a model loading after the settings were saved, a generation ending): the
+  // server says so, and the click is kept, asked again until it can start.
+  const startBy = Date.now() + 90000;
+  for (;;) {
+    try {
+      await api('updates/install', { session });
+      break;
+    } catch (error) {
+      if (!error?.busy || Date.now() > startBy) throw error;
+      onProgress(`${error.message} La mise à jour démarrera ensuite.`);
+      await pause();
+    }
+  }
+  const deadline = Date.now() + 360000;
   onProgress('Téléchargement et préparation de la mise à jour…');
   while (Date.now() < deadline) {
     let status;

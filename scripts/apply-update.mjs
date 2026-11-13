@@ -73,7 +73,9 @@ async function restart(expectedVersion) {
       resolve();
     }),
   );
-  const deadline = Date.now() + 20000;
+  // A first start after an update can be slow (files scanned, catalog checked): a minute
+  // before it is given up and the previous version put back (a plan may say less: the tests).
+  const deadline = Date.now() + (Number(plan.confirmTimeout) > 0 ? Number(plan.confirmTimeout) : 60000);
   try {
     while (Date.now() < deadline) {
       if (spawnError || exited) throw spawnError || new Error('La nouvelle application s’est arrêtée.');
