@@ -951,10 +951,10 @@ body[data-view='studio'] .suggestions {
   gap: 8px;
 }
 /* ------------------------------------------------------------------ the chat in the Studio */
-/* The chat is one panel: its messages and its message box. In the Studio it is folded into a bar
-   at the bottom, in the three colours and without a word (the message box seen from afar); a
-   click opens it over everything, in the middle of the window, on its last lines. It folds back
-   into the bar when Moodix AI sets the Studio, on Échap, or on a click beside it. */
+/* The chat is one panel: its messages and its message box. In the Studio it is folded into a band
+   along the foot of the page (the message box seen from afar); a click opens it over everything,
+   in the middle of the window, on its last lines. It folds back into the band when Moodix AI sets
+   the Studio, on Échap, or on a click beside it. */
 .chat-panel {
   display: flex;
   flex-direction: column;
@@ -971,65 +971,114 @@ body[data-view='studio']:not([data-chat='open']) .chat-panel {
   display: none;
 }
 body[data-view='studio'] .chat-bar {
-  display: block;
+  display: flex;
 }
 /* Opened, the bar keeps its place: the Studio does not move under the chat. */
 body[data-view='studio'][data-chat='open'] .chat-bar {
   visibility: hidden;
 }
+/* As wide as the blocks of the Studio, against the bottom of the window: the chat icon, who
+   answers, the way to write, an arrow to open it; on top, the four colours of the logo. */
 .chat-bar {
   position: relative;
   flex: none;
-  width: min(calc(var(--chat-column) - 2 * var(--chat-side)), calc(100% - 2 * var(--pad)));
-  height: 30px;
-  margin: 0 auto 10px;
-  padding: 0;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% - 2 * var(--pad));
+  height: 44px;
+  margin: 0 auto;
+  padding: 0 16px;
   border: 0;
-  border-radius: 999px;
-  background: none;
+  border-radius: 0 0 12px 12px;
+  background: #15171c;
+  color: #aeb4bf;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  text-align: left;
   cursor: pointer;
-}
-/* The line: blue, yellow, red, as the letters of MDX and the tile of Moodix AI. It thickens under
-   the pointer, as a field does. */
-.chat-bar::before {
-  content: '';
-  position: absolute;
-  inset: 12px 0;
-  border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    var(--fn-input) 0 calc(100% / 3 - 2px),
-    transparent 0 calc(100% / 3 + 2px),
-    var(--fn-output) 0 calc(200% / 3 - 2px),
-    transparent 0 calc(200% / 3 + 2px),
-    var(--fn-action) 0
-  );
   transition:
-    inset 0.2s ease,
+    background-color 0.2s ease,
     box-shadow 0.3s ease;
 }
-.chat-bar:hover::before,
-.chat-bar:focus-visible::before {
-  inset: 9px 0;
+:root[data-theme='light'] .chat-bar {
+  background: var(--surface);
+  color: var(--muted);
+}
+.chat-bar:hover,
+.chat-bar:focus-visible {
+  background: var(--hover);
 }
 .chat-bar:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-/* Moodix AI writes while the chat is folded: a light runs along the bar. */
-.chat-bar::after {
+.chat-bar-rule {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 3px;
+  height: 2px;
+  overflow: hidden;
+}
+.chat-bar-rule span {
+  border-radius: 999px;
+}
+.chat-bar-rule span:nth-child(1) {
+  flex: 4;
+  background: #3d6bf5;
+}
+.chat-bar-rule span:nth-child(2) {
+  flex: 2;
+  background: #22a060;
+}
+.chat-bar-rule span:nth-child(3) {
+  flex: 3;
+  background: #f6c343;
+}
+.chat-bar-rule span:nth-child(4) {
+  flex: 1.5;
+  background: #e8402f;
+}
+.chat-bar-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--ink);
+}
+.chat-bar-name {
+  flex: none;
+  color: var(--ink);
+  font-weight: 800;
+  white-space: nowrap;
+}
+.chat-bar-hint {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.chat-bar-open {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  transform: rotate(-90deg);
+}
+/* Moodix AI writes while the chat is folded: a light runs along the colours. */
+.chat-bar-rule::after {
   content: '';
   position: absolute;
-  top: 12px;
-  bottom: 12px;
+  top: 0;
+  bottom: 0;
   left: 0;
   width: 18%;
-  border-radius: 999px;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent);
   opacity: 0;
   pointer-events: none;
 }
-.chat-bar.is-working::after {
+.chat-bar.is-working .chat-bar-rule::after {
   opacity: 1;
   animation: chat-bar-light 1.4s ease-in-out infinite;
 }
@@ -1042,13 +1091,13 @@ body[data-view='studio'][data-chat='open'] .chat-bar {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-bar.is-working::after {
+  .chat-bar.is-working .chat-bar-rule::after {
     left: 41%;
     animation: none;
   }
 }
-/* An answer came while the chat was folded: the bar glows until the chat is opened. */
-.chat-bar[data-unread='true']::before {
+/* An answer came while the chat was folded: the band glows until the chat is opened. */
+.chat-bar[data-unread='true'] {
   box-shadow: 0 0 16px rgba(246, 195, 67, 0.45);
 }
 /* Opened: over a dimmed Studio, the message box in the middle of the room left to the page
@@ -1080,6 +1129,19 @@ body[data-view='studio'][data-chat='open'] .chat-panel {
   border: 1px solid var(--line);
   background: var(--bg);
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
+  translate: 0 calc(-1 * var(--chat-lift, 0px));
+  transition: translate 0.35s ease;
+}
+/* A message sent: the conversation in the middle of the window, as a whole, and its message box
+   going down as the answer grows; app.js lifts it by half the room left (--chat-lift). */
+body[data-view='studio'][data-chat='open'][data-chat-sent] .chat-panel {
+  bottom: 32px;
+  max-height: calc(100% - 64px);
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-view='studio'][data-chat='open'] .chat-panel {
+    transition: none;
+  }
 }
 :root[data-theme='light'] body[data-view='studio'][data-chat='open'] .chat-panel {
   box-shadow: 0 24px 70px rgba(18, 20, 26, 0.22);
@@ -2886,14 +2948,15 @@ html[data-switch='open']::view-transition-new(chat) {
   object-fit: cover;
   object-position: center bottom;
 }
-/* The bar keeps its own size, at the foot of the moving box. */
+/* The band keeps its own size, at the foot of the moving box, from its left: its icon and the
+   name of Moodix AI stay whole while the box widens to it or narrows from it. */
 html[data-switch='studio']::view-transition-new(chat),
 html[data-switch='close']::view-transition-new(chat),
 html[data-switch='chat']::view-transition-old(chat),
 html[data-switch='open']::view-transition-old(chat) {
   height: 100%;
   object-fit: none;
-  object-position: center bottom;
+  object-position: left bottom;
 }
 /* The Studio comes down into place as the chat leaves it, and goes back up. */
 @keyframes studio-come {

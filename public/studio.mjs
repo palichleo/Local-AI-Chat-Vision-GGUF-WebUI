@@ -163,6 +163,9 @@ export function setupStudio({
   stopTurn = () => {},
   // Another conversation is open.
   onConversation = () => {},
+  // Resolves once the page has stopped moving (a change of view): drawing the Studio again then
+  // made the movement stutter.
+  afterMove = () => Promise.resolve(),
   // The pace of the pointer: 1 as it is seen, 0 at once (the tests).
   pace = 1,
 }) {
@@ -2138,12 +2141,17 @@ export function setupStudio({
     // Another conversation: what was on the screen belonged to the one before.
     if (seenConversation !== undefined && seenConversation !== conversation()) forget();
     render();
+    const drawn = shown();
     try {
       if (!info) await load();
       else if (toolsStale || Date.now() - toolsAt > TOOLS_TTL_MS) {
         const before = JSON.stringify(info);
         void load()
-          .then(() => JSON.stringify(info) !== before && !ai && render())
+          .then(async () => {
+            if (JSON.stringify(info) === before || ai) return;
+            await afterMove();
+            render();
+          })
           .catch(() => {});
       }
       if (runsStale || runsFor !== place() || seenConversation !== conversation()) await refresh();
@@ -2151,8 +2159,12 @@ export function setupStudio({
       if (!info) unreadable = error.message;
       notice('Studio indisponible : ' + error.message);
     }
-    render();
+    // Drawn again only if what it shows has changed, once the page has stopped moving.
+    await afterMove();
+    if (shown() !== drawn) render();
   }
+  /** What the Studio shows of what it reads: its tools and creations, from where. */
+  const shown = () => JSON.stringify([info, runs, legacyRuns.length, legacy, unreadable]);
   /**
    * Reads ahead, as the page opens (app.js): its tools, most of the wait the first time, and the
    * creations of the conversation. The Studio is then drawn whole the first time it comes on screen.
@@ -2164,7 +2176,10 @@ export function setupStudio({
       if (!info || toolsStale) await load();
       if (runsStale || runsFor !== place() || seenConversation !== conversation()) await refresh();
       // Read again (the engine is ready): drawn again if what it offers changed.
-      if (before && JSON.stringify(info) !== before && !ai && !working) render();
+      if (before && JSON.stringify(info) !== before && !ai && !working) {
+        await afterMove();
+        render();
+      }
     } catch {
       // Said when the Studio opens, which reads them again.
     }

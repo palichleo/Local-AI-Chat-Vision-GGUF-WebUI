@@ -1824,6 +1824,7 @@ async function sendMessage(event) {
   resizePrompt();
   notice('');
   scrollToBottom();
+  state.onChatSent?.();
   function snapshot() {
     return {
       messages: [
@@ -2497,6 +2498,7 @@ const studioUI = setupStudio({
   reveal: () => closeChat().then(() => revealStudio()),
   stopTurn: () => state.controller?.abort(),
   onConversation: () => showLastReply(),
+  afterMove,
 });
 state.studio = studioUI;
 const generationUI = setupGenerationUI({
@@ -2726,8 +2728,12 @@ function closeNavigation() {
 }
 /** The « Créations » tab of the files panel follows the conversation, in the chat as in its Studio; the former Studio while its Sortie shows it. */
 function showCreations() {
-  const id = state.view === 'studio' && state.studioLegacy ? state.studioId : state.conversationId;
-  return workflowsUI.renderGallery(id ?? null).catch(error => notice(`Galerie indisponible : ${error.message}`));
+  const draw = () => {
+    const id = state.view === 'studio' && state.studioLegacy ? state.studioId : state.conversationId;
+    return workflowsUI.renderGallery(id ?? null).catch(error => notice(`Galerie indisponible : ${error.message}`));
+  };
+  // While the page moves (see switchView), once it has stopped.
+  return state.moving ? state.moving.then(draw) : draw();
 }
 function openFiles(open = true) {
   if (!open) assetsUI.pause();
@@ -2795,9 +2801,19 @@ function switchView(kind, apply) {
     end = () => {
       if (root.dataset.switch === kind) delete root.dataset.switch;
     };
-  transition.finished.then(end, end);
+  // What can wait (the gallery, the Studio drawn again) waits for the end of the move: drawn while
+  // the page moves, it made the movement stutter.
+  const moving = transition.finished.then(end, end);
+  state.moving = moving;
+  void moving.then(() => {
+    if (state.moving === moving) state.moving = null;
+  });
   transition.ready.catch(() => {});
   return transition.updateCallbackDone;
+}
+/** Once the page has stopped moving (see switchView), at once when it does not move. */
+function afterMove() {
+  return state.moving ?? Promise.resolve();
 }
 /**
  * The Studio of the open conversation: its creation tools, beside its chat. Switching between
@@ -2852,6 +2868,7 @@ function showChat() {
 function openChat() {
   if (state.view !== 'studio' || document.body.dataset.chat === 'open') return Promise.resolve();
   return switchView('open', () => {
+    unsendChat();
     document.body.dataset.chat = 'open';
     delete $('chat-bar').dataset.unread;
     const area = $('chat-area');
@@ -2867,9 +2884,48 @@ function closeChat({ refocus = false } = {}) {
   if (document.body.dataset.chat !== 'open') return Promise.resolve();
   return switchView('close', () => {
     delete document.body.dataset.chat;
+    unsendChat();
     if (refocus) $('chat-bar').focus({ preventScroll: true });
   });
 }
+/**
+ * A message sent from the chat opened over the Studio: the conversation comes to the middle of the
+ * window, and stays there as the answer grows, its message box going down (moodix.css,
+ * data-chat-sent). It moves by `translate` only, which the graphics card draws by itself.
+ */
+let chatCentring = null;
+function centreChat() {
+  const panel = $('chat-panel'),
+    room = panel.offsetParent?.clientHeight || window.innerHeight;
+  panel.style.setProperty('--chat-lift', Math.max(0, (room - 64 - panel.offsetHeight) / 2) + 'px');
+}
+function chatSent() {
+  if (state.view !== 'studio' || document.body.dataset.chat !== 'open' || document.body.dataset.chatSent) return;
+  const panel = $('chat-panel'),
+    room = panel.offsetParent?.clientHeight || window.innerHeight;
+  // From where it stands (the middle of its message box on the middle of the window, 32 px from
+  // the foot of the room once sent), without a jump; then down to the middle as a whole.
+  panel.style.transition = 'none';
+  panel.style.setProperty('--chat-lift', Math.max(0, room / 2 - 95 - 32) + 'px');
+  document.body.dataset.chatSent = 'true';
+  void panel.offsetHeight;
+  panel.style.removeProperty('transition');
+  centreChat();
+  if (!chatCentring && typeof ResizeObserver === 'function') {
+    chatCentring = new ResizeObserver(() => {
+      if (document.body.dataset.chatSent) centreChat();
+    });
+    chatCentring.observe(panel);
+    window.addEventListener('resize', () => {
+      if (document.body.dataset.chatSent) centreChat();
+    });
+  }
+}
+function unsendChat() {
+  delete document.body.dataset.chatSent;
+  $('chat-panel').style.removeProperty('--chat-lift');
+}
+state.onChatSent = chatSent;
 $('chat-bar').onclick = () => void openChat();
 $('chat-scrim').onclick = () => void closeChat({ refocus: true });
 $('studio-open').onclick = () => showStudio();
