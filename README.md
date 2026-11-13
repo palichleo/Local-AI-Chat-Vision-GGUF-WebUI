@@ -89,6 +89,20 @@ Conversations created with earlier ComfyUI-based versions remain readable: their
 
 At launch, one background request checks the public version of this repository. When a newer stable version exists, a button appears next to Configuration; clicking it downloads the pinned source archive, backs up the replaced sources, restarts and restores the open conversation. `data/`, `history/`, `output/`, `workflow/`, models and Git metadata are preserved.
 
+### Rescue update
+
+If the button fails, or the page does not open at all, update from the application folder instead. This command uses neither the page nor the server of the installed version, so a broken version cannot keep the next one from arriving:
+
+- Windows: double-click **Mettre-a-jour-Windows.cmd**.
+- Linux: `sh mettre-a-jour-linux.sh`.
+- Either system: `node scripts/rescue-update.mjs`.
+
+> En français : si la mise à jour depuis la page échoue, double-cliquez sur **Mettre-a-jour-Windows.cmd** dans le dossier de Moodix, puis gardez cette fenêtre ouverte : elle devient celle de l’application.
+
+It downloads the latest version of `main` exactly as the button does (pinned commit, same size limits, same archive checks), then closes the running app if it is idle. If the app is busy, opened from another folder, or if another program holds the port, it says what to close and goes on as soon as the port is free; after 10 minutes it gives up without changing anything. The sources are then replaced with a backup, and the new version is started by its own launcher and must answer with its new version number; otherwise the previous sources are put back and started again. `data/`, `history/`, `output/`, `workflow/`, models and Git metadata are never touched, and nothing else is installed (no Python environment). The window then holds the application, like the launcher's: keep it open.
+
+Options: `--port=<n>` (8787 by default), `--no-open` (no browser), `--reinstall` (installs the published version again when it is the installed one; an older version is never installed). The command comes with version 0.5.24: an installation updated from an earlier version receives `scripts/rescue-update.mjs` at once, and the two double-click files with the following update.
+
 ## Security
 
 The server listens only on `127.0.0.1`. Control routes check host, origin and a session token. Remote image URLs are rejected. Only one generation runs at a time.
@@ -108,6 +122,7 @@ The Node suite uses simulated llama.cpp and generation workers; it checks behavi
 - **Out of memory:** stop the model, reduce the context or the number of GPU layers.
 - **Generation tool unavailable:** check that generation is enabled, its environment is ready, at least one workflow is enabled and valid, and the chat model supports native tool calls.
 - **Port in use:** another instance may be using 8787.
+- **Update button fails:** run the [rescue update](#rescue-update) from the application folder.
 
 ## References and licensing
 
