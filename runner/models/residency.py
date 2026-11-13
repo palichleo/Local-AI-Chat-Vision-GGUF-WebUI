@@ -363,6 +363,134 @@ class _Slice:
         return self.tensor[index]
 
 
+class Reader:
+    """Reads tensors of a file from the disk a little ahead of their use, in the order given.
+
+    For a file used once from end to end that finds no room in RAM: a text encoder of 15 GiB
+    beside the locked share of its video model, in 32 GiB. Read through its mapping, such a file
+    comes in page by page as its layers touch it (1 GiB/s measured where the disk gives 2.1 in
+    sequence), and its pages enter the working set of the process, which pushes the rest out.
+    Here a thread reads each tensor whole into a buffer of its own, at most `ahead` bytes before
+    the model asks for them: the disk works in sequence while the GPU computes, and RAM holds
+    one window of the file. A tensor asked for out of turn is read at once by the caller.
+    """
+
+    def __init__(self, path, keys, ahead=GiB):
+        header, base = _header(path)
+        self.path, self.ahead = path, ahead
+        # {key: (position in the file, bytes, dtype, shape)}, in the order of use.
+        self.plan = {
+            key: (
+                base + header[key]['data_offsets'][0],
+                header[key]['data_offsets'][1] - header[key]['data_offsets'][0],
+                header[key]['dtype'],
+                header[key]['shape'],
+            )
+            for key in keys
+            if key in header and key != '__metadata__'
+        }
+        self.ready, self.held, self.taken = {}, 0, set()
+        self.reading, self.waiting, self.done, self.closed = None, False, False, False
+        self.stats = dict(read_gib=0.0, seconds=0.0, ahead_gib=0.0, direct_gib=0.0)
+        self.state = threading.Condition()
+        self.direct = threading.Lock()
+        self.handle = open(path, 'rb', buffering=0)
+        self.thread = threading.Thread(target=self._run, name='reader', daemon=True)
+        self.thread.start()
+
+    @staticmethod
+    def _read(handle, offset, size):
+        import torch
+
+        data = torch.empty(size, dtype=torch.uint8)
+        view = memoryview(data.numpy()) if size else b''
+        handle.seek(offset)
+        done = 0
+        while done < size:
+            count = handle.readinto(view[done : done + CHUNK])
+            if not count:
+                raise OSError('Unexpected end of file')
+            done += count
+        return data
+
+    def _run(self):
+        import time
+
+        try:
+            with open(self.path, 'rb', buffering=0) as handle:
+                for key, (offset, size, _dtype, _shape) in self.plan.items():
+                    with self.state:
+                        # One window ahead: what is ready waits for the model to take it.
+                        while not self.closed and self.ready and self.held + size > self.ahead:
+                            self.waiting = True
+                            self.state.notify_all()
+                            self.state.wait()
+                        self.waiting = False
+                        if self.closed:
+                            return
+                        if key in self.taken:
+                            continue
+                        self.reading = key
+                    started = time.perf_counter()
+                    data = self._read(handle, offset, size)
+                    with self.state:
+                        self.stats['seconds'] += time.perf_counter() - started
+                        self.reading = None
+                        if key not in self.taken and not self.closed:
+                            self.ready[key] = data
+                            self.held += size
+                            self.stats['read_gib'] += size / GiB
+                        self.state.notify_all()
+        except OSError:
+            pass  # what is not read ahead is read by whoever asks for it
+        finally:
+            with self.state:
+                self.reading, self.waiting, self.done = None, False, True
+                self.state.notify_all()
+
+    def take(self, key):
+        """The tensor of this key, or None for a key this reader does not follow."""
+        import torch
+
+        entry = self.plan.get(key)
+        if entry is None:
+            return None
+        offset, size, dtype, shape = entry
+        data = None
+        with self.state:
+            while not self.closed:
+                if key in self.ready:
+                    data = self.ready.pop(key)
+                    self.held -= size
+                    self.stats['ahead_gib'] += size / GiB
+                    break
+                # The thread is on it or will come to it: wait, unless it is held up by a full
+                # window (what is ready is asked for later), or has passed this key already.
+                if self.done or key in self.taken or (self.waiting and self.reading != key):
+                    break
+                self.state.wait(0.05)
+            if data is None:
+                self.taken.add(key)
+            self.state.notify_all()
+        if data is None:
+            with self.direct:
+                data = self._read(self.handle, offset, size)
+            self.stats['direct_gib'] += size / GiB
+        return data.view(getattr(torch, _DTYPES[dtype])).reshape(shape)
+
+    def close(self):
+        with self.state:
+            self.closed = True
+            self.ready.clear()
+            self.held = 0
+            self.state.notify_all()
+        self.thread.join(timeout=10)
+        self.handle.close()
+
+    def summary(self):
+        return {name: round(value, 2) for name, value in self.stats.items()}
+
+
 class Store:
     """`safe_open`-compatible reader over a resident arena (or the file mapping as fallback)."""
 
@@ -377,6 +505,8 @@ class Store:
         self.mapping = None
         # A part of the file kept in locked RAM beside the mapping (see `keep`).
         self.part = None
+        # Tensors read from the disk ahead of their use, for a file not kept in RAM (see `follow`).
+        self.reader = None
         # The size of each tensor, read from the header when first asked (see `measure`).
         self.sizes = None
         if self.arena is not None:
@@ -406,7 +536,19 @@ class Store:
     def __exit__(self, *_):
         self.close()
 
+    def follow(self, keys, ahead=GiB):
+        """From now on these tensors, asked for in this order, come from the disk a little ahead
+        of their use (see Reader) instead of through the mapping. Nothing changes for a file
+        kept in RAM. Returns whether a reader was started."""
+        if self.arena is not None or self.reader is not None:
+            return False
+        self.reader = Reader(self.path, keys, ahead)
+        return True
+
     def close(self):
+        if self.reader is not None:
+            self.reader.close()
+            self.reader = None
         if self.mapping is not None:
             self.mapping.__exit__(None, None, None)
             self.mapping = None
@@ -432,6 +574,10 @@ class Store:
             return self.arena.tensor(key)
         if self.part and key in self.part.header:
             return self.part.tensor(key)
+        if self.reader is not None:
+            value = self.reader.take(key)
+            if value is not None:
+                return value
         return self.mapping.get_tensor(key)
 
     def get_slice(self, key):

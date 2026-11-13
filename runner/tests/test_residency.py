@@ -344,6 +344,82 @@ class MeasureTest(unittest.TestCase):
                     store.measure('absent')
 
 
+class ReaderTest(unittest.TestCase):
+    """A file read from the disk a little ahead of its use, where RAM has no room to keep it."""
+
+    def setUp(self):
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            self.skipTest('torch is required')
+        self.folder = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.folder.name, 'weights.safetensors')
+        self.tensors = {name: bytes([index + 1]) * 1000 for index, name in enumerate('abcdef')}
+        _safetensors(self.path, self.tensors)
+
+    def tearDown(self):
+        self.folder.cleanup()
+
+    def test_tensors_come_ahead_of_their_use_in_the_order_given(self):
+        from runner.models import residency
+
+        reader = residency.Reader(self.path, list('abcdef'), ahead=2500)
+        try:
+            for name in 'abcdef':
+                self.assertEqual(bytes(reader.take(name).numpy().tobytes()), self.tensors[name], name)
+            # Never more than its window at once, and nothing was left for the caller to read.
+            said = reader.summary()
+            self.assertEqual(said['direct_gib'], 0)
+            self.assertLessEqual(reader.held, 2500)
+            self.assertIsNone(reader.take('absent'), 'a key it does not follow is left to the mapping')
+        finally:
+            reader.close()
+        self.assertFalse(reader.thread.is_alive())
+
+    def test_a_tensor_asked_for_out_of_turn_is_read_at_once_and_only_once(self):
+        from runner.models import residency
+
+        reader = residency.Reader(self.path, list('abcdef'), ahead=2500)
+        try:
+            # The last one first: the window fills with a and b, the caller reads f itself.
+            self.assertEqual(bytes(reader.take('f').numpy().tobytes()), self.tensors['f'])
+            for name in 'abcde':
+                self.assertEqual(bytes(reader.take(name).numpy().tobytes()), self.tensors[name], name)
+            # Asked for again (a layer run twice): read again, the same.
+            self.assertEqual(bytes(reader.take('c').numpy().tobytes()), self.tensors['c'])
+            reader.thread.join(timeout=5)
+            self.assertNotIn('f', reader.ready)
+        finally:
+            reader.close()
+
+    def test_a_store_follows_its_file_only_when_it_is_not_kept_in_ram(self):
+        try:
+            import psutil  # noqa: F401
+        except ImportError:
+            self.skipTest('psutil is required')
+        from runner.models import residency
+
+        with residency.open_store(self.path, False) as store:
+            self.assertTrue(store.follow(list('abc')))
+            self.assertFalse(store.follow(list('abc')), 'once')
+            for name in 'abcdef':
+                self.assertEqual(bytes(store.get_tensor(name).numpy().tobytes()), self.tensors[name], name)
+            reader = store.reader
+            self.assertGreater(reader.stats['ahead_gib'] + reader.stats['direct_gib'], 0)
+        self.assertFalse(reader.thread.is_alive(), 'closed with its store')
+        table = residency.Residency()
+        saved = residency.RESIDENCY
+        residency.RESIDENCY = table
+        try:
+            with residency.open_store(self.path, reserve=0) as store:
+                if store.arena is not None:
+                    self.assertFalse(store.follow(list('abc')), 'a file kept in RAM needs no reader')
+                    self.assertIsNone(store.reader)
+        finally:
+            table.clear()
+            residency.RESIDENCY = saved
+
+
 class PrefetchTest(unittest.TestCase):
     def test_reads_ahead_only_the_wanted_weights_of_mapped_files(self):
         from runner.models import residency

@@ -227,6 +227,10 @@ class WeightPool:
             self.recent_bytes += size
             while self.recent_bytes > RECENT:
                 self.recent_bytes -= self.recent.pop(next(iter(self.recent)))[1]
+        if getattr(self.stores[location[0]], 'reader', None) is not None:
+            # Read from the disk into a buffer of its own (Store.follow), not a view of the file:
+            # kept for a second use, the whole file would end up in RAM.
+            self.host.pop(location, None)
         if self.ahead_limit and self.known:
             self._send_ahead(location)
         return result

@@ -45,6 +45,19 @@ class WeightPoolTest(unittest.TestCase):
         Tensor.copies = 0
         return pool, module
 
+    def test_weights_read_from_the_disk_into_their_own_buffer_are_not_kept_in_ram(self):
+        # A file used through its mapping costs nothing to keep a view of: a layer run again
+        # finds it. One read from the disk tensor by tensor (Store.follow) would stay in RAM whole.
+        sizes = {'a.weight': 60, 'b.weight': 30}
+        pool, _ = self.pool(sizes, limit=0)
+        pool.bundle(('model', 'a.weight', None))
+        self.assertIn(('model', 'a.weight', None), pool.host)
+        pool, _ = self.pool(sizes, limit=0)
+        pool.stores['model'].reader = object()
+        for key in sizes:
+            pool.bundle(('model', key, None))
+        self.assertEqual(pool.host, {})
+
     def test_the_gpu_share_is_filled_before_the_model_runs(self):
         pool, _ = self.pool({'a.weight': 60, 'b.weight': 30, 'c.weight': 50, 'd.weight': 10}, limit=100)
         pool.preload()

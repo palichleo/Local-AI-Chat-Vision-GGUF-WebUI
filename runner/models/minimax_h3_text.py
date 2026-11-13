@@ -186,16 +186,26 @@ def load(path):
     from transformers import Qwen3VLModel
     from runner.models.residency import open_store
 
-    store = open_store(path)
+    # Read once per prompt, this file sends nothing away from RAM to sit there (`evict`): the
+    # share of the video model locked for every step stays where it is. Where the file finds no
+    # room (15 GiB beside that share, in 32 GiB), its layers come from the disk in the order they
+    # run, a little ahead of them (Store.follow). Sent away, the share of the video model was read
+    # back from the disk at every new prompt: 12 to 13 s.
+    store = open_store(path, evict=False)
     keys = set(store.keys())
     with init_empty_weights():
         model = Qwen3VLModel(config())
     # MiniMax-H3 reads the hidden state after the last kept layer, before any final norm.
     model.language_model.norm = torch.nn.Identity()
     pool = _TextPool(store)
+    order = []
     for name, module in list(model.language_model.named_modules()):
         if isinstance(module, torch.nn.Linear):
             model.language_model.set_submodule(name, QuantLinear(pool, 'model.' + name))
+            # What the layer reads when it runs, in that order (QuantLinear.forward).
+            for suffix in ('.weight', '.weight_scale', '.bias', '.pre_quant_scale', '.weight_scale_2'):
+                if 'model.' + name + suffix in keys:
+                    order.append('model.' + name + suffix)
     model.language_model.embed_tokens = QuantEmbedding(store, 'model.embed_tokens')
     for name, _ in list(model.named_parameters()):
         key = 'model.' + name[len('language_model.') :] if name.startswith('language_model.') else name
@@ -205,7 +215,9 @@ def load(path):
     for name, buffer in list(model.named_buffers()):
         if buffer.device.type == 'meta':
             raise ValueError('Uninitialized conditioner buffer ' + name)
-    return model.eval().to('cuda'), store
+    model = model.eval().to('cuda')
+    store.follow(order)
+    return model, store
 
 
 def prompt_embeds(

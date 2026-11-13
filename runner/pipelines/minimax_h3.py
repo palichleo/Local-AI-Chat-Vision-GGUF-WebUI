@@ -322,9 +322,13 @@ def generate(job, config, progress):
     else:
         tokenizer, processor = minimax_h3_text.processor(paths['tokenizer'])
         text_encoder, text_store = minimax_h3_text.load(paths['textEncoder'])
-        # The disk reads the conditioner in sequence while its layers run, then the DiT while
-        # the conditions are encoded and the model is built (see Prefetch).
-        ahead = prefetch(paths, {'textEncoder': text_store}, [('textEncoder', key, None) for key in text_store.keys()])
+        # The disk reads the conditioner in sequence while its layers run: by the store itself
+        # when the file is not kept in RAM (Store.follow), else through the system's cache.
+        ahead = (
+            None
+            if text_store.reader
+            else prefetch(paths, {'textEncoder': text_store}, [('textEncoder', key, None) for key in text_store.keys()])
+        )
         original = reference_encoders.get_qwen3vl_prompt_embeds
         reference_encoders.get_qwen3vl_prompt_embeds = minimax_h3_text.prompt_embeds
         before = dict(state.values)
@@ -335,7 +339,7 @@ def generate(job, config, progress):
             )
         finally:
             reference_encoders.get_qwen3vl_prompt_embeds = original
-            read = ahead.stop() if ahead else None
+            read = ahead.stop() if ahead else text_store.reader.summary() if text_store.reader else None
         written = conditioning.changes(before, state.values)
         kept = (
             'kept for the next generations'
@@ -343,7 +347,9 @@ def generate(job, config, progress):
             and conditioning.save(config, entry, written[0], dict(written[1], kinds=dict(state.kwargs_mapping)))
             else 'not kept'
         )
-        del text_encoder, text_store, before, written
+        del text_encoder
+        text_store.close()
+        del text_store, before, written
     state.set('prompt_embeds', state.get('prompt_embeds').to('cuda', torch.bfloat16))
     _free(scope={})
     progress(
