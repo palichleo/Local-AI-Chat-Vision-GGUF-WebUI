@@ -379,3 +379,107 @@ test('installed from the settings, the build becomes the engine of the chat mode
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('the builds before are removed but the one the engine runs, which stays to go back to', async () => {
+  const { utimes } = await import('node:fs/promises');
+  const root = await mkdtemp(join(tmpdir(), 'llama-builds-'));
+  // The build in use is the oldest: the newer ones before it go, it stays.
+  const ages = { 'b100-cuda-13.4': 300, 'b200-cuda-13.4': 200, 'b300-vulkan': 100 };
+  for (const [name, age] of Object.entries(ages)) {
+    await mkdir(join(root, name), { recursive: true });
+    await writeFile(join(root, name, 'llama-server.exe'), 'exe');
+    const at = new Date(Date.now() - age * 1000);
+    await utimes(join(root, name), at, at);
+  }
+  const { fetchImpl } = github({ 'llama-b12110-bin-win-cpu-x64.zip': Buffer.from('cpu') });
+  const builds = new LlamaBuilds({
+    root,
+    fetchImpl,
+    run: async () => ({ code: 0, output: 'Available devices:\n' }),
+    unpack: async (_archive, destination) => writeFile(join(destination, 'llama-server.exe'), 'exe'),
+    platform: 'win32',
+    arch: 'x64',
+    env: {},
+    detect: async () => ({ platform: 'win32', arch: 'x64', gpus: [] }),
+  });
+  try {
+    const kept = await builds.install({ inUse: join(root, 'b100-cuda-13.4', 'llama-server.exe') });
+    assert.equal(kept.id, 'cpu');
+    assert.equal(builds.status().state, 'done');
+    assert.deepEqual((await readdir(root)).sort(), ['b100-cuda-13.4', 'b12110-cpu', 'downloads']);
+    // An engine of its own (Ollama's): the newest build before stays instead.
+    await mkdir(join(root, 'b400-vulkan'), { recursive: true });
+    await builds.install({ inUse: 'C:\Ollama\llama-server.exe' });
+    assert.deepEqual((await readdir(root)).sort(), ['b12110-cpu', 'b400-vulkan', 'downloads']);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a build that cannot load the model gives the engine back to the former one', async () => {
+  const { createApplication } = await import('../server.mjs');
+  const { readFile } = await import('node:fs/promises');
+  const { spawn } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const root = await mkdtemp(join(tmpdir(), 'llama-app-'));
+  const folder = join(root, 'engines', 'llama.cpp', 'b12110-cuda-13.4');
+  const enginePath = join(folder, 'llama-server.exe');
+  await mkdir(folder, { recursive: true });
+  await writeFile(enginePath, 'exe');
+  const fakeEngine = fileURLToPath(new URL('./fixtures/fake-engine.mjs', import.meta.url));
+  // The engine in use loads the model; the new build says its version, then stops at loading.
+  const spawnProcess = (command, args, options) =>
+    command === enginePath && args[0] !== '--version'
+      ? spawn(
+          process.execPath,
+          ['-e', 'console.error("error: unknown argument: --reasoning-format"); process.exit(1)'],
+          options,
+        )
+      : spawn(process.execPath, [fakeEngine, ...args], options);
+  const fake = new LlamaBuilds({ root: join(root, 'engines', 'llama.cpp') });
+  fake.install = async () => {
+    const result = { enginePath, tag: 'b12110', id: 'cuda-13.4', label: 'CUDA 13.4', devices: [] };
+    fake.job = { state: 'done', step: '', tried: [], result };
+    return result;
+  };
+  const app = await createApplication({ port: 0, dataDir: root, llamaBuilds: fake, spawnProcess });
+  try {
+    const { token } = await (await fetch(app.url + '/api/bootstrap')).json();
+    const api = (route, body) =>
+      fetch(app.url + '/api/' + route, {
+        method: body ? 'POST' : 'GET',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    const until = async check => {
+      for (let turn = 0; turn < 200; turn++) {
+        const value = await check();
+        if (value) return value;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      assert.fail('nothing came in time');
+    };
+    const modelPath = join(root, 'model.gguf');
+    await writeFile(modelPath, Buffer.from('GGUF\x03\0\0\0'));
+    const settings = { enginePath: process.execPath, modelPath, projectorPath: '', contextSize: 4096 };
+    assert.equal((await api('config', { ...settings, maxOutputTokens: 1024, gpuLayers: 0 })).status, 200);
+    assert.equal((await api('start', {})).status, 202);
+    await until(async () => (await (await api('status')).json()).state === 'ready');
+    assert.equal((await api('llama/install', {})).status, 202);
+    const job = await until(async () => {
+      const value = await (await api('llama')).json();
+      return ['done', 'error'].includes(value.state) && value;
+    });
+    assert.equal(job.state, 'error');
+    assert.match(job.error, /ne démarre pas avec le modèle/);
+    assert.match(job.error, /unknown argument/, 'what the build said');
+    assert.match(job.error, /Le moteur d’avant est remis/);
+    assert.equal(job.ours, false);
+    assert.equal(JSON.parse(await readFile(join(root, 'config.json'), 'utf8')).enginePath, process.execPath);
+    // The model runs again on the engine before.
+    await until(async () => (await (await api('status')).json()).state === 'ready');
+  } finally {
+    await app.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

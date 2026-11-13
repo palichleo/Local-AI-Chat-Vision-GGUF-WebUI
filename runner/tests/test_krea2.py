@@ -71,6 +71,44 @@ class Krea2Tests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_lora(entries | {'layer.dora_scale': {'shape': [4]}}, base)
 
+    def test_lora_of_every_common_naming_is_read_and_others_are_named(self):
+        from runner.models.lora_keys import lora_pairs
+
+        base = {'blocks.0.attn.wq.weight': {'shape': [4, 8]}, 'txt_fusion.proj.weight': {'shape': [4, 8]}}
+        down, up, alpha = {'shape': [2, 8]}, {'shape': [4, 2]}, {'shape': []}
+        # PEFT with a prefix and an alpha; kohya with dots; kohya with underscores, even for a
+        # layer whose own name has one.
+        for entries in (
+            {
+                'diffusion_model.blocks.0.attn.wq.lora_A.weight': down,
+                'diffusion_model.blocks.0.attn.wq.lora_B.weight': up,
+                'diffusion_model.blocks.0.attn.wq.alpha': alpha,
+            },
+            {'blocks.0.attn.wq.lora_down.weight': down, 'blocks.0.attn.wq.lora_up.weight': up},
+            {
+                'lora_unet_blocks_0_attn_wq.lora_down.weight': down,
+                'lora_unet_blocks_0_attn_wq.lora_up.weight': up,
+                'lora_unet_blocks_0_attn_wq.alpha': alpha,
+                'lora_unet_txt_fusion_proj.lora_down.weight': down,
+                'lora_unet_txt_fusion_proj.lora_up.weight': up,
+            },
+        ):
+            validate_lora(entries, base)
+            pairs, left = lora_pairs(entries, {key for key in base})
+            self.assertFalse(left)
+            self.assertIn('blocks.0.attn.wq.weight', pairs)
+        # Another kind of adapter, or a LoRA of another model: said as such.
+        with self.assertRaisesRegex(ValueError, 'LoKr'):
+            validate_lora({'blocks.0.attn.wq.lokr_w1': down, 'blocks.0.attn.wq.lokr_w2': up}, base)
+        with self.assertRaisesRegex(ValueError, 'another one'):
+            validate_lora(
+                {
+                    'transformer_blocks.0.attn1.to_k.lora_A.weight': down,
+                    'transformer_blocks.0.attn1.to_k.lora_B.weight': up,
+                },
+                base,
+            )
+
     def test_architecture_preflight_imports_never_initialize_cuda(self):
         code = '''import sys
 sys.path.insert(0,sys.argv[1])

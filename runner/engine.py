@@ -123,8 +123,16 @@ def unload():
     return dict(release(), freedRamGiB=round(freed, 2))
 
 
-def release():
+def release(keep_above=None):
+    """The GPU's memory goes back to the driver. With `keep_above` (bytes) the chat model is about
+    to load: the model files kept in RAM between generations leave, least recently used first,
+    until the machine has that much available (see Residency.leave_room)."""
     gc.collect()
+    freed = 0
+    if keep_above:
+        residency = sys.modules.get('runner.models.residency')
+        if residency is not None:
+            freed = residency.RESIDENCY.leave_room(keep_above)
     torch = sys.modules.get('torch')
     allocated = 0
     if torch is not None and torch.cuda.is_initialized():
@@ -137,4 +145,6 @@ def release():
         allocated = torch.cuda.memory_allocated() / 1024**3
     if allocated:
         raise RuntimeError(f'GPU cleanup incomplete: {allocated:.6f} GiB still allocated')
+    if keep_above:
+        return dict(released=True, allocatedGiB=allocated, freedRamGiB=round(freed / 1024**3, 2))
     return dict(released=True, allocatedGiB=allocated)

@@ -432,25 +432,44 @@ export async function createApplication({
         throw Object.assign(job, { state: 'error', error: 'Le modèle est resté occupé : llama.cpp n’a pas été mis en service.' });
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    const previous = config,
+    const former = config.enginePath,
       restart = engine.state === 'ready';
     if (restart) await engine.stop();
     const next = { ...config, enginePath: kept.enginePath };
     await atomicJson(configPath, next);
     config = next;
-    if (restart)
+    if (restart) {
+      job.step = `Chargement du modèle sur llama.cpp ${kept.tag}…`;
+      // start() returns once the program is launched: the model itself is waited for, loaded or
+      // failed (a build that cannot load it, an argument it does not know), before it is kept.
+      let failure = '';
       try {
         await engine.start(config);
+        const deadline = Date.now() + 330000;
+        while (engine.state === 'loading' && !closing && Date.now() < deadline)
+          await new Promise(resolve => setTimeout(resolve, 250));
+        if (engine.state !== 'ready') {
+          const said = engine.logs.findLast(line => /error|failed|unknown|invalid/i.test(line));
+          failure = (engine.error || 'le modèle n’a pas fini de charger.') + (said ? ` (${said.slice(0, 300)})` : '');
+        }
       } catch (error) {
-        await atomicJson(configPath, previous);
-        config = previous;
-        await engine.start(config).catch(() => {});
+        failure = error.message;
+      }
+      if (failure) {
+        await engine.stop().catch(() => {});
+        // Only the engine goes back: a setting saved meanwhile stays.
+        const restored = { ...config, enginePath: former };
+        await atomicJson(configPath, restored);
+        config = restored;
+        if (!closing) await engine.start(config).catch(() => {});
         Object.assign(job, {
           state: 'error',
-          error: `llama.cpp ${kept.tag} (${kept.label}) ne démarre pas avec le modèle : ${error.message} Le moteur d’avant est remis.`,
+          step: '',
+          error: `llama.cpp ${kept.tag} (${kept.label}) ne démarre pas avec le modèle : ${failure} Le moteur d’avant est remis.`,
         });
         return;
       }
+    }
     Object.assign(job, { state: 'done', step: '', used: true });
   }
   let url;
@@ -1093,7 +1112,8 @@ export async function createApplication({
         if (llamaInstalling) throw problem('Une installation de llama.cpp est déjà en cours.', 409);
         llamaInstalling = (async () => {
           try {
-            await useLlama(await llamaBuilds.install());
+            // The build in use stays on disk whatever comes: it is the one to go back to.
+            await useLlama(await llamaBuilds.install({ inUse: config.enginePath }));
           } catch {
             // Told by the status of the installation.
           } finally {

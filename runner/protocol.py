@@ -11,6 +11,14 @@ from runner.models.headers import unique_object
 MAX_LINE = 1024 * 1024
 
 
+def _keep_above(params):
+    """The RAM (bytes) the machine must have available once released: the chat model's room."""
+    value = params.get('keepAbove')
+    if set(params) != {'keepAbove'} or type(value) not in (int, float) or not 0 <= value < 2**60:
+        raise ValueError('Invalid release parameters')
+    return int(value)
+
+
 def serve(config, source=None, destination=None):
     source = source or sys.stdin
     destination = destination or sys.stdout
@@ -53,7 +61,7 @@ def serve(config, source=None, destination=None):
                     raise ValueError('Unsupported worker method')
                 if not isinstance(params, dict):
                     raise ValueError('Worker params must be an object')
-                if method not in ('preflight', 'generate') and params:
+                if method not in ('preflight', 'generate', 'release') and params:
                     raise ValueError('This method accepts no parameters')
 
                 def progress(**data):
@@ -68,6 +76,8 @@ def serve(config, source=None, destination=None):
                         result = generate(params, config, progress)
                     elif method == 'unload':
                         result = unload()
+                    elif params:
+                        result = release(keep_above=_keep_above(params))
                     else:
                         result = release()
                 response = dict(id=request_id, result=result)

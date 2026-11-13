@@ -17,6 +17,13 @@ test('llama.cpp versions: a release build by number, a build outside the release
     detail: 'build hors versions publiées',
   });
   assert.equal(llamaVersion('Usage: ollama [command]'), null);
+  // Since llama.cpp 0.9: a version number, then the build and its commit (it was read as b0, and
+  // the build just installed was offered again as a newer one).
+  assert.deepEqual(
+    llamaVersion('version: 0.9.0-dev (build 12110, commit cd959bae9)\nbuilt with Clang 20.1.8 for Windows x86_64'),
+    { version: 'b12110', detail: '0.9.0-dev · commit cd959ba' },
+  );
+  assert.deepEqual(llamaVersion('version: 0.9.1 (build 12200)'), { version: 'b12200', detail: '0.9.1' });
 });
 
 test('PyTorch and NVIDIA versions are read without loading anything', () => {

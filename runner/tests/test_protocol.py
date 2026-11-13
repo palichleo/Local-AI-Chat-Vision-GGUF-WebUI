@@ -140,6 +140,28 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(rows[1], {'event': 'progress', 'id': 1, 'data': {'stage': 'denoising', 'step': 1, 'total': 1}})
         self.assertEqual(rows[2]['result']['jobId'], 'j')
 
+    def test_release_is_told_the_room_the_chat_model_needs(self):
+        source = io.StringIO(
+            '{"id":1,"method":"release","params":{"keepAbove":1000}}\n'
+            '{"id":2,"method":"release","params":{"keepAbove":"all"}}\n'
+            '{"id":3,"method":"unload","params":{"keepAbove":1000}}\n'
+        )
+        destination = io.StringIO()
+        asked = []
+
+        def release(keep_above=None):
+            asked.append(keep_above)
+            return dict(released=True, allocatedGiB=0, freedRamGiB=0)
+
+        with patch('runner.protocol.release', release), patch('runner.protocol._log_failure', lambda *args: None):
+            serve({}, source, destination)
+        rows = [json.loads(line) for line in destination.getvalue().splitlines()]
+        # The room asked, then the plain release of a worker that stops.
+        self.assertEqual(asked, [1000, None])
+        self.assertTrue(rows[1]['result']['released'])
+        self.assertEqual(rows[2]['error']['message'], 'Invalid release parameters')
+        self.assertEqual(rows[3]['error']['message'], 'This method accepts no parameters')
+
     def test_failed_generate_cleans_up_and_can_receive_next_request(self):
         source = io.StringIO('{"id":1,"method":"generate","params":{}}\n{"id":2,"method":"release","params":{}}\n')
         destination = io.StringIO()

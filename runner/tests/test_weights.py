@@ -181,7 +181,7 @@ class MergedAdaptersTest(unittest.TestCase):
             key = f'lora{index}.layer'
             tensors[key + '.lora_A.weight'] = torch.randn(rank, 12)
             tensors[key + '.lora_B.weight'] = torch.randn(8, rank)
-            adapters.append(('loras', key, strength))
+            adapters.append(('loras', key + '.lora_A.weight', key + '.lora_B.weight', strength))
         reads = []
 
         class Loras:
@@ -198,8 +198,8 @@ class MergedAdaptersTest(unittest.TestCase):
         # The same sum as each LoRA applied in turn with its strength.
         value = torch.randn(5, 12)
         expected = sum(
-            F.linear(F.linear(value, tensors[key + '.lora_A.weight']), tensors[key + '.lora_B.weight']) * strength
-            for _, key, strength in adapters
+            F.linear(F.linear(value, tensors[down]), tensors[up]) * strength
+            for _, down, up, strength in adapters
         )
         self.assertTrue(torch.allclose(F.linear(F.linear(value, down), up), expected, atol=1e-5))
         # Read once: the next step finds the pair where it is, and it counts in what the GPU holds.

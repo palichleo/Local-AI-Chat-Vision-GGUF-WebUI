@@ -312,6 +312,25 @@ class Residency:
             while self.arenas:
                 self._discard(self.arenas.popitem()[1])
 
+    def leave_room(self, available):
+        """The chat model is about to load: arenas leave, least recently used first (never one a
+        store still reads), until the machine has `available` bytes of RAM available. Returns
+        the bytes let go. Without psutil nothing is measured, and nothing leaves."""
+        try:
+            import psutil
+        except ImportError:
+            return 0
+        freed = 0
+        with self.lock:
+            while psutil.virtual_memory().available < available:
+                idle = next((path for path, arena in self.arenas.items() if not arena.users), None)
+                if idle is None:
+                    break
+                arena = self.arenas.pop(idle)
+                freed += arena.size
+                arena.release()
+        return freed
+
     def summary(self):
         try:
             import psutil

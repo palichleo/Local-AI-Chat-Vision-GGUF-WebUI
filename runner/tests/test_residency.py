@@ -223,6 +223,43 @@ class EvictionTest(unittest.TestCase):
             residency.RESERVE, psutil.virtual_memory = saved_reserve, saved_memory
 
 
+class RoomForTheChatModel(unittest.TestCase):
+    def test_idle_arenas_leave_oldest_first_until_the_chat_model_has_its_room(self):
+        try:
+            import psutil
+        except ImportError:
+            self.skipTest('psutil is required')
+        from runner.models import residency
+
+        released, sizes = [], {'encoder': 5, 'vae': 1, 'model': 13}
+
+        def arena(name, users):
+            return SimpleNamespace(users=users, size=sizes[name], pinned=False, release=lambda: released.append(name))
+
+        table = residency.Residency()
+        # Least recently used first: the text encoder, then the model; the VAE is still read.
+        table.arenas['encoder'] = arena('encoder', 0)
+        table.arenas['vae'] = arena('vae', 1)
+        table.arenas['model'] = arena('model', 0)
+        saved = psutil.virtual_memory
+        # 4 units available, and what each arena gives back once gone.
+        psutil.virtual_memory = lambda: SimpleNamespace(total=32, available=4 + sum(sizes[name] for name in released))
+        try:
+            # Room enough already: nothing leaves.
+            self.assertEqual(table.leave_room(4), 0)
+            self.assertEqual(released, [])
+            # 8 wanted: the encoder alone gives it.
+            self.assertEqual(table.leave_room(8), 5)
+            self.assertEqual(released, ['encoder'])
+            self.assertEqual(list(table.arenas), ['vae', 'model'])
+            # More than all of them give: the idle ones go, never the one still read.
+            self.assertEqual(table.leave_room(100), 13)
+            self.assertEqual(released, ['encoder', 'model'])
+            self.assertEqual(list(table.arenas), ['vae'])
+        finally:
+            psutil.virtual_memory = saved
+
+
 def _safetensors(path, tensors):
     """A safetensors file written by hand: {name: bytes}, each stored as I8."""
     header, offset = {}, 0

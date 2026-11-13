@@ -59,6 +59,8 @@ class WeightPool:
         # The LoRAs of each layer: which ones (`adapted`, said by the layer when it is built),
         # and their matrices once on the GPU (`merged`), where they stay.
         self.adapted = {}
+        # Each LoRA file's pairs for the layers of the model, read once (see lora_layers).
+        self.lora_cache = {}
         self.merged = {}
         self.merged_bytes = 0
         self.device = 'cuda'
@@ -247,15 +249,26 @@ class WeightPool:
             torch = self.torch
             dtype = dtype or torch.bfloat16
             downs, ups = [], []
-            for source, key, strength in adapters:
+            for source, down, up, strength in adapters:
                 store = self.stores[source]
-                downs.append(store.get_tensor(key + '.lora_A.weight').to(self.device, dtype=dtype))
-                ups.append(store.get_tensor(key + '.lora_B.weight').to(self.device, dtype=dtype) * strength)
+                downs.append(store.get_tensor(down).to(self.device, dtype=dtype))
+                ups.append(store.get_tensor(up).to(self.device, dtype=dtype) * strength)
             found = (torch.cat(downs, dim=0), torch.cat(ups, dim=1))
             size = sum(value.numel() * value.element_size() for value in found)
             self.merged[location] = found
             self.merged_bytes += size
             self.bytes += size
+        return found
+
+    def lora_layers(self, source):
+        """{layer: (down, up, alpha)} of one LoRA file for the layers of the model, whatever the
+        tool that named its tensors (runner.models.lora_keys); read once."""
+        found = self.lora_cache.get(source)
+        if found is None:
+            from runner.models.lora_keys import lora_pairs
+
+            targets = {key.removeprefix('model.diffusion_model.') for key in self.stores['model'].keys()}
+            found = self.lora_cache[source] = lora_pairs(self.stores[source].keys(), targets)[0]
         return found
 
     def preload(self):
@@ -318,17 +331,13 @@ def load_streamed(model, names, pool):
             if location[0] == 'model':
                 stem = location[1].removesuffix('.weight').removeprefix('model.diffusion_model.')
                 for source, strength in pool.adapters:
-                    for prefix in ('diffusion_model.', 'model.diffusion_model.', ''):
-                        key = prefix + stem
-                        if key + '.lora_A.weight' in pool.stores[source].keys():
-                            alpha = (
-                                pool.stores[source].get_tensor(key + '.alpha').item()
-                                / pool.stores[source].get_slice(key + '.lora_A.weight').get_shape()[0]
-                                if key + '.alpha' in pool.stores[source].keys()
-                                else 1
-                            )
-                            self.adapters.append((source, key, strength * alpha))
-                            break
+                    found = pool.lora_layers(source).get(stem + '.weight')
+                    if found:
+                        down, up, alpha = found
+                        store = pool.stores[source]
+                        # The pair is scaled by alpha / rank when the file gives an alpha.
+                        scale = store.get_tensor(alpha).item() / store.get_slice(down).get_shape()[0] if alpha else 1
+                        self.adapters.append((source, down, up, strength * scale))
 
             if self.adapters:
                 pool.adapted[self.location] = self.adapters

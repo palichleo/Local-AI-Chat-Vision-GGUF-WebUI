@@ -58,6 +58,29 @@ def config():
     )
 
 
+def align_extra_tokens(tokenizer):
+    """MiniMax-H3's own tokens, at the ids the model was trained with: right after the 151669 of a
+    Qwen3 tokenizer. A Qwen2.5 tokenizer stops at 151665: placeholders no prompt contains fill the
+    gap first, so either gives them the same ids."""
+    if all(tokenizer.convert_tokens_to_ids(token) == index for token, index in EXTRA_TOKENS.items()):
+        return
+    first = min(EXTRA_TOKENS.values())
+    fillers = ['<|minimax_h3_reserved_' + str(index) + '|>' for index in range(len(tokenizer), first)]
+    tokenizer.add_special_tokens({'additional_special_tokens': fillers + list(EXTRA_TOKENS)})
+    for token, index in EXTRA_TOKENS.items():
+        found = tokenizer.convert_tokens_to_ids(token)
+        if found != index:
+            raise ValueError(
+                'Tokenizer vocabulary does not match MiniMax-H3 ('
+                + token
+                + ' is '
+                + str(found)
+                + ', expected '
+                + str(index)
+                + '): choose a Qwen2.5 or Qwen3 tokenizer, such as ComfyUI qwen25_tokenizer'
+            )
+
+
 def processor(tokenizer_path):
     """Qwen3-VL processor around the local Qwen tokenizer, with MiniMax-H3's extra tokens."""
     from pathlib import Path
@@ -73,10 +96,7 @@ def processor(tokenizer_path):
     for token in specials:
         if tokenizer.convert_tokens_to_ids(token) in (None, tokenizer.unk_token_id):
             raise ValueError('The tokenizer lacks the Qwen-VL vision tokens')
-    tokenizer.add_special_tokens({'additional_special_tokens': list(EXTRA_TOKENS)})
-    for token, index in EXTRA_TOKENS.items():
-        if tokenizer.convert_tokens_to_ids(token) != index:
-            raise ValueError('Tokenizer vocabulary does not match MiniMax-H3 (' + token + ')')
+    align_extra_tokens(tokenizer)
     images = Qwen2VLImageProcessor(
         size={'shortest_edge': 65536, 'longest_edge': 16777216},
         patch_size=16,

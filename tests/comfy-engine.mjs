@@ -723,7 +723,10 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
       return { jobId: payload.id, outputs: [], metadata: {} };
     },
     unload: async () => calls.push('unload'),
-    release: async () => (calls.push('release'), { released: true }),
+    release: async ({ keepAbove } = {}) => (
+      calls.push(keepAbove ? 'release, ' + keepAbove / 1024 ** 3 + ' GiB available' : 'release'),
+      { released: true }
+    ),
     close: async () => {},
   };
   const service = new GenerationService({
@@ -757,6 +760,10 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
   ]);
   await client.free();
   assert.deepEqual(calls, ['preflight', 'generate', 'release']);
+  // The chat model comes back (8 GiB of files): what the built-in engine keeps in RAM leaves
+  // until 5 GiB more than that are available, as ComfyUI's models do.
+  await client.free({ reserve: 8 * 1024 ** 3 });
+  assert.equal(calls.at(-1), 'release, 13 GiB available');
   await assert.rejects(service.client().preflight(moss()), /ComfyUI n’est pas configuré/);
   assert.equal(fake.seen.prompts.length + fake.seen.freed.length, 0);
 

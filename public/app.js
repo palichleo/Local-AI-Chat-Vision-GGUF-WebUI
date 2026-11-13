@@ -771,7 +771,10 @@ async function showLlama() {
   try {
     const job = await (await api('llama')).json();
     if (LLAMA_WORKING.includes(job.state)) return void followLlama();
-    text.textContent = 'Recherche de la version officielle pour cet ordinateur…';
+    // Just installed (followLlama): what was done stays said, in place of « À jour ».
+    const done = state.llamaDone;
+    state.llamaDone = '';
+    text.textContent = done || 'Recherche de la version officielle pour cet ordinateur…';
     go.hidden = true;
     const offer = await (await api('llama/check', {})).json(),
       best = offer.candidates[0];
@@ -781,7 +784,7 @@ async function showLlama() {
     }
     const upToDate = job.ours && current === offer.tag;
     text.textContent = upToDate
-      ? `À jour : version officielle ${offer.tag}.`
+      ? done || `À jour : version officielle ${offer.tag}.`
       : job.ours
         ? `Version officielle plus récente : ${offer.tag} · ${best.label} (${megabytes(best.size)}).`
         : `Version officielle pour cet ordinateur : ${offer.tag} · ${best.label} (${megabytes(best.size)}). « Installer » la met à la place du moteur actuel.`;
@@ -821,7 +824,8 @@ async function followLlama() {
         return;
       } else if (job.state === 'done') {
         const { result } = job;
-        text.textContent =
+        // Said again by showLlama once the list is drawn anew with the version now in use.
+        state.llamaDone = text.textContent =
           `llama.cpp ${result.tag} (${result.label}) installé${job.used ? ' et utilisé par le modèle' : ''}.` +
           (result.devices[0] ? ' Il voit : ' + result.devices[0] + '.' : '');
         // The setting changed on the server: the field says so. A form without other changes
@@ -1444,7 +1448,16 @@ async function addImages(files) {
 }
 
 function scrollToBottom() {
-  if (state.stickToBottom) $('chat-area').scrollTop = $('chat-area').scrollHeight;
+  if (state.stickToBottom) pinChat($('chat-area'));
+}
+/**
+ * The chat on its last line, at once. The area scrolls smoothly (styles.css) for the reader; done
+ * so here, it stopped above an answer that grew meanwhile, and its steps read as the reader
+ * scrolling up (onscroll), which then left the chat above its end.
+ */
+function pinChat(area) {
+  if (area.scrollTo) area.scrollTo({ top: area.scrollHeight, behavior: 'instant' });
+  else area.scrollTop = area.scrollHeight;
 }
 
 function renderText(target, text) {
@@ -2868,6 +2881,8 @@ function openChat() {
     unsendChat();
     document.body.dataset.chat = 'open';
     delete $('chat-bar').dataset.unread;
+    // A conversation already begun: in the middle of the window at once, as once a message is sent.
+    if ($('messages').childElementCount) centreOpenedChat();
     const area = $('chat-area');
     if (area.scrollTo) area.scrollTo({ top: area.scrollHeight, behavior: 'instant' });
     $('prompt').focus({ preventScroll: true });
@@ -2908,15 +2923,28 @@ function chatSent() {
   void panel.offsetHeight;
   panel.style.removeProperty('transition');
   centreChat();
-  if (!chatCentring && typeof ResizeObserver === 'function') {
-    chatCentring = new ResizeObserver(() => {
-      if (document.body.dataset.chatSent) centreChat();
-    });
-    chatCentring.observe(panel);
-    window.addEventListener('resize', () => {
-      if (document.body.dataset.chatSent) centreChat();
-    });
-  }
+  watchChatCentring();
+}
+/** Opened on a conversation already begun: centred at once, without a glide from the middle. */
+function centreOpenedChat() {
+  const panel = $('chat-panel');
+  panel.style.transition = 'none';
+  document.body.dataset.chatSent = 'true';
+  centreChat();
+  void panel.offsetHeight;
+  panel.style.removeProperty('transition');
+  watchChatCentring();
+}
+/** Centred again as the answer grows or the window changes size. */
+function watchChatCentring() {
+  if (chatCentring || typeof ResizeObserver !== 'function') return;
+  chatCentring = new ResizeObserver(() => {
+    if (document.body.dataset.chatSent) centreChat();
+  });
+  chatCentring.observe($('chat-panel'));
+  window.addEventListener('resize', () => {
+    if (document.body.dataset.chatSent) centreChat();
+  });
 }
 function unsendChat() {
   delete document.body.dataset.chatSent;
@@ -3044,6 +3072,22 @@ $('chat-area').onscroll = () => {
   const area = $('chat-area');
   state.stickToBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 100;
 };
+
+/**
+ * The chat stays on its last lines while it grows or its room changes (pictures that come, the
+ * message box that grows, the view shown again): it was left a little above its end. Not when the
+ * reader has scrolled up.
+ */
+function keepChatAtBottom() {
+  if (typeof ResizeObserver !== 'function') return;
+  const area = $('chat-area');
+  const keep = new ResizeObserver(() => {
+    if (state.stickToBottom && area.clientHeight) pinChat(area);
+  });
+  keep.observe(area);
+  keep.observe($('messages'));
+}
+keepChatAtBottom();
 window.addEventListener('beforeunload', event => {
   if (state.updateReload) return;
   if (
