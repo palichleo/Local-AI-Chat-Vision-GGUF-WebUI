@@ -702,16 +702,20 @@ body:not([data-view='studio']) .kind-tabs {
 .ai-status[hidden] {
   display: none;
 }
+/* Moodix AI is a small tile with cut corners, as the letters of MDX are, in their three
+   colours: blue, yellow, red, in bands across it. No glow. */
+.ai-dot,
+.ai-mark,
+.message-avatar {
+  flex: none;
+  border-radius: 0;
+  clip-path: polygon(30% 0, 100% 0, 100% 70%, 70% 100%, 0 100%, 0 30%);
+  background: linear-gradient(135deg, var(--fn-input) 0 34%, var(--fn-output) 37% 63%, var(--fn-action) 66% 100%);
+  box-shadow: none;
+}
 .ai-dot {
   width: 10px;
   height: 10px;
-  flex: none;
-  border-radius: 999px;
-  background: var(--ai);
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.6);
-}
-:root[data-theme='light'] .ai-dot {
-  box-shadow: 0 0 0 3px var(--ai-soft);
 }
 .ai-status-text {
   font-size: 13px;
@@ -807,18 +811,10 @@ body[data-view='studio'] .suggestions {
   font-size: 13px;
   font-weight: 800;
 }
-/* Moodix AI is a white dot, the same as its pointer in the Studio. */
+/* Moodix AI in the chat: its tile (above, with the dot of the Studio), at the size of a line. */
 .message-avatar {
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  background: var(--ai);
-  box-shadow:
-    0 0 0 4px rgba(255, 255, 255, 0.08),
-    0 0 14px rgba(255, 255, 255, 0.35);
-}
-:root[data-theme='light'] .message-avatar {
-  box-shadow: 0 0 0 4px var(--ai-soft);
+  width: 18px;
+  height: 18px;
 }
 .message-avatar svg {
   display: none;
@@ -926,7 +922,6 @@ body[data-view='studio'] .composer-region {
 .studio-context .ai-dot {
   width: 10px;
   height: 10px;
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
 }
 .studio-last-reply {
   flex: 1;
@@ -1130,16 +1125,11 @@ body[data-view='studio'] .composer-region {
   letter-spacing: 0;
   text-transform: none;
 }
-/* A setting Moodix AI may change (« Assistant » in its workflow) wears a small white dot. */
+/* A setting Moodix AI may change (« Assistant » in its workflow) wears its tile, small (see
+   .ai-dot). */
 .ai-mark {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--ai);
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
-}
-:root[data-theme='light'] .ai-mark {
-  box-shadow: 0 0 0 2px var(--ai-soft);
+  width: 7px;
+  height: 7px;
 }
 .studio-prompt-field {
   flex: 1;
@@ -2204,9 +2194,14 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
   .studio-block {
     min-height: 0;
   }
-  .studio-block.is-input,
   .studio-block.is-preview {
     overflow: hidden;
+  }
+  /* A window too short for the prompt and its images: they scroll in their block, as the
+     settings do, rather than overlapping. */
+  .studio-block.is-input {
+    overflow-x: hidden;
+    overflow-y: auto;
   }
   .studio-block.is-settings {
     overflow-y: auto;
@@ -2223,9 +2218,10 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
     min-height: 100px;
     overflow: hidden;
   }
+  /* Never shorter than its text box: the star and the fade stay at the foot of the text. */
   .studio-block.is-input .studio-prompt-field {
     flex: 1 1 auto;
-    min-height: 0;
+    min-height: 110px;
   }
   .studio-block.is-input .studio-prompt-field textarea {
     flex: 1 1 auto;
@@ -2250,44 +2246,74 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
   min-height: 18px;
 }
 
-/* The prompt, and « Enrichir le prompt » at its bottom right, in it. */
+/* The prompt, and its star (« Enrichir le prompt ») at its bottom right, left of its scroll bar. */
 .studio-prompt-field {
+  /* The room left on the right for the scroll bar of the prompt. */
+  --enrich-clear: 18px;
   position: relative;
   display: flex;
   flex-direction: column;
 }
 .studio-prompt-field.has-enrich textarea {
-  padding-bottom: 52px;
+  padding-bottom: 46px;
+}
+/* The last lines fade out as they come down to the star: from the top of its box to the foot of
+   the field, in the colour of the field. The scroll bar, on the right, stays clear. */
+.studio-prompt-field.has-enrich::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: var(--enrich-clear);
+  bottom: 1px;
+  height: 40px;
+  z-index: 1;
+  border-radius: 0 0 0 13px;
+  background: linear-gradient(to bottom, transparent, var(--field) 92%);
+  pointer-events: none;
 }
 .studio-prompt-field .studio-enrich {
   position: absolute;
-  right: 8px;
+  right: var(--enrich-clear);
   bottom: 8px;
-  left: 8px;
+  left: auto;
+  z-index: 2;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 4px;
   pointer-events: none;
 }
 .studio-prompt-field .studio-enrich > * {
   pointer-events: auto;
 }
 .studio-enrich-go {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 12px 0 10px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
   border-radius: 999px;
   border: 1px solid rgba(157, 180, 255, 0.32);
   background: rgba(61, 107, 245, 0.16);
   color: var(--fn-input-text);
-  font-size: 12.5px;
-  font-weight: 700;
 }
 .studio-enrich-go svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   stroke-width: 2;
+}
+/* While the model rewrites: the star turns, slowly. */
+.studio-enrich-go.is-working svg {
+  animation: enrich-turn 2.4s linear infinite;
+}
+@keyframes enrich-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-enrich-go.is-working svg {
+    animation: none;
+  }
 }
 .studio-enrich-go:hover:enabled {
   background: rgba(61, 107, 245, 0.28);
@@ -2298,11 +2324,21 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
   background: rgba(47, 94, 232, 0.1);
 }
 .studio-prompt-field .studio-enrich .studio-link {
-  min-height: 34px;
-  padding: 0 10px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
   border-radius: 999px;
+  border: 1px solid var(--field-line);
   background: var(--field);
-  font-size: 12.5px;
+  color: var(--soft);
+}
+.studio-prompt-field .studio-enrich .studio-link svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2;
 }
 
 /* Settings: the size of a field, all of them; the rare ones under « Plus de réglages », in the block. */

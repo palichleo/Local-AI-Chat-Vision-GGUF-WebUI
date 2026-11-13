@@ -254,7 +254,7 @@ export function setupStudio({
     control.onclick = onclick;
     return control;
   };
-  // The settings Moodix AI may change wear a white dot; the one it is changing, a ring.
+  // The settings Moodix AI may change wear its tile; the one it is changing, a ring.
   function aiTarget(element, key) {
     element.dataset.ai = key;
     if (ai?.active === key) element.setAttribute('data-ai-active', '');
@@ -815,21 +815,42 @@ export function setupStudio({
       render();
     }
   }
+  /**
+   * In the corner of the prompt: the star that enriches it (its name for screen readers and in
+   * its tooltip), and once used the arrow back to what was typed.
+   */
   function enrichRow() {
     const draft = drafts[mode],
       row = node('div', 'studio-enrich'),
-      make = button('studio-enrich-go', enriching ? 'Enrichissement…' : 'Enrichir le prompt', enrich, 'spark');
-    make.title = 'Le modèle de chat réécrit votre texte en un prompt complet';
+      label = enriching ? 'Enrichissement…' : 'Enrichir le prompt',
+      make = button('studio-enrich-go', '', enrich, 'spark');
+    make.append(node('span', 'sr-only', label));
+    make.setAttribute('aria-label', label);
+    make.title = enriching
+      ? 'Le modèle de chat réécrit votre texte…'
+      : 'Enrichir le prompt : le modèle de chat réécrit votre texte en un prompt complet';
+    if (enriching) {
+      make.classList.add('is-working');
+      make.setAttribute('aria-busy', 'true');
+    }
     make.disabled = enriching || Boolean(working);
-    row.append(make);
     if (draft.before !== null && !enriching && !working) {
-      const back = button('studio-link', 'Revenir à mon texte', () => {
-        draft.prompt = draft.before;
-        draft.before = null;
-        render();
-      });
+      const back = button(
+        'studio-link',
+        '',
+        () => {
+          draft.prompt = draft.before;
+          draft.before = null;
+          render();
+        },
+        'undo',
+      );
+      back.append(node('span', 'sr-only', 'Revenir à mon texte'));
+      back.setAttribute('aria-label', 'Revenir à mon texte');
+      back.title = 'Revenir à mon texte';
       row.append(back);
     }
+    row.append(make);
     return row;
   }
 
