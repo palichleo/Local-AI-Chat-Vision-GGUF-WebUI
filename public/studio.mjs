@@ -38,8 +38,14 @@ const ROLES = {
   end_image: 'Image de fin',
   reference: 'Référence',
 };
-// Under each input tile: one word, the full name in its tooltip.
-const SHORT = { source: 'À modifier', start_image: 'Début', end_image: 'Fin', reference: 'Réf.' };
+// Each input image says what it is with a picto, never a word (moodix-design.md 13): its name is
+// in its tooltip and for screen readers. A reference shows « @ », and « @1 » once given.
+const PICTO = { source: 'edit', start_image: 'start', end_image: 'end' };
+const ADD = {
+  source: 'Ajouter l’image à modifier',
+  start_image: 'Ajouter l’image de début',
+  end_image: 'Ajouter l’image de fin',
+};
 const SETTINGS = { lyrics: 'Paroles', seconds: 'Durée (s)', language: 'Langue' };
 const SETTING_HELP = { lyrics: 'Vide pour un morceau instrumental. Balises : [Verse], [Chorus], [Bridge]…' };
 const MAX_STYLES = 3;
@@ -365,6 +371,13 @@ export function setupStudio({
   }
   // The slot an image is being dragged from: dropped on another, the image changes role.
   let dragged = null;
+  // The model each mode showed last: another one, and the blocks of the images say so for a
+  // moment (moodix-design.md 21).
+  const shownModel = {};
+  let flashUntil = 0,
+    flashTimer = null,
+    // The line from the start to the end: its colour and its figure follow the duration bar.
+    span = null;
   /**
    * Moves an image to another slot; the two swap when that slot is taken. Refused, with the
    * reason, when the inputs would no longer combine (MiniMax: references, or start and end).
@@ -397,7 +410,13 @@ export function setupStudio({
     }
     render();
   }
-  function slot(workflow, role, index, label, short = label) {
+  /**
+   * One image of the inputs (moodix-design.md 13): dashed while empty, with its picto (« @ » for
+   * a reference); given, its picture, the picto kept small in a badge (« @1 »). No word: the name
+   * is in its tooltip and for screen readers. A click picks a file; a file dropped on it, or the
+   * image of another slot (that changes its role); × takes it back.
+   */
+  function slot(workflow, role, index, { label, add, tip, picto = null, badge = '', onRemove = null }) {
     const draft = drafts[mode],
       value = draft.inputs[role]?.[index],
       clash = exclusiveWith(workflow, role),
@@ -420,7 +439,8 @@ export function setupStudio({
       };
       picker.click();
     });
-    pick.title = refused || (value ? label + ' · glissez-la vers un autre emplacement pour changer son rôle' : label);
+    pick.title = refused || (value ? label + ' · glissez-la vers un autre emplacement pour changer son rôle' : tip);
+    pick.setAttribute('aria-label', value ? label + ' · ' + value.name : refused ? label + ' · ' + refused : add);
     pick.disabled = Boolean(working);
     if (refused) pick.setAttribute('aria-disabled', 'true');
     if (value) {
@@ -431,6 +451,11 @@ export function setupStudio({
       preview.draggable = false;
       if (value.preview) pick.append(preview);
       else pick.append(icon('image'));
+      // What the image is, small, at the bottom left of it.
+      const mark = node('span', 'studio-slot-badge' + (badge ? ' is-text' : ''), badge);
+      mark.setAttribute('aria-hidden', 'true');
+      if (!badge && picto) mark.append(icon(picto));
+      pick.append(mark);
       pick.draggable = !working;
       pick.ondragstart = event => {
         dragged = { role, index };
@@ -442,7 +467,12 @@ export function setupStudio({
         dragged = null;
         tile.classList.remove('is-dragged');
       };
-    } else pick.append(icon('plus'));
+    } else if (picto) pick.append(icon(picto));
+    else {
+      const at = node('span', 'studio-slot-at', '@');
+      at.setAttribute('aria-hidden', 'true');
+      pick.append(at);
+    }
     // The whole tile takes a drop: a file from the computer, or the image of another slot.
     tile.ondragover = event => {
       event.preventDefault();
@@ -464,38 +494,198 @@ export function setupStudio({
       if (chosenByAi) return;
       void fill(role, index, event.dataTransfer.files[0]);
     };
-    tile.append(pick, node('span', 'studio-slot-label', short));
+    tile.append(pick);
     if (value && !chosenByAi) {
       const remove = button(
         'studio-slot-remove',
         '',
-        () => {
-          draft.inputs[role][index] = null;
-          render();
-        },
+        onRemove ??
+          (() => {
+            draft.inputs[role][index] = null;
+            render();
+          }),
         'close',
       );
       remove.setAttribute('aria-label', 'Retirer ' + label);
+      remove.title = 'Retirer';
       tile.append(remove);
     }
     return tile;
   }
-  function inputs(workflow) {
-    const row = node('div', 'studio-slots');
-    for (const [role, spec] of Object.entries(workflow.roles)) {
-      if (!spec.count || !spec.media.includes('image')) continue;
-      for (let index = 0; index < spec.count; index++)
-        row.append(
-          slot(
-            workflow,
-            role,
-            index,
-            ROLES[role] + (spec.count > 1 ? ' ' + (index + 1) : ''),
-            SHORT[role] + (spec.count > 1 ? ' ' + (index + 1) : ''),
-          ),
-        );
+  /** Whether the workflow takes images in this role. */
+  const takesImages = (workflow, role) =>
+    Boolean(workflow.roles?.[role]?.count && workflow.roles[role].media.includes('image'));
+  /** The length set in Réglages, written as everywhere, and its place between the model's ends. */
+  function spanLength(workflow) {
+    const length = lengthOf(workflow);
+    if (!length) return null;
+    const low = length.list[0],
+      high = length.list.at(-1);
+    return { text: seconds(length.value), share: high > low ? (length.value - low) / (high - low) : 1 };
+  }
+  /**
+   * The line from the start to the end, in the colour of the duration bar: the same gradient,
+   * spread so that its end is the colour of the length set; the figure in that colour too.
+   */
+  function paintSpan() {
+    if (!span) return;
+    const length = spanLength(span.workflow);
+    span.time.hidden = !length;
+    if (!length) return;
+    span.line.style.backgroundSize = 100 / Math.max(length.share, 0.01) + '% 100%';
+    span.time.textContent = length.text;
+    span.time.style.color = barColour(length.share);
+  }
+  /** « Inverser début et fin »: the two images change places; the end stays optional. */
+  function swapEnds(workflow) {
+    const start = { role: 'start_image', index: 0 },
+      end = { role: 'end_image', index: 0 };
+    if (drafts[mode].inputs.start_image?.[0]) move(workflow, start, end);
+    else if (drafts[mode].inputs.end_image?.[0]) move(workflow, end, start);
+  }
+  /**
+   * Bloc Début et fin: the start image at the start of a fine line of time, the end image at its
+   * other end (when the model takes one), the length set in Réglages on the line: in its middle,
+   * with the button that swaps them, « ⇄ 05.17 s ».
+   */
+  function framesBlock(workflow) {
+    const start = takesImages(workflow, 'start_image'),
+      end = takesImages(workflow, 'end_image');
+    if (!start && !end) return null;
+    const block = node('div', 'studio-input-block studio-frames'),
+      row = node('div', 'studio-frames-row'),
+      middle = node('div', 'studio-span' + (start && end ? ' is-both' : '')),
+      line = node('span', 'studio-span-line'),
+      time = node('span', 'studio-span-time');
+    block.setAttribute('role', 'group');
+    block.setAttribute('aria-label', start && end ? 'Début et fin' : start ? 'Image de début' : 'Image de fin');
+    line.setAttribute('aria-hidden', 'true');
+    middle.append(line);
+    if (start && end) {
+      const swap = button('studio-swap', '', () => swapEnds(workflow), 'swap');
+      swap.setAttribute('aria-label', 'Inverser début et fin');
+      swap.title = 'Inverser début et fin';
+      swap.disabled = Boolean(working);
+      swap.append(time);
+      middle.append(swap);
+    } else middle.append(time);
+    if (start)
+      row.append(
+        slot(workflow, 'start_image', 0, {
+          label: ROLES.start_image,
+          add: ADD.start_image,
+          tip: ROLES.start_image + ' · glisser, coller ou cliquer',
+          picto: PICTO.start_image,
+        }),
+      );
+    row.append(middle);
+    if (end)
+      row.append(
+        slot(workflow, 'end_image', 0, {
+          label: ROLES.end_image,
+          add: ADD.end_image,
+          tip: ROLES.end_image + (start ? ' (facultatif)' : '') + ' · glisser, coller ou cliquer',
+          picto: PICTO.end_image,
+        }),
+      );
+    span = { line, time, workflow };
+    paintSpan();
+    block.append(row);
+    return block;
+  }
+  /**
+   * Bloc Références: a tray, no time; each image with its number (« @1 »), one empty slot at a
+   * time, and « n/3 » at the end of the line (the model's own most).
+   */
+  function referencesBlock(workflow) {
+    if (!takesImages(workflow, 'reference')) return null;
+    const draft = drafts[mode],
+      most = workflow.roles.reference.count,
+      // Without holes: the numbers follow each other. What is sent leaves the holes out anyway.
+      given = (draft.inputs.reference ?? []).filter(Boolean);
+    draft.inputs.reference = given;
+    // Those past the model's most stay kept, for a model that takes them.
+    const shown = given.slice(0, most),
+      block = node('div', 'studio-input-block studio-references'),
+      row = node('div', 'studio-references-row'),
+      name = place => (most > 1 ? ROLES.reference + ' ' + (place + 1) : ROLES.reference);
+    block.setAttribute('role', 'group');
+    block.setAttribute('aria-label', most > 1 ? 'Références' : 'Référence');
+    shown.forEach((item, place) =>
+      row.append(
+        slot(workflow, 'reference', place, {
+          label: name(place),
+          badge: '@' + (place + 1),
+          onRemove: () => {
+            draft.inputs.reference.splice(place, 1);
+            render();
+          },
+        }),
+      ),
+    );
+    if (shown.length < most)
+      row.append(
+        slot(workflow, 'reference', shown.length, {
+          label: name(shown.length),
+          add: most > 1 ? 'Ajouter la référence ' + (shown.length + 1) : 'Ajouter la référence',
+          tip: 'Référence : personnage, objet ou décor · glisser, coller ou cliquer',
+        }),
+      );
+    if (most > 1) {
+      const count = node('span', 'studio-references-count', shown.length + '/' + most);
+      count.title = shown.length + ' référence' + (shown.length > 1 ? 's' : '') + ' sur ' + most;
+      row.append(count);
     }
-    return row.children.length ? aiTarget(row, 'inputs') : null;
+    block.append(row);
+    return block;
+  }
+  /** The image to modify (and any other input image): a slot each, with its picto. */
+  function sourcesBlock(workflow) {
+    const block = node('div', 'studio-input-block studio-sources'),
+      row = node('div', 'studio-sources-row'),
+      labels = [];
+    for (const [role, spec] of Object.entries(workflow.roles ?? {})) {
+      if (['start_image', 'end_image', 'reference'].includes(role) || !takesImages(workflow, role)) continue;
+      for (let index = 0; index < spec.count; index++) {
+        const label = (ROLES[role] ?? 'Image') + (spec.count > 1 ? ' ' + (index + 1) : '');
+        labels.push(label);
+        row.append(
+          slot(workflow, role, index, {
+            label,
+            add: spec.count === 1 && ADD[role] ? ADD[role] : 'Ajouter : ' + label,
+            tip: label + ' · glisser, coller ou cliquer',
+            picto: PICTO[role] ?? 'image',
+          }),
+        );
+      }
+    }
+    if (!labels.length) return null;
+    block.setAttribute('role', 'group');
+    block.setAttribute('aria-label', labels.length > 1 ? 'Images' : labels[0]);
+    block.append(row);
+    return block;
+  }
+  /**
+   * The input images, below the prompt: only what the model takes, each kind in its block in the
+   * style of the prompt's box (the image to modify; the start and the end; the references, below).
+   */
+  function inputs(workflow) {
+    span = null;
+    const blocks = [sourcesBlock(workflow), framesBlock(workflow), referencesBlock(workflow)].filter(Boolean);
+    if (!blocks.length) return null;
+    // Another model: a blue line around them for a moment, which fades (nothing blinks). Drawn
+    // again meanwhile, they keep it until the moment is over.
+    if (Date.now() < flashUntil) {
+      for (const block of blocks) block.className += ' is-flash';
+      clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => {
+        const lit = globalThis.document?.querySelectorAll?.('#studio-view .studio-input-block.is-flash') ?? [];
+        for (const block of lit) block.classList.remove('is-flash');
+      }, flashUntil - Date.now());
+    }
+    const column = node('div', 'studio-inputs');
+    column.append(...blocks);
+    return aiTarget(column, 'inputs');
   }
 
   // ------------------------------------------------------------------ size, length
@@ -714,8 +904,10 @@ export function setupStudio({
     });
     return block;
   }
-  /** What depends on the length, kept in step while its bar moves (the start and end line, lot 4). */
-  function lengthMoved() {}
+  /** What depends on the length, kept in step while its bar moves: the line from start to end. */
+  function lengthMoved() {
+    paintSpan();
+  }
   /**
    * Bloc LoRA (moodix-design.md 11, 7 bis 5): « LoRA · n / 3 », those of the workflow first (a
    * padlock in place of ×, their bar greyed when their strength is fixed there, their switch when
@@ -2391,7 +2583,10 @@ export function setupStudio({
           }),
         );
     }
-    // A continuation shows only the inputs it takes (subject references, for MiniMax H3).
+    // The input images (a continuation shows only those it takes: subject references, for
+    // MiniMax H3). Another model than the last one drawn: their blocks say so for a moment.
+    if (shownModel[mode] && shownModel[mode] !== workflow.id) flashUntil = Date.now() + 650;
+    shownModel[mode] = workflow.id;
     const row = inputs(workflow);
     if (row) write.append(row);
 

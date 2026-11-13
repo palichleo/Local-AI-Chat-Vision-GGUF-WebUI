@@ -889,10 +889,10 @@ test('an image dragged to another slot changes role; a move that would not combi
         slots()[from].children[0].ondragstart(event([]));
         slots()[to].ondrop(event([]));
       };
-    assert.equal(slots().length, 4, 'start, end and two references');
+    assert.equal(slots().length, 3, 'start, end, and one empty reference slot at a time');
 
     await drop(0, 'a.png');
-    assert.deepEqual(shown(), ['/preview/a.png', '', '', '']);
+    assert.deepEqual(shown(), ['/preview/a.png', '', '']);
     // References do not combine with a start image: their slots say so, and still take the move.
     assert.match(slots()[2].className, /is-blocked/);
     drag(0, 2);
@@ -903,14 +903,124 @@ test('an image dragged to another slot changes role; a move that would not combi
     // To the end slot, then a start image beside it: the two swap when one is dropped on the other.
     drag(2, 1);
     await drop(0, 'b.png');
-    assert.deepEqual(shown(), ['/preview/b.png', '/preview/a.png', '', '']);
+    assert.deepEqual(shown(), ['/preview/b.png', '/preview/a.png', '']);
     drag(0, 1);
-    assert.deepEqual(shown(), ['/preview/a.png', '/preview/b.png', '', '']);
+    assert.deepEqual(shown(), ['/preview/a.png', '/preview/b.png', '']);
 
     // A reference beside an end image is what the model cannot take: nothing moves, and it is said.
-    drag(0, 3);
-    assert.deepEqual(shown(), ['/preview/a.png', '/preview/b.png', '', '']);
+    drag(0, 2);
+    assert.deepEqual(shown(), ['/preview/a.png', '/preview/b.png', '']);
     assert.match(body.find('studio-error')[0].textContent, /ne se combine pas avec : Image de fin/);
+  } finally {
+    restore();
+  }
+});
+
+test('the input images: pictos and no word, start and end on a line of time, references numbered without holes', async () => {
+  const lengths = { seconds: [121 / 24, 193 / 24, 241 / 24], standard: 121 / 24 },
+    video = {
+      id: 'v',
+      name: 'Clip',
+      external: true,
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      settings: [],
+      seeded: true,
+      lengths,
+      exclusive: [['start_image', 'end_image'], ['reference']],
+      roles: {
+        start_image: { count: 1, media: ['image'] },
+        end_image: { count: 1, media: ['image'] },
+        reference: { count: 3, media: ['image'] },
+      },
+    },
+    // A model that takes a start image only.
+    other = { ...video, id: 'w', name: 'Autre', exclusive: [], roles: { start_image: { count: 1, media: ['image'] } } };
+  const { body, restore, mode } = await studioPage({ create_video: [video, other] });
+  try {
+    mode(1);
+    const slots = () => body.find('studio-slot'),
+      picks = () => body.find('studio-slot-pick'),
+      shown = () => slots().map(tile => (tile.className.includes('is-filled') ? tile.children[0].children[0].src : '')),
+      badges = () => body.find('studio-slot-badge').map(badge => badge.textContent),
+      event = files => ({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files, setData() {} } }),
+      drop = async (index, name) => {
+        slots()[index].ondrop(event([{ name }]));
+        await new Promise(resolve => setTimeout(resolve, 5));
+      },
+      model = id => {
+        const pick = body.find('studio-model-pick')[0];
+        pick.value = id;
+        pick.onchange();
+      };
+    // Two blocks: the start and the end, the references below; none says « is-flash » yet.
+    const [frames, references] = body.find('studio-input-block');
+    assert.equal(frames.attributes['aria-label'], 'Début et fin');
+    assert.equal(references.attributes['aria-label'], 'Références');
+    assert.doesNotMatch(frames.className, /is-flash/);
+    // No word under the images: their names are for screen readers and in the tooltips.
+    assert.deepEqual(body.find('studio-slot-label'), []);
+    assert.deepEqual(
+      picks().map(pick => pick.attributes['aria-label']),
+      ['Ajouter l’image de début', 'Ajouter l’image de fin', 'Ajouter la référence 1'],
+    );
+    assert.equal(picks()[1].title, 'Image de fin (facultatif) · glisser, coller ou cliquer');
+    // Empty, the start and the end show their pictos, a reference « @ ».
+    assert.equal(picks()[0].children[0].tag, 'svg');
+    assert.equal(picks()[2].children[0].textContent, '@');
+
+    // The length set, on the line, in the colour of the duration bar: the shortest, blue.
+    const [time] = body.find('studio-span-time'),
+      [line] = body.find('studio-span-line');
+    assert.equal(time.textContent, '05.04 s');
+    assert.equal(time.style.color, 'rgb(61, 107, 245)');
+    // The bar moved to the longest: the line follows at once, red, without drawing the Studio again.
+    const bar = body.find('studio-bar').find(item => item.dataset.ai === 'duration');
+    bar.value = '2';
+    bar.oninput();
+    assert.equal(time.textContent, '10.04 s');
+    assert.equal(time.style.color, 'rgb(232, 64, 47)');
+    assert.equal(line.style.backgroundSize, '100% 100%');
+
+    // A start image: its picto stays, small, in a badge; « ⇄ » swaps it to the end and back.
+    await drop(0, 'a.png');
+    assert.equal(slots()[0].find('studio-slot-badge').length, 1);
+    assert.equal(picks()[0].attributes['aria-label'], 'Image de début · Ref 1 · a.png');
+    const [swap] = body.find('studio-swap');
+    assert.equal(swap.attributes['aria-label'], 'Inverser début et fin');
+    swap.onclick();
+    assert.deepEqual(shown(), ['', '/preview/a.png', '']);
+    body.find('studio-swap')[0].onclick();
+    assert.deepEqual(shown(), ['/preview/a.png', '', '']);
+
+    // Taken back, then references one at a time, numbered, « n/3 » at the end of the line.
+    slots()[0].find('studio-slot-remove')[0].onclick();
+    await drop(2, 'b.png');
+    await drop(3, 'c.png');
+    assert.deepEqual(badges(), ['@1', '@2']);
+    assert.equal(body.find('studio-references-count')[0].textContent, '2/3');
+    assert.equal(slots().length, 5, 'start, end, two references and one empty slot');
+    // @1 taken back: the next one becomes @1, no hole.
+    body.find('studio-references')[0].find('studio-slot-remove')[0].onclick();
+    assert.deepEqual(badges(), ['@1']);
+    assert.equal(
+      body.find('studio-references')[0].find('studio-slot')[0].children[0].children[0].src,
+      '/preview/c.png',
+    );
+    assert.equal(body.find('studio-references-count')[0].textContent, '1/3');
+
+    // Another model: its blocks say so for a moment (a blue line); a start image only, the line
+    // ends with the length, no « ⇄ ».
+    model('w');
+    const [start] = body.find('studio-input-block');
+    assert.equal(body.find('studio-input-block').length, 1);
+    assert.equal(start.attributes['aria-label'], 'Image de début');
+    assert.match(start.className, /is-flash/);
+    assert.deepEqual(body.find('studio-swap'), []);
+    assert.equal(body.find('studio-span-time')[0].textContent, '10.04 s');
+    // Back: the reference kept comes back with it.
+    model('v');
+    assert.deepEqual(badges(), ['@1']);
   } finally {
     restore();
   }
@@ -1136,11 +1246,11 @@ test('Ctrl+E improves the prompt from the Studio; an image pasted or dropped on 
     write.onpaste({ clipboardData: { files: [file('a.png')] }, preventDefault: () => stopped++ });
     await settle();
     assert.equal(stopped, 1, 'the image is not pasted as text');
-    assert.deepEqual(shown(), ['/preview/a.png', '', '', '']);
+    assert.deepEqual(shown(), ['/preview/a.png', '', '']);
     body.find('studio-write')[0].ondrop({ dataTransfer: { files: [file('b.png')] }, preventDefault() {} });
     await settle();
     // The references do not combine with a start image: the end takes it.
-    assert.deepEqual(shown(), ['/preview/a.png', '/preview/b.png', '', '']);
+    assert.deepEqual(shown(), ['/preview/a.png', '/preview/b.png', '']);
     body.find('studio-write')[0].onpaste({ clipboardData: { files: [file('c.png')] }, preventDefault() {} });
     await settle();
     assert.equal(notices.at(-1), 'Toutes les cases d’images sont prises.');

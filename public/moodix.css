@@ -1340,74 +1340,258 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   min-height: 40px;
   padding: 0 8px;
 }
-/* Input images: 60 px squares, the one given ringed in blue. */
-.studio-slots {
+/* Images d'entrée (moodix-design.md 13, 21): below the prompt, a block for the image to modify,
+   one for the start and the end, one for the references, in the style of the prompt's box, 10 px
+   apart. No word: a picto in each empty slot (dashed), kept small in a badge once the image is
+   given; the input blue on hover; × on hover, on focus, and always on a screen without hover. */
+.studio-inputs {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
+  flex-direction: column;
   gap: 10px;
+}
+.studio-input-block {
+  padding: 12px;
+  border: 1px solid #262a33;
+  border-radius: 10px;
+  background: #0b0c0f;
+  transition: box-shadow 0.45s ease;
+}
+:root[data-theme='light'] .studio-input-block {
+  border-color: var(--field-line);
+  background: var(--field);
+}
+/* Another model: a blue line around the blocks for 0.65 s, which fades in 0.45 s. */
+.studio-input-block.is-flash {
+  box-shadow:
+    0 0 0 1px rgba(61, 107, 245, 0.65),
+    0 0 18px rgba(61, 107, 245, 0.18);
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-input-block {
+    transition: none;
+  }
+}
+.studio-frames-row,
+.studio-references-row,
+.studio-sources-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 .studio-slot {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--muted);
+  flex: none;
 }
-.studio-slot-pick {
-  width: 60px;
-  height: 60px;
-  padding: 0;
+#studio-view .studio-slot-pick {
+  position: relative;
   display: grid;
   place-items: center;
+  width: 52px;
+  height: 52px;
+  min-height: 0;
+  padding: 0;
   overflow: hidden;
-  border-radius: 12px;
   border: 1px dashed #343944;
+  border-radius: 7px;
   background: transparent;
-  color: #aeb4bf;
+  color: #6e7480;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
 }
-:root[data-theme='light'] .studio-slot-pick {
+:root[data-theme='light'] #studio-view .studio-slot-pick {
   border-color: var(--line-strong);
   color: var(--muted);
 }
-.studio-slot.is-filled .studio-slot-pick {
+#studio-view .studio-slot-pick > svg {
+  width: 18px;
+  height: 18px;
+}
+.studio-slot-at {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+}
+#studio-view .studio-slot:not(.is-blocked) .studio-slot-pick:hover:enabled,
+#studio-view .studio-slot:not(.is-blocked) .studio-slot-pick:focus-visible,
+#studio-view .studio-slot.is-target .studio-slot-pick {
+  border-color: #3d6bf5;
+  background-color: rgba(61, 107, 245, 0.08);
+  color: #9db6ff;
+}
+#studio-view .studio-slot.is-filled .studio-slot-pick {
   border: 0;
-  box-shadow: 0 0 0 1.5px var(--fn-input);
+}
+#studio-view .studio-slot.is-filled:not(.is-blocked) .studio-slot-pick:hover:enabled,
+#studio-view .studio-slot.is-filled .studio-slot-pick:focus-visible,
+#studio-view .studio-slot.is-filled.is-target .studio-slot-pick {
+  box-shadow: inset 0 0 0 1.5px #3d6bf5;
 }
 .studio-slot-pick img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.studio-slot.is-target .studio-slot-pick {
-  border-color: var(--fn-input);
-  border-style: solid;
-}
-.studio-slot.is-blocked .studio-slot-pick {
+#studio-view .studio-slot.is-blocked .studio-slot-pick {
   opacity: 0.4;
+  cursor: not-allowed;
 }
-.studio-slot-label {
-  font-size: 12px;
-  color: var(--muted);
+.studio-slot.is-dragged {
+  opacity: 0.5;
 }
-.studio-slot-remove {
+/* What the image is, small, at its bottom left: the picto, or « @1 » for a reference. */
+.studio-slot-badge {
   position: absolute;
-  top: -8px;
-  left: 46px;
-  width: 24px;
-  height: 24px;
-  padding: 0;
+  bottom: 3px;
+  left: 3px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: rgba(11, 12, 15, 0.85);
+  color: #eceef2;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+}
+.studio-slot-badge.is-text {
+  color: #9db6ff;
+}
+.studio-slot-badge svg {
+  width: 12px;
+  height: 12px;
+}
+#studio-view .studio-slot-remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 2;
   display: grid;
   place-items: center;
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid #2a2e37;
   border-radius: 999px;
-  border: 1px solid var(--line-strong);
+  background: #0b0c0f;
+  color: #c3c8d0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+#studio-view .studio-slot:hover .studio-slot-remove,
+#studio-view .studio-slot:focus-within .studio-slot-remove {
+  opacity: 1;
+}
+@media (hover: none) {
+  #studio-view .studio-slot-remove {
+    opacity: 1;
+  }
+}
+:root[data-theme='light'] #studio-view .studio-slot-remove {
+  border-color: var(--line-strong);
   background: var(--surface-raised);
   color: var(--ink);
 }
-.studio-slot-remove svg {
-  width: 12px;
-  height: 12px;
+#studio-view .studio-slot-remove svg {
+  width: 10px;
+  height: 10px;
+}
+/* The line of time between the start and the end, in the colour of the duration bar (its
+   gradient spread by the page so that its end is the colour of the length set). */
+.studio-span {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: 52px;
+}
+.studio-span-line {
+  flex: 1 1 auto;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3d6bf5 0%, #22a060 33.333%, #f6c343 66.667%, #e8402f 100%) left center / 100% 100%
+    no-repeat;
+}
+.studio-span.is-both .studio-span-line {
+  position: absolute;
+  top: 25px;
+  right: 0;
+  left: 0;
+}
+.studio-span-time {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.studio-span-time[hidden] {
+  display: none;
+}
+:root[data-theme='light'] .studio-span-time {
+  filter: brightness(0.72);
+}
+/* « ⇄ 05.17 s »: one pill in the middle of the line, which swaps the start and the end. */
+#studio-view .studio-swap {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  min-height: 0;
+  padding: 0 8px;
+  border: 1px solid #2a2e37;
+  border-radius: 999px;
+  background: #0b0c0f;
+  color: #9aa0ab;
+}
+#studio-view .studio-swap:hover:enabled,
+#studio-view .studio-swap:focus-visible {
+  border-color: #eceef2;
+  color: #eceef2;
+}
+:root[data-theme='light'] #studio-view .studio-swap {
+  border-color: var(--line-strong);
+  background: var(--field);
+  color: var(--soft);
+}
+#studio-view .studio-swap svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+.studio-references-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #6e7480;
+}
+/* A short window: the blocks of the images a little tighter, so that the prompt keeps its lines
+   and the column does not scroll (MiniMax H3: start and end, and references, at 1024 × 640). */
+@media (max-height: 700px) {
+  .studio-inputs {
+    gap: 8px;
+  }
+  .studio-input-block {
+    padding: 9px;
+  }
 }
 .studio-lyrics-toggle {
   align-self: flex-start;
