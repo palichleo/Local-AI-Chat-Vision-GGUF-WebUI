@@ -1817,6 +1817,25 @@ video.studio-frame-result {
   text-align: right;
   overflow-wrap: anywhere;
 }
+#studio-view .studio-details-open {
+  grid-column: 1 / -1;
+  justify-self: end;
+  height: 26px;
+  min-height: 0;
+  margin-top: 2px;
+  padding: 0 10px;
+  border: 1px solid #262a33;
+  border-radius: 999px;
+  background: transparent;
+  color: #c3c8d0;
+  font-size: 12px;
+  font-weight: 700;
+}
+#studio-view .studio-details-open:hover,
+#studio-view .studio-details-open:focus-visible {
+  border-color: #3a3f4a;
+  color: #eceef2;
+}
 /* A sound: its bars, lit in the action colour as the generation goes. */
 .studio-bars {
   position: absolute;
@@ -3791,4 +3810,264 @@ html[data-switch='chat']::view-transition-old(studio) {
 #studio-view .studio-dice svg {
   width: 16px;
   height: 16px;
+}
+
+/* ------------------------------------------------------------------ Sortie: timeline and gallery */
+/* moodix-design.md 15, 15 bis, 22, 24: nothing written; pictures of 208 × 117 px, 6 px corners,
+   14 px apart, 18 px from the edges of the band (4 of them in the strip, room for the white ring
+   of the one shown); the newest at the left, its number at its bottom left; one round button at
+   its bottom right (Prolonger, Animer); the bin and « Détails » on hover, on focus, and always on
+   a screen without hover; a menu (right click, long press) and the question of a deletion on the
+   picture itself. */
+#studio-view .studio-block.is-output {
+  --block-pad: 14px 14px 16px;
+}
+#studio-view .studio-strip {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: 14px;
+  min-height: 0;
+  padding: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+#studio-view .studio-item {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: 208px;
+  height: 117px;
+  border-radius: 6px;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition: outline-color 0.15s;
+}
+#studio-view .studio-item.is-shown,
+#studio-view .studio-item.is-selected,
+#studio-view .studio-item:has(.studio-item-pick:focus-visible) {
+  outline-color: #eceef2;
+}
+#studio-view .studio-item-pick {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: #000;
+  cursor: pointer;
+}
+#studio-view .studio-item-pick:focus-visible {
+  outline: none;
+}
+#studio-view .studio-item-pick > img,
+#studio-view .studio-item-pick > video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+#studio-view .studio-item-pick .studio-thumb-wave {
+  top: 34%;
+  bottom: 34%;
+  left: 14px;
+  right: 14px;
+}
+.studio-item-number {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  z-index: 2;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(11, 12, 15, 0.85);
+  color: #eceef2;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+  pointer-events: none;
+}
+#studio-view .studio-item-main,
+#studio-view .studio-item-del,
+#studio-view .studio-item-info {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(11, 12, 15, 0.82);
+  color: #eceef2;
+}
+#studio-view .studio-item-main {
+  right: 6px;
+  bottom: 6px;
+  width: 28px;
+  height: 28px;
+}
+#studio-view .studio-item-main svg {
+  width: 14px;
+  height: 14px;
+}
+#studio-view .studio-item-main.is-off {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+#studio-view .studio-item-del {
+  top: 6px;
+  left: 6px;
+}
+#studio-view .studio-item-info {
+  top: 6px;
+  right: 6px;
+}
+#studio-view .studio-item-del,
+#studio-view .studio-item-info {
+  width: 26px;
+  height: 26px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+#studio-view .studio-item-del svg,
+#studio-view .studio-item-info svg {
+  width: 13px;
+  height: 13px;
+}
+#studio-view .studio-item:hover .studio-item-del,
+#studio-view .studio-item:hover .studio-item-info,
+#studio-view .studio-item:focus-within .studio-item-del,
+#studio-view .studio-item:focus-within .studio-item-info {
+  opacity: 1;
+}
+@media (hover: none) {
+  #studio-view .studio-item-del,
+  #studio-view .studio-item-info {
+    opacity: 1;
+  }
+}
+#studio-view .studio-item-main:hover:enabled:not(.is-off),
+#studio-view .studio-item-del:hover:enabled,
+#studio-view .studio-item-info:hover:enabled {
+  background: rgba(11, 12, 15, 0.95);
+  color: #ffffff;
+}
+/* The menu of a right click or a long press, at the top right of the picture. */
+.studio-item-menu {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  padding: 4px;
+  border: 1px solid #262a33;
+  border-radius: 8px;
+  background: rgba(11, 12, 15, 0.95);
+}
+#studio-view .studio-menu-item {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  min-height: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #eceef2;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-align: left;
+}
+#studio-view .studio-menu-item:hover:enabled,
+#studio-view .studio-menu-item:focus-visible {
+  background: #1c1f26;
+  outline: none;
+}
+#studio-view .studio-menu-item.is-danger {
+  color: #f08a7e;
+}
+#studio-view .studio-menu-item[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* « Supprimer #3 ? », on the picture: ✕ to keep it, the red bin to take it away. */
+.studio-item-confirm {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 6px;
+  background: rgba(11, 12, 15, 0.86);
+}
+.studio-confirm-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: #eceef2;
+}
+.studio-confirm-row {
+  display: flex;
+  gap: 8px;
+}
+#studio-view .studio-confirm-no,
+#studio-view .studio-confirm-yes {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+}
+#studio-view .studio-confirm-no {
+  background: #1c1f26;
+  color: #eceef2;
+}
+#studio-view .studio-confirm-no svg {
+  width: 12px;
+  height: 12px;
+}
+#studio-view .studio-confirm-yes {
+  background: #e8402f;
+  color: #0b0c0f;
+}
+#studio-view .studio-confirm-yes svg {
+  width: 13px;
+  height: 13px;
+}
+/* Empty: a dashed place with the icon of the mode, which says so. */
+.studio-empty-strip {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
+  height: 117px;
+  margin: 4px;
+  border: 1px dashed #343944;
+  border-radius: 6px;
+  color: #6e7480;
+  font-size: 13px;
+}
+:root[data-theme='light'] .studio-empty-strip {
+  border-color: var(--line-strong);
+  color: var(--muted);
+}
+.studio-empty-strip svg {
+  width: 18px;
+  height: 18px;
 }

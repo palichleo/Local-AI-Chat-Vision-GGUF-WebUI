@@ -19,7 +19,7 @@ const MODES = [
     label: 'Image',
     icon: 'image',
     output: 'Images',
-    none: 'Vos images apparaîtront ici.',
+    none: 'Aucune image pour l’instant',
   },
   {
     id: 'video',
@@ -27,9 +27,9 @@ const MODES = [
     label: 'Vidéo',
     icon: 'video',
     output: 'Timeline',
-    none: 'Vos vidéos s’aligneront ici, dans l’ordre de création.',
+    none: 'Aucune vidéo pour l’instant',
   },
-  { id: 'audio', verb: 'create_audio', label: 'Son', icon: 'wave', output: 'Sons', none: 'Vos sons apparaîtront ici.' },
+  { id: 'audio', verb: 'create_audio', label: 'Son', icon: 'wave', output: 'Sons', none: 'Aucun son pour l’instant' },
 ];
 const MODE_OF_VERB = { create_image: 'image', create_video: 'video', extend_video: 'video', create_audio: 'audio' };
 const ROLES = {
@@ -1359,6 +1359,12 @@ export function setupStudio({
     card.onkeydown = closing;
     for (const [key, value] of last ? recordDetails(last) : draftDetails())
       card.append(node('span', 'studio-details-key', key), node('span', 'studio-details-value', value));
+    // The original and all its settings: what « Détails » of the Sortie opened before.
+    if (last) {
+      const whole = button('studio-details-open', 'Voir l’original', () => viewOutput(last, 0));
+      whole.title = 'Voir l’original et ses paramètres';
+      card.append(whole);
+    }
     return [go, card];
   }
   function toggleDetails(open) {
@@ -2152,11 +2158,6 @@ export function setupStudio({
   /** Whether some ready workflow of this verb takes an input in this role. */
   const takes = (verb, role) => (info?.tools?.[verb] ?? []).some(item => item.roles[role]?.count);
   const sourceOf = record => record.parameters?.references?.find(ref => ref.role === 'source_video')?.output_id;
-  function length(record) {
-    const p = record.parameters ?? {};
-    if (mediaOf(record) === 'audio') return p.seconds ? figures(p.seconds) : '';
-    return p.frames && p.fps ? figures(p.frames / p.fps) : '';
-  }
   async function remove(record) {
     try {
       await api('studio/delete', { id: record.id, conversationId: place() });
@@ -2168,37 +2169,23 @@ export function setupStudio({
     }
     render();
   }
-  function actions(record, extra = []) {
-    const row = node('div', 'studio-actions');
-    for (const [label, glyph, onclick, title] of [
-      ...extra,
-      ['Détails', 'info', () => viewOutput(record, 0), 'Voir l’original et ses paramètres'],
-      [
-        '',
-        'trash',
-        () => remove(record),
-        legacy
-          ? 'Retirer de l’ancien Studio (le fichier reste dans le dossier output)'
-          : 'Retirer de cette conversation (le fichier reste dans le dossier output)',
-      ],
-    ]) {
-      // An icon on the picture; its name for screen readers and in its tooltip.
-      const control = button('output-action', '', onclick, glyph);
-      if (label) control.append(node('span', 'sr-only', label));
-      control.title = label ? label + ' · ' + title : title;
-      control.setAttribute('aria-label', label || title);
-      control.disabled = Boolean(working);
-      row.append(control);
-    }
-    return row;
-  }
+  // ------------------------------------------------------------------ the Sortie
+  // (moodix-design.md 15, 15 bis, 22-24; 7 bis 7, 8, 11): pictures only, the newest at the left
+  // with the largest number; one round button on each (Prolonger, Animer), the bin and « Détails »
+  // on hover or focus, all of them under a right click or a long press; a deletion is asked on the
+  // picture itself.
+  const KIND = { video: 'Clip', image: 'Image', audio: 'Son' };
+  let menuFor = null, // the creation whose menu is open
+    confirmFor = null, // the creation whose deletion waits for its confirmation
+    pressed = false; // a long press opened a menu: the click that ends it selects nothing
   // The size of each image shown, read from the picture itself: a record does not keep it.
   const measured = new Map();
-  function useImage(record, target, role) {
+  /** Puts an image of the Sortie in a slot of a mode (`index`: which one of its role). */
+  function useImage(record, target, role, index = 0) {
     const output = { ...record.outputs[0], ...measured.get(record.id) };
     setMode(target);
     extending = null;
-    (drafts[target].inputs[role] ??= [])[0] = {
+    (drafts[target].inputs[role] ??= [])[index] = {
       source: { output: record.id },
       preview: output.thumbUrl || output.originalUrl,
       name: record.prompt,
@@ -2208,6 +2195,43 @@ export function setupStudio({
     followFormat(role);
     render();
     $('studio-view')?.scrollTo?.({ top: 0, behavior: 'smooth' });
+  }
+  /** Where « Animer » puts a picture: the first video model, its references, else its start image. */
+  function animation() {
+    const video = offered('create_video')[0];
+    if (!video) return null;
+    const role = takesImages(video, 'reference')
+      ? 'reference'
+      : takesImages(video, 'start_image')
+        ? 'start_image'
+        : null;
+    return role ? { video, role } : null;
+  }
+  /**
+   * « Animer » (7 bis 11): the picture goes to the first video model, among its references, or as
+   * its start image when it takes none; nothing is added when it is there already. Not while a
+   * proposal of Moodix AI waits.
+   */
+  function animateImage(record) {
+    const target = animation();
+    if (!target || working) return;
+    if (proposal) return notice('Moodix AI est en train de proposer');
+    const { video, role } = target,
+      draft = drafts.video;
+    setMode('video');
+    extending = null;
+    if (current()?.id !== video.id) choose(video.id);
+    const given = Object.values(draft.inputs).some(list =>
+      (list ?? []).some(item => item?.source?.output === record.id),
+    );
+    if (given) return;
+    if (role === 'start_image') return useImage(record, 'video', role, 0);
+    const list = (draft.inputs.reference ?? []).filter(Boolean),
+      clash = exclusiveWith(video, 'reference');
+    if (clash.length) return notice(`Ne se combine pas avec : ${clash.map(other => ROLES[other]).join(', ')}`);
+    if (list.length >= video.roles.reference.count) return notice('Toutes les cases d’images sont prises.');
+    draft.inputs.reference = list;
+    useImage(record, 'video', 'reference', list.length);
   }
   /** Puts a creation on the screen; a clip starts playing. */
   function onScreen(record, play = false) {
@@ -2219,20 +2243,116 @@ export function setupStudio({
         ?.play?.()
         ?.catch?.(() => {});
   }
-  function item(record, number, from) {
+  /** « Détails » of a creation: on the screen, its card open. */
+  function showDetails(record) {
+    kept[mediaOf(record)] = record;
+    menuFor = confirmFor = null;
+    toggleDetails(true);
+  }
+  function askDelete(record) {
+    menuFor = null;
+    confirmFor = record.id;
+    render();
+    document.querySelector?.('#studio-view .studio-confirm-no')?.focus?.();
+  }
+  function openMenu(record) {
+    if (working) return;
+    confirmFor = null;
+    menuFor = record.id;
+    render();
+    document.querySelector?.('#studio-view .studio-item-menu button')?.focus?.();
+  }
+  /** Back on the picture of a creation, its menu or its question closed. */
+  function backTo(record) {
+    menuFor = confirmFor = null;
+    render();
+    document.querySelector?.(`#studio-view .studio-item[data-id="${record.id}"] .studio-item-pick`)?.focus?.();
+  }
+  /** What can be done with a creation: Prolonger or Animer first, then Modifier, Détails, Supprimer. */
+  function actionsOf(record) {
+    const media = mediaOf(record),
+      list = [];
+    if (media === 'video')
+      list.push({
+        id: 'extend',
+        label: 'Prolonger',
+        glyph: 'extend',
+        title: 'Prolonger · écrire la suite de ce clip',
+        run: () => {
+          extending = record;
+          failure = '';
+          menuFor = confirmFor = null;
+          render();
+          $('studio-view')?.scrollTo?.({ top: 0, behavior: 'smooth' });
+        },
+      });
+    if (media === 'image' && animation())
+      list.push({
+        id: 'animate',
+        label: 'Animer',
+        glyph: 'animate',
+        title: proposal ? 'Moodix AI est en train de proposer' : 'Animer · en faire une vidéo',
+        off: Boolean(proposal),
+        run: () => animateImage(record),
+      });
+    // Not in the design, kept: an image starts the next one, with a model that takes one.
+    if (media === 'image' && takes('create_image', 'source'))
+      list.push({
+        id: 'edit',
+        label: 'Modifier',
+        glyph: 'edit',
+        title: 'Modifier · repartir de cette image',
+        run: () => useImage(record, 'image', 'source'),
+      });
+    list.push({ id: 'details', label: 'Détails', glyph: 'info', title: 'Détails', run: () => showDetails(record) });
+    list.push({
+      id: 'delete',
+      label: 'Supprimer',
+      glyph: 'trash',
+      title: 'Supprimer de cette conversation (le fichier reste dans le dossier output)',
+      danger: true,
+      run: () => askDelete(record),
+    });
+    return list;
+  }
+  /** A round button on the picture: its icon, its name and the creation's for screen readers. */
+  function onPicture(action, className, name) {
+    const control = button(className + (action.off ? ' is-off' : ''), '', action.run, action.glyph);
+    control.setAttribute('aria-label', action.label + ' · ' + name);
+    control.title = action.title;
+    // Off while a proposal waits, it says why on hover, on focus, and when it is pressed.
+    if (action.off) control.setAttribute('aria-disabled', 'true');
+    control.disabled = Boolean(working);
+    return control;
+  }
+  function item(record) {
     const media = mediaOf(record),
       output = record.outputs[0] ?? {},
-      card = node(
-        'article',
-        'studio-item studio-card' +
+      number = numberOf(record),
+      name = (KIND[media] ?? 'Création') + ' #' + number,
+      from = media === 'video' && sourceOf(record) ? numberOf({ id: sourceOf(record), mediaType: 'video' }) : null,
+      said = [name, from ? 'suite du clip #' + from : '', record.prompt || ''].filter(Boolean).join(' · '),
+      actions = actionsOf(record),
+      tile = node(
+        'div',
+        'studio-item' +
           (extending?.id === record.id ? ' is-selected' : '') +
           (kept[mode]?.id === record.id ? ' is-shown' : ''),
-      ),
-      thumb = node('div', 'studio-thumb');
+      );
+    tile.dataset.id = record.id;
+    // The picture: a click shows it on the screen, ringed in white here (moodix-design.md 24).
+    const pick = button('studio-item-pick', '', () => {
+      if (pressed) return void (pressed = false);
+      menuFor = confirmFor = null;
+      onScreen(record);
+    });
+    pick.setAttribute('aria-label', said);
+    pick.title = said.length > 140 ? said.slice(0, 139) + '…' : said;
+    if (kept[mode]?.id === record.id) pick.setAttribute('aria-current', 'true');
     if (media === 'audio') {
       const wave = node('span', 'studio-thumb-wave');
       wave.setAttribute('aria-hidden', 'true');
-      thumb.append(wave);
+      pick.append(wave);
     } else {
       const small = output.thumbUrl,
         key = record.id + '|' + (small || output.originalUrl || '');
@@ -2240,7 +2360,7 @@ export function setupStudio({
       if (picture) used.add(key);
       else if (small || media === 'image') {
         picture = node('img');
-        Object.assign(picture, { alt: record.prompt || '', loading: 'lazy', decoding: 'async' });
+        Object.assign(picture, { alt: '', loading: 'lazy', decoding: 'async' });
         picture.src = small || output.originalUrl || '';
         picture.onload = () => {
           if (media === 'image' && !small) {
@@ -2263,123 +2383,139 @@ export function setupStudio({
         pictures.set(key, picture);
         used.add(key);
       }
-      picture.title = 'Afficher sur l’écran du Studio';
-      picture.onclick = () => onScreen(record);
-      thumb.append(picture);
+      pick.append(picture);
     }
-    if (media !== 'image') {
-      const play = button('studio-play', '', () => onScreen(record, true), 'play');
-      play.setAttribute('aria-label', 'Lire sur l’écran du Studio');
-      play.title = 'Lire sur l’écran du Studio';
-      thumb.append(play);
-    }
-    const title = node('p', 'studio-item-title studio-prompt', (from ? `↳ #${from} · ` : '') + (record.prompt || ''));
-    title.title = record.prompt || '';
-    const meta = node(
-      'p',
-      'studio-item-meta studio-caption',
-      [
-        number ? '#' + number : '',
-        media === 'audio' ? length(record) : '',
-        media === 'video' ? length(record) : '',
-        media === 'audio' ? (record.workflowName || '').toUpperCase() : '',
-      ]
-        .filter(Boolean)
-        .join(' · '),
+    // A right click, the menu key, or a long press: every action in a menu.
+    tile.oncontextmenu = event => {
+      event.preventDefault();
+      openMenu(record);
+    };
+    let holding = null;
+    pick.onpointerdown = event => {
+      if (event.pointerType !== 'touch') return;
+      holding = setTimeout(() => {
+        pressed = true;
+        openMenu(record);
+      }, 550);
+    };
+    pick.onpointerup = pick.onpointercancel = pick.onpointerleave = () => clearTimeout(holding);
+    const badge = node('span', 'studio-item-number', '#' + number);
+    badge.setAttribute('aria-hidden', 'true');
+    tile.append(pick, badge);
+    const main = actions.find(action => action.id === 'extend' || action.id === 'animate');
+    if (main) tile.append(onPicture(main, 'studio-item-main', name));
+    tile.append(
+      onPicture(
+        actions.find(action => action.id === 'delete'),
+        'studio-item-del',
+        name,
+      ),
+      onPicture(
+        actions.find(action => action.id === 'details'),
+        'studio-item-info',
+        name,
+      ),
     );
-    meta.title = record.workflowName || '';
-    const extra = legacy
-      ? []
-      : media === 'video'
-        ? [
-            [
-              'Prolonger',
-              'forward',
-              () => {
-                extending = record;
-                failure = '';
-                render();
-                $('studio-view')?.scrollTo?.({ top: 0, behavior: 'smooth' });
-              },
-              'Écrire la suite de ce clip',
-            ],
-          ]
-        : media === 'image'
-          ? [
-              ...(takes('create_image', 'source')
-                ? [['Modifier', 'edit', () => useImage(record, 'image', 'source'), 'Repartir de cette image']]
-                : []),
-              ...(takes('create_video', 'start_image')
-                ? [
-                    [
-                      'Animer',
-                      'video',
-                      () => useImage(record, 'video', 'start_image'),
-                      'En faire l’image de début d’une vidéo',
-                    ],
-                  ]
-                : []),
-            ]
-          : [];
-    thumb.append(actions(record, extra));
-    card.append(thumb, title);
-    if (meta.textContent) card.append(meta);
-    return card;
+    if (menuFor === record.id) {
+      const menu = node('div', 'studio-item-menu');
+      menu.setAttribute('role', 'menu');
+      menu.setAttribute('aria-label', 'Actions · ' + name);
+      for (const action of actions) {
+        const entry = button('studio-menu-item' + (action.danger ? ' is-danger' : ''), action.label, () => {
+          menuFor = null;
+          action.run();
+        });
+        entry.setAttribute('role', 'menuitem');
+        entry.title = action.title;
+        if (action.off) entry.setAttribute('aria-disabled', 'true');
+        menu.append(entry);
+      }
+      menu.onkeydown = event => {
+        const entries = [...(menu.querySelectorAll?.('button') ?? [])],
+          at = entries.indexOf(document.activeElement);
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation?.();
+          backTo(record);
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          entries[(at + (event.key === 'ArrowDown' ? 1 : entries.length - 1)) % entries.length]?.focus?.();
+        }
+      };
+      // Closed when the focus leaves it (a click elsewhere, Tab).
+      menu.onfocusout = event => {
+        if (menuFor === record.id && !menu.contains?.(event.relatedTarget)) {
+          menuFor = null;
+          render();
+        }
+      };
+      tile.append(menu);
+    }
+    if (confirmFor === record.id) {
+      const ask = node('div', 'studio-item-confirm'),
+        row = node('div', 'studio-confirm-row'),
+        no = button('studio-confirm-no', '', () => backTo(record), 'close'),
+        yes = button(
+          'studio-confirm-yes',
+          '',
+          () => {
+            confirmFor = null;
+            void remove(record);
+          },
+          'trash',
+        );
+      ask.setAttribute('role', 'alertdialog');
+      ask.setAttribute('aria-label', 'Supprimer #' + number + ' ?');
+      no.setAttribute('aria-label', 'Annuler');
+      no.title = 'Annuler';
+      yes.setAttribute('aria-label', 'Supprimer ' + name);
+      yes.title = 'Supprimer de cette conversation (le fichier reste dans le dossier output)';
+      ask.onkeydown = event => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation?.();
+        backTo(record);
+      };
+      row.append(no, yes);
+      ask.append(node('span', 'studio-confirm-text', 'Supprimer #' + number + ' ?'), row);
+      tile.append(ask);
+    }
+    return tile;
   }
   // The pictures of the Sortie, kept from one drawing to the next (those of this drawing in `used`).
   const pictures = new Map();
   let used = new Set();
+  /**
+   * The Sortie: the creations of this conversation of the mode, the newest at the left (a new one
+   * pushes the others to the right); nothing written, no count; empty, a dashed place that says so.
+   */
   function outputs() {
     used = new Set();
     const mine = runs.filter(record => mediaOf(record) === mode),
       section = node('section', 'studio-block is-output studio-results'),
       about = modeOf(mode);
     section.setAttribute('aria-label', 'Sortie');
-    const extra = node('div', 'studio-output-tools');
-    extra.append(node('span', 'studio-count', resultCount(mine.length)));
-    if (legacyRuns.length) {
-      // The creations of the Studio of before, which had no conversation: still there, apart.
-      const where = select(
-        [
-          ['conversation', 'Cette conversation'],
-          ['legacy', 'Ancien Studio'],
-        ],
-        legacy ? 'legacy' : 'conversation',
-        value => {
-          legacy = value === 'legacy';
-          extending = null;
-          void refresh().then(render);
-        },
-      );
-      where.className = 'studio-source-pick';
-      where.setAttribute('aria-label', 'Créations affichées');
-      where.disabled = Boolean(working || proposal);
-      extra.append(where);
-    }
-    section.append(blockHead('', { extra }));
     if (!mine.length) {
-      section.append(node('p', 'studio-empty asset-empty', about.none));
+      const empty = node('div', 'studio-empty-strip');
+      empty.append(icon(about.icon), node('span', '', about.none));
+      section.append(empty);
       return section;
     }
     const strip = node(
       'div',
       'studio-strip studio-timeline' + (mode === 'image' ? ' is-images' : mode === 'audio' ? ' is-sounds' : ''),
     );
-    if (mode === 'video') {
-      // Oldest first: the timeline reads from left to right.
-      const clips = [...mine].reverse(),
-        numbers = new Map(clips.map((record, index) => [record.id, index + 1]));
-      for (const record of clips) strip.append(item(record, numbers.get(record.id), numbers.get(sourceOf(record))));
-    } else for (const record of mine) strip.append(item(record));
+    strip.setAttribute('aria-label', about.output);
+    for (const record of mine) strip.append(item(record));
     section.append(strip);
     // Those no longer shown (another mode, a creation removed) are let go.
     for (const key of pictures.keys()) if (!used.has(key)) pictures.delete(key);
     return section;
   }
-  /** A new clip goes at the end of the timeline: the strip shows it. */
+  /** A new creation goes at the left of the strip: the strip shows it. */
   function scrollStrip() {
     const strip = document.querySelector?.('#studio-view .studio-strip');
-    if (strip && mode === 'video') strip.scrollLeft = strip.scrollWidth;
+    if (strip) strip.scrollLeft = 0;
   }
 
   // ------------------------------------------------------------------ the page

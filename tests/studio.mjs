@@ -775,13 +775,13 @@ test('the last creation stays on the screen; another conversation starts from an
     // A click shows it whole, with its settings.
     kept.onclick();
     assert.deepEqual(opened, ['r1']);
-    // In the Sortie, with its count; on the screen still after a visit of the chat.
+    // In the Sortie, without a count (moodix-design.md 23); on the screen still after a visit of the chat.
     assert.equal(body.find('studio-item').length, 1);
-    assert.equal(body.find('studio-count')[0].textContent, '1 résultat');
+    assert.deepEqual(body.find('studio-count'), []);
     // A creation is shown as it is, with no grain over it; its actions sit on its picture, so the
     // Sortie keeps its height. No title on the blocks: their colour says what they are for.
     assert.deepEqual(body.find('picture-grain'), []);
-    assert.equal(body.find('studio-thumb')[0].find('studio-actions').length, 1);
+    assert.equal(body.find('studio-item')[0].find('studio-item-del').length, 1);
     assert.deepEqual(body.find('studio-block-title'), []);
     await studio.open();
     assert.equal(body.find('studio-frame-result').length, 1);
@@ -821,38 +821,145 @@ test('« Ouvrir » on a card puts the creation on the screen of its mode', async
   }
 });
 
-test('the creations of the former Studio stay listed apart, and are made there', async () => {
+test('the creations of the former Studio are no longer shown, nothing chooses them; empty, the Sortie says so', async () => {
   const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] };
   const old = { id: 'o', prompt: 'avant', outputs: [{ originalUrl: '/old.png' }] };
-  const { body, asked, restore } = await studioPage(
-    { create_image: [image] },
-    {
-      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
-      'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+  const { body, restore } = await studioPage({ create_image: [image] }, {}, { legacy: [old] });
+  try {
+    // moodix-design.md 7 bis 7: no « Cette conversation / Ancien Studio »; their files stay in output.
+    assert.deepEqual(body.find('studio-source-pick'), []);
+    assert.equal(body.find('studio-item').length, 0);
+    const [empty] = body.find('studio-empty-strip');
+    assert.equal(empty.children[1].textContent, 'Aucune image pour l’instant');
+  } finally {
+    restore();
+  }
+});
+
+test('the Sortie: pictures only, the newest at the left with the largest number, their actions on them', async () => {
+  const image = {
+      id: 'i',
+      name: 'Image',
+      external: true,
+      limits: sizes,
+      size: { width: 1024, height: 1024 },
+      settings: [],
+      seeded: true,
+      roles: { source: { count: 1, media: ['image'] } },
     },
-    { legacy: [old] },
+    video = {
+      id: 'v',
+      name: 'Clip',
+      external: true,
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      settings: [],
+      seeded: true,
+      roles: { start_image: { count: 1, media: ['image'] }, reference: { count: 2, media: ['image'] } },
+      exclusive: [['start_image'], ['reference']],
+    },
+    runs = [
+      {
+        id: 'p2',
+        prompt: 'un phare',
+        outputs: [{ originalUrl: '/p2.png' }],
+        parameters: { width: 1024, height: 1024 },
+      },
+      {
+        id: 'c2',
+        mediaType: 'video',
+        prompt: 'la suite',
+        outputs: [{ originalUrl: '/c2.mp4' }],
+        parameters: { references: [{ role: 'source_video', output_id: 'c1' }] },
+      },
+      {
+        id: 'p1',
+        prompt: 'un renard',
+        outputs: [{ originalUrl: '/p1.png' }],
+        parameters: { width: 1024, height: 1024 },
+      },
+      { id: 'c1', mediaType: 'video', prompt: 'un renard qui court', outputs: [{ originalUrl: '/c1.mp4' }] },
+    ];
+  const { body, restore, mode, asked } = await studioPage(
+    { create_image: [image], create_video: [video] },
+    {},
+    { runs },
   );
   try {
-    const [where] = body.find('studio-source-pick');
-    assert.ok(where, 'a choice appears once the former Studio holds something');
-    assert.equal(body.find('studio-item').length, 0);
-    where.value = 'legacy';
-    where.onchange();
-    await settle();
-    assert.equal(body.find('studio-item').length, 1);
-    // Its creations stay where they were: Détails and Retirer, no action written to a conversation.
+    const items = () => body.find('studio-item'),
+      numbers = () => body.find('studio-item-number').map(badge => badge.textContent),
+      references = () => body.find('studio-slot-badge').map(badge => badge.textContent);
+    // The newest at the left, numbered; nothing written under the pictures (their names are for
+    // screen readers and in their tooltips).
+    assert.deepEqual(numbers(), ['#2', '#1']);
+    assert.deepEqual(body.find('studio-item-title'), []);
+    assert.deepEqual(body.find('studio-caption'), []);
+    assert.equal(items()[0].find('studio-item-pick')[0].attributes['aria-label'], 'Image #2 · un phare');
+    // A clip: its continuation said too; « Prolonger » is its round button; no « Lire ».
+    mode(1);
+    assert.deepEqual(numbers(), ['#2', '#1']);
+    assert.equal(
+      items()[0].find('studio-item-pick')[0].attributes['aria-label'],
+      'Clip #2 · suite du clip #1 · la suite',
+    );
+    assert.equal(items()[0].find('studio-item-main')[0].attributes['aria-label'], 'Prolonger · Clip #2');
+    assert.deepEqual(body.find('studio-play'), []);
+    // A click shows it on the screen, ringed.
+    items()[1].find('studio-item-pick')[0].onclick();
+    assert.match(items()[1].className, /is-shown/);
+    // « Détails » on a picture: on the screen, its card open.
+    items()[0].find('studio-item-info')[0].onclick();
+    assert.match(items()[0].className, /is-shown/);
+    assert.equal(body.find('studio-details-go')[0].attributes['aria-expanded'], 'true');
     assert.deepEqual(
       body
-        .find('studio-item')[0]
-        .find('output-action')
-        .map(action => action.children.at(-1)?.textContent ?? ''),
-      ['Détails', ''],
+        .find('studio-details')[0]
+        .children.slice(0, 2)
+        .map(cell => cell.textContent),
+      ['Clip', '#2'],
     );
-    const prompt = body.find('studio-prompt-field')[0].children[0];
-    prompt.value = 'encore';
-    prompt.oninput();
-    await body.find('studio-go')[0].onclick();
-    assert.equal(asked.find(([route]) => route === 'tools/action')[1].conversationId, STUDIO_ID);
+    // A right click: every action in a menu; « Supprimer » asks on the picture before anything goes.
+    items()[0].oncontextmenu({ preventDefault() {} });
+    const [menu] = body.find('studio-item-menu');
+    assert.equal(menu.attributes.role, 'menu');
+    assert.deepEqual(
+      menu.children.map(entry => entry.children.at(-1).textContent),
+      ['Prolonger', 'Détails', 'Supprimer'],
+    );
+    menu.children[2].onclick();
+    assert.deepEqual(body.find('studio-item-menu'), []);
+    const [ask] = body.find('studio-item-confirm');
+    assert.equal(ask.attributes.role, 'alertdialog');
+    assert.equal(ask.find('studio-confirm-text')[0].textContent, 'Supprimer #2 ?');
+    // ✕ keeps it.
+    ask.find('studio-confirm-no')[0].onclick();
+    assert.deepEqual(body.find('studio-item-confirm'), []);
+    assert.equal(asked.filter(([route]) => route === 'studio/delete').length, 0);
+    // The bin, then the red bin: it goes.
+    items()[0].find('studio-item-del')[0].onclick();
+    body.find('studio-confirm-yes')[0].onclick();
+    await settle();
+    assert.equal(asked.find(([route]) => route === 'studio/delete')[1].id, 'c2');
+
+    // « Animer »: the picture goes to the references of the first video model, once.
+    mode(0);
+    assert.equal(items()[0].find('studio-item-main')[0].attributes['aria-label'], 'Animer · Image #2');
+    items()[0].find('studio-item-main')[0].onclick();
+    assert.equal(body.dataset.mode, 'video');
+    assert.deepEqual(references(), ['@1']);
+    mode(0);
+    items()[0].find('studio-item-main')[0].onclick();
+    assert.deepEqual(references(), ['@1'], 'there already: nothing is added');
+    mode(0);
+    items()[1].find('studio-item-main')[0].onclick();
+    assert.deepEqual(references(), ['@1', '@2']);
+    // An image's menu keeps « Modifier » (a model of images takes one to start from).
+    mode(0);
+    items()[0].oncontextmenu({ preventDefault() {} });
+    assert.deepEqual(
+      body.find('studio-item-menu')[0].children.map(entry => entry.children.at(-1).textContent),
+      ['Animer', 'Modifier', 'Détails', 'Supprimer'],
+    );
   } finally {
     restore();
   }
@@ -1081,7 +1188,11 @@ test('the screen: its format and length at the top left, « Détails » at the t
   try {
     const readout = () => body.find('studio-readout')[0].textContent,
       go = () => body.find('studio-details-go')[0],
-      rows = () => body.find('studio-details')[0].children.map(cell => cell.textContent);
+      rows = () =>
+        body
+          .find('studio-details')[0]
+          .children.filter(cell => cell.className !== 'studio-details-open')
+          .map(cell => cell.textContent);
     // An image: its format; a sound: its length; a clip: both (« BROUILLON » is in Détails now).
     assert.equal(readout(), '1:1');
     mode(2);
@@ -1647,7 +1758,7 @@ test('drawn again, the Studio keeps the pictures of its Sortie and what its scre
   };
   const { studio, body, restore } = await studioPage({ create_image: [image] }, {}, { runs: [made] });
   try {
-    const picture = () => body.find('studio-thumb')[0].children[0];
+    const picture = () => body.find('studio-item-pick')[0].children[0];
     const first = picture();
     assert.equal(first.src, '/phare.jpg');
     studio.render();
