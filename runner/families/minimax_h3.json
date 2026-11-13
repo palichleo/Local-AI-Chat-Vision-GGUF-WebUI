@@ -4,6 +4,7 @@
   "mediaType": "video",
   "tasks": ["create_video", "extend_video"],
   "engine": "external",
+  "hardware": { "cuda": true, "vramGiB": 10 },
   "selectable": true,
   "requires": [
     "torch",

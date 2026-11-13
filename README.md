@@ -12,7 +12,7 @@ Requirements:
 
 - **Node.js 22 or later** in PATH and a recent browser.
 - A **llama-server** build compatible with your GGUF model, with its native libraries. NVIDIA/CUDA is optional for chat: **Calcul → CPU uniquement** runs it on the processor.
-- For generation: Windows or Linux x64 with a compatible NVIDIA GPU. The first activation downloads a private Python environment (several GB) into `data/runtime/`; your system Python is left untouched.
+- For generation: Windows or Linux x64. Images and videos on the built-in engine need an NVIDIA card with at least 10 GB of video memory (a smaller card, or none, is told so before anything starts; ComfyUI can create in its place); sounds, upscaling and interpolation also run on the processor. The first activation downloads a private Python environment (several GB) into `data/runtime/`; your system Python is left untouched.
 
 Start the application:
 

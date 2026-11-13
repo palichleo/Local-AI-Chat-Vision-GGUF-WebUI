@@ -56,17 +56,20 @@ def pipeline(name):
 
 
 def capabilities():
-    """Readiness of each family from the packages importable in this environment (no import, no GPU)."""
+    """Readiness of each family: the packages importable in this environment, and the graphics
+    card its manifest asks for (runner.hardware). Nothing is imported, no video memory is taken."""
+    from runner import hardware
+
     result = {}
     for name, manifest in families().items():
         if not manifest.get('native', True):
             continue
         missing = [module for module in manifest.get('requires', []) if importlib.util.find_spec(module) is None]
-        result[name] = dict(
-            ready=not missing,
-            mediaType=manifest['mediaType'],
-            reason='Missing packages: ' + ', '.join(missing) if missing else '',
+        reason = 'Missing packages: ' + ', '.join(missing) if missing else ''
+        reason = reason or hardware.unmet(
+            manifest['label'], manifest.get('hardware'), external=manifest.get('engine') == 'external'
         )
+        result[name] = dict(ready=not reason, mediaType=manifest['mediaType'], reason=reason)
     return result
 
 

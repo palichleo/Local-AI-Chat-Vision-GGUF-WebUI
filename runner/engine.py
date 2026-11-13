@@ -8,6 +8,7 @@ import gc
 from pathlib import Path
 import sys
 
+from runner import hardware
 from runner.contracts import validate_config
 from runner.journal import Journal
 from runner.registry import capabilities, family, pipeline, validate_job
@@ -43,6 +44,9 @@ def preflight(job, config):
     capability = capabilities()[job['pipeline']]
     if not capability['ready']:
         raise RuntimeError(capability['reason'])
+    # A card the driver lists and PyTorch cannot compute on is said now, not once the chat model
+    # is unloaded.
+    hardware.confirm(manifest['label'], manifest.get('hardware'))
     module = pipeline(job['pipeline'])
     if hasattr(module, 'preflight'):
         module.preflight(job, config)

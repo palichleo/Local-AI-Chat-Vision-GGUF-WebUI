@@ -4,6 +4,7 @@
   "mediaType": "image",
   "tasks": ["upscale"],
   "engine": "internal",
+  "hardware": { "cuda": true },
   "requires": ["torch", "PIL", "safetensors"],
   "components": {
     "model": {
