@@ -1026,6 +1026,109 @@ test('the input images: pictos and no word, start and end on a line of time, ref
   }
 });
 
+test('the screen: its format and length at the top left, « Détails » at the top right with what is made', async () => {
+  const video = {
+      id: 'v',
+      name: 'Clip',
+      external: true,
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      settings: [],
+      seeded: true,
+      stages: true,
+      lengths: { seconds: [121 / 24, 193 / 24], standard: 121 / 24 },
+      roles: {},
+      loras: [{ id: 'grain', name: 'Grain', assistant: false, on: true, strength: { value: 0.8 } }],
+    },
+    image = {
+      id: 'i',
+      name: 'Image',
+      external: true,
+      limits: sizes,
+      size: { width: 1024, height: 1024 },
+      settings: [],
+      seeded: true,
+      roles: {},
+    },
+    sound = {
+      id: 's',
+      name: 'Bruitages',
+      roles: {},
+      settings: [{ key: 'seconds', type: 'number', min: 1, max: 30, default: 10 }],
+    },
+    clip = {
+      id: 'c',
+      mediaType: 'video',
+      prompt: 'un renard',
+      workflowId: 'v',
+      workflowName: 'Clip',
+      parameters: {
+        width: 512,
+        height: 288,
+        frames: 124,
+        fps: 24,
+        stage: 'draft',
+        loras: [{ id: 'grain', strength: 0.8 }],
+        styles: [{ name: 'sub\\light.safetensors', strength: 1 }],
+      },
+      outputs: [{ originalUrl: '/clip.mp4' }],
+    };
+  const { studio, body, restore, mode } = await studioPage(
+    { create_image: [image], create_video: [video], create_audio: [sound] },
+    {},
+    { runs: [clip] },
+  );
+  try {
+    const readout = () => body.find('studio-readout')[0].textContent,
+      go = () => body.find('studio-details-go')[0],
+      rows = () => body.find('studio-details')[0].children.map(cell => cell.textContent);
+    // An image: its format; a sound: its length; a clip: both (« BROUILLON » is in Détails now).
+    assert.equal(readout(), '1:1');
+    mode(2);
+    assert.equal(readout(), '10.00 S');
+    mode(1);
+    assert.equal(readout(), '16:9 - 05.04 S');
+
+    // « Détails »: an « i » named for screen readers, closed at first.
+    assert.equal(go().attributes['aria-label'], 'Détails de la génération');
+    assert.equal(go().attributes['aria-expanded'], 'false');
+    assert.deepEqual(body.find('studio-details'), []);
+    // Open, with the clip on the screen: what that clip is made of, its number first.
+    studio.show(clip);
+    go().onclick();
+    assert.equal(go().attributes['aria-expanded'], 'true');
+    assert.deepEqual(rows(), [
+      'Clip',
+      '#1',
+      'Modèle',
+      'Clip',
+      'Format',
+      '16:9',
+      'Durée',
+      '05.17 s',
+      'Taille',
+      '512 × 288',
+      'LoRA',
+      'Grain, light',
+      'Étape',
+      'Brouillon',
+    ]);
+    // Nothing on the screen: what will be made.
+    mode(0);
+    assert.deepEqual(rows(), ['Modèle', 'Image', 'Format', '1:1', 'Taille', '1024 × 1024', 'LoRA', '—']);
+    mode(2);
+    assert.deepEqual(rows(), ['Modèle', 'Bruitages', 'Durée', '10.00 s']);
+    // Échap closes it.
+    let stopped = 0;
+    body.find('studio-details')[0].onkeydown({ key: 'Escape', preventDefault: () => stopped++, stopPropagation() {} });
+    assert.equal(stopped, 1);
+    assert.deepEqual(body.find('studio-details'), []);
+    assert.equal(go().attributes['aria-expanded'], 'false');
+  } finally {
+    restore();
+  }
+});
+
 test('Ctrl + Entrée generates from anywhere in the Studio, and the button says so in its corner', async () => {
   const image = {
     id: 'w',

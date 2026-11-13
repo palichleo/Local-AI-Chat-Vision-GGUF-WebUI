@@ -192,6 +192,7 @@ export function setupStudio({
     failure = '',
     advanced = false, // « Plus de réglages » is open
     formatsOpen = false, // « ··· » is open
+    detailsOpen = false, // « Détails » of the screen is open
     drawn = null, // the size the frame was last drawn at, to ease from
     watching = null, // follows the size of the stage
     live = null, // { frame, preview } : the picture so far, in the frame now on the page
@@ -1121,21 +1122,28 @@ export function setupStudio({
     const format = FORMATS.find(item => item.id === drafts[mode].format);
     return { ratio: format?.ratio ?? 1, label: format?.id ?? '' };
   }
-  /** What will be made, in figures, at the top left of the screen. */
+  /**
+   * What will be made, at the top left of the screen (moodix-design.md 25, 7 bis 13): its format
+   * and its length, « 16:9 - 05.17 S »; an image, its format; a sound, its length. Whether it is
+   * a draft or a final is said in Détails.
+   */
   function readoutText(workflow = current()) {
     if (!workflow) return '';
     const shape = shapeOf(),
       length = lengthOf(workflow);
     if (mode === 'audio') {
-      const sound =
-        drafts.audio.settings[workflow.id]?.seconds ?? workflow.settings.find(s => s.key === 'seconds')?.default;
-      return [(workflow.for || workflow.name || 'Son').toUpperCase(), sound ? figures(Number(sound)) : '']
-        .filter(Boolean)
-        .join(' · ');
+      const sound = soundSeconds(workflow);
+      return sound ? figures(sound) : '';
     }
-    if (mode === 'image') return [shape.label, 'IMAGE'].filter(Boolean).join(' · ');
-    const stage = extending ? 'SUITE' : { draft: 'BROUILLON', final: 'FINALE' }[stageOf(workflow)];
-    return [shape.label, length ? figures(length.value) : '', stage].filter(Boolean).join(' · ');
+    if (mode === 'image') return shape.label;
+    return [shape.label, length ? figures(length.value) : ''].filter(Boolean).join(' - ');
+  }
+  /** The length of a sound to make, as its setting has it. */
+  function soundSeconds(workflow) {
+    const sound =
+      drafts.audio.settings[workflow.id]?.seconds ??
+      workflow.settings.find(setting => setting.key === 'seconds')?.default;
+    return Number(sound) > 0 ? Number(sound) : null;
   }
   function readout() {
     const text = document.querySelector?.('.studio-readout');
@@ -1149,10 +1157,12 @@ export function setupStudio({
     // As large as the stage: the Studio fills the window, the screen with it.
     return width > 40 && height > 40 ? { width: Math.min(width, 1600), height: Math.min(height, 1000) } : FRAME;
   }
-  function reshape(frame, { ratio }) {
+  function reshape(frame, { ratio }, over = null) {
     const size = frameSize(ratio, room(frame));
-    frame.style.width = size.width + 'px';
-    frame.style.height = size.height + 'px';
+    for (const element of [frame, over].filter(Boolean)) {
+      element.style.width = size.width + 'px';
+      element.style.height = size.height + 'px';
+    }
     drawn = size;
     readout();
   }
@@ -1190,16 +1200,33 @@ export function setupStudio({
     const shown = node('span', 'studio-readout', readoutText());
     shown.setAttribute('aria-hidden', 'true');
     frame.append(shown);
+    // Over the frame, at its size, never clipped by it: « Détails » and what it opens.
+    const over = node('div', 'studio-frame-over');
+    over.append(...details(last));
+    // While a creation is made: the step under way at the foot of the screen, « Arrêter » beside
+    // it, as the label and « Détails » are at its top; the bar under the screen keeps its line.
+    if (working) {
+      const step = node('p', 'studio-progress', working.label ?? '');
+      step.id = 'studio-progress';
+      step.setAttribute('role', 'status');
+      step.hidden = false;
+      const halt = button('studio-stop', '', stop, 'stop');
+      halt.setAttribute('aria-label', 'Arrêter la génération');
+      halt.title = 'Arrêter la génération';
+      over.append(step, halt);
+    }
     // Drawn at the previous shape first, so the browser has something to ease from.
     const from = drawn ?? frameSize(next.ratio);
-    frame.style.width = from.width + 'px';
-    frame.style.height = from.height + 'px';
-    box.append(frame);
+    for (const element of [frame, over]) {
+      element.style.width = from.width + 'px';
+      element.style.height = from.height + 'px';
+    }
+    box.append(frame, over);
     screen.append(box);
     watching?.disconnect();
     if (typeof ResizeObserver === 'function') {
       // Called once the stage is laid out, then at every change of its size.
-      watching = new ResizeObserver(() => reshape(frame, shapeOf()));
+      watching = new ResizeObserver(() => reshape(frame, shapeOf(), over));
       watching.observe(box);
     }
     return { screen, box, frame };
@@ -1237,6 +1264,109 @@ export function setupStudio({
     }
     return element;
   }
+  // ------------------------------------------------------------------ Détails
+  const STAGES = { draft: 'Brouillon', final: 'Finale' };
+  /** The number of a creation among those of its kind here: the first made is #1, the newest the largest. */
+  function numberOf(record) {
+    const mine = runs.filter(item => mediaOf(item) === mediaOf(record)),
+      at = mine.findIndex(item => item.id === record.id);
+    return at < 0 ? null : mine.length - at;
+  }
+  /** The LoRAs a creation was made with: those of its workflow, then those added in the Studio. */
+  function madeWith(record) {
+    const p = record.parameters ?? {},
+      workflow = Object.values(info?.tools ?? {})
+        .flat()
+        .find(item => item.id === record.workflowId),
+      own = (p.loras ?? []).map(lora => workflow?.loras?.find(item => item.id === lora.id)?.name ?? lora.id),
+      added = (p.styles ?? []).map(style => leaf(style.name));
+    return [...own, ...added].join(', ');
+  }
+  /** What the creation on the screen is made of: its number, model, format, length, size, LoRAs, stage. */
+  function recordDetails(record) {
+    const p = record.parameters ?? {},
+      media = mediaOf(record),
+      number = numberOf(record),
+      pictured = media !== 'audio' && p.width > 0 && p.height > 0,
+      made = media === 'audio' ? Number(p.seconds) : p.frames > 0 && p.fps > 0 ? p.frames / p.fps : 0,
+      rows = [];
+    if (number) rows.push([{ video: 'Clip', image: 'Image', audio: 'Son' }[media] ?? 'Création', '#' + number]);
+    rows.push(['Modèle', record.workflowName || '—']);
+    if (pictured) rows.push(['Format', formatOf(p.width, p.height)?.id ?? '—']);
+    if (made > 0) rows.push(['Durée', seconds(made)]);
+    if (pictured) rows.push(['Taille', p.width + ' × ' + p.height]);
+    if (media !== 'audio') rows.push(['LoRA', madeWith(record) || '—']);
+    if (STAGES[p.stage]) rows.push(['Étape', STAGES[p.stage]]);
+    return rows;
+  }
+  /** What will be made, or is being made: the model, format, length, size, LoRAs and stage. */
+  function draftDetails(workflow = current()) {
+    if (!workflow) return [];
+    const draft = drafts[mode],
+      shape = shapeOf(),
+      length = lengthOf(workflow),
+      sound = mode === 'audio' ? soundSeconds(workflow) : null,
+      stage = extending ? null : stageOf(workflow),
+      rows = [];
+    if (extending) {
+      const from = numberOf(extending);
+      rows.push(['Clip', from ? 'suite de #' + from : 'suite']);
+    }
+    rows.push(['Modèle', workflow.name]);
+    if (mode !== 'audio' && shape.label) rows.push(['Format', shape.label]);
+    if (length) rows.push(['Durée', seconds(length.value)]);
+    else if (sound) rows.push(['Durée', seconds(sound)]);
+    if (mode !== 'audio' && draft.size && !extending) rows.push(['Taille', draft.size.replace('x', ' × ')]);
+    if (mode !== 'audio') {
+      const own = (workflow.loras ?? []).filter(lora => loraChoice(workflow, lora).on).map(lora => lora.name),
+        added =
+          workflow.external && !extending
+            ? draft.styles.filter(style => style.name).map(style => leaf(style.name))
+            : [];
+      rows.push(['LoRA', [...own, ...added].join(', ') || '—']);
+    }
+    if (STAGES[stage]) rows.push(['Étape', STAGES[stage]]);
+    return rows;
+  }
+  /**
+   * « Détails » (moodix-design.md 25, 7 bis 6): a small « i » at the top right of the screen,
+   * which opens below it what the creation shown is made of (what will be made, while none is),
+   * the stage, draft or final, with it. Échap closes it.
+   */
+  function details(last) {
+    const go = button(
+      'studio-details-go' + (detailsOpen ? ' is-open' : ''),
+      '',
+      () => toggleDetails(!detailsOpen),
+      'info',
+    );
+    go.setAttribute('aria-label', 'Détails de la génération');
+    go.title = 'Détails';
+    go.setAttribute('aria-expanded', String(detailsOpen));
+    go.setAttribute('aria-controls', 'studio-details');
+    const closing = event => {
+      if (event.key !== 'Escape' || !detailsOpen) return;
+      event.preventDefault();
+      event.stopPropagation?.();
+      toggleDetails(false);
+    };
+    go.onkeydown = closing;
+    if (!detailsOpen) return [go];
+    const card = node('div', 'studio-details');
+    card.id = 'studio-details';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-label', 'Détails de la génération');
+    card.onkeydown = closing;
+    for (const [key, value] of last ? recordDetails(last) : draftDetails())
+      card.append(node('span', 'studio-details-key', key), node('span', 'studio-details-value', value));
+    return [go, card];
+  }
+  function toggleDetails(open) {
+    detailsOpen = open;
+    render();
+    document.querySelector?.('#studio-view .studio-details-go')?.focus?.();
+  }
+
   /** The formats under the preview: 1:1, 16:9, 9:16, and « ··· » for all of them. */
   function formatChips(workflow, frame) {
     const draft = drafts[mode],
@@ -1319,127 +1449,6 @@ export function setupStudio({
     }
     return Object.keys(result).length ? result : null;
   }
-  /**
-   * The LoRAs the workflow brings, chosen in its settings (Workflows): a row each, its name, its
-   * strength, and whether it is on. Those « Activé » there are always on; those left to the
-   * « Assistant » (the tile of Moodix AI) are switched here as Moodix AI would, their strength too.
-   */
-  function workflowLoraSection(workflow) {
-    const section = node('section', 'studio-loras is-workflow'),
-      head = node('div', 'studio-loras-head');
-    head.append(node('h3', '', 'LoRA du workflow'));
-    section.append(head);
-    for (const lora of workflow.loras) {
-      const choice = loraChoice(workflow, lora),
-        row = node('div', 'studio-lora is-workflow' + (choice.on ? '' : ' is-off')),
-        name = node('span', 'studio-lora-name'),
-        amount = node('output', 'studio-lora-strength', strengthText(choice.strength)),
-        toggle = node('input', 'studio-lora-switch');
-      let slider = null;
-      if (lora.assistant) name.append(node('span', 'ai-mark'));
-      name.append(node('span', 'studio-lora-label', lora.name));
-      name.title = lora.description ? lora.name + ' · ' + lora.description : lora.name;
-      toggle.type = 'checkbox';
-      toggle.checked = choice.on;
-      toggle.disabled = !lora.assistant;
-      toggle.title = lora.assistant
-        ? 'Utiliser ce LoRA pour cette création'
-        : 'Activé dans Workflows : toujours appliqué';
-      toggle.setAttribute('aria-label', 'LoRA ' + lora.name);
-      toggle.onchange = () => {
-        choice.on = toggle.checked;
-        row.classList.toggle('is-off', !choice.on);
-        if (slider) slider.disabled = !choice.on;
-      };
-      if (freeStrength(lora)) {
-        slider = node('input');
-        slider.type = 'range';
-        slider.min = String(lora.strength.min ?? 0);
-        slider.max = String(lora.strength.max ?? 2);
-        slider.step = '0.05';
-        slider.value = String(choice.strength);
-        slider.disabled = !choice.on;
-        slider.title = 'Force du LoRA';
-        slider.setAttribute('aria-label', 'Force du LoRA ' + lora.name);
-        slider.oninput = () => {
-          choice.strength = Number(slider.value);
-          amount.textContent = strengthText(choice.strength);
-        };
-        row.append(name, slider, amount, toggle);
-      } else {
-        amount.title = 'Force fixée dans Workflows';
-        row.append(name, amount, toggle);
-      }
-      section.append(row);
-    }
-    return section;
-  }
-
-  // ------------------------------------------------------------------ LoRA
-  /** The LoRAs added to the model for this creation: three at most, a card each, its name over its strength. */
-  function loraSection() {
-    const draft = drafts[mode],
-      section = node('section', 'studio-loras'),
-      head = node('div', 'studio-loras-head');
-    head.append(
-      node('h3', '', 'Style (LoRA)'),
-      node('span', 'studio-loras-count', `${draft.styles.length} / ${MAX_STYLES}`),
-    );
-    section.append(head);
-    draft.styles.forEach((style, index) => {
-      const card = node('div', 'studio-lora'),
-        name = select(
-          info.styles.map(file => [file, leaf(file)]),
-          style.name,
-          value => {
-            style.name = value;
-          },
-        ),
-        slider = node('input'),
-        amount = node('output', 'studio-lora-strength', strengthText(style.strength));
-      name.setAttribute('aria-label', 'LoRA');
-      slider.type = 'range';
-      slider.min = '0';
-      slider.max = '2';
-      slider.step = '0.05';
-      slider.value = String(style.strength);
-      slider.title = 'Force du LoRA';
-      slider.setAttribute('aria-label', 'Force du LoRA');
-      slider.oninput = () => {
-        style.strength = Number(slider.value);
-        amount.textContent = strengthText(style.strength);
-      };
-      const remove = button(
-        'studio-lora-remove',
-        '',
-        () => {
-          draft.styles.splice(index, 1);
-          render();
-        },
-        'close',
-      );
-      remove.title = 'Retirer ce LoRA';
-      remove.setAttribute('aria-label', 'Retirer ce LoRA');
-      card.append(name, remove, slider, amount);
-      section.append(card);
-    });
-    if (!info.styles.length)
-      section.append(node('small', 'field-help', 'Aucun LoRA listé : le dossier loras est vide.'));
-    else if (draft.styles.length < MAX_STYLES)
-      section.append(
-        button(
-          'studio-lora-add',
-          'Ajouter un LoRA',
-          () => {
-            draft.styles.push({ name: info.styles[0], strength: 1 });
-            render();
-          },
-          'plus',
-        ),
-      );
-    return section;
-  }
-
   // ------------------------------------------------------------------ images handed over
   const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
   /** The first image of files pasted or dropped, if any. */
@@ -2627,7 +2636,9 @@ export function setupStudio({
       fill = node('span', 'studio-go-bar');
     key.setAttribute('aria-hidden', 'true');
     fill.setAttribute('aria-hidden', 'true');
-    go.append(label, key, fill);
+    // « Ctrl ↵ » says how to launch; while the creation is made, « Génération · 42 % » takes its
+    // room (146 px at most, as « Générer » and « Ctrl ↵ »): « Générer » keeps its 190 px.
+    go.append(...(working ? [label, fill] : [label, key, fill]));
     go.title = answering() ? 'Générer la proposition de Moodix AI · ' + MODIFIER + ' + Entrée' : MODIFIER + ' + Entrée';
     go.disabled = enriching || Boolean(working);
     if (working) {
@@ -2639,23 +2650,13 @@ export function setupStudio({
     // « Agent » and « Générer » (and what goes with it) together at the right: they wrap as one.
     const group = node('div', 'studio-go-group');
     group.append(agent, go);
-    if (working) {
-      const halt = button('secondary studio-stop', '', stop, 'stop');
-      halt.setAttribute('aria-label', 'Arrêter la génération');
-      halt.title = 'Arrêter la génération';
-      group.append(halt);
-    } else if (answering()) {
+    if (answering()) {
       const no = button('secondary studio-decline', 'Annuler', () => decline());
       no.title = 'Refuser cette proposition de Moodix AI';
       group.append(no);
     }
     bar.append(group);
     preview.append(bar);
-    const line = node('p', 'studio-progress', working?.label ?? '');
-    line.id = 'studio-progress';
-    line.setAttribute('role', 'status');
-    line.hidden = !working;
-    preview.append(line);
     if (failure) {
       const alert = node('p', 'studio-error', failure);
       alert.setAttribute('role', 'alert');
