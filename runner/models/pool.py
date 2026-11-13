@@ -85,6 +85,8 @@ class WeightPool:
         self.adapted = {}
         # Each LoRA file's pairs for the layers of the model, read once (see lora_layers).
         self.lora_cache = {}
+        # The keys of each store, listed once (see sized).
+        self.listed = {}
         self.merged = {}
         self.merged_bytes = 0
         self.device = 'cuda'
@@ -122,16 +124,42 @@ class WeightPool:
         and the file keys they come from."""
         source, key, part = location
         store = self.stores[source]
+        # Listed once: a store lists its keys anew each time it is asked (4 000 names for a video
+        # model, asked twice per layer: seconds of the first step).
+        listed = self.listed.get(source)
+        if listed is None:
+            listed = self.listed[source] = set(store.keys())
         values, keys = {'weight': self.read(location)}, [key]
         for suffix, label in (('.weight_scale', 'scale'), ('.bias', 'bias')):
             candidate = key.removesuffix('.weight') + suffix
-            if candidate in store.keys():
+            if candidate in listed:
                 value = store.get_tensor(candidate)
                 if part is not None and value.ndim:
                     value = value.chunk(3, dim=0)[part]
                 values[label] = value
                 keys.append(candidate)
         return values, keys
+
+    def sized(self, location):
+        """(bytes, file keys) of what a layer reads from its file, as `parts` gives it. From the
+        header of the file when the store knows its sizes (`measure`): nothing is read."""
+        source, key, part = location
+        store = self.stores[source]
+        measure = getattr(store, 'measure', None)
+        if measure is None:
+            values, names = self.parts(location)
+            return sum(value.numel() * value.element_size() for value in values.values()), names
+        listed = self.listed.get(source)
+        if listed is None:
+            listed = self.listed[source] = set(store.keys())
+        size, names = measure(key)[0] // (3 if part is not None else 1), [key]
+        for suffix in ('.weight_scale', '.bias'):
+            candidate = key.removesuffix('.weight') + suffix
+            if candidate in listed:
+                held, dimensions = measure(candidate)
+                size += held // 3 if part is not None and dimensions else held
+                names.append(candidate)
+        return size, names
 
     def streamed(self, margin_gib=0, onward=False):
         """The file keys of the weights that will not stay on the GPU with the present limit,
@@ -152,8 +180,7 @@ class WeightPool:
         for location in self.order:
             if location in self.gpu:
                 continue
-            values, names = self.parts(location)
-            size = sum(value.numel() * value.element_size() for value in values.values())
+            size, names = self.sized(location)
             if not (cut and onward) and held + size <= limit:
                 held += size
             else:

@@ -9,6 +9,8 @@ each phase cost, what stayed on the GPU and what was kept in RAM.
         --vae V.safetensors --tokenizer TOKENIZER_FOLDER --out FOLDER [--lora FILE:STRENGTH]
     python -s -m runner.bench minimax_h3 --model M.safetensors --text-encoder T.safetensors \\
         --vae V.safetensors --audio-vae A.safetensors --tokenizer TOKENIZER_FOLDER --out FOLDER
+    python -s -m runner.bench ltx25 --model M.safetensors --text-encoder T.safetensors \\
+        --vae V.safetensors --audio-vae A.safetensors [--upscaler U.safetensors] --out FOLDER
 
     Common: [--runs 3] [--seed 1] [--size WxH] [--steps 8] [--frames 124] [--prompt "..."]
             [--new-prompts N] [--gpu-gib N] [--ram-reserve-gib N]
@@ -102,8 +104,43 @@ def minimax_h3_job(args, run):
     )
 
 
+def ltx25_job(args, run):
+    _need(args, 'model', 'text_encoder', 'vae', 'audio_vae')
+    width, height = _size(args, '288x512')
+    components = dict(model=args.model, textEncoder=args.text_encoder, vae=args.vae, audioVae=args.audio_vae)
+    # With the latent upscaler, a large video is sampled in two passes, as the workflow does.
+    if args.upscaler:
+        components['upscaler'] = args.upscaler
+    return dict(
+        id=str(uuid.uuid4()),
+        pipeline='ltx25',
+        mediaType='video',
+        parameters=dict(
+            prompt=_prompt(args, run),
+            seed=args.seed + run - 1,
+            width=width,
+            height=height,
+            steps=args.steps,
+            stage='draft',
+            frames=args.frames,
+            fps=24,
+            audio=True,
+            start_strength=0.7,
+            end_strength=0.7,
+            image_compression=18,
+            msr_strength=1,
+            msr_frames=33,
+            overlap_frames=9,
+        ),
+        components=components,
+        loras=[],
+        references=[],
+    )
+
+
 FAMILIES = {
     'krea2': ('runner.pipelines.krea2', krea2_job),
+    'ltx25': ('runner.pipelines.ltx25', ltx25_job),
     'minimax_h3': ('runner.pipelines.minimax_h3', minimax_h3_job),
 }
 
@@ -111,7 +148,7 @@ FAMILIES = {
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('family', choices=sorted(FAMILIES))
-    for name in ('model', 'text-encoder', 'vae', 'audio-vae', 'tokenizer'):
+    for name in ('model', 'text-encoder', 'vae', 'audio-vae', 'tokenizer', 'upscaler'):
         parser.add_argument('--' + name)
     parser.add_argument('--out', required=True)
     parser.add_argument('--runs', type=int, default=3)

@@ -163,6 +163,29 @@ class StreamedShareTest(unittest.TestCase):
         pool.order = [('model', key, None) for key in sizes if key.endswith('.weight')]
         self.assertEqual(pool.streamed(), {})
 
+    def test_a_store_that_knows_its_sizes_is_not_read_to_name_what_is_streamed(self):
+        sizes = {'a.weight': 60, 'a.weight_scale': 5, 'b.weight': 50, 'b.bias': 5, 'qkv.weight': 90, 'qkv.bias': 9}
+
+        class Sized(Store):
+            """As runner.models.residency.Store: sizes from the header of the file."""
+
+            asked = 0
+
+            def measure(self, key):
+                return self.sizes[key], 1
+
+            def get_tensor(self, key):
+                Sized.asked += 1
+                return super().get_tensor(key)
+
+        pool, _ = WeightPoolTest.pool(self, sizes, limit=70)
+        pool.stores = {'model': Sized(sizes)}
+        # One of the three parts of a fused matrix counts for a third of it, bias included.
+        pool.order = [('model', 'a.weight', None), ('model', 'b.weight', None), ('model', 'qkv.weight', 1)]
+        self.assertEqual(pool.sized(('model', 'qkv.weight', 1)), (33, ['qkv.weight', 'qkv.bias']))
+        self.assertEqual(pool.streamed(), {'model': {'b.weight', 'b.bias', 'qkv.weight', 'qkv.bias'}})
+        self.assertEqual(Sized.asked, 0, 'no tensor was mapped to find out')
+
 
 class MergedAdaptersTest(unittest.TestCase):
     def test_the_loras_of_a_layer_are_one_pair_of_matrices_that_stays_on_the_gpu(self):

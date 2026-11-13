@@ -329,6 +329,21 @@ def _safetensors(path, tensors):
     return 8 + len(encoded)
 
 
+class MeasureTest(unittest.TestCase):
+    def test_the_size_of_a_tensor_comes_from_the_header_of_the_file(self):
+        from runner.models import residency
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'weights.safetensors')
+            _safetensors(path, {'a.weight': b'a' * 1000, 'a.weight_scale': b's' * 10})
+            # Through its mapping, as a file too large to be kept in RAM.
+            with residency.open_store(path, False) as store:
+                self.assertEqual(store.measure('a.weight'), (1000, 1))
+                self.assertEqual(store.measure('a.weight_scale'), (10, 1))
+                with self.assertRaises(KeyError):
+                    store.measure('absent')
+
+
 class PrefetchTest(unittest.TestCase):
     def test_reads_ahead_only_the_wanted_weights_of_mapped_files(self):
         from runner.models import residency

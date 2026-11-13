@@ -377,6 +377,8 @@ class Store:
         self.mapping = None
         # A part of the file kept in locked RAM beside the mapping (see `keep`).
         self.part = None
+        # The size of each tensor, read from the header when first asked (see `measure`).
+        self.sizes = None
         if self.arena is not None:
             RESIDENCY.hold(self.arena)
         if self.arena is None:
@@ -436,6 +438,18 @@ class Store:
         if self.arena:
             return _Slice(self.arena.tensor(key))
         return self.mapping.get_slice(key)
+
+    def measure(self, key):
+        """(bytes, dimensions) of a tensor as the header of the file gives them: nothing of the
+        tensor is read, where `get_tensor` maps it (6 s for the 4 000 tensors of a video model)."""
+        if self.sizes is None:
+            header = self.arena.header if self.arena else _header(self.path)[0]
+            self.sizes = {
+                name: (info['data_offsets'][1] - info['data_offsets'][0], len(info['shape']))
+                for name, info in header.items()
+                if name != '__metadata__'
+            }
+        return self.sizes[key]
 
     @property
     def pinned(self):

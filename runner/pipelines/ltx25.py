@@ -11,6 +11,17 @@ DISTILLED_SIGMAS = (1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421
 REFINE_SIGMAS = (0.909375, 0.725, 0.421875)
 # Below this side, half the size is too small for a first pass worth refining.
 TWO_PASS_SIDE = 512
+# As MiniMax-H3 does (runner.pipelines.minimax_h3): the model (20 GiB) does not fit whole in a
+# 12 GiB card nor, beside the rest, in 32 GiB of RAM. The share of it that every step copies to
+# the GPU is kept in page-locked RAM, leaving this much free, a little beyond what is copied so
+# that the next video finds its weights there; and copied in advance, while the GPU computes the
+# layers before. Read from the file through unlocked memory, those copies were the whole of a
+# step: 1.85 s at 288 x 512 where ComfyUI takes 0.62 s (measured, 12.8 GiB copied per step).
+RAM_RESERVE_GIB = 4
+LOCK_MARGIN_GIB = 0.5
+AHEAD_GIB = 0.5
+# Video memory the tiles of the decode take at their peak, in GiB (measured at 896 x 1600).
+DECODE_GIB = 6
 
 
 def working_gib(parameters, width, height, subjects):
@@ -180,24 +191,41 @@ def generate(job, config, progress):
 
         def share(width, height):
             """GiB of the DiT kept on the GPU while sampling at this size."""
-            kept = max(0, free - working_gib(p, width, height, subjects))
+            kept = max(0, free - working_gib(p, width, height, subjects) - AHEAD_GIB)
             return min(config['cacheGiB'], kept) if 'cacheGiB' in config else kept
 
         budget = share(*(first or (p['width'], p['height'])))
-        hot = WeightPool(stores, budget, adapters=adapters)
+        hot = WeightPool(stores, budget, adapters=adapters, ahead_gib=AHEAD_GIB)
         cold = WeightPool(stores, 0)
-        # From here to the end of the first step, the disk reads the DiT in sequence: its
-        # layers then find their weights in RAM instead of faulting them in one by one.
-        ahead = prefetch(
-            job['components'],
-            stores,
-            [*use_order(names['connectors']), *use_order(names['model'])],
-            lead=lambda: hot.used() + cold.used(),
-        )
+        ahead = None
         timed('layouts and stores')
         try:
             transformer = chunk_feed_forwards(load_streamed(models.pop('model'), names['model'], hot))
             timed('transformer')
+            # What will not stay on the GPU goes to page-locked RAM once, for every step and the
+            # next videos. The second pass of a large video keeps less there: what it copies
+            # beyond the first is locked too when RAM allows, else read from the file as before.
+            reserve = int(RAM_RESERVE_GIB * 1024**3)
+            copied = hot.streamed().get('model', ())
+            later = max(LOCK_MARGIN_GIB, budget - share(p['width'], p['height'])) if first else LOCK_MARGIN_GIB
+            locked = stores['model'].keep(copied, reserve, spare=hot.streamed(later, onward=True).get('model', ()))
+            if not locked and first:
+                locked = stores['model'].keep(
+                    copied, reserve, spare=hot.streamed(LOCK_MARGIN_GIB, onward=True).get('model', ())
+                )
+            timed('weights locked in RAM')
+            # From here to the end of the first step, the disk reads in sequence what is not
+            # locked (the share that stays on the GPU, the connectors): the layers then find
+            # their weights in RAM instead of faulting them in one by one. What is locked was
+            # read once; read again here, it pushed everything else out of the system's cache.
+            held = stores['model'].part.header if stores['model'].part else {}
+            order = [*use_order(names['connectors']), *use_order(names['model'])]
+            ahead = prefetch(
+                job['components'],
+                stores,
+                [location for location in order if location[0] != 'model' or location[1] not in held],
+                lead=lambda: hot.used() + cold.used(),
+            )
             hot.preload()
             timed('weights kept on the GPU')
             connectors = load_streamed(models.pop('connectors'), names['connectors'], cold)
@@ -375,6 +403,7 @@ def generate(job, config, progress):
                 gpu_cache_gib=round(hot.bytes / 1024**3, 3),
                 gpu_cache_limit_gib=round(budget, 3),
                 pinned_model=stores['model'].pinned,
+                locked_ram_gib=round(locked / 1024**3, 3),
                 residency=RESIDENCY.summary(),
             )
             progress(stage='video sampled', **cache)
@@ -530,6 +559,7 @@ def decode_pixels(job, headers, latents, progress):
     import numpy
     import torch
     from runner.models.ltx25 import validate_layout, WeightPool, load_streamed
+    from runner.models.pool import room
     from runner.models.residency import open_store
 
     seed = job['parameters']['seed']
@@ -537,7 +567,11 @@ def decode_pixels(job, headers, latents, progress):
         models, names = validate_layout(headers)
         vae = models.pop('vae')
         del models
-        pool = WeightPool({'vae': source}, 0)
+        # The decoder stays on the GPU while it works, where there is room beside its tiles
+        # (5.6 GiB at their peak): each tile runs it several times.
+        entries = (entry for name, entry in headers['vae'].items() if name != '__metadata__')
+        size = sum(entry['data_offsets'][1] - entry['data_offsets'][0] for entry in entries)
+        pool = WeightPool({'vae': source}, size / 1024**3 if room(DECODE_GIB) * 1024**3 >= size else 0)
         try:
             vae = load_streamed(vae, names['vae'], pool)
             plan = configure_decode(vae, latents.shape)
