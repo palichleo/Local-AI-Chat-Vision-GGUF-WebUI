@@ -41,6 +41,7 @@ import { convertKreaWorkflow } from './lib/native-workflow-conversion.mjs';
 import { importComfyWorkflow } from './lib/comfy-import.mjs';
 import { previewWorkflowImport } from './lib/workflow-import.mjs';
 import { STUDIO_ID, STUDIO_VERBS, enrichedPrompt, enrichMessages } from './lib/studio.mjs';
+import { LlamaBuilds } from './lib/llama-builds.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 20 * 1024 * 1024;
@@ -209,6 +210,8 @@ export async function createApplication({
   managed = false,
   // Starts the launcher again (POST /api/relaunch); tests pass their own.
   launcher = startLauncher,
+  // The official builds of llama.cpp (lib/llama-builds.mjs); tests pass their own.
+  llamaBuilds: givenLlamaBuilds = null,
   // A generation call with a two-line prompt is sent back once (lib/thin-prompt.mjs).
   fullPrompts = true,
   currentSources = appSources,
@@ -410,6 +413,44 @@ export async function createApplication({
     toolJob: runtime.active ? runtime.status() : null,
     runner: generation.status(),
   });
+  // The official builds of llama.cpp the application installs (Réglages, Composants).
+  const llamaBuilds = givenLlamaBuilds ?? new LlamaBuilds({ root: join(dataDir, 'engines', 'llama.cpp') });
+  let llamaInstalling = null;
+  /**
+   * The build of llama.cpp just installed becomes the one the chat model runs on: once nothing
+   * uses the model, it is stopped, the setting changed and the model started again on the new
+   * build. If the model does not start on it, the former build comes back.
+   */
+  async function useLlama(kept) {
+    const job = llamaBuilds.job;
+    Object.assign(job, { state: 'switching', step: 'Mise en service dès que le modèle est libre…' });
+    const until = Date.now() + 15 * 60000;
+    while (engine.busy || runtime.active || savingSettings || ['loading', 'stopping'].includes(engine.state)) {
+      if (closing || Date.now() > until)
+        throw Object.assign(job, { state: 'error', error: 'Le modèle est resté occupé : llama.cpp n’a pas été mis en service.' });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    const previous = config,
+      restart = engine.state === 'ready';
+    if (restart) await engine.stop();
+    const next = { ...config, enginePath: kept.enginePath };
+    await atomicJson(configPath, next);
+    config = next;
+    if (restart)
+      try {
+        await engine.start(config);
+      } catch (error) {
+        await atomicJson(configPath, previous);
+        config = previous;
+        await engine.start(config).catch(() => {});
+        Object.assign(job, {
+          state: 'error',
+          error: `llama.cpp ${kept.tag} (${kept.label}) ne démarre pas avec le modèle : ${error.message} Le moteur d’avant est remis.`,
+        });
+        return;
+      }
+    Object.assign(job, { state: 'done', step: '', used: true });
+  }
   let url;
   let saving = false;
 
@@ -728,6 +769,8 @@ export async function createApplication({
         }
         return send(200, await updates);
       }
+      if (path === '/api/llama' && req.method === 'GET')
+        return send(200, { ...llamaBuilds.status(), ours: llamaBuilds.owns(config.enginePath) });
       if (path === '/api/components' && req.method === 'GET') {
         // The Update tab asks once when it opens and again on its button: two at once share one answer.
         componentsCheck ||= (async () =>
@@ -1040,6 +1083,25 @@ export async function createApplication({
         return;
       }
       if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
+      if (path === '/api/llama/check')
+        // The newest release of llama.cpp and the builds it offers this computer (GitHub asked at
+        // most once an hour, unless `again`).
+        return send(200, await llamaBuilds.check({ again: body.again === true }));
+      if (path === '/api/llama/install') {
+        // Downloaded, checked, unpacked and tried in the background; the status says where it is.
+        if (llamaInstalling) throw problem('Une installation de llama.cpp est déjà en cours.', 409);
+        llamaInstalling = (async () => {
+          try {
+            await useLlama(await llamaBuilds.install());
+          } catch {
+            // Told by the status of the installation.
+          } finally {
+            llamaInstalling = null;
+            componentsCheck = null;
+          }
+        })();
+        return send(202, llamaBuilds.status());
+      }
       if (path === '/api/models/add' || path === '/api/models/select' || path === '/api/models/remove') {
         if (
           savingSettings ||
@@ -1939,7 +2001,9 @@ export async function createApplication({
   }
   async function stopApplication() {
     installController.abort();
+    llamaBuilds.cancel();
     await installTask;
+    await llamaInstalling;
     return closeApplication();
   }
   return { url, close: stopApplication };

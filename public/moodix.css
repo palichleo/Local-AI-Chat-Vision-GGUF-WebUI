@@ -2634,6 +2634,36 @@ video.studio-frame-result {
   opacity: 0.8;
 }
 
+/* Under the llama.cpp row of the components: the official build for this computer. */
+.llama-install {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.llama-install-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.llama-install-go {
+  flex: none;
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.llama-install-go[hidden] {
+  display: none;
+}
+/* The llama.cpp row takes the whole width: its line under it has room. */
+.component-row[data-id='llama'] {
+  grid-column: 1 / -1;
+}
+
 /* « Redémarrer », beside « Fermer l'application », in the same quiet words. */
 .settings-footer .app-restart {
   margin-right: auto;

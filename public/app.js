@@ -741,6 +741,107 @@ async function saveToken(token) {
 }
 
 const COMPONENT_STATES = { missing: 'Manquant', error: 'Problème', off: 'Non utilisé' };
+const LLAMA_WORKING = ['checking', 'downloading', 'unpacking', 'trying', 'switching'];
+const megabytes = bytes => Math.max(1, Math.round((bytes || 0) / 1048576)).toLocaleString('fr-FR') + ' Mo';
+/** The line under the llama.cpp row of the components (made once, filled again). */
+function llamaLine() {
+  const row = $('components-list').querySelector('[data-id="llama"]');
+  if (!row) return null;
+  let line = row.querySelector('.llama-install');
+  if (!line) {
+    line = node('div', 'llama-install');
+    const text = node('span', 'llama-install-text'),
+      go = node('button', 'secondary llama-install-go');
+    go.type = 'button';
+    go.hidden = true;
+    line.append(text, go);
+    row.append(line);
+  }
+  return { line, text: line.querySelector('.llama-install-text'), go: line.querySelector('.llama-install-go') };
+}
+/**
+ * Under the llama.cpp row: the official build that fits this computer (its system, its
+ * processor, its graphics card), installed or brought up to date in one click: downloaded,
+ * checked, tried on the card, then used by the chat model.
+ */
+async function showLlama() {
+  const parts = llamaLine();
+  if (!parts) return;
+  const { text, go } = parts,
+    current = $('components-list').querySelector('[data-id="llama"] .component-version')?.textContent || '';
+  try {
+    const job = await (await api('llama')).json();
+    if (LLAMA_WORKING.includes(job.state)) return void followLlama();
+    text.textContent = 'Recherche de la version officielle pour cet ordinateur…';
+    go.hidden = true;
+    const offer = await (await api('llama/check', {})).json(),
+      best = offer.candidates[0];
+    if (!best) {
+      text.textContent = 'llama.cpp ne publie aucune version pour ce système.';
+      return;
+    }
+    const upToDate = job.ours && current === offer.tag;
+    text.textContent = upToDate
+      ? `À jour : version officielle ${offer.tag}.`
+      : `Version officielle pour cet ordinateur : ${offer.tag} · ${best.label} (${megabytes(best.size)}).` +
+        (job.ours ? '' : ' Elle remplacera le moteur actuel.');
+    go.textContent = job.ours ? 'Mettre à jour' : 'Installer';
+    go.hidden = upToDate;
+    go.onclick = () => void installLlama();
+  } catch (error) {
+    text.textContent = 'Versions officielles de llama.cpp indisponibles : ' + error.message;
+  }
+}
+async function installLlama() {
+  const parts = llamaLine();
+  if (!parts) return;
+  parts.go.hidden = true;
+  try {
+    await api('llama/install', {});
+  } catch (error) {
+    parts.text.textContent = error.message;
+    return;
+  }
+  await followLlama();
+}
+/** The installation as it goes, until the chat model runs on the new build (or what failed). */
+async function followLlama() {
+  if (state.followingLlama) return;
+  state.followingLlama = true;
+  try {
+    while (true) {
+      const job = await (await api('llama')).json(),
+        parts = llamaLine();
+      if (!parts) return;
+      const { text, go } = parts;
+      go.hidden = true;
+      if (job.state === 'downloading') text.textContent = `${job.step} ${megabytes(job.received)} / ${megabytes(job.total)}`;
+      else if (job.state === 'error') {
+        text.textContent = job.error;
+        return;
+      } else if (job.state === 'done') {
+        const { result } = job;
+        text.textContent =
+          `llama.cpp ${result.tag} (${result.label}) installé${job.used ? ' et utilisé par le modèle' : ''}.` +
+          (result.devices[0] ? ' Il voit : ' + result.devices[0] + '.' : '');
+        // The setting changed on the server: the field says so. A form without other changes
+        // stays saved; one with changes of the user keeps them to save (the new path with them).
+        const clean = !settingsGuard.isDirty();
+        state.config.enginePath = result.enginePath;
+        $('engine-path').value = result.enginePath;
+        if (clean) settingsGuard.markSaved();
+        await checkComponents({ again: true });
+        return;
+      } else text.textContent = job.step || 'Installation…';
+      await new Promise(resolve => setTimeout(resolve, 800));
+    }
+  } catch (error) {
+    const parts = llamaLine();
+    if (parts) parts.text.textContent = error.message;
+  } finally {
+    state.followingLlama = false;
+  }
+}
 /** The versions of the programs Atelier runs on (GET /api/components), once per opening of the tab. */
 async function checkComponents({ again = false } = {}) {
   if (state.checkingComponents || (!again && state.componentsSession === state.settingsSession)) return;
@@ -756,6 +857,7 @@ async function checkComponents({ again = false } = {}) {
       ...result.components.map(component => {
         const row = node('li', 'component-row');
         row.dataset.state = component.state;
+        row.dataset.id = component.id;
         const name = node('div', 'component-name');
         name.append(node('strong', '', component.name));
         if (component.detail) name.append(node('span', 'component-detail', component.detail));
@@ -770,6 +872,7 @@ async function checkComponents({ again = false } = {}) {
     $('components-status').textContent = problems
       ? problems + (problems > 1 ? ' composants demandent' : ' composant demande') + ' votre attention.'
       : '';
+    void showLlama();
   } catch (error) {
     $('components-status').textContent = error.message;
   } finally {
