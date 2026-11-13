@@ -61,6 +61,7 @@ const staticFiles = new Map([
   ['/fonts/Michroma-Regular.ttf', ['fonts/Michroma-Regular.ttf', 'font/ttf']],
   ['/fonts/Manrope-Variable.ttf', ['fonts/Manrope-Variable.ttf', 'font/ttf']],
   ['/fonts/JetBrainsMono-Variable.ttf', ['fonts/JetBrainsMono-Variable.ttf', 'font/ttf']],
+  ['/assets/fonts/Archivo-Variable.ttf', ['assets/fonts/Archivo-Variable.ttf', 'font/ttf']],
   ['/studio-pointer.mjs', ['studio-pointer.mjs', 'text/javascript; charset=utf-8']],
   ['/assets/metallic-surface.svg', ['assets/metallic-surface.svg', 'image/svg+xml']],
   ['/settings-search.mjs', ['settings-search.mjs', 'text/javascript; charset=utf-8']],

@@ -16,13 +16,14 @@ Any future adaptation of MIT, BSD or Apache-2.0 code must be listed here with it
 
 ## Fonts included in this repository
 
-The interface uses three fonts served from `public/fonts/`, so the page loads nothing from the web. Each is licensed under the [SIL Open Font License 1.1](https://openfontlicense.org), whose full text sits beside it; the files are the unmodified releases of the [Google Fonts repository](https://github.com/google/fonts).
+The interface uses four fonts served by the application itself (`public/fonts/` and `public/assets/fonts/`), so the page loads nothing from the web. Each is licensed under the [SIL Open Font License 1.1](https://openfontlicense.org), whose full text sits beside it. Michroma, Manrope and JetBrains Mono are the unmodified releases of the [Google Fonts repository](https://github.com/google/fonts); Archivo is the unmodified variable font of [its own repository](https://github.com/Omnibus-Type/Archivo) (`fonts/variable/Archivo[wdth,wght].ttf`, renamed).
 
-| Font           | File                                      | Copyright                                                                                      | License                           |
-| -------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------- |
-| Michroma       | `public/fonts/Michroma-Regular.ttf`       | Copyright 2011 The Michroma Project Authors (https://github.com/googlefonts/Michroma-font)     | OFL-1.1 (`OFL-Michroma.txt`)      |
-| Manrope        | `public/fonts/Manrope-Variable.ttf`       | Copyright 2018 The Manrope Project Authors (https://github.com/googlefonts/manrope)            | OFL-1.1 (`OFL-Manrope.txt`)       |
-| JetBrains Mono | `public/fonts/JetBrainsMono-Variable.ttf` | Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) | OFL-1.1 (`OFL-JetBrainsMono.txt`) |
+| Font           | File                                       | Copyright                                                                                      | License                           |
+| -------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------- | --------------------------------- |
+| Michroma       | `public/fonts/Michroma-Regular.ttf`        | Copyright 2011 The Michroma Project Authors (https://github.com/googlefonts/Michroma-font)     | OFL-1.1 (`OFL-Michroma.txt`)      |
+| Manrope        | `public/fonts/Manrope-Variable.ttf`        | Copyright 2018 The Manrope Project Authors (https://github.com/googlefonts/manrope)            | OFL-1.1 (`OFL-Manrope.txt`)       |
+| JetBrains Mono | `public/fonts/JetBrainsMono-Variable.ttf`  | Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) | OFL-1.1 (`OFL-JetBrainsMono.txt`) |
+| Archivo        | `public/assets/fonts/Archivo-Variable.ttf` | Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)           | OFL-1.1 (`Archivo-OFL.txt`)       |
 
 ## Components installed separately
 

@@ -2355,9 +2355,7 @@ function syncViews() {
   const label = studio ? 'Chat' : 'Studio';
   $('mode-switch').querySelector('.mode-switch-label').textContent = label;
   // The logo of the mode it is in: MDX-CHAT in the chat, MDX-STUDIO in the Studio.
-  const word = $('mode-switch').querySelector('.mode-word');
-  word.setAttribute('viewBox', studio ? '0 0 618 100' : '0 0 472 100');
-  word.querySelector('use').setAttribute('href', studio ? '#w-studio' : '#w-chat');
+  $('mode-switch').querySelector('.mode-word').textContent = studio ? '-STUDIO' : '-CHAT';
   $('mode-switch').setAttribute('aria-label', studio ? 'Revenir au chat' : 'Passer au Studio');
   $('mode-switch').title = studio ? 'Revenir au chat' : 'Passer au Studio';
 }

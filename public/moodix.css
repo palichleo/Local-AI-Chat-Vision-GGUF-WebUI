@@ -29,6 +29,14 @@
   font-style: normal;
   font-display: swap;
 }
+/* The name of the mode on the switch (-CHAT, -STUDIO): width 62 to 125 %, weight 100 to 900. */
+@font-face {
+  font-family: 'Archivo';
+  src: url('/assets/fonts/Archivo-Variable.ttf') format('truetype');
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+}
 
 /* ------------------------------------------------------------------ tokens */
 :root {
@@ -587,26 +595,32 @@ summary:focus-visible {
 /* The switch wears the logo of the mode it is in: MDX-CHAT in the chat, MDX-STUDIO in the
    Studio; a click goes to the other. MDX in white, the name in the colour of the text. */
 #mode-switch {
-  gap: 3px;
+  /* The height of the logo: the name is sized on it. */
+  --mode-logo: 14px;
+  gap: 0;
   padding: 0 16px;
 }
 #mode-switch .mode-logo {
   display: block;
-  height: 14px;
+  height: var(--mode-logo);
   width: auto;
   flex: none;
 }
+/* The name, in Archivo Black at its widest, read with the logo as one word (MDX-STUDIO): its
+   capitals as tall as the letters of the logo (102 px of the 114 of the picture, capitals of
+   0.686 em: 1.304 times its height), centred on them, the dash close to the X. */
 #mode-switch .mode-word {
   display: block;
-  height: 14px;
-  width: auto;
-  aspect-ratio: 472 / 100;
-  fill: currentColor;
-  stroke: none;
   flex: none;
-}
-body[data-view='studio'] #mode-switch .mode-word {
-  aspect-ratio: 618 / 100;
+  font-family: 'Archivo', sans-serif;
+  font-size: calc(var(--mode-logo) * 1.304);
+  font-weight: 900;
+  font-stretch: 125%;
+  letter-spacing: 0.5px;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink);
 }
 body[data-view='home'] .mode-switch {
   display: none;
@@ -784,11 +798,8 @@ body:not([data-view='studio']) .kind-tabs {
 }
 @media (max-width: 519px) {
   #mode-switch {
+    --mode-logo: 11px;
     padding: 0 12px;
-  }
-  #mode-switch .mode-logo,
-  #mode-switch .mode-word {
-    height: 11px;
   }
   .kind-tab {
     padding: 0 10px;
