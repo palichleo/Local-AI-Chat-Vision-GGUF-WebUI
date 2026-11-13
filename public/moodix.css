@@ -2572,6 +2572,23 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
   opacity: 0;
   animation: none;
 }
+/* The waiting animation is two plain moving layers, without a blur or a blend mode. With them,
+   the browser draws each layer apart and clips it to the frame as it was at its last drawing: on
+   the graphics card, as the layer turned, its straight edges showed as a dark square moving over
+   the frame. Same shapes, same colours, same movement; the light layer a little stronger, as
+   « screen » made it. */
+.generation-frame::before,
+.generation-frame::after,
+.studio-frame.is-busy:not(.is-audio)::before,
+.studio-frame.is-busy:not(.is-audio)::after,
+.generation-original[aria-busy='true']::before {
+  filter: none;
+  mix-blend-mode: normal;
+}
+.generation-frame:not(.has-preview)::after,
+.studio-frame.is-busy:not(.is-audio):not(.has-preview)::after {
+  opacity: 0.8;
+}
 
 /* The message box of the Studio is the chat's, and grows as it does; its ceiling is lower, so the
    Studio keeps its height: past it, its text scrolls in it (the rule: the message box scrolls, not
