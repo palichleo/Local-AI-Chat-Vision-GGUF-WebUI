@@ -584,8 +584,8 @@ summary:focus-visible {
   background: var(--fn-action);
   flex: none;
 }
-/* The switch wears the logo of the mode it goes to: MDX-STUDIO from the chat, MDX-CHAT from the
-   Studio. MDX in white, the name in the colour of the text (it follows the theme). */
+/* The switch wears the logo of the mode it is in: MDX-CHAT in the chat, MDX-STUDIO in the
+   Studio; a click goes to the other. MDX in white, the name in the colour of the text. */
 #mode-switch {
   gap: 3px;
   padding: 0 16px;
@@ -600,13 +600,13 @@ summary:focus-visible {
   display: block;
   height: 14px;
   width: auto;
-  aspect-ratio: 618 / 100;
+  aspect-ratio: 472 / 100;
   fill: currentColor;
   stroke: none;
   flex: none;
 }
 body[data-view='studio'] #mode-switch .mode-word {
-  aspect-ratio: 472 / 100;
+  aspect-ratio: 618 / 100;
 }
 body[data-view='home'] .mode-switch {
   display: none;
@@ -663,7 +663,8 @@ body[data-view='home'] .mode-switch {
   color: var(--muted);
   font-size: 13px;
 }
-/* Image / Vidéo / Son, at the top left of the Studio. */
+/* Image / Vidéo / Son, at the top left of the Studio: the mode in use shows its name on the pill
+   of what is selected, the others their icon only. A tab eases to its new width (Chromium). */
 .kind-tabs {
   display: flex;
   gap: 2px;
@@ -671,6 +672,7 @@ body[data-view='home'] .mode-switch {
   border-radius: 14px;
   background: #14161b;
   border: 1px solid var(--line);
+  interpolate-size: allow-keywords;
 }
 :root[data-theme='light'] .kind-tabs {
   background: var(--surface);
@@ -683,17 +685,20 @@ body:not([data-view='studio']) .kind-tabs {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 38px;
+  height: 40px;
   min-width: 44px;
-  padding: 0 14px;
-  position: relative;
+  padding: 0 12px;
   border: 0;
   border-radius: 10px;
   background: transparent;
   color: #aeb4bf;
-  font-size: 14px;
-  font-weight: 600;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 800;
+  transition:
+    padding 0.2s ease,
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 :root[data-theme='light'] .kind-tab {
   color: var(--muted);
@@ -703,27 +708,27 @@ body:not([data-view='studio']) .kind-tabs {
   height: 17px;
   stroke-width: 2;
 }
-/* The chosen one takes the dark ground of what is active (as Studio in the sidebar), with a
-   line of the action colour under it: no white pill. */
+/* The name takes no room but in the tab in use, 8 px from its icon; it is still read out. */
+.kind-name {
+  width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: width 0.2s ease;
+}
+.kind-name > span {
+  display: block;
+  padding-left: 8px;
+}
 .kind-tab[aria-selected='true'] {
-  background: #262a33;
-  color: var(--ink);
-  font-weight: 800;
+  padding: 0 16px;
+  background: var(--selected);
+  color: var(--on-selected);
 }
-:root[data-theme='light'] .kind-tab[aria-selected='true'] {
-  background: var(--chip);
-}
-.kind-tab[aria-selected='true']::after {
-  content: '';
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 4px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--fn-action);
+.kind-tab[aria-selected='true'] .kind-name {
+  width: auto;
 }
 .kind-tab:hover:enabled:not([aria-selected='true']) {
+  background: var(--hover);
   color: var(--ink);
 }
 /* While Moodix AI sets the Studio: what it does, and the way to take over. */

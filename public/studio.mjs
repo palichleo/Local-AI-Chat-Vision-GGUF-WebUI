@@ -1794,30 +1794,49 @@ export function setupStudio({
   function kinds() {
     const bar = $('studio-kinds');
     if (!bar) return;
-    bar.replaceChildren();
     bar.removeAttribute('data-ai-active');
     bar.removeAttribute('data-ai-touched');
     aiTarget(bar, 'kind');
-    for (const item of MODES) {
-      const tab = button(
-        'kind-tab',
-        item.label,
-        () => {
-          if (working || mode === item.id) return;
-          if (ai) takeOver();
-          setMode(item.id);
-          release();
-        },
-        item.icon,
+    // Made once and kept: a tab eases from one width to the other as the mode changes.
+    if (bar.children.length !== MODES.length) {
+      bar.replaceChildren(
+        ...MODES.map(item => {
+          const tab = node('button', 'kind-tab'),
+            name = node('span', 'kind-name');
+          tab.type = 'button';
+          tab.setAttribute('role', 'tab');
+          // Only the mode in use shows its name: the others say it to screen readers and on hover.
+          tab.setAttribute('aria-label', item.label);
+          tab.title = item.label;
+          tab.dataset.mode = item.id;
+          name.append(node('span', '', item.label));
+          tab.append(icon(item.icon), name);
+          tab.onclick = () => chooseMode(item.id);
+          return tab;
+        }),
       );
-      tab.setAttribute('role', 'tab');
-      tab.setAttribute('aria-selected', String(item.id === mode));
-      tab.setAttribute('aria-label', item.label);
-      tab.title = item.label;
-      tab.dataset.mode = item.id;
-      tab.disabled = Boolean(working);
-      bar.append(tab);
+      // ← and → go from one mode to the next, as in any row of tabs.
+      bar.onkeydown = event => {
+        const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
+        if (!step || working) return;
+        event.preventDefault();
+        const next = MODES[(MODES.findIndex(item => item.id === mode) + step + MODES.length) % MODES.length];
+        chooseMode(next.id);
+        for (const tab of bar.children) if (tab.dataset.mode === next.id) tab.focus();
+      };
     }
+    for (const tab of bar.children) {
+      const chosen = tab.dataset.mode === mode;
+      tab.setAttribute('aria-selected', String(chosen));
+      tab.tabIndex = chosen ? 0 : -1;
+      tab.disabled = Boolean(working);
+    }
+  }
+  function chooseMode(id) {
+    if (working || mode === id) return;
+    if (ai) takeOver();
+    setMode(id);
+    release();
   }
   function setMode(next) {
     mode = next;

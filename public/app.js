@@ -2354,10 +2354,10 @@ function syncViews() {
   $('composer-context').hidden = !studio;
   const label = studio ? 'Chat' : 'Studio';
   $('mode-switch').querySelector('.mode-switch-label').textContent = label;
-  // The logo of the mode it goes to: MDX-CHAT from the Studio, MDX-STUDIO from the chat.
+  // The logo of the mode it is in: MDX-CHAT in the chat, MDX-STUDIO in the Studio.
   const word = $('mode-switch').querySelector('.mode-word');
-  word.setAttribute('viewBox', studio ? '0 0 472 100' : '0 0 618 100');
-  word.querySelector('use').setAttribute('href', studio ? '#w-chat' : '#w-studio');
+  word.setAttribute('viewBox', studio ? '0 0 618 100' : '0 0 472 100');
+  word.querySelector('use').setAttribute('href', studio ? '#w-studio' : '#w-chat');
   $('mode-switch').setAttribute('aria-label', studio ? 'Revenir au chat' : 'Passer au Studio');
   $('mode-switch').title = studio ? 'Revenir au chat' : 'Passer au Studio';
 }
