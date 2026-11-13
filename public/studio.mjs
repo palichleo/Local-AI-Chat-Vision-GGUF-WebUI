@@ -538,7 +538,7 @@ export function setupStudio({
       );
     control.className = 'studio-length';
     aiTarget(control, 'duration');
-    return field(extending ? 'Durée ajoutée' : 'Durée', control, { mark: true });
+    return field(extending ? 'Durée ajoutée' : 'Durée', control);
   }
 
   // ------------------------------------------------------------------ the screen
@@ -1901,7 +1901,7 @@ export function setupStudio({
         readout();
       };
       aiTarget(resolution, 'size');
-      const sized = field('Taille', resolution, { mark: workflow.direct });
+      const sized = field('Taille', resolution);
       sized.title = mode === 'video' ? 'Plus grand : plus long à générer. La taille finale est marquée.' : '';
       settings.append(sized);
     }
