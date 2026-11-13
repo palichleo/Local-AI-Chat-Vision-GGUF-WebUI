@@ -103,8 +103,10 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       text.append(title, meta);
       open = node('button', 'card-open', 'Ouvrir');
       open.type = 'button';
+      // Before its creation exists, « Ouvrir » leads to the Studio, where it is set or followed.
       open.title = 'Afficher dans le Studio';
-      open.disabled = true;
+      open.disabled = !onOpen;
+      open.onclick = () => onOpen?.(null);
       figure.append(text, open);
     }
     figure.append(caption);

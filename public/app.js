@@ -598,12 +598,16 @@ function updateControls() {
     state.loadingHistory ||
     (!$('prompt').value.trim() && !state.images.length && !state.videos.length);
   $('send').hidden = (state.generating && !proposing) || toolBusy;
-  // A proposal waits in the Studio: its « Annuler » is there, and a new message declines it.
-  $('cancel').hidden = proposing || (!state.generating && (!toolBusy || s.toolJob.blocked));
-  $('cancel').setAttribute(
-    'aria-label',
-    state.waitingForModel ? 'Annuler le message en attente' : 'Interrompre la réponse',
-  );
+  // A proposal waits in the Studio: it is cancelled from here as from the Studio's « Annuler »,
+  // and a new message declines it too.
+  $('cancel').hidden = !state.generating && (!toolBusy || s.toolJob.blocked);
+  const cancelLabel = proposing
+    ? 'Annuler la proposition de Moodix AI'
+    : state.waitingForModel
+      ? 'Annuler le message en attente'
+      : 'Interrompre la réponse';
+  $('cancel').setAttribute('aria-label', cancelLabel);
+  $('cancel').title = cancelLabel;
   $('thinking').disabled = state.generating;
   $('attach').disabled = state.generating || state.preparing || state.loadingHistory;
   $('new-chat').disabled = state.projectWorking || toolBusy || state.generating || state.loadingHistory;
@@ -2007,9 +2011,10 @@ async function sendMessage(event) {
             ...(viaStudio
               ? {
                   approve: async (proposal, abort) => {
+                    const answer = state.studio.propose(proposal, abort);
                     updateControls();
                     try {
-                      return await state.studio.propose(proposal, abort);
+                      return await answer;
                     } finally {
                       updateControls();
                     }
@@ -2175,6 +2180,10 @@ function syncViews() {
   $('studio-context').hidden = !studio;
   const label = studio ? 'Chat' : 'Studio';
   $('mode-switch').querySelector('.mode-switch-label').textContent = label;
+  // The logo of the mode it goes to: MDX-CHAT from the Studio, MDX-STUDIO from the chat.
+  const word = $('mode-switch').querySelector('.mode-word');
+  word.setAttribute('viewBox', studio ? '0 0 472 100' : '0 0 618 100');
+  word.querySelector('use').setAttribute('href', studio ? '#w-chat' : '#w-studio');
   $('mode-switch').setAttribute('aria-label', studio ? 'Revenir au chat' : 'Passer au Studio');
   $('mode-switch').title = studio ? 'Revenir au chat' : 'Passer au Studio';
 }
@@ -2327,7 +2336,7 @@ const generationUI = setupGenerationUI({
   // « Ouvrir » on a card: the creation on the Studio's screen.
   onOpen: record => {
     revealStudio();
-    studioUI.show(record);
+    if (record) studioUI.show(record);
   },
 });
 const workflowsUI = setupNativeWorkflows({

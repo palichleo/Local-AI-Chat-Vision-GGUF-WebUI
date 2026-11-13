@@ -541,7 +541,7 @@ summary:focus-visible {
     display: inline-flex;
   }
 }
-/* The mode the switch goes to: « Studio » with the action colour from the chat, « Chat » from the Studio. */
+/* The dot of the action colour: the Studio label of the message box. */
 .mode-dot {
   width: 8px;
   height: 8px;
@@ -549,14 +549,29 @@ summary:focus-visible {
   background: var(--fn-action);
   flex: none;
 }
-.mode-switch svg {
-  display: none;
+/* The switch wears the logo of the mode it goes to: MDX-STUDIO from the chat, MDX-CHAT from the
+   Studio. MDX in its colours, the name in the colour of the text (it follows the theme). */
+#mode-switch {
+  gap: 3px;
+  padding: 0 16px;
 }
-body[data-view='studio'] .mode-switch svg {
+#mode-switch .mode-logo {
   display: block;
+  height: 14px;
+  width: auto;
+  flex: none;
 }
-body[data-view='studio'] .mode-switch .mode-dot {
-  display: none;
+#mode-switch .mode-word {
+  display: block;
+  height: 14px;
+  width: auto;
+  aspect-ratio: 618 / 100;
+  fill: currentColor;
+  stroke: none;
+  flex: none;
+}
+body[data-view='studio'] #mode-switch .mode-word {
+  aspect-ratio: 472 / 100;
 }
 body[data-view='home'] .mode-switch {
   display: none;
@@ -613,7 +628,7 @@ body[data-view='home'] .mode-switch {
   display: flex;
   gap: 2px;
   padding: 4px;
-  border-radius: 999px;
+  border-radius: 14px;
   background: #14161b;
   border: 1px solid var(--line);
 }
@@ -632,8 +647,9 @@ body:not([data-view='studio']) .kind-tabs {
   min-height: 38px;
   min-width: 44px;
   padding: 0 14px;
+  position: relative;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: #aeb4bf;
   font-size: 14px;
@@ -647,10 +663,25 @@ body:not([data-view='studio']) .kind-tabs {
   height: 17px;
   stroke-width: 2;
 }
+/* The chosen one takes the dark ground of what is active (as Studio in the sidebar), with a
+   line of the action colour under it: no white pill. */
 .kind-tab[aria-selected='true'] {
-  background: var(--selected);
-  color: var(--on-selected);
+  background: #262a33;
+  color: var(--ink);
   font-weight: 800;
+}
+:root[data-theme='light'] .kind-tab[aria-selected='true'] {
+  background: var(--chip);
+}
+.kind-tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 4px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--fn-action);
 }
 .kind-tab:hover:enabled:not([aria-selected='true']) {
   color: var(--ink);
@@ -703,16 +734,12 @@ body:not([data-view='studio']) .kind-tabs {
   }
 }
 @media (max-width: 519px) {
-  .mode-switch-label {
-    display: none;
+  #mode-switch {
+    padding: 0 12px;
   }
-  .mode-switch {
-    padding: 0;
-    width: 44px;
-  }
-  body:not([data-view='studio']) .mode-switch .mode-dot {
-    width: 10px;
-    height: 10px;
+  #mode-switch .mode-logo,
+  #mode-switch .mode-word {
+    height: 11px;
   }
   .kind-tab {
     padding: 0 10px;
@@ -1788,14 +1815,14 @@ video.studio-frame-result {
 /* ------------------------------------------------------------------ film grain, of the interface */
 /* Part of the look, never of a creation: the grain lies in the background of the surfaces (the
    blocks of the Studio, the screen around the picture, the message box, the cards), under what
-   they hold. Fine and hard: fractal noise of one octave, grey, contrast raised. Still: a generation
+   they hold. Fine and sharp: fractal noise of one octave, grey, contrast raised hard, a light touch. Still: a generation
    running or not, it does not move. */
 :root {
-  --grain-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='1' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncG type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncB type='linear' slope='1.9' intercept='-0.45'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23g)'/%3E%3C/svg%3E");
-  --grain-strength: 0.42;
+  --grain-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.35' numOctaves='1' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='2.4' intercept='-0.7'/%3E%3CfeFuncG type='linear' slope='2.4' intercept='-0.7'/%3E%3CfeFuncB type='linear' slope='2.4' intercept='-0.7'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23g)'/%3E%3C/svg%3E");
+  --grain-strength: 0.34;
 }
 :root[data-theme='light'] {
-  --grain-strength: 0.3;
+  --grain-strength: 0.24;
 }
 .studio-block,
 .studio-screen,
@@ -2209,7 +2236,7 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
 }
 @container studio (min-width: 900px) {
   .studio-desk {
-    min-height: 400px;
+    min-height: 360px;
     grid-template-rows: minmax(0, 1fr) var(--out-h);
   }
 }
@@ -2428,36 +2455,6 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
   display: none;
 }
 
-/* In the Studio, the message box is one line (on a window wide enough for it): the room goes to the blocks. */
-@media (min-width: 700px) {
-  body[data-view='studio'] #chat-form.composer {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-areas: 'files files files' 'tools text send';
-    align-items: end;
-    column-gap: 8px;
-    padding: 6px 6px 6px 10px;
-  }
-  body[data-view='studio'] #chat-form .attachments {
-    grid-area: files;
-  }
-  body[data-view='studio'] #chat-form textarea {
-    grid-area: text;
-    min-height: 44px;
-    padding: 11px 4px;
-  }
-  body[data-view='studio'] #chat-form .composer-tools {
-    display: contents;
-  }
-  body[data-view='studio'] #chat-form .composer-options {
-    grid-area: tools;
-    align-self: center;
-    flex-wrap: nowrap;
-  }
-  body[data-view='studio'] #chat-form .send-tools {
-    grid-area: send;
-  }
-}
 /* One column: a prompt of a few lines, the page scrolls for the rest. */
 @container studio (max-width: 639px) {
   .studio-desk .studio-prompt-field textarea {
@@ -2474,35 +2471,15 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
   animation: none;
 }
 
-/* The message box of the Studio, on one line: the attachment, thinking and the Studio label on the
-   left, the text, the send button. It does not grow: past two lines its text scrolls in it, so the
-   Studio keeps its height (that is the rule: the message box scrolls, not the page). The share of
-   the context sits under its right end, in the margin, without a line of its own. */
+/* The message box of the Studio is the chat's, and grows as it does; its ceiling is lower, so the
+   Studio keeps its height: past it, its text scrolls in it (the rule: the message box scrolls, not
+   the page). The share of the context sits under its right end, in the margin. */
 body[data-view='studio'] .composer-region {
   position: relative;
 }
 body[data-view='studio'] #prompt {
-  max-height: 66px;
+  max-height: 90px;
   overflow-y: auto;
-}
-body[data-view='studio'] #chat-form .tool-separator {
-  display: none;
-}
-body[data-view='studio'] #chat-form .composer-options {
-  gap: 4px;
-}
-body[data-view='studio'] #thinking {
-  width: 34px;
-  min-width: 34px;
-  min-height: 34px;
-  padding: 0;
-  justify-content: center;
-  gap: 0;
-  font-size: 0;
-}
-body[data-view='studio'] #thinking svg {
-  width: 15px;
-  height: 15px;
 }
 body[data-view='studio'] .context-meter {
   position: absolute;

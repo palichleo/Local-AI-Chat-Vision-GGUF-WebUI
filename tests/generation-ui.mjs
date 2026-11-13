@@ -427,3 +427,51 @@ test('loading animation pauses outside the viewport and observation stops on ref
   assert.equal(observed.targets.size, 0);
   assert.equal(frame.hidden, true);
 });
+
+test('a creation of the Studio is a card: what it is, and « Ouvrir », which leads to the Studio before it exists too', () => {
+  const container = new Element(),
+    opened = [];
+  const ui = setupGenerationUI({
+    api: async () => {
+      throw Error('No request expected');
+    },
+    node: (...args) => new Element(...args),
+    openOutput: () => {},
+    onOpen: record => opened.push(record?.id ?? null),
+  });
+  const card = ui.mount(
+    container,
+    {
+      mediaType: 'video',
+      resolution: { width: 1344, height: 768 },
+      plan: { prompt: 'Un renard se lève', parameters: { frames: 121, fps: 24 } },
+    },
+    { compact: true },
+  );
+  const [figure] = container.children,
+    find = cls => figure.children.find(child => child.cls === cls);
+  assert.equal(figure.cls, 'generation-card is-compact');
+  assert.equal(find('card-text').children[0].textContent, 'Un renard se lève');
+  assert.equal(find('card-text').children[1].textContent, 'VIDÉO · 16:9 · 05 S');
+  // Waiting for « Générer » in the Studio: « Ouvrir » goes there.
+  find('card-open').onclick();
+  assert.deepEqual(opened, [null]);
+  const record = {
+    id: 'r',
+    conversationId: 'c',
+    mediaType: 'video',
+    prompt: 'Un renard se lève',
+    workflowName: 'MiniMax',
+    parameters: { width: 1344, height: 768, frames: 121, fps: 24 },
+    outputs: [{ thumbUrl: '/thumb.jpg', originalUrl: '/clip.mp4' }],
+  };
+  card.image({ record, index: 0 });
+  card.finish({ record });
+  // Made: its first picture as it is (no grain over it), and « Ouvrir » puts it on the screen.
+  const [shown] = figure.children[0].children;
+  assert.equal(shown.tag, 'img');
+  assert.equal(shown.src, '/thumb.jpg');
+  assert.equal(figure.children[0].children.length, 1);
+  find('card-open').onclick();
+  assert.deepEqual(opened, [null, 'r']);
+});
