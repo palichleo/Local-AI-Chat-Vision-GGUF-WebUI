@@ -1753,6 +1753,19 @@ export function setupStudio({
     panel.append(node('p', 'asset-empty', text));
     return panel;
   }
+  /** A block of the Studio on its grain of old film (moodix.css): still dust and three scratches
+   *  under what the block holds, which goes above it, so that no grain is ever over a picture. */
+  function grained(block) {
+    const grain = node('div', 'studio-grain'),
+      body = node('div', 'studio-block-body');
+    grain.setAttribute('aria-hidden', 'true');
+    grain.innerHTML =
+      '<svg class="studio-dust" width="100%" height="100%" focusable="false">' +
+      '<rect width="100%" height="100%" filter="url(#moodix-dust)"/></svg><div class="studio-scratches"></div>';
+    body.append(...block.children);
+    block.replaceChildren(grain, body);
+    return block;
+  }
   /** Image / Vidéo / Son, at the top left. */
   function kinds() {
     const bar = $('studio-kinds');
@@ -2009,7 +2022,7 @@ export function setupStudio({
       preview.append(alert);
     }
 
-    desk.append(write, preview, settings, outputs());
+    desk.append(...[write, preview, settings, outputs()].map(grained));
     desk.classList.toggle('is-generating', Boolean(working));
     if (working) for (const control of desk.querySelectorAll('textarea, select, input')) control.disabled = true;
     return desk;

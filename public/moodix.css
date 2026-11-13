@@ -240,17 +240,51 @@ summary:focus-visible {
   gap: 8px;
   flex: none;
 }
+/* The logo, MDX in white, and 7 px under it the four colours of Moodix in one rule as wide as it. */
 #sidebar .brand {
   display: inline-flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
   padding: 6px 4px;
   border-radius: 8px;
   font-size: 0;
 }
 .brand-logo {
   display: block;
-  height: 30px;
+  height: 28px;
   width: auto;
+}
+.brand-rule {
+  display: flex;
+  align-self: stretch;
+  gap: 3px;
+}
+.brand-rule span {
+  height: 3px;
+  border-radius: 999px;
+}
+.brand-rule span:nth-child(1) {
+  flex: 4;
+  background: #3d6bf5;
+}
+.brand-rule span:nth-child(2) {
+  flex: 2;
+  background: #22a060;
+}
+.brand-rule span:nth-child(3) {
+  flex: 3;
+  background: #f6c343;
+}
+.brand-rule span:nth-child(4) {
+  flex: 1.5;
+  background: #e8402f;
+}
+/* White letters, dark on the light theme (sidebar, switch, welcome). */
+:root[data-theme='light'] .brand-logo,
+:root[data-theme='light'] .mode-logo,
+:root[data-theme='light'] .welcome-logo {
+  filter: invert(1);
 }
 #sidebar .nav-close {
   display: none;
@@ -550,7 +584,7 @@ summary:focus-visible {
   flex: none;
 }
 /* The switch wears the logo of the mode it goes to: MDX-STUDIO from the chat, MDX-CHAT from the
-   Studio. MDX in its colours, the name in the colour of the text (it follows the theme). */
+   Studio. MDX in white, the name in the colour of the text (it follows the theme). */
 #mode-switch {
   gap: 3px;
   padding: 0 16px;
@@ -576,25 +610,30 @@ body[data-view='studio'] #mode-switch .mode-word {
 body[data-view='home'] .mode-switch {
   display: none;
 }
-/* The signature: three rounded strokes under the top bar, blue, yellow and red. */
+/* The signature: four rounded pipes under the top bar, blue, green, yellow and red, each shorter
+   than the one above, from the left edge of the content. */
 .signature {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   padding: 2px var(--pad) 12px;
 }
 .signature span {
   display: block;
-  height: 5px;
+  height: 3px;
   border-radius: 999px;
   background: var(--fn-input);
 }
 .signature span:nth-child(2) {
-  width: 68%;
-  background: var(--fn-output);
+  width: 82%;
+  background: var(--fn-settings);
 }
 .signature span:nth-child(3) {
-  width: 44%;
+  width: 64%;
+  background: var(--fn-output);
+}
+.signature span:nth-child(4) {
+  width: 46%;
   background: var(--fn-action);
 }
 #chat-header {
@@ -1105,11 +1144,12 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
 .studio-block {
   --block: var(--line-strong);
   --block-text: var(--muted);
+  /* The padding of what the block holds (.studio-block-body), above its grain. */
+  --block-pad: 16px;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px;
   border-radius: 20px;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -1137,7 +1177,7 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   --block: var(--fn-output);
   --block-text: var(--fn-output-text);
   grid-area: out;
-  padding: 14px 16px;
+  --block-pad: 14px 16px;
 }
 .studio-block-head {
   display: flex;
@@ -1486,6 +1526,9 @@ video.studio-frame-result {
 }
 /* The row under the preview: formats on the left, Générer on the right. */
 .studio-actionbar {
+  /* The format bar and « Générer » share one height: buttons of 38 px, 4 px inside the bar. */
+  --format-button: 38px;
+  --format-inset: 4px;
   width: 100%;
   display: flex;
   flex-wrap: wrap;
@@ -1498,14 +1541,14 @@ video.studio-frame-result {
 #studio-view .studio-formats {
   display: flex;
   gap: 4px;
-  padding: 4px;
+  padding: var(--format-inset);
   margin: 0;
   border-radius: 14px;
   background: var(--field);
   transition: box-shadow 0.4s ease;
 }
 #studio-view .studio-format {
-  min-height: 40px;
+  min-height: var(--format-button);
   min-width: 52px;
   padding: 0 10px;
   border: 0;
@@ -1561,17 +1604,20 @@ video.studio-frame-result {
   background: var(--selected);
   color: var(--on-selected);
 }
-/* Générer: full in the action colour, 14 px corners, a thin progress bar along its foot. */
+/* Générer: full in the action colour, 12 px corners, exactly as tall as the format bar at its
+   left, a thin progress bar along its foot. */
 #studio-view .studio-go {
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
   margin-left: auto;
   flex: 0 0 auto;
-  min-width: 200px;
-  min-height: 52px;
+  min-width: 190px;
+  height: calc(var(--format-button) + 2 * var(--format-inset));
+  min-height: 0;
   padding: 0 18px 0 20px;
   border: 0;
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--fn-action);
   background-image: none;
   color: var(--on-action);
@@ -1889,42 +1935,108 @@ video.studio-frame-result {
   padding: 0 8px;
 }
 
-/* ------------------------------------------------------------------ film grain, of the interface */
-/* Part of the look, never of a creation: the grain lies in the background of the surfaces (the
-   blocks of the Studio, the screen around the picture, the message box, the cards), under what
-   they hold. Fine and sharp: fractal noise of one octave, grey, contrast raised hard, a light touch. Still: a generation
-   running or not, it does not move. */
-:root {
-  --grain-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.35' numOctaves='1' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='2.4' intercept='-0.7'/%3E%3CfeFuncG type='linear' slope='2.4' intercept='-0.7'/%3E%3CfeFuncB type='linear' slope='2.4' intercept='-0.7'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23g)'/%3E%3C/svg%3E");
-  --grain-strength: 0.34;
+/* ------------------------------------------------------------------ grain of old film, on the Studio */
+/* Only on the four blocks of the Studio (Entrée, Aperçu, Réglages, Résultats), under what they
+   hold: never over a picture, a clip or a sound, and nowhere else. Still: dust, specks of white and
+   of black (the filter #moodix-dust of index.html), and three thin scratches, a little apart from
+   one block to the next. studio.mjs lays it in each block and puts what the block holds above it. */
+.studio-block {
+  position: relative;
+  isolation: isolate;
 }
-:root[data-theme='light'] {
-  --grain-strength: 0.24;
+.studio-grain {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
 }
-.studio-block,
+.studio-dust,
+.studio-scratches {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.studio-dust {
+  opacity: 0.07;
+}
+.studio-dust rect {
+  fill: #000;
+  stroke: none;
+}
+.studio-scratches {
+  --scratch: rgba(255, 255, 255, 0.22);
+  opacity: 0.2;
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent calc(var(--scratch-1) - 0.5px),
+      var(--scratch) calc(var(--scratch-1) - 0.5px),
+      var(--scratch) calc(var(--scratch-1) + 0.5px),
+      transparent calc(var(--scratch-1) + 0.5px)
+    ),
+    linear-gradient(
+      90deg,
+      transparent calc(var(--scratch-2) - 0.5px),
+      var(--scratch) calc(var(--scratch-2) - 0.5px),
+      var(--scratch) calc(var(--scratch-2) + 0.5px),
+      transparent calc(var(--scratch-2) + 0.5px)
+    ),
+    linear-gradient(
+      90deg,
+      transparent calc(var(--scratch-3) - 0.5px),
+      var(--scratch) calc(var(--scratch-3) - 0.5px),
+      var(--scratch) calc(var(--scratch-3) + 0.5px),
+      transparent calc(var(--scratch-3) + 0.5px)
+    );
+}
+.studio-block.is-input {
+  --scratch-1: 22%;
+  --scratch-2: 61%;
+  --scratch-3: 83%;
+}
+.studio-block.is-preview {
+  --scratch-1: 19%;
+  --scratch-2: 57%;
+  --scratch-3: 86%;
+}
+.studio-block.is-settings {
+  --scratch-1: 25%;
+  --scratch-2: 64%;
+  --scratch-3: 80%;
+}
+.studio-block.is-output {
+  --scratch-1: 21%;
+  --scratch-2: 59%;
+  --scratch-3: 84%;
+}
+/* What the block holds, above its grain, with the padding of the block: what scrolls in it (the
+   prompt and its images, the settings) scrolls to the edge of the block, under a grain that stays. */
+.studio-block-body {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  align-items: inherit;
+  padding: var(--block-pad);
+  border-radius: inherit;
+}
+/* The screen, the message box and the cards keep the layer of their own the former grain gave
+   them: what they hold stays placed as it was. */
 .studio-screen,
 #chat-form.composer,
 .generation-card.is-compact {
   position: relative;
   isolation: isolate;
 }
-.studio-block::before,
-.studio-screen::before,
-#chat-form.composer::before,
-.generation-card.is-compact::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  pointer-events: none;
-  background-image: var(--grain-tile);
-  background-size: 240px 240px;
-  mix-blend-mode: overlay;
-  opacity: var(--grain-strength);
-  transition: opacity 0.6s ease;
-}
-/* The grain stays still, a generation running or not: it is of the surfaces, not of what moves. */
 /* Never over a picture, a clip or a sound. */
 .film-grain,
 .picture-grain {
@@ -2254,7 +2366,7 @@ video.studio-frame-result {
 .studio-block.is-output {
   height: var(--out-h);
   overflow: hidden;
-  padding: 10px 14px 12px;
+  --block-pad: 10px 14px 12px;
   gap: 8px;
 }
 @container studio (min-width: 640px) {
@@ -2275,12 +2387,12 @@ video.studio-frame-result {
     overflow: hidden;
   }
   /* A window too short for the prompt and its images: they scroll in their block, as the
-     settings do, rather than overlapping. */
-  .studio-block.is-input {
+     settings do, rather than overlapping; the grain of the block stays. */
+  .studio-block.is-input > .studio-block-body {
     overflow-x: hidden;
     overflow-y: auto;
   }
-  .studio-block.is-settings {
+  .studio-block.is-settings > .studio-block-body {
     overflow-y: auto;
     scrollbar-width: thin;
   }
@@ -2797,7 +2909,7 @@ html[data-switch='chat']::view-transition-old(studio) {
 #studio-view:hover,
 #sidebar:hover,
 #prompt:hover,
-.studio-block.is-settings:hover,
+.studio-block.is-settings > .studio-block-body:hover,
 .studio-strip:hover,
 .studio-desk textarea:hover,
 .settings-body:hover {
