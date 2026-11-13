@@ -240,11 +240,15 @@ export function setupStudio({
   const place = () => (legacy ? (info?.legacyId ?? null) : conversation());
   function current() {
     const draft = drafts[mode],
-      list = offered();
+      list = offered(),
+      // A model this computer cannot run (`unavailable`, its reason) is shown greyed: it is the
+      // one in hand only when no other can be.
+      usable = list.filter(item => !item.unavailable),
+      first = usable[0] ?? list[0] ?? null;
     // A continuation stays with the workflow that made the clip when it can.
     if (mode === 'video' && extending && !proposal)
-      return list.find(item => item.id === extending.workflowId) ?? list[0] ?? null;
-    return list.find(item => item.id === draft.workflow) ?? list[0] ?? null;
+      return usable.find(item => item.id === extending.workflowId) ?? first;
+    return usable.find(item => item.id === draft.workflow) ?? first;
   }
   // A proposal of Moodix AI is answered from its own mode: the others still work by hand.
   const answering = () => Boolean(proposal && proposal.mode === mode && !working);
@@ -943,10 +947,14 @@ export function setupStudio({
     const block = node('div', 'studio-set-block studio-set-model');
     if (list.length > 1 && !extending) {
       const model = select(
-        list.map(item => [item.id, item.name]),
+        list.map(item => [item.id, item.unavailable ? item.name + ' · indisponible' : item.name]),
         workflow.id,
         choose,
       );
+      // Greyed, with its reason under the list (unavailableNote): never left out unexplained.
+      list.forEach((item, index) => {
+        if (item.unavailable) Object.assign(model.options[index], { disabled: true, title: item.unavailable });
+      });
       model.className = 'studio-model-pick';
       model.title = workflow.description || workflow.name;
       model.disabled = answering() || Boolean(working);
@@ -957,12 +965,24 @@ export function setupStudio({
     } else {
       const name = node('span', 'studio-model-name', workflow.name);
       name.title = workflow.description || workflow.name;
+      if (workflow.unavailable) name.classList.add('is-unavailable');
       block.append(name);
     }
     // Not for a continuation: what it would keep would never come back (a clip is continued with
     // the model that made it, never chosen).
     if (!extending) block.append(saveButtonFor(workflow));
     return block;
+  }
+  /**
+   * Why the greyed models of the list cannot be used on this computer (no NVIDIA card for a model
+   * that computes on one), each reason once; null when every model can.
+   */
+  function unavailableNote(list) {
+    const reasons = [...new Set(list.map(item => item.unavailable).filter(Boolean))];
+    if (!reasons.length) return null;
+    const note = node('p', 'studio-model-note', reasons.join(' '));
+    note.setAttribute('role', 'note');
+    return note;
   }
   /**
    * Bloc Durée + Taille: the length the model allows, step by step (its counts of frames at 24 a
@@ -1789,7 +1809,7 @@ export function setupStudio({
   async function generate() {
     if (working) return;
     if (answering()) return approve();
-    const reason = blocked();
+    const reason = blocked() || current()?.unavailable;
     if (reason) return notice(reason);
     let wanted;
     try {
@@ -2899,6 +2919,8 @@ export function setupStudio({
     // Réglages (moodix-design.md 16, 20, 28): blocks without titles, Modèle · Durée + Taille ·
     // LoRA, and « ··· » for the rare ones (the seed, the workflow's own settings).
     settings.append(modelBlock(workflow, list));
+    const lacking = extending ? null : unavailableNote(list);
+    if (lacking) settings.append(lacking);
     const shape = shapeBlock(workflow);
     if (shape) settings.append(shape);
     const styled = workflow.external && mode !== 'audio' && !extending && !answering();
@@ -2937,7 +2959,9 @@ export function setupStudio({
     // room (146 px at most, as « Générer » and « Ctrl ↵ »): « Générer » keeps its 190 px.
     go.append(...(working ? [label, fill] : [label, key, fill]));
     go.title = answering() ? 'Générer la proposition de Moodix AI · ' + MODIFIER + ' + Entrée' : MODIFIER + ' + Entrée';
-    go.disabled = enriching || Boolean(working);
+    go.disabled = enriching || Boolean(working) || Boolean(workflow.unavailable);
+    // The only model of this mode cannot run here: « Générer » says why.
+    if (workflow.unavailable) go.title = workflow.unavailable;
     if (working) {
       go.setAttribute('role', 'progressbar');
       go.setAttribute('aria-valuemin', '0');

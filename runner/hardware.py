@@ -1,11 +1,14 @@
 """The graphics card a family needs, checked before anything is unloaded for it.
 
-A manifest says what its family computes on: ``"hardware": {"cuda": true, "vramGiB": 10}`` is an
-NVIDIA card (PyTorch here is built for CUDA) with that much video memory in all; a family
-without the field also runs on the processor. Two checks, neither of which takes video memory:
+A manifest says what its family computes on: ``"hardware": {"cuda": true}`` is an NVIDIA card
+(PyTorch here is built for CUDA), whatever the files chosen; a family without the field also runs
+on the processor. How much video memory a generation takes is not asked here: it depends on the
+files the user chose (a smaller model fits a smaller card). Two checks, neither of which takes
+video memory:
 
 - ``unmet`` when the worker says what it can run: the cards the driver lists (``nvidia-smi``,
-  without loading PyTorch), so the application does not offer what this computer cannot make;
+  without loading PyTorch), so the application shows greyed, with the reason, what this
+  computer cannot make;
 - ``confirm`` at preflight, while the chat model is still loaded: PyTorch itself sees the card
   (a driver too old for this PyTorch lists its card and still cannot compute on it).
 
@@ -16,13 +19,13 @@ import os
 import subprocess
 import sys
 
-QUERY = ['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader,nounits']
+QUERY = ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader']
 _found = {}
 
 
 def nvidia_cards(run=subprocess.run, platform=sys.platform, exists=os.path.exists):
-    """``[(name, MiB of video memory)]`` for the NVIDIA cards the driver lists: empty when this
-    computer has none, None when it cannot be known."""
+    """The names of the NVIDIA cards the driver lists: empty when this computer has none, None
+    when it cannot be known."""
     try:
         answer = run(
             QUERY,
@@ -41,12 +44,7 @@ def nvidia_cards(run=subprocess.run, platform=sys.platform, exists=os.path.exist
     if answer.returncode:
         text = (answer.stdout or '') + (answer.stderr or '')
         return [] if 'No devices were found' in text or 'communicate with the NVIDIA driver' in text else None
-    cards = []
-    for line in answer.stdout.splitlines():
-        name, _, memory = line.rpartition(',')
-        if name.strip() and memory.strip().isdigit():
-            cards.append((name.strip(), int(memory)))
-    return cards
+    return [line.strip() for line in answer.stdout.splitlines() if line.strip()]
 
 
 def cards():
@@ -56,7 +54,7 @@ def cards():
     return _found['cards']
 
 
-# For a family ComfyUI also runs: it manages with less (it keeps what does not fit in main memory).
+# For a family ComfyUI also runs.
 ELSEWHERE = ' ComfyUI peut créer à sa place : réglages, Workflows, moteur externe.'
 
 
@@ -68,15 +66,11 @@ def unmet(label, needs, external=False, found=None):
     listed = (found or cards)()
     if listed is None:
         return ''
-    hint = ELSEWHERE if external else ''
     if not listed:
-        return label + ' demande une carte graphique NVIDIA : son pilote n’en voit aucune sur cet ordinateur.' + hint
-    name, memory = max(listed, key=lambda card: card[1])
-    wanted = needs.get('vramGiB', 0)
-    if memory < wanted * 1024:
         return (
-            f'{label} demande une carte NVIDIA d’au moins {wanted:g} Go de mémoire vidéo : '
-            f'la {name} en a {memory / 1024:.0f}.' + hint
+            label
+            + ' demande une carte graphique NVIDIA : son pilote n’en voit aucune sur cet ordinateur.'
+            + (ELSEWHERE if external else '')
         )
     return ''
 

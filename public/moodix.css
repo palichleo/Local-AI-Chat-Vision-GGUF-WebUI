@@ -3558,6 +3558,19 @@ html[data-switch='chat']::view-transition-old(studio) {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* A model this computer cannot run: greyed, and why, under the list. */
+.studio-model-name.is-unavailable,
+#studio-view .studio-model-pick option:disabled {
+  color: var(--muted);
+}
+.studio-model-note {
+  flex: none;
+  margin: -2px 0 0;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
 /* The fine line between Durée and Taille. */
 .studio-set-rule {
   height: 1px;

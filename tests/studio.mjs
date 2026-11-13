@@ -101,6 +101,38 @@ test('the styles of a Studio job are LoRA nodes between the model and the sample
   await assert.rejects(comfyNames(client, krea([{ name: 'absent.safetensors', strength: 1 }])), /absent\.safetensors/);
 });
 
+test('a model this computer cannot run is shown greyed with its reason, others not ready stay out', async () => {
+  const { readFile, readdir } = await import('node:fs/promises');
+  const { ToolCatalog } = await import('../lib/tool-catalog.mjs');
+  const folder = new URL('../runner/workflows/', import.meta.url);
+  const reason = 'Krea2 demande une carte graphique NVIDIA : son pilote n’en voit aucune sur cet ordinateur.';
+  const workflows = [];
+  for (const name of await readdir(folder)) {
+    const workflow = JSON.parse(await readFile(new URL(name, folder), 'utf8'));
+    // No NVIDIA card: the image and video models of the built-in engine cannot compute; a
+    // workflow whose file is missing is another matter, and the sounds still run.
+    if (workflow.pipeline === 'krea2')
+      workflows.push({ ...workflow, ready: false, unavailableReason: reason, unavailableKind: 'hardware' });
+    else if (workflow.pipeline === 'minimax_h3')
+      workflows.push({ ...workflow, ready: false, unavailableReason: 'Fichier introuvable pour « Modèle ».' });
+    else workflows.push({ ...workflow, ready: true });
+  }
+  const catalog = new ToolCatalog({ list: async () => workflows });
+  const tools = await catalog.studio();
+  const images = tools.create_image.map(item => [item.family, item.unavailable]);
+  // The ready model first (it is the one in hand), the greyed one after it with its reason.
+  assert.deepEqual(images, [
+    ['moss', undefined],
+    ['krea2', reason],
+  ]);
+  assert.ok(tools.create_image[1].limits, 'described as the others, for the page to draw it');
+  // Not ready for another reason: left out, as before.
+  assert.deepEqual(tools.create_video.map(item => item.family), ['ltx25']);
+  // The chat model is not offered what cannot run, and a request for it finds no workflow.
+  const offered = (await catalog.definitions()).find(tool => tool.function.name === 'create_image');
+  assert.doesNotMatch(offered.function.description, /Krea 2/);
+});
+
 test('the Studio is told, per verb, the ready workflows with their inputs, sizes, lengths and settings', async () => {
   const { readFile, readdir } = await import('node:fs/promises');
   const { ToolCatalog } = await import('../lib/tool-catalog.mjs');

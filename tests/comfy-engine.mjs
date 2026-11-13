@@ -973,25 +973,23 @@ test('what a ComfyUI offers of the attention nodes is read from its node list', 
   assert.deepEqual(asked, [], 'nothing asked when the job wants neither');
 });
 
-test('a card too small for the built-in engine: said with its reason, and ComfyUI still creates', async t => {
+test('no NVIDIA card for the built-in engine: said with its reason, and ComfyUI still creates', async t => {
   const fake = await comfy(t),
     dataDir = await trial(null);
-  const small = 'Krea2 demande une carte NVIDIA d’au moins 10 Go de mémoire vidéo : la RTX 4060 en a 8.';
+  const none = 'Krea2 demande une carte graphique NVIDIA : son pilote n’en voit aucune sur cet ordinateur.';
+  const lacking = { ready: false, mediaType: 'image', reason: none, hardware: true };
   const calls = [];
   const worker = {
-    // What the Python worker says on an 8 GB card (runner/hardware.py).
+    // What the Python worker says on a computer without an NVIDIA card (runner/hardware.py).
     status: () => ({
       state: 'ready',
       busy: false,
-      capabilities: {
-        krea2: { ready: false, mediaType: 'image', reason: small },
-        rife: { ready: true, mediaType: 'video', reason: '' },
-      },
+      capabilities: { krea2: lacking, rife: { ready: true, mediaType: 'video', reason: '' } },
     }),
     request: async method => {
       calls.push(method);
       // As runner.engine.preflight does for a family that is not ready.
-      throw Object.assign(new Error(small), { status: 409 });
+      throw Object.assign(new Error(none), { status: 409 });
     },
     unload: async () => {},
     release: async () => ({ released: true }),
@@ -1011,17 +1009,17 @@ test('a card too small for the built-in engine: said with its reason, and ComfyU
     service.syncCapabilities();
     return service.catalog.capabilities.krea2;
   };
-  // Without ComfyUI the family is not offered, and the workflow says why.
-  assert.deepEqual(await krea2(), { ready: false, mediaType: 'image', reason: small });
+  // Without ComfyUI the family cannot run, and says that the computer is why (shown greyed).
+  assert.deepEqual(await krea2(), lacking);
   assert.equal(service.catalog.capabilities.rife.ready, true);
-  // With ComfyUI, which manages with less, it is ComfyUI's and ready.
+  // With ComfyUI it is ComfyUI's, and ready.
   await service.saveComfy({ enabled: true, baseUrl: fake.baseUrl });
-  assert.equal((await krea2()).ready, true);
+  assert.deepEqual(await krea2(), { ready: true, mediaType: 'image', reason: '' });
   // Kept on the built-in engine by the user, or ComfyUI silent: the reason again, before
   // anything is unloaded (preflight).
   await service.saveComfy({ enabled: true, baseUrl: fake.baseUrl, own: ['krea2'] });
-  assert.deepEqual(await krea2(), { ready: false, mediaType: 'image', reason: small });
+  assert.deepEqual(await krea2(), lacking);
   await service.saveComfy({ enabled: true, baseUrl: 'http://127.0.0.1:9', own: [] });
-  await assert.rejects(service.client().preflight(krea()), /au moins 10 Go/);
+  await assert.rejects(service.client().preflight(krea()), /carte graphique NVIDIA/);
   assert.deepEqual(calls, ['preflight']);
 });

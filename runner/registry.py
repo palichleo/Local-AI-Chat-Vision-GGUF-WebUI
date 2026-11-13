@@ -66,10 +66,14 @@ def capabilities():
             continue
         missing = [module for module in manifest.get('requires', []) if importlib.util.find_spec(module) is None]
         reason = 'Missing packages: ' + ', '.join(missing) if missing else ''
-        reason = reason or hardware.unmet(
+        # What the computer itself lacks is told apart: the application shows the family greyed
+        # with this reason instead of leaving it out.
+        lacking = '' if reason else hardware.unmet(
             manifest['label'], manifest.get('hardware'), external=manifest.get('engine') == 'external'
         )
-        result[name] = dict(ready=not reason, mediaType=manifest['mediaType'], reason=reason)
+        result[name] = dict(ready=not (reason or lacking), mediaType=manifest['mediaType'], reason=reason or lacking)
+        if lacking:
+            result[name]['hardware'] = True
     return result
 
 
