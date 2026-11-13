@@ -761,9 +761,9 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
   await client.free();
   assert.deepEqual(calls, ['preflight', 'generate', 'release']);
   // The chat model comes back (8 GiB of files): what the built-in engine keeps in RAM leaves
-  // until 5 GiB more than that are available, as ComfyUI's models do.
+  // until 2 GiB more than that are available (measured: its model then stays, its encoder goes).
   await client.free({ reserve: 8 * 1024 ** 3 });
-  assert.equal(calls.at(-1), 'release, 13 GiB available');
+  assert.equal(calls.at(-1), 'release, 10 GiB available');
   await assert.rejects(service.client().preflight(moss()), /ComfyUI n’est pas configuré/);
   assert.equal(fake.seen.prompts.length + fake.seen.freed.length, 0);
 
