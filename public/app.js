@@ -2336,8 +2336,7 @@ const generationUI = setupGenerationUI({
   onResize: scrollToBottom,
   // « Ouvrir » on a card: the creation on the Studio's screen.
   onOpen: record => {
-    revealStudio();
-    if (record) studioUI.show(record);
+    void revealStudio().then(() => record && studioUI.show(record));
   },
 });
 const workflowsUI = setupNativeWorkflows({
@@ -2596,21 +2595,53 @@ function showHome() {
   });
 }
 /**
+ * Chat ⇄ Studio in one movement, as quick as the screen of the Studio taking a new format: the
+ * message box slides to its place, the chat shrinks into the last answer beside it (and grows back
+ * from it), the Studio comes and goes, all at once (the browser's view transitions, named in
+ * moodix.css while `data-switch` is on the root). Without them, with reduced motion, or to and
+ * from another view, the view simply changes. Resolves once the page shows the new view.
+ */
+function switchView(view, apply) {
+  const between = new Set([state.view, view]),
+    animate =
+      typeof document.startViewTransition === 'function' &&
+      between.has('chat') &&
+      between.has('studio') &&
+      document.visibilityState === 'visible' &&
+      !globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (!animate) {
+    apply();
+    return Promise.resolve();
+  }
+  const root = document.documentElement;
+  root.dataset.switch = view;
+  const transition = document.startViewTransition(apply),
+    end = () => {
+      if (root.dataset.switch === view) delete root.dataset.switch;
+    };
+  transition.finished.then(end, end);
+  transition.ready.catch(() => {});
+  return transition.updateCallbackDone;
+}
+/**
  * The Studio of the open conversation: its creation tools, beside its chat. Switching between
  * the two changes nothing of the conversation, so it is allowed even while an answer is written.
+ * Resolves once it is on screen.
  */
 function revealStudio() {
   const coming = state.view !== 'studio';
-  state.view = 'studio';
-  closeNavigation();
-  projectUI.render();
-  syncViews();
-  updateControls();
-  showLastReply();
-  if (coming) {
-    void showCreations();
-    void studioUI.open().catch(error => notice(error.message));
-  }
+  return switchView('studio', () => {
+    state.view = 'studio';
+    closeNavigation();
+    projectUI.render();
+    syncViews();
+    updateControls();
+    showLastReply();
+    if (coming) {
+      void showCreations();
+      void studioUI.open().catch(error => notice(error.message));
+    }
+  });
 }
 function showStudio() {
   if (state.updating || state.closingApp || state.loadingHistory) return;
@@ -2621,15 +2652,20 @@ function showChat() {
   if (state.updating || state.closingApp || state.loadingHistory) return;
   requestSettingsClose(() => {
     const coming = state.view !== 'chat';
-    state.view = 'chat';
-    closeNavigation();
-    projectUI.render();
-    syncViews();
-    updateControls();
-    if (coming) void showCreations();
-    state.stickToBottom = true;
-    scrollToBottom();
-    $('prompt').focus();
+    void switchView('chat', () => {
+      state.view = 'chat';
+      closeNavigation();
+      projectUI.render();
+      syncViews();
+      updateControls();
+      if (coming) void showCreations();
+      // Back on its last lines at once: the chat grows back from the last answer, not from its top.
+      state.stickToBottom = true;
+      const area = $('chat-area');
+      if (area.scrollTo) area.scrollTo({ top: area.scrollHeight, behavior: 'instant' });
+      else scrollToBottom();
+      $('prompt').focus();
+    });
   });
 }
 $('studio-open').onclick = () => showStudio();

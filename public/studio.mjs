@@ -1132,8 +1132,14 @@ export function setupStudio({
       signal?.addEventListener('abort', abort, { once: true });
       legacy = false;
       failure = '';
-      reveal();
+      const shown = reveal();
       void (async () => {
+        // The Studio comes on screen first (from the chat, its movement), then the pointer works.
+        try {
+          await shown;
+        } catch {
+          // The view changed anyway, or did not: the proposal is shown where it is.
+        }
         if (!info) await load().catch(() => {});
         if (!proposal || proposal.request !== request) return;
         proposal.values = proposedValues(request, offered(request.tool || request.call?.function?.name));
