@@ -2000,6 +2000,11 @@ video.studio-frame-result {
   opacity: 1;
   cursor: progress;
 }
+/* The model in hand cannot run on this computer: greyed, where a creation under way stays bright. */
+#studio-view .studio-go.is-unavailable:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 #studio-view .studio-go::before {
   content: '';
   position: absolute;

@@ -953,7 +953,7 @@ export function setupStudio({
       );
       // Greyed, with its reason under the list (unavailableNote): never left out unexplained.
       list.forEach((item, index) => {
-        if (item.unavailable) Object.assign(model.options[index], { disabled: true, title: item.unavailable });
+        if (item.unavailable) Object.assign(model.children[index], { disabled: true, title: item.unavailable });
       });
       model.className = 'studio-model-pick';
       model.title = workflow.description || workflow.name;
@@ -2960,8 +2960,11 @@ export function setupStudio({
     go.append(...(working ? [label, fill] : [label, key, fill]));
     go.title = answering() ? 'Générer la proposition de Moodix AI · ' + MODIFIER + ' + Entrée' : MODIFIER + ' + Entrée';
     go.disabled = enriching || Boolean(working) || Boolean(workflow.unavailable);
-    // The only model of this mode cannot run here: « Générer » says why.
-    if (workflow.unavailable) go.title = workflow.unavailable;
+    // The only model of this mode cannot run here: « Générer » is greyed and says why.
+    if (workflow.unavailable) {
+      go.title = workflow.unavailable;
+      go.classList.add('is-unavailable');
+    }
     if (working) {
       go.setAttribute('role', 'progressbar');
       go.setAttribute('aria-valuemin', '0');

@@ -1457,6 +1457,53 @@ test('the settings saved for a model come back the first time the Studio shows i
   }
 });
 
+test('a model this computer cannot run is greyed in the list with its reason, and never generates', async () => {
+  const reason = 'Krea2 demande une carte graphique NVIDIA : son pilote n’en voit aucune sur cet ordinateur.';
+  const model = (id, more = {}) => ({
+    id,
+    name: id,
+    roles: {},
+    limits: sizes,
+    direct: true,
+    size: { width: 1024, height: 1024 },
+    settings: [],
+    seeded: true,
+    ...more,
+  });
+  const routes = { 'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }) };
+  const started = asked => asked.filter(([route]) => route === 'tools/action').length;
+  // Another model can run: it is the one in hand, the other is greyed in the list, its reason under it.
+  let studio = await studioPage({ create_image: [model('moss'), model('krea', { unavailable: reason })] }, routes);
+  try {
+    const [usable, greyed] = studio.body.find('studio-model-pick')[0].children;
+    assert.equal(usable.disabled, undefined);
+    assert.deepEqual([greyed.disabled, greyed.title], [true, reason]);
+    assert.equal(studio.body.find('studio-model-note')[0].textContent, reason);
+    assert.equal(studio.body.find('studio-go')[0].disabled, false);
+  } finally {
+    studio.restore();
+  }
+  // No other model: it is shown all the same, « Générer » greyed and saying why.
+  studio = await studioPage({ create_image: [model('krea', { unavailable: reason })] }, routes);
+  try {
+    const go = studio.body.find('studio-go')[0];
+    assert.deepEqual([go.disabled, go.title], [true, reason]);
+    assert.equal(studio.body.find('studio-model-note')[0].textContent, reason);
+    // Asked all the same (Ctrl + Entrée, or the button reached otherwise): nothing starts, and
+    // the reason is said.
+    studio.prompt().value = 'un phare';
+    studio.prompt().oninput();
+    studio.page['studio-view'].onkeydown({ key: 'Enter', ctrlKey: true, preventDefault() {} });
+    await settle();
+    await go.onclick();
+    await settle();
+    assert.equal(started(studio.asked), 0);
+    assert.equal(studio.notices.at(-1), reason);
+  } finally {
+    studio.restore();
+  }
+});
+
 test('Ctrl + Entrée generates from anywhere in the Studio, and the button says so in its corner', async () => {
   const image = {
     id: 'w',
