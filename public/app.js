@@ -2153,32 +2153,21 @@ function alignConversation() {
 alignConversation();
 setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 
-/** Markdown read as one line: what the Studio shows of the last answer. */
-function plainLine(text) {
-  return String(text ?? '')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/[#>*_`~|]+/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-/** The last answer of Moodix AI, just above the message box of the Studio. */
+/**
+ * While the chat is folded into its bar in the Studio, the bar tells what Moodix AI does: a light
+ * runs along it while an answer is written, and it glows once an answer came unseen, until the
+ * chat is opened.
+ */
 function showLastReply(streaming = '') {
-  let text = plainLine(streaming);
-  for (let index = state.messages.length - 1; !text && index >= 0; index--) {
-    const message = state.messages[index];
-    if (message.role === 'assistant' && !message.internal) text = plainLine(spokenText(message.content));
-  }
-  $('studio-last-reply').textContent = text;
-  $('studio-last-reply').title = text;
-  // Nothing said yet: no line, the room goes to the Studio.
-  $('studio-context').dataset.empty = String(!text);
+  const bar = $('chat-bar'),
+    folded = state.view === 'studio' && document.body.dataset.chat !== 'open';
+  bar.classList.toggle('is-working', Boolean(streaming) && state.generating === true);
+  if (streaming && folded) bar.dataset.unread = 'true';
 }
 /** What depends on the view: the switch between Chat and Studio, the context of the message box. */
 function syncViews() {
   const studio = state.view === 'studio';
   $('composer-context').hidden = !studio;
-  $('studio-context').hidden = !studio;
   const label = studio ? 'Chat' : 'Studio';
   $('mode-switch').querySelector('.mode-switch-label').textContent = label;
   // The logo of the mode it goes to: MDX-CHAT from the Studio, MDX-STUDIO from the chat.
@@ -2323,7 +2312,7 @@ const studioUI = setupStudio({
   conversation: () => state.conversationId,
   ensureConversation: async () => (state.conversationId ||= crypto.randomUUID()),
   run: runInStudio,
-  reveal: () => revealStudio(),
+  reveal: () => closeChat().then(() => revealStudio()),
   stopTurn: () => state.controller?.abort(),
   onConversation: () => showLastReply(),
 });
@@ -2336,7 +2325,9 @@ const generationUI = setupGenerationUI({
   onResize: scrollToBottom,
   // « Ouvrir » on a card: the creation on the Studio's screen.
   onOpen: record => {
-    void revealStudio().then(() => record && studioUI.show(record));
+    void closeChat()
+      .then(() => revealStudio())
+      .then(() => record && studioUI.show(record));
   },
 });
 const workflowsUI = setupNativeWorkflows({
@@ -2584,6 +2575,7 @@ function showHome() {
       if (!(await assetsUI.flush()) || !(await persistConversation())) return;
       state.view = 'home';
       void showCreations();
+      delete document.body.dataset.chat;
       closeNavigation();
       projectUI.render();
     } catch (error) {
@@ -2595,18 +2587,19 @@ function showHome() {
   });
 }
 /**
- * Chat ⇄ Studio in one movement, as quick as the screen of the Studio taking a new format: the
- * message box slides to its place, the chat shrinks into the last answer beside it (and grows back
- * from it), the Studio comes and goes, all at once (the browser's view transitions, named in
- * moodix.css while `data-switch` is on the root). Without them, with reduced motion, or to and
- * from another view, the view simply changes. Resolves once the page shows the new view.
+ * The page moves in one movement, as quick as the screen of the Studio taking a new format: to the
+ * Studio (`studio`) the chat folds into its bar while the Studio comes in, back to the chat
+ * (`chat`) it unfolds from it; in the Studio the bar opens into the chat in the middle (`open`)
+ * and the chat folds back into it (`close`). The browser's view transitions draw it, named in
+ * moodix.css while `data-switch` is on the root. Without them, with reduced motion, or to and
+ * from the home page, the page simply changes. Resolves once the page shows the change.
  */
-function switchView(view, apply) {
-  const between = new Set([state.view, view]),
+function switchView(kind, apply) {
+  const folding = kind === 'open' || kind === 'close',
+    between = new Set([state.view, kind]),
     animate =
       typeof document.startViewTransition === 'function' &&
-      between.has('chat') &&
-      between.has('studio') &&
+      (folding ? state.view === 'studio' : between.has('chat') && between.has('studio')) &&
       document.visibilityState === 'visible' &&
       !globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   if (!animate) {
@@ -2614,10 +2607,10 @@ function switchView(view, apply) {
     return Promise.resolve();
   }
   const root = document.documentElement;
-  root.dataset.switch = view;
+  root.dataset.switch = kind;
   const transition = document.startViewTransition(apply),
     end = () => {
-      if (root.dataset.switch === view) delete root.dataset.switch;
+      if (root.dataset.switch === kind) delete root.dataset.switch;
     };
   transition.finished.then(end, end);
   transition.ready.catch(() => {});
@@ -2654,6 +2647,7 @@ function showChat() {
     const coming = state.view !== 'chat';
     void switchView('chat', () => {
       state.view = 'chat';
+      delete document.body.dataset.chat;
       closeNavigation();
       projectUI.render();
       syncViews();
@@ -2668,9 +2662,35 @@ function showChat() {
     });
   });
 }
+/**
+ * In the Studio the chat is folded into the bar at the bottom. Opened, it comes over everything,
+ * in the middle of the window, on its last lines. Resolves once the page shows it.
+ */
+function openChat() {
+  if (state.view !== 'studio' || document.body.dataset.chat === 'open') return Promise.resolve();
+  return switchView('open', () => {
+    document.body.dataset.chat = 'open';
+    delete $('chat-bar').dataset.unread;
+    const area = $('chat-area');
+    if (area.scrollTo) area.scrollTo({ top: area.scrollHeight, behavior: 'instant' });
+    $('prompt').focus({ preventScroll: true });
+  });
+}
+/**
+ * The chat folds back into its bar: Moodix AI sets the Studio, or Échap, or a click beside it
+ * (`refocus`: the keyboard goes back to the bar).
+ */
+function closeChat({ refocus = false } = {}) {
+  if (document.body.dataset.chat !== 'open') return Promise.resolve();
+  return switchView('close', () => {
+    delete document.body.dataset.chat;
+    if (refocus) $('chat-bar').focus({ preventScroll: true });
+  });
+}
+$('chat-bar').onclick = () => void openChat();
+$('chat-scrim').onclick = () => void closeChat({ refocus: true });
 $('studio-open').onclick = () => showStudio();
 $('chat-open').onclick = () => showChat();
-$('studio-to-chat').onclick = () => showChat();
 $('mode-switch').onclick = () => (state.view === 'studio' ? showChat() : showStudio());
 async function newConversation(projectId = state.projectId || 'inbox') {
   if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)
@@ -2733,6 +2753,14 @@ $('navigation-scrim').onclick = () => closeNavigation();
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && document.body.dataset.navOpen === 'true' && !document.querySelector('dialog[open]'))
     closeNavigation();
+  // The chat opened over the Studio folds back into its bar.
+  else if (
+    event.key === 'Escape' &&
+    document.body.dataset.chat === 'open' &&
+    !event.defaultPrevented &&
+    !document.querySelector('dialog[open]')
+  )
+    void closeChat({ refocus: true });
 });
 document.querySelectorAll('[data-prompt]').forEach(button => {
   button.onclick = () => {
