@@ -35,6 +35,11 @@ for (const privateRuntime of [false, true])
           await writeFile(join(root, 'runner/uv.lock'), 'old lock');
           await mkdir(join(root, 'data/runtime/venv'), { recursive: true });
           await writeFile(join(root, 'data/runtime/venv/pyvenv.cfg'), 'preserved environment identity');
+          // Generation switched off (it is on by default): the environment is still checked.
+          await writeFile(
+            join(root, 'data/generation.json'),
+            JSON.stringify({ enabled: false, autoAllow: false, maxIterations: 5, pythonPath: '' }),
+          );
           // Stub only package installation: the updater, replacement server and startup reconciliation are real.
           await writeFile(
             join(root, 'lib/python-environment.mjs'),

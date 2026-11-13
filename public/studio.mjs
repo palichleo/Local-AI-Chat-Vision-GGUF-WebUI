@@ -262,11 +262,12 @@ export function setupStudio({
     control.onclick = onclick;
     return control;
   };
-  // The settings Moodix AI may change wear its tile; the one it is changing, a ring.
+  // The settings Moodix AI may change wear its tile; the one it is changing, a ring; those it
+  // has set, a fine trace while it works. Once it has stopped, nothing is framed any more.
   function aiTarget(element, key) {
     element.dataset.ai = key;
     if (ai?.active === key) element.setAttribute('data-ai-active', '');
-    if (ai?.touched.has(key) || proposal?.touched?.has(key)) element.setAttribute('data-ai-touched', '');
+    if (ai?.touched.has(key)) element.setAttribute('data-ai-touched', '');
     return element;
   }
   function field(label, control, { help, wide = false, mark = false } = {}) {

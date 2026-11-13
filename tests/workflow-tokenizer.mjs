@@ -203,9 +203,11 @@ test('the former application-wide tokenizer moves into existing workflows and le
   const service = await new GenerationService(options).init();
   t.after(() => service.close());
   assert.equal(service.config.tokenizerPath, undefined);
-  // Rewritten with the folders added since, empty.
+  // Rewritten with the folders added since, empty, and the choices added since at their default.
   assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'generation.json'), 'utf8')), {
     ...settings,
+    autoAllowVideos: true,
+    reviewImages: false,
     modelsDir: '',
     textEncoderRoot: '',
     tokenizerRoot: '',

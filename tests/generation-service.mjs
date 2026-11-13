@@ -407,6 +407,8 @@ test('launch reconciles an existing private environment even with generation dis
     worker,
     environment,
   });
+  // Generation switched off: an environment already there is brought up to date, nothing more.
+  service.config.enabled = false;
   await service.prepareOnLaunch();
   assert.equal(checks, 0);
   present = true;
@@ -417,7 +419,20 @@ test('launch reconciles an existing private environment even with generation dis
   await service.prepareOnLaunch();
   assert.equal(checks, 1);
   assert.equal(probes, 2);
+  // On, as by default: the engine starts with the application only once its environment is
+  // there; a new installation downloads nothing at launch.
+  service.config.pythonPath = '';
+  service.config.enabled = true;
+  present = false;
+  await service.prepareOnLaunch();
+  assert.equal(checks, 1);
+  assert.equal(starts, 0);
+  present = true;
+  await service.prepareOnLaunch();
+  assert.equal(checks, 2);
+  assert.equal(starts, 1);
+  assert.equal(probes, 4);
   await service.close();
   await service.prepareOnLaunch();
-  assert.equal(probes, 2);
+  assert.equal(probes, 4);
 });

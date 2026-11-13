@@ -209,6 +209,8 @@ export function setupNativeWorkflows(options) {
           ![
             'generation-enabled',
             'generation-auto',
+            'generation-auto-video',
+            'generation-review-images',
             'generation-review',
             'generation-iterations',
             'generation-minus',
@@ -283,7 +285,9 @@ export function setupNativeWorkflows(options) {
     return {
       enabled: $('generation-enabled').checked,
       autoAllow: $('generation-auto').checked,
+      autoAllowVideos: $('generation-auto-video').checked,
       maxIterations,
+      reviewImages: $('generation-review-images').checked,
       reviewVideos: $('generation-review').checked,
       pythonPath: $('generation-python').value.trim(),
       ...folderValues(),
@@ -645,6 +649,8 @@ export function setupNativeWorkflows(options) {
       if (settings) {
         $('generation-enabled').checked = config.enabled;
         $('generation-auto').checked = config.autoAllow;
+        $('generation-auto-video').checked = config.autoAllowVideos !== false;
+        $('generation-review-images').checked = config.reviewImages === true;
         $('generation-review').checked = config.reviewVideos === true;
         unlimited = config.maxIterations === 10000;
         if (!unlimited) lastLimited = config.maxIterations || 5;

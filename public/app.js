@@ -2176,11 +2176,13 @@ async function sendMessage(event) {
       const viaStudio = Boolean(state.studio?.accepts?.(request.tool || request.call?.function?.name));
       const generation = generationUI.mount(view.generations, request, { compact: viaStudio });
       // A video is commented by the model only when the user chose it in the settings: the
-      // reload and the analysis take about a minute. Otherwise it ends the turn, like an image.
-      const review = state.generation?.reviewVideos === true;
+      // reload and the analysis take about a minute. An image too, by its own choice. Otherwise
+      // the creation ends the turn; a sound always does.
+      const review = state.generation?.reviewVideos === true,
+        lookAtImage = !request.mediaType && state.generation?.reviewImages === true;
       // Made from the Studio, the generator keeps its models for the next creation, and the chat
-      // model comes back with the next message: unless it has a video to look at.
-      const kept = viaStudio && !(review && request.mediaType === 'video');
+      // model comes back with the next message: unless it has a creation to look at.
+      const kept = viaStudio && !(review && request.mediaType === 'video') && !lookAtImage;
       let result;
       try {
         result = await workflowsUI.requestTool(
@@ -2194,6 +2196,7 @@ async function sendMessage(event) {
           image => generation.image(image),
           {
             review,
+            reviewImages: lookAtImage,
             ...(viaStudio
               ? {
                   approve: async (proposal, abort) => {
@@ -2237,12 +2240,11 @@ async function sendMessage(event) {
         complete = true;
         break;
       }
-      const reviewImages =
-        review && result.record?.mediaType === 'video' && state.status.state === 'ready' && state.status.vision
-          ? result.images
-          : [];
+      const looked =
+        (review && result.record?.mediaType === 'video') || (lookAtImage && result.record?.mediaType === 'image');
+      const reviewImages = looked && state.status.state === 'ready' && state.status.vision ? result.images : [];
       reviewRecord = reviewImages.length ? result.record : null;
-      if (review && result.record?.mediaType === 'video') {
+      if (looked) {
         history.push({
           role: 'user',
           internal: true,
@@ -2274,7 +2276,8 @@ async function sendMessage(event) {
       if (result.denied || result.failed || iterations >= (state.generation?.maxIterations || 5)) allowTools = false;
       // After a refusal or a failure the model explains it: it does not go on inspecting outputs.
       if (result.denied || result.failed) resourceReads = 8;
-      silent = Boolean(result.record && !(review && result.record.mediaType === 'video') && !result.failed);
+      // Not seen (no analysis chosen for it): its text would only repeat what the user sees.
+      silent = Boolean(result.record && !looked && !result.failed);
       state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
       await persistConversation();
       view = assistantMessage(view);
@@ -2559,6 +2562,8 @@ const settingsGuard = setupSettingsGuard({
       'gpu-layers',
       'generation-enabled',
       'generation-auto',
+      'generation-auto-video',
+      'generation-review-images',
       'generation-review',
       'generation-iterations',
       'generation-python',

@@ -279,7 +279,9 @@ test('settings read native generation values and descriptions come from workflow
   assert.deepEqual(f.ui.values(), {
     enabled: true,
     autoAllow: false,
+    autoAllowVideos: true,
     maxIterations: 5,
+    reviewImages: false,
     reviewVideos: false,
     pythonPath: '',
     modelsDir: '',

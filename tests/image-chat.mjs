@@ -27,6 +27,7 @@ async function exchange({
   finalReason = 'stop',
   generationCalls = 1,
   reviewVideos = false,
+  reviewImages = false,
 } = {}) {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const element = (tag = '', className = '', textContent = '') => ({
@@ -62,7 +63,7 @@ async function exchange({
     videos: [],
     status: { state: 'ready', vision: true, busy: false },
     thinking: true,
-    generation: { maxIterations: Math.max(5, generationCalls), reviewVideos },
+    generation: { maxIterations: Math.max(5, generationCalls), reviewVideos, reviewImages },
   };
   const requests = [],
     toolOptions = [],
@@ -287,6 +288,18 @@ test('a video is analysed after its generation only when the user chose it in th
   assert.equal(result.reviews.length, 1);
   assert.match(JSON.stringify(result.requests[1]), /base64/);
   assert.equal(result.toolOptions[0].review, true);
+});
+
+test('an image is analysed after its generation only when the user chose it in the settings', async () => {
+  const result = await exchange({ reviewImages: true });
+  assert.equal(result.toolOptions[0].reviewImages, true);
+  assert.equal(result.reviews.length, 1);
+  assert.match(JSON.stringify(result.requests[1]), /base64/);
+  // The choice for videos says nothing of images, and the other way round.
+  const video = await exchange({ mediaType: 'video', reviewImages: true });
+  assert.equal(video.toolOptions[0].review, false);
+  assert.equal(video.reviews.length, 0);
+  assert.doesNotMatch(JSON.stringify(video.requests), /base64/);
 });
 
 test('by default a video ends the turn like an image: no frames sent, no thinking, no text', async () => {

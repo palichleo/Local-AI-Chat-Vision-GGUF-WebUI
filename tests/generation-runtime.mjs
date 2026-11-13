@@ -419,7 +419,8 @@ const labelled = (all, label) =>
 const videoProposal = () => ({
   requestId: 'proposal',
   mediaType: 'video',
-  autoAllow: true,
+  // Videos not allowed in the settings: each one is confirmed in its window.
+  autoAllow: false,
   workflowName: 'MiniMax',
   args: { prompt: 'dives' },
   approvalToken: 'first-token',
@@ -554,6 +555,19 @@ test('an untouched video proposal starts by itself; touching the window stops th
     { confirmDelay: 20 },
   );
 });
+test('a video allowed in the settings starts at once, with its token, without its window', async () =>
+  fixture(async ({ ui, nodes, calls, setIntercept }) => {
+    setIntercept(route =>
+      route === 'tools/execute' ? Response.json({ id: 'job', state: 'error', error: 'test boundary' }) : undefined,
+    );
+    await ui.requestTool({ ...videoProposal(), autoAllow: true }, new AbortController().signal, () => {});
+    assert.ok(!nodes.get('tool-dialog').open, 'no window to confirm in');
+    assert.deepEqual(calls.find(call => call.route === 'tools/execute').body, {
+      requestId: 'proposal',
+      permission: 'once',
+      approvalToken: 'first-token',
+    });
+  }));
 test('video confirm sends the exact proposal token once and final label is explicit', async () =>
   fixture(async ({ ui, nodes, calls, setIntercept }) => {
     setIntercept(route =>
@@ -563,7 +577,7 @@ test('video confirm sends the exact proposal token once and final label is expli
       {
         requestId: 'final-proposal',
         mediaType: 'video',
-        autoAllow: true,
+        autoAllow: false,
         approvalToken: 'final-token',
         workflowName: 'Motion',
         args: {},

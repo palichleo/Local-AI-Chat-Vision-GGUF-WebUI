@@ -144,7 +144,9 @@ export function setupGenerationRuntime({
     const video = request.mediaType === 'video',
       // A sound is confirmed like a video (its lyrics and length are worth a look), without the countdown.
       confirmed = video || request.mediaType === 'audio';
-    if (request.autoAllow && !confirmed) return undefined;
+    // Allowed in the settings: an image runs at once, a video too with its token (the server
+    // marks a video so only when the user allowed videos); a sound always asks.
+    if (request.autoAllow) return confirmed ? 'once' : undefined;
     const title = () =>
       ($('tool-title').textContent = video
         ? request.plan?.stage === 'draft'
@@ -278,8 +280,9 @@ export function setupGenerationRuntime({
     signal,
     onProgress,
     onImage = () => {},
-    // `review`: the storyboard of a generated video is handed to the model with the result.
-    { confirmed = false, review = true, approve = null, studio = false } = {},
+    // `review`: the storyboard of a generated video is handed to the model with the result;
+    // `reviewImages`: the copy of a generated image, when the user chose it in the settings.
+    { confirmed = false, review = true, reviewImages = false, approve = null, studio = false } = {},
   ) {
     const cancel = () => api('tools/cancel', { requestId: request.requestId }).catch(() => {});
     let decision;
@@ -313,7 +316,7 @@ export function setupGenerationRuntime({
         throw Error('Cette sortie ne correspond pas à la conversation courante.');
       // Made in the Studio, with no model to look at it now: no copy for it, no original to
       // download; the card shows its file. The copies are made from the original when asked.
-      if (studio && !review) {
+      if (studio && !review && !reviewImages) {
         for (const [index] of record.outputs.entries()) onImage({ record, index });
         originalsTask = Promise.resolve({ prepared: [], errors: [] });
         return;
@@ -531,13 +534,13 @@ export function setupGenerationRuntime({
           note:
             record.mediaType === 'audio'
               ? 'Son généré et proposé à l’écoute de l’utilisateur. Tu ne peux pas l’entendre : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque son demande la confirmation de l’utilisateur. Sinon termine sans texte.'
-              : record.mediaType !== 'video'
-                ? 'Image générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil. Si l’utilisateur a demandé une vérification, consulte la copie compressée avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
-                : !review
+              : !(record.mediaType === 'video' ? review : reviewImages)
+                ? record.mediaType === 'video'
                   ? 'Vidéo générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque vidéo demande la confirmation de l’utilisateur. Si l’utilisateur demande une vérification, consulte sa planche d’images avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
-                  : images.length
-                    ? 'Les images jointes sont les copies réduites des sorties identifiées par analysis_outputs (indices à partir de zéro). Les sorties sans copie ne sont pas vérifiables visuellement. Les entrées optionnelles absentes conservent leurs valeurs dans le workflow ; elles ne sont pas des références fournies par l’utilisateur. Les originaux sont dans la galerie.'
-                    : 'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.',
+                  : 'Image générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil. Si l’utilisateur a demandé une vérification, consulte la copie compressée avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
+                : images.length
+                  ? 'Les images jointes sont les copies réduites des sorties identifiées par analysis_outputs (indices à partir de zéro). Les sorties sans copie ne sont pas vérifiables visuellement. Les entrées optionnelles absentes conservent leurs valeurs dans le workflow ; elles ne sont pas des références fournies par l’utilisateur. Les originaux sont dans la galerie.'
+                  : 'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.',
         }),
         images,
         record,

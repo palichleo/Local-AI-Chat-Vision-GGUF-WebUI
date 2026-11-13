@@ -2359,7 +2359,7 @@ video.studio-frame-result {
 .ai-cursor-label span:empty {
   display: none;
 }
-/* The setting being changed has a clear ring; once set, a fine trace stays. */
+/* The setting being changed has a clear ring; once set, a fine trace while the pointer works. */
 [data-ai-active] {
   box-shadow:
     0 0 0 2px rgba(255, 255, 255, 0.85),

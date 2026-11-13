@@ -228,6 +228,33 @@ test('native video approval shows the resolved fixed stage and cannot use global
   await assert.rejects(
     runtime.execute({ requestId: request.requestId, permission: 'once', approvalToken: request.approvalToken }),
   );
+  // Videos allowed in the settings: the proposal says it, and still runs with its token only.
+  const allowing = new ToolRuntime({
+    catalog,
+    engine: { state: 'ready', stop: async () => {}, start: async () => {} },
+    gallery: { put: async record => record },
+    getConfig: () => ({
+      enabled: true,
+      autoAllow: false,
+      autoAllowVideos: true,
+      maxIterations: 5,
+      baseUrl: 'native',
+    }),
+    engineConfig: () => ({}),
+    clientFactory: () => ({ status: async () => ({ idle: true }) }),
+  });
+  const allowed = await allowing.request(
+    [
+      {
+        id: 'video-call-2',
+        type: 'function',
+        function: { name: 'create_video', arguments: JSON.stringify({ intention: 'Test' }) },
+      },
+    ],
+    { conversationId: id, turnId: id, messages: [] },
+  );
+  assert.equal(allowed.autoAllow, true);
+  await assert.rejects(allowing.execute({ requestId: allowed.requestId, permission: 'once', approvalToken: 'wrong' }));
 });
 
 test('native continuation stages the original video instead of a sampled image', async () => {
