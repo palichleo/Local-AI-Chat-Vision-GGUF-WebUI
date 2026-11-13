@@ -1641,7 +1641,7 @@ export function setupStudio({
   const improveTitle = () =>
     drafts[mode].prompt.trim().length < IMPROVE_MIN
       ? 'Écris d’abord quelques mots'
-      : 'Améliorer le prompt (' + MODIFIER + '+E)';
+      : 'Améliorer le prompt avec Moodix AI (' + MODIFIER + '+E)';
   /** The button follows what is typed, without drawing the Studio again (the field keeps its focus). */
   function improvable() {
     const go = document.querySelector?.('#studio-view .studio-enrich-go');
@@ -2641,7 +2641,8 @@ export function setupStudio({
   let used = new Set();
   /**
    * The Sortie: the creations of this conversation of the mode, the newest at the left (a new one
-   * pushes the others to the right); nothing written, no count; empty, a dashed place that says so.
+   * pushes the others to the right); nothing written, no count; empty, its icon and a line that say
+   * so, without a frame (one would look like a place to drop a file: moodix-design.md 7 bis 18).
    */
   function outputs() {
     used = new Set();

@@ -2899,7 +2899,7 @@ video.studio-frame-result {
 .studio-prompt-field .studio-enrich {
   position: absolute;
   right: var(--enrich-clear);
-  bottom: 10px;
+  bottom: 12px;
   left: auto;
   z-index: 2;
   justify-content: flex-end;
@@ -2919,43 +2919,61 @@ video.studio-frame-result {
 .studio-prompt-field .studio-enrich > * {
   pointer-events: auto;
 }
-.studio-enrich-go {
+/* « Améliorer le prompt » (moodix-design.md 7 bis 16): a square of 36 px, 8 px corners, in the
+   box of the prompt, 16 px from its right edge and 12 px from its foot; the wand of the design,
+   17 px, 2 px strokes; no blue. Waiting for a few words, it is barely there; ready, a dark tile;
+   at work, white, the wand turned into a dark ring that turns slowly (still with less motion). */
+#studio-view .studio-enrich-go {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  min-height: 32px;
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  min-height: 0;
   padding: 0;
-  border-radius: 999px;
-  border: 1px solid rgba(157, 180, 255, 0.32);
-  background: rgba(61, 107, 245, 0.16);
-  color: var(--fn-input-text);
+  border: 1px solid #2a2e37;
+  border-radius: 8px;
+  background: #15171c;
+  color: #dde1e8;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
-.studio-enrich-go svg {
-  width: 15px;
-  height: 15px;
+#studio-view .studio-enrich-go svg {
+  width: 17px;
+  height: 17px;
   stroke-width: 2;
 }
-/* Too few words: the wand waits, quietly. */
-.studio-enrich-go:disabled:not(.is-working) {
-  opacity: 0.45;
+#studio-view .studio-enrich-go:hover:enabled {
+  background: #1c1f26;
+  color: #eceef2;
+}
+#studio-view .studio-enrich-go:disabled:not(.is-working) {
+  opacity: 1;
+  border-color: #1e2129;
+  background: transparent;
+  color: #4a4f59;
   cursor: default;
 }
-/* While Moodix AI rewrites: the button turns white, a ring turns around it, slowly (still with
-   less motion). */
-.studio-enrich-go.is-working {
-  position: relative;
-  background: #eceef2;
+#studio-view .studio-enrich-go.is-working {
+  opacity: 1;
   border-color: #eceef2;
+  background: #eceef2;
   color: #0b0c0f;
+  cursor: progress;
 }
-.studio-enrich-go.is-working::after {
+#studio-view .studio-enrich-go.is-working svg {
+  display: none;
+}
+#studio-view .studio-enrich-go.is-working::after {
   content: '';
-  position: absolute;
-  inset: -4px;
-  border: 1.5px solid rgba(236, 238, 242, 0.75);
-  border-top-color: transparent;
-  border-radius: 999px;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #0b0c0f;
+  border-right-color: transparent;
+  border-radius: 50%;
   animation: enrich-turn 1.8s linear infinite;
 }
 @keyframes enrich-turn {
@@ -2964,17 +2982,32 @@ video.studio-frame-result {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .studio-enrich-go.is-working::after {
+  #studio-view .studio-enrich-go.is-working::after {
     animation: none;
   }
 }
-.studio-enrich-go:hover:enabled {
-  background: rgba(61, 107, 245, 0.28);
-  border-color: rgba(157, 180, 255, 0.55);
+/* The light theme: the same steps in its own greys. */
+:root[data-theme='light'] #studio-view .studio-enrich-go {
+  border-color: var(--line-strong);
+  background: var(--chip);
+  color: var(--ink);
 }
-:root[data-theme='light'] .studio-enrich-go {
-  border-color: rgba(47, 94, 232, 0.35);
-  background: rgba(47, 94, 232, 0.1);
+:root[data-theme='light'] #studio-view .studio-enrich-go:hover:enabled {
+  background: var(--hover);
+}
+:root[data-theme='light'] #studio-view .studio-enrich-go:disabled:not(.is-working) {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+:root[data-theme='light'] #studio-view .studio-enrich-go.is-working {
+  border-color: #12141a;
+  background: #12141a;
+  color: #eceef2;
+}
+:root[data-theme='light'] #studio-view .studio-enrich-go.is-working::after {
+  border-color: #eceef2;
+  border-right-color: transparent;
 }
 .studio-prompt-field .studio-enrich .studio-link {
   display: grid;
@@ -4048,7 +4081,8 @@ html[data-switch='chat']::view-transition-old(studio) {
   width: 13px;
   height: 13px;
 }
-/* Empty: a dashed place with the icon of the mode, which says so. */
+/* Empty (moodix-design.md 7 bis 18): the icon of the mode and what it says, centred, without a
+   frame; dashes are kept for the empty image slots, where a file can really be dropped. */
 .studio-empty-strip {
   display: flex;
   flex: 1 1 auto;
@@ -4058,13 +4092,10 @@ html[data-switch='chat']::view-transition-old(studio) {
   box-sizing: border-box;
   height: 117px;
   margin: 4px;
-  border: 1px dashed #343944;
-  border-radius: 6px;
   color: #6e7480;
   font-size: 13px;
 }
 :root[data-theme='light'] .studio-empty-strip {
-  border-color: var(--line-strong);
   color: var(--muted);
 }
 .studio-empty-strip svg {
@@ -4121,4 +4152,20 @@ html[data-switch='chat']::view-transition-old(studio) {
   #studio-view .studio-save {
     transition: none;
   }
+}
+
+/* ------------------------------------------------------------------ neutral blocks */
+/* moodix-design.md 7 bis 17: no line of colour at the top of the blocks; the four of them in one
+   neutral border, 1 px #1A1D24. The colours of Beaubourg stay in the four pipes, the rules of the
+   logo, under the timeline and under « Agent », the band of « Générer », the gradient of the bars
+   and the blue of the image slots on hover (the column of the prompt keeps its blue while an image
+   is dragged over it: it takes the image too). */
+#studio-view .studio-block {
+  border: 1px solid #1a1d24;
+}
+:root[data-theme='light'] #studio-view .studio-block {
+  border-color: var(--line);
+}
+#studio-view .studio-block.is-input.is-dropping {
+  border-color: rgba(61, 107, 245, 0.65);
 }

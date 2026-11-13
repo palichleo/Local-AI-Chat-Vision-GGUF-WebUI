@@ -1566,6 +1566,9 @@ test('« Améliorer le prompt » rewrites what is typed, which can be taken back
 
     studio.prompt().value = 'un phare';
     studio.prompt().oninput();
+    // Ready: it says what it does, and its keys.
+    studio.studio.render();
+    assert.match(wand().title, /^Améliorer le prompt avec Moodix AI \((Ctrl|⌘)\+E\)$/);
     await body.find('studio-enrich-go')[0].onclick();
     assert.deepEqual(asked.find(([route]) => route === 'studio/enrich')[1], {
       prompt: 'un phare',
