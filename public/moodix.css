@@ -2053,7 +2053,8 @@ video.studio-frame-result {
 }
 
 /* ------------------------------------------------------------------ the pointer of Moodix AI */
-/* A white pointer in a soft halo, with a label of what it does; it moves slowly (0.9 s). */
+/* A white pointer in a soft halo, with a label of what it does; it glides in 0.45 s (the steps
+   of studio.mjs wait for it: stepTo). */
 .ai-cursor {
   position: fixed;
   left: 0;
@@ -2063,8 +2064,8 @@ video.studio-frame-result {
   opacity: 0;
   transform: translate(var(--ai-x, 50vw), var(--ai-y, 50vh));
   transition:
-    transform 0.9s cubic-bezier(0.45, 0, 0.2, 1),
-    opacity 0.5s ease;
+    transform 0.45s cubic-bezier(0.45, 0, 0.2, 1),
+    opacity 0.25s ease;
 }
 .ai-cursor[hidden] {
   display: none;
@@ -2147,7 +2148,7 @@ video.studio-frame-result {
 }
 @media (prefers-reduced-motion: reduce) {
   .ai-cursor {
-    transition: opacity 0.5s ease;
+    transition: opacity 0.25s ease;
   }
 }
 

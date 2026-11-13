@@ -1,6 +1,6 @@
 /**
  * The pointer of Moodix AI: a white arrow in a soft halo, with a label of what it does
- * (« Moodix AI · règle la durée »). It glides from one setting to the next, slowly (0.9 s), and
+ * (« Moodix AI · règle la durée »). It glides from one setting to the next (0.45 s), and
  * leaves a clear ring on the setting it changes, then a fine trace once it is set. Nothing
  * blinks; with `prefers-reduced-motion` it does not glide, it appears where it goes.
  */
@@ -46,10 +46,10 @@ export function setupPointer({ cursor, text, host = globalThis }) {
       if (!shown) return;
       shown = false;
       cursor.classList.remove('is-visible');
-      // Gone once faded: nothing is left over the page.
+      // Gone once faded (0.25 s): nothing is left over the page.
       host.setTimeout?.(() => {
         if (!shown) cursor.hidden = true;
-      }, 500);
+      }, 250);
     },
     get visible() {
       return shown;

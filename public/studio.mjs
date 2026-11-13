@@ -1065,13 +1065,16 @@ export function setupStudio({
     key === 'kind'
       ? document.querySelector?.(`#studio-kinds [data-mode="${proposal?.mode ?? mode}"]`)
       : document.querySelector?.(`#studio-view [data-ai="${key}"]`);
-  /** One step of the pointer: it goes, it rings, it sets, it leaves a trace. Stops when the user takes over. */
+  /**
+   * One step of the pointer: it goes (its glide, 0.45 s), it rings, it sets, it leaves a trace:
+   * about 0.75 s. Stops when the user takes over.
+   */
   async function stepTo(key, label, apply, { anchor } = {}) {
     if (!ai || ai.stopped) return false;
     ai.active = key;
     render();
     pointer?.move(targetOf(key), label, anchor);
-    await wait(pointer?.reduced() ? 400 : 950);
+    await wait(pointer?.reduced() ? 200 : 475);
     if (!ai || ai.stopped) return false;
     await apply();
     if (!ai || ai.stopped) return false;
@@ -1079,10 +1082,10 @@ export function setupStudio({
     ai.active = null;
     render();
     pointer?.follow(targetOf(key), anchor);
-    await wait(pointer?.reduced() ? 400 : 550);
+    await wait(pointer?.reduced() ? 200 : 275);
     return Boolean(ai && !ai.stopped);
   }
-  /** The prompt written as it is typed: fast, the whole of it in about two seconds and a half. */
+  /** The prompt written as it is typed: fast, the whole of it in about a second and a quarter. */
   async function typePrompt(draft, text) {
     const box = document.querySelector?.('#studio-view [data-ai="prompt"]');
     if (pointer?.reduced() || !box) {
@@ -1095,7 +1098,7 @@ export function setupStudio({
       draft.prompt = text.slice(0, index);
       box.value = draft.prompt;
       box.scrollTop = box.scrollHeight;
-      await wait(30);
+      await wait(15);
     }
     draft.prompt = text;
   }
@@ -1224,14 +1227,14 @@ export function setupStudio({
       targetOf('generate'),
       auto ? 'lance la génération (autorisé dans la configuration)' : 'attend ton accord',
     );
-    await wait(1100);
+    await wait(550);
     if (!ai || ai.stopped || proposal !== current) return;
     status(false);
     if (auto) {
       endPointer();
       return approve();
     }
-    await wait(1300);
+    await wait(650);
     if (ai && !ai.stopped && proposal === current) endPointer();
   }
   /** The images of a proposal, in the slots of their roles. */
