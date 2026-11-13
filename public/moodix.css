@@ -374,11 +374,12 @@ summary:focus-visible {
   margin: 0;
   min-height: 40px;
 }
+/* « PROJETS »: in the font of the sidebar, small capitals of a label. */
 #sidebar .project-nav-heading > span {
-  font-family: var(--font-display);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 2.5px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -2029,6 +2030,26 @@ video.studio-frame-result {
   padding: var(--block-pad);
   border-radius: inherit;
 }
+/* The Studio while its tools are read the first time (studio.mjs, skeleton): its blocks are
+   there at once, the screen with the room of its bar; then what they hold fades in. */
+.studio-actionbar.is-waiting {
+  min-height: calc(var(--format-button) + 2 * var(--format-inset));
+}
+.studio-desk.is-arriving .studio-block-body > :not(.studio-screen),
+.studio-desk.is-arriving .studio-screen > * {
+  animation: studio-arrive 0.28s ease-out both;
+}
+@keyframes studio-arrive {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-desk.is-arriving .studio-block-body > :not(.studio-screen),
+  .studio-desk.is-arriving .studio-screen > * {
+    animation: none;
+  }
+}
 /* The screen, the message box and the cards keep the layer of their own the former grain gave
    them: what they hold stays placed as it was. */
 .studio-screen,
@@ -2885,15 +2906,16 @@ html[data-switch='chat']::view-transition-old(studio) {
   }
 }
 
-/* Scroll bars: thin and quiet, a thumb that shows without a track. */
+/* Scroll bars: thin and quiet, a thumb without track nor arrows. */
 :root {
-  --scroll-thumb: rgba(255, 255, 255, 0.13);
-  --scroll-thumb-hover: rgba(255, 255, 255, 0.26);
+  --scroll-thumb: rgba(255, 255, 255, 0.1);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.22);
 }
 :root[data-theme='light'] {
-  --scroll-thumb: rgba(18, 20, 26, 0.16);
-  --scroll-thumb-hover: rgba(18, 20, 26, 0.3);
+  --scroll-thumb: rgba(18, 20, 26, 0.13);
+  --scroll-thumb-hover: rgba(18, 20, 26, 0.26);
 }
+/* Firefox: its thin bars have no arrows. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
@@ -2915,20 +2937,50 @@ html[data-switch='chat']::view-transition-old(studio) {
 .settings-body:hover {
   scrollbar-color: var(--scroll-thumb-hover) transparent;
 }
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background: var(--scroll-thumb) padding-box;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--scroll-thumb-hover) padding-box;
+/* Brave, Chrome, Edge: their thin bars have an arrow at each end. The bar is drawn here instead,
+   the thumb alone, 4 px wide in 8 px that it can be taken by; the standard properties above
+   would make them ignore these rules, so they are set back. */
+@supports selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: auto !important;
+    scrollbar-color: auto !important;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--scroll-thumb) padding-box;
+  }
+  .chat-area:hover::-webkit-scrollbar-thumb,
+  .asset-pane:hover::-webkit-scrollbar-thumb,
+  #studio-view:hover::-webkit-scrollbar-thumb,
+  #sidebar:hover::-webkit-scrollbar-thumb,
+  #prompt:hover::-webkit-scrollbar-thumb,
+  .studio-block.is-settings > .studio-block-body:hover::-webkit-scrollbar-thumb,
+  .studio-strip:hover::-webkit-scrollbar-thumb,
+  .studio-desk textarea:hover::-webkit-scrollbar-thumb,
+  .settings-body:hover::-webkit-scrollbar-thumb,
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scroll-thumb-hover);
+  }
+  /* The tabs of the settings, in a row on a narrow window, scroll without a bar (styles.css). */
+  @media (max-width: 760px) {
+    #settings .settings-tabs {
+      scrollbar-width: none !important;
+    }
+  }
 }
 /* The head of the Sortie, at its top left: how many, then where from, in the same quiet words. */
 .studio-block.is-output .studio-block-head {

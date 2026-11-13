@@ -190,6 +190,8 @@ export function setupStudio({
     runsFor, // the place (conversation, or the former Studio) they were read from
     runsStale = false, // something was made elsewhere since
     loading = null, // the tools being read
+    unreadable = '', // why the tools could not be read, while they are not
+    sketched = false, // the blocks were drawn empty while the tools were read: what comes fades in
     toolsAt = 0,
     toolsStale = false,
     shownMedia = null; // { key, element }: what the screen shows, kept from one drawing to the next
@@ -1753,6 +1755,28 @@ export function setupStudio({
     panel.append(node('p', 'asset-empty', text));
     return panel;
   }
+  /**
+   * The Studio as it will be, while its tools are read the first time: its four blocks on their
+   * grain, the screen in the middle with the room of its bar. What they hold fades in once read.
+   */
+  function skeleton() {
+    const desk = node('div', 'studio-desk is-loading'),
+      said = node('p', 'sr-only', 'Chargement du Studio…'),
+      screen = node('div', 'studio-screen'),
+      preview = node('section', 'studio-block is-preview');
+    desk.setAttribute('aria-busy', 'true');
+    said.setAttribute('role', 'status');
+    screen.append(node('div', 'studio-stage'));
+    preview.append(screen, node('div', 'studio-actionbar is-waiting'));
+    const blocks = [
+      node('section', 'studio-block is-input'),
+      preview,
+      node('section', 'studio-block is-settings'),
+      node('section', 'studio-block is-output'),
+    ];
+    desk.append(said, ...blocks.map(grained));
+    return desk;
+  }
   /** A block of the Studio on its grain of old film (moodix.css): still dust and three scratches
    *  under what the block holds, which goes above it, so that no grain is ever over a picture. */
   function grained(block) {
@@ -2036,8 +2060,15 @@ export function setupStudio({
     // watched, it was reported once more as it went, with no mode left to read a format from.
     watching?.disconnect();
     watching = null;
-    if (!info) return body.replaceChildren(node('p', 'asset-empty', 'Chargement…'));
-    body.replaceChildren(form());
+    if (!info) {
+      if (unreadable) return body.replaceChildren(message('Studio indisponible : ' + unreadable));
+      sketched = true;
+      return body.replaceChildren(skeleton());
+    }
+    const desk = form();
+    if (sketched) desk.classList.add('is-arriving');
+    sketched = false;
+    body.replaceChildren(desk);
     if (working) progress();
   }
   async function refresh() {
@@ -2069,6 +2100,7 @@ export function setupStudio({
       .then(response => response.json())
       .then(value => {
         info = value;
+        unreadable = '';
         toolsAt = Date.now();
         toolsStale = false;
       })
@@ -2097,9 +2129,22 @@ export function setupStudio({
       }
       if (runsStale || runsFor !== place() || seenConversation !== conversation()) await refresh();
     } catch (error) {
+      if (!info) unreadable = error.message;
       notice('Studio indisponible : ' + error.message);
     }
     render();
+  }
+  /**
+   * Reads ahead, as the page opens (app.js): its tools, most of the wait the first time, and the
+   * creations of the conversation. The Studio is then drawn whole the first time it comes on screen.
+   */
+  async function prefetch() {
+    try {
+      if (!info) await load();
+      if (runsStale || runsFor !== place() || seenConversation !== conversation()) await refresh();
+    } catch {
+      // Said when the Studio opens, which reads them again.
+    }
   }
   /**
    * Something changed elsewhere: a creation made from the chat (its creations are read again at
@@ -2165,6 +2210,7 @@ export function setupStudio({
   });
   return {
     open,
+    prefetch,
     render,
     busy: () => Boolean(working) || enriching,
     propose,

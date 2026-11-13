@@ -52,9 +52,13 @@ test('component rows say what is missing, what fails and what is not used', asyn
   let rows = await componentVersions({
     config: { enginePath: engine, gpuLayers: 0 },
     runtimeDir,
-    comfy: { enabled: false },
     run,
   });
+  // llama.cpp first, Node.js under it; ComfyUI is no longer listed.
+  assert.deepEqual(
+    rows.map(row => row.id),
+    ['llama', 'node', 'nvidia', 'python'],
+  );
   const byId = list => Object.fromEntries(list.map(row => [row.id, row]));
   let found = byId(rows);
   assert.equal(found.llama.version, 'b7001');
@@ -62,7 +66,6 @@ test('component rows say what is missing, what fails and what is not used', asyn
   assert.equal(found.nvidia.state, 'off');
   assert.equal(found.python.state, 'missing');
   assert.equal(found.torch, undefined);
-  assert.equal(found.comfy.state, 'off');
   assert.equal(found.node.version, process.versions.node);
   assert.ok(!calls.some(command => /python/i.test(command)), 'no Python is started when none is prepared');
 
@@ -73,7 +76,6 @@ test('component rows say what is missing, what fails and what is not used', asyn
   rows = await componentVersions({
     config: { enginePath: '', gpuLayers: 0 },
     runtimeDir,
-    comfy: { enabled: true, reachable: false, baseUrl: 'http://127.0.0.1:8188' },
     run,
   });
   found = byId(rows);
@@ -83,6 +85,5 @@ test('component rows say what is missing, what fails and what is not used', asyn
   assert.equal(found.torch.detail, 'Sans CUDA');
   assert.equal(found.diffusers.version, '0.41.0');
   assert.equal(found.transformers.state, 'missing');
-  assert.equal(found.comfy.state, 'error');
-  assert.match(found.comfy.detail, /127\.0\.0\.1:8188/);
+  assert.equal(found.comfy, undefined);
 });

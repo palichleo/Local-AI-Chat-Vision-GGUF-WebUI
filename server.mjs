@@ -779,7 +779,6 @@ export async function createApplication({
             config,
             pythonPath: generation.config.pythonPath || '',
             runtimeDir: generation.environment.directory,
-            comfy: await generation.comfyState(),
             ...(spawnProcess ? { run: (command, args, options) => runVersion(command, args, { ...options, spawnProcess }) } : {}),
           }))().finally(() => {
           componentsCheck = null;

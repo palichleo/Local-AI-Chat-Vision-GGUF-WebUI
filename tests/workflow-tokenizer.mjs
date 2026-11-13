@@ -252,3 +252,17 @@ test('an unusable former tokenizer is kept in the settings and reported instead 
   );
   assert.equal((await service.catalog.read('krea')).components.tokenizer, undefined);
 });
+
+test('a tokenizer is read again only once its files changed', async t => {
+  const root = await directory(t),
+    folder = join(root, 'tokenizer');
+  await tokenizer(folder, 12);
+  assert.equal((await inspectTokenizer(folder)).vocabulary, 12);
+  assert.equal((await inspectTokenizer(folder)).vocabulary, 12, 'the same folder, as it was');
+  // Another tokenizer in its place: read again, not the one kept.
+  await rm(folder, { recursive: true, force: true });
+  await tokenizer(folder, 30);
+  assert.equal((await inspectTokenizer(folder)).vocabulary, 30);
+  await rm(join(folder, 'tokenizer_config.json'));
+  await assert.rejects(inspectTokenizer(folder), /tokenizer_config.json/);
+});

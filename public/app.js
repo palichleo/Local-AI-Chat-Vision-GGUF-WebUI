@@ -3034,6 +3034,8 @@ try {
   if (initial.warning) notice(initial.warning);
   contextMeter.schedule();
   updateControls();
+  // The Studio read ahead: drawn whole the first time it comes on screen.
+  void studioUI.prefetch();
 } catch (error) {
   // Nothing is left waiting: each action then says itself what it could not do.
   tokenKnown();

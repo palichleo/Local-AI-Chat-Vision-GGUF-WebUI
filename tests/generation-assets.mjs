@@ -138,3 +138,19 @@ test('MOSS Image: the model itself is refused as its text encoder, and each file
     assert.equal((await register(vae, 'vae')).kind, 'vae');
   });
 });
+
+test('a model file is inspected again once it changed, never taken from what was kept', async () => {
+  await fixture(async (directory, assets) => {
+    const path = join(directory, 'encoder.safetensors');
+    await weights(path, { 'model.embed_tokens.weight': encoderTensor });
+    await assets.register({ id: 'encoder', path, kind: 'textEncoder', family: 'krea2' });
+    const first = await assets.resolve('encoder', { kind: 'textEncoder', family: 'krea2' });
+    assert.deepEqual(await assets.resolve('encoder', { kind: 'textEncoder', family: 'krea2' }), first);
+    // Another file in its place, of another layout: refused, as it would be the first time.
+    await weights(path, { 'unrelated.weight': tensor });
+    await assert.rejects(
+      assets.resolve('encoder', { kind: 'textEncoder', family: 'krea2' }),
+      /structure|signature|attendu/i,
+    );
+  });
+});
