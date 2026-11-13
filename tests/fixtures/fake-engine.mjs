@@ -12,6 +12,7 @@ if (!args.includes('--offline') || arg('--host') !== '127.0.0.1') process.exit(2
 const key = arg('--api-key');
 console.log(`Bibliothèque GPU : ${process.env.GGML_BACKEND_PATH || 'aucune'}`);
 console.log(`Métadonnées : ${args.includes('--override-kv') ? arg('--override-kv') : 'sans correction'}`);
+console.log(`Ajustement à la carte : ${process.env.LLAMA_ARG_FIT || 'par défaut'}`);
 console.log(`Modèle lancé : ${arg('-m')}`);
 const server = http.createServer(async (req, res) => {
   if (req.url === '/health') {

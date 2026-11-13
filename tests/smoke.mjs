@@ -300,6 +300,8 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async t => {
       await call('start', {});
       await until(async () => (await status()).state === 'ready');
       assert.ok((await status()).logs.some(line => line.includes('Métadonnées : sans correction')));
+      // llama.cpp's fitting has nothing to adjust (layers and context are set): it is off.
+      assert.ok((await status()).logs.some(line => line === 'Ajustement à la carte : off'));
       await call('stop', {});
     });
 
