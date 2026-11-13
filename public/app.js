@@ -897,9 +897,15 @@ async function refreshStatus() {
   statusRefreshing = true;
   try {
     const previous = state.status.state;
+    const runnerBefore = state.status.runner?.state;
     const wasConnected = state.connected;
     state.status = await (await api('status', undefined, { signal: AbortSignal.timeout(5000) })).json();
     workflowsUI.updateRunner?.(state.status.runner);
+    // The generation engine has just become ready: the Studio reads again what it offers.
+    if (state.status.runner?.state === 'ready' && runnerBefore !== 'ready') {
+      state.studio?.invalidate?.({ tools: true });
+      void state.studio?.prefetch?.();
+    }
     state.connected = true;
     if (previous !== state.status.state || !wasConnected) contextMeter.schedule();
     if (state.status.state !== previous) {

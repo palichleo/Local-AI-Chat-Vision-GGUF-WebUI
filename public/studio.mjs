@@ -2137,11 +2137,15 @@ export function setupStudio({
   /**
    * Reads ahead, as the page opens (app.js): its tools, most of the wait the first time, and the
    * creations of the conversation. The Studio is then drawn whole the first time it comes on screen.
+   * Again once the generation engine is ready: until then no workflow is.
    */
   async function prefetch() {
     try {
-      if (!info) await load();
+      const before = info && JSON.stringify(info);
+      if (!info || toolsStale) await load();
       if (runsStale || runsFor !== place() || seenConversation !== conversation()) await refresh();
+      // Read again (the engine is ready): drawn again if what it offers changed.
+      if (before && JSON.stringify(info) !== before && !ai && !working) render();
     } catch {
       // Said when the Studio opens, which reads them again.
     }
