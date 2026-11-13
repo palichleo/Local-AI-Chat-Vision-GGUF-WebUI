@@ -228,6 +228,58 @@ class RoomTest(unittest.TestCase):
         with patch.dict(sys.modules, torch=card(2.0)):
             self.assertEqual(module.room(2.9), 0.0)
 
+    def test_a_job_is_refused_only_when_its_own_tensors_do_not_fit_and_never_for_more_than_before(self):
+        import math
+
+        from runner.models import pool as module
+        from runner.pipelines import krea2, ltx25, minimax_h3
+
+        def card(free_gib):
+            return SimpleNamespace(cuda=SimpleNamespace(mem_get_info=lambda: (int(free_gib * 1024**3), 0)))
+
+        def asked(working, free_gib):
+            with patch.dict(sys.modules, torch=card(free_gib)):
+                try:
+                    module.require('MiniMax H3', working, 'la taille ou la durée de la vidéo')
+                except RuntimeError as error:
+                    return str(error)
+            return ''
+
+        video = lambda width, height: minimax_h3.working_gib(  # noqa: E731
+            math.prod(minimax_h3.grid_of(dict(frames=124, width=width, height=height))) + 512
+        )
+        draft, final = video(768, 448), video(1344, 768)
+        # What a job asks for grows with it, whatever the files chosen: a draft on an 8 GiB card
+        # (7 free), which the fixed 9 GiB refused; its final needs a larger one.
+        self.assertLess(draft, 6.1)
+        self.assertEqual(asked(draft, 7.0), '')
+        self.assertIn('demande environ 8,0 Go de mémoire vidéo libre', asked(final, 7.0))
+        self.assertIn('7,0 Go sont libres', asked(final, 7.0))
+        self.assertIn('réduisez la taille ou la durée de la vidéo', asked(final, 7.0))
+        # Never more than before: a job whose estimate passes 9 GiB still runs with 9 free.
+        large = ltx25.working_gib(dict(frames=121), 896, 1600, 0)
+        self.assertGreater(large, module.FLOOR_GIB)
+        self.assertEqual(asked(large, 9.0), '')
+        self.assertIn('environ 9,0 Go', asked(large, 8.9))
+        # An image asks for little: its text encoder and its weights follow the card.
+        image = krea2.RESERVE_GIB + krea2.RESERVE_PER_MEGAPIXEL_GIB * 1 + krea2.AHEAD_GIB
+        self.assertEqual(asked(image, 3.5), '')
+        self.assertIn('Go sont libres', asked(image, 3.0))
+        # Subject references add their clips to an LTX video.
+        clip = dict(frames=121)
+        self.assertGreater(ltx25.working_gib(clip, 448, 800, 2), ltx25.working_gib(clip, 448, 800, 0))
+
+    def test_no_pipeline_asks_for_a_fixed_amount_of_video_memory(self):
+        import re
+        from pathlib import Path
+
+        from runner.pipelines import krea2
+
+        for path in Path(krea2.__file__).parent.glob('*.py'):
+            source = path.read_text(encoding='utf-8')
+            fixed = re.search(r'mem_get_info\(\)\[0\]\s*<\s*\d|free\s*<\s*\d+\s*\*\s*1024', source)
+            self.assertIsNone(fixed, path.name)
+
     def test_the_pool_is_still_found_where_the_families_import_it(self):
         from runner.models import ltx25
         from runner.models import pool as module

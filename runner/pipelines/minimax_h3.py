@@ -30,6 +30,18 @@ LOCK_MARGIN_GIB = 0.5
 AHEAD_GIB = 0.5
 
 
+def grid_of(parameters):
+    """(latent frames, rows, columns) of the tokens of a video."""
+    return ((parameters['frames'] - 5) // 17 * 5 + 2, parameters['height'] // 32, parameters['width'] // 32)
+
+
+def working_gib(tokens):
+    """Video memory the model computes with beside its weights, in GiB: 5 (a feed-forward chunk,
+    the allocator's slack, the engine's margin) plus the activations, which grow with the video
+    (1 GiB for a 5 s draft)."""
+    return 5 + tokens * 7168 * 2 * 6 / 1024**3
+
+
 def check(job, family):
     p = job['parameters']
     roles = [ref['role'] for ref in job['references']]
@@ -211,14 +223,20 @@ def generate(job, config, progress):
     from runner.models.headers import header
     from runner.models import conditioning, minimax_h3, minimax_h3_text, minimax_h3_vae
     from runner.models.ltx25 import WeightPool
+    from runner.models.pool import require
     from runner.models.residency import RESIDENCY, open_store, prefetch, use_order
     from runner.pipelines.ltx25 import memory
     from runner.video.export import save_video
 
     if not torch.cuda.is_available():
         raise RuntimeError('Native MiniMax-H3 requires CUDA')
-    if torch.cuda.mem_get_info()[0] < 9 * 1024**3:
-        raise RuntimeError('Free the other GPU models before generating video')
+    # Asked for before anything is loaded: what the model computes with for this video. Its
+    # weights follow the card (see the budget below).
+    require(
+        'MiniMax H3',
+        working_gib(math.prod(grid_of(job['parameters'])) + 512),
+        'la taille ou la durée de la vidéo',
+    )
     start = time.perf_counter()
     torch.cuda.reset_peak_memory_stats()
     timeline = []
@@ -337,7 +355,7 @@ def generate(job, config, progress):
     # The workflow's « attention creuse » (VSA), for the FastH3 models trained with it, decided
     # before the model is read: a dense generation neither loads nor reads ahead the gates. It
     # needs comfy-kitchen's sparse kernel, and a video large enough to gain from it.
-    grid = ((p['frames'] - 5) // 17 * 5 + 2, p['height'] // 32, p['width'] // 32)
+    grid = grid_of(p)
     tokens = math.prod(grid) + 512
     sparse, dense_why = None, None
     if p.get('sparse_attention', 'off') == 'vsa':
@@ -375,7 +393,7 @@ def generate(job, config, progress):
         # with the video (1 GiB for a 5 s draft). Video memory that runs out halves the speed,
         # a smaller share costs a second per step at most.
         # (Sparse attention needs less at its peak: 5 widths instead of 6, measured at 1344 x 768.)
-        room = torch.cuda.mem_get_info()[0] / 1024**3 - 5 - tokens * 7168 * 2 * 6 / 1024**3
+        room = torch.cuda.mem_get_info()[0] / 1024**3 - working_gib(tokens)
         budget = min(config.get('cacheGiB', 6), max(0, room - AHEAD_GIB))
         pool = WeightPool({'model': store}, budget, ahead_gib=AHEAD_GIB)
         if ahead:
@@ -484,7 +502,20 @@ def generate(job, config, progress):
     vae = minimax_h3_vae.video_vae(paths['vae'], 'decoder')
     audio_vae = minimax_h3_vae.audio_vae(paths['audioVae'])
     with torch.inference_mode():
-        state = _stage('decode', dict(vae=vae, audio_vae=audio_vae), state, output_type='pt')
+        try:
+            decoded = _stage('decode', dict(vae=vae, audio_vae=audio_vae), state, output_type='pt')
+        except torch.OutOfMemoryError:
+            decoded = None
+        if decoded is None:
+            # The decoder with the whole video in float32 (6.3 GiB for a 5 s draft, whatever the
+            # files of the model) did not fit under the engine's ceiling, 1 GiB below what the card
+            # had free: an 8 GiB card. Decoded again with all of the card, where the engine would
+            # run the whole video again.
+            _free(scope={})
+            torch.cuda.set_per_process_memory_fraction(1.0)
+            progress(stage='decoding video again without the video memory ceiling')
+            decoded = _stage('decode', dict(vae=vae, audio_vae=audio_vae), state, output_type='pt')
+    state = decoded
     videos, audio, rate = state.get('videos'), state.get('audio'), state.get('sampling_rate')
     del vae, audio_vae
     _free(scope={})

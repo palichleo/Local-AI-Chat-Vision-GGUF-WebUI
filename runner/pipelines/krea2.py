@@ -136,9 +136,13 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
 
     if not torch.cuda.is_available():
         raise RuntimeError('The native Krea2 implementation requires a CUDA GPU')
-    free, _ = torch.cuda.mem_get_info()
-    if free < 9 * 1024**3:
-        raise RuntimeError(f'Only {free / 1024**3:.1f} GiB VRAM free. Free other models first; no process was stopped.')
+    from runner.models.pool import require
+
+    # What a step needs beside the weights (its own tensors grow with the picture): asked for
+    # before anything is loaded. The weights follow the card: see the budget below.
+    megapixels = plan['width'] * plan['height'] / 1024**2
+    reserve = RESERVE_GIB + RESERVE_PER_MEGAPIXEL_GIB * megapixels
+    require('Krea 2', reserve + AHEAD_GIB, 'la taille de l’image')
     if plan['sampler'] != 'euler' or plan['scheduler'] != 'simple':
         raise ValueError('Krea2 implements Euler + simple only')
     if plan['cfg'] != 1:
@@ -239,10 +243,8 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
         for index, (item, path) in enumerate(files['loras']):
             stores['lora' + str(index)] = cleanup.enter_context(open_store(str(path)))
             adapters.append(('lora' + str(index), item['strength']))
-        # What the card has free now, less what a step needs beside the weights (its own
-        # tensors grow with the picture, and the weights that do not stay pass through).
-        megapixels = plan['width'] * plan['height'] / 1024**2
-        reserve = RESERVE_GIB + RESERVE_PER_MEGAPIXEL_GIB * megapixels
+        # What the card has free now, less what a step needs beside the weights (the weights
+        # that do not stay pass through).
         budget = room(reserve + AHEAD_GIB)
         if args.cache_gib is not None:
             budget = min(budget, args.cache_gib)

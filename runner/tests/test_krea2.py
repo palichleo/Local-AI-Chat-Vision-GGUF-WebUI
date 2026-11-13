@@ -204,5 +204,46 @@ class KeptPromptTests(unittest.TestCase):
             self.encode('a fox')
 
 
+class StreamedEncoderTests(unittest.TestCase):
+    """The text encoder on a card it does not fit on: one module's weights there at a time."""
+
+    def test_each_module_receives_its_weights_for_its_forward_and_gives_them_back(self):
+        try:
+            import torch
+            from accelerate import init_empty_weights
+        except ImportError:
+            self.skipTest('torch and accelerate are required')
+        from runner.models.krea2_text import stream_weights
+
+        def build():
+            return torch.nn.Sequential(torch.nn.Embedding(10, 4), torch.nn.Linear(4, 4), torch.nn.Linear(4, 2))
+
+        torch.manual_seed(0)
+        reference = build().double()
+        weights = dict(reference.named_parameters())
+        with init_empty_weights():
+            model = build()
+        held, loaded = [], []
+
+        def load(name):
+            # How many weights are out of the file while this one is asked for.
+            held.append(sum(not parameter.is_meta for parameter in model.parameters()))
+            loaded.append(name)
+            return weights[name].detach().clone()
+
+        stream_weights(model, load, 'cpu')
+        tokens = torch.tensor([[1, 2, 3]])
+        with torch.inference_mode():
+            first, second = model(tokens), model(tokens)
+            expected = reference(tokens)
+        # The same numbers, in the precision of the weights given (not that of the empty model).
+        self.assertEqual(first.dtype, torch.float64)
+        self.assertTrue(torch.equal(first, expected) and torch.equal(second, expected))
+        # Read again at every forward, one module at a time, and nothing is left behind.
+        self.assertEqual(loaded, ['0.weight', '1.weight', '1.bias', '2.weight', '2.bias'] * 2)
+        self.assertLessEqual(max(held), 1)
+        self.assertTrue(all(parameter.is_meta for parameter in model.parameters()))
+
+
 if __name__ == '__main__':
     unittest.main()

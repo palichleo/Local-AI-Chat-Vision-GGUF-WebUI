@@ -13,6 +13,17 @@ REFINE_SIGMAS = (0.909375, 0.725, 0.421875)
 TWO_PASS_SIDE = 512
 
 
+def working_gib(parameters, width, height, subjects):
+    """Video memory the model computes with beside its weights while sampling at this size, in
+    GiB: 5 (the connectors and encoders at their peak, the allocator's slack, the engine's margin)
+    plus the activations, which grow with the video. Each subject reference adds its own short
+    clip of tokens to the sequence."""
+    area = (height // 32) * (width // 32)
+    clip = (parameters.get('msr_frames', 33) - 1) // 8 + 1
+    tokens = area * ((parameters['frames'] - 1) // 8 + 1 + subjects * clip)
+    return 5 + tokens * 4096 * 2 * 30 / 1024**3
+
+
 def first_pass_size(parameters, components):
     """The half size a large video is first sampled at, or None for a single pass.
 
@@ -86,8 +97,17 @@ def generate(job, config, progress):
 
     if not torch.cuda.is_available():
         raise RuntimeError('Native LTX2.5 requires CUDA')
-    if torch.cuda.mem_get_info()[0] < 9 * 1024**3:
-        raise RuntimeError('Free the other GPU models before generating video')
+    from runner.models.pool import require
+
+    # Asked for before anything is loaded: what the model computes with for the first pass of
+    # this video. Its weights follow the card (see `share` below).
+    p = job['parameters']
+    subjects = sum(ref['role'] == 'msr_image' for ref in job['references'])
+    require(
+        'LTX 2.5',
+        working_gib(p, *(first_pass_size(p, job['components']) or (p['width'], p['height'])), subjects),
+        'la taille ou la durée de la vidéo',
+    )
     start = time.perf_counter()
     torch.cuda.reset_peak_memory_stats()
     # Every stage with its elapsed time and GPU memory, kept with the video to find slow phases.
@@ -153,21 +173,14 @@ def generate(job, config, progress):
             stores[key] = stack.enter_context(open_store(item['path']))
             adapters.append((key, item['strength']))
         free = torch.cuda.mem_get_info()[0] / 1024**3
-        p = job['parameters']
         # The share of the DiT kept on the GPU; the rest is copied from RAM at every step, at
-        # about 12 GiB/s. What the model computes with comes first: 5 GiB (the connectors and
-        # encoders at their peak, the allocator's slack, the engine's margin) plus the
-        # activations, which grow with the video. Video memory that runs out halves the speed,
-        # a smaller share costs a second per step at most.
+        # about 12 GiB/s. What the model computes with comes first (working_gib). Video memory
+        # that runs out halves the speed, a smaller share costs a second per step at most.
         first = first_pass_size(p, job['components'])
-        subjects = sum(ref['role'] == 'msr_image' for ref in job['references'])
 
         def share(width, height):
             """GiB of the DiT kept on the GPU while sampling at this size."""
-            area = (height // 32) * (width // 32)
-            # Each subject reference adds its own short clip of tokens to the sequence.
-            tokens = area * ((p['frames'] - 1) // 8 + 1 + subjects * ((p.get('msr_frames', 33) - 1) // 8 + 1))
-            kept = max(0, free - 5 - tokens * 4096 * 2 * 30 / 1024**3)
+            kept = max(0, free - working_gib(p, width, height, subjects))
             return min(config['cacheGiB'], kept) if 'cacheGiB' in config else kept
 
         budget = share(*(first or (p['width'], p['height'])))

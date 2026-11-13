@@ -8,12 +8,47 @@ from pathlib import Path
 # the same prompt drawn again with another seed does not bring the 5 GiB encoder back.
 KEPT = OrderedDict()
 KEEP = 8
+# Video memory the encoder needs free beyond its weights to sit whole on the card, in GiB: what it
+# takes while it reads a prompt (0.2 measured) and the margin the engine keeps under what is free (1).
+TEXT_ROOM_GIB = 1.3
 
 
 def _identity(path):
     path = Path(path).resolve()
     stat = path.stat()
     return (str(path), stat.st_size, stat.st_mtime_ns)
+
+
+def stream_weights(model, load, device):
+    """For a card the model does not fit on: each module receives its own weights for the time of
+    its forward and gives them back after it, so the card holds one layer at a time (and the
+    table of the tokens, 0.8 GiB, while they are looked up). `load(name)` gives a parameter on
+    the card, in the working precision. Read once per prompt, the model then costs one copy of
+    its file to the card, as when it sits there whole; a text written token by token (the prompt
+    expansion) pays that copy at every token.
+    """
+    from accelerate.utils import set_module_tensor_to_device
+
+    for prefix, module in model.named_modules():
+        names = [name for name, _ in module.named_parameters(recurse=False)]
+        if not names:
+            continue
+
+        def bring(module, _inputs, names=names, prefix=prefix):
+            for name in names:
+                value = load(prefix + '.' + name if prefix else name)
+                # In its own precision: without it, the precision of the empty model (float32).
+                set_module_tensor_to_device(module, name, device, value=value, dtype=value.dtype)
+
+        def leave(module, _inputs, _output, names=names):
+            for name in names:
+                set_module_tensor_to_device(module, name, 'meta')
+
+        module.register_forward_pre_hook(bring)
+        module.register_forward_hook(leave)
+    for name, _ in list(model.named_buffers()):
+        set_module_tensor_to_device(model, name, device)
+    return model
 
 
 def encode_prompt(plan, files, tokenizer_path, tensor, device, dtype, progress, ram_reserve=None):
@@ -51,65 +86,80 @@ def encode_prompt(plan, files, tokenizer_path, tensor, device, dtype, progress, 
         config._attn_implementation = 'sdpa'
         with init_empty_weights():
             text_model = Qwen3ForCausalLM(config)
+        expected = {key: parameter for key, parameter in text_model.named_parameters() if key != 'lm_head.weight'}
+        # In the working precision whatever the precision of its file: 7.5 GiB for Qwen3-VL-4B.
+        size = sum(parameter.numel() for parameter in expected.values()) * torch.finfo(dtype).bits // 8
+        whole = size + TEXT_ROOM_GIB * 1024**3 <= torch.cuda.mem_get_info()[0]
         # The file stays in RAM between images when it fits beside the model, never in its
         # place: the model is read at every step, the encoder once per prompt. Unlocked, for the
         # same reason: the share of locked RAM goes to the model (4.9 GiB of it held the 12.6 of
         # the model out).
         with open_store(str(files['encoder']), reserve=ram_reserve, evict=False, pin=False) as store:
-            for key, parameter in list(text_model.named_parameters()):
-                if key == 'lm_head.weight':
-                    continue
-                if key not in store.keys():
+            listed = set(store.keys())
+
+            def load(key):
+                # The head writes with the table of the tokens: one tensor in the file.
+                key = 'model.embed_tokens.weight' if key == 'lm_head.weight' else key
+                if key not in listed:
                     raise ValueError('Missing text weight: ' + key)
                 value = tensor(store, key)
-                if tuple(value.shape) != tuple(parameter.shape):
+                if tuple(value.shape) != tuple(expected[key].shape):
                     raise ValueError('Text shape mismatch: ' + key)
-                set_module_tensor_to_device(text_model, key, device, value=value, dtype=dtype)
-        text_model.lm_head.weight = text_model.model.embed_tokens.weight
-        text_model.eval().to(device)
-        progress('text encoder loaded')
-        if plan['refine_enabled']:
-            progress('expanding prompt')
-            options = plan['promptExpansion']
-            prompt = (
-                '<|im_start|>user\n'
-                + options['template'].replace('{{prompt}}', plan['prompt'])
-                + '<|im_end|>\n<|im_start|>assistant\n'
-            )
-            tokens = tokenizer(prompt, return_tensors='pt').to(device)
-            torch.manual_seed(options['seed'])
-            generated = text_model.generate(
-                **tokens,
-                do_sample=True,
-                max_new_tokens=options['maxTokens'],
-                temperature=options['temperature'],
-                top_k=options['topK'],
-                top_p=options['topP'],
-                min_p=options['minP'],
-                repetition_penalty=options['repetitionPenalty'],
-                eos_token_id=[151643, 151645],
-                pad_token_id=151643,
-            )
-            plan['prompt'] = tokenizer.decode(
-                generated[0, tokens.input_ids.shape[1] :], skip_special_tokens=True
-            ).strip()
-            if not plan['prompt']:
-                raise RuntimeError('Prompt expansion returned no text')
-            plan['prompt'] += options['suffix']
-            del generated, tokens
-        progress('encoding prompt', prompt=plan['prompt'])
-        prefix = '<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n'
-        text = prefix + plan['prompt'] + '<|im_end|>\n<|im_start|>assistant\n'
-        tokens = tokenizer(text, return_tensors='pt').to(device)
-        outputs = text_model.model(**tokens, output_hidden_states=True, use_cache=False)
-        prefix_length = len(tokenizer.encode(prefix))
-        conditioning = torch.stack(
-            [outputs.hidden_states[i][:, prefix_length:] for i in (2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35)], dim=2
-        ).to(dtype)
-        del outputs, tokens, text_model
-        gc.collect()
-        torch.cuda.empty_cache()
-        progress('prompt encoded')
+                return value
+
+            if whole:
+                for key in expected:
+                    set_module_tensor_to_device(text_model, key, device, value=load(key), dtype=dtype)
+                text_model.lm_head.weight = text_model.model.embed_tokens.weight
+                text_model.eval().to(device)
+            else:
+                # A card it does not fit on (8 GiB and less): its layers pass through one at a time.
+                for key in expected:
+                    if key not in listed:
+                        raise ValueError('Missing text weight: ' + key)
+                stream_weights(text_model.eval(), load, device)
+            progress('text encoder loaded', whole=whole)
+            if plan['refine_enabled']:
+                progress('expanding prompt')
+                options = plan['promptExpansion']
+                prompt = (
+                    '<|im_start|>user\n'
+                    + options['template'].replace('{{prompt}}', plan['prompt'])
+                    + '<|im_end|>\n<|im_start|>assistant\n'
+                )
+                tokens = tokenizer(prompt, return_tensors='pt').to(device)
+                torch.manual_seed(options['seed'])
+                generated = text_model.generate(
+                    **tokens,
+                    do_sample=True,
+                    max_new_tokens=options['maxTokens'],
+                    temperature=options['temperature'],
+                    top_k=options['topK'],
+                    top_p=options['topP'],
+                    min_p=options['minP'],
+                    repetition_penalty=options['repetitionPenalty'],
+                    eos_token_id=[151643, 151645],
+                    pad_token_id=151643,
+                )
+                plan['prompt'] = tokenizer.decode(
+                    generated[0, tokens.input_ids.shape[1] :], skip_special_tokens=True
+                ).strip()
+                if not plan['prompt']:
+                    raise RuntimeError('Prompt expansion returned no text')
+                plan['prompt'] += options['suffix']
+                del generated, tokens
+            progress('encoding prompt', prompt=plan['prompt'])
+            prefix = '<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n'
+            text = prefix + plan['prompt'] + '<|im_end|>\n<|im_start|>assistant\n'
+            tokens = tokenizer(text, return_tensors='pt').to(device)
+            outputs = text_model.model(**tokens, output_hidden_states=True, use_cache=False)
+            prefix_length = len(tokenizer.encode(prefix))
+            layers = (2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35)
+            conditioning = torch.stack([outputs.hidden_states[i][:, prefix_length:] for i in layers], dim=2).to(dtype)
+            del outputs, tokens, text_model
+            gc.collect()
+            torch.cuda.empty_cache()
+            progress('prompt encoded')
         if kept is not None:
             KEPT[kept] = conditioning.cpu()
             while len(KEPT) > KEEP:

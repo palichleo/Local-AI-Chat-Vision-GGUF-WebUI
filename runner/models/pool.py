@@ -26,6 +26,30 @@ def room(reserve_gib):
     return max(0.0, free / GiB - reserve_gib)
 
 
+# What every job was asked to find free before the floor followed the job (0.5.43 and before): a
+# job is never asked for more than then, so none that ran is refused now.
+FLOOR_GIB = 9
+
+
+def require(label, working_gib, smaller):
+    """Refuses, in the user's words, a job whose own tensors would not find their place in the
+    video memory that is free now. The weights are not counted: a share of them stays on the card
+    where there is room, the rest passes through, so a model in smaller files fits a smaller card.
+    `working_gib` is what the pipeline itself sets aside beside them for this job (it grows with
+    the picture), `smaller` what the user may reduce.
+    """
+    import torch
+
+    free = torch.cuda.mem_get_info()[0] / GiB
+    need = min(working_gib, FLOOR_GIB)
+    if free < need:
+        said = lambda value: f'{value:.1f}'.replace('.', ',')  # noqa: E731
+        raise RuntimeError(
+            f'{label} demande environ {said(need)} Go de mémoire vidéo libre pour cette création ; '
+            f'{said(free)} Go sont libres. Fermez ce qui occupe la carte graphique, ou réduisez {smaller}.'
+        )
+
+
 RECENT = 384 * 1024**2
 
 
