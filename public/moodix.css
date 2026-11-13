@@ -925,139 +925,160 @@ body[data-view='home'] .chat-panel,
 body[data-view='studio']:not([data-chat='open']) .chat-panel {
   display: none;
 }
-.chat-bar,
 .chat-scrim {
   display: none;
 }
-body[data-view='studio'] .chat-bar {
+/* The four colours of the logo as a line, in its proportions (4 / 2 / 3 / 1.5). */
+.moodix-rule {
   display: flex;
+  pointer-events: none;
 }
-/* Opened, the bar keeps its place: the Studio does not move under the chat. */
-body[data-view='studio'][data-chat='open'] .chat-bar {
-  visibility: hidden;
+.moodix-rule span:nth-child(1) {
+  flex: 4;
+  background: #3d6bf5;
 }
-/* As wide as the blocks of the Studio, against the bottom of the window: the chat icon, who
-   answers, the way to write, an arrow to open it; on top, the four colours of the logo. */
-.chat-bar {
+.moodix-rule span:nth-child(2) {
+  flex: 2;
+  background: #22a060;
+}
+.moodix-rule span:nth-child(3) {
+  flex: 3;
+  background: #f6c343;
+}
+.moodix-rule span:nth-child(4) {
+  flex: 1.5;
+  background: #e8402f;
+}
+/* « Agent », left of « Générer » (moodix-design.md 15 bis): the chat of Moodix AI opens from it as
+   it did from the band at the foot of the Studio. As tall as Générer, the four colours along its
+   foot, against its edge. */
+#studio-view .studio-agent {
   position: relative;
-  flex: none;
+  overflow: hidden;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  margin-left: auto;
+  height: calc(var(--format-button, 38px) + 2 * var(--format-inset, 4px));
+  min-height: 0;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  width: calc(100% - 2 * var(--pad));
-  height: 44px;
-  margin: 0 auto;
+  gap: 8px;
   padding: 0 16px;
-  border: 0;
-  border-radius: 0 0 12px 12px;
-  background: #15171c;
-  color: #aeb4bf;
+  border: 1px solid #262a33;
+  border-radius: 8px;
+  background: #14161b;
+  color: var(--ink);
   font-family: var(--font-ui);
+  font-weight: 700;
   font-size: 14px;
-  text-align: left;
   cursor: pointer;
   transition:
     background-color 0.2s ease,
     box-shadow 0.3s ease;
 }
-:root[data-theme='light'] .chat-bar {
-  background: var(--surface);
-  color: var(--muted);
+#studio-view .studio-agent svg {
+  width: 18px;
+  height: 18px;
 }
-.chat-bar:hover,
-.chat-bar:focus-visible {
+:root[data-theme='light'] #studio-view .studio-agent {
+  background: var(--surface);
+  border-color: var(--line-strong);
+}
+#studio-view .studio-agent:hover,
+#studio-view .studio-agent:focus-visible {
   background: var(--hover);
 }
-.chat-bar:focus-visible {
+#studio-view .studio-agent:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-.chat-bar-rule {
+/* « Agent » and « Générer » as one group at the right of the bar: they wrap together. */
+.studio-actionbar {
+  container: actionbar / inline-size;
+}
+.studio-go-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+#studio-view .studio-go-group .studio-agent,
+#studio-view .studio-go-group .studio-go {
+  margin-left: 0;
+}
+/* The bar with its formats just too narrow for one line: « Agent » keeps its icon (its name in
+   its tooltip). */
+@container actionbar (max-width: 540px) {
+  #studio-view .has-formats .studio-go-group .studio-agent {
+    justify-content: center;
+    width: calc(var(--format-button, 38px) + 2 * var(--format-inset, 4px));
+    padding: 0;
+  }
+  .has-formats .studio-agent-word {
+    display: none;
+  }
+}
+/* Nothing to make here: the chat stays at hand, under the message. */
+.studio-desk.is-empty .studio-agent {
+  margin: 14px auto 0;
+}
+/* Opened, the button keeps its place: the chat unfolds from it, the Studio does not move. */
+body[data-view='studio'][data-chat='open'] #studio-view .studio-agent {
+  visibility: hidden;
+}
+.studio-agent-rule {
   position: absolute;
-  top: 0;
   left: 0;
   right: 0;
-  display: flex;
-  gap: 3px;
-  height: 2px;
+  bottom: 0;
+  height: 3px;
   overflow: hidden;
-}
-.chat-bar-rule span {
-  border-radius: 999px;
-}
-.chat-bar-rule span:nth-child(1) {
-  flex: 4;
-  background: #3d6bf5;
-}
-.chat-bar-rule span:nth-child(2) {
-  flex: 2;
-  background: #22a060;
-}
-.chat-bar-rule span:nth-child(3) {
-  flex: 3;
-  background: #f6c343;
-}
-.chat-bar-rule span:nth-child(4) {
-  flex: 1.5;
-  background: #e8402f;
-}
-.chat-bar-icon {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  color: var(--ink);
-}
-.chat-bar-name {
-  flex: none;
-  color: var(--ink);
-  font-weight: 800;
-  white-space: nowrap;
-}
-.chat-bar-hint {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.chat-bar-open {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  margin-left: auto;
-  transform: rotate(-90deg);
 }
 /* Moodix AI writes while the chat is folded: a light runs along the colours. */
-.chat-bar-rule::after {
+.studio-agent-rule::after {
   content: '';
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
-  width: 18%;
+  width: 30%;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent);
   opacity: 0;
-  pointer-events: none;
 }
-.chat-bar.is-working .chat-bar-rule::after {
+.studio-agent.is-working .studio-agent-rule::after {
   opacity: 1;
-  animation: chat-bar-light 1.4s ease-in-out infinite;
+  animation: agent-light 1.4s ease-in-out infinite;
 }
-@keyframes chat-bar-light {
+@keyframes agent-light {
   from {
-    transform: translateX(0);
+    transform: translateX(-100%);
   }
   to {
-    transform: translateX(455%);
+    transform: translateX(340%);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-bar.is-working .chat-bar-rule::after {
-    left: 41%;
+  .studio-agent.is-working .studio-agent-rule::after {
+    left: 35%;
     animation: none;
   }
 }
-/* An answer came while the chat was folded: the band glows until the chat is opened. */
-.chat-bar[data-unread='true'] {
+/* An answer came while the chat was folded: the button glows until the chat is opened. */
+#studio-view .studio-agent[data-unread='true'] {
   box-shadow: 0 0 16px rgba(246, 195, 67, 0.45);
+}
+/* The Sortie: the four colours of the logo along its foot, the whole width (2 px, 3 px apart). */
+.studio-block.is-output {
+  position: relative;
+}
+.studio-output-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  height: 2px;
+  gap: 3px;
 }
 /* Opened: over a dimmed Studio, the message box in the middle of the room left to the page
    (beside the sidebar and the files), the messages above it up to near the top, where they
@@ -1148,7 +1169,8 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 6px var(--pad) 8px;
+  /* 18 px under the Sortie down to the window (no band at the foot any more, 15 bis). */
+  padding: 6px var(--pad) 18px;
   scrollbar-width: thin;
   container: studio / inline-size;
 }
@@ -1597,11 +1619,17 @@ video.studio-frame-result {
   font-size: 13px;
   font-weight: 400;
 }
+/* The format chosen in dark grey: « Générer » is the only white surface (moodix-design.md 19). */
 #studio-view .studio-format[aria-checked='true'],
 #studio-view .studio-format.is-on {
-  background: var(--selected);
-  color: var(--on-selected);
+  background: #2a2e37;
+  color: #eceef2;
   font-weight: 600;
+}
+:root[data-theme='light'] #studio-view .studio-format[aria-checked='true'],
+:root[data-theme='light'] #studio-view .studio-format.is-on {
+  background: #dcdfe5;
+  color: #0b0c0f;
 }
 #studio-view .studio-format.is-more {
   min-width: 44px;
@@ -1639,11 +1667,15 @@ video.studio-frame-result {
   font-size: 13px;
 }
 .studio-format-menu button[aria-pressed='true'] {
-  background: var(--selected);
-  color: var(--on-selected);
+  background: #2a2e37;
+  color: #eceef2;
 }
-/* Générer: full in the action colour, 12 px corners, exactly as tall as the format bar at its
-   left, a thin progress bar along its foot. */
+:root[data-theme='light'] .studio-format-menu button[aria-pressed='true'] {
+  background: #dcdfe5;
+  color: #0b0c0f;
+}
+/* Générer (moodix-design.md 5): light, the action red as a band of 8 px along its left edge, 8 px
+   corners, exactly as tall as the format bar, a thin progress bar along its foot. */
 #studio-view .studio-go {
   position: relative;
   overflow: hidden;
@@ -1653,12 +1685,12 @@ video.studio-frame-result {
   min-width: 190px;
   height: calc(var(--format-button) + 2 * var(--format-inset));
   min-height: 0;
-  padding: 0 18px 0 20px;
+  padding: 0 18px 0 26px;
   border: 0;
-  border-radius: 12px;
-  background: var(--fn-action);
+  border-radius: 8px;
+  background: var(--selected);
   background-image: none;
-  color: var(--on-action);
+  color: var(--on-selected);
   font-family: var(--font-ui);
   font-weight: 800;
   font-size: 16px;
@@ -1678,6 +1710,15 @@ video.studio-frame-result {
   opacity: 1;
   cursor: progress;
 }
+#studio-view .studio-go::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: var(--fn-action);
+}
 #studio-view .studio-go svg {
   display: none;
 }
@@ -1686,11 +1727,14 @@ video.studio-frame-result {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
-  opacity: 0.7;
+  opacity: 1;
   background: none;
   border: 0;
   padding: 0;
-  color: inherit;
+  color: #6e7480;
+}
+:root[data-theme='light'] #studio-view .studio-go-key {
+  color: #9aa0ab;
 }
 .studio-go-bar {
   position: absolute;
@@ -1698,7 +1742,7 @@ video.studio-frame-result {
   bottom: 0;
   height: 3px;
   width: calc(var(--studio-progress, 0) * 100%);
-  background: rgba(11, 12, 15, 0.6);
+  background: var(--fn-action);
   transition: width 0.2s linear;
 }
 .studio-go.is-indeterminate .studio-go-bar {
@@ -1736,8 +1780,12 @@ video.studio-frame-result {
   font-size: 13px;
 }
 @container studio (max-width: 719px) {
-  #studio-view .studio-go {
+  #studio-view .studio-go,
+  .studio-go-group {
     flex: 1 1 100%;
+  }
+  #studio-view .studio-go-group .studio-go {
+    flex: 1 1 auto;
   }
   #studio-view .studio-go-key {
     display: none;
@@ -2874,7 +2922,7 @@ video.studio-frame-result {
 }
 html[data-switch] body[data-view='chat'] #chat-panel,
 html[data-switch] body[data-view='studio'][data-chat='open'] #chat-panel,
-html[data-switch] body[data-view='studio']:not([data-chat='open']) #chat-bar {
+html[data-switch] body[data-view='studio']:not([data-chat='open']) #agent-open {
   view-transition-name: chat;
 }
 html[data-switch='studio'] #studio-view,

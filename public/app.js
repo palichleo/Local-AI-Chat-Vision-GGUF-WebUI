@@ -2347,15 +2347,16 @@ alignConversation();
 setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 
 /**
- * While the chat is folded into its bar in the Studio, the bar tells what Moodix AI does: a light
- * runs along it while an answer is written, and it glows once an answer came unseen, until the
- * chat is opened.
+ * While the chat is folded in the Studio, its « Agent » button tells what Moodix AI does: a light
+ * runs along its colours while an answer is written, and it glows once an answer came unseen,
+ * until the chat is opened.
  */
 function showLastReply(streaming = '') {
-  const bar = $('chat-bar'),
+  const agent = $('agent-open'),
     folded = state.view === 'studio' && document.body.dataset.chat !== 'open';
-  bar.classList.toggle('is-working', Boolean(streaming) && state.generating === true);
-  if (streaming && folded) bar.dataset.unread = 'true';
+  if (!agent) return;
+  agent.classList.toggle('is-working', Boolean(streaming) && state.generating === true);
+  if (streaming && folded) agent.dataset.unread = 'true';
 }
 /** What depends on the view: the switch between Chat and Studio, the context of the message box. */
 function syncViews() {
@@ -2365,8 +2366,12 @@ function syncViews() {
   $('mode-switch').querySelector('.mode-switch-label').textContent = label;
   // The logo of the mode it is in: MDX-CHAT in the chat, MDX-STUDIO in the Studio.
   $('mode-switch').querySelector('.mode-word').textContent = studio ? '-STUDIO' : '-CHAT';
-  $('mode-switch').setAttribute('aria-label', studio ? 'Revenir au chat' : 'Passer au Studio');
-  $('mode-switch').title = studio ? 'Revenir au chat' : 'Passer au Studio';
+  // The mode it is in, and where a click goes (moodix-design.md 18).
+  const where = studio
+    ? 'Tu es dans le Studio · cliquer pour passer au Chat'
+    : 'Tu es dans le Chat · cliquer pour passer au Studio';
+  $('mode-switch').setAttribute('aria-label', where);
+  $('mode-switch').title = where;
 }
 
 /**
@@ -2507,6 +2512,7 @@ const studioUI = setupStudio({
   stopTurn: () => state.controller?.abort(),
   onConversation: () => showLastReply(),
   afterMove,
+  openAgent: () => void openChat(),
 });
 state.studio = studioUI;
 const generationUI = setupGenerationUI({
@@ -2880,7 +2886,8 @@ function openChat() {
   return switchView('open', () => {
     unsendChat();
     document.body.dataset.chat = 'open';
-    delete $('chat-bar').dataset.unread;
+    const agent = $('agent-open');
+    if (agent) delete agent.dataset.unread;
     // A conversation already begun: in the middle of the window at once, as once a message is sent.
     if ($('messages').childElementCount) centreOpenedChat();
     const area = $('chat-area');
@@ -2889,15 +2896,15 @@ function openChat() {
   });
 }
 /**
- * The chat folds back into its bar: Moodix AI sets the Studio, or Échap, or a click beside it
- * (`refocus`: the keyboard goes back to the bar).
+ * The chat folds back into « Agent »: Moodix AI sets the Studio, or Échap, or a click beside it
+ * (`refocus`: the keyboard goes back to the button).
  */
 function closeChat({ refocus = false } = {}) {
   if (document.body.dataset.chat !== 'open') return Promise.resolve();
   return switchView('close', () => {
     delete document.body.dataset.chat;
     unsendChat();
-    if (refocus) $('chat-bar').focus({ preventScroll: true });
+    if (refocus) $('agent-open')?.focus({ preventScroll: true });
   });
 }
 /**
@@ -2951,7 +2958,6 @@ function unsendChat() {
   $('chat-panel').style.removeProperty('--chat-lift');
 }
 state.onChatSent = chatSent;
-$('chat-bar').onclick = () => void openChat();
 $('chat-scrim').onclick = () => void closeChat({ refocus: true });
 $('studio-open').onclick = () => showStudio();
 $('chat-open').onclick = () => showChat();

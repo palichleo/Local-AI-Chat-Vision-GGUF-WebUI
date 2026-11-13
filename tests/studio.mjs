@@ -709,6 +709,7 @@ async function studioPage(tools, routes = {}, options = {}) {
     reveal: () => revealed.push(true),
     pace: 0,
     ...(options.run ? { run: options.run } : {}),
+    ...(options.openAgent ? { openAgent: options.openAgent } : {}),
   });
   if (options.open !== false) await studio.open();
   return {
@@ -972,6 +973,52 @@ test('Ctrl + Entrée generates from anywhere in the Studio, and the button says 
     assert.equal(started(), 2);
   } finally {
     restore();
+  }
+});
+
+test('« Agent », left of « Générer », opens the chat as the band at the foot did; the Sortie wears the four colours', async () => {
+  const image = {
+    id: 'w',
+    name: 'Image',
+    roles: {},
+    limits: sizes,
+    direct: true,
+    size: { width: 1024, height: 1024 },
+    settings: [],
+    seeded: true,
+  };
+  let opened = 0;
+  const { body, restore } = await studioPage({ create_image: [image] }, {}, { openAgent: () => opened++ });
+  try {
+    const group = body.find('studio-go-group')[0],
+      [agent] = body.find('studio-agent'),
+      go = body.find('studio-go')[0];
+    assert.equal(agent.id, 'agent-open');
+    assert.deepEqual(group.children.slice(0, 2), [agent, go], 'just before Générer, in one group');
+    assert.equal(agent.find('studio-agent-word')[0].textContent, 'Agent');
+    // An icon, its word, its name for screen readers and in its tooltip.
+    assert.equal(agent.attributes['aria-label'], 'Agent Moodix AI');
+    assert.equal(agent.title, 'Agent Moodix AI');
+    assert.equal(agent.attributes['aria-controls'], 'chat-panel');
+    assert.equal(agent.find('studio-agent-rule').length, 1);
+    agent.onclick();
+    assert.equal(opened, 1);
+    // The Sortie: the four colours of the logo along its foot.
+    const output = body.find('is-output')[0];
+    assert.equal(output.children.at(-1).className, 'moodix-rule studio-output-rule');
+    assert.equal(output.children.at(-1).children.length, 4);
+  } finally {
+    restore();
+  }
+  // Nothing ready to make: the chat stays at hand all the same.
+  const empty = await studioPage({ create_image: [] }, {}, { openAgent: () => opened++ });
+  try {
+    const [agent] = empty.body.find('studio-agent');
+    assert.ok(agent, 'Agent shown with the message');
+    agent.onclick();
+    assert.equal(opened, 2);
+  } finally {
+    empty.restore();
   }
 });
 

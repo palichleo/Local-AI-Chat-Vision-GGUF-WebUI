@@ -168,6 +168,8 @@ export function setupStudio({
   afterMove = () => Promise.resolve(),
   // The pace of the pointer: 1 as it is seen, 0 at once (the tests).
   pace = 1,
+  // « Agent »: opens the chat of Moodix AI, as the band at the foot of the Studio did.
+  openAgent = () => {},
 }) {
   const $ = id => document.getElementById(id);
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms * pace));
@@ -262,6 +264,23 @@ export function setupStudio({
     control.onclick = onclick;
     return control;
   };
+  /** The four colours of the logo, in their proportions (4 / 2 / 3 / 1.5), as a line. */
+  function rule(className) {
+    const line = node('span', 'moodix-rule ' + className);
+    line.setAttribute('aria-hidden', 'true');
+    for (let index = 0; index < 4; index++) line.append(node('span'));
+    return line;
+  }
+  // « Agent », left of « Générer » (moodix-design.md 15 bis): the chat of Moodix AI opens from it as
+  // it did from the band at the foot. Made once and moved from one drawing to the next: the move
+  // between the chat and the Studio folds the chat into it (view transition, moodix.css).
+  const agent = button('studio-agent', '', () => openAgent(), 'agent');
+  agent.id = 'agent-open';
+  agent.title = 'Agent Moodix AI';
+  agent.setAttribute('aria-label', 'Agent Moodix AI');
+  agent.setAttribute('aria-controls', 'chat-panel');
+  // Its word leaves when the bar is just too narrow for one line (moodix.css): its name stays.
+  agent.append(node('span', 'studio-agent-word', 'Agent'), rule('studio-agent-rule'));
   // The settings Moodix AI may change wear its tile; the one it is changing, a ring; those it
   // has set, a fine trace while it works. Once it has stopped, nothing is framed any more.
   function aiTarget(element, key) {
@@ -1767,8 +1786,14 @@ export function setupStudio({
   // ------------------------------------------------------------------ the page
   function message(text) {
     const panel = node('section', 'studio-desk is-empty');
-    panel.append(node('p', 'asset-empty', text));
+    // The chat stays at hand when nothing can be made here.
+    panel.append(node('p', 'asset-empty', text), agent);
     return panel;
+  }
+  /** The Sortie with the four colours of the logo along its foot (moodix-design.md 15 bis). */
+  function ruled(block) {
+    block.append(rule('studio-output-rule'));
+    return block;
   }
   /**
    * The Studio as it will be, while its tools are read the first time: its four blocks on their
@@ -1782,14 +1807,11 @@ export function setupStudio({
     desk.setAttribute('aria-busy', 'true');
     said.setAttribute('role', 'status');
     screen.append(node('div', 'studio-stage'));
-    preview.append(screen, node('div', 'studio-actionbar is-waiting'));
-    const blocks = [
-      node('section', 'studio-block is-input'),
-      preview,
-      node('section', 'studio-block is-settings'),
-      node('section', 'studio-block is-output'),
-    ];
-    desk.append(said, ...blocks.map(grained));
+    const waiting = node('div', 'studio-actionbar is-waiting');
+    waiting.append(agent);
+    preview.append(screen, waiting);
+    const blocks = [node('section', 'studio-block is-input'), preview, node('section', 'studio-block is-settings')];
+    desk.append(said, ...blocks.map(grained), ruled(grained(node('section', 'studio-block is-output'))));
     return desk;
   }
   /** A block of the Studio on its grain of old film (moodix.css): still dust and three scratches
@@ -2041,7 +2063,10 @@ export function setupStudio({
     const { screen, frame } = stage();
     preview.append(screen);
     const bar = node('div', 'studio-actionbar');
-    if (workflow.limits && !extending && mode !== 'audio') bar.append(formatChips(workflow, frame, resolution));
+    if (workflow.limits && !extending && mode !== 'audio') {
+      bar.append(formatChips(workflow, frame, resolution));
+      bar.classList.add('has-formats');
+    }
     const go = aiTarget(button('primary studio-go', '', generate, 'spark'), 'generate'),
       label = node('span', 'studio-go-label', working ? 'Génération…' : extending ? 'Générer la suite' : 'Générer'),
       key = node('kbd', 'studio-go-key', MODIFIER + ' ↵'),
@@ -2057,17 +2082,20 @@ export function setupStudio({
       go.setAttribute('aria-valuemax', '100');
       go.setAttribute('aria-label', 'Génération en cours');
     }
-    bar.append(go);
+    // « Agent » and « Générer » (and what goes with it) together at the right: they wrap as one.
+    const group = node('div', 'studio-go-group');
+    group.append(agent, go);
     if (working) {
       const halt = button('secondary studio-stop', '', stop, 'stop');
       halt.setAttribute('aria-label', 'Arrêter la génération');
       halt.title = 'Arrêter la génération';
-      bar.append(halt);
+      group.append(halt);
     } else if (answering()) {
       const no = button('secondary studio-decline', 'Annuler', () => decline());
       no.title = 'Refuser cette proposition de Moodix AI';
-      bar.append(no);
+      group.append(no);
     }
+    bar.append(group);
     preview.append(bar);
     const line = node('p', 'studio-progress', working?.label ?? '');
     line.id = 'studio-progress';
@@ -2080,7 +2108,7 @@ export function setupStudio({
       preview.append(alert);
     }
 
-    desk.append(...[write, preview, settings, outputs()].map(grained));
+    desk.append(...[write, preview, settings].map(grained), ruled(grained(outputs())));
     desk.classList.toggle('is-generating', Boolean(working));
     if (working) for (const control of desk.querySelectorAll('textarea, select, input')) control.disabled = true;
     return desk;
