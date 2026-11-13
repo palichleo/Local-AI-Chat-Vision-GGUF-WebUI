@@ -1496,6 +1496,7 @@ async function runOutputAction(record, index, action) {
       await persistConversation();
     }
     state.generating = false;
+    state.studio?.invalidate?.();
     turnActions();
     updateControls();
   }
@@ -2347,6 +2348,8 @@ const workflowsUI = setupNativeWorkflows({
   onRequestClose: () => requestSettingsClose(),
   openOutput: (record, index) => assetsUI.viewOutput(record, index),
   outputActions: actionButtons,
+  // The « Créations » tab is drawn while the files panel is open, and as it opens.
+  isShown: () => document.body.dataset.files === 'open',
   onOutput: () => {
     openFiles();
     assetsUI.show('output');
@@ -2456,6 +2459,7 @@ $('history-enabled').onchange = async () => {
 let filePickerController = null;
 $('settings').addEventListener('close', () => {
   if ($('settings').open) return;
+  state.studio?.invalidate?.({ tools: true });
   state.settingsSession = (state.settingsSession || 0) + 1;
   state.settingsLoading = false;
   state.settingsReady = false;
@@ -2554,8 +2558,11 @@ function showCreations() {
 }
 function openFiles(open = true) {
   if (!open) assetsUI.pause();
+  const opening = open && document.body.dataset.files !== 'open';
   document.body.dataset.files = open ? 'open' : 'closed';
   $('all-files').setAttribute('aria-pressed', String(open));
+  // Closed, its « Créations » tab was not kept up to date: it is drawn now.
+  if (opening) void showCreations();
 }
 function showHome() {
   const blocked = () =>

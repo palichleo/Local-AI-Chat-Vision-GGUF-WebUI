@@ -680,7 +680,7 @@ async function studioPage(tools, routes = {}, options = {}) {
           route === 'studio'
             ? { enabled: true, legacyId: STUDIO_ID, styles: ['a.safetensors', 'b.safetensors'], tools }
             : route.startsWith('gallery/')
-              ? { runs: route.endsWith(STUDIO_ID) ? (options.legacy ?? []) : runs }
+              ? { runs: route.includes(STUDIO_ID) ? (options.legacy ?? []) : runs }
               : (routes[route]?.(body) ?? {}),
       };
     },
@@ -710,7 +710,7 @@ async function studioPage(tools, routes = {}, options = {}) {
     pace: 0,
     ...(options.run ? { run: options.run } : {}),
   });
-  await studio.open();
+  if (options.open !== false) await studio.open();
   return {
     studio,
     page,
@@ -1245,6 +1245,69 @@ test('the pointer only sets what the workflow leaves to the assistant', async ()
     assert.deepEqual(body.find('studio-length'), []);
     await body.find('studio-go')[0].onclick();
     assert.equal(await answer, 'once');
+  } finally {
+    restore();
+  }
+});
+
+test('the Studio reads its tools once at a time, and its creations only when something changed', async () => {
+  const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] };
+  const { clip, request } = proposalOf();
+  const studio = await studioPage({ create_image: [image], create_video: [clip] }, {}, { open: false });
+  const { asked, restore } = studio;
+  const tools = () => asked.filter(([route]) => route === 'studio').length,
+    galleries = () => asked.filter(([route]) => route.startsWith('gallery/')).map(([route]) => route);
+  try {
+    // A proposal arrives as the Studio opens: one reading of the tools for both.
+    const opening = studio.studio.open(),
+      answer = studio.studio.propose(request, new AbortController().signal);
+    await opening;
+    await settle();
+    assert.equal(tools(), 1);
+    studio.studio.decline();
+    await answer;
+    // Its creations, without the copies kept for the model.
+    assert.ok(galleries().length >= 1);
+    assert.ok(galleries().every(route => route.endsWith('?images=0')));
+    // Going to the chat and back reads nothing again.
+    const read = galleries().length;
+    await studio.studio.open();
+    await studio.studio.open();
+    assert.equal(galleries().length, read);
+    assert.equal(tools(), 1);
+    // Something made from the chat: its creations are read again at the next opening.
+    studio.studio.invalidate();
+    await studio.studio.open();
+    assert.equal(galleries().length, read + 1);
+    // The settings closed: the tools too, in the background.
+    studio.studio.invalidate({ tools: true });
+    await studio.studio.open();
+    await settle();
+    assert.equal(tools(), 2);
+  } finally {
+    restore();
+  }
+});
+
+test('drawn again, the Studio keeps the pictures of its Sortie and what its screen shows', async () => {
+  const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] };
+  const made = {
+    id: 'r1',
+    mediaType: 'image',
+    prompt: 'un phare',
+    outputs: [{ originalUrl: '/phare', thumbUrl: '/phare.jpg' }],
+  };
+  const { studio, body, restore } = await studioPage({ create_image: [image] }, {}, { runs: [made] });
+  try {
+    const picture = () => body.find('studio-thumb')[0].children[0];
+    const first = picture();
+    assert.equal(first.src, '/phare.jpg');
+    studio.render();
+    assert.equal(picture(), first, 'the same picture: nothing loaded again');
+    studio.show(made);
+    const [shown] = body.find('studio-frame-result');
+    studio.render();
+    assert.equal(body.find('studio-frame-result')[0], shown);
   } finally {
     restore();
   }

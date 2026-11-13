@@ -62,6 +62,8 @@ const figures = value => {
 const sizeKey = size => size.width + 'x' + size.height;
 // The box the format frame fits in before its stage is laid out.
 const FRAME = { width: 264, height: 176 };
+// The tools of the Studio are read again in the background past this age.
+const TOOLS_TTL_MS = 60000;
 
 /** The frame of a ratio, as large as its box allows. */
 export function frameSize(ratio, box = FRAME) {
@@ -182,7 +184,13 @@ export function setupStudio({
     live = null, // { frame, preview } : the picture so far, in the frame now on the page
     proposal = null, // a proposal of Moodix AI waiting for « Générer »
     ai = null, // { stopped, active, touched } while the pointer sets the Studio
-    seenConversation; // the conversation the creations were read for
+    seenConversation, // the conversation the creations were read for
+    runsFor, // the place (conversation, or the former Studio) they were read from
+    runsStale = false, // something was made elsewhere since
+    loading = null, // the tools being read
+    toolsAt = 0,
+    toolsStale = false,
+    shownMedia = null; // { key, element }: what the screen shows, kept from one drawing to the next
   // What is shown on the screen for each mode: the last creation, or one opened from the chat.
   const kept = {};
   const blank = () => ({
@@ -628,7 +636,15 @@ export function setupStudio({
   /** The creation on the screen: the image (a click shows it whole), the clip to play, or the sound. */
   function result(record) {
     const output = record.outputs[0],
-      media = mediaOf(record);
+      media = mediaOf(record),
+      key = record.id + '|' + (output.originalUrl || '');
+    if (shownMedia?.key === key) return shownMedia.element;
+    const element = screenMedia(record, output, media);
+    shownMedia = { key, element };
+    return element;
+  }
+  /** The element that shows a creation on the screen: its picture, its clip to play, or its sound. */
+  function screenMedia(record, output, media) {
     if (media === 'audio') {
       const player = node('audio', 'studio-frame-result studio-frame-sound');
       Object.assign(player, { controls: true, preload: 'metadata', src: output.originalUrl || '' });
@@ -1445,9 +1461,11 @@ export function setupStudio({
       wave.setAttribute('aria-hidden', 'true');
       thumb.append(wave);
     } else {
-      const small = output.thumbUrl;
-      let picture;
-      if (small || media === 'image') {
+      const small = output.thumbUrl,
+        key = record.id + '|' + (small || output.originalUrl || '');
+      let picture = pictures.get(key);
+      if (picture) used.add(key);
+      else if (small || media === 'image') {
         picture = node('img');
         Object.assign(picture, { alt: record.prompt || '', loading: 'lazy', decoding: 'async' });
         picture.src = small || output.originalUrl || '';
@@ -1467,6 +1485,10 @@ export function setupStudio({
           src: (output.originalUrl || '') + '#t=0.1',
         });
         picture.onloadeddata = () => void thumbnailOf(api, record, 0, picture);
+      }
+      if (!used.has(key)) {
+        pictures.set(key, picture);
+        used.add(key);
       }
       picture.title = 'Afficher sur l’écran du Studio';
       picture.onclick = () => onScreen(record);
@@ -1531,7 +1553,11 @@ export function setupStudio({
     if (meta.textContent) card.append(meta);
     return card;
   }
+  // The pictures of the Sortie, kept from one drawing to the next (those of this drawing in `used`).
+  const pictures = new Map();
+  let used = new Set();
   function outputs() {
+    used = new Set();
     const mine = runs.filter(record => mediaOf(record) === mode),
       section = node('section', 'studio-block is-output studio-results'),
       about = modeOf(mode);
@@ -1573,6 +1599,8 @@ export function setupStudio({
       for (const record of clips) strip.append(item(record, numbers.get(record.id), numbers.get(sourceOf(record))));
     } else for (const record of mine) strip.append(item(record));
     section.append(strip);
+    // Those no longer shown (another mode, a creation removed) are let go.
+    for (const key of pictures.keys()) if (!used.has(key)) pictures.delete(key);
     return section;
   }
   /** A new clip goes at the end of the timeline: the strip shows it. */
@@ -1863,10 +1891,13 @@ export function setupStudio({
     if (!info) return;
     const id = place();
     seenConversation = conversation();
-    runs = id ? (await (await api(`gallery/${id}`)).json()).runs : [];
+    // Without the copies kept for the model (a storyboard per clip): the Studio shows the files.
+    runs = id ? (await (await api(`gallery/${id}?images=0`)).json()).runs : [];
+    runsFor = id;
+    runsStale = false;
     if (info.legacyId && !legacyRuns.loaded) {
       try {
-        legacyRuns = (await (await api(`gallery/${info.legacyId}`)).json()).runs ?? [];
+        legacyRuns = (await (await api(`gallery/${info.legacyId}?images=0`)).json()).runs ?? [];
       } catch {
         legacyRuns = [];
       }
@@ -1876,21 +1907,54 @@ export function setupStudio({
     }
     onRuns(id, legacy);
   }
-  async function load() {
-    info = await (await api('studio')).json();
+  /**
+   * Reads the tools of the Studio (the server checks the files of every workflow: most of a
+   * second). Two callers at once (a proposal arriving as the Studio opens) share one request.
+   */
+  function load() {
+    loading ??= api('studio')
+      .then(response => response.json())
+      .then(value => {
+        info = value;
+        toolsAt = Date.now();
+        toolsStale = false;
+      })
+      .finally(() => {
+        loading = null;
+      });
+    return loading;
   }
-  /** The Studio comes on screen: its tools are read once, the creations of the conversation each time. */
+  /**
+   * The Studio comes on screen. Its tools are read the first time, then again in the background
+   * when the settings were closed since or a minute went by (the page shows them meanwhile, and
+   * is drawn again only if they changed). The creations are read again only for another
+   * conversation, or when something was made elsewhere: switching views costs nothing.
+   */
   async function open() {
     // Another conversation: what was on the screen belonged to the one before.
     if (seenConversation !== undefined && seenConversation !== conversation()) forget();
     render();
     try {
       if (!info) await load();
-      await refresh();
+      else if (toolsStale || Date.now() - toolsAt > TOOLS_TTL_MS) {
+        const before = JSON.stringify(info);
+        void load()
+          .then(() => JSON.stringify(info) !== before && !ai && render())
+          .catch(() => {});
+      }
+      if (runsStale || runsFor !== place() || seenConversation !== conversation()) await refresh();
     } catch (error) {
       notice('Studio indisponible : ' + error.message);
     }
     render();
+  }
+  /**
+   * Something changed elsewhere: a creation made from the chat (its creations are read again at
+   * the next opening), or the settings (`tools`: its workflows too).
+   */
+  function invalidate({ tools = false } = {}) {
+    runsStale = true;
+    if (tools) toolsStale = true;
   }
   function forget() {
     for (const key of Object.keys(kept)) delete kept[key];
@@ -1957,6 +2021,7 @@ export function setupStudio({
     show,
     takeOver,
     conversationChanged,
+    invalidate,
     /** Whether a proposal of Moodix AI waits for « Générer ». */
     proposing: () => Boolean(proposal),
     /** The verbs the Studio answers for Moodix AI. */

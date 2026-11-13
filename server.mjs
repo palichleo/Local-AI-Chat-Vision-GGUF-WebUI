@@ -827,7 +827,10 @@ export async function createApplication({
       if (req.method === 'GET' && path.startsWith('/api/gallery/')) {
         const [, , , conversationId, runId, index] = path.split('/');
         if (!runId) {
-          const result = await gallery.list(conversationId);
+          // `?images=0`: without the session copies kept for the model (the Studio shows the files).
+          const result = await gallery.list(conversationId, {
+            includeImages: requestURL.searchParams.get('images') !== '0',
+          });
           result.runs = result.runs.map(galleryView);
           return send(200, result);
         }

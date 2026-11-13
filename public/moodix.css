@@ -2283,7 +2283,6 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
   color: var(--fn-input-text);
   font-size: 12.5px;
   font-weight: 700;
-  backdrop-filter: blur(6px);
 }
 .studio-enrich-go svg {
   width: 14px;
@@ -2509,9 +2508,17 @@ body[data-view='studio'] .workspace:has(#messages) .composer-region {
 .asset-pane {
   scrollbar-color: var(--scroll-thumb) transparent;
 }
-*:hover,
+/* Brighter under the pointer, on the areas that scroll: a rule on every element (`*:hover`)
+   would make the page recompute its styles at each move of the pointer. */
 .chat-area:hover,
-.asset-pane:hover {
+.asset-pane:hover,
+#studio-view:hover,
+#sidebar:hover,
+#prompt:hover,
+.studio-block.is-settings:hover,
+.studio-strip:hover,
+.studio-desk textarea:hover,
+.settings-body:hover {
   scrollbar-color: var(--scroll-thumb-hover) transparent;
 }
 ::-webkit-scrollbar {

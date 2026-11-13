@@ -385,14 +385,25 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       target.figure.append(buttons(record, index));
       // While the original loads: the copy the model saw, or the thumbnail kept by the server.
       const small = output?.analysisDataUrl || output?.thumbUrl;
-      if (blob) display(slot, blob);
-      else if (small) img.src = small;
-      else img.hidden = true;
-      watch(button, visible => {
-        slot.visible = visible;
-        if (visible) loadOriginal(slot);
-        else release(slot);
-      });
+      if (compact) {
+        // A card is a small picture: its thumbnail; without one, its file once, of which a
+        // thumbnail is made. Nothing is downloaded again when the card comes back into view.
+        if (blob) display(slot, blob);
+        else if (small) img.src = small;
+        else if (output?.originalUrl) {
+          img.onload = () => void thumbnailOf(api, record, index, img);
+          img.src = output.originalUrl;
+        } else img.hidden = true;
+      } else {
+        if (blob) display(slot, blob);
+        else if (small) img.src = small;
+        else img.hidden = true;
+        watch(button, visible => {
+          slot.visible = visible;
+          if (visible) loadOriginal(slot);
+          else release(slot);
+        });
+      }
       frame.classList.add('has-image');
       frame.setAttribute('aria-busy', 'false');
       caption('Image originale · ' + record.workflowName);
@@ -411,6 +422,8 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       finished = true;
       settle();
       if (!slots.size) frame.hidden = true;
+      // Refused, stopped or failed: nothing was made, nothing to open in the Studio.
+      if (!record) for (const target of tiles) if (target.open) target.open.disabled = true;
       caption(message || 'Génération interrompue.');
       onResize();
     }

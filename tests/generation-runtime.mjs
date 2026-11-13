@@ -53,7 +53,7 @@ class Element {
     delete (this.events ??= {})[name];
   }
 }
-async function fixture(fn, { confirmDelay = 0 } = {}) {
+async function fixture(fn, { confirmDelay = 0, isShown } = {}) {
   const previousDocument = globalThis.document,
     previousOption = globalThis.Option;
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
@@ -100,6 +100,7 @@ async function fixture(fn, { confirmDelay = 0 } = {}) {
     notice: () => {},
     onChange: () => {},
     confirmDelay,
+    ...(isShown ? { isShown } : {}),
   });
   try {
     await fn({
@@ -800,3 +801,45 @@ test('in the Studio the « Créations » tab lists the conversation, or the form
     await ui.renderGallery(null);
     assert.deepEqual(texts(), ['Aucune génération dans cette conversation.']);
   }));
+
+test('a creation of the Studio makes no copy for the model and downloads nothing; a closed panel is not drawn', async () =>
+  fixture(
+    async ({ ui, calls, state, setIntercept }) => {
+      state.conversationId = 'conversation';
+      const record = {
+        id: 'run',
+        conversationId: 'conversation',
+        mediaType: 'video',
+        workflowName: 'MiniMax H3 Omni',
+        prompt: 'un chien aboie',
+        createdAt: '2026-11-13T00:00:00Z',
+        parameters: { workflow_digest: 'd', frames: 124, fps: 24 },
+        outputs: [{ source: { filename: 'run.mp4' }, originalUrl: '/media/run' }],
+      };
+      setIntercept(route =>
+        route === 'tools/execute' ? Response.json({ id: 'job', state: 'done', record }) : undefined,
+      );
+      const shown = [];
+      const result = await ui.requestTool(
+        { requestId: 'q', mediaType: 'video', approvalToken: 't', plan: { parameters: {} } },
+        new AbortController().signal,
+        () => {},
+        image => shown.push(image),
+        { confirmed: true, review: false, studio: true },
+      );
+      // The clip is not read in the page to make a storyboard, nothing is sent back for the model,
+      // and the files panel, closed, is not drawn: the execution is the only request.
+      assert.deepEqual(
+        calls.map(call => call.route),
+        ['tools/execute'],
+      );
+      assert.equal(calls[0].body.studio, true);
+      // The card shows its file.
+      assert.deepEqual(shown, [{ record, index: 0 }]);
+      const content = JSON.parse(result.content);
+      assert.equal(content.studio, true);
+      assert.equal(content.status, 'success');
+      assert.equal(result.images.length, 0);
+    },
+    { isShown: () => false },
+  ));

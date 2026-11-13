@@ -17,6 +17,8 @@ export function setupGenerationRuntime({
   onOutput = () => {},
   // A video proposal left untouched starts by itself after this delay (0: never).
   confirmDelay = 30000,
+  // Whether the « Créations » tab is on screen: closed, it is drawn when it opens, not before.
+  isShown = () => true,
 }) {
   const $ = id => document.getElementById(id);
   let urls = [],
@@ -47,6 +49,8 @@ export function setupGenerationRuntime({
   }
   async function renderGallery(conversationId) {
     if (conversationId && conversationId !== place().id) return;
+    // The files panel is closed: nothing to draw (it is drawn as it opens).
+    if (!isShown()) return;
     reset();
     const version = galleryVersion;
     if (!conversationId) return;
@@ -307,6 +311,13 @@ export function setupGenerationRuntime({
       if (originalsTask) return;
       if (record.conversationId !== state.conversationId)
         throw Error('Cette sortie ne correspond pas à la conversation courante.');
+      // Made in the Studio, with no model to look at it now: no copy for it, no original to
+      // download; the card shows its file. The copies are made from the original when asked.
+      if (studio && !review) {
+        for (const [index] of record.outputs.entries()) onImage({ record, index });
+        originalsTask = Promise.resolve({ prepared: [], errors: [] });
+        return;
+      }
       // Transfer and compress one original at a time, including large workflow batches.
       originalsTask = (async () => {
         const prepared = [],

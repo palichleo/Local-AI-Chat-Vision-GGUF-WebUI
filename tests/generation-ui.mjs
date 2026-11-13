@@ -475,3 +475,53 @@ test('a creation of the Studio is a card: what it is, and « Ouvrir », which le
   find('card-open').onclick();
   assert.deepEqual(opened, [null, 'r']);
 });
+
+test('a card of the Studio shows its thumbnail, or its file once, and never downloads its original again', () => {
+  const container = new Element();
+  const ui = setupGenerationUI({
+    api: async () => {
+      throw Error('No request expected');
+    },
+    node: (...args) => new Element(...args),
+    openOutput: () => {},
+    onOpen: () => {},
+  });
+  const record = thumb => ({
+    id: 'r',
+    conversationId: 'c',
+    mediaType: 'image',
+    prompt: 'un chien',
+    workflowName: 'Krea 2',
+    parameters: { width: 1024, height: 1024 },
+    outputs: [{ originalUrl: '/media/r', ...(thumb ? { thumbUrl: '/thumb/r' } : {}) }],
+  });
+  for (const [thumb, expected] of [
+    [true, '/thumb/r'],
+    [false, '/media/r'],
+  ]) {
+    const card = ui.mount(container, { resolution: { width: 1024, height: 1024 } }, { compact: true });
+    const made = record(thumb);
+    card.image({ record: made, index: 0 });
+    const figure = container.children.at(-1),
+      [button] = figure.children[0].children,
+      [picture] = button.children;
+    assert.equal(picture.src, expected);
+  }
+});
+
+test('a proposal refused or stopped leaves its card without « Ouvrir »', () => {
+  const container = new Element();
+  const ui = setupGenerationUI({
+    api: async () => {
+      throw Error('No request expected');
+    },
+    node: (...args) => new Element(...args),
+    openOutput: () => {},
+    onOpen: () => {},
+  });
+  const card = ui.mount(container, { mediaType: 'video', resolution: { width: 768, height: 448 } }, { compact: true });
+  const open = container.children[0].children.find(child => child.cls === 'card-open');
+  assert.equal(open.disabled, false, 'waiting: it leads to the Studio');
+  card.finish({ denied: true });
+  assert.equal(open.disabled, true);
+});
