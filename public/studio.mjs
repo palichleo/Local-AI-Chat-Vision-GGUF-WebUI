@@ -53,12 +53,12 @@ const leaf = name =>
     .split(/[\\/]/)
     .pop()
     .replace(/\.safetensors$/i, '');
-const seconds = value => (Math.round(value * 10) / 10).toString().replace('.', ',') + ' s';
-// A length as the screen and the cards write it: two figures, in capitals (« 05 S »).
-const figures = value => {
-  const rounded = Math.round(value * 10) / 10;
-  return (rounded < 10 ? '0' : '') + String(rounded).replace('.', ',') + ' S';
-};
+// A length as the Studio writes it everywhere (moodix-design.md 27): two figures before the
+// point, two after (« 05.17 s »); in capitals on the screen (« 05.17 S »). The value is the true
+// one, from the frames the model makes (5 s asked can be 5.17 s made).
+const twoFigures = value => (Math.round(Number(value) * 100) / 100).toFixed(2).padStart(5, '0');
+const seconds = value => twoFigures(value) + ' s';
+const figures = value => twoFigures(value) + ' S';
 const sizeKey = size => size.width + 'x' + size.height;
 // The box the format frame fits in before its stage is laid out.
 const FRAME = { width: 264, height: 176 };
@@ -511,23 +511,6 @@ export function setupStudio({
     if (!proposed && !sizes.some(size => sizeKey(size) === draft.size)) draft.size = nearest ? sizeKey(nearest) : null;
     return { formats, sizes, final: workflow.final && sizeKey(workflow.final) };
   }
-  /** Fills the resolution list for the draft's format. */
-  function listSizes(control, workflow) {
-    const { sizes, final } = sizing(workflow),
-      draft = drafts[mode],
-      list = [...sizes];
-    // A size of a proposal outside the list (kept from a source) is shown as it is.
-    if (draft.size && !list.some(size => sizeKey(size) === draft.size)) {
-      const [width, height] = draft.size.split('x').map(Number);
-      list.push({ width, height });
-    }
-    control.replaceChildren();
-    for (const size of list)
-      control.add(
-        new Option(`${size.width} × ${size.height}` + (sizeKey(size) === final ? ' · finale' : ''), sizeKey(size)),
-      );
-    control.value = draft.size ?? '';
-  }
   /** Draft or final, from the size: a large picture is a final, a small one a draft. */
   function stageOf(workflow, size = drafts[mode].size) {
     if (!workflow?.stages || !size) return null;
@@ -545,25 +528,393 @@ export function setupStudio({
     if (!lengths.seconds.includes(draft[key])) draft[key] = nearest(draft[key] ?? lengths.standard ?? 5);
     return { key, list: lengths.seconds, value: draft[key], nearest };
   }
+  // ------------------------------------------------------------------ the bars and blocks of Réglages
+  // The colours of every bar of the Studio, from its start to its end (moodix-design.md 12).
+  const STOPS = [
+    [0x3d, 0x6b, 0xf5],
+    [0x22, 0xa0, 0x60],
+    [0xf6, 0xc3, 0x43],
+    [0xe8, 0x40, 0x2f],
+  ];
+  /** The colour of a bar at a place between its ends (0 to 1). */
+  function barColour(place) {
+    const at = Math.min(1, Math.max(0, place)) * (STOPS.length - 1),
+      index = Math.min(STOPS.length - 2, Math.floor(at)),
+      part = at - index;
+    return `rgb(${STOPS[index].map((value, channel) => Math.round(value + (STOPS[index + 1][channel] - value) * part)).join(', ')})`;
+  }
   /**
-   * The length, in a list like the other settings: the lengths the model allows, from its
-   * counts of frames (MiniMax H3: 17n + 5 frames at 24 a second, from 5,2 s; LTX 2.5 from 0,7 s).
+   * A thin bar (2 px, its handle 8 px) over `count` choices, at `index`: its filled part in the
+   * gradient of all the bars, as far as `share(index)` between its ends (the gradient spreads over
+   * the whole bar, only the part travelled shows); `notches` for a bar of a few choices, those
+   * passed in the colour of their place. Returns the bar and its value, written by `text`.
    */
-  function lengthField(workflow) {
-    const length = lengthOf(workflow);
-    if (!length) return null;
-    const draft = drafts[mode],
-      control = select(
-        length.list.map(value => [value, seconds(value)]),
-        length.value,
-        value => {
-          draft[length.key] = Number(value);
-          readout();
-        },
+  function slider({ label, key, count, index, share, text, onInput, notches = false, disabled = false }) {
+    const track = node('div', 'studio-bar-track' + (notches ? ' has-notches' : '')),
+      bar = node('input', 'studio-bar'),
+      value = node('output', 'studio-bar-value', text(index));
+    bar.type = 'range';
+    bar.min = '0';
+    bar.max = String(Math.max(0, count - 1));
+    bar.step = '1';
+    bar.value = String(index);
+    bar.disabled = disabled || Boolean(working);
+    bar.setAttribute('aria-label', label);
+    if (key) aiTarget(bar, key);
+    const marks = [];
+    if (notches && count > 1)
+      for (let at = 0; at < count; at++) {
+        const mark = node('span', 'studio-bar-notch');
+        mark.setAttribute('aria-hidden', 'true');
+        mark.style.left = `calc(4px + ${at / (count - 1)} * (100% - 8px))`;
+        marks.push(mark);
+      }
+    const show = place => {
+      bar.style.setProperty?.('--fill', String(share(place)));
+      value.textContent = text(place);
+      bar.setAttribute('aria-valuetext', text(place));
+      marks.forEach((mark, at) => {
+        mark.style.background = at <= place ? barColour(share(at)) : '';
+        mark.classList.toggle('is-passed', at <= place);
+      });
+    };
+    show(index);
+    bar.oninput = () => {
+      const place = Number(bar.value);
+      show(place);
+      onInput(place);
+    };
+    track.append(bar, ...marks);
+    return { track, value };
+  }
+  /** One line « label — thin bar — value » (moodix-design.md 8, 9). */
+  function barLine(label, options) {
+    const row = node('div', 'studio-bar-line'),
+      { track, value } = slider({ label, ...options });
+    row.append(node('span', 'studio-bar-label', label), track, value);
+    return row;
+  }
+  /** The choices of a strength, at 0.05 apart between its ends. */
+  function strengths(min, max) {
+    const list = [];
+    for (let step = 0; min + step * 0.05 <= max + 1e-9; step++) list.push(Math.round((min + step * 0.05) * 100) / 100);
+    return list;
+  }
+  /** Bloc Modèle: the model chosen (a list when there are several), its own block. */
+  function modelBlock(workflow, list) {
+    const block = node('div', 'studio-set-block studio-set-model');
+    if (list.length > 1 && !extending) {
+      const model = select(
+        list.map(item => [item.id, item.name]),
+        workflow.id,
+        choose,
       );
-    control.className = 'studio-length';
-    aiTarget(control, 'duration');
-    return field(extending ? 'Durée ajoutée' : 'Durée', control);
+      model.className = 'studio-model-pick';
+      model.title = workflow.description || workflow.name;
+      model.disabled = answering() || Boolean(working);
+      if (answering()) model.title = 'Modèle choisi par Moodix AI pour cette proposition';
+      model.setAttribute('aria-label', mode === 'audio' ? 'Type' : 'Modèle');
+      aiTarget(model, 'model');
+      block.append(model);
+    } else {
+      const name = node('span', 'studio-model-name', workflow.name);
+      name.title = workflow.description || workflow.name;
+      block.append(name);
+    }
+    return block;
+  }
+  /**
+   * Bloc Durée + Taille: the length the model allows, step by step (its counts of frames at 24 a
+   * second: MiniMax H3 from 5.17 s, LTX 2.5 from 0.71 s; a sound, its own setting), and the sizes
+   * of the format chosen, a notch each; a fine line between them.
+   */
+  function shapeBlock(workflow) {
+    const draft = drafts[mode],
+      lines = [],
+      length = lengthOf(workflow);
+    if (length) {
+      const list = length.list,
+        low = list[0],
+        high = list.at(-1);
+      lines.push(
+        barLine(extending ? 'Durée ajoutée' : 'Durée', {
+          key: 'duration',
+          count: list.length,
+          index: Math.max(0, list.indexOf(length.value)),
+          share: place => (high > low ? (list[place] - low) / (high - low) : 1),
+          text: place => seconds(list[place]),
+          onInput: place => {
+            draft[length.key] = list[place];
+            readout();
+            lengthMoved();
+          },
+        }),
+      );
+    }
+    const sound = workflow.settings.find(setting => setting.key === 'seconds' && setting.type === 'number');
+    if (sound && !length) {
+      const store = (draft.settings[workflow.id] ??= {}),
+        low = Number(sound.min ?? 1),
+        high = Number(sound.max ?? 30),
+        step = Number(sound.step ?? 1),
+        list = [];
+      for (let value = low; value <= high + 1e-9; value += step) list.push(Math.round(value * 1000) / 1000);
+      const wanted = Number(store.seconds ?? sound.default ?? low),
+        index = list.reduce(
+          (best, value, at) => (Math.abs(value - wanted) < Math.abs(list[best] - wanted) ? at : best),
+          0,
+        );
+      lines.push(
+        barLine('Durée', {
+          key: 'setting-seconds',
+          count: list.length,
+          index,
+          share: place => (high > low ? (list[place] - low) / (high - low) : 1),
+          text: place => seconds(list[place]),
+          onInput: place => {
+            store.seconds = list[place];
+            readout();
+          },
+        }),
+      );
+    }
+    if (workflow.limits && !extending) {
+      const { sizes } = sizing(workflow),
+        list = [...sizes];
+      // A size of a proposal outside the list (kept from a source) is shown as it is.
+      if (draft.size && !list.some(size => sizeKey(size) === draft.size)) {
+        const [width, height] = draft.size.split('x').map(Number);
+        list.push({ width, height });
+      }
+      if (list.length) {
+        const line = barLine('Taille', {
+          key: 'size',
+          count: list.length,
+          index: Math.max(
+            0,
+            list.findIndex(size => sizeKey(size) === draft.size),
+          ),
+          share: place => (list.length > 1 ? place / (list.length - 1) : 1),
+          text: place => `${list[place].width} × ${list[place].height}`,
+          onInput: place => {
+            draft.size = sizeKey(list[place]);
+            readout();
+          },
+          notches: true,
+        });
+        line.title = mode === 'video' ? 'Plus grand : plus long à générer.' : '';
+        lines.push(line);
+      }
+    }
+    if (!lines.length) return null;
+    const block = node('div', 'studio-set-block studio-set-shape');
+    lines.forEach((line, at) => {
+      if (at) block.append(node('div', 'studio-set-rule'));
+      block.append(line);
+    });
+    return block;
+  }
+  /** What depends on the length, kept in step while its bar moves (the start and end line, lot 4). */
+  function lengthMoved() {}
+  /**
+   * Bloc LoRA (moodix-design.md 11, 7 bis 5): « LoRA · n / 3 », those of the workflow first (a
+   * padlock in place of ×, their bar greyed when their strength is fixed there, their switch when
+   * they are left to the assistant), then those added here, three at most, 0 to 2.
+   */
+  function loraBlock(workflow, styled) {
+    const own = workflow.loras ?? [];
+    if (!own.length && !styled) return null;
+    const draft = drafts[mode],
+      section = node('section', 'studio-set-block studio-lora-block'),
+      head = node('div', 'studio-lora-head');
+    section.setAttribute('aria-label', 'LoRA');
+    head.append(node('h3', 'studio-lora-heading', 'LoRA'));
+    if (styled) {
+      head.append(node('span', 'studio-lora-count', `· ${draft.styles.length} / ${MAX_STYLES}`));
+      if (info.styles.length && draft.styles.length < MAX_STYLES) {
+        const add = button(
+          'studio-lora-plus',
+          '',
+          () => {
+            draft.styles.push({ name: info.styles[0], strength: 1 });
+            render();
+          },
+          'plus',
+        );
+        add.setAttribute('aria-label', 'Ajouter un LoRA');
+        add.title = 'Ajouter un LoRA';
+        add.disabled = Boolean(working);
+        head.append(add);
+      }
+    }
+    section.append(head);
+    for (const lora of own) section.append(workflowLoraRow(workflow, lora));
+    if (styled) {
+      draft.styles.forEach((style, index) => section.append(styleRow(style, index)));
+      if (!info.styles.length)
+        section.append(node('small', 'field-help', 'Aucun LoRA listé : le dossier loras est vide.'));
+    }
+    return section;
+  }
+  /** A LoRA of the workflow: its name, its strength (greyed when fixed there), its switch, a padlock. */
+  function workflowLoraRow(workflow, lora) {
+    const choice = loraChoice(workflow, lora),
+      free = freeStrength(lora),
+      low = free ? Number(lora.strength.min ?? 0) : Math.min(0, choice.strength),
+      high = free ? Number(lora.strength.max ?? 2) : Math.max(2, choice.strength),
+      list = strengths(low, high),
+      row = node('div', 'studio-lora-row is-workflow' + (choice.on ? '' : ' is-off')),
+      name = node('span', 'studio-lora-title'),
+      { track, value } = slider({
+        label: 'Force du LoRA ' + lora.name,
+        count: list.length,
+        index: Math.max(0, Math.round((choice.strength - low) / 0.05)),
+        share: place => (high > low ? (list[place] - low) / (high - low) : 1),
+        text: place => strengthText(list[place]),
+        onInput: place => {
+          choice.strength = list[place];
+        },
+        disabled: !free || !choice.on,
+      }),
+      lock = node('span', 'studio-lora-lock');
+    // Left to the assistant: the tile of Moodix AI, which may switch it.
+    if (lora.assistant) name.append(node('span', 'ai-mark'));
+    name.append(node('span', 'studio-lora-label', lora.name));
+    name.title = lora.description ? lora.name + ' · ' + lora.description : lora.name;
+    if (!free) value.title = 'Force fixée dans Workflows';
+    lock.append(icon('lock'));
+    lock.setAttribute('role', 'img');
+    lock.setAttribute('aria-label', 'LoRA du workflow');
+    lock.title = 'LoRA du workflow : réglé dans Configuration › Workflows';
+    row.append(name, track, value);
+    if (lora.assistant) {
+      const toggle = node('input', 'studio-lora-switch');
+      toggle.type = 'checkbox';
+      toggle.checked = choice.on;
+      toggle.disabled = Boolean(working);
+      toggle.title = 'Utiliser ce LoRA pour cette création';
+      toggle.setAttribute('aria-label', 'Utiliser le LoRA ' + lora.name);
+      toggle.onchange = () => {
+        choice.on = toggle.checked;
+        render();
+      };
+      row.append(toggle);
+    }
+    row.append(lock);
+    return row;
+  }
+  /** A LoRA added here: its name (a click opens the list), its strength from 0 to 2, × to remove it. */
+  function styleRow(style, index) {
+    const draft = drafts[mode],
+      list = strengths(0, 2),
+      row = node('div', 'studio-lora-row'),
+      name = select(
+        info.styles.map(file => [file, leaf(file)]),
+        style.name,
+        value => {
+          style.name = value;
+          name.title = leaf(value);
+        },
+      ),
+      { track, value } = slider({
+        label: 'Force du LoRA ' + leaf(style.name),
+        count: list.length,
+        index: Math.max(0, Math.min(list.length - 1, Math.round(style.strength / 0.05))),
+        share: place => list[place] / 2,
+        text: place => strengthText(list[place]),
+        onInput: place => {
+          style.strength = list[place];
+        },
+      }),
+      remove = button(
+        'studio-lora-drop',
+        '',
+        () => {
+          draft.styles.splice(index, 1);
+          render();
+        },
+        'close',
+      );
+    name.className = 'studio-lora-pick';
+    name.title = leaf(style.name);
+    name.disabled = Boolean(working);
+    name.setAttribute('aria-label', 'LoRA ' + (index + 1));
+    remove.title = 'Retirer ce LoRA';
+    remove.setAttribute('aria-label', 'Retirer ce LoRA');
+    remove.disabled = Boolean(working);
+    row.append(name, track, value, remove);
+    return row;
+  }
+  /**
+   * The rare settings, under « ··· » (moodix-design.md 10, 20, 28): the seed (a field, empty for
+   * one drawn at each creation, and a die), then the workflow's own settings; one line each.
+   */
+  function rareLines(workflow) {
+    const draft = drafts[mode],
+      lines = [];
+    if (workflow.seeded) {
+      const row = node('div', 'studio-set-line studio-seed'),
+        seed = node('input'),
+        dice = button(
+          'studio-dice',
+          '',
+          () => {
+            seed.value = draft.seed = String(Math.floor(Math.random() * 2 ** 32));
+          },
+          'dice',
+        );
+      seed.type = 'number';
+      seed.min = '0';
+      seed.placeholder = 'aléatoire';
+      seed.value = draft.seed;
+      seed.disabled = Boolean(working);
+      seed.setAttribute('aria-label', 'Seed');
+      seed.oninput = () => {
+        draft.seed = seed.value;
+      };
+      aiTarget(seed, 'seed');
+      dice.title = 'Tirer une seed au hasard';
+      dice.setAttribute('aria-label', 'Tirer une seed au hasard');
+      dice.disabled = Boolean(working);
+      row.append(node('span', 'studio-bar-label', 'Seed'), seed, dice);
+      lines.push(row);
+    }
+    for (const setting of workflow.settings) {
+      if (setting.key === 'lyrics' && setting.type === 'string') continue;
+      // A sound's length is on the bar of Durée.
+      if (setting.key === 'seconds' && setting.type === 'number') continue;
+      // Kept per workflow: a song's length is not a sound effect's.
+      const store = (draft.settings[workflow.id] ??= {}),
+        value = store[setting.key] ?? setting.default ?? '',
+        label = SETTINGS[setting.key] || setting.key,
+        set = next => {
+          store[setting.key] = next;
+          readout();
+        };
+      let control;
+      if (setting.type === 'string' && !setting.choices) {
+        control = textarea(String(value), 4, SETTING_HELP[setting.key] ?? '', set);
+        if (setting.maxLength) control.maxLength = setting.maxLength;
+      } else if (setting.choices)
+        control = select(
+          setting.choices.map(choice => [choice, String(choice)]),
+          value,
+          set,
+        );
+      else {
+        control = node('input');
+        control.type = 'number';
+        control.value = String(value);
+        if (setting.min !== undefined) control.min = String(setting.min);
+        if (setting.max !== undefined) control.max = String(setting.max);
+        control.oninput = () => set(control.value);
+      }
+      aiTarget(control, 'setting-' + setting.key);
+      const wrapper = field(label, control, { mark: true, wide: setting.type === 'string' && !setting.choices });
+      if (setting.max !== undefined) wrapper.title = `De ${setting.min ?? 0} à ${setting.max}.`;
+      lines.push(wrapper);
+    }
+    return lines;
   }
 
   // ------------------------------------------------------------------ the screen
@@ -695,7 +1046,7 @@ export function setupStudio({
     return element;
   }
   /** The formats under the preview: 1:1, 16:9, 9:16, and « ··· » for all of them. */
-  function formatChips(workflow, frame, resolution) {
+  function formatChips(workflow, frame) {
     const draft = drafts[mode],
       wrap = node('div', 'studio-formats-wrap'),
       row = aiTarget(node('div', 'studio-formats'), 'ratio'),
@@ -707,8 +1058,7 @@ export function setupStudio({
     const pick = id => {
       Object.assign(draft, { format: id, size: null, formatChosen: true });
       formatsOpen = false;
-      listSizes(resolution, workflow);
-      // The chips change with the format (another one may take the place of « ··· »).
+      // The chips and the sizes change with the format (another one may take the place of « ··· »).
       render();
     };
     for (const id of main) {
@@ -2045,92 +2395,27 @@ export function setupStudio({
     const row = inputs(workflow);
     if (row) write.append(row);
 
-    // Réglages: the model, the length, the size, the workflow's own settings; the rare ones under « Plus de réglages ».
-    if (list.length > 1 && !extending) {
-      const model = select(
-        list.map(item => [item.id, item.name]),
-        workflow.id,
-        choose,
-      );
-      model.title = workflow.description;
-      model.disabled = answering();
-      if (answering()) model.title = 'Modèle choisi par Moodix AI pour cette proposition';
-      aiTarget(model, 'model');
-      settings.append(field(mode === 'audio' ? 'Type' : 'Modèle', model));
-    }
-    const length = lengthField(workflow);
-    if (length) settings.append(length);
-    const resolution = node('select');
-    if (workflow.limits && !extending) {
-      listSizes(resolution, workflow);
-      resolution.onchange = () => {
-        draft.size = resolution.value;
-        readout();
-      };
-      aiTarget(resolution, 'size');
-      const sized = field('Taille', resolution);
-      sized.title = mode === 'video' ? 'Plus grand : plus long à générer. La taille finale est marquée.' : '';
-      settings.append(sized);
-    }
-    for (const setting of workflow.settings) {
-      if (setting.key === 'lyrics' && setting.type === 'string') continue;
-      // Kept per workflow: a song's length is not a sound effect's.
-      const store = (draft.settings[workflow.id] ??= {}),
-        value = store[setting.key] ?? setting.default ?? '',
-        label = SETTINGS[setting.key] || setting.key,
-        set = next => {
-          store[setting.key] = next;
-          readout();
-        };
-      let control;
-      if (setting.type === 'string' && !setting.choices) {
-        control = textarea(String(value), 4, SETTING_HELP[setting.key] ?? '', set);
-        if (setting.maxLength) control.maxLength = setting.maxLength;
-      } else if (setting.choices)
-        control = select(
-          setting.choices.map(choice => [choice, String(choice)]),
-          value,
-          set,
-        );
-      else {
-        control = node('input');
-        control.type = 'number';
-        control.value = String(value);
-        if (setting.min !== undefined) control.min = String(setting.min);
-        if (setting.max !== undefined) control.max = String(setting.max);
-        control.oninput = () => set(control.value);
-      }
-      aiTarget(control, 'setting-' + setting.key);
-      const wrapper = field(label, control, { mark: true, wide: setting.type === 'string' && !setting.choices });
-      if (setting.max !== undefined) wrapper.title = `De ${setting.min ?? 0} à ${setting.max}.`;
-      settings.append(wrapper);
-    }
-    const lora = workflow.external && mode !== 'audio' && !extending && !answering();
-    // The LoRAs chosen in the workflow's settings: in sight, a proposal of Moodix AI included.
-    if (workflow.loras?.length) settings.append(workflowLoraSection(workflow));
-    if (workflow.seeded || lora) {
-      const more = button('studio-more', advanced ? '− Moins de réglages' : '+ Plus de réglages', () => {
+    // Réglages (moodix-design.md 16, 20, 28): blocks without titles, Modèle · Durée + Taille ·
+    // LoRA, and « ··· » for the rare ones (the seed, the workflow's own settings).
+    settings.append(modelBlock(workflow, list));
+    const shape = shapeBlock(workflow);
+    if (shape) settings.append(shape);
+    const styled = workflow.external && mode !== 'audio' && !extending && !answering();
+    const loras = loraBlock(workflow, styled);
+    if (loras) settings.append(loras);
+    const rare = rareLines(workflow);
+    if (rare.length) {
+      const more = button('studio-more-pill' + (advanced ? ' is-open' : ''), '···', () => {
         advanced = !advanced;
         render();
       });
+      more.setAttribute('aria-label', 'Plus de réglages');
+      more.title = 'Plus de réglages';
       more.setAttribute('aria-expanded', String(advanced));
-      settings.append(more);
-      const rare = node('div', 'studio-advanced');
-      rare.hidden = !advanced;
-      if (workflow.seeded) {
-        const seed = node('input');
-        seed.type = 'number';
-        seed.min = '0';
-        seed.placeholder = 'au hasard';
-        seed.value = draft.seed;
-        seed.oninput = () => {
-          draft.seed = seed.value;
-        };
-        aiTarget(seed, 'seed');
-        rare.append(field('Seed', seed));
-      }
-      if (lora) rare.append(loraSection());
-      settings.append(rare);
+      const block = node('div', 'studio-set-block studio-rare');
+      block.hidden = !advanced;
+      block.append(...rare);
+      settings.append(more, block);
     }
 
     // The preview, its formats and the button.
@@ -2138,7 +2423,7 @@ export function setupStudio({
     preview.append(screen);
     const bar = node('div', 'studio-actionbar');
     if (workflow.limits && !extending && mode !== 'audio') {
-      bar.append(formatChips(workflow, frame, resolution));
+      bar.append(formatChips(workflow, frame));
       bar.classList.add('has-formats');
     }
     const go = aiTarget(button('primary studio-go', '', generate, 'spark'), 'generate'),

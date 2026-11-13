@@ -452,7 +452,8 @@ test('a creation of the Studio is a card: what it is, and « Ouvrir », which le
     find = cls => figure.children.find(child => child.cls === cls);
   assert.equal(figure.cls, 'generation-card is-compact');
   assert.equal(find('card-text').children[0].textContent, 'Un renard se lève');
-  assert.equal(find('card-text').children[1].textContent, 'VIDÉO · 16:9 · 05 S');
+  // The true length of what is made, two figures each side of the point (121 frames at 24 a second).
+  assert.equal(find('card-text').children[1].textContent, 'VIDÉO · 16:9 · 05.04 S');
   // Waiting for « Générer » in the Studio: « Ouvrir » goes there.
   find('card-open').onclick();
   assert.deepEqual(opened, [null]);

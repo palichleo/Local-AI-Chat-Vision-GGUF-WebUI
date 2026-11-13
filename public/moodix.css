@@ -3142,3 +3142,367 @@ html[data-switch='chat']::view-transition-old(studio) {
 .studio-output-tools {
   gap: 10px;
 }
+
+/* ------------------------------------------------------------------ Réglages in blocks */
+/* moodix-design.md 16: the blocks of Réglages in the style of the prompt's box, 8 px apart, no
+   line between them; « label — thin bar — value » lines (8, 9, 12); one block for the LoRAs (11,
+   7 bis 5); « ··· » for the rare settings, the seed first (10, 20, 28). */
+.studio-block.is-settings > .studio-block-body {
+  gap: 8px;
+}
+.studio-set-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: none;
+  padding: 10px 12px;
+  border: 1px solid #262a33;
+  border-radius: 10px;
+  background: #0b0c0f;
+}
+:root[data-theme='light'] .studio-set-block {
+  border-color: var(--field-line);
+  background: var(--field);
+}
+.studio-set-block[hidden] {
+  display: none;
+}
+/* Bloc Modèle: the name of the model, its list without a box of its own. */
+.studio-set-model {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 6px 0 12px;
+}
+#studio-view .studio-model-pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 28px 0 0;
+  border: 0;
+  background-color: transparent;
+  font-weight: 700;
+  font-size: 14px;
+  text-overflow: ellipsis;
+}
+.studio-model-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The fine line between Durée and Taille. */
+.studio-set-rule {
+  height: 1px;
+  background: #1a1d24;
+}
+:root[data-theme='light'] .studio-set-rule {
+  background: var(--line);
+}
+/* One line: its label, its thin bar, its value (in figures). */
+.studio-bar-line,
+.studio-set-line {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+.studio-bar-label {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.studio-bar-value {
+  min-width: 7ch;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  text-align: right;
+  white-space: nowrap;
+}
+/* The bar: 2 px, its handle 8 px, over a taller area the pointer can take. The gradient of all
+   the bars (blue, green, yellow, red) spreads over its whole length; the part not travelled is
+   covered in the colour of the track, so only the part travelled shows. */
+.studio-bar-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 24px;
+}
+#studio-view .studio-bar {
+  --fill: 0;
+  --bar-rest: #262a33;
+  position: relative;
+  z-index: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 24px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(
+        to right,
+        transparent calc(4px + var(--fill) * (100% - 8px)),
+        var(--bar-rest) calc(4px + var(--fill) * (100% - 8px))
+      )
+      center / 100% 2px no-repeat,
+    linear-gradient(90deg, #3d6bf5, #22a060, #f6c343, #e8402f) center / 100% 2px no-repeat;
+  cursor: pointer;
+}
+:root[data-theme='light'] #studio-view .studio-bar {
+  --bar-rest: #d3d8e0;
+}
+#studio-view .studio-bar::-webkit-slider-runnable-track {
+  height: 2px;
+  border: 0;
+  background: transparent;
+}
+#studio-view .studio-bar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 8px;
+  height: 8px;
+  margin-top: -3px;
+  border: 0;
+  border-radius: 50%;
+  background: #eceef2;
+}
+#studio-view .studio-bar::-moz-range-track {
+  height: 2px;
+  border: 0;
+  background: transparent;
+}
+#studio-view .studio-bar::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  border: 0;
+  border-radius: 50%;
+  background: #eceef2;
+}
+:root[data-theme='light'] #studio-view .studio-bar::-webkit-slider-thumb {
+  background: #12141a;
+}
+:root[data-theme='light'] #studio-view .studio-bar::-moz-range-thumb {
+  background: #12141a;
+}
+#studio-view .studio-bar:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+#studio-view .studio-bar:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* The notches of a bar of a few choices (the sizes): those passed in the colour of their place,
+   the next ones dark; under the line, they show above and below it. */
+.studio-bar-notch {
+  position: absolute;
+  top: 50%;
+  z-index: 0;
+  width: 2px;
+  height: 8px;
+  margin: -4px 0 0 -1px;
+  border-radius: 1px;
+  background: #3a3f4a;
+  pointer-events: none;
+}
+:root[data-theme='light'] .studio-bar-notch {
+  background: #c4cad4;
+}
+/* Bloc LoRA: « LoRA · n / 3 » and its « + », then a line each: its name, its strength, its
+   switch when it is left to the assistant, × (or a padlock for those of the workflow). */
+.studio-lora-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+.studio-lora-heading {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--soft);
+}
+.studio-lora-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+#studio-view .studio-lora-plus {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid #262a33;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--soft);
+}
+#studio-view .studio-lora-plus:hover:enabled,
+#studio-view .studio-lora-plus:focus-visible {
+  border-color: rgba(34, 160, 96, 0.6);
+  color: var(--ink);
+}
+#studio-view .studio-lora-plus svg {
+  width: 12px;
+  height: 12px;
+}
+.studio-lora-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.studio-lora-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.studio-lora-title .studio-lora-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-lora-row.is-off .studio-lora-title,
+.studio-lora-row.is-off .studio-bar-value {
+  opacity: 0.45;
+}
+#studio-view .studio-lora-pick {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 28px;
+  min-height: 0;
+  padding: 0 4px 0 0;
+  border: 0;
+  background-color: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.studio-lora-row .studio-bar-track {
+  flex: 1.2 1 0;
+}
+.studio-lora-row .studio-bar-value {
+  min-width: 4ch;
+}
+#studio-view .studio-lora-row .studio-lora-switch {
+  flex: none;
+}
+.studio-lora-lock {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--muted);
+}
+.studio-lora-lock svg {
+  width: 13px;
+  height: 13px;
+}
+#studio-view .studio-lora-drop {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+}
+#studio-view .studio-lora-drop:hover:enabled,
+#studio-view .studio-lora-drop:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+}
+#studio-view .studio-lora-drop svg {
+  width: 12px;
+  height: 12px;
+}
+/* « ··· »: a small pill at the right under the LoRAs; open, a darker ground, and under it the
+   block of the rare settings (fine lines between its lines). */
+#studio-view .studio-more-pill {
+  align-self: flex-end;
+  flex: none;
+  height: 22px;
+  min-height: 0;
+  padding: 0 10px;
+  border: 1px solid #262a33;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+#studio-view .studio-more-pill:hover,
+#studio-view .studio-more-pill:focus-visible {
+  color: var(--ink);
+}
+#studio-view .studio-more-pill.is-open {
+  background: #1c1f26;
+  color: var(--ink);
+}
+:root[data-theme='light'] #studio-view .studio-more-pill.is-open {
+  background: var(--chip);
+}
+.studio-rare > * + * {
+  padding-top: 10px;
+  border-top: 1px solid #1a1d24;
+}
+.studio-seed {
+  grid-template-columns: 52px minmax(0, 1fr) 30px;
+}
+#studio-view .studio-seed input {
+  height: 30px;
+  min-height: 0;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+#studio-view .studio-dice {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid #262a33;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--soft);
+}
+#studio-view .studio-dice:hover:enabled,
+#studio-view .studio-dice:focus-visible {
+  border-color: rgba(34, 160, 96, 0.6);
+  color: var(--ink);
+}
+#studio-view .studio-dice svg {
+  width: 16px;
+  height: 16px;
+}

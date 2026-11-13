@@ -4,12 +4,10 @@ import { livePreview } from './live-preview.mjs';
 import { formatOf } from './formats.mjs';
 
 const KINDS = { image: 'IMAGE', video: 'VIDÉO', audio: 'SON' };
-/** A length as the cards write it: two figures, in capitals (« 05 S »). */
-const figures = value => {
-  const rounded = Math.round(value * 10) / 10;
-  return (rounded < 10 ? '0' : '') + String(rounded).replace('.', ',') + ' S';
-};
-/** What a card says of a creation: its kind, its format and its length (« VIDÉO · 16:9 · 05 S »). */
+/** A length as the Studio writes it everywhere (moodix-design.md 27): « 05.04 S » in capitals. */
+const twoFigures = value => (Math.round(Number(value) * 100) / 100).toFixed(2).padStart(5, '0');
+const figures = value => twoFigures(value) + ' S';
+/** What a card says of a creation: its kind, its format and its length (« VIDÉO · 16:9 · 05.04 S »). */
 export function cardMeta({ media = 'image', width, height, seconds } = {}) {
   const format =
     media === 'audio' ? '' : (formatOf(width, height)?.id ?? (width && height ? width + '×' + height : ''));
@@ -445,7 +443,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       else if (record) {
         const count = record.parameters?.reference_count;
         caption(
-          `${record.mediaType === 'video' ? (record.parameters.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale') : record.mediaType === 'audio' ? 'Son' + (record.parameters.seconds ? ' · ' + Math.round(record.parameters.seconds) + ' s' : '') : 'Image originale'} · ${record.workflowName}${Number.isInteger(count) ? ' · ' + count + ' référence(s) transmise(s)' : ''}`,
+          `${record.mediaType === 'video' ? (record.parameters.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale') : record.mediaType === 'audio' ? 'Son' + (record.parameters.seconds ? ' · ' + twoFigures(record.parameters.seconds) + ' s' : '') : 'Image originale'} · ${record.workflowName}${Number.isInteger(count) ? ' · ' + count + ' référence(s) transmise(s)' : ''}`,
         );
       }
     }

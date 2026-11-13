@@ -1069,20 +1069,21 @@ test('« Améliorer le prompt » rewrites what is typed, which can be taken back
     assert.equal(studio.prompt().value, 'un phare');
     assert.equal(body.find('studio-enrich')[0].children.length, 1);
 
-    // The seed and the LoRAs are rare: under « Plus de réglages ».
-    const [more] = body.find('studio-more');
-    assert.equal(more.children.at(-1).textContent, '+ Plus de réglages');
-    assert.equal(body.find('studio-advanced')[0].hidden, true);
+    // The seed is rare: under « ··· », a pill named for screen readers, closed at first.
+    const [more] = body.find('studio-more-pill');
+    assert.equal(more.attributes['aria-label'], 'Plus de réglages');
+    assert.equal(body.find('studio-rare')[0].hidden, true);
     more.onclick();
-    assert.equal(body.find('studio-advanced')[0].hidden, false);
-    // LoRAs: a card each, the count shown, and no fourth.
-    for (let added = 0; added < 3; added++) body.find('studio-lora-add')[0].onclick();
-    assert.equal(body.find('studio-lora').length, 3);
-    assert.equal(body.find('studio-loras-count')[0].textContent, '3 / 3');
-    assert.deepEqual(body.find('studio-lora-add'), []);
-    body.find('studio-lora-remove')[0].onclick();
-    assert.equal(body.find('studio-lora').length, 2);
-    assert.equal(body.find('studio-lora-add').length, 1);
+    assert.equal(body.find('studio-rare')[0].hidden, false);
+    assert.equal(body.find('studio-seed').length, 1);
+    // The LoRAs in their own block: « LoRA · n / 3 », a line each, and no fourth.
+    for (let added = 0; added < 3; added++) body.find('studio-lora-plus')[0].onclick();
+    assert.equal(body.find('studio-lora-row').length, 3);
+    assert.equal(body.find('studio-lora-count')[0].textContent, '· 3 / 3');
+    assert.deepEqual(body.find('studio-lora-plus'), []);
+    body.find('studio-lora-drop')[0].onclick();
+    assert.equal(body.find('studio-lora-row').length, 2);
+    assert.equal(body.find('studio-lora-plus').length, 1);
   } finally {
     restore();
   }
@@ -1190,7 +1191,7 @@ test('the LoRAs of a model do not follow to a model of another family, and come 
   const { body, asked, restore } = studio;
   try {
     const model = to => {
-        const control = body.find('studio-field').find(field => field.children[0].textContent === 'Modèle').children[1];
+        const control = body.find('studio-model-pick')[0];
         control.value = to;
         control.onchange();
       },
@@ -1201,29 +1202,29 @@ test('the LoRAs of a model do not follow to a model of another family, and come 
         await settle();
         return asked.filter(([route]) => route === 'tools/action').at(-1)[1];
       };
-    body.find('studio-lora-add')[0].onclick();
-    body.find('studio-lora-add')[0].onclick();
-    assert.equal(body.find('studio-lora').length, 2);
+    body.find('studio-lora-plus')[0].onclick();
+    body.find('studio-lora-plus')[0].onclick();
+    assert.equal(body.find('studio-lora-row').length, 2);
 
     // Another workflow of the same family keeps them.
     model('k2');
-    assert.equal(body.find('studio-lora').length, 2);
+    assert.equal(body.find('studio-lora-row').length, 2);
 
     // MOSS Image: none of Krea 2's LoRAs is shown, and none is sent.
     model('m');
-    assert.equal(body.find('studio-lora').length, 0);
-    assert.equal(body.find('studio-loras-count')[0].textContent, '0 / 3');
+    assert.equal(body.find('studio-lora-row').length, 0);
+    assert.equal(body.find('studio-lora-count')[0].textContent, '· 0 / 3');
     const sent = await generate();
     assert.equal(sent.arguments.workflow ?? 'm', 'm');
     assert.equal(sent.styles, undefined);
 
     // One of its own, then back to Krea 2: each family finds its own again.
-    body.find('studio-lora-add')[0].onclick();
+    body.find('studio-lora-plus')[0].onclick();
     model('k');
-    assert.equal(body.find('studio-lora').length, 2);
+    assert.equal(body.find('studio-lora-row').length, 2);
     assert.equal((await generate()).styles.length, 2);
     model('m');
-    assert.equal(body.find('studio-lora').length, 1);
+    assert.equal(body.find('studio-lora-row').length, 1);
   } finally {
     restore();
   }
@@ -1288,16 +1289,19 @@ test('Moodix AI sets its proposal in the Studio and waits: « Générer » is th
     assert.equal(revealed.length, 1);
     assert.equal(body.dataset.mode, 'video');
     assert.equal(studio.prompt().value, 'Un renard se lève');
-    // The lengths of the model, in a list like the other settings: the one proposed is chosen.
-    assert.equal(body.find('studio-length')[0].value, String(121 / 24));
+    // The lengths of the model on a bar, step by step: the one proposed, written as it is made.
+    const duration = () => body.find('studio-bar').find(bar => bar.dataset.ai === 'duration');
+    assert.equal(duration().value, '0');
+    assert.equal(duration().attributes['aria-valuetext'], '05.04 s');
     assert.equal(studio.studio.proposing(), true);
     // Nothing starts by itself: the pointer stops on « Générer », beside a way to decline.
     assert.equal(asked.filter(([route]) => route.startsWith('tools/')).length, 0);
     assert.equal(body.find('studio-decline').length, 1);
     // The user lengthens it, then generates: the change goes first, then the answer.
-    const length = body.find('studio-length')[0];
-    length.value = String(193 / 24);
-    length.onchange();
+    const length = duration();
+    length.value = '1';
+    length.oninput();
+    assert.equal(length.attributes['aria-valuetext'], '08.04 s');
     await body.find('studio-go')[0].onclick();
     assert.equal(await answer, 'once');
     assert.deepEqual(asked.find(([route]) => route === 'tools/revise')[1], {
@@ -1315,7 +1319,7 @@ test('Moodix AI sets its proposal in the Studio and waits: « Générer » is th
     assert.equal(studio.studio.busy(), false);
     assert.match(body.find('studio-error')[0].textContent, /Mémoire insuffisante/);
     // The seed drawn for the proposal was its own: a creation by hand draws again.
-    assert.equal(body.find('studio-advanced')[0].find('studio-field')[0].children[1].value, '');
+    assert.equal(body.find('studio-seed')[0].children[1].value, '');
   } finally {
     restore();
   }
@@ -1370,7 +1374,10 @@ test('the pointer only sets what the workflow leaves to the assistant', async ()
     const answer = studio.studio.propose(request, new AbortController().signal);
     await settle();
     // No length to set: none is shown, none is sent.
-    assert.deepEqual(body.find('studio-length'), []);
+    assert.deepEqual(
+      body.find('studio-bar').filter(bar => bar.dataset.ai === 'duration'),
+      [],
+    );
     await body.find('studio-go')[0].onclick();
     assert.equal(await answer, 'once');
   } finally {
@@ -1530,14 +1537,17 @@ test('the LoRAs of the workflow show in the Studio: those of the assistant are s
   );
   const { body, asked, restore } = page;
   try {
-    // In sight among the settings, without « Plus de réglages »: one row each.
-    const rows = body.find('studio-lora');
+    // In the LoRA block, first, one line each, a padlock in place of ×.
+    const rows = body.find('studio-lora-row');
     assert.equal(rows.length, 2);
     assert.match(rows[0].className, /is-off/, 'off by default, as the workflow says');
     assert.equal(rows[0].find('ai-mark').length, 1, 'the tile of Moodix AI: the assistant may switch it');
-    const [grain, net] = body.find('studio-lora-switch');
-    assert.equal(net.checked, true);
-    assert.equal(net.disabled, true, '« Activé » in Workflows: always applied');
+    assert.equal(rows[1].find('studio-lora-lock').length, 1);
+    // A switch only for the one left to the assistant; « Activé » in Workflows is always applied,
+    // its strength fixed there: its bar greyed.
+    assert.equal(body.find('studio-lora-switch').length, 1);
+    assert.equal(rows[1].find('studio-bar')[0].disabled, true);
+    const [grain] = body.find('studio-lora-switch');
     grain.checked = true;
     grain.onchange();
     page.prompt().value = 'un renard';
@@ -1567,7 +1577,7 @@ test('a proposal of Moodix AI switches the LoRAs of the workflow as it has them;
     await settle();
     const [grain] = body.find('studio-lora-switch');
     assert.equal(grain.checked, true, 'on, as Moodix AI has it');
-    assert.equal(body.find('studio-lora-strength')[0].textContent, '1,20');
+    assert.equal(body.find('studio-lora-row')[0].find('studio-bar-value')[0].textContent, '1,20');
     // The user switches it off before generating: the change goes with the answer.
     grain.checked = false;
     grain.onchange();
