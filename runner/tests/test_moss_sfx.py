@@ -77,7 +77,7 @@ class MossSoundEffectTests(unittest.TestCase):
         self.assertAlmostEqual(levels[-1], 5 * 0.25 / (1 + 4 * 0.25))
 
     @unittest.skipUnless(TORCH, 'torch is not installed')
-    def test_the_prompt_is_read_in_float32_on_the_card_when_it_has_room_else_on_the_processor(self):
+    def test_the_prompt_is_read_in_float32_on_the_processor_whatever_the_card(self):
         # In bfloat16 the sound came out silent (peak 0.0004 against 0.82 in float32).
         from unittest.mock import patch
 
@@ -102,7 +102,7 @@ class MossSoundEffectTests(unittest.TestCase):
             read.append((prompts[0], place))
             return torch.zeros(1, 2, 3)
 
-        for free, place in ((12, 'cuda'), (4, 'cpu')):
+        for free, place in ((24, 'cpu'), (12, 'cpu'), (4, 'cpu')):
             loaded.clear()
             read.clear()
             with (
@@ -113,7 +113,7 @@ class MossSoundEffectTests(unittest.TestCase):
                 patch('torch.Tensor.to', lambda self, *args, **kwargs: self),
             ):
                 context, empty = moss_sfx._read_prompts(Path('m'), None, ['bang duration: 3.0s', ''], 'cuda')
-            self.assertEqual(loaded[0], torch.float32)
+            self.assertEqual(loaded, [torch.float32], 'loaded in float32 and never moved to the card')
             self.assertEqual(read, [('bang duration: 3.0s', place), ('', place)])
             self.assertEqual(tuple(context.shape), (1, 2, 3))
 

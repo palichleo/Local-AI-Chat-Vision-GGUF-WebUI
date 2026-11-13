@@ -126,6 +126,18 @@ test('each computer gets its builds, the best first, the processor alone last', 
     'vulkan',
     'cpu',
   ]);
+  // The newest cards (Blackwell, 12.0) take CUDA 13 first; two cards, the oldest decides.
+  assert.deepEqual(ids({ platform: 'win32', arch: 'x64', gpus: [nvidia(12.0, [13, 4])] }), [
+    'cuda-13.4',
+    'cuda-12.4',
+    'vulkan',
+    'cpu',
+  ]);
+  assert.deepEqual(ids({ platform: 'win32', arch: 'x64', gpus: [nvidia(8.9, [13, 3]), nvidia(6.1, [13, 3])] }), [
+    'cuda-12.4',
+    'vulkan',
+    'cpu',
+  ]);
   // AMD and Intel: Vulkan, which works almost everywhere; no card: the processor.
   assert.deepEqual(ids({ platform: 'win32', arch: 'x64', gpus: [{ vendor: 'amd', name: 'Radeon' }] }), [
     'vulkan',

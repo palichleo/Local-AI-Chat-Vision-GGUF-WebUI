@@ -230,20 +230,22 @@ def clean(text):
 
 
 def encode_text(model, tokenizer, prompts, device):
-    """Last hidden states of Qwen3 over 512 tokens, zero after each prompt's own tokens."""
+    """Last hidden states of Qwen3 for each prompt's own tokens, then zeros up to 512, as the model
+    was trained. Only those tokens are read: padded on the right under causal attention, they
+    never saw the padding (measured: 1e-4 at most against reading all 512, on values up to 68),
+    and a prompt without tokens (the empty negative one) is zeros without running the model.
+    On the processor, 0.2 s instead of 6 for a sentence."""
     tokens = tokenizer(
-        [clean(prompt) for prompt in prompts],
-        return_tensors='pt',
-        padding='max_length',
-        truncation=True,
-        max_length=TEXT_LENGTH,
-        add_special_tokens=True,
+        [clean(prompt) for prompt in prompts], truncation=True, max_length=TEXT_LENGTH, add_special_tokens=True
     )
-    ids, mask = tokens.input_ids.to(device), tokens.attention_mask.to(device)
+    hidden = torch.zeros(len(prompts), TEXT_LENGTH, model.config.hidden_size, dtype=model.dtype, device=device)
     with torch.no_grad():
-        hidden = model(input_ids=ids, attention_mask=mask, output_hidden_states=True, use_cache=False).hidden_states[-1]
-    for index, length in enumerate(mask.gt(0).sum(dim=1).tolist()):
-        hidden[index, length:] = 0
+        for index, ids in enumerate(tokens.input_ids):
+            if not ids:
+                continue
+            ids = torch.tensor([ids], device=device)
+            read = model(input_ids=ids, attention_mask=torch.ones_like(ids), output_hidden_states=True, use_cache=False)
+            hidden[index, : ids.shape[1]] = read.hidden_states[-1][0]
     return hidden
 
 

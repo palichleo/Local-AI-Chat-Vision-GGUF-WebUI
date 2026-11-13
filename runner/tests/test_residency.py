@@ -259,6 +259,63 @@ class RoomForTheChatModel(unittest.TestCase):
         finally:
             psutil.virtual_memory = saved
 
+    def test_on_every_size_of_machine_only_what_the_chat_model_lacks_leaves(self):
+        """Krea 2 keeps its files after two images (its encoder without sending anyone away, then
+        its model, 4 GiB reserve each), then the chat model comes back and asks its room + 2 GiB.
+        The system and the usual programs take 4 GiB + 15 % of the RAM."""
+        try:
+            import psutil
+        except ImportError:
+            self.skipTest('psutil is required')
+        from runner.models import residency
+
+        def after_images_then_chat(total, chat):
+            used, held, table = 4 + 0.15 * total, {}, residency.Residency()
+
+            def available():
+                return (total - used - sum(held.values())) * GiB
+
+            psutil.virtual_memory = lambda: SimpleNamespace(total=total * GiB, available=available())
+
+            def admit(name, size, evict):
+                if name in held:
+                    table.arenas.move_to_end(name)
+                elif table._make_room(size * GiB, 4 * GiB, evict):
+                    held[name] = size
+                    table.arenas[name] = SimpleNamespace(
+                        users=0, size=size * GiB, pinned=False, release=lambda: held.pop(name)
+                    )
+
+            for _ in range(2):
+                admit('encoder', 4.9, evict=False)
+                admit('model', 13.5, evict=True)
+            kept = sorted(held)
+            table.leave_room(int((chat + 2) * GiB))
+            return kept, sorted(held), available() / GiB
+
+        GiB = 1024**3
+        saved = psutil.virtual_memory
+        try:
+            # A big machine: both files stay, the chat model has its room beside them.
+            kept, left, free = after_images_then_chat(64, 8.3)
+            self.assertEqual((kept, left), (['encoder', 'model'], ['encoder', 'model']))
+            self.assertGreaterEqual(free, 8.3 + 2)
+            # A big chat model on 48 GiB: the encoder leaves, the model (used last) stays.
+            kept, left, free = after_images_then_chat(48, 20)
+            self.assertEqual((kept, left), (['encoder', 'model'], ['model']))
+            self.assertGreaterEqual(free, 20 + 2)
+            # 32 GiB and less room: everything idle leaves for the chat model.
+            kept, left, free = after_images_then_chat(32, 8.3)
+            self.assertEqual((kept, left), (['encoder', 'model'], []))
+            # 16 GiB: the model never stayed; what can leave leaves, short of the room, no error.
+            kept, left, free = after_images_then_chat(16, 8.3)
+            self.assertEqual((kept, left), (['encoder'], []))
+            self.assertLess(free, 8.3 + 2)
+            # 8 GiB: nothing was kept, nothing to give.
+            self.assertEqual(after_images_then_chat(8, 2.5)[:2], ([], []))
+        finally:
+            psutil.virtual_memory = saved
+
 
 def _safetensors(path, tensors):
     """A safetensors file written by hand: {name: bytes}, each stored as I8."""
