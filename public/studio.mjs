@@ -683,7 +683,7 @@ export function setupStudio({
     span = null;
     const blocks = [sourcesBlock(workflow), framesBlock(workflow), referencesBlock(workflow)].filter(Boolean);
     if (!blocks.length) return null;
-    // Another model: a blue line around them for a moment, which fades (nothing blinks). Drawn
+    // Another model: a light line around them for a moment, which fades (nothing blinks). Drawn
     // again meanwhile, they keep it until the moment is over.
     if (Date.now() < flashUntil) {
       for (const block of blocks) block.className += ' is-flash';
@@ -887,7 +887,7 @@ export function setupStudio({
   /**
    * The floppy disk (moodix-design.md 7, 15 ter): 32 px at the right of the model's name, its
    * name only in its tooltip; quiet while nothing changed, a light pill once something did since
-   * the last saving, a green check just after one.
+   * the last saving, a check just after one.
    */
   function saveButtonFor(workflow) {
     const disk = button('studio-save', '', () => void savePreset(workflow)),

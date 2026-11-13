@@ -1065,7 +1065,10 @@ body[data-view='studio'][data-chat='open'] #studio-view .studio-agent {
 }
 /* An answer came while the chat was folded: the button glows until the chat is opened. */
 #studio-view .studio-agent[data-unread='true'] {
-  box-shadow: 0 0 16px rgba(246, 195, 67, 0.45);
+  box-shadow: 0 0 16px rgba(236, 238, 242, 0.35);
+}
+:root[data-theme='light'] #studio-view .studio-agent[data-unread='true'] {
+  box-shadow: 0 0 16px rgba(18, 20, 26, 0.25);
 }
 /* The Sortie: the four colours of the logo along its foot, the whole width (2 px, 3 px apart). */
 .studio-block.is-output {
@@ -1335,7 +1338,7 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
 .studio-link {
   border: 0;
   background: none;
-  color: var(--link);
+  color: var(--ink);
   font-weight: 650;
   min-height: 40px;
   padding: 0 8px;
@@ -1361,11 +1364,17 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   border-color: var(--field-line);
   background: var(--field);
 }
-/* Another model: a blue line around the blocks for 0.65 s, which fades in 0.45 s. */
+/* Another model: a light line around the blocks for 0.65 s, which fades in 0.45 s (no colour:
+   moodix-design.md 7 bis 17). */
 .studio-input-block.is-flash {
   box-shadow:
-    0 0 0 1px rgba(61, 107, 245, 0.65),
-    0 0 18px rgba(61, 107, 245, 0.18);
+    0 0 0 1px rgba(236, 238, 242, 0.5),
+    0 0 18px rgba(236, 238, 242, 0.08);
+}
+:root[data-theme='light'] .studio-input-block.is-flash {
+  box-shadow:
+    0 0 0 1px rgba(18, 20, 26, 0.45),
+    0 0 18px rgba(18, 20, 26, 0.08);
 }
 @media (prefers-reduced-motion: reduce) {
   .studio-input-block {
@@ -1467,7 +1476,7 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   pointer-events: none;
 }
 .studio-slot-badge.is-text {
-  color: #9db6ff;
+  color: #eceef2;
 }
 .studio-slot-badge svg {
   width: 12px;
@@ -1627,7 +1636,7 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
 .studio-extending svg {
   width: 16px;
   height: 16px;
-  color: var(--fn-output);
+  color: var(--soft);
 }
 /* The kind of sound, in the settings. */
 .studio-kinds {
@@ -1847,14 +1856,23 @@ video.studio-frame-result {
 .studio-bars span {
   flex: 1;
   border-radius: 999px;
-  background: var(--fn-action);
+  background: #4a4f59;
   transition: background 0.4s ease;
+}
+:root[data-theme='light'] .studio-bars span {
+  background: #b9c0cb;
 }
 .studio-frame.is-busy .studio-bars span {
   background: #2a2e37;
 }
 .studio-frame.is-busy .studio-bars span.is-lit {
-  background: var(--fn-action);
+  background: #eceef2;
+}
+:root[data-theme='light'] .studio-frame.is-busy .studio-bars span {
+  background: #dfe3e9;
+}
+:root[data-theme='light'] .studio-frame.is-busy .studio-bars span.is-lit {
+  background: #12141a;
 }
 /* The row under the preview: formats on the left, Générer on the right. */
 .studio-actionbar {
@@ -2071,8 +2089,8 @@ video.studio-frame-result {
 }
 #studio-view .studio-frame-over .studio-stop:hover,
 #studio-view .studio-frame-over .studio-stop:focus-visible {
-  background: var(--fn-action);
-  color: #fff;
+  background: #eceef2;
+  color: #0b0c0f;
 }
 #studio-view .studio-frame-over .studio-stop svg {
   width: 13px;
@@ -2081,7 +2099,7 @@ video.studio-frame-result {
 .studio-error {
   width: 100%;
   margin: 0;
-  color: var(--fn-action-text);
+  color: var(--ink);
   font-size: 13px;
 }
 @container studio (max-width: 719px) {
@@ -2869,7 +2887,10 @@ video.studio-frame-result {
 }
 #studio-view .studio-prompt-field textarea:focus {
   outline: none;
-  border-color: rgba(61, 107, 245, 0.55);
+  border-color: #4a4f59;
+}
+:root[data-theme='light'] #studio-view .studio-prompt-field textarea:focus {
+  border-color: var(--line-strong);
 }
 /* Its thin bar: the thumb in the grey of the fields. */
 #studio-view .studio-prompt-field textarea::-webkit-scrollbar-thumb {
@@ -2913,8 +2934,8 @@ video.studio-frame-result {
 }
 /* An image dragged over the column: the place it goes is the column of the prompt. */
 .studio-block.is-input.is-dropping {
-  border-color: rgba(61, 107, 245, 0.65);
-  box-shadow: 0 0 18px rgba(61, 107, 245, 0.18);
+  border-color: rgba(236, 238, 242, 0.5);
+  box-shadow: 0 0 18px rgba(236, 238, 242, 0.08);
 }
 .studio-prompt-field .studio-enrich > * {
   pointer-events: auto;
@@ -3102,8 +3123,11 @@ video.studio-frame-result {
   width: 16px;
   height: 16px;
   margin: 0;
-  accent-color: var(--fn-settings);
+  accent-color: #eceef2;
   cursor: pointer;
+}
+:root[data-theme='light'] .studio-lora-switch {
+  accent-color: #12141a;
 }
 .studio-lora-switch:disabled {
   cursor: default;
@@ -3693,7 +3717,7 @@ html[data-switch='chat']::view-transition-old(studio) {
 }
 #studio-view .studio-lora-plus:hover:enabled,
 #studio-view .studio-lora-plus:focus-visible {
-  border-color: rgba(34, 160, 96, 0.6);
+  border-color: #4a4f59;
   color: var(--ink);
 }
 #studio-view .studio-lora-plus svg {
@@ -3837,7 +3861,7 @@ html[data-switch='chat']::view-transition-old(studio) {
 }
 #studio-view .studio-dice:hover:enabled,
 #studio-view .studio-dice:focus-visible {
-  border-color: rgba(34, 160, 96, 0.6);
+  border-color: #4a4f59;
   color: var(--ink);
 }
 #studio-view .studio-dice svg {
@@ -3909,6 +3933,8 @@ html[data-switch='chat']::view-transition-old(studio) {
   bottom: 34%;
   left: 14px;
   right: 14px;
+  /* A sound of the Sortie: grey stripes, no colour (moodix-design.md 7 bis 17). */
+  background: repeating-linear-gradient(90deg, #6e7480 0 3px, transparent 3px 7px);
 }
 .studio-item-number {
   position: absolute;
@@ -4025,14 +4051,11 @@ html[data-switch='chat']::view-transition-old(studio) {
   background: #1c1f26;
   outline: none;
 }
-#studio-view .studio-menu-item.is-danger {
-  color: #f08a7e;
-}
 #studio-view .studio-menu-item[aria-disabled='true'] {
   opacity: 0.45;
   cursor: not-allowed;
 }
-/* « Supprimer #3 ? », on the picture: ✕ to keep it, the red bin to take it away. */
+/* « Supprimer #3 ? », on the picture: ✕ to keep it, the light bin to take it away. */
 .studio-item-confirm {
   position: absolute;
   inset: 0;
@@ -4074,7 +4097,7 @@ html[data-switch='chat']::view-transition-old(studio) {
   height: 12px;
 }
 #studio-view .studio-confirm-yes {
-  background: #e8402f;
+  background: #eceef2;
   color: #0b0c0f;
 }
 #studio-view .studio-confirm-yes svg {
@@ -4106,7 +4129,7 @@ html[data-switch='chat']::view-transition-old(studio) {
 /* ------------------------------------------------------------------ « Enregistrer » */
 /* moodix-design.md 7, 15 ter: a floppy disk of 32 px at the right of the model's name, no word
    (its name in its tooltip); quiet while nothing changed, a light pill once something did since
-   the last saving, a green check just after one. */
+   the last saving, a check just after one. */
 #studio-view .studio-save {
   display: grid;
   flex: none;
@@ -4134,7 +4157,10 @@ html[data-switch='chat']::view-transition-old(studio) {
 }
 #studio-view .studio-save[data-state='saved'] {
   background: transparent;
-  color: #22a060;
+  color: #eceef2;
+}
+:root[data-theme='light'] #studio-view .studio-save[data-state='saved'] {
+  color: var(--ink);
 }
 :root[data-theme='light'] #studio-view .studio-save[data-state='changed'] {
   background: #12141a;
@@ -4158,8 +4184,8 @@ html[data-switch='chat']::view-transition-old(studio) {
 /* moodix-design.md 7 bis 17: no line of colour at the top of the blocks; the four of them in one
    neutral border, 1 px #1A1D24. The colours of Beaubourg stay in the four pipes, the rules of the
    logo, under the timeline and under « Agent », the band of « Générer », the gradient of the bars
-   and the blue of the image slots on hover (the column of the prompt keeps its blue while an image
-   is dragged over it: it takes the image too). */
+   and the blue of the image slots on hover; nowhere else in the Studio (a soft light line while an
+   image is dragged over the column of the prompt). */
 #studio-view .studio-block {
   border: 1px solid #1a1d24;
 }
@@ -4167,5 +4193,9 @@ html[data-switch='chat']::view-transition-old(studio) {
   border-color: var(--line);
 }
 #studio-view .studio-block.is-input.is-dropping {
-  border-color: rgba(61, 107, 245, 0.65);
+  border-color: rgba(236, 238, 242, 0.5);
+}
+:root[data-theme='light'] #studio-view .studio-block.is-input.is-dropping {
+  border-color: rgba(18, 20, 26, 0.45);
+  box-shadow: 0 0 18px rgba(18, 20, 26, 0.08);
 }

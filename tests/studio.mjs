@@ -990,7 +990,7 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     ask.find('studio-confirm-no')[0].onclick();
     assert.deepEqual(body.find('studio-item-confirm'), []);
     assert.equal(asked.filter(([route]) => route === 'studio/delete').length, 0);
-    // The bin, then the red bin: it goes.
+    // The bin, then the light one: it goes.
     items()[0].find('studio-item-del')[0].onclick();
     body.find('studio-confirm-yes')[0].onclick();
     await settle();
@@ -1171,7 +1171,7 @@ test('the input images: pictos and no word, start and end on a line of time, ref
     );
     assert.equal(body.find('studio-references-count')[0].textContent, '1/3');
 
-    // Another model: its blocks say so for a moment (a blue line); a start image only, the line
+    // Another model: its blocks say so for a moment (a light line); a start image only, the line
     // ends with the length, no « ⇄ ».
     model('w');
     const [start] = body.find('studio-input-block');
@@ -1368,7 +1368,7 @@ test('the floppy disk keeps the settings of the model, given back each time it i
     assert.equal(first.preset.format, '16:9');
     assert.deepEqual(first.preset.styles, []);
     assert.deepEqual(first.preset.loras, { msr: { on: true, strength: 1 } }, 'the LoRA fixed in Workflows is not kept');
-    // Just saved: the green check.
+    // Just saved: the check.
     assert.equal(disk().dataset.state, 'saved');
     assert.match(disk().attributes['aria-label'], /^Réglages enregistrés pour H3/);
 
