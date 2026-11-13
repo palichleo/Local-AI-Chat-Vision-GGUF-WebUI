@@ -2541,40 +2541,75 @@ video.studio-frame-result {
   min-height: 18px;
 }
 
-/* The prompt, and its star (« Enrichir le prompt ») at its bottom right, left of its scroll bar. */
+/* The prompt (moodix-design.md 14): a box in sight, its buttons inside it at its bottom right,
+   16 px from its right edge, never over its scroll bar; the text fades out under them. */
 .studio-prompt-field {
-  /* The room left on the right for the scroll bar of the prompt. */
-  --enrich-clear: 18px;
+  /* The room left on the right for the scroll bar of the prompt (8 px, and the border). */
+  --enrich-clear: 16px;
   position: relative;
   display: flex;
   flex-direction: column;
 }
-.studio-prompt-field.has-enrich textarea {
-  padding-bottom: 46px;
+#studio-view .studio-prompt-field textarea {
+  border: 1px solid #262a33;
+  border-radius: 10px;
+  background: #0b0c0f;
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.4s ease;
 }
-/* The last lines fade out as they come down to the star: from the top of its box to the foot of
-   the field, in the colour of the field. The scroll bar, on the right, stays clear. */
+:root[data-theme='light'] #studio-view .studio-prompt-field textarea {
+  border-color: var(--field-line);
+  background: var(--field);
+}
+#studio-view .studio-prompt-field textarea:focus {
+  outline: none;
+  border-color: rgba(61, 107, 245, 0.55);
+}
+/* Its thin bar: the thumb in the grey of the fields. */
+#studio-view .studio-prompt-field textarea::-webkit-scrollbar-thumb {
+  background-color: #2a2e37;
+}
+/* The last line can come up above the fade (60 px under the text). */
+.studio-prompt-field.has-enrich textarea {
+  padding-bottom: 60px;
+}
+/* The last lines fade out as they come down to the buttons: 64 px down to the foot of the box, in
+   its colour, stopping short of the scroll bar on the right. */
 .studio-prompt-field.has-enrich::after {
   content: '';
   position: absolute;
   left: 1px;
-  right: var(--enrich-clear);
+  right: 9px;
   bottom: 1px;
-  height: 40px;
+  height: 64px;
   z-index: 1;
-  border-radius: 0 0 0 13px;
-  background: linear-gradient(to bottom, transparent, var(--field) 92%);
+  border-radius: 0 0 0 9px;
+  background: linear-gradient(to bottom, rgba(11, 12, 15, 0), #0b0c0f 88%);
   pointer-events: none;
+}
+:root[data-theme='light'] .studio-prompt-field.has-enrich::after {
+  background: linear-gradient(to bottom, transparent, var(--field) 88%);
 }
 .studio-prompt-field .studio-enrich {
   position: absolute;
   right: var(--enrich-clear);
-  bottom: 8px;
+  bottom: 10px;
   left: auto;
   z-index: 2;
   justify-content: flex-end;
   gap: 4px;
   pointer-events: none;
+}
+/* Moodix AI rewrites the prompt: a thin soft white line around the box, its colour. */
+#studio-view .studio-prompt-field.is-improving textarea {
+  border-color: rgba(236, 238, 242, 0.55);
+  box-shadow: 0 0 0 1px rgba(236, 238, 242, 0.18);
+}
+/* An image dragged over the column: the place it goes is the column of the prompt. */
+.studio-block.is-input.is-dropping {
+  border-color: rgba(61, 107, 245, 0.65);
+  box-shadow: 0 0 18px rgba(61, 107, 245, 0.18);
 }
 .studio-prompt-field .studio-enrich > * {
   pointer-events: auto;
@@ -2596,9 +2631,27 @@ video.studio-frame-result {
   height: 15px;
   stroke-width: 2;
 }
-/* While the model rewrites: the star turns, slowly. */
-.studio-enrich-go.is-working svg {
-  animation: enrich-turn 2.4s linear infinite;
+/* Too few words: the wand waits, quietly. */
+.studio-enrich-go:disabled:not(.is-working) {
+  opacity: 0.45;
+  cursor: default;
+}
+/* While Moodix AI rewrites: the button turns white, a ring turns around it, slowly (still with
+   less motion). */
+.studio-enrich-go.is-working {
+  position: relative;
+  background: #eceef2;
+  border-color: #eceef2;
+  color: #0b0c0f;
+}
+.studio-enrich-go.is-working::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1.5px solid rgba(236, 238, 242, 0.75);
+  border-top-color: transparent;
+  border-radius: 999px;
+  animation: enrich-turn 1.8s linear infinite;
 }
 @keyframes enrich-turn {
   to {
@@ -2606,7 +2659,7 @@ video.studio-frame-result {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .studio-enrich-go.is-working svg {
+  .studio-enrich-go.is-working::after {
     animation: none;
   }
 }

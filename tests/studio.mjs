@@ -1022,7 +1022,7 @@ test('« Agent », left of « Générer », opens the chat as the band at the fo
   }
 });
 
-test('« Enrichir le prompt » rewrites what is typed, which can be taken back; three LoRAs at most', async () => {
+test('« Améliorer le prompt » rewrites what is typed, which can be taken back; three LoRAs at most', async () => {
   const image = {
     id: 'w',
     name: 'Image',
@@ -1040,12 +1040,20 @@ test('« Enrichir le prompt » rewrites what is typed, which can be taken back; 
   );
   const { body, asked, restore } = studio;
   try {
-    assert.equal(body.find('studio-enrich-go')[0].children.at(-1).textContent, 'Enrichir le prompt');
+    const wand = () => body.find('studio-enrich-go')[0];
+    assert.equal(wand().children.at(-1).textContent, 'Améliorer le prompt');
+    // Fewer than three letters: the wand waits, and says why.
+    assert.equal(wand().disabled, true);
+    assert.equal(wand().title, 'Écris d’abord quelques mots');
 
     // Nothing typed: nothing is asked of the model.
-    await body.find('studio-enrich-go')[0].onclick();
+    await wand().onclick();
     assert.equal(asked.filter(([route]) => route === 'studio/enrich').length, 0);
     assert.match(body.find('studio-error')[0].textContent, /quelques mots/);
+    studio.prompt().value = 'un';
+    studio.prompt().oninput();
+    await wand().onclick();
+    assert.equal(asked.filter(([route]) => route === 'studio/enrich').length, 0);
 
     studio.prompt().value = 'un phare';
     studio.prompt().oninput();
@@ -1075,6 +1083,79 @@ test('« Enrichir le prompt » rewrites what is typed, which can be taken back; 
     body.find('studio-lora-remove')[0].onclick();
     assert.equal(body.find('studio-lora').length, 2);
     assert.equal(body.find('studio-lora-add').length, 1);
+  } finally {
+    restore();
+  }
+});
+
+test('Ctrl+E improves the prompt from the Studio; an image pasted or dropped on its column goes to the first free slot', async () => {
+  const video = {
+    id: 'v',
+    name: 'Clip',
+    external: true,
+    limits: sizes,
+    size: { width: 768, height: 448 },
+    settings: [],
+    seeded: true,
+    exclusive: [['start_image', 'end_image'], ['reference']],
+    roles: {
+      start_image: { count: 1, media: ['image'] },
+      end_image: { count: 1, media: ['image'] },
+      reference: { count: 2, media: ['image'] },
+    },
+  };
+  const studio = await studioPage(
+    { create_video: [video], create_audio: [{ id: 's', name: 'Son', roles: {}, settings: [] }] },
+    { 'studio/enrich': ({ prompt }) => ({ prompt: 'Better: ' + prompt }) },
+  );
+  const { page, body, asked, notices, restore, mode } = studio;
+  try {
+    mode(1);
+    const improved = () => asked.filter(([route]) => route === 'studio/enrich').length,
+      key = (overrides = {}) => ({ key: 'e', ctrlKey: true, preventDefault() {}, ...overrides });
+    studio.prompt().value = 'un bateau';
+    studio.prompt().oninput();
+    // In the message box of the chat, Ctrl+E is not the Studio's.
+    page['studio-view'].onkeydown(key({ target: { id: 'prompt' } }));
+    await settle();
+    assert.equal(improved(), 0);
+    page['studio-view'].onkeydown(key());
+    await settle();
+    assert.equal(improved(), 1);
+    assert.equal(studio.prompt().value, 'Better: un bateau');
+
+    // Pasted, then dropped on the column: the first free slots, in their order.
+    const write = body.find('studio-write')[0],
+      file = name => ({ name, type: 'image/png' }),
+      shown = () =>
+        body
+          .find('studio-slot')
+          .map(tile => (tile.className.includes('is-filled') ? tile.children[0].children[0].src : ''));
+    let stopped = 0;
+    write.onpaste({ clipboardData: { files: [file('a.png')] }, preventDefault: () => stopped++ });
+    await settle();
+    assert.equal(stopped, 1, 'the image is not pasted as text');
+    assert.deepEqual(shown(), ['/preview/a.png', '', '', '']);
+    body.find('studio-write')[0].ondrop({ dataTransfer: { files: [file('b.png')] }, preventDefault() {} });
+    await settle();
+    // The references do not combine with a start image: the end takes it.
+    assert.deepEqual(shown(), ['/preview/a.png', '/preview/b.png', '', '']);
+    body.find('studio-write')[0].onpaste({ clipboardData: { files: [file('c.png')] }, preventDefault() {} });
+    await settle();
+    assert.equal(notices.at(-1), 'Toutes les cases d’images sont prises.');
+    // Text pasted stays text.
+    stopped = 0;
+    body.find('studio-write')[0].onpaste({ clipboardData: { files: [] }, preventDefault: () => stopped++ });
+    assert.equal(stopped, 0);
+
+    // A sound: no wand, and Ctrl+E does nothing.
+    mode(2);
+    studio.prompt().value = 'pluie';
+    studio.prompt().oninput();
+    assert.deepEqual(body.find('studio-enrich-go'), []);
+    page['studio-view'].onkeydown(key());
+    await settle();
+    assert.equal(improved(), 1);
   } finally {
     restore();
   }

@@ -898,14 +898,53 @@ export function setupStudio({
     return section;
   }
 
-  // ------------------------------------------------------------------ the prompt, enriched
+  // ------------------------------------------------------------------ images handed over
+  const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+  /** The first image of files pasted or dropped, if any. */
+  const imageFile = files => [...(files ?? [])].find(file => IMAGE_TYPES.includes(file.type)) ?? null;
+  /**
+   * An image pasted or dropped on the column of the prompt goes to the first free slot the model
+   * takes, in the order of its slots, never to one that would not combine with those given.
+   */
+  function placeImage(workflow, file) {
+    if (working) return;
+    if (answering())
+      return notice(
+        'Les images de cette proposition sont celles de Moodix AI : demandez-lui dans le chat pour en changer.',
+      );
+    const draft = drafts[mode];
+    let taken = false;
+    for (const [role, spec] of Object.entries(workflow.roles ?? {})) {
+      if (!spec.count || !spec.media.includes('image')) continue;
+      taken = true;
+      if (exclusiveWith(workflow, role).length) continue;
+      for (let index = 0; index < spec.count; index++)
+        if (!draft.inputs[role]?.[index]) return void fill(role, index, file);
+    }
+    notice(taken ? 'Toutes les cases d’images sont prises.' : 'Ce modèle ne prend pas d’image en entrée.');
+  }
+
+  // ------------------------------------------------------------------ the prompt, improved
+  // « Améliorer le prompt » asks for a few words first (moodix-design.md 17).
+  const IMPROVE_MIN = 3;
+  const improveTitle = () =>
+    drafts[mode].prompt.trim().length < IMPROVE_MIN
+      ? 'Écris d’abord quelques mots'
+      : 'Améliorer le prompt (' + MODIFIER + '+E)';
+  /** The button follows what is typed, without drawing the Studio again (the field keeps its focus). */
+  function improvable() {
+    const go = document.querySelector?.('#studio-view .studio-enrich-go');
+    if (!go || enriching) return;
+    go.disabled = Boolean(working) || drafts[mode].prompt.trim().length < IMPROVE_MIN;
+    go.title = improveTitle();
+  }
   /** The chat model rewrites what is typed as a full prompt; what was typed can be taken back. */
   async function enrich() {
     if (enriching || working) return;
     const draft = drafts[mode],
       text = draft.prompt.trim();
-    if (!text) {
-      failure = 'Écrivez d’abord quelques mots à enrichir.';
+    if (text.length < IMPROVE_MIN) {
+      failure = 'Écris d’abord quelques mots.';
       return render();
     }
     const reason = blocked();
@@ -920,6 +959,16 @@ export function setupStudio({
       await waitForModel(api, controller.signal, () => {});
       const result = await (await api('studio/enrich', { prompt: text, verb: verbOf() })).json();
       draft.before = text;
+      // The text rewritten writes itself in the box, in half a second (at once with less motion).
+      const box = document.querySelector?.('#studio-view [data-ai="prompt"]');
+      if (box && pointer && !pointer.reduced()) {
+        const step = Math.max(2, Math.ceil(result.prompt.length / 36));
+        for (let index = step; index < result.prompt.length + step; index += step) {
+          box.value = result.prompt.slice(0, index);
+          box.scrollTop = box.scrollHeight;
+          await wait(14);
+        }
+      }
       draft.prompt = result.prompt;
       notice('');
     } catch (error) {
@@ -931,24 +980,23 @@ export function setupStudio({
     }
   }
   /**
-   * In the corner of the prompt: the star that enriches it (its name for screen readers and in
-   * its tooltip), and once used the arrow back to what was typed.
+   * In the corner of the prompt, inside its box: the wand that improves it (its name for screen
+   * readers and in its tooltip, with its shortcut), and once used the arrow back to what was typed.
    */
   function enrichRow() {
     const draft = drafts[mode],
       row = node('div', 'studio-enrich'),
-      label = enriching ? 'Enrichissement…' : 'Enrichir le prompt',
-      make = button('studio-enrich-go', '', enrich, 'spark');
+      label = enriching ? 'Amélioration du prompt…' : 'Améliorer le prompt',
+      make = button('studio-enrich-go', '', enrich, 'wand');
     make.append(node('span', 'sr-only', label));
     make.setAttribute('aria-label', label);
-    make.title = enriching
-      ? 'Le modèle de chat réécrit votre texte…'
-      : 'Enrichir le prompt : le modèle de chat réécrit votre texte en un prompt complet';
+    make.setAttribute('aria-keyshortcuts', MODIFIER === '⌘' ? 'Meta+E' : 'Control+E');
+    make.title = enriching ? 'Moodix AI réécrit ton texte…' : improveTitle();
     if (enriching) {
       make.classList.add('is-working');
       make.setAttribute('aria-busy', 'true');
     }
-    make.disabled = enriching || Boolean(working);
+    make.disabled = enriching || Boolean(working) || draft.prompt.trim().length < IMPROVE_MIN;
     if (draft.before !== null && !enriching && !working) {
       const back = button(
         'studio-link',
@@ -1927,12 +1975,14 @@ export function setupStudio({
       extending
         ? 'Ce qui se passe ensuite…'
         : mode === 'image'
-          ? 'Décrivez l’image…'
+          ? 'Décris ton image…'
           : mode === 'video'
-            ? 'Décrivez le clip : ce qu’on voit, ce qui se passe, la caméra, le son…'
-            : 'Décrivez le son : genre, instruments, ambiance…',
+            ? 'Décris ta vidéo…'
+            : 'Décris ton son…',
       value => {
         draft.prompt = value;
+        // « Améliorer le prompt » waits for a few words.
+        improvable();
       },
     );
     prompt.id = 'studio-prompt';
@@ -1945,7 +1995,31 @@ export function setupStudio({
     );
     promptField.append(prompt);
     if (mode !== 'audio') promptField.append(enrichRow());
+    if (enriching) promptField.classList.add('is-improving');
     write.append(promptField);
+    // An image pasted (Ctrl+V) or dropped anywhere on the column: in the first free slot.
+    write.ondragover = event => {
+      if (!event.dataTransfer?.types?.includes?.('Files')) return;
+      event.preventDefault();
+      write.classList.add('is-dropping');
+    };
+    write.ondragleave = event => {
+      if (!write.contains?.(event.relatedTarget)) write.classList.remove('is-dropping');
+    };
+    write.ondrop = event => {
+      write.classList.remove('is-dropping');
+      const file = imageFile(event.dataTransfer?.files);
+      if (!event.dataTransfer?.files?.length) return;
+      event.preventDefault();
+      if (file) placeImage(workflow, file);
+      else notice('Seules les images PNG, JPEG ou WebP vont dans les cases.');
+    };
+    write.onpaste = event => {
+      const file = imageFile(event.clipboardData?.files);
+      if (!file) return;
+      event.preventDefault();
+      placeImage(workflow, file);
+    };
     // A song's lyrics are words handed over too: under the prompt, opened on demand.
     const lyrics = workflow.settings.find(setting => setting.key === 'lyrics' && setting.type === 'string');
     if (lyrics) {
@@ -2254,11 +2328,17 @@ export function setupStudio({
 
   // Ctrl + Entrée (⌘ on a Mac) generates from anywhere in the Studio, not only from the prompt.
   const shortcut = event => {
-    if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || working || enriching) return;
-    // The message box of the chat sends with Entrée: the shortcut is the Studio's.
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || working || enriching) return;
+    // The message box of the chat has its own keys: these are the Studio's.
     if (event.target?.id === 'prompt') return;
-    event.preventDefault();
-    void generate();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void generate();
+    } else if (String(event.key).toLowerCase() === 'e' && !event.shiftKey && mode !== 'audio' && info?.enabled) {
+      // « Améliorer le prompt » (moodix-design.md 17): Ctrl+E, ⌘+E on a Mac.
+      event.preventDefault();
+      void enrich();
+    }
   };
   const view = $('studio-view');
   if (view) {
