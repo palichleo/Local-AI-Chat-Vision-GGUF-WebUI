@@ -2465,6 +2465,45 @@ video.studio-frame-result {
 .studio-lora-add {
   min-height: 36px;
 }
+/* The LoRAs of the workflow: a row each, its name (with the tile of Moodix AI when the assistant
+   may switch it), its strength, and whether it is on; off, it fades. */
+.studio-lora.is-workflow {
+  grid-template-columns: minmax(0, 1fr) 64px 34px 30px;
+  grid-template-areas: 'name slider amount switch';
+  min-height: 40px;
+}
+.studio-lora-name {
+  grid-area: name;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding-left: 4px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.studio-lora-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-lora-switch {
+  grid-area: switch;
+  justify-self: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--fn-settings);
+  cursor: pointer;
+}
+.studio-lora-switch:disabled {
+  cursor: default;
+}
+.studio-lora.is-off .studio-lora-name,
+.studio-lora.is-off .studio-lora-strength,
+.studio-lora.is-off input[type='range'] {
+  opacity: 0.45;
+}
 
 /* The Sortie: one height, a row of pictures; their actions on the picture. */
 .studio-output-tools {

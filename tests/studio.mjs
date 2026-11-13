@@ -1312,3 +1312,143 @@ test('drawn again, the Studio keeps the pictures of its Sortie and what its scre
     restore();
   }
 });
+
+test('the LoRAs chosen in a workflow are listed for the Studio, named by their file, those switched off left out', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { ToolCatalog } = await import('../lib/tool-catalog.mjs');
+  const krea = JSON.parse(
+    await readFile(new URL('../runner/workflows/fefb88eb-8311-4409-b636-6efbb42e952c.json', import.meta.url), 'utf8'),
+  );
+  const loras = [
+    {
+      id: 'grain',
+      asset: 'a1',
+      description: 'Grain de film',
+      enabled: { policy: 'model', default: false },
+      strength: { policy: 'model', min: 0, max: 1.5, default: 0.8 },
+    },
+    {
+      id: 'net',
+      asset: 'a2',
+      description: '',
+      enabled: { policy: 'fixed', value: true },
+      strength: { policy: 'fixed', value: 1 },
+    },
+    {
+      id: 'old',
+      asset: 'a3',
+      description: 'Hors service',
+      enabled: { policy: 'off' },
+      strength: { policy: 'fixed', value: 1 },
+    },
+  ];
+  const tools = new ToolCatalog({
+    list: async () => [{ ...krea, loras, ready: true }],
+    // The registry names its files; a LoRA without one is named by its description.
+    assets: {
+      list: async () => [
+        { id: 'a1', path: 'D:/loras/film_grain.safetensors' },
+        { id: 'a2', name: 'net.safetensors', path: 'D:/x/autre.safetensors' },
+      ],
+    },
+  });
+  const [workflow] = (await tools.studio()).create_image;
+  assert.deepEqual(workflow.loras, [
+    {
+      id: 'grain',
+      name: 'film_grain',
+      description: 'Grain de film',
+      assistant: true,
+      on: false,
+      strength: { min: 0, max: 1.5, default: 0.8 },
+    },
+    { id: 'net', name: 'net', description: '', assistant: false, on: true, strength: { value: 1 } },
+  ]);
+});
+
+/** A workflow that brings two LoRAs: one left to the assistant (off by default), one always on. */
+const withLoras = workflow => ({
+  ...workflow,
+  loras: [
+    {
+      id: 'grain',
+      name: 'film_grain',
+      description: 'Grain de film',
+      assistant: true,
+      on: false,
+      strength: { min: 0, max: 1.5, default: 0.8 },
+    },
+    { id: 'net', name: 'net', description: '', assistant: false, on: true, strength: { value: 1 } },
+  ],
+});
+
+test('the LoRAs of the workflow show in the Studio: those of the assistant are switched there and go with the creation', async () => {
+  const workflow = withLoras({
+    id: 'w',
+    name: 'Krea 2',
+    family: 'krea2',
+    roles: {},
+    limits: sizes,
+    direct: true,
+    size: { width: 1024, height: 1024 },
+    settings: [],
+  });
+  const page = await studioPage(
+    { create_image: [workflow] },
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'error', error: 'arrêt' }),
+    },
+  );
+  const { body, asked, restore } = page;
+  try {
+    // In sight among the settings, without « Plus de réglages »: one row each.
+    const rows = body.find('studio-lora');
+    assert.equal(rows.length, 2);
+    assert.match(rows[0].className, /is-off/, 'off by default, as the workflow says');
+    assert.equal(rows[0].find('ai-mark').length, 1, 'the tile of Moodix AI: the assistant may switch it');
+    const [grain, net] = body.find('studio-lora-switch');
+    assert.equal(net.checked, true);
+    assert.equal(net.disabled, true, '« Activé » in Workflows: always applied');
+    grain.checked = true;
+    grain.onchange();
+    page.prompt().value = 'un renard';
+    page.prompt().oninput();
+    await body.find('studio-go')[0].onclick();
+    const [, action] = asked.find(([route]) => route === 'tools/action');
+    // As the model would give it; the LoRA fixed in the workflow is not the creation's to set.
+    assert.deepEqual(action.arguments.loras, { grain: { enabled: true, strength: 0.8 } });
+  } finally {
+    restore();
+  }
+});
+
+test('a proposal of Moodix AI switches the LoRAs of the workflow as it has them; changed here, they go with « Générer »', async () => {
+  const { clip, request } = proposalOf();
+  request.plan.loras = [
+    { id: 'grain', strength: 1.2 },
+    { id: 'net', strength: 1 },
+  ];
+  const studio = await studioPage(
+    { create_video: [withLoras(clip)] },
+    { 'tools/revise': ({ edits }) => ({ requestId: 'q2', approvalToken: 't2', revised: edits }) },
+  );
+  const { body, asked, restore } = studio;
+  try {
+    const answer = studio.studio.propose(request, new AbortController().signal);
+    await settle();
+    const [grain] = body.find('studio-lora-switch');
+    assert.equal(grain.checked, true, 'on, as Moodix AI has it');
+    assert.equal(body.find('studio-lora-strength')[0].textContent, '1,20');
+    // The user switches it off before generating: the change goes with the answer.
+    grain.checked = false;
+    grain.onchange();
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    assert.deepEqual(asked.find(([route]) => route === 'tools/revise')[1].edits, {
+      loras: { grain: { enabled: false } },
+    });
+  } finally {
+    restore();
+  }
+});

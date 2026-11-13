@@ -126,6 +126,8 @@ export function proposedValues(request, offered = []) {
     settings,
     settingsFree: Object.fromEntries(Object.keys(settings).map(key => [key, free(key)])),
     references: references.filter(ref => ref.role !== 'source_video'),
+    // The LoRAs of the workflow it switches on, with their strength (the others are off).
+    loras: Array.isArray(plan.loras) ? plan.loras : null,
     roleChoices: editable.references || [],
     source: source?.output_id ?? null,
   };
@@ -199,6 +201,7 @@ export function setupStudio({
     before: null, // what was typed before « Enrichir le prompt », to come back to
     styles: [],
     shelved: {}, // the LoRAs of the other families of models, for the way back
+    workflowLoras: {}, // per workflow, its own LoRAs: { id: { on, strength } }
     format: null,
     size: null,
     seed: '',
@@ -718,6 +721,93 @@ export function setupStudio({
     return wrap;
   }
 
+  // ------------------------------------------------------------------ LoRA of the workflow
+  /** Whether the strength of a LoRA of the workflow is left to whoever asks (a range) or fixed there. */
+  const freeStrength = lora => !Object.hasOwn(lora.strength, 'value');
+  /**
+   * What this creation does with a LoRA of its workflow: on or off, and how strongly. What the
+   * workflow fixes follows it (switched there, it is so here at once); the rest is chosen here.
+   */
+  function loraChoice(workflow, lora, draft = drafts[mode]) {
+    const own = (draft.workflowLoras[workflow.id] ??= {}),
+      start = freeStrength(lora)
+        ? (lora.strength.default ?? Math.min(lora.strength.max ?? 1, Math.max(lora.strength.min ?? 1, 1)))
+        : lora.strength.value;
+    const choice = (own[lora.id] ??= { on: lora.on, strength: start });
+    if (!lora.assistant) choice.on = true;
+    if (!freeStrength(lora)) choice.strength = lora.strength.value;
+    else if (Number.isFinite(lora.strength.min) && Number.isFinite(lora.strength.max))
+      choice.strength = Math.min(lora.strength.max, Math.max(lora.strength.min, choice.strength));
+    return choice;
+  }
+  /** The workflow's LoRAs left to the assistant, as this creation has them, in the model's terms. */
+  function loraArgs(workflow, draft = drafts[mode]) {
+    const result = {};
+    for (const lora of workflow?.loras ?? []) {
+      const choice = loraChoice(workflow, lora, draft),
+        entry = {};
+      if (lora.assistant) entry.enabled = choice.on;
+      if (choice.on && freeStrength(lora)) entry.strength = choice.strength;
+      if (Object.keys(entry).length) result[lora.id] = entry;
+    }
+    return Object.keys(result).length ? result : null;
+  }
+  /**
+   * The LoRAs the workflow brings, chosen in its settings (Workflows): a row each, its name, its
+   * strength, and whether it is on. Those « Activé » there are always on; those left to the
+   * « Assistant » (the tile of Moodix AI) are switched here as Moodix AI would, their strength too.
+   */
+  function workflowLoraSection(workflow) {
+    const section = node('section', 'studio-loras is-workflow'),
+      head = node('div', 'studio-loras-head');
+    head.append(node('h3', '', 'LoRA du workflow'));
+    section.append(head);
+    for (const lora of workflow.loras) {
+      const choice = loraChoice(workflow, lora),
+        row = node('div', 'studio-lora is-workflow' + (choice.on ? '' : ' is-off')),
+        name = node('span', 'studio-lora-name'),
+        amount = node('output', 'studio-lora-strength', strengthText(choice.strength)),
+        toggle = node('input', 'studio-lora-switch');
+      let slider = null;
+      if (lora.assistant) name.append(node('span', 'ai-mark'));
+      name.append(node('span', 'studio-lora-label', lora.name));
+      name.title = lora.description ? lora.name + ' · ' + lora.description : lora.name;
+      toggle.type = 'checkbox';
+      toggle.checked = choice.on;
+      toggle.disabled = !lora.assistant;
+      toggle.title = lora.assistant
+        ? 'Utiliser ce LoRA pour cette création'
+        : 'Activé dans Workflows : toujours appliqué';
+      toggle.setAttribute('aria-label', 'LoRA ' + lora.name);
+      toggle.onchange = () => {
+        choice.on = toggle.checked;
+        row.classList.toggle('is-off', !choice.on);
+        if (slider) slider.disabled = !choice.on;
+      };
+      if (freeStrength(lora)) {
+        slider = node('input');
+        slider.type = 'range';
+        slider.min = String(lora.strength.min ?? 0);
+        slider.max = String(lora.strength.max ?? 2);
+        slider.step = '0.05';
+        slider.value = String(choice.strength);
+        slider.disabled = !choice.on;
+        slider.title = 'Force du LoRA';
+        slider.setAttribute('aria-label', 'Force du LoRA ' + lora.name);
+        slider.oninput = () => {
+          choice.strength = Number(slider.value);
+          amount.textContent = strengthText(choice.strength);
+        };
+        row.append(name, slider, amount, toggle);
+      } else {
+        amount.title = 'Force fixée dans Workflows';
+        row.append(name, amount, toggle);
+      }
+      section.append(row);
+    }
+    return section;
+  }
+
   // ------------------------------------------------------------------ LoRA
   /** The LoRAs added to the model for this creation: three at most, a card each, its name over its strength. */
   function loraSection() {
@@ -893,6 +983,9 @@ export function setupStudio({
       if (value === undefined || value === '') continue;
       args[setting.key] = setting.type === 'string' ? value : Number(value);
     }
+    // The LoRAs of the workflow left to the assistant, as chosen here.
+    const loras = loraArgs(workflow, draft);
+    if (loras) args.loras = loras;
     const styles = workflow.external && mode !== 'audio' && !extending ? draft.styles.filter(style => style.name) : [];
     return { verb, args, edits, styles };
   }
@@ -1169,6 +1262,16 @@ export function setupStudio({
     }
     current.seedBefore = draft.seed;
     if (values.seed !== null) draft.seed = String(values.seed);
+    // The LoRAs of the workflow as the proposal has them: on with their strength, the others off.
+    if (values.loras && workflow.loras?.length) {
+      const chosen = new Map(values.loras.map(item => [item.id, item.strength]));
+      for (const item of workflow.loras) {
+        const choice = loraChoice(workflow, item, draft);
+        choice.on = chosen.has(item.id) || !item.assistant;
+        if (chosen.has(item.id) && Number.isFinite(chosen.get(item.id))) choice.strength = chosen.get(item.id);
+      }
+      current.lorasShown = JSON.stringify(loraArgs(workflow, draft));
+    }
     if (!values.promptFree) draft.prompt = values.prompt;
     for (const [key, value] of Object.entries(values.settings))
       if (!values.settingsFree[key]) (draft.settings[workflow.id] ??= {})[key] = value;
@@ -1312,6 +1415,11 @@ export function setupStudio({
       const number = Number(seed);
       if (!Number.isSafeInteger(number) || number < 0) throw Error('Seed : un entier positif.');
       changes.seed = number;
+    }
+    // The LoRAs of the workflow switched or set here.
+    if (proposal.lorasShown !== undefined && workflow) {
+      const now = loraArgs(workflow, draft);
+      if (JSON.stringify(now) !== proposal.lorasShown) changes.loras = now ?? {};
     }
     for (const key of Object.keys(values.settings)) {
       const item = items.get(key),
@@ -1831,6 +1939,8 @@ export function setupStudio({
       settings.append(wrapper);
     }
     const lora = workflow.external && mode !== 'audio' && !extending && !answering();
+    // The LoRAs chosen in the workflow's settings: in sight, a proposal of Moodix AI included.
+    if (workflow.loras?.length) settings.append(workflowLoraSection(workflow));
     if (workflow.seeded || lora) {
       const more = button('studio-more', advanced ? '− Moins de réglages' : '+ Plus de réglages', () => {
         advanced = !advanced;
