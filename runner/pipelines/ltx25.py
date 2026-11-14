@@ -20,7 +20,7 @@ TWO_PASS_SIDE = 512
 RAM_RESERVE_GIB = 4
 LOCK_MARGIN_GIB = 0.5
 AHEAD_GIB = 0.5
-# Video memory the tiles of the decode take at their peak, in GiB (measured at 896 x 1600).
+# Video memory a decode in the smallest tiles takes at its peak, in GiB (measured at 896 x 1600).
 DECODE_GIB = 6
 
 
@@ -428,6 +428,8 @@ def generate(job, config, progress):
             try:
                 video, _audio = sample(*passes[0], 0)
             except torch.OutOfMemoryError:
+                video = None
+            if video is None:
                 # The steps needed more than was set aside for them (working_gib): once again
                 # with half the weights kept, rather than a failure after the model was read.
                 budget /= 2
@@ -571,30 +573,71 @@ def equal_tiles(length, tile, stride, _min_size=0):
     ]
 
 
-# The largest tile the last decoder stages run on, and what two tiles share to hide their seam,
-# in cells of 8 pixels and 2 frames: 256 pixels and 64 frames, 32 pixels and 8 frames shared.
-# Measured on a 896 × 1600 clip of 121 frames: wider tiles cost as much (the decoder's local
-# attention works on whole rows of a tile), a wider overlap decodes up to twice the video.
+# The smallest tiles the last decoder stages run on, and what two tiles share to hide their
+# seam, in cells of 8 pixels and 2 frames: 256 pixels and 64 frames, 32 pixels and 8 frames
+# shared. A wider overlap decodes up to twice the video.
 TILE = dict(frames=32, side=32, overlap_frames=4, overlap_side=4)
+# Video memory a tile holds for each token of the decoder's last stage, at most (1.5 to 3.3 KiB
+# measured, from 0.2 to 1.5 million tokens a tile).
+TILE_TOKEN_BYTES = 3600
 
 
-def configure_decode(vae, shape):
+def plan_tiles(frames, height, width, cells, tile=None):
+    """The tiles of the decode, (tile, stride) in cells for each axis: the ones that compute
+    the least of what tiles share, none holding more than `cells` cells; the smallest (TILE) when
+    even those hold more.
+
+    What two tiles share is decoded twice: 256-pixel tiles of 64 frames decode 1.4 times a
+    video. Measured on an RTX 4070 Super, 121 frames: 288 x 512 in one tile 3.0 s instead of
+    3.9; 896 x 1600 in 384-pixel tiles of the whole length 26.5 s instead of 31.5. Larger tiles
+    are also fewer seams."""
+    tile = tile or TILE
+
+    def sizes(length, smallest):
+        return sorted({*range(smallest, length, 8), max(smallest, length)})
+
+    def plan(largest_frames, largest_side):
+        return (
+            tiling(frames, largest_frames, tile['overlap_frames']),
+            tiling(height, largest_side, tile['overlap_side']),
+            tiling(width, largest_side, tile['overlap_side']),
+        )
+
+    best = None
+    for largest_frames in sizes(frames, tile['frames']):
+        for largest_side in sizes(max(height, width), tile['side']):
+            found = plan(largest_frames, largest_side)
+            held, computed = 1, 1
+            for (size, stride), length in zip(found, (frames, height, width)):
+                held *= size
+                computed *= size * len(equal_tiles(length, size, stride))
+            if held <= cells and (best is None or (computed, held) < best[:2]):
+                best = (computed, held, found)
+    return dict(zip(('frames', 'height', 'width'), best[2] if best else plan(tile['frames'], tile['side'])))
+
+
+def configure_decode(vae, shape, free_gib=0.0):
     """Tiled decode with tiles of one size: returns the plan, for the timeline.
 
-    The decoder's attention is compiled for each tile shape it meets (seconds each time). The
-    library's own tiling ends every axis on a shorter tile, up to eight shapes for one video;
-    equal tiles leave the first and last in time as the only different ones.
+    `free_gib` is the video memory the decode may use beyond the decoder's weights: the tiles
+    are as large as it allows (plan_tiles), after what the whole video holds whatever the tiles
+    (the features the tiles are cut from, and the decoded pixels while they are put together).
+
+    Without comfy-kitchen's neighborhood attention, diffusers' FlexAttention is compiled for
+    each tile shape it meets (seconds each time): the smallest tiles then, all of one size (the
+    library's own tiling ends every axis on a shorter one, up to eight shapes for one video).
     """
     import torch
     import torch.nn.attention.flex_attention as flex
     from diffusers.models.autoencoders import ltx2_diffusion_decoder as library
+    from runner.models.ltx25_decoder import fuse
 
-    if not getattr(configure_decode, 'compiled', False):
-        # Eager attention AND eager mask construction materialize quadratic matrices.
+    # Eager attention AND eager mask construction materialize quadratic matrices.
+    fused = fuse(vae)
+    if not fused and not getattr(configure_decode, 'compiled', False):
         flex.flex_attention = torch.compile(flex.flex_attention, dynamic=False)
         flex.create_block_mask = torch.compile(flex.create_block_mask, dynamic=False)
         configure_decode.compiled = True
-    tile = TILE
     decoder = vae.decoder
     stride = decoder.upsamples[-1].stride
     cell_frames, cell_side = stride[0], stride[1] * decoder.patch_size
@@ -602,11 +645,16 @@ def configure_decode(vae, shape):
     # Cells of the grid the tiles are cut on, from the latent size.
     frames = ((shape[2] - 1) * ratio_frames + 1 + cell_frames - 1) // cell_frames
     height, width = shape[3] * ratio_side // cell_side, shape[4] * ratio_side // cell_side
-    plan = dict(
-        frames=tiling(frames, tile['frames'], tile['overlap_frames']),
-        height=tiling(height, tile['side'], tile['overlap_side']),
-        width=tiling(width, tile['side'], tile['overlap_side']),
-    )
+    cells = 0
+    if fused:
+        # In bfloat16: the features of the whole video, its last frames repeated for the border
+        # of the attention, and two and a half times its pixels while the tiles are joined.
+        ghost = decoder.trailing_pad_latent_frames * ratio_frames // cell_frames
+        features = (frames + ghost) * height * width * decoder.upsamples[-1].proj.in_features * 2
+        pixels = frames * cell_frames * height * cell_side * width * cell_side * decoder.out_channels * 2
+        spare = free_gib * 1024**3 - features - 2.5 * pixels
+        cells = int(spare / TILE_TOKEN_BYTES) // (cell_frames * (cell_side // decoder.patch_size) ** 2)
+    plan = plan_tiles(frames, height, width, cells)
     library._tile_intervals = equal_tiles
     vae.enable_tiling(
         tile_sample_min_height=plan['height'][0] * cell_side,
@@ -635,20 +683,18 @@ def decode_pixels(job, headers, latents, progress):
         models, names = validate_layout(headers)
         vae = models.pop('vae')
         del models
-        # The decoder stays on the GPU while it works, where there is room beside its tiles
-        # (5.6 GiB at their peak): each tile runs it several times.
+        # The decoder stays on the GPU while it works, where there is room beside what the
+        # decode holds: each tile runs it several times.
         entries = (entry for name, entry in headers['vae'].items() if name != '__metadata__')
         size = sum(entry['data_offsets'][1] - entry['data_offsets'][0] for entry in entries)
-        pool = WeightPool({'vae': source}, size / 1024**3 if room(DECODE_GIB) * 1024**3 >= size else 0)
+        kept = size / 1024**3 if room(DECODE_GIB) * 1024**3 >= size else 0
+        pool = WeightPool({'vae': source}, kept)
         try:
             vae = load_streamed(vae, names['vae'], pool)
-            plan = configure_decode(vae, latents.shape)
-            progress(stage='decoding video', tiles=plan)
-            # The decode is the longest silent stage of a large video: say where it is.
-            total = plan['frames']['tiles'] * plan['height']['tiles'] * plan['width']['tiles']
-            denoise, done, told = vae.decoder.denoise, 0, time.perf_counter()
+            denoise, done, told, total = vae.decoder.denoise, 0, time.perf_counter(), 0
 
             def counted(*args, **kwargs):
+                # The decode is the longest silent stage of a large video: say where it is.
                 nonlocal done, told
                 result = denoise(*args, **kwargs)
                 done += 1
@@ -658,10 +704,29 @@ def decode_pixels(job, headers, latents, progress):
                 return result
 
             vae.decoder.denoise = counted
-            with torch._dynamo.config.patch(recompile_limit=64, fail_on_recompile_limit_hit=True):
-                decoded = vae.decode(
-                    latents.to('cuda', dtype=torch.bfloat16), generator=torch.Generator('cuda').manual_seed(seed)
-                ).sample
+
+            def decode(free_gib):
+                nonlocal done, total
+                plan = configure_decode(vae, latents.shape, free_gib)
+                progress(stage='decoding video', tiles=plan)
+                done, total = 0, plan['frames']['tiles'] * plan['height']['tiles'] * plan['width']['tiles']
+                with torch._dynamo.config.patch(recompile_limit=64, fail_on_recompile_limit_hit=True):
+                    return vae.decode(
+                        latents.to('cuda', dtype=torch.bfloat16),
+                        generator=torch.Generator('cuda').manual_seed(seed),
+                    ).sample
+
+            try:
+                # What is free below the engine's margin, less the weights and half a gigabyte.
+                decoded = decode(room(1.5) - kept)
+            except torch.OutOfMemoryError:
+                decoded = None
+            if decoded is None:
+                # The tiles held more than was counted for them: again with the smallest, once
+                # what the failed attempt held is gone (the error itself kept it until here).
+                gc.collect()
+                torch.cuda.empty_cache()
+                decoded = decode(0)
             # A few frames at a time: the whole video as 32-bit floats would not fit beside itself.
             frames = []
             for start in range(0, decoded.shape[2], 8):

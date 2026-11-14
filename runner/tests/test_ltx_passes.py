@@ -1,11 +1,12 @@
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
 
 from runner.journal import Journal
 from runner.models.ltx25 import kept_text, latent_upscaler, spread
-from runner.pipelines.ltx25 import equal_tiles, first_pass_size, tiling
+from runner.pipelines.ltx25 import TILE, equal_tiles, first_pass_size, plan_tiles, tiling
 
 
 class PassTests(unittest.TestCase):
@@ -52,6 +53,36 @@ class PassTests(unittest.TestCase):
         self.assertIsNone(size(384, 256))
         self.assertIsNone(size(448, 768))
         self.assertIsNone(size(896, 1600, {'model': 'm'}))
+
+    def test_decode_tiles_are_as_large_as_memory_allows_and_never_smaller_than_the_smallest(self):
+        count = lambda plan, lengths: [  # noqa: E731
+            len(equal_tiles(length, *plan[axis])) for axis, length in zip(('frames', 'height', 'width'), lengths)
+        ]
+        held = lambda plan: plan['frames'][0] * plan['height'][0] * plan['width'][0]  # noqa: E731
+        draft, final = (61, 64, 36), (61, 200, 112)
+        # No room, or FlexAttention (compiled for each shape): the smallest tiles, as before.
+        smallest = plan_tiles(*final, 0)
+        self.assertEqual(smallest, dict(frames=tiling(61, 32, 4), height=tiling(200, 32, 4), width=tiling(112, 32, 4)))
+        self.assertEqual(count(smallest, final), [3, 7, 4])
+        # Room for the whole draft: one tile, nothing decoded twice.
+        self.assertEqual(count(plan_tiles(*draft, 61 * 64 * 36), draft), [1, 1, 1])
+        # Less: the largest that fit, and among those the ones that share the least.
+        for cells in (30_000, 60_000, 110_000, 200_000):
+            plan = plan_tiles(*final, cells)
+            self.assertLessEqual(held(plan), max(cells, held(smallest)))
+            computed = lambda found: math.prod(  # noqa: E731
+                size * tiles for (size, _), tiles in zip(found.values(), count(found, final))
+            )
+            self.assertLessEqual(computed(plan), computed(smallest))
+            for axis, length in zip(('frames', 'height', 'width'), final):
+                tile, stride = plan[axis]
+                tiles = equal_tiles(length, tile, stride)
+                self.assertEqual((tiles[0][0], tiles[-1][1]), (0, length))
+                self.assertTrue(all(stop - start == tile for start, stop in tiles))
+                overlap = TILE['overlap_frames' if axis == 'frames' else 'overlap_side']
+                self.assertTrue(len(tiles) == 1 or tile - stride >= overlap)
+        # The whole length of a 121-frame video in 384-pixel tiles, measured the fastest that fits 12 GiB.
+        self.assertEqual(count(plan_tiles(*final, 110_000), final)[0], 1)
 
     def test_decode_tiles_are_equal_cover_the_video_and_share_a_seam(self):
         for length in range(1, 260):
