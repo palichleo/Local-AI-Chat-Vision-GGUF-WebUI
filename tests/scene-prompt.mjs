@@ -23,7 +23,7 @@ const answering =
   };
 
 test('the prompt of a character put in a video is written from the frames of the video and the image', async () => {
-  const pictures = await scenePictures(args, library);
+  const pictures = await scenePictures(args, { resources: library });
   // Three frames of the video at most, in order, then the character.
   assert.deepEqual(pictures, {
     frames: ['a', 'b', 'c'].map(name => frame(name).url),
@@ -63,11 +63,43 @@ test('a prompt that cannot be written from the pictures never stops the video: t
   );
   assert.equal(await kept({ fetchImpl: answering('A woman.') }), args);
   // The video or the character not in the library (an earlier result, an image of the message).
+  const places = { resources: library };
   const other = { ...args, source: { output: 'run' } };
-  assert.equal(await scenePictures(other, library), null);
+  assert.equal(await scenePictures(other, places), null);
   assert.equal(await withScenePrompt(other, { resources: library, engine, fetchImpl: answering(written) }), other);
-  assert.equal(await scenePictures({ ...args, reference: { image: 0 } }, library), null);
-  assert.equal(await scenePictures({ ...args, source: { resource: 'gone' } }, library), null);
+  assert.equal(await scenePictures({ ...args, reference: { image: 0 } }, places), null);
+  assert.equal(await scenePictures({ ...args, source: { resource: 'gone' } }, places), null);
   // An image given as the video is not one to follow.
-  assert.equal(await scenePictures({ ...args, source: { resource: 'person' } }, library), null);
+  assert.equal(await scenePictures({ ...args, source: { resource: 'person' } }, places), null);
+});
+
+test('the pictures are found wherever they come from: the library, the conversation, an earlier result', async () => {
+  const attached = 'data:image/png;base64,attached',
+    messages = [
+      { role: 'user', content: [{ type: 'text', text: 'voici' }, { type: 'image_url', image_url: { url: attached } }] },
+      { role: 'user', internal: true, content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,shown' } }] },
+    ],
+    conversationId = '11111111-1111-4111-8111-111111111111',
+    run = '22222222-2222-4222-8222-222222222222',
+    thumbnails = {
+      has: key => key === `${conversationId}.${run}.0`,
+      read: async () => Buffer.from('small'),
+    };
+  // The character attached to the message (by its position, the pictures the page showed the model left out).
+  assert.deepEqual(await scenePictures({ ...args, reference: { image: 0 } }, { resources: library, messages }), {
+    frames: ['a', 'b', 'c'].map(name => frame(name).url),
+    character: attached,
+  });
+  // The video made earlier in the conversation: the small picture kept of it.
+  const earlier = await scenePictures(
+    { ...args, source: { output: run } },
+    { resources: library, thumbnails, conversationId },
+  );
+  assert.deepEqual(earlier, {
+    frames: ['data:image/jpeg;base64,' + Buffer.from('small').toString('base64')],
+    character: frame('p').url,
+  });
+  // A frame of a video of the library given as the character: that frame.
+  const framed = await scenePictures({ ...args, reference: { resource: 'clip', frame: 1 } }, { resources: library });
+  assert.equal(framed.character, frame('b').url);
 });

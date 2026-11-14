@@ -148,7 +148,9 @@ export function setupGenerationRuntime({
     // marks a video so only when the user allowed videos); a sound always asks.
     if (request.autoAllow) return confirmed ? 'once' : undefined;
     const title = () =>
-      ($('tool-title').textContent = video
+      ($('tool-title').textContent = request.explicit
+        ? 'Remplacer un personnage · Confirmer ?'
+        : video
         ? request.plan?.stage === 'draft'
           ? 'Brouillon vidéo · Confirmer ?'
           : 'Vidéo finale · Confirmer ?'
@@ -162,7 +164,7 @@ export function setupGenerationRuntime({
     $('tool-deny').textContent = confirmed ? 'Annuler' : 'Refuser';
     $('tool-once').textContent = confirmed ? 'Confirmer et générer' : 'Cette fois';
     $('tool-once').title =
-      video && confirmDelay > 0
+      video && confirmDelay > 0 && !request.explicit
         ? `Se lance seul après ${Math.round(confirmDelay / 1000)} s, sauf si vous touchez à la fenêtre`
         : '';
     let form = null,
@@ -252,7 +254,8 @@ export function setupGenerationRuntime({
       for (const [id, action] of buttons) $(id).onclick = action;
       $('tool-dialog').addEventListener('cancel', cancel);
       signal.addEventListener('abort', abort, { once: true });
-      if (video && confirmDelay > 0) {
+      // A proposal agreed on in this window (a character put in a video) waits for the click.
+      if (video && confirmDelay > 0 && !request.explicit) {
         $('tool-once').style?.setProperty('--countdown', confirmDelay + 'ms');
         $('tool-once').classList?.add('is-counting');
         $('tool-dialog').addEventListener('pointerdown', stopCountdown, true);

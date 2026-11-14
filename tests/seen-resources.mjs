@@ -38,29 +38,10 @@ test('images passed to a generator and never looked at are shown to the model fi
   assert.match(SEEN_NOTE, /Nothing was generated/);
 });
 
-test('a character put in a video: the video is looked at too, with the image of the character', () => {
+test('a character put in a video: the model is not sent back to look, the application sees for it', () => {
   const asked = [{ role: 'user', content: 'remplace la fille par ce personnage' }];
   const replace = call('replace_character', { prompt: 'x', source: { resource: 'v' }, reference: { resource: A } });
-  assert.deepEqual(
-    unseenResources(asked, catalog, replace).map(item => item.id),
-    [A, 'v'],
-  );
-  const shown = { role: 'tool', content: JSON.stringify({ status: 'nothing_generated', resources: [{ id: 'v' }] }) },
-    read = [...asked, shown];
-  assert.deepEqual(
-    unseenResources(read, catalog, replace).map(item => item.id),
-    [A],
-  );
-  // Looked at while the video was agreed on: the call made after the user's go is not sent
-  // back for them (the model, sent back, answered « done » without generating).
-  const agreed = [
-    ...asked,
-    { role: 'tool', content: JSON.stringify({ status: 'nothing_generated', resources: [{ id: 'v' }, { id: A }] }) },
-    { role: 'assistant', content: 'Je remplacerai la fille par la femme. Scène : un verger. Go ?' },
-    { role: 'user', content: 'oui' },
-  ];
-  assert.deepEqual(unseenResources(agreed, catalog, replace), []);
-  assert.match(SEEN_NOTE, /a few frames of it/);
+  assert.deepEqual(unseenResources(asked, catalog, replace), []);
 });
 
 test('nothing to show for a call without images, another tool, or no conversation', () => {

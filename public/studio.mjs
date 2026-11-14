@@ -1786,24 +1786,44 @@ export function setupStudio({
   // ------------------------------------------------------------------ the prompt, improved
   // « Améliorer le prompt » asks for a few words first (moodix-design.md 17).
   const IMPROVE_MIN = 3;
+  /**
+   * A character put in a video: the video and the image handed over, from which the prompt is
+   * written (not from words alone, which would invent a scene the video does not show). Null
+   * for another model, or while one of the two is missing.
+   */
+  function sceneInputs() {
+    if (!current()?.follows) return null;
+    const { source, reference } = drafts[mode].inputs,
+      video = source?.find(Boolean)?.source,
+      character = reference?.find(Boolean)?.source;
+    return video && character ? { source: video, reference: character } : null;
+  }
   const improveTitle = () =>
-    drafts[mode].prompt.trim().length < IMPROVE_MIN
-      ? 'Écris d’abord quelques mots'
-      : 'Améliorer le prompt avec Moodix AI (' + MODIFIER + '+E)';
+    sceneInputs()
+      ? 'Écrire le prompt d’après la vidéo et le personnage (' + MODIFIER + '+E)'
+      : current()?.follows
+        ? 'Ajoute d’abord la vidéo et le personnage'
+        : drafts[mode].prompt.trim().length < IMPROVE_MIN
+          ? 'Écris d’abord quelques mots'
+          : 'Améliorer le prompt avec Moodix AI (' + MODIFIER + '+E)';
+  /** Whether « Améliorer » has what it needs: a few words, or the pictures a prompt is written from. */
+  const improves = () =>
+    current()?.follows ? Boolean(sceneInputs()) : drafts[mode].prompt.trim().length >= IMPROVE_MIN;
   /** The button follows what is typed, without drawing the Studio again (the field keeps its focus). */
   function improvable() {
     const go = document.querySelector?.('#studio-view .studio-enrich-go');
     if (!go || enriching) return;
-    go.disabled = Boolean(working) || drafts[mode].prompt.trim().length < IMPROVE_MIN;
+    go.disabled = Boolean(working) || !improves();
     go.title = improveTitle();
   }
   /** The chat model rewrites what is typed as a full prompt; what was typed can be taken back. */
   async function enrich() {
     if (enriching || working) return;
     const draft = drafts[mode],
-      text = draft.prompt.trim();
-    if (text.length < IMPROVE_MIN) {
-      failure = 'Écris d’abord quelques mots.';
+      text = draft.prompt.trim(),
+      scene = sceneInputs();
+    if (!improves()) {
+      failure = current()?.follows ? 'Ajoute d’abord la vidéo et le personnage.' : 'Écris d’abord quelques mots.';
       return render();
     }
     const reason = blocked();
@@ -1816,7 +1836,9 @@ export function setupStudio({
       // The chat model is started when it is not running, once it has finished leaving.
       await releasing;
       await waitForModel(api, controller.signal, () => {});
-      const result = await (await api('studio/enrich', { prompt: text, verb: verbOf() })).json();
+      const result = await (
+        await api('studio/enrich', { prompt: text, verb: verbOf(), ...(scene ?? {}) })
+      ).json();
       draft.before = text;
       // The text rewritten writes itself in the box, in half a second (at once with less motion).
       const box = document.querySelector?.('#studio-view [data-ai="prompt"]');
@@ -1883,7 +1905,12 @@ export function setupStudio({
       verb = verbOf(),
       prompt = draft.prompt.trim();
     if (!workflow) throw Error('Aucun workflow prêt pour cette création.');
-    if (!prompt) throw Error('Écrivez un prompt.');
+    if (!prompt)
+      throw Error(
+        workflow?.follows
+          ? 'Écrivez un prompt, ou cliquez sur la baguette : il sera écrit d’après la vidéo et le personnage.'
+          : 'Écrivez un prompt.',
+      );
     const args = { prompt },
       edits = {};
     // Named when its verb has several: the models of another verb of the list are not its rivals.

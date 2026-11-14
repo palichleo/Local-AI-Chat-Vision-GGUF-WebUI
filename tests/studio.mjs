@@ -226,11 +226,14 @@ test('a character replaced in a video: its model among the videos, a video and a
     {
       'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
       'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+      'studio/enrich': () => ({ prompt: 'A woman in a white top wipes an apple in an orchard.', seen: true }),
     },
   );
   const { body, asked, notices, restore } = page;
   try {
     page.mode(1);
+    const wand = () => body.find('studio-enrich-go')[0],
+      enriched = () => asked.filter(([route]) => route === 'studio/enrich');
     const blocks = () => body.find('studio-input-block').map(block => block.attributes['aria-label']),
       slots = () => body.find('studio-slot'),
       event = files => ({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files, setData() {} } }),
@@ -265,6 +268,11 @@ test('a character replaced in a video: its model among the videos, a video and a
       ],
     );
     assert.equal(body.find('studio-rare')[0].children.length, 1);
+    // The wand writes the prompt from the video and the character: it waits for both, not for words.
+    assert.equal(wand().disabled, true);
+    assert.equal(wand().title, 'Ajoute d’abord la vidéo et le personnage');
+    await wand().onclick();
+    assert.equal(enriched().length, 0);
     // What the model cannot do without is asked for in plain words, nothing is sent.
     page.prompt().value = 'Une femme en haut blanc mange une pomme dans un verger.';
     page.prompt().oninput();
@@ -281,6 +289,22 @@ test('a character replaced in a video: its model among the videos, a video and a
     await drop(1, { name: 'clip.mp4', type: 'video/mp4' });
     assert.match(notices.at(-1), /attend une image/);
     await drop(1, { name: 'perso.png', type: 'image/png' });
+    // Both given: the wand is ready, even with nothing typed, and hands the two over.
+    page.prompt().value = '';
+    page.prompt().oninput();
+    assert.equal(wand().disabled, false);
+    assert.match(wand().title, /^Écrire le prompt d’après la vidéo et le personnage/);
+    await generate();
+    assert.match(body.find('studio-error')[0].textContent, /cliquez sur la baguette/);
+    await wand().onclick();
+    await settle();
+    assert.deepEqual(enriched().at(-1)[1], {
+      prompt: '',
+      verb: 'replace_character',
+      source: { resource: 'r1' },
+      reference: { resource: 'r2' },
+    });
+    assert.equal(page.prompt().value, 'A woman in a white top wipes an apple in an orchard.');
     const subject = who()[0].children[1];
     subject.value = 'girl, handkerchief';
     subject.oninput();
@@ -289,7 +313,7 @@ test('a character replaced in a video: its model among the videos, a video and a
     assert.equal(action.name, 'replace_character');
     // The video and the character each alone (not a list); who is drawn is left to its default.
     assert.deepEqual(action.arguments, {
-      prompt: 'Une femme en haut blanc mange une pomme dans un verger.',
+      prompt: 'A woman in a white top wipes an apple in an orchard.',
       intention: 'Personnage remplacé, demandé dans le Studio.',
       source: { resource: 'r1' },
       reference: { resource: 'r2' },

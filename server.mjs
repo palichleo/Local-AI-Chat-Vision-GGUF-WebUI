@@ -1469,6 +1469,21 @@ export async function createApplication({
         const onClose = () => controller.abort();
         res.once('close', onClose);
         try {
+          // A character put in a video: the prompt is written from the video and the image handed
+          // over (lib/scene-prompt.mjs), what is typed kept as what the user asks for. Words alone
+          // would invent a scene the video does not show.
+          if (body.verb === 'replace_character' && body.source && body.reference) {
+            const typed = String(body.prompt ?? '').trim().slice(0, 4000),
+              given = { prompt: typed, source: body.source, reference: body.reference },
+              written = await withScenePrompt(given, { resources, engine, asked: typed, timeoutMs: enrichTimeoutMs });
+            if (written !== given) return send(200, { prompt: written.prompt, seen: true });
+            throw problem(
+              engine.vision
+                ? 'Le prompt n’a pas pu être écrit d’après la vidéo et l’image. Réessayez.'
+                : 'Ce modèle de chat ne voit pas les images : écrivez le prompt vous-même, en décrivant ce que la vidéo montre.',
+              502,
+            );
+          }
           const upstream = await fetch(`${engine.base}/v1/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${engine.apiKey}` },
@@ -1923,7 +1938,7 @@ export async function createApplication({
                   workflowName: unseen.map(item => item.label + ' · ' + item.name).join(', '),
                   note: brief
                     ? 'You now see the images below. ' +
-                      briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []), call.function.name)
+                      briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []))
                     : SEEN_NOTE,
                   brief,
                 },
@@ -1935,7 +1950,7 @@ export async function createApplication({
                 local_tool_request: {
                   kind: 'brief',
                   call,
-                  message: briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []), call.function.name),
+                  message: briefMessage(await runtime.tools.lengths(call.function.name).catch(() => [])),
                 },
               });
             // A prompt of two lines: sent back once, with the images it is about shown again.
@@ -1962,13 +1977,23 @@ export async function createApplication({
                 if (unused.length) throw problem(citedMessage(unused), 400);
                 // A character put in a video: its prompt is written here from the frames of the
                 // video and the image of the character, which the model no longer has under its eyes.
-                if (call.function.name === 'replace_character')
+                const replacing = call.function.name === 'replace_character';
+                let seen = false;
+                if (replacing)
                   try {
                     const given = JSON.parse(calls[0].function.arguments),
                       last = body.messages.findLast(message => message?.role === 'user' && !message.internal),
                       asked = typeof last?.content === 'string' ? last.content : '';
-                    const written = await withScenePrompt(given, { resources, engine, asked: asked.slice(0, 2000) });
-                    if (written !== given) calls[0].function.arguments = JSON.stringify(written);
+                    const written = await withScenePrompt(given, {
+                      resources,
+                      engine,
+                      asked: asked.slice(0, 2000),
+                      messages: body.messages,
+                      thumbnails,
+                      conversationId: body.conversationId,
+                    });
+                    seen = written !== given;
+                    if (seen) calls[0].function.arguments = JSON.stringify(written);
                   } catch {
                     // The call keeps the prompt it came with.
                   }
@@ -1977,6 +2002,14 @@ export async function createApplication({
                   turnId: body.turnId,
                   messages: body.messages,
                 });
+                // Said in the window where the user confirms: what the prompt was written from.
+                if (replacing && request)
+                  request.notes = [
+                    ...(request.notes ?? []),
+                    seen
+                      ? 'Prompt écrit par l’application d’après la vidéo et l’image du personnage.'
+                      : 'Prompt écrit sans voir la vidéo : relisez-le, il doit décrire ce que la vidéo montre.',
+                  ];
               } catch (error) {
                 await rejectCall(call, error);
               }
