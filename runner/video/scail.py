@@ -17,18 +17,53 @@ SEGMENT = 81  # frames a segment
 OVERLAP = 5  # frames of a segment kept from the one before
 
 
-def cover(pictures, width, height):
-    """The pictures resized to fill width x height, what overflows cut equally on both sides."""
+def plan(frames, segment=SEGMENT, overlap=OVERLAP):
+    """[(first frame, frames)]: the segments of a video of `frames` frames (4n + 1). Each one
+    after the first starts on the last `overlap` frames of the one before, which it is given
+    and does not draw again; the last one is as long as what is left."""
+    if frames % 4 != 1 or segment % 4 != 1 or overlap % 4 != 1 or not overlap < segment:
+        raise ValueError('SCAIL-2 reads 4n + 1 frames')
+    found, first = [], 0
+    while True:
+        count = min(segment, frames - first)
+        found.append((first, count))
+        if first + count >= frames:
+            return found
+        first += segment - overlap
+
+
+def tokens(frames, height, width):
+    """Tokens of a segment: the reference, the video, the pose at half its size."""
+    grid = (height // 16) * (width // 16)
+    latent = (frames - 1) // 4 + 1
+    return grid + latent * grid + latent * (height // 32) * (width // 32)
+
+
+def cover(pictures, width, height, flat=False):
+    """The pictures resized to fill width x height, what overflows cut equally on both sides.
+    `flat` for a mask: its colours are kept as they are, none blended with its neighbour."""
     import torch.nn.functional as F
 
     single = pictures.ndim == 3
     batch = pictures[None] if single else pictures
     scale = max(width / batch.shape[-1], height / batch.shape[-2])
     size = (max(height, round(batch.shape[-2] * scale)), max(width, round(batch.shape[-1] * scale)))
-    resized = F.interpolate(batch.float(), size=size, mode='bicubic', align_corners=False).clamp(-1, 1)
+    if flat:
+        resized = F.interpolate(batch.float(), size=size, mode='nearest')
+    else:
+        resized = F.interpolate(batch.float(), size=size, mode='bicubic', align_corners=False).clamp(-1, 1)
     top, left = (size[0] - height) // 2, (size[1] - width) // 2
     cut = resized[..., top : top + height, left : left + width]
     return cut[0] if single else cut
+
+
+def matte(reference, mask):
+    """The reference on black wherever its mask marks no character: the one to draw is shown
+    alone, as the model was given it to replace a character."""
+    import torch
+
+    shown = (mask > LIT).any(dim=-3, keepdim=True)
+    return torch.where(shown, reference, torch.full_like(reference, -1.0))
 
 
 def halved(video):

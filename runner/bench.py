@@ -63,7 +63,7 @@ def krea2_job(args, run):
             seed=args.seed + run - 1,
             width=width,
             height=height,
-            steps=args.steps,
+            steps=args.steps or 8,
             cfg=1,
             denoise=1,
             expandPrompt=False,
@@ -86,7 +86,7 @@ def minimax_h3_job(args, run):
             seed=args.seed + run - 1,
             width=width,
             height=height,
-            steps=args.steps,
+            steps=args.steps or 8,
             stage='draft',
             frames=args.frames,
             fps=24,
@@ -125,7 +125,7 @@ def ltx25_job(args, run):
             seed=args.seed + run - 1,
             width=width,
             height=height,
-            steps=args.steps,
+            steps=args.steps or 8,
             stage='draft',
             frames=args.frames,
             fps=24,
@@ -143,28 +143,69 @@ def ltx25_job(args, run):
     )
 
 
+def wan_scail2_job(args, run):
+    _need(args, 'model', 'text_encoder', 'vae', 'clip_vision')
+    from runner.video.stream import probe
+
+    references = [
+        dict(input=role, role=role, path=path) for role, _, path in (item.partition('=') for item in args.reference)
+    ]
+    driving = next((ref['path'] for ref in references if ref['role'] == 'driving_video'), None)
+    if not driving:
+        raise SystemExit('missing: --reference driving_video=FILE')
+    width, height = _size(args, '896x512')
+    parameters = dict(
+        prompt=_prompt(args, run),
+        seed=args.seed + run - 1,
+        width=width,
+        height=height,
+        steps=args.steps or 6,
+        shift=5,
+        frames=args.frames,
+        fps=float(probe(driving)['fps']),
+        audio=True,
+        mode='replace',
+    )
+    if args.segment_frames:
+        parameters['segment_frames'] = args.segment_frames
+    return dict(
+        id=str(uuid.uuid4()),
+        pipeline='wan_scail2',
+        mediaType='video',
+        parameters=parameters,
+        components=dict(
+            model=args.model, textEncoder=args.text_encoder, clipVision=args.clip_vision, vae=args.vae
+        ),
+        loras=_loras(args),
+        references=references,
+    )
+
+
 FAMILIES = {
     'krea2': ('runner.pipelines.krea2', krea2_job),
     'ltx25': ('runner.pipelines.ltx25', ltx25_job),
     'minimax_h3': ('runner.pipelines.minimax_h3', minimax_h3_job),
+    'wan_scail2': ('runner.pipelines.wan_scail2', wan_scail2_job),
 }
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('family', choices=sorted(FAMILIES))
-    for name in ('model', 'text-encoder', 'vae', 'audio-vae', 'tokenizer', 'upscaler'):
+    for name in ('model', 'text-encoder', 'vae', 'audio-vae', 'tokenizer', 'upscaler', 'clip-vision'):
         parser.add_argument('--' + name)
     parser.add_argument('--out', required=True)
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--size')
-    parser.add_argument('--steps', type=int, default=8)
+    parser.add_argument('--steps', type=int, help='8 unless the family has its own (SCAIL-2: 6)')
     parser.add_argument('--frames', type=int, default=124)
     parser.add_argument('--prompt', default=PROMPT)
     parser.add_argument('--new-prompts', type=int, default=0, help='prompts that differ; later runs repeat the last')
     parser.add_argument('--same-prompt', action='store_true', help='one prompt for every run')
     parser.add_argument('--lora', action='append', default=[], metavar='FILE:STRENGTH')
+    parser.add_argument('--reference', action='append', default=[], metavar='ROLE=FILE')
+    parser.add_argument('--segment-frames', type=int, help='SCAIL-2: frames of a segment, 81 unless the card is small')
     parser.add_argument('--keep', action='store_true', help='leave the model on the GPU between runs, as the Studio')
     parser.add_argument('--gpu-gib', type=float, help='ceiling on the weights kept on the GPU')
     parser.add_argument('--ram-reserve-gib', type=float, help='RAM the resident files must leave free')
