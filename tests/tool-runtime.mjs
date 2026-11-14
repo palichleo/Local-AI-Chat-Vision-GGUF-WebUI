@@ -63,7 +63,11 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
     run: async () => {
       runs++;
       order.push('run');
-      return { outputs: [{ filename: 'x.png', subfolder: '', type: 'output' }] };
+      return {
+        outputs: [{ filename: 'x.png', subfolder: '', type: 'output' }],
+        // The engine made another size than asked (a video in the shape of the one it follows).
+        metadata: { parameters: { width: 384, height: 640, frames: 29, fps: 30, seed: 99 } },
+      };
     },
     free: async () => {
       order.push('free');
@@ -97,6 +101,9 @@ test('approval pins workflow, is consumed once, and enforces a turn limit', asyn
   assert.equal(job.id, rt.job.id);
   assert.equal(rt.job.record.parameters.reference_count, 0);
   assert.equal(rt.job.record.parameters.reference_capacity, 0);
+  // The record says what was made: the size, the length and the rate come from the engine.
+  const kept = rt.job.record.parameters;
+  assert.deepEqual([kept.width, kept.height, kept.frames, kept.fps, kept.seed], [384, 640, 29, 30, 7]);
   assert.equal(rt.job.record.parameters.reference_mode, 'not_provided');
   assert.deepEqual(order, ['stop', 'run', 'free', 'start']);
   assert.equal(runs, 1);
