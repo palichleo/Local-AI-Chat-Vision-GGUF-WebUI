@@ -178,6 +178,7 @@ class StreamedLinearTests(unittest.TestCase):
             keys=lambda source: {'layer.weight'},
             adapters=(),
             adapted={},
+            shifts={},
             order=[],
             read=lambda location: weight,
             bundle=lambda location: tensors,
@@ -185,6 +186,26 @@ class StreamedLinearTests(unittest.TestCase):
         model = torch.nn.Sequential(torch.nn.Linear(features, rows))
         self.pool = pool
         return load_streamed(model, {'0.weight': ('model', 'layer.weight')}, pool)[0]
+
+    def test_what_a_lora_adds_to_a_bias_is_added_with_it_in_every_kind_of_product(self):
+        torch.manual_seed(5)
+        rows = torch.randn(1, 300, 256, dtype=torch.bfloat16, device='cuda')
+        residual = torch.randn(1, 300, 64, dtype=torch.bfloat16, device='cuda')
+        gate = torch.rand(64, dtype=torch.bfloat16, device='cuda')
+        shift = torch.randn(64, dtype=torch.bfloat16, device='cuda')
+        for weight, scale in (
+            (torch.randint(-127, 128, (64, 256), dtype=torch.int8), torch.tensor(0.01)),
+            (torch.randn(64, 256, dtype=torch.bfloat16), None),
+        ):
+            with self.subTest(weight=weight.dtype):
+                linear = self.linear(weight, scale)
+                with torch.no_grad():
+                    plain, summed = linear(rows), linear(rows, residual=residual, gate=gate)
+                    self.pool.shifts[linear.location] = shift
+                    self.assertLess(relative(linear(rows), plain + shift), 0.02)
+                    # Inside the sum of a branch it is scaled by the gate, as the bias is.
+                    moved = linear(rows, residual=residual, gate=gate)
+                    self.assertLess(relative(moved, summed + gate * shift), 0.02)
 
     def test_an_activation_and_a_residual_go_into_the_int8_product_with_the_same_result(self):
         torch.manual_seed(0)

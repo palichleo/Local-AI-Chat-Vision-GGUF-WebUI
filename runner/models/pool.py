@@ -54,6 +54,10 @@ def require(label, working_gib, smaller):
 
 
 RECENT = 384 * 1024**2
+# What a weight stores beside itself, and what the pool calls it: its scale (one a row for INT8
+# and 8-bit floats, `.weight_scale`; one for the whole weight in the older « fp8 scaled » files
+# of ComfyUI, `.scale_weight`) and its bias.
+BESIDE = (('.weight_scale', 'scale'), ('.scale_weight', 'scale'), ('.bias', 'bias'))
 # A layer's scale and bias are this small at most: beside a weight sent to the GPU at every step
 # they stay there (see WeightPool._hold).
 SMALL = 64 * 1024
@@ -95,6 +99,9 @@ class WeightPool:
         self.listed = {}
         self.merged = {}
         self.merged_bytes = 0
+        # What a LoRA adds to a layer's bias beside its pair (`diff_b` tensors), by layer, on
+        # the GPU: a few values a layer, set by the family when it builds the model.
+        self.shifts = {}
         self.device = 'cuda'
         # What streaming costs: `first` is the first copy of each tensor, whose pages come from
         # the disk or the file cache (timed); `again` is every later copy, from RAM.
@@ -150,7 +157,7 @@ class WeightPool:
         source, key, part = location
         store, listed = self.stores[source], self.keys(source)
         values, keys = {'weight': self.read(location)}, [key]
-        for suffix, label in (('.weight_scale', 'scale'), ('.bias', 'bias')):
+        for suffix, label in BESIDE:
             candidate = key.removesuffix('.weight') + suffix
             if candidate in listed:
                 value = store.get_tensor(candidate)
@@ -171,7 +178,7 @@ class WeightPool:
             return sum(value.numel() * value.element_size() for value in values.values()), names
         listed = self.keys(source)
         size, names = measure(key)[0] // (3 if part is not None else 1), [key]
-        for suffix in ('.weight_scale', '.bias'):
+        for suffix, _label in BESIDE:
             candidate = key.removesuffix('.weight') + suffix
             if candidate in listed:
                 held, dimensions = measure(candidate)
@@ -570,6 +577,9 @@ def load_streamed(model, names, pool):
             1.2 s a step where the same video takes 0.7 without)."""
             bundle = pool.bundle(self.location)
             weight, scale, bias = bundle['weight'], bundle.get('scale'), bundle.get('bias')
+            shift = pool.shifts.get(self.location)
+            if shift is not None:
+                bias = shift if bias is None else bias + shift.to(bias.dtype)
             quantized = weight.dtype == torch.int8
             rows = value
             if act is not None and (self.adapters or not quantized):

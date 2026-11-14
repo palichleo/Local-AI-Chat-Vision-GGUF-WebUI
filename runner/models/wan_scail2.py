@@ -210,6 +210,66 @@ def use_int8_attention(model):
     return True
 
 
+def lora_differences(entries, header):
+    """{key of the model's file: key of the LoRA} for what a LoRA adds to a tensor of the model
+    as it is, beside its pairs: `<layer>.diff_b` to a bias, `<tensor>.diff` to a vector (a
+    norm's weight). The step-distillation LoRAs of Wan carry one for nearly every layer."""
+    found = {}
+    for key in entries:
+        stem = key.removeprefix('diffusion_model.')
+        if stem.endswith('.diff_b'):
+            target = stem.removesuffix('.diff_b') + '.bias'
+        elif stem.endswith('.diff'):
+            target = stem.removesuffix('.diff') + '.weight'
+        else:
+            continue
+        if header.get(target, {}).get('shape') != entries[key]['shape']:
+            raise ValueError('Incompatible LoRA: ' + key + ' fits no tensor of this model')
+        found[target] = key
+    return found
+
+
+def validate_lora(entries, header):
+    """A LoRA of this model: pairs for its layers (runner.models.lora_keys) and differences for
+    its biases and norms, nothing else."""
+    from runner.models.lora_keys import lora_pairs, other_kind
+
+    keys = [key for key in entries if key != '__metadata__']
+    kind = other_kind(keys)
+    if kind:
+        raise ValueError('Unsupported LoRA kind (' + kind + '): only LoRA pairs are applied')
+    pairs, left = lora_pairs(keys, {key for key in header if key != '__metadata__'})
+    if not pairs:
+        raise ValueError('Incompatible LoRA: none of its layers belongs to this model (made for another one?)')
+    left -= set(lora_differences({key: entries[key] for key in left}, header).values())
+    if left:
+        raise ValueError('Incompatible LoRA: unsupported or orphan tensors (' + sorted(left)[0] + ')')
+
+
+def add_differences(model, pool, source, strength):
+    """Adds a LoRA's differences to the model already built: to the bias of a layer served by
+    the pool (WeightPool.shifts), else to the tensor itself. Returns how many."""
+    import torch
+
+    store = pool.stores[source]
+    entries = {key: {'shape': list(store.get_slice(key).get_shape())} for key in store.keys() if '.diff' in key}
+    header = {key: {'shape': list(pool.stores['model'].get_slice(key).get_shape())} for key in pool.keys('model')}
+    found = lora_differences(entries, header)
+    for target, key in found.items():
+        value = store.get_tensor(key).to('cuda', dtype=torch.bfloat16) * strength
+        name = renamed(target)
+        owner, _, leaf = name.rpartition('.')
+        layer = model.get_submodule(owner)
+        if leaf == 'bias' and hasattr(layer, 'location'):
+            held = pool.shifts.get(layer.location)
+            pool.shifts[layer.location] = value if held is None else held + value
+        else:
+            parameter = getattr(layer, leaf)
+            with torch.no_grad():
+                parameter.add_(value.reshape(parameter.shape).to(parameter.dtype))
+    return len(found)
+
+
 def rotations(rope, frames, rows, columns, replace, pose=True, dtype=None):
     """(cos, sin) of the rotary positions of every token, each [1, tokens, 1, head size]: the
     reference frame, `frames` frames of video of `rows` x `columns` tokens, then the pose.

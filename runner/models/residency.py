@@ -785,7 +785,7 @@ class Prefetch:
 def _companions(key):
     """A weight and what is stored beside it: its scale, bias and quantization notes."""
     stem = key.removesuffix('.weight')
-    return [key, *(stem + suffix for suffix in ('.weight_scale', '.bias', '.comfy_quant'))]
+    return [key, *(stem + suffix for suffix in ('.weight_scale', '.scale_weight', '.bias', '.comfy_quant'))]
 
 
 def weight_ranges(path, keys, gap=4 * 1024**2):
