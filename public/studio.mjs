@@ -2545,6 +2545,14 @@ export function setupStudio({
           const prompt = drafts.image.prompt.trim();
           checking = null;
           render();
+          // Read by screen readers: the question answered.
+          $('live-status') &&
+            ($('live-status').textContent =
+              decision === 'cancel'
+                ? 'Remplacement annulé.'
+                : decision === 'again'
+                  ? 'Autre image du personnage…'
+                  : 'Personnage gardé : le remplacement se prépare.');
           resolve({ decision, prompt });
         },
       };

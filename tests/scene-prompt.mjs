@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   askedSince,
+  characterOf,
   characterPrompt,
+  lastReplacement,
   sceneMessages,
   scenePictures,
   withScenePrompt,
@@ -138,6 +140,12 @@ test('a character with no image yet: no prompt from words, the image prompt alon
   assert.match(image, /^A full-length photo of a male volleyball player .*white shorts, alone,/);
   assert.match(image, /filling the height of the frame/);
   assert.match(image, /Plain light grey studio background with nothing else in it/);
+  // Given the prompt of the replacement as the character: who they replace is left out.
+  assert.match(
+    characterPrompt('A male volleyball player with short hair, a blue jersey and white shorts replaces the girl.'),
+    /^A full-length photo of a male volleyball player with short hair, a blue jersey and white shorts, alone,/,
+  );
+  assert.match(characterPrompt('An old robot, who takes the place of the man'), /^A full-length photo of an old robot, alone,/);
 });
 
 test('a video made earlier is seen through frames read from its file, else its small picture', async () => {
@@ -214,4 +222,33 @@ test('what the user asked about a replacement: their words since the last one ma
   // A correction said in two messages; what came before the last replacement made is done.
   assert.equal(askedSince(messages), 'on voit encore un bout du terrain\nrefais-le');
   assert.equal(askedSince(undefined), '');
+});
+
+test('a change asked for a replacement already made keeps its character', () => {
+  const clip = { resource: 'd276' },
+    kept = { output: 'image-1' },
+    made = (id, run, status = 'success', again = { source: clip, reference: kept }) => [
+      { role: 'assistant', content: '', tool_calls: [{ id, function: { name: 'replace_character', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: id, content: JSON.stringify({ status, run_id: run, replace_again: again }) },
+    ];
+  const messages = [{ role: 'user', content: 'remplace la fille' }, ...made('a', 'video-1')];
+  // The same video, or the video it made: its video and its character.
+  assert.deepEqual(lastReplacement(messages, { resource: 'd276' }), { source: clip, reference: kept });
+  assert.deepEqual(lastReplacement(messages, { output: 'video-1' }), { source: clip, reference: kept });
+  // Another video, a replacement cancelled, nothing given: nothing to keep.
+  assert.equal(lastReplacement(messages, { resource: 'other' }), null);
+  assert.equal(lastReplacement(made('b', 'video-2', 'cancelled'), clip), null);
+  assert.equal(lastReplacement(messages, null), null);
+  // The last one made from that video.
+  const later = [...messages, ...made('c', 'video-3', 'success', { source: clip, reference: { output: 'image-2' } })];
+  assert.deepEqual(lastReplacement(later, clip).reference, { output: 'image-2' });
+  // Who to draw from a prompt given with no character: its first sentence, not the scene.
+  assert.equal(
+    characterOf('A male volleyball player in a blue jersey stands in an orchard. Rain falls on the leaves.'),
+    'A male volleyball player in a blue jersey stands in an orchard.',
+  );
+  assert.match(
+    characterPrompt(characterOf('A male volleyball player with short hair replaces the girl. It rains.')),
+    /^A full-length photo of a male volleyball player with short hair, alone,/,
+  );
 });

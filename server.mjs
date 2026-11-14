@@ -6,7 +6,7 @@ import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from 
 import { citedMessage, citedUnused } from './lib/cited-resources.mjs';
 import { briefMessage, briefMissing } from './lib/video-brief.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
-import { askedSince, characterPrompt, withScenePrompt } from './lib/scene-prompt.mjs';
+import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
 import { THIN_NOTE, passedImages, thinPrompt } from './lib/thin-prompt.mjs';
 import { outputToolFor, readOutput } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
@@ -2034,9 +2034,19 @@ export async function createApplication({
                   } catch {
                     given = null;
                   }
+                // A change asked for a replacement already made (the same video, no character): its
+                // character stays, the image the user kept (lib/scene-prompt.mjs, lastReplacement).
+                const again =
+                  replacing && given && given.reference == null && !String(given.character ?? '').trim()
+                    ? lastReplacement(body.messages, given.source)
+                    : null;
+                if (again) {
+                  given = { ...given, source: again.source, reference: again.reference };
+                  calls[0].function.arguments = JSON.stringify(given);
+                }
                 const described =
                   replacing && given && given.reference == null
-                    ? String(given.character || given.prompt || '').trim()
+                    ? String(given.character || '').trim() || characterOf(given.prompt)
                     : '';
                 const places = {
                   resources,
