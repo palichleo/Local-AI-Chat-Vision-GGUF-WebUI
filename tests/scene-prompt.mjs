@@ -37,6 +37,19 @@ test('the prompt of a character put in a video is written from the frames of the
     [...pictures.frames, pictures.character],
   );
   assert.match(parts.at(-1).text, /What the user asked: remplace la fille/);
+  assert.match(messages[0].content, /What the user asks for comes first/);
+  // In the Studio what is typed is the wish itself: said once, not as a draft too.
+  const wished = [];
+  await withScenePrompt(args, {
+    resources: library,
+    engine,
+    asked: 'elle porte une robe rouge',
+    draft: '',
+    fetchImpl: answering(written, wished),
+  });
+  const said = wished[0][1].messages[1].content.at(-1).text;
+  assert.match(said, /What the user asked: elle porte une robe rouge/);
+  assert.doesNotMatch(said, /first draft/);
   const seen = [];
   const result = await withScenePrompt(args, { resources: library, engine, fetchImpl: answering(written, seen) });
   assert.equal(result.prompt, written);

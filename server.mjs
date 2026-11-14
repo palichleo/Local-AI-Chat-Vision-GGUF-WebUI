@@ -1478,7 +1478,8 @@ export async function createApplication({
           if (fromPictures) {
             const typed = String(body.prompt ?? '').trim().slice(0, 4000),
               given = { prompt: typed, source: body.source, reference: body.reference },
-              written = await withScenePrompt(given, { resources, engine, asked: typed, timeoutMs: enrichTimeoutMs });
+              // What is typed is what the user asks for, not a draft to tidy up.
+              written = await withScenePrompt(given, { resources, engine, asked: typed, draft: '', timeoutMs: enrichTimeoutMs });
             if (written !== given) return send(200, { prompt: written.prompt, seen: true });
             throw problem(
               engine.vision
