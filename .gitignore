@@ -30,3 +30,6 @@ experiment_keep_engine/
 # Working notes and assistant instructions: kept on this machine, out of the repository.
 doc/
 CLAUDE.md
+
+# Design files from the user (favicon, marks, design notes): copies are in public/; kept out of the repository.
+claude_design/

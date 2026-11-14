@@ -92,6 +92,9 @@ async function exchange({
     readSSE,
     node: element,
     icon: () => element('svg'),
+    // The mark of Moodix AI beside its name, and its moving while the model thinks.
+    moodixMark: () => [],
+    markThinking() {},
     userMessage: () => element(),
     contextMeter: { pause() {}, observe() {}, schedule() {} },
     renderAttachments() {},
@@ -413,6 +416,7 @@ test('restored generations share a response until the next real user message', a
     state: { conversationId: 'saved' },
     node,
     icon: () => node('svg'),
+    moodixMark: () => [],
     $: () => ({ append: root => roots.push(root) }),
     savedUser: message => ({ text: message.content, images: [] }),
     userMessage() {},

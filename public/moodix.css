@@ -745,15 +745,19 @@ body:not([data-view='studio']) .kind-tabs {
   background: var(--hover);
   color: var(--ink);
 }
-/* Moodix AI is a small tile with cut corners, as the letters of MDX are, in their three
-   colours: blue, yellow, red, in bands across it. No glow. */
+/* Moodix AI: the « matrice d'attention » (moodix-design.md 1, Petit logo), four rows of four cells
+   in the colours of the pipes, the diagonal lit; no ground. */
 .ai-mark,
 .message-avatar {
   flex: none;
+  border: 0;
   border-radius: 0;
-  clip-path: polygon(30% 0, 100% 0, 100% 70%, 70% 100%, 0 100%, 0 30%);
-  background: linear-gradient(135deg, var(--fn-input) 0 34%, var(--fn-output) 37% 63%, var(--fn-action) 66% 100%);
+  clip-path: none;
+  background: none;
   box-shadow: none;
+}
+.ai-mark {
+  background: url('/assets/moodix-mark.svg') center / contain no-repeat;
 }
 @media (max-width: 519px) {
   #mode-switch {
@@ -826,13 +830,139 @@ body[data-view='studio'] .suggestions {
   font-size: 13px;
   font-weight: 800;
 }
-/* Moodix AI in the chat: its tile (above, with the dot of the Studio), at the size of a line. */
+/* Moodix AI in the chat, at the size of a line: at rest its file; while the model thinks, the
+   same cells drawn in the page, each at its own pace (moodix-mark-thinking.svg), the two laid one
+   over the other and passing from one to the other in 0.5 s. The movement stops, frozen, as the
+   answer starts; with less motion asked, the mark stays at rest. */
 .message-avatar {
-  width: 18px;
-  height: 18px;
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 20px;
+  padding: 0;
 }
-.message-avatar svg {
-  display: none;
+.message-avatar > .moodix-mark-rest,
+.message-avatar > .moodix-mark-thinking {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transition: opacity 0.5s ease;
+}
+.message-avatar > .moodix-mark-thinking {
+  opacity: 0;
+  fill: none;
+  stroke: none;
+}
+.message-avatar.is-thinking > .moodix-mark-thinking {
+  opacity: 1;
+}
+.message-avatar.is-thinking > .moodix-mark-rest {
+  opacity: 0;
+}
+.moodix-mark-thinking rect {
+  stroke: none;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation-name: moodix-think;
+  animation-duration: 2.5s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-play-state: paused;
+}
+.message-avatar.is-thinking .moodix-mark-thinking rect {
+  animation-play-state: running;
+}
+.moodix-mark-thinking rect:nth-child(1) {
+  animation-duration: 1.9s;
+  animation-delay: 0s;
+}
+.moodix-mark-thinking rect:nth-child(2) {
+  animation-duration: 2.56s;
+  animation-delay: -1.55s;
+}
+.moodix-mark-thinking rect:nth-child(3) {
+  animation-duration: 3.03s;
+  animation-delay: -3.1s;
+}
+.moodix-mark-thinking rect:nth-child(4) {
+  animation-duration: 3.4s;
+  animation-delay: -1.24s;
+}
+.moodix-mark-thinking rect:nth-child(5) {
+  animation-duration: 3.53s;
+  animation-delay: -2.17s;
+}
+.moodix-mark-thinking rect:nth-child(6) {
+  animation-duration: 1.9s;
+  animation-delay: -0.31s;
+}
+.moodix-mark-thinking rect:nth-child(7) {
+  animation-duration: 2.56s;
+  animation-delay: -1.86s;
+}
+.moodix-mark-thinking rect:nth-child(8) {
+  animation-duration: 3.03s;
+  animation-delay: 0s;
+}
+.moodix-mark-thinking rect:nth-child(9) {
+  animation-duration: 3.16s;
+  animation-delay: -0.93s;
+}
+.moodix-mark-thinking rect:nth-child(10) {
+  animation-duration: 3.53s;
+  animation-delay: -2.48s;
+}
+.moodix-mark-thinking rect:nth-child(11) {
+  animation-duration: 1.9s;
+  animation-delay: -0.62s;
+}
+.moodix-mark-thinking rect:nth-child(12) {
+  animation-duration: 2.56s;
+  animation-delay: -2.17s;
+}
+.moodix-mark-thinking rect:nth-child(13) {
+  animation-duration: 2.3s;
+  animation-delay: -3.1s;
+}
+.moodix-mark-thinking rect:nth-child(14) {
+  animation-duration: 3.16s;
+  animation-delay: -1.24s;
+}
+.moodix-mark-thinking rect:nth-child(15) {
+  animation-duration: 3.53s;
+  animation-delay: -2.79s;
+}
+.moodix-mark-thinking rect:nth-child(16) {
+  animation-duration: 1.9s;
+  animation-delay: -0.93s;
+}
+@keyframes moodix-think {
+  0%,
+  100% {
+    transform: scale(0.48);
+    opacity: 0.45;
+  }
+  45% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  70% {
+    transform: scale(0.72);
+    opacity: 0.75;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .message-avatar.is-thinking > .moodix-mark-thinking {
+    opacity: 0;
+  }
+  .message-avatar.is-thinking > .moodix-mark-rest {
+    opacity: 1;
+  }
+  .moodix-mark-thinking rect {
+    animation-name: none;
+  }
 }
 
 /* ------------------------------------------------------------------ composer */
@@ -1315,11 +1445,11 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   letter-spacing: 0;
   text-transform: none;
 }
-/* A setting Moodix AI may change (« Assistant » in its workflow) wears its tile, small (see
-   .message-avatar). */
+/* A setting Moodix AI may change (« Assistant » in its workflow) wears its mark, small (see
+   .message-avatar), never moving. */
 .ai-mark {
-  width: 7px;
-  height: 7px;
+  width: 10px;
+  height: 10px;
 }
 .studio-prompt-field {
   flex: 1;

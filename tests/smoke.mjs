@@ -113,6 +113,17 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async t => {
       assert.equal(icon.headers.get('content-type'), 'image/svg+xml');
       assert.match(await page.text(), /<link rel="icon"[^>]*href="\/favicon\.svg"/);
       assert.match(await icon.text(), /<svg[^>]*viewBox="0 0 32 32"/);
+      // The small logo, its fallback and its large sizes, and the mark of Moodix AI in the chat.
+      for (const [path, type] of [
+        ['/favicon.ico', 'image/x-icon'],
+        ['/apple-touch-icon.png', 'image/png'],
+        ['/icon-512.png', 'image/png'],
+        ['/assets/moodix-mark.svg', 'image/svg+xml'],
+      ]) {
+        const served = await fetch(base + path);
+        assert.equal(served.status, 200, path);
+        assert.equal(served.headers.get('content-type'), type, path);
+      }
       const texture = await fetch(base + '/assets/metallic-grain.png');
       assert.equal(texture.status, 200);
       assert.equal(texture.headers.get('content-type'), 'image/png');

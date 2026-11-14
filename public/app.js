@@ -93,6 +93,38 @@ function icon(name) {
   return svg;
 }
 
+// The « matrice d'attention » of Moodix AI (moodix-design.md 1, Petit logo): four rows of four cells,
+// one colour a row, in the order of the pipes. At rest, its file; while the model thinks, the same
+// cells drawn in the page, so that they move everywhere (their pace is in moodix.css: the page
+// takes no style of its own). Both are laid one over the other; .is-thinking passes from one to the
+// other.
+const MARK_COLOURS = ['#3D6BF5', '#22A060', '#F6C343', '#E8402F'];
+function moodixMark() {
+  const rest = node('img', 'moodix-mark-rest');
+  rest.src = '/assets/moodix-mark.svg';
+  rest.alt = '';
+  const thinking = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  thinking.setAttribute('class', 'moodix-mark-thinking');
+  thinking.setAttribute('viewBox', '0 0 32 32');
+  thinking.setAttribute('aria-hidden', 'true');
+  for (let row = 0; row < 4; row++)
+    for (let column = 0; column < 4; column++) {
+      const cell = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      cell.setAttribute('x', (4.6 + column * 5.95).toFixed(2));
+      cell.setAttribute('y', (4.6 + row * 5.95).toFixed(2));
+      cell.setAttribute('width', '5');
+      cell.setAttribute('height', '5');
+      cell.setAttribute('rx', '1.1');
+      cell.setAttribute('fill', MARK_COLOURS[row]);
+      thinking.append(cell);
+    }
+  return [rest, thinking];
+}
+/** The mark of a reply moves while its model thinks: reasoning has come, the answer not yet. */
+function markThinking(view, thinking) {
+  view.article.querySelector('.message-avatar')?.classList.toggle('is-thinking', thinking);
+}
+
 function notice(message) {
   $('notice-text').textContent = message;
   $('notice').hidden = !message;
@@ -1569,7 +1601,8 @@ function assistantMessage(parent = null) {
   if (!parent) {
     const header = node('div', 'message-header');
     const avatar = node('span', 'message-avatar');
-    avatar.append(icon('spark'));
+    avatar.setAttribute('aria-hidden', 'true');
+    avatar.append(...moodixMark());
     header.append(avatar, node('span', '', 'Moodix AI'));
     article.append(header);
   }
@@ -1843,6 +1876,8 @@ async function sendMessage(event) {
   }
   function render() {
     if (silent) return;
+    // « Réflexion en cours… »: the mark of Moodix AI thinks with it, until the answer is written.
+    markThinking(view, Boolean(reasoning) && !output);
     view.reasoning.hidden = !reasoning;
     view.thoughts.textContent = reasoning;
     if (output) renderText(view.body, output);
@@ -2317,6 +2352,8 @@ async function sendMessage(event) {
       state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: !complete };
       setConversationTitle(text || 'Une image à explorer');
     }
+    // The turn is over, answered, failed or stopped: the mark is at rest.
+    markThinking(view, false);
     await persistConversation();
     state.generating = false;
     state.waitingForModel = false;

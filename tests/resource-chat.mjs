@@ -60,6 +60,7 @@ test('grouped resource frames retain their separate labels and never enter saved
     }),
     renderAttachments() {},
     resizePrompt() {},
+    markThinking() {},
     notice() {},
     scrollToBottom() {},
     renderText() {},
