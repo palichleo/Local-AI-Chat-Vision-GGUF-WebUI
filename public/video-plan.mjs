@@ -286,7 +286,10 @@ export function renderProposal(container, request, { node, onStage } = {}) {
       showSize();
     };
     grid.append(field('Format', formatControl), field('Résolution', resolutionControl));
-  } else if (numeric(size.width) && numeric(size.height))
+  } else if (widthItem?.follows)
+    // A character put in a video: as many points as this, in the shape of the video followed.
+    grid.append(field('Résolution', fixed('environ ' + sizeText(size)), { help: widthItem.locked }));
+  else if (numeric(size.width) && numeric(size.height))
     grid.append(
       field(
         'Résolution',
