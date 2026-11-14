@@ -2399,16 +2399,6 @@ function showLastReply(streaming = '') {
 function syncViews() {
   const studio = state.view === 'studio';
   $('composer-context').hidden = !studio;
-  const label = studio ? 'Chat' : 'Studio';
-  $('mode-switch').querySelector('.mode-switch-label').textContent = label;
-  // The logo of the mode it is in: MDX-CHAT in the chat, MDX-STUDIO in the Studio.
-  $('mode-switch').querySelector('.mode-word').textContent = studio ? '-STUDIO' : '-CHAT';
-  // The mode it is in, and where a click goes (moodix-design.md 18).
-  const where = studio
-    ? 'Tu es dans le Studio · cliquer pour passer au Chat'
-    : 'Tu es dans le Chat · cliquer pour passer au Studio';
-  $('mode-switch').setAttribute('aria-label', where);
-  $('mode-switch').title = where;
 }
 
 /**
@@ -2550,6 +2540,8 @@ const studioUI = setupStudio({
   onConversation: () => showLastReply(),
   afterMove,
   openAgent: () => void openChat(),
+  // A mode chosen in the sidebar from the Chat or the home: the Studio opens, in that mode.
+  openStudio: () => showStudio(),
 });
 state.studio = studioUI;
 const generationUI = setupGenerationUI({
@@ -2998,7 +2990,6 @@ state.onChatSent = chatSent;
 $('chat-scrim').onclick = () => void closeChat({ refocus: true });
 $('studio-open').onclick = () => showStudio();
 $('chat-open').onclick = () => showChat();
-$('mode-switch').onclick = () => (state.view === 'studio' ? showChat() : showStudio());
 async function newConversation(projectId = state.projectId || 'inbox') {
   if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)
     return;

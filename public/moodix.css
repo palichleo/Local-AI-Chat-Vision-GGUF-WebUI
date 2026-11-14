@@ -533,16 +533,11 @@ summary:focus-visible {
   min-height: 64px;
   padding: 10px var(--pad) 8px;
 }
-.topbar-start,
-.topbar-end {
+.topbar-start {
   display: flex;
   align-items: center;
   gap: 12px;
   min-width: 0;
-}
-.topbar-end {
-  gap: 8px;
-  flex: none;
 }
 .topbar-button {
   display: inline-flex;
@@ -591,39 +586,6 @@ summary:focus-visible {
   border-radius: 999px;
   background: var(--fn-action);
   flex: none;
-}
-/* The switch wears the logo of the mode it is in: MDX-CHAT in the chat, MDX-STUDIO in the
-   Studio; a click goes to the other. MDX in white, the name in the colour of the text. */
-#mode-switch {
-  /* The height of the logo: the name is sized on it. */
-  --mode-logo: 14px;
-  gap: 0;
-  padding: 0 16px;
-}
-#mode-switch .mode-logo {
-  display: block;
-  height: var(--mode-logo);
-  width: auto;
-  flex: none;
-}
-/* The name, in Archivo Black at its widest, read with the logo as one word (MDX-STUDIO): its
-   capitals as tall as the letters of the logo (102 px of the 114 of the picture, capitals of
-   0.686 em: 1.304 times its height), centred on them, the dash close to the X. */
-#mode-switch .mode-word {
-  display: block;
-  flex: none;
-  font-family: 'Archivo', sans-serif;
-  font-size: calc(var(--mode-logo) * 1.304);
-  font-weight: 900;
-  font-stretch: 125%;
-  letter-spacing: 0.5px;
-  line-height: 1;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--ink);
-}
-body[data-view='home'] .mode-switch {
-  display: none;
 }
 /* The signature: four rounded pipes under the top bar, blue, green, yellow and red, each shorter
    than the one above, from the left edge of the content. */
@@ -677,73 +639,81 @@ body[data-view='home'] .mode-switch {
   color: var(--muted);
   font-size: 13px;
 }
-/* Image / Vidéo / Son, at the top left of the Studio: the mode in use shows its name on the pill
-   of what is selected, the others their icon only. A tab eases to its new width (Chromium). */
-.kind-tabs {
+/* Image / Vidéo / Son under « Studio » in the sidebar (moodix-design.md 7 bis 19). While the Studio
+   is on screen, « Studio » and its modes are one card (#1C1F26, 12 px corners); under the name, a
+   dark track with three equal tabs, icons only (their names for screen readers and in their
+   tooltips), 28 px high, the one in use white with a dark icon. Seen from the Chat or the home,
+   the card stays, without its ground and without a white tab: a click opens the Studio there. */
+.studio-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 4px 5px;
+  border-radius: 12px;
+  background: transparent;
+}
+body[data-view='studio'] .studio-nav {
+  background: #1c1f26;
+}
+#sidebar .studio-nav .home-button {
+  min-height: 34px;
+  padding: 0 8px;
+}
+body[data-view='studio'] #sidebar .studio-nav .home-button {
+  background: transparent;
+}
+#studio-kinds.kind-tabs {
   display: flex;
   gap: 2px;
-  padding: 4px;
-  border-radius: 14px;
-  background: #14161b;
-  border: 1px solid var(--line);
-  interpolate-size: allow-keywords;
+  padding: 2px;
+  border-radius: 9px;
+  background: #0f1115;
 }
-:root[data-theme='light'] .kind-tabs {
-  background: var(--surface);
-}
-.kind-tabs:empty,
-body:not([data-view='studio']) .kind-tabs {
-  display: none;
-}
-.kind-tab {
-  display: inline-flex;
+#studio-kinds .kind-tab {
+  display: flex;
+  flex: 1 1 0;
   align-items: center;
   justify-content: center;
-  height: 40px;
-  min-width: 44px;
-  padding: 0 12px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: 7px;
   background: transparent;
   color: #aeb4bf;
-  font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 800;
   transition:
-    padding 0.2s ease,
     background-color 0.2s ease,
     color 0.2s ease;
 }
-:root[data-theme='light'] .kind-tab {
-  color: var(--muted);
-}
-.kind-tab svg {
-  width: 17px;
-  height: 17px;
+#studio-kinds .kind-tab svg {
+  width: 16px;
+  height: 16px;
   stroke-width: 2;
 }
-/* The name takes no room but in the tab in use, 8 px from its icon; it is still read out. */
-.kind-name {
-  width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  transition: width 0.2s ease;
+#studio-kinds .kind-tab:hover:enabled {
+  background: #1c1f26;
+  color: #eceef2;
 }
-.kind-name > span {
-  display: block;
-  padding-left: 8px;
+body[data-view='studio'] #studio-kinds .kind-tab[aria-selected='true'] {
+  background: #eceef2;
+  color: #0b0c0f;
 }
-.kind-tab[aria-selected='true'] {
-  padding: 0 16px;
-  background: var(--selected);
-  color: var(--on-selected);
+:root[data-theme='light'] body[data-view='studio'] .studio-nav {
+  background: var(--chip);
 }
-.kind-tab[aria-selected='true'] .kind-name {
-  width: auto;
-}
-.kind-tab:hover:enabled:not([aria-selected='true']) {
+:root[data-theme='light'] #studio-kinds.kind-tabs {
   background: var(--hover);
+}
+:root[data-theme='light'] #studio-kinds .kind-tab {
+  color: var(--muted);
+}
+:root[data-theme='light'] #studio-kinds .kind-tab:hover:enabled {
+  background: var(--chip);
   color: var(--ink);
+}
+:root[data-theme='light'] body[data-view='studio'] #studio-kinds .kind-tab[aria-selected='true'] {
+  background: #12141a;
+  color: #eceef2;
 }
 /* Moodix AI: the « matrice d'attention » (moodix-design.md 1, Petit logo), four rows of four cells
    in the colours of the pipes, the diagonal lit; no ground. */
@@ -758,18 +728,6 @@ body:not([data-view='studio']) .kind-tabs {
 }
 .ai-mark {
   background: url('/assets/moodix-mark.svg') center / contain no-repeat;
-}
-@media (max-width: 519px) {
-  #mode-switch {
-    --mode-logo: 11px;
-    padding: 0 12px;
-  }
-  .kind-tab {
-    padding: 0 10px;
-  }
-  .kind-tab span {
-    display: none;
-  }
 }
 @media (max-width: 1039px) {
   :root {

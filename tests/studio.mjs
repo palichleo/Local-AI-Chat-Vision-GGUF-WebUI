@@ -127,7 +127,10 @@ test('a model this computer cannot run is shown greyed with its reason, others n
   ]);
   assert.ok(tools.create_image[1].limits, 'described as the others, for the page to draw it');
   // Not ready for another reason: left out, as before.
-  assert.deepEqual(tools.create_video.map(item => item.family), ['ltx25']);
+  assert.deepEqual(
+    tools.create_video.map(item => item.family),
+    ['ltx25'],
+  );
   // The chat model is not offered what cannot run, and a request for it finds no workflow.
   const offered = (await catalog.definitions()).find(tool => tool.function.name === 'create_image');
   assert.doesNotMatch(offered.function.description, /Krea 2/);
@@ -797,6 +800,7 @@ async function studioPage(tools, routes = {}, options = {}) {
     pace: 0,
     ...(options.run ? { run: options.run } : {}),
     ...(options.openAgent ? { openAgent: options.openAgent } : {}),
+    ...(options.openStudio ? { openStudio: options.openStudio } : {}),
   });
   if (options.open !== false) await studio.open();
   return {
@@ -817,6 +821,47 @@ async function studioPage(tools, routes = {}, options = {}) {
 }
 const sizes = { width: { min: 256, max: 2048, multipleOf: 32 }, height: { min: 256, max: 2048, multipleOf: 32 } };
 const settle = () => new Promise(resolve => setTimeout(resolve, 15));
+
+test('Image, Vidéo and Son under « Studio » in the sidebar: icons named, there from the start, opening the Studio in their mode', async () => {
+  const image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [] };
+  const opened = [];
+  const { page, body, restore } = await studioPage(
+    { create_image: [image], create_video: [video] },
+    {},
+    { open: false, openStudio: () => opened.push(true) },
+  );
+  try {
+    // Drawn before the Studio is ever opened: the sidebar shows them from the Chat too.
+    const tabs = page['studio-kinds'].children;
+    assert.deepEqual(
+      tabs.map(tab => [tab.attributes.role, tab.attributes['aria-label'], tab.title, tab.children.length]),
+      [
+        ['tab', 'Image', 'Image', 1],
+        ['tab', 'Vidéo', 'Vidéo', 1],
+        ['tab', 'Son', 'Son', 1],
+      ],
+      'an icon each, its name for screen readers and in its tooltip',
+    );
+    assert.equal(tabs[0].attributes['aria-selected'], 'true');
+    // From the Chat: the mode is chosen as the selector of the Studio did, and the Studio opens.
+    tabs[1].onclick();
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(opened.length, 1);
+    // In the Studio: the mode changes, nothing else opens.
+    globalThis.document.body.dataset = { view: 'studio' };
+    tabs[0].onclick();
+    assert.equal(body.dataset.mode, 'image');
+    assert.equal(opened.length, 1);
+    // The arrows go from one mode to the next, along the row or down the column.
+    page['studio-kinds'].onkeydown({ key: 'ArrowDown', preventDefault() {} });
+    assert.equal(body.dataset.mode, 'video');
+    page['studio-kinds'].onkeydown({ key: 'ArrowLeft', preventDefault() {} });
+    assert.equal(body.dataset.mode, 'image');
+  } finally {
+    restore();
+  }
+});
 
 test('the last creation stays on the screen; another conversation starts from an empty screen', async () => {
   const workflow = {

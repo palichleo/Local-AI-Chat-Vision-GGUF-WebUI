@@ -176,6 +176,8 @@ export function setupStudio({
   pace = 1,
   // « Agent »: opens the chat of Moodix AI, as the band at the foot of the Studio did.
   openAgent = () => {},
+  // Brings the Studio on screen (as « Studio » of the sidebar does): a mode chosen from elsewhere.
+  openStudio = () => {},
 }) {
   const $ = id => document.getElementById(id);
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms * pace));
@@ -1954,10 +1956,11 @@ export function setupStudio({
     if (live && on) live.textContent = 'Moodix AI règle le Studio.';
   }
   /** Where the pointer goes for a setting: the element that wears its key. */
-  const targetOf = key =>
-    key === 'kind'
-      ? document.querySelector?.(`#studio-kinds [data-mode="${proposal?.mode ?? mode}"]`)
-      : document.querySelector?.(`#studio-view [data-ai="${key}"]`);
+  const targetOf = key => {
+    if (key !== 'kind') return document.querySelector?.(`#studio-view [data-ai="${key}"]`);
+    const tab = document.querySelector?.(`#studio-kinds [data-mode="${proposal?.mode ?? mode}"]`);
+    return tab && tab.checkVisibility?.({ visibilityProperty: true }) !== false ? tab : null;
+  };
   /**
    * One step of the pointer: it goes (its glide, 0.25 s), it rings, it sets, it leaves a trace:
    * about 0.4 s. Stops when the user takes over.
@@ -2736,38 +2739,43 @@ export function setupStudio({
     return block;
   }
   /** Image / Vidéo / Son, at the top left. */
+  /**
+   * Image / Vidéo / Son, under « Studio » in the sidebar (moodix-design.md 7 bis 19): three tabs,
+   * their icons only, their names for screen readers and in their tooltips. Each does what the
+   * selector at the top of the Studio did (chooseMode); from the Chat or the home, the Studio
+   * opens in that mode.
+   */
   function kinds() {
     const bar = $('studio-kinds');
     if (!bar) return;
     bar.removeAttribute('data-ai-active');
     bar.removeAttribute('data-ai-touched');
     aiTarget(bar, 'kind');
-    // Made once and kept: a tab eases from one width to the other as the mode changes.
     if (bar.children.length !== MODES.length) {
       bar.replaceChildren(
         ...MODES.map(item => {
-          const tab = node('button', 'kind-tab'),
-            name = node('span', 'kind-name');
+          const tab = node('button', 'kind-tab');
           tab.type = 'button';
           tab.setAttribute('role', 'tab');
-          // Only the mode in use shows its name: the others say it to screen readers and on hover.
           tab.setAttribute('aria-label', item.label);
           tab.title = item.label;
           tab.dataset.mode = item.id;
-          name.append(node('span', '', item.label));
-          tab.append(icon(item.icon), name);
-          tab.onclick = () => chooseMode(item.id);
+          tab.append(icon(item.icon));
+          tab.onclick = () => {
+            chooseMode(item.id);
+            if (globalThis.document?.body?.dataset?.view !== 'studio') openStudio();
+          };
           return tab;
         }),
       );
-      // ← and → go from one mode to the next, as in any row of tabs.
+      // The arrows go from one mode to the next, as in any row (or column) of tabs.
       bar.onkeydown = event => {
-        const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
+        const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
         if (!step || working) return;
         event.preventDefault();
         const next = MODES[(MODES.findIndex(item => item.id === mode) + step + MODES.length) % MODES.length];
         chooseMode(next.id);
-        for (const tab of bar.children) if (tab.dataset.mode === next.id) tab.focus();
+        for (const tab of bar.children) if (tab.dataset.mode === next.id) tab.focus?.();
       };
     }
     for (const tab of bar.children) {
@@ -3172,6 +3180,8 @@ export function setupStudio({
     const menu = document.querySelector?.('#studio-view .studio-format-menu');
     if (menu) menu.hidden = true;
   });
+  // The modes under « Studio » in the sidebar are there from the start: seen from the Chat too.
+  kinds();
   return {
     open,
     prefetch,
