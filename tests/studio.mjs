@@ -293,6 +293,9 @@ test('a character replaced in a video: its model among the videos, a video and a
     page.prompt().value = '';
     page.prompt().oninput();
     assert.equal(wand().disabled, false);
+    // Drawn again (another model and back), the wand is still ready: the page itself says so.
+    page.studio.render();
+    assert.equal(wand().disabled, false);
     assert.match(wand().title, /^Écrire le prompt d’après la vidéo et le personnage/);
     await generate();
     assert.match(body.find('studio-error')[0].textContent, /cliquez sur la baguette/);

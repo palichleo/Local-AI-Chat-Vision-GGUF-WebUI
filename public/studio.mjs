@@ -1877,7 +1877,7 @@ export function setupStudio({
       make.classList.add('is-working');
       make.setAttribute('aria-busy', 'true');
     }
-    make.disabled = enriching || Boolean(working) || draft.prompt.trim().length < IMPROVE_MIN;
+    make.disabled = enriching || Boolean(working) || !improves();
     if (draft.before !== null && !enriching && !working) {
       const back = button(
         'studio-link',
