@@ -101,6 +101,15 @@ class RuleTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 pipeline.check(job(**wrong), None)
 
+    def test_without_masks_the_job_names_what_finds_the_subjects(self):
+        bare = job(roles=('driving_video', 'reference_image'))
+        self.assertFalse(pipeline.masks_given(bare))
+        with self.assertRaisesRegex(ValueError, 'SAM 3.1'):
+            pipeline.check(bare, None)
+        bare['components'] = dict(segmenter='C:/sam.safetensors', segmenterTokenizer='C:/tokenizer')
+        pipeline.check(bare, None)
+        self.assertTrue(pipeline.masks_given(job()))
+
     def test_a_smaller_card_draws_shorter_segments(self):
         self.assertEqual(pipeline.segment_frames(23, 512, 896), 81)
         # A 12 GiB card with the desktop on it: the whole segment the model was trained on.

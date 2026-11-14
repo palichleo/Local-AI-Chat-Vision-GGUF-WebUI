@@ -11,8 +11,9 @@ by a shift of 5, the model's LoRAs (lightx2v, DPO) applied as it runs. The refer
 black outside its mask and the image encoder sees the whole of it, as ComfyUI's node does: the
 same seed then gives the same video.
 
-The masks are given (two more references: an image and a video in flat colours) until this
-engine makes them itself.
+The masks are made here from a few words (`subject`: who to follow in the video;
+`reference_subject`: who to draw from the image), by SAM 3.1's detector (runner.video.identity).
+They can also be given, as two more references: an image and a video in flat colours.
 """
 
 import gc
@@ -31,6 +32,9 @@ SHORTEST = 21
 # The share of the model a card keeps at least for a segment to be worth its full length.
 LEAST_SHARE_GIB = 1.0
 AUDIO_RATE = 48000
+# Who is looked for when the job does not say.
+SUBJECT = 'person'
+MASKS = ('driving_mask', 'reference_mask')
 
 
 def working_gib(tokens):
@@ -93,9 +97,18 @@ def check(job, family):
     segment = p.get('segment_frames')
     if segment is not None and (segment % 4 != 1 or segment < 9):
         raise ValueError('SCAIL-2 segments are 4n+1 frames, 9 at least')
-    for role in ('driving_video', 'reference_image', 'driving_mask', 'reference_mask'):
+    for role in ('driving_video', 'reference_image'):
         if _one(job, role) is None:
             raise ValueError('SCAIL-2 needs one ' + role.replace('_', ' '))
+    given = [role for role in MASKS if any(ref['role'] == role for ref in job['references'])]
+    if given and (len(given) < len(MASKS) or any(_one(job, role) is None for role in MASKS)):
+        raise ValueError('SCAIL-2 masks are given together: one for the reference, one for the video')
+    if not given and not all(job['components'].get(name) for name in ('segmenter', 'segmenterTokenizer')):
+        raise ValueError('SCAIL-2 needs SAM 3.1 and its tokenizer to find the subjects, or their masks')
+
+
+def masks_given(job):
+    return _one(job, MASKS[0]) is not None
 
 
 def _probe(path, parameters, label, rate=True):
@@ -127,7 +140,17 @@ def preflight(job, config):
     # A driving video too short or of another frame rate is refused here, before the chat model
     # is unloaded.
     _probe(_one(job, 'driving_video'), job['parameters'], 'La vidéo à suivre')
-    _probe(_one(job, 'driving_mask'), job['parameters'], 'Le masque de la vidéo', rate=False)
+    if masks_given(job):
+        _probe(_one(job, 'driving_mask'), job['parameters'], 'Le masque de la vidéo', rate=False)
+    else:
+        from pathlib import Path
+
+        from runner.models import sam3
+
+        sam3.validate_layout(header(job['components']['segmenter']))
+        folder = Path(job['components']['segmenterTokenizer'])
+        if not all((folder / name).is_file() for name in ('vocab.json', 'merges.txt')):
+            raise ValueError('The SAM 3.1 tokenizer folder must hold vocab.json and merges.txt')
 
 
 def _picture(array):
@@ -136,25 +159,96 @@ def _picture(array):
     return torch.from_numpy(array).permute(2, 0, 1).float() / 127.5 - 1
 
 
-def read_halved(path, count, width, height, flat=False):
-    """The first `count` frames of a video cut to the shape of the generation, at half its size
-    as the model reads them: [count, 3, height / 2, width / 2] from -1 to 1."""
+def read_frames(path, count, width, height, flat=False):
+    """Yields the first `count` frames of a video cut to the shape of the generation,
+    [3, height, width] from -1 to 1."""
     from contextlib import closing
     from itertools import islice
-
-    import torch
 
     from runner.video import scail
     from runner.video.stream import frames
 
     with closing(frames(path)) as source:
-        found = [
-            scail.halved(scail.cover(_picture(frame), width, height, flat=flat)[None])[0]
-            for frame in islice(source, count)
-        ]
+        for frame in islice(source, count):
+            yield scail.cover(_picture(frame), width, height, flat=flat)
+
+
+def _whole(found, count):
+    import torch
+
     if len(found) < count:
         raise ValueError(f'The video holds {len(found)} frames, {count} are needed')
     return torch.stack(found)
+
+
+def read_halved(path, count, width, height, flat=False):
+    """The first `count` frames of a video cut to the shape of the generation, at half its size
+    as the model reads them: [count, 3, height / 2, width / 2] from -1 to 1."""
+    from runner.video import scail
+
+    return _whole([scail.halved(frame[None])[0] for frame in read_frames(path, count, width, height, flat)], count)
+
+
+def find_masks(job, raw, width, height, progress):
+    """(pose, pose masks, reference mask, what was found): the driving video at half its size,
+    its coloured masks likewise and the mask of the reference image `raw` cut to the shape of
+    the generation, the subjects found by SAM 3.1 from the job's words."""
+    import torch
+
+    from runner.models import sam3
+    from runner.video import identity, scail
+
+    p, paths = job['parameters'], job['components']
+    wanted, drawn = p.get('subject') or SUBJECT, p.get('reference_subject') or SUBJECT
+    model = sam3.load(paths['segmenter'])
+    one = follower = None
+    try:
+        pieces = sam3.tokenizer(paths['segmenterTokenizer'])
+        # The reference: the whole image, as it is.
+        one = identity.follow(model, pieces, drawn, [raw])
+        ranked = identity.order(one.frames, one.count)
+        if not ranked:
+            raise ValueError(
+                f'Aucun sujet « {drawn} » n’a été trouvé dans l’image de référence. Décrivez-le autrement.'
+            )
+        shown = identity.coloured(one.frames[0], ranked, raw.shape[-2], raw.shape[-1], identity.BLACK)
+        reference_mask = scail.cover(shown, width, height, flat=True)
+        # The video: every frame is read once, for the pose and for the masks.
+        pose = []
+
+        def pictures():
+            for picture in read_frames(_one(job, 'driving_video'), p['frames'], width, height):
+                pose.append(scail.halved(picture[None])[0])
+                yield picture
+
+        follower = identity.follow(
+            model, pieces, wanted, pictures(), progress=lambda done: progress(stage='finding subjects', frame=done)
+        )
+        pose = _whole(pose, p['frames'])
+        order = identity.order(follower.frames, follower.count)
+        if not order:
+            raise ValueError(
+                f'Aucun sujet « {wanted} » n’a été trouvé dans la vidéo à suivre. Décrivez-le autrement.'
+            )
+        pose_mask = torch.stack(
+            [scail.halved(identity.coloured(frame, order, height, width)[None])[0] for frame in follower.frames]
+        )
+        facts = dict(
+            subject=wanted,
+            reference_subject=drawn,
+            reference_objects=len(ranked),
+            objects=[
+                dict(colour=rank, frames=sum(item in frame for frame in follower.frames))
+                for rank, item in enumerate(order)
+            ],
+        )
+        return pose, pose_mask, reference_mask, facts
+    finally:
+        # Nothing of the detector stays on the card for the video model.
+        del model, one, follower
+        sam3.forget()
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 def read_image(path):
@@ -361,11 +455,16 @@ def generate(job, config, progress):
             (conditioning.stamp(paths['clipVision']), conditioning.stamp(reference_path)),
             seen,
         )
-        reference_mask = scail.cover(read_image(_one(job, 'reference_mask')), width, height, flat=True)
+        if masks_given(job):
+            reference_mask = scail.cover(read_image(_one(job, 'reference_mask')), width, height, flat=True)
+            pose = read_halved(_one(job, 'driving_video'), p['frames'], width, height)
+            pose_mask = read_halved(_one(job, 'driving_mask'), p['frames'], width, height, flat=True)
+        else:
+            progress(stage='finding subjects')
+            pose, pose_mask, reference_mask, subjects = find_masks(job, raw, width, height, progress)
+            progress(stage='subjects found', **subjects)
         reference = scail.matte(scail.cover(raw, width, height), reference_mask)
         del raw
-        pose = read_halved(_one(job, 'driving_video'), p['frames'], width, height)
-        pose_mask = read_halved(_one(job, 'driving_mask'), p['frames'], width, height, flat=True)
         vae = wan_vae.load(paths['vae'])
         reference_stream = scail.given(wan_vae.encode(vae, reference[None, :, None].cuda())[0])[None].to(**kind)
         reference_masks = scail.mask_latents(reference_mask[None])[None].to(**kind)

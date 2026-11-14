@@ -168,14 +168,19 @@ def wan_scail2_job(args, run):
     )
     if args.segment_frames:
         parameters['segment_frames'] = args.segment_frames
+    components = dict(model=args.model, textEncoder=args.text_encoder, clipVision=args.clip_vision, vae=args.vae)
+    # Without masks among the references, SAM 3.1 finds the subjects from these words.
+    for name in ('subject', 'reference_subject'):
+        if getattr(args, name):
+            parameters[name] = getattr(args, name)
+    if args.segmenter:
+        components.update(segmenter=args.segmenter, segmenterTokenizer=args.segmenter_tokenizer)
     return dict(
         id=str(uuid.uuid4()),
         pipeline='wan_scail2',
         mediaType='video',
         parameters=parameters,
-        components=dict(
-            model=args.model, textEncoder=args.text_encoder, clipVision=args.clip_vision, vae=args.vae
-        ),
+        components=components,
         loras=_loras(args),
         references=references,
     )
@@ -192,7 +197,7 @@ FAMILIES = {
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('family', choices=sorted(FAMILIES))
-    for name in ('model', 'text-encoder', 'vae', 'audio-vae', 'tokenizer', 'upscaler', 'clip-vision'):
+    for name in ('model', 'text-encoder', 'vae', 'audio-vae', 'tokenizer', 'upscaler', 'clip-vision', 'segmenter'):
         parser.add_argument('--' + name)
     parser.add_argument('--out', required=True)
     parser.add_argument('--runs', type=int, default=3)
@@ -205,6 +210,9 @@ def main(argv=None):
     parser.add_argument('--same-prompt', action='store_true', help='one prompt for every run')
     parser.add_argument('--lora', action='append', default=[], metavar='FILE:STRENGTH')
     parser.add_argument('--reference', action='append', default=[], metavar='ROLE=FILE')
+    parser.add_argument('--segmenter-tokenizer', help='SCAIL-2: folder of the CLIP tokenizer SAM 3.1 reads')
+    parser.add_argument('--subject', help='SCAIL-2: who to follow in the video ("girl, handkerchief")')
+    parser.add_argument('--reference-subject', help='SCAIL-2: who to draw from the reference image')
     parser.add_argument('--segment-frames', type=int, help='SCAIL-2: frames of a segment, 81 unless the card is small')
     parser.add_argument('--keep', action='store_true', help='leave the model on the GPU between runs, as the Studio')
     parser.add_argument('--gpu-gib', type=float, help='ceiling on the weights kept on the GPU')
