@@ -180,8 +180,12 @@ def generate(job, config, progress):
         lap = time.perf_counter()
 
     with ExitStack() as stack, torch.inference_mode():
-        models, names = validate_layout(headers)
-        del models['textEncoder']
+        # Only what this generation runs is built: not the text encoder (its own module builds
+        # it when a prompt is new), nor the connectors of a prompt whose text is kept, nor the
+        # decoder (decode_pixels) unless the pipeline is given it for want of an encoder.
+        wanted = ['model', 'audioVae', *(['connectors'] if text is None else [])]
+        wanted += [] if job['references'] else ['vae']
+        models, names = validate_layout(headers, wanted)
         # Weights come from RAM-resident arenas when they fit (kept between jobs); the text
         # encoder file only lends its projection here, so it is not loaded for that alone.
         stores = {
@@ -223,7 +227,7 @@ def generate(job, config, progress):
             if job['references']:
                 encoder, encoder_names = video_encoder(headers)
                 vae = load_streamed(encoder, encoder_names, cold)
-                del encoder, models['vae']
+                del encoder
             else:
                 vae = load_streamed(models.pop('vae'), names['vae'], cold)
             timed('vae')
@@ -292,8 +296,6 @@ def generate(job, config, progress):
                 del connectors, found
                 cold.clear()
                 setup['text kept'] = conditioning.save(config, text_entry, text)
-            else:
-                del models['connectors']
             connectors = kept_text(*(text[name].to('cuda') for name in ('video', 'audio', 'mask')))
             del text
             timed('connectors')
@@ -680,9 +682,8 @@ def decode_pixels(job, headers, latents, progress):
 
     seed = job['parameters']['seed']
     with open_store(job['components']['vae']) as source, torch.inference_mode():
-        models, names = validate_layout(headers)
+        models, names = validate_layout(headers, ('vae',))
         vae = models.pop('vae')
-        del models
         # The decoder stays on the GPU while it works, where there is room beside what the
         # decode holds: each tile runs it several times.
         entries = (entry for name, entry in headers['vae'].items() if name != '__metadata__')

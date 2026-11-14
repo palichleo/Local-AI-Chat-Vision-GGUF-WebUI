@@ -9,9 +9,7 @@ def encode(job, headers, progress):
     from runner.models.residency import open_store, prefetch, use_order
     from runner.models.ltx25 import architectures, mappings, WeightPool, load_streamed
 
-    models = architectures(headers)
-    model = models.pop('textEncoder')
-    del models
+    model = architectures(headers, ('textEncoder',))['textEncoder']
     names = mappings(headers)['textEncoder']
     # Read once per prompt, this file sends nothing away from RAM to sit there (`evict`): the
     # share of the video model locked for every step stays. Where it finds no room, its layers

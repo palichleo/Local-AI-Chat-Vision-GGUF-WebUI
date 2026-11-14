@@ -27,9 +27,8 @@ def decode(latents, job, headers, progress):
     from runner.models.ltx25 import validate_layout, WeightPool, load_streamed
 
     with open_store(job['components']['audioVae']) as source, torch.inference_mode():
-        models, names = validate_layout(headers)
+        models, names = validate_layout(headers, ('audioVae',))
         vae = models.pop('audioVae')
-        del models
         vocoder, vocoder_names = vocoder_layout(headers)
         pool = WeightPool({'audioVae': source}, 0)
         try:

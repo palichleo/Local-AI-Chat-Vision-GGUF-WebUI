@@ -7,7 +7,9 @@ import time
 from runner.models.pool import RECENT, WeightPool, load_streamed  # noqa: F401
 
 
-def architectures(headers):
+def architectures(headers, roles=None):
+    """The empty models of the roles asked for (all of them without `roles`): building one takes
+    a fraction of a second, and a generation asked for all five three times over."""
     from accelerate import init_empty_weights
     from diffusers.utils import import_utils
 
@@ -47,8 +49,8 @@ def architectures(headers):
     if len(config.get('layer_types', [])) != 48:
         raise ValueError('Invalid Gemma4 attention layer count')
     with init_empty_weights():
-        return dict(
-            model=LTX2VideoTransformer3DModel(
+        builders = dict(
+            model=lambda: LTX2VideoTransformer3DModel(
                 gated_attn=True,
                 cross_attn_mod=True,
                 audio_gated_attn=True,
@@ -60,7 +62,7 @@ def architectures(headers):
                 use_prompt_adaln_single=False,
                 use_keyframes_abs_pos_embedding=True,
             ),
-            connectors=LTX2TextConnectors(
+            connectors=lambda: LTX2TextConnectors(
                 video_connector_num_attention_heads=32,
                 video_connector_num_layers=8,
                 video_gated_attn=True,
@@ -72,14 +74,15 @@ def architectures(headers):
                 per_modality_projections=True,
                 proj_bias=True,
             ),
-            textEncoder=Gemma4UnifiedTextModel(
+            textEncoder=lambda: Gemma4UnifiedTextModel(
                 Gemma4UnifiedTextConfig(
                     **supported, sliding_window=1024, max_position_embeddings=262144, tie_word_embeddings=True
                 )
             ),
-            vae=LTX2VideoDiffusionDecoderModel(),
-            audioVae=AutoencoderKLLTX2Audio(),
+            vae=LTX2VideoDiffusionDecoderModel,
+            audioVae=AutoencoderKLLTX2Audio,
         )
+        return {role: build() for role, build in builders.items() if roles is None or role in roles}
 
 
 def mappings(headers):
@@ -143,8 +146,8 @@ def mappings(headers):
     )
 
 
-def validate_layout(headers):
-    models = architectures(headers)
+def validate_layout(headers, roles=None):
+    models = architectures(headers, roles)
     names = mappings(headers)
     for role, model in models.items():
         for key, value in model.state_dict().items():
