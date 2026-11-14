@@ -398,7 +398,25 @@ test('a character is replaced in a video by a verb of its own: the video, the im
     resources: [{ id: 'clip', type: 'video' }],
     outputs: [],
   });
-  assert.ok(some.some(tool => tool.function.name === 'replace_character'));
+  const offered = some.find(tool => tool.function.name === 'replace_character').function.parameters.properties;
+  // The video is taken whole: no frame of it is offered for the source, one is for an image role.
+  assert.deepEqual(Object.keys(offered.source.properties), ['resource']);
+  assert.ok(
+    offered.reference.anyOf.some(variant => variant.properties.frame),
+    'a frame of a video can still stand for the image of the character',
+  );
+  // A model that names a frame all the same means the video: the call is not refused for it.
+  const framed = await catalog.route(
+    'replace_character',
+    {
+      prompt: 'x',
+      intention: 'y',
+      source: { resource: 'clip', frame: 1 },
+      reference: { image: 0 },
+    },
+    { mediaOf: async source => (source.resource === 'clip' && source.frame === undefined ? 'video' : 'image') },
+  );
+  assert.deepEqual(framed.args.references[0], { input: 'video', resource_id: 'clip' });
   const routed = await catalog.route(
     'replace_character',
     {
