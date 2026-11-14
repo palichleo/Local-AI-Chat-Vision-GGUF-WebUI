@@ -45,11 +45,37 @@ test('a character put in a video: the video is looked at too, with the image of 
     unseenResources(asked, catalog, replace).map(item => item.id),
     [A, 'v'],
   );
-  const read = [...asked, { role: 'tool', content: JSON.stringify({ status: 'nothing_generated', resources: [{ id: 'v' }] }) }];
+  const shown = { role: 'tool', content: JSON.stringify({ status: 'nothing_generated', resources: [{ id: 'v' }] }) },
+    read = [...asked, shown];
   assert.deepEqual(
     unseenResources(read, catalog, replace).map(item => item.id),
     [A],
   );
+  // Looked at while the video was agreed on, a turn earlier: their pixels are gone when the
+  // prompt is written, both are shown again. Seen in this turn, the call goes through.
+  const agreed = [
+    ...asked,
+    { role: 'tool', content: JSON.stringify({ status: 'nothing_generated', resources: [{ id: 'v' }, { id: A }] }) },
+    { role: 'assistant', content: 'Je remplace la fille par la femme. Go ?' },
+    { role: 'user', content: 'oui' },
+  ];
+  assert.deepEqual(
+    unseenResources(agreed, catalog, replace).map(item => item.id),
+    [A, 'v'],
+  );
+  const again = [
+    ...agreed,
+    { role: 'user', internal: true, resourceId: A, content: [] },
+    { role: 'user', internal: true, resourceId: 'v', content: [] },
+  ];
+  assert.deepEqual(unseenResources(again, catalog, replace), []);
+  // The other verbs keep what was read in an earlier turn.
+  const earlier = [
+    { role: 'user', content: 'une vidéo' },
+    { role: 'tool', content: JSON.stringify({ status: 'loaded', resources: [{ id: A }, { id: B }] }) },
+    { role: 'user', content: 'oui' },
+  ];
+  assert.deepEqual(unseenResources(earlier, catalog, video), []);
   assert.match(SEEN_NOTE, /a few frames of it/);
 });
 
