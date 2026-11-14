@@ -1690,10 +1690,19 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
     padding: 9px;
   }
 }
-/* The check of a character Moodix AI made: the question, then Annuler, Autre image, OK. */
+/* The check of a character Moodix AI made: the question on a line of its own, then Annuler,
+   Autre image, OK (on one line, « OK » was cut at the right of a window of 1280 px). */
+.studio-go-group.is-checking {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 8px;
+}
+.studio-go-group.is-checking > button {
+  white-space: nowrap;
+}
 .studio-check-question {
-  align-self: center;
-  margin-right: 4px;
+  flex: 1 1 100%;
+  text-align: right;
   color: var(--soft);
   font-size: 13px;
   font-weight: 600;

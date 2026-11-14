@@ -1844,7 +1844,12 @@ export function setupStudio({
       await releasing;
       await waitForModel(api, controller.signal, () => {});
       const result = await (
-        await api('studio/enrich', { prompt: text, verb: verbOf(), ...(scene ?? {}) })
+        await api('studio/enrich', {
+          prompt: text,
+          verb: verbOf(),
+          // Its video or its character made in the conversation are found there.
+          ...(scene ? { ...scene, conversationId: place() } : {}),
+        })
       ).json();
       draft.before = text;
       // The text rewritten writes itself in the box, in half a second (at once with less motion).
@@ -1868,6 +1873,51 @@ export function setupStudio({
     }
   }
   /**
+   * The prompt of a replacement whose character Moodix AI has just made, written from the video
+   * and that image as the wand writes it: the chat model comes back for it (the generator of the
+   * image leaves the card to it), with what the user asked and the prompt of Moodix AI as a draft.
+   * When it cannot be, the prompt of Moodix AI stays and the Studio says why.
+   */
+  async function writeScene(current) {
+    const draft = drafts[current.mode],
+      scene = sceneInputs(),
+      { signal } = current,
+      before = draft.prompt;
+    if (!scene) return;
+    enriching = true;
+    render();
+    try {
+      await releasing;
+      await waitForModel(api, signal, () => {});
+      const result = await (
+        await api(
+          'studio/enrich',
+          {
+            prompt: String(current.request.scene?.asked ?? ''),
+            draft: before.trim(),
+            verb: 'replace_character',
+            ...scene,
+            conversationId: place(),
+          },
+          { signal },
+        )
+      ).json();
+      // The user wrote their own meanwhile: theirs stays.
+      if (draft.prompt !== before) return;
+      draft.before = before;
+      enriching = false;
+      render();
+      if (ai && !ai.stopped) await typePrompt(draft, result.prompt);
+      draft.prompt = result.prompt;
+    } catch (error) {
+      // Stopped with the turn: nothing to say.
+      if (!signal?.aborted) notice('Prompt de Moodix AI gardé : ' + error.message);
+    } finally {
+      enriching = false;
+      render();
+    }
+  }
+  /**
    * In the corner of the prompt, inside its box: the wand that improves it (its name for screen
    * readers and in its tooltip, with its shortcut), and once used the arrow back to what was typed.
    */
@@ -1875,7 +1925,7 @@ export function setupStudio({
     const draft = drafts[mode],
       row = node('div', 'studio-enrich'),
       label = enriching ? 'Amélioration du prompt…' : 'Améliorer le prompt',
-      make = button('studio-enrich-go', '', enrich, 'wand');
+      make = aiTarget(button('studio-enrich-go', '', enrich, 'wand'), 'enrich');
     make.append(node('span', 'sr-only', label));
     make.setAttribute('aria-label', label);
     make.setAttribute('aria-keyshortcuts', MODIFIER === '⌘' ? 'Meta+E' : 'Control+E');
@@ -2198,6 +2248,7 @@ export function setupStudio({
         mode: target,
         values: null,
         touched: new Set(),
+        signal,
         resolve: decision => {
           settle();
           resolve(decision);
@@ -2311,6 +2362,12 @@ export function setupStudio({
           },
         ]);
     for (const [key, label, apply, options] of steps) if (!(await stepTo(key, label, apply, options))) return;
+    if (!ai || ai.stopped || proposal !== current) return;
+    // A character Moodix AI has just made: the pointer has the prompt written from the video and
+    // that image, with the wand (the chat model comes back for it, then leaves the card again).
+    if (request.scene && sceneInputs())
+      if (!(await stepTo('enrich', 'écrit le prompt d’après la vidéo et le personnage', () => writeScene(current))))
+        return;
     if (!ai || ai.stopped || proposal !== current) return;
     // The values it reached are those of the proposal: what changes after that is the user's.
     current.touched = new Set(ai.touched);
@@ -3204,7 +3261,10 @@ export function setupStudio({
     group.append(agent, go);
     // The character Moodix AI made, on the screen: kept, made again, or everything stopped.
     if (checking && mode === 'image' && !working) {
-      label.textContent = 'OK · Remplacer';
+      // The question on a line of its own above its three answers: on one line with them, « OK »
+      // was cut at the right of a window of 1280 px.
+      group.className += ' is-checking';
+      label.textContent = 'OK';
       key.textContent = MODIFIER + ' ↵';
       go.title = 'Garder ce personnage : le remplacement se lance · ' + MODIFIER + ' + Entrée';
       go.disabled = false;

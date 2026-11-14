@@ -306,6 +306,8 @@ test('a character replaced in a video: its model among the videos, a video and a
       verb: 'replace_character',
       source: { resource: 'r1' },
       reference: { resource: 'r2' },
+      // A video or a character made in the conversation is found there.
+      conversationId: 'c1',
     });
     assert.equal(page.prompt().value, 'A woman in a white top wipes an apple in an orchard.');
     const subject = who()[0].children[1];
@@ -2504,7 +2506,13 @@ test('the character Moodix AI made is checked: OK keeps it, « Autre image » ha
     assert.ok(revealed.length >= 1, 'the Studio comes on screen');
     assert.equal(studio.studio.proposing(), true);
     assert.equal(body.find('studio-check-question')[0].textContent, 'Ce personnage vous convient ?');
-    assert.equal(body.find('studio-go-label')[0].textContent, 'OK · Remplacer');
+    assert.equal(body.find('studio-go-label')[0].textContent, 'OK');
+    // The question on a line of its own, above its three answers.
+    assert.match(body.find('studio-go-group')[0].className, /is-checking/);
+    assert.deepEqual(
+      body.find('studio-go-group')[0].children.map(child => child.className),
+      ['studio-check-question', 'secondary studio-decline', 'secondary studio-again', 'primary studio-go'],
+    );
     // The prompt of the screen, changed or not, is the one of the next image.
     studio.prompt().value = 'A full-length photo of a player in red';
     studio.prompt().oninput();
@@ -2530,5 +2538,110 @@ test('the character Moodix AI made is checked: OK keeps it, « Autre image » ha
     assert.equal(studio.studio.proposing(), false);
   } finally {
     restore();
+  }
+});
+
+test('a replacement whose character Moodix AI just made: the pointer has its prompt written from the video and that image', async () => {
+  const scail = {
+      id: 's',
+      name: 'SCAIL-2',
+      verb: 'replace_character',
+      follows: true,
+      seeded: true,
+      roles: {
+        source: { count: 1, media: ['video'], many: false, required: true },
+        reference: { count: 1, media: ['image'], many: false, required: true },
+      },
+      settings: [
+        { key: 'subject', type: 'string', maxLength: 200, default: 'person' },
+        { key: 'reference_subject', type: 'string', maxLength: 200, default: 'person' },
+      ],
+    },
+    runs = [
+      {
+        id: 'penguin',
+        mediaType: 'video',
+        prompt: 'un pingouin vole',
+        outputs: [{ originalUrl: '/penguin.mp4', thumbUrl: '/penguin.jpg', width: 672, height: 672 }],
+      },
+      { id: 'player', prompt: 'une joueuse', outputs: [{ originalUrl: '/player.png', thumbUrl: '/player.jpg' }] },
+    ];
+  const drafted = 'A volleyball player takes the place of the penguin.',
+    written =
+      'A young woman in a navy volleyball jersey and black shorts flies over snowy peaks, arms spread wide, ' +
+      'under a pale winter sky.';
+  const proposal = () => ({
+    requestId: 'q',
+    approvalToken: 't',
+    tool: 'replace_character',
+    mediaType: 'video',
+    autoAllow: true,
+    workflowName: 'SCAIL-2',
+    call: { id: 'call', type: 'function', function: { name: 'replace_character', arguments: '{}' } },
+    plan: {
+      prompt: drafted,
+      parameters: { prompt: drafted, width: 672, height: 672, frames: 121, fps: 24, seed: 3 },
+      editable: { prompt: true, parameters: [{ key: 'seed', type: 'integer', value: 3 }], references: [[], []] },
+      references: [
+        { input: 'video', role: 'driving_video', as: 'source', output_id: 'penguin', roleLabel: 'Vidéo à suivre' },
+        { input: 'character', role: 'reference_image', as: 'reference', output_id: 'player', roleLabel: 'Personnage' },
+      ],
+    },
+    // Set by the page for a character it has just made: what the user asked.
+    scene: { asked: 'remplace le pingouin par une joueuse de volley' },
+  });
+  let studio = await studioPage(
+    { replace_character: [scail] },
+    {
+      'studio/enrich': () => ({ prompt: written, seen: true }),
+      'tools/revise': ({ edits }) => ({ requestId: 'q2', approvalToken: 't2', revised: edits }),
+    },
+    { runs },
+  );
+  try {
+    assert.equal(await studio.studio.propose(proposal(), new AbortController().signal), 'once');
+    // The chat model sees the video and the character where they were made, with what the user
+    // asked and the prompt of Moodix AI as a draft.
+    assert.deepEqual(studio.asked.find(([route]) => route === 'studio/enrich')[1], {
+      prompt: 'remplace le pingouin par une joueuse de volley',
+      draft: drafted,
+      verb: 'replace_character',
+      source: { output: 'penguin' },
+      reference: { output: 'player' },
+      conversationId: 'c1',
+    });
+    assert.equal(studio.prompt().value, written);
+    // What it wrote is what is made.
+    assert.deepEqual(studio.asked.find(([route]) => route === 'tools/revise')[1].edits, { prompt: written });
+  } finally {
+    studio.restore();
+  }
+  // The chat model cannot write it: the prompt of Moodix AI is made, and the Studio says why.
+  studio = await studioPage(
+    { replace_character: [scail] },
+    {
+      'studio/enrich': () => {
+        throw Error('Ce modèle de chat ne voit pas les images.');
+      },
+    },
+    { runs },
+  );
+  try {
+    assert.equal(await studio.studio.propose(proposal(), new AbortController().signal), 'once');
+    assert.equal(studio.notices.at(-1), 'Prompt de Moodix AI gardé : Ce modèle de chat ne voit pas les images.');
+    assert.equal(studio.prompt().value, drafted);
+    assert.equal(studio.asked.filter(([route]) => route === 'tools/revise').length, 0);
+  } finally {
+    studio.restore();
+  }
+  // A proposal of the chat itself (its own image given): its prompt, already written, is not
+  // written again.
+  studio = await studioPage({ replace_character: [scail] }, {}, { runs });
+  try {
+    const { scene, ...given } = proposal();
+    assert.equal(await studio.studio.propose(given, new AbortController().signal), 'once');
+    assert.equal(studio.asked.filter(([route]) => route === 'studio/enrich').length, 0);
+  } finally {
+    studio.restore();
   }
 });

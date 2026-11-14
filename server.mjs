@@ -1511,7 +1511,9 @@ export async function createApplication({
           if (fromPictures) {
             const typed = String(body.prompt ?? '').trim().slice(0, 4000),
               given = { prompt: typed, source: body.source, reference: body.reference },
-              // What is typed is what the user asks for, not a draft to tidy up.
+              // What is typed is what the user asks for, not a draft to tidy up. A draft comes
+              // apart: the prompt of Moodix AI for a character it has just made.
+              drafted = typeof body.draft === 'string' ? body.draft.trim().slice(0, 4000) : '',
               written = await withScenePrompt(given, {
                 resources,
                 engine,
@@ -1519,7 +1521,7 @@ export async function createApplication({
                 outputFrames,
                 conversationId: typeof body.conversationId === 'string' ? body.conversationId : null,
                 asked: typed,
-                draft: '',
+                draft: drafted,
                 timeoutMs: enrichTimeoutMs,
               });
             if (written !== given) return send(200, { prompt: written.prompt, seen: true });
@@ -2047,15 +2049,17 @@ export async function createApplication({
                   onSkip: why => (skipped = why),
                 };
                 if (replacing && given && given.reference == null) {
-                  // No image of the character: the page makes it (its prompt written here), the
-                  // user keeps it or has another made, then the replacement runs with it.
+                  // No image of the character: the page makes it, the user keeps it or has another
+                  // made, then the replacement runs with it. Its prompt is written in the Studio
+                  // once the image is kept, from the video and that image (the chat model comes
+                  // back for it): written here from words, the person of the video lent the
+                  // character their clothes (a headscarf and a tote bag on a volleyball player).
                   if (described.length < 3 || !given.source || typeof given.source !== 'object')
                     throw problem(
                       'Donne la vidéo à suivre (source) et le personnage : son image (reference), ou sa description (character).',
                       400,
                     );
-                  const { character, ...rest } = given,
-                    written = await withScenePrompt(rest, { ...places, described });
+                  const { character, ...rest } = given;
                   await emit({
                     local_tool_request: {
                       kind: 'character',
@@ -2063,9 +2067,9 @@ export async function createApplication({
                       character: described.slice(0, 600),
                       imagePrompt: characterPrompt(described),
                       sourceSize: await sourceSize(given.source, body.conversationId),
-                      replace: { ...rest, prompt: written.prompt || described },
-                      written: written !== rest,
-                      ...(skipped ? { skipped } : {}),
+                      replace: { ...rest, prompt: String(rest.prompt || described).trim() },
+                      // What the user asked, for the prompt written once the image is kept.
+                      asked: places.asked,
                     },
                   });
                 } else {

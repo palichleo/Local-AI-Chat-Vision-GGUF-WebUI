@@ -2052,8 +2052,8 @@ async function sendMessage(event) {
       if (request.kind === 'character') {
         // A character to put in a video with no image of them: the application makes the image
         // (the pointer, in the Studio), the user keeps it or has another made, then the
-        // replacement runs with it. The chat model stays unloaded all along: what it had to say,
-        // the prompts, was written when it called (lib/scene-prompt.mjs).
+        // replacement runs with it. The chat model leaves the card to the image as for any
+        // creation, and comes back once it is kept to write the prompt of the video from it.
         iterations++;
         const outcome = await replaceWithCharacter(request, { view, signal });
         history.push({ role: 'tool', tool_call_id: request.call.id, content: outcome.content });
@@ -2498,10 +2498,11 @@ async function replaceWithCharacter(request, { view, signal }) {
   }
   if (!image) return { content: JSON.stringify({ status: 'cancelled', message: 'Trop d’images refaites.' }) };
   said('');
-  const result = await runForTurn(
-    await action('replace_character', { ...request.replace, reference: { output: image.id } }),
-    { view, signal },
-  );
+  const proposal = await action('replace_character', { ...request.replace, reference: { output: image.id } });
+  // Its prompt is written in the Studio from the video and the image kept, with what the user
+  // asked (the pointer's wand: the chat model comes back for it).
+  proposal.scene = { asked: request.asked ?? '' };
+  const result = await runForTurn(proposal, { view, signal });
   if (!result.record) return { content: result.content ?? JSON.stringify({ status: 'error', message: result.error }) };
   // Said to the model with its result: the image of the character it can use again.
   const content = JSON.parse(result.content);

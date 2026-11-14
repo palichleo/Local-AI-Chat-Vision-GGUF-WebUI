@@ -36,7 +36,7 @@ test('the prompt of a character put in a video is written from the frames of the
     character: frame('p').url,
   });
   const messages = sceneMessages({ ...pictures, asked: 'remplace la fille', draft: args.prompt });
-  assert.match(messages[0].content, /Never\s+describe the place, the pose or the background of the image of the character/);
+  assert.match(messages[0].content, /Never describe the place, the pose or the background of that image/);
   const parts = messages[1].content;
   assert.deepEqual(
     parts.filter(part => part.type === 'image_url').map(part => part.image_url.url),
@@ -124,26 +124,14 @@ test('the pictures are found wherever they come from: the library, the conversat
   assert.equal(framed.character, frame('b').url);
 });
 
-test('a character with no image yet: the prompt from the frames and the description, the image prompt alone on grey', async () => {
-  // The video's frames only: the character is in words.
-  const pictures = await scenePictures(
-    { source: { resource: 'clip' } },
-    { resources: library },
-    { described: 'a volleyball player' },
-  );
-  assert.deepEqual(pictures, { frames: ['a', 'b', 'c'].map(name => frame(name).url), character: null });
-  const parts = sceneMessages({ ...pictures, described: 'a male volleyball player, blue jersey' })[1].content;
-  assert.equal(parts.filter(part => part.type === 'image_url').length, 3);
-  assert.match(
-    parts.find(part => /described/.test(part.text ?? '')).text,
-    /The character, described \(no image yet\): a male volleyball player, blue jersey/,
-  );
-  const seen = [];
-  const result = await withScenePrompt(
-    { prompt: 'x', source: { resource: 'clip' } },
-    { resources: library, engine, described: 'a volleyball player', fetchImpl: answering(written, seen) },
-  );
-  assert.equal(result.prompt, written);
+test('a character with no image yet: no prompt from words, the image prompt alone on grey', async () => {
+  // The prompt of the video waits for the image of the character: written from words, the person
+  // of the video lent the character their clothes (a headscarf and a tote bag on a volleyball player).
+  assert.equal(await scenePictures({ source: { resource: 'clip' } }, { resources: library }), null);
+  const call = { prompt: 'x', source: { resource: 'clip' } },
+    seen = [];
+  assert.equal(await withScenePrompt(call, { resources: library, engine, fetchImpl: answering(written, seen) }), call);
+  assert.equal(seen.length, 0);
   // The image of the character: alone, whole, large, on a plain background (what else it holds
   // goes into the video too).
   const image = characterPrompt('a male volleyball player with short dark hair, a blue jersey and white shorts.');
