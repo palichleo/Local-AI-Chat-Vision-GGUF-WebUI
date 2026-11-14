@@ -1,0 +1,329 @@
+{
+  "family": "wan_scail2",
+  "label": "Wan 2.1 SCAIL-2",
+  "mediaType": "video",
+  "tasks": ["replace_character"],
+  "engine": "internal",
+  "hardware": {
+    "cuda": true
+  },
+  "requires": [
+    "torch",
+    "diffusers",
+    "transformers",
+    "accelerate",
+    "safetensors",
+    "sentencepiece",
+    "PIL",
+    "imageio",
+    "imageio_ffmpeg",
+    "av",
+    "comfy_kitchen"
+  ],
+  "components": {
+    "model": {
+      "label": "Modèle",
+      "folder": "diffusion_models",
+      "required": true,
+      "note": "Wan 2.1 SCAIL-2 14B (int8 ConvRot).",
+      "signature": [
+        {
+          "key": "^patch_embedding_pose\\.weight$",
+          "shape": [5120, 20, 1, 2, 2]
+        },
+        {
+          "key": "^patch_embedding_mask\\.weight$",
+          "shape": [5120, 28, 1, 2, 2]
+        }
+      ]
+    },
+    "textEncoder": {
+      "label": "Encodeur de texte",
+      "folder": "text_encoders",
+      "required": true,
+      "note": "UMT5-XXL, avec son vocabulaire dans le fichier (umt5_xxl_fp8_e4m3fn_scaled).",
+      "signature": [
+        {
+          "key": "^shared\\.weight$",
+          "shape": [256384, 4096]
+        },
+        {
+          "key": "^spiece_model$"
+        }
+      ]
+    },
+    "clipVision": {
+      "label": "Encodeur d’image",
+      "folder": "clip_vision",
+      "required": true,
+      "note": "CLIP ViT-H/14 (clip_vision_h).",
+      "signature": [
+        {
+          "key": "^vision_model\\.embeddings\\.patch_embedding\\.weight$",
+          "shape": [1280, 3, 14, 14]
+        }
+      ]
+    },
+    "vae": {
+      "label": "VAE vidéo",
+      "folder": "vae",
+      "required": true,
+      "note": "VAE de Wan 2.1.",
+      "signature": [
+        {
+          "key": "^decoder\\.conv1\\.weight$",
+          "shape": [384, 16, 3, 3, 3]
+        },
+        {
+          "key": "^conv2\\.weight$",
+          "shape": [16, 16, 1, 1, 1]
+        }
+      ]
+    },
+    "stepLora": {
+      "label": "LoRA de distillation",
+      "folder": "loras",
+      "required": true,
+      "note": "lightx2v I2V 14B (cfg + step distill) : c’est lui qui rend six étapes suffisantes.",
+      "signature": [
+        {
+          "key": "blocks\\.0\\.self_attn\\.q\\.lora_down\\.weight$",
+          "shape": [null, 5120]
+        },
+        {
+          "key": "blocks\\.0\\.self_attn\\.q\\.diff_b$",
+          "shape": [5120]
+        }
+      ]
+    },
+    "identityLora": {
+      "label": "LoRA d’identité",
+      "folder": "loras",
+      "required": false,
+      "note": "SCAIL-2 DPO : garde mieux le visage du personnage.",
+      "signature": [
+        {
+          "key": "blocks\\.0\\.self_attn\\.q\\.lora_down\\.weight$",
+          "shape": [null, 5120]
+        }
+      ]
+    },
+    "segmenter": {
+      "label": "Repérage des personnages",
+      "folder": "checkpoints",
+      "required": true,
+      "note": "SAM 3.1 (sam3.1_multiplex) : trouve dans la vidéo et dans l’image qui est qui.",
+      "signature": [
+        {
+          "key": "^detector\\.transformer\\.decoder\\.query_embed\\.weight$",
+          "shape": [200, 256]
+        },
+        {
+          "key": "^detector\\.backbone\\.language_backbone\\.encoder\\.token_embedding\\.weight$",
+          "shape": [49408, 1024]
+        }
+      ]
+    },
+    "segmenterTokenizer": {
+      "label": "Tokenizer du repérage",
+      "folder": "text_encoders",
+      "required": true,
+      "format": "tokenizer",
+      "policies": ["fixed"],
+      "picker": "tokenizer",
+      "help": "Dossier du tokenizer de CLIP (vocab.json, merges.txt, tokenizer_config.json), qui découpe les mots donnés à SAM 3.1. Ce n’est pas celui de l’encodeur de texte."
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "maxLength": 8000,
+      "nonempty": true
+    },
+    "seed": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "width": {
+      "type": "integer",
+      "min": 256,
+      "max": 2048,
+      "multipleOf": 32,
+      "note": "Avec la hauteur, dit combien de points fait la vidéo ; sa forme est celle de la vidéo suivie (un portrait reste un portrait)."
+    },
+    "height": {
+      "type": "integer",
+      "min": 256,
+      "max": 2048,
+      "multipleOf": 32
+    },
+    "steps": {
+      "type": "integer",
+      "min": 2,
+      "max": 20,
+      "note": "Six avec le LoRA de distillation."
+    },
+    "shift": {
+      "type": "number",
+      "min": 1,
+      "max": 12
+    },
+    "frames": {
+      "type": "integer",
+      "choices": [25, 49, 73, 97, 121, 145, 169, 193, 217, 241, 265, 289, 313, 337, 361, 385, 409, 433, 457, 481],
+      "note": "Au plus ce nombre d’images : la vidéo dure autant que celle qu’elle suit, à sa cadence."
+    },
+    "audio": {
+      "type": "boolean",
+      "note": "Reprend le son de la vidéo suivie."
+    },
+    "subject": {
+      "type": "string",
+      "maxLength": 200,
+      "nonempty": true,
+      "note": "Qui remplacer dans la vidéo, en quelques mots anglais (« girl », « man in red jacket »). Après une virgule, un objet tenu à garder tel quel (« girl, handkerchief »)."
+    },
+    "reference_subject": {
+      "type": "string",
+      "maxLength": 200,
+      "nonempty": true,
+      "note": "Qui est le personnage dans l’image, en un ou deux mots anglais (« woman », « robot »)."
+    },
+    "step_lora_strength": {
+      "type": "number",
+      "min": 0,
+      "max": 2
+    },
+    "identity_lora_strength": {
+      "type": "number",
+      "min": 0,
+      "max": 2
+    }
+  },
+  "requiredParameters": ["prompt", "seed", "width", "height", "steps", "frames"],
+  "roles": {
+    "driving_video": {
+      "as": "source",
+      "media": "video",
+      "max": 1,
+      "label": "Vidéo à suivre"
+    },
+    "reference_image": {
+      "as": "reference",
+      "media": "image",
+      "max": 1,
+      "label": "Personnage"
+    }
+  },
+  "template": {
+    "name": "Wan 2.1 SCAIL-2 character replacement",
+    "description": "Replaces a person of a video with the character of an image: the motion, the framing, the scene and the sound stay those of the video.",
+    "components": {
+      "model": {
+        "policy": "fixed",
+        "asset": "select-local-model"
+      },
+      "textEncoder": {
+        "policy": "fixed",
+        "asset": "select-local-text-encoder"
+      },
+      "clipVision": {
+        "policy": "fixed",
+        "asset": "select-local-image-encoder"
+      },
+      "vae": {
+        "policy": "fixed",
+        "asset": "select-local-video-vae"
+      },
+      "stepLora": {
+        "policy": "fixed",
+        "asset": "select-local-step-lora"
+      },
+      "identityLora": {
+        "policy": "fixed",
+        "asset": "select-local-identity-lora"
+      },
+      "segmenter": {
+        "policy": "fixed",
+        "asset": "select-local-segmenter"
+      },
+      "segmenterTokenizer": {
+        "policy": "fixed",
+        "asset": "select-local-clip-tokenizer"
+      }
+    },
+    "parameters": {
+      "prompt": {
+        "policy": "model",
+        "type": "string",
+        "maxLength": 8000
+      },
+      "seed": {
+        "policy": "random",
+        "type": "integer"
+      },
+      "width": {
+        "policy": "fixed",
+        "value": 896
+      },
+      "height": {
+        "policy": "fixed",
+        "value": 512
+      },
+      "steps": {
+        "policy": "fixed",
+        "value": 6
+      },
+      "shift": {
+        "policy": "fixed",
+        "value": 5
+      },
+      "frames": {
+        "policy": "fixed",
+        "value": 241
+      },
+      "audio": {
+        "policy": "fixed",
+        "value": true
+      },
+      "subject": {
+        "policy": "model",
+        "type": "string",
+        "maxLength": 200,
+        "default": "person",
+        "description": "Who is replaced in the source video, in one to three English words a detector can find in every frame (\"girl\", \"man in red jacket\"). After a comma, an object in their hands that must stay as it is (\"girl, handkerchief\")."
+      },
+      "reference_subject": {
+        "policy": "model",
+        "type": "string",
+        "maxLength": 200,
+        "default": "person",
+        "description": "Who the character is in the reference image, in one or two English words (\"woman\", \"robot\", \"cartoon cat\")."
+      },
+      "step_lora_strength": {
+        "policy": "fixed",
+        "value": 0.8
+      },
+      "identity_lora_strength": {
+        "policy": "fixed",
+        "value": 1
+      }
+    },
+    "loras": [],
+    "references": [
+      {
+        "id": "video",
+        "role": "driving_video",
+        "required": true,
+        "name": "Vidéo à suivre"
+      },
+      {
+        "id": "character",
+        "role": "reference_image",
+        "required": true,
+        "name": "Personnage"
+      }
+    ]
+  }
+}

@@ -357,5 +357,29 @@
     "path": "vae/qwen_image_vae.safetensors",
     "size": 253806246,
     "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+  },
+  "clip_tokenizer": {
+    "repo": "openai/clip-vit-large-patch14",
+    "revision": "32bd64288804d66eefd0ccbe215aa642df71cc41",
+    "folder": true,
+    "size": 1487056,
+    "files": [
+      {
+        "path": "merges.txt",
+        "size": 524619
+      },
+      {
+        "path": "special_tokens_map.json",
+        "size": 389
+      },
+      {
+        "path": "tokenizer_config.json",
+        "size": 905
+      },
+      {
+        "path": "vocab.json",
+        "size": 961143
+      }
+    ]
   }
 }

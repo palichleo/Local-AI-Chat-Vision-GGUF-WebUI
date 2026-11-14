@@ -16,6 +16,11 @@ test('a video is agreed on with the user before it is generated', () => {
   const asked = [user('une vidéo de la fille sur la balançoire')];
   assert.equal(briefMissing(asked, call()), true, 'first request: the model has not spoken yet');
   assert.equal(briefMissing(asked, call('extend_video')), true);
+  assert.equal(briefMissing(asked, call('replace_character')), true);
+  // A character put in a video is agreed on in its own words: who is replaced, by whom.
+  assert.match(briefMessage([], 'replace_character'), /who in it is replaced and by which character/);
+  assert.doesNotMatch(briefMessage([], 'replace_character'), /the image the clip starts on/);
+  assert.match(briefMessage([]), /the image the clip starts on/);
   // Told to agree first, the model cannot simply call again in the same reply.
   const told = [...asked, calls('a'), result('a', 'waiting_for_user')];
   assert.equal(briefMissing(told, call()), true);

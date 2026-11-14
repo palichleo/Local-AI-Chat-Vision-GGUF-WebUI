@@ -11,6 +11,12 @@ by a shift of 5, the model's LoRAs (lightx2v, DPO) applied as it runs. The refer
 black outside its mask and the image encoder sees the whole of it, as ComfyUI's node does: the
 same seed then gives the same video.
 
+The video lasts as long as the driving video, up to the frames asked, plays at its rate and
+has its shape: the width and the height of the job say how many pixels, not which way round.
+
+The model's own LoRAs are two of its files (components `stepLora`, the distillation that makes
+six steps enough, and `identityLora`), each with its strength; a job's `loras` come after them.
+
 The masks are made here from a few words (`subject`: who to follow in the video;
 `reference_subject`: who to draw from the image), by SAM 3.1's detector (runner.video.identity).
 They can also be given, as two more references: an image and a video in flat colours.
@@ -32,6 +38,11 @@ SHORTEST = 21
 # The share of the model a card keeps at least for a segment to be worth its full length.
 LEAST_SHARE_GIB = 1.0
 AUDIO_RATE = 48000
+# The model's own LoRAs, by component: the parameter that holds its strength, and the
+# strength of the workflow the six steps were set for.
+OWN_LORAS = (('stepLora', 'step_lora_strength', 0.8), ('identityLora', 'identity_lora_strength', 1.0))
+# Tokens of CLIP's vocabulary, which SAM 3.1 reads.
+VOCABULARY = 49408
 # Who is looked for when the job does not say.
 SUBJECT = 'person'
 MASKS = ('driving_mask', 'reference_mask')
@@ -90,8 +101,8 @@ def check(job, family):
     p = job['parameters']
     if p['width'] % 32 or p['height'] % 32:
         raise ValueError('SCAIL-2 sizes are multiples of 32')
-    if p['frames'] % 4 != 1 or p['frames'] < 5:
-        raise ValueError('SCAIL-2 frames must be 4n+1')
+    if p['frames'] < 5:
+        raise ValueError('SCAIL-2 draws 5 frames at least')
     if p.get('mode', 'replace') not in MODES:
         raise ValueError('Unsupported SCAIL-2 mode')
     segment = p.get('segment_frames')
@@ -111,21 +122,40 @@ def masks_given(job):
     return _one(job, MASKS[0]) is not None
 
 
-def _probe(path, parameters, label, rate=True):
+def size_like(source_width, source_height, width, height):
+    """(width, height) of a video with the shape of its source and about the pixels of
+    width x height, both multiples of 32: a portrait video followed stays a portrait."""
+    area, ratio = width * height, source_width / source_height
+    side = lambda value: max(256, round(value / 32) * 32)  # noqa: E731
+    return side((area * ratio) ** 0.5), side((area / ratio) ** 0.5)
+
+
+def clip(job):
+    """(frames, frames a second, width, height) of the video to make: as long as the driving
+    video up to the frames the job asks, 4n + 1 of them, at the driving video's own rate (each
+    frame drawn follows one frame of it) and in its shape."""
     from runner.video.stream import probe
 
-    found = probe(path)
-    if found['frames'] and found['frames'] < parameters['frames']:
-        raise ValueError(
-            f'{label} compte {found["frames"]} images ; la création en demande {parameters["frames"]}. '
-            'Réduisez la durée.'
-        )
-    if rate and abs(float(found['fps']) - parameters['fps']) > 0.01:
-        raise ValueError(
-            f'{label} est à {float(found["fps"]):g} images/s ; la création serait à {parameters["fps"]:g} images/s. '
-            'Le mouvement serait accéléré ou ralenti.'
-        )
-    return found
+    p = job['parameters']
+    found = probe(_one(job, 'driving_video'))
+    available = min(p['frames'], found['frames'] or p['frames'])
+    count = (available - 1) // 4 * 4 + 1
+    if count < 5:
+        raise ValueError('La vidéo à suivre est trop courte : il faut au moins 5 images.')
+    width, height = size_like(found['width'], found['height'], p['width'], p['height'])
+    return count, float(found['fps']), width, height
+
+
+def loras_of(job):
+    """The LoRAs of a job, in the order they are applied: the model's own, by component, then
+    the job's."""
+    p, paths = job['parameters'], job['components']
+    own = [
+        dict(id=name, path=paths[name], strength=float(p.get(parameter, strength)))
+        for name, parameter, strength in OWN_LORAS
+        if paths.get(name)
+    ]
+    return own + list(job['loras'])
 
 
 def preflight(job, config):
@@ -135,13 +165,17 @@ def preflight(job, config):
     check(job, None)
     model = header(job['components']['model'])
     wan_scail2.validate_layout(model)
-    for item in job['loras']:
+    for item in loras_of(job):
         wan_scail2.validate_lora(header(item['path']), model)
-    # A driving video too short or of another frame rate is refused here, before the chat model
-    # is unloaded.
-    _probe(_one(job, 'driving_video'), job['parameters'], 'La vidéo à suivre')
+    # A driving video that cannot be read or is too short is refused here, before the chat
+    # model is unloaded.
+    count = clip(job)[0]
     if masks_given(job):
-        _probe(_one(job, 'driving_mask'), job['parameters'], 'Le masque de la vidéo', rate=False)
+        from runner.video.stream import probe
+
+        masks = probe(_one(job, 'driving_mask'))['frames']
+        if masks and masks < count:
+            raise ValueError(f'Le masque de la vidéo compte {masks} images ; la création en demande {count}.')
     else:
         from pathlib import Path
 
@@ -151,6 +185,14 @@ def preflight(job, config):
         folder = Path(job['components']['segmenterTokenizer'])
         if not all((folder / name).is_file() for name in ('vocab.json', 'merges.txt')):
             raise ValueError('The SAM 3.1 tokenizer folder must hold vocab.json and merges.txt')
+        import json
+
+        # Another model's tokenizer has the same two files: its words would be read as others.
+        if len(json.loads((folder / 'vocab.json').read_text(encoding='utf-8'))) != VOCABULARY:
+            raise ValueError(
+                'Le tokenizer choisi pour SAM 3.1 n’est pas celui de CLIP (49 408 mots) : '
+                'les sujets à suivre seraient mal compris.'
+            )
 
 
 def _picture(array):
@@ -282,10 +324,15 @@ def sample(velocity, noise, levels, history=None, step=None):
         if history is not None:
             latents[:, :, : history.shape[2]] = history
         stream = torch.cat([latents.to(torch.bfloat16), given], dim=1)
-        latents = latents + (levels[index + 1] - levels[index]) * velocity(stream, levels[index]).float()
+        moved = velocity(stream, levels[index]).float()
         del stream
         if step:
-            step(index + 1)
+            # With the step's number, the picture so far: the frame in the middle as the model
+            # sees it finished, asked for only if it is shown.
+            middle = latents.shape[2] // 2
+            step(index + 1, lambda: latents[0, :, middle] - levels[index] * moved[0, :, middle])
+        latents = latents + (levels[index + 1] - levels[index]) * moved
+        del moved
     if history is not None:
         latents[:, :, : history.shape[2]] = history
     return latents
@@ -379,6 +426,7 @@ def _cached(config, name, parts, make):
 def generate(job, config, progress):
     import torch
 
+    from runner import preview
     from runner.models import conditioning, wan_clip, wan_scail2, wan_text, wan_vae
     from runner.models.headers import header
     from runner.models.pool import require
@@ -391,6 +439,9 @@ def generate(job, config, progress):
     if not torch.cuda.is_available():
         raise RuntimeError('Native Wan 2.1 SCAIL-2 requires CUDA')
     check(job, None)
+    # The length, the rate and the shape are the driving video's: the job is told what was made.
+    count, rate, width, height = clip(job)
+    job = dict(job, parameters=dict(job['parameters'], frames=count, fps=rate, width=width, height=height))
     p, paths = job['parameters'], job['components']
     width, height, steps = p['width'], p['height'], p.get('steps', STEPS)
     GiB = 1024**3
@@ -476,7 +527,7 @@ def generate(job, config, progress):
         # 3. The segments: the model stays between them, the VAE beside it.
         room = share_gib(torch.cuda.mem_get_info()[0] / GiB, longest, height, width, len(segments))
         budget = min(config.get('cacheGiB', 16), room)
-        loaded = _Model(paths, job['loras'], names)
+        loaded = _Model(paths, loras_of(job), names)
         levels = scail.sigmas(steps, p.get('shift', SHIFT))
         total = steps * len(segments)
         done, history, pictures = 0, None, []
@@ -517,7 +568,7 @@ def generate(job, config, progress):
                             rotary,
                         )
 
-                    def stepped(number):
+                    def stepped(number, estimate):
                         progress(
                             stage='generating video',
                             step=done + number,
@@ -525,6 +576,7 @@ def generate(job, config, progress):
                             segment=index + 1,
                             weights=loaded.pool.summary(),
                         )
+                        preview.send(report, preview.WAN21, estimate)
 
                     return sample(velocity, noise, levels, history, stepped)
 

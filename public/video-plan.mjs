@@ -34,6 +34,10 @@ const LABELS = {
   sparse_attention: 'Attention creuse',
   sparse_keep: 'Cubes gardés (%)',
   sparse_start: 'Début de l’attention creuse',
+  subject: 'Qui remplacer dans la vidéo',
+  reference_subject: 'Qui dessiner depuis l’image',
+  step_lora_strength: 'Force du LoRA de distillation',
+  identity_lora_strength: 'Force du LoRA d’identité',
 };
 const STAGES = { draft: 'Brouillon', final: 'Finale' };
 // Shown in the main area; every other editable parameter goes to « Paramètres avancés ».

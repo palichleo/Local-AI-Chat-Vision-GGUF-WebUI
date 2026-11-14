@@ -92,7 +92,7 @@ class RuleTests(unittest.TestCase):
         pipeline.check(job(), None)
         for wrong in (
             dict(parameters=dict(width=900)),
-            dict(parameters=dict(frames=120)),
+            dict(parameters=dict(frames=4)),
             dict(parameters=dict(mode='animate')),
             dict(parameters=dict(segment_frames=44)),
             dict(roles=('driving_video', 'reference_image', 'driving_mask')),
@@ -109,6 +109,47 @@ class RuleTests(unittest.TestCase):
         bare['components'] = dict(segmenter='C:/sam.safetensors', segmenterTokenizer='C:/tokenizer')
         pipeline.check(bare, None)
         self.assertTrue(pipeline.masks_given(job()))
+
+    def test_the_video_lasts_as_long_as_the_one_it_follows_up_to_the_frames_asked(self):
+        import imageio.v3 as iio
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / 'video.mp4')
+            iio.imwrite(path, np.zeros((30, 32, 64, 3), dtype=np.uint8), fps=30, codec='libx264', macro_block_size=None)
+            made = job(parameters=dict(frames=121))
+            made['references'][0]['path'] = path
+            # 30 frames filmed: 29 drawn (4n + 1), at the video's own 30 frames a second.
+            # A video twice as wide as high: 896 x 512 asked gives its shape in as many pixels.
+            self.assertEqual(pipeline.clip(made), (29, 30.0, 960, 480))
+            made['parameters']['frames'] = 12
+            self.assertEqual(pipeline.clip(made)[:2], (9, 30.0))
+            iio.imwrite(path, np.zeros((4, 32, 64, 3), dtype=np.uint8), fps=30, codec='libx264', macro_block_size=None)
+            with self.assertRaisesRegex(ValueError, 'trop courte'):
+                pipeline.clip(made)
+
+    def test_the_video_has_the_shape_of_the_one_it_follows(self):
+        self.assertEqual(pipeline.size_like(1280, 720, 896, 512), (896, 512))
+        self.assertEqual(pipeline.size_like(720, 1280, 896, 512), (512, 896))
+        self.assertEqual(pipeline.size_like(1080, 1080, 896, 512), (672, 672))
+        self.assertEqual(pipeline.size_like(1920, 1080, 1344, 768), (1344, 768))
+        # Never a side the model cannot draw.
+        width, height = pipeline.size_like(4000, 400, 896, 512)
+        self.assertEqual((width % 32, height % 32, height), (0, 0, 256))
+
+    def test_the_models_own_loras_come_first_each_with_its_strength(self):
+        made = job()
+        made['loras'] = [dict(id='style', path='C:/style', strength=0.5)]
+        self.assertEqual(pipeline.loras_of(made), made['loras'])
+        made['components'] = dict(stepLora='C:/step', identityLora='C:/identity')
+        made['parameters']['identity_lora_strength'] = 0.7
+        self.assertEqual(
+            pipeline.loras_of(made),
+            [
+                dict(id='stepLora', path='C:/step', strength=0.8),
+                dict(id='identityLora', path='C:/identity', strength=0.7),
+                *made['loras'],
+            ],
+        )
 
     def test_a_smaller_card_draws_shorter_segments(self):
         self.assertEqual(pipeline.segment_frames(23, 512, 896), 81)
@@ -154,11 +195,20 @@ class SamplingTests(unittest.TestCase):
             seen.append((tuple(stream.shape), stream.dtype, level))
             return torch.ones(1, 16, 3, 4, 4)
 
-        steps = []
-        result = pipeline.sample(velocity, noise.clone(), levels, step=steps.append)
+        steps, pictures = [], []
+
+        def stepped(number, estimate):
+            steps.append(number)
+            pictures.append(estimate())
+
+        result = pipeline.sample(velocity, noise.clone(), levels, step=stepped)
         # The levels go from 1 to 0: a velocity of one takes one away.
         self.assertTrue(torch.allclose(result, noise - 1, atol=1e-5))
         self.assertEqual(steps, [1, 2, 3, 4])
+        # The picture so far: the middle frame as the model sees it finished. A velocity of one
+        # from the first level (1) takes one away from the noise.
+        self.assertEqual(tuple(pictures[0].shape), (16, 4, 4))
+        self.assertTrue(torch.allclose(pictures[0], noise[0, :, 1] - 1, atol=1e-5))
         self.assertEqual([level for _shape, _kind, level in seen], levels[:-1])
         self.assertEqual(seen[0][:2], ((1, 20, 3, 4, 4), torch.bfloat16))
 

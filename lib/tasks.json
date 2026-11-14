@@ -48,6 +48,24 @@
       }
     }
   },
+  "replace_character": {
+    "output": "video",
+    "summary": "Replace a person of an existing video with the character of an image: the new video keeps the motion, the framing, the scene and the sound of the source video.",
+    "guidance": "Use when the user gives a video and the image of a character and wants that character to play in the video in place of someone (\"remplace la fille par ce personnage\", \"mets-le à sa place\"). Not to create a video from a description (create_video) nor to continue one (extend_video). The new video lasts as long as its source, up to ten seconds, and keeps its format. Every video is shown to the user, who can edit it before it runs. Before generating, agree with the user in one short spoken message, without a tool (five lines at most, plain sentences, no lists): which video is followed, who in it is replaced, by which character; call this tool once they answered.",
+    "prompt": "The finished video as it will look, written for a video model that knows nothing of this conversation: three to six sentences in English, present tense. Describe the new character as the reference image shows them (age, hair, clothes, colours), doing what the person of the source video does, in the place the source video shows and in its light. Only concrete, visible things.",
+    "roles": {
+      "source": {
+        "media": ["video"],
+        "required": true,
+        "description": "Video whose motion, scene and sound are kept: the person to replace is in it."
+      },
+      "reference": {
+        "media": ["image"],
+        "required": true,
+        "description": "Image of the character who takes that person’s place, kept as they look."
+      }
+    }
+  },
   "create_audio": {
     "output": "audio",
     "summary": "Create music (a song with sung lyrics, or an instrumental piece) or sound effects from a description.",

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { ToolCatalog, serves } from '../lib/tool-catalog.mjs';
 
 const video = (id, references, extra = {}) => ({
@@ -358,4 +359,65 @@ test('music and sound effects: the model names the workflow, and each keeps its 
   const song = await catalog.route('create_audio', { workflow: music.id, prompt: 'synth-pop', seconds: 200 }, media);
   assert.equal(song.args.seconds, 200);
   assert.deepEqual(song.notes, []);
+});
+
+test('a character is replaced in a video by a verb of its own: the video, the image, who is who', async () => {
+  const scail = {
+    ...JSON.parse(readFileSync(new URL('../runner/families/wan_scail2.json', import.meta.url), 'utf8')).template,
+    schemaVersion: 1,
+    id: 'scail',
+    enabled: true,
+    ready: true,
+    pipeline: 'wan_scail2',
+    mediaType: 'video',
+  };
+  const catalog = catalogOf([...workflows, scail]);
+  assert.equal(serves(scail, 'replace_character'), true);
+  // Neither a video made from a description nor the continuation of one.
+  assert.equal(serves(scail, 'create_video'), false);
+  assert.equal(serves(scail, 'extend_video'), false);
+  const tools = Object.fromEntries((await catalog.definitions()).map(t => [t.function.name, t.function]));
+  const replace = tools.replace_character.parameters;
+  assert.deepEqual(Object.keys(replace.properties).sort(), [
+    'intention',
+    'prompt',
+    'reference',
+    'reference_subject',
+    'seed',
+    'source',
+    'subject',
+  ]);
+  // The length and the format are the source video's: the model is asked neither.
+  assert.deepEqual(replace.required.sort(), ['intention', 'prompt', 'reference', 'source']);
+  assert.match(replace.properties.subject.description, /girl, handkerchief/);
+  // Without a video in the conversation there is nothing to follow: the verb is not offered.
+  const none = await catalog.definitions({ images: 1, resources: [], outputs: [] });
+  assert.ok(!none.some(tool => tool.function.name === 'replace_character'));
+  const some = await catalog.definitions({
+    images: 1,
+    resources: [{ id: 'clip', type: 'video' }],
+    outputs: [],
+  });
+  assert.ok(some.some(tool => tool.function.name === 'replace_character'));
+  const routed = await catalog.route(
+    'replace_character',
+    {
+      prompt: 'A woman in a white top eats an apple in an orchard.',
+      intention: 'Remplacer la fille.',
+      source: { output: 'video-run' },
+      reference: { image: 0 },
+      subject: 'girl, handkerchief',
+    },
+    media,
+  );
+  assert.equal(routed.workflow.id, 'scail');
+  assert.equal(routed.args.subject, 'girl, handkerchief');
+  assert.deepEqual(
+    routed.args.references.map(ref => ref.input),
+    ['video', 'character'],
+  );
+  await assert.rejects(
+    catalog.route('replace_character', { prompt: 'x', intention: 'y', reference: { image: 0 } }, media),
+    /needs a source/,
+  );
 });

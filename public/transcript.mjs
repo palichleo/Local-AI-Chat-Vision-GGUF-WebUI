@@ -10,6 +10,7 @@ const MADE = {
   create_image: 'Image',
   create_video: 'Vidéo',
   extend_video: 'Suite de la vidéo',
+  replace_character: 'Personnage remplacé',
   create_audio: 'Son',
   upscale: 'Agrandissement',
   interpolate: 'Interpolation',

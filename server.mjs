@@ -1922,7 +1922,7 @@ export async function createApplication({
                   workflowName: unseen.map(item => item.label + ' · ' + item.name).join(', '),
                   note: brief
                     ? 'You now see the images below. ' +
-                      briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []))
+                      briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []), call.function.name)
                     : SEEN_NOTE,
                   brief,
                 },
@@ -1934,7 +1934,7 @@ export async function createApplication({
                 local_tool_request: {
                   kind: 'brief',
                   call,
-                  message: briefMessage(await runtime.tools.lengths(call.function.name).catch(() => [])),
+                  message: briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []), call.function.name),
                 },
               });
             // A prompt of two lines: sent back once, with the images it is about shown again.

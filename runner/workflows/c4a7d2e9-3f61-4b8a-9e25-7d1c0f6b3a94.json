@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "id": "c4a7d2e9-3f61-4b8a-9e25-7d1c0f6b3a94",
+  "enabled": true,
+  "pipeline": "wan_scail2",
+  "mediaType": "video",
+  "name": "Wan 2.1 SCAIL-2",
+  "description": "Remplacer une personne d’une vidéo par le personnage d’une image : le mouvement, le cadrage, le décor et le son restent ceux de la vidéo. La vidéo dure autant que celle qu’elle suit (dix secondes au plus) et garde sa forme.",
+  "components": {
+    "model": {
+      "policy": "fixed",
+      "asset": "1f8e6b2a-9c47-4d35-a0e1-5b7c3d9f2e60",
+      "file": "wan2.1_14B_SCAIL_2_int8_convrot.safetensors"
+    },
+    "textEncoder": {
+      "policy": "fixed",
+      "asset": "7a3c9e15-2d6b-4f80-b4c7-0e9a1d5f8b23",
+      "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+    },
+    "clipVision": {
+      "policy": "fixed",
+      "asset": "d5b0f7c3-8e12-4a69-9f3d-6c2e4a1b7d58",
+      "file": "clip_vision_h.safetensors"
+    },
+    "vae": {
+      "policy": "fixed",
+      "asset": "3e9d1a6f-5b74-4c20-8d6e-a1f7c0b2e495",
+      "file": "Wan2_1_VAE_bf16.safetensors"
+    },
+    "stepLora": {
+      "policy": "fixed",
+      "asset": "b6f2c8d0-1a95-4e37-b7a4-9d3e5f0c1a72",
+      "file": "lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors"
+    },
+    "identityLora": {
+      "policy": "fixed",
+      "asset": "0c7e4b9a-6d28-4f13-a5c9-2b8f1e6d3a07",
+      "file": "wan2.1_SCAIL_2_DPO_lora_bf16.safetensors"
+    },
+    "segmenter": {
+      "policy": "fixed",
+      "asset": "9a1d5e3b-7c06-4b82-8f1a-4e6c2d0b9f35",
+      "file": "sam3.1_multiplex_fp16.safetensors"
+    },
+    "segmenterTokenizer": {
+      "policy": "fixed",
+      "asset": "e2c8a4f6-0b59-4d71-9c3e-8a5d7f1b2c46",
+      "file": "clip_tokenizer"
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "policy": "model",
+      "type": "string",
+      "maxLength": 8000
+    },
+    "seed": {
+      "policy": "random",
+      "type": "integer"
+    },
+    "width": {
+      "policy": "fixed",
+      "value": 896
+    },
+    "height": {
+      "policy": "fixed",
+      "value": 512
+    },
+    "steps": {
+      "policy": "fixed",
+      "value": 6
+    },
+    "shift": {
+      "policy": "fixed",
+      "value": 5
+    },
+    "frames": {
+      "policy": "fixed",
+      "value": 241
+    },
+    "audio": {
+      "policy": "fixed",
+      "value": true
+    },
+    "subject": {
+      "policy": "model",
+      "type": "string",
+      "maxLength": 200,
+      "default": "person",
+      "description": "Who is replaced in the source video, in one to three English words a detector can find in every frame (\"girl\", \"man in red jacket\"). After a comma, an object in their hands that must stay as it is (\"girl, handkerchief\")."
+    },
+    "reference_subject": {
+      "policy": "model",
+      "type": "string",
+      "maxLength": 200,
+      "default": "person",
+      "description": "Who the character is in the reference image, in one or two English words (\"woman\", \"robot\", \"cartoon cat\")."
+    },
+    "step_lora_strength": {
+      "policy": "fixed",
+      "value": 0.8
+    },
+    "identity_lora_strength": {
+      "policy": "fixed",
+      "value": 1
+    }
+  },
+  "loras": [],
+  "references": [
+    {
+      "id": "video",
+      "role": "driving_video",
+      "required": true,
+      "name": "Vidéo à suivre"
+    },
+    {
+      "id": "character",
+      "role": "reference_image",
+      "required": true,
+      "name": "Personnage"
+    }
+  ]
+}
