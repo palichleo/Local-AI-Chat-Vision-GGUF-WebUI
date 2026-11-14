@@ -137,7 +137,7 @@ test('the tokenizer ComfyUI ships is found from the encoder and registered as a 
   );
 });
 
-test('Krea 2 runs on ComfyUI: no tokenizer is needed, and one that is given must still fit', async t => {
+test('Krea 2 runs on Atelier’s engine: its tokenizer is needed, and the one given must fit', async t => {
   const root = await directory(t),
     files = await comfy(root),
     assets = new GenerationAssets(join(root, 'assets.json')),
@@ -153,11 +153,13 @@ test('Krea 2 runs on ComfyUI: no tokenizer is needed, and one that is given must
   await mkdir(join(root, 'workflow'));
   await writeFile(join(root, 'workflow', 'krea.json'), JSON.stringify(workflow(base)));
   assert.equal((await catalog.read('krea')).components.tokenizer, undefined);
-  // ComfyUI has its own tokenizer: the workflow is whole without one.
+  // Atelier's engine has no tokenizer of its own (ComfyUI, which made these images, had): the
+  // workflow stays readable, says what it lacks, and is neither saved nor run without it.
   const [listed] = await catalog.list();
-  assert.equal(listed.ready, true, listed.unavailableReason);
-  await catalog.save(workflow(base));
-  assert.equal((await catalog.prepare('krea', { prompt: 'a boat' })).job.components.tokenizer, undefined);
+  assert.equal(listed.ready, false);
+  assert.match(listed.unavailableReason, /Aucun fichier pour « Tokenizer »/);
+  await assert.rejects(catalog.save(workflow(base)), /Tokenizer/);
+  await assert.rejects(catalog.prepare('krea', { prompt: 'a boat' }), /Tokenizer/);
 
   const other = await assets.register({ path: files.other, kind: 'tokenizer', family: 'krea2' });
   await assert.rejects(

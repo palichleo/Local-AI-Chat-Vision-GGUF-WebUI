@@ -729,13 +729,14 @@ test('four unsupported references and three named LoRAs all appear in the editor
   assert.equal(record.references.length, 4);
   assert.equal(record.loras.length, 3);
   assert.ok(Object.values(record.importDraft.files).includes('my-specific-2.safetensors'));
-  await f.$('workflow-list').children.at(-1).children.at(-1).children.at(-1).onclick();
+  const cards = f.$('workflow-list').children.filter(item => item.className === 'workflow-card');
+  await cards.at(-1).children.at(-1).children.at(-1).onclick();
   assert.ok(f.calls.some(call => call.route === 'generation/workflows/' + record.id));
   assert.equal(f.$('native-reference-count').textContent, '4');
   assert.equal(f.$('native-value-cfg').value, 4);
 });
 
-test('Krea 2 is run by ComfyUI: its tokenizer is neither asked for nor proposed', async t => {
+test('Krea 2 is created by Atelier’s engine: its tokenizer is asked for, and proposed from the encoder', async t => {
   const f = await setup(t),
     record = structuredClone(f.template);
   delete record.components.tokenizer;
@@ -743,10 +744,11 @@ test('Krea 2 is run by ComfyUI: its tokenizer is neither asked for nor proposed'
   await new Promise(resolve => setImmediate(resolve));
   const ids = element => [element.id, ...element.children.flatMap(ids)].filter(Boolean);
   assert.ok(ids(f.$('native-workflow-components')).includes('native-component-textEncoder'));
-  assert.ok(!ids(f.$('native-workflow-components')).includes('native-component-tokenizer'));
-  assert.deepEqual(f.tokenizerRequests, []);
+  assert.ok(ids(f.$('native-workflow-components')).includes('native-component-tokenizer'));
+  // The one that matches the encoder is asked of the server, and taken.
+  assert.deepEqual(f.tokenizerRequests, [{ encoder: 'encoder-one', family: 'krea2' }]);
   assert.equal(await f.ui.saveEditor(), true);
-  assert.equal(f.workflows.at(-1).components.tokenizer, undefined);
+  assert.deepEqual(f.workflows.at(-1).components.tokenizer, { policy: 'fixed', asset: 'tokenizer-one' });
 });
 
 test('workflows are listed by engine: the built-in one, then ComfyUI with its address', async t => {
@@ -757,20 +759,26 @@ test('workflows are listed by engine: the built-in one, then ComfyUI with its ad
     sections.map(section => section.children[0].textContent),
     ['Moteur interne', 'Moteur externe · ComfyUI'],
   );
-  // Nothing of the built-in engine in this installation; Krea 2 is ComfyUI's.
-  assert.equal(list[list.indexOf(sections[0]) + 1].textContent, 'Aucun workflow.');
-  assert.equal(list.at(-1).className, 'workflow-card');
+  // Krea 2 is the built-in engine's; nothing of ComfyUI's (MOSS Image) in this installation.
+  assert.equal(list[list.indexOf(sections[0]) + 1].className, 'workflow-card');
+  assert.equal(list.at(-1).textContent, 'Aucun workflow.');
   const panel = sections[1].children.at(-1),
     ids = element => [element.id, ...element.children.flatMap(ids)].filter(Boolean);
   assert.equal(panel.className, 'comfy-panel');
   assert.ok(ids(panel).includes('comfy-url') && ids(panel).includes('comfy-enabled'));
+  // No family is offered to be « created with Atelier's engine »: all of its own always are.
+  assert.deepEqual(
+    ids(panel).filter(id => id.startsWith('comfy-own')),
+    [],
+  );
+  assert.equal(panel.children.length, 3);
   // Saving the address goes to the server, whose answer redraws the list.
   f.$('comfy-url').value = ' http://127.0.0.1:7821 ';
   f.$('comfy-enabled').checked = true;
   await panel.children.at(-1).children.at(-1).onclick();
   assert.deepEqual(f.calls.at(-1), {
     route: 'generation/comfy',
-    body: { enabled: true, baseUrl: 'http://127.0.0.1:7821', own: [] },
+    body: { enabled: true, baseUrl: 'http://127.0.0.1:7821' },
   });
 });
 

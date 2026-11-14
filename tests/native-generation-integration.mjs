@@ -42,8 +42,48 @@ async function tokenizerFolder(root) {
   return folder;
 }
 /**
+ * Atelier's own engine as far as these tests go: it runs Krea 2, and answers each job with one
+ * image saved in the output folder.
+ */
+function fakeEngine(outputDir, { onGenerate = () => {}, onRelease = () => {} } = {}) {
+  return {
+    state: 'stopped',
+    status() {
+      return {
+        state: this.state,
+        error: '',
+        capabilities: { krea2: { ready: true, mediaType: 'image', reason: '' } },
+      };
+    },
+    async unload() {},
+    async start() {
+      this.state = 'ready';
+      return this.status();
+    },
+    async close() {
+      this.state = 'stopped';
+    },
+    async release() {
+      onRelease();
+      return { released: true, allocatedGiB: 0 };
+    },
+    async request(method, job) {
+      if (method !== 'generate') return {};
+      onGenerate(job);
+      const filename = randomUUID().replaceAll('-', '') + '.png';
+      await writeFile(join(outputDir, filename), png);
+      return {
+        jobId: job.id,
+        outputs: [{ filename, subfolder: '', type: 'output', width: 1, height: 1 }],
+        metadata: {},
+      };
+    },
+  };
+}
+/**
  * A ComfyUI as far as Atelier asks: it knows every node, lists the fixture files and answers
- * each graph with one saved image. Krea 2 images are ComfyUI's, the built-in engine has none.
+ * each graph with one saved image. Set and answering, it is still not the one that creates a
+ * Krea 2 image.
  */
 async function fakeComfy(onPrompt = () => {}) {
   const names = ['model.safetensors', 'textEncoder.safetensors', 'vae.safetensors'];
@@ -108,38 +148,17 @@ test(
     const root = await mkdtemp(join(tmpdir(), 'native-http-'));
     let app;
     const events = [];
-    const comfy = await fakeComfy(graph => {
-      events.push('generate');
-      assert.equal(graph.sampler.inputs.seed, 99);
-    });
+    // A ComfyUI is set and answers: Atelier's engine makes the image all the same.
+    const comfy = await fakeComfy(() => assert.fail('a graph was sent to ComfyUI'));
     const outputDir = join(root, 'output');
     await mkdir(outputDir);
-    const worker = {
-      state: 'stopped',
-      status() {
-        return {
-          state: this.state,
-          error: '',
-          capabilities: { ltx25: { ready: false } },
-        };
+    const worker = fakeEngine(outputDir, {
+      onGenerate(job) {
+        events.push('generate');
+        assert.equal(job.parameters.seed, 99);
       },
-      async unload() {},
-      async start() {
-        this.state = 'ready';
-        return this.status();
-      },
-      async close() {
-        this.state = 'stopped';
-      },
-      async release() {
-        events.push('runner released');
-        return { released: true, allocatedGiB: 0 };
-      },
-      // ComfyUI makes the image: the built-in engine is asked nothing.
-      async request(method) {
-        assert.fail('the built-in engine was asked to ' + method);
-      },
-    };
+      onRelease: () => events.push('runner released'),
+    });
     try {
       app = await createApplication({
         // The scripted model writes three-word prompts: the length of a prompt is tested apart.
@@ -273,27 +292,7 @@ test(
     const outputDir = join(root, 'output');
     await mkdir(outputDir);
     let app;
-    const comfy = await fakeComfy();
-    const worker = {
-      state: 'stopped',
-      status() {
-        return { state: this.state, error: '', capabilities: {} };
-      },
-      async unload() {},
-      async start() {
-        this.state = 'ready';
-        return this.status();
-      },
-      async close() {
-        this.state = 'stopped';
-      },
-      async release() {
-        return { released: true, allocatedGiB: 0 };
-      },
-      async request(method) {
-        assert.fail('the built-in engine was asked to ' + method);
-      },
-    };
+    const worker = fakeEngine(outputDir);
     try {
       app = await createApplication({
         // The scripted model writes three-word prompts: the length of a prompt is tested apart.
@@ -336,7 +335,6 @@ test(
         maxIterations: 5,
         pythonPath: process.execPath,
       });
-      await api('generation/comfy', { enabled: true, baseUrl: comfy.baseUrl });
       // Same shape as a Krea 2 workflow imported with its optional image-to-image slot.
       await api('generation/workflows', {
         schemaVersion: 1,
@@ -423,7 +421,6 @@ test(
       assert.equal(edit.referenceCount, 1);
     } finally {
       await app?.close();
-      await comfy.close();
       await rm(root, { recursive: true, force: true });
     }
   },

@@ -169,6 +169,18 @@ test('a MiniMax continuation takes subject references; an LTX one does not yet',
   assert.equal(create.function.parameters.properties.reference.maxItems, 2);
 });
 
+test('the Studio offers its style LoRAs where the engine that creates applies them', async () => {
+  const minimax = { ...video('minimax', []), pipeline: 'minimax_h3' },
+    moss = { ...image('moss-image'), pipeline: 'moss' };
+  const studio = await catalogOf([image('krea'), moss, video('ltx', []), minimax]).studio();
+  const styled = Object.fromEntries(
+    [...studio.create_image, ...studio.create_video].map(item => [item.id, item.styled]),
+  );
+  // Atelier's engine applies them to Krea 2, ComfyUI to MOSS Image; the video models of
+  // Atelier's engine take none yet.
+  assert.deepEqual(styled, { krea: true, 'moss-image': true, ltx: false, minimax: false });
+});
+
 test('arguments are checked against the chosen workflow, never forwarded blindly', async () => {
   const tools = catalogOf(workflows);
   const routed = await tools.route('create_video', { prompt: 'x', intention: 'y', fps: 12, stage: 'final' }, media);

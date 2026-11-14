@@ -3,7 +3,7 @@
   "label": "LTX2.5",
   "mediaType": "video",
   "tasks": ["create_video", "extend_video"],
-  "engine": "external",
+  "engine": "internal",
   "hardware": { "cuda": true },
   "requires": [
     "torch",

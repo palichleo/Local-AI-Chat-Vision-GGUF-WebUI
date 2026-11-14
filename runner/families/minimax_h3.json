@@ -3,9 +3,8 @@
   "label": "MiniMax H3",
   "mediaType": "video",
   "tasks": ["create_video", "extend_video"],
-  "engine": "external",
+  "engine": "internal",
   "hardware": { "cuda": true },
-  "selectable": true,
   "requires": [
     "torch",
     "torchvision",

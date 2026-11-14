@@ -75,7 +75,7 @@ def preflight(job, config):
     from runner.models.krea2_headers import validate_krea2_components
     from runner.models.krea2_shapes import validate_shapes
 
-    # ComfyUI brings its own tokenizer; this engine reads the one the workflow names.
+    # This engine reads the tokenizer the workflow names (required by the family's manifest).
     tokenizer = job['components'].get('tokenizer')
     if not tokenizer or not Path(tokenizer).is_dir():
         raise ValueError(

@@ -275,7 +275,7 @@ test('ComfyUI is used only when data/comfy-engine.json enables a loopback addres
   );
   assert.equal(await comfyEngine(dir), null);
   await writeFile(join(dir, 'comfy-engine.json'), JSON.stringify({ enabled: true, baseUrl: 'http://127.0.0.1:7821/' }));
-  assert.deepEqual(await comfyEngine(dir), { baseUrl: 'http://127.0.0.1:7821', own: [] });
+  assert.deepEqual(await comfyEngine(dir), { baseUrl: 'http://127.0.0.1:7821' });
   // Without it no job goes anywhere.
   assert.equal(await comfyRoute(await trial(null), ltx()), null);
 });
@@ -700,7 +700,7 @@ test('the index of an MP4 gives its size, length and rate', async () => {
   assert.equal(mp4Bytes(png()), null);
 });
 
-test('the generation service: ComfyUI for its families, the built-in engine for the others', async t => {
+test('the generation service: ComfyUI for MOSS Image, the built-in engine for everything else', async t => {
   const fake = await comfy(t),
     dataDir = await trial(null),
     outputDir = join(dataDir, 'output');
@@ -775,17 +775,12 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
     baseUrl: fake.baseUrl + '/',
     reachable: true,
     version: '',
-    // Krea 2 and MiniMax H3 also run on Atelier's own engine; nothing is kept there until the
-    // user says so.
-    choices: [
-      { family: 'krea2', label: 'Krea2' },
-      { family: 'minimax_h3', label: 'MiniMax H3' },
-    ],
-    own: [],
   });
-  assert.deepEqual(await available(), { ltx25: true, rife: true, krea2: true, minimax_h3: true, moss: true });
+  // ComfyUI makes MOSS Image ready and nothing else: Krea 2 and MiniMax H3 are the built-in
+  // engine's, which says nothing of them here.
+  assert.deepEqual(await available(), { ltx25: true, rife: true, moss: true });
 
-  // A continuation still belongs to the built-in engine, which gets the memory ComfyUI kept.
+  // A large model of the built-in engine gets the memory ComfyUI kept.
   const continuation = ltx({ references: source('source_video', '/x.mp4') });
   calls.length = 0;
   client = service.client();
@@ -806,30 +801,38 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
   assert.deepEqual(calls, ['preflight', 'generate', 'release']);
   assert.equal(fake.seen.prompts.length + fake.seen.freed.length, 0);
 
-  for (const [work, extension] of [
-    [ltx(), '.mp4'],
-    [krea(), '.png'],
-    [moss(), '.png'],
-  ]) {
+  // Krea 2, MiniMax H3 and LTX 2.5 are created by Atelier's engine although ComfyUI is set and
+  // answers: nothing is sent to it but the request to let go of the models it holds.
+  for (const work of [ltx(), krea(), h3()]) {
     calls.length = 0;
     client = service.client();
     await client.preflight(work);
-    const result = await client.run(work);
-    assert.equal(result.metadata.backend, 'comfyui');
-    assert.ok(result.outputs[0].filename.endsWith(extension));
+    await client.run(work);
     await client.free();
-    // The built-in engine is not asked anything but to leave memory, if it holds any.
-    assert.deepEqual(calls, ['unload', 'release']);
+    assert.deepEqual(calls, ['preflight', 'generate', 'release']);
+    assert.deepEqual(fake.seen.freed.splice(0), [{ unload_models: true, free_memory: true }]);
   }
-  // The video memory is given back each time; the models stay in main memory while there is room.
-  assert.deepEqual(fake.seen.freed, Array(3).fill({ unload_models: true }));
-  assert.equal((await readdir(outputDir)).length, 6);
+  assert.equal(fake.seen.prompts.length, 0);
+
+  // MOSS Image alone is ComfyUI's.
+  calls.length = 0;
+  client = service.client();
+  await client.preflight(moss());
+  const result = await client.run(moss());
+  assert.equal(result.metadata.backend, 'comfyui');
+  assert.ok(result.outputs[0].filename.endsWith('.png'));
+  await client.free();
+  // The built-in engine is not asked anything but to leave memory, if it holds any.
+  assert.deepEqual(calls, ['unload', 'release']);
+  // The video memory is given back; the models stay in main memory while there is room.
+  assert.deepEqual(fake.seen.freed, [{ unload_models: true }]);
+  assert.equal((await readdir(outputDir)).length, 2);
 
   // On a machine short of memory, ComfyUI lets go of everything.
   const tight = await comfy(t, { available: 1024 ** 3 });
   await service.saveComfy({ enabled: true, baseUrl: tight.baseUrl });
   client = service.client();
-  await client.preflight(krea());
+  await client.preflight(moss());
   await client.free();
   assert.deepEqual(tight.seen.freed, [{ unload_models: true }, { unload_models: true, free_memory: true }]);
 
@@ -838,48 +841,35 @@ test('the generation service: ComfyUI for its families, the built-in engine for 
   const shared = await comfy(t, { available: 12 * 1024 ** 3 });
   await service.saveComfy({ enabled: true, baseUrl: shared.baseUrl });
   client = service.client();
-  await client.preflight(krea());
+  await client.preflight(moss());
   await client.free();
   assert.deepEqual(shared.seen.freed.splice(0), [{ unload_models: true }]);
   client = service.client();
-  await client.preflight(krea());
+  await client.preflight(moss());
   await client.free({ reserve: 8 * 1024 ** 3 });
   assert.deepEqual(shared.seen.freed, [{ unload_models: true }, { unload_models: true, free_memory: true }]);
 
-  // A family kept on Atelier's own engine: ComfyUI stays on for the others, its jobs go to the
-  // worker, and ComfyUI lets go of what it holds first. Only a family that has an engine here.
-  await assert.rejects(
-    service.saveComfy({ enabled: true, baseUrl: shared.baseUrl, own: ['moss'] }),
-    /n’a pas de moteur dans Atelier/,
-  );
-  const kept = await service.saveComfy({ enabled: true, baseUrl: shared.baseUrl, own: ['krea2'] });
-  assert.deepEqual(kept.comfy.own, ['krea2']);
-  calls.length = 0;
-  const sent = shared.seen.prompts.length;
-  client = service.client();
-  await client.preflight(krea());
-  await client.run(krea());
-  assert.deepEqual(
-    calls.filter(call => call !== 'unload'),
-    ['preflight', 'generate'],
-  );
-  assert.equal(shared.seen.prompts.length, sent, 'nothing was sent to ComfyUI');
+  // The families an older version let the user « keep on Atelier's engine » (`own` in the
+  // file): no longer read, all of them are there now, and gone at the next save.
+  const file = join(dataDir, 'comfy-engine.json');
+  await writeFile(file, JSON.stringify({ enabled: true, baseUrl: shared.baseUrl, own: ['moss', 'krea2'] }));
+  assert.deepEqual(Object.keys(await comfyEngine(dataDir)), ['baseUrl']);
   // MOSS Image is still ComfyUI's.
   assert.notEqual(await comfyRoute(dataDir, moss(), { connect: shared.connect }), null);
-  assert.equal(await comfyRoute(dataDir, krea(), { connect: shared.connect }), null);
-  // Saving the address again without naming the families keeps the choice.
-  assert.deepEqual((await service.saveComfy({ enabled: true, baseUrl: shared.baseUrl })).comfy.own, ['krea2']);
-  await service.saveComfy({ enabled: true, baseUrl: shared.baseUrl, own: [] });
+  const again = await service.saveComfy({ enabled: true, baseUrl: shared.baseUrl, own: ['krea2'] });
+  assert.deepEqual(Object.keys(again.comfy).sort(), ['baseUrl', 'enabled', 'reachable', 'version']);
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(file, 'utf8'))), ['enabled', 'baseUrl']);
 
   // A ComfyUI that is not running: said in the settings, and before anything is unloaded.
   const stopped = await service.saveComfy({ enabled: true, baseUrl: 'http://127.0.0.1:9' });
   assert.equal(stopped.comfy.reachable, false);
-  await assert.rejects(service.client().preflight(ltx()), /ComfyUI ne répond pas/);
-  // Krea 2 and MiniMax H3 also run on Atelier's engine: they go there instead of waiting for ComfyUI.
+  await assert.rejects(service.client().preflight(moss()), /ComfyUI ne répond pas/);
+  // The families of Atelier's engine do not wait for it.
   calls.length = 0;
   await service.client().preflight(krea());
   await service.client().preflight(h3());
-  assert.deepEqual(calls, ['preflight', 'preflight']);
+  await service.client().preflight(ltx());
+  assert.deepEqual(calls, ['preflight', 'preflight', 'preflight']);
   // Switched off: the address is kept, the families are ComfyUI's no more.
   const off = await service.saveComfy({ enabled: false, baseUrl: 'http://127.0.0.1:9' });
   assert.deepEqual([off.comfy.enabled, off.comfy.baseUrl], [false, 'http://127.0.0.1:9']);
@@ -973,7 +963,7 @@ test('what a ComfyUI offers of the attention nodes is read from its node list', 
   assert.deepEqual(asked, [], 'nothing asked when the job wants neither');
 });
 
-test('no NVIDIA card for the built-in engine: said with its reason, and ComfyUI still creates', async t => {
+test('no NVIDIA card for the built-in engine: said with its reason, whether ComfyUI is set or not', async t => {
   const fake = await comfy(t),
     dataDir = await trial(null);
   const none = 'Krea2 demande une carte graphique NVIDIA : son pilote n’en voit aucune sur cet ordinateur.';
@@ -1009,17 +999,14 @@ test('no NVIDIA card for the built-in engine: said with its reason, and ComfyUI 
     service.syncCapabilities();
     return service.catalog.capabilities.krea2;
   };
-  // Without ComfyUI the family cannot run, and says that the computer is why (shown greyed).
+  // The family cannot run, and says that the computer is why (shown greyed).
   assert.deepEqual(await krea2(), lacking);
   assert.equal(service.catalog.capabilities.rife.ready, true);
-  // With ComfyUI it is ComfyUI's, and ready.
+  // A ComfyUI that is set and answers changes nothing: Krea 2 is created by Atelier's engine
+  // only. The reason again when a creation is asked for, before anything is unloaded (preflight).
   await service.saveComfy({ enabled: true, baseUrl: fake.baseUrl });
-  assert.deepEqual(await krea2(), { ready: true, mediaType: 'image', reason: '' });
-  // Kept on the built-in engine by the user, or ComfyUI silent: the reason again, before
-  // anything is unloaded (preflight).
-  await service.saveComfy({ enabled: true, baseUrl: fake.baseUrl, own: ['krea2'] });
   assert.deepEqual(await krea2(), lacking);
-  await service.saveComfy({ enabled: true, baseUrl: 'http://127.0.0.1:9', own: [] });
   await assert.rejects(service.client().preflight(krea()), /carte graphique NVIDIA/);
   assert.deepEqual(calls, ['preflight']);
+  assert.equal(fake.seen.prompts.length, 0);
 });

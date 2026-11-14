@@ -831,7 +831,7 @@ export function setupStudio({
     if (workflow.limits && workflow.direct && !extending && draft.size)
       Object.assign(values, { format: draft.format, size: draft.size });
     if (workflow.seeded) values.seed = draft.seed.trim();
-    if (workflow.external && mode !== 'audio' && !extending)
+    if (workflow.styled && mode !== 'audio' && !extending)
       values.styles = draft.styles.filter(style => style.name).map(({ name, strength }) => ({ name, strength }));
     const loras = {};
     for (const lora of workflow.loras ?? []) {
@@ -867,7 +867,7 @@ export function setupStudio({
         Object.assign(draft, { format: saved.format, size: saved.size });
     }
     if (typeof saved.seed === 'string' && workflow.seeded) draft.seed = saved.seed;
-    if (Array.isArray(saved.styles) && workflow.external && mode !== 'audio')
+    if (Array.isArray(saved.styles) && workflow.styled && mode !== 'audio')
       draft.styles = saved.styles
         .filter(style => info.styles.includes(style.name))
         .slice(0, MAX_STYLES)
@@ -1494,9 +1494,7 @@ export function setupStudio({
     if (mode !== 'audio') {
       const own = (workflow.loras ?? []).filter(lora => loraChoice(workflow, lora).on).map(lora => lora.name),
         added =
-          workflow.external && !extending
-            ? draft.styles.filter(style => style.name).map(style => leaf(style.name))
-            : [];
+          workflow.styled && !extending ? draft.styles.filter(style => style.name).map(style => leaf(style.name)) : [];
       rows.push(['LoRA', [...own, ...added].join(', ') || '—']);
     }
     if (STAGES[stage]) rows.push(['Étape', STAGES[stage]]);
@@ -1790,7 +1788,7 @@ export function setupStudio({
     // The LoRAs of the workflow left to the assistant, as chosen here.
     const loras = loraArgs(workflow, draft);
     if (loras) args.loras = loras;
-    const styles = workflow.external && mode !== 'audio' && !extending ? draft.styles.filter(style => style.name) : [];
+    const styles = workflow.styled && mode !== 'audio' && !extending ? draft.styles.filter(style => style.name) : [];
     return { verb, args, edits, styles };
   }
   // The user sets the Studio to make something: the chat model leaves the GPU now, not at the
@@ -2923,7 +2921,7 @@ export function setupStudio({
     if (lacking) settings.append(lacking);
     const shape = shapeBlock(workflow);
     if (shape) settings.append(shape);
-    const styled = workflow.external && mode !== 'audio' && !extending && !answering();
+    const styled = workflow.styled && mode !== 'audio' && !extending && !answering();
     const loras = loraBlock(workflow, styled);
     if (loras) settings.append(loras);
     const rare = rareLines(workflow);

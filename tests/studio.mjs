@@ -927,7 +927,7 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
   const image = {
       id: 'i',
       name: 'Image',
-      external: true,
+      styled: true,
       limits: sizes,
       size: { width: 1024, height: 1024 },
       settings: [],
@@ -937,7 +937,7 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     video = {
       id: 'v',
       name: 'Clip',
-      external: true,
+      styled: true,
       limits: sizes,
       size: { width: 768, height: 448 },
       settings: [],
@@ -1056,7 +1056,7 @@ test('an image dragged to another slot changes role; a move that would not combi
   const video = {
     id: 'v',
     name: 'Clip',
-    external: true,
+    styled: true,
     limits: sizes,
     size: { width: 768, height: 448 },
     settings: [],
@@ -1115,7 +1115,7 @@ test('the input images: pictos and no word, start and end on a line of time, ref
     video = {
       id: 'v',
       name: 'Clip',
-      external: true,
+      styled: true,
       limits: sizes,
       size: { width: 768, height: 448 },
       settings: [],
@@ -1224,7 +1224,7 @@ test('the screen: its format and length at the top left, « Détails » at the t
   const video = {
       id: 'v',
       name: 'Clip',
-      external: true,
+      styled: true,
       limits: sizes,
       size: { width: 768, height: 448 },
       settings: [],
@@ -1237,7 +1237,7 @@ test('the screen: its format and length at the top left, « Détails » at the t
     image = {
       id: 'i',
       name: 'Image',
-      external: true,
+      styled: true,
       limits: sizes,
       size: { width: 1024, height: 1024 },
       settings: [],
@@ -1332,7 +1332,7 @@ test('the floppy disk keeps the settings of the model, given back each time it i
     free = {
       id: 'h',
       name: 'H3',
-      external: true,
+      styled: true,
       direct: true,
       seeded: true,
       limits: sizes,
@@ -1349,7 +1349,7 @@ test('the floppy disk keeps the settings of the model, given back each time it i
     fixed = {
       id: 'f',
       name: 'Fixe',
-      external: true,
+      styled: true,
       direct: false,
       seeded: false,
       limits: sizes,
@@ -1428,7 +1428,7 @@ test('the settings saved for a model come back the first time the Studio shows i
   const video = {
     id: 'h',
     name: 'H3',
-    external: true,
+    styled: true,
     direct: true,
     seeded: true,
     limits: sizes,
@@ -1614,7 +1614,7 @@ test('« Améliorer le prompt » rewrites what is typed, which can be taken back
   const image = {
     id: 'w',
     name: 'Image',
-    external: true,
+    styled: true,
     roles: {},
     limits: sizes,
     direct: true,
@@ -1684,7 +1684,7 @@ test('Ctrl+E improves the prompt from the Studio; an image pasted or dropped on 
   const video = {
     id: 'v',
     name: 'Clip',
-    external: true,
+    styled: true,
     limits: sizes,
     size: { width: 768, height: 448 },
     settings: [],
@@ -1758,7 +1758,7 @@ test('the LoRAs of a model do not follow to a model of another family, and come 
     id,
     name,
     family,
-    external: true,
+    styled: true,
     roles: {},
     limits: sizes,
     direct: true,

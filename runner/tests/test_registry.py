@@ -33,9 +33,11 @@ class RegistryTests(unittest.TestCase):
         # A family ComfyUI runs is known here by its manifest only: no module, no capability.
         own = {name for name, manifest in families().items() if manifest.get('native', True)}
         self.assertEqual(set(capabilities()), own)
-        self.assertIn(families()['krea2']['engine'], ('external',))
-        # Krea 2 runs on either engine; MOSS Image is ComfyUI's only.
-        self.assertIn('krea2', own)
+        # Krea 2, MiniMax H3 and LTX 2.5 are this engine's; MOSS Image is ComfyUI's only.
+        for name in ('krea2', 'minimax_h3', 'ltx25'):
+            self.assertEqual(families()[name]['engine'], 'internal')
+            self.assertIn(name, own)
+        self.assertEqual(families()['moss']['engine'], 'external')
         self.assertNotIn('moss', own)
         for name, manifest in families().items():
             with self.subTest(family=name):
