@@ -379,6 +379,7 @@ test('a character is replaced in a video by a verb of its own: the video, the im
   const tools = Object.fromEntries((await catalog.definitions()).map(t => [t.function.name, t.function]));
   const replace = tools.replace_character.parameters;
   assert.deepEqual(Object.keys(replace.properties).sort(), [
+    'character',
     'intention',
     'prompt',
     'reference',
@@ -387,8 +388,11 @@ test('a character is replaced in a video by a verb of its own: the video, the im
     'source',
     'subject',
   ]);
-  // The length and the format are the source video's: the model is asked neither.
-  assert.deepEqual(replace.required.sort(), ['intention', 'prompt', 'reference', 'source']);
+  // The length and the format are the source video's: the model is asked neither. The character
+  // is its image, or its description when there is none (the application makes the image).
+  assert.deepEqual(replace.required.sort(), ['intention', 'prompt', 'source']);
+  assert.match(replace.properties.character.description, /no image of the character/);
+  assert.match(tools.replace_character.description, /never make one\s+with create_image/);
   assert.match(replace.properties.subject.description, /girl, handkerchief/);
   // Without a video in the conversation there is nothing to follow: the verb is not offered.
   const none = await catalog.definitions({ images: 1, resources: [], outputs: [] });
@@ -438,4 +442,18 @@ test('a character is replaced in a video by a verb of its own: the video, the im
     catalog.route('replace_character', { prompt: 'x', intention: 'y', reference: { image: 0 } }, media),
     /needs a source/,
   );
+  // A description given beside an image: the image is the character, the words go no further.
+  const both = await catalog.route(
+    'replace_character',
+    {
+      prompt: 'x',
+      intention: 'y',
+      source: { output: 'video-run' },
+      reference: { image: 0 },
+      character: 'a volleyball player',
+    },
+    media,
+  );
+  assert.equal(both.args.character, undefined);
+  assert.equal(both.args.references.length, 2);
 });

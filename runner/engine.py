@@ -130,6 +130,26 @@ def generate(job, config, progress):
     return result
 
 
+def frames(params, config):
+    """A few small pictures of a video made earlier (runner.video.frames), for the application to
+    describe it. Only a file of the folder of the outputs is read."""
+    from runner.registry import fields
+    from runner.video.frames import sample
+
+    config = validate_config(config)
+    fields(params, ('path', 'count', 'side'), ('path',), 'frames request')
+    path = params['path']
+    count, side = params.get('count', 3), params.get('side', 512)
+    if not isinstance(path, str) or not path or '\0' in path:
+        raise ValueError('Invalid video path')
+    if type(count) is not int or not 1 <= count <= 8 or type(side) is not int or not 64 <= side <= 1024:
+        raise ValueError('Invalid frames request')
+    root, target = Path(config['outputRoot']).resolve(), Path(path).resolve()
+    if root not in target.parents:
+        raise ValueError('Only a video of the outputs is read')
+    return dict(frames=sample(target, count, side))
+
+
 def unload():
     """Everything the worker keeps between generations leaves RAM and VRAM: the model files
     held in RAM (and pinned for fast transfers), then the GPU allocator's cache."""

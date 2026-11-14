@@ -6,10 +6,11 @@ import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from 
 import { citedMessage, citedUnused } from './lib/cited-resources.mjs';
 import { briefMessage, briefMissing } from './lib/video-brief.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
-import { withScenePrompt } from './lib/scene-prompt.mjs';
+import { askedSince, characterPrompt, withScenePrompt } from './lib/scene-prompt.mjs';
 import { THIN_NOTE, passedImages, thinPrompt } from './lib/thin-prompt.mjs';
 import { outputToolFor, readOutput } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
+import { generatedFile } from './lib/generated-media.mjs';
 import { countContext } from './lib/context-count.mjs';
 import http from 'node:http';
 import { compactSession } from './public/update-ui.mjs';
@@ -378,6 +379,38 @@ export async function createApplication({
       };
     },
   });
+  /**
+   * A few frames of a video made earlier in a conversation, read from its file by the worker
+   * (runner.video.frames): for the prompt of a character put in it. { urls, video }, or null.
+   */
+  async function outputFrames(conversationId, runId, index = 0) {
+    const record = await gallery.get(conversationId, runId, { includeImages: false });
+    const output = record.outputs[index];
+    if (record.provider !== 'native' || !output?.source) return null;
+    if ((record.mediaType || 'image') !== 'video') return { urls: [], video: false };
+    const { path } = await generatedFile(outputDir, output.source);
+    const frames = await generation.videoFrames(path, 3);
+    return { urls: frames.map(frame => frame.url), video: true };
+  }
+  /** Width and height of the video a character is put in: as its record or its resource says. */
+  async function sourceSize(source, conversationId) {
+    try {
+      if (typeof source?.resource === 'string') {
+        const { width, height } = await resources.activeRecord(source.resource);
+        return width > 0 && height > 0 ? { width, height } : null;
+      }
+      if (typeof source?.output === 'string') {
+        const record = await gallery.get(conversationId, source.output, { includeImages: false }),
+          output = record.outputs[Number(source.index ?? 0)] ?? {},
+          width = output.width ?? record.parameters?.width,
+          height = output.height ?? record.parameters?.height;
+        return width > 0 && height > 0 ? { width, height } : null;
+      }
+    } catch {
+      // Unknown: the image of the character keeps the size of its own workflow.
+    }
+    return null;
+  }
   function galleryView(record) {
     return {
       ...record,
@@ -1479,7 +1512,16 @@ export async function createApplication({
             const typed = String(body.prompt ?? '').trim().slice(0, 4000),
               given = { prompt: typed, source: body.source, reference: body.reference },
               // What is typed is what the user asks for, not a draft to tidy up.
-              written = await withScenePrompt(given, { resources, engine, asked: typed, draft: '', timeoutMs: enrichTimeoutMs });
+              written = await withScenePrompt(given, {
+                resources,
+                engine,
+                thumbnails,
+                outputFrames,
+                conversationId: typeof body.conversationId === 'string' ? body.conversationId : null,
+                asked: typed,
+                draft: '',
+                timeoutMs: enrichTimeoutMs,
+              });
             if (written !== given) return send(200, { prompt: written.prompt, seen: true });
             throw problem(
               engine.vision
@@ -1980,40 +2022,77 @@ export async function createApplication({
                 const unused = citedUnused(body.messages, await resources.catalog(), call);
                 if (unused.length) throw problem(citedMessage(unused), 400);
                 // A character put in a video: its prompt is written here from the frames of the
-                // video and the image of the character, which the model no longer has under its eyes.
+                // video and the character, which the model no longer has under its eyes.
                 const replacing = call.function.name === 'replace_character';
-                let seen = false;
+                let given = null,
+                  skipped = '';
                 if (replacing)
                   try {
-                    const given = JSON.parse(calls[0].function.arguments),
-                      last = body.messages.findLast(message => message?.role === 'user' && !message.internal),
-                      asked = typeof last?.content === 'string' ? last.content : '';
-                    const written = await withScenePrompt(given, {
-                      resources,
-                      engine,
-                      asked: asked.slice(0, 2000),
-                      messages: body.messages,
-                      thumbnails,
-                      conversationId: body.conversationId,
-                    });
-                    seen = written !== given;
-                    if (seen) calls[0].function.arguments = JSON.stringify(written);
+                    given = JSON.parse(calls[0].function.arguments);
                   } catch {
-                    // The call keeps the prompt it came with.
+                    given = null;
                   }
-                request = await runtime.request(calls, {
-                  conversationId: body.conversationId,
-                  turnId: body.turnId,
+                const described =
+                  replacing && given && given.reference == null
+                    ? String(given.character || given.prompt || '').trim()
+                    : '';
+                const places = {
+                  resources,
+                  engine,
+                  asked: askedSince(body.messages),
                   messages: body.messages,
-                });
-                // Said in the window where the user confirms: what the prompt was written from.
-                if (replacing && request)
-                  request.notes = [
-                    ...(request.notes ?? []),
-                    seen
-                      ? 'Prompt écrit par l’application d’après la vidéo et l’image du personnage.'
-                      : 'Prompt écrit sans voir la vidéo : relisez-le, il doit décrire ce que la vidéo montre.',
-                  ];
+                  thumbnails,
+                  outputFrames,
+                  conversationId: body.conversationId,
+                  onSkip: why => (skipped = why),
+                };
+                if (replacing && given && given.reference == null) {
+                  // No image of the character: the page makes it (its prompt written here), the
+                  // user keeps it or has another made, then the replacement runs with it.
+                  if (described.length < 3 || !given.source || typeof given.source !== 'object')
+                    throw problem(
+                      'Donne la vidéo à suivre (source) et le personnage : son image (reference), ou sa description (character).',
+                      400,
+                    );
+                  const { character, ...rest } = given,
+                    written = await withScenePrompt(rest, { ...places, described });
+                  await emit({
+                    local_tool_request: {
+                      kind: 'character',
+                      call,
+                      character: described.slice(0, 600),
+                      imagePrompt: characterPrompt(described),
+                      sourceSize: await sourceSize(given.source, body.conversationId),
+                      replace: { ...rest, prompt: written.prompt || described },
+                      written: written !== rest,
+                      ...(skipped ? { skipped } : {}),
+                    },
+                  });
+                } else {
+                  let seen = false;
+                  if (replacing && given)
+                    try {
+                      const { character, ...rest } = given,
+                        written = await withScenePrompt(rest, places);
+                      seen = written !== rest;
+                      calls[0].function.arguments = JSON.stringify(written);
+                    } catch {
+                      // The call keeps the prompt it came with.
+                    }
+                  request = await runtime.request(calls, {
+                    conversationId: body.conversationId,
+                    turnId: body.turnId,
+                    messages: body.messages,
+                  });
+                  // Said where the user confirms: what the prompt was written from.
+                  if (replacing && request)
+                    request.notes = [
+                      ...(request.notes ?? []),
+                      seen
+                        ? 'Prompt écrit par l’application d’après la vidéo et l’image du personnage.'
+                        : `Prompt de Moodix AI gardé (${skipped || 'raison inconnue'}) : relisez-le, il doit décrire ce que la vidéo montre.`,
+                    ];
+                }
               } catch (error) {
                 await rejectCall(call, error);
               }

@@ -2049,6 +2049,18 @@ async function sendMessage(event) {
         finishReason = '';
         continue;
       }
+      if (request.kind === 'character') {
+        // A character to put in a video with no image of them: the application makes the image
+        // (the pointer, in the Studio), the user keeps it or has another made, then the
+        // replacement runs with it. The chat model stays unloaded all along: what it had to say,
+        // the prompts, was written when it called (lib/scene-prompt.mjs).
+        iterations++;
+        const outcome = await replaceWithCharacter(request, { view, signal });
+        history.push({ role: 'tool', tool_call_id: request.call.id, content: outcome.content });
+        if (outcome.record) state.status = await (await api('status')).json();
+        complete = true;
+        break;
+      }
       if (request.kind === 'output') {
         resourceReads++;
         // Its images are already in this turn: reading it again would only loop.
@@ -2399,6 +2411,102 @@ function showLastReply(streaming = '') {
 function syncViews() {
   const studio = state.view === 'studio';
   $('composer-context').hidden = !studio;
+}
+
+/**
+ * A proposal of the application itself in a chat turn (the image of a character, then its
+ * replacement): set in the Studio by the pointer and started at once, followed by a card in the
+ * conversation. Returns the result, as for a creation of the chat.
+ */
+async function runForTurn(proposal, { view, signal }) {
+  proposal.autoAllow = true;
+  view.generation = true;
+  const generation = generationUI.mount(view.generations, proposal, { compact: true });
+  try {
+    const result = await workflowsUI.requestTool(
+      proposal,
+      signal,
+      (progress, fraction, preview) => {
+        generation.progress(progress, fraction, preview);
+        state.studio.follow(progress, fraction, preview);
+        scrollToBottom();
+      },
+      image => generation.image(image),
+      {
+        review: false,
+        reviewImages: false,
+        approve: async (asked, abort) => {
+          const answer = state.studio.propose(asked, abort);
+          updateControls();
+          try {
+            return await answer;
+          } finally {
+            updateControls();
+          }
+        },
+        studio: true,
+      },
+    );
+    generation.finish(result);
+    void state.studio.settled(result);
+    return result;
+  } catch (error) {
+    void state.studio.settled({ error: signal.aborted ? 'Génération arrêtée.' : error.message });
+    generation.fail(error.message);
+    throw error;
+  }
+}
+
+/**
+ * A character put in a video when there is no image of them (replace_character with
+ * `character`): their image made in the Studio, checked by the user (« OK », « Autre image »,
+ * « Annuler »), then the replacement with it. Returns { content, record } for the model's call.
+ */
+async function replaceWithCharacter(request, { view, signal }) {
+  const said = text => (view.note.textContent = text);
+  const action = async (name, args) =>
+    (await api('tools/action', { conversationId: state.conversationId, studio: true, name, arguments: args })).json();
+  if (!state.studio) throw Error('Le Studio est indisponible : impossible de faire l’image du personnage.');
+  let prompt = request.imagePrompt,
+    image = null;
+  for (let tries = 0; tries < 20 && !image; tries++) {
+    said('Image du personnage…');
+    const size = state.studio.imageSize?.(request.sourceSize) ?? null;
+    const made = await runForTurn(await action('create_image', { prompt, ...(size ?? {}) }), { view, signal });
+    if (!made.record) {
+      said(made.error || 'L’image du personnage n’a pas pu être faite.');
+      return { content: JSON.stringify({ status: 'error', message: made.error || 'Image du personnage non faite.' }) };
+    }
+    said('Ce personnage vous convient ? Répondez dans le Studio : OK, Autre image ou Annuler.');
+    const answer = await state.studio.checkCharacter(made.record, signal);
+    if (answer.decision === 'cancel') {
+      said('Remplacement annulé.');
+      return {
+        content: JSON.stringify({
+          status: 'cancelled',
+          message:
+            'L’utilisateur a annulé le remplacement après avoir vu l’image du personnage : la vidéo n’a pas été faite. ' +
+            `L’image reste dans la conversation (run_id ${made.record.id}). Ne relance rien sans nouvelle demande.`,
+        }),
+      };
+    }
+    if (answer.decision === 'again') {
+      prompt = answer.prompt || prompt;
+      continue;
+    }
+    image = made.record;
+  }
+  if (!image) return { content: JSON.stringify({ status: 'cancelled', message: 'Trop d’images refaites.' }) };
+  said('');
+  const result = await runForTurn(
+    await action('replace_character', { ...request.replace, reference: { output: image.id } }),
+    { view, signal },
+  );
+  if (!result.record) return { content: result.content ?? JSON.stringify({ status: 'error', message: result.error }) };
+  // Said to the model with its result: the image of the character it can use again.
+  const content = JSON.parse(result.content);
+  content.character_image = { output: image.id };
+  return { content: JSON.stringify(content), record: result.record };
 }
 
 /**

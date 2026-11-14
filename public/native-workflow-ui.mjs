@@ -286,6 +286,7 @@ export function setupNativeWorkflows(options) {
       enabled: $('generation-enabled').checked,
       autoAllow: $('generation-auto').checked,
       autoAllowVideos: $('generation-auto-video').checked,
+      confirmReplacements: $('generation-confirm-replace')?.checked === true,
       maxIterations,
       reviewImages: $('generation-review-images').checked,
       reviewVideos: $('generation-review').checked,
@@ -631,6 +632,7 @@ export function setupNativeWorkflows(options) {
         $('generation-enabled').checked = config.enabled;
         $('generation-auto').checked = config.autoAllow;
         $('generation-auto-video').checked = config.autoAllowVideos !== false;
+        if ($('generation-confirm-replace')) $('generation-confirm-replace').checked = config.confirmReplacements === true;
         $('generation-review-images').checked = config.reviewImages === true;
         $('generation-review').checked = config.reviewVideos === true;
         unlimited = config.maxIterations === 10000;

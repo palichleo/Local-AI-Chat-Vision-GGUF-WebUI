@@ -2,7 +2,7 @@
   "create_image": {
     "output": "image",
     "summary": "Create a new image from a description, or modify an image.",
-    "guidance": "Use only when the user asks for an image to be produced or changed; writing or improving a prompt alone does not mean generating. The image model only sees the images passed in source and reference: an image that is only described in the prompt is not used.",
+    "guidance": "Use only when the user asks for an image to be produced or changed (not the character to put in a video: replace_character makes it); writing or improving a prompt alone does not mean generating. The image model only sees the images passed in source and reference: an image that is only described in the prompt is not used.",
     "prompt": "The whole image, written for an image model that knows nothing of this conversation: three to six sentences in English. Say the subject with its concrete look (age, expression, pose, clothes, colours, materials), the place and what is behind, the framing (how close, from which angle, what is in the foreground), the light and the colours, and the kind of picture (photo with its lens and film look, illustration, painting, 3D render). Text to write in the image goes in quotes, in the language asked. Only concrete, visible things: a word like \"beautiful\" or \"high quality\" alone says nothing. Keep everything the user asked for.",
     "roles": {
       "source": { "media": ["image"], "description": "Image to modify. Omit to create a new image." },
@@ -51,8 +51,16 @@
   "replace_character": {
     "output": "video",
     "summary": "Replace a person of an existing video with the character of an image: the new video keeps the motion, the framing, the scene and the sound of the source video.",
-    "guidance": "Use when the user gives a video and the image of a character and wants that character to play in the video in place of someone (\"remplace la fille par ce personnage\", \"mets-le à sa place\"). Not to create a video from a description (create_video) nor to continue one (extend_video). Call it at once, without asking the user anything first: the application then writes the final prompt itself from the video and the image, and shows the user a window with the video, the character and that prompt, where they confirm or cancel. Nothing is generated before they confirm, so never say the video is made before the tool result says so. The new video lasts as long as its source, up to ten seconds, and keeps its format.",
-    "prompt": "One or two sentences in English saying what the user asked beyond the replacement itself (a detail to keep, a change of clothes), or just who replaces whom. The application rewrites the prompt from the pictures: do not describe the scene from memory.",
+    "guidance": "Use when the user gives a video and wants a character in it in place of someone (\"remplace le pingouin par un joueur de volley\", \"mets la femme de cette image à sa place\"). Call it at once, without asking the user anything first. If the user gave an image of the character, pass it in reference. If not, never make one with create_image: describe the character in character, and the application makes its image, shows it to the user to keep or redo, then runs the replacement. The character takes the place, the size and the moves of the one replaced: it cannot be drawn bigger, say so if asked. To change a replacement already made, call this tool again with the same source (the video followed, not the result) and the same reference, with the change in prompt; extend_video only continues a video in time. Not to create a video from a description (create_video). The new video lasts as long as its source, up to ten seconds, and keeps its format.",
+    "prompt": "One or two sentences in English: who replaces whom, and what the user asked beyond the replacement itself (a detail to keep, a change). The application writes the full prompt from the pictures.",
+    "arguments": {
+      "character": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 600,
+        "description": "Only when there is no image of the character: who to draw, in English, as they look (kind, age, hair, clothes with their colours), e.g. a male volleyball player with short dark hair, a blue jersey and white shorts. The application makes the image, the user checks it."
+      }
+    },
     "roles": {
       "source": {
         "media": ["video"],
@@ -61,8 +69,7 @@
       },
       "reference": {
         "media": ["image"],
-        "required": true,
-        "description": "Image of the character who takes that person’s place, kept as they look."
+        "description": "Image of the character who takes that person’s place, kept as they look. Leave it out and use character when the user has no image of them."
       }
     }
   },

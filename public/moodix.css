@@ -1690,6 +1690,14 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
     padding: 9px;
   }
 }
+/* The check of a character Moodix AI made: the question, then Annuler, Autre image, OK. */
+.studio-check-question {
+  align-self: center;
+  margin-right: 4px;
+  color: var(--soft);
+  font-size: 13px;
+  font-weight: 600;
+}
 /* Who is who, for a character put in a video: two short fields, one under the other (side by
    side they were 94 px wide in a 1280 px window: « girl, handkerchief » was cut). */
 .studio-who {

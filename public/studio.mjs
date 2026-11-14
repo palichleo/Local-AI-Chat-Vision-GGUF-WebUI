@@ -31,7 +31,13 @@ const MODES = [
   },
   { id: 'audio', verb: 'create_audio', label: 'Son', icon: 'wave', output: 'Sons', none: 'Aucun son pour l’instant' },
 ];
-const MODE_OF_VERB = { create_image: 'image', create_video: 'video', extend_video: 'video', create_audio: 'audio' };
+const MODE_OF_VERB = {
+  create_image: 'image',
+  create_video: 'video',
+  extend_video: 'video',
+  replace_character: 'video',
+  create_audio: 'audio',
+};
 const ROLES = {
   source: 'Image à modifier',
   start_image: 'Image de début',
@@ -218,6 +224,7 @@ export function setupStudio({
     watching = null, // follows the size of the stage
     live = null, // { frame, preview } : the picture so far, in the frame now on the page
     proposal = null, // a proposal of Moodix AI waiting for « Générer »
+    checking = null, // { record, resolve }: the character Moodix AI made, waiting for the user
     ai = null, // { stopped, active, touched } while the pointer sets the Studio
     seenConversation, // the conversation the creations were read for
     runsFor, // the place (conversation, or the former Studio) they were read from
@@ -1974,6 +1981,8 @@ export function setupStudio({
   }
   async function generate() {
     if (working) return;
+    // The character being checked: the key that generates keeps it.
+    if (checking) return checking.resolve('ok');
     if (answering()) return approve();
     const reason = blocked() || current()?.unavailable;
     if (reason) return notice(reason);
@@ -2327,12 +2336,17 @@ export function setupStudio({
     const inputs = {};
     references.forEach((ref, index) => {
       const resource = ref.resource_id ? assets.resource?.(ref.resource_id) : null,
-        output = ref.output_id ? runs.find(item => item.id === ref.output_id)?.outputs?.[ref.output_index ?? 0] : null,
-        role = ref.role in ROLES ? ref.role : ref.role === 'msr_image' ? 'reference' : ref.role;
+        record = ref.output_id ? runs.find(item => item.id === ref.output_id) : null,
+        output = record?.outputs?.[ref.output_index ?? 0] ?? null,
+        // The role as the verb names it (a video to follow is its « source »), else the slot's.
+        role = ref.as ?? (ref.role in ROLES ? ref.role : ref.role === 'msr_image' ? 'reference' : ref.role),
+        width = resource?.width ?? output?.width ?? record?.parameters?.width,
+        height = resource?.height ?? output?.height ?? record?.parameters?.height;
       (inputs[role] ??= []).push({
         source: ref.resource_id ? { resource: ref.resource_id } : ref.output_id ? { output: ref.output_id } : null,
         preview: resource?.previewUrl || resource?.originalUrl || output?.thumbUrl || output?.originalUrl || '',
         name: ref.label || ref.roleLabel || ROLES[role] || 'Entrée',
+        ...(width > 0 && height > 0 ? { width, height } : {}),
         ref: index,
         role,
       });
@@ -2454,8 +2468,46 @@ export function setupStudio({
     giveBackSeed(current);
     current.resolve('once');
   }
+  /**
+   * The image of a character Moodix AI made to put in a video, shown to the user before the
+   * video is made: « OK » keeps it (the replacement runs at once), « Autre image » has another
+   * made from the prompt of the screen (changed or not), « Annuler » stops everything. Resolves
+   * { decision: 'ok' | 'again' | 'cancel', prompt }; rejects when the turn is stopped.
+   */
+  function checkCharacter(record, signal) {
+    return new Promise((resolve, reject) => {
+      const abort = () => {
+        checking = null;
+        render();
+        reject(signal.reason || new DOMException('Annulé', 'AbortError'));
+      };
+      checking = {
+        record,
+        resolve: decision => {
+          signal?.removeEventListener('abort', abort);
+          const prompt = drafts.image.prompt.trim();
+          checking = null;
+          render();
+          resolve({ decision, prompt });
+        },
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      legacy = false;
+      failure = '';
+      if (mode !== 'image') setMode('image');
+      kept.image = runs.find(item => item.id === record.id) ?? record;
+      void reveal();
+      render();
+      $('live-status') &&
+        ($('live-status').textContent = 'Image du personnage à vérifier : OK, autre image ou annuler.');
+    });
+  }
   /** The proposal is declined: from its « Annuler », or by a new message in the chat. */
   function decline() {
+    if (checking) {
+      checking.resolve('cancel');
+      return true;
+    }
     if (!proposal || working) return false;
     const current = proposal;
     proposal = null;
@@ -3150,6 +3202,19 @@ export function setupStudio({
     // « Agent » and « Générer » (and what goes with it) together at the right: they wrap as one.
     const group = node('div', 'studio-go-group');
     group.append(agent, go);
+    // The character Moodix AI made, on the screen: kept, made again, or everything stopped.
+    if (checking && mode === 'image' && !working) {
+      label.textContent = 'OK · Remplacer';
+      key.textContent = MODIFIER + ' ↵';
+      go.title = 'Garder ce personnage : le remplacement se lance · ' + MODIFIER + ' + Entrée';
+      go.disabled = false;
+      const again = button('secondary studio-again', 'Autre image', () => checking.resolve('again'), 'dice');
+      again.title = 'Faire une autre image du personnage, avec le prompt ci-contre';
+      const stop = button('secondary studio-decline', 'Annuler', () => checking.resolve('cancel'));
+      stop.title = 'Arrêter le remplacement';
+      const question = node('span', 'studio-check-question', 'Ce personnage vous convient ?');
+      group.replaceChildren(question, stop, again, go);
+    }
     if (answering()) {
       const no = button('secondary studio-decline', 'Annuler', () => decline());
       no.title = 'Refuser cette proposition de Moodix AI';
@@ -3365,8 +3430,21 @@ export function setupStudio({
     takeOver,
     conversationChanged,
     invalidate,
-    /** Whether a proposal of Moodix AI waits for « Générer ». */
-    proposing: () => Boolean(proposal),
+    checkCharacter,
+    /**
+     * The size of the image of a character for a video of `size` (its format, about as many
+     * points as the image workflow makes by itself), or null when that workflow sets its own.
+     */
+    imageSize: size => {
+      const workflow = offered('create_image').find(item => !item.unavailable);
+      const format = size?.width > 0 && size?.height > 0 ? formatOf(size.width, size.height) : null;
+      if (!workflow?.direct || !workflow.limits || !format) return null;
+      const pixels = (workflow.size?.width ?? 1024) * (workflow.size?.height ?? 1024);
+      const { nearest } = sizeChoices(workflow, format.id, pixels);
+      return nearest ? { width: nearest.width, height: nearest.height } : null;
+    },
+    /** Whether a proposal of Moodix AI waits for « Générer », or a character for its check. */
+    proposing: () => Boolean(proposal || checking),
     /** The verbs the Studio answers for Moodix AI. */
     accepts: name => name in MODE_OF_VERB,
   };

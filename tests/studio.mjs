@@ -2396,3 +2396,139 @@ test('a proposal of Moodix AI switches the LoRAs of the workflow as it has them;
     restore();
   }
 });
+
+test('a replacement proposed in the chat is set by the pointer: the model, the video, the character, who is who', async () => {
+  const scail = {
+      id: 's',
+      name: 'SCAIL-2',
+      verb: 'replace_character',
+      follows: true,
+      seeded: true,
+      roles: {
+        source: { count: 1, media: ['video'], many: false, required: true },
+        reference: { count: 1, media: ['image'], many: false, required: true },
+      },
+      settings: [
+        { key: 'subject', type: 'string', maxLength: 200, default: 'person' },
+        { key: 'reference_subject', type: 'string', maxLength: 200, default: 'person' },
+      ],
+    },
+    clip = { id: 'v', name: 'Clip', verb: 'create_video', limits: sizes, size: { width: 768, height: 448 }, settings: [], roles: {} },
+    runs = [
+      {
+        id: 'penguin',
+        mediaType: 'video',
+        prompt: 'un pingouin vole',
+        outputs: [{ originalUrl: '/penguin.mp4', thumbUrl: '/penguin.jpg', width: 672, height: 672 }],
+      },
+      { id: 'player', prompt: 'un joueur', outputs: [{ originalUrl: '/player.png', thumbUrl: '/player.jpg' }] },
+    ];
+  const prompt = 'A volleyball player flies over the ice.';
+  const request = {
+    requestId: 'q',
+    approvalToken: 't',
+    tool: 'replace_character',
+    mediaType: 'video',
+    autoAllow: true,
+    workflowName: 'SCAIL-2',
+    call: { id: 'call', type: 'function', function: { name: 'replace_character', arguments: '{}' } },
+    plan: {
+      prompt,
+      parameters: { prompt, width: 672, height: 672, frames: 121, fps: 24, seed: 3, subject: 'penguin', reference_subject: 'man' },
+      editable: {
+        prompt: true,
+        parameters: [
+          { key: 'subject', type: 'string', value: 'penguin' },
+          { key: 'reference_subject', type: 'string', value: 'man' },
+          { key: 'seed', type: 'integer', value: 3 },
+          { key: 'width', type: 'integer', value: 672, locked: 'La vidéo prend la forme de celle qu’elle suit.' },
+        ],
+        references: [[], []],
+      },
+      // The slots' own roles, and the roles the verb gives them.
+      references: [
+        { input: 'video', role: 'driving_video', as: 'source', output_id: 'penguin', roleLabel: 'Vidéo à suivre' },
+        { input: 'character', role: 'reference_image', as: 'reference', output_id: 'player', roleLabel: 'Personnage' },
+      ],
+    },
+  };
+  const studio = await studioPage({ create_video: [clip], replace_character: [scail] }, {}, { runs });
+  const { body, restore } = studio;
+  try {
+    assert.equal(studio.studio.accepts('replace_character'), true);
+    const answer = studio.studio.propose(request, new AbortController().signal);
+    // Allowed in the settings: the pointer sets it, then starts it.
+    assert.equal(await answer, 'once');
+    assert.equal(body.dataset.mode, 'video');
+    const pick = body.find('studio-model-pick')[0];
+    assert.equal(pick.value, 's');
+    // The video in its slot, the character in theirs, each with its picture.
+    const tiles = body.find('studio-slot');
+    assert.deepEqual(
+      tiles.map(tile => tile.children[0].children[0]?.src),
+      ['/penguin.jpg', '/player.jpg'],
+    );
+    assert.deepEqual(
+      body.find('studio-who')[0].children.map(field => field.children[1].value),
+      ['penguin', 'man'],
+    );
+    assert.equal(studio.prompt().value, prompt);
+    // The screen has the shape of the video followed.
+    assert.equal(body.find('studio-readout')[0]?.textContent ?? '1:1', '1:1');
+  } finally {
+    restore();
+  }
+});
+
+test('the character Moodix AI made is checked: OK keeps it, « Autre image » has another made, « Annuler » stops', async () => {
+  const krea = {
+      id: 'k',
+      name: 'Krea 2',
+      verb: 'create_image',
+      direct: true,
+      limits: sizes,
+      size: { width: 1024, height: 1024 },
+      settings: [],
+      roles: {},
+    },
+    runs = [{ id: 'made', prompt: 'A full-length photo of a player', outputs: [{ originalUrl: '/made.png', thumbUrl: '/made.jpg' }] }];
+  const studio = await studioPage({ create_image: [krea] }, {}, { runs });
+  const { body, revealed, restore } = studio;
+  try {
+    // The image of a character for a video of 1280 x 720: its format, about as many points.
+    assert.deepEqual(studio.studio.imageSize({ width: 1280, height: 720 }), { width: 1344, height: 768 });
+    assert.equal(studio.studio.imageSize(null), null);
+    let check = studio.studio.checkCharacter(runs[0], new AbortController().signal);
+    await settle();
+    assert.equal(body.dataset.mode, 'image');
+    assert.ok(revealed.length >= 1, 'the Studio comes on screen');
+    assert.equal(studio.studio.proposing(), true);
+    assert.equal(body.find('studio-check-question')[0].textContent, 'Ce personnage vous convient ?');
+    assert.equal(body.find('studio-go-label')[0].textContent, 'OK · Remplacer');
+    // The prompt of the screen, changed or not, is the one of the next image.
+    studio.prompt().value = 'A full-length photo of a player in red';
+    studio.prompt().oninput();
+    body.find('studio-again')[0].onclick();
+    assert.deepEqual(await check, { decision: 'again', prompt: 'A full-length photo of a player in red' });
+    assert.equal(body.find('studio-check-question').length, 0);
+    check = studio.studio.checkCharacter(runs[0], new AbortController().signal);
+    await settle();
+    await body.find('studio-go')[0].onclick();
+    assert.equal((await check).decision, 'ok');
+    check = studio.studio.checkCharacter(runs[0], new AbortController().signal);
+    await settle();
+    body.find('studio-decline')[0].onclick();
+    assert.equal((await check).decision, 'cancel');
+    // A new message in the chat cancels it too; a stopped turn stops it.
+    check = studio.studio.checkCharacter(runs[0], new AbortController().signal);
+    assert.equal(studio.studio.decline(), true);
+    assert.equal((await check).decision, 'cancel');
+    const stopped = new AbortController();
+    check = studio.studio.checkCharacter(runs[0], stopped.signal);
+    stopped.abort();
+    await assert.rejects(check);
+    assert.equal(studio.studio.proposing(), false);
+  } finally {
+    restore();
+  }
+});

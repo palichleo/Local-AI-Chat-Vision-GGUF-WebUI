@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sceneMessages, scenePictures, withScenePrompt } from '../lib/scene-prompt.mjs';
+import {
+  askedSince,
+  characterPrompt,
+  sceneMessages,
+  scenePictures,
+  withScenePrompt,
+} from '../lib/scene-prompt.mjs';
 
 const frame = name => ({ time: 0, url: 'data:image/jpeg;base64,' + name });
 const library = {
@@ -30,7 +36,7 @@ test('the prompt of a character put in a video is written from the frames of the
     character: frame('p').url,
   });
   const messages = sceneMessages({ ...pictures, asked: 'remplace la fille', draft: args.prompt });
-  assert.match(messages[0].content, /Never describe the place, the pose or the background of that image/);
+  assert.match(messages[0].content, /Never\s+describe the place, the pose or the background of the image of the character/);
   const parts = messages[1].content;
   assert.deepEqual(
     parts.filter(part => part.type === 'image_url').map(part => part.image_url.url),
@@ -116,4 +122,108 @@ test('the pictures are found wherever they come from: the library, the conversat
   // A frame of a video of the library given as the character: that frame.
   const framed = await scenePictures({ ...args, reference: { resource: 'clip', frame: 1 } }, { resources: library });
   assert.equal(framed.character, frame('b').url);
+});
+
+test('a character with no image yet: the prompt from the frames and the description, the image prompt alone on grey', async () => {
+  // The video's frames only: the character is in words.
+  const pictures = await scenePictures(
+    { source: { resource: 'clip' } },
+    { resources: library },
+    { described: 'a volleyball player' },
+  );
+  assert.deepEqual(pictures, { frames: ['a', 'b', 'c'].map(name => frame(name).url), character: null });
+  const parts = sceneMessages({ ...pictures, described: 'a male volleyball player, blue jersey' })[1].content;
+  assert.equal(parts.filter(part => part.type === 'image_url').length, 3);
+  assert.match(
+    parts.find(part => /described/.test(part.text ?? '')).text,
+    /The character, described \(no image yet\): a male volleyball player, blue jersey/,
+  );
+  const seen = [];
+  const result = await withScenePrompt(
+    { prompt: 'x', source: { resource: 'clip' } },
+    { resources: library, engine, described: 'a volleyball player', fetchImpl: answering(written, seen) },
+  );
+  assert.equal(result.prompt, written);
+  // The image of the character: alone, whole, large, on a plain background (what else it holds
+  // goes into the video too).
+  const image = characterPrompt('a male volleyball player with short dark hair, a blue jersey and white shorts.');
+  assert.match(image, /^A full-length photo of a male volleyball player .*white shorts, alone,/);
+  assert.match(image, /filling the height of the frame/);
+  assert.match(image, /Plain light grey studio background with nothing else in it/);
+});
+
+test('a video made earlier is seen through frames read from its file, else its small picture', async () => {
+  const conversationId = '11111111-1111-4111-8111-111111111111',
+    run = '22222222-2222-4222-8222-222222222222',
+    thumbnails = { has: () => true, read: async () => Buffer.from('small') },
+    asked = [];
+  const outputFrames = async (conversation, id, index) => {
+    asked.push([conversation, id, index]);
+    return id === run ? { urls: ['f1', 'f2', 'f3', 'f4'], video: true } : { urls: [], video: false };
+  };
+  const pictures = await scenePictures(
+    { source: { output: run }, reference: { resource: 'person' } },
+    { resources: library, thumbnails, conversationId, outputFrames },
+  );
+  assert.deepEqual(pictures.frames, ['f1', 'f2', 'f3']);
+  assert.deepEqual(asked, [[conversationId, run, 0]]);
+  // An image made earlier given as the video: not a video to follow.
+  assert.equal(
+    await scenePictures(
+      { source: { output: 'other' }, reference: { resource: 'person' } },
+      { resources: library, thumbnails, conversationId, outputFrames },
+    ),
+    null,
+  );
+  // Frames that cannot be read: the small picture kept of it.
+  const small = await scenePictures(
+    { source: { output: run }, reference: { resource: 'person' } },
+    { resources: library, thumbnails, conversationId, outputFrames: async () => null },
+  );
+  assert.deepEqual(small.frames, ['data:image/jpeg;base64,' + Buffer.from('small').toString('base64')]);
+});
+
+test('why the prompt was not written is told', async () => {
+  const reasons = [];
+  const onSkip = why => reasons.push(why);
+  await withScenePrompt(args, { resources: library, engine: { ...engine, vision: false }, onSkip });
+  await withScenePrompt({ ...args, source: { resource: 'gone' } }, { resources: library, engine, onSkip });
+  await withScenePrompt(args, { resources: library, engine, onSkip, fetchImpl: async () => ({ ok: false, status: 503 }) });
+  await withScenePrompt(args, { resources: library, engine, onSkip, fetchImpl: answering('Short.') });
+  const late = Object.assign(Error('late'), { name: 'TimeoutError' });
+  await withScenePrompt(args, {
+    resources: library,
+    engine,
+    onSkip,
+    timeoutMs: 5000,
+    fetchImpl: async () => {
+      throw late;
+    },
+  });
+  assert.deepEqual(reasons, [
+    'le modèle de chat ne voit pas les images',
+    'les images de la vidéo ou du personnage sont introuvables',
+    'le modèle de chat a refusé la demande (503)',
+    'le modèle de chat a répondu trop court',
+    'pas de réponse en 5 s',
+  ]);
+});
+
+test('what the user asked about a replacement: their words since the last one made', () => {
+  const made = (id, status = 'success') => [
+    { role: 'assistant', content: '', tool_calls: [{ id, function: { name: 'replace_character', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: id, content: JSON.stringify({ status }) },
+  ];
+  assert.equal(askedSince([{ role: 'user', content: 'remplace le pingouin' }]), 'remplace le pingouin');
+  const messages = [
+    { role: 'user', content: 'remplace le pingouin' },
+    ...made('a'),
+    { role: 'user', content: 'on voit encore un bout du terrain' },
+    { role: 'user', internal: true, content: 'shown pictures' },
+    ...made('b', 'cancelled'),
+    { role: 'user', content: 'refais-le' },
+  ];
+  // A correction said in two messages; what came before the last replacement made is done.
+  assert.equal(askedSince(messages), 'on voit encore un bout du terrain\nrefais-le');
+  assert.equal(askedSince(undefined), '');
 });

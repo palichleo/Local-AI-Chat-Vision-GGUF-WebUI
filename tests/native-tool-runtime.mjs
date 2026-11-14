@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ToolRuntime } from '../lib/tool-runtime.mjs';
+import { runsByItself, ToolRuntime } from '../lib/tool-runtime.mjs';
 const id = 'a1111111-1111-4111-8111-111111111111';
 test('native immutable job keeps random seed through authorization and GPU handoff', async () => {
   const events = [];
@@ -716,4 +716,16 @@ test('a sound is always confirmed with its token, runs as audio and is saved as 
   assert.equal(ran.options?.mediaType, 'audio');
   assert.equal(saved.mediaType, 'audio');
   assert.equal(saved.outputs[0].filename ?? saved.outputs[0].source?.filename, 'song.wav');
+});
+
+test('a character replaced in a video runs by itself like the other videos, unless the user asked to confirm each', () => {
+  const settings = { autoAllow: true, autoAllowVideos: true };
+  assert.equal(runsByItself(settings, 'video', 'replace_character'), true);
+  assert.equal(runsByItself({ ...settings, confirmReplacements: true }, 'video', 'replace_character'), false);
+  // The option is the replacement's own: the other videos follow theirs.
+  assert.equal(runsByItself({ ...settings, confirmReplacements: true }, 'video', 'create_video'), true);
+  assert.equal(runsByItself({ ...settings, autoAllowVideos: false }, 'video', 'replace_character'), false);
+  assert.equal(runsByItself(settings, 'image', 'create_image'), true);
+  assert.equal(runsByItself({ ...settings, autoAllow: false }, 'image', 'create_image'), false);
+  assert.equal(runsByItself(settings, 'audio', 'create_audio'), false);
 });

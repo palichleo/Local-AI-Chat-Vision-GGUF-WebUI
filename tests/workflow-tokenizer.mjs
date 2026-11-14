@@ -209,6 +209,7 @@ test('the former application-wide tokenizer moves into existing workflows and le
   assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'generation.json'), 'utf8')), {
     ...settings,
     autoAllowVideos: true,
+    confirmReplacements: false,
     reviewImages: false,
     modelsDir: '',
     textEncoderRoot: '',

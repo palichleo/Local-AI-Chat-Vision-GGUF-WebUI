@@ -6,6 +6,24 @@ import { compressImage } from './images.mjs';
  * Chat-side generation flow: asks for approval, follows the job, prepares compressed
  * copies for the vision model and keeps the Output gallery in sync.
  */
+/**
+ * For a character put in a video: { source, reference } as replace_character takes them again
+ * (the video followed and the character, from the inputs the result was made with), else null.
+ */
+export function replacedAgain(request, record) {
+  if ((request?.tool || request?.call?.function?.name) !== 'replace_character') return null;
+  const as = { driving_video: 'source', reference_image: 'reference' },
+    found = {};
+  for (const ref of record?.parameters?.references ?? []) {
+    const role = ref.as ?? as[ref.role];
+    if (!role || found[role]) continue;
+    if (ref.output_id) found[role] = { output: ref.output_id };
+    else if (ref.resource_id) found[role] = { resource: ref.resource_id };
+    else if (Number.isInteger(ref.image)) found[role] = { image: ref.image };
+  }
+  return found.source && found.reference ? found : null;
+}
+
 export function setupGenerationRuntime({
   api,
   state,
@@ -148,9 +166,7 @@ export function setupGenerationRuntime({
     // marks a video so only when the user allowed videos); a sound always asks.
     if (request.autoAllow) return confirmed ? 'once' : undefined;
     const title = () =>
-      ($('tool-title').textContent = request.explicit
-        ? 'Remplacer un personnage · Confirmer ?'
-        : video
+      ($('tool-title').textContent = video
         ? request.plan?.stage === 'draft'
           ? 'Brouillon vidéo · Confirmer ?'
           : 'Vidéo finale · Confirmer ?'
@@ -164,7 +180,7 @@ export function setupGenerationRuntime({
     $('tool-deny').textContent = confirmed ? 'Annuler' : 'Refuser';
     $('tool-once').textContent = confirmed ? 'Confirmer et générer' : 'Cette fois';
     $('tool-once').title =
-      video && confirmDelay > 0 && !request.explicit
+      video && confirmDelay > 0
         ? `Se lance seul après ${Math.round(confirmDelay / 1000)} s, sauf si vous touchez à la fenêtre`
         : '';
     let form = null,
@@ -254,8 +270,7 @@ export function setupGenerationRuntime({
       for (const [id, action] of buttons) $(id).onclick = action;
       $('tool-dialog').addEventListener('cancel', cancel);
       signal.addEventListener('abort', abort, { once: true });
-      // A proposal agreed on in this window (a character put in a video) waits for the click.
-      if (video && confirmDelay > 0 && !request.explicit) {
+      if (video && confirmDelay > 0) {
         $('tool-once').style?.setProperty('--countdown', confirmDelay + 'ms');
         $('tool-once').classList?.add('is-counting');
         $('tool-dialog').addEventListener('pointerdown', stopCountdown, true);
@@ -417,7 +432,9 @@ export function setupGenerationRuntime({
       const showGallery = () =>
         renderGallery(record.conversationId).catch(error => notice(`Galerie indisponible : ${error.message}`));
       await showGallery();
-      // The Studio shows its creation on its own screen: the files panel stays as it is.
+      // A character put in a video: what to call again to change it (the video followed, not
+      // the result; the same character), said with the result for the next request.
+      const again = replacedAgain(request, record);
       if (!studio) onOutput();
       if (job.warning) notice(job.warning);
       let images = [],
@@ -529,13 +546,17 @@ export function setupGenerationRuntime({
                   'Each attached image is a storyboard of one output: frames read left to right then top to bottom, each stamped with its order and time in seconds. It shows the progression of the clip, not continuous motion; no audio.',
               }
             : {}),
+          ...(again ? { replace_again: again } : {}),
           reference_count: record.parameters?.reference_count ?? null,
           reference_capacity: record.parameters?.reference_capacity ?? null,
           reference_mode: record.parameters?.reference_mode || 'unknown',
           outputs: record.outputs.map(o => o.source),
           ...(error ? { warning: error } : {}),
-          note:
-            record.mediaType === 'audio'
+          note: again
+            ? 'Personnage remplacé dans la vidéo, affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description. ' +
+              'Pour la changer ensuite (ce qui se voit, un détail, le personnage), rappelle replace_character avec replace_again et le changement dans prompt ; pour un autre personnage sans image, character à la place de reference. ' +
+              'extend_video ne fait que la prolonger dans le temps. La taille et la place du personnage sont celles de ce qu’il remplace : un prompt ne les change pas, dis-le si on te le demande.'
+            : record.mediaType === 'audio'
               ? 'Son généré et proposé à l’écoute de l’utilisateur. Tu ne peux pas l’entendre : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque son demande la confirmation de l’utilisateur. Sinon termine sans texte.'
               : !(record.mediaType === 'video' ? review : reviewImages)
                 ? record.mediaType === 'video'

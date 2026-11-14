@@ -857,3 +857,19 @@ test('a creation of the Studio makes no copy for the model and downloads nothing
     },
     { isShown: () => false },
   ));
+
+test('a replacement tells the model what to call again to change it: the video followed and the character', async () => {
+  const { replacedAgain } = await import('../public/generation-runtime.mjs');
+  const request = { tool: 'replace_character' },
+    record = {
+      parameters: {
+        references: [
+          { input: 'video', role: 'driving_video', output_id: 'penguin' },
+          { input: 'character', role: 'reference_image', resource_id: 'player' },
+        ],
+      },
+    };
+  assert.deepEqual(replacedAgain(request, record), { source: { output: 'penguin' }, reference: { resource: 'player' } });
+  assert.equal(replacedAgain({ tool: 'create_video' }, record), null);
+  assert.equal(replacedAgain(request, { parameters: { references: [record.parameters.references[0]] } }), null);
+});
