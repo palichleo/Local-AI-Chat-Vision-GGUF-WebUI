@@ -27,6 +27,16 @@ RESERVE = 12 * GiB  # never let arenas push free RAM below this
 # nothing (« CUDA error: out of memory » at the first copy), 14.5 GiB ran well.
 PIN_SHARE = 0.45
 MIN_PINNED = 1024**2  # nor a buffer this small
+# What the weights a model copies to the GPU at every step leave to the system and to the other
+# programs when they are read into locked RAM (Residency.partial): a quarter of the RAM, 4 GiB
+# at least. Beyond that the other programs give way: Windows moves their idle memory to its
+# paging file while this part is read, and they find it again a moment after they are used.
+# The user's choice (14/11): the application comes first. Unlocked for want of 0.2 GiB beside a
+# browser and a chat window, that part made every step take twice as long.
+OTHERS_SHARE = 0.25
+OTHERS_FLOOR = 4 * GiB
+# A part cut short for want of RAM is worth building from this size on.
+MIN_PART = GiB
 PAGE = 4096  # where a partial arena's tensors start (see Residency.partial, _pin)
 CHUNK = 64 * 1024**2
 
@@ -60,8 +70,12 @@ class Arena:
         self.size = data.numel()
         # Open stores reading from this arena: it is not released under them (see Residency.hold).
         self.users = 0
-        # The tensors held when the arena is a part of the file only (see Residency.partial).
+        # The tensors held when the arena is a part of the file only (see Residency.partial); what
+        # was asked for when it was built, and the bytes all of that takes: more than `size` when
+        # RAM allowed a part of it only.
         self.keys = None
+        self.asked = None
+        self.whole = self.size
 
     def tensor(self, key):
         import torch
@@ -156,6 +170,10 @@ class Residency:
 
         `spare` names keys to hold as well when the arena has to be built: what the next
         generations may need beyond `keys`, so that it is not built again for a few megabytes.
+
+        When RAM allows a part of them only (see _budget), the arena holds the first ones that
+        fit, those asked for before those to spare: their copies are fast, the others are read
+        from the mapping. It is reused as it is until RAM allows the rest.
         """
         import time
         import torch
@@ -166,10 +184,16 @@ class Residency:
         wanted = set(keys)
         with self.lock:
             found = self.arenas.get(name)
-            if found and found.stamp == stamp and wanted <= found.keys:
-                self.arenas.move_to_end(name)
-                self.stats['hits'] += 1
-                return found
+            if found and found.stamp == stamp:
+                # Cut short for want of RAM: kept until the rest would fit (half a gigabyte to
+                # spare, so that it is not built again and again around the limit).
+                short = found.size < found.whole and wanted <= found.asked
+                room = self._budget(reserve)
+                waits = short and (room is None or room + found.size < found.whole + GiB // 2)
+                if wanted <= found.keys or waits:
+                    self.arenas.move_to_end(name)
+                    self.stats['hits'] += 1
+                    return found
             if found:
                 self._discard(self.arenas.pop(name))
             first = set(keys)
@@ -188,17 +212,30 @@ class Residency:
                 packed[key] = dict(header[key], data_offsets=[size, size + end - start])
                 size += end - start
             cuts.append(size)
-            if not size or not self._make_room(size, reserve, True):
+            whole, claimed = size, self._claim(size, reserve) if size else 0
+            if claimed < size:
+                # The first tensors that fit: asked for now before held to spare, in file order.
+                packed = {key: entry for key, entry in packed.items() if entry['data_offsets'][1] <= claimed}
+                size = max((entry['data_offsets'][1] for entry in packed.values()), default=0)
+                cuts = [entry['data_offsets'][0] for entry in packed.values()] + [size]
+                if size < MIN_PART:
+                    size = 0
+            if not size:
                 self.stats['skipped'] += 1
                 return None
             started = time.perf_counter()
-            # Starting on a page boundary, so that its tensors do too (torch aligns on 64 bytes).
-            block = torch.empty(size + PAGE, dtype=torch.uint8)
+            try:
+                # Starting on a page boundary, so that its tensors do too (torch aligns on 64 bytes).
+                block = torch.empty(size + PAGE, dtype=torch.uint8)
+            except (MemoryError, RuntimeError):
+                # The system refused the memory itself (its paging file is full): as without room.
+                self.stats['skipped'] += 1
+                return None
             skip = -block.data_ptr() % PAGE
             data = block[skip : skip + size]
             view = memoryview(data.numpy())
             with open(path, 'rb', buffering=0) as handle:
-                for _, _, key in ordered:
+                for key in packed:
                     start, end = header[key]['data_offsets']
                     to = packed[key]['data_offsets'][0]
                     handle.seek(base + start)
@@ -209,7 +246,7 @@ class Residency:
                             raise OSError('Unexpected end of ' + path)
                         done += read
             arena = Arena(path, stamp, packed, base, data, self._pin(data, cuts))
-            arena.keys = frozenset(packed)
+            arena.keys, arena.asked, arena.whole = frozenset(packed), frozenset(wanted), whole
             self.arenas[name] = arena
             self.stats['loads'] += 1
             self.stats['load_seconds'] += time.perf_counter() - started
@@ -242,6 +279,31 @@ class Residency:
                 break
             self.arenas.pop(idle).release()
         return psutil.virtual_memory().available - size >= reserve
+
+    def _budget(self, reserve=None):
+        """Bytes a part of a model may take of the RAM now, None when nothing can be measured:
+        what is available above `reserve`, and what the other programs hold beyond the share
+        left to them (OTHERS_SHARE). Nothing is sent away here."""
+        try:
+            import psutil
+        except ImportError:
+            return None
+        reserve = RESERVE if reserve is None else reserve
+        memory = psutil.virtual_memory()
+        # Page-locked arenas are not in the working set the system reports for this process.
+        own = psutil.Process().memory_info().rss + sum(int(arena.pinned) for arena in self.arenas.values())
+        others = max(0, memory.total - memory.available - own)
+        theirs = max(OTHERS_FLOOR, int(memory.total * OTHERS_SHARE))
+        return max(0, memory.available - reserve + max(0, others - theirs))
+
+    def _claim(self, size, reserve=None):
+        """Bytes of a part of `size` bytes that may be read into RAM now: all of them when the
+        machine has them available above `reserve` (idle arenas sent away first, as for a whole
+        file); else what the budget allows, the other programs giving way."""
+        if self._make_room(size, reserve, True):
+            return size
+        room = self._budget(reserve)
+        return min(size, room) if room else 0
 
     @staticmethod
     def _discard(arena):

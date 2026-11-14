@@ -624,6 +624,8 @@ def _generate(job, config, progress, key, holder):
                 gpu_cache_limit_gib=round(budget, 3),
                 pinned_model=stores['model'].pinned,
                 locked_ram_gib=round(locked / 1024**3, 3),
+                # All that the steps copy: more than what is locked when RAM allowed a part only.
+                copied_ram_gib=round(getattr(stores['model'].part, 'whole', 0) / 1024**3, 3),
                 residency=RESIDENCY.summary(),
             )
             progress(stage='video sampled', **cache)

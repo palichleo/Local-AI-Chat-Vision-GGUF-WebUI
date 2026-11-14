@@ -349,6 +349,109 @@ def _safetensors(path, tensors):
     return 8 + len(encoded)
 
 
+class ComesFirstTest(unittest.TestCase):
+    """The weights a model copies at every step are read into locked RAM before the other programs
+    are served, down to the share left to them; and a part of them rather than none."""
+
+    def machine(self, total, available, own):
+        import psutil
+
+        GiB = 1024**3
+        saved = psutil.virtual_memory, psutil.Process
+        psutil.virtual_memory = lambda: SimpleNamespace(total=int(total * GiB), available=int(available * GiB))
+        psutil.Process = lambda: SimpleNamespace(memory_info=lambda: SimpleNamespace(rss=int(own * GiB)))
+        self.addCleanup(lambda: setattr(psutil, 'virtual_memory', saved[0]))
+        self.addCleanup(lambda: setattr(psutil, 'Process', saved[1]))
+
+    def test_what_the_other_programs_hold_beyond_their_share_counts_as_room(self):
+        try:
+            import psutil  # noqa: F401
+        except ImportError:
+            self.skipTest('psutil is required')
+        from runner.models import residency
+
+        GiB = 1024**3
+        part, reserve = 11.4 * GiB, 4 * GiB
+        claimed = lambda: round(residency.Residency()._claim(part, reserve) / GiB, 1)  # noqa: E731
+        # 32 GiB, a browser and a chat window (13.9 GiB): 0.2 GiB short of the reserve, the part
+        # was left unlocked. They give way down to a quarter of the RAM.
+        self.machine(31.8, 14.9, 3)
+        self.assertFalse(residency.Residency()._make_room(part, reserve, True))
+        self.assertEqual(claimed(), 11.4)
+        # Another program holding 23 GiB: still all of it, taken from that program.
+        self.machine(31.8, 6, 3)
+        self.assertEqual(claimed(), 11.4)
+        # 16 GiB, where nothing can be asked of the others: the part that leaves the reserve free.
+        self.machine(15.9, 10, 3)
+        self.assertEqual(claimed(), 6.0)
+        # 8 GiB: nothing, as before. 64 GiB: all of it, without asking anything of anyone.
+        self.machine(7.9, 3, 1.4)
+        self.assertEqual(claimed(), 0)
+        self.machine(63.8, 50, 3)
+        self.assertEqual(claimed(), 11.4)
+        # What this process holds in locked RAM is its own, not the others' to give.
+        table = residency.Residency()
+        table.arenas['held'] = SimpleNamespace(pinned=12 * GiB, users=1)
+        self.machine(31.8, 6, 3)
+        self.assertEqual(round(table._budget(reserve) / GiB, 1), 4.9)
+
+    def test_a_part_cut_short_holds_the_first_tensors_and_is_kept_until_the_rest_fits(self):
+        try:
+            import torch
+            import psutil  # noqa: F401
+            from safetensors.torch import save_file
+        except ImportError:
+            self.skipTest('torch, psutil and safetensors are required')
+        from unittest.mock import patch
+
+        from runner.models import residency
+
+        megabyte = 1024**2
+        tensors = {name + '.weight': torch.randint(-127, 128, (megabyte,), dtype=torch.int8) for name in 'abcd'}
+        table = residency.RESIDENCY
+        try:
+            with tempfile.TemporaryDirectory() as folder, patch.object(residency, 'MIN_PART', 1):
+                path = os.path.join(folder, 'model.safetensors')
+                save_file(tensors, path)
+                store = residency.open_store(path, resident=False)
+                asked = ['b.weight', 'c.weight', 'd.weight']
+                # Room for two of the three asked for (and for nothing of what is held to spare).
+                with patch.object(table, '_claim', lambda size, reserve=None: 2 * megabyte + 2 * residency.PAGE):
+                    kept = store.keep(asked, reserve=0, spare=['a.weight'])
+                short = store.part
+                self.assertEqual(short.keys, {'b.weight', 'c.weight'})
+                self.assertEqual((kept, short.asked), (short.size, frozenset(tensors)))
+                self.assertGreater(short.whole, short.size)
+                held = short.data.data_ptr()
+                inside = lambda tensor: held <= tensor.data_ptr() < held + short.size  # noqa: E731
+                self.assertEqual([inside(store.get_tensor(key)) for key in asked], [True, True, False])
+                for key, value in tensors.items():
+                    self.assertTrue(torch.equal(store.get_tensor(key), value), key)
+                # The next video asks the same while RAM is as short: the same part, not built again.
+                loads = table.stats['loads']
+                with patch.object(table, '_budget', lambda reserve=None: 0):
+                    store.keep(asked, reserve=0, spare=['a.weight'])
+                self.assertIs(store.part, short)
+                self.assertEqual((table.stats['loads'], short.users), (loads, 1))
+                # RAM allows the rest: built whole, the short one released.
+                store.keep(asked, reserve=0, spare=['a.weight'])
+                self.assertIsNot(store.part, short)
+                self.assertEqual(store.part.keys, set(tensors))
+                self.assertEqual(store.part.size, store.part.whole)
+                self.assertIsNone(short.data)
+                # Less than a part worth building: none, the file is read through its mapping.
+                store.close()
+                table.clear()
+                store = residency.open_store(path, resident=False)
+                with patch.object(residency, 'MIN_PART', 3 * megabyte):
+                    with patch.object(table, '_claim', lambda size, reserve=None: 2 * megabyte + 2 * residency.PAGE):
+                        self.assertEqual(store.keep(asked, reserve=0), 0)
+                self.assertIsNone(store.part)
+                store.close()
+        finally:
+            table.clear()
+
+
 class MeasureTest(unittest.TestCase):
     def test_the_size_of_a_tensor_comes_from_the_header_of_the_file(self):
         from runner.models import residency
