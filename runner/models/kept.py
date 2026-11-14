@@ -31,9 +31,11 @@ def put(name, value):
 
 
 def only(name):
-    """A generation of `name` starts: what any other pipeline left goes."""
-    for other in [found for found in _kept if found != name]:
+    """A generation of `name` starts: what any other pipeline left goes. True when something did."""
+    others = [found for found in _kept if found != name]
+    for other in others:
         _kept.pop(other).drop()
+    return bool(others)
 
 
 def drop():

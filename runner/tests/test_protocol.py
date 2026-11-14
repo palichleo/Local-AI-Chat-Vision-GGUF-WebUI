@@ -176,8 +176,10 @@ class ProtocolTests(unittest.TestCase):
                 self.assertEqual(dropped, ['ltx25'])
                 held['bytes'] = 3 * 1024**3
                 kept.put('ltx25', model('ltx25', 'a'))
-                kept.only('krea2')
+                self.assertFalse(kept.only('ltx25'))
+                self.assertTrue(kept.only('krea2'))
                 self.assertEqual(dropped, ['ltx25', 'ltx25'])
+                self.assertFalse(kept.only('krea2'))
                 # The application asks (chat model back, stop, close): everything leaves.
                 held['bytes'] = 3 * 1024**3
                 kept.put('ltx25', model('ltx25', 'a'))

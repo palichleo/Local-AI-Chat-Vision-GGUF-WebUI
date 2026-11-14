@@ -87,9 +87,12 @@ def generate(job, config, progress):
     module, config = pipeline(job['pipeline']), validate_config(config)
     journal = Journal(config, job)
     kept = _kept()
-    if kept is not None:
-        # The card is this pipeline's: what another left there for its next generation goes.
-        kept.only(job['pipeline'])
+    if kept is not None and kept.only(job['pipeline']):
+        # The card is this pipeline's: what another left there for its next generation went, and
+        # goes back to the driver. Left in PyTorch's reserve, it was missing from the free
+        # memory a pipeline reads to size the share of its own model.
+        gc.collect()
+        sys.modules['torch'].cuda.empty_cache()
 
     def report(**data):
         # The picture so far is for the page: kilobytes at every step, nothing to diagnose.

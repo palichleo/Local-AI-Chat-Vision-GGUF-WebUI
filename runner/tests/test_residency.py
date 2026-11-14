@@ -159,6 +159,18 @@ class PartialArenaTest(unittest.TestCase):
                 store.close()
                 self.assertIsNone(arena.data)
                 self.assertFalse(arena.pinned)
+                # A store kept from one video to the next, alone to read its part: asked for more,
+                # that part is released before the new one looks for its room in RAM, not after.
+                old, seen = again.part, []
+                real = residency.RESIDENCY._make_room
+                residency.RESIDENCY._make_room = lambda *args: seen.append(old.data is None) or real(*args)
+                try:
+                    again.keep(['first.weight', 'second.weight', 'third.weight'], reserve=0)
+                finally:
+                    del residency.RESIDENCY._make_room
+                self.assertEqual(seen, [True])
+                self.assertEqual(again.part.keys, {'first.weight', 'second.weight', 'third.weight'})
+                self.assertEqual(again.part.users, 1)
                 again.close()
                 self.assertEqual(again.part, None)
                 # A file that is resident whole needs no part of it kept again.

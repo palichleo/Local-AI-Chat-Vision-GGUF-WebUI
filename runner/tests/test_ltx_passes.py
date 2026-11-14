@@ -195,5 +195,56 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(validate.call_count, 5)
 
 
+class KeptModelTests(unittest.TestCase):
+    def test_the_model_left_is_taken_back_for_the_same_shape_only_and_built_anew_when_it_does_not_fit(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from runner.models import kept
+        from runner.pipelines import ltx25 as pipeline
+
+        def job(width=288, references=()):
+            parameters = dict(width=width, height=512, frames=121)
+            return dict(components={'model': 'model'}, loras=[], references=list(references), parameters=parameters)
+
+        given, dropped = [], []
+
+        def run(_job, _config, _progress, key, holder):
+            given.append(holder[0])
+            if holder[0] is None:
+                holder[0] = SimpleNamespace(key=key, fits=True, allocated=0, drop=lambda: dropped.append(key[2][0]))
+            elif not holder[0].fits:
+                raise pipeline.Refit
+            return 'video'
+
+        with (
+            mock.patch('runner.models.conditioning.stamp', side_effect=lambda path: [path, 1, 1]),
+            mock.patch.object(pipeline, '_generate', run),
+        ):
+            try:
+                self.assertEqual(pipeline.generate(job(), {}, None), 'video')
+                first = kept._kept['ltx25']
+                self.assertEqual(pipeline.generate(job(), {}, None), 'video')
+                self.assertEqual((given, dropped), ([None, first], []))
+                # Its share no longer suits this video: dropped, and the video starts over without it.
+                first.fits = False
+                self.assertEqual(pipeline.generate(job(), {}, None), 'video')
+                self.assertEqual((given[2:], dropped), ([first, None], [288]))
+                second = kept._kept['ltx25']
+                self.assertIsNot(second, first)
+                # Another size, or an image to start from: another share, the model is not taken back.
+                pipeline.generate(job(width=544), {}, None)
+                pipeline.generate(job(width=544, references=[{'role': 'start_image'}]), {}, None)
+                self.assertEqual((given[4:], dropped), ([None, None], [288, 288, 544]))
+                # A failure leaves nothing for the next video.
+                kept._kept['ltx25'].fits = False
+                with mock.patch.object(pipeline, '_generate', side_effect=RuntimeError('out of memory')):
+                    with self.assertRaises(RuntimeError):
+                        pipeline.generate(job(width=544, references=[{'role': 'start_image'}]), {}, None)
+                self.assertEqual((dropped[3:], kept._kept), ([544], {}))
+            finally:
+                kept._kept.clear()
+
+
 if __name__ == '__main__':
     unittest.main()

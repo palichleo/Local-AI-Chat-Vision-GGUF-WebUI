@@ -122,10 +122,13 @@ class Loaded:
         self.allocated = 0
 
     def drop(self):
-        if self.hot is not None:
-            self.hot.clear()
-        self.transformer = self.hot = None
-        self.stack.close()
+        try:
+            if self.hot is not None:
+                self.hot.clear()
+        finally:
+            # Whatever the card answered, the files are closed and their RAM given back.
+            self.transformer = self.hot = None
+            self.stack.close()
 
 
 def decode_floor_gib(shape):
@@ -139,16 +142,38 @@ def decode_floor_gib(shape):
     return (features + 2.5 * pixels + tile * TILE_TOKEN_BYTES) / 1024**3 + 2
 
 
+class Refit(Exception):
+    """The model the last generation left does not suit this one: it is built anew.
+
+    Taken back with a share of another size, it could not be given the page-locked RAM of this
+    one: its file is still open, the pages read for its share count against the free RAM, and
+    the steps copied from unlocked memory (measured: 12 to 14 s a draft instead of 8, for the
+    rest of the series). Dropped and built again, it is a first video, as before it was kept."""
+
+
 def generate(job, config, progress):
     """One video. The model the last generation left on the GPU is taken back when it is the
-    one this job asks for (same file, same LoRAs), and left there again at the end."""
+    one this job asks for (same file, same LoRAs) for a video of the same shape, and left there
+    again at the end. Another size or another conditioning leaves the model another share of the
+    card: it is then built anew."""
     from runner.models import conditioning, kept
 
+    p = job['parameters']
     files = [job['components']['model'], *(item['path'] for item in job['loras'])]
-    key = [[conditioning.stamp(path) for path in files], [item['strength'] for item in job['loras']]]
+    shape = [p['width'], p['height'], p['frames'], sorted(ref['role'] for ref in job['references'])]
+    shape.append('upscaler' in job['components'])
+    key = [[conditioning.stamp(path) for path in files], [item['strength'] for item in job['loras']], shape]
     holder = [kept.take('ltx25', key)]
     try:
-        result = _generate(job, config, progress, key, holder)
+        try:
+            result = _generate(job, config, progress, key, holder)
+        except Refit:
+            result = None
+        if result is None:
+            # Out of the handler: the error would keep what the first attempt held until here.
+            stale, holder[0] = holder[0], None
+            stale.drop()
+            result = _generate(job, config, progress, key, holder)
     except BaseException:
         # Whatever state the failure left it in, it is not one to start the next video from.
         if holder[0] is not None:
@@ -325,13 +350,19 @@ def _generate(job, config, progress, key, holder):
             # of the model. Left out, a video from an image ran its steps with 45 MiB free.
             beside = max(0, torch.cuda.memory_allocated() - hot.bytes) / 1024**3
             budget = share(*(first or (p['width'], p['height'])))
-            # The share the last generation left is this one's when it fits what this video
-            # leaves it (a quarter of a gigabyte over is within what the steps are given to
-            # spare): nothing to read again. Else it is filled anew at this video's size.
-            ready = bool(hot.gpu) and hot.bytes <= (budget + 0.25) * 1024**3
+            # The share the last generation left is this one's when it is about what this video
+            # leaves the model (a quarter of a gigabyte over is within what the steps are given
+            # to spare; half a gigabyte under is what the page-locked RAM was built to cover):
+            # nothing to read again. Else it is filled anew at this video's size.
+            near = (budget - LOCK_MARGIN_GIB) * 1024**3 <= hot.limit
+            ready = bool(hot.gpu) and near and hot.bytes <= (budget + 0.25) * 1024**3
             if ready:
                 budget = hot.limit / 1024**3
             else:
+                if again and hot.gpu:
+                    # A share of another size than this video leaves it (halved for want of
+                    # memory, or the card filled by something else since): see Refit.
+                    raise Refit
                 hot.limit = int(budget * 1024**3)
             # What will not stay on the GPU goes to page-locked RAM once, for every step and the
             # next videos. The second pass of a large video keeps less there: what it copies

@@ -522,6 +522,13 @@ class Store:
         resident already, or when RAM does not allow it."""
         if self.arena is not None:
             return 0
+        if self.part is not None and not set(keys) <= self.part.keys:
+            # The part this store reads from no longer holds all that is asked (a store kept from
+            # one generation to the next, for a video that leaves the model a smaller share): it
+            # leaves first. Still held, it was not released when replaced, the new one found no
+            # room beside it in RAM, and the steps copied from unlocked memory.
+            RESIDENCY.drop(self.part)
+            self.part = None
         arena = RESIDENCY.partial(self.path, keys, reserve, spare)
         if self.part is not None and self.part is not arena:
             RESIDENCY.drop(self.part)
