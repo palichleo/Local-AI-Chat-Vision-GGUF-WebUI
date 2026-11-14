@@ -1690,6 +1690,20 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
     padding: 9px;
   }
 }
+/* Who is who, for a character put in a video: two short fields side by side. */
+.studio-who {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+#studio-view .studio-who input {
+  width: 100%;
+  height: 32px;
+  min-height: 0;
+  padding: 0 9px;
+  border-radius: 8px;
+  font-size: 13px;
+}
 .studio-lyrics-toggle {
   align-self: flex-start;
   min-height: 40px;

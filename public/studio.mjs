@@ -46,7 +46,26 @@ const ADD = {
   start_image: 'Ajouter l’image de début',
   end_image: 'Ajouter l’image de fin',
 };
-const SETTINGS = { lyrics: 'Paroles', seconds: 'Durée (s)', language: 'Langue' };
+const SETTINGS = {
+  lyrics: 'Paroles',
+  seconds: 'Durée (s)',
+  language: 'Langue',
+  subject: 'Qui remplacer',
+  reference_subject: 'Qui dessiner',
+};
+// Who is who, for a character put in a video: said in a few words beside the inputs, not
+// among the rare settings. Read by a detector that knows English words.
+const WHO = {
+  subject: {
+    hint: 'girl, handkerchief',
+    help: 'La personne à remplacer dans la vidéo, en quelques mots anglais (« girl », « man in red jacket »). Après une virgule, un objet tenu à garder tel quel.',
+  },
+  reference_subject: {
+    hint: 'woman',
+    help: 'Le personnage de l’image, en un ou deux mots anglais (« woman », « robot », « cartoon cat »).',
+  },
+};
+const VIDEO_TYPES = ['video/mp4', 'video/webm'];
 const SETTING_HELP = { lyrics: 'Vide pour un morceau instrumental. Balises : [Verse], [Chorus], [Bridge]…' };
 const MAX_STYLES = 3;
 // The three formats shown under the preview; « ··· » opens all of them.
@@ -237,8 +256,18 @@ export function setupStudio({
     pointer = cursor ? setupPointer({ cursor, text: $('ai-cursor-text') ?? cursor }) : null;
 
   const modeOf = id => MODES.find(item => item.id === id);
-  const verbOf = () => (mode === 'video' && extending ? 'extend_video' : modeOf(mode).verb);
-  const offered = (verb = verbOf()) => info?.tools?.[verb] ?? [];
+  /**
+   * The models of a verb; without one, those the mode in hand offers: its own and, for a video,
+   * those that put a character in an existing one (chosen in the same list, they bring their
+   * own inputs).
+   */
+  const offered = verb => {
+    if (verb) return info?.tools?.[verb] ?? [];
+    if (mode === 'video' && extending) return info?.tools?.extend_video ?? [];
+    const list = info?.tools?.[modeOf(mode).verb] ?? [];
+    return mode === 'video' ? [...list, ...(info?.tools?.replace_character ?? [])] : list;
+  };
+  const verbOf = () => (mode === 'video' && extending ? 'extend_video' : (current()?.verb ?? modeOf(mode).verb));
   const place = () => (legacy ? (info?.legacyId ?? null) : conversation());
   function current() {
     const draft = drafts[mode],
@@ -355,11 +384,18 @@ export function setupStudio({
       .flat()
       .filter(other => workflow.roles[other]?.count && drafts[mode].inputs[other]?.some(Boolean));
   }
-  async function fill(role, index, file) {
+  async function fill(role, index, file, media = 'image') {
     if (!file) return;
+    if (media === 'video' && !VIDEO_TYPES.includes(file.type))
+      return notice('Cette case attend une vidéo MP4 ou WebM.');
+    if (media === 'image' && VIDEO_TYPES.includes(file.type))
+      return notice('Cette case attend une image, pas une vidéo.');
     const imported = await assets.importFiles([file], { reveal: false });
     if (!imported.length)
-      return notice('Image non importée : la bibliothèque est occupée ou le fichier est illisible.');
+      return notice(
+        (media === 'video' ? 'Vidéo non importée' : 'Image non importée') +
+          ' : la bibliothèque est occupée ou le fichier est illisible.',
+      );
     const [resource] = imported;
     (drafts[mode].inputs[role] ??= [])[index] = {
       source: { resource: resource.id },
@@ -432,7 +468,7 @@ export function setupStudio({
    * is in its tooltip and for screen readers. A click picks a file; a file dropped on it, or the
    * image of another slot (that changes its role); × takes it back.
    */
-  function slot(workflow, role, index, { label, add, tip, picto = null, badge = '', onRemove = null }) {
+  function slot(workflow, role, index, { label, add, tip, picto = null, badge = '', onRemove = null, media = 'image' }) {
     const draft = drafts[mode],
       value = draft.inputs[role]?.[index],
       clash = exclusiveWith(workflow, role),
@@ -448,10 +484,11 @@ export function setupStudio({
         return notice(
           'Les images de cette proposition sont celles de Moodix AI : demandez-lui dans le chat pour en changer.',
         );
+      picker.accept = (media === 'video' ? VIDEO_TYPES : IMAGE_TYPES).join(',');
       picker.onchange = () => {
         const [file] = picker.files;
         picker.value = '';
-        void fill(role, index, file);
+        void fill(role, index, file, media);
       };
       picker.click();
     });
@@ -474,7 +511,7 @@ export function setupStudio({
       pick.append(mark);
       pick.draggable = !working;
       pick.ondragstart = event => {
-        dragged = { role, index };
+        dragged = { role, index, media };
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', label);
         tile.classList.add('is-dragged');
@@ -504,11 +541,13 @@ export function setupStudio({
       if (dragged) {
         const from = dragged;
         dragged = null;
+        // A video stays a video: it does not take the place of an image, nor an image its own.
+        if (from.media !== media) return notice('Une vidéo et une image n’échangent pas leurs cases.');
         return move(workflow, from, { role, index });
       }
       if (refused) return notice(refused);
       if (chosenByAi) return;
-      void fill(role, index, event.dataTransfer.files[0]);
+      void fill(role, index, event.dataTransfer.files[0], media);
     };
     tile.append(pick);
     if (value && !chosenByAi) {
@@ -531,6 +570,9 @@ export function setupStudio({
   /** Whether the workflow takes images in this role. */
   const takesImages = (workflow, role) =>
     Boolean(workflow.roles?.[role]?.count && workflow.roles[role].media.includes('image'));
+  /** Whether the workflow takes a video in this role (the one a character is replaced in). */
+  const takesVideo = (workflow, role) =>
+    Boolean(workflow.roles?.[role]?.count && workflow.roles[role].media.includes('video'));
   /** The length set in Réglages, written as everywhere, and its place between the model's ends. */
   function spanLength(workflow) {
     const length = lengthOf(workflow);
@@ -624,9 +666,11 @@ export function setupStudio({
     const shown = given.slice(0, most),
       block = node('div', 'studio-input-block studio-references'),
       row = node('div', 'studio-references-row'),
-      name = place => (most > 1 ? ROLES.reference + ' ' + (place + 1) : ROLES.reference);
+      // In a video that follows another, the reference is who is drawn in it.
+      one = workflow.follows ? 'Personnage' : ROLES.reference,
+      name = place => (most > 1 ? one + ' ' + (place + 1) : one);
     block.setAttribute('role', 'group');
-    block.setAttribute('aria-label', most > 1 ? 'Références' : 'Référence');
+    block.setAttribute('aria-label', most > 1 ? 'Références' : one);
     shown.forEach((item, place) =>
       row.append(
         slot(workflow, 'reference', place, {
@@ -643,8 +687,14 @@ export function setupStudio({
       row.append(
         slot(workflow, 'reference', shown.length, {
           label: name(shown.length),
-          add: most > 1 ? 'Ajouter la référence ' + (shown.length + 1) : 'Ajouter la référence',
-          tip: 'Référence : personnage, objet ou décor · glisser, coller ou cliquer',
+          add: workflow.follows
+            ? 'Ajouter l’image du personnage'
+            : most > 1
+              ? 'Ajouter la référence ' + (shown.length + 1)
+              : 'Ajouter la référence',
+          tip: workflow.follows
+            ? 'Personnage à mettre dans la vidéo · glisser, coller ou cliquer'
+            : 'Référence : personnage, objet ou décor · glisser, coller ou cliquer',
         }),
       );
     if (most > 1) {
@@ -661,16 +711,20 @@ export function setupStudio({
       row = node('div', 'studio-sources-row'),
       labels = [];
     for (const [role, spec] of Object.entries(workflow.roles ?? {})) {
-      if (['start_image', 'end_image', 'reference'].includes(role) || !takesImages(workflow, role)) continue;
+      if (['start_image', 'end_image', 'reference'].includes(role)) continue;
+      // The video a character is replaced in: a slot like an image's, which takes a video.
+      const video = takesVideo(workflow, role);
+      if (!video && !takesImages(workflow, role)) continue;
       for (let index = 0; index < spec.count; index++) {
-        const label = (ROLES[role] ?? 'Image') + (spec.count > 1 ? ' ' + (index + 1) : '');
+        const label = (video ? 'Vidéo à suivre' : (ROLES[role] ?? 'Image')) + (spec.count > 1 ? ' ' + (index + 1) : '');
         labels.push(label);
         row.append(
           slot(workflow, role, index, {
             label,
-            add: spec.count === 1 && ADD[role] ? ADD[role] : 'Ajouter : ' + label,
-            tip: label + ' · glisser, coller ou cliquer',
-            picto: PICTO[role] ?? 'image',
+            add: video ? 'Ajouter la vidéo à suivre' : spec.count === 1 && ADD[role] ? ADD[role] : 'Ajouter : ' + label,
+            tip: label + (video ? ' · glisser ou cliquer' : ' · glisser, coller ou cliquer'),
+            picto: video ? 'video' : (PICTO[role] ?? 'image'),
+            media: video ? 'video' : 'image',
           }),
         );
       }
@@ -682,12 +736,47 @@ export function setupStudio({
     return block;
   }
   /**
+   * Who is who, for a character put in a video: two short fields in a block of the inputs, the
+   * person to replace and the character to draw (the settings `subject` and
+   * `reference_subject` of the workflow).
+   */
+  function whoBlock(workflow) {
+    const asked = workflow.settings.filter(setting => WHO[setting.key] && setting.type === 'string');
+    if (!asked.length) return null;
+    const store = (drafts[mode].settings[workflow.id] ??= {}),
+      block = node('div', 'studio-input-block studio-who');
+    block.setAttribute('role', 'group');
+    block.setAttribute('aria-label', 'Qui est qui');
+    for (const setting of asked) {
+      const control = node('input');
+      control.type = 'text';
+      control.value = String(store[setting.key] ?? setting.default ?? '');
+      control.placeholder = WHO[setting.key].hint;
+      control.spellcheck = false;
+      if (setting.maxLength) control.maxLength = setting.maxLength;
+      control.disabled = Boolean(working);
+      control.oninput = () => {
+        store[setting.key] = control.value;
+      };
+      aiTarget(control, 'setting-' + setting.key);
+      const wrapper = field(SETTINGS[setting.key], control, { mark: true });
+      wrapper.title = WHO[setting.key].help;
+      block.append(wrapper);
+    }
+    return block;
+  }
+  /**
    * The input images, below the prompt: only what the model takes, each kind in its block in the
    * style of the prompt's box (the image to modify; the start and the end; the references, below).
    */
   function inputs(workflow) {
     span = null;
-    const blocks = [sourcesBlock(workflow), framesBlock(workflow), referencesBlock(workflow)].filter(Boolean);
+    const blocks = [
+      sourcesBlock(workflow),
+      framesBlock(workflow),
+      referencesBlock(workflow),
+      whoBlock(workflow),
+    ].filter(Boolean);
     if (!blocks.length) return null;
     // Another model: a light line around them for a moment, which fades (nothing blinks). Drawn
     // again meanwhile, they keep it until the moment is over.
@@ -1249,6 +1338,8 @@ export function setupStudio({
     }
     for (const setting of workflow.settings) {
       if (setting.key === 'lyrics' && setting.type === 'string') continue;
+      // Who is who is said beside the inputs (whoBlock).
+      if (WHO[setting.key] && setting.type === 'string') continue;
       // A sound's length is on the bar of Durée.
       if (setting.key === 'seconds' && setting.type === 'number') continue;
       // Kept per workflow: a song's length is not a sound effect's.
@@ -1293,6 +1384,15 @@ export function setupStudio({
       const { width, height } = extending.parameters ?? {},
         format = formatOf(width, height);
       return { ratio: width > 0 && height > 0 ? width / height : 16 / 9, label: format?.id ?? 'Suite' };
+    }
+    // A character put in a video: the shape of that video, known once it is given.
+    if (current()?.follows) {
+      const video = drafts[mode].inputs.source?.[0],
+        known = video?.width > 0 && video?.height > 0;
+      return {
+        ratio: known ? video.width / video.height : 16 / 9,
+        label: known ? (formatOf(video.width, video.height)?.id ?? '') : '',
+      };
     }
     const format = FORMATS.find(item => item.id === drafts[mode].format);
     return { ratio: format?.ratio ?? 1, label: format?.id ?? '' };
@@ -1492,7 +1592,8 @@ export function setupStudio({
     if (mode !== 'audio' && shape.label) rows.push(['Format', shape.label]);
     if (length) rows.push(['Durée', seconds(length.value)]);
     else if (sound) rows.push(['Durée', seconds(sound)]);
-    if (mode !== 'audio' && draft.size && !extending) rows.push(['Taille', draft.size.replace('x', ' × ')]);
+    if (mode !== 'audio' && draft.size && !extending && workflow.limits)
+      rows.push(['Taille', draft.size.replace('x', ' × ')]);
     if (mode !== 'audio') {
       const own = (workflow.loras ?? []).filter(lora => loraChoice(workflow, lora).on).map(lora => lora.name),
         added =
@@ -1655,6 +1756,19 @@ export function setupStudio({
     notice(taken ? 'Toutes les cases d’images sont prises.' : 'Ce modèle ne prend pas d’image en entrée.');
   }
 
+  const videoFile = files => [...(files ?? [])].find(file => VIDEO_TYPES.includes(file.type)) ?? null;
+  /** A video dropped on the column of the prompt goes to the slot of the model that takes one. */
+  function placeVideo(workflow, file) {
+    if (working || answering()) return;
+    for (const [role, spec] of Object.entries(workflow.roles ?? {}))
+      if (takesVideo(workflow, role)) {
+        for (let index = 0; index < spec.count; index++)
+          if (!drafts[mode].inputs[role]?.[index]) return void fill(role, index, file, 'video');
+        return notice('La case de la vidéo est prise : retirez-la d’abord.');
+      }
+    notice('Ce modèle ne prend pas de vidéo en entrée.');
+  }
+
   // ------------------------------------------------------------------ the prompt, improved
   // « Améliorer le prompt » asks for a few words first (moodix-design.md 17).
   const IMPROVE_MIN = 3;
@@ -1758,16 +1872,27 @@ export function setupStudio({
     if (!prompt) throw Error('Écrivez un prompt.');
     const args = { prompt },
       edits = {};
-    if (offered().length > 1 && !extending) args.workflow = workflow.id;
+    // Named when its verb has several: the models of another verb of the list are not its rivals.
+    if (offered(verb).length > 1 && !extending) args.workflow = workflow.id;
     if (mode === 'video')
-      args.intention = extending ? 'Suite demandée dans le Studio.' : 'Création demandée dans le Studio.';
+      args.intention = extending
+        ? 'Suite demandée dans le Studio.'
+        : workflow.follows
+          ? 'Personnage remplacé, demandé dans le Studio.'
+          : 'Création demandée dans le Studio.';
     // A continuation starts from its clip; the inputs it also takes (subject references) follow.
     if (extending) args.source = { output: extending.id };
     for (const [role, spec] of Object.entries(workflow.roles)) {
       if (extending && role === 'source') continue;
       const chosen = (draft.inputs[role] ?? []).filter(Boolean).map(item => item.source);
+      // What the model cannot do without is asked for here, in the user's words.
+      if (spec.required && spec.count && !chosen.length)
+        throw Error(
+          spec.media.includes('video') ? 'Ajoutez la vidéo à suivre.' : 'Ajoutez l’image du personnage.',
+        );
       if (!chosen.length || !spec.count) continue;
-      args[role] = role === 'reference' ? chosen : chosen[0];
+      // Several references go as a list; a single one (the character of a video) alone.
+      args[role] = (spec.many ?? role === 'reference') ? chosen.slice(0, spec.count) : chosen[0];
     }
     if (workflow.lengths?.seconds.length) args.duration = draft[extending ? 'extension' : 'length'];
     if (workflow.limits && draft.size && !extending) {
@@ -2851,7 +2976,9 @@ export function setupStudio({
         : mode === 'image'
           ? 'Décris ton image…'
           : mode === 'video'
-            ? 'Décris ta vidéo…'
+            ? workflow.follows
+              ? 'Décris la vidéo avec ton personnage…'
+              : 'Décris ta vidéo…'
             : 'Décris ton son…',
       value => {
         draft.prompt = value;
@@ -2882,10 +3009,12 @@ export function setupStudio({
     };
     write.ondrop = event => {
       write.classList.remove('is-dropping');
-      const file = imageFile(event.dataTransfer?.files);
+      const file = imageFile(event.dataTransfer?.files),
+        clip = file ? null : videoFile(event.dataTransfer?.files);
       if (!event.dataTransfer?.files?.length) return;
       event.preventDefault();
       if (file) placeImage(workflow, file);
+      else if (clip) placeVideo(workflow, clip);
       else notice('Seules les images PNG, JPEG ou WebP vont dans les cases.');
     };
     write.onpaste = event => {

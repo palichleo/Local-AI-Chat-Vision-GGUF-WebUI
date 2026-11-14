@@ -172,6 +172,134 @@ test('the Studio is told, per verb, the ready workflows with their inputs, sizes
   assert.deepEqual(music.settings.map(item => item.key).sort(), ['language', 'lyrics', 'seconds']);
   assert.match(music.for, /music/);
   assert.equal(named('create_audio', 'Bruitages').settings.find(item => item.key === 'seconds').max, 30);
+
+  // A character put in a video: a verb of its own, a video and an image both needed, who is who
+  // in two settings; no size nor length, which are the video's.
+  const [scail] = tools.replace_character;
+  assert.equal(scail.family, 'wan_scail2');
+  assert.deepEqual([scail.verb, scail.follows], ['replace_character', true]);
+  assert.deepEqual(scail.roles, {
+    source: { count: 1, media: ['video'], many: false, required: true },
+    reference: { count: 1, media: ['image'], many: false, required: true },
+  });
+  assert.deepEqual(
+    scail.settings.map(item => [item.key, item.default]),
+    [
+      ['subject', 'person'],
+      ['reference_subject', 'person'],
+    ],
+  );
+  assert.deepEqual([scail.limits, scail.size, scail.lengths], [undefined, undefined, undefined]);
+  // The other verbs say theirs, and are not told to follow a video.
+  assert.deepEqual([h3.verb, h3.follows, more.verb, more.follows], ['create_video', undefined, 'extend_video', undefined]);
+  assert.equal(h3.roles.reference.many, true);
+});
+
+test('a character replaced in a video: its model among the videos, a video and an image handed over, who is who', async () => {
+  const clip = {
+      id: 'v',
+      name: 'Clip',
+      verb: 'create_video',
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      settings: [],
+      seeded: true,
+      roles: { start_image: { count: 1, media: ['image'], many: false } },
+    },
+    scail = {
+      id: 's',
+      name: 'SCAIL-2',
+      verb: 'replace_character',
+      follows: true,
+      seeded: true,
+      roles: {
+        source: { count: 1, media: ['video'], many: false, required: true },
+        reference: { count: 1, media: ['image'], many: false, required: true },
+      },
+      settings: [
+        { key: 'subject', type: 'string', maxLength: 200, default: 'person' },
+        { key: 'reference_subject', type: 'string', maxLength: 200, default: 'person' },
+      ],
+    };
+  const page = await studioPage(
+    { create_video: [clip], replace_character: [scail] },
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+    },
+  );
+  const { body, asked, notices, restore } = page;
+  try {
+    page.mode(1);
+    const blocks = () => body.find('studio-input-block').map(block => block.attributes['aria-label']),
+      slots = () => body.find('studio-slot'),
+      event = files => ({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files, setData() {} } }),
+      drop = async (index, file) => {
+        slots()[index].ondrop(event([file]));
+        await new Promise(resolve => setTimeout(resolve, 5));
+      },
+      generate = async () => {
+        await body.find('studio-go')[0].onclick();
+        await settle();
+      },
+      sent = () => asked.filter(([route]) => route === 'tools/action');
+    // Both models in the one list of the videos; the first is the one that makes a clip.
+    const pick = body.find('studio-model-pick')[0];
+    assert.equal(pick.children.length, 2);
+    assert.deepEqual(blocks(), ['Image de début']);
+    pick.value = 's';
+    pick.onchange();
+    // Its inputs: the video, the character, and who is who. No rare setting but the seed.
+    assert.deepEqual(blocks(), ['Vidéo à suivre', 'Personnage', 'Qui est qui']);
+    assert.equal(page.prompt().placeholder, 'Décris la vidéo avec ton personnage…');
+    const who = () => body.find('studio-who')[0].children;
+    assert.deepEqual(
+      who().map(field => [field.children[0].textContent, field.children[1].value, field.children[1].placeholder]),
+      [
+        ['Qui remplacer', 'person', 'girl, handkerchief'],
+        ['Qui dessiner', 'person', 'woman'],
+      ],
+    );
+    assert.equal(body.find('studio-rare')[0].children.length, 1);
+    // What the model cannot do without is asked for in plain words, nothing is sent.
+    page.prompt().value = 'Une femme en haut blanc mange une pomme dans un verger.';
+    page.prompt().oninput();
+    await generate();
+    assert.match(body.find('studio-error')[0].textContent, /Ajoutez la vidéo à suivre/);
+    assert.equal(sent().length, 0);
+    // An image is not a video: the slot says so and stays empty.
+    await drop(0, { name: 'photo.png', type: 'image/png' });
+    assert.match(notices.at(-1), /attend une vidéo/);
+    await drop(0, { name: 'clip.mp4', type: 'video/mp4' });
+    assert.match(slots()[0].className, /is-filled/);
+    await generate();
+    assert.match(body.find('studio-error')[0].textContent, /Ajoutez l’image du personnage/);
+    await drop(1, { name: 'clip.mp4', type: 'video/mp4' });
+    assert.match(notices.at(-1), /attend une image/);
+    await drop(1, { name: 'perso.png', type: 'image/png' });
+    const subject = who()[0].children[1];
+    subject.value = 'girl, handkerchief';
+    subject.oninput();
+    await generate();
+    const [, action] = sent().at(-1);
+    assert.equal(action.name, 'replace_character');
+    // The video and the character each alone (not a list); who is drawn is left to its default.
+    assert.deepEqual(action.arguments, {
+      prompt: 'Une femme en haut blanc mange une pomme dans un verger.',
+      intention: 'Personnage remplacé, demandé dans le Studio.',
+      source: { resource: 'r1' },
+      reference: { resource: 'r2' },
+      subject: 'girl, handkerchief',
+    });
+    // Back to the model of the clips: its own inputs, and its own verb.
+    body.find('studio-model-pick')[0].value = 'v';
+    body.find('studio-model-pick')[0].onchange();
+    assert.deepEqual(blocks(), ['Image de début']);
+    await generate();
+    assert.equal(sent().at(-1)[1].name, 'create_video');
+  } finally {
+    restore();
+  }
 });
 
 test('the page module loads and offers the sizes of a format', async () => {
