@@ -349,7 +349,15 @@ test('without ComfyUI the Studio lists the LoRAs of the folder, and Atelier’s 
       made.ownJob({ ...job, styles: [{ name, strength: 1 }] }),
       /LoRA introuvable dans le dossier loras/,
     );
-  // A family whose LoRAs are ComfyUI's only: the styles are left out, as before.
-  const video = await made.ownJob({ id: 'v', pipeline: 'ltx25', loras: [], styles });
-  assert.deepEqual([video.styles, video.loras], [undefined, []]);
+  // LTX 2.5 takes them too, after the workflow's own LoRA (the one of its subject references).
+  const subject = { id: 'msr', path: join(root, 'msr.safetensors'), strength: 1 };
+  const video = await made.ownJob({ id: 'v', pipeline: 'ltx25', loras: [subject], styles });
+  assert.equal(video.styles, undefined);
+  assert.deepEqual(
+    video.loras.map(lora => lora.id),
+    ['msr', 'style-0', 'style-1'],
+  );
+  // A family whose engine applies no style LoRA (MiniMax H3): they are left out.
+  const other = await made.ownJob({ id: 'h', pipeline: 'minimax_h3', loras: [], styles });
+  assert.deepEqual([other.styles, other.loras], [undefined, []]);
 });

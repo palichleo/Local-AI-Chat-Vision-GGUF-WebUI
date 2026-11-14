@@ -43,6 +43,14 @@ def _need(args, *names):
         raise SystemExit('missing: ' + ', '.join('--' + name.replace('_', '-') for name in missing))
 
 
+def _loras(args):
+    """--lora FILE:STRENGTH, as many times as there are LoRAs."""
+    return [
+        dict(id=f'lora-{index}', path=path, strength=float(strength))
+        for index, (path, _, strength) in enumerate(item.rpartition(':') for item in args.lora)
+    ]
+
+
 def krea2_job(args, run):
     _need(args, 'model', 'text_encoder', 'vae', 'tokenizer')
     width, height = _size(args, '1024x1024')
@@ -61,10 +69,7 @@ def krea2_job(args, run):
             expandPrompt=False,
         ),
         components=dict(model=args.model, textEncoder=args.text_encoder, vae=args.vae, tokenizer=args.tokenizer),
-        loras=[
-            dict(id=f'lora-{index}', path=path, strength=float(strength))
-            for index, (path, _, strength) in enumerate(item.rpartition(':') for item in args.lora)
-        ],
+        loras=_loras(args),
         references=[],
     )
 
@@ -133,7 +138,7 @@ def ltx25_job(args, run):
             overlap_frames=9,
         ),
         components=components,
-        loras=[],
+        loras=_loras(args),
         references=[],
     )
 

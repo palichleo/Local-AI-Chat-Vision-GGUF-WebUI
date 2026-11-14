@@ -166,7 +166,7 @@ class VideoTests(unittest.TestCase):
         import torch
         from safetensors.torch import save_file
         from safetensors import safe_open
-        from runner.video.msr import validate_msr, slot_embedding
+        from runner.video.msr import msr_index, slot_embedding, validate_loras
 
         with tempfile.TemporaryDirectory() as folder:
             prefix = 'diffusion_model.reference_slot_embedding.'
@@ -191,16 +191,50 @@ class VideoTests(unittest.TestCase):
             value_job = job()
             value_job['loras'] = [dict(id='slots', path=path, strength=1)]
             headers = {'model': {'model.diffusion_model.transformer_blocks.0.attn1.to_q.weight': {'shape': [2, 3]}}}
-            validate_msr(value_job, headers)
+            validate_loras(value_job, headers)
             with safe_open(path, framework='pt') as source:
                 first = slot_embedding(1, source, torch, 'cpu', torch.float32)
                 second = slot_embedding(2, source, torch, 'cpu', torch.float32)
                 self.assertEqual(list(first.shape), [128])
                 self.assertTrue(torch.isfinite(first).all())
                 self.assertFalse(torch.allclose(first, second))
+            # Style LoRAs go beside it, in any order: pairs for layers of this model, whatever the
+            # tool that named them. The MSR one is found by its learned slots.
+            layer = 'transformer_blocks.0.attn1.to_q'
+            style = str(Path(folder) / 'style.safetensors')
+            save_file(
+                {
+                    f'transformer.{layer}.lora_down.weight': torch.zeros((4, 3)),
+                    f'transformer.{layer}.lora_up.weight': torch.zeros((2, 4)),
+                    f'transformer.{layer}.alpha': torch.tensor(4.0),
+                },
+                style,
+            )
+            styled = job()
+            styled['loras'] = [dict(id='style-0', path=style, strength=-1.5), dict(id='slots', path=path, strength=1)]
+            validate_loras(styled, headers)
+            self.assertEqual((msr_index(styled), msr_index(value_job)), (1, 0))
+            styled['loras'] = styled['loras'][:1]
+            validate_loras(styled, headers)
+            self.assertIsNone(msr_index(styled))
+            # Subject references need the MSR LoRA, a style does not stand for it; one MSR at most.
+            wanting = dict(styled, references=[dict(input='ref', role='msr_image', path=style)])
+            with self.assertRaisesRegex(ValueError, 'MSR references require'):
+                validate_loras(wanting, headers)
+            twice = dict(value_job, loras=value_job['loras'] * 2)
+            with self.assertRaisesRegex(ValueError, 'one MSR LoRA'):
+                validate_loras(twice, headers)
+            # A LoRA made for another model is refused before anything is loaded.
+            other = str(Path(folder) / 'other.safetensors')
+            pair = {'blocks.0.wq.lora_A.weight': torch.zeros((4, 3)), 'blocks.0.wq.lora_B.weight': torch.zeros((2, 4))}
+            save_file(pair, other)
+            with self.assertRaisesRegex(ValueError, 'none of its layers belongs to this model'):
+                validate_loras(dict(styled, loras=[dict(id='style-0', path=other, strength=1)]), headers)
             headers['model']['model.diffusion_model.transformer_blocks.0.attn1.to_q.weight']['shape'] = [4, 3]
             with self.assertRaisesRegex(ValueError, 'pair'):
-                validate_msr(value_job, headers)
+                validate_loras(value_job, headers)
+            with self.assertRaisesRegex(ValueError, 'pair'):
+                validate_loras(styled, headers)
 
 
 if __name__ == '__main__':

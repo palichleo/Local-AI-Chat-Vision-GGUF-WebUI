@@ -457,6 +457,16 @@ class WeightPool:
             found = self.lora_cache[source] = lora_pairs(self.stores[source].keys(), targets)[0]
         return found
 
+    def applied(self):
+        """{LoRA: layers of the model it changes} once the model is built, the LoRAs in the order
+        given. A LoRA may hold pairs for layers this pool does not serve (a connector read
+        once, a vector): they are not applied, and this is how to tell."""
+        counts = dict.fromkeys((source for source, _strength in self.adapters), 0)
+        for adapters in self.adapted.values():
+            for source, *_ in adapters:
+                counts[source] += 1
+        return counts
+
     def preload(self):
         """Fill the GPU share now, in layer order, before the model runs.
 

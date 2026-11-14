@@ -83,7 +83,7 @@ def preflight(job, config):
     from runner.models import conditioning
     from runner.models.headers import header
     from runner.models.ltx25 import validate_layout, video_encoder
-    from runner.video.msr import validate_msr
+    from runner.video.msr import validate_loras
 
     stamps = [(role, conditioning.stamp(path)) for role, path in sorted(job['components'].items())]
     stamps += [('lora', conditioning.stamp(item['path'])) for item in job['loras']]
@@ -98,7 +98,7 @@ def preflight(job, config):
             from runner.models.ltx25_audio import vocoder_layout
 
             vocoder_layout(headers)
-        validate_msr(job, headers)
+        validate_loras(job, headers)
         if 'upscaler' in headers:
             from runner.models.ltx25 import latent_upscaler
 
@@ -345,6 +345,15 @@ def _generate(job, config, progress, key, holder):
                 # Blocks of another kind keep diffusers' own computation, their feed-forwards in slices.
                 if not fuse(transformer):
                     chunk_feed_forwards(transformer)
+            # What each LoRA changes: the layers of the model it has pairs for, among those whose
+            # weights the pool serves. One that changes none (its pairs are all for the text
+            # connectors, say) is refused here, not left to make the same video without it.
+            changed = hot.applied()
+            for index, item in enumerate(job['loras']):
+                if not changed['lora-' + str(index)]:
+                    raise ValueError(f'Incompatible LoRA: none of its layers is applied to this model ({item["id"]})')
+            if changed:
+                setup['lora layers'] = list(changed.values())
             timed('transformer')
             if job['references']:
                 encoder, encoder_names = video_encoder(headers)
@@ -483,7 +492,9 @@ def _generate(job, config, progress, key, holder):
                     del clean
             if msr_refs:
                 pipe.msr_references = msr_refs
-                pipe.msr_store = stores['lora-0']
+                from runner.video.msr import msr_index
+
+                pipe.msr_store = stores['lora-' + str(msr_index(job))]
                 pipe.msr_frames = p.get('msr_frames', 33)
                 pipe.msr_strength = p.get('msr_strength', 1)
             images = {}

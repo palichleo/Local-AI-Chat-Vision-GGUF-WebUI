@@ -14,6 +14,8 @@ written with dots): its product, of the vector's size, is added to it.
 LoKr, LoHa and DoRA are other kinds of adapters, not pairs: they are named as such.
 """
 
+import math
+
 PREFIXES = ('model.diffusion_model.', 'diffusion_model.', 'transformer.', '')
 PAIRS = (('.lora_A.weight', '.lora_B.weight'), ('.lora_down.weight', '.lora_up.weight'))
 # Other kinds of adapters, which are not a down and an up matrix.
@@ -79,3 +81,31 @@ def lora_pairs(keys, targets):
             used.update(name for name in (key, up, alpha) if name)
             break
     return pairs, keys - used
+
+
+def validate_lora(entries, model):
+    """Every tensor of a LoRA is a pair for a layer of the model, whatever its naming (see
+    lora_pairs), or its scalar alpha. `entries` and `model` are the headers of the two files."""
+    keys = [key for key in entries if key != '__metadata__']
+    kind = other_kind(keys)
+    if kind:
+        raise ValueError('Unsupported LoRA kind (' + kind + '): only LoRA pairs are applied')
+    targets = {key.removeprefix('model.diffusion_model.') for key in model if key != '__metadata__'}
+    pairs, left = lora_pairs(keys, targets)
+    if not pairs:
+        raise ValueError('Incompatible LoRA: none of its layers belongs to this model (made for another one?)')
+    for target, (down, up, alpha) in pairs.items():
+        shape, pair = entries[down]['shape'], entries[up]['shape']
+        base = model.get(target, model.get('model.diffusion_model.' + target, {})).get('shape', [])
+        # A layer takes a pair of its own shape; a vector (a norm's scale), a product of its size.
+        fits = (
+            [pair[0], shape[1]] == base
+            if target.endswith('.weight')
+            else len(base) == 1 and pair[0] * shape[1] == base[0]
+        )
+        if len(shape) != 2 or len(pair) != 2 or shape[0] <= 0 or shape[0] != pair[1] or not fits:
+            raise ValueError('Incompatible LoRA target/pair: ' + down)
+        if alpha and math.prod(entries[alpha]['shape']) != 1:
+            raise ValueError('Invalid LoRA alpha')
+    if left:
+        raise ValueError('Incompatible LoRA: unsupported or orphan tensors (' + sorted(left)[0] + ')')

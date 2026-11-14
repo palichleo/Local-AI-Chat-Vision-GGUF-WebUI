@@ -1,9 +1,7 @@
 """Krea 2 checkpoint checks: tensor signatures, INT8 scales and LoRA targets (was part of headers.py)."""
 
-import math
-
 from runner.models.headers import header
-from runner.models.lora_keys import lora_pairs, other_kind
+from runner.models.lora_keys import validate_lora
 
 SIGNATURES = {
     'model': {
@@ -41,31 +39,3 @@ def validate_krea2_components(job):
     for item in job['loras']:
         validate_lora(header(item['path']), headers['model'])
     return headers
-
-
-def validate_lora(entries, model):
-    """Every tensor of a LoRA is a pair for a layer of the model, whatever its naming (see
-    runner.models.lora_keys), or its scalar alpha."""
-    keys = [key for key in entries if key != '__metadata__']
-    kind = other_kind(keys)
-    if kind:
-        raise ValueError('Unsupported LoRA kind (' + kind + '): only LoRA pairs are applied')
-    targets = {key.removeprefix('model.diffusion_model.') for key in model if key != '__metadata__'}
-    pairs, left = lora_pairs(keys, targets)
-    if not pairs:
-        raise ValueError('Incompatible LoRA: none of its layers belongs to this model (made for another one?)')
-    for target, (down, up, alpha) in pairs.items():
-        shape, pair = entries[down]['shape'], entries[up]['shape']
-        base = model.get(target, model.get('model.diffusion_model.' + target, {})).get('shape', [])
-        # A layer takes a pair of its own shape; a vector (a norm's scale), a product of its size.
-        fits = (
-            [pair[0], shape[1]] == base
-            if target.endswith('.weight')
-            else len(base) == 1 and pair[0] * shape[1] == base[0]
-        )
-        if len(shape) != 2 or len(pair) != 2 or shape[0] <= 0 or shape[0] != pair[1] or not fits:
-            raise ValueError('Incompatible LoRA target/pair: ' + down)
-        if alpha and math.prod(entries[alpha]['shape']) != 1:
-            raise ValueError('Invalid LoRA alpha')
-    if left:
-        raise ValueError('Incompatible LoRA: unsupported or orphan tensors (' + sorted(left)[0] + ')')

@@ -1,18 +1,42 @@
 """LTX2.5 learned image slots: repeated image latents at distinct negative times."""
 
+SLOTS = 'diffusion_model.reference_slot_embedding.'
 
-def validate_msr(job, headers):
+
+def is_msr(entries):
+    """Whether a LoRA file is the one of the subject references (MSR): it carries their learned
+    slots beside its pairs. Any other LoRA of a job is a style, applied to the model alone."""
+    said = entries.get('__metadata__', {}).get('reference_slot_embedding_enabled') == 'True'
+    return said or any(key.startswith(SLOTS) for key in entries)
+
+
+def msr_index(job):
+    """Where the MSR LoRA is in the job's LoRAs, or None."""
     from runner.models.headers import header
 
-    adapters = job['loras']
-    refs = [ref for ref in job['references'] if ref['role'] == 'msr_image']
-    if not adapters:
-        if refs:
-            raise ValueError('MSR references require their compatible learned-slot LoRA')
-        return
-    if len(adapters) != 1:
+    return next((index for index, item in enumerate(job['loras']) if is_msr(header(item['path']))), None)
+
+
+def validate_loras(job, headers):
+    """The LoRAs of an LTX2.5 job: one MSR LoRA at most, required by subject references; every
+    other one is a style, whose pairs must belong to this model (runner.models.lora_keys)."""
+    from runner.models.headers import header
+    from runner.models.lora_keys import validate_lora
+
+    files = [header(item['path']) for item in job['loras']]
+    subjects = [entries for entries in files if is_msr(entries)]
+    if any(ref['role'] == 'msr_image' for ref in job['references']) and not subjects:
+        raise ValueError('MSR references require their compatible learned-slot LoRA')
+    if len(subjects) > 1:
         raise ValueError('This LTX2.5 executor supports one MSR LoRA at a time')
-    entries = header(adapters[0]['path'])
+    for entries in files:
+        if is_msr(entries):
+            validate_msr(entries, headers)
+        else:
+            validate_lora(entries, headers['model'])
+
+
+def validate_msr(entries, headers):
     metadata = entries.get('__metadata__', {})
     required = {
         'reference_slot_embedding_enabled': 'True',
@@ -31,7 +55,7 @@ def validate_msr(job, headers):
     }
     accepted = {'__metadata__'}
     for key, shape in slots.items():
-        name = 'diffusion_model.reference_slot_embedding.' + key
+        name = SLOTS + key
         if entries.get(name, {}).get('shape') != shape:
             raise ValueError('Invalid learned MSR slot: ' + key)
         accepted.add(name)
@@ -57,7 +81,7 @@ def slot_embedding(slot, store, torch, device, dtype):
     import torch.nn.functional as F
 
     def read(key):
-        return store.get_tensor('diffusion_model.reference_slot_embedding.' + key).to(
+        return store.get_tensor(SLOTS + key).to(
             device=device, dtype=torch.float32
         )
 

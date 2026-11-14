@@ -311,6 +311,19 @@ class StreamedShareTest(unittest.TestCase):
         self.assertEqual(pool._unmerged(), 0)
         self.assertEqual(pool.streamed(), {'model': {'a.weight', 'c.weight'}})
 
+    def test_a_pool_says_how_many_layers_each_lora_changes(self):
+        from runner.models import pool as module
+
+        torch = SimpleNamespace(cuda=SimpleNamespace(synchronize=lambda: None))
+        adapters = [('lora-0', 1.0), ('lora-1', 0.5), ('lora-2', 1.0)]
+        with patch.dict(sys.modules, torch=torch, comfy_kitchen=SimpleNamespace()):
+            pool = module.WeightPool({'model': Store({'a.weight': 60})}, 0, adapters=adapters)
+        self.assertEqual(pool.applied(), {'lora-0': 0, 'lora-1': 0, 'lora-2': 0})
+        pool.adapted[('model', 'a.weight', None)] = [('lora-0', 'down', 'up', 1.0), ('lora-1', 'down', 'up', 0.5)]
+        pool.adapted[('model', 'b.weight', None)] = [('lora-1', 'down', 'up', 0.5)]
+        # The third has pairs for no layer this pool serves: the pipeline refuses it.
+        self.assertEqual(pool.applied(), {'lora-0': 1, 'lora-1': 2, 'lora-2': 0})
+
     def test_a_store_that_knows_its_sizes_is_not_read_to_name_what_is_streamed(self):
         sizes = {'a.weight': 60, 'a.weight_scale': 5, 'b.weight': 50, 'b.bias': 5, 'qkv.weight': 90, 'qkv.bias': 9}
 

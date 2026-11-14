@@ -174,7 +174,7 @@ class PreflightTests(unittest.TestCase):
             mock.patch('runner.models.conditioning.stamp', side_effect=lambda path: list(stamps[path])),
             mock.patch('runner.models.headers.header', return_value={}),
             mock.patch('runner.models.ltx25.validate_layout') as validate,
-            mock.patch('runner.video.msr.validate_msr'),
+            mock.patch('runner.video.msr.validate_loras'),
             mock.patch('runner.models.ltx25_audio.vocoder_layout'),
             mock.patch.object(pipeline, 'CHECKED', set()),
         ):

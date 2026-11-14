@@ -5,6 +5,7 @@
   "tasks": ["create_video", "extend_video"],
   "engine": "internal",
   "hardware": { "cuda": true },
+  "styles": true,
   "requires": [
     "torch",
     "diffusers",
@@ -201,11 +202,11 @@
     }
   },
   "loras": {
-    "max": 1,
+    "max": 8,
     "strength": {
       "type": "number",
-      "min": 0,
-      "max": 2
+      "min": -4,
+      "max": 4
     },
     "signature": [
       {
