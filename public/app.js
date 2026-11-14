@@ -2573,6 +2573,8 @@ async function runInStudio(proposal, { signal, onProgress }) {
 const tokenControls = setupTokenControls($);
 const computeControls = setupComputeControls($);
 const helpTips = setupHelpTips($('settings'));
+// The « ? » of the Studio's fields (« Qui remplacer », « Qui dessiner »), as in the settings.
+setupHelpTips($('studio-view'), { id: 'studio-help-bubble', host: document.body });
 const settingsTabs = setupSettingsTabs({
   list: $('settings-tabs'),
   onShow: name => {

@@ -267,6 +267,18 @@ test('a character replaced in a video: its model among the videos, a video and a
         ['Qui dessiner', 'person', 'woman'],
       ],
     );
+    // Each says what it is for in its « ? », as the settings do: at once under the pointer.
+    const tips = who().map(field => field.children[0].children.find(child => /help-tip/.test(child.className)));
+    assert.deepEqual(
+      tips.map(tip => [tip.textContent, tip.tabIndex, tip.attributes.role]),
+      [
+        ['?', 0, 'img'],
+        ['?', 0, 'img'],
+      ],
+    );
+    assert.match(tips[0].dataset.help, /« penguin ».*\n.*« girl, handkerchief »/s);
+    assert.match(tips[1].dataset.help, /décor de l’image est laissé de côté/);
+    assert.equal(tips[0].attributes['aria-label'], 'Aide : ' + tips[0].dataset.help);
     assert.equal(body.find('studio-rare')[0].children.length, 1);
     // The wand writes the prompt from the video and the character: it waits for both, not for words.
     assert.equal(wand().disabled, true);

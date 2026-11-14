@@ -1409,6 +1409,15 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   width: 10px;
   height: 10px;
 }
+/* The « ? » of a field (« Qui remplacer »), at the right of its name as in the corner of a block
+   of the settings, a little smaller. */
+.studio-label .studio-tip {
+  position: static;
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  font-size: 10px;
+}
 .studio-prompt-field {
   flex: 1;
 }

@@ -2,15 +2,16 @@
  * Help shown at once, under the pointer: any element with `data-help` (the « ? » of a block, the
  * state of a workflow) shows its text in one bubble as soon as it is hovered or focused, with
  * none of the delay of a `title`. The bubble is fixed to the window, so a scrolling area never
- * cuts it; it hides when the pointer or the focus leaves.
+ * cuts it; it hides when the pointer or the focus leaves. Each root has its own bubble (`id`),
+ * put in `host` (the Studio's in the page itself: nothing it moves carries it along).
  */
-export function setupHelpTips(root) {
+export function setupHelpTips(root, { id = 'help-bubble', host = root } = {}) {
   const bubble = root.ownerDocument.createElement('div');
   bubble.className = 'help-bubble';
   bubble.setAttribute('role', 'tooltip');
-  bubble.id = 'help-bubble';
+  bubble.id = id;
   bubble.hidden = true;
-  root.append(bubble);
+  host.append(bubble);
   let current = null;
 
   function show(target) {

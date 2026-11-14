@@ -64,11 +64,18 @@ const SETTINGS = {
 const WHO = {
   subject: {
     hint: 'girl, handkerchief',
-    help: 'La personne à remplacer dans la vidéo, en quelques mots anglais (« girl », « man in red jacket »). Après une virgule, un objet tenu à garder tel quel.',
+    help:
+      'La personne ou l’animal de la vidéo à remplacer, en quelques mots d’anglais : « girl », « penguin », ' +
+      'ou « man in red jacket » quand la vidéo montre plusieurs personnes.\n' +
+      'Après une virgule, un objet qu’elle tient reste tel quel : « girl, handkerchief ».\n' +
+      '« person » suffit quand il n’y a qu’une personne.',
   },
   reference_subject: {
     hint: 'woman',
-    help: 'Le personnage de l’image, en un ou deux mots anglais (« woman », « robot », « cartoon cat »).',
+    help:
+      'Le personnage à prendre dans l’image, en un ou deux mots d’anglais : « woman », « robot », « cartoon cat ». ' +
+      'Le décor de l’image est laissé de côté.\n' +
+      '« person » suffit pour un humain.',
   },
 };
 const VIDEO_TYPES = ['video/mp4', 'video/webm'];
@@ -341,7 +348,7 @@ export function setupStudio({
     if (ai?.touched.has(key)) element.setAttribute('data-ai-touched', '');
     return element;
   }
-  function field(label, control, { help, wide = false, mark = false } = {}) {
+  function field(label, control, { help, tip, wide = false, mark = false } = {}) {
     const wrapper = node('label', 'studio-field' + (wide ? ' is-wide' : '')),
       title = node('span', 'studio-label', label);
     if (mark) {
@@ -350,6 +357,17 @@ export function setupStudio({
       dot.setAttribute('aria-label', 'Moodix AI peut régler ce paramètre');
       dot.title = 'Moodix AI peut régler ce paramètre';
       title.append(dot);
+    }
+    // « ? » at the right of the name: its help at once under the pointer or on focus, as in the
+    // settings (public/help-tips.mjs). A click on it does not go to the field.
+    if (tip) {
+      const ask = node('span', 'help-tip studio-tip', '?');
+      ask.tabIndex = 0;
+      ask.setAttribute('role', 'img');
+      ask.setAttribute('aria-label', 'Aide : ' + tip);
+      ask.dataset.help = tip;
+      ask.onclick = event => event.preventDefault();
+      title.append(ask);
     }
     wrapper.append(title, control);
     if (help) wrapper.append(node('small', 'field-help', help));
@@ -780,9 +798,7 @@ export function setupStudio({
         store[setting.key] = control.value;
       };
       aiTarget(control, 'setting-' + setting.key);
-      const wrapper = field(SETTINGS[setting.key], control, { mark: true });
-      wrapper.title = WHO[setting.key].help;
-      block.append(wrapper);
+      block.append(field(SETTINGS[setting.key], control, { mark: true, tip: WHO[setting.key].help }));
     }
     return block;
   }
