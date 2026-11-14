@@ -656,7 +656,8 @@ export function setupStudio({
    * time, and « n/3 » at the end of the line (the model's own most).
    */
   function referencesBlock(workflow) {
-    if (!takesImages(workflow, 'reference')) return null;
+    // The character of a video that follows another sits beside that video (sourcesBlock).
+    if (!takesImages(workflow, 'reference') || workflow.follows) return null;
     const draft = drafts[mode],
       most = workflow.roles.reference.count,
       // Without holes: the numbers follow each other. What is sent leaves the holes out anyway.
@@ -666,11 +667,9 @@ export function setupStudio({
     const shown = given.slice(0, most),
       block = node('div', 'studio-input-block studio-references'),
       row = node('div', 'studio-references-row'),
-      // In a video that follows another, the reference is who is drawn in it.
-      one = workflow.follows ? 'Personnage' : ROLES.reference,
-      name = place => (most > 1 ? one + ' ' + (place + 1) : one);
+      name = place => (most > 1 ? ROLES.reference + ' ' + (place + 1) : ROLES.reference);
     block.setAttribute('role', 'group');
-    block.setAttribute('aria-label', most > 1 ? 'Références' : one);
+    block.setAttribute('aria-label', most > 1 ? 'Références' : 'Référence');
     shown.forEach((item, place) =>
       row.append(
         slot(workflow, 'reference', place, {
@@ -687,14 +686,8 @@ export function setupStudio({
       row.append(
         slot(workflow, 'reference', shown.length, {
           label: name(shown.length),
-          add: workflow.follows
-            ? 'Ajouter l’image du personnage'
-            : most > 1
-              ? 'Ajouter la référence ' + (shown.length + 1)
-              : 'Ajouter la référence',
-          tip: workflow.follows
-            ? 'Personnage à mettre dans la vidéo · glisser, coller ou cliquer'
-            : 'Référence : personnage, objet ou décor · glisser, coller ou cliquer',
+          add: most > 1 ? 'Ajouter la référence ' + (shown.length + 1) : 'Ajouter la référence',
+          tip: 'Référence : personnage, objet ou décor · glisser, coller ou cliquer',
         }),
       );
     if (most > 1) {
@@ -729,9 +722,30 @@ export function setupStudio({
         );
       }
     }
+    // A character put in a video: the video, then who is drawn in it, side by side.
+    if (workflow.follows && takesImages(workflow, 'reference')) {
+      const draft = drafts[mode];
+      draft.inputs.reference = (draft.inputs.reference ?? []).filter(Boolean);
+      labels.push('personnage');
+      row.append(
+        slot(workflow, 'reference', 0, {
+          label: 'Personnage',
+          add: 'Ajouter l’image du personnage',
+          tip: 'Personnage à mettre dans la vidéo · glisser, coller ou cliquer',
+          badge: '@',
+          onRemove: () => {
+            draft.inputs.reference.splice(0, 1);
+            render();
+          },
+        }),
+      );
+    }
     if (!labels.length) return null;
     block.setAttribute('role', 'group');
-    block.setAttribute('aria-label', labels.length > 1 ? 'Images' : labels[0]);
+    block.setAttribute(
+      'aria-label',
+      workflow.follows ? labels.join(' et ') : labels.length > 1 ? 'Images' : labels[0],
+    );
     block.append(row);
     return block;
   }

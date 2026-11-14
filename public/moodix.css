@@ -1690,11 +1690,11 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
     padding: 9px;
   }
 }
-/* Who is who, for a character put in a video: two short fields side by side. */
+/* Who is who, for a character put in a video: two short fields, one under the other (side by
+   side they were 94 px wide in a 1280 px window: « girl, handkerchief » was cut). */
 .studio-who {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 #studio-view .studio-who input {
   width: 100%;

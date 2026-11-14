@@ -250,7 +250,11 @@ test('a character replaced in a video: its model among the videos, a video and a
     pick.value = 's';
     pick.onchange();
     // Its inputs: the video, the character, and who is who. No rare setting but the seed.
-    assert.deepEqual(blocks(), ['Vidéo à suivre', 'Personnage', 'Qui est qui']);
+    assert.deepEqual(blocks(), ['Vidéo à suivre et personnage', 'Qui est qui']);
+    assert.deepEqual(
+      body.find('studio-slot-pick').map(pick => pick.attributes['aria-label']),
+      ['Ajouter la vidéo à suivre', 'Ajouter l’image du personnage'],
+    );
     assert.equal(page.prompt().placeholder, 'Décris la vidéo avec ton personnage…');
     const who = () => body.find('studio-who')[0].children;
     assert.deepEqual(
