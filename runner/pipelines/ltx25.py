@@ -120,6 +120,8 @@ class Loaded:
         self.transformer = self.hot = None
         # Video memory all this holds, measured once the generation that leaves it is over.
         self.allocated = 0
+        # Whether what its steps copy to the GPU comes from page-locked RAM (see generate).
+        self.locked = True
 
     def drop(self):
         try:
@@ -179,7 +181,15 @@ def generate(job, config, progress):
         if holder[0] is not None:
             holder[0].drop()
         raise
-    kept.put('ltx25', holder[0])
+    loaded = holder[0]
+    if not loaded.locked:
+        # RAM was short when it was built: its steps copied from the file's mapping, at half
+        # the speed, and those pages (the whole model) stay in this process while the file is
+        # open, so that the next video would find no room to lock either. Not kept: the next
+        # one builds it anew, with the RAM this gives back.
+        loaded.drop()
+    else:
+        kept.put('ltx25', loaded)
     return result
 
 
@@ -375,6 +385,7 @@ def _generate(job, config, progress, key, holder):
                 locked = stores['model'].keep(
                     copied, reserve, spare=hot.streamed(LOCK_MARGIN_GIB, onward=True).get('model', ())
                 )
+            loaded.locked = not copied or stores['model'].pinned
             timed('weights locked in RAM')
             # From here to the end of the first step, the disk reads in sequence what is not
             # locked (the share that stays on the GPU, the connectors): the layers then find
@@ -624,6 +635,9 @@ def _generate(job, config, progress, key, holder):
         # Its weights and LoRAs leave the GPU; its layers and their order stay with it.
         hot.clear()
     del hot
+    # The pages of the file read for the share of the GPU go back to the system: the file stays
+    # open with the model, and they counted against the free RAM until the next video.
+    loaded.stores['model'].reopen()
     pixels = decode_pixels(job, headers, video, progress)
     generated_audio = None
     if p['audio']:

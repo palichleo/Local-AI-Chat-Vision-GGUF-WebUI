@@ -212,7 +212,10 @@ class KeptModelTests(unittest.TestCase):
         def run(_job, _config, _progress, key, holder):
             given.append(holder[0])
             if holder[0] is None:
-                holder[0] = SimpleNamespace(key=key, fits=True, allocated=0, drop=lambda: dropped.append(key[2][0]))
+                holder[0] = SimpleNamespace(
+                    key=key, fits=True, locked=True, allocated=0, drop=lambda: dropped.append(key[2][0])
+                )
+                holder[0].locked = key[2][0] != 1024
             elif not holder[0].fits:
                 raise pipeline.Refit
             return 'video'
@@ -242,6 +245,10 @@ class KeptModelTests(unittest.TestCase):
                     with self.assertRaises(RuntimeError):
                         pipeline.generate(job(width=544, references=[{'role': 'start_image'}]), {}, None)
                 self.assertEqual((dropped[3:], kept._kept), ([544], {}))
+                # A model whose steps copied from unlocked memory (RAM was short) is not kept: its
+                # file left open would leave the next video no room to lock either.
+                self.assertEqual(pipeline.generate(job(width=1024), {}, None), 'video')
+                self.assertEqual((dropped[4:], kept._kept), ([1024], {}))
             finally:
                 kept._kept.clear()
 

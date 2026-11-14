@@ -171,6 +171,14 @@ class PartialArenaTest(unittest.TestCase):
                 self.assertEqual(seen, [True])
                 self.assertEqual(again.part.keys, {'first.weight', 'second.weight', 'third.weight'})
                 self.assertEqual(again.part.users, 1)
+                # Kept open with a model, a store maps its file anew to let go of the pages it
+                # read; what it holds in locked RAM stays, and everything still reads the same.
+                held, mapped = again.part, again.mapping
+                again.reopen()
+                self.assertIsNot(again.mapping, mapped)
+                self.assertIs(again.part, held)
+                for key, value in tensors.items():
+                    self.assertTrue(torch.equal(again.get_tensor(key).float(), value.float()), key)
                 again.close()
                 self.assertEqual(again.part, None)
                 # A file that is resident whole needs no part of it kept again.

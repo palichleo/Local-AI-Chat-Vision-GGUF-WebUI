@@ -537,6 +537,19 @@ class Store:
         self.part = arena
         return arena.size if arena else 0
 
+    def reopen(self):
+        """Maps the file anew, letting go of the pages read through the mapping so far.
+
+        For a store kept open once its weights are on the GPU or in page-locked RAM (a model left
+        on the card for the next video): those pages stayed in the working set of the process
+        until the file was closed, 7 GiB of a video model counted against the free RAM (1 GiB
+        left of 32 through a series, measured). Tensors still read from the old mapping keep it."""
+        if self.mapping is not None:
+            from safetensors import safe_open
+
+            self.mapping.__exit__(None, None, None)
+            self.mapping = safe_open(self.path, framework='pt')
+
     def __enter__(self):
         return self
 
