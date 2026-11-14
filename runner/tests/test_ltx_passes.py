@@ -4,11 +4,41 @@ import unittest
 from pathlib import Path
 
 from runner.journal import Journal
-from runner.models.ltx25 import latent_upscaler
+from runner.models.ltx25 import kept_text, latent_upscaler, spread
 from runner.pipelines.ltx25 import equal_tiles, first_pass_size, tiling
 
 
 class PassTests(unittest.TestCase):
+    def test_the_blocks_kept_on_the_gpu_are_spread_through_the_model(self):
+        layer = lambda name: ('model', 'model.diffusion_model.' + name + '.weight', None)  # noqa: E731
+        outside = [layer('patchify_proj'), layer('adaln_single.linear')]
+        blocks = [layer(f'transformer_blocks.{index}.{part}') for index in range(48) for part in ('attn1', 'ff')]
+        order = spread([outside[0], *blocks, outside[1]])
+        self.assertEqual(sorted(order), sorted(outside + blocks))
+        # What is not in a block first; then whole blocks, their layers in their own order.
+        self.assertEqual(order[:2], outside)
+        index = lambda location: int(location[1].split('.')[3])  # noqa: E731
+        ranked = [index(location) for location in order[2::2]]
+        self.assertEqual([index(location) for location in order[3::2]], ranked)
+        self.assertTrue(all('attn1' in location[1] for location in order[2::2]))
+        self.assertEqual(ranked[:8], [0, 32, 16, 8, 40, 24, 4, 36])
+        # Whatever the number kept, no long run of blocks is left to copy: 12 of 48 are four
+        # apart, 18 at most four, and a smaller share is a part of a larger one.
+        for kept, widest in ((6, 8), (12, 4), (18, 4), (24, 2)):
+            chosen = sorted(ranked[:kept])
+            gaps = [after - before for before, after in zip(chosen, [*chosen[1:], 48 + chosen[0]])]
+            self.assertLessEqual(max(gaps), widest, kept)
+
+    def test_the_text_kept_for_a_prompt_stands_for_the_connectors_in_the_pipeline(self):
+        import torch
+
+        video, audio, mask = torch.ones(1, 4, 8), torch.ones(1, 4, 6), torch.zeros(1, 1, 4)
+        connectors = kept_text(video, audio, mask)
+        self.assertIsInstance(connectors, torch.nn.Module)
+        # Whatever the pipeline calls them with: the encoder's output is no longer needed.
+        found = connectors(torch.zeros(1, 1, 1), torch.ones(1, 1), padding_side='left')
+        self.assertTrue(all(got is given for got, given in zip(found, (video, audio, mask))))
+
     def test_large_videos_are_sampled_at_half_size_first_when_the_upscaler_is_there(self):
         with_upscaler = {'model': 'm', 'upscaler': 'u'}
         size = lambda width, height, components=with_upscaler: first_pass_size(

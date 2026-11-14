@@ -8,6 +8,8 @@ class Tensor:
     """What a WeightPool needs of a tensor, counting the copies to the GPU."""
 
     copies = 0
+    pinned = True  # in page-locked RAM, as the weights a pool sends ahead normally are
+    returned = []
 
     def __init__(self, size):
         self.size, self.ndim = size, 2
@@ -15,6 +17,16 @@ class Tensor:
     def to(self, device, non_blocking=False):
         Tensor.copies += 1
         return Tensor(self.size)
+
+    def copy_(self, source, non_blocking=False):
+        Tensor.copies += 1
+        return self
+
+    def is_pinned(self):
+        return Tensor.pinned
+
+    def record_stream(self, stream):
+        Tensor.returned.append(stream)
 
     def numel(self):
         return self.size
@@ -68,40 +80,40 @@ class WeightPoolTest(unittest.TestCase):
         self.assertIs(pool.bundle(('model', 'a.weight', None)), kept)
 
     def test_streamed_layers_are_copied_ahead_once_their_order_is_known(self):
-        from contextlib import contextmanager
-
         from runner.models import pool as module
 
-        side = {'on': False, 'copies': 0}
-
-        @contextmanager
-        def stream(_stream):
-            side['on'] = True
-            yield
-            side['on'] = False
+        side = {'on': False, 'copies': 0, 'waits': []}
 
         class Event:
-            def record(self, _stream):
-                pass
+            def record(self, stream):
+                self.stream = stream
 
-        current = SimpleNamespace(wait_event=lambda _event: None)
+        class Stream:
+            def wait_event(self, event):
+                side['waits'].append((self, event.stream))
+
+        current = Stream()
+
+        def set_stream(stream):
+            # The copies ahead are launched on the pool's own stream, the model's kernels on its own.
+            side['on'] = stream is not current
+
         cuda = SimpleNamespace(
-            synchronize=lambda: None, Stream=object, Event=Event, stream=stream, current_stream=lambda: current
+            synchronize=lambda: None, Stream=Stream, Event=Event, set_stream=set_stream, current_stream=lambda: current
         )
         sizes = {'a.weight': 60, 'b.weight': 30, 'c.weight': 50, 'd.weight': 10}
-        original = Tensor.to
+        original = Tensor.copy_
 
-        def to(tensor, device, non_blocking=False):
+        def copy_(tensor, source, non_blocking=False):
             side['copies'] += side['on']
-            return original(tensor, device, non_blocking)
+            return original(tensor, source, non_blocking)
 
-        with patch.dict(sys.modules, torch=SimpleNamespace(cuda=cuda), comfy_kitchen=SimpleNamespace()):
+        torch = SimpleNamespace(cuda=cuda, empty_like=lambda value, device: Tensor(value.size))
+        with patch.dict(sys.modules, torch=torch, comfy_kitchen=SimpleNamespace()):
             pool = module.WeightPool({'model': Store(sizes)}, 0, ahead_gib=100 / 1024**3)
         layers = [('model', key, None) for key in sizes]
         Tensor.copies = 0
-        with patch.object(module, 'RECENT', 0), patch.object(Tensor, 'to', to), patch.object(
-            Tensor, 'record_stream', lambda self, _stream: None, create=True
-        ):
+        with patch.object(module, 'RECENT', 0), patch.object(Tensor, 'copy_', copy_):
             # The first step only learns the order: every layer is copied when it runs.
             for layer in layers:
                 pool.bundle(layer)
@@ -116,8 +128,110 @@ class WeightPoolTest(unittest.TestCase):
             self.assertEqual((Tensor.copies, side['copies']), (10, 5))
             self.assertEqual(set(pool.ahead), set(layers[:2]))
             self.assertEqual(pool.ahead_bytes, 90)
+            # Each copy waits, on the pool's stream, for what the model was asked before it (the
+            # memory it is copied to may have been a tensor of the model); each layer, on the
+            # model's stream, for its copy.
+            ahead = [of for waiting, of in side['waits'] if waiting is pool.stream]
+            self.assertEqual((len(ahead), set(ahead)), (5, {current}))
+            layer = [of for waiting, of in side['waits'] if waiting is current]
+            self.assertEqual((len(layer), set(layer)), (3, {pool.stream}))
         pool.clear()
         self.assertEqual((pool.ahead, pool.ahead_bytes), ({}, 0))
+
+    def ahead_pool(self, sizes, ahead):
+        """A pool that copies ahead, on a fake GPU with two streams."""
+        from runner.models import pool as module
+
+        class Event:
+            def record(self, _stream):
+                pass
+
+        class Stream:
+            def wait_event(self, _event):
+                pass
+
+        current = Stream()
+        cuda = SimpleNamespace(
+            synchronize=lambda: None,
+            Stream=Stream,
+            Event=Event,
+            set_stream=lambda _stream: None,
+            current_stream=lambda: current,
+        )
+        torch = SimpleNamespace(cuda=cuda, empty_like=lambda value, device: Tensor(value.size))
+        with patch.dict(sys.modules, torch=torch, comfy_kitchen=SimpleNamespace()):
+            pool = module.WeightPool({'model': Store(sizes)}, 0, ahead_gib=ahead / 1024**3)
+        Tensor.copies = 0
+        return pool, module, [('model', key, None) for key in sizes if key.endswith('.weight')]
+
+    def test_the_window_of_copies_ahead_moves_with_the_layers_without_being_walked_again(self):
+        pool, module, layers = self.ahead_pool({f'{index}.weight': 30 for index in range(10)}, ahead=100)
+        with patch.object(module, 'RECENT', 0):
+            for layer in layers:
+                pool.bundle(layer)
+            walked = []
+            whole = pool._send_window
+            pool._send_window = lambda *args: (walked.append(args), whole(*args))[1]
+            for _step in range(3):
+                for index, layer in enumerate(layers):
+                    pool.bundle(layer)
+                    # Three layers of 30 bytes fit in 100: the three that follow, in their order.
+                    self.assertEqual(list(pool.ahead), [layers[(index + ahead) % 10] for ahead in (1, 2, 3)])
+                    self.assertEqual(pool.ahead_bytes, 90)
+            # The whole window was looked at once, when the order became known.
+            self.assertEqual(len(walked), 1)
+            self.assertEqual(Tensor.copies, 10 + 30 + 3)
+            # A layer the model skips: its copy goes away and the window starts over after the next.
+            pool.bundle(layers[0])
+            pool.bundle(layers[2])
+            self.assertEqual(len(walked), 2)
+            self.assertEqual(list(pool.ahead), layers[3:6])
+            pool.bundle(layers[3])
+            self.assertEqual((len(walked), list(pool.ahead)), (2, layers[4:7]))
+
+    def test_a_weight_that_is_not_in_locked_ram_is_copied_ahead_on_memory_of_the_pools_stream(self):
+        pool, module, layers = self.ahead_pool({f'{index}.weight': 30 for index in range(6)}, ahead=100)
+        waits = []
+        with patch.object(module, 'RECENT', 0), patch.object(Tensor, 'pinned', False), patch.object(
+            Tensor, 'returned', []
+        ):
+            for layer in layers:
+                pool.bundle(layer)
+            pool.stream = pool.loose = SimpleNamespace(wait_event=waits.append)
+            pool.bundle(layers[0])
+            # Three layers sent: taken by `to` (no memory of the model's stream, no wait behind
+            # the model), and their memory handed to the model's stream for when it is done.
+            self.assertEqual(list(pool.ahead), layers[1:4])
+            self.assertEqual(waits, [])
+            self.assertEqual(Tensor.returned, [pool.current] * 3)
+            self.assertEqual(Tensor.copies, 6 + 1 + 3)
+
+    def test_a_scale_and_a_bias_stay_on_the_gpu_beside_a_weight_sent_at_every_step(self):
+        sizes = {}
+        for index in range(4):
+            sizes.update({f'{index}.weight': 100_000, f'{index}.weight_scale': 4, f'{index}.bias': 64})
+        pool, module, layers = self.ahead_pool(sizes, ahead=250_000)
+        with patch.object(module, 'RECENT', 0):
+            first = [pool.bundle(layer) for layer in layers]
+            # Three tensors each the first time; from then on the weight alone.
+            self.assertEqual(Tensor.copies, 12)
+            self.assertEqual(set(pool.host[layers[0]]), {'weight'})
+            second = [pool.bundle(layer) for layer in layers]
+            self.assertEqual(Tensor.copies, 12 + 4 + 2)
+            for before, after in zip(first, second):
+                self.assertEqual(set(after), {'weight', 'scale', 'bias'})
+                self.assertIs(after['scale'], before['scale'])
+                self.assertIs(after['bias'], before['bias'])
+                self.assertIsNot(after['weight'], before['weight'])
+            # What a layer weighs is still all of it: the share kept on the GPU is counted as before.
+            self.assertEqual(pool.sizes[layers[0]], 100_068)
+        pool.clear()
+        self.assertEqual((pool.small, pool.sizes), ({}, {}))
+        # A pool that copies each layer when it runs keeps nothing there.
+        plain, _ = self.pool(sizes, limit=0)
+        plain.bundle(layers[0])
+        self.assertEqual(plain.small, {})
+        self.assertEqual(set(plain.host[layers[0]]), {'weight', 'scale', 'bias'})
 
     def test_a_layer_run_in_chunks_copies_its_weights_once(self):
         pool, module = self.pool({'fc1.weight': 200, 'fc2.weight': 100, 'next.weight': 150}, limit=0)
@@ -293,10 +407,13 @@ class RoomTest(unittest.TestCase):
         self.assertIn('7,0 Go sont libres', asked(final, 7.0))
         self.assertIn('réduisez la taille ou la durée de la vidéo', asked(final, 7.0))
         # Never more than before: a job whose estimate passes 9 GiB still runs with 9 free.
-        large = ltx25.working_gib(dict(frames=121), 896, 1600, 0)
+        large = video(1920, 1088)
         self.assertGreater(large, module.FLOOR_GIB)
         self.assertEqual(asked(large, 9.0), '')
         self.assertIn('environ 9,0 Go', asked(large, 8.9))
+        # An LTX video asks for what its steps need: its largest size on an 8 GiB card too.
+        self.assertLess(ltx25.working_gib(dict(frames=121), 288, 512, 0), 3)
+        self.assertEqual(asked(ltx25.working_gib(dict(frames=121), 896, 1600, 0), 7.0), '')
         # An image asks for little: its text encoder and its weights follow the card.
         image = krea2.RESERVE_GIB + krea2.RESERVE_PER_MEGAPIXEL_GIB * 1 + krea2.AHEAD_GIB
         self.assertEqual(asked(image, 3.5), '')

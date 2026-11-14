@@ -221,6 +221,47 @@ def latent_upscaler(header, source=None):
     return model.eval().to('cuda', dtype=torch.bfloat16)
 
 
+def spread(order):
+    """The order in which the layers of a transformer are kept on the GPU, block by block, for a
+    pool that keeps the first ones that fit (WeightPool.order): the blocks spread through the
+    model, not its first ones.
+
+    The weights of the other blocks are copied to the GPU at every step, at the speed of the bus
+    (a block of LTX 2.5, 410 MiB, in 17 ms; it computes in 12). Kept in front, the first blocks
+    ran with nothing to copy, then every block waited for its weights: with 18 of the 48 kept,
+    0.72 s a step. Spread, each copy has the time of the kept block before it.
+
+    Blocks come in the order of their index read in binary backwards (0, 32, 16, 8, 40, ...):
+    whatever the number kept, they are evenly apart, and a smaller share keeps a subset of a
+    larger one's, so that what is page-locked in RAM for one video serves the next (see
+    WeightPool.streamed). Layers outside the blocks come first, in their own order."""
+    import re
+
+    first, blocks = [], {}
+    for location in order:
+        found = re.search(r'\btransformer_blocks\.(\d+)\.', location[1])
+        if found:
+            blocks.setdefault(int(found.group(1)), []).append(location)
+        else:
+            first.append(location)
+    bits = max(1, max(blocks, default=0).bit_length())
+    backwards = lambda index: int(format(index, f'0{bits}b')[::-1], 2)  # noqa: E731
+    return first + [location for index in sorted(blocks, key=backwards) for location in blocks[index]]
+
+
+def kept_text(video, audio, mask):
+    """In the place of the text connectors in diffusers' pipeline: what they gave for this
+    prompt (the text as the video and the sound read it, and its mask), whatever it is called
+    with."""
+    import torch
+
+    class KeptText(torch.nn.Module):
+        def forward(self, *args, **kwargs):
+            return video, audio, mask
+
+    return KeptText()
+
+
 def chunk_feed_forwards(transformer, rows=8192):
     """Run each block's feed-forward a few thousand tokens at a time.
 
