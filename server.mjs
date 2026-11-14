@@ -1459,7 +1459,10 @@ export async function createApplication({
         return send(200, { workflow: body.workflow, preset: await studioPresets.save(body.workflow, body.preset) });
       // What the user typed in the Studio, rewritten by the chat model as a full prompt.
       if (path === '/api/studio/enrich') {
-        if (typeof body.prompt !== 'string' || !body.prompt.trim()) throw problem('Écrivez d’abord quelques mots à enrichir.');
+        // A character put in a video needs no word: its prompt is written from the two pictures.
+        const fromPictures = body.verb === 'replace_character' && Boolean(body.source && body.reference);
+        if (typeof body.prompt !== 'string' || (!body.prompt.trim() && !fromPictures))
+          throw problem('Écrivez d’abord quelques mots à enrichir.');
         if (runtime.active) throw problem('La génération utilise le GPU.', 409);
         if (engine.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
         if (engine.busy) throw problem('Une réponse est déjà en cours.', 409);
@@ -1472,7 +1475,7 @@ export async function createApplication({
           // A character put in a video: the prompt is written from the video and the image handed
           // over (lib/scene-prompt.mjs), what is typed kept as what the user asks for. Words alone
           // would invent a scene the video does not show.
-          if (body.verb === 'replace_character' && body.source && body.reference) {
+          if (fromPictures) {
             const typed = String(body.prompt ?? '').trim().slice(0, 4000),
               given = { prompt: typed, source: body.source, reference: body.reference },
               written = await withScenePrompt(given, { resources, engine, asked: typed, timeoutMs: enrichTimeoutMs });

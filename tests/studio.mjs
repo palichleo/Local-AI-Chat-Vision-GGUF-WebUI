@@ -444,6 +444,17 @@ test('a style the model does not write in time is said as such, and the model is
   // The simulated engine never finishes this one, like a model crawling on a shared graphics card.
   // Nothing to enrich is said at once, without asking the model.
   assert.equal((await api('studio/enrich', { prompt: '   ' })).status, 400);
+  // A character put in a video: nothing typed is fine, the prompt comes from the two pictures.
+  // (This simulated model does not see pictures: said as such, not as « write a few words ».)
+  const blind = await api('studio/enrich', {
+    prompt: '',
+    verb: 'replace_character',
+    source: { resource: '11111111-1111-4111-8111-111111111111' },
+    reference: { resource: '22222222-2222-4222-8222-222222222222' },
+  });
+  assert.equal(blind.status, 502);
+  assert.match((await blind.json()).error, /ne voit pas les images/);
+  assert.equal((await api('studio/enrich', { prompt: '', verb: 'replace_character' })).status, 400);
   const late = await api('studio/enrich', { prompt: 'aquarelle, sans réponse', verb: 'create_image' });
   assert.equal(late.status, 504);
   assert.match((await late.json()).error, /n’a pas répondu en 0 secondes.*carte graphique/);
