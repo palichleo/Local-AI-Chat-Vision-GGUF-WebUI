@@ -6,6 +6,7 @@ import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from 
 import { citedMessage, citedUnused } from './lib/cited-resources.mjs';
 import { briefMessage, briefMissing } from './lib/video-brief.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
+import { withScenePrompt } from './lib/scene-prompt.mjs';
 import { THIN_NOTE, passedImages, thinPrompt } from './lib/thin-prompt.mjs';
 import { outputToolFor, readOutput } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
@@ -1959,6 +1960,18 @@ export async function createApplication({
                 // An image the user named by its label and the model left out: said once.
                 const unused = citedUnused(body.messages, await resources.catalog(), call);
                 if (unused.length) throw problem(citedMessage(unused), 400);
+                // A character put in a video: its prompt is written here from the frames of the
+                // video and the image of the character, which the model no longer has under its eyes.
+                if (call.function.name === 'replace_character')
+                  try {
+                    const given = JSON.parse(calls[0].function.arguments),
+                      last = body.messages.findLast(message => message?.role === 'user' && !message.internal),
+                      asked = typeof last?.content === 'string' ? last.content : '';
+                    const written = await withScenePrompt(given, { resources, engine, asked: asked.slice(0, 2000) });
+                    if (written !== given) calls[0].function.arguments = JSON.stringify(written);
+                  } catch {
+                    // The call keeps the prompt it came with.
+                  }
                 request = await runtime.request(calls, {
                   conversationId: body.conversationId,
                   turnId: body.turnId,

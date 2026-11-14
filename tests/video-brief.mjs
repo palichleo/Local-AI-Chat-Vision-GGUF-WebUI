@@ -19,8 +19,7 @@ test('a video is agreed on with the user before it is generated', () => {
   assert.equal(briefMissing(asked, call('replace_character')), true);
   // A character put in a video is agreed on in its own words: who is replaced, by whom.
   assert.match(briefMessage([], 'replace_character'), /who in it is replaced and by which/);
-  // What the video shows is written while it is seen: the prompt comes from those words later.
-  assert.match(briefMessage([], 'replace_character'), /starts with « Scène : »/);
+  assert.match(briefMessage([], 'replace_character'), /Speak in the future/);
   assert.doesNotMatch(briefMessage([], 'replace_character'), /the image the clip starts on/);
   assert.match(briefMessage([]), /the image the clip starts on/);
   // Told to agree first, the model cannot simply call again in the same reply.
