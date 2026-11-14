@@ -183,6 +183,7 @@ class StreamedLinearTests(unittest.TestCase):
             bundle=lambda location: tensors,
         )
         model = torch.nn.Sequential(torch.nn.Linear(features, rows))
+        self.pool = pool
         return load_streamed(model, {'0.weight': ('model', 'layer.weight')}, pool)[0]
 
     def test_an_activation_and_a_residual_go_into_the_int8_product_with_the_same_result(self):
@@ -199,6 +200,34 @@ class StreamedLinearTests(unittest.TestCase):
             both = linear(rows, act='gelu_tanh', residual=residual, gate=gate)
             self.assertLess(relative(both, residual + gate * linear(gelu)), 0.02)
             self.assertEqual(both.dtype, torch.bfloat16)
+
+    def test_a_lora_adds_its_term_to_the_product_whatever_goes_with_it(self):
+        torch.manual_seed(0)
+        value = lambda *shape: torch.randn(*shape, dtype=torch.bfloat16, device='cuda')  # noqa: E731
+        down, up = value(8, 256) * 0.1, value(64, 8) * 0.1
+        rows, residual = value(1, 300, 256), value(1, 300, 64)
+        gate = torch.rand(64, dtype=torch.bfloat16, device='cuda')
+        gelu = torch.nn.functional.gelu(rows, approximate='tanh')
+        term = lambda source: torch.nn.functional.linear(torch.nn.functional.linear(source, down), up)  # noqa: E731
+        weights = (
+            (torch.randint(-127, 128, (64, 256), dtype=torch.int8), torch.tensor(0.01)),
+            (torch.randn(64, 256, dtype=torch.bfloat16), None),
+        )
+        for weight, scale in weights:
+            linear = self.linear(weight, scale)
+            self.pool.adapter = lambda location, adapters, dtype=None: (down, up)
+            with self.subTest(weight=weight.dtype), torch.no_grad():
+                plain, activated = linear(rows), linear(gelu)
+                linear.adapters = [('lora', 'down', 'up', 1.0)]
+                self.assertLess(relative(linear(rows), plain + term(rows)), 0.02)
+                # The LoRA reads the activated rows, as the weight does.
+                self.assertLess(relative(linear(rows, act='gelu_tanh'), activated + term(gelu)), 0.02)
+                # Summed into the stream: the gate scales the LoRA's term with the weight's.
+                expected = residual + gate * (activated + term(gelu))
+                got = linear(rows, act='gelu_tanh', residual=residual, gate=gate)
+                self.assertLess(relative(got, expected), 0.02)
+                got = linear(rows, residual=residual, gate=gate)
+                self.assertLess(relative(got, residual + gate * (plain + term(rows))), 0.02)
 
     def test_a_weight_that_is_not_int8_computes_them_in_separate_steps(self):
         torch.manual_seed(0)

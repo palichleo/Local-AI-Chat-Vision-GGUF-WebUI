@@ -290,6 +290,27 @@ class StreamedShareTest(unittest.TestCase):
         pool.order = [('model', key, None) for key in sizes if key.endswith('.weight')]
         self.assertEqual(pool.streamed(), {})
 
+    def test_the_loras_a_pool_will_put_on_the_gpu_count_in_what_it_keeps_of_the_model(self):
+        from runner.models import pool as module
+
+        sizes = {'a.weight': 60, 'b.weight': 30, 'c.weight': 50, 'down': 10, 'up': 15}
+        torch = SimpleNamespace(cuda=SimpleNamespace(synchronize=lambda: None))
+        with patch.dict(sys.modules, torch=torch, comfy_kitchen=SimpleNamespace()):
+            pool = module.WeightPool({'model': Store(sizes)}, 100 / 1024**3)
+        pool.order = [('model', key, None) for key in sizes if key.endswith('.weight')]
+        self.assertEqual(pool.streamed(), {'model': {'c.weight'}})
+        # A LoRA on a layer: its pair goes to the GPU first (preload), in two bytes a value, and
+        # that much less of the model stays there: a no longer fits, the smaller b still does.
+        # Named now, a is in page-locked RAM for the steps.
+        pool.adapted[('model', 'a.weight', None)] = [('model', 'down', 'up', 1.0)]
+        self.assertEqual(pool._unmerged(), 50)
+        self.assertEqual(pool.streamed(), {'model': {'a.weight', 'c.weight'}})
+        # Once there they are in what the pool holds: not counted twice.
+        pool.merged[('model', 'a.weight', None)] = object()
+        pool.bytes = 50
+        self.assertEqual(pool._unmerged(), 0)
+        self.assertEqual(pool.streamed(), {'model': {'a.weight', 'c.weight'}})
+
     def test_a_store_that_knows_its_sizes_is_not_read_to_name_what_is_streamed(self):
         sizes = {'a.weight': 60, 'a.weight_scale': 5, 'b.weight': 50, 'b.bias': 5, 'qkv.weight': 90, 'qkv.bias': 9}
 

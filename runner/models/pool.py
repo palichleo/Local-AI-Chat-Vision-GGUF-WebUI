@@ -9,6 +9,7 @@ scaled back, plain weights as they are.
 """
 
 import json
+import math
 import time
 
 GiB = 1024**3
@@ -189,7 +190,7 @@ class WeightPool:
         streams lies from that first layer onward.
         """
         limit = max(0, self.limit - int(margin_gib * GiB))
-        held, keys, cut = self.bytes, {}, False
+        held, keys, cut = self.bytes + self._unmerged(), {}, False
         for location in self.order:
             if location in self.gpu:
                 continue
@@ -200,6 +201,23 @@ class WeightPool:
                 cut = True
                 keys.setdefault(location[0], set()).update(names)
         return keys
+
+    def _unmerged(self):
+        """Bytes the LoRAs will take on the GPU once there (preload puts them first): their pairs
+        as the files give them, in the bfloat16 they are kept in. Left out, the pool was counted
+        to keep that much more of the model than it does (1.2 GiB for LTX 2.5's subject LoRA),
+        and what it then copies at every step was not all in page-locked RAM."""
+        total = 0
+        for location, adapters in self.adapted.items():
+            if location in self.merged:
+                continue
+            for source, down, up, _strength in adapters:
+                store = self.stores[source]
+                for key in (down, up):
+                    # The shape alone where the store gives it without reading the tensor.
+                    shape = store.get_slice(key).get_shape() if hasattr(store, 'get_slice') else None
+                    total += 2 * (math.prod(shape) if shape is not None else store.get_tensor(key).numel())
+        return total
 
     def bundle(self, location):
         if location in self.gpu:
@@ -519,21 +537,30 @@ def load_streamed(model, names, pool):
 
             Both go into comfy-kitchen's INT8 kernel when the weight is INT8: a feed-forward's
             wide intermediate is never written out, nor the branch before its sum. Any other
-            weight, or one with LoRAs, computes the same in separate steps."""
+            weight computes the same in separate steps.
+
+            The layer's LoRAs read the activated rows and add up(down(rows)) to the result, in
+            the product itself (addmm_), scaled by the gate when the branch is summed in the
+            kernel: written out and added afterwards, that term was a pass over the layer's
+            whole output for each LoRA layer (LTX 2.5 with its subject LoRA, ten layers a block:
+            1.2 s a step where the same video takes 0.7 without)."""
             bundle = pool.bundle(self.location)
             weight, scale, bias = bundle['weight'], bundle.get('scale'), bundle.get('bias')
-            fused = weight.dtype == torch.int8 and not self.adapters
-            if act is not None and not fused:
+            quantized = weight.dtype == torch.int8
+            rows = value
+            if act is not None and (self.adapters or not quantized):
                 if act == 'swiglu':
                     first, up = value.chunk(2, dim=-1)
-                    value = F.silu(first) * up
+                    rows = F.silu(first) * up
                 elif act == 'gelu_tanh':
-                    value = F.gelu(value, approximate='tanh')
+                    rows = F.gelu(value, approximate='tanh')
                 else:
                     raise ValueError('Unknown activation ' + act)
-                act = None
-            if fused and (act is not None or residual is not None):
-                return pool.kernels.int8_linear(
+                if not quantized:
+                    value, act = rows, None
+            summed = quantized and residual is not None
+            if quantized and (act is not None or residual is not None):
+                result = pool.kernels.int8_linear(
                     value,
                     weight,
                     scale,
@@ -545,7 +572,7 @@ def load_streamed(model, names, pool):
                     residual=residual,
                     residual_scale=gate,
                 )
-            if weight.dtype == torch.int8:
+            elif quantized:
                 result = torch.ops.comfy_kitchen.int8_linear(
                     value,
                     weight,
@@ -562,9 +589,12 @@ def load_streamed(model, names, pool):
                     weight = weight * scale.to(value.dtype)
                 result = F.linear(value, weight, None if bias is None else bias.to(value.dtype))
             if self.adapters:
-                down, up = pool.adapter(self.location, self.adapters, value.dtype)
-                result = result + F.linear(F.linear(value, down), up)
-            if residual is not None:
+                down, up = pool.adapter(self.location, self.adapters, rows.dtype)
+                if summed:
+                    up = up * gate.to(up.dtype)[:, None]
+                low = F.linear(rows, down)
+                result.reshape(-1, result.shape[-1]).addmm_(low.reshape(-1, low.shape[-1]), up.t())
+            if residual is not None and not summed:
                 result = torch.addcmul(residual, result, gate)
             return result
 
