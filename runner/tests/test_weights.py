@@ -388,7 +388,8 @@ class RoomTest(unittest.TestCase):
         from runner.models import pool as module
 
         def card(free_gib):
-            return SimpleNamespace(cuda=SimpleNamespace(mem_get_info=lambda: (int(free_gib * 1024**3), 0)))
+            cuda = SimpleNamespace(mem_get_info=lambda: (int(free_gib * 1024**3), 0), memory_reserved=lambda: 0)
+            return SimpleNamespace(cuda=cuda)
 
         # The same code on a 12, a 24 and an 8 GiB card: what is free, less what a step needs.
         with patch.dict(sys.modules, torch=card(10.74)):
@@ -406,7 +407,8 @@ class RoomTest(unittest.TestCase):
         from runner.pipelines import krea2, ltx25, minimax_h3
 
         def card(free_gib):
-            return SimpleNamespace(cuda=SimpleNamespace(mem_get_info=lambda: (int(free_gib * 1024**3), 0)))
+            cuda = SimpleNamespace(mem_get_info=lambda: (int(free_gib * 1024**3), 0), memory_reserved=lambda: 0)
+            return SimpleNamespace(cuda=cuda)
 
         def asked(working, free_gib):
             with patch.dict(sys.modules, torch=card(free_gib)):

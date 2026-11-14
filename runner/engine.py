@@ -69,16 +69,27 @@ def _vram_ceiling(torch, margin=VRAM_MARGIN):
     if torch is None or not torch.cuda.is_available():
         return False
     free, total = torch.cuda.mem_get_info()
+    # The ceiling is on all this process holds: with what is free goes what it holds already,
+    # a model left on the card by the last generation (runner.models.kept).
+    free += torch.cuda.memory_reserved()
     if free - margin < total * 0.25:  # too little is free for a ceiling to help
         return False
     torch.cuda.set_per_process_memory_fraction((free - margin) / total)
     return True
 
 
+def _kept():
+    return sys.modules.get('runner.models.kept')
+
+
 def generate(job, config, progress):
     preflight(job, config)
     module, config = pipeline(job['pipeline']), validate_config(config)
     journal = Journal(config, job)
+    kept = _kept()
+    if kept is not None:
+        # The card is this pipeline's: what another left there for its next generation goes.
+        kept.only(job['pipeline'])
 
     def report(**data):
         # The picture so far is for the page: kilobytes at every step, nothing to diagnose.
@@ -127,10 +138,22 @@ def unload():
     return dict(release(), freedRamGiB=round(freed, 2))
 
 
-def release(keep_above=None):
+def release(keep_above=None, between=False):
     """The GPU's memory goes back to the driver. With `keep_above` (bytes) the chat model is about
     to load: the model files kept in RAM between generations leave, least recently used first,
-    until the machine has that much available (see Residency.leave_room)."""
+    until the machine has that much available (see Residency.leave_room).
+
+    `between` is the worker's own release after a generation: the model that generation left on
+    the card for the next one stays (runner.models.kept). Asked for by the application (the chat
+    model comes back, the user stops everything, nothing was created for a while, it closes),
+    that model leaves with the rest."""
+    kept = _kept()
+    held = 0
+    if kept is not None:
+        if between:
+            held = kept.allocated()
+        else:
+            kept.drop()
     gc.collect()
     freed = 0
     if keep_above:
@@ -146,7 +169,7 @@ def release(keep_above=None):
         if clear_blas is not None:
             clear_blas()
         torch.cuda.empty_cache()
-        allocated = torch.cuda.memory_allocated() / 1024**3
+        allocated = max(0, torch.cuda.memory_allocated() - held) / 1024**3
     if allocated:
         raise RuntimeError(f'GPU cleanup incomplete: {allocated:.6f} GiB still allocated')
     if keep_above:

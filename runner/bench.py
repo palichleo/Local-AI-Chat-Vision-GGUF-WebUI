@@ -160,6 +160,7 @@ def main(argv=None):
     parser.add_argument('--new-prompts', type=int, default=0, help='prompts that differ; later runs repeat the last')
     parser.add_argument('--same-prompt', action='store_true', help='one prompt for every run')
     parser.add_argument('--lora', action='append', default=[], metavar='FILE:STRENGTH')
+    parser.add_argument('--keep', action='store_true', help='leave the model on the GPU between runs, as the Studio')
     parser.add_argument('--gpu-gib', type=float, help='ceiling on the weights kept on the GPU')
     parser.add_argument('--ram-reserve-gib', type=float, help='RAM the resident files must leave free')
     parser.add_argument('--sparse-keep', type=float, help='MiniMax-H3: video sparse attention, percent of cubes kept')
@@ -221,7 +222,8 @@ def main(argv=None):
             if ceiling:
                 torch.cuda.set_per_process_memory_fraction(1.0)
         seconds = time.perf_counter() - started
-        worker.release()
+        # As the Studio does between two creations, or as the chat does after one.
+        worker.release(between=args.keep)
         print(f'\nrun {run}: {seconds:.1f} s  (seed {job["parameters"]["seed"]})', flush=True)
         timeline()
         metadata = result.get('metadata', {})

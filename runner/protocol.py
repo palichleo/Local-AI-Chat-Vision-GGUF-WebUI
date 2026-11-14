@@ -96,7 +96,9 @@ def serve(config, source=None, destination=None):
             if method == 'generate':
                 try:
                     with redirect_stdout(sys.stderr):
-                        release()
+                        # What the generation left on the card for the next one stays, until
+                        # the application asks for a release.
+                        release(between=True)
                 except Exception as exc:
                     emit(dict(id=request_id, error=dict(message=str(exc), code='GPU_RELEASE_FAILED')))
                     return

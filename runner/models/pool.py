@@ -41,7 +41,9 @@ def require(label, working_gib, smaller):
     """
     import torch
 
-    free = torch.cuda.mem_get_info()[0] / GiB
+    # What this process holds already is its own to use: the model a generation left on the
+    # card for the next (runner.models.kept) is not memory the next one lacks.
+    free = (torch.cuda.mem_get_info()[0] + torch.cuda.memory_reserved()) / GiB
     need = min(working_gib, FLOOR_GIB)
     if free < need:
         said = lambda value: f'{value:.1f}'.replace('.', ',')  # noqa: E731
@@ -482,6 +484,16 @@ class WeightPool:
         self.limit = int(limit_gib * 1024**3)
         if self.limit:
             self.preload()
+
+    def settle(self):
+        """Between two generations: the layers copied for a moment (the last ones used, the ones
+        on their way for a step that will not come) leave the GPU; the share that stays, and the
+        order of the layers, remain."""
+        self.torch.cuda.synchronize()
+        self.recent.clear()
+        self.ahead.clear()
+        self.reach = None
+        self.recent_bytes = self.ahead_bytes = 0
 
     def clear(self):
         self.torch.cuda.synchronize()

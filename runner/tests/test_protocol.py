@@ -32,6 +32,7 @@ class ProtocolTests(unittest.TestCase):
         cuda = SimpleNamespace(
             is_available=lambda: True,
             mem_get_info=lambda: (free_gib * 1024**3, 12 * 1024**3),
+            memory_reserved=lambda: 0,
             set_per_process_memory_fraction=fractions.append,
             empty_cache=lambda: fractions.append('empty'),
         )
@@ -125,8 +126,9 @@ class ProtocolTests(unittest.TestCase):
             calls.append('generated')
             return {'jobId': 'j', 'outputs': [], 'metadata': {}}
 
-        def release():
-            calls.append('released')
+        def release(between=False):
+            # The worker's own release: what the generation left for the next one stays.
+            calls.append('released between' if between else 'released')
             return dict(released=True, allocatedGiB=0)
 
         with (
@@ -136,9 +138,67 @@ class ProtocolTests(unittest.TestCase):
         ):
             serve({}, source, destination)
         rows = [json.loads(line) for line in destination.getvalue().splitlines()]
-        self.assertEqual(calls[:2], ['generated', 'released'])
+        self.assertEqual(calls, ['generated', 'released between', 'released'])
         self.assertEqual(rows[1], {'event': 'progress', 'id': 1, 'data': {'stage': 'denoising', 'step': 1, 'total': 1}})
         self.assertEqual(rows[2]['result']['jobId'], 'j')
+
+    def test_what_a_generation_leaves_on_the_card_stays_until_a_release_is_asked(self):
+        from runner import engine
+        from runner.models import kept
+
+        dropped = []
+        held = {'bytes': 3 * 1024**3}
+        cuda = SimpleNamespace(
+            is_initialized=lambda: True,
+            synchronize=lambda: None,
+            empty_cache=lambda: None,
+            memory_allocated=lambda: held['bytes'],
+        )
+
+        def model(name, key):
+            def drop():
+                dropped.append(name)
+                held['bytes'] = 0
+
+            return SimpleNamespace(key=key, allocated=3 * 1024**3, drop=drop)
+
+        with patch.dict(sys.modules, torch=SimpleNamespace(cuda=cuda, _C=SimpleNamespace())):
+            kept.put('ltx25', model('ltx25', 'a'))
+            try:
+                # After a generation: the model stays, and its memory is not a failed cleanup.
+                self.assertEqual(engine.release(between=True), dict(released=True, allocatedGiB=0))
+                self.assertEqual(dropped, [])
+                # The same model is taken back for the same files; anything else makes it leave.
+                found = kept.take('ltx25', 'a')
+                self.assertEqual((found.key, dropped), ('a', []))
+                kept.put('ltx25', found)
+                self.assertIsNone(kept.take('ltx25', 'other files'))
+                self.assertEqual(dropped, ['ltx25'])
+                held['bytes'] = 3 * 1024**3
+                kept.put('ltx25', model('ltx25', 'a'))
+                kept.only('krea2')
+                self.assertEqual(dropped, ['ltx25', 'ltx25'])
+                # The application asks (chat model back, stop, close): everything leaves.
+                held['bytes'] = 3 * 1024**3
+                kept.put('ltx25', model('ltx25', 'a'))
+                self.assertEqual(engine.release(), dict(released=True, allocatedGiB=0))
+                self.assertEqual(dropped, ['ltx25'] * 3)
+                # More than what was left is still a failed cleanup.
+                held['bytes'] = 4 * 1024**3
+                kept.put('ltx25', SimpleNamespace(key='a', allocated=3 * 1024**3, drop=lambda: None))
+                with self.assertRaisesRegex(RuntimeError, 'GPU cleanup incomplete: 1.0'):
+                    engine.release(between=True)
+            finally:
+                kept._kept.clear()
+
+    def test_the_ceiling_counts_what_the_process_already_holds(self):
+        from runner import engine
+
+        torch, fractions = self._engine_torch(free_gib=3)
+        # 3 GiB free and 7 held by the model left on the card: the ceiling is on the ten, less the margin.
+        torch.cuda.memory_reserved = lambda: 7 * 1024**3
+        self.assertTrue(engine._vram_ceiling(torch))
+        self.assertAlmostEqual(fractions[0], 9 / 12)
 
     def test_release_is_told_the_room_the_chat_model_needs(self):
         source = io.StringIO(
@@ -172,7 +232,10 @@ class ProtocolTests(unittest.TestCase):
 
         with (
             patch('runner.protocol.generate', fail),
-            patch('runner.protocol.release', lambda: calls.append('release') or dict(released=True, allocatedGiB=0)),
+            patch(
+                'runner.protocol.release',
+                lambda **_: calls.append('release') or dict(released=True, allocatedGiB=0),
+            ),
         ):
             serve({}, source, destination)
         rows = [json.loads(line) for line in destination.getvalue().splitlines()]

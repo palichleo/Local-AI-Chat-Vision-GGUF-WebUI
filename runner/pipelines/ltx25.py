@@ -95,7 +95,54 @@ def preflight(job, config):
             source_tail(ref['path'], job['parameters'])
 
 
+class Loaded:
+    """The video model as one generation leaves it for the next (runner.models.kept): its files
+    open, its layers built, and the share of its weights that stays on the GPU."""
+
+    def __init__(self, key):
+        self.key, self.stack, self.stores, self.adapters = key, ExitStack(), {}, []
+        self.transformer = self.hot = None
+        # Video memory all this holds, measured once the generation that leaves it is over.
+        self.allocated = 0
+
+    def drop(self):
+        if self.hot is not None:
+            self.hot.clear()
+        self.transformer = self.hot = None
+        self.stack.close()
+
+
+def decode_floor_gib(shape):
+    """Video memory the decode of latents of this shape needs at least, in GiB: what the whole
+    video holds whatever the tiles, one of the smallest tiles, and what decode_pixels leaves
+    free (see configure_decode, which counts the same from the decoder itself)."""
+    frames, height, width = (shape[2] - 1) * 4 + 1, shape[3] * 4, shape[4] * 4
+    features = (frames + 8) * height * width * 512 * 2
+    pixels = frames * 2 * height * 8 * width * 8 * 3 * 2
+    tile = min(frames, TILE['frames']) * min(height, TILE['side']) * min(width, TILE['side']) * 8
+    return (features + 2.5 * pixels + tile * TILE_TOKEN_BYTES) / 1024**3 + 2
+
+
 def generate(job, config, progress):
+    """One video. The model the last generation left on the GPU is taken back when it is the
+    one this job asks for (same file, same LoRAs), and left there again at the end."""
+    from runner.models import conditioning, kept
+
+    files = [job['components']['model'], *(item['path'] for item in job['loras'])]
+    key = [[conditioning.stamp(path) for path in files], [item['strength'] for item in job['loras']]]
+    holder = [kept.take('ltx25', key)]
+    try:
+        result = _generate(job, config, progress, key, holder)
+    except BaseException:
+        # Whatever state the failure left it in, it is not one to start the next video from.
+        if holder[0] is not None:
+            holder[0].drop()
+        raise
+    kept.put('ltx25', holder[0])
+    return result
+
+
+def _generate(job, config, progress, key, holder):
     import torch
     from runner.models import conditioning
     from runner.models.headers import header
@@ -117,7 +164,7 @@ def generate(job, config, progress):
 
     if not torch.cuda.is_available():
         raise RuntimeError('Native LTX2.5 requires CUDA')
-    from runner.models.pool import require
+    from runner.models.pool import require, room
 
     # Asked for before anything is loaded: what the model computes with for the first pass of
     # this video. Its weights follow the card (see `share` below).
@@ -179,26 +226,34 @@ def generate(job, config, progress):
         setup[name] = round(time.perf_counter() - lap, 2)
         lap = time.perf_counter()
 
+    # A model taken back from the last generation: this one is the next of a run (the Studio).
+    loaded = holder[0]
+    again = loaded is not None
     with ExitStack() as stack, torch.inference_mode():
         # Only what this generation runs is built: not the text encoder (its own module builds
         # it when a prompt is new), nor the connectors of a prompt whose text is kept, nor the
-        # decoder (decode_pixels) unless the pipeline is given it for want of an encoder.
-        wanted = ['model', 'audioVae', *(['connectors'] if text is None else [])]
+        # decoder (decode_pixels) unless the pipeline is given it for want of an encoder, nor
+        # the model when the last generation left it.
+        wanted = ['audioVae', *([] if again else ['model']), *(['connectors'] if text is None else [])]
         wanted += [] if job['references'] else ['vae']
         models, names = validate_layout(headers, wanted)
+        if not again:
+            # The model's file and its LoRAs stay open with it, beyond this generation.
+            loaded = holder[0] = Loaded(key)
+            loaded.stores['model'] = loaded.stack.enter_context(open_store(job['components']['model'], True))
+            for index, item in enumerate(job['loras']):
+                name = 'lora-' + str(index)
+                loaded.stores[name] = loaded.stack.enter_context(open_store(item['path']))
+                loaded.adapters.append((name, item['strength']))
         # Weights come from RAM-resident arenas when they fit (kept between jobs); the text
         # encoder file only lends its projection here, so it is not loaded for that alone.
-        stores = {
-            role: stack.enter_context(open_store(path, 'if-present' if role == 'textEncoder' else True))
-            for role, path in job['components'].items()
-            if role != 'upscaler'
-        }
-        adapters = []
-        for index, item in enumerate(job['loras']):
-            key = 'lora-' + str(index)
-            stores[key] = stack.enter_context(open_store(item['path']))
-            adapters.append((key, item['strength']))
-        free = torch.cuda.mem_get_info()[0] / 1024**3
+        stores = dict(loaded.stores)
+        for role, path in job['components'].items():
+            if role not in ('upscaler', 'model'):
+                stores[role] = stack.enter_context(open_store(path, 'if-present' if role == 'textEncoder' else True))
+        # What this process may hold: what is free, and what it holds already (the model left by
+        # the last generation, which the card no longer counts as free).
+        free = (torch.cuda.mem_get_info()[0] + torch.cuda.memory_reserved()) / 1024**3
         # The share of the DiT kept on the GPU; the rest is copied from RAM at every step, at
         # about 12 GiB/s. What the model computes with comes first (working_gib). Video memory
         # that runs out halves the speed, a smaller share costs a second per step at most.
@@ -212,17 +267,26 @@ def generate(job, config, progress):
             kept = max(0, free - beside - working_gib(p, width, height, subjects) - AHEAD_GIB)
             return min(config['cacheGiB'], kept) if 'cacheGiB' in config else kept
 
-        hot = WeightPool(stores, 0, adapters=adapters, ahead_gib=AHEAD_GIB)
+        if not again:
+            loaded.hot = WeightPool(loaded.stores, 0, adapters=loaded.adapters, ahead_gib=AHEAD_GIB)
+        hot = loaded.hot
         cold = WeightPool(stores, 0)
         ahead = None
+        # What this generation hangs on the model, taken off again at its end.
+        hooks = []
         timed('layouts and stores')
         try:
-            transformer = load_streamed(models.pop('model'), names['model'], hot)
-            # The blocks kept on the GPU are spread through the model: see spread.
-            hot.order = spread(hot.order)
-            # Blocks of another kind keep diffusers' own computation, their feed-forwards in slices.
-            if not fuse(transformer):
-                chunk_feed_forwards(transformer)
+            if again:
+                transformer = loaded.transformer
+                hot.stats.update(dict.fromkeys(hot.stats, 0.0))
+                getattr(transformer, '_masks', {}).clear()
+            else:
+                transformer = loaded.transformer = load_streamed(models.pop('model'), names['model'], hot)
+                # The blocks kept on the GPU are spread through the model: see spread.
+                hot.order = spread(hot.order)
+                # Blocks of another kind keep diffusers' own computation, their feed-forwards in slices.
+                if not fuse(transformer):
+                    chunk_feed_forwards(transformer)
             timed('transformer')
             if job['references']:
                 encoder, encoder_names = video_encoder(headers)
@@ -236,9 +300,16 @@ def generate(job, config, progress):
             # Their convolutions are on the GPU from here to the end of the steps (0.7 GiB for
             # the encoder of an image or of a source video, 0.1 without): they come off the share
             # of the model. Left out, a video from an image ran its steps with 45 MiB free.
-            beside = torch.cuda.memory_allocated() / 1024**3
+            beside = max(0, torch.cuda.memory_allocated() - hot.bytes) / 1024**3
             budget = share(*(first or (p['width'], p['height'])))
-            hot.limit = int(budget * 1024**3)
+            # The share the last generation left is this one's when it fits what this video
+            # leaves it (a quarter of a gigabyte over is within what the steps are given to
+            # spare): nothing to read again. Else it is filled anew at this video's size.
+            ready = bool(hot.gpu) and hot.bytes <= (budget + 0.25) * 1024**3
+            if ready:
+                budget = hot.limit / 1024**3
+            else:
+                hot.limit = int(budget * 1024**3)
             # What will not stay on the GPU goes to page-locked RAM once, for every step and the
             # next videos. The second pass of a large video keeps less there: what it copies
             # beyond the first is locked too when RAM allows, else read from the file as before.
@@ -257,7 +328,7 @@ def generate(job, config, progress):
             # read once; read again here, it pushed everything else out of the system's cache.
             held = stores['model'].part.header if stores['model'].part else {}
             # In the order they are asked for: the connectors, then the share of the model.
-            order = [*(use_order(names['connectors']) if text is None else ()), *hot.order]
+            order = [*(use_order(names['connectors']) if text is None else ()), *(() if ready else hot.order)]
             ahead = prefetch(
                 job['components'],
                 stores,
@@ -270,20 +341,21 @@ def generate(job, config, progress):
             # for their own tensors beside the weights. Filled here, the share had to leave those
             # 5 GiB free at every step: 4.7 GiB of the model stayed on a 12 GiB card, the other
             # 15 were copied at each step and the steps waited for the bus.
-            due = [budget]
+            due = [] if ready else [budget]
 
             def fill(_module, _inputs):
-                if due:
-                    began = time.perf_counter()
+                if cold.recent or due:
                     # What those ran with leaves first: the last layers of an encoder stay on the
                     # GPU for a moment (RECENT), and PyTorch keeps the blocks it has freed.
                     cold.clear()
                     torch.cuda.empty_cache()
+                if due:
+                    began = time.perf_counter()
                     hot.resize(due.pop())
                     spent = setup.get('weights kept on the GPU', 0) + time.perf_counter() - began
                     setup['weights kept on the GPU'] = round(spent, 2)
 
-            transformer.register_forward_pre_hook(fill)
+            hooks.append(transformer.register_forward_pre_hook(fill))
             if text is None:
                 # The connectors turn what the encoder gave into the text the model reads, and that
                 # depends on the prompt alone. They run once, here, while no weight of the model is
@@ -327,7 +399,7 @@ def generate(job, config, progress):
                 values['video_keyframes_mask'] = marker
                 return args, values
 
-            transformer.register_forward_pre_hook(keyframe_marker, with_kwargs=True)
+            hooks.append(transformer.register_forward_pre_hook(keyframe_marker, with_kwargs=True))
             if continuation and p['audio'] and continuation['sourceAudio']:
                 # Source sound under the overlap stays fixed, so the new audio continues it.
                 from runner.video.audio_tail import encode_tail, protect_head
@@ -341,7 +413,7 @@ def generate(job, config, progress):
                     clean = pipe._normalize_audio_latents(
                         pipe._pack_audio_latents(clean.to('cuda')), audio.latents_mean, audio.latents_std
                     )
-                    protect_head(transformer, clean)
+                    hooks.extend(protect_head(transformer, clean))
                     continuation['audioProtectedLatents'] = clean.shape[1]
                     del clean
             if msr_refs:
@@ -481,14 +553,23 @@ def generate(job, config, progress):
             progress(stage='video sampled', **cache)
             del _audio, pipe, transformer, connectors, vae, audio
         finally:
+            for hook in hooks:
+                hook.remove()
             if ahead:
                 ahead.stop()
-            hot.clear()
             cold.clear()
-    del hot, cold, stores, models, embeds, mask
+    del cold, stores, models, embeds, mask
+    # The share of the model stays on the GPU through the decode for the next video of a run
+    # (`again`), when the decode has its room beside it: the next video then starts at its first
+    # step, where reading the share from the disk took 3 s. A first video, or one the chat asked
+    # for, gives the card to its decode as before; so does a video too large for both.
+    hot.settle()
     gc.collect()
     torch.cuda.empty_cache()
-    # The large DiT/Gemma mappings are closed before the decode: their pages can be reclaimed.
+    if not (again and room(0) >= decode_floor_gib(video.shape)):
+        # Its weights and LoRAs leave the GPU; its layers and their order stay with it.
+        hot.clear()
+    del hot
     pixels = decode_pixels(job, headers, video, progress)
     generated_audio = None
     if p['audio']:
@@ -521,7 +602,12 @@ def generate(job, config, progress):
             strength=p.get('msr_strength', 1),
             timeOffsets=list(range(-len(msr_refs), 0)),
         )
-    return save_video(pixels, config, job, metadata, audio=generated_audio)
+    result = save_video(pixels, config, job, metadata, audio=generated_audio)
+    del pixels, generated_audio
+    gc.collect()
+    torch.cuda.empty_cache()
+    loaded.allocated = torch.cuda.memory_allocated()
+    return result
 
 
 def memory():
@@ -677,7 +763,7 @@ def decode_pixels(job, headers, latents, progress):
     import numpy
     import torch
     from runner.models.ltx25 import validate_layout, WeightPool, load_streamed
-    from runner.models.pool import room
+    from runner.models.pool import RECENT, room
     from runner.models.residency import open_store
 
     seed = job['parameters']['seed']
@@ -718,8 +804,9 @@ def decode_pixels(job, headers, latents, progress):
                     ).sample
 
             try:
-                # What is free below the engine's margin, less the weights and half a gigabyte.
-                decoded = decode(room(1.5) - kept)
+                # What is free below the engine's margin, less half a gigabyte and the decoder's
+                # weights: all of them when they stay on the GPU, else the last layers used.
+                decoded = decode(room(1.5) - (kept or RECENT / 1024**3))
             except torch.OutOfMemoryError:
                 decoded = None
             if decoded is None:
