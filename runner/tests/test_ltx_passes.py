@@ -162,5 +162,38 @@ class JournalTests(unittest.TestCase):
         Journal({}, {}).write(stage='anything')
 
 
+class PreflightTests(unittest.TestCase):
+    def test_files_that_passed_are_checked_again_only_when_one_changes(self):
+        from unittest import mock
+
+        from runner.pipelines import ltx25 as pipeline
+
+        job = dict(components={'model': 'model.safetensors'}, loras=[], references=[], parameters={'audio': False})
+        stamps = {'model.safetensors': ['model.safetensors', 10, 1]}
+        with (
+            mock.patch('runner.models.conditioning.stamp', side_effect=lambda path: list(stamps[path])),
+            mock.patch('runner.models.headers.header', return_value={}),
+            mock.patch('runner.models.ltx25.validate_layout') as validate,
+            mock.patch('runner.video.msr.validate_msr'),
+            mock.patch('runner.models.ltx25_audio.vocoder_layout'),
+            mock.patch.object(pipeline, 'CHECKED', set()),
+        ):
+            pipeline.preflight(job, {})
+            pipeline.preflight(job, {})
+            self.assertEqual(validate.call_count, 1)
+            stamps['model.safetensors'][2] = 2
+            pipeline.preflight(job, {})
+            self.assertEqual(validate.call_count, 2)
+            # Another way to use the same files is another check, and a refusal is not remembered.
+            pipeline.preflight(dict(job, parameters={'audio': True}, components={'model': 'model.safetensors'}), {})
+            self.assertEqual(validate.call_count, 3)
+            stamps['model.safetensors'][2] = 3
+            validate.side_effect = ValueError('Unsupported LTX2.5 layout')
+            for _ in range(2):
+                with self.assertRaises(ValueError):
+                    pipeline.preflight(job, {})
+            self.assertEqual(validate.call_count, 5)
+
+
 if __name__ == '__main__':
     unittest.main()

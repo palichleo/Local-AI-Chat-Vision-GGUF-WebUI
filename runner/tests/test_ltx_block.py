@@ -172,10 +172,10 @@ class StreamedLinearTests(unittest.TestCase):
         tensors = {'weight': weight.cuda(), 'bias': torch.randn(rows, dtype=torch.bfloat16, device='cuda')}
         if scale is not None:
             tensors['scale'] = scale.cuda()
-        store = SimpleNamespace(keys=lambda: ['layer.weight'])
         pool = SimpleNamespace(
             kernels=comfy_kitchen,
-            stores={'model': store},
+            stores={'model': None},
+            keys=lambda source: {'layer.weight'},
             adapters=(),
             adapted={},
             order=[],

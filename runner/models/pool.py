@@ -91,7 +91,7 @@ class WeightPool:
         self.adapted = {}
         # Each LoRA file's pairs for the layers of the model, read once (see lora_layers).
         self.lora_cache = {}
-        # The keys of each store, listed once (see sized).
+        # The keys of each store, listed once (see keys).
         self.listed = {}
         self.merged = {}
         self.merged_bytes = 0
@@ -135,16 +135,20 @@ class WeightPool:
     def summary(self):
         return {key: round(value, 2) for key, value in self.stats.items()}
 
+    def keys(self, source):
+        """The keys of a store, listed once: a store lists them anew each time it is asked (4 000
+        names for a video model, asked by every layer when it is built and when it first runs:
+        2.7 of the 3.4 s a 1 650-layer model took to build)."""
+        listed = self.listed.get(source)
+        if listed is None:
+            listed = self.listed[source] = set(self.stores[source].keys())
+        return listed
+
     def parts(self, location):
         """What a layer reads from its file: its weight, with its scale and bias when it has them,
         and the file keys they come from."""
         source, key, part = location
-        store = self.stores[source]
-        # Listed once: a store lists its keys anew each time it is asked (4 000 names for a video
-        # model, asked twice per layer: seconds of the first step).
-        listed = self.listed.get(source)
-        if listed is None:
-            listed = self.listed[source] = set(store.keys())
+        store, listed = self.stores[source], self.keys(source)
         values, keys = {'weight': self.read(location)}, [key]
         for suffix, label in (('.weight_scale', 'scale'), ('.bias', 'bias')):
             candidate = key.removesuffix('.weight') + suffix
@@ -165,9 +169,7 @@ class WeightPool:
         if measure is None:
             values, names = self.parts(location)
             return sum(value.numel() * value.element_size() for value in values.values()), names
-        listed = self.listed.get(source)
-        if listed is None:
-            listed = self.listed[source] = set(store.keys())
+        listed = self.keys(source)
         size, names = measure(key)[0] // (3 if part is not None else 1), [key]
         for suffix in ('.weight_scale', '.bias'):
             candidate = key.removesuffix('.weight') + suffix
@@ -514,16 +516,6 @@ def load_streamed(model, names, pool):
     import torch.nn.functional as F
     from accelerate.utils import set_module_tensor_to_device
 
-    names_of = {}
-
-    def listed(source):
-        # A store lists its keys anew each time it is asked: asked by every layer for its
-        # quantisation note, that was 2.7 of the 3.4 s a 1 650-layer video model took to build.
-        found = names_of.get(source)
-        if found is None:
-            found = names_of[source] = set(pool.stores[source].keys())
-        return found
-
     class Linear(torch.nn.Module):
         def __init__(self, location):
             super().__init__()
@@ -532,7 +524,7 @@ def load_streamed(model, names, pool):
             self.out_features, self.in_features = pool.read(location).shape
             store = pool.stores[location[0]]
             key = location[1].removesuffix('.weight') + '.comfy_quant'
-            quant = json.loads(store.get_tensor(key).numpy().tobytes()) if key in listed(location[0]) else {}
+            quant = json.loads(store.get_tensor(key).numpy().tobytes()) if key in pool.keys(location[0]) else {}
             self.rotation = quant.get('convrot_groupsize', 256) if quant.get('convrot') else 0
             if self.rotation and self.in_features % self.rotation:
                 raise ValueError('Invalid ConvRot group size')

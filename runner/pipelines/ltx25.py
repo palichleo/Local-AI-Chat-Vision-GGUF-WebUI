@@ -69,25 +69,41 @@ def check(job, family):
             raise ValueError('Invalid continuation overlap')
 
 
+# The files already checked by preflight in this process, by what tells one version of a file
+# from another: the same files are checked once, not twice at every generation.
+CHECKED = set()
+
+
 def preflight(job, config):
-    """File-level checks run on CPU before the chat model is unloaded."""
+    """File-level checks run on CPU before the chat model is unloaded.
+
+    Checking the files builds every model empty to compare it with them: half a second, asked
+    twice for each generation (by the application, then by the worker before it generates).
+    A set of files that passed is not checked again while none of them has changed."""
+    from runner.models import conditioning
     from runner.models.headers import header
     from runner.models.ltx25 import validate_layout, video_encoder
     from runner.video.msr import validate_msr
 
-    headers = {role: header(path) for role, path in job['components'].items()}
-    validate_layout(headers)
-    if job['references']:
-        video_encoder(headers)
-    if job['parameters']['audio']:
-        from runner.models.ltx25_audio import vocoder_layout
+    stamps = [(role, conditioning.stamp(path)) for role, path in sorted(job['components'].items())]
+    stamps += [('lora', conditioning.stamp(item['path'])) for item in job['loras']]
+    roles = sorted({ref['role'] for ref in job['references']})
+    files = repr((stamps, roles, bool(job['parameters']['audio'])))
+    if files not in CHECKED:
+        headers = {role: header(path) for role, path in job['components'].items()}
+        validate_layout(headers)
+        if job['references']:
+            video_encoder(headers)
+        if job['parameters']['audio']:
+            from runner.models.ltx25_audio import vocoder_layout
 
-        vocoder_layout(headers)
-    validate_msr(job, headers)
-    if 'upscaler' in headers:
-        from runner.models.ltx25 import latent_upscaler
+            vocoder_layout(headers)
+        validate_msr(job, headers)
+        if 'upscaler' in headers:
+            from runner.models.ltx25 import latent_upscaler
 
-        latent_upscaler(headers['upscaler'])
+            latent_upscaler(headers['upscaler'])
+        CHECKED.add(files)
     for ref in job['references']:
         if ref['role'] == 'source_video':
             from runner.video.continuation import source_tail
