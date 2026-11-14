@@ -38,6 +38,21 @@ test('images passed to a generator and never looked at are shown to the model fi
   assert.match(SEEN_NOTE, /Nothing was generated/);
 });
 
+test('a character put in a video: the video is looked at too, with the image of the character', () => {
+  const asked = [{ role: 'user', content: 'remplace la fille par ce personnage' }];
+  const replace = call('replace_character', { prompt: 'x', source: { resource: 'v' }, reference: { resource: A } });
+  assert.deepEqual(
+    unseenResources(asked, catalog, replace).map(item => item.id),
+    [A, 'v'],
+  );
+  const read = [...asked, { role: 'tool', content: JSON.stringify({ status: 'nothing_generated', resources: [{ id: 'v' }] }) }];
+  assert.deepEqual(
+    unseenResources(read, catalog, replace).map(item => item.id),
+    [A],
+  );
+  assert.match(SEEN_NOTE, /a few frames of it/);
+});
+
 test('nothing to show for a call without images, another tool, or no conversation', () => {
   const asked = [{ role: 'user', content: 'une vidéo' }];
   assert.deepEqual(unseenResources(asked, catalog, call('create_video', { prompt: 'x' })), []);
