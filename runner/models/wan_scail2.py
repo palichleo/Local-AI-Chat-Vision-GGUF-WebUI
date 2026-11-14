@@ -369,7 +369,14 @@ def forward(
     # The pose has done its work: only the reference and the video go through the head.
     tokens = tokens[:, :kept]
     shift, scale = (model.scale_shift_table.to(temb.device) + temb.unsqueeze(1)).chunk(2, dim=1)
-    tokens = (model.norm_out(tokens.float()) * (1 + scale) + shift).type_as(tokens)
+    if tokens.dtype in (torch.bfloat16, torch.float16):
+        # One kernel in the precision of the tokens (see runner.models.wan_block): in float32,
+        # as diffusers computes it, this norm alone held two gigabytes for a full segment.
+        import comfy_kitchen
+
+        tokens = comfy_kitchen.adaln(tokens, scale.to(tokens.dtype), shift.to(tokens.dtype), model.norm_out.eps)
+    else:
+        tokens = (model.norm_out(tokens.float()) * (1 + scale) + shift).type_as(tokens)
     tokens = model.proj_out(tokens)
     p_t, p_h, p_w = model.config.patch_size
     tokens = tokens.reshape(batch, 1 + frames, rows, columns, p_t, p_h, p_w, -1)
