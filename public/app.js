@@ -420,6 +420,9 @@ function renderTranscript(messages, incomplete = false) {
           result = messages[index + 1];
         try {
           const data = result?.role === 'tool' && result.tool_call_id === call.id ? JSON.parse(result.content) : null;
+          // The character Moodix AI made for a replacement: its image first, as it was shown.
+          if (typeof data?.character_image?.output === 'string')
+            generationUI.restore(view.generations, state.conversationId, data.character_image.output, { compact: true });
           if (data?.run_id) {
             if (!text) view.body.replaceChildren();
             generationUI.restore(view.generations, state.conversationId, data.run_id, { compact: data.studio === true });
@@ -2487,6 +2490,7 @@ async function replaceWithCharacter(request, { view, signal }) {
           message:
             'L’utilisateur a annulé le remplacement après avoir vu l’image du personnage : la vidéo n’a pas été faite. ' +
             `L’image reste dans la conversation (run_id ${made.record.id}). Ne relance rien sans nouvelle demande.`,
+          character_image: { output: made.record.id },
         }),
       };
     }

@@ -42,6 +42,8 @@ export function callNote(call, result) {
   if (!data) return `${made} : génération interrompue.`;
   if (data.run_id) return '';
   if (data.status === 'denied') return `${made} : génération refusée dans la fenêtre de confirmation.`;
+  // The image of the character Moodix AI made, seen and declined: nothing was stopped midway.
+  if (data.status === 'cancelled' && data.character_image) return 'Remplacement annulé à la vérification du personnage.';
   if (data.status === 'cancelled') return `${made} : génération arrêtée avant la fin.`;
   if (data.status === 'error')
     return `${made} : génération non aboutie` + (data.message ? ` (${String(data.message).replace(/\.$/, '')}).` : '.');

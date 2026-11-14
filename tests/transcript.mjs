@@ -40,6 +40,14 @@ test('a generation that left no media is told in the user’s words, not the mod
     callNote(call('upscale'), result({ status: 'cancelled', message: 'L’utilisateur a arrêté cette génération…' })),
     'Agrandissement : génération arrêtée avant la fin.',
   );
+  // The image of a character Moodix AI made, seen and declined by the user.
+  assert.equal(
+    callNote(
+      call('replace_character'),
+      result({ status: 'cancelled', message: 'L’utilisateur a annulé…', character_image: { output: 'image-1' } }),
+    ),
+    'Remplacement annulé à la vérification du personnage.',
+  );
   // Stopped before any result was kept, or a result that belongs to another call.
   assert.equal(callNote(call('create_audio'), undefined), 'Son : génération interrompue.');
   assert.equal(
