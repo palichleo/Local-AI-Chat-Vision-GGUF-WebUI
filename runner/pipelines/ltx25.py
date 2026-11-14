@@ -213,6 +213,13 @@ def _generate(job, config, progress, key, holder):
         found = conditioning.load(config, conditioning.key('ltx25', stamps[0], job['parameters']['prompt']))
         if found:
             embeds, mask = found[0]['embeds'], found[0]['mask']
+    if text is None and holder[0] is not None and holder[0].hot is not None:
+        # A prompt to read: its encoder, then the connectors, have the card to themselves as
+        # they always had. The share of the model the last generation left there goes (its
+        # layers stay built), and is filled again when the model first runs.
+        holder[0].hot.clear()
+        gc.collect()
+        torch.cuda.empty_cache()
     if found:
         progress(stage='video prompt encoded', conditioning='kept from an earlier generation')
     else:
