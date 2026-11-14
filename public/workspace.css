@@ -70,11 +70,6 @@ dialog,
   font-weight: 650;
   flex-shrink: 0;
 }
-.brand-mark,
-.brand-mark svg {
-  width: 27px;
-  height: 31px;
-}
 .brand-local {
   font-weight: 350;
   color: var(--muted);
@@ -1063,11 +1058,6 @@ body:not([data-files='open']) .assets-panel {
     font-size: 19px;
     gap: 7px;
   }
-  .brand-mark,
-  .brand-mark svg {
-    width: 23px;
-    height: 26px;
-  }
   .sidebar > .new-chat {
     display: none;
   }
@@ -1217,11 +1207,6 @@ body:not([data-files='open']) .assets-panel {
   .sidebar .brand {
     font-size: 17px;
     gap: 5px;
-  }
-  .sidebar .brand-mark,
-  .sidebar .brand-mark svg {
-    width: 21px;
-    height: 24px;
   }
   .sidebar .sidebar-actions {
     gap: 2px;

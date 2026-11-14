@@ -172,19 +172,6 @@ button svg {
   font-weight: 650;
   padding: 0 7px;
 }
-.brand-mark {
-  width: 33px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-}
-.brand-mark svg {
-  width: 33px;
-  height: 33px;
-  fill: var(--accent);
-  stroke-width: 1;
-}
 .brand-local {
   font-weight: 350;
   color: var(--muted);
@@ -402,19 +389,6 @@ button svg {
   display: grid;
   place-items: center;
   margin-bottom: 22px;
-  color: var(--accent);
-}
-.welcome-mark > svg {
-  width: 62px;
-  height: 62px;
-  fill: var(--tint);
-  stroke-width: 0.9;
-}
-.welcome-mark-small {
-  position: absolute;
-  right: 0;
-  top: -4px;
-  font-size: 25px;
   color: var(--accent);
 }
 .welcome h1 {
@@ -1085,10 +1059,6 @@ fieldset {
     font-size: 21px;
     gap: 7px;
   }
-  .brand-mark svg {
-    width: 28px;
-    height: 28px;
-  }
   .new-chat {
     font-size: 12px;
     padding: 9px;
@@ -1107,10 +1077,6 @@ fieldset {
     width: 50px;
     height: 50px;
     margin-bottom: 15px;
-  }
-  .welcome-mark > svg {
-    width: 47px;
-    height: 47px;
   }
   .welcome h1 {
     font-size: 36px;
@@ -1892,13 +1858,6 @@ fieldset {
   height: 42px;
   margin-bottom: 12px;
 }
-.composer-region .welcome-mark > svg {
-  width: 42px;
-  height: 42px;
-}
-.composer-region .welcome-mark-small {
-  font-size: 18px;
-}
 .composer-region .welcome h1 {
   font-size: 34px;
   letter-spacing: -1.1px;
@@ -2097,14 +2056,6 @@ fieldset {
     padding: 0;
     gap: 6px;
   }
-  .sidebar .brand-mark {
-    width: 27px;
-    height: 27px;
-  }
-  .sidebar .brand-mark svg {
-    width: 27px;
-    height: 27px;
-  }
   .sidebar-bottom {
     padding: 0;
     margin: 0;
@@ -2278,16 +2229,6 @@ body {
 }
 .brand {
   letter-spacing: -0.8px;
-}
-.brand-mark,
-.welcome-mark-small {
-  color: var(--accent);
-}
-.brand-mark svg {
-  fill: var(--accent);
-}
-.welcome-mark > svg {
-  fill: var(--surface-raised);
 }
 .welcome h1 {
   color: var(--ink);

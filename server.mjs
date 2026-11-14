@@ -63,7 +63,6 @@ const staticFiles = new Map([
   ['/project-navigation.mjs', ['project-navigation.mjs', 'text/javascript; charset=utf-8']],
   ['/workspace.css', ['workspace.css', 'text/css; charset=utf-8']],
   ['/moodix.css', ['moodix.css', 'text/css; charset=utf-8']],
-  ['/moodix-logo.png', ['moodix-logo.png', 'image/png']],
   ['/assets/mdx-white.png', ['assets/mdx-white.png', 'image/png']],
   ['/fonts/Michroma-Regular.ttf', ['fonts/Michroma-Regular.ttf', 'font/ttf']],
   ['/fonts/Manrope-Variable.ttf', ['fonts/Manrope-Variable.ttf', 'font/ttf']],
