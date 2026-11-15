@@ -4327,11 +4327,12 @@ body {
   :root {
     --sidebar-width: 232px;
   }
-  /* The sidebar spans the window's height: the top of the logo on the window's top edge (4 px
-     here, then the 6 px of the logo's own box: 10 px), the foot of the actions on its bottom edge
-     (10 px from the bottom of the frame, like the window). */
+  /* The sidebar spans the window's height: the letters of the logo on the window's top edge, the
+     foot of the actions on its bottom edge (10 px from the bottom of the frame, like the window).
+     At the top, 3 px, then the 6 px of the logo's box and the 1.5 px drawn empty above the letters
+     in mdx-white.png: the letters begin at 10.5 px, on the window's border (10 to 11 px). */
   #sidebar {
-    padding: 4px 12px 10px;
+    padding: 3px 12px 10px;
     background: transparent;
     border-right: 0;
   }
@@ -4540,8 +4541,12 @@ body {
     height: 36px;
     margin: 0;
   }
+  /* Its squares begin 3.45 px into the drawing (4.6 of 32): 2 px higher than the middle of its
+     button, they begin at 10.5 px too, like the letters unfolded. Hovered, the mark gives way to the
+     icon, which stays in the middle of the button's ground. */
   :root[data-sidebar='collapsed'] .sidebar-toggle .sidebar-mark {
     display: block;
+    transform: translateY(-2px);
   }
   :root[data-sidebar='collapsed'] .sidebar-toggle .sidebar-panel,
   :root[data-sidebar='collapsed'] .sidebar-toggle:is(:hover, :focus-visible) .sidebar-mark {
