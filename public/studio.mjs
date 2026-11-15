@@ -2576,6 +2576,15 @@ export function setupStudio({
   // focus, all of them and « Détails » under a right click or a long press; a click shows it whole
   // with its details; a deletion is asked on the picture itself.
   const KIND = { video: 'Clip', image: 'Image', audio: 'Son' };
+  // What the Sortie shows (its button at the right): every creation, or one kind of them.
+  const SORTS = [
+    { id: 'all', icon: 'media', label: 'Tout', none: 'Aucune création dans ce projet pour l’instant' },
+    { id: 'image', icon: 'image', label: 'Images', none: 'Aucune image dans ce projet pour l’instant' },
+    { id: 'video', icon: 'video', label: 'Vidéos', none: 'Aucune vidéo dans ce projet pour l’instant' },
+    { id: 'audio', icon: 'wave', label: 'Sons', none: 'Aucun son dans ce projet pour l’instant' },
+  ];
+  let sortieKind = 'all', // the kind the Sortie shows
+    sortOpen = false; // its button unfolded
   let menuFor = null, // the creation whose menu is open
     confirmFor = null, // the creation whose deletion waits for its confirmation
     pressed = false; // a long press opened a menu: the click that ends it selects nothing
@@ -2899,21 +2908,32 @@ export function setupStudio({
   function outputs() {
     used = new Set();
     const section = node('section', 'studio-block is-output studio-results'),
-      about = modeOf(mode);
+      about = modeOf(mode),
+      sort = SORTS.find(item => item.id === sortieKind) ?? SORTS[0],
+      shown = sort.id === 'all' ? runs : runs.filter(record => mediaOf(record) === sort.id);
     section.setAttribute('aria-label', 'Sortie');
     if (!runs.length) {
       const empty = node('div', 'studio-empty-strip');
-      empty.append(icon(about.icon), node('span', '', 'Aucune création dans ce projet pour l’instant'));
+      empty.append(icon(about.icon), node('span', '', SORTS[0].none));
       section.append(empty);
       return section;
     }
+    // The creations, and at their right the button that sorts them.
+    const row = node('div', 'studio-sortie-row');
+    section.append(row);
+    if (!shown.length) {
+      const empty = node('div', 'studio-empty-strip');
+      empty.append(icon(sort.icon), node('span', '', sort.none));
+      row.append(empty, sortButton(sort));
+      return section;
+    }
     const strip = node('div', 'studio-strip studio-timeline');
-    strip.setAttribute('aria-label', 'Créations du projet');
-    for (const record of runs) strip.append(item(record));
+    strip.setAttribute('aria-label', sort.id === 'all' ? 'Créations du projet' : sort.label + ' du projet');
+    for (const record of shown) strip.append(item(record));
     // The wheel of a mouse scrolls it sideways, the pointer anywhere over the Sortie (a mouse has
     // no sideways wheel); a sideways move of a trackpad is left to the browser.
     section.onwheel = event => scrollSideways(strip, event);
-    section.append(strip);
+    row.append(strip, sortButton(sort));
     // Those no longer shown (another mode, a creation removed) are let go.
     for (const key of pictures.keys()) if (!used.has(key)) pictures.delete(key);
     return section;
@@ -2973,6 +2993,60 @@ export function setupStudio({
     transfer.setDragImage(canvas, width / 2, height / 2);
     // Its picture is taken as the drag starts: the canvas can go.
     setTimeout(() => canvas.remove(), 0);
+  }
+  /**
+   * The button at the right of the Sortie: the kind it shows (all of them: the media icon). A
+   * click unfolds it downward into the other kinds; one chosen, the Sortie shows only them. Échap
+   * or the focus leaving folds it.
+   */
+  function sortButton(sort) {
+    const box = node('div', 'studio-sort' + (sortOpen ? ' is-open' : '')),
+      main = button('studio-sort-go is-current', '', () => {
+        sortOpen = !sortOpen;
+        render();
+        document.querySelector?.('#studio-view .studio-sort-go')?.focus?.();
+      }, sort.icon),
+      said = sort.id === 'all' ? 'tout' : sort.label.toLowerCase();
+    main.setAttribute('aria-label', 'Trier la Sortie · ' + said);
+    main.title = sort.id === 'all' ? 'Tout afficher · trier' : sort.label + ' seulement · trier';
+    main.setAttribute('aria-haspopup', 'menu');
+    main.setAttribute('aria-expanded', String(sortOpen));
+    box.append(main);
+    if (sortOpen) {
+      const menu = node('div', 'studio-sort-menu');
+      menu.setAttribute('role', 'menu');
+      menu.setAttribute('aria-label', 'Trier la Sortie');
+      for (const other of SORTS.filter(item => item.id !== sort.id)) {
+        const choice = button('studio-sort-choice', '', () => {
+          sortieKind = other.id;
+          sortOpen = false;
+          render();
+          document.querySelector?.('#studio-view .studio-sort-go')?.focus?.();
+        }, other.icon);
+        const named = other.id === 'all' ? 'Tout afficher' : other.label + ' seulement';
+        choice.setAttribute('role', 'menuitemradio');
+        choice.setAttribute('aria-checked', 'false');
+        choice.setAttribute('aria-label', named);
+        choice.title = named;
+        menu.append(choice);
+      }
+      box.append(menu);
+    }
+    box.onkeydown = event => {
+      if (event.key !== 'Escape' || !sortOpen) return;
+      event.preventDefault();
+      event.stopPropagation?.();
+      sortOpen = false;
+      render();
+      document.querySelector?.('#studio-view .studio-sort-go')?.focus?.();
+    };
+    box.onfocusout = event => {
+      if (sortOpen && !box.contains?.(event.relatedTarget)) {
+        sortOpen = false;
+        render();
+      }
+    };
+    return box;
   }
   /** A turn of the wheel, as so many pixels sideways along `strip` (nothing when it all shows). */
   function scrollSideways(strip, event) {

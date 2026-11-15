@@ -4178,6 +4178,56 @@ html[data-switch='chat']::view-transition-old(studio) {
   width: 13px;
   height: 13px;
 }
+/* The creations, and at their right the button that sorts them: the kind shown (all: the media
+   icon), unfolding downward into the others. Grey and white, as the rest of the Studio. */
+.studio-sortie-row {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+.studio-sortie-row > .studio-strip,
+.studio-sortie-row > .studio-empty-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.studio-sort {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+.studio-sort-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#studio-view .studio-sort button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid #262a33;
+  border-radius: 8px;
+  background: rgba(11, 12, 15, 0.85);
+  color: #9aa0ab;
+}
+#studio-view .studio-sort button:hover,
+#studio-view .studio-sort button:focus-visible,
+#studio-view .studio-sort.is-open .studio-sort-go {
+  border-color: #3a3f4a;
+  color: #eceef2;
+  outline: none;
+}
+#studio-view .studio-sort svg {
+  width: 15px;
+  height: 15px;
+}
 /* Empty (moodix-design.md 7 bis 18): the icon of the mode and what it says, centred, without a
    frame; dashes are kept for the empty image slots, where a file can really be dropped. */
 .studio-empty-strip {

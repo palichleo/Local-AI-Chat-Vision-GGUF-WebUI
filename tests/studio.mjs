@@ -2710,3 +2710,56 @@ test('the Sortie is the project: its creations from every conversation, one drag
     restore();
   }
 });
+
+test('the button at the right of the Sortie sorts it: all at first, then images, clips or sounds', async () => {
+  const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    runs = [
+      { id: 's1', mediaType: 'audio', prompt: 'un son', outputs: [{ originalUrl: '/s1.wav' }] },
+      { id: 'c1', mediaType: 'video', prompt: 'un clip', outputs: [{ originalUrl: '/c1.mp4', thumbUrl: '/c1.jpg' }] },
+      { id: 'p1', prompt: 'une image', outputs: [{ originalUrl: '/p1.png' }] },
+    ];
+  let page = await studioPage({ create_image: [image] }, {}, { runs });
+  try {
+    const { body } = page,
+      go = () => body.find('studio-sort-go')[0],
+      ids = () => body.find('studio-item').map(tile => tile.dataset.id),
+      choices = () => body.find('studio-sort-choice').map(choice => choice.attributes['aria-label']);
+    // Everything at first: the media icon, folded.
+    assert.deepEqual(ids(), ['s1', 'c1', 'p1']);
+    assert.equal(go().attributes['aria-label'], 'Trier la Sortie · tout');
+    assert.equal(go().attributes['aria-expanded'], 'false');
+    assert.deepEqual(choices(), []);
+    // Unfolded downward: the other kinds.
+    go().onclick();
+    assert.equal(go().attributes['aria-expanded'], 'true');
+    assert.deepEqual(choices(), ['Images seulement', 'Vidéos seulement', 'Sons seulement']);
+    body.find('studio-sort-choice')[1].onclick();
+    assert.deepEqual(ids(), ['c1']);
+    assert.equal(go().attributes['aria-label'], 'Trier la Sortie · vidéos');
+    assert.deepEqual(choices(), [], 'folded once chosen');
+    // A creation keeps its number in the whole Sortie.
+    assert.deepEqual(body.find('studio-item-number').map(badge => badge.textContent), ['#2']);
+    go().onclick();
+    assert.deepEqual(choices(), ['Tout afficher', 'Images seulement', 'Sons seulement']);
+    // Échap folds it; « Tout afficher » shows everything again.
+    body.find('studio-sort')[0].onkeydown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    assert.deepEqual(choices(), []);
+    go().onclick();
+    body.find('studio-sort-choice')[0].onclick();
+    assert.deepEqual(ids(), ['s1', 'c1', 'p1']);
+  } finally {
+    page.restore();
+  }
+  // A kind with nothing made says so, its button still there to choose another.
+  page = await studioPage({ create_image: [image] }, {}, { runs: [runs[2]] });
+  try {
+    const { body } = page;
+    body.find('studio-sort-go')[0].onclick();
+    body.find('studio-sort-choice')[2].onclick();
+    assert.equal(body.find('studio-item').length, 0);
+    assert.equal(body.find('studio-empty-strip')[0].children[1].textContent, 'Aucun son dans ce projet pour l’instant');
+    assert.equal(body.find('studio-sort-go').length, 1);
+  } finally {
+    page.restore();
+  }
+});
