@@ -4624,44 +4624,8 @@ body {
     height: 36px;
     min-height: 0;
   }
-  /* Each icon's name, at its right, on hover and on keyboard focus (::before: the ::after of
-     Configuration is its dot of an update). The button beside the logo says what it does in both
-     states: under it, unfolded (the sidebar scrolls, it would cut a tooltip at its right). */
-  :root[data-sidebar='collapsed'] #sidebar :is([data-tip], .sidebar-actions button[aria-label]) {
-    position: relative;
-  }
-  :root[data-sidebar='collapsed'] #sidebar [data-tip]:is(:hover, :focus-visible)::before,
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions button[aria-label]:is(:hover, :focus-visible)::before,
-  .sidebar-toggle:is(:hover, :focus-visible)::before {
-    content: attr(data-tip);
-    position: absolute;
-    top: 50%;
-    left: calc(100% + 10px);
-    z-index: 50;
-    padding: 5px 9px;
-    border: 1px solid #262a33;
-    border-radius: 7px;
-    background: #1c1f26;
-    color: #eceef2;
-    font-family: var(--font-ui);
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.3;
-    letter-spacing: 0;
-    text-transform: none;
-    white-space: nowrap;
-    transform: translateY(-50%);
-    pointer-events: none;
-  }
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions button[aria-label]:is(:hover, :focus-visible)::before {
-    content: attr(aria-label);
-  }
-  :root:not([data-sidebar='collapsed']) .sidebar-toggle:is(:hover, :focus-visible)::before {
-    top: calc(100% + 6px);
-    right: 0;
-    left: auto;
-    transform: none;
-  }
+  /* Each icon's name at its right, on hover and on keyboard focus: the one tooltip of the page
+     (help-tips.mjs), no more its own here. */
 }
 @media (min-width: 1100px) and (prefers-reduced-motion: reduce) {
   #sidebar,
@@ -5118,4 +5082,49 @@ body[data-view='library'] .chat-panel {
 }
 :root[data-theme='light'] .ref-peek-caption {
   color: #5a606b;
+}
+
+/* ------------------------------------------------------------------ one tooltip, one ring (0.5.120)
+   The help of a « ? » and the name of a control in one bubble (help-tips.mjs): one style, one
+   delay. The help, longer, in lighter words; the name, short, as a label. */
+.help-bubble {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 5px 9px;
+  border: 1px solid #262a33;
+  border-radius: 8px;
+  background: #1c1f26;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  color: #eceef2;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: pre-line;
+  pointer-events: none;
+}
+.help-bubble[hidden] {
+  display: none;
+}
+.help-bubble[data-kind='help'] {
+  padding: 9px 11px;
+  font-weight: 500;
+  line-height: 1.55;
+}
+:root[data-theme='light'] .help-bubble {
+  border-color: #d5d9e0;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 17, 21, 0.14);
+  color: #0b0c0f;
+}
+/* One ring for the keyboard's focus, everywhere: 2 px of --focus (it was white on the modes of
+   the Studio and the projects, grey elsewhere). Where a control draws it inside itself (the lines
+   of the sidebar), its offset stays; where it shows its focus otherwise (the message box), it has
+   none. */
+:focus-visible {
+  outline-color: var(--focus) !important;
+  outline-width: 2px !important;
 }

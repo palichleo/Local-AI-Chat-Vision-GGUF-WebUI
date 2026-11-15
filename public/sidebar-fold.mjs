@@ -23,26 +23,14 @@ export function setupSidebarFold({ root, toggle, sidebar, page, view = globalThi
   if (!root || !toggle) return { folded: () => false, flip: () => {} };
   const keys = (mac ? '⌘' : 'Ctrl') + '+B';
   const folded = () => root.dataset.sidebar === 'collapsed';
-  // Folded, each icon says its name at its right at once: the browser's own tooltip, which would
-  // come a second later under the pointer, is put aside (a title set meanwhile too, the engine's).
-  const hush = element => {
-    if (!element?.hasAttribute?.('title')) return;
-    element.dataset.title = element.getAttribute('title');
-    element.removeAttribute('title');
-  };
+  // Folded, each icon says its name at its right: the one tooltip of the page does it
+  // (help-tips.mjs), from the tips every title became.
   function apply(collapsed) {
     root.dataset.sidebar = collapsed ? 'collapsed' : 'expanded';
     const label = collapsed ? 'Déplier la barre' : 'Replier la barre';
     toggle.setAttribute('aria-expanded', String(!collapsed));
     toggle.setAttribute('aria-label', label);
     toggle.dataset.tip = `${label} (${keys})`;
-    for (const element of sidebar?.querySelectorAll?.(collapsed ? '[title]' : '[data-title]') ?? []) {
-      if (collapsed) hush(element);
-      else {
-        element.setAttribute('title', element.dataset.title);
-        delete element.dataset.title;
-      }
-    }
   }
   function flip() {
     const collapsed = !folded(),
@@ -58,18 +46,6 @@ export function setupSidebarFold({ root, toggle, sidebar, page, view = globalThi
     if (collapsed && focused?.closest?.('#history-section, .project-nav-heading, .brand')) toggle.focus?.();
   }
   apply(folded());
-  if (sidebar && typeof view.MutationObserver === 'function') {
-    new view.MutationObserver(records => {
-      if (!folded()) return;
-      for (const record of records) {
-        hush(record.target);
-        for (const added of record.addedNodes ?? []) {
-          hush(added);
-          for (const inner of added.querySelectorAll?.('[title]') ?? []) hush(inner);
-        }
-      }
-    }).observe(sidebar, { subtree: true, childList: true, attributes: true, attributeFilter: ['title'] });
-  }
   // The same button in both states: the focus stays on it.
   toggle.onclick = () => flip();
   page?.addEventListener?.('keydown', event => {

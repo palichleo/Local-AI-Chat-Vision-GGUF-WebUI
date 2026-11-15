@@ -16,18 +16,19 @@ export function setupCopy(root, { writeText = text => navigator.clipboard.writeT
       ? button.closest('.code-block').querySelector('code').textContent
       : quoteText(button.closest('blockquote').querySelector('.copy-content')).trim();
     if (!text) return;
+    // Its tip (help-tips.mjs turns titles into tips): « Copié » a moment, then its own again.
     const label = button.querySelector('span'),
       original = label.textContent,
-      title = button.title;
+      tip = button.dataset.tip ?? button.title;
     button.disabled = true;
     try {
       await writeText(text);
       label.textContent = 'Copié';
-      button.title = 'Copié';
+      button.dataset.tip = 'Copié';
       announce('Texte copié.');
       setTimeout(() => {
         label.textContent = original;
-        button.title = title;
+        button.dataset.tip = tip;
         button.disabled = false;
       }, 1600);
     } catch {

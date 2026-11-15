@@ -2612,9 +2612,9 @@ async function runInStudio(proposal, { signal, onProgress }) {
 
 const tokenControls = setupTokenControls($);
 const computeControls = setupComputeControls($);
-const helpTips = setupHelpTips($('settings'));
-// The « ? » of the Studio's fields (« Qui remplacer », « Qui dessiner »), as in the settings.
-setupHelpTips($('studio-view'), { id: 'studio-help-bubble', host: document.body });
+// The one tooltip of the page: the « ? » of the settings and of the Studio, the names of the
+// controls (their titles become its tips), in one bubble (help-tips.mjs).
+const helpTips = setupHelpTips(document.body);
 const settingsTabs = setupSettingsTabs({
   list: $('settings-tabs'),
   onShow: name => {

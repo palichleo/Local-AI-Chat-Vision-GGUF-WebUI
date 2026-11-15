@@ -64,24 +64,21 @@ test('the button folds and unfolds the sidebar, says which, and the state is kep
   assert.equal(toggle.getAttribute('aria-expanded'), 'false');
   assert.equal(toggle.getAttribute('aria-label'), 'Déplier la barre');
   assert.equal(toggle.dataset.tip, 'Déplier la barre (Ctrl+B)');
-  // Folded, its own tooltip at the right of the icon; the browser's, late and under it, is put aside.
-  assert.equal(engine.hasAttribute('title'), false);
-  assert.equal(engine.dataset.title, 'Démarrer le modèle');
+  // The names of the icons are the one tooltip's (help-tips.mjs): the sidebar leaves them as they are.
+  assert.equal(engine.getAttribute('title'), 'Démarrer le modèle');
   assert.equal(engine.getAttribute('aria-label'), 'Démarrer le modèle');
 
   toggle.onclick();
   assert.equal(root.dataset.sidebar, 'expanded');
   assert.equal(saved[KEY], 'expanded');
   assert.equal(engine.getAttribute('title'), 'Démarrer le modèle');
-  assert.equal('title' in engine.dataset, false);
 });
 
 test('a sidebar left folded comes back folded', () => {
-  const { root, toggle, files } = setup({ state: 'collapsed' });
+  const { root, toggle } = setup({ state: 'collapsed' });
   assert.equal(root.dataset.sidebar, 'collapsed');
   assert.equal(toggle.getAttribute('aria-expanded'), 'false');
   assert.equal(toggle.getAttribute('aria-label'), 'Déplier la barre');
-  assert.equal(files.hasAttribute('title'), false);
 });
 
 test('Ctrl+B (⌘+B on a Mac) folds and unfolds, never in a field, under a dialog or on a narrow window', () => {
