@@ -1,4 +1,5 @@
 import { followWindow } from './filet.mjs';
+import { setupSidebarFold } from './sidebar-fold.mjs';
 import { setupProjectNavigation } from './project-navigation.mjs';
 import { setupSettingsSearch } from './settings-search.mjs';
 import { setupSettingsTabs } from './settings-tabs.mjs';
@@ -3265,6 +3266,21 @@ try {
 }
 // The filet over the window: its four colours along the top, at the window's size.
 followWindow(document.querySelector('.mdx-filet'), document.querySelector('.workspace'));
+// The sidebar folds to its icons and back (its button, Ctrl+B / ⌘+B).
+setupSidebarFold({
+  root: document.documentElement,
+  toggle: $('sidebar-toggle'),
+  sidebar: $('sidebar'),
+  page: document,
+  storage: (() => {
+    try {
+      return localStorage;
+    } catch {
+      return null;
+    }
+  })(),
+  mac: /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || ''),
+});
 setInterval(() => {
   if (!document.hidden) refreshStatus();
 }, 1200);

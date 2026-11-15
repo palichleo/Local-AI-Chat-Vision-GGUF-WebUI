@@ -3134,6 +3134,8 @@ export function setupStudio({
           tab.setAttribute('role', 'tab');
           tab.setAttribute('aria-label', item.label);
           tab.title = item.label;
+          // Its name at its right when the sidebar is folded (moodix.css).
+          tab.dataset.tip = item.label;
           tab.dataset.mode = item.id;
           tab.append(icon(item.icon));
           tab.onclick = () => {

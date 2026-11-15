@@ -64,6 +64,8 @@ const staticFiles = new Map([
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/project-navigation.mjs', ['project-navigation.mjs', 'text/javascript; charset=utf-8']],
   ['/filet.mjs', ['filet.mjs', 'text/javascript; charset=utf-8']],
+  ['/sidebar-fold.mjs', ['sidebar-fold.mjs', 'text/javascript; charset=utf-8']],
+  ['/sidebar-state.js', ['sidebar-state.js', 'text/javascript; charset=utf-8']],
   ['/workspace.css', ['workspace.css', 'text/css; charset=utf-8']],
   ['/moodix.css', ['moodix.css', 'text/css; charset=utf-8']],
   ['/assets/mdx-white.png', ['assets/mdx-white.png', 'image/png']],

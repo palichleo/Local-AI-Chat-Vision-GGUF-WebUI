@@ -4444,3 +4444,211 @@ body {
     animation: none;
   }
 }
+
+/* ------------------------------------------------------------------ sidebar folded (0.5.99)
+   Beside the logo, the button that folds the sidebar to its icons (64 px, on the frame); folded,
+   the small logo is that button. Wide windows only: under 1100 px it is the drawer, always
+   unfolded, without the button. The width moves in 180 ms and the buttons follow it (they stretch
+   across the sidebar): their icons stay where they are, the words fade in the first 80 ms (and
+   come back in the last 80 ms), on one line. Rows keep their height: nothing moves up or down. */
+.sidebar-toggle {
+  display: none;
+}
+@media (min-width: 1100px) {
+  #sidebar {
+    z-index: 40;
+    transition:
+      flex-basis 180ms ease,
+      width 180ms ease;
+  }
+  #sidebar .sidebar-top {
+    min-height: 50px;
+  }
+  /* On the line of the logo, at its right. */
+  .sidebar-toggle {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: none;
+    align-self: flex-start;
+    width: 28px;
+    height: 28px;
+    min-height: 0;
+    margin: 6px 0 0;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #6e7480;
+    cursor: pointer;
+  }
+  .sidebar-toggle:hover,
+  .sidebar-toggle:focus-visible {
+    background: #15171c;
+    color: #eceef2;
+  }
+  .sidebar-toggle > * {
+    grid-area: 1 / 1;
+  }
+  .sidebar-toggle .sidebar-panel {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    transition: opacity 120ms ease;
+  }
+  .sidebar-toggle .sidebar-mark {
+    display: none;
+    width: 24px;
+    height: 24px;
+    transition: opacity 120ms ease;
+  }
+  /* The words clipped in their own box as the width moves (the button itself does not clip:
+     its tooltip goes out of it), on one line. */
+  #sidebar .home-button > svg,
+  #sidebar > .new-chat > svg {
+    flex: none;
+  }
+  #sidebar .home-button > span,
+  #sidebar > .new-chat > span {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    transition: opacity 80ms ease 100ms;
+  }
+
+  /* Folded: icons only, centred, 40 × 36. */
+  :root[data-sidebar='collapsed'] {
+    --sidebar-width: 64px;
+  }
+  :root[data-sidebar='collapsed'] #sidebar {
+    overflow: visible;
+  }
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-top {
+    justify-content: center;
+  }
+  :root[data-sidebar='collapsed'] #sidebar .brand {
+    display: none;
+  }
+  :root[data-sidebar='collapsed'] .sidebar-toggle {
+    align-self: center;
+    width: 40px;
+    height: 36px;
+    margin: 0;
+  }
+  :root[data-sidebar='collapsed'] .sidebar-toggle .sidebar-mark {
+    display: block;
+  }
+  :root[data-sidebar='collapsed'] .sidebar-toggle .sidebar-panel,
+  :root[data-sidebar='collapsed'] .sidebar-toggle:is(:hover, :focus-visible) .sidebar-mark {
+    opacity: 0;
+  }
+  :root[data-sidebar='collapsed'] .sidebar-toggle:is(:hover, :focus-visible) .sidebar-panel {
+    opacity: 1;
+  }
+  /* The words fade out, still there for screen readers (the button's name). */
+  :root[data-sidebar='collapsed'] #sidebar .home-button > span,
+  :root[data-sidebar='collapsed'] #sidebar > .new-chat > span {
+    opacity: 0;
+    transition: opacity 80ms ease;
+  }
+  :root[data-sidebar='collapsed'] #sidebar > .new-chat {
+    min-height: 36px;
+    margin: 5px 0;
+    padding: 0 0 0 10.5px;
+  }
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-nav > .home-button {
+    min-height: 36px;
+    margin: 4px 0;
+    padding: 0 0 0 11px;
+  }
+  /* The projects and conversations come back with the sidebar unfolded. */
+  :root[data-sidebar='collapsed'] #sidebar .project-nav-heading,
+  :root[data-sidebar='collapsed'] #sidebar #history-section {
+    display: none;
+  }
+  /* The Studio card in a column: its icon (36 × 34), then the track of Image, Vidéo, Son (34 × 28). */
+  :root[data-sidebar='collapsed'] #sidebar .studio-nav {
+    padding-right: 2px;
+    padding-left: 2px;
+  }
+  :root[data-sidebar='collapsed'] #sidebar .studio-nav .home-button {
+    min-height: 34px;
+    padding: 0 0 0 9px;
+  }
+  :root[data-sidebar='collapsed'] #studio-kinds.kind-tabs {
+    flex-direction: column;
+    padding: 1px;
+  }
+  :root[data-sidebar='collapsed'] #studio-kinds .kind-tab {
+    flex: none;
+    width: 34px;
+  }
+  /* The actions at the foot, in a column. */
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions {
+    flex-direction: column;
+    gap: 2px;
+    padding: 0;
+    border: 0;
+  }
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions .engine-button,
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions .settings-button,
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions .files-button {
+    flex: none;
+    width: 40px;
+    min-width: 0;
+    height: 36px;
+    min-height: 0;
+  }
+  /* Each icon's name, at its right, on hover and on keyboard focus (::before: the ::after of
+     Configuration is its dot of an update). The button beside the logo says what it does in both
+     states: under it, unfolded (the sidebar scrolls, it would cut a tooltip at its right). */
+  :root[data-sidebar='collapsed'] #sidebar :is([data-tip], .sidebar-actions button[aria-label]) {
+    position: relative;
+  }
+  :root[data-sidebar='collapsed'] #sidebar [data-tip]:is(:hover, :focus-visible)::before,
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions button[aria-label]:is(:hover, :focus-visible)::before,
+  .sidebar-toggle:is(:hover, :focus-visible)::before {
+    content: attr(data-tip);
+    position: absolute;
+    top: 50%;
+    left: calc(100% + 10px);
+    z-index: 50;
+    padding: 5px 9px;
+    border: 1px solid #262a33;
+    border-radius: 7px;
+    background: #1c1f26;
+    color: #eceef2;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: 0;
+    text-transform: none;
+    white-space: nowrap;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions button[aria-label]:is(:hover, :focus-visible)::before {
+    content: attr(aria-label);
+  }
+  :root:not([data-sidebar='collapsed']) .sidebar-toggle:is(:hover, :focus-visible)::before {
+    top: calc(100% + 6px);
+    right: 0;
+    left: auto;
+    transform: none;
+  }
+}
+@media (min-width: 1100px) and (prefers-reduced-motion: reduce) {
+  #sidebar,
+  #sidebar .home-button > span,
+  #sidebar > .new-chat > span,
+  :root[data-sidebar='collapsed'] #sidebar .home-button > span,
+  :root[data-sidebar='collapsed'] #sidebar > .new-chat > span,
+  .sidebar-toggle .sidebar-panel,
+  .sidebar-toggle .sidebar-mark {
+    transition: none;
+  }
+}
