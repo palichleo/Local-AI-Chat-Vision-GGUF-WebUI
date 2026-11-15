@@ -2749,6 +2749,8 @@ export function setupStudio({
       carried = record;
       event.dataTransfer.effectAllowed = 'copy';
       event.dataTransfer.setData('text/plain', name);
+      // Carried at the size of a slot of the inputs: the whole picture hid where it would go.
+      dragGhost(pick, event.dataTransfer);
     };
     pick.ondragend = () => {
       carried = null;
@@ -2914,6 +2916,55 @@ export function setupStudio({
     // Those no longer shown (another mode, a creation removed) are let go.
     for (const key of pictures.keys()) if (!used.has(key)) pictures.delete(key);
     return section;
+  }
+  /**
+   * What the pointer carries when a creation leaves the Sortie: its picture as small as a slot of
+   * the inputs (one on the screen gives the size, 52 px otherwise), cut to fill it as the slot
+   * shows it, corners rounded; a sound, its grey stripes. Drawn at once on a canvas, from the
+   * picture the tile already holds: nothing is loaded while the drag starts.
+   */
+  function dragGhost(pick, transfer) {
+    const page = globalThis.document;
+    if (!transfer?.setDragImage || !page?.createElement || !page.body) return;
+    const slot = page.querySelector?.('#studio-view .studio-slot')?.getBoundingClientRect?.(),
+      width = Math.round(slot?.width || 52),
+      height = Math.round(slot?.height || 52),
+      ratio = globalThis.devicePixelRatio || 1,
+      canvas = page.createElement('canvas'),
+      context = canvas.getContext?.('2d');
+    if (!context) return;
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    Object.assign(canvas.style, {
+      position: 'fixed',
+      top: '-1000px',
+      left: '-1000px',
+      width: width + 'px',
+      height: height + 'px',
+      pointerEvents: 'none',
+    });
+    context.beginPath();
+    if (context.roundRect) context.roundRect(0, 0, canvas.width, canvas.height, 6 * ratio);
+    else context.rect(0, 0, canvas.width, canvas.height);
+    context.clip();
+    context.fillStyle = '#000';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const source = pick.querySelector?.('img, video'),
+      sourceWidth = source?.naturalWidth || source?.videoWidth,
+      sourceHeight = source?.naturalHeight || source?.videoHeight;
+    if (sourceWidth && sourceHeight) {
+      const scale = Math.max(canvas.width / sourceWidth, canvas.height / sourceHeight),
+        drawn = [sourceWidth * scale, sourceHeight * scale];
+      context.drawImage(source, (canvas.width - drawn[0]) / 2, (canvas.height - drawn[1]) / 2, ...drawn);
+    } else {
+      context.fillStyle = '#6e7480';
+      for (let x = 7 * ratio; x < canvas.width - 7 * ratio; x += 7 * ratio)
+        context.fillRect(x, canvas.height * 0.34, 3 * ratio, canvas.height * 0.32);
+    }
+    page.body.append(canvas);
+    transfer.setDragImage(canvas, width / 2, height / 2);
+    // Its picture is taken as the drag starts: the canvas can go.
+    setTimeout(() => canvas.remove(), 0);
   }
   /** A turn of the wheel, as so many pixels sideways along `strip` (nothing when it all shows). */
   function scrollSideways(strip, event) {
