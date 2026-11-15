@@ -212,8 +212,11 @@ test('the context gauge writes its share in figures beside the bar', () => {
 });
 
 test('no text of the interface is smaller than 12 px', async () => {
-  for (const sheet of ['styles.css', 'workspace.css']) {
-    const css = await readFile(new URL('../public/' + sheet, import.meta.url), 'utf8');
+  // The parts of the one sheet that were styles.css and workspace.css (moodix.css, 0.5.121).
+  const sheet = (await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const parts = sheet.split(/\n\/\* =+ part \d: /).slice(1, 3);
+  assert.equal(parts.length, 2);
+  for (const css of parts) {
     // By `font-size` or by the `font` shorthand, whose size comes first on its own line.
     const small = [...css.matchAll(/font(?:-size)?:\s*(?:clamp\()?([\d.]+)px/g)].filter(
       ([, size]) => Number(size) < 12,
@@ -221,12 +224,11 @@ test('no text of the interface is smaller than 12 px', async () => {
     assert.deepEqual(
       small.map(([found]) => found),
       [],
-      sheet,
+      css.slice(0, 40),
     );
   }
   // A bare <small> does not fall back on the browser's « smaller » (11,7 px in a 14 px page).
-  const base = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
-  assert.match(base, /\nsmall \{\s+font-size: 12px;/);
+  assert.match(sheet, /\nsmall \{\s+font-size: 12px;/);
 });
 
 test('the context meter ignores stale counts; its details are in its tooltip, its share beside the bar', async () => {

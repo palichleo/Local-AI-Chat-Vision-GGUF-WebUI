@@ -345,7 +345,7 @@ test(
       (await api('history/save', { id, messages: [{ role: 'user', content: 'Keep my saved conversation' }] })).status,
       200,
     );
-    const cssPath = join(root, 'public/workspace.css');
+    const cssPath = join(root, 'public/moodix.css');
     await writeFile(cssPath, (await readFile(cssPath, 'utf8')) + '\n/* latest local interface */\n');
     const second = launch(true);
     await until(async () => {
@@ -359,7 +359,7 @@ test(
     await until(async () => first.child.exitCode !== null, 'Old launcher remained attached');
     assert.equal(first.child.exitCode, 0, first.output());
     assert.equal(second.child.exitCode, null, second.output());
-    assert.match(await (await fetch(url + '/workspace.css')).text(), /latest local interface/);
+    assert.match(await (await fetch(url + '/moodix.css')).text(), /latest local interface/);
     const history = await fetch(url + '/api/history/' + id, { headers: { Authorization: 'Bearer ' + current.token } });
     assert.equal((await history.json()).messages[0].content, 'Keep my saved conversation');
   },
@@ -373,7 +373,7 @@ test('source fingerprints ignore private data and model weights but detect code 
   await mkdir(join(root, 'data'), { recursive: true });
   await writeFile(join(root, 'data/preferences.json'), '{}');
   assert.deepEqual(await appSources(root), before);
-  await writeFile(join(root, 'public/workspace.css'), '/* changed */');
+  await writeFile(join(root, 'public/moodix.css'), '/* changed */');
   const after = await appSources(root);
   assert.equal(after.installationId, before.installationId);
   assert.notEqual(after.sourceRevision, before.sourceRevision);

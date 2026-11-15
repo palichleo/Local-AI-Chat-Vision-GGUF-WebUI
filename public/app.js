@@ -1512,7 +1512,7 @@ function scrollToBottom() {
   if (state.stickToBottom) pinChat($('chat-area'));
 }
 /**
- * The chat on its last line, at once. The area scrolls smoothly (styles.css) for the reader; done
+ * The chat on its last line, at once. The area scrolls smoothly (moodix.css) for the reader; done
  * so here, it stopped above an answer that grew meanwhile, and its steps read as the reader
  * scrolling up (onscroll), which then left the chat above its end.
  */

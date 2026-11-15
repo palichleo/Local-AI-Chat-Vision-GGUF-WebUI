@@ -129,7 +129,7 @@ test('the model: one icon ⏻ whatever its state, a dot of 7 px says it; its nam
 });
 
 test('nothing left of the panel of files in the styles', async () => {
-  for (const name of ['styles.css', 'workspace.css', 'moodix.css']) {
+  for (const name of ['moodix.css']) {
     const css = (await read(name)).replace(/\/\*[^]*?\*\//g, '');
     assert.doesNotMatch(css, /assets-panel|assets-tabs|asset-pane|#resource-|\.resource-|files-button|data-files|resources-grid/, name);
   }
