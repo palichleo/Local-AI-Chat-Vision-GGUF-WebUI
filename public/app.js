@@ -276,7 +276,6 @@ async function clearHistory() {
       state.conversationInstructions = null;
       state.archiveSnapshot = null;
       state.historyDirty = false;
-      void showCreations();
       generationUI.clear();
       $('messages').replaceChildren();
       $('welcome').hidden = false;
@@ -375,11 +374,6 @@ async function loadConversation(id) {
     state.stickToBottom = true;
     scrollToBottom();
     state.studio?.conversationChanged?.();
-    try {
-      await workflowsUI.renderGallery(id);
-    } catch (error) {
-      notice(`Galerie indisponible : ${error.message}`);
-    }
     $('prompt').focus();
   } catch (error) {
     notice(error.message);
@@ -462,7 +456,6 @@ async function restoreUpdate() {
   renderHistory();
   scrollToBottom();
   contextMeter.schedule();
-  if (state.conversationId) await workflowsUI.renderGallery(state.conversationId);
   await api('updates/session/clear', {});
   if (saved.restarted) {
     $('live-status').textContent = 'Application redémarrée. Conversation restaurée.';
@@ -2645,9 +2638,10 @@ const studioUI = setupStudio({
   onRuns: (id, legacy) => {
     state.studioId = id;
     state.studioLegacy = legacy;
-    if (state.view === 'studio') void showCreations();
   },
   conversation: () => state.conversationId,
+  // The Sortie of the Studio shows the creations of the whole project.
+  project: () => state.projectId || 'inbox',
   ensureConversation: async () => (state.conversationId ||= crypto.randomUUID()),
   run: runInStudio,
   reveal: () => closeChat().then(() => revealStudio()),
@@ -2678,14 +2672,6 @@ const workflowsUI = setupNativeWorkflows({
   node,
   notice,
   onRequestClose: () => requestSettingsClose(),
-  openOutput: (record, index) => assetsUI.viewOutput(record, index),
-  outputActions: actionButtons,
-  // The « Créations » tab is drawn while the files panel is open, and as it opens.
-  isShown: () => document.body.dataset.files === 'open',
-  onOutput: () => {
-    openFiles();
-    assetsUI.show('output');
-  },
   onChange: () => refreshStatus(),
   onSettingsBusyChange: busy => {
     state.generationSettingsWorking = busy;
@@ -2886,22 +2872,11 @@ function closeNavigation() {
   // The focus left in the closed drawer goes back to the button that opens it.
   if (open && $('sidebar').contains?.(document.activeElement)) $('navigation-open').focus?.();
 }
-/** The « Créations » tab of the files panel follows the conversation, in the chat as in its Studio; the former Studio while its Sortie shows it. */
-function showCreations() {
-  const draw = () => {
-    const id = state.view === 'studio' && state.studioLegacy ? state.studioId : state.conversationId;
-    return workflowsUI.renderGallery(id ?? null).catch(error => notice(`Galerie indisponible : ${error.message}`));
-  };
-  // While the page moves (see switchView), once it has stopped.
-  return state.moving ? state.moving.then(draw) : draw();
-}
 function openFiles(open = true) {
   if (!open) assetsUI.pause();
   const opening = open && document.body.dataset.files !== 'open';
   document.body.dataset.files = open ? 'open' : 'closed';
   $('all-files').setAttribute('aria-pressed', String(open));
-  // Closed, its « Créations » tab was not kept up to date: it is drawn now.
-  if (opening) void showCreations();
 }
 function showHome() {
   const blocked = () =>
@@ -2923,7 +2898,6 @@ function showHome() {
     try {
       if (!(await assetsUI.flush()) || !(await persistConversation())) return;
       state.view = 'home';
-      void showCreations();
       delete document.body.dataset.chat;
       closeNavigation();
       projectUI.render();
@@ -2989,10 +2963,7 @@ function revealStudio() {
     syncViews();
     updateControls();
     showLastReply();
-    if (coming) {
-      void showCreations();
-      void studioUI.open().catch(error => notice(error.message));
-    }
+    if (coming) void studioUI.open().catch(error => notice(error.message));
   });
 }
 function showStudio() {
@@ -3011,7 +2982,6 @@ function showChat() {
       projectUI.render();
       syncViews();
       updateControls();
-      if (coming) void showCreations();
       // Back on its last lines at once: the chat grows back from the last answer, not from its top.
       state.stickToBottom = true;
       const area = $('chat-area');

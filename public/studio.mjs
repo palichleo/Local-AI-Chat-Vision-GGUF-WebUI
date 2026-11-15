@@ -190,6 +190,8 @@ export function setupStudio({
   onRuns = () => {},
   // The conversation the Studio works in: its id, or null before its first message or creation.
   conversation = () => null,
+  // The project of that conversation: its Sortie shows the creations of all its conversations.
+  project = () => 'inbox',
   // An id for the conversation, created when it has none yet: a creation belongs to it.
   ensureConversation = async () => conversation(),
   // Runs an approved proposal in the conversation and writes it there; the result of the
@@ -441,7 +443,9 @@ export function setupStudio({
     if (format) Object.assign(draft, { format: format.id, size: null });
   }
   // The slot an image is being dragged from: dropped on another, the image changes role.
-  let dragged = null;
+  let dragged = null,
+    // A creation of the Sortie dragged to a slot: it becomes that input.
+    carried = null;
   // The model each mode showed last: another one, and the blocks of the images say so for a
   // moment (moodix-design.md 21).
   const shownModel = {};
@@ -555,6 +559,7 @@ export function setupStudio({
     tile.ondragover = event => {
       event.preventDefault();
       if (dragged) event.dataTransfer.dropEffect = 'move';
+      else if (carried) event.dataTransfer.dropEffect = 'copy';
       tile.classList.add('is-target');
     };
     tile.ondragleave = () => tile.classList.remove('is-target');
@@ -572,6 +577,14 @@ export function setupStudio({
       }
       if (refused) return notice(refused);
       if (chosenByAi) return;
+      // A creation of the Sortie: a video in a slot of a video, an image in one of an image.
+      if (carried) {
+        const record = carried;
+        carried = null;
+        if (mediaOf(record) !== media)
+          return notice(media === 'video' ? 'Cette case attend une vidéo.' : 'Cette case attend une image.');
+        return putCreation(record, role, index);
+      }
       void fill(role, index, event.dataTransfer.files[0], media);
     };
     tile.append(pick);
@@ -1488,7 +1501,7 @@ export function setupStudio({
     const screen = node('div', 'studio-screen'),
       box = node('div', 'studio-stage'),
       // While a creation is being made the frame is its own (the picture so far).
-      last = working ? null : (kept[mode] ?? null),
+      last = onStage(),
       frame = node(
         'div',
         'studio-frame' +
@@ -1995,7 +2008,7 @@ export function setupStudio({
           ? 'Personnage remplacé, demandé dans le Studio.'
           : 'Création demandée dans le Studio.';
     // A continuation starts from its clip; the inputs it also takes (subject references) follow.
-    if (extending) args.source = { output: extending.id };
+    if (extending) args.source = outputSource(extending);
     for (const [role, spec] of Object.entries(workflow.roles)) {
       if (extending && role === 'source') continue;
       const chosen = (draft.inputs[role] ?? []).filter(Boolean).map(item => item.source);
@@ -2416,7 +2429,11 @@ export function setupStudio({
         width = resource?.width ?? output?.width ?? record?.parameters?.width,
         height = resource?.height ?? output?.height ?? record?.parameters?.height;
       (inputs[role] ??= []).push({
-        source: ref.resource_id ? { resource: ref.resource_id } : ref.output_id ? { output: ref.output_id } : null,
+        source: ref.resource_id
+          ? { resource: ref.resource_id }
+          : ref.output_id
+            ? { output: ref.output_id, ...(ref.output_conversation ? { conversation: ref.output_conversation } : {}) }
+            : null,
         preview: resource?.previewUrl || resource?.originalUrl || output?.thumbUrl || output?.originalUrl || '',
         name: ref.label || ref.roleLabel || ROLES[role] || 'Entrée',
         ...(width > 0 && height > 0 ? { width, height } : {}),
@@ -2629,12 +2646,23 @@ export function setupStudio({
 
   // ------------------------------------------------------------------ results
   const mediaOf = record => record.mediaType || 'image';
+  /** A creation as an input: its run, with its conversation when it is another of the project. */
+  const outputSource = record =>
+    record.conversationId && record.conversationId !== place()
+      ? { output: record.id, conversation: record.conversationId }
+      : { output: record.id };
+  /** What the screen shows: the creation just made or opened from the chat, else the last of its mode. */
+  function onStage() {
+    if (working) return null;
+    return kept[mode] ?? runs.find(item => mediaOf(item) === mode) ?? null;
+  }
   /** Whether some ready workflow of this verb takes an input in this role. */
   const takes = (verb, role) => (info?.tools?.[verb] ?? []).some(item => item.roles[role]?.count);
   const sourceOf = record => record.parameters?.references?.find(ref => ref.role === 'source_video')?.output_id;
   async function remove(record) {
     try {
-      await api('studio/delete', { id: record.id, conversationId: place() });
+      // A creation of another conversation of the project leaves that conversation.
+      await api('studio/delete', { id: record.id, conversationId: record.conversationId ?? place() });
       if (extending?.id === record.id) extending = null;
       for (const key of Object.keys(kept)) if (kept[key].id === record.id) delete kept[key];
       await refresh();
@@ -2656,19 +2684,24 @@ export function setupStudio({
   const measured = new Map();
   /** Puts an image of the Sortie in a slot of a mode (`index`: which one of its role). */
   function useImage(record, target, role, index = 0) {
-    const output = { ...record.outputs[0], ...measured.get(record.id) };
     setMode(target);
     extending = null;
-    (drafts[target].inputs[role] ??= [])[index] = {
-      source: { output: record.id },
+    putCreation(record, role, index);
+    $('studio-view')?.scrollTo?.({ top: 0, behavior: 'smooth' });
+  }
+  /** A creation of the Sortie (of any conversation of the project) in a slot of the mode shown. */
+  function putCreation(record, role, index = 0) {
+    const output = { ...record.outputs[0], ...measured.get(record.id) };
+    (drafts[mode].inputs[role] ??= [])[index] = {
+      source: outputSource(record),
       preview: output.thumbUrl || output.originalUrl,
-      name: record.prompt,
+      name: record.prompt || KIND[mediaOf(record)] || 'Création',
       width: output.width ?? record.parameters?.width,
       height: output.height ?? record.parameters?.height,
     };
+    failure = '';
     followFormat(role);
     render();
-    $('studio-view')?.scrollTo?.({ top: 0, behavior: 'smooth' });
   }
   /** Where « Animer » puts a picture: the first video model, its references, else its start image. */
   function animation() {
@@ -2707,21 +2740,11 @@ export function setupStudio({
     draft.inputs.reference = list;
     useImage(record, 'video', 'reference', list.length);
   }
-  /** Puts a creation on the screen; a clip starts playing. */
-  function onScreen(record, play = false) {
-    kept[mediaOf(record)] = record;
-    render();
-    if (play)
-      document
-        .querySelector?.('#studio-view .studio-frame video, #studio-view .studio-frame audio')
-        ?.play?.()
-        ?.catch?.(() => {});
-  }
-  /** « Détails » of a creation: on the screen, its card open. */
+  /** « Détails » of a creation: shown whole, its details beside it (what a click on it does). */
   function showDetails(record) {
-    kept[mediaOf(record)] = record;
     menuFor = confirmFor = null;
-    toggleDetails(true);
+    render();
+    viewOutput(record, 0);
   }
   function askDelete(record) {
     menuFor = null;
@@ -2807,22 +2830,31 @@ export function setupStudio({
       from = media === 'video' && sourceOf(record) ? numberOf({ id: sourceOf(record), mediaType: 'video' }) : null,
       said = [name, from ? 'suite du clip #' + from : '', record.prompt || ''].filter(Boolean).join(' · '),
       actions = actionsOf(record),
+      shown = onStage()?.id === record.id,
       tile = node(
         'div',
-        'studio-item' +
-          (extending?.id === record.id ? ' is-selected' : '') +
-          (kept[mode]?.id === record.id ? ' is-shown' : ''),
+        'studio-item' + (extending?.id === record.id ? ' is-selected' : '') + (shown ? ' is-shown' : ''),
       );
     tile.dataset.id = record.id;
-    // The picture: a click shows it on the screen, ringed in white here (moodix-design.md 24).
+    // The picture: a click shows it whole with its details (the screen keeps the last creation);
+    // the one on the screen is ringed in white here (moodix-design.md 24). Dragged to a slot of
+    // the inputs, it becomes that input.
     const pick = button('studio-item-pick', '', () => {
       if (pressed) return void (pressed = false);
-      menuFor = confirmFor = null;
-      onScreen(record);
+      showDetails(record);
     });
     pick.setAttribute('aria-label', said);
     pick.title = said.length > 140 ? said.slice(0, 139) + '…' : said;
-    if (kept[mode]?.id === record.id) pick.setAttribute('aria-current', 'true');
+    if (shown) pick.setAttribute('aria-current', 'true');
+    pick.draggable = !working;
+    pick.ondragstart = event => {
+      carried = record;
+      event.dataTransfer.effectAllowed = 'copy';
+      event.dataTransfer.setData('text/plain', name);
+    };
+    pick.ondragend = () => {
+      carried = null;
+    };
     if (media === 'audio') {
       const wave = node('span', 'studio-thumb-wave');
       wave.setAttribute('aria-hidden', 'true');
@@ -2834,7 +2866,8 @@ export function setupStudio({
       if (picture) used.add(key);
       else if (small || media === 'image') {
         picture = node('img');
-        Object.assign(picture, { alt: '', loading: 'lazy', decoding: 'async' });
+        // The tile is what is dragged, not the picture as a file of the browser.
+        Object.assign(picture, { alt: '', loading: 'lazy', decoding: 'async', draggable: false });
         picture.src = small || output.originalUrl || '';
         picture.onload = () => {
           if (media === 'image' && !small) {
@@ -2849,6 +2882,7 @@ export function setupStudio({
           muted: true,
           preload: 'metadata',
           playsInline: true,
+          draggable: false,
           src: (output.originalUrl || '') + '#t=0.1',
         });
         picture.onloadeddata = () => void thumbnailOf(api, record, 0, picture);
@@ -2878,15 +2912,11 @@ export function setupStudio({
     tile.append(pick, badge);
     const main = actions.find(action => action.id === 'extend' || action.id === 'animate');
     if (main) tile.append(onPicture(main, 'studio-item-main', name));
+    // No « i » on the picture: a click on it shows its details.
     tile.append(
       onPicture(
         actions.find(action => action.id === 'delete'),
         'studio-item-del',
-        name,
-      ),
-      onPicture(
-        actions.find(action => action.id === 'details'),
-        'studio-item-info',
         name,
       ),
     );
@@ -2960,28 +2990,25 @@ export function setupStudio({
   const pictures = new Map();
   let used = new Set();
   /**
-   * The Sortie: the creations of this conversation of the mode, the newest at the left (a new one
-   * pushes the others to the right); nothing written, no count; empty, its icon and a line that say
-   * so, without a frame (one would look like a place to drop a file: moodix-design.md 7 bis 18).
+   * The Sortie: the creations of the project, of all its conversations, images, clips and sounds
+   * together, the newest at the left (a new one pushes the others to the right); nothing written,
+   * no count; empty, its icon and a line that say so, without a frame (one would look like a place
+   * to drop a file: moodix-design.md 7 bis 18).
    */
   function outputs() {
     used = new Set();
-    const mine = runs.filter(record => mediaOf(record) === mode),
-      section = node('section', 'studio-block is-output studio-results'),
+    const section = node('section', 'studio-block is-output studio-results'),
       about = modeOf(mode);
     section.setAttribute('aria-label', 'Sortie');
-    if (!mine.length) {
+    if (!runs.length) {
       const empty = node('div', 'studio-empty-strip');
-      empty.append(icon(about.icon), node('span', '', about.none));
+      empty.append(icon(about.icon), node('span', '', 'Aucune création dans ce projet pour l’instant'));
       section.append(empty);
       return section;
     }
-    const strip = node(
-      'div',
-      'studio-strip studio-timeline' + (mode === 'image' ? ' is-images' : mode === 'audio' ? ' is-sounds' : ''),
-    );
-    strip.setAttribute('aria-label', about.output);
-    for (const record of mine) strip.append(item(record));
+    const strip = node('div', 'studio-strip studio-timeline');
+    strip.setAttribute('aria-label', 'Créations du projet');
+    for (const record of runs) strip.append(item(record));
     section.append(strip);
     // Those no longer shown (another mode, a creation removed) are let go.
     for (const key of pictures.keys()) if (!used.has(key)) pictures.delete(key);
@@ -3345,8 +3372,12 @@ export function setupStudio({
     const id = place();
     seenConversation = conversation();
     // Without the copies kept for the model (a storyboard per clip): the Studio shows the files.
-    runs = id ? (await (await api(`gallery/${id}?images=0`)).json()).runs : [];
-    runsFor = id;
+    // Those of the whole project, the open conversation with them (the former Studio: its own).
+    const route = legacy
+      ? id && `gallery/${id}?images=0`
+      : `project-gallery/${encodeURIComponent(project())}?images=0` + (id ? '&conversation=' + id : '');
+    runs = route ? ((await (await api(route)).json()).runs ?? []) : [];
+    runsFor = where();
     runsStale = false;
     if (info.legacyId && !legacyRuns.loaded) {
       try {
@@ -3401,7 +3432,7 @@ export function setupStudio({
           })
           .catch(() => {});
       }
-      if (runsStale || runsFor !== place() || seenConversation !== conversation()) await refresh();
+      if (runsStale || runsFor !== where() || seenConversation !== conversation()) await refresh();
     } catch (error) {
       if (!info) unreadable = error.message;
       notice('Studio indisponible : ' + error.message);
@@ -3410,6 +3441,8 @@ export function setupStudio({
     await afterMove();
     if (shown() !== drawn) render();
   }
+  /** Where the creations shown come from: the conversation and its project. */
+  const where = () => `${place()}|${legacy ? '' : project()}`;
   /** What the Studio shows of what it reads: its tools and creations, from where. */
   const shown = () => JSON.stringify([info, runs, legacyRuns.length, legacy, unreadable]);
   /**
@@ -3421,7 +3454,7 @@ export function setupStudio({
     try {
       const before = info && JSON.stringify(info);
       if (!info || toolsStale) await load();
-      if (runsStale || runsFor !== place() || seenConversation !== conversation()) await refresh();
+      if (runsStale || runsFor !== where() || seenConversation !== conversation()) await refresh();
       // Read again (the engine is ready): drawn again if what it offers changed.
       if (before && JSON.stringify(info) !== before && !ai && !working) {
         await afterMove();

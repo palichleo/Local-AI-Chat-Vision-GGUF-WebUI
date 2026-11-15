@@ -252,3 +252,20 @@ test('a change asked for a replacement already made keeps its character', () => 
     /^A full-length photo of a male volleyball player with short hair, alone,/,
   );
 });
+
+test('a video of another conversation of the project is read in its own conversation', async () => {
+  const open = '11111111-1111-4111-8111-111111111111',
+    other = '33333333-3333-4333-8333-333333333333',
+    run = '22222222-2222-4222-8222-222222222222',
+    asked = [];
+  const outputFrames = async (conversation, id) => {
+    asked.push([conversation, id]);
+    return { urls: ['f1', 'f2'], video: true };
+  };
+  const pictures = await scenePictures(
+    { source: { output: run, conversation: other }, reference: { resource: 'person' } },
+    { resources: library, conversationId: open, outputFrames },
+  );
+  assert.deepEqual(pictures.frames, ['f1', 'f2']);
+  assert.deepEqual(asked, [[other, run]]);
+});

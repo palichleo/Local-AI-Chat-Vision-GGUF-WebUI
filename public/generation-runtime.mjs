@@ -3,8 +3,9 @@ import { prepareStoryboard } from './resource-preparation.mjs';
 import { compressImage } from './images.mjs';
 
 /**
- * Chat-side generation flow: asks for approval, follows the job, prepares compressed
- * copies for the vision model and keeps the Output gallery in sync.
+ * Chat-side generation flow: asks for approval, follows the job and prepares compressed
+ * copies for the vision model. The creations are shown in the conversation and in the Sortie of
+ * the Studio (the « Créations » tab of the files panel is gone, 0.5.87).
  */
 /**
  * For a character put in a video: { source, reference } as replace_character takes them again
@@ -17,7 +18,8 @@ export function replacedAgain(request, record) {
   for (const ref of record?.parameters?.references ?? []) {
     const role = ref.as ?? as[ref.role];
     if (!role || found[role]) continue;
-    if (ref.output_id) found[role] = { output: ref.output_id };
+    if (ref.output_id)
+      found[role] = { output: ref.output_id, ...(ref.output_conversation ? { conversation: ref.output_conversation } : {}) };
     else if (ref.resource_id) found[role] = { resource: ref.resource_id };
     else if (Number.isInteger(ref.image)) found[role] = { image: ref.image };
   }
@@ -30,129 +32,12 @@ export function setupGenerationRuntime({
   node,
   notice,
   onChange = () => {},
-  openOutput,
-  outputActions = null,
-  onOutput = () => {},
   // A video proposal left untouched starts by itself after this delay (0: never).
   confirmDelay = 30000,
-  // Whether the « Créations » tab is on screen: closed, it is drawn when it opens, not before.
-  isShown = () => true,
 }) {
   const $ = id => document.getElementById(id);
-  let urls = [],
-    galleryVersion = 0;
-  // The place whose creations the « Créations » tab lists: the open conversation, in the chat as
-  // in its Studio; or the former Studio, which had no conversation, while its Sortie shows it.
-  const place = () =>
-    state.view === 'studio' && state.studioLegacy
-      ? { id: state.studioId ?? null, studio: true }
-      : { id: state.conversationId, studio: false };
-  function reset() {
-    for (const media of $('gallery-list').querySelectorAll('video, audio')) media.pause();
-    galleryVersion++;
-    for (const url of urls) URL.revokeObjectURL(url);
-    urls = [];
-    $('gallery-list').replaceChildren(
-      node(
-        'p',
-        'asset-empty',
-        place().studio
-          ? 'Aucune création dans le Studio pour l’instant.'
-          : 'Aucune génération dans cette conversation.',
-      ),
-    );
-  }
   async function original(record, index, signal) {
     return (await api(`gallery/${record.conversationId}/${record.id}/${index}`, undefined, { signal })).blob();
-  }
-  async function renderGallery(conversationId) {
-    if (conversationId && conversationId !== place().id) return;
-    // The files panel is closed: nothing to draw (it is drawn as it opens).
-    if (!isShown()) return;
-    reset();
-    const version = galleryVersion;
-    if (!conversationId) return;
-    const result = await (await api(`gallery/${conversationId}`)).json();
-    if (version !== galleryVersion || conversationId !== place().id) return;
-    // Upscale, Interpoler and Prolonger are written to the open conversation: a creation of the
-    // Studio, which has its own buttons in its view, only shows its details from here.
-    const actions = place().studio ? null : outputActions;
-    if (result.runs.length) $('gallery-list').replaceChildren();
-    for (const record of result.runs) {
-      for (const [index, output] of record.outputs.entries()) {
-        const card = node('article', 'gallery-card');
-        if (record.mediaType === 'video' && output.originalUrl) {
-          const video = node('video');
-          video.controls = true;
-          // Without this session's copy as a poster, the first frame comes from the original.
-          video.preload = output.analysisDataUrl ? 'none' : 'metadata';
-          video.playsInline = true;
-          video.src = output.originalUrl;
-          if (output.analysisDataUrl) video.poster = output.analysisDataUrl;
-          card.append(video);
-        }
-        if (record.mediaType === 'audio' && output.originalUrl) {
-          const audio = node('audio');
-          audio.controls = true;
-          audio.preload = 'metadata';
-          audio.src = output.originalUrl;
-          card.append(audio);
-        }
-        // The user sees the original; the model's compressed copy only exists in this session.
-        const still = !['video', 'audio'].includes(record.mediaType) && (output.originalUrl || output.analysisDataUrl);
-        if (still) {
-          const img = node('img');
-          img.loading = 'lazy';
-          img.decoding = 'async';
-          img.src = still;
-          img.alt = record.prompt;
-          img.onclick = () => openOutput(record, index);
-          card.append(img);
-        }
-        const prompt = node('details', 'output-prompt'),
-          summary = node('summary');
-        summary.setAttribute('aria-label', 'Afficher ou réduire le prompt');
-        summary.append(node('span', '', record.prompt));
-        prompt.append(summary);
-        card.append(node('strong', '', record.workflowName), prompt);
-        if (record.parameters.expanded_prompt) {
-          const expanded = node('details', 'output-prompt output-prompt-enhanced'),
-            label = node('summary');
-          label.append(node('span', '', 'Prompt amélioré : ' + record.parameters.expanded_prompt));
-          label.setAttribute('aria-label', 'Afficher ou réduire le prompt amélioré');
-          expanded.append(label);
-          card.append(expanded);
-        }
-        card.append(node('small', '', new Date(record.createdAt).toLocaleString('fr-FR')));
-        const labels = { reviewed: 'Analyse disponible', correction_requested: 'Nouvelle génération demandée' };
-        card.append(
-          node(
-            'small',
-            'gallery-meta',
-            [
-              record.mediaType === 'video' ? (record.parameters.stage === 'draft' ? 'Brouillon' : 'Vidéo finale') : '',
-              record.parameters.seed === undefined ? '' : `Seed : ${record.parameters.seed}`,
-              labels[record.analysis?.status] || '',
-            ]
-              .filter(Boolean)
-              .join(' · '),
-          ),
-        );
-        if (record.analysis?.text) {
-          const details = node('details', 'gallery-review');
-          details.append(node('summary', '', 'Analyse du modèle'), node('p', '', record.analysis.text));
-          card.append(details);
-        }
-        if (actions) card.append(actions(record, index));
-        else {
-          const details = node('button', 'secondary', 'Détails');
-          details.type = 'button';
-          details.onclick = () => openOutput(record, index);
-          card.append(details);
-        }
-        $('gallery-list').append(card);
-      }
-    }
   }
   /**
    * The proposal, editable in place. A video starts by itself after CONFIRM_DELAY unless the
@@ -285,7 +170,6 @@ export function setupGenerationRuntime({
   }
   async function saveReview(record, text, status) {
     await api('gallery/review', { id: record.id, conversationId: record.conversationId, text, status });
-    await renderGallery(record.conversationId);
   }
   /**
    * `confirmed`: the user started this very action with a button (Upscale, Interpoler, or
@@ -429,13 +313,9 @@ export function setupGenerationRuntime({
       receiveOriginals(record);
       if (record.conversationId !== state.conversationId)
         throw Error('Cette sortie ne correspond pas à la conversation courante.');
-      const showGallery = () =>
-        renderGallery(record.conversationId).catch(error => notice(`Galerie indisponible : ${error.message}`));
-      await showGallery();
       // A character put in a video: what to call again to change it (the video followed, not
       // the result; the same character), said with the result for the next request.
       const again = replacedAgain(request, record);
-      if (!studio) onOutput();
       if (job.warning) notice(job.warning);
       let images = [],
         dimensions = record.outputs.map(() => null),
@@ -497,7 +377,6 @@ export function setupGenerationRuntime({
           notice(`Copies d’analyse non enregistrées : ${failure.message}`);
         }
       }
-      await showGallery();
       return {
         content: JSON.stringify({
           status: error ? 'generated' : 'success',
@@ -581,5 +460,5 @@ export function setupGenerationRuntime({
       onChange();
     }
   }
-  return { reset, renderGallery, requestTool, saveReview };
+  return { requestTool, saveReview };
 }

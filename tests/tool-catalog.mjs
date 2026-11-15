@@ -457,3 +457,34 @@ test('a character is replaced in a video by a verb of its own: the video, the im
   assert.equal(both.args.character, undefined);
   assert.equal(both.args.references.length, 2);
 });
+
+test('an output of another conversation of the project keeps its conversation; a conversation alone is refused', async () => {
+  const tools = catalogOf([
+    image('portrait'),
+    {
+      schemaVersion: 1,
+      id: 'bigger-video',
+      name: 'bigger-video',
+      description: 'bigger-video',
+      enabled: true,
+      ready: true,
+      pipeline: 'realesrgan_video',
+      mediaType: 'video',
+      parameters: {},
+      components: {},
+      loras: [],
+      references: [slot('source', 'source_video', true)],
+    },
+  ]);
+  const other = 'b2222222-2222-4222-8222-222222222222';
+  const routed = await tools.route('upscale', { source: { output: 'video-run', conversation: other } }, media);
+  assert.deepEqual(routed.args.references, [{ input: 'source', output_id: 'video-run', output_conversation: other }]);
+  await assert.rejects(
+    tools.route('upscale', { source: { resource: 'clip', conversation: other } }, media),
+    /conversation goes only with an output/,
+  );
+  await assert.rejects(
+    tools.route('upscale', { source: { output: 'video-run', conversation: 'not-an-id' } }, media),
+    /conversation goes only with an output/,
+  );
+});

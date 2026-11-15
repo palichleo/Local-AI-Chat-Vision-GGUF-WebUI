@@ -953,7 +953,7 @@ async function studioPage(tools, routes = {}, options = {}) {
                 tools,
                 presets: options.presets ?? {},
               }
-            : route.startsWith('gallery/')
+            : route.startsWith('gallery/') || route.startsWith('project-gallery/')
               ? { runs: route.includes(STUDIO_ID) ? (options.legacy ?? []) : runs }
               : (routes[route]?.(body) ?? {}),
       };
@@ -979,6 +979,7 @@ async function studioPage(tools, routes = {}, options = {}) {
     blocked: () => '',
     onChange() {},
     conversation: () => options.conversation?.() ?? 'c1',
+    ...(options.project ? { project: options.project } : {}),
     ensureConversation: async () => options.conversation?.() ?? 'c1',
     reveal: () => revealed.push(true),
     pace: 0,
@@ -1146,7 +1147,7 @@ test('the creations of the former Studio are no longer shown, nothing chooses th
     assert.deepEqual(body.find('studio-source-pick'), []);
     assert.equal(body.find('studio-item').length, 0);
     const [empty] = body.find('studio-empty-strip');
-    assert.equal(empty.children[1].textContent, 'Aucune image pour l’instant');
+    assert.equal(empty.children[1].textContent, 'Aucune création dans ce projet pour l’instant');
   } finally {
     restore();
   }
@@ -1196,46 +1197,46 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
       },
       { id: 'c1', mediaType: 'video', prompt: 'un renard qui court', outputs: [{ originalUrl: '/c1.mp4' }] },
     ];
+  const opened = [];
   const { body, restore, mode, asked } = await studioPage(
     { create_image: [image], create_video: [video] },
     {},
-    { runs },
+    { runs, viewOutput: record => opened.push(record.id) },
   );
   try {
     const items = () => body.find('studio-item'),
       numbers = () => body.find('studio-item-number').map(badge => badge.textContent),
       references = () => body.find('studio-slot-badge').map(badge => badge.textContent);
-    // The newest at the left, numbered; nothing written under the pictures (their names are for
-    // screen readers and in their tooltips).
-    assert.deepEqual(numbers(), ['#2', '#1']);
+    // Images, clips and sounds together, the newest at the left, each numbered among its kind;
+    // nothing written under the pictures (their names are for screen readers and in their tooltips).
+    assert.deepEqual(numbers(), ['#2', '#2', '#1', '#1']);
     assert.deepEqual(body.find('studio-item-title'), []);
     assert.deepEqual(body.find('studio-caption'), []);
     assert.equal(items()[0].find('studio-item-pick')[0].attributes['aria-label'], 'Image #2 · un phare');
-    // A clip: its continuation said too; « Prolonger » is its round button; no « Lire ».
+    // The same Sortie in every mode.
     mode(1);
-    assert.deepEqual(numbers(), ['#2', '#1']);
+    assert.deepEqual(numbers(), ['#2', '#2', '#1', '#1']);
+    // A clip: its continuation said too; « Prolonger » is its round button; no « Lire ».
     assert.equal(
-      items()[0].find('studio-item-pick')[0].attributes['aria-label'],
+      items()[1].find('studio-item-pick')[0].attributes['aria-label'],
       'Clip #2 · suite du clip #1 · la suite',
     );
-    assert.equal(items()[0].find('studio-item-main')[0].attributes['aria-label'], 'Prolonger · Clip #2');
+    assert.equal(items()[1].find('studio-item-main')[0].attributes['aria-label'], 'Prolonger · Clip #2');
     assert.deepEqual(body.find('studio-play'), []);
-    // A click shows it on the screen, ringed.
-    items()[1].find('studio-item-pick')[0].onclick();
+    // The screen shows the last clip; it is ringed in the Sortie.
     assert.match(items()[1].className, /is-shown/);
-    // « Détails » on a picture: on the screen, its card open.
-    items()[0].find('studio-item-info')[0].onclick();
-    assert.match(items()[0].className, /is-shown/);
-    assert.equal(body.find('studio-details-go')[0].attributes['aria-expanded'], 'true');
-    assert.deepEqual(
-      body
-        .find('studio-details')[0]
-        .children.slice(0, 2)
-        .map(cell => cell.textContent),
-      ['Clip', '#2'],
-    );
-    // A right click: every action in a menu; « Supprimer » asks on the picture before anything goes.
-    items()[0].oncontextmenu({ preventDefault() {} });
+    assert.doesNotMatch(items()[3].className, /is-shown/);
+    // A click shows it whole with its details; the screen keeps the last clip. No « i » on the picture.
+    items()[3].find('studio-item-pick')[0].onclick();
+    assert.deepEqual(opened, ['c1']);
+    assert.match(items()[1].className, /is-shown/);
+    assert.deepEqual(body.find('studio-item-info'), []);
+    // A right click: every action in a menu; « Détails » is the same view; « Supprimer » asks on the
+    // picture before anything goes.
+    items()[1].oncontextmenu({ preventDefault() {} });
+    body.find('studio-item-menu')[0].children[1].onclick();
+    assert.deepEqual(opened, ['c1', 'c2']);
+    items()[1].oncontextmenu({ preventDefault() {} });
     const [menu] = body.find('studio-item-menu');
     assert.equal(menu.attributes.role, 'menu');
     assert.deepEqual(
@@ -1252,7 +1253,7 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     assert.deepEqual(body.find('studio-item-confirm'), []);
     assert.equal(asked.filter(([route]) => route === 'studio/delete').length, 0);
     // The bin, then the light one: it goes.
-    items()[0].find('studio-item-del')[0].onclick();
+    items()[1].find('studio-item-del')[0].onclick();
     body.find('studio-confirm-yes')[0].onclick();
     await settle();
     assert.equal(asked.find(([route]) => route === 'studio/delete')[1].id, 'c2');
@@ -1267,7 +1268,7 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     items()[0].find('studio-item-main')[0].onclick();
     assert.deepEqual(references(), ['@1'], 'there already: nothing is added');
     mode(0);
-    items()[1].find('studio-item-main')[0].onclick();
+    items()[2].find('studio-item-main')[0].onclick();
     assert.deepEqual(references(), ['@1', '@2']);
     // An image's menu keeps « Modifier » (a model of images takes one to start from).
     mode(0);
@@ -2211,7 +2212,8 @@ test('the Studio reads its tools once at a time, and its creations only when som
   const studio = await studioPage({ create_image: [image], create_video: [clip] }, {}, { open: false });
   const { asked, restore } = studio;
   const tools = () => asked.filter(([route]) => route === 'studio').length,
-    galleries = () => asked.filter(([route]) => route.startsWith('gallery/')).map(([route]) => route);
+    galleries = () =>
+      asked.filter(([route]) => /^(project-)?gallery\//.test(route)).map(([route]) => route);
   try {
     // A proposal arrives as the Studio opens: one reading of the tools for both.
     const opening = studio.studio.open(),
@@ -2223,7 +2225,7 @@ test('the Studio reads its tools once at a time, and its creations only when som
     await answer;
     // Its creations, without the copies kept for the model.
     assert.ok(galleries().length >= 1);
-    assert.ok(galleries().every(route => route.endsWith('?images=0')));
+    assert.ok(galleries().every(route => /\?images=0(&|$)/.test(route)));
     // Going to the chat and back reads nothing again.
     const read = galleries().length;
     await studio.studio.open();
@@ -2655,5 +2657,73 @@ test('a replacement whose character Moodix AI just made: the pointer has its pro
     assert.equal(studio.asked.filter(([route]) => route === 'studio/enrich').length, 0);
   } finally {
     studio.restore();
+  }
+});
+
+test('the Sortie is the project: its creations from every conversation, one dragged into a slot becomes that input', async () => {
+  const scail = {
+      id: 's',
+      name: 'SCAIL-2',
+      verb: 'replace_character',
+      follows: true,
+      seeded: true,
+      roles: {
+        source: { count: 1, media: ['video'], many: false, required: true },
+        reference: { count: 1, media: ['image'], many: false, required: true },
+      },
+      settings: [],
+    },
+    runs = [
+      // Made in another conversation of the project.
+      {
+        id: 'clip',
+        conversationId: 'other',
+        mediaType: 'video',
+        prompt: 'une fille cueille une pomme',
+        outputs: [{ originalUrl: '/clip.mp4', thumbUrl: '/clip.jpg', width: 896, height: 512 }],
+      },
+      { id: 'face', conversationId: 'c1', prompt: 'un joueur', outputs: [{ originalUrl: '/face.png', thumbUrl: '/face.jpg' }] },
+    ];
+  const page = await studioPage(
+    { replace_character: [scail] },
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+    },
+    { runs, project: () => 'p1' },
+  );
+  const { body, asked, notices, restore } = page;
+  try {
+    // Read for the whole project, with the open conversation.
+    assert.ok(asked.some(([route]) => route === 'project-gallery/p1?images=0&conversation=c1'));
+    page.mode(1);
+    const items = () => body.find('studio-item'),
+      slots = () => body.find('studio-slot'),
+      event = { preventDefault() {}, stopPropagation() {}, dataTransfer: { files: [], setData() {} } },
+      carry = (item, slot) => {
+        items()[item].find('studio-item-pick')[0].ondragstart(event);
+        slots()[slot].ondrop(event);
+      };
+    assert.equal(items().length, 2);
+    // An image is not the video to follow; the clip is.
+    carry(1, 0);
+    assert.match(notices.at(-1), /attend une vidéo/);
+    assert.doesNotMatch(slots()[0].className, /is-filled/);
+    carry(0, 0);
+    carry(1, 1);
+    assert.deepEqual(
+      slots().map(tile => tile.children[0].children[0]?.src),
+      ['/clip.jpg', '/face.jpg'],
+    );
+    page.prompt().value = 'A young man picks an apple.';
+    page.prompt().oninput();
+    await body.find('studio-go')[0].onclick();
+    await settle();
+    // The clip keeps its conversation: the server finds it there.
+    const [, action] = asked.findLast(([route]) => route === 'tools/action');
+    assert.deepEqual(action.arguments.source, { output: 'clip', conversation: 'other' });
+    assert.deepEqual(action.arguments.reference, { output: 'face' });
+  } finally {
+    restore();
   }
 });

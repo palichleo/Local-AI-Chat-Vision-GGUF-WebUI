@@ -3242,6 +3242,10 @@ dialog::backdrop {
   overflow-wrap: anywhere;
   min-width: 0;
 }
+/* A creation has no name at the top left (its file is in « Fichier »): the cross stays at the right. */
+#original-close {
+  margin-left: auto;
+}
 .media-details-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(230px, 320px);

@@ -729,3 +729,87 @@ test('a character replaced in a video runs by itself like the other videos, unle
   assert.equal(runsByItself({ ...settings, autoAllow: false }, 'image', 'create_image'), false);
   assert.equal(runsByItself(settings, 'audio', 'create_audio'), false);
 });
+
+test('a video made in another conversation of the project is continued from its own conversation', async () => {
+  let generated;
+  const sourceId = '22222222-2222-4222-8222-222222222222',
+    other = 'b2222222-2222-4222-8222-222222222222',
+    looked = [];
+  const workflow = {
+    schemaVersion: 1,
+    id: 'continue',
+    name: 'Continue',
+    mediaType: 'video',
+    pipeline: 'ltx25',
+    enabled: true,
+    ready: true,
+    parameters: { prompt: { policy: 'model', type: 'string' } },
+    digest: 'c'.repeat(64),
+    references: [{ id: 'source', role: 'source_video', required: true }],
+  };
+  const catalog = {
+    list: async () => [workflow],
+    read: async () => workflow,
+    prepare: async () => ({
+      workflow,
+      job: { parameters: { prompt: 'continue', seed: 2, stage: 'draft', width: 384, height: 256 }, components: {}, loras: [] },
+      outputNodes: [],
+    }),
+  };
+  const runtime = new ToolRuntime({
+    catalog,
+    engine: { state: 'ready', stop: async () => {}, start: async () => {} },
+    gallery: {
+      put: async record => record,
+      get: async (conversation, run) => {
+        looked.push([conversation, run]);
+        return { provider: 'native', mediaType: 'video', outputs: [{ source: { filename: 'prior.mp4' } }] };
+      },
+    },
+    getConfig: () => ({ enabled: true, autoAllow: true, maxIterations: 5, baseUrl: 'native' }),
+    engineConfig: () => ({}),
+    sourceMedia: async (ref, conversation) => {
+      // The reference says where the video was made; the call is in the open conversation.
+      assert.deepEqual([ref.output_id, ref.output_conversation, conversation], [sourceId, other, id]);
+      return { mime: 'video/mp4', name: 'Previous output', handle: { close: async () => {} } };
+    },
+    clientFactory: () => ({
+      status: async () => ({ idle: true }),
+      preflight: async () => {},
+      stage: async media => {
+        await media.handle.close();
+        return { path: '/local/staged-source.mp4' };
+      },
+      upload: () => assert.fail('Must not upload sampled pixels'),
+      run: async job => {
+        generated = job;
+        return { outputs: [{ filename: 'new.mp4', subfolder: '', type: 'output' }] };
+      },
+      free: async () => {},
+    }),
+  });
+  const request = await runtime.request(
+    [
+      {
+        id: 'continue-call',
+        type: 'function',
+        function: {
+          name: 'extend_video',
+          arguments: JSON.stringify({
+            prompt: 'continue',
+            intention: 'Continue',
+            source: { output: sourceId, conversation: other },
+          }),
+        },
+      },
+    ],
+    { conversationId: id, turnId: id, messages: [] },
+  );
+  await runtime.execute({ requestId: request.requestId, permission: 'once', approvalToken: request.approvalToken });
+  await runtime.finished;
+  assert.equal(runtime.status().state, 'done');
+  assert.deepEqual(generated.references, [{ input: 'source', role: 'source_video', path: '/local/staged-source.mp4' }]);
+  // Every reading of that video was made in its conversation, never in the open one.
+  assert.ok(looked.length > 0);
+  assert.ok(looked.every(([conversation]) => conversation === other));
+});

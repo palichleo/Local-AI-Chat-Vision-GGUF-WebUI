@@ -31,7 +31,8 @@ export function setupAssets({
     for (const video of container.querySelectorAll('video')) video.pause();
   }
   function show(tab) {
-    for (const name of ['resources', 'output']) {
+    // « Ressources » alone: the creations are in the Sortie of the Studio (0.5.87).
+    for (const name of ['resources']) {
       $(`assets-${name}-tab`).setAttribute('aria-selected', String(tab === name));
       $(`assets-${name}-tab`).tabIndex = tab === name ? 0 : -1;
       $(`${name}-pane`).hidden = tab !== name;
@@ -230,23 +231,6 @@ export function setupAssets({
     return imported;
   }
   $('assets-resources-tab').onclick = () => show('resources');
-  $('assets-output-tab').onclick = () => show('output');
-  for (const tab of ['resources', 'output'])
-    $(`assets-${tab}-tab`).onkeydown = event => {
-      if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
-        event.preventDefault();
-        const next =
-          event.key === 'Home'
-            ? 'resources'
-            : event.key === 'End'
-              ? 'output'
-              : tab === 'resources'
-                ? 'output'
-                : 'resources';
-        show(next);
-        $(`assets-${next}-tab`).focus();
-      }
-    };
   $('resource-file').onchange = event => {
     const files = [...event.target.files];
     event.target.value = '';
@@ -298,10 +282,12 @@ export function setupAssets({
     $('media-metadata').append(title, content);
     return content;
   }
-  function begin(name) {
+  /** `shown`: the name at the top left (a resource); a creation has its file in « Fichier » only. */
+  function begin(name, { shown = true } = {}) {
     pause();
     cleanViewer();
     $('original-name').textContent = name;
+    $('original-name').classList.toggle('sr-only', !shown);
     $('media-metadata').replaceChildren();
     $('media-error').textContent = '';
     $('original-image').hidden = true;
@@ -340,7 +326,8 @@ export function setupAssets({
   }
   async function viewOutput(record, index, originalBlob) {
     const output = record.outputs[index],
-      version = begin(output.source.filename);
+      // Named for screen readers only: its file is in the details.
+      version = begin(output.source.filename, { shown: false });
     viewController = new AbortController();
     row('Workflow', record.workflowName);
     if (record.mediaType === 'video')

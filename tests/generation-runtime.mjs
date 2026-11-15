@@ -133,31 +133,6 @@ async function fixture(fn, { confirmDelay = 0, isShown } = {}) {
   }
 }
 
-test('latest gallery refresh wins without duplicate images', async () =>
-  fixture(async ({ ui, state, nodes, setIntercept }) => {
-    state.conversationId = 'conversation';
-    const replies = [];
-    setIntercept(route =>
-      route === 'gallery/conversation' ? new Promise(resolve => replies.push(resolve)) : undefined,
-    );
-    const record = {
-      id: 'run',
-      conversationId: 'conversation',
-      workflowName: 'Portrait',
-      prompt: 'A portrait',
-      createdAt: '2026-11-08T00:00:00Z',
-      parameters: {},
-      outputs: [{ source: { filename: 'image.png' } }],
-    };
-    const first = ui.renderGallery('conversation'),
-      second = ui.renderGallery('conversation');
-    replies[1](Response.json({ runs: [record] }));
-    await second;
-    replies[0](Response.json({ runs: [record] }));
-    await first;
-    assert.equal(nodes.get('gallery-list').children.length, 1);
-  }));
-
 test('cancel during launch acknowledgement is sent immediately and is scoped to that request', async () =>
   fixture(async ({ ui, state, calls, setIntercept }) => {
     state.conversationId = 'conversation';
@@ -672,16 +647,6 @@ test('photo tool results expose the actual seed and dimensions for a later corre
     assert.equal(data.workflow_digest, 'photo-version');
   }));
 
-test('replacing an Output gallery pauses its videos before removing their players', async () =>
-  fixture(async ({ ui, nodes }) => {
-    const video = new Element('video');
-    let paused = 0;
-    video.pause = () => paused++;
-    nodes.get('gallery-list').append(video);
-    ui.reset();
-    assert.equal(paused, 1);
-    assert.equal(nodes.get('gallery-list').children.includes(video), false);
-  }));
 test('an image proposal is the same form, never starts by itself, and keeps « Toujours autoriser »', async () =>
   fixture(
     async ({ ui, nodes, all, calls, setIntercept }) => {
@@ -767,55 +732,6 @@ test('an action the user started with a button runs without a second confirmatio
     });
   }));
 
-test('in the Studio the « Créations » tab lists the conversation, or the former Studio with its details only', async () =>
-  fixture(async ({ ui, state, nodes, calls, setIntercept }) => {
-    const run = (id, conversationId) => ({
-      id,
-      conversationId,
-      workflowName: 'Portrait',
-      prompt: 'A portrait',
-      createdAt: '2026-11-12T00:00:00Z',
-      parameters: {},
-      outputs: [{ source: { filename: id + '.png' } }],
-    });
-    setIntercept(route =>
-      route === 'gallery/studio'
-        ? Response.json({ runs: [run('a', 'studio'), run('b', 'studio')] })
-        : route === 'gallery/conversation'
-          ? Response.json({ runs: [run('c', 'conversation')] })
-          : undefined,
-    );
-    const list = nodes.get('gallery-list'),
-      texts = () => list.children.map(child => child.textContent);
-    // The Studio is a view of the open conversation: the tab shows its creations there too.
-    state.conversationId = 'conversation';
-    state.view = 'studio';
-    await ui.renderGallery('conversation');
-    assert.equal(list.children.length, 1);
-    // The Sortie shows the former Studio, which had no conversation: the tab follows, its id not known yet.
-    state.studioLegacy = true;
-    await ui.renderGallery(null);
-    assert.deepEqual(texts(), ['Aucune création dans le Studio pour l’instant.']);
-    // The conversation is not what the tab shows then.
-    const asked = calls.filter(call => call.route === 'gallery/conversation').length;
-    await ui.renderGallery('conversation');
-    assert.equal(calls.filter(call => call.route === 'gallery/conversation').length, asked);
-    state.studioId = 'studio';
-    await ui.renderGallery('studio');
-    assert.equal(list.children.length, 2);
-    // No action that would write to the conversation: « Détails » alone.
-    for (const card of list.children) assert.equal(card.children.at(-1).textContent, 'Détails');
-    // Back in the conversation, its own creations.
-    state.view = 'chat';
-    state.studioLegacy = false;
-    await ui.renderGallery('studio');
-    assert.equal(list.children.length, 2, 'a late answer of the Studio changes nothing');
-    await ui.renderGallery('conversation');
-    assert.equal(list.children.length, 1);
-    await ui.renderGallery(null);
-    assert.deepEqual(texts(), ['Aucune génération dans cette conversation.']);
-  }));
-
 test('a creation of the Studio makes no copy for the model and downloads nothing; a closed panel is not drawn', async () =>
   fixture(
     async ({ ui, calls, state, setIntercept }) => {
@@ -872,4 +788,20 @@ test('a replacement tells the model what to call again to change it: the video f
   assert.deepEqual(replacedAgain(request, record), { source: { output: 'penguin' }, reference: { resource: 'player' } });
   assert.equal(replacedAgain({ tool: 'create_video' }, record), null);
   assert.equal(replacedAgain(request, { parameters: { references: [record.parameters.references[0]] } }), null);
+});
+
+test('a replacement made from a creation of another conversation says where to find it again', async () => {
+  const { replacedAgain } = await import('../public/generation-runtime.mjs');
+  const record = {
+    parameters: {
+      references: [
+        { input: 'video', role: 'driving_video', output_id: 'clip', output_conversation: 'other' },
+        { input: 'character', role: 'reference_image', output_id: 'face' },
+      ],
+    },
+  };
+  assert.deepEqual(replacedAgain({ tool: 'replace_character' }, record), {
+    source: { output: 'clip', conversation: 'other' },
+    reference: { output: 'face' },
+  });
 });

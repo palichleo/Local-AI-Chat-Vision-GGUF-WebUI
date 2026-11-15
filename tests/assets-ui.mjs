@@ -113,11 +113,10 @@ async function fixture(t) {
 }
 test('resource tabs preserve the library, annotations save, and activation changes are persisted', async t => {
   const { ui, $, calls } = await fixture(t);
+  // « Ressources » alone: the creations are in the Sortie of the Studio.
   assert.equal($('resources-pane').hidden, false);
-  assert.equal($('output-pane').hidden, true);
-  $('assets-output-tab').onclick();
-  assert.equal($('output-pane').hidden, false);
   $('assets-resources-tab').onclick();
+  assert.equal($('resources-pane').hidden, false);
   const card = $('resources-list').children[0],
     activation = card.children[3].children[0],
     description = card.children[4];
@@ -184,18 +183,3 @@ test('chat details reuse the displayed original blob and persisted original dime
   $('original-close').onclick();
 });
 
-test('hidden output videos pause when switching tabs, closing files or opening Details', async t => {
-  const { ui, $ } = await fixture(t),
-    video = new Element('video');
-  let pauses = 0;
-  video.pause = () => pauses++;
-  $('output-pane').append(video);
-  $('assets-panel').append($('output-pane'));
-  ui.show('output');
-  ui.show('resources');
-  assert.equal(pauses, 1);
-  ui.pause();
-  assert.equal(pauses, 2);
-  $('resources-list').children[0].children[0].onclick();
-  assert.equal(pauses, 3);
-});

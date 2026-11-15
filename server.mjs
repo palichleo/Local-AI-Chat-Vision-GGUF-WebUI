@@ -370,7 +370,10 @@ export async function createApplication({
         await resources.activeRecord(ref.resource_id);
         return resources.media(ref.resource_id, 'original');
       }
-      const record = await gallery.get(conversationId, ref.output_id, { includeImages: false });
+      // Made in another conversation of the project (the Sortie of the Studio is the project's).
+      const record = await gallery.get(ref.output_conversation ?? conversationId, ref.output_id, {
+        includeImages: false,
+      });
       if (record.provider !== 'native' || !record.outputs[ref.output_index ?? 0])
         throw problem('Le fichier original de ce résultat est indisponible.');
       return {
@@ -400,7 +403,7 @@ export async function createApplication({
         return width > 0 && height > 0 ? { width, height } : null;
       }
       if (typeof source?.output === 'string') {
-        const record = await gallery.get(conversationId, source.output, { includeImages: false }),
+        const record = await gallery.get(source.conversation ?? conversationId, source.output, { includeImages: false }),
           output = record.outputs[Number(source.index ?? 0)] ?? {},
           width = output.width ?? record.parameters?.width,
           height = output.height ?? record.parameters?.height;
@@ -932,6 +935,26 @@ export async function createApplication({
               : {}),
           },
         );
+      }
+      // The Sortie of the Studio: the creations of every conversation of a project, the newest
+      // first, the open one too (even before it is saved). Without the history, the open one alone.
+      if (req.method === 'GET' && path.startsWith('/api/project-gallery/')) {
+        const project = projectId(decodeURIComponent(path.slice('/api/project-gallery/'.length))),
+          open = requestURL.searchParams.get('conversation'),
+          includeImages = requestURL.searchParams.get('images') !== '0',
+          ids = new Set(open ? [open] : []);
+        if (preferences.saveHistory)
+          for (const item of (await history.list()).conversations)
+            if ((item.projectId || 'inbox') === project) ids.add(item.id);
+        const runs = [];
+        for (const id of ids)
+          try {
+            runs.push(...(await gallery.list(id, { includeImages })).runs);
+          } catch {
+            // A conversation that cannot be read leaves the others.
+          }
+        runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        return send(200, { runs: runs.map(galleryView) });
       }
       if (req.method === 'GET' && path.startsWith('/api/gallery/')) {
         const [, , , conversationId, runId, index] = path.split('/');

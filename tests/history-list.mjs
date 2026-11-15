@@ -278,13 +278,11 @@ test('logo navigation keeps the current messages and draft and closes the mobile
     },
     prompt = { value: 'An unsent draft' },
     attributes = {},
-    document = { body: { dataset: { navOpen: 'true' } } },
-    listed = [];
+    document = { body: { dataset: { navOpen: 'true' } } };
   let pending,
     saves = 0,
     renders = 0;
   const context = {
-    workflowsUI: { renderGallery: async id => listed.push(id) },
     ...sessionCopies,
     requestSettingsClose: action => context.settingsGuard.requestClose(action),
     updateControls() {},
@@ -317,8 +315,6 @@ test('logo navigation keeps the current messages and draft and closes the mobile
   assert.equal(document.body.dataset.navOpen, 'false');
   assert.equal(saves, 1);
   assert.equal(renders, 1);
-  // Outside the Studio the « Créations » tab lists the open conversation's creations.
-  assert.deepEqual(listed, ['kept']);
 });
 
 test('home keeps an unsaved conversation reachable without adding it to saved project cards', t => {
@@ -418,8 +414,7 @@ test('an action clicked before the page knows its token waits for it instead of 
 test('Chat and Studio are two views of one conversation: switching is immediate, even during an answer', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     state = { status: {}, view: 'chat', conversationId: 'kept', studioId: 'studio', generating: true },
-    document = { body: { dataset: {} } },
-    listed = [];
+    document = { body: { dataset: {} } };
   let loaded,
     opened,
     synced = 0;
@@ -440,7 +435,6 @@ test('Chat and Studio are two views of one conversation: switching is immediate,
       assetsUI: { flush: async () => true },
       persistConversation: async () => assert.fail('nothing to save: it is the same conversation'),
       projectUI: { render() {} },
-      workflowsUI: { renderGallery: async id => listed.push(id) },
       // GET /api/studio takes seconds; the Studio is on screen meanwhile.
       studioUI: {
         open() {
@@ -460,13 +454,9 @@ test('Chat and Studio are two views of one conversation: switching is immediate,
     assert.equal(state.view, 'studio');
     assert.equal(opened, undefined, 'the tools load without locking the page');
     assert.equal(synced, 1);
-    // The « Créations » tab lists the open conversation, in its Studio as in its chat.
-    await new Promise(resolve => setTimeout(resolve, 20));
-    assert.deepEqual(listed, ['kept']);
     context.chat();
     assert.equal(state.view, 'chat');
     assert.equal(synced, 2);
-    assert.deepEqual(listed, ['kept', 'kept']);
   } finally {
     loaded();
   }
