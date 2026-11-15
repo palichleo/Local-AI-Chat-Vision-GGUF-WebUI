@@ -4328,8 +4328,17 @@ body {
     --sidebar-width: 232px;
   }
   #sidebar {
+    padding-right: 12px;
+    padding-left: 12px;
     background: transparent;
     border-right: 0;
+  }
+  /* At 232 px « Nouvelle conversation » went on two lines: one, a little tighter. */
+  #sidebar > .new-chat {
+    gap: 8px;
+    padding: 0 12px;
+    font-size: 13.5px;
+    white-space: nowrap;
   }
 }
 .workspace {
