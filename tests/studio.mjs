@@ -1216,6 +1216,23 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     assert.deepEqual(body.find('studio-item-title'), []);
     assert.deepEqual(body.find('studio-caption'), []);
     assert.equal(items()[0].find('studio-item-pick')[0].attributes['aria-label'], 'Image #2 · un phare');
+    // The wheel scrolls it sideways, the pointer anywhere over it; a sideways move is the
+    // browser's, and nothing moves when all of it shows.
+    const [sortie] = body.find('is-output'),
+      [strip] = body.find('studio-strip');
+    Object.assign(strip, { scrollLeft: 0, scrollWidth: 1200, clientWidth: 400 });
+    let stopped = 0;
+    const wheel = (deltaY, deltaX = 0, deltaMode = 0) =>
+      sortie.onwheel({ deltaY, deltaX, deltaMode, preventDefault: () => stopped++ });
+    wheel(100);
+    wheel(3, 0, 1);
+    assert.equal(strip.scrollLeft, 220);
+    assert.equal(stopped, 2);
+    wheel(10, 80);
+    assert.equal(strip.scrollLeft, 220);
+    strip.scrollWidth = 400;
+    wheel(100);
+    assert.deepEqual([strip.scrollLeft, stopped], [220, 2]);
     // The same Sortie in every mode.
     mode(1);
     assert.deepEqual(numbers(), ['#2', '#2', '#1', '#1']);

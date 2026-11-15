@@ -2907,10 +2907,21 @@ export function setupStudio({
     const strip = node('div', 'studio-strip studio-timeline');
     strip.setAttribute('aria-label', 'Créations du projet');
     for (const record of runs) strip.append(item(record));
+    // The wheel of a mouse scrolls it sideways, the pointer anywhere over the Sortie (a mouse has
+    // no sideways wheel); a sideways move of a trackpad is left to the browser.
+    section.onwheel = event => scrollSideways(strip, event);
     section.append(strip);
     // Those no longer shown (another mode, a creation removed) are let go.
     for (const key of pictures.keys()) if (!used.has(key)) pictures.delete(key);
     return section;
+  }
+  /** A turn of the wheel, as so many pixels sideways along `strip` (nothing when it all shows). */
+  function scrollSideways(strip, event) {
+    if (Math.abs(event.deltaX) >= Math.abs(event.deltaY) || strip.scrollWidth <= strip.clientWidth) return;
+    // Lines (Firefox) or pages, as pixels.
+    const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? strip.clientWidth : 1;
+    event.preventDefault();
+    strip.scrollLeft += event.deltaY * unit;
   }
   /** A new creation goes at the left of the strip: the strip shows it. */
   function scrollStrip() {
@@ -3259,10 +3270,17 @@ export function setupStudio({
       sketched = true;
       return body.replaceChildren(skeleton());
     }
+    // Where the Sortie was scrolled to: drawn again, it stays there (a click on a creation, a
+    // change of model), not back at its start.
+    const along = document.querySelector?.('#studio-view .studio-strip')?.scrollLeft ?? 0;
     const desk = form();
     if (sketched) desk.classList.add('is-arriving');
     sketched = false;
     body.replaceChildren(desk);
+    if (along) {
+      const strip = document.querySelector?.('#studio-view .studio-strip');
+      if (strip) strip.scrollLeft = along;
+    }
     if (working) progress();
   }
   async function refresh() {
