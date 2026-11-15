@@ -596,3 +596,75 @@ test('a project is deleted with its bin, renamed by double click, and both are i
   );
   assert.equal(state.projectId, 'inbox');
 });
+
+// The requests of the page, with what serverRestarted needs: the answers of a server started again.
+async function restartedServer({ token = 'old', version = '0.5.128', next = { token: 'new', version: '0.5.128' }, updating = false, valid = next.token } = {}) {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    state = { token, version, updating, closingApp: false, messages: [], images: [], videos: [], thinking: true, view: 'chat', historyItems: [] },
+    sent = [],
+    kept = new Map(),
+    reloads = [];
+  let asked = 0;
+  const context = {
+    state,
+    AbortSignal,
+    $: id => (id === 'prompt' ? { value: 'Un brouillon' } : { textContent: 'Une conversation' }),
+    sessionStorage: { setItem: (key, value) => kept.set(key, value) },
+    location: { reload: () => reloads.push(true) },
+    fetch: async (url, options = {}) => {
+      if (url.startsWith('/api/bootstrap')) {
+        asked++;
+        await new Promise(resolve => setTimeout(resolve, 5));
+        return { json: async () => next };
+      }
+      const key = options.headers.Authorization.slice(7);
+      sent.push([url, key]);
+      // The server knows its key only.
+      return key === valid ? { ok: true, status: 200 } : { ok: false, status: 401, json: async () => ({ error: 'Accès refusé. Recharge la page.' }) };
+    },
+  };
+  runInNewContext(
+    source.slice(source.indexOf('let tokenKnown;'), source.indexOf('let historyWrite')) +
+      ';this.api=api;this.tokenKnown=tokenKnown;this.RESUME=RESUME;',
+    context,
+  );
+  context.tokenKnown();
+  return { context, state, sent, kept, reloads, asked: () => asked };
+}
+
+test('a page left open through a restart takes the new key itself and asks again (the same version)', async () => {
+  const page = await restartedServer();
+  // Two requests refused at once: one question to the server, both asked again with the new key.
+  await Promise.all([page.context.api('status'), page.context.api('history')]);
+  assert.equal(page.state.token, 'new');
+  assert.equal(page.asked(), 1);
+  assert.deepEqual(
+    page.sent.filter(([, key]) => key === 'new').map(([url]) => url).sort(),
+    ['/api/history', '/api/status'],
+  );
+  assert.deepEqual(page.reloads, [], 'no reload: the media keep their keys');
+});
+
+test('a refusal with the key still valid is a refusal; during an update, the update reloads the page', async () => {
+  const same = await restartedServer({ next: { token: 'old', version: '0.5.128' }, valid: 'other' });
+  await assert.rejects(same.context.api('status'), { status: 401 });
+  const updating = await restartedServer({ updating: true });
+  await assert.rejects(updating.context.api('status'), { status: 401 });
+  assert.equal(updating.asked(), 0);
+});
+
+test('a page of an older version reloads, its draft kept in its tab for the page that replaces it', async () => {
+  const page = await restartedServer({ next: { token: 'new', version: '0.5.129' } });
+  let settled = false;
+  void page.context.api('status').finally(() => (settled = true));
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.deepEqual(page.reloads, [true]);
+  assert.equal(page.state.updateReload, true, 'no « Quitter la page ? »');
+  assert.equal(settled, false, 'what asked waits: the page goes');
+  const kept = JSON.parse(page.kept.get(page.context.RESUME));
+  assert.equal(kept.prompt, 'Un brouillon');
+  assert.equal(kept.title, 'Une conversation');
+  assert.equal(kept.view, 'chat');
+  // Not in the history: its messages go with it.
+  assert.deepEqual(kept.messages, []);
+});

@@ -207,6 +207,20 @@ function chatPayload(input, vision, maxOutputTokens, countOnly = false) {
   };
 }
 
+/** 32 random bytes kept in a file of their own: drawn the first time, then read again. */
+async function keptSecret(path) {
+  try {
+    const bytes = await readFile(path);
+    if (bytes.length === 32) return bytes;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  const bytes = randomBytes(32);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, bytes, { mode: 0o600 });
+  return bytes;
+}
+
 export async function createApplication({
   port = 8787,
   dataDir = join(root, 'data'),
@@ -335,7 +349,10 @@ export async function createApplication({
   // Small pictures of the creations, made by the page and kept here (lib/thumbnails.mjs).
   const thumbnails = await new Thumbnails(join(dataDir, 'thumbnails')).load();
   const resources = new Resources(join(dataDir, 'resources'));
-  const mediaSecret = randomBytes(32),
+  // The secret of the media addresses (their `?key=`): kept in the data folder, the same from one
+  // launch to the next (0.5.128). A page left open through a restart takes the new key of the page
+  // by itself (public/app.js) and goes on showing and playing what it shows.
+  const mediaSecret = await keptSecret(join(dataDir, 'media-secret')),
     resourceTurns = new Map();
   const mediaKey = (id, part) =>
     createHmac('sha256', mediaSecret)

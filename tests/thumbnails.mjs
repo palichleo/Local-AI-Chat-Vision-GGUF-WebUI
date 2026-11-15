@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Thumbnails } from '../lib/thumbnails.mjs';
@@ -264,4 +264,86 @@ test('the black thumbnail of a clip is made again from the clip, sent in its pla
   await healThumbnail(api, image, 0, picture);
   assert.equal(clips.length, 1);
   assert.equal(sent.length, 1);
+});
+
+test('the addresses of the media keep their key from one launch to the next (0.5.128)', async t => {
+  const data = await mkdtemp(join(tmpdir(), 'atelier-thumbs-secret-')),
+    other = await mkdtemp(join(tmpdir(), 'atelier-thumbs-secret-'));
+  t.after(async () => {
+    await rm(data, { recursive: true, force: true });
+    await rm(other, { recursive: true, force: true });
+  });
+  await new Gallery({ historyDir: join(data, 'history') }).put(
+    {
+      id: run,
+      conversationId: conversation,
+      provider: 'native',
+      mediaType: 'image',
+      workflowId: 'basic',
+      workflowName: 'Basic',
+      prompt: 'Un lac',
+      parameters: {},
+      createdAt: '2026-11-15T10:00:00.000Z',
+      outputs: [{ source: { filename: 'lac.png', subfolder: '', type: 'output' } }],
+    },
+    { persist: true },
+  );
+  const sendThumbnail = async app => {
+    const { token } = await (await fetch(app.url + '/api/bootstrap?brief=1')).json();
+    return (
+      await (
+        await fetch(app.url + '/api/gallery/thumbnail', {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer ' + token,
+            'Content-Type': 'image/jpeg',
+            'X-Conversation-Id': conversation,
+            'X-Run-Id': run,
+            'X-Output-Index': '0',
+          },
+          body: jpeg,
+        })
+      ).json()
+    ).thumbUrl;
+  };
+  let app = await createApplication({ port: 0, dataDir: data });
+  const address = await sendThumbnail(app),
+    firstToken = (await (await fetch(app.url + '/api/bootstrap?brief=1')).json()).token;
+  await app.close();
+  // Started again: a new key for the page, the same for the media.
+  app = await createApplication({ port: 0, dataDir: data });
+  try {
+    assert.notEqual((await (await fetch(app.url + '/api/bootstrap?brief=1')).json()).token, firstToken);
+    const again = await fetch(app.url + address);
+    assert.equal(again.status, 200);
+    assert.deepEqual(Buffer.from(await again.arrayBuffer()), jpeg);
+    assert.equal((await readFile(join(data, 'media-secret'))).length, 32);
+  } finally {
+    await app.close();
+  }
+  // Another installation has its own secret: the addresses of one are no good for the other.
+  await mkdir(join(other, 'thumbnails'), { recursive: true });
+  await new Gallery({ historyDir: join(other, 'history') }).put(
+    {
+      id: run,
+      conversationId: conversation,
+      provider: 'native',
+      mediaType: 'image',
+      workflowId: 'basic',
+      workflowName: 'Basic',
+      prompt: 'Un lac',
+      parameters: {},
+      createdAt: '2026-11-15T10:00:00.000Z',
+      outputs: [{ source: { filename: 'lac.png', subfolder: '', type: 'output' } }],
+    },
+    { persist: true },
+  );
+  const elsewhere = await createApplication({ port: 0, dataDir: other });
+  try {
+    const own = await sendThumbnail(elsewhere);
+    assert.notEqual(own.split('key=')[1], address.split('key=')[1]);
+    assert.equal((await fetch(elsewhere.url + address)).status, 401);
+  } finally {
+    await elsewhere.close();
+  }
 });

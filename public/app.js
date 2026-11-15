@@ -41,6 +41,8 @@ const state = {
   projects: [{ id: 'inbox', name: 'Conversations' }],
   projectWorking: false,
   token: '',
+  // The version of the application this page is the code of (bootstrap).
+  version: '',
   config: {},
   globalInstructions: '',
   conversationInstructions: null,
@@ -152,17 +154,29 @@ const pageReady = new Promise(resolve => {
 });
 async function api(route, body, options = {}) {
   await pageReady;
-  const { raw = false, headers: extraHeaders = {}, ...requestOptions } = options;
+  const { raw = false, headers: extraHeaders = {}, again = false, ...requestOptions } = options;
+  const used = state.token;
   const response = await fetch(`/api/${route}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: {
-      Authorization: `Bearer ${state.token}`,
+      Authorization: `Bearer ${used}`,
       'Content-Type': raw ? 'application/octet-stream' : 'application/json',
       ...extraHeaders,
     },
     ...(body === undefined ? {} : { body: raw ? body : JSON.stringify(body) }),
     ...requestOptions,
   });
+  // Refused with the key this page had: the server was started again with the page open. With its
+  // new key (taken meanwhile by another request, or now), the same request once more. An update
+  // or « Redémarrer » of this page reloads it by itself.
+  if (
+    response.status === 401 &&
+    !again &&
+    !state.updating &&
+    !state.closingApp &&
+    (used !== state.token || (await serverRestarted()))
+  )
+    return api(route, body, { ...options, again: true });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw Object.assign(new Error(data.error || `La requête a échoué (${response.status}).`), {
@@ -172,6 +186,73 @@ async function api(route, body, options = {}) {
     });
   }
   return response;
+}
+
+/**
+ * A request refused (401) with the key of this page: the server was started again with the page
+ * open (the launcher, an update, a relaunch) and drew a new key (0.5.128). Of the same version, the
+ * page takes the new key and goes on: the addresses of the media keep theirs (server.mjs). Of
+ * another version, its code is old: it reloads, its draft and its conversation kept in this tab for
+ * the page that replaces it (resumeAfterRestart). False when the key has not changed: the refusal
+ * is real. Several refused requests share one question to the server.
+ */
+let restarting = null;
+function serverRestarted() {
+  restarting ??= (async () => {
+    try {
+      const next = await (
+        await fetch('/api/bootstrap?brief=1', { cache: 'no-store', signal: AbortSignal.timeout(4000) })
+      ).json();
+      if (!next?.token || next.token === state.token || next.updating) return false;
+      if (!state.version || next.version === state.version) {
+        state.token = next.token;
+        return true;
+      }
+      keepForReload();
+      state.updateReload = true;
+      location.reload();
+      // The page goes: what asked waits for nothing more.
+      return new Promise(() => {});
+    } catch {
+      return false;
+    }
+  })().finally(() => {
+    restarting = null;
+  });
+  return restarting;
+}
+const RESUME = 'moodix.reprise';
+/**
+ * What the page replacing this one takes back: the draft (its words, its images, its videos), the
+ * conversation (its messages when the history does not have them: history off, or not saved yet),
+ * the view. Kept in this tab only; less of it when it does not fit (the images, then the messages).
+ */
+function keepForReload() {
+  const saved = state.historyItems?.some(item => item.id === state.conversationId) && !state.historyDirty;
+  const kept = {
+    conversationId: state.conversationId,
+    ...(saved
+      ? {}
+      : {
+          messages: state.messages,
+          archiveSnapshot: state.archiveSnapshot,
+          conversationInstructions: state.conversationInstructions,
+        }),
+    prompt: $('prompt').value,
+    // Without the files given (they are not written): their copy, as after « Redémarrer ».
+    images: (state.images || []).map(({ source, ...image }) => image),
+    videos: state.videos || [],
+    thinking: state.thinking,
+    title: $('conversation-title').textContent,
+    view: state.view,
+  };
+  for (const less of [kept, { ...kept, images: [] }, { ...kept, images: [], messages: [], archiveSnapshot: null }])
+    try {
+      sessionStorage.setItem(RESUME, JSON.stringify(less));
+      return;
+    } catch {
+      // Too large for the tab: less of it.
+    }
 }
 
 let historyWrite = Promise.resolve();
@@ -469,6 +550,19 @@ function renderTranscript(messages, incomplete = false) {
 async function restoreUpdate() {
   const saved = await (await api('updates/session')).json();
   if (!saved) return;
+  restoreSession(saved);
+  await api('updates/session/clear', {});
+  if (saved.restarted) {
+    $('live-status').textContent = 'Application redémarrée. Conversation restaurée.';
+    return;
+  }
+  const result = await (await api('updates/install')).json();
+  if (result.state === 'rolled-back' || result.state === 'error') notice(result.error);
+  else $('live-status').textContent = 'Mise à jour installée. Conversation restaurée.';
+}
+
+/** A conversation and its draft as a page kept them (an update, « Redémarrer », another version). */
+function restoreSession(saved) {
   state.messages = saved.messages;
   state.conversationId = saved.conversationId;
   state.conversationInstructions = saved.conversationInstructions ?? (saved.messages.length ? '' : null);
@@ -492,14 +586,36 @@ async function restoreUpdate() {
   renderHistory();
   scrollToBottom();
   contextMeter.schedule();
-  await api('updates/session/clear', {});
-  if (saved.restarted) {
-    $('live-status').textContent = 'Application redémarrée. Conversation restaurée.';
-    return;
+}
+
+/**
+ * At launch: what a page of an older version kept in this tab before reloading (keepForReload,
+ * 0.5.128): its conversation (from the history, or its messages), its draft and its view.
+ */
+async function resumeAfterRestart() {
+  let kept = null;
+  try {
+    kept = JSON.parse(sessionStorage.getItem(RESUME) || 'null');
+    sessionStorage.removeItem(RESUME);
+  } catch {
+    // Unreadable: nothing to take back.
   }
-  const result = await (await api('updates/install')).json();
-  if (result.state === 'rolled-back' || result.state === 'error') notice(result.error);
-  else $('live-status').textContent = 'Mise à jour installée. Conversation restaurée.';
+  // Taken back by the server already (an update, « Redémarrer »).
+  if (!kept || state.conversationId) return;
+  if (kept.messages?.length)
+    restoreSession({ ...kept, archiveSnapshot: kept.archiveSnapshot ?? null, images: kept.images || [] });
+  else if (kept.conversationId && state.historyItems.some(item => item.id === kept.conversationId))
+    await loadConversation(kept.conversationId);
+  $('prompt').value = kept.prompt || '';
+  state.images = kept.images || [];
+  state.videos = kept.videos || [];
+  state.thinking = kept.thinking !== false;
+  $('thinking').setAttribute('aria-pressed', String(state.thinking));
+  renderAttachments();
+  resizePrompt();
+  $('live-status').textContent = 'Application mise à jour. Brouillon et conversation repris.';
+  if (kept.view === 'studio') showStudio();
+  else if (kept.view === 'library') showLibrary();
 }
 
 async function installUpdate({ confirmed = false } = {}) {
@@ -958,6 +1074,9 @@ async function refreshStatus() {
     const previous = state.status.state;
     const runnerBefore = state.status.runner?.state;
     const wasConnected = state.connected;
+    // The server was out of reach: back, it may be another one (restarted, a new key). The key is
+    // asked for first, so that the question is not refused (0.5.128).
+    if (!wasConnected && state.token) await serverRestarted();
     state.status = await (await api('status', undefined, { signal: AbortSignal.timeout(5000) })).json();
     workflowsUI.updateRunner?.(state.status.runner);
     // The generation engine has just become ready: the Studio reads again what it offers.
@@ -3340,6 +3459,7 @@ try {
     connected: true,
   });
   tokenKnown();
+  state.version = initial.version || '';
   if (initial.version) $('settings-version').textContent = 'Atelier ' + initial.version;
   void checkUpdates();
   applyTheme(initial.preferences?.theme);
@@ -3349,6 +3469,8 @@ try {
   await assetsUI.refresh().catch(error => notice('Bibliothèque indisponible : ' + error.message));
   await workflowsUI.refresh();
   await restoreUpdate();
+  // A page of an older version, replaced while it was open: its draft and its conversation (0.5.128).
+  await resumeAfterRestart();
   // At launch, the conversation open last (0.5.123), or « Nouveau chat » when there is none.
   await reopenLastConversation();
   syncViews();
