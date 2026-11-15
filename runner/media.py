@@ -6,6 +6,14 @@ from pathlib import Path
 import uuid
 
 
+def manifest_path(config, name):
+    """Where the manifest of the creation `name` goes: the folder of the manifests when the
+    application names one (the folder of the creations then holds only them), else beside it."""
+    root = Path(config.get('manifestRoot') or config['outputRoot']).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root / (name + '.json')
+
+
 def save_image(pixels, config, job, metadata):
     from PIL import Image, PngImagePlugin
 
@@ -13,9 +21,9 @@ def save_image(pixels, config, job, metadata):
     destination.mkdir(parents=True, exist_ok=True)
     filename = uuid.uuid4().hex + '.png'
     output = destination / filename
-    manifest = output.with_suffix('.json')
+    manifest = manifest_path(config, output.stem)
     temporary = destination / (filename + '.tmp')
-    temporary_manifest = destination / (filename + '.json.tmp')
+    temporary_manifest = manifest.with_name(manifest.name + '.tmp')
     descriptor = dict(
         filename=filename,
         subfolder='',
@@ -102,6 +110,6 @@ def save_audio(samples, sample_rate, config, job, metadata):
     return publish(
         temporary,
         output,
-        output.with_suffix('.json'),
+        manifest_path(config, output.stem),
         dict(jobId=job['id'], outputs=[descriptor], metadata=metadata),
     )

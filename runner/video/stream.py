@@ -125,4 +125,6 @@ def output_paths(config, extension):
     destination = Path(config['outputRoot']).resolve()
     destination.mkdir(parents=True, exist_ok=True)
     name = uuid.uuid4().hex
-    return destination / (name + extension), destination / (name + '.tmp' + extension), destination / (name + '.json')
+    from runner.media import manifest_path
+
+    return destination / (name + extension), destination / (name + '.tmp' + extension), manifest_path(config, name)

@@ -10,12 +10,15 @@ def validate_config(config):
     # tokenizerPath is accepted from older launchers but unused: each job names its own tokenizer.
     fields(
         config,
-        ('tokenizerPath', 'cacheRoot', 'outputRoot', 'engine', 'tuned', 'cacheGiB'),
+        ('tokenizerPath', 'cacheRoot', 'outputRoot', 'manifestRoot', 'engine', 'tuned', 'cacheGiB'),
         ('cacheRoot', 'outputRoot'),
         'worker configuration',
     )
-    for key in ('cacheRoot', 'outputRoot'):
-        path(config[key], key)
+    # `manifestRoot`: where the manifest of each creation goes (its folder of creations keeps
+    # only them); without it, beside the creation, as before.
+    for key in ('cacheRoot', 'outputRoot', 'manifestRoot'):
+        if key in config:
+            path(config[key], key)
     result = {'engine': 'int8', 'tuned': True} | config
     if result['engine'] not in ('int8', 'stream'):
         raise ValueError('Unknown engine')

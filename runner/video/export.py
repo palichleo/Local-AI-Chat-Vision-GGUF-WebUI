@@ -18,8 +18,10 @@ def save_video(pixels, config, job, metadata, audio=None):
     output = destination / (name + '.mp4')
     wave_path = destination / (name + '.tmp.wav')
     muxed = destination / (name + '.mux.mp4')
-    manifest = destination / (name + '.json')
-    temporary_manifest = destination / (name + '.json.tmp')
+    from runner.media import manifest_path
+
+    manifest = manifest_path(config, name)
+    temporary_manifest = manifest.with_name(manifest.name + '.tmp')
     p = job['parameters']
     descriptor = dict(filename=output.name, subfolder='', type='output', width=p['width'], height=p['height'])
     result = dict(jobId=job['id'], outputs=[descriptor], metadata=metadata)

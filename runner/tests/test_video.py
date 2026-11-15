@@ -82,6 +82,36 @@ class VideoTests(unittest.TestCase):
             )
             self.assertEqual(len(list(Path(folder).glob('*.tmp*'))), 0)
 
+    def test_manifests_go_to_their_own_folder_when_the_application_names_one(self):
+        import numpy as np
+        from runner.contracts import validate_config
+        from runner.media import save_image
+        from runner.video.export import save_video
+
+        with tempfile.TemporaryDirectory() as folder:
+            output, manifests = Path(folder) / 'output', Path(folder) / 'manifests'
+            config = validate_config(
+                {'cacheRoot': str(Path(folder) / 'cache'), 'outputRoot': str(output), 'manifestRoot': str(manifests)}
+            )
+            value = job()
+            video = save_video(np.zeros((9, 64, 64, 3), dtype=np.uint8), config, value, dict(job=value, seed=7))
+            image = save_image(np.zeros((32, 32, 3), dtype=np.uint8), config, value, dict(job=value, seed=8))
+            # The folder of the creations holds only them; each manifest has the creation's name.
+            self.assertEqual(
+                sorted(path.name for path in output.iterdir()),
+                sorted([video['outputs'][0]['filename'], image['outputs'][0]['filename']]),
+            )
+            seeds = {
+                path.stem: json.loads(path.read_text(encoding='utf-8'))['metadata']['seed']
+                for path in manifests.iterdir()
+            }
+            self.assertEqual(
+                seeds,
+                {Path(video['outputs'][0]['filename']).stem: 7, Path(image['outputs'][0]['filename']).stem: 8},
+            )
+            with self.assertRaises(ValueError):
+                validate_config({'cacheRoot': folder, 'outputRoot': folder, 'manifestRoot': 'relative'})
+
     def test_invalid_decoded_dimensions_publish_no_original_or_manifest(self):
         import numpy as np
         from runner.video.export import save_video
