@@ -4917,7 +4917,10 @@ body[data-view='studio'] #sidebar .studio-nav .home-button {
     animation: none;
   }
 }
+/* The gear in the colour of its button, as ⏻: an older rule (styles.css) gave it its own, dimmer
+   (#9AA0AB) and deaf to the hover. */
 #sidebar .sidebar-actions .settings-button svg {
+  color: inherit;
   stroke-width: 1.75;
 }
 

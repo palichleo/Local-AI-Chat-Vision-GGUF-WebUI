@@ -118,6 +118,8 @@ test('the model: one icon ⏻ whatever its state, a dot of 7 px says it; its nam
   assert.match(css, /\.engine-button\.is-running\.is-busy::after \{\n {2}animation: mdx-engine-wait 1\.6s ease-in-out infinite;/);
   assert.match(css, /@keyframes mdx-engine-wait \{\n {2}0%,\n {2}100% \{\n {4}opacity: 1;\n {2}\}\n {2}50% \{\n {4}opacity: 0\.4;/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\n {2}#sidebar \.sidebar-actions \.engine-button\.is-running\.is-busy::after \{\n {4}animation: none;/);
+  // The gear in the colour of its button (#AEB4BF, white under the pointer), as ⏻.
+  assert.match(css, /#sidebar \.sidebar-actions \.settings-button svg \{\n {2}color: inherit;\n {2}stroke-width: 1\.75;/);
   // The foot without a box: the model at the left, Configuration at the right.
   assert.match(css, /#sidebar \.sidebar-actions,\n:root\[data-theme='light'\] #sidebar \.sidebar-actions \{\n {2}justify-content: space-between;[^}]*padding: 0;\n {2}border: 0;[^}]*background: transparent;/);
 });
