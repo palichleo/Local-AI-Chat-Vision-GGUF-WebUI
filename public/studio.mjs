@@ -1589,11 +1589,12 @@ export function setupStudio({
     }
     return element;
   }
-  /** The number of a creation among those of its kind here: the first made is #1, the newest the largest. */
+  /** The number of a creation in the Sortie: the first made is #1, the newest the largest. */
   function numberOf(record) {
-    const mine = runs.filter(item => mediaOf(item) === mediaOf(record)),
-      at = mine.findIndex(item => item.id === record.id);
-    return at < 0 ? null : mine.length - at;
+    // One count for all the creations of the Sortie, images, clips and sounds together: counted
+    // kind by kind, an image, a clip and a sound were each « #1 » side by side.
+    const at = runs.findIndex(item => item.id === record.id);
+    return at < 0 ? null : runs.length - at;
   }
 
   /** The formats under the preview: 1:1, 16:9, 9:16, and « ··· » for all of them. */

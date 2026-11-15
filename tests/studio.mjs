@@ -1210,12 +1210,13 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     const items = () => body.find('studio-item'),
       numbers = () => body.find('studio-item-number').map(badge => badge.textContent),
       references = () => body.find('studio-slot-badge').map(badge => badge.textContent);
-    // Images, clips and sounds together, the newest at the left, each numbered among its kind;
-    // nothing written under the pictures (their names are for screen readers and in their tooltips).
-    assert.deepEqual(numbers(), ['#2', '#2', '#1', '#1']);
+    // Images, clips and sounds together, the newest at the left, numbered together (never two
+    // « #1 »); nothing written under the pictures (their names are for screen readers and in their
+    // tooltips).
+    assert.deepEqual(numbers(), ['#4', '#3', '#2', '#1']);
     assert.deepEqual(body.find('studio-item-title'), []);
     assert.deepEqual(body.find('studio-caption'), []);
-    assert.equal(items()[0].find('studio-item-pick')[0].attributes['aria-label'], 'Image #2 · un phare');
+    assert.equal(items()[0].find('studio-item-pick')[0].attributes['aria-label'], 'Image #4 · un phare');
     // The wheel scrolls it sideways, the pointer anywhere over it; a sideways move is the
     // browser's, and nothing moves when all of it shows.
     const [sortie] = body.find('is-output'),
@@ -1235,13 +1236,13 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     assert.deepEqual([strip.scrollLeft, stopped], [220, 2]);
     // The same Sortie in every mode.
     mode(1);
-    assert.deepEqual(numbers(), ['#2', '#2', '#1', '#1']);
+    assert.deepEqual(numbers(), ['#4', '#3', '#2', '#1']);
     // A clip: its continuation said too; « Prolonger » is its round button; no « Lire ».
     assert.equal(
       items()[1].find('studio-item-pick')[0].attributes['aria-label'],
-      'Clip #2 · suite du clip #1 · la suite',
+      'Clip #3 · suite du clip #1 · la suite',
     );
-    assert.equal(items()[1].find('studio-item-main')[0].attributes['aria-label'], 'Prolonger · Clip #2');
+    assert.equal(items()[1].find('studio-item-main')[0].attributes['aria-label'], 'Prolonger · Clip #3');
     assert.deepEqual(body.find('studio-play'), []);
     // The screen shows the last clip; it is ringed in the Sortie.
     assert.match(items()[1].className, /is-shown/);
@@ -1267,7 +1268,7 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     assert.deepEqual(body.find('studio-item-menu'), []);
     const [ask] = body.find('studio-item-confirm');
     assert.equal(ask.attributes.role, 'alertdialog');
-    assert.equal(ask.find('studio-confirm-text')[0].textContent, 'Supprimer #2 ?');
+    assert.equal(ask.find('studio-confirm-text')[0].textContent, 'Supprimer #3 ?');
     // ✕ keeps it.
     ask.find('studio-confirm-no')[0].onclick();
     assert.deepEqual(body.find('studio-item-confirm'), []);
@@ -1280,7 +1281,7 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
 
     // « Animer »: the picture goes to the references of the first video model, once.
     mode(0);
-    assert.equal(items()[0].find('studio-item-main')[0].attributes['aria-label'], 'Animer · Image #2');
+    assert.equal(items()[0].find('studio-item-main')[0].attributes['aria-label'], 'Animer · Image #4');
     items()[0].find('studio-item-main')[0].onclick();
     assert.equal(body.dataset.mode, 'video');
     assert.deepEqual(references(), ['@1']);
