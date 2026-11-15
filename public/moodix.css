@@ -5372,26 +5372,6 @@ dialog,
   width: 12px;
   height: 12px;
 }
-.project-empty {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border: 0;
-  background: none;
-  text-align: left;
-  font-size: var(--size-1);
-  padding: 9px 8px;
-  color: var(--muted);
-  border-radius: 6px;
-}
-.project-empty svg {
-  width: 12px;
-  height: 12px;
-}
-.project-empty:hover {
-  background: var(--metal-edge);
-  color: var(--ink);
-}
 .sidebar-bottom {
   margin-top: auto;
   padding-top: 18px;
@@ -6350,6 +6330,15 @@ summary:focus-visible {
   background: var(--surface-raised);
   color: var(--ink);
   font-weight: 700;
+}
+/* The project the library shows (0.5.126): its line on the ground of a line under the pointer, its
+   name in white. The page « Bibliothèque » keeps its white line. */
+#sidebar .project-row.is-current {
+  background: var(--row-hover);
+  color: var(--row-open);
+}
+#sidebar .project-row.is-current .project-open svg {
+  color: var(--row-open);
 }
 #sidebar .sidebar-bottom {
   display: block;
@@ -7897,14 +7886,15 @@ video.studio-frame-result {
 }
 /* Générer (moodix-design.md 7 bis 22): dark, the triangle (14 px) and its word centred, exactly as
    tall as the format bar, 8 px corners; along its foot, fixed (it does not breathe), the gradient
-   of the window's filet. The keys are in its tooltip. */
+   of the window's filet. The keys are in its tooltip. 170 px wide at least (0.5.126, 190 before):
+   at 1440 px, the formats, « Agent » and « Générer » on one line under the preview. */
 #studio-view .studio-go {
   position: relative;
   overflow: hidden;
   box-sizing: border-box;
   margin-left: auto;
   flex: 0 0 auto;
-  min-width: 190px;
+  min-width: 170px;
   height: calc(var(--format-button) + 2 * var(--format-inset));
   min-height: 0;
   padding: 0 20px;
@@ -10818,9 +10808,11 @@ body[data-view='studio'] #sidebar .studio-nav .home-button {
 }
 
 /* The library (Bibliothèque, 0.5.123): a page of its own in the window, its title in the title
-   bar. Its project chosen at its top; on a project, its conversations, then its creations, which
-   their kind and their conversation narrow. Pictures of 16:9 with 6 px corners, as in the Sortie
-   of the Studio, the newest first; under each, its prompt and where it was made. */
+   bar. On a project, its conversations at the top; then, on one line, the project, the conversation
+   and the kind (at the right); then « Créations » and the tiles. A tile is the picture alone, as in
+   the timeline (0.5.126): 16:9, 6 px corners, the badge of a clip or a sound at its top right; its
+   prompt, where it was made and when come over its foot under the pointer or the keyboard's focus.
+   The newest first. */
 .library-view,
 .library-heading {
   display: none;
@@ -10840,10 +10832,12 @@ body[data-view='library'] .library-view {
   color: var(--text-2);
   font-size: var(--size-3);
 }
-.library-top {
+/* The three filters on one line: the project and the conversation, the kind at the right. */
+.library-filters {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 10px 12px;
 }
 /* A filter: its icon and its list in one frame, the ring of the focus around the frame. */
 .library-select {
@@ -11018,13 +11012,12 @@ body[data-view='library'] .library-view {
 .library-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 22px 16px;
+  gap: 16px;
 }
 .library-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  position: relative;
   min-width: 0;
+  border-radius: 6px;
 }
 .library-pick {
   position: relative;
@@ -11045,8 +11038,8 @@ body[data-view='library'] .library-view {
   object-fit: cover;
   transition: transform 0.3s ease;
 }
-.library-pick:hover > img,
-.library-pick:hover > video {
+.library-tile:hover .library-pick > img,
+.library-tile:hover .library-pick > video {
   transform: scale(1.02);
 }
 /* A sound: grey stripes, as in the Sortie of the Studio. */
@@ -11072,43 +11065,76 @@ body[data-view='library'] .library-view {
   width: 13px;
   height: 13px;
 }
-.library-words {
+/* Over the foot of the picture, shown under the pointer or the keyboard's focus: dark below, clear
+   above. Its words in the two lightest greys of the dark theme whatever the theme (they lie on the
+   dark veil); only its button catches the pointer, the rest of the picture still shows it whole. */
+.library-veil {
+  position: absolute;
+  inset: auto 0 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 3px;
-  min-width: 0;
+  padding: 30px 10px 8px;
+  border-radius: 0 0 6px 6px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.55) 55%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.library-tile:hover .library-veil,
+.library-tile:focus-within .library-veil {
+  opacity: 1;
 }
 .library-prompt {
   display: -webkit-box;
   margin: 0;
   overflow: hidden;
-  color: var(--text-1);
+  color: #eceef2;
   font-size: var(--size-2);
-  line-height: 1.4;
+  line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
 }
+.library-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  color: #aeb4bf;
+  font-size: var(--size-1);
+  white-space: nowrap;
+}
 .library-from {
+  min-width: 0;
   max-width: 100%;
   padding: 0;
   overflow: hidden;
   border: 0;
   background: none;
-  color: var(--text-3);
-  font-size: var(--size-1);
+  color: inherit;
+  font: inherit;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.library-dot,
+.library-date {
+  flex: none;
+}
+.library-tile:hover button.library-from,
+.library-tile:focus-within button.library-from {
+  pointer-events: auto;
+}
 button.library-from:hover {
-  color: var(--text-1);
+  color: #eceef2;
   text-decoration: underline;
 }
 @media (prefers-reduced-motion: reduce) {
   .library-pick > img,
-  .library-pick > video {
+  .library-pick > video,
+  .library-veil {
     transition: none;
   }
 }
@@ -11122,7 +11148,7 @@ button.library-from:hover {
   }
   .library-grid {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 18px 12px;
+    gap: 12px;
   }
 }
 body[data-view='library'] .library-heading {

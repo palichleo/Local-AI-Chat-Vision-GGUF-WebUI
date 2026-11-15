@@ -148,7 +148,11 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     }
     box.hidden = false;
   }
-  /** A tile: the picture (a click shows it whole), the prompt, where it was made (a click opens it). */
+  /**
+   * A tile, as in the timeline: the picture alone (a click shows it whole), with the badge of a clip
+   * or a sound. Over its foot, under the pointer or the keyboard's focus: its prompt, then where it
+   * was made (a click opens it) and when.
+   */
   function build(record) {
     const media = mediaOf(record),
       output = record.outputs?.[0] ?? {},
@@ -158,8 +162,9 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     card.dataset.media = media;
     const pick = node('button', 'library-pick');
     pick.type = 'button';
-    pick.setAttribute('aria-label', [NAMES[media] ?? 'Création', record.prompt || ''].filter(Boolean).join(' · '));
     pick.onclick = () => viewOutput(kept.record, 0);
+    kept.pick = pick;
+    kept.media = media;
     if (media === 'audio') {
       const wave = node('span', 'library-wave');
       wave.setAttribute('aria-hidden', 'true');
@@ -184,19 +189,30 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
       badge.append(icon(media === 'video' ? 'video' : 'wave'));
       pick.append(badge);
     }
-    const words = node('div', 'library-words');
-    words.append(node('p', 'library-prompt', record.prompt || NAMES[media] || 'Création'));
+    // Said whole by the label of the picture: what the veil shows is for the eyes only, but its
+    // button that opens the conversation.
+    const veil = node('div', 'library-veil'),
+      said = node('p', 'library-prompt', record.prompt || NAMES[media] || 'Création'),
+      meta = node('p', 'library-meta');
+    said.setAttribute('aria-hidden', 'true');
     if (record.legacy || record.unsaved) {
       // The Studio of before had no conversation, one never saved cannot be opened.
-      words.append(node('span', 'library-from', record.legacy ? 'Ancien Studio' : 'Conversation non enregistrée'));
+      meta.append(node('span', 'library-from', record.legacy ? 'Sans conversation' : 'Conversation non enregistrée'));
     } else {
       const from = node('button', 'library-from');
       from.type = 'button';
       from.onclick = () => openConversation(kept.record.conversationId);
-      words.append(from);
+      meta.append(from);
       kept.from = from;
     }
-    card.append(pick, words);
+    const dot = node('span', 'library-dot', '·'),
+      when = node('time', 'library-date', date(record.createdAt));
+    dot.setAttribute('aria-hidden', 'true');
+    when.setAttribute('aria-hidden', 'true');
+    if (record.createdAt) when.dateTime = record.createdAt;
+    meta.append(dot, when);
+    veil.append(said, meta);
+    card.append(pick, veil);
     return kept;
   }
   function tile(record) {
@@ -204,11 +220,21 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     let kept = cards.get(key);
     if (!kept) cards.set(key, (kept = build(record)));
     kept.record = record;
+    // Its project said only when every project is shown.
+    const where = record.legacy
+      ? 'Sans conversation'
+      : record.unsaved
+        ? 'Conversation non enregistrée'
+        : (filter.project === 'all' ? projectName(record.projectId) + ' · ' : '') + titleOf(record.conversationId);
     if (kept.from) {
-      // Its project said only when every project is shown.
-      kept.from.textContent = (filter.project === 'all' ? projectName(record.projectId) + ' · ' : '') + titleOf(record.conversationId);
+      kept.from.textContent = where;
       kept.from.setAttribute('aria-label', 'Ouvrir la conversation : ' + titleOf(record.conversationId));
     }
+    // For a screen reader, everything at once: its kind, its prompt, where it was made and when.
+    kept.pick.setAttribute(
+      'aria-label',
+      [NAMES[kept.media] ?? 'Création', record.prompt || '', where, date(record.createdAt)].filter(Boolean).join(' · '),
+    );
     return kept.card;
   }
   function paintGrid() {

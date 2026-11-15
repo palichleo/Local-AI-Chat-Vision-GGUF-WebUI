@@ -140,6 +140,9 @@ test('a click on a project opens the library on it, lit in the sidebar while it 
   const [inbox, project] = $('history-list').children;
   assert.match(project.className, /is-active/);
   assert.doesNotMatch(inbox.className, /is-active/);
+  // Its line on the ground of a line under the pointer (0.5.126).
+  assert.match(project.children[0].className, /\bis-current\b/);
+  assert.doesNotMatch(inbox.children[0].className, /is-current/);
   assert.equal(project.children[0].children[1].attributes['aria-current'], 'page');
   assert.equal(inbox.children[0].children[1].attributes['aria-current'], undefined);
   assert.equal(
@@ -149,7 +152,7 @@ test('a click on a project opens the library on it, lit in the sidebar while it 
   );
   assert.equal(globalThis.document.body.dataset.view, 'library');
 });
-test('project collapse, rename and project-specific new conversation keep the hierarchy intact', async t => {
+test('project collapse, rename, and a new project: its « 0 » alone, opened in the library', async t => {
   const { $, calls, state } = fixture(t);
   const group = $('history-list').children[1];
   group.children[0].children[0].onclick();
@@ -158,11 +161,18 @@ test('project collapse, rename and project-specific new conversation keep the hi
   $('project-name').value = 'A new idea';
   await $('project-form').onsubmit({ preventDefault() {} });
   assert.ok(state.projects.some(project => project.name === 'A new idea'));
-  const added = walk($('history-list')).find(
-    element => element.attributes['aria-label'] === 'Nouveau chat dans A new idea',
+  // Empty, it shows its « 0 » alone: « Nouveau chat » at the top is enough (0.5.126).
+  assert.equal(
+    walk($('history-list')).find(element => element.attributes['aria-label'] === 'Nouveau chat dans A new idea'),
+    undefined,
   );
-  added.onclick();
-  assert.ok(calls.some(call => call[0] === 'new' && call[1] === 'created'));
+  const created = $('history-list').children.find(group => walk(group).some(element => element.textContent === 'A new idea'));
+  assert.equal(created.children[1].children.length, 0);
+  assert.equal(walk(created).find(element => element.className === 'project-count').textContent, '0');
+  walk(created)
+    .find(element => element.className === 'project-open')
+    .onclick();
+  assert.deepEqual(calls.at(-1), ['library', { project: 'created' }]);
 });
 test('moving an unsaved conversation changes its organization without saving chat content', async t => {
   const { $, calls, state } = fixture(t, { conversationId: null, historyItems: [] });

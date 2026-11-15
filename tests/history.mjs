@@ -48,13 +48,14 @@ test('history stays ordered by creation after an old conversation is saved again
   );
 });
 
-test('a conversation begun in the Studio is titled by its line, never with the words added for the model', async t => {
+test('a conversation begun in the Studio is named by its prompt alone; old titles too, unless written otherwise', async t => {
   const root = await mkdtemp(join(tmpdir(), 'atelier-history-studio-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, 'history'),
     history = new History(directory),
     id = randomUUID(),
-    line = 'Studio · Image : un renard dans la neige';
+    line = 'Studio · Image : un renard dans la neige',
+    prompt = 'un renard dans la neige';
   const saved = await history.save({
     id,
     messages: [
@@ -62,15 +63,37 @@ test('a conversation begun in the Studio is titled by its line, never with the w
       { role: 'assistant', content: 'Voici le renard.' },
     ],
   });
-  assert.equal(saved.title, line);
-  // Saved so before 0.5.125: the title on the disk has the note, cut at 120 characters.
+  // The pill of the title bar says the mode: the name is the prompt alone (0.5.126).
+  assert.equal(saved.title, prompt);
+  // Titles an earlier version made of that first message: with the note cut at 120 characters
+  // (before 0.5.125), with the line (0.5.125). A title written otherwise is left as it is.
   const path = join(directory, id, 'conversation.json'),
     stored = JSON.parse(await readFile(path, 'utf8'));
-  await writeFile(path, JSON.stringify({ ...stored, title: (line + '\n\n' + STUDIO_NOTE).slice(0, 120) }));
-  const [listed] = (await history.list()).conversations;
-  assert.equal(listed.title, line);
-  assert.equal(listed.firstPrompt, line);
-  assert.equal((await history.read(id)).title, line);
+  for (const [title, shown] of [
+    [(line + '\n\n' + STUDIO_NOTE).slice(0, 120), prompt],
+    [line, prompt],
+    ['Studio · Image : mon renard préféré', 'Studio · Image : mon renard préféré'],
+  ]) {
+    await writeFile(path, JSON.stringify({ ...stored, title }));
+    const [listed] = (await history.list()).conversations;
+    assert.equal(listed.title, shown);
+    assert.equal((await history.read(id)).title, shown);
+  }
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).title, 'Studio · Image : mon renard préféré', 'nothing rewritten');
+  // A creation without a prompt leaves the name to the next message; alone, « Nouveau chat ».
+  const empty = 'Studio · Son : \n\n' + STUDIO_NOTE;
+  const named = await history.save({
+    id: randomUUID(),
+    messages: [
+      { role: 'user', internal: true, content: empty },
+      { role: 'assistant', content: '' },
+      { role: 'user', content: 'Un chat qui miaule' },
+    ],
+  });
+  assert.equal(named.title, 'Un chat qui miaule');
+  assert.equal((await history.save({ id: randomUUID(), messages: [{ role: 'user', internal: true, content: empty }] })).title, 'Nouveau chat');
+  // A conversation begun in the chat keeps its first words.
+  assert.equal((await history.save({ id: randomUUID(), messages: [{ role: 'user', content: 'Bonjour' }] })).title, 'Bonjour');
 });
 
 test('historique optionnel : l’original joint est conservé, les copies du modèle jamais', async () => {

@@ -30,16 +30,16 @@ test('the sidebar: « Nouveau chat » a line as the pages, then Chat, Studio, Bi
   assert.match(html, /<symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3\.5v7\.5"\/><path d="M6\.6 6\.8a7\.6 7\.6 0 1 0 10\.8 0"\/><\/symbol>/);
 });
 
-test('the library: a page of its own in the window, its title in the title bar, its filters above what they narrow', async () => {
+test('the library: a page of its own in the window, its title in the title bar, its filters on one line', async () => {
   const html = await read('index.html'),
     app = await read('app.js'),
     navigation = await read('project-navigation.mjs'),
     css = await read('moodix.css');
   const page = html.match(/<section id="library-view"[^]*?<\/section><\/section>/)?.[0] ?? '';
   assert.match(page, /^<section id="library-view" class="library-view" aria-labelledby="library-title"><h1 id="library-title" class="sr-only">Bibliothèque<\/h1>/);
-  // Its project at its top; then the conversations of a project; then the creations, their kind and
-  // their conversation above them.
-  const order = ['id="library-project"', 'id="library-project-view"', 'id="library-creations-title"', 'id="library-kinds"', 'id="library-conversation"', 'id="library-grid"', 'id="library-empty"'].map(
+  // The conversations of a project at the top; then on one line the project, the conversation and
+  // the kind; then « Créations » and the tiles (0.5.126).
+  const order = ['id="library-project-view"', 'id="library-project"', 'id="library-conversation"', 'id="library-kinds"', 'id="library-creations-title"', 'id="library-grid"', 'id="library-empty"'].map(
     mark => page.indexOf(mark),
   );
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'in this order');
@@ -62,6 +62,14 @@ test('the library: a page of its own in the window, its title in the title bar, 
   assert.match(css, /body\[data-view='library'\] \.library-view \{[^}]*overflow-y: auto;/);
   assert.match(css, /\.library-grid \{\n {2}display: grid;\n {2}grid-template-columns: repeat\(auto-fill, minmax\(220px, 1fr\)\);/);
   assert.match(css, /\.library-pick \{[^}]*aspect-ratio: 16 \/ 9;[^}]*border-radius: 6px;/);
+  assert.match(page, /<div class="library-filters"><label class="library-select">/);
+  assert.match(css, /\.library-filters \{\n {2}display: flex;/);
+  // The words of a tile over its foot, under the pointer or the keyboard's focus only.
+  assert.match(css, /\.library-veil \{[^}]*opacity: 0;[^}]*pointer-events: none;/);
+  assert.match(css, /\.library-tile:hover \.library-veil,\n\.library-tile:focus-within \.library-veil \{\n {2}opacity: 1;/);
+  assert.match(css, /\.library-prompt \{[^}]*color: #eceef2;[^}]*font-size: var\(--size-2\);[^}]*-webkit-line-clamp: 2;/);
+  assert.match(css, /\.library-meta \{[^}]*color: #aeb4bf;[^}]*font-size: var\(--size-1\);/);
+  assert.doesNotMatch(css, /library-words|library-top|project-empty/);
   assert.match(css, /\.library-kind\[aria-checked='true'\],\n\.library-kind\[aria-checked='true'\]:hover:enabled \{\n {2}background: var\(--selected\);/);
   // Nothing left of the home page in the sheet.
   assert.doesNotMatch(css, /home-view|\.home-header|project-card|project-cover|project-grid|#home-open|data-view='home'/);

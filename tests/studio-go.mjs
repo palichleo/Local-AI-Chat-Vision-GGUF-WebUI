@@ -13,7 +13,7 @@ function rule(selector) {
 test('Générer: dark, its triangle and word centred, 46 px, 8 px corners (moodix-design.md 7 bis 22)', () => {
   const go = rule('#studio-view .studio-go');
   for (const declaration of [
-    'min-width: 190px;',
+    'min-width: 170px;',
     'height: calc(var(--format-button) + 2 * var(--format-inset));',
     'padding: 0 20px;',
     'border: 1px solid #2e323c;',

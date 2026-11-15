@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-import { STUDIO_NOTE, callNote, lastExchange, spokenText, withoutStudioNote } from '../public/transcript.mjs';
+import { STUDIO_NOTE, callNote, conversationTitle, lastExchange, spokenText, withoutStudioNote } from '../public/transcript.mjs';
 import * as chatVideos from '../public/chat-videos.mjs';
 
 const call = (name, id = 'c1') => ({ id, type: 'function', function: { name, arguments: '{}' } });
@@ -199,4 +199,13 @@ test('a title begun in the Studio is its line, without the words added for the m
   assert.equal(withoutStudioNote('Bonjour\n\n' + STUDIO_NOTE), 'Bonjour\n\n' + STUDIO_NOTE);
   assert.equal(withoutStudioNote(line + '\n\n(une précision)'), line + '\n\n(une précision)');
   assert.equal(withoutStudioNote(undefined), '');
+});
+
+test('a conversation is named by its words; a creation of the Studio by its prompt alone', () => {
+  assert.equal(conversationTitle('Studio · Vidéo : un renard\n\n' + STUDIO_NOTE), 'un renard');
+  assert.equal(conversationTitle('Studio · Image : caca'), 'caca');
+  assert.equal(conversationTitle('Studio · Son : \n\n' + STUDIO_NOTE), '', 'no prompt: no name');
+  assert.equal(conversationTitle('Studio · Image : un lac\n\n' + STUDIO_NOTE.slice(0, 12)), 'un lac');
+  assert.equal(conversationTitle('Bonjour, Studio · Image : rien'), 'Bonjour, Studio · Image : rien');
+  assert.equal(conversationTitle(undefined), '');
 });

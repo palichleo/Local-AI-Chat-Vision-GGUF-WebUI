@@ -288,7 +288,7 @@ export function setupProjectNavigation({
             'section',
             'project-group' + ((state.view === 'chat' && state.projectId === group.id) || shown ? ' is-active' : ''),
           ),
-          header = node('div', 'project-row'),
+          header = node('div', 'project-row' + (shown ? ' is-current' : '')),
           children = node('div', 'project-conversations');
         const expanded = !collapsed.has(group.id),
           toggle = button(
@@ -323,16 +323,7 @@ export function setupProjectNavigation({
           children.append(row);
           if (revealDraft && item.temporary && group.id === state.projectId) draftRow = row;
         }
-        if (!group.conversations.length) {
-          const create = button(
-            'Nouveau chat dans ' + group.name,
-            'project-empty',
-            () => newConversation(group.id),
-            'plus',
-          );
-          create.append(node('span', '', 'Nouveau chat'));
-          children.append(create);
-        }
+        // An empty project shows its « 0 » alone: « Nouveau chat » at the top is enough (0.5.126).
         section.append(header, children);
         list.append(section);
       }

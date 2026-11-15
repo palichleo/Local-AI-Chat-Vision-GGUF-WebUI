@@ -66,6 +66,18 @@ export function withoutStudioNote(text) {
   const at = value.lastIndexOf('\n\n(');
   return (at >= 0 && STUDIO_NOTE.startsWith(value.slice(at + 2)) ? value.slice(0, at) : value).trimEnd();
 }
+/**
+ * What names a conversation from a message: its words; for a creation of the Studio, its prompt
+ * alone (0.5.126), without « Studio · Image : » (the pill of the title bar says the mode) and
+ * without the words added for the model. Empty when the Studio was given no prompt.
+ */
+export function conversationTitle(text) {
+  const value = String(text ?? '');
+  if (!STUDIO_LINE.test(value)) return value;
+  const prompt = value.replace(STUDIO_LINE, ''),
+    at = prompt.lastIndexOf('\n\n(');
+  return (at >= 0 && STUDIO_NOTE.startsWith(prompt.slice(at + 2)) ? prompt.slice(0, at) : prompt).trim();
+}
 const written = message =>
   typeof message.content === 'string'
     ? message.content

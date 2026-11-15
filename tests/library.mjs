@@ -38,7 +38,14 @@ const HISTORY = [
 const output = (conversation, id, extra = {}) => ({ originalUrl: `/media/generated/${conversation}/${id}/0?key=k`, ...extra });
 // As the server sends them: the newest first, each with its project.
 const RUNS = [
-  { id: 'r1', conversationId: 'c1', projectId: 'p1', prompt: 'Une plage', outputs: [output('c1', 'r1', { thumbUrl: '/media/thumbnail/r1' })] },
+  {
+    id: 'r1',
+    conversationId: 'c1',
+    projectId: 'p1',
+    prompt: 'Une plage',
+    createdAt: '2026-11-14T10:00:00.000Z',
+    outputs: [output('c1', 'r1', { thumbUrl: '/media/thumbnail/r1' })],
+  },
   { id: 'r2', conversationId: 'c2', projectId: 'inbox', mediaType: 'video', prompt: 'Un clip', outputs: [output('c2', 'r2')] },
   { id: 'r3', conversationId: 'open', projectId: 'p1', mediaType: 'audio', prompt: 'Des vagues', outputs: [output('open', 'r3')] },
   { id: 'r4', conversationId: STUDIO_ID, projectId: 'inbox', legacy: true, prompt: '', outputs: [output(STUDIO_ID, 'r4')] },
@@ -119,11 +126,28 @@ test('every project: each creation with its project and its conversation; a clic
     ['Toutes les conversations', 'Plage · Voyage', 'Idées · Conversations'],
   );
   const [image, clip, sound, before] = grid.children;
-  assert.equal(find(image, 'library-from').textContent, 'Voyage · Plage');
+  // The picture alone, as in the timeline (0.5.126); over its foot, under the pointer or the focus:
+  // its prompt (for the eyes: the label of the picture says it all), where it was made and when.
+  assert.deepEqual(
+    image.children.map(item => item.className),
+    ['library-pick', 'library-veil'],
+  );
+  const veil = find(image, 'library-veil');
+  assert.equal(find(veil, 'library-prompt').textContent, 'Une plage');
+  assert.equal(find(veil, 'library-prompt').attributes['aria-hidden'], 'true');
+  assert.deepEqual(
+    find(veil, 'library-meta').children.map(item => [item.className, item.textContent]),
+    [
+      ['library-from', 'Voyage · Plage'],
+      ['library-dot', '·'],
+      ['library-date', '14 nov.'],
+    ],
+  );
+  assert.equal(find(image, 'library-pick').attributes['aria-label'], 'Image · Une plage · Voyage · Plage · 14 nov.');
   assert.equal(find(sound, 'library-from').textContent, 'Voyage · Nouveau chat', 'the open one, not saved yet');
-  // The Studio of before had no conversation: its line opens nothing.
+  // The Studio of before had no conversation: « Sans conversation », and nothing to open.
   assert.equal(find(before, 'library-from').tag, 'span');
-  assert.equal(find(before, 'library-from').textContent, 'Ancien Studio');
+  assert.equal(find(before, 'library-from').textContent, 'Sans conversation');
   // The picture: its thumbnail; the first frame of a clip; the stripes of a sound, and their badge.
   assert.equal(walk(image).find(item => item.tag === 'img').src, '/media/thumbnail/r1');
   assert.equal(walk(clip).find(item => item.tag === 'video').src, '/media/generated/c2/r2/0?key=k#t=0.1');
@@ -131,7 +155,7 @@ test('every project: each creation with its project and its conversation; a clic
   assert.equal(find(image, 'library-badge'), undefined);
   assert.equal(find(find(clip, 'library-badge'), 'icon-video').tag, 'svg');
   assert.equal(find(find(sound, 'library-badge'), 'icon-wave').tag, 'svg');
-  assert.equal(find(clip, 'library-pick').attributes['aria-label'], 'Clip · Un clip');
+  assert.equal(find(clip, 'library-pick').attributes['aria-label'], 'Clip · Un clip · Conversations · Idées');
   find(image, 'library-pick').onclick();
   assert.deepEqual(f.viewed, [['r1', 0]]);
   find(clip, 'library-from').onclick();

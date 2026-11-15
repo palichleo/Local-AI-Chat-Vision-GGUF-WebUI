@@ -15,7 +15,7 @@ import { setupHelpTips } from './help-tips.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
-import { STUDIO_NOTE, callNote, lastExchange, spokenText } from './transcript.mjs';
+import { STUDIO_NOTE, callNote, conversationTitle, lastExchange, spokenText } from './transcript.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
 import { setupContextMeter } from './context-meter.mjs';
 import { installFromButton, compactSession } from './update-ui.mjs';
@@ -2629,7 +2629,9 @@ async function runInStudio(proposal, { signal, onProgress }) {
     { role: 'tool', tool_call_id: proposal.call.id, content: result.content },
   ]);
   state.archiveSnapshot = { messages: [...state.messages], incomplete: false };
-  if (untitled($('conversation-title').textContent)) setConversationTitle(said.slice(0, 120));
+  // Named by its prompt alone, as the server names it (the pill of the title bar says the mode).
+  const named = conversationTitle(said).slice(0, 120);
+  if (named && untitled($('conversation-title').textContent)) setConversationTitle(named);
   turnActions();
   await persistConversation();
   contextMeter.schedule();
