@@ -30,7 +30,11 @@ export function removedNotice(items) {
     : `Références peu utilisées effacées pour faire de la place : ${named}.`;
 }
 
-export function setupReferencePicker({ input, host, node, references, onPick }) {
+/**
+ * `host` holds the list (the page itself: the region of the message box scrolls, and cut it);
+ * it is laid above `anchor` (the message box), in the window's coordinates.
+ */
+export function setupReferencePicker({ input, host, anchor = host, node, references, onPick, view = globalThis }) {
   const list = node('div', 'ref-picker');
   list.id = 'ref-picker';
   list.hidden = true;
@@ -88,15 +92,29 @@ export function setupReferencePicker({ input, host, node, references, onPick }) 
     input.setAttribute('aria-activedescendant', 'ref-option-' + shown[active].reference);
     list.children?.[active]?.scrollIntoView?.({ block: 'nearest' });
   }
+  /** Above the message box, from its left, 8 px over it. */
+  function place() {
+    const box = anchor.getBoundingClientRect?.();
+    if (!box) return;
+    Object.assign(list.style, {
+      left: box.left + 12 + 'px',
+      top: box.top - 8 + 'px',
+      width: Math.max(220, Math.min(360, (box.width || 384) - 24)) + 'px',
+    });
+  }
   function update() {
     typed = referenceAt(input.value, input.selectionStart ?? input.value.length);
     shown = narrowed(typed ? references() : [], typed);
     if (!shown.length) return close();
     active = Math.min(active, shown.length - 1);
     paint();
+    place();
     list.hidden = false;
     input.setAttribute('aria-expanded', 'true');
   }
+  // The box moved (the window resized, a scroll, the box grown with the text): the list follows.
+  view.addEventListener?.('resize', () => isOpen() && place());
+  view.addEventListener?.('scroll', () => isOpen() && place(), true);
   input.addEventListener('input', () => {
     active = 0;
     update();

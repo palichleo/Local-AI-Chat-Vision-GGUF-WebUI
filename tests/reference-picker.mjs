@@ -123,6 +123,8 @@ test('the list of the project above the box: ↑ ↓ choose, Entrée writes, nev
   assert.deepEqual(list.children.map(option => option.textContent), ['#ref1pluie.png', '#ref2Vidéo · joueur.mp4', '#ref12neige.png']);
   assert.equal(list.children[0].children[0].children[0].src, '/p/1');
   assert.equal(input.attributes['aria-activedescendant'], 'ref-option-1');
+  // On the page, above the box (it is laid in the window's coordinates).
+  assert.deepEqual(list.style, { left: '312px', top: '392px', width: '360px' });
   input.dispatch('keydown', { key: 'ArrowDown' });
   input.dispatch('keydown', { key: 'ArrowDown' });
   assert.equal(input.attributes['aria-activedescendant'], 'ref-option-12');

@@ -3304,7 +3304,8 @@ followWindow(document.querySelector('.mdx-filet'), document.querySelector('.work
 const projectReferences = () => assetsUI.references(state.projectId || 'inbox');
 setupReferencePicker({
   input: $('prompt'),
-  host: $('chat-form'),
+  host: document.body,
+  anchor: $('chat-form'),
   node,
   references: projectReferences,
   onPick: (item, typed) => {
