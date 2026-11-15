@@ -1450,7 +1450,7 @@ test('the input images: pictos and no word, start and end on a line of time, ref
   }
 });
 
-test('the screen: its format and length at the top left, « Détails » at the top right with what is made', async () => {
+test('the screen: its format and length at the top left, no « i » (a click in the Sortie shows the details)', async () => {
   const video = {
       id: 'v',
       name: 'Clip',
@@ -1503,55 +1503,17 @@ test('the screen: its format and length at the top left, « Détails » at the t
     { runs: [clip] },
   );
   try {
-    const readout = () => body.find('studio-readout')[0].textContent,
-      go = () => body.find('studio-details-go')[0],
-      rows = () =>
-        body
-          .find('studio-details')[0]
-          .children.filter(cell => cell.className !== 'studio-details-open')
-          .map(cell => cell.textContent);
+    const readout = () => body.find('studio-readout')[0].textContent;
     // An image: its format; a sound: its length; a clip: both (« BROUILLON » is in Détails now).
     assert.equal(readout(), '1:1');
     mode(2);
     assert.equal(readout(), '10.00 S');
     mode(1);
     assert.equal(readout(), '16:9 - 05.04 S');
-
-    // « Détails »: an « i » named for screen readers, closed at first.
-    assert.equal(go().attributes['aria-label'], 'Détails de la génération');
-    assert.equal(go().attributes['aria-expanded'], 'false');
-    assert.deepEqual(body.find('studio-details'), []);
-    // Open, with the clip on the screen: what that clip is made of, its number first.
+    // No « i » on the screen, nothing it opened.
     studio.show(clip);
-    go().onclick();
-    assert.equal(go().attributes['aria-expanded'], 'true');
-    assert.deepEqual(rows(), [
-      'Clip',
-      '#1',
-      'Modèle',
-      'Clip',
-      'Format',
-      '16:9',
-      'Durée',
-      '05.17 s',
-      'Taille',
-      '512 × 288',
-      'LoRA',
-      'Grain, light',
-      'Étape',
-      'Brouillon',
-    ]);
-    // Nothing on the screen: what will be made.
-    mode(0);
-    assert.deepEqual(rows(), ['Modèle', 'Image', 'Format', '1:1', 'Taille', '1024 × 1024', 'LoRA', '—']);
-    mode(2);
-    assert.deepEqual(rows(), ['Modèle', 'Bruitages', 'Durée', '10.00 s']);
-    // Échap closes it.
-    let stopped = 0;
-    body.find('studio-details')[0].onkeydown({ key: 'Escape', preventDefault: () => stopped++, stopPropagation() {} });
-    assert.equal(stopped, 1);
+    assert.deepEqual(body.find('studio-details-go'), []);
     assert.deepEqual(body.find('studio-details'), []);
-    assert.equal(go().attributes['aria-expanded'], 'false');
   } finally {
     restore();
   }

@@ -228,7 +228,6 @@ export function setupStudio({
     failure = '',
     advanced = false, // « Plus de réglages » is open
     formatsOpen = false, // « ··· » is open
-    detailsOpen = false, // « Détails » of the screen is open
     drawn = null, // the size the frame was last drawn at, to ease from
     watching = null, // follows the size of the stage
     live = null, // { frame, preview } : the picture so far, in the frame now on the page
@@ -1450,7 +1449,7 @@ export function setupStudio({
   /**
    * What will be made, at the top left of the screen (moodix-design.md 25, 7 bis 13): its format
    * and its length, « 16:9 - 05.17 S »; an image, its format; a sound, its length. Whether it is
-   * a draft or a final is said in Détails.
+   * a draft or a final is said in the details of the creation (a click in the Sortie).
    */
   function readoutText(workflow = current()) {
     if (!workflow) return '';
@@ -1526,11 +1525,11 @@ export function setupStudio({
     const shown = node('span', 'studio-readout', readoutText());
     shown.setAttribute('aria-hidden', 'true');
     frame.append(shown);
-    // Over the frame, at its size, never clipped by it: « Détails » and what it opens.
+    // Over the frame, at its size, never clipped by it. No « i » on the screen: a click on a
+    // creation of the Sortie shows it whole with its details.
     const over = node('div', 'studio-frame-over');
-    over.append(...details(last));
     // While a creation is made: the step under way at the foot of the screen, « Arrêter » beside
-    // it, as the label and « Détails » are at its top; the bar under the screen keeps its line.
+    // it, as the label is at its top; the bar under the screen keeps its line.
     if (working) {
       const step = node('p', 'studio-progress', working.label ?? '');
       step.id = 'studio-progress';
@@ -1590,112 +1589,11 @@ export function setupStudio({
     }
     return element;
   }
-  // ------------------------------------------------------------------ Détails
-  const STAGES = { draft: 'Brouillon', final: 'Finale' };
   /** The number of a creation among those of its kind here: the first made is #1, the newest the largest. */
   function numberOf(record) {
     const mine = runs.filter(item => mediaOf(item) === mediaOf(record)),
       at = mine.findIndex(item => item.id === record.id);
     return at < 0 ? null : mine.length - at;
-  }
-  /** The LoRAs a creation was made with: those of its workflow, then those added in the Studio. */
-  function madeWith(record) {
-    const p = record.parameters ?? {},
-      workflow = Object.values(info?.tools ?? {})
-        .flat()
-        .find(item => item.id === record.workflowId),
-      own = (p.loras ?? []).map(lora => workflow?.loras?.find(item => item.id === lora.id)?.name ?? lora.id),
-      added = (p.styles ?? []).map(style => leaf(style.name));
-    return [...own, ...added].join(', ');
-  }
-  /** What the creation on the screen is made of: its number, model, format, length, size, LoRAs, stage. */
-  function recordDetails(record) {
-    const p = record.parameters ?? {},
-      media = mediaOf(record),
-      number = numberOf(record),
-      pictured = media !== 'audio' && p.width > 0 && p.height > 0,
-      made = media === 'audio' ? Number(p.seconds) : p.frames > 0 && p.fps > 0 ? p.frames / p.fps : 0,
-      rows = [];
-    if (number) rows.push([{ video: 'Clip', image: 'Image', audio: 'Son' }[media] ?? 'Création', '#' + number]);
-    rows.push(['Modèle', record.workflowName || '—']);
-    if (pictured) rows.push(['Format', formatOf(p.width, p.height)?.id ?? '—']);
-    if (made > 0) rows.push(['Durée', seconds(made)]);
-    if (pictured) rows.push(['Taille', p.width + ' × ' + p.height]);
-    if (media !== 'audio') rows.push(['LoRA', madeWith(record) || '—']);
-    if (STAGES[p.stage]) rows.push(['Étape', STAGES[p.stage]]);
-    return rows;
-  }
-  /** What will be made, or is being made: the model, format, length, size, LoRAs and stage. */
-  function draftDetails(workflow = current()) {
-    if (!workflow) return [];
-    const draft = drafts[mode],
-      shape = shapeOf(),
-      length = lengthOf(workflow),
-      sound = mode === 'audio' ? soundSeconds(workflow) : null,
-      stage = extending ? null : stageOf(workflow),
-      rows = [];
-    if (extending) {
-      const from = numberOf(extending);
-      rows.push(['Clip', from ? 'suite de #' + from : 'suite']);
-    }
-    rows.push(['Modèle', workflow.name]);
-    if (mode !== 'audio' && shape.label) rows.push(['Format', shape.label]);
-    if (length) rows.push(['Durée', seconds(length.value)]);
-    else if (sound) rows.push(['Durée', seconds(sound)]);
-    if (mode !== 'audio' && draft.size && !extending && workflow.limits)
-      rows.push(['Taille', draft.size.replace('x', ' × ')]);
-    if (mode !== 'audio') {
-      const own = (workflow.loras ?? []).filter(lora => loraChoice(workflow, lora).on).map(lora => lora.name),
-        added =
-          workflow.styled && !extending ? draft.styles.filter(style => style.name).map(style => leaf(style.name)) : [];
-      rows.push(['LoRA', [...own, ...added].join(', ') || '—']);
-    }
-    if (STAGES[stage]) rows.push(['Étape', STAGES[stage]]);
-    return rows;
-  }
-  /**
-   * « Détails » (moodix-design.md 25, 7 bis 6): a small « i » at the top right of the screen,
-   * which opens below it what the creation shown is made of (what will be made, while none is),
-   * the stage, draft or final, with it. Échap closes it.
-   */
-  function details(last) {
-    const go = button(
-      'studio-details-go' + (detailsOpen ? ' is-open' : ''),
-      '',
-      () => toggleDetails(!detailsOpen),
-      'info',
-    );
-    go.setAttribute('aria-label', 'Détails de la génération');
-    go.title = 'Détails';
-    go.setAttribute('aria-expanded', String(detailsOpen));
-    go.setAttribute('aria-controls', 'studio-details');
-    const closing = event => {
-      if (event.key !== 'Escape' || !detailsOpen) return;
-      event.preventDefault();
-      event.stopPropagation?.();
-      toggleDetails(false);
-    };
-    go.onkeydown = closing;
-    if (!detailsOpen) return [go];
-    const card = node('div', 'studio-details');
-    card.id = 'studio-details';
-    card.setAttribute('role', 'dialog');
-    card.setAttribute('aria-label', 'Détails de la génération');
-    card.onkeydown = closing;
-    for (const [key, value] of last ? recordDetails(last) : draftDetails())
-      card.append(node('span', 'studio-details-key', key), node('span', 'studio-details-value', value));
-    // The original and all its settings: what « Détails » of the Sortie opened before.
-    if (last) {
-      const whole = button('studio-details-open', 'Voir l’original', () => viewOutput(last, 0));
-      whole.title = 'Voir l’original et ses paramètres';
-      card.append(whole);
-    }
-    return [go, card];
-  }
-  function toggleDetails(open) {
-    detailsOpen = open;
-    render();
-    document.querySelector?.('#studio-view .studio-details-go')?.focus?.();
   }
 
   /** The formats under the preview: 1:1, 16:9, 9:16, and « ··· » for all of them. */
@@ -2673,9 +2571,9 @@ export function setupStudio({
   }
   // ------------------------------------------------------------------ the Sortie
   // (moodix-design.md 15, 15 bis, 22-24; 7 bis 7, 8, 11): pictures only, the newest at the left
-  // with the largest number; one round button on each (Prolonger, Animer), the bin and « Détails »
-  // on hover or focus, all of them under a right click or a long press; a deletion is asked on the
-  // picture itself.
+  // with the largest number; one round button on each (Prolonger, Animer), the bin on hover or
+  // focus, all of them and « Détails » under a right click or a long press; a click shows it whole
+  // with its details; a deletion is asked on the picture itself.
   const KIND = { video: 'Clip', image: 'Image', audio: 'Son' };
   let menuFor = null, // the creation whose menu is open
     confirmFor = null, // the creation whose deletion waits for its confirmation
