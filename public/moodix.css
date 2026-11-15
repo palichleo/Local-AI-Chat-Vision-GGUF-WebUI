@@ -175,7 +175,6 @@ kbd {
 .iteration-setting,
 .sidebar,
 .gallery,
-.assets-panel,
 dialog {
   background-image: none;
   box-shadow: none;
@@ -426,8 +425,7 @@ summary:focus-visible {
   box-shadow: none;
 }
 #sidebar .sidebar-actions .engine-button,
-#sidebar .sidebar-actions .settings-button,
-#sidebar .sidebar-actions .files-button {
+#sidebar .sidebar-actions .settings-button {
   width: 44px;
   height: 44px;
   min-width: 44px;
@@ -442,17 +440,14 @@ summary:focus-visible {
   color: var(--ink);
   box-shadow: none;
 }
-#sidebar .sidebar-actions .settings-button svg,
-#sidebar .sidebar-actions .files-button svg {
+#sidebar .sidebar-actions .settings-button svg {
   width: 19px;
   height: 19px;
 }
 #sidebar .sidebar-actions .settings-button svg {
   stroke-width: 1.5;
 }
-#sidebar .sidebar-actions .settings-button:hover:enabled,
-#sidebar .sidebar-actions .files-button:hover:enabled,
-#sidebar .sidebar-actions .files-button[aria-pressed='true'] {
+#sidebar .sidebar-actions .settings-button:hover:enabled {
   background: var(--hover);
 }
 #sidebar .sidebar-actions .mobile-new {
@@ -3509,14 +3504,12 @@ html[data-switch='chat']::view-transition-old(studio) {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
 }
-.chat-area,
-.asset-pane {
+.chat-area {
   scrollbar-color: var(--scroll-thumb) transparent;
 }
 /* Brighter under the pointer, on the areas that scroll: a rule on every element (`*:hover`)
    would make the page recompute its styles at each move of the pointer. */
 .chat-area:hover,
-.asset-pane:hover,
 #studio-view:hover,
 #sidebar:hover,
 #prompt:hover,
@@ -3553,7 +3546,6 @@ html[data-switch='chat']::view-transition-old(studio) {
     background: var(--scroll-thumb) padding-box;
   }
   .chat-area:hover::-webkit-scrollbar-thumb,
-  .asset-pane:hover::-webkit-scrollbar-thumb,
   #studio-view:hover::-webkit-scrollbar-thumb,
   #sidebar:hover::-webkit-scrollbar-thumb,
   #prompt:hover::-webkit-scrollbar-thumb,
@@ -4661,8 +4653,7 @@ body {
     border: 0;
   }
   :root[data-sidebar='collapsed'] #sidebar .sidebar-actions .engine-button,
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions .settings-button,
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions .files-button {
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions .settings-button {
     flex: none;
     width: 40px;
     min-width: 0;
@@ -4718,4 +4709,278 @@ body {
   .sidebar-toggle .sidebar-mark {
     transition: none;
   }
+}
+
+/* ------------------------------------------------------------------ sidebar, rows (0.5.108)
+   Every line of the sidebar alike: « Nouvelle conversation » and the pages (Accueil, Chat, Studio,
+   Bibliothèque), 36 px, 10 px corners, an icon of 18 px and its word, no border, no ground; a
+   ground #15171C under the pointer. The page open has no ground: its word in white, 800, and a
+   white line 3 px wide on the inner left edge of the sidebar. The icon at 8 px and the word at
+   32 px from the edge of the line: the track of the Studio's modes starts there too. */
+#sidebar {
+  --sidebar-inset: 14px;
+  --bar-ground: var(--sidebar);
+  --row-ink: #aeb4bf;
+  --row-hover: #15171c;
+  --row-open: #eceef2;
+}
+@media (min-width: 1100px) {
+  /* Wide, the sidebar lies on the frame, without a ground of its own. */
+  #sidebar {
+    --sidebar-inset: 12px;
+    --bar-ground: var(--frame);
+  }
+}
+:root[data-theme='light'] #sidebar {
+  --row-ink: #5a606b;
+  --row-hover: #eef0f3;
+  --row-open: #0b0c0f;
+}
+#sidebar > .new-chat,
+#sidebar .home-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: auto;
+  height: 36px;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--row-ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+#sidebar > .new-chat {
+  /* One line of the list with the pages, 2 px above Accueil as they are from each other. */
+  margin-bottom: -16px;
+  color: var(--row-open);
+  font-weight: 700;
+}
+#sidebar > .new-chat svg,
+#sidebar .home-button svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+#sidebar > .new-chat:hover:enabled,
+#sidebar .home-button:hover:enabled,
+body[data-view='studio'] #sidebar .studio-nav .home-button:hover:enabled,
+:root[data-theme='light'] #sidebar > .new-chat:hover:enabled {
+  background: var(--row-hover);
+  color: var(--row-open);
+}
+#sidebar > .new-chat:focus-visible,
+#sidebar .home-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+#sidebar .home-button[aria-current='page'],
+body[data-view='studio'] #sidebar .studio-nav .home-button[aria-current='page'] {
+  background: transparent;
+  color: var(--row-open);
+  font-weight: 800;
+}
+#sidebar .home-button[aria-current='page']:hover:enabled {
+  background: var(--row-hover);
+}
+#sidebar .home-button[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: calc(-1 * var(--sidebar-inset));
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--row-open);
+  pointer-events: none;
+}
+/* The Studio and its modes, without a card: the line of the Studio like the others, the track of
+   Image, Vidéo, Son always under it, from the word; the mode chosen white in the Studio alone. */
+.studio-nav,
+body[data-view='studio'] .studio-nav,
+:root[data-theme='light'] body[data-view='studio'] .studio-nav {
+  gap: 2px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+#sidebar .studio-nav .home-button,
+body[data-view='studio'] #sidebar .studio-nav .home-button {
+  min-height: 36px;
+  padding: 0 8px;
+}
+#sidebar #studio-kinds.kind-tabs {
+  margin: 0 0 2px 32px;
+}
+
+/* The foot: the model at the left, Configuration at the right, without a box around them; one
+   under the other when the sidebar is folded. */
+#sidebar .sidebar-actions,
+:root[data-theme='light'] #sidebar .sidebar-actions {
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+#sidebar .sidebar-actions .engine-button,
+#sidebar .sidebar-actions .settings-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  min-width: 0;
+  height: 36px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--row-ink);
+  --engine-ring: var(--bar-ground);
+}
+#sidebar .sidebar-actions .engine-button:is(:hover, :focus-visible):enabled,
+#sidebar .sidebar-actions .settings-button:is(:hover, :focus-visible):enabled {
+  background: var(--row-hover);
+  color: var(--row-open);
+  --engine-ring: var(--row-hover);
+}
+#sidebar .sidebar-actions .engine-button:focus-visible,
+#sidebar .sidebar-actions .settings-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+#sidebar .sidebar-actions .engine-button svg,
+#sidebar .sidebar-actions .settings-button svg {
+  width: 18px;
+  height: 18px;
+}
+/* ⏻ whatever the state, in a line of 1.75 px; it never turns. */
+#sidebar .sidebar-actions .engine-button svg,
+#sidebar .sidebar-actions .engine-button.is-busy svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  animation: none;
+}
+/* What the model is doing, in a dot of 7 px at the top right of the icon, ringed with 2 px of the
+   ground around it: stopped grey, starting amber (breathing), ready green, set aside while a
+   creation is made amber. Its name and tooltip are the button's, unchanged. */
+#sidebar .sidebar-actions .engine-button::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--engine-dot, #4a4f59);
+  box-shadow: 0 0 0 2px var(--engine-ring);
+  pointer-events: none;
+}
+#sidebar .sidebar-actions .engine-button.is-off {
+  --engine-dot: #4a4f59;
+}
+#sidebar .sidebar-actions .engine-button.is-running {
+  --engine-dot: #22a060;
+}
+#sidebar .sidebar-actions .engine-button.is-running.is-busy,
+#sidebar .sidebar-actions .engine-button.is-paused {
+  --engine-dot: #f6c343;
+}
+#sidebar .sidebar-actions .engine-button.is-running.is-busy::after {
+  animation: mdx-engine-wait 1.6s ease-in-out infinite;
+}
+@keyframes mdx-engine-wait {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #sidebar .sidebar-actions .engine-button.is-running.is-busy::after {
+    animation: none;
+  }
+}
+#sidebar .sidebar-actions .settings-button svg {
+  stroke-width: 1.75;
+}
+
+/* Folded: icons alone, 40 × 36, one under the other, the line of the page open kept; its icon
+   white. The track of the modes in a column under the Studio. */
+@media (min-width: 1100px) {
+  :root[data-sidebar='collapsed'] #sidebar > .new-chat,
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-nav > .home-button,
+  :root[data-sidebar='collapsed'] #sidebar .studio-nav .home-button {
+    height: 36px;
+    min-height: 36px;
+    margin: 0;
+    padding: 0 0 0 11px;
+  }
+  :root[data-sidebar='collapsed'] #sidebar > .new-chat {
+    margin-bottom: -16px;
+  }
+  :root[data-sidebar='collapsed'] #sidebar .studio-nav {
+    padding: 0;
+  }
+  :root[data-sidebar='collapsed'] #sidebar #studio-kinds.kind-tabs {
+    align-self: center;
+    width: 36px;
+    margin: 0 0 2px;
+  }
+  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions {
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+}
+
+/* The library (Bibliothèque): a page of its own in the window, as the home page; its title in the
+   title bar. Its content is not drawn yet. */
+.library-view,
+.library-heading {
+  display: none;
+}
+body[data-view='library'] .library-view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding: 28px 32px;
+}
+.library-note {
+  margin: 0;
+  color: #9aa0ab;
+  font-size: 14px;
+}
+body[data-view='library'] .library-heading {
+  display: inline;
+  color: #eceef2;
+  font-size: 13.5px;
+  font-weight: 800;
+}
+:root[data-theme='light'] body[data-view='library'] .library-heading {
+  color: var(--ink);
+}
+body[data-view='library'] .chat-area,
+body[data-view='library'] .composer-region,
+body[data-view='library'] .chat-header {
+  display: none !important;
+}
+body[data-view='library'] .chat-panel {
+  display: none;
 }

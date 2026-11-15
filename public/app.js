@@ -611,7 +611,8 @@ function updateControls() {
     (paused ? 'is-paused' : running ? (s.state === 'ready' ? 'is-running' : 'is-running is-busy') : 'is-off');
   $('toggle-engine').setAttribute('aria-label', engineLabel);
   $('toggle-engine').title = engineLabel;
-  $('toggle-engine').replaceChildren(icon(paused || running ? 'stop' : 'play'));
+  // One icon whatever the state (⏻): the dot beside it says it (moodix.css, engine-button::after).
+  $('toggle-engine').replaceChildren(icon('power'));
   const proposing = Boolean(state.studio?.proposing?.());
   $('send').disabled =
     state.projectWorking ||
@@ -2893,7 +2894,11 @@ function closeNavigation() {
   // The focus left in the closed drawer goes back to the button that opens it.
   if (open && $('sidebar').contains?.(document.activeElement)) $('navigation-open').focus?.();
 }
-function showHome() {
+/**
+ * A page of its own outside a conversation: the home page, or the library (`page`, its
+ * body[data-view]; its content not drawn yet). The conversation is kept first.
+ */
+function showHome(page = 'home') {
   const blocked = () =>
     state.projectWorking ||
     state.status.toolJob ||
@@ -2912,7 +2917,7 @@ function showHome() {
     updateControls();
     try {
       if (!(await assetsUI.flush()) || !(await persistConversation())) return;
-      state.view = 'home';
+      state.view = page;
       delete document.body.dataset.chat;
       closeNavigation();
       projectUI.render();
@@ -3089,6 +3094,7 @@ function unsendChat() {
 state.onChatSent = chatSent;
 $('chat-scrim').onclick = () => void closeChat({ refocus: true });
 $('studio-open').onclick = () => showStudio();
+$('library-open').onclick = () => showHome('library');
 $('chat-open').onclick = () => showChat();
 async function newConversation(projectId = state.projectId || 'inbox') {
   if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)

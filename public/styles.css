@@ -2918,230 +2918,6 @@ dialog::backdrop {
   }
 }
 
-.assets-panel {
-  width: 350px;
-  flex-shrink: 0;
-  min-height: 0;
-  height: calc(100dvh - 36px);
-  margin: 18px 18px 18px 0;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--line-strong);
-  border-radius: 20px;
-  background-color: var(--sidebar);
-  background-image: linear-gradient(var(--side-veil), var(--side-veil)), var(--grain);
-  background-size:
-    auto,
-    1024px 1024px;
-  box-shadow:
-    inset 0 1px 0 var(--edge),
-    0 12px 35px var(--shadow);
-}
-.assets-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  padding: 4px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  flex-shrink: 0;
-}
-.assets-tabs button {
-  min-height: 38px;
-  padding: 8px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 550;
-}
-.assets-tabs button[aria-selected='true'] {
-  background: linear-gradient(var(--surface-veil), var(--surface-veil)), var(--surface);
-  border-color: var(--line-strong);
-  color: var(--ink);
-  box-shadow:
-    inset 0 1px 0 var(--edge),
-    0 2px 5px var(--shadow);
-}
-.assets-tabs button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.asset-pane {
-  min-height: 0;
-  flex: 1;
-  overflow: auto;
-  padding: 14px 2px 2px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
-}
-.resource-drop {
-  display: block;
-  text-align: center;
-  border: 1px dashed var(--line-strong);
-  border-radius: 11px;
-  padding: 17px 10px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.7;
-  cursor: pointer;
-  background: var(--surface);
-}
-.resource-drop strong {
-  display: block;
-  color: var(--ink);
-  font-weight: 500;
-  font-size: 12px;
-}
-.resource-drop small {
-  font-size: 12px;
-}
-.assets-panel.dragging {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-.assets-panel.is-busy .resource-drop {
-  cursor: default;
-  opacity: 0.6;
-}
-.resource-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.5;
-  margin: 10px 0;
-}
-.resource-status span {
-  flex: 1;
-  overflow-wrap: anywhere;
-}
-.resource-status button {
-  font-size: 12px;
-}
-#resource-count {
-  color: var(--muted);
-  font-size: 12px;
-  margin: 12px 1px;
-}
-.resources-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(135px, 100%), 1fr));
-  gap: 11px;
-  align-items: start;
-}
-.resource-card {
-  position: relative;
-  min-width: 0;
-  padding: 7px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  box-shadow: inset 0 1px 0 var(--edge);
-}
-.resource-card.inactive .resource-preview {
-  opacity: 0.5;
-}
-.resource-preview {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 100%;
-  aspect-ratio: 1;
-  border: 0;
-  border-radius: 7px;
-  padding: 0;
-  overflow: hidden;
-  background: var(--bg);
-  color: var(--muted);
-}
-.resource-preview img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.resource-preview > svg {
-  width: 28px;
-  height: 28px;
-}
-.resource-video {
-  position: absolute;
-  right: 5px;
-  bottom: 5px;
-  padding: 3px 5px;
-  border-radius: 4px;
-  background: #000b;
-  color: #fff;
-  font-size: 12px;
-}
-.resource-name {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 500;
-  margin: 9px 1px 7px;
-}
-.resource-enabled {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--muted);
-  margin: 0 0 8px;
-}
-.resource-enabled input {
-  accent-color: var(--accent);
-  width: 13px;
-  height: 13px;
-  margin: 0;
-}
-.resource-description {
-  display: block;
-  width: 100%;
-  min-height: 48px;
-  resize: vertical;
-  max-height: 140px;
-  padding: 7px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: inherit;
-  line-height: 1.6;
-  font-size: 12px;
-}
-.resource-description::placeholder {
-  color: var(--muted);
-}
-.resource-remove {
-  position: absolute;
-  right: 10px;
-  top: 10px;
-  width: 27px;
-  height: 27px;
-  opacity: 0;
-  pointer-events: none;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  box-shadow: 0 2px 6px var(--shadow);
-  color: var(--danger);
-}
-.resource-card:hover .resource-remove,
-.resource-card:focus-within .resource-remove {
-  opacity: 1;
-  pointer-events: auto;
-}
-.resource-remove:disabled {
-  opacity: 0.35;
-  pointer-events: none;
-}
 .asset-empty {
   color: var(--muted);
   font-size: 12px;
@@ -3149,35 +2925,13 @@ dialog::backdrop {
   padding: 20px 7px;
   text-align: center;
 }
-.resource-help {
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.7;
-  margin: 13px 1px 2px;
-}
+
 #gallery-list {
   display: flex;
   flex-direction: column;
   gap: 13px;
 }
-.assets-panel .gallery-card {
-  padding: 11px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  min-width: 0;
-}
-.assets-panel .gallery-card img {
-  width: 100%;
-  max-height: 230px;
-  object-fit: contain;
-  cursor: zoom-in;
-}
-.assets-panel .gallery-card strong {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-  margin-top: 10px;
-}
+
 .output-prompt {
   font-size: 12px;
   line-height: 1.65;
@@ -3208,17 +2962,7 @@ dialog::backdrop {
   border-left: 2px solid var(--accent, currentColor);
   color: var(--text, inherit);
 }
-.assets-panel .gallery-actions {
-  display: flex;
-  gap: 7px;
-}
-.assets-panel .gallery-actions button {
-  flex: 1;
-  font-size: 12px;
-  padding: 7px;
-  min-height: 32px;
-  border-radius: 7px;
-}
+
 #original-dialog {
   width: min(1250px, 94vw);
   height: fit-content;
@@ -3311,14 +3055,7 @@ dialog::backdrop {
   margin-top: 18px;
   font-size: 12px;
 }
-@media (max-width: 1200px) {
-  .assets-panel {
-    width: 300px;
-    margin: 14px 14px 14px 0;
-    height: calc(100dvh - 28px);
-    padding: 10px;
-  }
-}
+
 @media (max-width: 900px) and (min-width: 641px) {
   body {
     flex-wrap: wrap;
@@ -3333,15 +3070,7 @@ dialog::backdrop {
   .workspace {
     flex-basis: 0;
   }
-  .assets-panel {
-    width: calc(100% - 32px);
-    height: 55dvh;
-    min-height: 300px;
-    margin: 0 16px 16px;
-  }
-  .resources-grid {
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  }
+
   #gallery-list {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -3360,13 +3089,7 @@ dialog::backdrop {
     flex-shrink: 0;
     width: 100%;
   }
-  .assets-panel {
-    width: calc(100% - 24px);
-    height: 60dvh;
-    min-height: 300px;
-    margin: 0 12px 12px;
-    flex-shrink: 0;
-  }
+
   .media-details-layout {
     grid-template-columns: 1fr;
   }
@@ -3379,12 +3102,6 @@ dialog::backdrop {
   #original-dialog .media-stage #original-image,
   #original-video {
     max-height: 50dvh;
-  }
-}
-@media (hover: none), (pointer: coarse) {
-  .resource-remove {
-    opacity: 1;
-    pointer-events: auto;
   }
 }
 
@@ -4939,15 +4656,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   cursor: not-allowed;
 }
 /* Narrow Output panel: a tidy two-column grid. */
-.assets-panel .output-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-}
-.assets-panel .output-action {
-  min-height: 30px;
-  padding: 5px 8px;
-  font-size: 12px;
-}
+
 .generation-card .output-actions {
   margin: 10px 0 2px;
 }

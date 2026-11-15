@@ -443,6 +443,7 @@ export function setupProjectNavigation({
     $('home-open').setAttribute('aria-current', state.view === 'home' ? 'page' : 'false');
     $('chat-open')?.setAttribute('aria-current', state.view === 'chat' ? 'page' : 'false');
     $('studio-open').setAttribute('aria-current', state.view === 'studio' ? 'page' : 'false');
+    $('library-open')?.setAttribute('aria-current', state.view === 'library' ? 'page' : 'false');
     $('home-view').hidden = state.view !== 'home';
     $('studio-view').hidden = state.view !== 'studio';
     // The title bar of the window, the same in the Chat and the Studio; its pill in the Studio.
@@ -453,7 +454,7 @@ export function setupProjectNavigation({
   }
   function sync() {
     for (const control of document.querySelectorAll(
-      '.project-group button,.project-card button,#project-create,#home-create-project,#conversation-project,#home-open,#chat-open,#studio-open',
+      '.project-group button,.project-card button,#project-create,#home-create-project,#conversation-project,#home-open,#chat-open,#studio-open,#library-open',
     ))
       control.disabled = !!busy();
   }
