@@ -701,7 +701,7 @@ body[data-view='studio'] #studio-kinds .kind-tab[aria-selected='true'] {
   box-shadow: none;
 }
 .ai-mark {
-  background: url('/assets/moodix-mark.svg') center / contain no-repeat;
+  background: url('/assets/moodix-mark.svg?v=3') center / contain no-repeat;
 }
 @media (max-width: 1039px) {
   :root {

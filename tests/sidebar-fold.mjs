@@ -193,7 +193,7 @@ test('the button beside the logo, and each icon named for its tooltip', async ()
   assert.match(button, /aria-expanded="true"/);
   assert.match(button, /data-tip="Replier la barre \(Ctrl\+B\)"/);
   assert.ok(html.indexOf('id="sidebar-toggle"') > html.indexOf('class="brand-rule"'), 'at the right of the logo');
-  assert.match(html, /<img class="sidebar-mark" src="\/assets\/moodix-mark\.svg"/);
+  assert.match(html, /<img class="sidebar-mark" src="\/assets\/moodix-mark\.svg\?v=3"/);
   assert.match(html, /<symbol id="i-panel" viewBox="0 0 24 24"><rect x="3\.5" y="4\.5" width="17" height="15" rx="3"\/><path d="M9\.5 4\.5v15"\/><\/symbol>/);
   for (const [id, tip] of [
     ['new-chat', 'Nouvelle conversation'],

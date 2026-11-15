@@ -96,14 +96,15 @@ function icon(name) {
 }
 
 // The « matrice d'attention » of Moodix AI (moodix-design.md 1, Petit logo): four rows of four cells,
-// one colour a row, in the order of the pipes. At rest, its file; while the model thinks, the same
+// one colour a row, in the order of the pipes. At rest, its file (the full logo, its 16 cells whole;
+// ?v=3: the browsers kept the earlier one, a still of the movement); while the model thinks, the same
 // cells drawn in the page, so that they move everywhere (their pace is in moodix.css: the page
 // takes no style of its own). Both are laid one over the other; .is-thinking passes from one to the
 // other.
 const MARK_COLOURS = ['#3D6BF5', '#22A060', '#F6C343', '#E8402F'];
 function moodixMark() {
   const rest = node('img', 'moodix-mark-rest');
-  rest.src = '/assets/moodix-mark.svg';
+  rest.src = '/assets/moodix-mark.svg?v=3';
   rest.alt = '';
   const thinking = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   thinking.setAttribute('class', 'moodix-mark-thinking');
