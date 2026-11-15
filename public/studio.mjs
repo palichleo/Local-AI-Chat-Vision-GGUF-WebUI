@@ -2750,7 +2750,7 @@ export function setupStudio({
       event.dataTransfer.effectAllowed = 'copy';
       event.dataTransfer.setData('text/plain', name);
       // Carried at the size of a slot of the inputs: the whole picture hid where it would go.
-      dragGhost(pick, event.dataTransfer);
+      dragGhost(pick, event.dataTransfer, media);
     };
     pick.ondragend = () => {
       carried = null;
@@ -2923,7 +2923,7 @@ export function setupStudio({
    * shows it, corners rounded; a sound, its grey stripes. Drawn at once on a canvas, from the
    * picture the tile already holds: nothing is loaded while the drag starts.
    */
-  function dragGhost(pick, transfer) {
+  function dragGhost(pick, transfer, media) {
     const page = globalThis.document;
     if (!transfer?.setDragImage || !page?.createElement || !page.body) return;
     const slot = page.querySelector?.('#studio-view .studio-slot')?.getBoundingClientRect?.(),
@@ -2951,15 +2951,22 @@ export function setupStudio({
     context.fillRect(0, 0, canvas.width, canvas.height);
     const source = pick.querySelector?.('img, video'),
       sourceWidth = source?.naturalWidth || source?.videoWidth,
-      sourceHeight = source?.naturalHeight || source?.videoHeight;
-    if (sourceWidth && sourceHeight) {
+      sourceHeight = source?.naturalHeight || source?.videoHeight,
+      // A picture still loading has its size and no pixels yet.
+      drawable = source?.tagName === 'VIDEO' ? source.readyState >= 2 : source?.complete !== false;
+    if (media !== 'audio' && sourceWidth && sourceHeight && drawable) {
       const scale = Math.max(canvas.width / sourceWidth, canvas.height / sourceHeight),
         drawn = [sourceWidth * scale, sourceHeight * scale];
       context.drawImage(source, (canvas.width - drawn[0]) / 2, (canvas.height - drawn[1]) / 2, ...drawn);
-    } else {
+    } else if (media === 'audio') {
       context.fillStyle = '#6e7480';
       for (let x = 7 * ratio; x < canvas.width - 7 * ratio; x += 7 * ratio)
         context.fillRect(x, canvas.height * 0.34, 3 * ratio, canvas.height * 0.32);
+    } else {
+      // Its picture not there yet: the slot's size all the same, framed in grey.
+      context.strokeStyle = '#6e7480';
+      context.lineWidth = 2 * ratio;
+      context.strokeRect(ratio, ratio, canvas.width - 2 * ratio, canvas.height - 2 * ratio);
     }
     page.body.append(canvas);
     transfer.setDragImage(canvas, width / 2, height / 2);
