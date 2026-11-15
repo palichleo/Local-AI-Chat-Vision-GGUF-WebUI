@@ -1,5 +1,6 @@
 import { followWindow } from './filet.mjs';
 import { setupSidebarFold } from './sidebar-fold.mjs';
+import { withReference, withoutReference } from './reference-tokens.mjs';
 import { setupProjectNavigation } from './project-navigation.mjs';
 import { setupSettingsSearch } from './settings-search.mjs';
 import { setupSettingsTabs } from './settings-tabs.mjs';
@@ -1394,12 +1395,16 @@ function renderAttachments() {
     remove.type = 'button';
     remove.setAttribute('aria-label', `Retirer ${image.name}`);
     remove.append(icon('close'));
+    // The reference stays in the project: only this message no longer names it.
     remove.onclick = () => {
       state.images.splice(index, 1);
+      if (image.ref) unwriteReference(image.ref);
       renderAttachments();
       updateControls();
     };
-    box.append(preview, remove);
+    box.append(preview);
+    if (image.ref) box.append(node('span', 'attachment-badge', image.ref));
+    box.append(remove);
     $('attachments').append(box);
   });
   state.videos.forEach((video, index) => {
@@ -1417,9 +1422,10 @@ function renderAttachments() {
     remove.type = 'button';
     remove.setAttribute('aria-label', `Retirer ${video.name}`);
     remove.append(icon('close'));
-    // The video stays in the library: only this message no longer names it.
+    // The video stays in the project: only this message no longer names it.
     remove.onclick = () => {
       state.videos.splice(index, 1);
+      unwriteReference(video.label);
       renderAttachments();
       updateControls();
     };
@@ -1428,49 +1434,59 @@ function renderAttachments() {
   });
 }
 
-/** Images and videos dropped, pasted or chosen: videos go to the library, images to the message. */
-function addFiles(files) {
-  const videos = files.filter(isVideo),
-    images = files.filter(file => !isVideo(file));
-  if (videos.length) addVideos(videos);
-  if (images.length) addImages(images);
+/** « #ref3 » written in the message where the cursor is. */
+function writeReference(label) {
+  const box = $('prompt'),
+    written = withReference(box.value, label, box.selectionStart ?? box.value.length, box.selectionEnd ?? undefined);
+  box.value = written.text;
+  box.setSelectionRange?.(written.caret, written.caret);
+  resizePrompt();
+}
+/** « #ref3 » taken out of the message with its attachment. */
+function unwriteReference(label) {
+  $('prompt').value = withoutReference($('prompt').value, label);
+  resizePrompt();
 }
 
-async function addVideos(files) {
-  if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)
+/**
+ * Images and videos dropped, pasted or chosen in the message box: each is kept as a reference of
+ * the project, and « #ref3 » is written in the message. A video is named so; an image is shown to
+ * the model in the message as well, when it can see (its projector of vision).
+ */
+async function addFiles(files) {
+  if (
+    !files.length ||
+    state.projectWorking ||
+    state.status.toolJob ||
+    state.generating ||
+    state.preparing ||
+    state.loadingHistory
+  )
     return;
+  if (files.filter(file => !isVideo(file)).length + state.images.length > 64)
+    return notice('Vous pouvez joindre 64 images au maximum par message.');
   state.preparing = true;
   updateControls();
+  const project = state.projectId || 'inbox',
+    images = [];
   try {
-    const imported = await assetsUI.importFiles(files, { reveal: false });
-    if (!imported.length)
-      return notice('Vidéo non importée : la bibliothèque est occupée ou le fichier est illisible.');
-    state.videos.push(...imported.map(resource => ({ id: resource.id, label: resource.label, name: resource.name })));
+    for (const file of files) {
+      const [reference] = await assetsUI.importFiles([file], { project });
+      if (!reference) continue;
+      writeReference(reference.label);
+      if (isVideo(file)) state.videos.push({ id: reference.id, label: reference.label, name: reference.name });
+      else images.push({ file, reference });
+    }
+    if (images.length && state.config.projectorPath) {
+      const refs = [...state.images.map(image => image.ref), ...images.map(item => item.reference.label)],
+        ids = [...state.images.map(image => image.resource), ...images.map(item => item.reference.id)];
+      state.images = (await prepareImages([...state.images, ...images.map(item => item.file)])).map((image, index) =>
+        refs[index] ? { ...image, ref: refs[index], resource: ids[index] } : image,
+      );
+    }
     notice('');
   } catch (error) {
-    notice(error.message || 'Cette vidéo ne peut pas être lue.');
-  } finally {
-    state.preparing = false;
-    renderAttachments();
-    updateControls();
-  }
-}
-
-async function addImages(files) {
-  if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)
-    return;
-  if (!state.config.projectorPath) {
-    notice('Ajoutez un projecteur de vision dans Configuration pour joindre des images.');
-    return openSettings();
-  }
-  if (files.length + state.images.length > 64) return notice('Vous pouvez joindre 64 images au maximum par message.');
-  state.preparing = true;
-  updateControls();
-  try {
-    state.images = await prepareImages([...state.images, ...files]);
-    notice('');
-  } catch (error) {
-    notice(error.message || 'Cette image ne peut pas être lue.');
+    notice(error.message || 'Ce fichier ne peut pas être lu.');
   } finally {
     state.preparing = false;
     renderAttachments();
@@ -1758,6 +1774,8 @@ function chatRequest(messages, tools = true, resources = true) {
     thinking: state.thinking,
     tools,
     resources,
+    // The references the model knows are those of the conversation's project.
+    project: state.projectId || 'inbox',
   };
 }
 
@@ -2875,12 +2893,6 @@ function closeNavigation() {
   // The focus left in the closed drawer goes back to the button that opens it.
   if (open && $('sidebar').contains?.(document.activeElement)) $('navigation-open').focus?.();
 }
-function openFiles(open = true) {
-  if (!open) assetsUI.pause();
-  const opening = open && document.body.dataset.files !== 'open';
-  document.body.dataset.files = open ? 'open' : 'closed';
-  $('all-files').setAttribute('aria-pressed', String(open));
-}
 function showHome() {
   const blocked = () =>
     state.projectWorking ||
@@ -3126,8 +3138,6 @@ async function newConversation(projectId = state.projectId || 'inbox') {
 }
 $('new-chat').onclick = () => newConversation();
 $('new-chat-mobile').onclick = () => newConversation();
-$('all-files').onclick = () => openFiles(document.body.dataset.files !== 'open');
-$('assets-close').onclick = () => openFiles(false);
 $('navigation-open').onclick = () => {
   const open = document.body.dataset.navOpen !== 'true';
   document.body.dataset.navOpen = String(open);

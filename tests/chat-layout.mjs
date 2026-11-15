@@ -102,11 +102,12 @@ test('under a message, only the last exchange can be taken back: nothing copies 
   assert.doesNotMatch(actions, /clipboard|Copier/);
 });
 
-test('the interface names its places in French: Accueil, Fichiers, Jour and Nuit; no « Créations » tab', async () => {
+test('the interface names its places in French: Accueil, Jour and Nuit; no « Créations », no « Fichiers »', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(html, /id="home-open"[^>]*>.*?<span>Accueil<\/span>/);
-  assert.match(html, /id="all-files"[^>]*aria-label="Fichiers" title="Fichiers"/);
+  // The references are kept from the Studio and the chats of a project: no panel of files.
+  assert.doesNotMatch(html, /id="all-files"|id="assets-panel"|assets-resources-tab/);
   // The creations are in the Sortie of the Studio, shared by the project.
   assert.doesNotMatch(html, /assets-output-tab|output-pane|gallery-list/);
   assert.match(app, /dark \? 'Jour' : 'Nuit'/);
@@ -115,12 +116,7 @@ test('the interface names its places in French: Accueil, Fichiers, Jour and Nuit
   assert.doesNotMatch(app, /'Day'|'Night'/);
 });
 
-test('the files panel takes its place beside the page on a wide window', async () => {
-  const css = await readFile(new URL('../public/workspace.css', import.meta.url), 'utf8'),
-    app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  // A sheet over the page by default (narrow windows), in the flow of the page with room for both.
-  assert.match(css, /\.assets-panel \{\s+position: fixed;/);
-  assert.match(css, /@media \(min-width: 1180px\) \{\s+\.assets-panel \{\s+position: relative;/);
-  // No tab of creations to keep up to date any more.
-  assert.doesNotMatch(app, /showCreations|renderGallery/);
+test('no panel of files to open: no button, no tab of creations to keep up to date', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(app, /openFiles|all-files|assets-close|showCreations|renderGallery/);
 });

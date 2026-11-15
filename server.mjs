@@ -3,7 +3,7 @@ import { Projects, projectId } from './lib/projects.mjs';
 import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
-import { citedMessage, citedUnused } from './lib/cited-resources.mjs';
+import { citedMessage, citedUnused, citedNumbers } from './lib/cited-resources.mjs';
 import { briefMessage, briefMissing } from './lib/video-brief.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
@@ -65,6 +65,7 @@ const staticFiles = new Map([
   ['/project-navigation.mjs', ['project-navigation.mjs', 'text/javascript; charset=utf-8']],
   ['/filet.mjs', ['filet.mjs', 'text/javascript; charset=utf-8']],
   ['/sidebar-fold.mjs', ['sidebar-fold.mjs', 'text/javascript; charset=utf-8']],
+  ['/reference-tokens.mjs', ['reference-tokens.mjs', 'text/javascript; charset=utf-8']],
   ['/sidebar-state.js', ['sidebar-state.js', 'text/javascript; charset=utf-8']],
   ['/workspace.css', ['workspace.css', 'text/css; charset=utf-8']],
   ['/moodix.css', ['moodix.css', 'text/css; charset=utf-8']],
@@ -531,9 +532,18 @@ export async function createApplication({
   let controlResponse = null,
     controlledOnce = false,
     controlTimer;
+  /** The project a request names (its conversation's), Conversations when it names none. */
+  const projectOf = value => {
+    try {
+      return projectId(value || 'inbox');
+    } catch {
+      return 'inbox';
+    }
+  };
   async function includeTools(payload, body) {
-    const active = await resources.catalog();
-    const context = resourceCatalogPrompt(active);
+    // The references of the conversation's project; those it names stay in the list.
+    const active = await resources.catalog(projectOf(body?.project));
+    const context = resourceCatalogPrompt(active, { cited: citedNumbers(body?.messages) });
     if (context) {
       if (payload.messages[0]?.role === 'system')
         payload.messages[0] = { ...payload.messages[0], content: payload.messages[0].content + context };
@@ -909,6 +919,8 @@ export async function createApplication({
           name,
           mime: (req.headers['content-type'] || '').split(';')[0],
           length: req.headers['content-length'],
+          // The project of the conversation (the Studio, a chat): its references are shared there.
+          project: String(req.headers['x-resource-project'] || 'inbox'),
         });
         return send(201, resourceView(resource));
       }
@@ -1290,11 +1302,16 @@ export async function createApplication({
         return send(200, { deleted: true });
       }
       if (path === '/api/resources/read') {
+        // Read by the model: a use, counted (the least used leave its list first).
         if (body.ids !== undefined) {
           const ids = resourceReadIds({ resource_ids: body.ids });
-          return send(200, { resources: await Promise.all(ids.map(id => resources.readActive(id))) });
+          const read = await Promise.all(ids.map(id => resources.readActive(id)));
+          void resources.used(ids).catch(() => {});
+          return send(200, { resources: read });
         }
-        return send(200, await resources.readActive(body.id));
+        const read = await resources.readActive(body.id);
+        void resources.used([body.id]).catch(() => {});
+        return send(200, read);
       }
       if (path === '/api/updates/session/clear') {
         await rm(join(dataDir, 'update-session.json'), { force: true });
@@ -1773,6 +1790,8 @@ export async function createApplication({
             const conversation = await history.read(item.id);
             moved.push(historyView(await history.save({ ...conversation, projectId: 'inbox' })));
           }
+          // Its references follow its conversations.
+          await resources.moveProject(body.id, 'inbox');
           await projects.remove(body.id);
           return send(200, { deleted: body.id, moved });
         } finally {
@@ -1996,7 +2015,7 @@ export async function createApplication({
             // Images passed to the generator and never looked at: the model sees them first.
             const unseen =
               engine.vision && body.resources !== false && /^[0-9a-f-]{36}$/.test(body.turnId || '')
-                ? unseenResources(body.messages, await resources.catalog(), call)
+                ? unseenResources(body.messages, await resources.catalog(projectOf(body.project)), call)
                 : [];
             if (unseen.length && (resourceTurns.get(body.turnId) || 0) + unseen.length <= 8) {
               resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + unseen.length);
@@ -2029,7 +2048,10 @@ export async function createApplication({
               });
             // A prompt of two lines: sent back once, with the images it is about shown again.
             else if (fullPrompts && thinPrompt(body.messages, call)) {
-              const images = engine.vision && body.resources !== false ? passedImages(await resources.catalog(), call) : [];
+              const images =
+                engine.vision && body.resources !== false
+                  ? passedImages(await resources.catalog(projectOf(body.project)), call)
+                  : [];
               const room = /^[0-9a-f-]{36}$/.test(body.turnId || '') && (resourceTurns.get(body.turnId) || 0) + images.length <= 8;
               if (images.length && room) {
                 resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + images.length);
@@ -2047,7 +2069,7 @@ export async function createApplication({
             } else
               try {
                 // An image the user named by its label and the model left out: said once.
-                const unused = citedUnused(body.messages, await resources.catalog(), call);
+                const unused = citedUnused(body.messages, await resources.catalog(projectOf(body.project)), call);
                 if (unused.length) throw problem(citedMessage(unused), 400);
                 // A character put in a video: its prompt is written here from the frames of the
                 // video and the character, which the model no longer has under its eyes.

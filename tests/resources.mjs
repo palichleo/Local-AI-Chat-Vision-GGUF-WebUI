@@ -7,7 +7,8 @@ import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { Resources, resourceCatalogPrompt } from '../lib/resources.mjs';
+import { Resources, resourceCatalogPrompt, shownCatalog } from '../lib/resources.mjs';
+import { citedNumbers } from '../lib/cited-resources.mjs';
 import { createApplication } from '../server.mjs';
 import { Gallery } from '../lib/gallery.mjs';
 import { readSSE } from '../public/stream.mjs';
@@ -20,8 +21,13 @@ async function directory(t) {
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return root;
 }
-async function image(store, name = 'Reference.png') {
-  const record = await store.add(Readable.from([bytes]), { name, mime: 'image/png', length: bytes.length });
+async function image(store, name = 'Reference.png', project) {
+  const record = await store.add(Readable.from([bytes]), {
+    name,
+    mime: 'image/png',
+    length: bytes.length,
+    ...(project ? { project } : {}),
+  });
   return store.update(record.id, {
     description: 'Reference de lumière bleue',
     prepared: { width: 1, height: 1, frames: [{ url: png, time: null }] },
@@ -140,13 +146,14 @@ async function apiFixture(t, { engine = false } = {}) {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-  const upload = async () => {
+  const upload = async project => {
     const response = await fetch(app.url + '/api/resources/upload', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'image/png',
         'X-Resource-Name': encodeURIComponent('native.png'),
+        ...(project ? { 'X-Resource-Project': project } : {}),
       },
       body: bytes,
     });
@@ -328,16 +335,16 @@ test('reference labels survive deactivation, deletion, additional imports and re
     store = new Resources(path),
     a = await image(store, 'a.png'),
     b = await image(store, 'b.png');
-  assert.equal(a.label, 'Ref 1');
-  assert.equal(b.label, 'Ref 2');
+  assert.equal(a.label, '#ref1');
+  assert.equal(b.label, '#ref2');
   await store.update(a.id, { enabled: false });
-  assert.equal((await store.catalog())[0].label, 'Ref 2');
+  assert.equal((await store.catalog())[0].label, '#ref2');
   await store.remove(a.id);
   const c = await image(new Resources(path), 'c.png');
-  assert.equal(c.label, 'Ref 3');
+  assert.equal(c.label, '#ref3');
   assert.deepEqual(
     (await new Resources(path).list()).map(item => item.label),
-    ['Ref 2', 'Ref 3'],
+    ['#ref2', '#ref3'],
   );
   const f = await apiFixture(t),
     one = await f.upload(),
@@ -345,7 +352,7 @@ test('reference labels survive deactivation, deletion, additional imports and re
   const result = await (await f.request('resources/read', { ids: [one.id, two.id] })).json();
   assert.deepEqual(
     result.resources.map(item => item.label),
-    ['Ref 1', 'Ref 2'],
+    ['#ref1', '#ref2'],
   );
   await f.request('resources/update', { id: two.id, patch: { enabled: false } });
   assert.equal((await f.request('resources/read', { ids: [one.id, two.id] })).status, 403);
@@ -409,4 +416,103 @@ test('the final image review can still read references when further generations 
   );
   assert.deepEqual(body.tools[0].function.parameters.properties.resource_id.enum, [active.id]);
   assert.deepEqual(body.tools[1].function.parameters.properties.run_id.enum, [runId]);
+});
+
+test('each project numbers its own references, shared by its chats and its Studio', async t => {
+  const root = await directory(t),
+    path = join(root, 'resources'),
+    store = new Resources(path),
+    project = randomUUID(),
+    a = await image(store, 'a.png'),
+    b = await image(store, 'b.png', project),
+    c = await image(store, 'c.png', project);
+  assert.deepEqual([a.project, a.label], ['inbox', '#ref1']);
+  assert.deepEqual([b.project, b.label, c.label], [project, '#ref1', '#ref2']);
+  // The model of a conversation knows those of its project only.
+  assert.deepEqual((await store.catalog(project)).map(item => item.label), ['#ref1', '#ref2']);
+  assert.deepEqual((await store.catalog()).map(item => item.name), ['a.png']);
+  assert.equal((await store.list()).length, 3);
+  await assert.rejects(image(store, 'd.png', '../other'), /Projet invalide/);
+  // A project removed: its references go to Conversations, numbered after those it has.
+  await store.moveProject(project, 'inbox');
+  assert.deepEqual(
+    (await new Resources(path).catalog()).map(item => [item.name, item.label]),
+    [
+      ['a.png', '#ref1'],
+      ['b.png', '#ref2'],
+      ['c.png', '#ref3'],
+    ],
+  );
+  assert.deepEqual(await store.catalog(project), []);
+});
+
+test('the library of before becomes the references of Conversations, their numbers kept', async t => {
+  const root = await directory(t),
+    path = join(root, 'resources'),
+    store = new Resources(path),
+    first = await image(store, 'first.png');
+  // As 0.5.105 left it: one numbering for everything, « Ref 34 » the last given.
+  const ids = { [first.id]: 34 };
+  for (let number = 1; number < 34; number++) ids[randomUUID()] = number;
+  await writeFile(join(path, 'references.json'), JSON.stringify({ version: 1, next: 35, ids }));
+  const restored = new Resources(path);
+  assert.equal((await restored.list())[0].label, '#ref34');
+  assert.equal((await image(restored, 'next.png')).label, '#ref35');
+  assert.equal((await image(restored, 'elsewhere.png', randomUUID())).label, '#ref1');
+  const index = JSON.parse(await readFile(join(path, 'references.json'), 'utf8'));
+  assert.equal(index.version, 2);
+  assert.equal(index.projects.inbox.ids[first.id], 34);
+});
+
+test('too many for the model: the least used leave its list, never those the message names', async t => {
+  const root = await directory(t),
+    store = new Resources(join(root, 'resources')),
+    old = await image(store, 'old.png'),
+    newer = await image(store, 'newer.png'),
+    newest = await image(store, 'newest.png');
+  // The oldest is the most used, the newest the least.
+  await store.used([old.id, old.id]);
+  await store.used([old.id]);
+  await store.used([newer.id, 'not-an-id']);
+  const catalog = await store.catalog();
+  assert.deepEqual(
+    catalog.map(item => [item.name, item.uses]),
+    [
+      ['old.png', 2],
+      ['newer.png', 1],
+      ['newest.png', 0],
+    ],
+  );
+  const size = items => JSON.stringify(shownCatalog(items, { budget: Infinity })).length;
+  // Room for two: the least used leaves, not the oldest.
+  const two = size(catalog.slice(0, 2)) + 5;
+  assert.deepEqual(shownCatalog(catalog, { budget: two }).map(item => item.name), ['old.png', 'newer.png']);
+  // Room for one: the two least used, at once.
+  assert.deepEqual(shownCatalog(catalog, { budget: size(catalog.slice(0, 1)) + 5 }).map(item => item.name), ['old.png']);
+  // Named in the user's last message: kept, another leaves in its place.
+  const named = shownCatalog(catalog, { budget: two, cited: [newest.reference] });
+  assert.deepEqual(named.map(item => item.name), ['old.png', 'newest.png']);
+  // Used as often: the one whose last use is the oldest leaves.
+  await store.used([newest.id]);
+  const tied = await store.catalog();
+  assert.deepEqual(shownCatalog(tied, { budget: two }).map(item => item.name), ['old.png', 'newest.png']);
+  // What the model reads has no count, and nothing was removed from the disk.
+  assert.doesNotMatch(resourceCatalogPrompt(tied, { budget: two }), /"uses"|"usedAt"/);
+  assert.match(resourceCatalogPrompt(tied), /#ref1, #ref2/);
+  assert.equal((await store.list()).length, 3);
+  assert.deepEqual(citedNumbers([{ role: 'user', content: 'anime #ref3 et la ref 12' }, { role: 'assistant', content: '#ref9' }]), [3, 12]);
+});
+
+test('a reference sent from a chat or the Studio belongs to its project; a reading by the model is a use', async t => {
+  const f = await apiFixture(t),
+    project = randomUUID(),
+    one = await f.upload(project),
+    two = await f.upload();
+  assert.deepEqual([one.project, one.label, two.project, two.label], [project, '#ref1', 'inbox', '#ref1']);
+  await f.request('resources/read', { ids: [one.id] });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const listed = (await (await f.request('resources')).json()).resources;
+  assert.equal(listed.length, 2);
+  assert.equal(listed.find(item => item.id === one.id).uses, 1);
+  assert.equal(listed.find(item => item.id === two.id).uses, undefined);
 });

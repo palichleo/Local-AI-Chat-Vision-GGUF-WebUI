@@ -416,7 +416,8 @@ export function setupStudio({
       return notice('Cette case attend une vidéo MP4 ou WebM.');
     if (media === 'image' && VIDEO_TYPES.includes(file.type))
       return notice('Cette case attend une image, pas une vidéo.');
-    const imported = await assets.importFiles([file], { reveal: false });
+    // Kept as a reference of the project (« #ref3 »), shared with its chats.
+    const imported = await assets.importFiles([file], { project: project() });
     if (!imported.length)
       return notice(
         (media === 'video' ? 'Vidéo non importée' : 'Image non importée') +

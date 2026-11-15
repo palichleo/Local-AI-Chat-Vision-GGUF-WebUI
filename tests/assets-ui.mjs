@@ -98,6 +98,11 @@ async function fixture(t) {
       stored = stored.filter(item => item.id !== body.id);
       return Response.json({ deleted: true });
     }
+    if (route === 'resources/upload') {
+      const record = { id: 'two', name: decodeURIComponent(options.headers['X-Resource-Name']), mime: 'image/png' };
+      stored.push(record);
+      return Response.json(record);
+    }
     throw Error('Unexpected ' + route);
   };
   const state = { resourceWorking: false };
@@ -107,37 +112,28 @@ async function fixture(t) {
     node: (...args) => new Element(...args),
     icon: () => new Element('svg'),
     notice: text => notices.push(text),
+    prepare: async file => ({ mime: file.type, width: 1, height: 1, frames: [] }),
   });
   await ui.refresh();
   return { ui, $, calls, state, notices };
 }
-test('resource tabs preserve the library, annotations save, and activation changes are persisted', async t => {
-  const { ui, $, calls } = await fixture(t);
-  // « Ressources » alone: the creations are in the Sortie of the Studio.
-  assert.equal($('resources-pane').hidden, false);
-  $('assets-resources-tab').onclick();
-  assert.equal($('resources-pane').hidden, false);
-  const card = $('resources-list').children[0],
-    activation = card.children[3].children[0],
-    description = card.children[4];
-  assert.equal(activation.checked, true);
-  activation.checked = false;
-  await activation.onchange();
-  await new Promise(setImmediate);
-  assert.deepEqual(calls.at(-1).body, { id: 'one', patch: { enabled: false } });
-  description.value = 'A cinematic blue light';
-  assert.equal(ui.hasDraft(), true);
-  assert.equal(await ui.flush(), true);
-  await new Promise(setImmediate);
-  assert.equal(ui.hasDraft(), false);
-  assert.equal(calls.at(-1).body.patch.description, 'A cinematic blue light');
+test('no panel: a file is kept as a reference of the project it comes from', async t => {
+  const { ui, calls, state } = await fixture(t);
+  assert.equal(ui.resource('one').name, 'Reference');
+  const file = new File(['x'], 'pluie.png', { type: 'image/png' });
+  const [kept] = await ui.importFiles([file], { project: 'p' });
+  assert.equal(kept.id, 'two');
+  const upload = calls.find(call => call.route === 'resources/upload');
+  assert.equal(upload.options.headers['X-Resource-Project'], 'p');
+  assert.deepEqual(calls.at(-1).body, { id: 'two', patch: { prepared: { mime: 'image/png', width: 1, height: 1, frames: [] } } });
+  assert.equal(ui.resource('two').id, 'two');
+  assert.equal(state.resourceWorking, false);
+  // Busy (a reply, a generation): nothing is kept meanwhile.
   ui.setBusy(true);
-  assert.equal(activation.disabled, true);
+  assert.deepEqual(await ui.importFiles([file]), []);
   ui.setBusy(false);
-  assert.equal(activation.disabled, false);
-  await card.children[1].onclick();
-  await new Promise(setImmediate);
-  assert.equal($('resources-list').children.length, 0);
+  assert.equal(await ui.flush(), true);
+  assert.equal(ui.hasDraft(), false);
 });
 test('output details expose full prompts, workflow, seed and available parameters', async t => {
   const { ui, $ } = await fixture(t);

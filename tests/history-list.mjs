@@ -499,21 +499,6 @@ test('a deferred Home action never hides a response that started while settings 
   assert.equal(state.view, 'chat');
   assert.equal(flushes, 0);
 });
-test('closing All files pauses media before hiding the panel', async () => {
-  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
-    document = { body: { dataset: { files: 'open' } } };
-  let paused = 0;
-  const context = { document, assetsUI: { pause: () => paused++ }, $: () => ({ setAttribute() {} }) };
-  runInNewContext(
-    source.slice(source.indexOf('function openFiles('), source.indexOf('function showHome(')) +
-      ';this.close=()=>openFiles(false);',
-    context,
-  );
-  context.close();
-  assert.equal(paused, 1);
-  assert.equal(document.body.dataset.files, 'closed');
-});
-
 test('failed Home preparation keeps the chat visible and releases navigation controls', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   for (const failure of [false, new Error('Description save failed')]) {
