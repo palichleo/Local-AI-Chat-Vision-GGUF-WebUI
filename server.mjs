@@ -540,10 +540,15 @@ export async function createApplication({
       return 'inbox';
     }
   };
-  async function includeTools(payload, body) {
+  async function includeTools(payload, body, { prune = false } = {}) {
     // The references of the conversation's project; those it names stay in the list.
-    const active = await resources.catalog(projectOf(body?.project));
-    const context = resourceCatalogPrompt(active, { cited: citedNumbers(body?.messages) });
+    const project = projectOf(body?.project),
+      cited = citedNumbers(body?.messages);
+    // A message answered (not a count of the context): too many references for the model's
+    // list, the least used are removed from the disk (copies, never the user's originals).
+    if (prune) await resources.prune(project, { cited }).catch(error => console.error('Références :', error.message));
+    const active = await resources.catalog(project);
+    const context = resourceCatalogPrompt(active, { cited });
     if (context) {
       if (payload.messages[0]?.role === 'system')
         payload.messages[0] = { ...payload.messages[0], content: payload.messages[0].content + context };
@@ -1905,7 +1910,7 @@ export async function createApplication({
       res.once('close', onClose);
       let streamHeartbeat;
       try {
-        const definitions = await includeTools(payload, body);
+        const definitions = await includeTools(payload, body, { prune: true });
         const upstream = await fetch(`${engine.base}/v1/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${engine.apiKey}` },

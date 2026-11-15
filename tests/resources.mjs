@@ -496,10 +496,20 @@ test('too many for the model: the least used leave its list, never those the mes
   await store.used([newest.id]);
   const tied = await store.catalog();
   assert.deepEqual(shownCatalog(tied, { budget: two }).map(item => item.name), ['old.png', 'newest.png']);
-  // What the model reads has no count, and nothing was removed from the disk.
+  // What the model reads has no count; the list alone leaves nothing removed.
   assert.doesNotMatch(resourceCatalogPrompt(tied, { budget: two }), /"uses"|"usedAt"/);
   assert.match(resourceCatalogPrompt(tied), /#ref1, #ref2/);
   assert.equal((await store.list()).length, 3);
+  // Before a message is answered, those that leave are removed from the disk (they are copies).
+  const original = join(root, 'pluie-originale.png');
+  await writeFile(original, bytes);
+  assert.deepEqual(await store.prune('inbox', { budget: two }), [newer.id]);
+  assert.deepEqual((await store.list()).map(item => item.name), ['old.png', 'newest.png']);
+  await assert.rejects(store.readActive(newer.id), { status: 404 });
+  assert.deepEqual(await readFile(original), bytes);
+  // Room enough: nothing removed.
+  assert.deepEqual(await store.prune('inbox'), []);
+  assert.equal((await store.list()).length, 2);
   assert.deepEqual(citedNumbers([{ role: 'user', content: 'anime #ref3 et la ref 12' }, { role: 'assistant', content: '#ref9' }]), [3, 12]);
 });
 
