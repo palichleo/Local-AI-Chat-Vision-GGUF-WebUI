@@ -1813,13 +1813,15 @@ test('« Agent », left of « Générer », opens the chat as the band at the fo
     assert.equal(agent.attributes['aria-label'], 'Agent Moodix AI');
     assert.equal(agent.title, 'Agent Moodix AI');
     assert.equal(agent.attributes['aria-controls'], 'chat-panel');
-    assert.equal(agent.find('studio-agent-rule').length, 1);
+    // No colour along its foot (moodix-design.md 7 bis 22), only the light of its work.
+    assert.equal(agent.find('studio-agent-rule').length, 0);
+    assert.equal(agent.find('studio-agent-light').length, 1);
     agent.onclick();
     assert.equal(opened, 1);
-    // The Sortie: the four colours of the logo along its foot.
+    // The Sortie: no colour along its foot any more.
     const output = body.find('is-output')[0];
-    assert.equal(output.children.at(-1).className, 'moodix-rule studio-output-rule');
-    assert.equal(output.children.at(-1).children.length, 4);
+    assert.equal(body.find('moodix-rule').length, 0);
+    assert.notEqual(output.children.at(-1).className, 'moodix-rule studio-output-rule');
   } finally {
     restore();
   }

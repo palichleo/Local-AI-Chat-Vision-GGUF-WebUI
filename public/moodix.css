@@ -985,30 +985,9 @@ body[data-view='studio']:not([data-chat='open']) .chat-panel {
 .chat-scrim {
   display: none;
 }
-/* The four colours of the logo as a line, in its proportions (4 / 2 / 3 / 1.5). */
-.moodix-rule {
-  display: flex;
-  pointer-events: none;
-}
-.moodix-rule span:nth-child(1) {
-  flex: 4;
-  background: #3d6bf5;
-}
-.moodix-rule span:nth-child(2) {
-  flex: 2;
-  background: #22a060;
-}
-.moodix-rule span:nth-child(3) {
-  flex: 3;
-  background: #f6c343;
-}
-.moodix-rule span:nth-child(4) {
-  flex: 1.5;
-  background: #e8402f;
-}
 /* « Agent », left of « Générer » (moodix-design.md 15 bis): the chat of Moodix AI opens from it as
-   it did from the band at the foot of the Studio. As tall as Générer, the four colours along its
-   foot, against its edge. */
+   it did from the band at the foot of the Studio. As tall as Générer, without colour (7 bis 22:
+   the colour goes to the main action). */
 #studio-view .studio-agent {
   position: relative;
   overflow: hidden;
@@ -1083,16 +1062,17 @@ body[data-view='studio']:not([data-chat='open']) .chat-panel {
 body[data-view='studio'][data-chat='open'] #studio-view .studio-agent {
   visibility: hidden;
 }
-.studio-agent-rule {
+.studio-agent-light {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   height: 3px;
   overflow: hidden;
+  pointer-events: none;
 }
-/* Moodix AI writes while the chat is folded: a light runs along the colours. */
-.studio-agent-rule::after {
+/* Moodix AI writes while the chat is folded: a light runs along its foot. */
+.studio-agent-light::after {
   content: '';
   position: absolute;
   top: 0;
@@ -1102,7 +1082,7 @@ body[data-view='studio'][data-chat='open'] #studio-view .studio-agent {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent);
   opacity: 0;
 }
-.studio-agent.is-working .studio-agent-rule::after {
+.studio-agent.is-working .studio-agent-light::after {
   opacity: 1;
   animation: agent-light 1.4s ease-in-out infinite;
 }
@@ -1115,7 +1095,7 @@ body[data-view='studio'][data-chat='open'] #studio-view .studio-agent {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .studio-agent.is-working .studio-agent-rule::after {
+  .studio-agent.is-working .studio-agent-light::after {
     left: 35%;
     animation: none;
   }
@@ -1127,18 +1107,10 @@ body[data-view='studio'][data-chat='open'] #studio-view .studio-agent {
 :root[data-theme='light'] #studio-view .studio-agent[data-unread='true'] {
   box-shadow: 0 0 16px rgba(18, 20, 26, 0.25);
 }
-/* The Sortie: the four colours of the logo along its foot, the whole width (2 px, 3 px apart). */
+/* The Sortie, without colour along its foot (15/11: the four colours went only to the window,
+   Générer and the logo). */
 .studio-block.is-output {
   position: relative;
-}
-.studio-output-rule {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 2;
-  height: 2px;
-  gap: 3px;
 }
 /* Opened: over a dimmed Studio, the message box in the middle of the room left to the page
    (beside the sidebar and the files), the messages above it up to near the top, where they

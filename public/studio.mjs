@@ -324,13 +324,6 @@ export function setupStudio({
     control.onclick = onclick;
     return control;
   };
-  /** The four colours of the logo, in their proportions (4 / 2 / 3 / 1.5), as a line. */
-  function rule(className) {
-    const line = node('span', 'moodix-rule ' + className);
-    line.setAttribute('aria-hidden', 'true');
-    for (let index = 0; index < 4; index++) line.append(node('span'));
-    return line;
-  }
   // « Agent », left of « Générer » (moodix-design.md 15 bis): the chat of Moodix AI opens from it as
   // it did from the band at the foot. Made once and moved from one drawing to the next: the move
   // between the chat and the Studio folds the chat into it (view transition, moodix.css).
@@ -339,8 +332,12 @@ export function setupStudio({
   agent.title = 'Agent Moodix AI';
   agent.setAttribute('aria-label', 'Agent Moodix AI');
   agent.setAttribute('aria-controls', 'chat-panel');
-  // Its word leaves when the bar is just too narrow for one line (moodix.css): its name stays.
-  agent.append(node('span', 'studio-agent-word', 'Agent'), rule('studio-agent-rule'));
+  // Its word leaves when the bar is just too narrow for one line (moodix.css): its name stays. No
+  // colour along its foot (moodix-design.md 7 bis 22: the colour goes to Générer); a light runs
+  // there while Moodix AI writes with the chat folded.
+  const light = node('span', 'studio-agent-light');
+  light.setAttribute('aria-hidden', 'true');
+  agent.append(node('span', 'studio-agent-word', 'Agent'), light);
   // The settings Moodix AI may change wear its tile; the one it is changing, a ring; those it
   // has set, a fine trace while it works. Once it has stopped, nothing is framed any more.
   function aiTarget(element, key) {
@@ -3070,11 +3067,6 @@ export function setupStudio({
     panel.append(node('p', 'asset-empty', text), agent);
     return panel;
   }
-  /** The Sortie with the four colours of the logo along its foot (moodix-design.md 15 bis). */
-  function ruled(block) {
-    block.append(rule('studio-output-rule'));
-    return block;
-  }
   /**
    * The Studio as it will be, while its tools are read the first time: its four blocks on their
    * grain, the screen in the middle with the room of its bar. What they hold fades in once read.
@@ -3091,7 +3083,7 @@ export function setupStudio({
     waiting.append(agent);
     preview.append(screen, waiting);
     const blocks = [node('section', 'studio-block is-input'), preview, node('section', 'studio-block is-settings')];
-    desk.append(said, ...blocks.map(grained), ruled(grained(node('section', 'studio-block is-output'))));
+    desk.append(said, ...blocks.map(grained), grained(node('section', 'studio-block is-output')));
     return desk;
   }
   /** A block of the Studio on its grain of old film (moodix.css): still dust and three scratches
@@ -3388,7 +3380,7 @@ export function setupStudio({
       preview.append(alert);
     }
 
-    desk.append(...[write, preview, settings].map(grained), ruled(grained(outputs())));
+    desk.append(...[write, preview, settings].map(grained), grained(outputs()));
     desk.classList.toggle('is-generating', Boolean(working));
     if (working) for (const control of desk.querySelectorAll('textarea, select, input')) control.disabled = true;
     // What « Enregistrer » compares with, until the model is saved: the settings it showed first.
