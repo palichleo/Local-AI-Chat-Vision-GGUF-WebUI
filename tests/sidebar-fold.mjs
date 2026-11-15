@@ -196,15 +196,15 @@ test('the button beside the logo, and each icon named for its tooltip', async ()
   assert.match(html, /<img class="sidebar-mark" src="\/assets\/moodix-mark\.svg\?v=3"/);
   assert.match(html, /<symbol id="i-panel" viewBox="0 0 24 24"><rect x="3\.5" y="4\.5" width="17" height="15" rx="3"\/><path d="M9\.5 4\.5v15"\/><\/symbol>/);
   for (const [id, tip] of [
-    ['new-chat', 'Nouvelle conversation'],
+    ['new-chat', 'Nouveau chat'],
     ['home-open', 'Accueil'],
     ['chat-open', 'Chat'],
     ['studio-open', 'Studio'],
   ]) {
     assert.match(html, new RegExp(`id="${id}"[^>]*data-tip="${tip}"`));
   }
-  // The words of « Nouvelle conversation » in their own element, so that they can fade.
-  assert.match(html, /id="new-chat"[^>]*><svg><use href="#i-plus"\/><\/svg><span>Nouvelle conversation<\/span>/);
+  // The words of « Nouveau chat » in their own element, so that they can fade.
+  assert.match(html, /id="new-chat"[^>]*><svg><use href="#i-plus"\/><\/svg><span>Nouveau chat<\/span>/);
 });
 
 test('folded only on a wide window, 64 px, animated unless motion is reduced', async () => {

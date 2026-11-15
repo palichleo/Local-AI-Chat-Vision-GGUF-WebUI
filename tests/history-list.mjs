@@ -156,7 +156,7 @@ test('project collapse, rename and project-specific new conversation keep the hi
   await $('project-form').onsubmit({ preventDefault() {} });
   assert.ok(state.projects.some(project => project.name === 'A new idea'));
   const added = walk($('history-list')).find(
-    element => element.attributes['aria-label'] === 'Nouvelle conversation dans A new idea',
+    element => element.attributes['aria-label'] === 'Nouveau chat dans A new idea',
   );
   added.onclick();
   assert.ok(calls.some(call => call[0] === 'new' && call[1] === 'created'));

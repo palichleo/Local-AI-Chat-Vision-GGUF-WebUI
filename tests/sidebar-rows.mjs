@@ -6,11 +6,11 @@ import * as sessionCopies from '../public/session-copies.mjs';
 
 const read = async name => (await readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
-test('the sidebar: « Nouvelle conversation » a line as the pages, then Accueil, Chat, Studio, Bibliothèque', async () => {
+test('the sidebar: « Nouveau chat » a line as the pages, then Accueil, Chat, Studio, Bibliothèque', async () => {
   const html = await read('index.html'),
     sidebar = html.slice(html.indexOf('<aside id="sidebar"'), html.indexOf('</aside>'));
   // No bordered button any more; the same id, the same words.
-  assert.match(sidebar, /<button class="new-chat" id="new-chat" data-tip="Nouvelle conversation"><svg><use href="#i-plus"\/><\/svg><span>Nouvelle conversation<\/span><\/button>/);
+  assert.match(sidebar, /<button class="new-chat" id="new-chat" data-tip="Nouveau chat"><svg><use href="#i-plus"\/><\/svg><span>Nouveau chat<\/span><\/button>/);
   const order = ['id="new-chat"', 'id="home-open"', 'id="chat-open"', 'id="studio-open"', 'id="studio-kinds"', 'id="library-open"'].map(
     mark => sidebar.indexOf(mark),
   );

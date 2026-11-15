@@ -328,12 +328,12 @@ export function setupProjectNavigation({
         }
         if (!group.conversations.length) {
           const create = button(
-            'Nouvelle conversation dans ' + group.name,
+            'Nouveau chat dans ' + group.name,
             'project-empty',
             () => newConversation(group.id),
             'plus',
           );
-          create.append(node('span', '', 'Nouvelle conversation'));
+          create.append(node('span', '', 'Nouveau chat'));
           children.append(create);
         }
         section.append(header, children);
@@ -411,12 +411,12 @@ export function setupProjectNavigation({
       if (!conversations.length) list.append(node('p', 'project-card-empty', 'Votre prochaine idée commence ici.'));
       const footer = node('div', 'project-card-footer'),
         create = button(
-          'Nouvelle conversation dans ' + group.name,
+          'Nouveau chat dans ' + group.name,
           'project-card-new',
           () => newConversation(group.id),
           'plus',
         );
-      create.append(node('span', '', 'Nouvelle conversation'));
+      create.append(node('span', '', 'Nouveau chat'));
       footer.append(create);
       card.append(list, footer);
       grid.append(card);

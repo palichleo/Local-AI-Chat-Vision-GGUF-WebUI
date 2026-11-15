@@ -1,6 +1,10 @@
 import { followWindow } from './filet.mjs';
 import { setupSidebarFold } from './sidebar-fold.mjs';
 import { withReference, withoutReference } from './reference-tokens.mjs';
+
+/** The title of a chat before its first message gives it one (« Nouvelle conversation » before 0.5.109). */
+const UNTITLED = 'Nouveau chat';
+const untitled = title => title === UNTITLED || title === 'Nouvelle conversation';
 import { setupProjectNavigation } from './project-navigation.mjs';
 import { setupSettingsSearch } from './settings-search.mjs';
 import { setupSettingsTabs } from './settings-tabs.mjs';
@@ -283,7 +287,7 @@ async function clearHistory() {
       generationUI.clear();
       $('messages').replaceChildren();
       $('welcome').hidden = false;
-      setConversationTitle('Nouvelle conversation');
+      setConversationTitle(UNTITLED);
       state.studio?.conversationChanged?.();
     }
     renderHistory();
@@ -451,7 +455,7 @@ async function restoreUpdate() {
   renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
   turnActions();
   $('welcome').hidden = state.messages.length > 0;
-  setConversationTitle(saved.title || 'Nouvelle conversation');
+  setConversationTitle(saved.title || UNTITLED);
   const restored = state.historyItems.find(item => item.id === state.conversationId);
   state.projectId = restored?.projectId || 'inbox';
   state.view = 'chat';
@@ -2578,7 +2582,7 @@ async function runInStudio(proposal, { signal, onProgress }) {
     { role: 'tool', tool_call_id: proposal.call.id, content: result.content },
   ]);
   state.archiveSnapshot = { messages: [...state.messages], incomplete: false };
-  if ($('conversation-title').textContent === 'Nouvelle conversation') setConversationTitle(said.slice(0, 120));
+  if (untitled($('conversation-title').textContent)) setConversationTitle(said.slice(0, 120));
   turnActions();
   await persistConversation();
   contextMeter.schedule();
@@ -3125,11 +3129,10 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     state.archiveSnapshot = null;
     state.historyDirty = false;
     $('prompt').value = '';
-    workflowsUI.reset();
     generationUI.clear();
     $('messages').replaceChildren();
     $('welcome').hidden = false;
-    setConversationTitle('Nouvelle conversation');
+    setConversationTitle(UNTITLED);
     renderAttachments();
     notice('');
     resizePrompt();
