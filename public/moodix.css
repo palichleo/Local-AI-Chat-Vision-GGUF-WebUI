@@ -587,32 +587,6 @@ summary:focus-visible {
   background: var(--fn-action);
   flex: none;
 }
-/* The signature: four rounded pipes under the top bar, blue, green, yellow and red, each shorter
-   than the one above, from the left edge of the content. */
-.signature {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 2px var(--pad) 12px;
-}
-.signature span {
-  display: block;
-  height: 3px;
-  border-radius: 999px;
-  background: var(--fn-input);
-}
-.signature span:nth-child(2) {
-  width: 82%;
-  background: var(--fn-settings);
-}
-.signature span:nth-child(3) {
-  width: 64%;
-  background: var(--fn-output);
-}
-.signature span:nth-child(4) {
-  width: 46%;
-  background: var(--fn-action);
-}
 #chat-header {
   display: flex;
   align-items: center;
@@ -4322,4 +4296,142 @@ html[data-switch='chat']::view-transition-old(studio) {
 :root[data-theme='light'] #studio-view .studio-block.is-input.is-dropping {
   border-color: rgba(18, 20, 26, 0.45);
   box-shadow: 0 0 18px rgba(18, 20, 26, 0.08);
+}
+
+/* ------------------------------------------------------------------ frame and window
+   The page is a frame (#07080A) holding one window, the view in use (home, chat, studio) inside:
+   10 px from the top, the right and the bottom, against the sidebar on the left (from the left
+   edge when the sidebar is a drawer). Everything that scrolls scrolls in the window; the page
+   does not. The sidebar lies on the frame, without a ground or a border of its own. */
+:root {
+  --frame: #07080a;
+  --window: #0b0c0f;
+  --window-line: #1a1c21;
+  --title-line: #1a1d24;
+}
+:root[data-theme='light'] {
+  --frame: #e6e8ed;
+  --window: var(--bg);
+  --window-line: var(--line-strong);
+  --title-line: var(--line);
+}
+html,
+body {
+  overflow: hidden;
+}
+body {
+  position: relative;
+  background: var(--frame);
+}
+@media (min-width: 1100px) {
+  :root {
+    --sidebar-width: 232px;
+  }
+  #sidebar {
+    background: transparent;
+    border-right: 0;
+  }
+}
+.workspace {
+  position: relative;
+  box-sizing: border-box;
+  height: calc(100dvh - 20px);
+  margin: 10px 10px 10px 0;
+  border: 1px solid var(--window-line);
+  border-radius: 16px;
+  background: var(--window);
+  overflow: hidden;
+}
+@media (max-width: 1099px) {
+  .workspace {
+    margin-left: 10px;
+  }
+}
+/* The title bar: the first line of the window, the same in the Chat and the Studio. */
+#topbar {
+  background: transparent;
+}
+.topbar-row {
+  box-sizing: border-box;
+  height: 46px;
+  min-height: 0;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--title-line);
+}
+@media (min-width: 1100px) {
+  body[data-view='home'] #topbar {
+    display: none;
+  }
+}
+#chat-header {
+  gap: 8px;
+  color: #9aa0ab;
+  font-size: 13px;
+}
+#chat-header > svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+}
+#chat-header select {
+  color: #9aa0ab;
+  font-size: 13px;
+}
+#chat-header .chat-header-divider {
+  color: #5d636e;
+}
+#chat-header #chat-heading {
+  min-width: 0;
+  overflow: hidden;
+  color: #eceef2;
+  font-size: 13.5px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root[data-theme='light'] #chat-header #chat-heading {
+  color: var(--ink);
+}
+.studio-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #1c1f26;
+  color: #c3c8d0;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.studio-pill[hidden] {
+  display: none;
+}
+.studio-pill svg {
+  width: 13px;
+  height: 13px;
+}
+/* The filet over the window (public/filet.mjs): beside it in the page, laid exactly on it,
+   above what it holds; it breathes, its opacity alone. */
+.mdx-filet {
+  position: absolute;
+  z-index: 30;
+  overflow: visible;
+  pointer-events: none;
+  animation: mdx-breath 7s ease-in-out infinite;
+}
+@keyframes mdx-breath {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mdx-filet {
+    animation: none;
+  }
 }

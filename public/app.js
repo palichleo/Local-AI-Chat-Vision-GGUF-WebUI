@@ -1,3 +1,4 @@
+import { followWindow } from './filet.mjs';
 import { setupProjectNavigation } from './project-navigation.mjs';
 import { setupSettingsSearch } from './settings-search.mjs';
 import { setupSettingsTabs } from './settings-tabs.mjs';
@@ -3262,6 +3263,8 @@ try {
   notice(error.message);
   updateControls();
 }
+// The filet over the window: its four colours along the top, at the window's size.
+followWindow(document.querySelector('.mdx-filet'), document.querySelector('.workspace'));
 setInterval(() => {
   if (!document.hidden) refreshStatus();
 }, 1200);

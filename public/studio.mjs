@@ -3114,6 +3114,13 @@ export function setupStudio({
    * opens in that mode.
    */
   function kinds() {
+    // The pill of the title bar: « Studio · Image », with the icon of the mode.
+    const pill = $('studio-pill-text'),
+      about = modeOf(mode);
+    if (pill) {
+      pill.textContent = 'Studio · ' + about.label;
+      pill.parentElement?.querySelector?.('use')?.setAttribute('href', '#i-' + about.icon);
+    }
     const bar = $('studio-kinds');
     if (!bar) return;
     bar.removeAttribute('data-ai-active');

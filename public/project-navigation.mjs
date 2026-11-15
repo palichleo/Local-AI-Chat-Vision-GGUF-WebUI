@@ -445,7 +445,9 @@ export function setupProjectNavigation({
     $('studio-open').setAttribute('aria-current', state.view === 'studio' ? 'page' : 'false');
     $('home-view').hidden = state.view !== 'home';
     $('studio-view').hidden = state.view !== 'studio';
-    $('chat-header').hidden = state.view !== 'chat';
+    // The title bar of the window, the same in the Chat and the Studio; its pill in the Studio.
+    $('chat-header').hidden = !['chat', 'studio'].includes(state.view);
+    if ($('studio-pill')) $('studio-pill').hidden = state.view !== 'studio';
     document.body.dataset.view = state.view || 'home';
     sync();
   }
