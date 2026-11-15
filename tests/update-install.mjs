@@ -85,3 +85,34 @@ test('invalid commit metadata or obsolete versions never stage or install source
   );
   assert.deepEqual(await readdir(root), []);
 });
+
+test('main moved between the check and the click: the version downloaded is the one installed (0.5.129)', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'atelier-prepare-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'lib'));
+  await mkdir(join(root, 'scripts'));
+  await cp(project + '/lib/update-files.mjs', join(root, 'lib/update-files.mjs'));
+  await cp(project + '/lib/update-archive.mjs', join(root, 'lib/update-archive.mjs'));
+  await cp(project + '/scripts/apply-update.mjs', join(root, 'scripts/apply-update.mjs'));
+  const published = version => async url =>
+    url.includes('/commits/')
+      ? new Response(sha)
+      : new Response(
+          tarball(
+            sourceEntries.map(entry =>
+              entry.name === 'repo/package.json' ? { ...entry, text: entry.text.replace('"0.3.0"', `"${version}"`) } : entry,
+            ),
+          ),
+        );
+  // Announced 0.3.0 when the application started; 0.4.0 pushed since.
+  const plan = await module.prepareUpdate({ root, version: '0.3.0', currentVersion: '0.2.0', port: 8787, fetchUpdate: published('0.4.0') });
+  assert.equal(plan.version, '0.4.0');
+  assert.equal(JSON.parse(await readFile(join(plan.workspace, 'plan.json'), 'utf8')).version, '0.4.0');
+  // What is on GitHub is not newer than what is installed: said, nothing staged.
+  await rm(join(root, 'data'), { recursive: true, force: true });
+  await assert.rejects(
+    module.prepareUpdate({ root, version: '0.3.0', currentVersion: '0.2.0', port: 8787, fetchUpdate: published('0.2.0') }),
+    /La version publiée sur GitHub \(v0\.2\.0\) n’est pas plus récente que celle installée \(v0\.2\.0\)/,
+  );
+  assert.deepEqual((await readdir(root)).sort(), ['lib', 'scripts']);
+});

@@ -56,3 +56,26 @@ test('native runner sources are updated while workflows, caches and originals st
   assert.equal(files.get('runner/engine.py').toString(), 'native runner');
   assert.ok(![...files.keys()].some(path => /^(workflow|output|data)\//.test(path)));
 });
+
+test('the button takes any release newer than the one installed; an older or equal one is said plainly', () => {
+  const release = version =>
+    tarball(
+      sourceEntries.map(entry =>
+        entry.name === 'repo/package.json' ? { ...entry, text: entry.text.replace('"0.3.0"', `"${version}"`) } : entry,
+      ),
+    );
+  // GitHub moved since the check: newer than the installed one, it goes in.
+  assert.equal(JSON.parse(module.readUpdateArchive(release('0.4.0'), { newerThan: '0.2.0' }).get('package.json')).version, '0.4.0');
+  for (const [published, installed] of [
+    ['0.3.0', '0.3.0'],
+    ['0.2.9', '0.3.0'],
+  ])
+    assert.throws(
+      () => module.readUpdateArchive(release(published), { newerThan: installed }),
+      new RegExp(`v${published.replace(/\./g, '\\.')}\\) n’est pas plus récente que celle installée \\(v${installed.replace(/\./g, '\\.')}`),
+    );
+  // Not a release: invalid, as before.
+  assert.throws(() => module.readUpdateArchive(release('0.4.0-beta'), { newerThan: '0.2.0' }), /pas plus récente/);
+  // The rescue update still asks for the exact version.
+  assert.throws(() => module.readUpdateArchive(release('0.4.0'), '0.3.0'), /Archive de mise à jour invalide/);
+});
