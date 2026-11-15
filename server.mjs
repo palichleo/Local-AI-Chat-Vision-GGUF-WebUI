@@ -67,6 +67,7 @@ const staticFiles = new Map([
   ['/sidebar-fold.mjs', ['sidebar-fold.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-tokens.mjs', ['reference-tokens.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-picker.mjs', ['reference-picker.mjs', 'text/javascript; charset=utf-8']],
+  ['/unexpected-errors.mjs', ['unexpected-errors.mjs', 'text/javascript; charset=utf-8']],
   ['/sidebar-state.js', ['sidebar-state.js', 'text/javascript; charset=utf-8']],
   ['/workspace.css', ['workspace.css', 'text/css; charset=utf-8']],
   ['/moodix.css', ['moodix.css', 'text/css; charset=utf-8']],

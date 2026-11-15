@@ -1,0 +1,7 @@
+#!/bin/sh
+# Before each commit that touches the page, the server or its library: the interface is gone
+# through in a headless browser on an empty copy of the server (scripts/check-ui.mjs); an error
+# of the page stops the commit. Without a Chromium browser, the check is skipped, never blocking.
+if git diff --cached --name-only | grep -qE '^(public/|server\.mjs|lib/)'; then
+  node scripts/check-ui.mjs || exit 1
+fi

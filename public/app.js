@@ -2,6 +2,7 @@ import { followWindow } from './filet.mjs';
 import { setupSidebarFold } from './sidebar-fold.mjs';
 import { withReference, withoutReference } from './reference-tokens.mjs';
 import { markReferences, removedNotice, setupReferencePeek, setupReferencePicker } from './reference-picker.mjs';
+import { setupUnexpectedErrors } from './unexpected-errors.mjs';
 
 /** The title of a chat before its first message gives it one (« Nouvelle conversation » before 0.5.109). */
 const UNTITLED = 'Nouveau chat';
@@ -3329,6 +3330,8 @@ setupReferencePeek({
   node,
   lookup: number => projectReferences().find(item => item.reference === number) ?? null,
 });
+// An error nobody caught: said in a notice instead of a button that does nothing.
+setupUnexpectedErrors({ notice, quiet: () => state.updating || state.closingApp });
 // The sidebar folds to its icons and back (its button, Ctrl+B / ⌘+B).
 setupSidebarFold({
   root: document.documentElement,
