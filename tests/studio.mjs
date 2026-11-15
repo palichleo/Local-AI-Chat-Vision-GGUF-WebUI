@@ -962,7 +962,7 @@ async function studioPage(tools, routes = {}, options = {}) {
       };
     },
     node: (tag, className, text) => new Element(tag, className, text),
-    icon: () => new Element('svg'),
+    icon: glyph => Object.assign(new Element('svg'), { glyph }),
     notice: text => notices.push(text),
     // Each file dropped becomes a resource of the library, with its own preview.
     assets: {
@@ -1717,7 +1717,7 @@ test('a model this computer cannot run is greyed in the list with its reason, an
   }
 });
 
-test('Ctrl + Entrée generates from anywhere in the Studio, and the button says so in its corner', async () => {
+test('Ctrl + Entrée generates from anywhere in the Studio, and the button says so in its tooltip', async () => {
   const image = {
     id: 'w',
     name: 'Image',
@@ -1739,7 +1739,12 @@ test('Ctrl + Entrée generates from anywhere in the Studio, and the button says 
   try {
     const key = (overrides = {}) => ({ key: 'Enter', ctrlKey: true, preventDefault() {}, ...overrides }),
       started = () => asked.filter(([route]) => route === 'tools/action').length;
-    assert.match(body.find('studio-go-key')[0].textContent, /^(Ctrl|⌘) ↵$/);
+    // The triangle and « Générer »; the keys in its tooltip, no more « Ctrl ↵ » in the button.
+    const go = body.find('studio-go')[0];
+    assert.equal(go.children[0].glyph, 'play');
+    assert.equal(go.children[1].textContent, 'Générer');
+    assert.equal(body.find('studio-go-key').length, 0);
+    assert.match(go.title, /^Générer \((Ctrl|⌘)\+Entrée\)$/);
     // Nothing typed: a prompt is asked for, nothing starts.
     page['studio-view'].onkeydown(key());
     await settle();

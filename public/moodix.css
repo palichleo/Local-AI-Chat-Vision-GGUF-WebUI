@@ -1994,8 +1994,9 @@ video.studio-frame-result {
   background: #dcdfe5;
   color: #0b0c0f;
 }
-/* Générer (moodix-design.md 5): light, the action red as a band of 8 px along its left edge, 8 px
-   corners, exactly as tall as the format bar, a thin progress bar along its foot. */
+/* Générer (moodix-design.md 7 bis 22): dark, the triangle (14 px) and its word centred, exactly as
+   tall as the format bar, 8 px corners; along its foot, fixed (it does not breathe), the gradient
+   of the window's filet. The keys are in its tooltip. */
 #studio-view .studio-go {
   position: relative;
   overflow: hidden;
@@ -2005,12 +2006,12 @@ video.studio-frame-result {
   min-width: 190px;
   height: calc(var(--format-button) + 2 * var(--format-inset));
   min-height: 0;
-  padding: 0 18px 0 26px;
-  border: 0;
+  padding: 0 20px;
+  border: 1px solid #2e323c;
   border-radius: 8px;
-  background: var(--selected);
+  background: #1c1f26;
   background-image: none;
-  color: var(--on-selected);
+  color: #ffffff;
   font-family: var(--font-ui);
   font-weight: 800;
   font-size: 16px;
@@ -2018,57 +2019,107 @@ video.studio-frame-result {
   text-transform: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
+  justify-content: center;
+  gap: 10px;
   box-shadow: none;
-  transition: box-shadow 0.4s ease;
+  filter: none;
+  transition:
+    box-shadow 0.4s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
-#studio-view .studio-go:hover:enabled {
-  filter: brightness(1.06);
+#studio-view .studio-go:is(:hover, :focus-visible):enabled {
+  background: #252932;
+  border-color: #3a3f4a;
+  filter: none;
+}
+#studio-view .studio-go:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 #studio-view .studio-go:disabled {
   opacity: 1;
   cursor: progress;
 }
-/* The model in hand cannot run on this computer: greyed, where a creation under way stays bright. */
-#studio-view .studio-go.is-unavailable:disabled {
-  opacity: 0.4;
+/* Nothing to launch (the model cannot run here, Moodix AI writing the prompt): dim, without the
+   gradient; its tooltip says why. A creation under way is not that: it keeps its ground. */
+#studio-view .studio-go.is-unavailable,
+#studio-view .studio-go:disabled:not([role='progressbar']) {
+  background: #121318;
+  border-color: #22252c;
+  color: #5a606b;
+}
+#studio-view .studio-go.is-unavailable {
   cursor: not-allowed;
+}
+#studio-view .studio-go.is-unavailable::before,
+#studio-view .studio-go:disabled:not([role='progressbar'])::before {
+  display: none;
 }
 #studio-view .studio-go::before {
   content: '';
   position: absolute;
-  left: 0;
-  top: 0;
+  right: 0;
   bottom: 0;
-  width: 8px;
-  background: var(--fn-action);
+  left: 0;
+  z-index: 2;
+  height: 3px;
+  background: var(--mdx-gradient);
+  pointer-events: none;
 }
 #studio-view .studio-go svg {
+  position: relative;
+  z-index: 1;
+  display: block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  stroke: none;
+}
+#studio-view .studio-go-label {
+  position: relative;
+  z-index: 1;
+  white-space: nowrap;
+}
+/* While a creation is made: the triangle goes, « Génération · 42 % » in mono, over the bar that
+   fills the button from the left; the gradient stays at its foot, over all. */
+#studio-view .studio-go[role='progressbar'] svg {
   display: none;
 }
-#studio-view .studio-go-key {
-  position: static;
+#studio-view .studio-go[role='progressbar'] .studio-go-label {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
-  opacity: 1;
-  background: none;
-  border: 0;
-  padding: 0;
-  color: #6e7480;
-}
-:root[data-theme='light'] #studio-view .studio-go-key {
-  color: #9aa0ab;
 }
 .studio-go-bar {
   position: absolute;
-  left: 0;
+  top: 0;
   bottom: 0;
-  height: 3px;
+  left: 0;
+  z-index: 0;
   width: calc(var(--studio-progress, 0) * 100%);
-  background: var(--fn-action);
+  background: #2c313b;
   transition: width 0.2s linear;
+  pointer-events: none;
+}
+:root[data-theme='light'] #studio-view .studio-go {
+  border-color: #d5d9e0;
+  background: #ffffff;
+  color: #0b0c0f;
+}
+:root[data-theme='light'] #studio-view .studio-go:is(:hover, :focus-visible):enabled {
+  border-color: #c3c8d0;
+  background: #f1f3f6;
+}
+:root[data-theme='light'] #studio-view .studio-go.is-unavailable,
+:root[data-theme='light'] #studio-view .studio-go:disabled:not([role='progressbar']) {
+  border-color: #d5d9e0;
+  background: #f1f3f6;
+  color: #9aa0ab;
+}
+:root[data-theme='light'] .studio-go-bar {
+  background: #e3e6eb;
 }
 .studio-go.is-indeterminate .studio-go-bar {
   width: 30%;
@@ -2144,9 +2195,6 @@ video.studio-frame-result {
   }
   #studio-view .studio-go-group .studio-go {
     flex: 1 1 auto;
-  }
-  #studio-view .studio-go-key {
-    display: none;
   }
 }
 
@@ -4304,6 +4352,9 @@ html[data-switch='chat']::view-transition-old(studio) {
    edge when the sidebar is a drawer). Everything that scrolls scrolls in the window; the page
    does not. The sidebar lies on the frame, without a ground or a border of its own. */
 :root {
+  /* The four colours of the logo in one gradient, each pure at the middle of its old segment
+     (4 / 2 / 3 / 1.5): the foot of Générer (moodix-design.md 7 bis 22, 20). */
+  --mdx-gradient: linear-gradient(90deg, #3d6bf5 19%, #22a060 47.6%, #f6c343 71.4%, #e8402f 92.9%);
   --frame: #07080a;
   --window: #0b0c0f;
   --window-line: #1a1c21;

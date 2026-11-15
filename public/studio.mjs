@@ -3336,16 +3336,14 @@ export function setupStudio({
       bar.append(formatChips(workflow, frame));
       bar.classList.add('has-formats');
     }
-    const go = aiTarget(button('primary studio-go', '', generate, 'spark'), 'generate'),
+    const go = aiTarget(button('primary studio-go', '', generate, 'play'), 'generate'),
       label = node('span', 'studio-go-label', working ? 'Génération…' : extending ? 'Générer la suite' : 'Générer'),
-      key = node('kbd', 'studio-go-key', MODIFIER + ' ↵'),
       fill = node('span', 'studio-go-bar');
-    key.setAttribute('aria-hidden', 'true');
     fill.setAttribute('aria-hidden', 'true');
-    // « Ctrl ↵ » says how to launch; while the creation is made, « Génération · 42 % » takes its
-    // room (146 px at most, as « Générer » and « Ctrl ↵ »): « Générer » keeps its 190 px.
-    go.append(...(working ? [label, fill] : [label, key, fill]));
-    go.title = answering() ? 'Générer la proposition de Moodix AI · ' + MODIFIER + ' + Entrée' : MODIFIER + ' + Entrée';
+    // The triangle and its word, centred (moodix-design.md 7 bis 22); the keys are in its tooltip.
+    // While the creation is made, « Génération · 42 % » alone, over the bar that fills the button.
+    go.append(label, fill);
+    go.title = (answering() ? 'Générer la proposition de Moodix AI' : 'Générer') + ` (${MODIFIER}+Entrée)`;
     go.disabled = enriching || Boolean(working) || Boolean(workflow.unavailable);
     // The only model of this mode cannot run here: « Générer » is greyed and says why.
     if (workflow.unavailable) {
@@ -3367,8 +3365,7 @@ export function setupStudio({
       // was cut at the right of a window of 1280 px.
       group.className += ' is-checking';
       label.textContent = 'OK';
-      key.textContent = MODIFIER + ' ↵';
-      go.title = 'Garder ce personnage : le remplacement se lance · ' + MODIFIER + ' + Entrée';
+      go.title = `Garder ce personnage : le remplacement se lance (${MODIFIER}+Entrée)`;
       go.disabled = false;
       const again = button('secondary studio-again', 'Autre image', () => checking.resolve('again'), 'dice');
       again.title = 'Faire une autre image du personnage, avec le prompt ci-contre';
