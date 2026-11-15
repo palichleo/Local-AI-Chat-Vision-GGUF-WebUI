@@ -4327,9 +4327,11 @@ body {
   :root {
     --sidebar-width: 232px;
   }
+  /* The sidebar spans the window's height: the top of the logo on the window's top edge (4 px
+     here, then the 6 px of the logo's own box: 10 px), the foot of the actions on its bottom edge
+     (10 px from the bottom of the frame, like the window). */
   #sidebar {
-    padding-right: 12px;
-    padding-left: 12px;
+    padding: 4px 12px 10px;
     background: transparent;
     border-right: 0;
   }
@@ -4532,8 +4534,8 @@ body {
   :root[data-sidebar='collapsed'] #sidebar .brand {
     display: none;
   }
+  /* The small logo, 24 px in its 36 px button, its top on the window's top edge too. */
   :root[data-sidebar='collapsed'] .sidebar-toggle {
-    align-self: center;
     width: 40px;
     height: 36px;
     margin: 0;

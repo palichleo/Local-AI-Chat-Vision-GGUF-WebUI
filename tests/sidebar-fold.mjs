@@ -223,3 +223,19 @@ test('folded only on a wide window, 64 px, animated unless motion is reduced', a
   assert.match(section, /white-space: nowrap;/);
   assert.match(section, /@media \(min-width: 1100px\) and \(prefers-reduced-motion: reduce\) \{[^}]*#sidebar,[^}]*transition: none;/);
 });
+
+test('the sidebar spans the window: the logo at its top edge, the actions at its bottom edge', async () => {
+  const css = (await read('moodix.css')).replace(/\r\n/g, '\n');
+  const frame = css.slice(css.indexOf('frame and window'));
+  // The window: 10 px from the top and the bottom of the frame.
+  assert.match(frame, /\.workspace \{[^}]*height: calc\(100dvh - 20px\);[^}]*margin: 10px 10px 10px 0;/);
+  // The sidebar: 4 px, then the logo's box (6 px of padding) puts the logo at 10 px; 10 px under the actions.
+  assert.match(frame, /@media \(min-width: 1100px\) \{[^@]*#sidebar \{\n {4}padding: 4px 12px 10px;/);
+  assert.match(css, /#sidebar \.brand \{[^}]*padding: 6px 4px;/);
+  // Unfolded, the button on the logo's line; folded, the small logo (24 px in 36) at the same top.
+  assert.match(css, /\.sidebar-toggle \{[^}]*align-self: flex-start;[^}]*height: 28px;[^}]*margin: 6px 0 0;/);
+  const folded = css.match(/:root\[data-sidebar='collapsed'\] \.sidebar-toggle \{[^}]*\}/)?.[0] ?? '';
+  assert.match(folded, /height: 36px;/);
+  assert.match(folded, /margin: 0;/);
+  assert.doesNotMatch(folded, /align-self/);
+});
