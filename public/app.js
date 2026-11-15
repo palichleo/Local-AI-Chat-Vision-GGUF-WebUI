@@ -1479,6 +1479,13 @@ async function addFiles(files) {
     for (const file of files) {
       const [reference] = await assetsUI.importFiles([file], { project });
       if (!reference) continue;
+      // Already joined to this message (the same file again, the same reference): nothing more.
+      if (
+        state.images.some(image => image.resource === reference.id) ||
+        state.videos.some(video => video.id === reference.id) ||
+        images.some(item => item.reference.id === reference.id)
+      )
+        continue;
       writeReference(reference.label);
       if (isVideo(file)) state.videos.push({ id: reference.id, label: reference.label, name: reference.name });
       else images.push({ file, reference });
