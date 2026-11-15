@@ -11,6 +11,9 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createApplication } from '../server.mjs';
 
+/** The project each file dropped in the Studio was kept in (« #ref3 » of that project). */
+const importedInto = [];
+
 test('a prompt is enriched from what the user typed, for the creation it is for', () => {
   const [system, user] = enrichMessages('  un renard dans la neige  ');
   // What was typed is the whole request; the model is told to keep it and add what is missing.
@@ -299,6 +302,8 @@ test('a character replaced in a video: its model among the videos, a video and a
     assert.match(notices.at(-1), /attend une vidéo/);
     await drop(0, { name: 'clip.mp4', type: 'video/mp4' });
     assert.match(slots()[0].className, /is-filled/);
+    // Kept as a reference of the project of the conversation (Conversations here).
+    assert.equal(importedInto.at(-1), 'inbox');
     await generate();
     assert.match(body.find('studio-error')[0].textContent, /Ajoutez l’image du personnage/);
     await drop(1, { name: 'clip.mp4', type: 'video/mp4' });
@@ -964,17 +969,19 @@ async function studioPage(tools, routes = {}, options = {}) {
     node: (tag, className, text) => new Element(tag, className, text),
     icon: glyph => Object.assign(new Element('svg'), { glyph }),
     notice: text => notices.push(text),
-    // Each file dropped becomes a resource of the library, with its own preview.
+    // Each file dropped becomes a reference of the project, with its own preview.
     assets: {
-      importFiles: async files =>
-        files.map(file => ({
+      importFiles: async (files, kept) => {
+        importedInto.push(kept?.project);
+        return files.map(file => ({
           id: 'r' + ++imported,
-          label: 'Ref ' + imported,
+          label: '#ref' + imported,
           name: file.name,
           previewUrl: '/preview/' + file.name,
           width: 1280,
           height: 720,
-        })),
+        }));
+      },
       resource: id => ({ previewUrl: '/preview/' + id }),
     },
     viewOutput: options.viewOutput ?? (() => {}),
@@ -1430,7 +1437,7 @@ test('the input images: pictos and no word, start and end on a line of time, ref
     // A start image: its picto stays, small, in a badge; « ⇄ » swaps it to the end and back.
     await drop(0, 'a.png');
     assert.equal(slots()[0].find('studio-slot-badge').length, 1);
-    assert.equal(picks()[0].attributes['aria-label'], 'Image de début · Ref 1 · a.png');
+    assert.equal(picks()[0].attributes['aria-label'], 'Image de début · #ref1 · a.png');
     const [swap] = body.find('studio-swap');
     assert.equal(swap.attributes['aria-label'], 'Inverser début et fin');
     swap.onclick();
