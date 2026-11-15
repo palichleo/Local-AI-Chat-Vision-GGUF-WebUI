@@ -1,15 +1,26 @@
 /**
- * The filet of the window: the four colours of the logo along its top, blue, green, yellow and
- * red in one continuous gradient; past the two corners it slides down the sides (blue to green on
- * the left, red to yellow on the right) and fades out towards half the height. No line at the
- * bottom. Drawn for the window's real size, on its border (the svg lies exactly over the window,
- * border included).
+ * The filet of the window (moodix-design.md 7 bis 20): 1.5 px on its inner edge. Along the top, one
+ * continuous gradient from the middle of the left corner to the middle of the right one, each colour
+ * pure only at the middle of its old segment (STOPS, the gradient of the foot of Générer); past the
+ * corners it slides down the sides (blue to green on the left, red to yellow on the right) and
+ * fades out over 620 px. No line at the bottom. Drawn for the window's real size (the svg lies
+ * exactly over the window, border included).
  */
 const NS = 'http://www.w3.org/2000/svg';
 const BLUE = '#3d6bf5',
   GREEN = '#22a060',
   YELLOW = '#f6c343',
   RED = '#e8402f';
+/**
+ * Each colour pure at the middle of its segment of the logo's rule (4 / 2 / 3 / 1.5): the same
+ * gradient as --mdx-gradient in moodix.css.
+ */
+export const STOPS = [
+  [0.19, BLUE],
+  [0.476, GREEN],
+  [0.714, YELLOW],
+  [0.929, RED],
+];
 let drawn = 0;
 
 function element(name, attributes = {}, children = []) {
@@ -22,22 +33,29 @@ const stop = (offset, color, opacity = 1) =>
   element('stop', { offset, 'stop-color': color, 'stop-opacity': opacity });
 
 /** Draws the filet in `svg` for a window of `width` × `height` px (corners of `radius` px). */
-export function drawFilet(svg, width, height, { radius = 16, stroke = 2 } = {}) {
-  if (!(width > 2 * radius) || !(height > 2 * radius)) return svg.replaceChildren();
+export function drawFilet(svg, width, height, { radius = 16, stroke = 1.5, fade = 620 } = {}) {
+  if (!(width > 2 * radius) || !(height > 2 * radius)) {
+    svg.replaceChildren();
+    return svg;
+  }
   const id = 'mdx-filet-' + ++drawn,
     inset = stroke / 2,
     round = radius - inset,
-    middle = Math.round(height / 2);
+    // The middle of the arc of each top corner: the top ends there, the sides begin there.
+    corner = +(radius - round * Math.SQRT1_2).toFixed(2),
+    // Gone 620 px down the sides; before the bottom corners on a lower window.
+    end = Math.min(fade, height - radius),
+    arc = `A ${round} ${round} 0 0`;
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.setAttribute('width', String(width));
   svg.setAttribute('height', String(height));
   const along = element(
     'linearGradient',
-    { id: id + '-top', gradientUnits: 'userSpaceOnUse', x1: radius, y1: 0, x2: width - radius, y2: 0 },
-    [stop(0, BLUE), stop(0.36, GREEN), stop(0.68, YELLOW), stop(1, RED)],
+    { id: id + '-top', gradientUnits: 'userSpaceOnUse', x1: corner, y1: 0, x2: width - corner, y2: 0 },
+    STOPS.map(([offset, color]) => stop(offset, color)),
   );
   const side = (name, top, bottom) =>
-    element('linearGradient', { id: id + '-' + name, gradientUnits: 'userSpaceOnUse', x1: 0, y1: 0, x2: 0, y2: middle }, [
+    element('linearGradient', { id: id + '-' + name, gradientUnits: 'userSpaceOnUse', x1: 0, y1: corner, x2: 0, y2: end }, [
       stop(0, top),
       stop(0.45, bottom, 0.75),
       stop(1, bottom, 0),
@@ -46,9 +64,9 @@ export function drawFilet(svg, width, height, { radius = 16, stroke = 2 } = {}) 
     element('path', { d, fill: 'none', stroke: `url(#${id}-${paint})`, 'stroke-width': stroke, 'stroke-linecap': 'butt' });
   svg.replaceChildren(
     element('defs', {}, [along, side('left', BLUE, GREEN), side('right', RED, YELLOW)]),
-    line(`M ${radius} ${inset} H ${width - radius}`, 'top'),
-    line(`M ${radius} ${inset} A ${round} ${round} 0 0 0 ${inset} ${radius} V ${middle}`, 'left'),
-    line(`M ${width - radius} ${inset} A ${round} ${round} 0 0 1 ${width - inset} ${radius} V ${middle}`, 'right'),
+    line(`M ${corner} ${corner} ${arc} 1 ${radius} ${inset} H ${width - radius} ${arc} 1 ${width - corner} ${corner}`, 'top'),
+    line(`M ${corner} ${corner} ${arc} 0 ${inset} ${radius} V ${end}`, 'left'),
+    line(`M ${width - corner} ${corner} ${arc} 1 ${width - inset} ${radius} V ${end}`, 'right'),
   );
   return svg;
 }

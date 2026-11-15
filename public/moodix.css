@@ -4353,7 +4353,8 @@ html[data-switch='chat']::view-transition-old(studio) {
    does not. The sidebar lies on the frame, without a ground or a border of its own. */
 :root {
   /* The four colours of the logo in one gradient, each pure at the middle of its old segment
-     (4 / 2 / 3 / 1.5): the foot of Générer (moodix-design.md 7 bis 22, 20). */
+     (4 / 2 / 3 / 1.5): the foot of Générer (moodix-design.md 7 bis 22), and the filet of the window
+     drawn with the same stops (STOPS in public/filet.mjs, 7 bis 20). */
   --mdx-gradient: linear-gradient(90deg, #3d6bf5 19%, #22a060 47.6%, #f6c343 71.4%, #e8402f 92.9%);
   --frame: #07080a;
   --window: #0b0c0f;
