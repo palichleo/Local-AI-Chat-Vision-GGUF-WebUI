@@ -148,3 +148,18 @@ test('updates deliver the shipped workflows and never touch the user folder', as
     assert.ok(history.workflows[workflow.id]?.includes(workflowFingerprint(workflow)), workflow.name + ' missing from the history');
   }
 });
+
+test('every file of a shipped workflow has its source: a missing one offers its download', async () => {
+  const { readFile: read, readdir: list } = await import('node:fs/promises');
+  const folder = new URL('../runner/workflows/', import.meta.url);
+  const catalog = JSON.parse(await read(new URL('../runner/downloads.json', import.meta.url), 'utf8'));
+  const missing = [];
+  for (const name of (await list(folder)).filter(file => file.endsWith('.json'))) {
+    const workflow = JSON.parse(await read(new URL(name, folder), 'utf8'));
+    for (const [role, policy] of Object.entries(workflow.components ?? {}))
+      if (policy?.policy === 'fixed' && policy.file && !catalog[policy.file])
+        missing.push(`${workflow.name} · ${role} · ${policy.file}`);
+  }
+  // Wan 2.1 SCAIL-2 was shipped without them: no « Télécharger » on another computer.
+  assert.deepEqual(missing, []);
+});
