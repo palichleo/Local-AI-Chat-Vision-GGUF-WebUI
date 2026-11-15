@@ -58,11 +58,14 @@ export function setupAssets({ api, state, node, notice, onChange = () => {}, onB
               },
             })
           ).json();
-          const resource = await (await api('resources/update', { id: uploaded.id, patch: { prepared } })).json();
+          // The same file already kept in this project: that reference, as it is.
+          const resource = uploaded.existing
+            ? uploaded
+            : await (await api('resources/update', { id: uploaded.id, patch: { prepared } })).json();
           items = [...items.filter(item => item.id !== resource.id), resource];
           imported.push(resource);
         } catch (error) {
-          if (uploaded) await api('resources/delete', { id: uploaded.id }).catch(() => {});
+          if (uploaded && !uploaded.existing) await api('resources/delete', { id: uploaded.id }).catch(() => {});
           notice(`${file.name} : ${error.message}`);
         }
       }
@@ -269,6 +272,11 @@ export function setupAssets({ api, state, node, notice, onChange = () => {}, onB
     importFiles,
     /** A reference by its id, or null (removed since). */
     resource: id => items.find(item => item.id === id) ?? null,
+    /** The references of a project, ready, by their number (« # » in the message box). */
+    references: (project = 'inbox') =>
+      items
+        .filter(item => (item.project || 'inbox') === project && item.ready)
+        .sort((a, b) => a.reference - b.reference),
     hasDraft: () => false,
   };
 }

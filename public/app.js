@@ -1,6 +1,7 @@
 import { followWindow } from './filet.mjs';
 import { setupSidebarFold } from './sidebar-fold.mjs';
 import { withReference, withoutReference } from './reference-tokens.mjs';
+import { markReferences, removedNotice, setupReferencePeek, setupReferencePicker } from './reference-picker.mjs';
 
 /** The title of a chat before its first message gives it one (« Nouvelle conversation » before 0.5.109). */
 const UNTITLED = 'Nouveau chat';
@@ -1515,6 +1516,8 @@ function pinChat(area) {
 function renderText(target, text) {
   target.classList.add('markdown');
   target.innerHTML = markdownToHtml(text);
+  // « #ref3 » marked: its picture under the pointer.
+  markReferences(target, node);
 }
 
 function userMessage(text, images, videos = []) {
@@ -1549,7 +1552,7 @@ function userMessage(text, images, videos = []) {
     }
     article.append(previews);
   }
-  if (text) article.append(node('div', 'message-body', text));
+  if (text) article.append(markReferences(node('div', 'message-body', text), node));
   $('messages').append(article);
   return article;
 }
@@ -1951,6 +1954,16 @@ async function sendMessage(event) {
         },
         { signal },
       );
+      // References too little used for the model's list were removed from the disk: said.
+      const removed = response.headers?.get?.('X-References-Removed');
+      if (removed) {
+        try {
+          notice(removedNotice(JSON.parse(decodeURIComponent(removed))));
+        } catch {
+          // Unreadable: the list of references is refreshed all the same.
+        }
+        void assetsUI.refresh().catch(() => {});
+      }
       await readSSE(response.body, chunk => {
         contextMeter.observe(chunk);
         if (chunk.local_tool_request) request = chunk.local_tool_request;
@@ -3286,6 +3299,28 @@ try {
 }
 // The filet over the window: its four colours along the top, at the window's size.
 followWindow(document.querySelector('.mdx-filet'), document.querySelector('.workspace'));
+// The references of the project at hand: « # » in the message box lists them, « #ref3 » in a
+// message shows its picture under the pointer.
+const projectReferences = () => assetsUI.references(state.projectId || 'inbox');
+setupReferencePicker({
+  input: $('prompt'),
+  host: $('chat-form'),
+  node,
+  references: projectReferences,
+  onPick: (item, typed) => {
+    const box = $('prompt'),
+      written = withReference(box.value, item.label, typed.start, box.selectionStart ?? box.value.length);
+    box.value = written.text;
+    box.setSelectionRange?.(written.caret, written.caret);
+    resizePrompt();
+  },
+});
+setupReferencePeek({
+  root: $('messages'),
+  page: document,
+  node,
+  lookup: number => projectReferences().find(item => item.reference === number) ?? null,
+});
 // The sidebar folds to its icons and back (its button, Ctrl+B / ⌘+B).
 setupSidebarFold({
   root: document.documentElement,

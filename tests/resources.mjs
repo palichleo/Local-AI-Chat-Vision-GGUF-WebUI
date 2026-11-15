@@ -21,11 +21,14 @@ async function directory(t) {
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return root;
 }
+// Each image its own file (the same file twice in a project is one reference since 0.5.114).
+const fileOf = name => Buffer.concat([bytes, Buffer.from(name)]);
 async function image(store, name = 'Reference.png', project) {
-  const record = await store.add(Readable.from([bytes]), {
+  const file = fileOf(name);
+  const record = await store.add(Readable.from([file]), {
     name,
     mime: 'image/png',
-    length: bytes.length,
+    length: file.length,
     ...(project ? { project } : {}),
   });
   return store.update(record.id, {
@@ -146,7 +149,8 @@ async function apiFixture(t, { engine = false } = {}) {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-  const upload = async project => {
+  let uploads = 0;
+  const upload = async (project, file = Buffer.concat([bytes, Buffer.from('upload ' + ++uploads)])) => {
     const response = await fetch(app.url + '/api/resources/upload', {
       method: 'POST',
       headers: {
@@ -155,7 +159,7 @@ async function apiFixture(t, { engine = false } = {}) {
         'X-Resource-Name': encodeURIComponent('native.png'),
         ...(project ? { 'X-Resource-Project': project } : {}),
       },
-      body: bytes,
+      body: file,
     });
     assert.equal(response.status, 201);
     const record = await response.json();
@@ -186,7 +190,7 @@ async function apiFixture(t, { engine = false } = {}) {
 }
 test('resource HTTP media uses scoped tickets, byte ranges and survives clearing history and restart', async t => {
   const f = await apiFixture(t),
-    record = await f.upload();
+    record = await f.upload(undefined, bytes);
   assert.match((await fetch(f.app.url)).headers.get('content-security-policy'), /media-src 'self' blob:/);
   assert.equal((await fetch(f.app.url + '/api/resources')).status, 401);
   let response = await fetch(f.app.url + record.originalUrl, { headers: { Range: 'bytes=1-4' } });
@@ -503,7 +507,7 @@ test('too many for the model: the least used leave its list, never those the mes
   // Before a message is answered, those that leave are removed from the disk (they are copies).
   const original = join(root, 'pluie-originale.png');
   await writeFile(original, bytes);
-  assert.deepEqual(await store.prune('inbox', { budget: two }), [newer.id]);
+  assert.deepEqual(await store.prune('inbox', { budget: two }), [{ id: newer.id, label: newer.label, name: 'newer.png' }]);
   assert.deepEqual((await store.list()).map(item => item.name), ['old.png', 'newest.png']);
   await assert.rejects(store.readActive(newer.id), { status: 404 });
   assert.deepEqual(await readFile(original), bytes);
@@ -525,4 +529,46 @@ test('a reference sent from a chat or the Studio belongs to its project; a readi
   assert.equal(listed.length, 2);
   assert.equal(listed.find(item => item.id === one.id).uses, 1);
   assert.equal(listed.find(item => item.id === two.id).uses, undefined);
+});
+
+test('the same file twice in a project is one reference; in another project, its own', async t => {
+  const root = await directory(t),
+    path = join(root, 'resources'),
+    store = new Resources(path),
+    project = randomUUID(),
+    first = await image(store, 'pluie.png');
+  const again = await store.add(Readable.from([fileOf('pluie.png')]), { name: 'pluie-copie.png', mime: 'image/png' });
+  assert.deepEqual([again.existing, again.id, again.label], [true, first.id, '#ref1']);
+  assert.equal((await store.list()).length, 1);
+  // Its own in another project.
+  const elsewhere = await image(store, 'pluie.png', project);
+  assert.notEqual(elsewhere.id, first.id);
+  assert.equal(elsewhere.label, '#ref1');
+  // Kept before 0.5.114, without a digest: found all the same, and its digest kept.
+  const manifest = join(path, first.id, 'manifest.json'),
+    record = JSON.parse(await readFile(manifest, 'utf8'));
+  delete record.sha256;
+  await writeFile(manifest, JSON.stringify(record));
+  const third = await new Resources(path).add(Readable.from([fileOf('pluie.png')]), { name: 'x.png', mime: 'image/png' });
+  assert.equal(third.id, first.id);
+  assert.match(JSON.parse(await readFile(manifest, 'utf8')).sha256, /^[0-9a-f]{64}$/);
+  assert.equal((await store.list('inbox')).length, 1);
+  // Another file: another reference.
+  assert.equal((await image(store, 'neige.png')).label, '#ref2');
+});
+
+test('a file sent again from the chat or the Studio comes back as the reference it already is', async t => {
+  const f = await apiFixture(t),
+    file = Buffer.concat([bytes, Buffer.from('le même')]),
+    one = await f.upload(undefined, file),
+    token = (await (await fetch(f.app.url + '/api/bootstrap')).json()).token;
+  const response = await fetch(f.app.url + '/api/resources/upload', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/png', 'X-Resource-Name': 'copie.png' },
+    body: file,
+  });
+  assert.equal(response.status, 200);
+  const again = await response.json();
+  assert.deepEqual([again.existing, again.id, again.label], [true, one.id, one.label]);
+  assert.equal((await (await f.request('resources')).json()).resources.length, 1);
 });
