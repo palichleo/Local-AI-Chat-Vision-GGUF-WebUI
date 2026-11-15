@@ -4327,12 +4327,12 @@ body {
   :root {
     --sidebar-width: 232px;
   }
-  /* The sidebar spans the window's height: the letters of the logo on the window's top edge, the
-     foot of the actions on its bottom edge (10 px from the bottom of the frame, like the window).
-     At the top, 3 px, then the 6 px of the logo's box and the 1.5 px drawn empty above the letters
-     in mdx-white.png: the letters begin at 10.5 px, on the window's border (10 to 11 px). */
+  /* The sidebar and the window, one height: the logo where it always was (20 px, then the 6 px of
+     its box and the 1.5 px drawn empty above the letters in mdx-white.png: the letters begin at
+     27.5 px), the window's top edge on them (.workspace below); at the foot, the actions 10 px from
+     the bottom of the frame, on the window's bottom edge. */
   #sidebar {
-    padding: 3px 12px 10px;
+    padding: 20px 12px 10px;
     background: transparent;
     border-right: 0;
   }
@@ -4357,6 +4357,14 @@ body {
 @media (max-width: 1099px) {
   .workspace {
     margin-left: 10px;
+  }
+}
+/* Wide, the window follows the logo of the sidebar: its top edge (27 to 28 px, its border) on the
+   letters, which begin at 27.5 px; its bottom 10 px from the frame, on the foot of the actions. */
+@media (min-width: 1100px) {
+  .workspace {
+    height: calc(100dvh - 37px);
+    margin-top: 27px;
   }
 }
 /* The title bar: the first line of the window, the same in the Chat and the Studio. */
@@ -4542,8 +4550,8 @@ body {
     margin: 0;
   }
   /* Its squares begin 3.45 px into the drawing (4.6 of 32): 2 px higher than the middle of its
-     button, they begin at 10.5 px too, like the letters unfolded. Hovered, the mark gives way to the
-     icon, which stays in the middle of the button's ground. */
+     button, they begin at 27.5 px too, like the letters unfolded, on the window's top edge. Hovered,
+     the mark gives way to the icon, which stays in the middle of the button's ground. */
   :root[data-sidebar='collapsed'] .sidebar-toggle .sidebar-mark {
     display: block;
     transform: translateY(-2px);

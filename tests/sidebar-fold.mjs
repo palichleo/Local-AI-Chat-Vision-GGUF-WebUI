@@ -227,11 +227,16 @@ test('folded only on a wide window, 64 px, animated unless motion is reduced', a
 test('the sidebar spans the window: the logo at its top edge, the actions at its bottom edge', async () => {
   const css = (await read('moodix.css')).replace(/\r\n/g, '\n');
   const frame = css.slice(css.indexOf('frame and window'));
-  // The window: 10 px from the top and the bottom of the frame.
+  // The window: 10 px from the frame, the drawer's (under 1100 px) at the top too.
   assert.match(frame, /\.workspace \{[^}]*height: calc\(100dvh - 20px\);[^}]*margin: 10px 10px 10px 0;/);
-  // The sidebar: 3 px, the logo's box (6 px of padding) and the 1.5 px of empty drawing above the
-  // letters put them at 10.5 px, on the window's border; 10 px under the actions.
-  assert.match(frame, /@media \(min-width: 1100px\) \{[^@]*#sidebar \{\n {4}padding: 3px 12px 10px;/);
+  // The sidebar: 20 px, the logo's box (6 px of padding) and the 1.5 px of empty drawing above the
+  // letters put them at 27.5 px; 10 px under the actions.
+  assert.match(frame, /@media \(min-width: 1100px\) \{[^@]*#sidebar \{\n {4}padding: 20px 12px 10px;/);
+  // Wide, the window follows the logo: its top edge at 27 px, 10 px from the bottom.
+  assert.match(
+    frame,
+    /@media \(min-width: 1100px\) \{\n {2}\.workspace \{\n {4}height: calc\(100dvh - 37px\);\n {4}margin-top: 27px;/,
+  );
   assert.match(css, /#sidebar \.brand \{[^}]*padding: 6px 4px;/);
   // Unfolded, the button on the logo's line; folded, the small logo (24 px in 36) at the same top.
   assert.match(css, /\.sidebar-toggle \{[^}]*align-self: flex-start;[^}]*height: 28px;[^}]*margin: 6px 0 0;/);
@@ -239,7 +244,7 @@ test('the sidebar spans the window: the logo at its top edge, the actions at its
   assert.match(folded, /height: 36px;/);
   assert.match(folded, /margin: 0;/);
   assert.doesNotMatch(folded, /align-self/);
-  // The small logo's squares (from 4.6 of 32, at 24 px: 3.45 px) 2 px above the middle: 3 + 6 - 2 + 3.45.
+  // The small logo's squares (from 4.6 of 32, at 24 px: 3.45 px) 2 px above the middle: 20 + 6 - 2 + 3.45.
   assert.match(css, /:root\[data-sidebar='collapsed'\] \.sidebar-toggle \.sidebar-mark \{[^}]*transform: translateY\(-2px\);/);
   const mark = await read('assets/moodix-mark.svg');
   assert.match(mark, /viewBox="0 0 32 32"/);
