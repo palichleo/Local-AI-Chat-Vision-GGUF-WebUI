@@ -172,7 +172,8 @@ try {
   await size(1280);
   await send('Page.navigate', { url: app.url + '/' });
   await wait(2500);
-  await run('accueil', () => click('#home-open'), view('home'));
+  // At launch, with no conversation yet: « Nouveau chat » (0.5.123: no home page any more).
+  await run('lancement', () => true, view('chat'));
   await run('chat', () => click('#chat-open'), view('chat'));
   await run('nouveau chat depuis le chat', () => click('#new-chat'), view('chat'));
   await run('studio', () => click('#studio-open'), view('studio'));
@@ -181,7 +182,14 @@ try {
   await run('Agent', () => click('#studio-view .studio-agent'), () => js(`document.body.dataset.chat === 'open'`));
   await run('Échap (Agent)', () => key('Escape', 'Escape', 27), () => js(`document.body.dataset.chat !== 'open'`));
   await run('nouveau chat depuis le Studio', () => click('#new-chat'), view('studio'));
-  await run('bibliothèque', () => click('#library-open'), view('library'));
+  await run('bibliothèque', () => click('#library-open'), () =>
+    js(`document.body.dataset.view === 'library' && document.getElementById('library-project').value === 'all' && document.getElementById('library-project-view').hidden && !document.getElementById('library-empty').hidden`));
+  await run('type Vidéos', () => click('#library-kinds [data-kind="video"]'), () =>
+    js(`document.querySelector('#library-kinds [data-kind="video"]')?.getAttribute('aria-checked') === 'true'`));
+  await run('projet dans la barre', () => click('#history-list .project-open'), () =>
+    js(`document.body.dataset.view === 'library' && document.getElementById('library-project').value === 'inbox' && !document.getElementById('library-project-view').hidden`));
+  await run('nouveau chat du projet', () => click('#library-project-view .library-new'), view('chat'));
+  await run('bibliothèque, de nouveau', () => click('#library-open'), view('library'));
   await run('nouveau chat depuis la bibliothèque', () => click('#new-chat'), view('chat'));
   await run('« # » dans la saisie', () => js(`(() => { const p = document.getElementById('prompt'); p.focus(); p.value = '#'; p.selectionStart = p.selectionEnd = 1; p.dispatchEvent(new Event('input')); return true; })()`));
   await run('replier la barre', () => click('#sidebar-toggle'), () => js(`document.documentElement.dataset.sidebar === 'collapsed'`));
@@ -197,7 +205,7 @@ try {
   await run('tiroir', () => click('#navigation-open'), () => js(`document.body.dataset.navOpen === 'true'`));
   await run('Bibliothèque dans le tiroir', () => click('#library-open'), view('library'));
   await size(1280);
-  await run('rechargement', () => send('Page.reload').then(() => wait(2000)), view('home'));
+  await run('rechargement', () => send('Page.reload').then(() => wait(2000)), view('chat'));
   console.log(`Vérification de l’interface (${browser.split(/[\\/]/).pop()}) : ${results.filter(([, ok]) => ok).length}/${results.length} étapes.`);
   if (problems.length) {
     console.error('Erreurs de la page :');

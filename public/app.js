@@ -3,6 +3,7 @@ import { setupSidebarFold } from './sidebar-fold.mjs';
 import { withReference, withoutReference } from './reference-tokens.mjs';
 import { markReferences, removedNotice, setupReferencePeek, setupReferencePicker } from './reference-picker.mjs';
 import { setupUnexpectedErrors } from './unexpected-errors.mjs';
+import { setupLibrary } from './library.mjs';
 
 /** The title of a chat before its first message gives it one (« Nouvelle conversation » before 0.5.109). */
 const UNTITLED = 'Nouveau chat';
@@ -32,7 +33,9 @@ import { fillCopies, forgetCopies, needsCopies, rememberCopy, remakeOutputCopy, 
 
 const $ = id => document.getElementById(id);
 const state = {
-  view: 'home',
+  view: 'chat',
+  // The project the library shows ('all': every one), lit in the sidebar.
+  libraryProject: 'all',
   studioId: null,
   projectId: 'inbox',
   projects: [{ id: 'inbox', name: 'Conversations' }],
@@ -230,11 +233,33 @@ async function changePreferences(patch) {
   }
 }
 
+/** The conversation open last, kept by the browser for the next launch (0.5.123). */
+const LAST_CONVERSATION = 'moodix.lastConversation';
+function rememberConversation(id) {
+  try {
+    if (id) localStorage.setItem(LAST_CONVERSATION, id);
+    else localStorage.removeItem(LAST_CONVERSATION);
+  } catch {
+    // Without the browser's storage, the next launch opens « Nouveau chat ».
+  }
+}
+/** At launch: the conversation open last, if it is still in the history; otherwise « Nouveau chat ». */
+async function reopenLastConversation() {
+  let id = null;
+  try {
+    id = localStorage.getItem(LAST_CONVERSATION);
+  } catch {
+    // Unreadable: « Nouveau chat ».
+  }
+  if (!state.conversationId && id && state.historyItems.some(item => item.id === id)) await loadConversation(id);
+}
+
 function persistConversation() {
   const snapshot = state.archiveSnapshot || { messages: state.messages, incomplete: false };
   if (!state.saveHistory || state.disablingHistory || !snapshot.messages.length) return Promise.resolve(true);
   const projectId = state.projectId || 'inbox';
   const id = (state.conversationId ||= crypto.randomUUID());
+  rememberConversation(id);
   const instructions = state.conversationInstructions || '';
   state.historyDirty = true;
   historyWrite = historyWrite.then(async () => {
@@ -361,6 +386,7 @@ async function loadConversation(id) {
         ? savedUser(messages.pop())
         : { text: '', images: [], videos: [] };
     state.conversationId = id;
+    rememberConversation(id);
     state.conversationInstructions = record.instructions || '';
     state.messages = messages;
     state.projectId = record.projectId || 'inbox';
@@ -2648,7 +2674,11 @@ const projectUI = setupProjectNavigation({
     requestSettingsClose(() => newConversation(id));
   },
   removeConversation: confirmHistoryDeletion,
-  showHome,
+  showLibrary,
+  // A project renamed or deleted: the library on screen says it too.
+  onChange: () => {
+    if (state.view === 'library') libraryUI.render();
+  },
   onBusy: () => updateControls(),
 });
 const assetsUI = setupAssets({
@@ -2659,6 +2689,22 @@ const assetsUI = setupAssets({
   notice,
   onChange: () => contextMeter.schedule(),
   onBusy: () => updateControls(),
+});
+// The library: every creation; a click shows it whole, its conversation opens it.
+const libraryUI = setupLibrary({
+  $,
+  state,
+  node,
+  icon,
+  api,
+  viewOutput: (record, index) => assetsUI.viewOutput(record, index),
+  openConversation: id => requestSettingsClose(() => loadConversation(id)),
+  newConversation: id => requestSettingsClose(() => newConversation(id)),
+  // The project chosen in the library is lit in the sidebar.
+  onFilter: filter => {
+    state.libraryProject = filter.project;
+    projectUI.render();
+  },
 });
 const actionButtons = outputActions({
   api,
@@ -2696,7 +2742,7 @@ const studioUI = setupStudio({
   onConversation: () => showLastReply(),
   afterMove,
   openAgent: () => void openChat(),
-  // A mode chosen in the sidebar from the Chat or the home: the Studio opens, in that mode.
+  // A mode chosen in the sidebar from the Chat or the library: the Studio opens, in that mode.
   openStudio: () => showStudio(),
 });
 state.studio = studioUI;
@@ -2920,10 +2966,11 @@ function closeNavigation() {
   if (open && $('sidebar').contains?.(document.activeElement)) $('navigation-open').focus?.();
 }
 /**
- * A page of its own outside a conversation: the home page, or the library (`page`, its
- * body[data-view]; its content not drawn yet). The conversation is kept first.
+ * The library (Bibliothèque), a page of its own outside a conversation: every creation, those of
+ * one project (`project`, a click on it in the sidebar) or of every one. The conversation is kept
+ * first.
  */
-function showHome(page = 'home') {
+function showLibrary({ project = 'all' } = {}) {
   const blocked = () =>
     state.projectWorking ||
     state.status.toolJob ||
@@ -2942,10 +2989,12 @@ function showHome(page = 'home') {
     updateControls();
     try {
       if (!(await assetsUI.flush()) || !(await persistConversation())) return;
-      state.view = page;
+      state.view = 'library';
+      state.libraryProject = project;
       delete document.body.dataset.chat;
       closeNavigation();
       projectUI.render();
+      void libraryUI.show({ project });
     } catch (error) {
       notice(error.message);
     } finally {
@@ -2960,7 +3009,7 @@ function showHome(page = 'home') {
  * (`chat`) it unfolds from it; in the Studio the bar opens into the chat in the middle (`open`)
  * and the chat folds back into it (`close`). The browser's view transitions draw it, named in
  * moodix.css while `data-switch` is on the root. Without them, with reduced motion, or to and
- * from the home page, the page simply changes. Resolves once the page shows the change.
+ * from the library, the page simply changes. Resolves once the page shows the change.
  */
 function switchView(kind, apply) {
   const folding = kind === 'open' || kind === 'close',
@@ -3119,7 +3168,12 @@ function unsendChat() {
 state.onChatSent = chatSent;
 $('chat-scrim').onclick = () => void closeChat({ refocus: true });
 $('studio-open').onclick = () => showStudio();
-$('library-open').onclick = () => showHome('library');
+$('library-open').onclick = () => showLibrary();
+// The logo: back to the chat (0.5.123: there is no home page any more).
+$('brand-home').onclick = event => {
+  event.preventDefault();
+  showChat();
+};
 $('chat-open').onclick = () => showChat();
 async function newConversation(projectId = state.projectId || 'inbox') {
   if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)
@@ -3146,6 +3200,7 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     state.images = [];
     state.videos = [];
     state.conversationId = null;
+    rememberConversation(null);
     state.conversationInstructions = null;
     state.archiveSnapshot = null;
     state.historyDirty = false;
@@ -3292,6 +3347,8 @@ try {
   await assetsUI.refresh().catch(error => notice('Bibliothèque indisponible : ' + error.message));
   await workflowsUI.refresh();
   await restoreUpdate();
+  // At launch, the conversation open last (0.5.123), or « Nouveau chat » when there is none.
+  await reopenLastConversation();
   syncViews();
   showLastReply();
   if (initial.warning) notice(initial.warning);

@@ -6,15 +6,18 @@ import * as sessionCopies from '../public/session-copies.mjs';
 
 const read = async name => (await readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
-test('the sidebar: « Nouveau chat » a line as the pages, then Accueil, Chat, Studio, Bibliothèque', async () => {
+test('the sidebar: « Nouveau chat » a line as the pages, then Chat, Studio, Bibliothèque; no Accueil', async () => {
   const html = await read('index.html'),
     sidebar = html.slice(html.indexOf('<aside id="sidebar"'), html.indexOf('</aside>'));
   // No bordered button any more; the same id, the same words.
   assert.match(sidebar, /<button class="new-chat" id="new-chat" data-tip="Nouveau chat"><svg><use href="#i-plus"\/><\/svg><span>Nouveau chat<\/span><\/button>/);
-  const order = ['id="new-chat"', 'id="home-open"', 'id="chat-open"', 'id="studio-open"', 'id="studio-kinds"', 'id="library-open"'].map(
+  const order = ['id="new-chat"', 'id="chat-open"', 'id="studio-open"', 'id="studio-kinds"', 'id="library-open"'].map(
     mark => sidebar.indexOf(mark),
   );
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'in this order');
+  // No home page any more (0.5.123): the projects are opened in the library.
+  assert.doesNotMatch(sidebar, /id="home-open"|Accueil/);
+  assert.doesNotMatch(html, /id="home-view"|id="project-grid"|<symbol id="i-home"/);
   assert.match(
     sidebar,
     /<button id="library-open" type="button" class="home-button" aria-controls="library-view" data-tip="Bibliothèque"><svg aria-hidden="true"><use href="#i-library"\/><\/svg><span>Bibliothèque<\/span><\/button><\/nav>/,
@@ -27,29 +30,50 @@ test('the sidebar: « Nouveau chat » a line as the pages, then Accueil, Chat, S
   assert.match(html, /<symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3\.5v7\.5"\/><path d="M6\.6 6\.8a7\.6 7\.6 0 1 0 10\.8 0"\/><\/symbol>/);
 });
 
-test('the library: a page of its own in the window, its title in the title bar, its content not drawn yet', async () => {
+test('the library: a page of its own in the window, its title in the title bar, its filters above what they narrow', async () => {
   const html = await read('index.html'),
     app = await read('app.js'),
     navigation = await read('project-navigation.mjs'),
     css = await read('moodix.css');
-  assert.match(
-    html,
-    /<section id="library-view" class="library-view" aria-labelledby="library-title"><h1 id="library-title" class="sr-only">Bibliothèque<\/h1><p class="library-note">Toutes vos créations, bientôt ici\.<\/p><\/section>/,
+  const page = html.match(/<section id="library-view"[^]*?<\/section><\/section>/)?.[0] ?? '';
+  assert.match(page, /^<section id="library-view" class="library-view" aria-labelledby="library-title"><h1 id="library-title" class="sr-only">Bibliothèque<\/h1>/);
+  // Its project at its top; then the conversations of a project; then the creations, their kind and
+  // their conversation above them.
+  const order = ['id="library-project"', 'id="library-project-view"', 'id="library-creations-title"', 'id="library-kinds"', 'id="library-conversation"', 'id="library-grid"', 'id="library-empty"'].map(
+    mark => page.indexOf(mark),
   );
+  assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'in this order');
+  assert.match(page, /<section id="library-project-view" class="library-project-view" aria-label="Conversations du projet" hidden>/);
+  assert.match(page, /<div id="library-kinds" class="library-kinds" role="radiogroup" aria-label="Type de création">/);
+  assert.match(page, /<span class="sr-only">Projet<\/span><select id="library-project"><\/select>/);
+  assert.match(page, /<span class="sr-only">Conversation<\/span><select id="library-conversation"><\/select>/);
   assert.match(html, /<span id="library-heading" class="library-heading">Bibliothèque<\/span>/);
-  assert.match(app, /\$\('library-open'\)\.onclick = \(\) => showHome\('library'\);/);
+  assert.match(app, /\$\('library-open'\)\.onclick = \(\) => showLibrary\(\);/);
+  // The logo goes back to the chat: there is no home page any more.
+  assert.match(app, /\$\('brand-home'\)\.onclick = event => \{\n {2}event\.preventDefault\(\);\n {2}showChat\(\);/);
+  assert.match(html, /<body data-view="chat">/);
+  assert.match(app, /\n {2}view: 'chat',\n/);
   assert.match(navigation, /\$\('library-open'\)\?\.setAttribute\('aria-current', state\.view === 'library' \? 'page' : 'false'\);/);
   assert.match(navigation, /#studio-open,#library-open'/);
   assert.match(css, /body\[data-view='library'\] \.library-view \{\n {2}display: flex;/);
   assert.match(css, /\.library-note \{\n {2}margin: 0;\n {2}color: var\(--text-2\);/);
   assert.match(css, /body\[data-view='library'\] \.chat-area,\nbody\[data-view='library'\] \.composer-region,/);
+  // Its own scroll; pictures of 16:9 with 6 px corners, as in the Sortie of the Studio.
+  assert.match(css, /body\[data-view='library'\] \.library-view \{[^}]*overflow-y: auto;/);
+  assert.match(css, /\.library-grid \{\n {2}display: grid;\n {2}grid-template-columns: repeat\(auto-fill, minmax\(220px, 1fr\)\);/);
+  assert.match(css, /\.library-pick \{[^}]*aspect-ratio: 16 \/ 9;[^}]*border-radius: 6px;/);
+  assert.match(css, /\.library-kind\[aria-checked='true'\],\n\.library-kind\[aria-checked='true'\]:hover:enabled \{\n {2}background: var\(--selected\);/);
+  // Nothing left of the home page in the sheet.
+  assert.doesNotMatch(css, /home-view|\.home-header|project-card|project-cover|project-grid|#home-open|data-view='home'/);
 });
 
-test('a page of its own: the conversation kept first, then the library on screen', async () => {
+test('a page of its own: the conversation kept first, then the library on screen, on a project or on all', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
-    state = { status: {}, view: 'chat' };
+    state = { status: {}, view: 'chat' },
+    shown = [];
   let rendered = 0;
   const context = {
+    libraryUI: { show: options => shown.push(options) },
     ...sessionCopies,
     state,
     document: { body: { dataset: { chat: 'open' } } },
@@ -63,17 +87,24 @@ test('a page of its own: the conversation kept first, then the library on screen
   };
   runInNewContext(
     source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
-      ';this.page=showHome;',
+      ';this.page=showLibrary;',
     context,
   );
-  await context.page('library');
-  await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(state.view, 'library');
-  assert.equal(rendered, 1);
-  assert.equal(context.document.body.dataset.chat, undefined);
   await context.page();
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(state.view, 'home');
+  assert.equal(state.view, 'library');
+  assert.equal(state.libraryProject, 'all');
+  assert.equal(rendered, 1);
+  assert.equal(context.document.body.dataset.chat, undefined);
+  // A click on a project in the sidebar: the library on it, the project lit there.
+  await context.page({ project: 'p1' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(state.view, 'library');
+  assert.equal(state.libraryProject, 'p1');
+  assert.deepEqual(
+    shown.map(options => options.project),
+    ['all', 'p1'],
+  );
 });
 
 test('every line alike: 36 px, 10 px corners; the page open, a white line on the left edge', async () => {

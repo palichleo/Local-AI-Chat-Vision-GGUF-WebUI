@@ -133,16 +133,16 @@ test('the sidebar: its lines say their name themselves, but folded, at the right
   for (const folded of [false, true]) {
     const { body } = page({ folded });
     const sidebar = new Element('aside', { id: 'sidebar' });
-    const line = new Element('button', { className: 'home-button', attributes: { 'data-tip': 'Accueil' }, box: { left: 12, top: 126, right: 52, bottom: 162 } });
+    const line = new Element('button', { className: 'home-button', attributes: { 'data-tip': 'Bibliothèque' }, box: { left: 12, top: 126, right: 52, bottom: 162 } });
     const engine = new Element('button', { className: 'engine-button', attributes: { title: 'Démarrer le modèle' }, box: { left: 12, top: 700, right: 52, bottom: 736 } });
     sidebar.append(line, engine);
     body.append(sidebar);
     setupHelpTips(body);
     const bubble = body.children.find(child => child.className === 'help-bubble');
     body.fire('focusin', { target: line });
-    if (!folded) assert.equal(bubble.hidden, true, 'unfolded, « Accueil » is written on its line');
+    if (!folded) assert.equal(bubble.hidden, true, 'unfolded, « Bibliothèque » is written on its line');
     else {
-      assert.equal(bubble.textContent, 'Accueil');
+      assert.equal(bubble.textContent, 'Bibliothèque');
       assert.deepEqual([bubble.style.left, bubble.style.top], ['62px', '131px'], 'at its right, on its middle');
     }
     body.fire('focusin', { target: engine });

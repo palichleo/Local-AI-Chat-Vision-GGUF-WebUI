@@ -64,6 +64,7 @@ const staticFiles = new Map([
   ['/project-navigation.mjs', ['project-navigation.mjs', 'text/javascript; charset=utf-8']],
   ['/filet.mjs', ['filet.mjs', 'text/javascript; charset=utf-8']],
   ['/sidebar-fold.mjs', ['sidebar-fold.mjs', 'text/javascript; charset=utf-8']],
+  ['/library.mjs', ['library.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-tokens.mjs', ['reference-tokens.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-picker.mjs', ['reference-picker.mjs', 'text/javascript; charset=utf-8']],
   ['/unexpected-errors.mjs', ['unexpected-errors.mjs', 'text/javascript; charset=utf-8']],
@@ -978,6 +979,28 @@ export async function createApplication({
         for (const id of ids)
           try {
             runs.push(...(await gallery.list(id, { includeImages })).runs);
+          } catch {
+            // A conversation that cannot be read leaves the others.
+          }
+        runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        return send(200, { runs: runs.map(galleryView) });
+      }
+      // The Bibliothèque: the creations of every conversation of every project, the newest first,
+      // each with its project; the open one too (even before it is saved, `project` its own), and
+      // those of the Studio of before, which had no conversation (`legacy`). Without the history,
+      // the open one and those of before.
+      if (req.method === 'GET' && path === '/api/library') {
+        const open = requestURL.searchParams.get('conversation'),
+          includeImages = requestURL.searchParams.get('images') !== '0',
+          places = new Map(open ? [[open, projectId(requestURL.searchParams.get('project') || 'inbox')]] : []);
+        if (preferences.saveHistory)
+          for (const item of (await history.list()).conversations) places.set(item.id, item.projectId || 'inbox');
+        places.set(STUDIO_ID, 'inbox');
+        const runs = [];
+        for (const [id, project] of places)
+          try {
+            for (const run of (await gallery.list(id, { includeImages })).runs)
+              runs.push({ ...run, projectId: project, ...(id === STUDIO_ID ? { legacy: true } : {}) });
           } catch {
             // A conversation that cannot be read leaves the others.
           }

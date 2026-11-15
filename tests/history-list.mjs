@@ -92,7 +92,7 @@ function fixture(t, patch = {}) {
     openConversation: id => calls.push(['open', id]),
     newConversation: id => calls.push(['new', id]),
     removeConversation: item => calls.push(['delete', item.id]),
-    showHome: () => calls.push(['home']),
+    showLibrary: options => calls.push(['library', options]),
   });
   ui.render();
   return { ui, state, $, calls };
@@ -127,24 +127,27 @@ test('history disabled still shows the current unsaved conversation only in its 
     0,
   );
 });
-test('home shows ten most recent first prompts, a visual cover and no invented active conversation', t => {
-  const items = Array.from({ length: 12 }, (_, i) => ({
-    id: String(i),
-    title: 'Title ' + i,
-    firstPrompt: 'First prompt ' + i,
-    projectId: 'project',
-    updatedAt: String(i).padStart(2, '0'),
-    ...(i === 11 ? { previewUrl: '/media/preview' } : {}),
-  }));
-  const { $, calls } = fixture(t, { view: 'home', historyItems: items });
-  assert.equal(walk($('history-list')).filter(element => element.attributes['aria-current']).length, 0);
-  const card = $('project-grid').children[1];
-  assert.match(card.className, /is-visual/);
-  const recent = walk(card).filter(element => element.className === 'project-recent-item');
-  assert.equal(recent.length, 10);
-  assert.equal(recent[0].children[0].textContent, 'First prompt 11');
-  recent[0].onclick();
-  assert.deepEqual(calls, [['open', '11']]);
+test('a click on a project opens the library on it, lit in the sidebar while it is shown (0.5.123)', t => {
+  const { ui, state, $, calls } = fixture(t);
+  const open = walk($('history-list')).find(
+    element => element.className === 'project-open' && element.attributes['aria-label'] === 'A project',
+  );
+  open.onclick();
+  assert.deepEqual(calls, [['library', { project: 'project' }]]);
+  // On screen: that project lit and said current, no other; no conversation said open.
+  Object.assign(state, { view: 'library', projectId: 'inbox', libraryProject: 'project' });
+  ui.render();
+  const [inbox, project] = $('history-list').children;
+  assert.match(project.className, /is-active/);
+  assert.doesNotMatch(inbox.className, /is-active/);
+  assert.equal(project.children[0].children[1].attributes['aria-current'], 'page');
+  assert.equal(inbox.children[0].children[1].attributes['aria-current'], undefined);
+  assert.equal(
+    walk($('history-list')).filter(element => element.className.startsWith('history-item') && element.attributes['aria-current'])
+      .length,
+    0,
+  );
+  assert.equal(globalThis.document.body.dataset.view, 'library');
 });
 test('project collapse, rename and project-specific new conversation keep the hierarchy intact', async t => {
   const { $, calls, state } = fixture(t);
@@ -160,8 +163,6 @@ test('project collapse, rename and project-specific new conversation keep the hi
   );
   added.onclick();
   assert.ok(calls.some(call => call[0] === 'new' && call[1] === 'created'));
-  $('brand-home').onclick({ preventDefault() {} });
-  assert.deepEqual(calls.at(-1), ['home']);
 });
 test('moving an unsaved conversation changes its organization without saving chat content', async t => {
   const { $, calls, state } = fixture(t, { conversationId: null, historyItems: [] });
@@ -266,7 +267,7 @@ test('a new unsaved conversation is first under its project and stays first afte
   );
 });
 
-test('logo navigation keeps the current messages and draft and closes the mobile tree', async () => {
+test('the library keeps the current messages and draft and closes the mobile tree', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     state = {
       projectWorking: false,
@@ -301,15 +302,18 @@ test('logo navigation keeps the current messages and draft and closes the mobile
       },
     },
     projectUI: { render: () => renders++ },
+    libraryUI: { show: () => shows++ },
   };
+  let shows = 0;
   runInNewContext(
     source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
-      ';this.show=showHome;',
+      ';this.show=showLibrary;',
     context,
   );
   context.show();
   await pending;
-  assert.equal(state.view, 'home');
+  assert.equal(state.view, 'library');
+  assert.equal(shows, 1);
   assert.deepEqual(state.messages, [{ role: 'user', content: 'Keep' }]);
   assert.equal(prompt.value, 'An unsent draft');
   assert.equal(document.body.dataset.navOpen, 'false');
@@ -317,9 +321,9 @@ test('logo navigation keeps the current messages and draft and closes the mobile
   assert.equal(renders, 1);
 });
 
-test('home keeps an unsaved conversation reachable without adding it to saved project cards', t => {
+test('the library keeps an unsaved conversation reachable in the sidebar, not said open', t => {
   const { $, calls } = fixture(t, {
-    view: 'home',
+    view: 'library',
     conversationId: null,
     historyItems: [],
     messages: [{ role: 'user', content: 'Unsaved' }],
@@ -330,23 +334,22 @@ test('home keeps an unsaved conversation reachable without adding it to saved pr
   assert.equal(row.attributes['aria-current'], undefined);
   row.onclick();
   assert.deepEqual(calls, [['open', null]]);
-  assert.equal(walk($('project-grid')).filter(element => element.className === 'project-recent-item').length, 0);
 });
 
-test('Home uses the existing return action and indicates the current view without changing the conversation', t => {
-  const { ui, state, $, calls } = fixture(t),
+test('the library is said current in the sidebar, the conversation unchanged', t => {
+  const { ui, state, $ } = fixture(t),
     before = JSON.stringify(state.historyItems);
-  assert.equal($('home-open').attributes['aria-current'], 'false');
-  $('home-open').onclick();
-  assert.deepEqual(calls, [['home']]);
+  assert.equal($('library-open').attributes['aria-current'], 'false');
+  assert.equal($('chat-open').attributes['aria-current'], 'page');
+  state.view = 'library';
+  ui.render();
+  assert.equal($('library-open').attributes['aria-current'], 'page');
+  assert.equal($('chat-open').attributes['aria-current'], 'false');
   assert.equal(JSON.stringify(state.historyItems), before);
   assert.equal(state.conversationId, 'current');
-  state.view = 'home';
-  ui.render();
-  assert.equal($('home-open').attributes['aria-current'], 'page');
 });
 
-test('Home locks navigation while pending descriptions and saves complete', async () => {
+test('the library locks navigation while pending descriptions and saves complete', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     state = { status: {}, view: 'chat' },
     document = { body: { dataset: {} } };
@@ -370,10 +373,11 @@ test('Home locks navigation while pending descriptions and saves complete', asyn
         },
       },
       projectUI: { render() {} },
+      libraryUI: { show() {} },
     };
   runInNewContext(
     source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
-      ';this.home=showHome;',
+      ';this.home=showLibrary;',
     context,
   );
   try {
@@ -384,7 +388,7 @@ test('Home locks navigation while pending descriptions and saves complete', asyn
     await pending;
   }
   assert.equal(state.loadingHistory, false);
-  assert.equal(state.view, 'home');
+  assert.equal(state.view, 'library');
 });
 test('an action clicked before the page knows its token waits for it instead of being refused', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
@@ -461,7 +465,7 @@ test('Chat and Studio are two views of one conversation: switching is immediate,
     loaded();
   }
 });
-test('a deferred Home action never hides a response that started while settings confirmation was pending', async () => {
+test('a deferred library action never hides a response that started while settings confirmation was pending', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     state = { status: {}, view: 'chat' };
   let deferred,
@@ -487,10 +491,11 @@ test('a deferred Home action never hides a response that started while settings 
       },
     },
     projectUI: { render() {} },
+    libraryUI: { show: () => assert.fail('nothing shown while an answer is written') },
   };
   runInNewContext(
     source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
-      ';this.home=showHome;',
+      ';this.home=showLibrary;',
     context,
   );
   context.home();
@@ -499,7 +504,7 @@ test('a deferred Home action never hides a response that started while settings 
   assert.equal(state.view, 'chat');
   assert.equal(flushes, 0);
 });
-test('failed Home preparation keeps the chat visible and releases navigation controls', async () => {
+test('failed library preparation keeps the chat visible and releases navigation controls', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   for (const failure of [false, new Error('Description save failed')]) {
     const state = { status: {}, view: 'chat' };
@@ -529,10 +534,11 @@ test('failed Home preparation keeps the chat visible and releases navigation con
         },
       },
       projectUI: { render: () => renders++ },
+      libraryUI: { show: () => assert.fail('nothing shown when the conversation could not be kept') },
     };
     runInNewContext(
       source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
-        ';this.home=showHome;',
+        ';this.home=showLibrary;',
       context,
     );
     context.home();

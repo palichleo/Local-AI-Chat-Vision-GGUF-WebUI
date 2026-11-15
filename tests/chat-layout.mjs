@@ -102,10 +102,12 @@ test('under a message, only the last exchange can be taken back: nothing copies 
   assert.doesNotMatch(actions, /clipboard|Copier/);
 });
 
-test('the interface names its places in French: Accueil, Jour and Nuit; no « Créations », no « Fichiers »', async () => {
+test('the interface names its places in French: Bibliothèque, Jour and Nuit; no « Créations », no « Fichiers »', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(html, /id="home-open"[^>]*>.*?<span>Accueil<\/span>/);
+  assert.match(html, /id="library-open"[^>]*>.*?<span>Bibliothèque<\/span>/);
+  // No home page any more (0.5.123): a project opens in the library.
+  assert.doesNotMatch(html, /id="home-open"|id="home-view"|>Accueil</);
   // The references are kept from the Studio and the chats of a project: no panel of files.
   assert.doesNotMatch(html, /id="all-files"|id="assets-panel"|assets-resources-tab/);
   // The creations are in the Sortie of the Studio, shared by the project.

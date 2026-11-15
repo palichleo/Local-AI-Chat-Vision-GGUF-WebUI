@@ -1,4 +1,3 @@
-import { keepThumbnail } from './thumbnails.mjs';
 import { dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 
 export function projectGroups(projects, conversations) {
@@ -26,7 +25,8 @@ export function setupProjectNavigation({
   openConversation,
   newConversation,
   removeConversation,
-  showHome,
+  showLibrary,
+  onChange = () => {},
   onBusy = () => {},
 }) {
   const collapsed = new Set();
@@ -42,7 +42,6 @@ export function setupProjectNavigation({
     state.updating ||
     state.closingApp ||
     !!state.status.toolJob;
-  const date = value => (value ? new Date(value).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '');
   function button(label, cls, action, symbol) {
     const element = node('button', cls);
     element.type = 'button';
@@ -53,11 +52,10 @@ export function setupProjectNavigation({
     element.disabled = !!busy();
     return element;
   }
+  /** A project opens in the library: its conversations, then its creations (0.5.123). */
   function openProject(project) {
     if (busy()) return;
-    const recent = project.conversations[0];
-    if (recent) openConversation(recent.id);
-    else newConversation(project.id);
+    showLibrary({ project: project.id });
   }
   function edit(project = null) {
     if (busy()) return;
@@ -101,6 +99,7 @@ export function setupProjectNavigation({
       collapsed.delete(project.id);
       $('project-delete-dialog').close();
       render();
+      onChange();
     } catch (error) {
       $('project-delete-error').textContent = error.message;
       $('project-delete-error').hidden = false;
@@ -187,6 +186,7 @@ export function setupProjectNavigation({
       state.projects = state.projects.filter(item => item.id !== project.id).concat(project);
       $('project-dialog').close();
       render();
+      onChange();
     } catch (error) {
       $('project-error').textContent = error.message;
       $('project-error').hidden = false;
@@ -199,12 +199,6 @@ export function setupProjectNavigation({
     }
   };
   $('project-create').onclick = () => edit();
-  $('home-create-project').onclick = () => edit();
-  $('home-open').onclick = () => showHome();
-  $('brand-home').onclick = event => {
-    event.preventDefault();
-    showHome();
-  };
   $('conversation-project').onchange = async () => {
     const previous = state.projectId,
       next = $('conversation-project').value;
@@ -288,9 +282,11 @@ export function setupProjectNavigation({
       let draftRow;
       list.replaceChildren();
       for (const group of groups) {
-        const section = node(
+        // The project at hand: that of the chat, or the one the library shows.
+        const shown = state.view === 'library' && state.libraryProject === group.id,
+          section = node(
             'section',
-            'project-group' + (state.view === 'chat' && state.projectId === group.id ? ' is-active' : ''),
+            'project-group' + ((state.view === 'chat' && state.projectId === group.id) || shown ? ' is-active' : ''),
           ),
           header = node('div', 'project-row'),
           children = node('div', 'project-conversations');
@@ -309,6 +305,7 @@ export function setupProjectNavigation({
         children.id = id + '-' + group.id;
         toggle.setAttribute('aria-controls', children.id);
         const open = button(group.name, 'project-open', () => openProject(group), 'folder');
+        if (shown) open.setAttribute('aria-current', 'page');
         open.append(
           node('span', 'project-name', group.name),
           node('span', 'project-count', String(group.conversations.length)),
@@ -343,85 +340,6 @@ export function setupProjectNavigation({
       draftRow?.scrollIntoView?.({ block: 'nearest' });
     }
   }
-  function renderHome(groups) {
-    const grid = $('project-grid');
-    grid.replaceChildren();
-    const total = state.historyItems.length;
-    $('home-summary').textContent =
-      groups.length +
-      ' projet' +
-      (groups.length > 1 ? 's' : '') +
-      ' · ' +
-      total +
-      ' conversation' +
-      (total > 1 ? 's' : '');
-    for (const group of groups) {
-      const conversations = group.conversations.filter(item => !item.temporary),
-        visual = conversations.find(item => item.previewUrl),
-        card = node('article', 'project-card' + (visual ? ' is-visual' : ''));
-      if (visual) {
-        const cover = button('Reprendre ' + visual.title, 'project-cover', () => openConversation(visual.id));
-        const image = node('img');
-        image.alt = 'Aperçu de ' + group.name;
-        image.loading = 'lazy';
-        image.decoding = 'async';
-        image.src = visual.previewUrl;
-        // Served the whole original (several megabytes for this tile): a thumbnail is kept for next time.
-        image.onload = () => {
-          if (Math.max(image.naturalWidth, image.naturalHeight) > 600)
-            void keepThumbnail(api, { conversationId: visual.id, preview: true }, image);
-        };
-        image.onerror = () => {
-          cover.hidden = true;
-          card.classList.remove('is-visual');
-        };
-        cover.append(image, node('span', 'project-cover-label', 'Dernier visuel'));
-        card.append(cover);
-      }
-      const head = node('div', 'project-card-heading'),
-        title = button(group.name, 'project-card-title', () => openProject(group), 'folder');
-      title.append(node('h2', '', group.name));
-      projectGestures(title, group);
-      head.oncontextmenu = event => openMenu(event, group);
-      head.append(title);
-      if (group.id !== 'inbox')
-        head.append(
-          button('Supprimer ' + group.name, 'icon-button project-card-rename project-delete', () => remove(group), 'trash'),
-        );
-      card.append(
-        head,
-        node(
-          'p',
-          'project-card-meta',
-          conversations.length +
-            ' conversation' +
-            (conversations.length > 1 ? 's' : '') +
-            (visual ? ' · Visuel' : ' · Texte'),
-        ),
-      );
-      const list = node('div', 'project-recent');
-      for (const item of conversations.slice(0, 10)) {
-        const row = button(item.firstPrompt || item.title, 'project-recent-item', () => openConversation(item.id));
-        row.append(
-          node('span', '', item.firstPrompt || item.title),
-          node('time', '', date(item.createdAt || item.updatedAt)),
-        );
-        list.append(row);
-      }
-      if (!conversations.length) list.append(node('p', 'project-card-empty', 'Votre prochaine idée commence ici.'));
-      const footer = node('div', 'project-card-footer'),
-        create = button(
-          'Nouveau chat dans ' + group.name,
-          'project-card-new',
-          () => newConversation(group.id),
-          'plus',
-        );
-      create.append(node('span', '', 'Nouveau chat'));
-      footer.append(create);
-      card.append(list, footer);
-      grid.append(card);
-    }
-  }
   function render() {
     const nextDraft = state.view === 'chat' && !state.conversationId ? state.projectId : null,
       revealDraft = nextDraft !== null && nextDraft !== draftProject;
@@ -431,7 +349,6 @@ export function setupProjectNavigation({
     $('history-section').hidden = false;
     $('history-mobile').hidden = !state.saveHistory;
     renderSidebar(groups, revealDraft);
-    if (state.view === 'home') renderHome(groups);
     const select = $('conversation-project');
     select.replaceChildren();
     for (const project of state.projects || []) {
@@ -440,21 +357,19 @@ export function setupProjectNavigation({
       select.append(option);
     }
     select.value = state.projectId || 'inbox';
-    $('home-open').setAttribute('aria-current', state.view === 'home' ? 'page' : 'false');
     $('chat-open')?.setAttribute('aria-current', state.view === 'chat' ? 'page' : 'false');
     $('studio-open').setAttribute('aria-current', state.view === 'studio' ? 'page' : 'false');
     $('library-open')?.setAttribute('aria-current', state.view === 'library' ? 'page' : 'false');
-    $('home-view').hidden = state.view !== 'home';
     $('studio-view').hidden = state.view !== 'studio';
     // The title bar of the window, the same in the Chat and the Studio; its pill in the Studio.
     $('chat-header').hidden = !['chat', 'studio'].includes(state.view);
     if ($('studio-pill')) $('studio-pill').hidden = state.view !== 'studio';
-    document.body.dataset.view = state.view || 'home';
+    document.body.dataset.view = state.view || 'chat';
     sync();
   }
   function sync() {
     for (const control of document.querySelectorAll(
-      '.project-group button,.project-card button,#project-create,#home-create-project,#conversation-project,#home-open,#chat-open,#studio-open,#library-open',
+      '.project-group button,#project-create,#conversation-project,#chat-open,#studio-open,#library-open',
     ))
       control.disabled = !!busy();
   }
