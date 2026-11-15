@@ -7794,7 +7794,9 @@ video.studio-frame-result {
 :root[data-theme='light'] .studio-frame.is-busy .studio-bars span.is-lit {
   background: #12141a;
 }
-/* The row under the preview: formats on the left, Générer on the right. */
+/* The row under the preview: formats on the left, Générer on the right. Between them 6 px at least
+   (0.5.127; « Générer » is pushed to the right, the space is wider whenever there is room), 10 px
+   between two lines when it wraps. */
 .studio-actionbar {
   /* The format bar and « Générer » share one height: buttons of 38 px, 4 px inside the bar. */
   --format-button: 38px;
@@ -7803,7 +7805,26 @@ video.studio-frame-result {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 10px 6px;
+}
+/* A bar narrower than its parts at their size (a window of 1280 px: 399 px for 456; 0.5.127): the
+   formats, « Agent » and « Générer » tightened to stay on one line. Buttons of format of 44 px
+   (« ··· » 36), « Générer » of 150 px, 6 px between « Agent » and « Générer ». Narrower still,
+   « Générer » goes under the formats. */
+@container actionbar (max-width: 455px) {
+  #studio-view .has-formats .studio-format {
+    min-width: 44px;
+    padding: 0 6px;
+  }
+  #studio-view .has-formats .studio-format.is-more {
+    min-width: 36px;
+  }
+  #studio-view .has-formats .studio-go-group {
+    gap: 6px;
+  }
+  #studio-view .has-formats .studio-go {
+    min-width: 150px;
+  }
 }
 .studio-formats-wrap {
   position: relative;
