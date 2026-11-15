@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../server.mjs';
 import { History } from '../lib/history.mjs';
+import { STUDIO_NOTE } from '../public/transcript.mjs';
 
 const png =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
@@ -45,6 +46,31 @@ test('history stays ordered by creation after an old conversation is saved again
     (await new History(directory).list()).conversations.map(item => item.id),
     [newer, older],
   );
+});
+
+test('a conversation begun in the Studio is titled by its line, never with the words added for the model', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'atelier-history-studio-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'history'),
+    history = new History(directory),
+    id = randomUUID(),
+    line = 'Studio · Image : un renard dans la neige';
+  const saved = await history.save({
+    id,
+    messages: [
+      { role: 'user', internal: true, content: line + '\n\n' + STUDIO_NOTE },
+      { role: 'assistant', content: 'Voici le renard.' },
+    ],
+  });
+  assert.equal(saved.title, line);
+  // Saved so before 0.5.125: the title on the disk has the note, cut at 120 characters.
+  const path = join(directory, id, 'conversation.json'),
+    stored = JSON.parse(await readFile(path, 'utf8'));
+  await writeFile(path, JSON.stringify({ ...stored, title: (line + '\n\n' + STUDIO_NOTE).slice(0, 120) }));
+  const [listed] = (await history.list()).conversations;
+  assert.equal(listed.title, line);
+  assert.equal(listed.firstPrompt, line);
+  assert.equal((await history.read(id)).title, line);
 });
 
 test('historique optionnel : l’original joint est conservé, les copies du modèle jamais', async () => {

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-import { callNote, lastExchange, spokenText } from '../public/transcript.mjs';
+import { STUDIO_NOTE, callNote, lastExchange, spokenText, withoutStudioNote } from '../public/transcript.mjs';
 import * as chatVideos from '../public/chat-videos.mjs';
 
 const call = (name, id = 'c1') => ({ id, type: 'function', function: { name, arguments: '{}' } });
@@ -186,4 +186,17 @@ test('nothing is taken back while a reply or a generation is running', async () 
   await takeBack(true);
   assert.equal(state.messages.length, 5);
   assert.match(done[0], /^avis : Attends la fin/);
+});
+
+test('a title begun in the Studio is its line, without the words added for the model, even cut short', () => {
+  const line = 'Studio · Image : un renard dans la neige';
+  assert.equal(withoutStudioNote(line + '\n\n' + STUDIO_NOTE), line);
+  // Titles keep 120 characters: the note cut anywhere, even right after its parenthesis.
+  for (const cut of [1, 5, 30, STUDIO_NOTE.length - 1])
+    assert.equal(withoutStudioNote(line + '\n\n' + STUDIO_NOTE.slice(0, cut)), line);
+  assert.equal(withoutStudioNote(line + '\n\n'), line);
+  // Anything else is left as written: another line, other words in parentheses.
+  assert.equal(withoutStudioNote('Bonjour\n\n' + STUDIO_NOTE), 'Bonjour\n\n' + STUDIO_NOTE);
+  assert.equal(withoutStudioNote(line + '\n\n(une précision)'), line + '\n\n(une précision)');
+  assert.equal(withoutStudioNote(undefined), '');
 });

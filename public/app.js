@@ -15,7 +15,7 @@ import { setupHelpTips } from './help-tips.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
-import { callNote, lastExchange, spokenText } from './transcript.mjs';
+import { STUDIO_NOTE, callNote, lastExchange, spokenText } from './transcript.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
 import { setupContextMeter } from './context-meter.mjs';
 import { installFromButton, compactSession } from './update-ui.mjs';
@@ -2623,7 +2623,7 @@ async function runInStudio(proposal, { signal, onProgress }) {
     {
       role: 'user',
       internal: true,
-      content: said + '\n\n(Créée dans le Studio : l’utilisateur a réglé et lancé cette génération lui-même.)',
+      content: said + '\n\n' + STUDIO_NOTE,
     },
     { role: 'assistant', content: '', tool_calls: [proposal.call] },
     { role: 'tool', tool_call_id: proposal.call.id, content: result.content },

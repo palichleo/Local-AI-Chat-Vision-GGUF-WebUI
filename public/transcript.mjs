@@ -54,6 +54,18 @@ export function callNote(call, result) {
 const DIRECT_ACTION = /^(?:Upscale|Interpolation) de la sortie [0-9a-f]{8}-/;
 // What it writes for the model when the user makes something in the Studio.
 export const STUDIO_LINE = /^Studio · (?:Image|Vidéo|Son) : /;
+// The words it adds after that line, for the model only: not what the user reads.
+export const STUDIO_NOTE = '(Créée dans le Studio : l’utilisateur a réglé et lancé cette génération lui-même.)';
+/**
+ * A title without those words, even cut short (a title keeps 120 characters): « Studio · Image :
+ * un renard », not the line and the note joined (the titles saved before 0.5.125).
+ */
+export function withoutStudioNote(text) {
+  const value = String(text ?? '');
+  if (!STUDIO_LINE.test(value)) return value;
+  const at = value.lastIndexOf('\n\n(');
+  return (at >= 0 && STUDIO_NOTE.startsWith(value.slice(at + 2)) ? value.slice(0, at) : value).trimEnd();
+}
 const written = message =>
   typeof message.content === 'string'
     ? message.content

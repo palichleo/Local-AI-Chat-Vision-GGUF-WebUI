@@ -444,8 +444,10 @@ export async function createApplication({
       })),
     };
   }
+  // `v`: the time it was written; one made again has another address, the browser keeping each for good.
   const thumbUrl = (conversationId, runId, index) =>
-    `/media/thumbs/${conversationId}/${runId}/${index}?key=${mediaKey(conversationId + '/' + runId + '/' + index, 'thumb')}`;
+    `/media/thumbs/${conversationId}/${runId}/${index}?key=${mediaKey(conversationId + '/' + runId + '/' + index, 'thumb')}` +
+    `&v=${thumbnails.version(Thumbnails.key(conversationId, runId, index)).toString(36)}`;
   /** The creation the cover of a conversation shows: its thumbnail when there is one, else the image itself. */
   const coverOf = conversationId =>
     history.preview(conversationId, async runId => {
@@ -912,7 +914,10 @@ export async function createApplication({
         }
         const record = await gallery.get(conversationId, runId, { includeImages: false });
         if (record.provider !== 'native' || !record.outputs[index]) throw problem('Sortie introuvable.', 404);
-        await thumbnails.write(Thumbnails.key(conversationId, runId, index), Buffer.concat(parts));
+        // `X-Replace`: made again, the one kept being black (see public/thumbnails.mjs).
+        await thumbnails.write(Thumbnails.key(conversationId, runId, index), Buffer.concat(parts), {
+          replace: req.headers['x-replace'] === '1' && req.headers['x-preview'] !== '1',
+        });
         return send(201, { thumbUrl: thumbUrl(conversationId, runId, index) });
       }
       const attachmentRead = req.method === 'GET' && path.match(/^\/api\/attachments\/([0-9a-f-]{36})\/([a-z0-9.-]{1,90})$/);
@@ -986,21 +991,34 @@ export async function createApplication({
         return send(200, { runs: runs.map(galleryView) });
       }
       // The Bibliothèque: the creations of every conversation of every project, the newest first,
-      // each with its project; the open one too (even before it is saved, `project` its own), and
-      // those of the Studio of before, which had no conversation (`legacy`). Without the history,
-      // the open one and those of before.
+      // each with its project; the open one too (even before it is saved, `project` its own), those
+      // of conversations never saved (`unsaved`, under Conversations: made in the Studio before any
+      // message, or a chat closed before its first save), and those of the Studio of before, which
+      // had no conversation (`legacy`). Without the history, the open one and those of before.
       if (req.method === 'GET' && path === '/api/library') {
         const open = requestURL.searchParams.get('conversation'),
           includeImages = requestURL.searchParams.get('images') !== '0',
-          places = new Map(open ? [[open, projectId(requestURL.searchParams.get('project') || 'inbox')]] : []);
-        if (preferences.saveHistory)
+          places = new Map(open ? [[open, projectId(requestURL.searchParams.get('project') || 'inbox')]] : []),
+          unsaved = new Set();
+        if (preferences.saveHistory) {
           for (const item of (await history.list()).conversations) places.set(item.id, item.projectId || 'inbox');
+          for (const id of await gallery.conversations())
+            if (!places.has(id) && id !== STUDIO_ID) {
+              places.set(id, 'inbox');
+              unsaved.add(id);
+            }
+        }
         places.set(STUDIO_ID, 'inbox');
         const runs = [];
         for (const [id, project] of places)
           try {
             for (const run of (await gallery.list(id, { includeImages })).runs)
-              runs.push({ ...run, projectId: project, ...(id === STUDIO_ID ? { legacy: true } : {}) });
+              runs.push({
+                ...run,
+                projectId: project,
+                ...(id === STUDIO_ID ? { legacy: true } : {}),
+                ...(unsaved.has(id) ? { unsaved: true } : {}),
+              });
           } catch {
             // A conversation that cannot be read leaves the others.
           }

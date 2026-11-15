@@ -223,6 +223,17 @@ test('the kind and the conversation narrow the creations; ← → move between t
   assert.deepEqual(ids(f.$('library-grid')), ['r2', 'r4']);
 });
 
+test('a creation of a conversation never saved says so, and opens nothing', async () => {
+  const f = fixture({
+    runs: [{ id: 'u1', conversationId: 'gone', projectId: 'inbox', unsaved: true, prompt: 'Un renard', outputs: [output('gone', 'u1')] }],
+  });
+  await f.library.show();
+  const from = find(f.$('library-grid').children[0], 'library-from');
+  assert.equal(from.tag, 'span');
+  assert.equal(from.textContent, 'Conversation non enregistrée');
+  assert.equal(from.onclick, undefined);
+});
+
 test('the tiles are kept from one drawing to the next: their pictures are not loaded again', async () => {
   const f = fixture();
   await f.library.show();
@@ -255,7 +266,7 @@ test('a project gone shows every project again; an empty library says where crea
   assert.equal(broken.$('library-empty').textContent, 'Bibliothèque illisible : Disque illisible.');
 });
 
-test('GET /api/library: the creations of every project, each with its own, the open one and those of before', async () => {
+test('GET /api/library: the creations of every project, each with its own, the open one, those never saved and those of before', async () => {
   const folder = await mkdtemp(join(tmpdir(), 'atelier-library-')),
     historyDir = join(folder, 'history');
   let app;
@@ -270,13 +281,15 @@ test('GET /api/library: the creations of every project, each with its own, the o
       });
     assert.equal((await call('preferences', { saveHistory: true })).status, 200);
     const project = (await (await call('projects/save', { name: 'Voyage' })).json()).project;
-    const [trip, idea, open] = [randomUUID(), randomUUID(), randomUUID()];
+    // `orphan`: a conversation never saved (a creation of the Studio before any message).
+    const [trip, idea, open, orphan] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
     const said = content => [{ role: 'user', content }];
     assert.equal((await call('history/save', { id: trip, projectId: project.id, messages: said('Une plage') })).status, 200);
     assert.equal((await call('history/save', { id: idea, messages: said('Une idée') })).status, 200);
     const gallery = new Gallery({ historyDir }),
       made = {};
     for (const [name, conversationId, createdAt, mediaType] of [
+      ['orphan', orphan, '2026-11-09T10:00:00.000Z', 'image'],
       ['before', STUDIO_ID, '2026-11-10T10:00:00.000Z', 'image'],
       ['trip', trip, '2026-11-11T10:00:00.000Z', 'image'],
       ['idea', idea, '2026-11-12T10:00:00.000Z', 'video'],
@@ -302,21 +315,28 @@ test('GET /api/library: the creations of every project, each with its own, the o
     const library = async query => (await (await call('library' + query)).json()).runs;
     const listed = await library(`?images=0&conversation=${open}&project=${project.id}`);
     assert.deepEqual(
-      listed.map(run => [run.id, run.projectId, run.legacy === true]),
+      listed.map(run => [run.id, run.projectId, run.legacy === true, run.unsaved === true]),
       [
-        [made.open, project.id, false],
-        [made.idea, 'inbox', false],
-        [made.trip, project.id, false],
-        [made.before, 'inbox', true],
+        [made.open, project.id, false, false],
+        [made.idea, 'inbox', false, false],
+        [made.trip, project.id, false, false],
+        [made.before, 'inbox', true, false],
+        [made.orphan, 'inbox', false, true],
       ],
       'the newest first, each with its project',
     );
     assert.match(listed[0].outputs[0].originalUrl, new RegExp(`^/media/generated/${open}/${made.open}/0\\?key=`));
     assert.equal(listed[0].mediaType, 'audio');
-    // Without the open one: the saved ones and those of before.
+    // Not said open: the conversation of the open one, never saved, is one of those never saved.
     assert.deepEqual(
-      (await library('?images=0')).map(run => run.id),
-      [made.idea, made.trip, made.before],
+      (await library('?images=0')).map(run => [run.id, run.unsaved === true]),
+      [
+        [made.open, true],
+        [made.idea, false],
+        [made.trip, false],
+        [made.before, false],
+        [made.orphan, true],
+      ],
     );
     assert.equal((await call('library?conversation=' + open + '&project=..')).status, 400, 'an invalid project');
     // Without the history: the open one and those of before.

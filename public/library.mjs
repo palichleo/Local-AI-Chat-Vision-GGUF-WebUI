@@ -6,7 +6,7 @@
  * with its details; on its conversation, opens it. The latest visual of a project is simply its
  * first tile.
  */
-import { thumbnailOf } from './thumbnails.mjs';
+import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
 
 export const KINDS = [
   { id: 'all', icon: 'media', label: 'Tout' },
@@ -167,8 +167,9 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     } else if (output.thumbUrl || media === 'image') {
       const picture = node('img');
       Object.assign(picture, { alt: '', loading: 'lazy', decoding: 'async', src: output.thumbUrl || output.originalUrl || '' });
-      // Served whole: a thumbnail is kept for the next time.
+      // Served whole: a thumbnail is kept for the next time. That of a clip found black: made again.
       if (!output.thumbUrl) picture.onload = () => void thumbnailOf(api, record, 0, picture);
+      else if (media === 'video') picture.onload = () => void healThumbnail(api, kept.record, 0, picture);
       pick.append(picture);
     } else {
       // Its first picture only, of which a thumbnail is made for the next time.
@@ -185,9 +186,9 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     }
     const words = node('div', 'library-words');
     words.append(node('p', 'library-prompt', record.prompt || NAMES[media] || 'Création'));
-    if (record.legacy) {
-      // The Studio of before had no conversation: nothing to open.
-      words.append(node('span', 'library-from', 'Ancien Studio'));
+    if (record.legacy || record.unsaved) {
+      // The Studio of before had no conversation, one never saved cannot be opened.
+      words.append(node('span', 'library-from', record.legacy ? 'Ancien Studio' : 'Conversation non enregistrée'));
     } else {
       const from = node('button', 'library-from');
       from.type = 'button';

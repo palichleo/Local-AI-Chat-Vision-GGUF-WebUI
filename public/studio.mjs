@@ -1,5 +1,5 @@
 import { FORMATS, formatOf, nearestSize, sizesFor } from './formats.mjs';
-import { thumbnailOf } from './thumbnails.mjs';
+import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
 import { livePreview } from './live-preview.mjs';
 import { setupPointer } from './studio-pointer.mjs';
 
@@ -2782,6 +2782,8 @@ export function setupStudio({
             measured.set(record.id, { width: picture.naturalWidth, height: picture.naturalHeight });
             void thumbnailOf(api, record, 0, picture);
           }
+          // The thumbnail of a clip found black (kept before 0.5.125): made again from the clip.
+          else if (media === 'video' && small) void healThumbnail(api, record, 0, picture);
         };
       } else {
         // Its first picture only, of which a thumbnail is made for the next time.
