@@ -41,7 +41,7 @@ test('the library: a page of its own in the window, its title in the title bar, 
   assert.match(navigation, /\$\('library-open'\)\?\.setAttribute\('aria-current', state\.view === 'library' \? 'page' : 'false'\);/);
   assert.match(navigation, /#studio-open,#library-open'/);
   assert.match(css, /body\[data-view='library'\] \.library-view \{\n {2}display: flex;/);
-  assert.match(css, /\.library-note \{\n {2}margin: 0;\n {2}color: #9aa0ab;/);
+  assert.match(css, /\.library-note \{\n {2}margin: 0;\n {2}color: var\(--text-2\);/);
   assert.match(css, /body\[data-view='library'\] \.chat-area,\nbody\[data-view='library'\] \.composer-region,/);
 });
 
@@ -80,9 +80,10 @@ test('every line alike: 36 px, 10 px corners; the page open, a white line on the
   const css = await read('moodix.css'),
     rows = css.slice(css.indexOf('sidebar, rows (0.5.108)'));
   assert.ok(rows.length > 100);
-  assert.match(rows, /#sidebar > \.new-chat,\n#sidebar \.home-button \{[^}]*height: 36px;[^}]*padding: 0 8px;[^}]*border: 0;[^}]*border-radius: 10px;[^}]*background: transparent;[^}]*font-size: 14px;[^}]*font-weight: 600;/);
-  assert.match(rows, /--row-ink: #aeb4bf;\n {2}--row-hover: #15171c;\n {2}--row-open: #eceef2;/);
-  assert.match(rows, /:root\[data-theme='light'\] #sidebar \{\n {2}--row-ink: #5a606b;\n {2}--row-hover: #eef0f3;\n {2}--row-open: #0b0c0f;/);
+  assert.match(rows, /#sidebar > \.new-chat,\n#sidebar \.home-button \{[^}]*height: 36px;[^}]*padding: 0 8px;[^}]*border: 0;[^}]*border-radius: 10px;[^}]*background: transparent;[^}]*font-size: var\(--size-3\);[^}]*font-weight: 600;/);
+  // Text in the four greys of the sheet (--text-1: principal, --text-2: secondaire).
+  assert.match(rows, /--row-ink: var\(--text-2\);\n {2}--row-hover: #15171c;\n {2}--row-open: var\(--text-1\);/);
+  assert.match(rows, /:root\[data-theme='light'\] #sidebar \{\n {2}--row-ink: var\(--text-2\);\n {2}--row-hover: #eef0f3;\n {2}--row-open: var\(--text-1\);/);
   assert.match(rows, /#sidebar > \.new-chat \{[^}]*color: var\(--row-open\);\n {2}font-weight: 700;/);
   assert.match(rows, /#sidebar \.home-button\[aria-current='page'\],\n[^{]*\{\n {2}background: transparent;\n {2}color: var\(--row-open\);\n {2}font-weight: 800;/);
   assert.match(
