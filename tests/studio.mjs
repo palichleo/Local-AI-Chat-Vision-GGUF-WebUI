@@ -157,7 +157,10 @@ test('the Studio is told, per verb, the ready workflows with their inputs, sizes
   const h3 = named('create_video', 'MiniMax');
   assert.deepEqual(h3.size, { width: 768, height: 448 });
   assert.deepEqual(h3.final, { width: 1344, height: 768 });
-  assert.deepEqual([h3.roles.start_image.count, h3.roles.end_image.count, h3.roles.reference.count], [1, 1, 3]);
+  // No start or end image: its model (Omni-Ref) does not follow them; references only.
+  assert.deepEqual([h3.roles.start_image.count, h3.roles.end_image.count, h3.roles.reference.count], [0, 0, 3]);
+  const ltxFrames = named('create_video', 'LTX');
+  assert.deepEqual([ltxFrames.roles.start_image.count, ltxFrames.roles.end_image.count], [1, 1]);
   assert.ok(Math.abs(h3.lengths.seconds[0] - 124 / 24) < 1e-9);
   assert.ok(h3.exclusive);
 

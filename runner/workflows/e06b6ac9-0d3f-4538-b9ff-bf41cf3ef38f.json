@@ -5,7 +5,7 @@
   "pipeline": "minimax_h3",
   "mediaType": "video",
   "name": "MiniMax H3 Omni",
-  "description": "Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, entre une image de début et/ou de fin, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Images de début/fin et références ne se combinent pas. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo.",
+  "description": "Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo.",
   "components": {
     "model": {
       "policy": "fixed",
@@ -142,18 +142,6 @@
       "role": "source_video",
       "required": false,
       "name": "Vidéo à prolonger"
-    },
-    {
-      "id": "start",
-      "role": "start_image",
-      "required": false,
-      "name": "Image de début"
-    },
-    {
-      "id": "end",
-      "role": "end_image",
-      "required": false,
-      "name": "Image de fin"
     },
     {
       "id": "subject-1",
