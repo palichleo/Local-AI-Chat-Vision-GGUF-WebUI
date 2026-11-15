@@ -1214,15 +1214,6 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   background: var(--surface);
   border-color: var(--line);
 }
-.suggestions button:nth-child(1) {
-  border-top: 2px solid var(--fn-action);
-}
-.suggestions button:nth-child(2) {
-  border-top: 2px solid var(--fn-output);
-}
-.suggestions button:nth-child(3) {
-  border-top: 2px solid var(--fn-input);
-}
 
 /* ------------------------------------------------------------------ Studio: four blocks */
 #studio-view {
@@ -4716,8 +4707,9 @@ body {
    Every line of the sidebar alike: « Nouveau chat » and the pages (Accueil, Chat, Studio,
    Bibliothèque), 36 px, 10 px corners, an icon of 18 px and its word, no border, no ground; a
    ground #15171C under the pointer. The page open has no ground: its word in white, 800, and a
-   white line 3 px wide on the inner left edge of the sidebar. The icon at 8 px and the word at
-   32 px from the edge of the line: the track of the Studio's modes starts there too. */
+   white line 3 px wide on the inner left edge of the sidebar. The icon in a box of 24 px (its
+   drawing fills about three quarters of it: in 18 px it looked 14 px) at 8 px from the edge of
+   the line, 12 px from its word; the word at 44 px, where the track of the Studio's modes starts. */
 #sidebar {
   --sidebar-inset: 14px;
   --bar-ground: var(--sidebar);
@@ -4743,7 +4735,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 6px;
+  gap: 12px;
   width: auto;
   height: 36px;
   min-height: 36px;
@@ -4768,8 +4760,14 @@ body {
 #sidebar > .new-chat svg,
 #sidebar .home-button svg {
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
+  stroke-width: 1.75;
+}
+/* The word at the left of its line (a button centres its text: « Nouveau chat » was). */
+#sidebar > .new-chat > span,
+#sidebar .home-button > span {
+  text-align: left;
 }
 #sidebar > .new-chat:hover:enabled,
 #sidebar .home-button:hover:enabled,
@@ -4819,7 +4817,7 @@ body[data-view='studio'] #sidebar .studio-nav .home-button {
   padding: 0 8px;
 }
 #sidebar #studio-kinds.kind-tabs {
-  margin: 0 0 2px 32px;
+  margin: 0 0 2px 44px;
 }
 
 /* The foot: the model at the left, Configuration at the right, without a box around them; one
@@ -4863,8 +4861,8 @@ body[data-view='studio'] #sidebar .studio-nav .home-button {
 }
 #sidebar .sidebar-actions .engine-button svg,
 #sidebar .sidebar-actions .settings-button svg {
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
 }
 /* ⏻ whatever the state, in a line of 1.75 px; it never turns. */
 #sidebar .sidebar-actions .engine-button svg,
@@ -4933,7 +4931,7 @@ body[data-view='studio'] #sidebar .studio-nav .home-button {
     height: 36px;
     min-height: 36px;
     margin: 0;
-    padding: 0 0 0 11px;
+    padding: 0 0 0 8px;
   }
   :root[data-sidebar='collapsed'] #sidebar > .new-chat {
     margin-bottom: -16px;
@@ -4987,4 +4985,33 @@ body[data-view='library'] .chat-header {
 }
 body[data-view='library'] .chat-panel {
   display: none;
+}
+
+/* ------------------------------------------------------------------ the message box (0.5.112)
+   Being written in, its border of 1 px a little lighter, and nothing else: the ring of 2 px laid
+   3 px around it (styles.css) made a second, white frame. */
+.composer:has(textarea:focus-visible),
+.composer:focus-within {
+  outline: none;
+}
+#chat-form.composer:focus-within {
+  border-color: #3a3f4a;
+  box-shadow: none;
+}
+:root[data-theme='light'] #chat-form.composer:focus-within {
+  border-color: #aeb4bf;
+}
+/* The share of the context in use (« 0 % »), a figure that says nothing at first sight: shown
+   under the pointer over the message box or over it, on the keyboard's focus, and when the
+   context is nearly full; its room kept, nothing moves. */
+.context-meter {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+#chat-form:hover ~ .context-meter,
+.context-meter:hover,
+.context-meter:focus-visible,
+.context-meter[data-warning='near'],
+.context-meter[data-warning='full'] {
+  opacity: 1;
 }

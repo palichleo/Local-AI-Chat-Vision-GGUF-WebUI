@@ -91,10 +91,14 @@ test('every line alike: 36 px, 10 px corners; the page open, a white line on the
   );
   // The Studio without its card; its track under it, from the word (32 px), white in the Studio alone.
   assert.match(rows, /\.studio-nav,\nbody\[data-view='studio'\] \.studio-nav,[^{]*\{[^}]*padding: 0;[^}]*background: transparent;/);
-  assert.match(rows, /#sidebar #studio-kinds\.kind-tabs \{\n {2}margin: 0 0 2px 32px;/);
+  assert.match(rows, /#sidebar #studio-kinds\.kind-tabs \{\n {2}margin: 0 0 2px 44px;/);
+  // The icon in 24 px, 12 px from its word; the word at the left of its line.
+  assert.match(rows, /#sidebar > \.new-chat,\n#sidebar \.home-button \{[^}]*gap: 12px;/);
+  assert.match(rows, /#sidebar > \.new-chat svg,\n#sidebar \.home-button svg \{\n {2}flex: none;\n {2}width: 24px;\n {2}height: 24px;\n {2}stroke-width: 1\.75;/);
+  assert.match(rows, /#sidebar > \.new-chat > span,\n#sidebar \.home-button > span \{\n {2}text-align: left;/);
   assert.match(css, /body\[data-view='studio'\] #studio-kinds \.kind-tab\[aria-selected='true'\] \{\n {2}background: #eceef2;\n {2}color: #0b0c0f;/);
   // Folded: icons alone, 40 × 36.
-  assert.match(rows, /:root\[data-sidebar='collapsed'\] #sidebar > \.new-chat,[^{]*\{[^}]*height: 36px;[^}]*padding: 0 0 0 11px;/);
+  assert.match(rows, /:root\[data-sidebar='collapsed'\] #sidebar > \.new-chat,[^{]*\{[^}]*height: 36px;[^}]*padding: 0 0 0 8px;/);
 });
 
 test('the model: one icon ⏻ whatever its state, a dot of 7 px says it; its name unchanged', async () => {
@@ -129,4 +133,20 @@ test('nothing left of the panel of files in the styles', async () => {
     const css = (await read(name)).replace(/\/\*[^]*?\*\//g, '');
     assert.doesNotMatch(css, /assets-panel|assets-tabs|asset-pane|#resource-|\.resource-|files-button|data-files|resources-grid/, name);
   }
+});
+
+test('the chat: no logo, an invitation; a quiet message box; « 0 % » under the pointer only', async () => {
+  const html = await read('index.html'),
+    css = await read('moodix.css');
+  const welcome = html.slice(html.indexOf('<div id="welcome"'), html.indexOf('<form class="composer"'));
+  assert.match(welcome, /<h1>Demandez n’importe quoi\.<\/h1>/);
+  assert.doesNotMatch(welcome, /welcome-logo|mdx-white|Votre modèle|Votre machine/);
+  // Being written in: 1 px a little lighter, no ring around it.
+  assert.match(css, /\.composer:has\(textarea:focus-visible\),\n\.composer:focus-within \{\n {2}outline: none;/);
+  assert.match(css, /#chat-form\.composer:focus-within \{\n {2}border-color: #3a3f4a;/);
+  // The share of the context: hidden, its room kept; shown over the box, on focus, or nearly full.
+  assert.match(css, /\.context-meter \{\n {2}opacity: 0;/);
+  assert.match(css, /#chat-form:hover ~ \.context-meter,\n\.context-meter:hover,\n\.context-meter:focus-visible,\n\.context-meter\[data-warning='near'\],\n\.context-meter\[data-warning='full'\] \{\n {2}opacity: 1;/);
+  // No colour at the top of the cards of suggestion.
+  assert.doesNotMatch(css, /\.suggestions button:nth-child\(\d\) \{\n {2}border-top: 2px solid/);
 });
