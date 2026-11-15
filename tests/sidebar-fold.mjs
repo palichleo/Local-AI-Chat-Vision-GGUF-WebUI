@@ -230,12 +230,13 @@ test('the sidebar spans the window: the logo at its top edge, the actions at its
   // The window: 10 px from the frame, the drawer's (under 1100 px) at the top too.
   assert.match(frame, /\.workspace \{[^}]*height: calc\(100dvh - 20px\);[^}]*margin: 10px 10px 10px 0;/);
   // The sidebar: 20 px, the logo's box (6 px of padding) and the 1.5 px of empty drawing above the
-  // letters put them at 27.5 px; 10 px under the actions.
-  assert.match(frame, /@media \(min-width: 1100px\) \{[^@]*#sidebar \{\n {4}padding: 20px 12px 10px;/);
-  // Wide, the window follows the logo: its top edge at 27 px, 10 px from the bottom.
+  // letters put them at 27.5 px; 27 px under the actions, as under the window.
+  assert.match(frame, /@media \(min-width: 1100px\) \{[^@]*#sidebar \{\n {4}padding: 20px 12px 27px;/);
+  // Wide, the window follows the logo: its top edge at 27 px, as far from the frame at its bottom
+  // and its right.
   assert.match(
     frame,
-    /@media \(min-width: 1100px\) \{\n {2}\.workspace \{\n {4}height: calc\(100dvh - 37px\);\n {4}margin-top: 27px;/,
+    /@media \(min-width: 1100px\) \{\n {2}\.workspace \{\n {4}height: calc\(100dvh - 54px\);\n {4}margin: 27px 27px 27px 0;/,
   );
   assert.match(css, /#sidebar \.brand \{[^}]*padding: 6px 4px;/);
   // Unfolded, the button on the logo's line; folded, the small logo (24 px in 36) at the same top.

@@ -4373,10 +4373,10 @@ body {
   }
   /* The sidebar and the window, one height: the logo where it always was (20 px, then the 6 px of
      its box and the 1.5 px drawn empty above the letters in mdx-white.png: the letters begin at
-     27.5 px), the window's top edge on them (.workspace below); at the foot, the actions 10 px from
+     27.5 px), the window's top edge on them (.workspace below); at the foot, the actions 27 px from
      the bottom of the frame, on the window's bottom edge. */
   #sidebar {
-    padding: 20px 12px 10px;
+    padding: 20px 12px 27px;
     background: transparent;
     border-right: 0;
   }
@@ -4404,11 +4404,12 @@ body {
   }
 }
 /* Wide, the window follows the logo of the sidebar: its top edge (27 to 28 px, its border) on the
-   letters, which begin at 27.5 px; its bottom 10 px from the frame, on the foot of the actions. */
+   letters, which begin at 27.5 px; as far from the frame at its bottom (on the foot of the actions)
+   and at its right (15/11: 10 px there was too low, too far right). */
 @media (min-width: 1100px) {
   .workspace {
-    height: calc(100dvh - 37px);
-    margin-top: 27px;
+    height: calc(100dvh - 54px);
+    margin: 27px 27px 27px 0;
   }
 }
 /* The title bar: the first line of the window, the same in the Chat and the Studio. */
