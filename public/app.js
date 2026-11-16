@@ -802,7 +802,8 @@ function updateControls() {
   $('cancel').setAttribute('aria-label', cancelLabel);
   $('cancel').title = cancelLabel;
   $('thinking').disabled = state.generating;
-  $('attach').disabled = state.generating || state.preparing || state.loadingHistory;
+  // A card of Moodix waits: an image may go with the message that answers it.
+  $('attach').disabled = (state.generating && !state.proposalCard) || state.preparing || state.loadingHistory;
   $('prompt').disabled = state.loadingHistory;
   $('compose-state').textContent = state.proposalCard
     ? ''
@@ -1619,11 +1620,13 @@ async function addFiles(files) {
     !files.length ||
     state.projectWorking ||
     state.status.toolJob ||
-    state.generating ||
+    (state.generating && !state.proposalCard) ||
     state.preparing ||
     state.loadingHistory
   )
     return;
+  // Joined while a card of Moodix waits: it is for the message that answers it, so the card waits too.
+  state.proposalCard?.stop();
   if (files.filter(file => !isVideo(file)).length + state.images.length > 64)
     return notice('Vous pouvez joindre 64 images au maximum par message.');
   state.preparing = true;
@@ -1829,6 +1832,8 @@ function proposalChoice(view, proposal, abort) {
     node,
     api,
     composer: $('prompt'),
+    // « + » on an input of the card: an image for the next message, which answers the card.
+    onAdd: () => $('image-input').click(),
     onChange: () => scrollToBottom(),
   });
   state.proposalCard = pending;

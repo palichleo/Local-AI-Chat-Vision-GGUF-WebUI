@@ -68,7 +68,7 @@ function setup(request = video(), { delay = 60 } = {}) {
   const [head] = pending.card.children,
     [title, status] = head.children,
     foot = pending.card.children[2],
-    [cancel, go] = foot.children;
+    [, cancel, go] = foot.children;
   return { ...pending, host, composer, controller, title, status, cancel, go, revised };
 }
 

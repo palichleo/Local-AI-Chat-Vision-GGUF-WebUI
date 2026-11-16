@@ -6,11 +6,19 @@ class Node {
   constructor(tag, className = '', text = '') {
     Object.assign(this, { tag, className, textContent: text, children: [], attributes: {}, value: '', options: [] });
   }
+  // As in a page: a node added elsewhere leaves where it was.
   append(...children) {
-    this.children.push(...children);
+    for (const child of children) {
+      if (child instanceof Node) {
+        if (child.parent) child.parent.children = child.parent.children.filter(item => item !== child);
+        child.parent = this;
+      }
+      this.children.push(child);
+    }
   }
   replaceChildren(...children) {
-    this.children = children;
+    this.children = [];
+    this.append(...children);
     this.options = [];
   }
   setAttribute(name, value) {
@@ -96,7 +104,7 @@ test('the proposal is one form: prompt, inputs, version, length, format, resolut
   );
   for (const label of ['Cadence (i/s)', 'Audio', 'Largeur', 'Hauteur', 'Étapes'])
     assert.ok(labelled(advanced, label), label);
-  assert.ok(!labelled(advanced, 'Seed'), 'the seed is shown once');
+  assert.ok(!labelled(advanced, 'Graine'), 'the seed is shown once');
   assert.deepEqual(form.edits(), {});
 });
 
@@ -169,7 +177,7 @@ test('a size typed by hand is kept as « Autre », and invalid values are refuse
 test('the seed gets a new random value from its button, within its limits', () => {
   const box = node('section');
   const form = renderProposal(box, proposal(), { node });
-  const roll = all(box).find(item => item.attributes['aria-label'] === 'Seed aléatoire');
+  const roll = all(box).find(item => item.attributes['aria-label'] === 'Graine au hasard');
   roll.onclick();
   const { seed } = form.edits();
   assert.ok(Number.isSafeInteger(seed) && seed >= 0);
@@ -261,4 +269,62 @@ test('a sound proposal shows its lyrics, length and language in view, and edits 
   assert.deepEqual(form.edits(), { lyrics: '', seconds: 30, language: 'en' });
   labelled(box, 'Paroles').value = 'x'.repeat(21);
   assert.throws(() => form.edits(), /Paroles : 20 caractères au plus/);
+});
+
+test('in the card of the conversation: the length in one click, version and seed advanced, the prompt folded', () => {
+  const box = node('section'),
+    request = proposal();
+  request.inputRoles = ['start_image', 'end_image', 'source_video', 'msr_image', 'msr_image'];
+  request.plan.references[0].preview = '/media/ref.png';
+  const form = renderProposal(box, request, { node, card: true });
+  // The inputs as pictures: DÉBUT and FIN to give, a rule, RÉF. 1, and one more the workflow takes.
+  const media = all(box).find(item => item.className === 'proposal-media');
+  assert.deepEqual(
+    media.children.map(item => [item.className, item.children[1]?.textContent ?? '']),
+    [
+      ['proposal-input is-empty', 'DÉBUT'],
+      ['proposal-input is-empty', 'FIN'],
+      ['proposal-media-rule', ''],
+      ['proposal-input is-reference', 'RÉF. 1'],
+      ['proposal-input is-empty is-reference', ''],
+    ],
+  );
+  assert.equal(media.children[3].children[0].children[0].src, '/media/ref.png');
+  assert.equal(media.children[0].children[0].disabled, true, 'nothing to join an image with: greyed');
+  // The prompt is folded at the foot of the card, with its way back to the prompt of Moodix.
+  assert.equal(labelled(box, 'Prompt'), undefined);
+  assert.deepEqual(
+    form.folds.map(fold => fold.name),
+    ['Paramètres avancés', 'Prompt'],
+  );
+  const [advanced, folded] = form.folds.map(fold => fold.panel);
+  assert.equal(labelled(folded, 'Prompt').value, 'A tiger runs');
+  assert.equal(all(folded).find(item => item.className === 'proposal-back').textContent, 'Revenir au prompt de Moodix');
+  // The version and the seed are advanced settings in a card.
+  assert.equal(labelled(advanced, 'Version').value, 'draft');
+  assert.ok(labelled(advanced, 'Graine'));
+  assert.equal(labelled(box, 'Version'), undefined);
+  // The length in one click: the whole seconds the model accepts, and the one proposed, marked.
+  const lengths = all(box).find(item => item.className === 'proposal-lengths'),
+    buttons = lengths.children.filter(item => item.tag === 'button');
+  assert.deepEqual(
+    buttons.map(item => [item.textContent, item.attributes['aria-checked'], item.className]),
+    [
+      ['5', 'true', 'proposal-length is-proposed'],
+      ['10', 'false', 'proposal-length'],
+    ],
+  );
+  buttons[1].onclick();
+  assert.deepEqual(form.edits(), { frames: 241 });
+  // The role of an input may change under « Paramètres avancés »; the size is not repeated there.
+  assert.ok(all(advanced).some(item => item.attributes['aria-label'] === 'Rôle de Upscale SeedVR2'));
+  assert.ok(!labelled(advanced, 'Largeur') && !labelled(advanced, 'Hauteur'));
+  // The choice of Moodix marked « proposé » in the open menu only: closed, the value alone.
+  const format = labelled(box, 'Format'),
+    marked = () => format.options.filter(option => option.text.endsWith(' · proposé')).map(option => option.value);
+  assert.deepEqual(marked(), []);
+  format.onmousedown();
+  assert.deepEqual(marked(), ['3:2']);
+  format.onblur();
+  assert.deepEqual(marked(), []);
 });

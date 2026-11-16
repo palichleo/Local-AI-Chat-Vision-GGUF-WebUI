@@ -12971,76 +12971,179 @@ body:not([data-view='chat']) .resume {
 }
 .proposal-body {
   display: grid;
-  gap: 8px;
+  gap: 8px 28px;
+}
+/* The inputs as pictures on the left, the settings in lines on the right; a sound, without inputs,
+   has its settings across the card. */
+.proposal-body:has(> .proposal-media:not([hidden])) {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  column-gap: 24px;
+  align-items: start;
+}
+.proposal-body > :not(.proposal-media, .proposal-grid) {
+  grid-column: 1 / -1;
 }
 /* The plan is said in the message above: the line of intention would say it twice. */
 .proposal-body .video-intention {
   display: none;
 }
-.proposal-body .proposal-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 0 18px;
+#messages .proposal-card .proposal-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
 }
-.proposal-body .proposal-field {
+/* Under « Paramètres avancés », the lines in two columns. */
+#messages .proposal-card .proposal-panels .proposal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 0 28px;
+}
+#messages .proposal-card .proposal-field {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 38px;
+  gap: 12px;
+  min-height: 37px;
   margin: 0;
+  padding: 0;
   border-bottom: 1px solid rgba(238, 232, 222, 0.07);
   color: var(--text-2);
   font: 400 14px/1.3 var(--font-ui);
 }
-.proposal-body .proposal-field.is-wide {
+#messages .proposal-card .proposal-body > .proposal-grid > .proposal-field:last-child {
+  border-bottom: 0;
+}
+#messages .proposal-card .proposal-field.is-wide {
   flex-direction: column;
   align-items: stretch;
-  padding: 8px 0;
+  gap: 8px;
+  padding: 4px 0 8px;
+  border-bottom: 0;
 }
-.proposal-body :where(select, input:not([type='checkbox']), textarea, output) {
-  min-height: 0;
-  padding: 6px 9px;
+#messages .proposal-card .proposal-field :is(select, input[type='number'], output) {
+  max-width: 220px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 7px;
+  background-color: rgba(0, 0, 0, 0.22);
+  color: var(--text-1);
+  font: 400 13px/1.4 var(--font-mono);
+  text-align: right;
+}
+#messages .proposal-card .proposal-field select {
+  padding-right: 26px;
+}
+#messages .proposal-card .proposal-field output {
+  background-color: transparent;
+}
+#messages .proposal-card .proposal-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 76px;
+  padding: 10px 12px;
   border: 1px solid rgba(238, 232, 222, 0.1);
   border-radius: var(--radius-s);
   background: rgba(0, 0, 0, 0.22);
   color: var(--text-1);
-  font: 400 13px/1.4 var(--font-mono);
-}
-.proposal-body textarea {
-  min-height: 58px;
-  font-family: var(--font-ui);
-  font-size: 14px;
+  font: 400 14px/1.5 var(--font-ui);
   resize: vertical;
 }
-.proposal-body .proposal-advanced > summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 2px;
-  color: var(--text-2);
-  font: 400 14px/1 var(--font-ui);
-  list-style: none;
+/* A value changed turns to the accent; Moodix's again, it goes back. */
+#messages .proposal-card .proposal-field :is(select, input, textarea).is-changed,
+#messages .proposal-card .proposal-field.is-changed .proposal-length[aria-checked='true'] {
+  color: var(--accent);
+}
+/* DÉBUT and FIN in the shape of the format, 50 px high; a rule; the references in their own shape;
+   « + » where the workflow takes one more. */
+.proposal-media {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 2px;
+}
+.proposal-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+.proposal-input-frame {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: calc(50px * var(--ratio, 1));
+  min-width: 28px;
+  max-width: 90px;
+  height: 50px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+}
+.proposal-input.is-reference .proposal-input-frame {
+  width: auto;
+  min-width: 50px;
+}
+.proposal-input-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.proposal-input.is-reference img {
+  width: auto;
+  height: 50px;
+  max-width: 90px;
+}
+.proposal-input-file {
+  padding: 0 6px;
+  overflow: hidden;
+  color: var(--text-3);
+  font: 400 12px/1.2 var(--font-ui);
+  text-align: center;
+  text-overflow: ellipsis;
+}
+.proposal-input.is-empty .proposal-input-frame {
+  border: 1px dashed rgba(238, 232, 222, 0.16);
+  background: transparent;
+  color: var(--text-3);
+  font: 300 18px/1 var(--font-ui);
   cursor: pointer;
 }
-.proposal-body .proposal-advanced > summary::-webkit-details-marker {
-  display: none;
+.proposal-input.is-empty .proposal-input-frame:hover:enabled {
+  border-color: rgba(238, 232, 222, 0.32);
+  color: var(--text-1);
 }
-.proposal-body .proposal-advanced > summary::after {
-  content: '';
-  width: 5px;
-  height: 5px;
-  border-right: 1.2px solid currentColor;
-  border-bottom: 1.2px solid currentColor;
-  transform: rotate(-45deg);
+.proposal-input.is-empty .proposal-input-frame:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
-.proposal-body .proposal-advanced[open] > summary::after {
-  transform: rotate(45deg);
+.proposal-input figcaption {
+  min-height: 12px;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.proposal-media-rule {
+  flex: 0 0 1px;
+  height: 50px;
+  margin: 0 6px;
+  background: rgba(238, 232, 222, 0.12);
 }
 .proposal-foot {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 14px;
   margin-top: 12px;
 }
@@ -13116,4 +13219,88 @@ body:not([data-view='chat']) .resume {
   margin: 2px 0 0;
   color: var(--text-3);
   font: italic 400 14px/1.5 var(--font-ui);
+}
+/* The card in the form of the captures: « Durée » in one click (2 · 4 · 6 · 8 · 10 s), the choice of
+   Moodix marked; « Paramètres avancés › » and « Prompt › » at the foot, their panel under it. */
+.proposal-lengths {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-s);
+  background: rgba(0, 0, 0, 0.22);
+}
+.proposal-length {
+  min-width: 28px;
+  height: 26px;
+  min-height: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+  cursor: pointer;
+}
+.proposal-length:hover {
+  color: var(--text-1);
+}
+.proposal-length[aria-checked='true'] {
+  background: rgba(238, 232, 222, 0.12);
+  color: var(--text-1);
+}
+.proposal-length-row {
+  display: inline-flex;
+  align-items: center;
+}
+.proposal-unit {
+  margin: 0 0 0 8px;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+}
+.proposal-toggles {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 16px;
+}
+.proposal-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 0;
+  padding: 6px 2px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-2);
+  font: 400 14px/1 var(--font-ui);
+  cursor: pointer;
+}
+.proposal-toggle:hover {
+  color: var(--text-1);
+}
+.proposal-toggle::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.2px solid currentColor;
+  border-bottom: 1.2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.2s ease;
+}
+.proposal-toggle[aria-expanded='true']::after {
+  transform: rotate(45deg);
+}
+.proposal-panels > * {
+  margin-top: 12px;
+}
+.proposal-back {
+  min-height: 0;
+  margin-top: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: 400 13px/1 var(--font-ui);
+  cursor: pointer;
 }

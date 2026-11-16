@@ -514,10 +514,26 @@ export async function createApplication({
       });
       if (record.provider !== 'native' || !record.outputs[ref.output_index ?? 0])
         throw problem('Le fichier original de ce résultat est indisponible.');
+      const output = record.outputs[ref.output_index ?? 0];
       return {
-        ...(await generatedMedia(outputDir, record.outputs[ref.output_index ?? 0].source)),
-        name: record.workflowName,
+        ...(await generatedMedia(outputDir, output.source)),
+        name: Number.isInteger(output.take) ? 'Prise ' + output.take : record.workflowName,
       };
+    },
+    // The picture of an input of a proposal, for its card (DÉBUT, FIN, RÉF. n): the image the user
+    // joined, the preview of a reference, the thumbnail of a take (an image take itself until it has
+    // one). Null for anything else: the card shows its name.
+    previewOf: (ref, conversationId, media) => {
+      if (ref.attachment) return attachmentUrl(conversationId, ref.attachment);
+      if (ref.resource_id) return `/media/resources/${ref.resource_id}/preview?key=${mediaKey(ref.resource_id, 'preview')}`;
+      if (!ref.output_id) return null;
+      const owner = ref.output_conversation ?? conversationId,
+        index = ref.output_index ?? 0;
+      if (thumbnails.has(Thumbnails.key(owner, ref.output_id, index))) return thumbUrl(owner, ref.output_id, index);
+      return media === 'image'
+        ? `/media/generated/${owner}/${ref.output_id}/${index}?key=` +
+            mediaKey(owner + '/' + ref.output_id + '/' + index, 'generated')
+        : null;
     },
   });
   /**

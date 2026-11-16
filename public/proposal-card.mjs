@@ -12,15 +12,28 @@ const KINDS = { video: 'Vidéo', audio: 'Son', image: 'Image' };
  *   ACCORD »): then only « Générer » starts it. A sound waits for « Générer » (no count).
  * - « Annuler » leaves the line « Proposition annulée. »; a new message declines it too, and the card
  *   goes (Moodix answers with another). No « Toujours autoriser ».
- * Returns `answer` ('once' or 'deny', after the changes are sent) and `decline()`.
+ * « + » on an input joins an image to the next message (`onAdd`); joining one stops the count (`stop`).
+ * Returns `answer` ('once' or 'deny', after the changes are sent), `decline()` and `stop()`.
  */
-export function proposalCard({ host, request, signal, node, api, delay = 30000, composer = null, onChange = () => {} }) {
+export function proposalCard({
+  host,
+  request,
+  signal,
+  node,
+  api,
+  delay = 30000,
+  composer = null,
+  onAdd = null,
+  onChange = () => {},
+}) {
   const card = node('section', 'proposal-card'),
     head = node('header', 'proposal-head'),
     title = node('p', 'proposal-title'),
     status = node('p', 'proposal-status'),
     body = node('div', 'proposal-body'),
     foot = node('footer', 'proposal-foot'),
+    toggles = node('div', 'proposal-toggles'),
+    panels = node('div', 'proposal-panels'),
     cancel = node('button', 'proposal-cancel', 'Annuler'),
     go = node('button', 'proposal-go'),
     counted = request.mediaType === 'video' && delay > 0;
@@ -30,15 +43,35 @@ export function proposalCard({ host, request, signal, node, api, delay = 30000, 
   go.append(node('span', 'proposal-go-play'), node('span', 'proposal-go-word', 'Générer'));
   go.setAttribute('aria-label', 'Générer');
   head.append(title, status);
-  foot.append(cancel, go);
-  card.append(head, body, foot);
+  foot.append(toggles, cancel, go);
+  card.append(head, body, foot, panels);
   host.append(card);
 
   let form = null,
     saving = false;
   function render() {
     title.textContent = ['Proposition', KINDS[request.mediaType] ?? KINDS.image, request.workflowName].filter(Boolean).join(' · ');
-    form = renderProposal(body, request, { node, onStage: (stage, edits) => void revise({ ...edits, stage }) });
+    form = renderProposal(body, request, {
+      node,
+      card: true,
+      onAdd,
+      onStage: (stage, edits) => void revise({ ...edits, stage }),
+    });
+    // « Paramètres avancés › » and « Prompt › » at the foot, their panel opening under it.
+    toggles.replaceChildren();
+    panels.replaceChildren();
+    for (const fold of form.folds ?? []) {
+      const toggle = node('button', 'proposal-toggle', fold.name);
+      toggle.type = 'button';
+      toggle.setAttribute('aria-expanded', 'false');
+      fold.panel.hidden = true;
+      toggle.onclick = () => {
+        fold.panel.hidden = !fold.panel.hidden;
+        toggle.setAttribute('aria-expanded', String(!fold.panel.hidden));
+      };
+      toggles.append(toggle);
+      panels.append(fold.panel);
+    }
   }
   // The changes sent: the revised proposal (a new token) replaces this one.
   async function revise(edits) {
@@ -185,5 +218,5 @@ export function proposalCard({ host, request, signal, node, api, delay = 30000, 
     if (composer?.value?.trim()) hold();
   }
   onChange();
-  return { answer, decline: () => finish('deny'), card };
+  return { answer, decline: () => finish('deny'), stop, card };
 }
