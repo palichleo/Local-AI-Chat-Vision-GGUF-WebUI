@@ -182,6 +182,20 @@ test('the Studio offers its style LoRAs where the engine that creates applies th
   assert.deepEqual(styled, { krea: true, 'moss-image': true, ltx: true, minimax: false });
 });
 
+test('the LoRA of the subject references is no setting: neither the Studio nor the model sees it (16/11)', async () => {
+  const lora = (id, enabled) => ({ id, asset: id, description: id, enabled, strength: { policy: 'fixed', value: 1 } });
+  const subject = video('subject', [slot('a', 'msr_image')], {
+      loras: [lora('reference-slots', { policy: 'model', default: false }), lora('grain', { policy: 'model', default: true })],
+    }),
+    // Without subject references, a LoRA left to the model stays the user's to switch.
+    plain = video('plain', [], { loras: [lora('grain', { policy: 'model', default: true })] });
+  const studio = Object.fromEntries((await catalogOf([subject, plain]).studio()).create_video.map(item => [item.id, item]));
+  assert.deepEqual(studio.subject.loras.map(item => item.id), ['grain']);
+  assert.deepEqual(studio.plain.loras.map(item => item.id), ['grain']);
+  const create = (await catalogOf([subject]).definitions()).find(tool => tool.function.name === 'create_video');
+  assert.deepEqual(Object.keys(create.function.parameters.properties.loras.properties), ['grain']);
+});
+
 test('arguments are checked against the chosen workflow, never forwarded blindly', async () => {
   const tools = catalogOf(workflows);
   const routed = await tools.route('create_video', { prompt: 'x', intention: 'y', fps: 12, stage: 'final' }, media);

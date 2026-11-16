@@ -10,6 +10,8 @@ import {
   validateNativeWorkflow,
   resolveNativeWorkflow,
   nativeWorkflowReferences,
+  referenceLora,
+  workflowSchema,
 } from '../lib/native-workflows.mjs';
 
 const assetMap = new Map(
@@ -295,6 +297,27 @@ test('a reference that depends on a LoRA switches it on, or is refused in plain 
   );
   assert.deepEqual((await resolve([{ input: 'start', image: 0 }])).loras, []);
   assert.deepEqual((await resolve()).loras, []);
+  // No setting (16/11): on with a subject image, off without one, whatever a request says of it.
+  const asking = (references, enabled) =>
+    resolveNativeWorkflow(
+      workflow,
+      {
+        prompt: 'a tiger runs',
+        intention: 'x',
+        loras: { 'reference-slots': { enabled } },
+        ...(references ? { references } : {}),
+      },
+      assets,
+      { allowPendingReferences: true },
+    );
+  assert.deepEqual((await asking(null, true)).loras, []);
+  assert.deepEqual((await asking([{ input: 'start', image: 0 }], true)).loras, []);
+  assert.deepEqual(
+    (await asking([{ input: 'subject-1', image: 0 }], false)).loras.map(lora => lora.id),
+    ['reference-slots'],
+  );
+  assert.equal(referenceLora(workflow)?.id, 'reference-slots');
+  assert.equal(workflowSchema(workflow).properties.loras, undefined, 'not offered to the model');
   const without = structuredClone(workflow);
   without.loras[0].enabled = { policy: 'off' };
   await assert.rejects(resolve([{ input: 'subject-1', image: 0 }], without), /référence de sujet.*LoRA/);
