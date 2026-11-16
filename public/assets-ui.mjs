@@ -119,10 +119,13 @@ export function setupAssets({
   $('original-dialog').addEventListener('close', cleanViewer);
   dismissSettingsOnOutsideClick($('original-dialog'));
   // ‹ › and the arrows of the keyboard go from one take to the next of what was shown.
-  let around = null;
+  let around = null,
+    shownTake = null;
+  /** Where a take is among those shown: by itself once moved to, by what opened it the first time. */
+  const placeOf = (list, record) => (list.includes(record) ? list.indexOf(record) : (around?.at?.() ?? -1));
   function step(by) {
     const list = around?.list?.() ?? [],
-      at = around?.at?.() ?? -1,
+      at = placeOf(list, shownTake),
       next = list[at + by];
     if (next) void viewOutput(next, 0, undefined, around);
   }
@@ -156,7 +159,12 @@ export function setupAssets({
     $('original-image').hidden = true;
     $('original-video').hidden = true;
     $('media-download').disabled = false;
-    if (!$('original-dialog').open) $('original-dialog').showModal();
+    if (!$('original-dialog').open) {
+      $('original-dialog').showModal();
+      // The take itself in hand, not its player: ‹ › and the arrows go to the next one (a video
+      // focused would take them to move in its time).
+      $('original-dialog').focus?.();
+    }
     return viewVersion;
   }
   function download(url, name) {
@@ -175,8 +183,9 @@ export function setupAssets({
     viewController = new AbortController();
     // Its head: « PRISE 31 · VIDÉO » and « 2 / 46 »; « PRISE 31 » on the take too.
     around = context;
+    shownTake = record;
     const list = context?.list?.() ?? [],
-      at = context?.at?.() ?? -1,
+      at = context ? placeOf(list, record) : -1,
       take = Number.isInteger(output.take) ? 'PRISE ' + output.take : '',
       kind = { image: 'IMAGE', video: 'VIDÉO', audio: 'SON' }[media];
     $('media-title').textContent = [take, kind].filter(Boolean).join(' · ');

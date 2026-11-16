@@ -3361,6 +3361,14 @@ export function setupStudio({
       tab.disabled = Boolean(working);
     }
   }
+  /**
+   * Image · Vidéo · Son are drawn in the head of the screen (form); without a screen (nothing ready to
+   * make, the Studio being read), they go back above the body, never left in a page drawn away.
+   */
+  function keepKinds(body) {
+    const bar = kindsBar();
+    if (bar && !body.contains?.(bar)) body.parentElement?.insertBefore?.(bar, body);
+  }
   function chooseMode(id) {
     if (working || mode === id) return;
     if (ai) takeOver();
@@ -3635,9 +3643,12 @@ export function setupStudio({
     watching?.disconnect();
     watching = null;
     if (!info) {
-      if (unreadable) return body.replaceChildren(message('Studio indisponible : ' + unreadable));
-      sketched = true;
-      return body.replaceChildren(skeleton());
+      if (unreadable) body.replaceChildren(message('Studio indisponible : ' + unreadable));
+      else {
+        sketched = true;
+        body.replaceChildren(skeleton());
+      }
+      return keepKinds(body);
     }
     // Where the Sortie was scrolled to: drawn again, it stays there (a click on a creation, a
     // change of model), not back at its start.
@@ -3646,6 +3657,7 @@ export function setupStudio({
     if (sketched) desk.classList.add('is-arriving');
     sketched = false;
     body.replaceChildren(desk);
+    keepKinds(body);
     if (along) {
       const strip = document.querySelector?.('#studio-view .studio-strip');
       if (strip) strip.scrollLeft = along;

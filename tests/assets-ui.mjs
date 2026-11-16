@@ -146,13 +146,21 @@ test('output details expose full prompts, workflow, seed and available parameter
     parameters: { seed: 42, width: 1024, height: 768 },
     outputs: [{ source: { filename: 'result.png' }, analysisDataUrl: 'data:image/png;base64,AA==', take: 12 }],
   };
-  const list = [{ id: 'newer' }, record, { id: 'older' }];
+  const list = [{ ...record, id: 'newer' }, record, { ...record, id: 'older' }];
   await ui.viewOutput(record, 0, undefined, { list: () => list, at: () => 1 });
   assert.equal($('original-dialog').open, true);
   // Its head (capture 33): « PRISE 12 · IMAGE » and « 2 / 3 »; ‹ › to the takes beside it.
   assert.equal($('media-title').textContent, 'PRISE 12 · IMAGE');
   assert.equal($('media-position').textContent, '2 / 3');
   assert.deepEqual([$('media-prev').hidden, $('media-next').hidden], [false, false]);
+  // The next one, then back: where it stands follows the take shown, not the one first opened.
+  $('media-next').onclick();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal($('media-position').textContent, '3 / 3');
+  assert.equal($('media-next').hidden, true);
+  $('media-prev').onclick();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal($('media-position').textContent, '2 / 3');
   // The prompt whole, with Copier; then Modèle, Format, Résolution, Seed and Date.
   assert.equal($('media-prompt').textContent, record.prompt);
   const texts = $('media-metadata').children.map(item => item.textContent);

@@ -15546,3 +15546,4 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   padding: 0;
   border: 0;
 }
+#original-dialog:focus { outline: none; }
