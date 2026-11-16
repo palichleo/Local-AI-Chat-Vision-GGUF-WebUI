@@ -136,52 +136,7 @@ button svg {
 .primary:hover {
   background: var(--button-hover);
 }
-.new-chat {
-  justify-content: flex-start;
-  gap: 8px;
-}
-.new-chat svg {
-  width: 17px;
-  height: 17px;
-}
 
-#history-section {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.model-card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-}
-.model-card-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.model-symbol {
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--line);
-  background: var(--surface-raised);
-  color: var(--muted);
-}
-.quant-tag {
-  background: var(--surface-raised);
-  color: var(--muted);
-  border-radius: 4px;
-}
-.model-card strong {
-  font-weight: 600;
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.model-card p {
-  color: var(--muted);
-  line-height: 1.5;
-}
 .dot {
   display: inline-block;
   width: 6px;
@@ -198,22 +153,7 @@ button svg {
 .dot.error {
   background: var(--danger);
 }
-.engine-action {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  font-weight: 550;
-}
-.engine-action svg {
-  width: 13px;
-  height: 13px;
-}
-.settings-button,
+
 .theme-button {
   display: flex;
   gap: 7px;
@@ -229,12 +169,10 @@ button svg {
   min-width: 74px;
   justify-content: center;
 }
-.settings-button svg,
 .theme-button svg {
   width: 14px;
   height: 14px;
 }
-.settings-button:hover,
 .theme-button:hover {
   background: var(--hover);
 }
@@ -256,15 +194,7 @@ button svg {
   align-items: center;
   justify-content: center;
 }
-.welcome-mark {
-  width: 69px;
-  height: 69px;
-  position: relative;
-  display: grid;
-  place-items: center;
-  margin-bottom: 22px;
-  color: var(--accent);
-}
+
 .welcome h1 {
   font-size: clamp(34px, 3.7vw, 51px);
   line-height: 1.14;
@@ -858,23 +788,13 @@ fieldset {
   }
 }
 @media (max-width: 850px) {
-  .new-chat {
-    gap: 5px;
-  }
-  .settings-button {
-    padding: 7px;
-  }
-  .settings-button span {
-    display: none;
-  }
+  
+  
+  
   .welcome {
     padding: 85px 20px 24px;
   }
-  .welcome-mark {
-    width: 50px;
-    height: 50px;
-    margin-bottom: 15px;
-  }
+  
   .welcome h1 {
     font-size: 36px;
   }
@@ -903,9 +823,7 @@ fieldset {
   .welcome {
     padding: 80px 21px 24px;
   }
-  .welcome-mark {
-    margin-bottom: 15px;
-  }
+  
   .welcome h1 {
     font-size: 38px;
   }
@@ -953,14 +871,7 @@ fieldset {
     height: 110px;
   }
 }
-.mobile-new {
-  display: none;
-}
-@media (max-width: 640px) {
-  .mobile-new {
-    display: grid;
-  }
-}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none !important;
@@ -1095,33 +1006,6 @@ fieldset {
   background: var(--surface-raised);
 }
 
-.model-card.is-off {
-  border-color: var(--danger);
-}
-.model-card.is-loading {
-  border-color: var(--warning);
-}
-.history-list {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.history-item {
-  flex-shrink: 0;
-  text-align: left;
-}
-.history-item span {
-  font-size: var(--size-1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  width: 100%;
-}
-.history-item small {
-  font-size: var(--size-1);
-  color: var(--muted);
-}
-
 .history-settings {
   border-top: 1px solid var(--line);
   padding: 18px 0 12px;
@@ -1142,14 +1026,6 @@ fieldset {
   color: var(--muted);
   font-size: var(--size-1);
   line-height: 1.7;
-}
-.history-mobile {
-  display: none;
-}
-@media (max-width: 640px) {
-  .history-mobile {
-    display: block;
-  }
 }
 
 .history-settings-row {
@@ -1230,39 +1106,6 @@ fieldset {
   font-size: var(--size-1);
   color: var(--muted);
 }
-.gallery-card {
-  padding: 18px 0;
-  border-bottom: 1px solid var(--line);
-}
-.gallery-card img {
-  width: 100%;
-  max-height: 260px;
-  object-fit: contain;
-  border-radius: 8px;
-  background: var(--bg);
-}
-.gallery-card strong {
-  display: block;
-  font-size: var(--size-1);
-  margin-top: 10px;
-}
-.gallery-card p {
-  font-size: var(--size-1);
-  line-height: 1.6;
-  max-height: 100px;
-  overflow: auto;
-  white-space: pre-wrap;
-}
-.gallery-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 10px;
-}
-.gallery-actions button {
-  font-size: var(--size-1);
-  padding: 7px;
-  min-height: 32px;
-}
 
 .field-help {
   font-size: var(--size-1);
@@ -1335,9 +1178,7 @@ fieldset {
     width: 250px;
     padding: 20px 12px;
   }
-  .gallery-actions {
-    flex-wrap: wrap;
-  }
+  
 }
 @media (max-width: 900px) {
   body:has(.gallery:not([hidden])) {
@@ -1359,25 +1200,7 @@ fieldset {
   body:has(.gallery:not([hidden])) .sidebar {
     height: 100dvh;
   }
-  #gallery-list {
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  }
-}
-
-.gallery-meta {
-  display: block;
-  margin-top: 8px;
-}
-.gallery-review {
-  margin-top: 10px;
-  color: var(--muted);
-  font-size: var(--size-1);
-}
-.gallery-review summary {
-  cursor: pointer;
-}
-.gallery-review p {
-  max-height: 220px;
+  
 }
 
 .path-input {
@@ -1402,90 +1225,7 @@ fieldset {
 .generation-auto-label {
   margin-bottom: 24px !important;
 }
-.iteration-setting {
-  display: grid;
-  gap: 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 16px;
-  margin: 5px 0 19px;
-  background: var(--surface);
-}
-.iteration-setting label {
-  font-size: var(--size-1);
-  font-weight: 550;
-}
-.iteration-setting p {
-  font-size: var(--size-1);
-  line-height: 1.7;
-  color: var(--muted);
-  margin: 7px 0 15px;
-}
-.iteration-controls {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.iteration-stepper {
-  display: flex;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  overflow: hidden;
-}
-.iteration-stepper button {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  width: 34px;
-  height: 38px;
-  font-size: 20px;
-}
-.iteration-stepper button:hover {
-  color: var(--accent);
-  background: var(--hover);
-}
-.iteration-stepper input {
-  width: 76px;
-  height: 38px;
-  background: none;
-  color: var(--ink);
-  border: 0;
-  text-align: center;
-  font-size: 18px;
-  font-variant-numeric: tabular-nums;
-  appearance: textfield;
-  outline-offset: -3px;
-}
-.iteration-stepper input::-webkit-inner-spin-button {
-  appearance: none;
-}
-.iteration-stepper span {
-  width: 76px;
-  text-align: center;
-  font-size: 25px;
-  color: var(--accent);
-}
-#generation-unlimited {
-  height: 40px;
-  width: 44px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  color: var(--muted);
-  font-size: 26px;
-  line-height: 1;
-}
-#generation-unlimited[aria-pressed='true'] {
-  color: var(--accent);
-  background: var(--tint);
-  border-color: var(--accent);
-}
-.iteration-caption {
-  font-size: var(--size-1);
-  color: var(--muted);
-  margin-left: 3px;
-}
+
 .workflow-heading {
   display: flex;
   justify-content: space-between;
@@ -1506,17 +1246,7 @@ fieldset {
   padding: 13px;
   margin: 10px 0;
 }
-.workflow-card-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.workflow-card-header strong {
-  font-size: var(--size-1);
-  font-weight: 550;
-  overflow-wrap: anywhere;
-}
+
 .workflow-card .text-button {
   font-size: var(--size-1);
 }
@@ -1552,25 +1282,11 @@ fieldset {
   .workflow-heading {
     align-items: flex-start;
   }
-  .iteration-caption {
-    flex-basis: 100%;
-    margin: 0;
-  }
+  
 }
 
 /* Conversation entry and sidebar controls. */
-.sidebar-actions .settings-button {
-  justify-content: center;
-}
-.sidebar-actions .theme-button {
-  min-width: 68px;
-  font-size: var(--size-1);
-  padding: 8px;
-}
-.sidebar-actions .mobile-new {
-  background: var(--surface);
-  border: 1px solid var(--line);
-}
+
 .composer-region {
   padding: 0 28px 22px;
   flex-shrink: 0;
@@ -1656,9 +1372,7 @@ fieldset {
 .path-input input[data-automatic='true']::placeholder {
   color: var(--muted);
 }
-#generation-python::placeholder {
-  color: var(--muted);
-}
+
 .token-settings {
   margin: 2px 0 22px;
   gap: 24px;
@@ -1722,13 +1436,8 @@ fieldset {
   margin-top: 0;
 }
 @media (max-width: 850px) {
-  .sidebar-actions .settings-button span {
-    display: inline;
-  }
-  .sidebar-actions .theme-button {
-    min-width: 61px;
-    padding: 8px 6px;
-  }
+  
+  
   .composer-region {
     padding-left: 20px;
     padding-right: 20px;
@@ -1743,54 +1452,21 @@ fieldset {
     height: auto;
     border-bottom: 1px solid var(--line);
   }
-  .sidebar > .new-chat,
-  .sidebar > .sidebar-section {
-    display: none;
-  }
+  
   .sidebar .brand {
     font-size: 20px;
     padding: 0;
     gap: 6px;
   }
-  .sidebar-bottom {
-    padding: 0;
-    margin: 0;
-    width: 190px;
-  }
-  .sidebar-bottom .model-card {
-    padding: 9px 11px;
-  }
-  .sidebar-bottom .model-card-top,
-  .sidebar-bottom .model-card p {
-    display: none;
-  }
-  .sidebar-bottom .model-card strong {
-    font-size: var(--size-1);
-    white-space: nowrap;
-  }
-  .sidebar-bottom .engine-action {
-    margin-top: 5px;
-    padding: 3px 0;
-    font-size: var(--size-1);
-  }
-  .sidebar-actions .settings-button span {
-    display: inline;
-  }
-  .sidebar-actions .theme-button {
-    min-width: 51px;
-    font-size: var(--size-1);
-    padding: 7px 5px;
-  }
-  .sidebar-actions .theme-button svg,
-  .sidebar-actions .settings-button svg {
-    width: 12px;
-    height: 12px;
-  }
-  .sidebar-actions .mobile-new {
-    width: 29px;
-    height: 29px;
-    flex-shrink: 0;
-  }
+  
+  
+  
+  
+  
+  
+  
+  
+  
   .composer-region {
     padding: 0 14px 14px;
   }
@@ -1837,17 +1513,11 @@ fieldset {
   .sidebar .brand {
     font-size: 18px;
   }
-  .sidebar .brand-local {
-    display: none;
-  }
-  .sidebar-bottom {
-    width: 190px;
-  }
+  
+  
 }
 @media (max-height: 650px) {
-  .composer-region .welcome-mark {
-    display: none;
-  }
+  
   .composer-region .welcome h1 {
     font-size: 27px;
   }
@@ -1898,11 +1568,9 @@ fieldset {
 .welcome h1 {
   color: var(--ink);
 }
-.model-card,
 .composer,
 .suggestions button,
-.workflow-card,
-.iteration-setting {
+.workflow-card {
   background-color: var(--surface);
 }
 .suggestions button:hover,
@@ -1912,9 +1580,7 @@ fieldset {
   border-color: var(--line-strong);
 }
 .secondary,
-.settings-button,
-.theme-button,
-.sidebar-actions .mobile-new {
+.theme-button {
   background-color: var(--surface);
   background-image: linear-gradient(var(--surface-veil), var(--surface-veil)), var(--grain);
   background-size:
@@ -1923,7 +1589,6 @@ fieldset {
   box-shadow: inset 0 1px 0 var(--edge);
 }
 .secondary:hover,
-.settings-button:hover,
 .theme-button:hover {
   background-color: var(--hover);
   background-image: linear-gradient(var(--surface-veil), var(--surface-veil)), var(--grain);
@@ -1939,31 +1604,12 @@ fieldset {
 .thinking-button {
   box-shadow: inset 0 1px 0 var(--edge);
 }
-.model-card {
-  position: relative;
-  isolation: isolate;
-}
-.model-card.is-ready {
-  border-color: var(--success);
-}
+
 .dot.ready {
   background: var(--success);
   box-shadow: 0 0 0 3px var(--success-tint);
 }
-.engine-action {
-  color: var(--success);
-}
-.engine-action:hover {
-  color: var(--success-hover);
-  background: var(--success-tint);
-}
-.engine-action.is-running,
-.engine-action.is-running:hover {
-  color: var(--danger);
-}
-.engine-action.is-running:hover {
-  background: var(--danger-bg);
-}
+
 .composer.dragging {
   border-color: var(--accent);
   background-color: var(--tint);
@@ -1980,8 +1626,7 @@ fieldset {
   position: relative;
   z-index: 1;
 }
-.composer::after,
-.model-card::after {
+.composer::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -1997,8 +1642,7 @@ fieldset {
   transition: opacity 0.2s ease-out;
 }
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  .composer[data-material-lit]::after,
-  .model-card[data-material-lit]::after {
+  .composer[data-material-lit]::after {
     opacity: 1;
   }
 }
@@ -2016,10 +1660,7 @@ dialog::backdrop {
   font-weight: 600;
   letter-spacing: -0.65px;
 }
-.quant-tag {
-  font-family: ui-monospace, Consolas, monospace;
-  letter-spacing: 0.6px;
-}
+
 .field-group input,
 .field-group select,
 .field-group textarea,
@@ -2057,11 +1698,7 @@ dialog::backdrop {
   letter-spacing: -0.2px;
   color: var(--ink);
 }
-.iteration-stepper,
-#generation-unlimited {
-  background: var(--input);
-  box-shadow: inset 0 1px 3px var(--inset-shadow);
-}
+
 .message.user .message-body,
 .message-body pre,
 .logs-panel {
@@ -2073,7 +1710,6 @@ dialog::backdrop {
 .markdown a:hover {
   color: var(--ink);
 }
-.gallery-card img,
 .message-images img,
 .attachment {
   border-color: var(--line-strong);
@@ -2089,64 +1725,6 @@ dialog::backdrop {
 }
 
 /* Quiet chrome; destructive actions also remain reachable by keyboard and touch. */
-
-.sidebar-actions {
-  margin-left: -2px;
-  margin-right: -2px;
-}
-.sidebar-actions .settings-button {
-  font-size: var(--size-1);
-  line-height: 1.2;
-  gap: 9px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.sidebar-actions .settings-button svg {
-  color: var(--muted);
-}
-.sidebar-actions .settings-button span {
-  flex-shrink: 0;
-}
-.history-delete-button {
-  opacity: 0;
-  pointer-events: none;
-  color: var(--danger);
-  transition:
-    opacity 0.15s,
-    background-color 0.15s;
-}
-.history-row:hover .history-delete-button,
-.history-row:focus-within .history-delete-button {
-  opacity: 1;
-  pointer-events: auto;
-}
-.history-delete-button:hover {
-  background: var(--danger-bg);
-}
-.history-delete-button:disabled {
-  pointer-events: none;
-  opacity: 0;
-}
-@media (hover: none), (pointer: coarse) {
-  .history-delete-button {
-    pointer-events: auto;
-  }
-  .history-delete-button:disabled {
-    opacity: 0.4;
-  }
-}
-@media (max-width: 850px) {
-  .sidebar-actions .settings-button {
-    font-size: var(--size-1);
-    gap: 7px;
-  }
-}
-@media (max-width: 640px) {
-  .sidebar-actions .settings-button {
-    font-size: var(--size-1);
-    gap: 6px;
-  }
-}
 
 /* A quiet blue accent on the same metal surface as Configuration. */
 :root {
@@ -2476,43 +2054,6 @@ dialog::backdrop {
   text-align: center;
 }
 
-#gallery-list {
-  display: flex;
-  flex-direction: column;
-  gap: 13px;
-}
-
-.output-prompt {
-  font-size: var(--size-1);
-  line-height: 1.65;
-  color: var(--muted);
-  margin: 8px 0;
-}
-.output-prompt summary {
-  cursor: pointer;
-  list-style: none;
-}
-.output-prompt summary::-webkit-details-marker {
-  display: none;
-}
-.output-prompt summary span {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.output-prompt[open] summary span {
-  display: block;
-}
-.output-prompt-enhanced {
-  margin-top: -2px;
-  padding-left: 8px;
-  border-left: 2px solid var(--accent, currentColor);
-  color: var(--text, inherit);
-}
-
 #original-dialog {
   width: min(1250px, 94vw);
   height: fit-content;
@@ -2616,11 +2157,7 @@ dialog::backdrop {
     height: 100dvh;
   }
 
-  #gallery-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    align-items: start;
-  }
+  
 }
 @media (max-width: 640px) {
   body {
@@ -2737,23 +2274,7 @@ dialog::backdrop {
 }
 /* Old-film grain: neither dust nor fine noise, a soft grain of two to three pixels that never
    sits still. Fractal noise drawn once (an inline SVG), moved a few times a second. */
-.film-grain {
-  position: absolute;
-  inset: -25%;
-  z-index: 1;
-  pointer-events: none;
-  opacity: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.5' numOctaves='2' seed='11' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='1.35' intercept='-0.175'/%3E%3CfeFuncG type='linear' slope='1.35' intercept='-0.175'/%3E%3CfeFuncB type='linear' slope='1.35' intercept='-0.175'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='256' height='256' filter='url(%23g)'/%3E%3C/svg%3E");
-  /* Tuned by eye on a real generation: the size of the grain is this number (three pixels or so),
-     its strength the opacity below; a harder contrast in the noise looked like dust. */
-  background-size: 400px 400px;
-  mix-blend-mode: soft-light;
-  transition: opacity 0.9s ease;
-  animation: film-grain 0.64s steps(1) infinite;
-}
-.has-preview > .film-grain {
-  opacity: 0.62;
-}
+
 @keyframes film-grain {
   0% {
     transform: translate(0, 0);
@@ -2780,11 +2301,7 @@ dialog::backdrop {
     transform: translate(-5%, -8%);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .film-grain {
-    animation: none;
-  }
-}
+
 .generation-frame.has-image,
 .generation-frame.is-finished {
   background: var(--bg);
@@ -3077,9 +2594,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   font: inherit;
   font-size: var(--size-1);
 }
-.model-card .model-select {
-  margin: 0 0 13px;
-}
 
 #models-status {
   white-space: pre-line;
@@ -3268,9 +2782,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   padding: 0;
   border: 0;
 }
-.settings-block .iteration-setting {
-  margin-bottom: 0;
-}
+
 .settings-block .field-help:empty {
   display: none;
 }
@@ -3291,11 +2803,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   font-size: var(--size-1);
   line-height: 1.7;
 }
-.settings-hint {
-  color: var(--muted);
-  font-size: var(--size-1);
-  margin: 9px 0 0;
-}
+
 @media (max-width: 640px) {
   #settings .settings-content {
     padding: 0;
@@ -3331,13 +2839,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   color: var(--ink) !important;
   white-space: pre-wrap;
 }
-.gallery-card video {
-  width: 100%;
-  max-height: 260px;
-  object-fit: contain;
-  border-radius: 10px;
-  background: var(--bg);
-}
+
 .generation-frame video {
   display: block;
   width: 100%;
@@ -3355,27 +2857,20 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   margin-bottom: 17px;
   font-size: var(--size-1);
 }
-.native-environment {
-  margin-top: 18px;
-  border-top: 1px solid var(--line);
-  padding-top: 16px;
-}
+
 .native-folders-apart {
   margin-top: 4px;
 }
 .native-folders-apart[open] > summary {
   margin-bottom: 14px;
 }
-.native-environment > summary,
 .native-folders-apart > summary,
 .native-manual-path > summary {
   font-size: var(--size-1);
   color: var(--muted);
   cursor: pointer;
 }
-.native-environment[open] > summary {
-  margin-bottom: 16px;
-}
+
 .workflow-settings .workflow-heading {
   margin: 0 0 18px;
   gap: 12px;
@@ -3478,53 +2973,11 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   grid-column: 2;
   grid-row: 1 / span 3;
 }
-.workflow-settings .workflow-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-  margin: 0;
-  min-width: 0;
-}
-.workflow-settings .workflow-card-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 8px;
-  min-width: 0;
-}
-.workflow-settings .workflow-card-title strong {
-  font-size: var(--size-1);
-  white-space: nowrap;
-}
-.workflow-settings .workflow-card-title small {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.workflow-settings .workflow-card > .workflow-card-description {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.workflow-settings .workflow-card > .workflow-card-problem {
-  color: var(--warning);
-}
+
 .workflow-settings .native-status {
   padding: 2px 7px;
 }
-.workflow-card-title {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-.workflow-card-title strong {
-  font-size: var(--size-2);
-  overflow-wrap: anywhere;
-}
-.workflow-card-title small {
-  margin: 0;
-}
+
 .native-status {
   font-size: var(--size-1);
   line-height: 1.4;
@@ -4360,9 +3813,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   padding: 9px 11px;
   line-height: 1.55;
 }
-#settings .settings-hint {
-  margin-top: 5px;
-}
+
 #settings .model-paths {
   margin-top: 10px;
 }
@@ -4398,49 +3849,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 #settings .generation-auto-label {
   margin-bottom: 10px !important;
 }
-#settings .iteration-setting {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  column-gap: 14px;
-  row-gap: 2px;
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  box-shadow: none;
-}
-#settings .iteration-setting label {
-  grid-column: 1;
-}
-#settings .iteration-setting p {
-  grid-column: 1;
-  margin: 0;
-  line-height: 1.5;
-}
-#settings .iteration-controls {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  gap: 6px;
-}
-#settings .iteration-stepper button {
-  width: 28px;
-  height: 30px;
-  font-size: var(--size-4);
-}
-#settings .iteration-stepper input,
-#settings .iteration-stepper span {
-  width: 46px;
-  height: 30px;
-  font-size: var(--size-3);
-}
-#settings #generation-unlimited {
-  width: 34px;
-  height: 32px;
-  font-size: 19px;
-}
-#settings .native-environment {
-  margin-top: 10px;
-  padding-top: 9px;
-}
+
 #settings #generation-status {
   margin: 6px 0 0;
 }
@@ -4655,19 +4064,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 .settings-panel:focus {
   outline: none;
 }
-.settings-panel.is-columns {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  align-items: start;
-}
-#settings .settings-column > .settings-block:last-child,
-#settings .settings-column > fieldset:last-child > .settings-block {
-  margin-bottom: 0;
-}
-#settings .settings-column > * + * {
-  margin-top: 0;
-}
+
 #settings .is-single > .settings-block:last-child {
   margin-bottom: 0;
 }
@@ -4710,9 +4107,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 #settings .update-settings:has(#settings-update-install:not([hidden])) {
   border-color: var(--update-line);
 }
-#settings .update-settings .settings-hint {
-  margin-top: 10px;
-}
+
 .components-heading {
   display: flex;
   align-items: center;
@@ -4729,9 +4124,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   padding: 5px 12px;
   font-size: var(--size-1);
 }
-#settings .components-intro {
-  margin: 4px 0 0;
-}
+
 .components-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5080,14 +4473,11 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   #settings-form .settings-footer {
     padding: 10px 14px;
   }
-  .settings-panel.is-columns,
   .components-list,
-  #settings #workflow-list {
+#settings #workflow-list {
     grid-template-columns: minmax(0, 1fr);
   }
-  .settings-panel.is-columns {
-    gap: 10px;
-  }
+  
 }
 @media (prefers-reduced-motion: reduce) {
   .settings-tab {
@@ -5110,13 +4500,10 @@ body {
 .sidebar,
 dialog,
 .composer,
-.model-card,
 .secondary,
-.settings-button,
 .theme-button,
 .suggestions button,
-.workflow-card,
-.iteration-setting {
+.workflow-card {
   background-size: auto;
 }
 .sidebar {
@@ -5135,333 +4522,16 @@ dialog,
   font-weight: 650;
   flex-shrink: 0;
 }
-.brand-local {
-  font-weight: 350;
-  color: var(--muted);
-  margin-left: 3px;
-}
-.new-chat {
-  min-height: 40px;
-  margin: 28px 0 8px;
-  padding: 10px 12px;
-  font-size: var(--size-1);
-  border-color: var(--line);
-  background-color: var(--surface);
-  border-radius: 8px;
-  flex-shrink: 0;
-  box-shadow: inset 0 1px 0 var(--metal-edge);
-}
-.new-chat:hover {
-  border-color: var(--line-strong);
-  background-color: var(--surface-raised);
-}
-.home-button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-  min-height: 38px;
-  margin: 0 0 18px;
-  padding: 8px 12px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--size-1);
-  font-weight: 500;
-  text-align: left;
-}
-.home-button svg {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-}
-.home-button:hover {
-  color: var(--ink);
-  background: var(--metal-edge);
-}
-.home-button[aria-current='page'] {
-  color: var(--ink);
-  background: var(--tint);
-  border-color: var(--line);
-  box-shadow: inset 0 1px 0 var(--metal-edge);
-}
-.sidebar-section {
-  margin: 0;
-  min-height: 0;
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.project-nav-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--muted);
-  font-size: var(--size-1);
-  font-weight: 550;
-  letter-spacing: 0.6px;
-  padding: 0 7px 8px;
-}
-.project-nav-heading .icon-button {
-  width: 25px;
-  height: 25px;
-}
-.project-nav-heading svg {
-  width: 14px;
-  height: 14px;
-}
-#history-section {
-  overflow: auto;
-  scrollbar-width: thin;
-  flex: 1;
-}
-.history-list {
-  gap: 14px;
-  max-height: none;
-  overflow: visible;
-}
-.project-group {
-  min-width: 0;
-}
-.project-row {
-  display: flex;
-  align-items: center;
-  min-height: 34px;
-  gap: 1px;
-  border-radius: 7px;
-  padding: 0 2px;
-  color: var(--muted);
-}
-.project-group.is-active > .project-row {
-  color: var(--ink);
-}
-.project-row:hover {
-  background: var(--metal-edge);
-}
-.project-toggle.icon-button {
-  width: 21px;
-  height: 28px;
-  flex-shrink: 0;
-  border-radius: 5px;
-}
-.project-toggle svg {
-  width: 12px;
-  height: 12px;
-  transition: transform 0.16s;
-}
-.project-toggle[aria-expanded='true'] svg {
-  transform: rotate(90deg);
-}
-.project-open {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  min-width: 0;
-  flex: 1;
-  background: none;
-  color: inherit;
-  padding: 8px 2px;
-  text-align: left;
-  font-size: var(--size-1);
-  font-weight: 550;
-}
-.project-open svg {
-  width: 15px;
-  height: 15px;
-  color: var(--muted);
-}
+
 .project-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.project-count {
-  font-size: var(--size-1);
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  margin-left: auto;
-  padding-right: 3px;
-}
-.project-rename.icon-button {
-  width: 24px;
-  height: 26px;
-  opacity: 0;
-  flex-shrink: 0;
-}
-.project-rename svg {
-  width: 12px;
-  height: 12px;
-}
-.project-row:hover .project-rename,
-.project-row:focus-within .project-rename {
-  opacity: 1;
-}
-.project-conversations {
-  margin: 4px 0 0 13px;
-  padding-left: 12px;
-  border-left: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.history-row {
-  min-width: 0;
-  position: relative;
-  flex-shrink: 0;
-}
-.history-item {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  min-height: 33px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 7px 25px 7px 8px;
-  color: var(--muted);
-  background: none;
-  font-size: var(--size-1);
-  width: 100%;
-}
-.history-item > svg {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-  opacity: 0.6;
-}
-.history-item .history-label {
-  min-width: 0;
-  flex: 1;
-  display: block;
-}
-.history-item .history-title {
-  font-size: var(--size-1);
-  font-weight: 400;
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.history-item:hover {
-  color: var(--ink);
-  background: var(--metal-edge);
-  border-color: transparent;
-}
-.history-item.active {
-  color: var(--ink);
-  background: var(--tint);
-  border-color: var(--line);
-  box-shadow: inset 0 1px 0 var(--metal-edge);
-}
-.history-item.active .history-title {
-  font-weight: 550;
-}
-.history-delete-button {
-  position: absolute;
-  right: 3px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 23px;
-  height: 25px;
-}
-.history-delete-button svg {
-  width: 12px;
-  height: 12px;
-}
-.sidebar-bottom {
-  margin-top: auto;
-  padding-top: 18px;
-  flex-shrink: 0;
-}
-.model-card {
-  padding: 12px;
-  border-radius: 10px;
-  background-color: var(--surface);
-}
-.model-card-top {
-  margin-bottom: 9px;
-}
-.model-symbol {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-}
-.model-symbol svg {
-  width: 15px;
-  height: 15px;
-}
-.quant-tag {
-  font-size: var(--size-1);
-  padding: 3px 5px;
-}
-.model-card strong {
-  font-size: var(--size-1);
-}
-.model-card p {
-  font-size: var(--size-1);
-  margin: 5px 0 9px;
-}
-.model-card .model-select {
-  font-size: var(--size-1);
-  min-height: 30px;
-  padding: 5px 24px 5px 7px;
-  border-radius: 6px;
-}
-.engine-action {
-  font-size: var(--size-1);
-  margin-top: 5px;
-  padding: 6px 0;
-}
-.model-card.is-off {
-  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
-}
-.model-card.is-ready {
-  border-color: color-mix(in srgb, var(--success) 60%, var(--line));
-}
+
 /* The bottom bar is one block, framed like « Nouvelle conversation ». */
-.sidebar-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 12px;
-  min-height: 40px;
-  padding: 5px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background-color: var(--surface);
-  box-shadow: inset 0 1px 0 var(--metal-edge);
-}
-.sidebar-actions .settings-button {
-  display: grid;
-  place-items: center;
-  flex: 0 0 40px;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  min-height: 40px;
-  padding: 0;
-  border-radius: 9px;
-  border: 1px solid transparent;
-  background: transparent;
-  box-shadow: none;
-  color: var(--muted);
-}
-.sidebar-actions .settings-button svg {
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
-  display: block;
-}
-.sidebar-actions .settings-button:hover {
-  background: var(--surface-raised);
-  color: var(--ink);
-  border-color: var(--line);
-}
+
 .workspace {
   height: 100dvh;
 }
@@ -5475,49 +4545,6 @@ dialog,
 }
 
 /* The Studio is styled in moodix.css. */
-.chat-header {
-  flex-shrink: 0;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  width: 100%;
-  max-width: var(--chat-column);
-  padding: 18px var(--chat-side) 9px;
-  margin: 0 auto;
-  min-height: 48px;
-  color: var(--muted);
-  font-size: var(--size-1);
-}
-.chat-header > svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-.chat-header select {
-  appearance: auto;
-  max-width: 180px;
-  min-width: 70px;
-  background: transparent;
-  color: var(--muted);
-  border: 0;
-  font-size: var(--size-1);
-  outline-offset: 3px;
-  padding: 4px 2px;
-}
-.chat-header option {
-  background: var(--surface);
-  color: var(--ink);
-}
-.chat-header-divider {
-  opacity: 0.4;
-}
-.chat-header #chat-heading {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.6;
-  min-width: 0;
-}
 
 /* With room for both, the panel takes its place beside the page, which narrows: nothing of the
    page is left under it (the Studio's « Retour » was). On a narrower window it stays a sheet
@@ -5660,71 +4687,20 @@ dialog,
     font-size: 19px;
     gap: 7px;
   }
-  .sidebar > .new-chat {
-    display: none;
-  }
-  .sidebar .sidebar-bottom {
-    display: contents;
-  }
-  .sidebar .model-card {
-    display: none;
-  }
-  .sidebar .sidebar-actions {
-    display: flex;
-    margin: 0;
-    gap: 3px;
-    min-height: 32px;
-    /* In the top bar on small screens: no frame. */
-    padding: 0;
-    border: 0;
-    background: none;
-    box-shadow: none;
-  }
-  .sidebar-actions .mobile-new {
-    display: grid;
-    background: none;
-    border: 0;
-    width: 36px;
-    height: 36px;
-  }
-  .sidebar-actions .settings-button {
-    width: 36px;
-    height: 36px;
-    min-width: 36px;
-    min-height: 36px;
-    flex: 0 0 36px;
-  }
-  .sidebar-actions .settings-button svg {
-    width: 20px;
-    height: 20px;
-  }
-  #navigation-open {
-    width: 36px;
-    order: -1;
-  }
-  .sidebar > .sidebar-section {
-    display: none;
-    position: fixed;
-    top: 62px;
-    left: 0;
-    bottom: 0;
-    width: 270px;
-    background: var(--sidebar);
-    border-right: 1px solid var(--line);
-    padding: 20px 12px;
-    box-shadow: 20px 0 60px #0005;
-    margin: 0;
-  }
-  body[data-nav-open='true'] .sidebar > .sidebar-section {
-    display: flex;
-  }
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   .workspace {
     height: auto;
   }
-  .chat-header {
-    padding-top: 12px;
-    min-height: 43px;
-  }
+  
 
   .composer-region {
     padding-bottom: 12px;
@@ -5733,22 +4709,7 @@ dialog,
     right: 14px;
     max-width: calc(100% - 28px);
   }
-  .history-mobile {
-    display: none;
-  }
-}
-@media (hover: none), (pointer: coarse) {
-  .project-rename {
-    opacity: 0.7;
-  }
-  .history-delete-button {
-    opacity: 0.75;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .project-toggle svg {
-    transition: none;
-  }
+  
 }
 
 @media (max-width: 380px) {
@@ -5760,46 +4721,12 @@ dialog,
     font-size: 17px;
     gap: 5px;
   }
-  .sidebar .sidebar-actions {
-    gap: 2px;
-  }
-  .sidebar-actions .mobile-new,
-  .sidebar-actions .settings-button,
-  #navigation-open {
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
-    min-height: 32px;
-    flex-basis: 32px;
-  }
+  
+  
 }
 
 /* Model start/stop: same size as the other sidebar icons, left of the settings. */
-.sidebar-actions .engine-button {
-  display: grid;
-  place-items: center;
-  flex: 0 0 40px;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  min-height: 40px;
-  padding: 0;
-  border-radius: 9px;
-  border: 1px solid transparent;
-  background: transparent;
-  box-shadow: none;
-  transition:
-    background-color 0.15s,
-    border-color 0.15s,
-    color 0.15s;
-}
-.sidebar-actions .engine-button svg {
-  width: 20px;
-  height: 20px;
-  display: block;
-  fill: currentColor;
-  stroke: none;
-}
+
 .engine-button.is-off {
   color: var(--success);
 }
@@ -5837,20 +4764,7 @@ dialog,
 }
 
 /* An update ready to install: a dot on the settings button (installed from the settings' first tab). */
-.sidebar-actions .settings-button {
-  position: relative;
-}
-.sidebar-actions .settings-button.has-update::after {
-  content: '';
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--update-light);
-  box-shadow: 0 0 0 2px var(--surface);
-}
+
 @media (prefers-reduced-motion: reduce) {
   .engine-button.is-busy svg {
     animation: none;
@@ -5900,39 +4814,6 @@ dialog,
   box-shadow: 0 12px 32px var(--shadow);
   display: grid;
   gap: 2px;
-}
-.project-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--ink);
-  font-size: var(--size-1);
-  text-align: left;
-  cursor: pointer;
-}
-.project-menu-item svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  color: var(--muted);
-}
-.project-menu-item:hover,
-.project-menu-item:focus-visible {
-  background: var(--hover);
-  outline: none;
-}
-.project-menu-item.is-danger,
-.project-menu-item.is-danger svg {
-  color: var(--danger);
-}
-.project-menu-item.is-danger:hover,
-.project-menu-item.is-danger:focus-visible {
-  background: var(--danger-bg);
 }
 
 /* ============================================================ part 3: Moodix (was moodix.css) */
@@ -6120,21 +5001,17 @@ kbd {
   font-family: var(--font-mono);
 }
 .composer,
-.model-card,
 .secondary,
-.settings-button,
 .theme-button,
 .suggestions button,
 .workflow-card,
-.iteration-setting,
 .sidebar,
 .gallery,
 dialog {
   background-image: none;
   box-shadow: none;
 }
-.composer::after,
-.model-card::after {
+.composer::after {
   display: none;
 }
 dialog {
@@ -6194,13 +5071,7 @@ summary:focus-visible {
   border-bottom: 0;
   box-shadow: none;
 }
-#sidebar .sidebar-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex: none;
-}
+
 /* The logo, MDX in white, and 7 px under it the four colours of Moodix in one rule as wide as it. */
 #sidebar .brand {
   display: inline-flex;
@@ -6211,214 +5082,13 @@ summary:focus-visible {
   border-radius: 8px;
   font-size: 0;
 }
-.brand-logo {
-  display: block;
-  height: 28px;
-  width: auto;
-}
-.brand-rule {
-  display: flex;
-  align-self: stretch;
-  gap: 3px;
-}
-.brand-rule span {
-  height: 3px;
-  border-radius: 999px;
-}
-.brand-rule span:nth-child(1) {
-  flex: 4;
-  background: #3d6bf5;
-}
-.brand-rule span:nth-child(2) {
-  flex: 2;
-  background: #22a060;
-}
-.brand-rule span:nth-child(3) {
-  flex: 3;
-  background: #f6c343;
-}
-.brand-rule span:nth-child(4) {
-  flex: 1.5;
-  background: #e8402f;
-}
+
 /* White letters, dark on the light theme (sidebar, switch, welcome). */
-:root[data-theme='light'] .brand-logo,
-:root[data-theme='light'] .mode-logo,
-:root[data-theme='light'] .welcome-logo {
-  filter: invert(1);
-}
-#sidebar .nav-close {
-  display: none;
-}
-#sidebar > .new-chat {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-  min-height: 46px;
-  margin: 0;
-  padding: 0 14px;
-  border-radius: 12px;
-  border: 1px solid #262a33;
-  background: var(--surface);
-  color: var(--ink);
-  font-size: var(--size-3);
-  font-weight: 700;
-}
-:root[data-theme='light'] #sidebar > .new-chat {
-  border-color: var(--line-strong);
-}
-#sidebar > .new-chat:hover:enabled {
-  background: var(--surface-raised);
-}
-#sidebar > .new-chat svg {
-  width: 17px;
-  height: 17px;
-  stroke-width: 2.2;
-}
-#sidebar > .sidebar-section {
-  position: static;
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  width: auto;
-  border: 0;
-  background: none;
-  box-shadow: none;
-  overflow: visible;
-}
-.sidebar-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 18px;
-}
-#sidebar .home-button {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 44px;
-  margin: 0;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--soft);
-  font-size: var(--size-3);
-  font-weight: 600;
-}
-#sidebar .home-button svg {
-  width: 18px;
-  height: 18px;
-  stroke-width: 2;
-}
-#sidebar .home-button:hover:enabled {
-  background: var(--hover);
-  color: var(--ink);
-}
-#sidebar .home-button[aria-current='page'] {
-  background: var(--chip);
-  color: var(--ink);
-  font-weight: 800;
-  border: 0;
-  box-shadow: none;
-}
-#sidebar .project-nav-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 4px 4px 12px;
-  margin: 0;
-  min-height: 40px;
-}
+
 /* « PROJETS »: in the font of the sidebar, small capitals of a label. */
-#sidebar .project-nav-heading > span {
-  font-family: var(--font-ui);
-  font-size: var(--size-1);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-#sidebar .project-nav-heading .icon-button {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-}
-#sidebar .history-item {
-  border-radius: 10px;
-  min-height: 38px;
-  font-size: var(--size-3);
-}
-#sidebar .history-item.active {
-  background: var(--surface-raised);
-  color: var(--ink);
-  font-weight: 700;
-}
+
 /* The project the library shows (0.5.126): its line on the ground of a line under the pointer, its
    name in white. The page « Bibliothèque » keeps its white line. */
-#sidebar .project-row.is-current {
-  background: var(--row-hover);
-  color: var(--row-open);
-}
-#sidebar .project-row.is-current .project-open svg {
-  color: var(--row-open);
-}
-#sidebar .sidebar-bottom {
-  display: block;
-  flex: none;
-  margin: 0;
-  padding: 0;
-}
-#sidebar .sidebar-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  gap: 4px;
-  min-height: 0;
-  margin: 0;
-  padding: 6px;
-  border-radius: 14px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  box-shadow: none;
-}
-#sidebar .sidebar-actions .engine-button,
-#sidebar .sidebar-actions .settings-button {
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-  min-height: 44px;
-  flex: 0 0 44px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--ink);
-  box-shadow: none;
-}
-#sidebar .sidebar-actions .settings-button svg {
-  width: 19px;
-  height: 19px;
-}
-#sidebar .sidebar-actions .settings-button svg {
-  stroke-width: 1.5;
-}
-#sidebar .sidebar-actions .settings-button:hover:enabled {
-  background: var(--hover);
-}
-#sidebar .sidebar-actions .mobile-new {
-  display: none;
-}
-.nav-scrim {
-  display: none;
-}
 
 /* Narrower than 1100 px: the sidebar is a drawer, opened by the menu button of the top bar. */
 @media (max-width: 1099px) {
@@ -6442,22 +5112,8 @@ summary:focus-visible {
     visibility: visible;
     transition: transform 0.4s ease;
   }
-  #sidebar .nav-close {
-    display: grid;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-  }
-  body[data-nav-open='true'] .nav-scrim {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 59;
-    border: 0;
-    background: rgba(0, 0, 0, 0.55);
-    cursor: pointer;
-  }
+  
+  
 }
 @media (prefers-reduced-motion: reduce) {
   #sidebar,
@@ -6477,66 +5133,7 @@ summary:focus-visible {
   height: 100dvh;
   background: transparent;
 }
-#topbar {
-  flex: none;
-  position: relative;
-  z-index: 6;
-  background: var(--bg);
-}
-.topbar-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 64px;
-  padding: 10px var(--pad) 8px;
-}
-.topbar-start {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-.topbar-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 44px;
-  min-width: 44px;
-  padding: 0 14px;
-  border-radius: 999px;
-  border: 1px solid #262a33;
-  background: #14161b;
-  color: var(--ink);
-  font-weight: 700;
-  font-size: var(--size-3);
-}
-:root[data-theme='light'] .topbar-button {
-  border-color: var(--line-strong);
-  background: var(--surface);
-}
-.topbar-button:hover:enabled {
-  background: var(--hover);
-}
-.topbar-button svg {
-  width: 17px;
-  height: 17px;
-  stroke-width: 2;
-}
-#navigation-open {
-  display: none;
-  flex: 0 0 44px;
-  height: 44px;
-  padding: 0;
-  border-radius: 14px;
-  background: transparent;
-}
-@media (max-width: 1099px) {
-  #navigation-open {
-    display: inline-flex;
-  }
-}
+
 /* The dot of the action colour: the Studio label of the message box. */
 .mode-dot {
   width: 8px;
@@ -6545,55 +5142,13 @@ summary:focus-visible {
   background: var(--fn-action);
   flex: none;
 }
-#chat-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: none;
-  width: auto;
-  min-width: 0;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  color: var(--muted);
-  font-size: var(--size-2);
-}
-#chat-header[hidden] {
-  display: none;
-}
-#chat-header #chat-heading {
-  color: var(--ink);
-  opacity: 1;
-  font-weight: 700;
-  font-size: var(--size-4);
-}
-#chat-header select {
-  color: var(--muted);
-  font-size: var(--size-2);
-}
+
 /* Image / Vidéo / Son under « Studio » in the sidebar (moodix-design.md 7 bis 19). While the Studio
    is on screen, « Studio » and its modes are one card (#1C1F26, 12 px corners); under the name, a
    dark track with three equal tabs, icons only (their names for screen readers and in their
    tooltips), 28 px high, the one in use white with a dark icon. Seen from the Chat or the library,
    the card stays, without its ground and without a white tab: a click opens the Studio there. */
-.studio-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 4px 4px 5px;
-  border-radius: 12px;
-  background: transparent;
-}
-body[data-view='studio'] .studio-nav {
-  background: #1c1f26;
-}
-#sidebar .studio-nav .home-button {
-  min-height: 34px;
-  padding: 0 8px;
-}
-body[data-view='studio'] #sidebar .studio-nav .home-button {
-  background: transparent;
-}
+
 #studio-kinds.kind-tabs {
   display: flex;
   gap: 2px;
@@ -6630,9 +5185,7 @@ body[data-view='studio'] #studio-kinds .kind-tab[aria-selected='true'] {
   background: #eceef2;
   color: #0b0c0f;
 }
-:root[data-theme='light'] body[data-view='studio'] .studio-nav {
-  background: var(--chip);
-}
+
 :root[data-theme='light'] #studio-kinds.kind-tabs {
   background: var(--hover);
 }
@@ -6926,16 +5479,7 @@ body[data-view='studio']:not([data-chat='open']) .chat-panel {
 }
 /* The bar with its formats just too narrow for one line: « Agent » keeps its icon (its name in
    its tooltip). */
-@container actionbar (max-width: 540px) {
-  #studio-view .has-formats .studio-go-group .studio-agent {
-    justify-content: center;
-    width: calc(var(--format-button, 38px) + 2 * var(--format-inset, 4px));
-    padding: 0;
-  }
-  .has-formats .studio-agent-word {
-    display: none;
-  }
-}
+
 /* Nothing to make here: the chat stays at hand, under the message. */
 .studio-desk.is-empty .studio-agent {
   margin: 14px auto 0;
@@ -7045,16 +5589,7 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   flex: 0 1 auto;
   min-height: 0;
 }
-.welcome-logo {
-  display: block;
-  height: 44px;
-  width: auto;
-}
-.composer-region .welcome-mark {
-  width: auto;
-  height: auto;
-  margin-bottom: 18px;
-}
+
 .welcome h1 {
   font-weight: 700;
   letter-spacing: -1px;
@@ -7151,21 +5686,7 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   gap: 8px;
   min-height: 18px;
 }
-.studio-block-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-size: var(--size-1);
-  line-height: 1.6;
-  letter-spacing: 2.5px;
-  text-transform: uppercase;
-  color: var(--block-text);
-}
-.studio-count {
-  font-family: var(--font-mono);
-  font-size: var(--size-1);
-  color: var(--muted);
-}
+
 .studio-desk.is-empty {
   display: block;
   padding: 40px 0;
@@ -7672,13 +6193,7 @@ video.studio-frame-result {
   background: #000;
   cursor: default;
 }
-.studio-frame-vignette {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.55);
-}
+
 /* What will be made, at the top left of the screen (moodix-design.md 25): « 16:9 - 05.17 S », in
    white, a light shadow to read on any picture, no ground. */
 .studio-readout {
@@ -7761,21 +6276,7 @@ video.studio-frame-result {
    formats, « Agent » and « Générer » tightened to stay on one line. Buttons of format of 44 px
    (« ··· » 36), « Générer » of 150 px, 6 px between « Agent » and « Générer ». Narrower still,
    « Générer » goes under the formats. */
-@container actionbar (max-width: 455px) {
-  #studio-view .has-formats .studio-format {
-    min-width: 44px;
-    padding: 0 6px;
-  }
-  #studio-view .has-formats .studio-format.is-more {
-    min-width: 36px;
-  }
-  #studio-view .has-formats .studio-go-group {
-    gap: 6px;
-  }
-  #studio-view .has-formats .studio-go {
-    min-width: 150px;
-  }
-}
+
 .studio-formats-wrap {
   position: relative;
 }
@@ -8077,35 +6578,7 @@ video.studio-frame-result {
 .studio-more:hover:enabled {
   background: var(--hover);
 }
-.studio-advanced {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.studio-advanced[hidden] {
-  display: none;
-}
-.studio-loras {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.studio-loras-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.studio-loras-head h3 {
-  margin: 0;
-  font-size: var(--size-1);
-  font-weight: 500;
-  color: var(--muted);
-}
-.studio-loras-count {
-  font-family: var(--font-mono);
-  font-size: var(--size-1);
-  color: var(--muted);
-}
+
 .studio-lora {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 40px;
@@ -8120,44 +6593,10 @@ video.studio-frame-result {
   grid-area: name;
   min-height: 40px;
 }
-.studio-lora-remove {
-  grid-area: remove;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--muted);
-}
+
 .studio-lora input[type='range'] {
   grid-area: slider;
   accent-color: var(--fn-settings);
-}
-.studio-lora-strength {
-  grid-area: amount;
-  font-family: var(--font-mono);
-  font-size: var(--size-1);
-  color: var(--fn-settings-text);
-  align-self: center;
-}
-.studio-lora-add {
-  min-height: 42px;
-  border-radius: 12px;
-  border: 1px dashed var(--fn-settings);
-  background: transparent;
-  color: var(--fn-settings-text);
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-.studio-lora-add svg {
-  width: 16px;
-  height: 16px;
 }
 
 /* The output: a row of results, newest last for a timeline. */
@@ -8220,35 +6659,7 @@ video.studio-frame-result {
   opacity: 0.8;
   background: repeating-linear-gradient(90deg, var(--fn-output) 0 3px, transparent 3px 7px);
 }
-.studio-play {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
-  z-index: 3;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  border: 0;
-  background: rgba(11, 12, 15, 0.82);
-  color: var(--fn-output);
-}
-.studio-play svg {
-  width: 14px;
-  height: 14px;
-  fill: currentColor;
-  stroke: none;
-}
-.studio-item-title {
-  margin: 0;
-  font-size: var(--size-2);
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+
 .studio-item-meta {
   margin: 0;
   font-family: var(--font-mono);
@@ -8258,11 +6669,7 @@ video.studio-frame-result {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.studio-item .studio-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
+
 .studio-item .output-action {
   min-height: 34px;
   padding: 0 8px;
@@ -8279,15 +6686,6 @@ video.studio-frame-result {
   font-size: var(--size-2);
   color: var(--muted);
 }
-.studio-source-pick {
-  min-height: 32px;
-  border-radius: 10px;
-  border: 1px solid var(--field-line);
-  background: var(--field);
-  color: var(--soft);
-  font-size: var(--size-1);
-  padding: 0 8px;
-}
 
 /* ------------------------------------------------------------------ grain of old film, on the Studio */
 /* Only on the four blocks of the Studio (Entrée, Aperçu, Réglages, Résultats), under what they
@@ -8298,55 +6696,7 @@ video.studio-frame-result {
   position: relative;
   isolation: isolate;
 }
-.studio-grain {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  border-radius: inherit;
-  pointer-events: none;
-}
-.studio-dust,
-.studio-scratches {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-.studio-dust {
-  opacity: 0.07;
-}
-.studio-dust rect {
-  fill: #000;
-  stroke: none;
-}
-.studio-scratches {
-  --scratch: rgba(255, 255, 255, 0.22);
-  opacity: 0.2;
-  background-image:
-    linear-gradient(
-      90deg,
-      transparent calc(var(--scratch-1) - 0.5px),
-      var(--scratch) calc(var(--scratch-1) - 0.5px),
-      var(--scratch) calc(var(--scratch-1) + 0.5px),
-      transparent calc(var(--scratch-1) + 0.5px)
-    ),
-    linear-gradient(
-      90deg,
-      transparent calc(var(--scratch-2) - 0.5px),
-      var(--scratch) calc(var(--scratch-2) - 0.5px),
-      var(--scratch) calc(var(--scratch-2) + 0.5px),
-      transparent calc(var(--scratch-2) + 0.5px)
-    ),
-    linear-gradient(
-      90deg,
-      transparent calc(var(--scratch-3) - 0.5px),
-      var(--scratch) calc(var(--scratch-3) - 0.5px),
-      var(--scratch) calc(var(--scratch-3) + 0.5px),
-      transparent calc(var(--scratch-3) + 0.5px)
-    );
-}
+
 .studio-block.is-input {
   --scratch-1: 22%;
   --scratch-2: 61%;
@@ -8412,10 +6762,7 @@ video.studio-frame-result {
   isolation: isolate;
 }
 /* Never over a picture, a clip or a sound. */
-.film-grain,
-.picture-grain {
-  display: none;
-}
+
 .studio-frame.is-busy .studio-frame-result {
   opacity: 0.55;
   transition: opacity 0.6s ease;
@@ -8669,11 +7016,7 @@ video.studio-frame-result {
   height: 40px;
   z-index: 4;
 }
-.studio-output-tools {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+
 .studio-decline {
   min-height: 52px;
   border-radius: 14px;
@@ -8998,12 +7341,7 @@ video.studio-frame-result {
   min-height: 38px;
   flex: none;
 }
-.studio-advanced {
-  gap: 10px;
-}
-.studio-loras {
-  gap: 6px;
-}
+
 .studio-lora {
   grid-template-columns: minmax(0, 1fr) 64px 34px 30px;
   grid-template-areas: 'name slider amount remove';
@@ -9021,17 +7359,7 @@ video.studio-frame-result {
   width: 100%;
   min-width: 0;
 }
-.studio-lora-remove {
-  width: 30px;
-  height: 30px;
-}
-.studio-lora-remove svg {
-  width: 14px;
-  height: 14px;
-}
-.studio-lora-add {
-  min-height: 36px;
-}
+
 /* The LoRAs of the workflow: a row each, its name (with the tile of Moodix AI when the assistant
    may switch it), its strength, and whether it is on; off, it fades. */
 .studio-lora.is-workflow {
@@ -9039,16 +7367,7 @@ video.studio-frame-result {
   grid-template-areas: 'name slider amount switch';
   min-height: 40px;
 }
-.studio-lora-name {
-  grid-area: name;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  padding-left: 4px;
-  font-size: var(--size-2);
-  color: var(--ink);
-}
+
 .studio-lora-label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -9069,31 +7388,12 @@ video.studio-frame-result {
 .studio-lora-switch:disabled {
   cursor: default;
 }
-.studio-lora.is-off .studio-lora-name,
-.studio-lora.is-off .studio-lora-strength,
 .studio-lora.is-off input[type='range'] {
   opacity: 0.45;
 }
 
 /* The Sortie: one height, a row of pictures; their actions on the picture. */
-.studio-output-tools {
-  gap: 6px;
-}
-.studio-desk .studio-source-pick {
-  min-height: 24px;
-  width: auto;
-  padding: 0 2px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  font-family: var(--font-ui);
-  font-size: var(--size-1);
-  cursor: pointer;
-}
-.studio-desk .studio-source-pick:hover:enabled {
-  color: var(--soft);
-}
+
 .studio-block.is-output .studio-empty {
   flex: 1 1 auto;
   display: flex;
@@ -9125,27 +7425,7 @@ video.studio-frame-result {
     height: 78px;
   }
 }
-.studio-item .studio-actions {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  right: 6px;
-  z-index: 3;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-.studio-thumb:hover .studio-actions,
-.studio-thumb:focus-within .studio-actions {
-  opacity: 1;
-}
-@media (hover: none) {
-  .studio-item .studio-actions {
-    opacity: 1;
-  }
-}
+
 .studio-item .output-action {
   width: 30px;
   height: 30px;
@@ -9165,10 +7445,6 @@ video.studio-frame-result {
 .studio-item .output-action svg {
   width: 14px;
   height: 14px;
-}
-.studio-play {
-  width: 40px;
-  height: 40px;
 }
 
 /* One column: a prompt of a few lines, the page scrolls for the rest. */
@@ -9345,9 +7621,6 @@ html[data-switch='chat']::view-transition-old(studio) {
 }
 
 /* « ∞ » of « Générations par message » in the middle of its box, level with − and +. */
-#settings .iteration-stepper span {
-  line-height: 30px;
-}
 
 /* Scroll bars: thin and quiet, a thumb without track nor arrows. */
 :root {
@@ -9425,18 +7698,6 @@ html[data-switch='chat']::view-transition-old(studio) {
 /* The head of the Sortie, at its top left: how many, then where from, in the same quiet words. */
 .studio-block.is-output .studio-block-head {
   justify-content: flex-start;
-}
-.studio-block.is-output .studio-count {
-  font-family: var(--font-ui);
-  font-size: var(--size-1);
-  font-weight: 500;
-  color: var(--muted);
-}
-.studio-block.is-output .studio-count:not(:empty) + .studio-source-pick::before {
-  content: none;
-}
-.studio-output-tools {
-  gap: 10px;
 }
 
 /* ------------------------------------------------------------------ Réglages in blocks */
@@ -9899,8 +8160,7 @@ html[data-switch='chat']::view-transition-old(studio) {
   pointer-events: none;
 }
 #studio-view .studio-item-main,
-#studio-view .studio-item-del,
-#studio-view .studio-item-info {
+#studio-view .studio-item-del {
   position: absolute;
   z-index: 3;
   display: grid;
@@ -9930,37 +8190,28 @@ html[data-switch='chat']::view-transition-old(studio) {
   top: 6px;
   left: 6px;
 }
-#studio-view .studio-item-info {
-  top: 6px;
-  right: 6px;
-}
-#studio-view .studio-item-del,
-#studio-view .studio-item-info {
+
+#studio-view .studio-item-del {
   width: 26px;
   height: 26px;
   opacity: 0;
   transition: opacity 0.15s;
 }
-#studio-view .studio-item-del svg,
-#studio-view .studio-item-info svg {
+#studio-view .studio-item-del svg {
   width: 13px;
   height: 13px;
 }
 #studio-view .studio-item:hover .studio-item-del,
-#studio-view .studio-item:hover .studio-item-info,
-#studio-view .studio-item:focus-within .studio-item-del,
-#studio-view .studio-item:focus-within .studio-item-info {
+#studio-view .studio-item:focus-within .studio-item-del {
   opacity: 1;
 }
 @media (hover: none) {
-  #studio-view .studio-item-del,
-  #studio-view .studio-item-info {
+  #studio-view .studio-item-del {
     opacity: 1;
   }
 }
 #studio-view .studio-item-main:hover:enabled:not(.is-off),
-#studio-view .studio-item-del:hover:enabled,
-#studio-view .studio-item-info:hover:enabled {
+#studio-view .studio-item-del:hover:enabled {
   background: rgba(11, 12, 15, 0.95);
   color: #ffffff;
 }
@@ -10240,12 +8491,7 @@ body {
     border-right: 0;
   }
   /* At 232 px « Nouvelle conversation » went on two lines: one, a little tighter. */
-  #sidebar > .new-chat {
-    gap: 8px;
-    padding: 0 12px;
-    font-size: var(--size-3);
-    white-space: nowrap;
-  }
+  
 }
 .workspace {
   position: relative;
@@ -10272,45 +8518,7 @@ body {
   }
 }
 /* The title bar: the first line of the window, the same in the Chat and the Studio. */
-#topbar {
-  background: transparent;
-}
-.topbar-row {
-  box-sizing: border-box;
-  height: 46px;
-  min-height: 0;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--title-line);
-}
-#chat-header {
-  gap: 8px;
-  color: var(--text-2);
-  font-size: var(--size-2);
-}
-#chat-header > svg {
-  flex: none;
-  width: 15px;
-  height: 15px;
-}
-#chat-header select {
-  color: var(--text-2);
-  font-size: var(--size-2);
-}
-#chat-header .chat-header-divider {
-  color: var(--text-3);
-}
-#chat-header #chat-heading {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-1);
-  font-size: var(--size-3);
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-:root[data-theme='light'] #chat-header #chat-heading {
-  color: var(--ink);
-}
+
 .studio-pill {
   display: inline-flex;
   flex: none;
@@ -10333,13 +8541,7 @@ body {
 }
 /* The filet over the window (public/filet.mjs): beside it in the page, laid exactly on it,
    above what it holds; it breathes, its opacity alone. */
-.mdx-filet {
-  position: absolute;
-  z-index: 30;
-  overflow: visible;
-  pointer-events: none;
-  animation: mdx-breath 7s ease-in-out infinite;
-}
+
 @keyframes mdx-breath {
   0%,
   100% {
@@ -10349,11 +8551,6 @@ body {
     opacity: 0.45;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .mdx-filet {
-    animation: none;
-  }
-}
 
 /* ------------------------------------------------------------------ sidebar folded (0.5.99)
    Beside the logo, the button that folds the sidebar to its icons (64 px, on the frame); folded,
@@ -10361,9 +8558,7 @@ body {
    unfolded, without the button. The width moves in 180 ms and the buttons follow it (they stretch
    across the sidebar): their icons stay where they are, the words fade in the first 80 ms (and
    come back in the last 80 ms), on one line. Rows keep their height: nothing moves up or down. */
-.sidebar-toggle {
-  display: none;
-}
+
 @media (min-width: 1100px) {
   #sidebar {
     z-index: 40;
@@ -10371,63 +8566,17 @@ body {
       flex-basis 180ms ease,
       width 180ms ease;
   }
-  #sidebar .sidebar-top {
-    min-height: 50px;
-  }
+  
   /* On the line of the logo, at its right. */
-  .sidebar-toggle {
-    position: relative;
-    display: grid;
-    place-items: center;
-    flex: none;
-    align-self: flex-start;
-    width: 28px;
-    height: 28px;
-    min-height: 0;
-    margin: 6px 0 0;
-    padding: 0;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text-3);
-    cursor: pointer;
-  }
-  .sidebar-toggle:hover,
-  .sidebar-toggle:focus-visible {
-    background: #15171c;
-    color: var(--text-1);
-  }
-  .sidebar-toggle > * {
-    grid-area: 1 / 1;
-  }
-  .sidebar-toggle .sidebar-panel {
-    width: 17px;
-    height: 17px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.75;
-    transition: opacity 120ms ease;
-  }
-  .sidebar-toggle .sidebar-mark {
-    display: none;
-    width: 24px;
-    height: 24px;
-    transition: opacity 120ms ease;
-  }
+  
+  
+  
+  
+  
   /* The words clipped in their own box as the width moves (the button itself does not clip:
      its tooltip goes out of it), on one line. */
-  #sidebar .home-button > svg,
-  #sidebar > .new-chat > svg {
-    flex: none;
-  }
-  #sidebar .home-button > span,
-  #sidebar > .new-chat > span {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    transition: opacity 80ms ease 100ms;
-  }
+  
+  
 
   /* Folded: icons only, centred, 40 × 36. */
   :root[data-sidebar='collapsed'] {
@@ -10436,62 +8585,27 @@ body {
   :root[data-sidebar='collapsed'] #sidebar {
     overflow: visible;
   }
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-top {
-    justify-content: center;
-  }
+  
   :root[data-sidebar='collapsed'] #sidebar .brand {
     display: none;
   }
   /* The small logo, 24 px in its 36 px button, its top on the window's top edge too. */
-  :root[data-sidebar='collapsed'] .sidebar-toggle {
-    width: 40px;
-    height: 36px;
-    margin: 0;
-  }
+  
   /* Its squares begin 3.45 px into the drawing (4.6 of 32): 2 px higher than the middle of its
      button, they begin at 27.5 px too, like the letters unfolded, on the window's top edge. Hovered,
      the mark gives way to the icon, which stays in the middle of the button's ground. */
-  :root[data-sidebar='collapsed'] .sidebar-toggle .sidebar-mark {
-    display: block;
-    transform: translateY(-2px);
-  }
-  :root[data-sidebar='collapsed'] .sidebar-toggle .sidebar-panel,
-  :root[data-sidebar='collapsed'] .sidebar-toggle:is(:hover, :focus-visible) .sidebar-mark {
-    opacity: 0;
-  }
-  :root[data-sidebar='collapsed'] .sidebar-toggle:is(:hover, :focus-visible) .sidebar-panel {
-    opacity: 1;
-  }
+  
+  
+  
   /* The words fade out, still there for screen readers (the button's name). */
-  :root[data-sidebar='collapsed'] #sidebar .home-button > span,
-  :root[data-sidebar='collapsed'] #sidebar > .new-chat > span {
-    opacity: 0;
-    transition: opacity 80ms ease;
-  }
-  :root[data-sidebar='collapsed'] #sidebar > .new-chat {
-    min-height: 36px;
-    margin: 5px 0;
-    padding: 0 0 0 10.5px;
-  }
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-nav > .home-button {
-    min-height: 36px;
-    margin: 4px 0;
-    padding: 0 0 0 11px;
-  }
+  
+  
+  
   /* The projects and conversations come back with the sidebar unfolded. */
-  :root[data-sidebar='collapsed'] #sidebar .project-nav-heading,
-  :root[data-sidebar='collapsed'] #sidebar #history-section {
-    display: none;
-  }
+  
   /* The Studio card in a column: its icon (36 × 34), then the track of Image, Vidéo, Son (34 × 28). */
-  :root[data-sidebar='collapsed'] #sidebar .studio-nav {
-    padding-right: 2px;
-    padding-left: 2px;
-  }
-  :root[data-sidebar='collapsed'] #sidebar .studio-nav .home-button {
-    min-height: 34px;
-    padding: 0 0 0 9px;
-  }
+  
+  
   :root[data-sidebar='collapsed'] #studio-kinds.kind-tabs {
     flex-direction: column;
     padding: 1px;
@@ -10501,31 +8615,13 @@ body {
     width: 34px;
   }
   /* The actions at the foot, in a column. */
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions {
-    flex-direction: column;
-    gap: 2px;
-    padding: 0;
-    border: 0;
-  }
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions .engine-button,
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions .settings-button {
-    flex: none;
-    width: 40px;
-    min-width: 0;
-    height: 36px;
-    min-height: 0;
-  }
+  
+  
   /* Each icon's name at its right, on hover and on keyboard focus: the one tooltip of the page
      (help-tips.mjs), no more its own here. */
 }
 @media (min-width: 1100px) and (prefers-reduced-motion: reduce) {
-  #sidebar,
-  #sidebar .home-button > span,
-  #sidebar > .new-chat > span,
-  :root[data-sidebar='collapsed'] #sidebar .home-button > span,
-  :root[data-sidebar='collapsed'] #sidebar > .new-chat > span,
-  .sidebar-toggle .sidebar-panel,
-  .sidebar-toggle .sidebar-mark {
+  #sidebar {
     transition: none;
   }
 }
@@ -10556,178 +8652,25 @@ body {
   --row-hover: #eef0f3;
   --row-open: var(--text-1);
 }
-#sidebar > .new-chat,
-#sidebar .home-button {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
-  width: auto;
-  height: 36px;
-  min-height: 36px;
-  margin: 0;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--row-ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-3);
-  font-weight: 600;
-  letter-spacing: 0;
-}
-#sidebar > .new-chat {
-  /* One line of the list with the pages, 2 px above Accueil as they are from each other. */
-  margin-bottom: -16px;
-  color: var(--row-open);
-  font-weight: 700;
-}
-#sidebar > .new-chat svg,
-#sidebar .home-button svg {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  stroke-width: 1.75;
-}
+
 /* The word at the left of its line (a button centres its text: « Nouveau chat » was). */
-#sidebar > .new-chat > span,
-#sidebar .home-button > span {
-  text-align: left;
-}
-#sidebar > .new-chat:hover:enabled,
-#sidebar .home-button:hover:enabled,
-body[data-view='studio'] #sidebar .studio-nav .home-button:hover:enabled,
-:root[data-theme='light'] #sidebar > .new-chat:hover:enabled {
-  background: var(--row-hover);
-  color: var(--row-open);
-}
-#sidebar > .new-chat:focus-visible,
-#sidebar .home-button:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-#sidebar .home-button[aria-current='page'],
-body[data-view='studio'] #sidebar .studio-nav .home-button[aria-current='page'] {
-  background: transparent;
-  color: var(--row-open);
-  font-weight: 800;
-}
-#sidebar .home-button[aria-current='page']:hover:enabled {
-  background: var(--row-hover);
-}
-#sidebar .home-button[aria-current='page']::after {
-  content: '';
-  position: absolute;
-  top: 9px;
-  bottom: 9px;
-  left: calc(-1 * var(--sidebar-inset));
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--row-open);
-  pointer-events: none;
-}
+
 /* The Studio and its modes, without a card: the line of the Studio like the others, the track of
    Image, Vidéo, Son always under it, from the word; the mode chosen white in the Studio alone. */
-.studio-nav,
-body[data-view='studio'] .studio-nav,
-:root[data-theme='light'] body[data-view='studio'] .studio-nav {
-  gap: 2px;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-}
-#sidebar .studio-nav .home-button,
-body[data-view='studio'] #sidebar .studio-nav .home-button {
-  min-height: 36px;
-  padding: 0 8px;
-}
+
 #sidebar #studio-kinds.kind-tabs {
   margin: 0 0 2px 44px;
 }
 
 /* The foot: the model at the left, Configuration at the right, without a box around them; one
    under the other when the sidebar is folded. */
-#sidebar .sidebar-actions,
-:root[data-theme='light'] #sidebar .sidebar-actions {
-  justify-content: space-between;
-  gap: 4px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-#sidebar .sidebar-actions .engine-button,
-#sidebar .sidebar-actions .settings-button {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 40px;
-  min-width: 0;
-  height: 36px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--row-ink);
-  --engine-ring: var(--bar-ground);
-}
-#sidebar .sidebar-actions .engine-button:is(:hover, :focus-visible):enabled,
-#sidebar .sidebar-actions .settings-button:is(:hover, :focus-visible):enabled {
-  background: var(--row-hover);
-  color: var(--row-open);
-  --engine-ring: var(--row-hover);
-}
-#sidebar .sidebar-actions .engine-button:focus-visible,
-#sidebar .sidebar-actions .settings-button:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-#sidebar .sidebar-actions .engine-button svg,
-#sidebar .sidebar-actions .settings-button svg {
-  width: 24px;
-  height: 24px;
-}
+
 /* ⏻ whatever the state, in a line of 1.75 px; it never turns. */
-#sidebar .sidebar-actions .engine-button svg,
-#sidebar .sidebar-actions .engine-button.is-busy svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.75;
-  stroke-linecap: round;
-  animation: none;
-}
+
 /* What the model is doing, in a dot of 7 px at the top right of the icon, ringed with 2 px of the
    ground around it: stopped grey, starting amber (breathing), ready green, set aside while a
    creation is made amber. Its name and tooltip are the button's, unchanged. */
-#sidebar .sidebar-actions .engine-button::after {
-  content: '';
-  position: absolute;
-  top: 6px;
-  right: 7px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--engine-dot, #4a4f59);
-  box-shadow: 0 0 0 2px var(--engine-ring);
-  pointer-events: none;
-}
-#sidebar .sidebar-actions .engine-button.is-off {
-  --engine-dot: #4a4f59;
-}
-#sidebar .sidebar-actions .engine-button.is-running {
-  --engine-dot: #22a060;
-}
-#sidebar .sidebar-actions .engine-button.is-running.is-busy,
-#sidebar .sidebar-actions .engine-button.is-paused {
-  --engine-dot: #f6c343;
-}
-#sidebar .sidebar-actions .engine-button.is-running.is-busy::after {
-  animation: mdx-engine-wait 1.6s ease-in-out infinite;
-}
+
 @keyframes mdx-engine-wait {
   0%,
   100% {
@@ -10737,45 +8680,22 @@ body[data-view='studio'] #sidebar .studio-nav .home-button {
     opacity: 0.4;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  #sidebar .sidebar-actions .engine-button.is-running.is-busy::after {
-    animation: none;
-  }
-}
+
 /* The gear in the colour of its button, as ⏻: an older rule (styles.css) gave it its own, dimmer
    (#9AA0AB) and deaf to the hover. */
-#sidebar .sidebar-actions .settings-button svg {
-  color: inherit;
-  stroke-width: 1.75;
-}
 
 /* Folded: icons alone, 40 × 36, one under the other, the line of the page open kept; its icon
    white. The track of the modes in a column under the Studio. */
 @media (min-width: 1100px) {
-  :root[data-sidebar='collapsed'] #sidebar > .new-chat,
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-nav > .home-button,
-  :root[data-sidebar='collapsed'] #sidebar .studio-nav .home-button {
-    height: 36px;
-    min-height: 36px;
-    margin: 0;
-    padding: 0 0 0 8px;
-  }
-  :root[data-sidebar='collapsed'] #sidebar > .new-chat {
-    margin-bottom: -16px;
-  }
-  :root[data-sidebar='collapsed'] #sidebar .studio-nav {
-    padding: 0;
-  }
+  
+  
+  
   :root[data-sidebar='collapsed'] #sidebar #studio-kinds.kind-tabs {
     align-self: center;
     width: 36px;
     margin: 0 0 2px;
   }
-  :root[data-sidebar='collapsed'] #sidebar .sidebar-actions {
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-  }
+  
 }
 
 /* The library (Bibliothèque, 0.5.123): a page of its own in the window, its title in the title
@@ -10804,92 +8724,9 @@ body[data-view='library'] .library-view {
   font-size: var(--size-3);
 }
 /* The three filters on one line: the project and the conversation, the kind at the right. */
-.library-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 12px;
-}
+
 /* A filter: its icon and its list in one frame, the ring of the focus around the frame. */
-.library-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 34px;
-  min-width: 0;
-  padding: 0 6px 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  color: var(--text-3);
-}
-.library-select:has(select:focus-visible) {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
-.library-select svg {
-  width: 15px;
-  height: 15px;
-}
-.library-select select {
-  appearance: auto;
-  min-width: 0;
-  max-width: 280px;
-  height: 32px;
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: var(--text-1);
-  font-size: var(--size-2);
-  font-weight: 650;
-  cursor: pointer;
-}
-.library-select select:focus-visible {
-  outline: none !important;
-}
-.library-select option {
-  background: var(--surface);
-  color: var(--text-1);
-}
-.library-section-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 12px;
-  margin-bottom: 14px;
-}
-.library-section-head h2 {
-  margin: 0;
-  color: var(--text-1);
-  font-size: var(--size-4);
-  font-weight: 800;
-}
-.library-count {
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: var(--size-1);
-  font-weight: 600;
-}
-.library-new {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  margin-left: auto;
-  padding: 0 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-1);
-  font-size: var(--size-2);
-  font-weight: 700;
-}
-.library-new svg {
-  width: 14px;
-  height: 14px;
-}
-.library-new:hover:enabled {
-  background: var(--hover);
-}
+
 .library-conversations {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -10913,15 +8750,7 @@ body[data-view='library'] .library-view {
   width: 15px;
   height: 15px;
 }
-.library-conversation-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-1);
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
 .library-conversation time {
   flex: none;
   font-size: var(--size-1);
@@ -10931,19 +8760,7 @@ body[data-view='library'] .library-view {
   border-color: var(--line-strong);
   background: var(--hover);
 }
-.library-more {
-  align-self: flex-start;
-  margin-top: 10px;
-  padding: 4px 0;
-  border: 0;
-  background: none;
-  color: var(--text-2);
-  font-size: var(--size-2);
-  font-weight: 650;
-}
-.library-more:hover {
-  color: var(--text-1);
-}
+
 /* Tout / Images / Vidéos / Sons: a dark track, the one in use white, as the modes of the Studio. */
 .library-kinds {
   display: inline-flex;
@@ -11020,22 +8837,7 @@ body[data-view='library'] .library-view {
   border-radius: 4px;
   background: repeating-linear-gradient(90deg, #6e7480 0 3px, transparent 3px 7px);
 }
-.library-badge {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  background: rgba(11, 12, 15, 0.82);
-  color: #eceef2;
-}
-.library-badge svg {
-  width: 13px;
-  height: 13px;
-}
+
 /* Over the foot of the picture, shown under the pointer or the keyboard's focus: dark below, clear
    above. Its words in the two lightest greys of the dark theme whatever the theme (they lie on the
    dark veil); only its button catches the pointer, the rest of the picture still shows it whole. */
@@ -11132,8 +8934,7 @@ body[data-view='library'] .library-heading {
   color: var(--ink);
 }
 body[data-view='library'] .chat-area,
-body[data-view='library'] .composer-region,
-body[data-view='library'] .chat-header {
+body[data-view='library'] .composer-region {
   display: none !important;
 }
 body[data-view='library'] .chat-panel {
@@ -11694,9 +9495,7 @@ body:has(dialog[open]) .room-grain {
   border-radius: var(--radius-s);
 }
 /* Le filet aux quatre couleurs de l'ancienne fenêtre n'a plus sa place dans la salle. */
-.mdx-filet {
-  display: none;
-}
+
 :root[data-theme='light'] {
   --mark: #0c0b0e;
 }
@@ -13657,9 +11456,7 @@ body:not([data-view='chat']) .resume {
   letter-spacing: 0.1em;
   text-shadow: none;
 }
-#studio-view .studio-frame-vignette {
-  display: none;
-}
+
 /* The bar under the screen: the actions of the take at the left, the Double verre in the middle. */
 #studio-view .studio-actionbar {
   display: grid;
@@ -15176,8 +12973,7 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   overflow-y: auto;
   scrollbar-width: thin;
 }
-#settings .settings-panel.is-single,
-#settings .settings-panel.is-columns {
+#settings .settings-panel.is-single {
   display: block;
 }
 #settings .settings-panel[hidden] {

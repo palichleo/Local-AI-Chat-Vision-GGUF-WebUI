@@ -62,7 +62,7 @@ test('the Pellicule: a page of its own, its title at its top, its projects and c
   assert.match(navigation, /'#thread button,#chat-open,#studio-open,#library-open'/);
   assert.match(css, /body\[data-view='library'\] \.library-view \{\n {2}display: flex;/);
   assert.match(css, /\.library-note \{\n {2}margin: 0;\n {2}color: var\(--text-2\);/);
-  assert.match(css, /body\[data-view='library'\] \.chat-area,\nbody\[data-view='library'\] \.composer-region,/);
+  assert.match(css, /body\[data-view='library'\] \.chat-area,\nbody\[data-view='library'\] \.composer-region \{/);
   // Its own scroll; the sheet by day, each take at its format on rows of 196 px (capture 31); the
   // projects and conversations in pills of 32 px with corners of 8.
   assert.match(css, /body\[data-view='library'\] \.library-view \{[^}]*overflow-y: auto;/);
