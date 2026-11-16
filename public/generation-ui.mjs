@@ -82,6 +82,8 @@ const ARTICLES = {
   Composition: 'la ',
   Génération: 'la ',
 };
+// The card held by the last generation (54): the same words in the chat and in the Studio.
+export const HELD_WORDS = 'La carte graphique est restée prise par la dernière génération.';
 export function failedDuring(stage = '') {
   const words = String(stage).replace(/…$/, '').replace(/ · \d+\/\d+$/, '').trim().split(' '),
     article = ARTICLES[words[0]];
@@ -102,7 +104,16 @@ export function setupGenerationUI({
   onAgain = null,
 }) {
   const cards = new Set(),
-    watched = new Map();
+    watched = new Map(),
+    // The takes that failed, worded again while the card stays held (`held`).
+    failures = new Set();
+  let gpuHeld = false;
+  /** « ARRÊTÉE » and the card held while it is; what failed, once it is free again. */
+  function word({ kicker, said, reason }) {
+    kicker.textContent = gpuHeld ? 'Arrêtée' : 'La génération a échoué';
+    said.replaceChildren(node('span', '', gpuHeld ? HELD_WORDS : reason));
+    if (gpuHeld || !/enregistré/.test(reason)) said.append(node('span', '', ' Rien n’a été enregistré.'));
+  }
   let downloads = Promise.resolve();
   const observer =
     typeof IntersectionObserver === 'function'
@@ -181,6 +192,8 @@ export function setupGenerationUI({
     const first = tile(container, request, compact),
       { figure, frame, label } = first,
       tiles = [first];
+    // Its failures worded by `held`, forgotten with it.
+    const ownFailures = [];
     let disposed = false,
       finished = false,
       // The last stage said: where a take that fails stopped.
@@ -591,14 +604,14 @@ export function setupGenerationUI({
         const veil = node('div', 'generation-failure'),
           reason = String(message || 'La génération a échoué.').trim();
         veil.setAttribute('role', 'alert');
-        veil.append(
-          node('p', 'generation-failure-kicker', 'La génération a échoué'),
-        );
         // One sentence a line (52): « Rien n’a été enregistré. » never cut after its first word.
-        const said = node('p', 'generation-failure-reason');
-        said.append(node('span', '', reason));
-        if (!/enregistré/.test(reason)) said.append(node('span', '', ' Rien n’a été enregistré.'));
-        veil.append(said);
+        const kicker = node('p', 'generation-failure-kicker'),
+          said = node('p', 'generation-failure-reason'),
+          failure = { kicker, said, reason };
+        word(failure);
+        failures.add(failure);
+        ownFailures.push(failure);
+        veil.append(kicker, said);
         if (onAgain && request.requestId) {
           const row = node('div', 'generation-failure-actions'),
             again = node('button', 'generation-again'),
@@ -663,6 +676,7 @@ export function setupGenerationUI({
       }
       slots.clear();
       cards.delete(card);
+      for (const failure of ownFailures) failures.delete(failure);
     }
     const card = {
       progress,
@@ -712,6 +726,11 @@ export function setupGenerationUI({
     },
     clear() {
       for (const card of [...cards]) card.dispose();
+    },
+    /** The card stays held (54): the takes that failed say it, as the Studio does; free, what failed. */
+    held(on) {
+      gpuHeld = Boolean(on);
+      for (const failure of failures) word(failure);
     },
   };
 }

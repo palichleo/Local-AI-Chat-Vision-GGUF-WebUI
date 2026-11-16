@@ -368,6 +368,16 @@ test('a take that fails stays veiled at its format: « ÉCHEC », what failed, �
     ' Rien n’a été enregistré.',
   ]);
   assert.equal(caption.children[1].textContent, 'Échec pendant le décodage de la vidéo');
+  // The card held (54): the same words as in the Studio, then what failed once it is free again.
+  ui.held(true);
+  assert.equal(veil.children[0].textContent, 'Arrêtée');
+  assert.deepEqual(veil.children[1].children.map(item => item.textContent), [
+    'La carte graphique est restée prise par la dernière génération.',
+    ' Rien n’a été enregistré.',
+  ]);
+  ui.held(false);
+  assert.equal(veil.children[0].textContent, 'La génération a échoué');
+  assert.equal(veil.children[1].children[0].textContent, 'La mémoire de la carte graphique a manqué au décodage.');
   const [relaunch, edit] = veil.children[2].children;
   relaunch.onclick();
   edit.onclick();

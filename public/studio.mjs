@@ -1722,14 +1722,13 @@ export function setupStudio({
       }
       const veil = node('div', 'studio-held-veil');
       veil.setAttribute('role', 'alert');
-      veil.append(
-        node('p', 'studio-held-kicker', 'Arrêtée'),
-        node(
-          'p',
-          'studio-held-text',
-          'La carte graphique est restée prise par la dernière génération. Libérez-la pour continuer.',
-        ),
+      // The same words as in the chat (54b); « Libérer le GPU » says what to do, under it.
+      const said = node('p', 'studio-held-text');
+      said.append(
+        node('span', '', 'La carte graphique est restée prise par la dernière génération.'),
+        node('span', '', ' Rien n’a été enregistré.'),
       );
+      veil.append(node('p', 'studio-held-kicker', 'Arrêtée'), said);
       frame.append(node('span', 'studio-failed-chip', 'Échec'), veil);
     } else if (last) {
       const shownTake = result(last);

@@ -15014,3 +15014,6 @@ body[data-setup='incomplete'] #resume-last {
 :root:not([data-theme='light']) .message-note.error {
   color: var(--alert);
 }
+#studio-view .studio-held-text > span {
+  display: block;
+}

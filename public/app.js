@@ -825,6 +825,9 @@ function updateControls() {
   document.documentElement.dataset.gpuHeld = String(held);
   if (held !== Boolean(state.gpuHeld)) {
     state.gpuHeld = held;
+    // The takes that failed in the conversation say it too (after the page's first run: the UI
+    // of the creations is made by then).
+    queueMicrotask(() => generationUI.held(held));
     state.studio?.render?.();
   }
   const running = ['loading', 'ready', 'stopping'].includes(s.state);
