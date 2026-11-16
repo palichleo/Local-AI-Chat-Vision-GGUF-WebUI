@@ -1985,6 +1985,8 @@ export function setupStudio({
       let proposed = await (
         await api('tools/action', {
           conversationId,
+          // Its takes are numbered in this project (« PRISE n »).
+          project: project(),
           studio: true,
           name: wanted.verb,
           arguments: wanted.args,

@@ -381,6 +381,14 @@ export function setupGenerationRuntime({
         content: JSON.stringify({
           status: error ? 'generated' : 'success',
           run_id: record.id,
+          // Their numbers in the project, as the user sees them (« PRISE 14 »): the model names them so.
+          ...(record.outputs.some(output => Number.isInteger(output.take))
+            ? {
+                takes: record.outputs.map(output => output.take ?? null),
+                takes_note:
+                  'Pour l’utilisateur, ces prises s’appellent « PRISE n » (takes, une par sortie) : nomme-les par ce numéro, jamais par run_id. Pour en reprendre une, {"take": n} suffit.',
+              }
+            : {}),
           // Made in the Studio: the conversation shows it as a card.
           ...(studio ? { studio: true } : {}),
           use_as_source: { output: record.id },

@@ -85,7 +85,10 @@ const server = http.createServer(async (req, res) => {
           : text.includes('invented source')
             ? // What a small model does with an optional source it cannot fill: copy the placeholder.
               { prompt: 'A red boat', source: { output: 'run_id' } }
-            : text.startsWith('generate from ')
+            : text.startsWith('generate from take ')
+              ? // A take named by its number, as the user says it (« la prise 12 »).
+                { prompt: 'A red boat', source: { take: Number(text.slice(19)) } }
+              : text.startsWith('generate from ')
               ? { prompt: 'A red boat', source: { output: text.slice(14) } }
               : { prompt: 'A red boat' },
       );

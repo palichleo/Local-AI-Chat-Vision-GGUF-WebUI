@@ -5605,6 +5605,13 @@ dialog,
     gap: 20px;
   }
 }
+/* Under the menu of the project: the numbers its takes would take there (lib/takes.mjs). */
+.conversation-takes {
+  margin: 10px 0 0;
+  color: var(--text-2);
+  font-size: var(--size-2);
+  line-height: 1.45;
+}
 #conversation-dialog .field-group label {
   display: block;
   margin: 0 0 8px;

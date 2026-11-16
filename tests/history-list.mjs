@@ -111,6 +111,8 @@ function fixture(t, patch = {}) {
     icon: name => new Element('svg', name),
     api: async (route, body) => {
       calls.push([route, body]);
+      // What a move would give the takes of a conversation (lib/takes.mjs).
+      if (route.startsWith('takes/preview')) return Response.json(state.preview ?? { count: 4, first: 33, last: 36 });
       const item = state.historyItems.find(entry => entry.id === body?.id) ?? state.historyItems[0];
       return Response.json({
         project: { id: 'created', name: body?.name },
@@ -232,6 +234,33 @@ test('a saved conversation is renamed or moved from its pencil: one request each
   assert.equal(state.historyItems.find(item => item.id === 'past').projectId, 'inbox');
   assert.equal(state.projectId, 'project', 'the open conversation stays in its project');
 });
+test('before a move, the window of the pencil says the numbers its takes will take, so that they do not surprise', async t => {
+  const { calls, open, lines, state, $ } = fixture(t);
+  lines(open('thread-conversation'))
+    .find(row => row.name === 'Current')
+    .tool('Renommer')
+    .onclick();
+  assert.equal($('conversation-takes').hidden, true, 'nothing said while the project is its own');
+  $('conversation-project').value = 'inbox';
+  await $('conversation-project').onchange();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(calls.at(-1), ['takes/preview?conversation=current&project=inbox', undefined]);
+  assert.equal($('conversation-takes').textContent, 'Ses 4 prises prendront les numéros 33 à 36 dans « Sans projet ».');
+  assert.equal($('conversation-takes').hidden, false);
+  // One take; none; back in its own project: said, then nothing.
+  state.preview = { count: 1, first: 12, last: 12 };
+  await $('conversation-project').onchange();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal($('conversation-takes').textContent, 'Sa prise prendra le numéro 12 dans « Sans projet ».');
+  state.preview = { count: 0, first: 12, last: 11 };
+  await $('conversation-project').onchange();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal($('conversation-takes').hidden, true);
+  $('conversation-project').value = 'project';
+  await $('conversation-project').onchange();
+  assert.equal($('conversation-takes').hidden, true);
+});
+
 test('unknown old project associations stay visible in the default group and sorting does not mutate history', () => {
   const items = [
       { id: 'old', projectId: 'missing', updatedAt: '2025' },

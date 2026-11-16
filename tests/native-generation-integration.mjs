@@ -414,11 +414,28 @@ test(
       assert.equal(job.state, 'done', job.error);
       await until(async () => (await (await api('status')).json()).state === 'ready');
       const edited = await createImage();
-      assert.deepEqual(edited.parameters.properties.source.properties.output.enum, [job.record.id]);
-      assert.deepEqual(edited.parameters.properties.source.required, ['output']);
+      // Its result is the only one the model may name: by its run_id, or by its number in the
+      // project as the user sees it (« PRISE 1 », 0.6.4).
+      const variants = edited.parameters.properties.source.anyOf;
+      assert.deepEqual(
+        variants.map(variant => variant.required),
+        [['output'], ['take']],
+      );
+      assert.deepEqual(variants[0].properties.output.enum, [job.record.id]);
+      assert.deepEqual(variants[1].properties.take.enum, [job.record.outputs[0].take]);
+      assert.equal(job.record.outputs[0].take, 1);
       const edit = (await chat('generate from ' + job.record.id)).find(e => e.local_tool_request).local_tool_request;
       assert.equal(edit.call.function.name, 'create_image');
       assert.equal(edit.referenceCount, 1);
+      // « Repars de la prise 1 » : named by its number, the take is found and passed as itself.
+      const byNumber = (await chat('generate from take 1')).find(e => e.local_tool_request).local_tool_request;
+      assert.equal(byNumber.call.function.name, 'create_image');
+      assert.deepEqual(JSON.parse(byNumber.call.function.arguments).source, { output: job.record.id });
+      assert.equal(byNumber.referenceCount, 1);
+      // A number that is no take of the project: said to the model, which can answer.
+      const unknown = (await chat('generate from take 99')).find(e => e.local_tool_request).local_tool_request;
+      assert.equal(unknown.kind, 'invalid');
+      assert.equal(unknown.message, 'La prise 99 n’existe pas dans ce projet.');
     } finally {
       await app?.close();
       await rm(root, { recursive: true, force: true });

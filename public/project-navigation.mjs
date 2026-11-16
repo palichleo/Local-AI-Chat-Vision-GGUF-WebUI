@@ -220,10 +220,36 @@ export function setupProjectNavigation({
       }),
     );
     select.value = item.projectId || 'inbox';
+    select.onchange = () => void previewTakes(item);
+    $('conversation-takes').hidden = true;
     $('conversation-error').hidden = true;
     $('conversation-save').disabled = false;
     $('conversation-dialog').showModal();
     $('conversation-name').focus();
+  }
+  /**
+   * Before a move, under the menu: the numbers its takes would take in the project chosen (they
+   * follow its counter), so that a change of numbers does not surprise.
+   */
+  async function previewTakes(item) {
+    const line = $('conversation-takes'),
+      project = $('conversation-project').value || 'inbox';
+    line.hidden = true;
+    if (project === (item.projectId || 'inbox')) return;
+    try {
+      const { count, first, last } = await (
+        await api(`takes/preview?conversation=${encodeURIComponent(item.id)}&project=${encodeURIComponent(project)}`)
+      ).json();
+      if (conversationEditing !== item || $('conversation-project').value !== project || !count) return;
+      const name = `« ${projectLabel(projects().find(entry => entry.id === project))} »`;
+      line.textContent =
+        count === 1
+          ? `Sa prise prendra le numéro ${first} dans ${name}.`
+          : `Ses ${count} prises prendront les numéros ${first} à ${last} dans ${name}.`;
+      line.hidden = false;
+    } catch {
+      // Without the numbers, the move is still possible.
+    }
   }
   $('conversation-cancel').onclick = () => $('conversation-dialog').close();
   dismissSettingsOnOutsideClick($('conversation-dialog'));

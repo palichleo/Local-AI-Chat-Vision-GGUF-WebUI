@@ -45,6 +45,7 @@ import { importComfyWorkflow } from './lib/comfy-import.mjs';
 import { previewWorkflowImport } from './lib/workflow-import.mjs';
 import { STUDIO_ID, STUDIO_VERBS, enrichedPrompt, enrichMessages } from './lib/studio.mjs';
 import { LlamaBuilds } from './lib/llama-builds.mjs';
+import { Takes, numbered } from './lib/takes.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 20 * 1024 * 1024;
@@ -348,7 +349,117 @@ export async function createApplication({
   let modelOperation = Promise.resolve();
   let pickingFile = false;
   let savingGeneration = false;
-  const gallery = new Gallery({ historyDir });
+  // The numbers of the takes, « PRISE n » (lib/takes.mjs): one counter per project. A take is
+  // numbered in the project of its conversation: saved, its own; not saved yet, the one the page
+  // named with its last request (chat, Studio); otherwise « Sans projet ».
+  const takes = new Takes(join(dataDir, 'takes.json'));
+  const namedProjects = new Map();
+  const projectFor = async conversationId =>
+    conversationId === STUDIO_ID
+      ? 'inbox'
+      : ((await history.projectOf(conversationId).catch(() => null)) ?? namedProjects.get(conversationId) ?? 'inbox');
+  const gallery = new Gallery({
+    historyDir,
+    numbering: async (conversationId, count) => takes.next(await projectFor(conversationId), count),
+  });
+  /**
+   * The takes made before the numbers (0.6.4), numbered once in the order of their creation, in
+   * the project of their conversation; the counters made again from the manifests the same way if
+   * takes.json is lost (a number already given is kept).
+   */
+  async function numberEarlierTakes() {
+    if (await takes.ready()) return;
+    const places = new Map();
+    for (const item of (await history.list().catch(() => ({ conversations: [] }))).conversations)
+      places.set(item.id, item.projectId || 'inbox');
+    const byProject = new Map();
+    for (const id of await gallery.conversations().catch(() => [])) {
+      const project = id === STUDIO_ID ? 'inbox' : places.get(id) || 'inbox';
+      try {
+        const { runs } = await gallery.list(id, { includeImages: false });
+        byProject.set(project, [...(byProject.get(project) ?? []), ...runs]);
+      } catch {
+        // A conversation that cannot be read leaves the others.
+      }
+    }
+    const counters = { inbox: 0 };
+    for (const [project, runs] of byProject) {
+      const { changed, last } = numbered(runs);
+      for (const { run, takes: numbers } of changed)
+        await gallery.setTakes(run.conversationId, run.id, numbers).catch(error => console.error('Numéros de prise :', error.message));
+      counters[project] = last;
+    }
+    await takes.raise(counters);
+  }
+  /**
+   * The takes of a project by their number, for the model: those of the conversation open, and of
+   * the others of its project (native results only: they are passed as their files).
+   */
+  async function projectTakes(conversationId, project) {
+    const ids = new Set(conversationId ? [conversationId] : []);
+    if (preferences.saveHistory)
+      for (const item of (await history.list().catch(() => ({ conversations: [] }))).conversations)
+        if ((item.projectId || 'inbox') === project) ids.add(item.id);
+    const found = [];
+    for (const id of ids)
+      try {
+        for (const run of (await gallery.list(id, { includeImages: false })).runs)
+          if (run.provider === 'native')
+            run.outputs.forEach((output, index) => {
+              if (Number.isInteger(output.take))
+                found.push({ take: output.take, id: run.id, index, conversationId: id, mediaType: run.mediaType || 'image' });
+            });
+      } catch {
+        // A conversation that cannot be read leaves the others.
+      }
+    return found.sort((a, b) => a.take - b.take);
+  }
+  /** The sources of a call named by their number, `{ take: 12 }`, made the take they stand for. */
+  async function withTakes(text, conversationId, project) {
+    let args;
+    try {
+      args = JSON.parse(text);
+    } catch {
+      return text;
+    }
+    const named = value => !!value && typeof value === 'object' && !Array.isArray(value) && value.take !== undefined;
+    if (!args || typeof args !== 'object' || !Object.values(args).some(value => named(value) || (Array.isArray(value) && value.some(named))))
+      return text;
+    const takes = await projectTakes(conversationId, project);
+    const resolve = ({ take, ...rest }) => {
+      const found = takes.find(item => item.take === take);
+      if (!found) throw problem(`La prise ${take} n’existe pas dans ce projet.`, 400);
+      return {
+        ...rest,
+        output: found.id,
+        ...(found.index ? { index: found.index } : {}),
+        ...(found.conversationId !== conversationId ? { conversation: found.conversationId } : {}),
+      };
+    };
+    for (const [key, value] of Object.entries(args))
+      if (named(value)) args[key] = resolve(value);
+      else if (Array.isArray(value)) args[key] = value.map(item => (named(item) ? resolve(item) : item));
+    return JSON.stringify(args);
+  }
+  /**
+   * Conversations that go to another project (moved, or their project deleted): their takes take
+   * the numbers that follow in it, in their order of creation.
+   */
+  async function renumber(conversationIds, project) {
+    const runs = [];
+    for (const id of conversationIds)
+      try {
+        runs.push(...(await gallery.list(id, { includeImages: false })).runs);
+      } catch {
+        // A conversation that cannot be read leaves the others.
+      }
+    runs.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    const count = runs.reduce((sum, run) => sum + run.outputs.length, 0);
+    if (!count) return;
+    const numbers = await takes.next(project, count);
+    let at = 0;
+    for (const run of runs) await gallery.setTakes(run.conversationId, run.id, run.outputs.map(() => numbers[at++]));
+  }
   // Small pictures of the creations, made by the page and kept here (lib/thumbnails.mjs).
   const thumbnails = await new Thumbnails(join(dataDir, 'thumbnails')).load();
   const resources = new Resources(join(dataDir, 'resources'));
@@ -366,6 +477,7 @@ export async function createApplication({
     originalUrl: `/media/resources/${record.id}/original?key=${mediaKey(record.id, 'original')}`,
     previewUrl: record.ready ? `/media/resources/${record.id}/preview?key=${mediaKey(record.id, 'preview')}` : null,
   });
+  await numberEarlierTakes().catch(error => console.error('Numéros de prise :', error.message));
   const pendingSession = await readUpdateSession(dataDir).catch(() => null);
   for (const record of pendingSession?.gallery || []) await gallery.put(record, { persist: false });
   // Attachments of conversations never saved belong to a session that has ended.
@@ -595,6 +707,8 @@ export async function createApplication({
       /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(body.conversationId)
         ? body.conversationId
         : null;
+    // Not saved yet, the conversation is in the project the page names (its takes are numbered there).
+    if (conversationId) namedProjects.set(conversationId, project);
     const runs = conversationId ? (await gallery.list(conversationId, { includeImages: false })).runs : [];
     if (
       toolConfig.enabled &&
@@ -605,6 +719,8 @@ export async function createApplication({
         ...(await runtime.tools.definitions({
           images: chatImageUrls(body.messages).length,
           resources: active.map(({ id, type }) => ({ id, type })),
+          // The takes of the project by their number (« PRISE n »), this conversation's and the others'.
+          takes: (await projectTakes(conversationId, project)).map(({ take, mediaType }) => ({ take, mediaType })),
           // Only native results can be passed to a workflow as an original file.
           outputs: runs
             .filter(run => run.provider === 'native')
@@ -1015,6 +1131,15 @@ export async function createApplication({
       // of conversations never saved (`unsaved`, under Conversations: made in the Studio before any
       // message, or a chat closed before its first save), and those of the Studio of before, which
       // had no conversation (`legacy`). Without the history, the open one and those of before.
+      // The numbers the takes of a conversation would take in another project (the window of the
+      // pencil says them before the move).
+      if (req.method === 'GET' && path === '/api/takes/preview') {
+        const project = projectId(requestURL.searchParams.get('project') || 'inbox'),
+          { runs } = await gallery.list(requestURL.searchParams.get('conversation') || '', { includeImages: false }),
+          count = runs.reduce((sum, run) => sum + run.outputs.length, 0),
+          first = (await takes.last(project)) + 1;
+        return send(200, { count, first, last: first + count - 1 });
+      }
       if (req.method === 'GET' && path === '/api/library') {
         const open = requestURL.searchParams.get('conversation'),
           includeImages = requestURL.searchParams.get('images') !== '0',
@@ -1568,6 +1693,8 @@ export async function createApplication({
         // In a conversation the output buttons, and every creation of its Studio (`studio`); the
         // former Studio, which had no conversation, keeps its own identifier.
         const studio = body.studio === true || body.conversationId === STUDIO_ID;
+        if (typeof body.conversationId === 'string' && body.project !== undefined)
+          namedProjects.set(body.conversationId, projectOf(body.project));
         const allowed = studio ? STUDIO_VERBS : ['upscale', 'interpolate'];
         if (!allowed.includes(body.name)) throw problem('Action inconnue.');
         if (body.styles !== undefined && !studio) throw problem('Action invalide.');
@@ -1851,7 +1978,7 @@ export async function createApplication({
       if (path === '/api/projects/delete') {
         if (body?.confirm !== true) throw problem('Confirme la suppression du projet.');
         projectId(body.id);
-        if (body.id === 'inbox') throw problem('Le projet Conversations ne peut pas être supprimé.');
+        if (body.id === 'inbox') throw problem('« Sans projet » ne peut pas être supprimé.');
         if (clearingHistory || disablingHistory || savingPreferences || runtime.active || engine.busy)
           throw problem('Attends la fin de l’opération en cours.', 409);
         clearingHistory = true;
@@ -1864,6 +1991,11 @@ export async function createApplication({
             const conversation = await history.read(item.id);
             moved.push(historyView(await history.save({ ...conversation, projectId: 'inbox' })));
           }
+          // Their takes take the numbers that follow in « Sans projet », in their order of creation.
+          await renumber(
+            moved.map(item => item.id),
+            'inbox',
+          );
           // Its references follow its conversations.
           await resources.moveProject(body.id, 'inbox');
           await projects.remove(body.id);
@@ -1881,9 +2013,10 @@ export async function createApplication({
           await historySaves;
           await projects.require(body.projectId);
           const conversation = await history.read(body.id);
-          return send(200, {
-            conversation: historyView(await history.save({ ...conversation, projectId: body.projectId })),
-          });
+          const moved = historyView(await history.save({ ...conversation, projectId: body.projectId }));
+          // Its takes take the numbers that follow in the project it joins.
+          if ((conversation.projectId || 'inbox') !== body.projectId) await renumber([body.id], body.projectId);
+          return send(200, { conversation: moved });
         } finally {
           clearingHistory = false;
         }
@@ -2099,6 +2232,13 @@ export async function createApplication({
               },
             });
           } else {
+            // « Anime la prise 12 » : a take named by its number is found in the project, before anything.
+            let takeError = null;
+            try {
+              calls[0].function.arguments = await withTakes(calls[0].function.arguments, body.conversationId, projectOf(body.project));
+            } catch (error) {
+              takeError = error;
+            }
             const call = nativeFields({ role: 'assistant', tool_calls: calls }).tool_calls[0];
             let request;
             // Images passed to the generator and never looked at: the model sees them first.
@@ -2157,6 +2297,7 @@ export async function createApplication({
               } else await emit({ local_tool_request: { kind: 'retry', call, message: THIN_NOTE } });
             } else
               try {
+                if (takeError) throw takeError;
                 // An image the user named by its label and the model left out: said once.
                 const unused = citedUnused(body.messages, await resources.catalog(projectOf(body.project)), call);
                 if (unused.length) throw problem(citedMessage(unused), 400);

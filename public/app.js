@@ -2637,7 +2637,15 @@ async function runForTurn(proposal, { view, signal }) {
 async function replaceWithCharacter(request, { view, signal }) {
   const said = text => (view.note.textContent = text);
   const action = async (name, args) =>
-    (await api('tools/action', { conversationId: state.conversationId, studio: true, name, arguments: args })).json();
+    (
+      await api('tools/action', {
+        conversationId: state.conversationId,
+        project: state.projectId || 'inbox',
+        studio: true,
+        name,
+        arguments: args,
+      })
+    ).json();
   if (!state.studio) throw Error('Le Studio est indisponible : impossible de faire l’image du personnage.');
   let prompt = request.imagePrompt,
     image = null;
