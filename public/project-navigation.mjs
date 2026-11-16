@@ -221,6 +221,8 @@ export function setupProjectNavigation({
     );
     select.value = item.projectId || 'inbox';
     select.onchange = () => void previewTakes(item);
+    paintPicker();
+    openPicker(false);
     $('conversation-takes').hidden = true;
     $('conversation-error').hidden = true;
     $('conversation-save').disabled = false;
@@ -251,6 +253,69 @@ export function setupProjectNavigation({
       // Without the numbers, the move is still possible.
     }
   }
+  /**
+   * « Projet » in the window of the pencil (16/11): a menu as those of the fil, not the menu of the
+   * browser. The projects in the order of the fil, the one of the conversation marked; one chosen
+   * goes in the hidden select (what the window saves), and the line of the numbers says what its
+   * takes would become there.
+   */
+  function paintPicker() {
+    const select = $('conversation-project'),
+      chosen = ordered().find(project => project.id === select.value) ?? ordered()[0];
+    $('conversation-project-name').textContent = chosen ? projectLabel(chosen) : '';
+  }
+  function openPicker(open) {
+    const list = $('conversation-project-menu'),
+      toggle = $('conversation-project-button'),
+      select = $('conversation-project');
+    list.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    list.replaceChildren(
+      ...ordered().map(project => {
+        const current = project.id === select.value,
+          row = node('div', 'thread-line' + (current ? ' is-current' : '')),
+          pick = node('button', 'thread-choice');
+        pick.type = 'button';
+        pick.setAttribute('role', 'option');
+        pick.setAttribute('aria-selected', String(current));
+        pick.append(node('span', 'thread-choice-name', projectLabel(project)));
+        pick.onclick = () => {
+          select.value = project.id;
+          paintPicker();
+          openPicker(false);
+          toggle.focus();
+          void select.onchange?.();
+        };
+        row.append(pick);
+        return row;
+      }),
+    );
+    (list.querySelector?.('.is-current .thread-choice') ?? list.querySelector?.('.thread-choice'))?.focus?.();
+  }
+  $('conversation-project-button').onclick = () => openPicker($('conversation-project-menu').hidden);
+  $('conversation-project-menu').onkeydown = event => {
+    if (event.key === 'Escape') {
+      // The menu closes, not the window.
+      event.preventDefault();
+      event.stopPropagation();
+      openPicker(false);
+      $('conversation-project-button').focus();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const items = [...$('conversation-project-menu').querySelectorAll('.thread-choice')];
+    if (!items.length) return;
+    event.preventDefault();
+    const at = items.indexOf(document.activeElement),
+      step = event.key === 'ArrowDown' ? 1 : -1;
+    items[at === -1 ? 0 : (at + step + items.length) % items.length].focus();
+  };
+  // A click elsewhere in the window closes the menu.
+  $('conversation-dialog').addEventListener('pointerdown', event => {
+    if (!$('conversation-project-menu').hidden && !event.target?.closest?.('.project-picker')) openPicker(false);
+  });
+  $('conversation-dialog').addEventListener('close', () => openPicker(false));
   $('conversation-cancel').onclick = () => $('conversation-dialog').close();
   dismissSettingsOnOutsideClick($('conversation-dialog'));
   $('conversation-form').onsubmit = async event => {

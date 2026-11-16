@@ -1424,14 +1424,7 @@ fieldset {
 .token-range:disabled {
   cursor: not-allowed;
 }
-.range-endpoints {
-  display: flex;
-  justify-content: space-between;
-  color: var(--muted);
-  font-size: var(--size-1);
-  margin-top: 13px;
-  font-variant-numeric: tabular-nums;
-}
+
 .compute-field {
   margin-top: 0;
 }
@@ -2709,25 +2702,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 .settings-block .field-group {
   margin-bottom: 18px;
 }
-.model-library-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.model-library-row select {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg);
-}
-.model-library-row button {
-  white-space: nowrap;
-  font-size: var(--size-1);
-  flex-shrink: 0;
-}
-.model-library-row svg {
-  width: 14px;
-  height: 14px;
-}
+
 .model-paths {
   margin-top: 16px;
   border-top: 1px solid var(--line);
@@ -2815,15 +2790,9 @@ html[data-page-hidden='true'] .generation-progress > span::after,
     padding: 16px;
     border-radius: 12px;
   }
-  .model-library-row {
-    flex-wrap: wrap;
-  }
-  .model-library-row select {
-    flex-basis: 100%;
-  }
-  .model-library-row button {
-    margin-left: auto;
-  }
+  
+  
+  
 }
 
 /* Video proposals use the same surface as settings, with readable effective inputs. */
@@ -2888,51 +2857,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   width: 14px;
   height: 14px;
 }
-.workflow-section {
-  margin: 22px 0 0;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-.workflow-section:first-child {
-  margin-top: 8px;
-  padding-top: 0;
-  border-top: 0;
-}
-.workflow-section h4 {
-  margin: 0 0 4px;
-  font-size: var(--size-1);
-}
-.workflow-section .field-help {
-  margin: 0;
-}
-.comfy-panel {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 12px;
-  margin-top: 12px;
-}
-.comfy-panel .history-toggle {
-  margin: 0;
-}
-.comfy-panel .path-input {
-  flex: 1 1 100%;
-}
-.comfy-panel .path-input input {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 11px;
-  font-size: var(--size-1);
-  color: var(--ink);
-  min-height: 40px;
-}
-.comfy-panel .path-input input::placeholder {
-  color: var(--muted);
-}
-.comfy-panel .path-input input:hover {
-  border-color: var(--line-strong);
-}
+
 /* The workflows of a section read as one list: a row each, name and state on the left, actions
    on the right, the description on one line (in full in its tooltip). */
 .workflow-settings .workflow-card {
@@ -2952,19 +2877,12 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 .workflow-settings .workflow-card:hover {
   background: var(--surface);
 }
-.workflow-settings .workflow-section + .workflow-card {
-  margin-top: 12px;
-  border-top: 1px solid var(--line);
-  border-radius: 10px 10px 0 0;
-}
+
 .workflow-settings .workflow-card:has(+ .workflow-section),
 .workflow-settings .workflow-card:last-child {
   border-radius: 0 0 10px 10px;
 }
-.workflow-settings .workflow-section + .workflow-card:has(+ .workflow-section),
-.workflow-settings .workflow-section + .workflow-card:last-child {
-  border-radius: 10px;
-}
+
 .workflow-settings .workflow-card > * {
   grid-column: 1;
   margin: 0;
@@ -2974,24 +2892,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   grid-row: 1 / span 3;
 }
 
-.workflow-settings .native-status {
-  padding: 2px 7px;
-}
-
-.native-status {
-  font-size: var(--size-1);
-  line-height: 1.4;
-  padding: 4px 8px;
-  flex-shrink: 0;
-  border: 1px solid var(--line);
-  border-radius: 99px;
-  color: var(--muted);
-}
-.native-status[data-active='true'] {
-  color: var(--accent);
-  border-color: var(--line-strong);
-  background: var(--tint);
-}
 .native-card-actions {
   display: flex;
   justify-content: flex-end;
@@ -3796,14 +3696,12 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   margin-bottom: 5px;
 }
 #settings .field-group input:not([type='checkbox']):not([type='range']),
-#settings .field-group select,
-#settings .model-library-row select {
+#settings .field-group select {
   min-height: 34px;
   padding-top: 7px;
   padding-bottom: 7px;
 }
 #settings .path-input button,
-#settings .model-library-row button,
 #settings .workflow-heading-actions button {
   min-height: 34px;
   padding: 6px 11px;
@@ -3838,9 +3736,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 #settings .token-title output {
   font-size: var(--size-1);
 }
-#settings .range-endpoints {
-  margin-top: 6px;
-}
+
 /* Generation: the toggles as a tight list, the limit on one row. */
 #settings .native-settings .history-toggle {
   margin-bottom: 7px;
@@ -3857,18 +3753,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 #settings .workflow-settings .workflow-heading {
   margin-bottom: 8px;
 }
-#settings .workflow-section {
-  margin-top: 12px;
-  padding-top: 10px;
-}
-#settings .workflow-section:first-child {
-  margin-top: 0;
-  padding-top: 0;
-}
-#settings .comfy-panel {
-  gap: 8px 10px;
-  margin-top: 8px;
-}
+
 /* Preferences and diagnostic. */
 #settings .preference-row + * {
   margin-top: 8px;
@@ -4108,23 +3993,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   border-color: var(--update-line);
 }
 
-.components-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-#settings .components-heading h3 {
-  margin: 0;
-  font-size: var(--size-1);
-  font-weight: 600;
-}
-#settings .components-heading button {
-  min-height: 32px;
-  padding: 5px 12px;
-  font-size: var(--size-1);
-}
-
 .components-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4200,30 +4068,16 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 #settings #workflow-list > :not(.workflow-card) {
   grid-column: 1 / -1;
 }
-#settings .workflow-settings .workflow-section {
-  margin-top: 14px;
-}
-#settings .workflow-settings .workflow-section:first-child {
-  margin-top: 0;
-}
+
 #settings .workflow-settings .workflow-card,
-#settings .workflow-settings .workflow-section + .workflow-card,
 #settings .workflow-settings .workflow-card:has(+ .workflow-section),
-#settings .workflow-settings .workflow-card:last-child,
-#settings .workflow-settings .workflow-section + .workflow-card:has(+ .workflow-section),
-#settings .workflow-settings .workflow-section + .workflow-card:last-child {
+#settings .workflow-settings .workflow-card:last-child {
   margin: 0;
   border-top: 1px solid var(--line);
   border-radius: 10px;
 }
 /* The address on a line of its own, the families kept on Atelier's engine side by side below. */
-#settings .comfy-panel .path-input {
-  flex: 1 1 100%;
-  max-width: 560px;
-}
-#settings .comfy-panel .path-input ~ .history-toggle {
-  margin-right: 14px;
-}
+
 /* A card on one line: its state (a coloured dot), its name, « ? » for its details, its actions.
    The dot says the state at a glance and, under the pointer, what it means; a workflow that
    needs something also wears a line of that colour on its left. The user's own (created or
@@ -4381,7 +4235,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   outline: none;
 }
 #settings .settings-block > h3,
-#settings .components-heading,
 #settings .workflow-heading {
   padding-right: 30px;
 }
@@ -4598,14 +4451,14 @@ dialog,
 }
 #project-name,
 #conversation-name,
-#conversation-project {
+#conversation-project-button {
   min-height: 42px;
   border-radius: 8px;
   font-size: var(--size-1);
 }
 #project-name:focus-visible,
 #conversation-name:focus-visible,
-#conversation-project:focus-visible {
+#conversation-project-button:focus-visible {
   outline: 2px solid var(--line-strong);
   outline-offset: 2px;
 }
@@ -12828,11 +12681,6 @@ body[data-view='library'] #library-view .library-heading {
   overflow-y: auto;
   scrollbar-width: thin;
 }
-.media-prompt {
-  max-height: 11.5em;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
 /* In the column of the page, nothing shrinks: the sheet makes it scroll (a row of pills, which
    scrolls sideways, was crushed to nothing by a long sheet). */
 #library-view > * {
@@ -13898,4 +13746,300 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   border-radius: 8px;
   font: 400 13px/1 var(--font-ui);
   white-space: nowrap;
+}
+
+/* « Projet » in the window of the pencil (16/11): a field that opens a menu as those of the fil,
+   under it, the chosen project marked. */
+.project-picker {
+  position: relative;
+}
+#conversation-dialog .project-picker-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 0 12px 0 14px;
+  border: 1px solid var(--field-line, rgba(238, 232, 222, 0.12));
+  background: var(--field, rgba(0, 0, 0, 0.22));
+  color: var(--text-1);
+  font: 400 15px/1 var(--font-ui);
+  text-align: left;
+}
+#conversation-dialog .project-picker-button svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--text-3);
+  transform: rotate(90deg);
+}
+#conversation-dialog .project-picker-button[aria-expanded='true'] svg {
+  transform: rotate(-90deg);
+}
+.project-picker-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#conversation-dialog .project-picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  max-height: 260px;
+  overflow-y: auto;
+}
+#conversation-dialog .project-picker-menu[hidden] {
+  display: none;
+}
+
+/* A take opened (16/11). The prompt whole: the panel scrolls, never the prompt cut. */
+#original-dialog .media-information > * {
+  flex-shrink: 0;
+}
+#original-dialog .media-information > .media-actions {
+  margin-top: auto;
+}
+/* Its player: none of the browser's controls. The round ▶ in the middle of the picture; at its
+   foot, a fine line of progress in the accent, the time in mono (« 02.00 / 06.04 »), the sound. */
+.take-player {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.take-player[hidden] {
+  display: none;
+}
+.take-player > .take-player-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+}
+.take-player-bar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 26px 14px 10px;
+  border-radius: 0 0 8px 8px;
+  background: linear-gradient(to top, rgba(10, 9, 12, 0.72), transparent);
+  pointer-events: auto;
+}
+.take-player-seek {
+  --progress: 0%;
+  flex: 1 1 auto;
+  height: 14px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.take-player-seek::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(to right, var(--accent) var(--progress), rgba(238, 232, 222, 0.24) var(--progress));
+}
+.take-player-seek::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(238, 232, 222, 0.24);
+}
+.take-player-seek::-moz-range-progress {
+  height: 2px;
+  background: var(--accent);
+}
+.take-player-seek::-webkit-slider-thumb {
+  width: 10px;
+  height: 10px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: opacity 0.15s ease;
+}
+.take-player-seek::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+}
+.take-player-bar:hover .take-player-seek::-webkit-slider-thumb,
+.take-player-seek:focus-visible::-webkit-slider-thumb {
+  opacity: 1;
+}
+.take-player-bar:hover .take-player-seek::-moz-range-thumb,
+.take-player-seek:focus-visible::-moz-range-thumb {
+  opacity: 1;
+}
+.take-player-seek:focus-visible {
+  outline: none;
+}
+.take-player-time {
+  flex: none;
+  color: var(--text-1);
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+}
+#original-dialog .take-player-sound {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-1);
+}
+#original-dialog .take-player-sound svg {
+  width: 16px;
+  height: 16px;
+}
+#original-dialog .take-player-sound.is-muted {
+  color: var(--text-3);
+}
+#original-dialog .take-player-sound.is-muted::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: rotate(-45deg);
+}
+/* A sound: the bar alone, its ▶ at the left. */
+.take-player.is-audio {
+  position: static;
+}
+.take-player.is-audio .take-player-bar {
+  position: static;
+  padding: 12px 14px;
+  background: none;
+}
+.take-player.is-audio > .take-player-play {
+  position: static;
+  transform: none;
+}
+.take-player.is-audio {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 12px;
+}
+#original-dialog #original-video:not(.is-audio) {
+  cursor: pointer;
+}
+#original-dialog #original-video.is-audio {
+  display: none;
+}
+
+/* The sheet of the Pellicule (16/11): its rows go to the right edge, their height growing so that
+   the takes fill the line, each at its format; the last row of a day keeps 196 px (what is left of
+   it is taken by nothing). */
+#library-view .library-row::after {
+  content: '';
+  flex: 1000000 1 0;
+}
+#library-view .library-tile,
+#library-view .library-tile.is-sound {
+  flex: var(--ratio, 1) 1 calc(196px * var(--ratio, 1));
+  width: auto;
+  max-width: none;
+  height: auto;
+  aspect-ratio: var(--ratio, 1);
+}
+#library-view .library-tile.is-sound {
+  --ratio: 1.6939;
+}
+@media (max-width: 720px) {
+  #library-view .library-tile,
+  #library-view .library-tile.is-sound {
+    flex-basis: calc(140px * var(--ratio, 1));
+    width: auto;
+    height: auto;
+  }
+}
+
+/* The stage hugs the take at its format (16/11): as large as the window allows, no band above or
+   under it, « PRISE n » on its corner; the panel is as high as the take (560 px at least) and its
+   own content scrolls. */
+#original-dialog .media-stage {
+  --stage-room: calc(min(1180px, 94vw) - 128px - 378px);
+  display: block;
+  align-self: center;
+  width: min(var(--stage-room), calc(80dvh * var(--media-ratio, 1)));
+  min-height: 0;
+  aspect-ratio: var(--media-ratio, 1);
+  overflow: hidden;
+}
+#original-dialog .media-stage > #original-video,
+#original-dialog .media-stage #original-frame,
+#original-dialog .media-stage #original-image {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+}
+#original-dialog .media-stage.is-audio {
+  width: min(var(--stage-room), 640px);
+  aspect-ratio: auto;
+}
+@media (min-width: 901px) {
+  #original-dialog .media-information {
+    contain: size;
+    min-height: min(560px, 80dvh);
+  }
+}
+@media (max-width: 900px) {
+  #original-dialog .media-stage {
+    --stage-room: calc(94vw - 96px);
+    justify-self: center;
+    width: min(var(--stage-room), calc(50dvh * var(--media-ratio, 1)));
+  }
+}
+/* Its menu « Projet » goes past the foot of the window rather than being cut by it. */
+#conversation-dialog:has(.project-picker-menu:not([hidden])) {
+  overflow: visible;
+}
+/* The search of the settings: its rounded field says the focus, not a square around the text. */
+#settings-form .settings-search input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+#settings-form .settings-search:focus-within {
+  border-color: rgba(238, 232, 222, 0.3);
+}
+/* The secondary buttons of the settings in the weight of the maquettes (regular, 14 px). */
+#settings button.secondary {
+  font: 400 14px/1 var(--font-ui);
+}
+/* The menu « Projet » of the window of the pencil: drawn as those of the fil, without being one
+   (a « .thread-menu » in the page is a menu of the fil open). */
+#conversation-dialog .project-picker-menu {
+  z-index: 70;
+  box-sizing: border-box;
+  padding: 8px;
+  border-radius: var(--radius-l);
+  background: var(--room-menu, var(--surface));
+  box-shadow:
+    inset 0 0 0 1px rgba(238, 232, 222, 0.08),
+    0 18px 48px rgba(0, 0, 0, 0.45);
+  color: var(--text-1);
+  font-family: var(--font-ui);
 }

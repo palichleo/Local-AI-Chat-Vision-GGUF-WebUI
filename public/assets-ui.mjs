@@ -2,6 +2,7 @@ import { comparedSource, imageCompare, loadSource } from './image-compare.mjs';
 import { prepareResource } from './resource-preparation.mjs';
 import { dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { formatOf } from './formats.mjs';
+import { setupTakePlayer } from './take-player.mjs';
 
 /**
  * The references and the large view of a creation. No panel any more (0.5.106): a reference is
@@ -94,7 +95,10 @@ export function setupAssets({
     return imported;
   }
 
+  // The player of a take opened: none of the browser's controls (take-player.mjs).
+  const player = setupTakePlayer({ host: $('take-player'), node });
   function cleanViewer() {
+    player.detach();
     $('media-download').onclick = null;
     viewVersion++;
     viewController?.abort();
@@ -175,6 +179,34 @@ export function setupAssets({
       link.click();
     };
   }
+  const playerOf = () => player;
+  /** The stage at the shape of the take (moodix.css: as large as the window allows, no band). */
+  function shape(width, height) {
+    if (width > 0 && height > 0) $('media-stage').style.setProperty?.('--media-ratio', (width / height).toFixed(4));
+  }
+  /**
+   * What a take was made from, by role, each named by its number when it is among those shown
+   * (« Image de début : PRISE 1 »; capture 33 of 16/11: the prompt of a clip made from a picture
+   * speaks of the scene asked, the clip may keep the picture).
+   */
+  function inputsOf(parameters, list) {
+    const names = {
+        start_image: 'Image de début',
+        end_image: 'Image de fin',
+        source_video: 'Vidéo suivie',
+        source: 'Image modifiée',
+      },
+      lines = new Map();
+    for (const ref of parameters.references ?? []) {
+      if (!ref?.output_id) continue;
+      const label = names[ref.role] ?? 'Référence',
+        made = list.find(item => item.id === ref.output_id),
+        take = made?.outputs?.[ref.output_index ?? 0]?.take,
+        value = Number.isInteger(take) ? 'PRISE ' + take : 'Une création';
+      lines.set(label, [...(lines.get(label) ?? []), value]);
+    }
+    return [...lines].map(([label, values]) => [label, values.join(', ')]);
+  }
   async function viewOutput(record, index, originalBlob, context = null) {
     const output = record.outputs[index],
       version = begin(output.source.filename),
@@ -209,11 +241,17 @@ export function setupAssets({
     // Its lines (capture 33): Modèle, Format, Résolution, Durée, Seed, Date, in mono.
     const width = output.width ?? parameters.width,
       height = output.height ?? parameters.height,
+      stage = $('media-stage'),
       seconds = Number(parameters.seconds) > 0 ? Number(parameters.seconds) : parameters.frames > 0 && parameters.fps > 0 ? parameters.frames / parameters.fps : null;
+    // The stage at the shape of the take, known from its record, then from its file.
+    stage.classList.toggle('is-audio', media === 'audio');
+    if (media !== 'audio' && width > 0 && height > 0) shape(width, height);
+    else stage.style.removeProperty?.('--media-ratio');
     row('Modèle', record.workflowName);
     if (media !== 'audio') row('Format', width && height ? (formatOf(width, height)?.id ?? 'Autre') : null);
     const resolution = media === 'audio' ? null : row('Résolution', width && height ? `${width} × ${height}` : null);
     const length = media === 'image' ? null : row('Durée', seconds ? duration(seconds) : null);
+    for (const [label, value] of inputsOf(parameters, list)) row(label, value);
     row('Seed', parameters.seed);
     row('Date', record.createdAt ? new Date(record.createdAt).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null);
     // « Plus de détails »: the workflow, the version, the prompt made better, the file…
@@ -235,7 +273,8 @@ export function setupAssets({
     $('media-error').textContent = 'Chargement de l’original…';
     if (record.mediaType === 'audio') {
       // A sound plays in the same player, as a bar of controls without a picture.
-      const player = $('original-video');
+      const player = $('original-video'),
+        takePlayer = playerOf();
       player.classList.add('is-audio');
       player.hidden = false;
       player.preload = 'metadata';
@@ -249,6 +288,7 @@ export function setupAssets({
       player.onerror = () => {
         if (version === viewVersion) $('media-error').textContent = 'Son indisponible ou format non pris en charge.';
       };
+      takePlayer.attach(player, { audio: true });
       download(output.originalUrl, output.source.filename);
       $('media-download').disabled = false;
       return;
@@ -262,6 +302,7 @@ export function setupAssets({
       video.onloadedmetadata = () => {
         if (version === viewVersion) {
           resolution.textContent = video.videoWidth + ' × ' + video.videoHeight;
+          shape(video.videoWidth, video.videoHeight);
           if (length && Number.isFinite(video.duration)) length.textContent = duration(video.duration);
           $('media-error').textContent = '';
         }
@@ -271,6 +312,7 @@ export function setupAssets({
           $('media-error').textContent = 'Vidéo indisponible ou codec non pris en charge par le navigateur.';
       };
       row('Analyse du modèle', 'Images compressées échantillonnées, sans audio.', { more: true });
+      playerOf().attach(video);
       download(output.originalUrl, output.source.filename);
       $('media-download').disabled = false;
       return;
@@ -304,6 +346,7 @@ export function setupAssets({
           if (comparison && img.naturalWidth)
             $('original-frame').style.setProperty('--compare-ratio', String(img.naturalWidth / img.naturalHeight));
           resolution.textContent = `${img.naturalWidth} × ${img.naturalHeight}`;
+          shape(img.naturalWidth, img.naturalHeight);
           $('media-error').textContent = '';
         }
       };

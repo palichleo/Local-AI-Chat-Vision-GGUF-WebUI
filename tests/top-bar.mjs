@@ -148,12 +148,16 @@ test('the window of the pencil: its name, its project in a menu, drawn like the 
   assert.match(dialog, /<h2 id="conversation-dialog-title">Renommer ou déplacer la conversation<\/h2>/);
   assert.match(dialog, /<label for="conversation-name">Nom<\/label><input id="conversation-name" type="text" maxlength="120"/);
   // « Projet » is a menu, not a field to type in.
-  assert.match(dialog, /<label for="conversation-project">Projet<\/label><select id="conversation-project"><\/select>/);
+  // A menu as those of the fil (16/11), the select hidden keeping the choice.
+  assert.match(dialog, /<label for="conversation-project-button">Projet<\/label><div class="project-picker"><button type="button" id="conversation-project-button" class="project-picker-button" aria-haspopup="listbox"/);
+  // Its own class: a menu of the fil (« .thread-menu ») is one open over the page.
+  assert.match(dialog, /<div id="conversation-project-menu" class="project-picker-menu" role="listbox"/);
+  assert.match(dialog, /<select id="conversation-project" hidden aria-hidden="true" tabindex="-1"><\/select>/);
   assert.match(dialog, /<button id="conversation-save" type="submit" class="primary">Enregistrer<\/button>/);
   // Centred and framed as the window of a project: the same rules, not a copy of them.
   assert.match(css, /#project-dialog,\n#conversation-dialog \{\n {2}position: fixed;\n {2}inset: 0;\n {2}margin: auto;/);
   assert.match(css, /#project-dialog footer,\n#conversation-dialog footer \{\n {2}display: flex;/);
-  assert.match(css, /#project-name,\n#conversation-name,\n#conversation-project \{\n {2}min-height: 42px;/);
+  assert.match(css, /#project-name,\n#conversation-name,\n#conversation-project-button \{\n {2}min-height: 42px;/);
 });
 
 test('nothing left of the panel of files in the styles', async () => {

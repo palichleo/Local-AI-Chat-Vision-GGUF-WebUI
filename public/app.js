@@ -887,7 +887,7 @@ async function checkUpdates({ refresh = false } = {}) {
       : 'Installer la mise à jour';
     const opener = $('settings-open');
     opener.classList.toggle('has-update', state.updateAvailable);
-    const label = state.updateAvailable ? 'Configuration · mise à jour disponible' : 'Configuration';
+    const label = state.updateAvailable ? 'Paramètres · une mise à jour est disponible' : 'Paramètres';
     opener.setAttribute('aria-label', label);
     opener.title = label;
     settingsTabs.mark('update', state.updateAvailable);
@@ -1060,7 +1060,7 @@ async function checkComponents({ again = false } = {}) {
   try {
     // Versions read for an earlier opening are still true: they are shown all the same.
     const result = await (await api('components')).json();
-    $('settings-version').textContent = 'Atelier ' + result.version;
+    $('settings-version').textContent = 'Moodix ' + result.version;
     $('components-list').replaceChildren(
       ...result.components.map(component => {
         const row = node('li', 'component-row');
@@ -3694,7 +3694,7 @@ try {
   });
   tokenKnown();
   state.version = initial.version || '';
-  if (initial.version) $('settings-version').textContent = 'Atelier ' + initial.version;
+  if (initial.version) $('settings-version').textContent = 'Moodix ' + initial.version;
   void checkUpdates();
   applyTheme(initial.preferences?.theme);
   // The room kept (Paramètres › Interface), on the page from the start.
