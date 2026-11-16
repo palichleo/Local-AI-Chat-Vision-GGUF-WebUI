@@ -1775,24 +1775,6 @@ dialog::backdrop {
 .context-meter[data-warning='full'] .context-track::before {
   background: var(--danger);
 }
-/* The share of the context in use, in figures: the bar alone was too small to be read. */
-.context-figure {
-  margin-left: 8px;
-  font-size: var(--size-1);
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.context-figure:empty {
-  display: none;
-}
-.context-meter[data-warning='near'] .context-figure {
-  color: var(--warning);
-}
-.context-meter[data-warning='full'] .context-figure {
-  color: var(--danger);
-}
 #settings-unsaved {
   position: fixed;
   inset: 0;
@@ -10271,21 +10253,6 @@ body:not([data-view='chat']) .resume {
 .workspace:not(:has(#messages:empty)) .context-track::before {
   background: rgba(238, 232, 222, 0.55);
 }
-.workspace:not(:has(#messages:empty)) .context-figure {
-  position: absolute;
-  right: 4px;
-  bottom: 8px;
-  margin: 0;
-  opacity: 0;
-  color: var(--text-3);
-  font: 400 12px/1 var(--font-mono);
-  transition: opacity 0.15s ease;
-}
-.workspace:not(:has(#messages:empty)) .context-meter:is(:hover, :focus-visible) .context-figure,
-.workspace:not(:has(#messages:empty)) #chat-form:hover ~ .context-meter .context-figure,
-.workspace:not(:has(#messages:empty)) .context-meter:is([data-warning='near'], [data-warning='full']) .context-figure {
-  opacity: 1;
-}
 /* While a generation runs: « 42 % » alone and Interrompre, in the box of the conversation. */
 #chat-form .compose-state {
   color: var(--text-3);
@@ -15109,4 +15076,83 @@ button.glass-select::after {
     flex: 0 1 auto;
     min-height: 72px;
   }
+}
+
+/* ------------------------------------------------------------------ after the try of 0.6.25 (16/11) */
+/* On a take of the Sortie, « Prolonger » (or « Animer ») is the button of the bar of the screen, smaller:
+   a rounded square with its fine line and the same picto, 6 px from the right and the bottom of the
+   picture (not of the tile, whose caption is under the picture). The bin takes the same shape. */
+#studio-view .studio-item-main,
+#studio-view .studio-item-del {
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(238, 232, 222, 0.14);
+  border-radius: 8px;
+  background: rgba(11, 12, 15, 0.82);
+}
+#studio-view .studio-item-main {
+  top: calc(var(--strip-h, 96px) - 32px);
+  right: 6px;
+  bottom: auto;
+}
+#studio-view .studio-item-main svg,
+#studio-view .studio-item-del svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+/* The button of the Sortie: its picto on whole pixels, in the middle (15 px in 26 fell on halves). */
+#studio-view .studio-sort svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+/* The whole box of the chat is where one writes: the pointer says so outside its buttons. */
+#chat-form {
+  cursor: text;
+}
+#chat-form :is(button, a, label, .attachments > *) {
+  cursor: pointer;
+}
+#chat-form button:disabled {
+  cursor: default;
+}
+/* How long a turn took, at the top right of its message: on the line of its takes, at their right
+   edge, when it has some; else on the line of « MOODIX ». */
+#messages .message.assistant {
+  position: relative;
+}
+#messages .generation-grid[data-takes] {
+  position: relative;
+  width: fit-content;
+  min-width: min(100% - 32px, 320px);
+  max-width: calc(100% - 32px);
+}
+/* The line of the takes is as wide as they are, and does not widen them: it counts for nothing in
+   the width of their grid (the gap after it taken back), then fills it. */
+#messages .generation-grid[data-takes]::before {
+  flex: 0 0 auto;
+  width: 0;
+  min-width: 100%;
+  margin-right: -14px;
+  white-space: nowrap;
+}
+#messages .generation-grid[data-takes][data-time]::after {
+  content: attr(data-time);
+  position: absolute;
+  top: 0;
+  right: 0;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+}
+#messages .message.assistant > .message-note.is-time {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  margin: 0;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+}
+#messages .message.assistant:has(> .generation-grid[data-takes][data-time]) > .message-note.is-time {
+  display: none;
 }

@@ -10,13 +10,6 @@ export function contextBudget({ used, capacity, precision }) {
   };
 }
 
-/** The share in use as it is written beside the bar: « 12 % », « < 1 % », « ≈ 40 % » ; nothing when unknown. */
-export function contextFigure({ used, occupied, precision }) {
-  if (used === null) return '';
-  const qualifier = precision === 'text-only' ? '≥ ' : precision === 'estimated' ? '≈ ' : '';
-  return qualifier + (used > 0 && occupied < 1 ? '< 1' : String(Math.round(occupied))) + ' %';
-}
-
 export function setupContextMeter({
   $,
   api,
@@ -32,8 +25,7 @@ export function setupContextMeter({
     revision = 0,
     conversation = getConversation(),
     last = {};
-  const box = $('context-meter'),
-    figure = $('context-figure');
+  const box = $('context-meter');
   function render(result = last) {
     last = result;
     const { contextSize: capacity = 8192 } = getConfig(),
@@ -64,7 +56,6 @@ export function setupContextMeter({
       budget.warning === 'full' ? 'Contexte saturé.' : budget.warning === 'near' ? 'Contexte presque rempli.' : '';
     box.title = [usage, detail, warning].filter(Boolean).join('\n');
     box.style.setProperty('--context-used', budget.occupied + '%');
-    if (figure) figure.textContent = contextFigure(budget);
     box.dataset.warning = budget.warning;
     box.setAttribute('aria-valuemax', String(capacity));
     box.setAttribute('aria-valuetext', box.title);

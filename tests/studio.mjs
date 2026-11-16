@@ -1192,7 +1192,7 @@ test('« Ouvrir » on a card puts the creation on the screen of its mode', async
     assert.equal(body.find('take-play').length, 1);
     shown.playButton.onclick();
     assert.equal(shown.controls, true, 'a clip plays on the screen');
-    assert.match(body.find('studio-item')[0].className, /is-shown/);
+    assert.match(body.find('studio-item').find(tile => tile.dataset.id === 'c').className, /is-shown/);
   } finally {
     restore();
   }
@@ -1281,12 +1281,13 @@ test('in the Sortie a clip is a strip as long as it lasts, a sound a card', asyn
   const page = await studioPage({ create_video: [video], create_audio: [sound] }, {}, { runs });
   try {
     const { body } = page;
+    // The Sortie shows them all, whatever the mode (16/11): the clip a strip, the sounds cards.
     page.mode(1);
-    const [strip] = body.find('studio-item');
+    const strip = body.find('studio-item').find(tile => tile.dataset.id === 'clip');
     assert.equal(strip.dataset.media, 'video');
     assert.doesNotMatch(strip.className, /is-sound/);
     page.mode(2);
-    const cards = body.find('studio-item');
+    const cards = body.find('studio-item').filter(tile => tile.dataset.media === 'audio');
     assert.deepEqual(cards.map(card => card.dataset.id), ['song', 'rain']);
     assert.match(cards[0].className, /is-sound/);
     assert.deepEqual(
@@ -1372,6 +1373,8 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     const items = () => body.find('studio-item'),
       numbers = () => body.find('studio-item-number').map(badge => badge.textContent),
       references = () => body.find('studio-slot-badge').map(badge => badge.textContent);
+    // Its button released: the kind of the mode only.
+    body.find('studio-sort-go')[0].onclick();
     // The kind of the mode (16/11), the newest at the left, numbered with the others (never two
     // « #1 »); under each its number (« PRISE n » once it has one), a continuation « ↳ SUITE »
     // (studio-maquette.md); no title (their names are for screen readers and in their tooltips).
@@ -3186,10 +3189,8 @@ test('the Sortie is the project’s: the creations of its other conversations dr
         items()[item].find('studio-item-pick')[0].ondragstart(event);
         slots()[slot].ondrop(event);
       };
-    // In Vidéo the clip of another conversation of the project (16/11: the takes are shared in it);
-    // the button at the right shows the whole project, the image with it.
-    assert.equal(items().length, 1);
-    body.find('studio-sort-go')[0].onclick();
+    // The whole project (16/11: the takes are shared in it): the clip of another conversation and
+    // the image of this one.
     assert.equal(items().length, 2);
     // An image is not the video to follow; the clip is.
     carry(1, 0);
@@ -3247,7 +3248,29 @@ test('a click on a slot, empty or filled, opens the files of the computer: no «
   }
 });
 
-test('the Sortie follows the mode; the button at its right shows the whole project, until the mode changes', async () => {
+test('on a take of the Sortie, « Prolonger » and « Animer » wear the pictos of the bar of the screen', async () => {
+  const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    clip = { id: 'v', name: 'Clip', roles: { start_image: { count: 1, media: ['image'] } }, limits: sizes, size: { width: 768, height: 448 }, settings: [] },
+    runs = [
+      { id: 'c1', mediaType: 'video', prompt: 'un clip', outputs: [{ originalUrl: '/c1.mp4', thumbUrl: '/c1.jpg' }] },
+      { id: 'p1', prompt: 'une image', outputs: [{ originalUrl: '/p1.png' }] },
+    ];
+  const page = await studioPage({ create_image: [image], create_video: [clip] }, {}, { runs });
+  try {
+    const main = id => page.body.find('studio-item').find(tile => tile.dataset.id === id).find('studio-item-main')[0];
+    assert.equal(main('c1').children[0].glyph, 'act-extend');
+    assert.equal(main('c1').attributes['aria-label'], 'Prolonger · Clip #2');
+    assert.equal(main('p1').children[0].glyph, 'act-animate');
+  } finally {
+    page.restore();
+  }
+  const css = (await (await import('node:fs/promises')).readFile(new URL('../public/moodix.css', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  // A rounded square, smaller than on the bar, 6 px from the bottom of the picture (not of the tile).
+  assert.match(css, /#studio-view \.studio-item-main,\n#studio-view \.studio-item-del \{\n  width: 26px;\n  height: 26px;\n  border: 1px solid rgba\(238, 232, 222, 0\.14\);\n  border-radius: 8px;/);
+  assert.match(css, /#studio-view \.studio-item-main \{\n  top: calc\(var\(--strip-h, 96px\) - 32px\);\n  right: 6px;\n  bottom: auto;/);
+});
+
+test('the Sortie shows the whole project to begin with; its button released, the kind of the mode only', async () => {
   const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
     clip = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [] },
     runs = [
@@ -3260,28 +3283,36 @@ test('the Sortie follows the mode; the button at its right shows the whole proje
     const { body } = page,
       go = () => body.find('studio-sort-go')[0],
       ids = () => body.find('studio-item').map(tile => tile.dataset.id);
-    // In Image, the images (capture 20: no clip among them).
-    assert.deepEqual(ids(), ['p1']);
-    assert.equal(go().attributes['aria-label'], 'Trier la Sortie · images');
-    assert.equal(go().attributes['aria-pressed'], 'false');
-    // The whole project, a click away; a creation keeps its number in it.
-    go().onclick();
+    // To begin with (16/11), in Image: everything of the project, sounds and clips with the images,
+    // the newest at the left, each with its number; the button pressed.
     assert.deepEqual(ids(), ['s1', 'c1', 'p1']);
     assert.equal(go().attributes['aria-label'], 'Trier la Sortie · tout');
     assert.equal(go().attributes['aria-pressed'], 'true');
     assert.deepEqual(body.find('studio-item-number').map(badge => badge.textContent), ['#3', '#2', '#1']);
-    // Another mode: its kind again.
+    // Another mode: still everything.
     page.mode(1);
+    assert.deepEqual(ids(), ['s1', 'c1', 'p1']);
+    // Released: the kind of the mode (capture 20: no clip among the images); a creation keeps its number.
+    go().onclick();
     assert.deepEqual(ids(), ['c1']);
     assert.equal(go().attributes['aria-label'], 'Trier la Sortie · vidéos');
+    assert.equal(go().attributes['aria-pressed'], 'false');
     assert.deepEqual(body.find('studio-item-number').map(badge => badge.textContent), ['#2']);
+    // It stays released from one mode to the other, until it is pressed again.
+    page.mode(0);
+    assert.deepEqual(ids(), ['p1']);
+    assert.equal(go().attributes['aria-label'], 'Trier la Sortie · images');
+    go().onclick();
+    assert.deepEqual(ids(), ['s1', 'c1', 'p1']);
   } finally {
     page.restore();
   }
-  // A kind with nothing made says so, its button still there to show the others.
+  // Released on a kind with nothing made: said so, the button still there to show the others.
   page = await studioPage({ create_image: [image] }, {}, { runs: [runs[0]] });
   try {
     const { body } = page;
+    assert.deepEqual(body.find('studio-item').map(tile => tile.dataset.id), ['s1']);
+    body.find('studio-sort-go')[0].onclick();
     assert.equal(body.find('studio-item').length, 0);
     assert.equal(
       body.find('studio-empty-strip')[0].children[0].textContent,

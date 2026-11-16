@@ -2938,7 +2938,8 @@ export function setupStudio({
   // focus, all of them and « Détails » under a right click or a long press; a click shows it whole
   // with its details; a deletion is asked on the picture itself.
   const KIND = { video: 'Clip', image: 'Image', audio: 'Son' };
-  // What the Sortie shows: the kind of the mode (16/11); its button at the right, the whole project.
+  // What the Sortie shows: the whole project, images, clips and sounds (16/11: its button at the
+  // right is pressed to begin with); released, the kind of the mode only.
   const SORTS = [
     { id: 'all', icon: 'grid', label: 'Tout', none: 'Aucune création dans ce projet pour l’instant' },
     // A mode without takes (etats-maquette.md, 55): what the Sortie will hold, the last at the left.
@@ -2946,8 +2947,7 @@ export function setupStudio({
     { id: 'video', icon: 'video', label: 'Vidéos', none: 'Rien pour l’instant. Vos vidéos apparaîtront ici, la dernière à gauche.' },
     { id: 'audio', icon: 'wave', label: 'Sons', none: 'Rien pour l’instant. Vos sons apparaîtront ici, la dernière à gauche.' },
   ];
-  let sortieAll = false, // the Sortie shows the whole project, not only the kind of the mode
-    sortieMode = null; // the mode it was drawn for (another mode: its kind again)
+  let sortieAll = true; // the Sortie shows the whole project, not only the kind of the mode
   let menuFor = null, // the creation whose menu is open
     confirmFor = null, // the creation whose deletion waits for its confirmation
     pressed = false; // a long press opened a menu: the click that ends it selects nothing
@@ -3037,7 +3037,7 @@ export function setupStudio({
       list.push({
         id: 'extend',
         label: 'Prolonger',
-        glyph: 'extend',
+        glyph: 'act-extend',
         title: 'Prolonger · écrire la suite de ce clip',
         run: () => {
           extending = record;
@@ -3051,7 +3051,7 @@ export function setupStudio({
       list.push({
         id: 'animate',
         label: 'Animer',
-        glyph: 'animate',
+        glyph: 'act-animate',
         title: proposal ? 'Moodix AI est en train de proposer' : 'Animer · en faire une vidéo',
         off: Boolean(proposal),
         run: () => animateImage(record),
@@ -3316,18 +3316,14 @@ export function setupStudio({
   const pictures = new Map();
   let used = new Set();
   /**
-   * The Sortie: the creations of the project, of all its conversations, of the kind of the mode
-   * (the images in Image, the clips in Vidéo, the sounds in Son: 16/11), the newest at the left (a
-   * new one pushes the others to the right); its button at the right shows them all, until the mode
-   * changes. Empty, its icon and a line that say so, without a frame (one would look like a place
+   * The Sortie: the creations of the project, of all its conversations, images, clips and sounds
+   * together (16/11), the newest at the left (a new one pushes the others to the right); its button
+   * at the right, released, keeps those of the kind of the mode (the images in Image, the clips in
+   * Vidéo, the sounds in Son). Empty, its icon and a line that say so, without a frame (one would look like a place
    * to drop a file: moodix-design.md 7 bis 18).
    */
   function outputs() {
     used = new Set();
-    if (sortieMode !== mode) {
-      sortieMode = mode;
-      sortieAll = false;
-    }
     const section = node('section', 'studio-block is-output studio-results'),
       about = modeOf(mode),
       own = SORTS.find(item => item.id === mode) ?? SORTS[0],
@@ -3461,8 +3457,8 @@ export function setupStudio({
     setTimeout(() => canvas.remove(), 0);
   }
   /**
-   * The button at the right of the Sortie: the kind of the mode it shows (its icon), or the whole
-   * project (the media icon, pressed); a click goes from one to the other.
+   * The button at the right of the Sortie: pressed, the whole project (as it is to begin with);
+   * released, the kind of the mode only; a click goes from one to the other.
    */
   function sortButton(own) {
     const box = node('div', 'studio-sort'),

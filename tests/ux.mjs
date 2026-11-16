@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setupSettingsGuard } from '../public/settings-guard.mjs';
 import { setupCopy } from '../public/copy.mjs';
-import { contextBudget, contextFigure, setupContextMeter } from '../public/context-meter.mjs';
+import { contextBudget, setupContextMeter } from '../public/context-meter.mjs';
 import { countContext } from '../lib/context-count.mjs';
 import { createApplication } from '../server.mjs';
 function element() {
@@ -198,17 +198,24 @@ test('context gauge fills only with used tokens, regardless of response reservat
   assert.equal(unknown.warning, '');
 });
 
-test('the context gauge writes its share in figures beside the bar', () => {
-  const figure = (used, precision = 'exact') => contextFigure(contextBudget({ used, capacity: 10000, precision }));
-  assert.equal(figure(0), '0 %');
-  // Something is used: never « 0 % ».
-  assert.equal(figure(40), '< 1 %');
-  assert.equal(figure(1249), '12 %');
-  assert.equal(figure(4000, 'estimated'), '≈ 40 %');
-  assert.equal(figure(6000, 'text-only'), '≥ 60 %');
-  assert.equal(figure(12000), '100 %');
-  // Not counted (engine stopped): no figure rather than a wrong one.
-  assert.equal(figure(null), '');
+test('the context gauge is its bar alone: no figure beside it (16/11); the share stays in its tooltip', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const read = async name => readFile(new URL('../public/' + name, import.meta.url), 'utf8');
+  assert.doesNotMatch(await read('index.html'), /context-figure/);
+  assert.doesNotMatch(await read('moodix.css'), /context-figure/);
+  const box = { style: { setProperty: (name, value) => (box.style[name] = value) }, dataset: {}, setAttribute() {}, removeAttribute() {} };
+  let asked = [];
+  setupContextMeter({
+    $: id => (asked.push(id), id === 'context-meter' ? box : null),
+    api: async () => ({ json: async () => ({}) }),
+    getRequest: () => null,
+    getConfig: () => ({ contextSize: 10000 }),
+    isReady: () => false,
+    isBusy: () => false,
+  }).observe({ usage: { prompt_tokens: 2000, completion_tokens: 500 } });
+  assert.deepEqual(asked, ['context-meter']);
+  assert.equal(box.style['--context-used'], '25%');
+  assert.match(box.title, /2.500 \/ 10.000 tokens \(25 %\)/);
 });
 
 test('no text of the interface is smaller than 12 px', async () => {
@@ -236,7 +243,7 @@ test('no text of the interface is smaller than 12 px', async () => {
   for (const rule of labels) assert.match(rule, /letter-spacing: 0\.\d+em/, rule);
 });
 
-test('the context meter ignores stale counts; its details are in its tooltip, its share beside the bar', async () => {
+test('the context meter ignores stale counts; its details are in its tooltip', async () => {
   const nodes = new Map(),
     $ = id => {
       if (!nodes.has(id)) nodes.set(id, element());
@@ -264,7 +271,6 @@ test('the context meter ignores stale counts; its details are in its tooltip, it
   assert.match($('context-meter').title, /≥.*6/);
   assert.equal($('context-meter').dataset.warning, '');
   assert.equal($('context-meter').attributes['aria-valuenow'], '6000');
-  assert.equal($('context-figure').textContent, '≥ 73 %');
   calls[0].resolve(Response.json({ used: 1, precision: 'exact' }));
   await tick();
   assert.match($('context-meter').title, /6/);
@@ -440,4 +446,55 @@ test('context API does not start a model and uses a ready local engine without s
   assert.equal((await api('chat', completed)).status, 400);
   assert.equal((await api('context', { messages: [] })).status, 400);
   assert.equal((await api('chat', input)).status, 400);
+});
+
+test('the whole box of the chat is where one writes: a click outside its buttons goes to the text (16/11)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { runInNewContext } = await import('node:vm');
+  const app = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n'),
+    from = app.indexOf("$('chat-form').addEventListener('click'"),
+    source = app.slice(from, app.indexOf('});', from) + 3);
+  assert.ok(from > 0);
+  let click,
+    focused = 0;
+  const nodes = {
+    'chat-form': { addEventListener: (type, listener) => type === 'click' && (click = listener) },
+    prompt: { focus: () => focused++ },
+  };
+  runInNewContext(source, { $: id => nodes[id] });
+  // What is under the pointer: itself or one of its parents is a button, a field, an attachment… or not.
+  const on = inside => ({ target: { closest: selector => (inside && selector.split(', ').includes(inside) ? {} : null) } });
+  click(on(null));
+  assert.equal(focused, 1, 'the edge of the box, the row of its tools');
+  for (const control of ['button', 'textarea', 'input', 'label', '.attachments > *']) click(on(control));
+  assert.equal(focused, 1, 'a button keeps its own job');
+});
+
+test('the time of a turn is written at the top right of its message, on the line of its takes when it has some (16/11)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { runInNewContext } = await import('node:vm');
+  const read = async name => (await readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const app = await read('app.js'),
+    source = app.slice(app.indexOf('function turnTime(view, started)'), app.indexOf('function assistantMessage('));
+  const classes = [],
+    attributes = {},
+    view = {
+      note: { textContent: '', classList: { add: name => classes.push(name) } },
+      generations: { setAttribute: (name, value) => (attributes[name] = value) },
+    };
+  const context = { performance: { now: () => 118300 } };
+  runInNewContext(source + '\nthis.turnTime = turnTime;', context);
+  context.turnTime(view, 2000);
+  assert.equal(view.note.textContent, '116.3 s');
+  assert.deepEqual(classes, ['is-time']);
+  assert.deepEqual(attributes, { 'data-time': '116.3 s' });
+  // Both ends of a turn go through it; nothing else writes a time under the message.
+  assert.equal(app.match(/turnTime\(view, started\)/g).length, 3);
+  assert.doesNotMatch(app.replace(source, ''), /toFixed\(1\)\} s`/);
+  const css = await read('moodix.css');
+  // At the right of the line of the takes, at their right edge; else at the top right of the message.
+  assert.match(css, /#messages \.generation-grid\[data-takes\] \{[^}]*position: relative;[^}]*width: fit-content;/);
+  assert.match(css, /#messages \.generation-grid\[data-takes\]\[data-time\]::after \{[^}]*content: attr\(data-time\);[^}]*position: absolute;[^}]*top: 0;[^}]*right: 0;/);
+  assert.match(css, /#messages \.message\.assistant > \.message-note\.is-time \{[^}]*position: absolute;[^}]*top: 4px;[^}]*right: 0;/);
+  assert.match(css, /:has\(> \.generation-grid\[data-takes\]\[data-time\]\) > \.message-note\.is-time \{[^}]*display: none;/);
 });

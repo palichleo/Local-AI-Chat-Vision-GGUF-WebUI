@@ -2014,6 +2014,16 @@ async function takeBack(resend) {
   if (resend) $('chat-form').requestSubmit();
   else $('prompt').focus();
 }
+/**
+ * How long a turn took (« 116.3 s »): at the top right of its message (16/11), on the line of its
+ * takes when it has some (moodix.css: `data-time` on their grid), else on the line of « MOODIX ».
+ */
+function turnTime(view, started) {
+  const text = `${((performance.now() - started) / 1000).toFixed(1)} s`;
+  view.note.textContent = text;
+  view.note.classList?.add('is-time');
+  view.generations?.setAttribute?.('data-time', text);
+}
 function assistantMessage(parent = null) {
   const article = parent?.article || node('article', 'message assistant');
   article.setAttribute('aria-label', 'Réponse du modèle');
@@ -2575,7 +2585,7 @@ async function sendMessage(event) {
         view.body.replaceChildren();
         view.reasoning.hidden = true;
         complete = true;
-        view.note.textContent = `${((performance.now() - started) / 1000).toFixed(1)} s`;
+        turnTime(view, started);
         break;
       }
       silent = false;
@@ -2594,10 +2604,8 @@ async function sendMessage(event) {
       }
       if (!request) {
         complete = true;
-        view.note.textContent =
-          finishReason === 'length'
-            ? 'Limite de sortie atteinte.'
-            : `${((performance.now() - started) / 1000).toFixed(1)} s`;
+        if (finishReason === 'length') view.note.textContent = 'Limite de sortie atteinte.';
+        else turnTime(view, started);
         break;
       }
       await historyWrite;
@@ -3634,6 +3642,12 @@ $('prompt').onkeydown = event => {
   }
 };
 $('chat-form').onsubmit = sendMessage;
+// A click anywhere in the box that is not a button (its edges, the row of its tools) goes to the
+// text (16/11): the whole box is where one writes.
+$('chat-form').addEventListener('click', event => {
+  if (event.target?.closest?.('button, a, input, select, textarea, label, .attachments > *')) return;
+  $('prompt').focus();
+});
 $('cancel').onclick = () => {
   if (state.controller) state.controller.abort();
   else api('tools/cancel', { jobId: state.status.toolJob?.id }).catch(error => notice(error.message));
