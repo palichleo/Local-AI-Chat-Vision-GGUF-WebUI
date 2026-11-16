@@ -3,7 +3,9 @@
  * card, in the message. « IL MANQUE UN FICHIER · VIDÉO · WAN SCAIL 2 », each file with an amber point,
  * its name and its size; where it goes; « Annuler » and « Télécharger · 28,6 Go ». While it downloads:
  * a line, « 3,4 / 28,6 GO » and « Arrêter » (what was fetched stays: it goes on from there). Once the
- * file is there, `onReady` (the page sends the request again).
+ * file is there, `onReady()`: true when the page sent the request again (the conversation had not
+ * moved); else the card says « Wan SCAIL 2 est prêt » and offers « Reprendre la demande » (`onResume`):
+ * a message sent hours later on its own would come out of context.
  */
 const KINDS = { video: 'Vidéo', audio: 'Son', image: 'Image' };
 
@@ -14,7 +16,17 @@ export function sizeText(bytes) {
   return Math.max(1, Math.round(value / 1024 ** 2)).toLocaleString('fr-FR') + ' Mo';
 }
 
-export function missingFileCard({ host, request, node, icon, api, onReady = () => {}, poll = 1000, wait = null }) {
+export function missingFileCard({
+  host,
+  request,
+  node,
+  icon,
+  api,
+  onReady = () => false,
+  onResume = () => {},
+  poll = 1000,
+  wait = null,
+}) {
   const missing = request.missing,
     card = node('section', 'missing-card'),
     pause = wait ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
@@ -72,6 +84,11 @@ export function missingFileCard({ host, request, node, icon, api, onReady = () =
       foot.append(progress, button('text-button missing-stop', 'Arrêter', () => void stop()));
     } else if (state === 'done') {
       foot.append(node('p', 'missing-done', 'Le fichier est là. Je reprends votre demande…'));
+    } else if (state === 'ready') {
+      foot.append(
+        node('p', 'missing-done', `${request.workflowName} est prêt`),
+        button('missing-go', 'Reprendre la demande', () => onResume(), 'play'),
+      );
     } else {
       foot.append(
         button('text-button missing-cancel', 'Annuler', () => cancel()),
@@ -111,9 +128,9 @@ export function missingFileCard({ host, request, node, icon, api, onReady = () =
           return;
         }
         if (job.state === 'done' && job.workflowId === missing.workflowId) {
-          state = 'done';
+          // Sent again by the page, or left to the user (the conversation moved meanwhile).
+          state = onReady() ? 'done' : 'ready';
           render();
-          onReady();
           return;
         }
         if (job.state === 'cancelled' || job.state === 'error' || job.state === 'idle') {

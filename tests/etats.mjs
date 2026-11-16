@@ -147,7 +147,7 @@ test('53 · a missing file: its card, the download as it goes, « Arrêter », a
               : {},
       };
     },
-    onReady: () => ready++,
+    onReady: () => ++ready > 0,
     wait: () => settle(),
   });
   await settle();
@@ -162,6 +162,32 @@ test('53 · a missing file: its card, the download as it goes, « Arrêter », a
   assert.equal(ready, 1, 'the request goes again');
   assert.equal(find(host, 'missing-done')[0].textContent, 'Le fichier est là. Je reprends votre demande…');
   assert.equal(sizeText(3.4 * 1024 ** 3), '3,4 Go');
+  // Written in the conversation meanwhile: not sent on its own; « Reprendre la demande ».
+  const later = new Element('div'),
+    resumed = [];
+  let polls = 0;
+  const waiting = missingFileCard({
+    host: later,
+    request,
+    node,
+    icon,
+    api: async route => ({
+      json: async () =>
+        route === 'downloads'
+          ? { job: ++polls > 1 ? { state: 'done', workflowId: 'wan-scail2' } : { state: 'idle' } }
+          : { state: 'running', workflowId: 'wan-scail2', received: 0, total: 1 },
+    }),
+    onReady: () => false,
+    onResume: () => resumed.push(true),
+    wait: () => settle(),
+  });
+  await settle();
+  await waiting.start();
+  assert.equal(find(later, 'missing-done')[0].textContent, 'Wan SCAIL 2 est prêt');
+  const resume = find(later, 'missing-go')[0];
+  assert.equal(resume.children.at(-1).textContent, 'Reprendre la demande');
+  resume.onclick();
+  assert.deepEqual(resumed, [true]);
   // « Annuler » leaves its line, as a proposal does.
   card.cancel();
   assert.deepEqual(

@@ -753,7 +753,8 @@ function updatePanel(step, text = '') {
   for (const item of $('update-steps').children) {
     const place = order.indexOf(item.dataset.step),
       now = Number(panel.dataset.step || 0);
-    item.className = place < now ? 'is-done' : place === now ? 'is-current' : '';
+    // Failed: the step it stopped at in amber, none « en cours » (56).
+    item.className = place < now ? 'is-done' : place === now ? (failed ? 'is-failed' : 'is-current') : '';
   }
   // A server busy for a moment says so in place of the sentence; the sentence otherwise.
   $('update-progress').textContent = /démarrera ensuite\.$/.test(text)
@@ -820,6 +821,8 @@ function updateControls() {
   // Studio drawn again when that changes).
   const held = Boolean(s.toolJob?.blocked);
   $('composer-recover').hidden = !held;
+  // Its only action then is « Libérer le GPU » (54): a take that failed waits for it.
+  document.documentElement.dataset.gpuHeld = String(held);
   if (held !== Boolean(state.gpuHeld)) {
     state.gpuHeld = held;
     state.studio?.render?.();
@@ -947,7 +950,7 @@ function updateControls() {
   $('compose-state').textContent = state.proposalCard
     ? ''
     : held
-    ? 'La carte graphique est restée prise par la dernière génération.'
+    ? ''
     : proposing
     ? 'Proposition dans le Studio · un message la refuse'
     : toolBusy
@@ -2100,7 +2103,8 @@ function missingFile(view, request, history) {
       `${MISSING_FOR[request.tool] ?? 'Pour cette création'}, il me faut ${request.workflowName}, et il lui manque ` +
       `${many ? 'des fichiers' : 'un fichier'}. Dès qu’${many ? 'ils sont' : 'il est'} là, je reprends votre demande.`,
     conversationId = state.conversationId,
-    asked = JSON.stringify(history.findLast(message => message.role === 'user' && !message.internal)?.content ?? '');
+    original = history.findLast(message => message.role === 'user' && !message.internal),
+    asked = JSON.stringify(original?.content ?? '');
   view.generations.append(node('p', 'missing-say', sentence));
   missingFileCard({
     host: view.generations,
@@ -2108,13 +2112,31 @@ function missingFile(view, request, history) {
     node,
     icon,
     api,
+    // The conversation has not moved: the message goes again by itself. Written in meanwhile (or
+    // something running, or a draft in the box): the card offers to take the request up again.
     onReady: () => {
       const index = lastExchange(state.messages);
       if (state.conversationId !== conversationId || index < 0 || JSON.stringify(state.messages[index].content) !== asked)
-        return;
-      if (state.generating || state.preparing || state.status.toolJob)
-        return notice('Le fichier est là : renvoyez votre message quand vous voulez.');
+        return false;
+      if (state.generating || state.preparing || state.status.toolJob) return false;
+      if ($('prompt').value.trim() || state.images.length || state.videos.length) return false;
       void takeBack(true);
+      return true;
+    },
+    // « Reprendre la demande »: the same message, sent as a new one.
+    onResume: () => {
+      if (state.conversationId !== conversationId) return notice('Ouvrez la conversation de cette demande.');
+      if (state.generating || state.preparing || state.status.toolJob)
+        return notice('Attendez la fin de la réponse ou de la génération en cours.');
+      if ($('prompt').value.trim() || state.images.length || state.videos.length)
+        return notice('Envoyez ou effacez d’abord le message en cours d’écriture.');
+      const draft = savedUser(original);
+      $('prompt').value = draft.text;
+      state.images = [...draft.images];
+      state.videos = [...draft.videos];
+      renderAttachments();
+      resizePrompt();
+      $('chat-form').requestSubmit();
     },
   });
   scrollToBottom();
@@ -2932,8 +2954,15 @@ async function sendMessage(event) {
         complete = true;
         break;
       }
-      if (result.failed && state.status.state !== 'ready')
+      if (result.failed && state.status.state !== 'ready') {
+        // Nothing made and the model cannot come back now (the card held, 54): the take says what
+        // failed; the turn ends there, without the same words again in red.
+        if (!result.record) {
+          complete = true;
+          break;
+        }
         throw Error(result.error || 'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
+      }
       // A take that failed says why on itself (52): no second line under the message.
       view.note.textContent = result.failed && result.record ? result.error || 'Analyse indisponible.' : '';
       if (result.denied || result.failed || iterations >= (state.generation?.maxIterations || 10)) allowTools = false;

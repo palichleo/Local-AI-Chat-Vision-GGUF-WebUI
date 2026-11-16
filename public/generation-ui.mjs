@@ -593,8 +593,12 @@ export function setupGenerationUI({
         veil.setAttribute('role', 'alert');
         veil.append(
           node('p', 'generation-failure-kicker', 'La génération a échoué'),
-          node('p', 'generation-failure-reason', /enregistré/.test(reason) ? reason : reason + ' Rien n’a été enregistré.'),
         );
+        // One sentence a line (52): « Rien n’a été enregistré. » never cut after its first word.
+        const said = node('p', 'generation-failure-reason');
+        said.append(node('span', '', reason));
+        if (!/enregistré/.test(reason)) said.append(node('span', '', ' Rien n’a été enregistré.'));
+        veil.append(said);
         if (onAgain && request.requestId) {
           const row = node('div', 'generation-failure-actions'),
             again = node('button', 'generation-again'),

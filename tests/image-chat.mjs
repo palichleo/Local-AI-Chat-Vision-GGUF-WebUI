@@ -253,7 +253,8 @@ test('image generation finishes without automatic pixels or review, while denial
 test('a failed generation without output checks engine readiness before continuing the chat', async () => {
   const result = await exchange({ ready: false, failed: true, images: [], hasRecord: false });
   assert.equal(result.requests.length, 1);
-  assert.match(result.views.at(-1).note.textContent, /restart failed/);
+  // The take says what failed (etats-maquette.md, 52 and 54): not the same words again under the message.
+  assert.equal(result.views.at(-1).note.textContent, '');
 });
 
 test('an optional output read supplies temporary pixels and can be followed by a reference comparison', async () => {

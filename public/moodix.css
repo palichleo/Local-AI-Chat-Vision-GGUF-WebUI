@@ -10233,6 +10233,20 @@ body:not([data-view='chat']) .resume {
   opacity: 0;
   transition: opacity 0.15s ease;
 }
+#messages .message:has(> .message-actions) {
+  position: relative;
+}
+#messages .message > .message-actions {
+  position: absolute;
+  top: 100%;
+  z-index: 2;
+}
+#messages .message.user > .message-actions {
+  right: 0;
+}
+#messages .message.assistant > .message-actions {
+  left: 0;
+}
 #messages .message:hover .message-actions,
 #messages .message-actions:focus-within {
   opacity: 1;
@@ -14404,7 +14418,7 @@ body[data-setup='incomplete'] #resume-last {
    « Votre première prise apparaîtra ici. » in Gloock, how to begin, the format and its size in mono;
    « Générer » greyed (45 %) while the prompt is empty. */
 #studio-view .studio-frame.is-empty {
-  border: 1px solid rgba(238, 232, 222, 0.1);
+  outline-color: rgba(238, 232, 222, 0.1);
   background: rgba(0, 0, 0, 0.12);
 }
 #studio-view .studio-frame.is-empty :is(.studio-frame-label, .studio-readout) {
@@ -14637,7 +14651,7 @@ body[data-setup='incomplete'] #resume-last {
   background: #0e0d11;
 }
 #messages .generation-card.is-failed > .generation-frame > :is(img, video, canvas, .live-preview, .take-flux) {
-  filter: blur(18px) brightness(0.35) saturate(0.8);
+  filter: blur(22px) saturate(0.35) brightness(0.38);
   transform: scale(1.08);
 }
 #messages .generation-card.is-failed > .generation-caption,
@@ -14717,6 +14731,7 @@ body[data-setup='incomplete'] #resume-last {
 :is(.generation-failure-reason, .studio-held-text) {
   max-width: 420px;
   margin: 0;
+  text-wrap: balance;
   color: var(--text-1);
   font: 400 15px/1.55 var(--font-ui);
 }
@@ -14765,7 +14780,7 @@ body[data-setup='incomplete'] #resume-last {
    encore prise » in place of the step, « Libérer le GPU » in place of Générer (same glass, 46 px, the
    card in amber); in the chat, in place of Envoyer. */
 #studio-view .studio-frame.is-held {
-  border: 1px solid color-mix(in srgb, var(--alert) 45%, transparent);
+  outline-color: color-mix(in srgb, var(--alert) 55%, transparent);
   background: #0e0d11;
 }
 #studio-view .studio-frame.is-held :is(.studio-frame-label, .studio-readout) {
@@ -14777,7 +14792,7 @@ body[data-setup='incomplete'] #resume-last {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  filter: blur(18px) brightness(0.35) saturate(0.8);
+  filter: blur(22px) saturate(0.35) brightness(0.38);
   transform: scale(1.08);
 }
 #studio-view .studio-go-group.is-held .studio-recover {
@@ -14971,4 +14986,31 @@ body[data-setup='incomplete'] #resume-last {
 }
 #messages .generation-card.is-failed > .generation-frame::before {
   opacity: 0;
+}
+
+/* 56 · Failed: the step it stopped at takes the amber ring, as the point of 52; none stays « en cours ». */
+.update-steps li.is-failed {
+  color: var(--alert);
+}
+.update-steps li.is-failed .update-ring {
+  border-color: var(--alert);
+  box-shadow: inset 0 0 0 3px rgba(22, 20, 26, 0.9), inset 0 0 0 8px var(--alert);
+}
+/* 54 · The card held: « Libérer le GPU » is the only action; a take that failed waits for it. */
+:root[data-gpu-held='true'] #messages .generation-failure-actions {
+  display: none;
+}
+#messages .generation-failure-reason > span {
+  display: block;
+}
+
+/* One colour of alert (etats-maquette.md): what went wrong is said in amber, never in red (the red
+   stays for what deletes). */
+:root:not([data-theme='light']) .notice {
+  border-color: color-mix(in srgb, var(--alert) 40%, transparent);
+  background: color-mix(in srgb, var(--alert) 10%, rgba(22, 20, 26, 0.9));
+  color: var(--alert);
+}
+:root:not([data-theme='light']) .message-note.error {
+  color: var(--alert);
 }

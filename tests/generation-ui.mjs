@@ -361,9 +361,11 @@ test('a take that fails stays veiled at its format: « ÉCHEC », what failed, �
   assert.equal(figure.classList.contains('is-failed'), true);
   const [chip, veil] = frame.children.slice(-2);
   assert.equal(chip.textContent, 'Échec');
-  assert.deepEqual(veil.children.slice(0, 2).map(item => item.textContent), [
-    'La génération a échoué',
-    'La mémoire de la carte graphique a manqué au décodage. Rien n’a été enregistré.',
+  assert.equal(veil.children[0].textContent, 'La génération a échoué');
+  // One sentence a line: « Rien » never left alone at the end of one.
+  assert.deepEqual(veil.children[1].children.map(item => item.textContent), [
+    'La mémoire de la carte graphique a manqué au décodage.',
+    ' Rien n’a été enregistré.',
   ]);
   assert.equal(caption.children[1].textContent, 'Échec pendant le décodage de la vidéo');
   const [relaunch, edit] = veil.children[2].children;
