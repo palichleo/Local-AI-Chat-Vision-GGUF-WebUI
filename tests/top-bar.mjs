@@ -37,23 +37,22 @@ test('the top bar: the Éclipse and « Moodix », then Chat · Studio · Pellicu
   assert.match(css, /\.top-place\[aria-current='page'\]::after \{[^}]*width: 16px;[^}]*height: 1\.5px;/);
 });
 
-test('the library: a page of its own, its title at its top, its filters on one line', async () => {
+test('the Pellicule: a page of its own, its title at its top, its projects and conversations in pills', async () => {
   const html = await read('index.html'),
     app = await read('app.js'),
     navigation = await read('project-navigation.mjs'),
     css = await read('moodix.css');
   const page = html.match(/<section id="library-view"[^]*?<\/section><\/section>/)?.[0] ?? '';
-  assert.match(page, /^<section id="library-view" class="library-view" aria-labelledby="library-heading"><h1 id="library-heading" class="library-heading">Pellicule<\/h1>/);
-  // The conversations of a project at the top; then on one line the project, the conversation and
-  // the kind; then « Créations » and the tiles (0.5.126).
-  const order = ['id="library-project-view"', 'id="library-project"', 'id="library-conversation"', 'id="library-kinds"', 'id="library-creations-title"', 'id="library-grid"', 'id="library-empty"'].map(
+  assert.match(page, /^<section id="library-view" class="library-view" aria-labelledby="library-heading"><header class="library-head"><h1 id="library-heading" class="library-heading"><span class="library-title">Pellicule<\/span><\/h1>/);
+  // The title, its number of takes and the kinds on one line; the projects, then the conversations
+  // of the one chosen, in pills; then the sheet (pellicule-maquette.md).
+  const order = ['id="library-heading"', 'id="library-total"', 'id="library-kinds"', 'id="library-projects"', 'id="library-conversations"', 'id="library-grid"', 'id="library-empty"'].map(
     mark => page.indexOf(mark),
   );
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'in this order');
-  assert.match(page, /<section id="library-project-view" class="library-project-view" aria-label="Conversations du projet" hidden>/);
+  assert.match(page, /<nav id="library-conversations" class="library-pills is-conversations" aria-label="Conversations du projet" hidden>/);
   assert.match(page, /<div id="library-kinds" class="library-kinds" role="radiogroup" aria-label="Type de création">/);
-  assert.match(page, /<span class="sr-only">Projet<\/span><select id="library-project"><\/select>/);
-  assert.match(page, /<span class="sr-only">Conversation<\/span><select id="library-conversation"><\/select>/);
+  assert.doesNotMatch(page, /<select/, 'no more lists that unfold');
   assert.match(app, /\$\('library-open'\)\.onclick = \(\) => showLibrary\(\);/);
   // The logo goes back to the chat.
   assert.match(app, /\$\('brand-home'\)\.onclick = event => \{\n {2}event\.preventDefault\(\);\n {2}showChat\(\);/);
@@ -64,12 +63,12 @@ test('the library: a page of its own, its title at its top, its filters on one l
   assert.match(css, /body\[data-view='library'\] \.library-view \{\n {2}display: flex;/);
   assert.match(css, /\.library-note \{\n {2}margin: 0;\n {2}color: var\(--text-2\);/);
   assert.match(css, /body\[data-view='library'\] \.chat-area,\nbody\[data-view='library'\] \.composer-region,/);
-  // Its own scroll; pictures of 16:9 with 6 px corners, as in the Sortie of the Studio.
+  // Its own scroll; the sheet by day, each take at its format on rows of 196 px (capture 31); the
+  // projects and conversations in pills of 32 px with corners of 8.
   assert.match(css, /body\[data-view='library'\] \.library-view \{[^}]*overflow-y: auto;/);
-  assert.match(css, /\.library-grid \{\n {2}display: grid;\n {2}grid-template-columns: repeat\(auto-fill, minmax\(220px, 1fr\)\);/);
-  assert.match(css, /\.library-pick \{[^}]*aspect-ratio: 16 \/ 9;[^}]*border-radius: 6px;/);
-  assert.match(page, /<div class="library-filters"><label class="library-select">/);
-  assert.match(css, /\.library-filters \{\n {2}display: flex;/);
+  assert.match(css, /\.library-row \{\n {2}display: flex;\n {2}flex-wrap: wrap;\n {2}gap: 10px;/);
+  assert.match(css, /#library-view \.library-tile \{[^}]*width: calc\(196px \* var\(--ratio, 1\)\);[^}]*height: 196px;/);
+  assert.match(css, /\.library-pill \{[^}]*height: 32px;[^}]*border-radius: 8px;/);
   // The words of a tile over its foot, under the pointer or the keyboard's focus only.
   assert.match(css, /\.library-veil \{[^}]*opacity: 0;[^}]*pointer-events: none;/);
   assert.match(css, /\.library-tile:hover \.library-veil,\n\.library-tile:focus-within \.library-veil \{\n {2}opacity: 1;/);

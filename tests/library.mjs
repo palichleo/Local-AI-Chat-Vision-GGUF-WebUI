@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { FIRST_CONVERSATIONS, filtered, mediaOf, setupLibrary } from '../public/library.mjs';
+import { filtered, mediaOf, setupLibrary } from '../public/library.mjs';
 import { createApplication } from '../server.mjs';
 import { Gallery } from '../lib/gallery.mjs';
 import { STUDIO_ID } from '../lib/studio.mjs';
@@ -25,7 +25,13 @@ class Element {
 }
 const walk = element => [element, ...element.children.flatMap(walk)];
 const find = (element, className) => walk(element).find(item => item.className === className);
-const ids = element => element.children.map(item => item.dataset.id);
+const tiles = element => walk(element).filter(item => item.className?.startsWith?.('library-tile')).map(item => item.dataset.id);
+const pills = row =>
+  row.children
+    .filter(item => item.className?.split?.(' ')[0] === 'library-pill' && !item.className.includes('is-new'))
+    .map(item => [item.children[0].textContent, item.children[1]?.textContent, item.attributes['aria-pressed']]);
+const project = (f, id) => f.$('library-projects').children.find(item => item.dataset.project === id);
+const card = (f, id) => walk(f.$('library-grid')).find(item => item.className?.startsWith?.('library-tile') && item.dataset.id === id);
 
 const PROJECTS = [
   { id: 'inbox', name: 'Conversations' },
@@ -46,12 +52,20 @@ const RUNS = [
     createdAt: '2026-11-14T10:00:00.000Z',
     outputs: [output('c1', 'r1', { thumbUrl: '/media/thumbnail/r1' })],
   },
-  { id: 'r2', conversationId: 'c2', projectId: 'inbox', mediaType: 'video', prompt: 'Un clip', outputs: [output('c2', 'r2')] },
+  {
+    id: 'r2',
+    conversationId: 'c2',
+    projectId: 'inbox',
+    mediaType: 'video',
+    prompt: 'Un clip',
+    parameters: { frames: 121, fps: 24 },
+    outputs: [output('c2', 'r2')],
+  },
   { id: 'r3', conversationId: 'open', projectId: 'p1', mediaType: 'audio', prompt: 'Des vagues', outputs: [output('open', 'r3')] },
   { id: 'r4', conversationId: STUDIO_ID, projectId: 'inbox', legacy: true, prompt: '', outputs: [output(STUDIO_ID, 'r4')] },
 ];
 
-function fixture({ runs = RUNS, historyItems = HISTORY, fail = '', conversationId = 'open' } = {}) {
+function fixture({ runs = RUNS, historyItems = HISTORY, fail = '', conversationId = 'open', ...more } = {}) {
   const nodes = new Map(),
     $ = id => {
       if (!nodes.has(id)) nodes.set(id, new Element('', id));
@@ -77,6 +91,7 @@ function fixture({ runs = RUNS, historyItems = HISTORY, fail = '', conversationI
     openConversation: id => opened.push(id),
     newConversation: id => created.push(id),
     onFilter: filter => filters.push(filter),
+    ...more,
   });
   return { library, $, state, asked, viewed, opened, created, filters };
 }
@@ -106,28 +121,27 @@ test('every project: each creation with its project and its conversation; a clic
   // The open conversation is asked for too, even before it is saved.
   assert.deepEqual(f.asked, ['library?images=0&conversation=open&project=p1']);
   const grid = f.$('library-grid');
-  assert.deepEqual(ids(grid), ['r1', 'r2', 'r3', 'r4']);
-  assert.equal(f.$('library-total').textContent, '4');
-  assert.equal(f.$('library-heading').textContent, 'Pellicule');
-  assert.equal(f.$('library-project-view').hidden, true, 'no conversations of a project above them');
+  assert.deepEqual(tiles(grid), ['r1', 'r2', 'r3', 'r4']);
+  assert.equal(f.$('library-total').textContent, '4 prises');
+  assert.deepEqual(f.$('library-heading').children.map(item => item.textContent), ['Pellicule']);
+  assert.equal(f.$('library-conversations').hidden, true, 'no conversations of a project above them');
   assert.equal(f.$('library-empty').hidden, true);
+  // The projects in pills, each with its number of takes; « Sans projet » after the projects.
+  assert.deepEqual(pills(f.$('library-projects')), [
+    ['Tous les projets', '4', 'true'],
+    ['Voyage', '2', 'false'],
+    ['Sans projet', '2', 'false'],
+  ]);
+  // The sheet by day: the line of a day, then its takes; those without a date together.
   assert.deepEqual(
-    f.$('library-project').children.map(item => [item.value, item.textContent]),
-    [
-      ['all', 'Tous les projets'],
-      ['inbox', 'Sans projet'],
-      ['p1', 'Voyage'],
-    ],
+    grid.children.map(day => find(day, 'library-day-count').textContent),
+    ['1', '3'],
   );
-  assert.equal(f.$('library-project').value, 'all');
-  // Every conversation, each with its project.
-  assert.deepEqual(
-    f.$('library-conversation').children.map(item => item.textContent),
-    ['Toutes les conversations', 'Plage · Voyage', 'Idées · Sans projet'],
-  );
-  const [image, clip, sound, before] = grid.children;
-  // The picture alone, as in the timeline (0.5.126); over its foot, under the pointer or the focus:
-  // its prompt (for the eyes: the label of the picture says it all), where it was made and when.
+  assert.match(find(grid.children[0], 'library-day-label').textContent, /14 nov\.$/);
+  assert.equal(find(grid.children[1], 'library-day-label').textContent, 'Sans date');
+  const [image, clip, sound, before] = walk(grid).filter(item => item.className?.startsWith?.('library-tile'));
+  // The picture alone (0.5.126); over its foot, under the pointer or the focus: its prompt (for the
+  // eyes: the label of the picture says it all), where it was made and when.
   assert.deepEqual(
     image.children.map(item => item.className),
     ['library-pick', 'library-veil'],
@@ -148,13 +162,16 @@ test('every project: each creation with its project and its conversation; a clic
   // The Studio of before had no conversation: « Sans conversation », and nothing to open.
   assert.equal(find(before, 'library-from').tag, 'span');
   assert.equal(find(before, 'library-from').textContent, 'Sans conversation');
-  // The picture: its thumbnail; the first frame of a clip; the stripes of a sound, and their badge.
+  // The picture: its thumbnail; the first frame of a clip and its length alone; a sound, a card that
+  // plays (« PRISE n » and its kind, its stripes, ▶, its name and its length).
   assert.equal(walk(image).find(item => item.tag === 'img').src, '/media/thumbnail/r1');
   assert.equal(walk(clip).find(item => item.tag === 'video').src, '/media/generated/c2/r2/0?key=k#t=0.1');
+  assert.equal(find(clip, 'library-length').textContent, '05.04 S');
+  assert.equal(find(image, 'library-length'), undefined);
   assert.ok(find(sound, 'library-wave'));
-  assert.equal(find(image, 'library-badge'), undefined);
-  assert.equal(find(find(clip, 'library-badge'), 'icon-video').tag, 'svg');
-  assert.equal(find(find(sound, 'library-badge'), 'icon-wave').tag, 'svg');
+  assert.deepEqual(find(sound, 'library-sound-head').children.map(item => item.textContent), ['SON', 'BRUITAGE']);
+  assert.equal(find(sound, 'library-sound-name').textContent, 'Des vagues');
+  assert.ok(find(sound, 'library-listen'));
   assert.equal(find(clip, 'library-pick').attributes['aria-label'], 'Clip · Un clip · Sans projet · Idées');
   find(image, 'library-pick').onclick();
   assert.deepEqual(f.viewed, [['r1', 0]]);
@@ -162,45 +179,47 @@ test('every project: each creation with its project and its conversation; a clic
   assert.deepEqual(f.opened, ['c2']);
 });
 
-test('on a project: its conversations above its creations, the first ones, a new chat in it', async () => {
+test('on a project: its conversations in pills under its own, a new chat in it, « ··· » to rename or delete it', async () => {
   const many = Array.from({ length: 8 }, (_, i) => ({
     id: 'k' + i,
     title: 'Chat ' + i,
     projectId: 'p1',
     createdAt: `2026-11-0${i + 1}T10:00:00.000Z`,
   }));
-  const f = fixture({ historyItems: [...HISTORY, ...many] });
+  const renamed = [],
+    deleted = [];
+  const f = fixture({ historyItems: [...HISTORY, ...many], onRenameProject: project => renamed.push(project.id), onDeleteProject: project => deleted.push(project.id) });
   await f.library.show({ project: 'p1' });
-  assert.equal(f.$('library-heading').textContent, 'Pellicule › Voyage');
-  assert.equal(f.$('library-project').value, 'p1');
-  const view = f.$('library-project-view');
-  assert.equal(view.hidden, false);
-  assert.equal(find(view, 'library-count').textContent, '9');
-  const rows = () => walk(f.$('library-project-view')).filter(item => item.className === 'library-conversation');
-  assert.equal(rows().length, FIRST_CONVERSATIONS);
-  assert.deepEqual(
-    rows().map(row => find(row, 'library-conversation-title').textContent),
-    ['Plage', 'Chat 0', 'Chat 1', 'Chat 2', 'Chat 3', 'Chat 4'],
-  );
-  assert.equal(rows()[0].children.find(item => item.tag === 'time').dateTime, '2026-11-14T10:00:00.000Z');
-  const more = find(view, 'library-more');
-  assert.equal(more.textContent, 'Afficher les 3 autres');
-  more.onclick();
-  assert.equal(rows().length, 9);
-  assert.equal(find(f.$('library-project-view'), 'library-more'), undefined);
-  rows()[0].onclick();
-  assert.deepEqual(f.opened, ['c1']);
-  find(f.$('library-project-view'), 'library-new').onclick();
+  assert.deepEqual(f.$('library-heading').children.slice(0, 2).map(item => item.textContent), ['Pellicule ›', 'Voyage']);
+  assert.equal(f.$('library-total').textContent, '2 prises');
+  assert.equal(pills(f.$('library-projects'))[1][2], 'true', 'Voyage chosen');
+  const row = f.$('library-conversations');
+  assert.equal(row.hidden, false);
+  // Those of its conversations that hold its takes, each with its number; a new one at the end.
+  assert.equal(row.children[0].textContent, 'Conversations');
+  assert.deepEqual(pills(row), [
+    ['Toutes les conversations', '2', 'true'],
+    ['Plage', '1', 'false'],
+  ]);
+  row.children.find(item => item.dataset.id === 'c1').onclick();
+  assert.deepEqual(tiles(f.$('library-grid')), ['r1']);
+  assert.deepEqual(f.filters.at(-1), { project: 'p1', media: 'all', conversation: 'c1' });
+  row.children.at(-1).onclick();
   assert.deepEqual(f.created, ['p1']);
   // Its creations only, the open conversation's among them, without the project in their line.
-  assert.deepEqual(ids(f.$('library-grid')), ['r1', 'r3']);
-  assert.equal(find(f.$('library-grid').children[0], 'library-from').textContent, 'Plage');
-  // Its own conversations in the filter, without their project.
-  assert.deepEqual(f.$('library-conversation').children.slice(0, 3).map(item => item.textContent), [
-    'Toutes les conversations',
-    'Plage',
-    'Chat 0',
-  ]);
+  row.children[1].onclick();
+  assert.deepEqual(tiles(f.$('library-grid')), ['r1', 'r3']);
+  assert.equal(find(f.$('library-grid'), 'library-from').textContent, 'Plage');
+  // « ··· » beside its name: Renommer, Supprimer le projet.
+  const more = f.$('library-heading').children.find(item => item.className === 'library-project-more');
+  more.onclick();
+  const menu = f.$('library-heading').children.find(item => item.className === 'library-project-menu');
+  assert.deepEqual(menu.children.map(item => item.textContent), ['Renommer', 'Supprimer le projet']);
+  menu.children[0].onclick();
+  assert.deepEqual(renamed, ['p1']);
+  f.$('library-heading').children.find(item => item.className === 'library-project-more').onclick();
+  f.$('library-heading').children.find(item => item.className === 'library-project-menu').children[1].onclick();
+  assert.deepEqual(deleted, ['p1']);
 });
 
 test('the kind and the conversation narrow the creations; ← → move between the kinds; a project keeps the kind', async () => {
@@ -219,32 +238,38 @@ test('the kind and the conversation narrow the creations; ← → move between t
   );
   assert.deepEqual(kinds.children.map(item => item.children[1].textContent), ['Tout', 'Images', 'Vidéos', 'Sons']);
   kind('video').onclick();
-  assert.deepEqual(ids(f.$('library-grid')), ['r2']);
+  assert.deepEqual(tiles(f.$('library-grid')), ['r2']);
   assert.equal(kind('video').attributes['aria-checked'], 'true');
   assert.deepEqual(f.filters.at(-1), { project: 'all', media: 'video', conversation: 'all' });
+  // The numbers of the projects follow the kind.
+  assert.deepEqual(pills(f.$('library-projects')).map(([name, number]) => [name, number]), [
+    ['Tous les projets', '1'],
+    ['Voyage', '0'],
+    ['Sans projet', '1'],
+  ]);
   kinds.onkeydown({ key: 'ArrowRight', preventDefault() {} });
-  assert.deepEqual(ids(f.$('library-grid')), ['r3']);
+  assert.deepEqual(tiles(f.$('library-grid')), ['r3']);
   kinds.onkeydown({ key: 'ArrowRight', preventDefault() {} });
-  assert.equal(f.$('library-grid').children.length, 4, 'after the last, the first');
+  assert.equal(tiles(f.$('library-grid')).length, 4, 'after the last, the first');
   kinds.onkeydown({ key: 'ArrowLeft', preventDefault() {} });
-  assert.deepEqual(ids(f.$('library-grid')), ['r3']);
+  assert.deepEqual(tiles(f.$('library-grid')), ['r3']);
   kind('image').onclick();
-  assert.deepEqual(ids(f.$('library-grid')), ['r1', 'r4']);
-  f.$('library-conversation').value = 'c1';
-  f.$('library-conversation').onchange();
-  assert.deepEqual(ids(f.$('library-grid')), ['r1']);
+  assert.deepEqual(tiles(f.$('library-grid')), ['r1', 'r4']);
+  project(f, 'p1').onclick();
+  assert.deepEqual(tiles(f.$('library-grid')), ['r1']);
+  f.$('library-conversations').children.find(item => item.dataset.id === 'c1').onclick();
+  assert.deepEqual(tiles(f.$('library-grid')), ['r1']);
   kind('audio').onclick();
-  assert.equal(f.$('library-grid').children.length, 0);
+  assert.deepEqual(tiles(f.$('library-grid')), []);
   assert.equal(f.$('library-empty').hidden, false);
-  assert.equal(f.$('library-empty').textContent, 'Aucune création de ce type ici.');
+  assert.equal(f.$('library-empty').children[0].textContent, 'Aucune création de ce type ici.');
   // Another project: its conversation forgotten, the kind kept.
-  f.$('library-project').value = 'inbox';
-  f.$('library-project').onchange();
+  project(f, 'inbox').onclick();
   assert.deepEqual(f.filters.at(-1), { project: 'inbox', media: 'audio', conversation: 'all' });
   // Shown again from the sidebar: everything again.
   await f.library.show({ project: 'inbox' });
   assert.deepEqual(f.library.filter(), { project: 'inbox', media: 'all', conversation: 'all' });
-  assert.deepEqual(ids(f.$('library-grid')), ['r2', 'r4']);
+  assert.deepEqual(tiles(f.$('library-grid')), ['r2', 'r4']);
 });
 
 test('a creation of a conversation never saved says so, and opens nothing', async () => {
@@ -252,7 +277,7 @@ test('a creation of a conversation never saved says so, and opens nothing', asyn
     runs: [{ id: 'u1', conversationId: 'gone', projectId: 'inbox', unsaved: true, prompt: 'Un renard', outputs: [output('gone', 'u1')] }],
   });
   await f.library.show();
-  const from = find(f.$('library-grid').children[0], 'library-from');
+  const from = find(f.$('library-grid'), 'library-from');
   assert.equal(from.tag, 'span');
   assert.equal(from.textContent, 'Conversation non enregistrée');
   assert.equal(from.onclick, undefined);
@@ -261,33 +286,43 @@ test('a creation of a conversation never saved says so, and opens nothing', asyn
 test('the tiles are kept from one drawing to the next: their pictures are not loaded again', async () => {
   const f = fixture();
   await f.library.show();
-  const first = f.$('library-grid').children[0];
-  f.$('library-project').value = 'p1';
-  f.$('library-project').onchange();
-  assert.equal(f.$('library-grid').children[0], first);
+  const first = card(f, 'r1');
+  project(f, 'p1').onclick();
+  assert.equal(card(f, 'r1'), first);
   assert.equal(find(first, 'library-from').textContent, 'Plage', 'its line follows the filter');
   await f.library.refresh();
-  assert.equal(f.$('library-grid').children[0], first, 'the same creation read again');
+  assert.equal(card(f, 'r1'), first, 'the same creation read again');
   find(first, 'library-pick').onclick();
   assert.deepEqual(f.viewed, [['r1', 0]]);
 });
 
-test('a project gone shows every project again; an empty library says where creations come from; an error is said', async () => {
-  const f = fixture({ runs: [], conversationId: null });
+test('a project gone shows every project again; an empty project offers two ways to begin; an error is said', async () => {
+  const opened = [];
+  const f = fixture({ runs: [], conversationId: null, openStudio: project => opened.push(project) });
   await f.library.show({ project: 'p1' });
   // No conversation open: only the saved ones.
   assert.deepEqual(f.asked, ['library?images=0']);
-  assert.equal(f.$('library-empty').textContent, 'Aucune création dans ce projet pour l’instant.');
-  f.state.projects = f.state.projects.filter(project => project.id !== 'p1');
+  // A project with nothing in it (capture 34): its sentence, a line, the Studio or a new chat.
+  const empty = f.$('library-empty');
+  assert.equal(empty.hidden, false);
+  assert.equal(empty.children[0].textContent, 'Rien dans ce projet pour l’instant.');
+  const doors = find(empty, 'library-doors').children;
+  assert.deepEqual(doors.map(item => item.textContent), ['Ouvrir le Studio', 'Nouvelle conversation']);
+  doors[0].onclick();
+  doors[1].onclick();
+  assert.deepEqual([opened, f.created], [['p1'], ['p1']]);
+  // Its conversations: « + Nouvelle conversation » only.
+  assert.deepEqual(f.$('library-conversations').children.map(item => item.className), ['library-pills-label', 'library-pill is-new']);
+  f.state.projects = f.state.projects.filter(item => item.id !== 'p1');
   f.library.render();
   assert.equal(f.library.filter().project, 'all');
   assert.deepEqual(f.filters.at(-1), { project: 'all', media: 'all', conversation: 'all' });
-  assert.equal(f.$('library-project-view').hidden, true);
-  assert.match(f.$('library-empty').textContent, /^Aucune création pour l’instant\. Les images, vidéos et sons/);
+  assert.equal(f.$('library-conversations').hidden, true);
+  assert.match(f.$('library-empty').children[0].textContent, /^Aucune création pour l’instant\. Les images, vidéos et sons/);
   const broken = fixture({ fail: 'Disque illisible.' });
   await broken.library.show();
   assert.equal(broken.$('library-empty').hidden, false);
-  assert.equal(broken.$('library-empty').textContent, 'Pellicule illisible : Disque illisible.');
+  assert.equal(broken.$('library-empty').children[0].textContent, 'Pellicule illisible : Disque illisible.');
 });
 
 test('GET /api/library: the creations of every project, each with its own, the open one, those never saved and those of before', async () => {

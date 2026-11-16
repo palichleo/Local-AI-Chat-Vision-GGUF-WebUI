@@ -2874,6 +2874,20 @@ const assetsUI = setupAssets({
   notice,
   onChange: () => contextMeter.schedule(),
   onBusy: () => updateControls(),
+  // A take opened (capture 33): where it was made, « test / Renard en pull bleu », which opens it.
+  describe: record => {
+    if (!record.conversationId || record.legacy || record.unsaved) return null;
+    const item = (state.historyItems || []).find(entry => entry.id === record.conversationId);
+    if (!item && record.conversationId !== state.conversationId) return null;
+    const projectId = item?.projectId || state.projectId || 'inbox',
+      project = projectId === 'inbox' ? 'Sans projet' : (state.projects || []).find(entry => entry.id === projectId)?.name || 'Sans projet';
+    return {
+      conversation: project + ' / ' + (item?.title || 'Nouvelle conversation'),
+      open: () => requestSettingsClose(() => loadConversation(record.conversationId)),
+    };
+  },
+  // Its actions at the foot of its panel, as in the conversation; done there, the take closed.
+  takeActions: (record, index) => viewerActions(record, index),
 });
 // The library: every creation; a click shows it whole, its conversation opens it.
 const libraryUI = setupLibrary({
@@ -2882,7 +2896,8 @@ const libraryUI = setupLibrary({
   node,
   icon,
   api,
-  viewOutput: (record, index) => assetsUI.viewOutput(record, index),
+  // `around`: the takes shown, which ‹ › of the take opened go through.
+  viewOutput: (record, index, blob, around) => assetsUI.viewOutput(record, index, blob, around),
   openConversation: id => requestSettingsClose(() => loadConversation(id)),
   newConversation: id => requestSettingsClose(() => newConversation(id)),
   // The project chosen in the Pellicule: the page follows it.
@@ -2890,7 +2905,52 @@ const libraryUI = setupLibrary({
     state.libraryProject = filter.project;
     projectUI.render();
   },
+  // On a take, the actions of the conversation (Ouvrir, Prolonger…), done in its conversation.
+  actions: (record, index) => libraryActions(record, index),
+  // The projects live here too (pellicule-maquette.md): « + Nouveau projet », « ··· » on one.
+  onNewProject: () => projectUI.edit(),
+  onRenameProject: project => projectUI.edit(project),
+  onDeleteProject: project => projectUI.remove(project),
+  // « Ouvrir le Studio » on a project with nothing in it: the Studio of that project.
+  openStudio: project =>
+    requestSettingsClose(async () => {
+      if ((state.projectId || 'inbox') !== project) await newConversation(project);
+      showStudio();
+    }),
 });
+const viewerActions = outputActions({
+  api,
+  node,
+  onDetails: null,
+  onAction: (record, index, action) => {
+    $('original-dialog').close();
+    actOnTake(record, index, action);
+  },
+  onShow: record => {
+    $('original-dialog').close();
+    showInStudio(record);
+  },
+});
+// Leaving the Pellicule (switchView): its sound stops.
+state.hushLibrary = () => libraryUI.hush();
+const libraryActions = outputActions({
+  api,
+  node,
+  onDetails: (record, index) => assetsUI.viewOutput(record, index),
+  onAction: (record, index, action) => actOnTake(record, index, action),
+  onShow: record => showInStudio(record),
+});
+/** An action on a take of the Pellicule: in its conversation, opened first (as from the chat). */
+function actOnTake(record, index, action) {
+  if (!record.conversationId || record.conversationId === state.conversationId) {
+    showChat();
+    return void runOutputAction(record, index, action);
+  }
+  requestSettingsClose(async () => {
+    await loadConversation(record.conversationId);
+    if (state.conversationId === record.conversationId) await runOutputAction(record, index, action);
+  });
+}
 const actionButtons = outputActions({
   api,
   node,
@@ -3191,6 +3251,8 @@ function showLibrary({ project = 'all' } = {}) {
  * from the library, the page simply changes. Resolves once the page shows the change.
  */
 function switchView(kind, apply) {
+  // A sound playing in the Pellicule stops as the page changes.
+  if (kind !== 'library') state.hushLibrary?.();
   const folding = kind === 'open' || kind === 'close',
     between = new Set([state.view, kind]),
     animate =

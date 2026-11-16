@@ -1,10 +1,12 @@
 /**
- * The library (Bibliothèque, 0.5.123): every creation of every project, images, clips and sounds,
- * newest first. Its project is chosen at its top; opened on one (a click on it in the sidebar), it
- * is the view of that project: its conversations, then its creations. The kind and the
- * conversation narrow the creations, above which they sit. A click on a creation shows it whole
- * with its details; on its conversation, opens it. The latest visual of a project is simply its
- * first tile.
+ * The Pellicule (pellicule-maquette.md; captures 30 to 34): every creation of every project, images,
+ * clips and sounds, the newest at the top left. The projects are pills under the title (« Tous les
+ * projets », each project and its number, « Sans projet », « + Nouveau projet »); a project chosen,
+ * its conversations are a second row of pills (no more lists that unfold). Tout · Images · Vidéos ·
+ * Sons at the right of the title. The takes are a contact sheet by day (« AUJOURD'HUI · 16 NOV. »),
+ * each in its own format at one height; a sound is a card that plays. Under the pointer, a veil
+ * with its prompt and where and when it was made, and at its top right the actions of the
+ * conversation. A click shows it whole with its details; on its conversation, opens it.
  */
 import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
 
@@ -15,8 +17,10 @@ export const KINDS = [
   { id: 'audio', icon: 'wave', label: 'Sons' },
 ];
 const NAMES = { image: 'Image', video: 'Clip', audio: 'Son' };
-/** The conversations of a project shown before « Afficher les autres ». */
+/** Kept for the callers of before (0.5.123): the conversations are all shown, as pills. */
 export const FIRST_CONVERSATIONS = 6;
+/** The height of a row of the sheet; a take is as wide as its format makes it at that height. */
+const ROW = 196;
 
 /** The kind of a creation: its media type, or what its first file says. */
 export function mediaOf(record) {
@@ -37,12 +41,60 @@ export function filtered(runs, { project = 'all', media = 'all', conversation = 
   );
 }
 
-export function setupLibrary({ $, state, node, icon, api, viewOutput, openConversation, newConversation, onFilter = () => {} }) {
+/** A length as everywhere (« 06.04 S » under a minute, « 1:45 » beyond). */
+export function lengthText(seconds) {
+  if (!(seconds > 0)) return '';
+  if (seconds >= 60) return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
+  return (Math.round(seconds * 100) / 100).toFixed(2).padStart(5, '0') + ' S';
+}
+/** The length of a creation, from its settings. */
+const secondsOf = record => {
+  const p = record.parameters ?? {};
+  if (Number(p.seconds) > 0) return Number(p.seconds);
+  return p.frames > 0 && p.fps > 0 ? p.frames / p.fps : null;
+};
+/** The shape of a creation, width over height: its file, its settings, or that of its kind. */
+const ratioOf = (record, media) => {
+  const output = record.outputs?.[0] ?? {},
+    width = output.width ?? record.parameters?.width,
+    height = output.height ?? record.parameters?.height;
+  if (width > 0 && height > 0) return width / height;
+  return media === 'video' ? 16 / 9 : 1;
+};
+/** The day of a creation, as the sheet groups them (local time), and its words. */
+function dayOf(value, now = new Date()) {
+  if (!value) return { key: 'unknown', label: 'Sans date' };
+  const date = new Date(value),
+    key = date.getFullYear() + '-' + (date.getMonth() + 1) + '-' + date.getDate(),
+    short = date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
+    today = new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+    that = new Date(date.getFullYear(), date.getMonth(), date.getDate()),
+    days = Math.round((today - that) / 86400000);
+  return { key, label: days === 0 ? 'Aujourd’hui · ' + short : days === 1 ? 'Hier · ' + short : short };
+}
+
+export function setupLibrary({
+  $,
+  state,
+  node,
+  icon,
+  api,
+  viewOutput,
+  openConversation,
+  newConversation,
+  onFilter = () => {},
+  actions = null,
+  onNewProject = null,
+  onRenameProject = null,
+  onDeleteProject = null,
+  openStudio = null,
+}) {
   const filter = { project: 'all', media: 'all', conversation: 'all' };
   let runs = [],
     version = 0,
-    unfolded = false,
-    failed = '';
+    failed = '',
+    menuOpen = false,
+    playing = null; // { audio, button }: the sound that plays
   // The tiles drawn, kept from one drawing to the next (another filter, a project renamed):
   // their pictures are not loaded again.
   const cards = new Map();
@@ -55,31 +107,86 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
   const titleOf = id =>
     (state.historyItems || []).find(item => item.id === id)?.title ?? (id === state.conversationId ? 'Nouvelle conversation' : 'Conversation');
   const date = value => (value ? new Date(value).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '');
+  const count = list => String(list.length);
 
-  function option(value, text, chosen) {
-    const element = node('option', '', text);
-    element.value = value;
-    element.selected = value === chosen;
+  /** A pill: its name, its number; `chosen` lights it. */
+  function pill(className, name, number, chosen, onclick) {
+    const element = node('button', className + (chosen ? ' is-chosen' : ''));
+    element.type = 'button';
+    element.setAttribute('aria-pressed', String(Boolean(chosen)));
+    element.append(node('span', 'library-pill-name', name));
+    if (number !== null) element.append(node('span', 'library-pill-count', number));
+    element.onclick = onclick;
     return element;
   }
-  /** The three filters; true when the project shown is gone (deleted elsewhere): every one is shown. */
+  /** The projects, then (one chosen) its conversations: filters in pills, at the same place. */
   function paintFilters() {
     const gone = filter.project !== 'all' && !projects().some(project => project.id === filter.project);
     if (gone) filter.project = 'all';
-    $('library-project').replaceChildren(
-      option('all', 'Tous les projets', filter.project),
-      ...projects().map(project => option(project.id, projectName(project.id), filter.project)),
+    // « Sans projet » after the projects, as in the fil.
+    const named = projects().filter(project => project.id !== 'inbox'),
+      ordered = [...named, ...projects().filter(project => project.id === 'inbox')],
+      row = $('library-projects');
+    row.replaceChildren(
+      pill('library-pill', 'Tous les projets', count(filtered(runs, { media: filter.media })), filter.project === 'all', () =>
+        choose({ project: 'all' }),
+      ),
+      ...ordered.map(project => {
+        const element = pill(
+          'library-pill',
+          projectName(project.id),
+          count(filtered(runs, { project: project.id, media: filter.media })),
+          filter.project === project.id,
+          () => choose({ project: project.id }),
+        );
+        element.dataset.project = project.id;
+        return element;
+      }),
     );
-    $('library-project').value = filter.project;
+    if (onNewProject) {
+      const create = node('button', 'library-pill is-new');
+      create.type = 'button';
+      create.append(icon('plus'), node('span', '', 'Nouveau projet'));
+      create.onclick = () => onNewProject();
+      row.append(create);
+    }
     const list = conversations();
     if (filter.conversation !== 'all' && !list.some(item => item.id === filter.conversation)) filter.conversation = 'all';
-    $('library-conversation').replaceChildren(
-      option('all', 'Toutes les conversations', filter.conversation),
-      ...list.map(item =>
-        option(item.id, item.title + (filter.project === 'all' ? ' · ' + projectName(item.projectId) : ''), filter.conversation),
-      ),
-    );
-    $('library-conversation').value = filter.conversation;
+    const talks = $('library-conversations');
+    talks.hidden = filter.project === 'all';
+    if (filter.project === 'all') talks.replaceChildren();
+    else {
+      const inProject = filtered(runs, { project: filter.project, media: filter.media }),
+        made = list.filter(item => inProject.some(record => record.conversationId === item.id));
+      talks.replaceChildren(
+        node('span', 'library-pills-label', 'Conversations'),
+        // A project without a creation keeps « + Nouvelle conversation » only (capture 34).
+        ...(inProject.length
+          ? [
+              pill('library-pill', 'Toutes les conversations', count(inProject), filter.conversation === 'all', () =>
+                choose({ conversation: 'all' }),
+              ),
+              ...made.map(item => {
+                const element = pill(
+                  'library-pill',
+                  item.title,
+                  count(inProject.filter(record => record.conversationId === item.id)),
+                  filter.conversation === item.id,
+                  () => choose({ conversation: item.id }),
+                );
+                element.dataset.id = item.id;
+                return element;
+              }),
+            ]
+          : []),
+      );
+      const create = node('button', 'library-pill is-new');
+      create.type = 'button';
+      create.append(icon('plus'), node('span', '', 'Nouvelle conversation'));
+      create.setAttribute('aria-label', 'Nouvelle conversation dans ' + projectName(filter.project));
+      create.onclick = () => newConversation(filter.project);
+      talks.append(create);
+    }
     const kinds = $('library-kinds');
     kinds.replaceChildren(
       ...KINDS.map(kind => {
@@ -88,8 +195,11 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
         choice.dataset.kind = kind.id;
         choice.setAttribute('role', 'radio');
         choice.setAttribute('aria-checked', String(filter.media === kind.id));
+        choice.setAttribute('aria-label', kind.label);
+        choice.title = kind.label;
         choice.tabIndex = filter.media === kind.id ? 0 : -1;
-        choice.append(icon(kind.icon), node('span', '', kind.label));
+        // Only the one chosen says its name (as Image · Vidéo · Son in the Studio).
+        choice.append(icon(kind.icon), node('span', 'library-kind-name', kind.label));
         choice.onclick = () => choose({ media: kind.id });
         return choice;
       }),
@@ -106,71 +216,109 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     };
     return gone;
   }
-  /** The view of a project: its conversations, the first ones, and a new chat in it. */
-  function paintProject() {
-    const box = $('library-project-view');
-    if (filter.project === 'all') {
-      box.hidden = true;
-      box.replaceChildren();
+  /** « Pellicule », or « Pellicule › test » with « ··· » (Renommer, Supprimer le projet). */
+  function paintHeading(total) {
+    const heading = $('library-heading');
+    if (filter.project === 'all') heading.replaceChildren(node('span', 'library-title', 'Pellicule'));
+    else {
+      heading.replaceChildren(node('span', 'library-crumb', 'Pellicule ›'), node('span', 'library-title', projectName(filter.project)));
+      const project = projects().find(item => item.id === filter.project);
+      if (project && project.id !== 'inbox' && (onRenameProject || onDeleteProject)) {
+        const more = node('button', 'library-project-more');
+        more.type = 'button';
+        more.setAttribute('aria-label', 'Projet ' + projectName(project.id) + ' : renommer, supprimer');
+        more.title = 'Renommer ou supprimer le projet';
+        more.setAttribute('aria-expanded', String(menuOpen));
+        more.append(node('span', '', '···'));
+        more.onclick = () => {
+          menuOpen = !menuOpen;
+          render();
+        };
+        heading.append(more);
+        if (menuOpen) {
+          const menu = node('div', 'library-project-menu');
+          menu.setAttribute('role', 'menu');
+          for (const [label, run] of [
+            ['Renommer', onRenameProject],
+            ['Supprimer le projet', onDeleteProject],
+          ]) {
+            if (!run) continue;
+            const entry = node('button', 'library-project-action', label);
+            entry.type = 'button';
+            entry.setAttribute('role', 'menuitem');
+            entry.onclick = () => {
+              menuOpen = false;
+              render();
+              run(project);
+            };
+            menu.append(entry);
+          }
+          heading.append(menu);
+        }
+      }
+    }
+    $('library-total').textContent = total + (total > 1 ? ' prises' : ' prise');
+  }
+  /** A sound plays in its card; another one stops it. */
+  function play(record, button) {
+    if (playing?.button === button) {
+      playing.audio.pause();
+      playing.button.classList.remove('is-playing');
+      playing = null;
       return;
     }
-    const list = conversations();
-    const head = node('div', 'library-section-head');
-    head.append(node('h2', '', 'Conversations'), node('span', 'library-count', String(list.length)));
-    const create = node('button', 'library-new');
-    create.type = 'button';
-    create.append(icon('plus'), node('span', '', 'Nouvelle conversation'));
-    create.setAttribute('aria-label', 'Nouvelle conversation dans ' + projectName(filter.project));
-    create.onclick = () => newConversation(filter.project);
-    head.append(create);
-    const rows = node('div', 'library-conversations');
-    for (const item of unfolded ? list : list.slice(0, FIRST_CONVERSATIONS)) {
-      const row = node('button', 'library-conversation');
-      row.type = 'button';
-      row.dataset.id = item.id;
-      if (item.id === state.conversationId) row.setAttribute('aria-current', 'true');
-      const when = node('time', '', date(item.createdAt || item.updatedAt));
-      if (item.createdAt || item.updatedAt) when.dateTime = item.createdAt || item.updatedAt;
-      row.append(icon('chat'), node('span', 'library-conversation-title', item.title), when);
-      row.onclick = () => openConversation(item.id);
-      rows.append(row);
+    if (playing) {
+      playing.audio.pause();
+      playing.button.classList.remove('is-playing');
     }
-    if (!list.length) rows.append(node('p', 'library-note', 'Aucune conversation dans ce projet pour l’instant.'));
-    box.replaceChildren(head, rows);
-    if (!unfolded && list.length > FIRST_CONVERSATIONS) {
-      const more = node('button', 'library-more'),
-        rest = list.length - FIRST_CONVERSATIONS;
-      more.type = 'button';
-      more.textContent = rest > 1 ? `Afficher les ${rest} autres` : 'Afficher l’autre';
-      more.onclick = () => {
-        unfolded = true;
-        paintProject();
-      };
-      box.append(more);
-    }
-    box.hidden = false;
+    const audio = node('audio');
+    audio.src = record.outputs?.[0]?.originalUrl || '';
+    audio.onended = () => {
+      button.classList.remove('is-playing');
+      if (playing?.audio === audio) playing = null;
+    };
+    playing = { audio, button };
+    button.classList.add('is-playing');
+    void audio.play?.()?.catch?.(() => button.classList.remove('is-playing'));
   }
   /**
-   * A tile, as in the timeline: the picture alone (a click shows it whole), with the badge of a clip
-   * or a sound. Over its foot, under the pointer or the keyboard's focus: its prompt, then where it
-   * was made (a click opens it) and when.
+   * A tile: the picture alone (a click shows it whole), at its format; the length of a clip at its
+   * bottom right; a sound, a card (« PRISE n » and its kind, its stripes, ▶, its name and length).
+   * Over its foot, under the pointer or the keyboard's focus: its prompt, then where it was made (a
+   * click opens it) and when; at its top right, the actions of the conversation.
    */
   function build(record) {
     const media = mediaOf(record),
       output = record.outputs?.[0] ?? {},
-      card = node('article', 'library-tile'),
+      card = node('article', 'library-tile' + (media === 'audio' ? ' is-sound' : '')),
       kept = { card, record };
     card.dataset.id = record.id;
     card.dataset.media = media;
+    if (media !== 'audio') card.style?.setProperty?.('--ratio', ratioOf(record, media).toFixed(4));
     const pick = node('button', 'library-pick');
     pick.type = 'button';
-    pick.onclick = () => viewOutput(kept.record, 0);
+    pick.onclick = () => viewOutput(kept.record, 0, undefined, { list: () => shownList(), at: () => shownList().indexOf(kept.record) });
     kept.pick = pick;
     kept.media = media;
     if (media === 'audio') {
-      const wave = node('span', 'library-wave');
+      const head = node('span', 'library-sound-head'),
+        wave = node('span', 'library-wave');
+      head.setAttribute('aria-hidden', 'true');
+      head.append(
+        node('span', '', Number.isInteger(output.take) ? 'PRISE ' + output.take : 'SON'),
+        node('span', '', /musi|ace-?step|song/i.test(record.workflowName || '') ? 'MUSIQUE' : 'BRUITAGE'),
+      );
       wave.setAttribute('aria-hidden', 'true');
-      pick.append(wave);
+      pick.append(head, wave);
+      const foot = node('div', 'library-sound-foot'),
+        listen = node('button', 'library-listen'),
+        name = String(record.prompt || 'Son').split('\n')[0].slice(0, 60);
+      listen.type = 'button';
+      listen.setAttribute('aria-label', 'Écouter');
+      listen.title = 'Écouter';
+      listen.onclick = () => play(kept.record, listen);
+      foot.append(listen, node('span', 'library-sound-name', [name, lengthText(secondsOf(record))].filter(Boolean).join(' · ')));
+      kept.foot = foot;
     } else if (output.thumbUrl || media === 'image') {
       const picture = node('img');
       Object.assign(picture, { alt: '', loading: 'lazy', decoding: 'async', src: output.thumbUrl || output.originalUrl || '' });
@@ -185,10 +333,11 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
       clip.onloadeddata = () => void thumbnailOf(api, record, 0, clip);
       pick.append(clip);
     }
-    if (media !== 'image') {
-      const badge = node('span', 'library-badge');
+    // On a clip, its length only (« 06.04 S »), at its bottom right.
+    const length = media === 'video' ? lengthText(secondsOf(record)) : '';
+    if (length) {
+      const badge = node('span', 'library-length', length);
       badge.setAttribute('aria-hidden', 'true');
-      badge.append(icon(media === 'video' ? 'video' : 'wave'));
       pick.append(badge);
     }
     // Said whole by the label of the picture: what the veil shows is for the eyes only, but its
@@ -215,6 +364,9 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     meta.append(dot, when);
     veil.append(said, meta);
     card.append(pick, veil);
+    if (kept.foot) card.append(kept.foot);
+    // The actions of a take, as in the conversation (output-actions.mjs).
+    if (actions && !record.legacy && !record.unsaved) card.append(actions(record, 0));
     return kept;
   }
   function tile(record) {
@@ -239,24 +391,73 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     );
     return kept.card;
   }
+  // The creations shown, in their order: what the arrows of a take opened go through.
+  let shown = [];
+  const shownList = () => shown;
+  /** The contact sheet: a section a day, its line and its number, its takes in a row that wraps. */
   function paintGrid() {
-    const shown = filtered(runs, filter);
-    $('library-grid').replaceChildren(...shown.map(tile));
-    $('library-total').textContent = String(shown.length);
+    shown = filtered(runs, filter);
+    const days = [];
+    for (const record of shown) {
+      const day = dayOf(record.createdAt);
+      if (days.at(-1)?.key !== day.key) days.push({ ...day, records: [] });
+      days.at(-1).records.push(record);
+    }
+    $('library-grid').replaceChildren(
+      ...days.map(day => {
+        const section = node('section', 'library-day'),
+          head = node('div', 'library-day-head'),
+          row = node('div', 'library-row');
+        head.append(
+          node('span', 'library-day-label', day.label),
+          node('span', 'library-day-rule'),
+          node('span', 'library-day-count', String(day.records.length)),
+        );
+        head.setAttribute('aria-hidden', 'true');
+        section.setAttribute('aria-label', day.label);
+        row.append(...day.records.map(tile));
+        section.append(head, row);
+        return section;
+      }),
+    );
+    paintHeading(shown.length);
     const empty = $('library-empty');
     empty.hidden = shown.length > 0;
-    empty.textContent = failed
-      ? 'Pellicule illisible : ' + failed
-      : filter.media !== 'all' || filter.conversation !== 'all'
-        ? 'Aucune création de ce type ici.'
-        : filter.project === 'all'
-          ? 'Aucune création pour l’instant. Les images, vidéos et sons faits dans le Studio ou dans un chat arrivent ici.'
-          : 'Aucune création dans ce projet pour l’instant.';
-    $('library-heading').textContent = filter.project === 'all' ? 'Pellicule' : 'Pellicule › ' + projectName(filter.project);
+    if (shown.length) return empty.replaceChildren();
+    // A project with nothing in it (capture 34): its sentence, and two ways to begin.
+    if (!failed && filter.project !== 'all' && filter.media === 'all' && filter.conversation === 'all') {
+      empty.replaceChildren(
+        node('p', 'library-empty-title', 'Rien dans ce projet pour l’instant.'),
+        node('p', 'library-empty-text', 'Les images, les vidéos et les sons faits dans ce projet arrivent ici, la dernière en haut à gauche.'),
+      );
+      const doors = node('div', 'library-doors');
+      if (openStudio) {
+        const studio = node('button', 'library-door', 'Ouvrir le Studio');
+        studio.type = 'button';
+        studio.onclick = () => openStudio(filter.project);
+        doors.append(studio);
+      }
+      const chat = node('button', 'library-door', 'Nouvelle conversation');
+      chat.type = 'button';
+      chat.onclick = () => newConversation(filter.project);
+      doors.append(chat);
+      empty.append(doors);
+      return;
+    }
+    empty.replaceChildren(
+      node(
+        'p',
+        'library-note',
+        failed
+          ? 'Pellicule illisible : ' + failed
+          : filter.media !== 'all' || filter.conversation !== 'all'
+            ? 'Aucune création de ce type ici.'
+            : 'Aucune création pour l’instant. Les images, vidéos et sons faits dans le Studio ou dans un chat arrivent ici.',
+      ),
+    );
   }
   function render() {
     const gone = paintFilters();
-    paintProject();
     paintGrid();
     if (gone) onFilter({ ...filter });
   }
@@ -264,13 +465,11 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     Object.assign(filter, change);
     if ('project' in change) {
       filter.conversation = 'all';
-      unfolded = false;
+      menuOpen = false;
     }
     render();
     onFilter({ ...filter });
   }
-  $('library-project').onchange = () => choose({ project: $('library-project').value });
-  $('library-conversation').onchange = () => choose({ conversation: $('library-conversation').value });
   /** The creations again, from the server (every conversation, and the one open if not saved yet). */
   async function refresh() {
     const asked = ++version,
@@ -296,12 +495,18 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     /** Shown on a project (`all`: every one), every kind, every conversation. */
     async show({ project = 'all' } = {}) {
       Object.assign(filter, { project, media: 'all', conversation: 'all' });
-      unfolded = false;
+      menuOpen = false;
       render();
       await refresh();
     },
     refresh,
     render,
     filter: () => ({ ...filter }),
+    /** Leaving the Pellicule: the sound that plays stops. */
+    hush() {
+      playing?.audio.pause();
+      playing?.button.classList.remove('is-playing');
+      playing = null;
+    },
   };
 }

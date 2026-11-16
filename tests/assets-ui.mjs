@@ -144,15 +144,27 @@ test('output details expose full prompts, workflow, seed and available parameter
     prompt: 'A full prompt with details',
     createdAt: '2026-01-02T12:00:00Z',
     parameters: { seed: 42, width: 1024, height: 768 },
-    outputs: [{ source: { filename: 'result.png' }, analysisDataUrl: 'data:image/png;base64,AA==' }],
+    outputs: [{ source: { filename: 'result.png' }, analysisDataUrl: 'data:image/png;base64,AA==', take: 12 }],
   };
-  await ui.viewOutput(record, 0);
+  const list = [{ id: 'newer' }, record, { id: 'older' }];
+  await ui.viewOutput(record, 0, undefined, { list: () => list, at: () => 1 });
   assert.equal($('original-dialog').open, true);
+  // Its head (capture 33): « PRISE 12 · IMAGE » and « 2 / 3 »; ‹ › to the takes beside it.
+  assert.equal($('media-title').textContent, 'PRISE 12 · IMAGE');
+  assert.equal($('media-position').textContent, '2 / 3');
+  assert.deepEqual([$('media-prev').hidden, $('media-next').hidden], [false, false]);
+  // The prompt whole, with Copier; then Modèle, Format, Résolution, Seed and Date.
+  assert.equal($('media-prompt').textContent, record.prompt);
   const texts = $('media-metadata').children.map(item => item.textContent);
-  assert.ok(texts.includes(record.prompt));
+  assert.deepEqual(texts.filter((_, at) => at % 2 === 0), ['Modèle', 'Format', 'Résolution', 'Seed', 'Date']);
   assert.ok(texts.includes(record.workflowName));
   assert.ok(texts.includes('42'));
-  assert.ok(texts.some(text => text.includes('1024')));
+  assert.ok(texts.includes('1024 × 768'));
+  // The rest under « Plus de détails »: its file, its id, its parameters.
+  const more = $('media-more-list').children.map(item => item.textContent);
+  assert.ok(more.includes('result.png'));
+  assert.ok(more.includes('run'));
+  assert.ok(more.some(text => text.includes('1024')));
   assert.match($('media-error').textContent, /Aperçu compressé/);
   $('original-close').onclick();
   assert.equal($('original-dialog').open, false);

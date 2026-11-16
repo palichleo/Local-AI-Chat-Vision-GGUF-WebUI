@@ -198,12 +198,12 @@ try {
   () => js(`!document.querySelector('.thread-empty')?.hidden`));
   await run('Échap (menu des conversations)', () => key('Escape', 'Escape', 27), menuClosed);
   await run('Pellicule', () => click('#library-open'), () =>
-    js(`document.body.dataset.view === 'library' && document.getElementById('library-project').value === 'all' && document.getElementById('library-project-view').hidden && !document.getElementById('library-empty').hidden`));
+    js(`document.body.dataset.view === 'library' && document.querySelector('#library-projects .library-pill')?.getAttribute('aria-pressed') === 'true' && document.getElementById('library-conversations').hidden && !document.getElementById('library-empty').hidden`));
   await run('type Vidéos', () => click('#library-kinds [data-kind="video"]'), () =>
     js(`document.querySelector('#library-kinds [data-kind="video"]')?.getAttribute('aria-checked') === 'true'`));
-  await run('projet dans la Pellicule', () => js(`(() => { const s = document.getElementById('library-project'); s.value = 'inbox'; s.dispatchEvent(new Event('change')); return true; })()`), () =>
-    js(`document.body.dataset.view === 'library' && document.getElementById('library-project').value === 'inbox' && !document.getElementById('library-project-view').hidden`));
-  await run('nouveau chat du projet', () => click('#library-project-view .library-new'), view('chat'));
+  await run('projet dans la Pellicule', () => click('#library-projects [data-project="inbox"]'), () =>
+    js(`document.body.dataset.view === 'library' && document.querySelector('#library-projects [data-project="inbox"]')?.getAttribute('aria-pressed') === 'true' && !document.getElementById('library-conversations').hidden`));
+  await run('nouveau chat du projet', () => click('#library-conversations .library-pill.is-new'), view('chat'));
   await run('Pellicule, de nouveau', () => click('#library-open'), view('library'));
   await run('Chat depuis la Pellicule', () => click('#chat-open'), view('chat'));
   // Typed with a real key, as a person does: the page has had a gesture of its user, so that its
