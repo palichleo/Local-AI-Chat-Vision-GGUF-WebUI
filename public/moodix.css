@@ -7277,30 +7277,21 @@ video.studio-frame-result {
 }
 
 /* ------------------------------------------------------------------ Chat ⇄ Studio */
-/* One movement, all at once and as quick as the screen of the Studio taking a new format: going
-   to the Studio, the chat folds into its bar at the bottom while the Studio comes in; opening the
-   bar unfolds it in the middle; it folds back the same way. The browser's view transitions draw
-   it, named only while the page moves (`data-switch` on the root, see switchView in app.js). */
+/* In the Studio, the bar opens into the chat in the middle and the chat folds back into it, in one
+   movement. The browser's view transitions draw it, named only while the page moves (`data-switch`
+   on the root: `open`, `close`; see switchView in app.js). From one view to another: `data-view-move`,
+   further down. */
 :root {
   --move-time: 0.55s;
   --move-ease: ease;
 }
-html[data-switch] body[data-view='chat'] #chat-panel,
 html[data-switch] body[data-view='studio'][data-chat='open'] #chat-panel,
 html[data-switch] body[data-view='studio']:not([data-chat='open']) #agent-open {
   view-transition-name: chat;
 }
-html[data-switch='studio'] #studio-view,
-html[data-switch='chat'] #studio-view {
-  view-transition-name: studio;
-}
 html[data-switch]::view-transition-group(*) {
   animation-duration: var(--move-time);
   animation-timing-function: var(--move-ease);
-}
-/* The Studio under the chat that moves. */
-html[data-switch]::view-transition-group(studio) {
-  z-index: 1;
 }
 /* The chat is solid while it moves (the colour of the page): the Studio does not show through
    its lines. */
@@ -7312,9 +7303,7 @@ html[data-switch]::view-transition-group(chat) {
 }
 /* Folding, the chat keeps its message box (its foot) in view down to the bar; unfolding, the
    message box comes first out of the bar. */
-html[data-switch='studio']::view-transition-old(chat),
 html[data-switch='close']::view-transition-old(chat),
-html[data-switch='chat']::view-transition-new(chat),
 html[data-switch='open']::view-transition-new(chat) {
   height: 100%;
   object-fit: cover;
@@ -7322,32 +7311,11 @@ html[data-switch='open']::view-transition-new(chat) {
 }
 /* The band keeps its own size, at the foot of the moving box, from its left: its icon and the
    name of Moodix AI stay whole while the box widens to it or narrows from it. */
-html[data-switch='studio']::view-transition-new(chat),
 html[data-switch='close']::view-transition-new(chat),
-html[data-switch='chat']::view-transition-old(chat),
 html[data-switch='open']::view-transition-old(chat) {
   height: 100%;
   object-fit: none;
   object-position: left bottom;
-}
-/* The Studio comes down into place as the chat leaves it, and goes back up. */
-@keyframes studio-come {
-  from {
-    opacity: 0;
-    transform: translateY(-12px);
-  }
-}
-@keyframes studio-leave {
-  to {
-    opacity: 0;
-    transform: translateY(-12px);
-  }
-}
-html[data-switch='studio']::view-transition-new(studio) {
-  animation-name: studio-come;
-}
-html[data-switch='chat']::view-transition-old(studio) {
-  animation-name: studio-leave;
 }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*),
@@ -9343,16 +9311,28 @@ body {
   color: var(--text-1);
   font-weight: 500;
 }
-.top-place[aria-current='page']::after {
-  content: '';
+/* The line under the tab of the view: one, which glides to the tab chosen (16/11). */
+.top-places {
+  position: relative;
+}
+.top-line {
   position: absolute;
   bottom: -1px;
-  left: 50%;
+  left: 0;
   width: 16px;
   height: 1.5px;
   border-radius: 1px;
-  background: currentColor;
-  transform: translateX(-50%);
+  background: var(--text-1);
+  transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+  pointer-events: none;
+}
+.top-line[hidden] {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .top-line {
+    transition: none;
+  }
 }
 .top-capsule {
   justify-self: end;
@@ -15016,4 +14996,138 @@ body[data-setup='incomplete'] #resume-last {
 }
 #studio-view .studio-held-text > span {
   display: block;
+}
+
+/* ------------------------------------------------------------------ after the try of 0.6.22 (16/11) */
+/* From one view to another (Chat, Studio, Pellicule), the same in both directions: the view that
+   leaves fades (120 ms), then the one that comes appears, 6 px upwards (200 ms). Never two views
+   together, no zoom, nothing opaque on them; the light, the grain and the top bar do not move. */
+:root[data-view-move='out'] .workspace {
+  opacity: 0 !important;
+  transition: opacity 120ms linear !important;
+}
+:root[data-view-move='in'] .workspace {
+  animation: view-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* No list of the system: a `<select>` is a button and a menu of dark glass (glass-menu.mjs), the
+   same as the menu of the formats. The choices from top to bottom, the chosen one marked, one that
+   cannot be chosen greyed (why, under the pointer). */
+select.glass-select-native {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+button.glass-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  text-align: left;
+  cursor: pointer;
+}
+button.glass-select:disabled {
+  cursor: default;
+}
+.glass-select-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.glass-select::after {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: -3px 3px 0 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  opacity: 0.7;
+  transform: rotate(45deg);
+}
+:root:not([data-theme='light']) button.glass-select {
+  background-image: none;
+}
+.glass-menu,
+.studio-format-menu[popover] {
+  box-sizing: border-box;
+  max-height: min(60vh, 420px);
+  margin: 0;
+  overflow: auto;
+  border: 1px solid rgba(238, 232, 222, 0.1);
+  border-radius: 12px;
+  background: var(--room-menu, #15171c);
+  color: var(--text-1);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+.glass-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 16px));
+  padding: 6px;
+}
+.glass-menu[hidden] {
+  display: none;
+}
+.glass-menu-item {
+  position: relative;
+  min-height: 36px;
+  padding: 0 14px 0 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font: 400 14px/1.2 var(--font-ui);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.glass-menu-item:is(:hover, :focus-visible):not(.is-off) {
+  outline: none;
+  background: rgba(238, 232, 222, 0.08);
+  color: var(--text-1);
+}
+.glass-menu-item.is-chosen {
+  color: var(--text-1);
+}
+.glass-menu-item.is-chosen::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  width: 9px;
+  height: 5px;
+  margin-top: -5px;
+  border-bottom: 1.5px solid var(--text-1);
+  border-left: 1.5px solid var(--text-1);
+  transform: rotate(-45deg);
+}
+.glass-menu-item.is-off {
+  color: var(--text-3);
+  opacity: 0.55;
+  cursor: default;
+}
+/* The screen has the format chosen: a take of another format is whole inside it, never cropped. */
+#studio-view .studio-frame-result {
+  object-fit: contain;
 }

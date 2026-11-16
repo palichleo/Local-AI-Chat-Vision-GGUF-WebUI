@@ -105,7 +105,7 @@ test('every title becomes a tip of the one bubble; an icon alone keeps it as its
   assert.equal(body.children.filter(child => child.className === 'help-bubble').length, 1);
 });
 
-test('one bubble, one delay: under the pointer after 300 ms, at once on the keyboard', async () => {
+test('one bubble, one delay: under the pointer after 150 ms, at once on the keyboard', async () => {
   const { body } = page();
   const button = new Element('button', { attributes: { title: 'Agent Moodix AI' } });
   const help = new Element('span', { className: 'help-tip', attributes: { 'data-help': 'Le contexte donné au modèle.' } });
@@ -116,8 +116,8 @@ test('one bubble, one delay: under the pointer after 300 ms, at once on the keyb
   assert.equal(bubble.hidden, true, 'not at once under the pointer');
   await new Promise(resolve => setTimeout(resolve, 40));
   assert.deepEqual([bubble.hidden, bubble.textContent, bubble.dataset.kind], [false, 'Agent Moodix AI', 'tip']);
-  // Under it, centred on it.
-  assert.deepEqual([bubble.style.left, bubble.style.top], ['60px', '142px']);
+  // Centred on it, 8 px above (16/11).
+  assert.deepEqual([bubble.style.left, bubble.style.top], ['60px', '66px']);
   body.fire('pointerout', { target: button, relatedTarget: body });
   assert.equal(bubble.hidden, true);
   // The keyboard: at once, and said to screen readers.
@@ -142,7 +142,7 @@ test('the top bar: its icons say their name in the bubble, under them', () => {
   body.fire('focusin', { target: engine });
   assert.equal(bubble.hidden, false);
   assert.equal(bubble.textContent, 'Démarrer le modèle');
-  assert.equal(bubble.style.top, '57px', 'under it, 6 px below');
+  assert.equal(bubble.style.top, '59px', 'no room above it: under it, 8 px below');
 });
 
 test('in an open dialog, the bubble goes into it (a dialog is above the page)', () => {

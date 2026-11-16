@@ -4,6 +4,7 @@ import { livePreview } from './live-preview.mjs';
 import { takeFlux } from './take-flux.mjs';
 import { outputActions } from './output-actions.mjs';
 import { setupPointer } from './studio-pointer.mjs';
+import { closePopup, openPopup } from './glass-menu.mjs';
 
 /**
  * The Studio: the creation tools of the conversation, beside the chat. Four blocks that never
@@ -246,6 +247,7 @@ export function setupStudio({
     formatsOpen = false, // « ··· » is open
     drawn = null, // the size the frame was last drawn at, to ease from
     watching = null, // follows the size of the stage
+    laidOut = false, // the stage was in sight at the last look: its screen eases to a new shape
     live = null, // { frame, preview } : the picture so far, in the frame now on the page
     flux = null, // { frame, flux }: the Flux of the take being made, in the frame now on the page
     proposal = null, // a proposal of Moodix AI waiting for « Générer »
@@ -259,7 +261,10 @@ export function setupStudio({
     sketched = false, // the blocks were drawn empty while the tools were read: what comes fades in
     toolsAt = 0,
     toolsStale = false,
-    shownMedia = null; // { key, element }: what the screen shows, kept from one drawing to the next
+    shownMedia = null, // { key, element }: what the screen shows, kept from one drawing to the next
+    draftsKey = null; // the conversation whose prompt and inputs are in the Studio (draftKey)
+  // The prompt and the inputs of each conversation left, by mode: they come back with it (16/11).
+  const leftDrafts = new Map();
   // What is shown on the screen for each mode: the last creation, or one opened from the chat.
   const kept = {};
   const blank = () => ({
@@ -1573,10 +1578,12 @@ export function setupStudio({
    * (the format chosen in the settings is for the next creation); while one is made, or with none,
    * the shape of what will be made.
    */
-  function screenShape(last) {
-    if (mode === 'audio' || working || !last) return shapeOf();
-    const size = sizeOfRecord(last);
-    return size ? { ratio: size.width / size.height, label: '' } : shapeOf();
+  /**
+   * The screen always takes the format chosen (16/11), empty or not: a take of another format is
+   * shown whole inside it, never cropped (moodix.css, studio-frame-result).
+   */
+  function screenShape() {
+    return shapeOf();
   }
   /** The take shown measured once its file is read (a record without its size): the screen follows. */
   function measuredOnScreen(record, width, height) {
@@ -1772,7 +1779,18 @@ export function setupStudio({
     watching?.disconnect();
     if (typeof ResizeObserver === 'function') {
       // Called once the stage is laid out, then at every change of its size.
-      watching = new ResizeObserver(() => reshape(frame, screenShape(shaped), over));
+      watching = new ResizeObserver(() => {
+        // Another view is shown: nothing to size. Back in sight (16/11): at its size at once, the
+        // screen never grows into place as the Studio comes; it eases only from one format to another.
+        const there = box.clientWidth > 40 && box.clientHeight > 40;
+        if (!there) return void (laidOut = false);
+        const still = laidOut ? [] : [frame, over];
+        for (const element of still) element.style.transition = 'none';
+        reshape(frame, screenShape(shaped), over);
+        if (still.length) void frame.offsetWidth;
+        for (const element of still) element.style.transition = '';
+        laidOut = true;
+      });
       watching.observe(box);
     }
     return { screen, box, frame };
@@ -1859,9 +1877,11 @@ export function setupStudio({
       chip.disabled = Boolean(working);
       row.append(chip);
     }
+    // Never cut by its panel (16/11): shown above the page, on the side that has room (glass-menu.mjs).
     const more = button('studio-format is-more' + (extra ? ' is-on' : ''), extra ? extra + ' ···' : '···', () => {
       formatsOpen = !formatsOpen;
-      menu.hidden = !formatsOpen;
+      if (formatsOpen) openPopup(menu, more);
+      else closePopup(menu);
       more.setAttribute('aria-expanded', String(formatsOpen));
     });
     more.setAttribute('aria-label', extra ? `Format ${extra} · tous les formats` : 'Tous les formats');
@@ -1882,6 +1902,8 @@ export function setupStudio({
       menu.append(choice);
     }
     wrap.append(row, menu);
+    // Left open while the Studio is drawn again: shown once it is on the page.
+    if (formatsOpen) globalThis.queueMicrotask?.(() => menu.isConnected && formatsOpen && openPopup(menu, more));
     return wrap;
   }
 
@@ -2954,9 +2976,16 @@ export function setupStudio({
       ? { output: record.id, conversation: record.conversationId }
       : { output: record.id };
   /** What the screen shows: the creation just made or opened from the chat, else the last of its mode. */
+  /**
+   * The takes of the open conversation: the Studio is that conversation's (16/11), its screen and its
+   * Sortie with it; those of the rest of the project are in « Créations du projet » and under the
+   * button of the Sortie. (The former Studio, read alone, has all of its own.)
+   */
+  const ownRuns = () =>
+    legacy ? runs : runs.filter(record => !record.conversationId || record.conversationId === conversation());
   function onStage() {
     if (working) return null;
-    return kept[mode] ?? runs.find(item => mediaOf(item) === mode) ?? null;
+    return kept[mode] ?? ownRuns().find(item => mediaOf(item) === mode) ?? null;
   }
   /** Whether some ready workflow of this verb takes an input in this role. */
   const takes = (verb, role) => (info?.tools?.[verb] ?? []).some(item => item.roles[role]?.count);
@@ -3380,7 +3409,7 @@ export function setupStudio({
       about = modeOf(mode),
       own = SORTS.find(item => item.id === mode) ?? SORTS[0],
       sort = sortieAll ? SORTS[0] : own,
-      shown = sortieAll ? runs : runs.filter(record => mediaOf(record) === mode);
+      shown = sortieAll ? runs : ownRuns().filter(record => mediaOf(record) === mode);
     section.setAttribute('aria-label', 'Sortie');
     if (!runs.length) {
       const empty = node('div', 'studio-empty-strip');
@@ -3835,7 +3864,7 @@ export function setupStudio({
     preview.append(head, screen);
     const bar = node('div', 'studio-actionbar');
     // The actions of the take on the screen; held while Moodix AI proposes or a take is made.
-    const onScreen = working ? (kept[mode] ?? runs.find(item => mediaOf(item) === mode) ?? null) : onStage();
+    const onScreen = working ? (kept[mode] ?? ownRuns().find(item => mediaOf(item) === mode) ?? null) : onStage();
     if (onScreen && mode !== 'audio' && !extending && !heldGpu) {
       const row = takeActions(onScreen, 0);
       row.inert = answering() || Boolean(working);
@@ -3945,6 +3974,9 @@ export function setupStudio({
     kinds();
     const body = $('studio-body');
     if (!body) return;
+    // The drafts are named after their conversation: at the first drawing, and when a new one gets
+    // its identifier (its first take) while they are on the page.
+    if (draftsKey === null || (draftsKey.startsWith('new|') && conversation())) draftsKey = draftKey();
     body.dataset.mode = mode;
     // The stage leaves with the form it is in, and nothing follows its size any longer: still
     // watched, it was reported once more as it went, with no mode left to read a format from.
@@ -4090,11 +4122,31 @@ export function setupStudio({
     failure = '';
     legacy = false;
   }
-  /** Another conversation is open: the Studio shows its creations. */
+  /** What names the conversation of the drafts: its identifier; a new one, by its project. */
+  const draftKey = () => conversation() ?? 'new|' + project();
+  /**
+   * Another conversation is open (or the project of one not begun changed): the Studio shows its
+   * creations, and its own prompt and inputs; those of the one left are kept for its return. A new
+   * conversation has none: the Studio empty (etats-maquette.md, 55).
+   */
   function conversationChanged() {
+    const next = draftKey();
+    if (draftsKey !== null && next !== draftsKey) {
+      if (!draftsKey.startsWith('new|'))
+        leftDrafts.set(
+          draftsKey,
+          Object.fromEntries(MODES.map(item => [item.id, { prompt: drafts[item.id].prompt, inputs: drafts[item.id].inputs }])),
+        );
+      if (leftDrafts.size > 40) leftDrafts.delete(leftDrafts.keys().next().value);
+      const back = leftDrafts.get(next) ?? {};
+      for (const item of MODES) Object.assign(drafts[item.id], { prompt: back[item.id]?.prompt ?? '', inputs: back[item.id]?.inputs ?? {} });
+      shelf = null;
+    }
+    draftsKey = next;
     forget();
     onConversation();
     if (info) void refresh().then(render, () => render());
+    else render();
   }
   /** « Ouvrir » on a card of the chat: the creation on the screen of its mode. */
   function show(record) {
@@ -4159,7 +4211,7 @@ export function setupStudio({
     if (!formatsOpen || event.target?.closest?.('.studio-formats-wrap')) return;
     formatsOpen = false;
     const menu = document.querySelector?.('#studio-view .studio-format-menu');
-    if (menu) menu.hidden = true;
+    if (menu) closePopup(menu);
   });
   // The modes under « Studio » in the sidebar are there from the start: seen from the Chat too.
   kinds();

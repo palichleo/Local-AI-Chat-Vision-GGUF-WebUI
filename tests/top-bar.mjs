@@ -34,7 +34,9 @@ test('the top bar: the Éclipse and « Moodix », then Chat · Studio · Pellicu
   assert.match(css, /\.top-brand \{[^}]*gap: 9px;/);
   assert.match(css, /\.top-brand \.top-mark \{[^}]*width: 20px;[^}]*height: 20px;[^}]*transform: translateY\(-1px\);/);
   assert.match(css, /\.top-name \{[^}]*font-family: var\(--font-display\);[^}]*font-size: 26px;/);
-  assert.match(css, /\.top-place\[aria-current='page'\]::after \{[^}]*width: 16px;[^}]*height: 1\.5px;/);
+  // One line under the tab of the view, which glides to the tab chosen (16/11).
+  assert.match(css, /\.top-line \{[^}]*width: 16px;[^}]*height: 1\.5px;[^}]*transition: transform 0\.2s cubic-bezier\(0\.2, 0\.7, 0\.2, 1\);/);
+  assert.match(html, /<span id="top-line" class="top-line" aria-hidden="true" hidden><\/span>/);
 });
 
 test('the Pellicule: a page of its own, its title at its top, its projects and conversations in pills', async () => {
@@ -54,8 +56,8 @@ test('the Pellicule: a page of its own, its title at its top, its projects and c
   assert.match(page, /<div id="library-kinds" class="library-kinds" role="radiogroup" aria-label="Type de création">/);
   assert.doesNotMatch(page, /<select/, 'no more lists that unfold');
   assert.match(app, /\$\('library-open'\)\.onclick = \(\) => showLibrary\(\);/);
-  // The logo goes back to the chat.
-  assert.match(app, /\$\('brand-home'\)\.onclick = event => \{\n {2}event\.preventDefault\(\);\n {2}showChat\(\);/);
+  // The logo opens the accueil (16/11: a new conversation of the project, from any view).
+  assert.match(app, /\$\('brand-home'\)\.onclick = event => \{\n {2}event\.preventDefault\(\);\n {2}goHome\(\);/);
   assert.match(html, /<body data-view="chat">/);
   assert.match(app, /\n {2}view: 'chat',\n/);
   assert.match(navigation, /\$\('library-open'\)\?\.setAttribute\('aria-current', state\.view === 'library' \? 'page' : 'false'\);/);
@@ -191,4 +193,42 @@ test('the welcome: no logo, an invitation in Gloock; a box of glass; « 0 % » u
   assert.match(css, /#chat-form:hover ~ \.context-meter,\n\.context-meter:hover,\n\.context-meter:focus-visible,\n\.context-meter\[data-warning='near'\],\n\.context-meter\[data-warning='full'\] \{\n {2}opacity: 1;/);
   // No colour at the top of the cards of suggestion.
   assert.doesNotMatch(css, /\.suggestions button:nth-child\(\d\) \{\n {2}border-top: 2px solid/);
+});
+
+test('the logo opens the accueil, a new conversation in the project in hand, from any view (16/11)', async () => {
+  const app = await read('app.js'),
+    source = app.slice(app.indexOf('function goHome()'), app.indexOf("$('brand-home').onclick"));
+  for (const [view, libraryProject, project] of [
+    ['studio', undefined, 'p1'],
+    ['chat', undefined, 'p1'],
+    // The Pellicule of one project: the accueil of that project; of all of them, the conversation's.
+    ['library', 'p2', 'p2'],
+    ['library', 'all', 'p1'],
+  ]) {
+    const state = { view, projectId: 'p1', libraryProject },
+      done = [];
+    const context = {
+      state,
+      document: { body: { dataset: { chat: 'open' } } },
+      requestSettingsClose: run => run(),
+      switchView: async (kind, apply) => {
+        done.push(['view', kind]);
+        apply();
+      },
+      projectUI: { render() {} },
+      syncViews() {},
+      updateControls() {},
+      newConversation: async into => done.push(['new', into]),
+    };
+    runInNewContext(source + '\nthis.goHome = goHome;', context);
+    context.goHome();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(done, [['view', 'chat'], ['new', project]], view);
+    assert.equal(state.view, 'chat');
+    assert.equal(context.document.body.dataset.chat, undefined, 'the chat of the Studio is folded');
+  }
+  // Nothing while the application updates or closes.
+  const busy = { state: { view: 'studio', updating: true }, requestSettingsClose: () => assert.fail('not while it updates') };
+  runInNewContext(source + '\nthis.goHome = goHome;', busy);
+  busy.goHome();
 });

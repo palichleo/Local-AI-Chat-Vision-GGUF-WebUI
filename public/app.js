@@ -31,6 +31,7 @@ import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick
 import { waitForModel } from './model-ready.mjs';
 import { setupFirstLaunch } from './first-launch.mjs';
 import { missingFileCard } from './missing-file.mjs';
+import { setupGlassSelects } from './glass-menu.mjs';
 import { outputActions } from './output-actions.mjs';
 import { fillCopies, forgetCopies, needsCopies, rememberCopy, remakeOutputCopy, withoutCopies } from './session-copies.mjs';
 
@@ -3232,6 +3233,8 @@ const computeControls = setupComputeControls($);
 // The one tooltip of the page: the « ? » of the settings and of the Studio, the names of the
 // controls (their titles become its tips), in one bubble (help-tips.mjs).
 const helpTips = setupHelpTips(document.body);
+// No list of the system (white on white in the dark room): each `<select>` shown is a menu of glass.
+setupGlassSelects(document.body);
 const settingsTabs = setupSettingsTabs({
   list: $('settings-tabs'),
   onShow: name => {
@@ -3280,6 +3283,9 @@ const projectUI = setupProjectNavigation({
   // A project renamed or deleted: the library on screen says it too.
   onChange: () => {
     if (state.view === 'library') libraryUI.render();
+    // The project of a conversation not begun changed in the fil: the Studio is that conversation's,
+    // its screen, its Sortie, its prompt and its inputs with it (16/11).
+    state.studio?.conversationChanged?.();
   },
   onBusy: () => updateControls(),
 });
@@ -3660,11 +3666,13 @@ function showLibrary({ project = 'all' } = {}) {
     updateControls();
     try {
       if (!(await assetsUI.flush()) || !(await persistConversation())) return;
-      state.view = 'library';
-      state.libraryProject = project;
-      delete document.body.dataset.chat;
-      projectUI.render();
-      void libraryUI.show({ project });
+      await switchView('library', () => {
+        state.view = 'library';
+        state.libraryProject = project;
+        delete document.body.dataset.chat;
+        projectUI.render();
+        void libraryUI.show({ project });
+      });
     } catch (error) {
       notice(error.message);
     } finally {
@@ -3673,22 +3681,85 @@ function showLibrary({ project = 'all' } = {}) {
     }
   });
 }
+// The line under the tab of the view, which glides to the tab chosen (moodix.css, top-line).
+const TABS = { chat: 'chat-open', studio: 'studio-open', library: 'library-open' };
+function tabLine(kind = state.view) {
+  const tab = $(TABS[kind]),
+    line = $('top-line');
+  if (!tab || !line || !tab.offsetWidth) return;
+  line.style.transform = `translateX(${Math.round(tab.offsetLeft + tab.offsetWidth / 2 - 8)}px)`;
+  line.hidden = false;
+}
+globalThis.addEventListener?.('resize', () => tabLine());
+// The view that leaves fades (120 ms), then the one that comes appears (200 ms).
+const VIEW_OUT = 120,
+  VIEW_IN = 200;
 /**
- * The page moves in one movement, as quick as the screen of the Studio taking a new format: to the
- * Studio (`studio`) the chat folds into its bar while the Studio comes in, back to the chat
- * (`chat`) it unfolds from it; in the Studio the bar opens into the chat in the middle (`open`)
- * and the chat folds back into it (`close`). The browser's view transitions draw it, named in
- * moodix.css while `data-switch` is on the root. Without them, with reduced motion, or to and
- * from the library, the page simply changes. Resolves once the page shows the change.
+ * From one view to another (Chat, Studio, Pellicule), one transition, the same in both directions
+ * (16/11): the view that leaves fades (opacity 1 → 0, 120 ms), then the one that comes appears
+ * (opacity 0 → 1 and 6 px upwards, 200 ms): never two views together, no zoom, nothing opaque on
+ * them; the light, the grain and the top bar do not move, the line under the tab glides to the new
+ * one. With reduced motion, or a page out of sight, the view changes at once. In the Studio, the bar
+ * still opens into the chat (`open`) and the chat folds back into it (`close`), by the browser's
+ * view transitions (`data-switch`). Resolves once the page shows the change.
  */
 function switchView(kind, apply) {
   // A sound playing in the Pellicule stops as the page changes.
   if (kind !== 'library') state.hushLibrary?.();
-  const folding = kind === 'open' || kind === 'close',
-    between = new Set([state.view, kind]),
-    animate =
+  const folding = kind === 'open' || kind === 'close';
+  if (!folding) {
+    // Asked while another moves: that one is shown at once.
+    state.viewSwitch?.();
+    const root = document.documentElement,
+      moves =
+        state.view !== kind &&
+        document.visibilityState === 'visible' &&
+        !globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    tabLine(kind);
+    if (!moves) {
+      apply();
+      tabLine();
+      return Promise.resolve();
+    }
+    let stage = 'out',
+      timer = 0,
+      shown,
+      ended;
+    const visible = new Promise(resolve => (shown = resolve)),
+      moving = new Promise(resolve => (ended = resolve));
+    const finish = () => {
+      if (stage === 'done') return;
+      clearTimeout(timer);
+      if (stage === 'out') {
+        apply();
+        tabLine();
+        shown();
+      }
+      stage = 'done';
+      delete root.dataset.viewMove;
+      if (state.viewSwitch === finish) state.viewSwitch = null;
+      ended();
+    };
+    root.dataset.viewMove = 'out';
+    timer = setTimeout(() => {
+      stage = 'in';
+      apply();
+      tabLine();
+      root.dataset.viewMove = 'in';
+      shown();
+      timer = setTimeout(finish, VIEW_IN);
+    }, VIEW_OUT);
+    state.viewSwitch = finish;
+    // What can wait (the gallery, the Studio drawn again) waits for the end of the move.
+    state.moving = moving;
+    void moving.then(() => {
+      if (state.moving === moving) state.moving = null;
+    });
+    return visible;
+  }
+  const animate =
       typeof document.startViewTransition === 'function' &&
-      (folding ? state.view === 'studio' : between.has('chat') && between.has('studio')) &&
+      state.view === 'studio' &&
       document.visibilityState === 'visible' &&
       !globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   if (!animate) {
@@ -3839,10 +3910,30 @@ state.onChatSent = chatSent;
 $('chat-scrim').onclick = () => void closeChat({ refocus: true });
 $('studio-open').onclick = () => showStudio();
 $('library-open').onclick = () => showLibrary();
-// The logo: back to the chat (0.5.123: there is no home page any more).
+/**
+ * The logo, from any view (16/11): the accueil, a new conversation in the project in hand (the one
+ * the Pellicule shows, when it shows one).
+ */
+function goHome() {
+  if (state.updating || state.closingApp || state.loadingHistory) return;
+  requestSettingsClose(async () => {
+    const project =
+      state.view === 'library' && state.libraryProject && state.libraryProject !== 'all'
+        ? state.libraryProject
+        : state.projectId || 'inbox';
+    await switchView('chat', () => {
+      state.view = 'chat';
+      delete document.body.dataset.chat;
+      projectUI.render();
+      syncViews();
+      updateControls();
+    });
+    await newConversation(project);
+  });
+}
 $('brand-home').onclick = event => {
   event.preventDefault();
-  showChat();
+  goHome();
 };
 $('chat-open').onclick = () => showChat();
 async function newConversation(projectId = state.projectId || 'inbox') {
@@ -4016,6 +4107,7 @@ try {
   });
   tokenKnown();
   state.version = initial.version || '';
+  tabLine();
   // The configuration is known: the card of the first launch may show (updateControls).
   state.booted = true;
   if (initial.version) $('settings-version').textContent = initial.version;

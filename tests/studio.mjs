@@ -1188,9 +1188,9 @@ test('« Ouvrir » on a card puts the creation on the screen of its mode', async
   }
 });
 
-test('the screen shows the take at its own format, « PRISE n » on it; while one is made, the number to come', async () => {
+test('the screen takes the format chosen, the take whole in it, « PRISE n » on it; while one is made, the number to come', async () => {
   const video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true };
-  // A square clip while 16:9 is the format of the next one (capture 22 of 16/11: no black bands).
+  // A square clip while 16:9 is the format chosen: the screen is 16:9, the clip whole inside (16/11).
   const clip = {
     id: 'c',
     mediaType: 'video',
@@ -1203,11 +1203,12 @@ test('the screen shows the take at its own format, « PRISE n » on it; while on
     const { studio, body } = page;
     studio.show(clip);
     const [frame] = body.find('studio-frame');
-    assert.deepEqual([frame.style.width, frame.style.height], ['176px', '176px'], 'square, at the size of the stage');
+    const [width, height] = [frame.style.width, frame.style.height].map(value => parseFloat(value));
+    assert.ok(Math.abs(width / height - 16 / 9) < 0.02, `16:9 with a square take in it (${width} × ${height})`);
     const [label] = body.find('studio-frame-label');
     assert.equal(label.textContent, 'PRISE 4');
     assert.equal(label.className, 'studio-frame-label is-take');
-    // The format chosen is for the next creation: the readout says it, the take keeps its shape.
+    // The readout says the format chosen, which the screen has.
     assert.match(body.find('studio-readout')[0].textContent, /^16:9/);
   } finally {
     page.restore();
@@ -2948,7 +2949,49 @@ test('a replacement whose character Moodix AI just made: the pointer has its pro
   }
 });
 
-test('the Sortie is the project: its creations from every conversation, one dragged into a slot becomes that input', async () => {
+test('the Studio is the conversation’s: another one, or another project, changes its screen, its Sortie, its prompt and its inputs', async () => {
+  const image = { id: 'w', name: 'Image', roles: { source: { count: 1, media: ['image'] } }, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    taken = { id: 'a', conversationId: 'c1', prompt: 'un phare', outputs: [{ originalUrl: '/a.png', thumbUrl: '/a.jpg', take: 3 }] },
+    elsewhere = { id: 'b', conversationId: 'c2', prompt: 'une falaise', outputs: [{ originalUrl: '/b.png', thumbUrl: '/b.jpg', take: 4 }] };
+  let conversation = 'c1',
+    project = 'p1';
+  const page = await studioPage({ create_image: [image] }, {}, { runs: [elsewhere, taken], conversation: () => conversation, project: () => project });
+  const { body, studio, restore } = page;
+  const items = () => body.find('studio-item').map(tile => tile.dataset.id);
+  try {
+    // The conversation open: its take on the screen and in the Sortie, not the one of another.
+    assert.deepEqual(items(), ['a']);
+    assert.equal(body.find('studio-frame')[0].className.includes('has-result'), true);
+    page.prompt().value = 'un phare sous la pluie';
+    page.prompt().oninput();
+    // A conversation without takes, in another project: the Studio empty (etats-maquette.md, 55).
+    conversation = 'c9';
+    project = 'p2';
+    studio.conversationChanged();
+    await settle();
+    assert.deepEqual(items(), []);
+    assert.equal(body.find('studio-frame')[0].className.includes('is-empty'), true);
+    assert.equal(body.find('studio-blank-title')[0].textContent, 'Votre première prise apparaîtra ici.');
+    assert.equal(page.prompt().value, '');
+    // Back in the first one: its take, and the prompt left there.
+    conversation = 'c1';
+    project = 'p1';
+    studio.conversationChanged();
+    await settle();
+    assert.deepEqual(items(), ['a']);
+    assert.equal(page.prompt().value, 'un phare sous la pluie');
+    // Another conversation of the project: its own take, an empty prompt.
+    conversation = 'c2';
+    studio.conversationChanged();
+    await settle();
+    assert.deepEqual(items(), ['b']);
+    assert.equal(page.prompt().value, '');
+  } finally {
+    restore();
+  }
+});
+
+test('the Sortie is the conversation’s; its button shows the project, whose creations dragged into a slot become inputs', async () => {
   const scail = {
       id: 's',
       name: 'SCAIL-2',
@@ -2992,8 +3035,9 @@ test('the Sortie is the project: its creations from every conversation, one drag
         items()[item].find('studio-item-pick')[0].ondragstart(event);
         slots()[slot].ondrop(event);
       };
-    // In Vidéo the clip; the button at the right shows the whole project, the image with it.
-    assert.equal(items().length, 1);
+    // In Vidéo nothing of this conversation (16/11); the button at the right shows the whole project,
+    // the clip of another conversation and the image.
+    assert.equal(items().length, 0);
     body.find('studio-sort-go')[0].onclick();
     assert.equal(items().length, 2);
     // An image is not the video to follow; the clip is.

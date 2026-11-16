@@ -96,6 +96,7 @@ const staticFiles = new Map([
   ['/take-player.mjs', ['take-player.mjs', 'text/javascript; charset=utf-8']],
   ['/first-launch.mjs', ['first-launch.mjs', 'text/javascript; charset=utf-8']],
   ['/missing-file.mjs', ['missing-file.mjs', 'text/javascript; charset=utf-8']],
+  ['/glass-menu.mjs', ['glass-menu.mjs', 'text/javascript; charset=utf-8']],
   ['/transcript.mjs', ['transcript.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-guard.mjs', ['settings-guard.mjs', 'text/javascript; charset=utf-8']],
   ['/context-meter.mjs', ['context-meter.mjs', 'text/javascript; charset=utf-8']],

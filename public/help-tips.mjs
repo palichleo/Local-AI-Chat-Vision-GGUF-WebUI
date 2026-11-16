@@ -2,13 +2,12 @@
  * The one tooltip of the page (0.5.120). The help of a « ? » (`data-help`) and the name of a
  * control (`data-tip`, and every `title`, turned into one so that the browser shows none of its
  * own, a second late and in another style) in one bubble, one style, one delay: under the pointer
- * after 300 ms, at once on the keyboard's focus. The bubble is fixed to the window, so a scrolling
- * area never cuts it; it goes into an open dialog when the control is in one (a dialog lies above
- * the page). It stands under the
- * control (right edges aligned for a « ? », `data-help-align="start"` for its left edges), above
- * it when the window has no room below.
+ * after 150 ms (16/11: half of what it was), at once on the keyboard's focus. The bubble is fixed to
+ * the window, so a scrolling area never cuts it; it goes into an open dialog when the control is in
+ * one (a dialog lies above the page). Every bubble is centred on its control, 8 px above it, under
+ * it when there is no room above, and stays inside the window.
  */
-export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 300 } = {}) {
+export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 150 } = {}) {
   const page = root.ownerDocument ?? root,
     view = page.defaultView ?? globalThis;
   const bubble = page.createElement('div');
@@ -48,20 +47,28 @@ export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 3
     return target.dataset.tip || '';
   }
   function place(target) {
+    const set = (x, y) => {
+      bubble.style.left = x + 'px';
+      bubble.style.top = y + 'px';
+    };
+    // Measured where nothing narrows it: left where it last stood, near an edge, it wrapped into a
+    // tall column, and was then placed far from its control.
+    set(0, 0);
     const box = target.getBoundingClientRect(),
       size = bubble.getBoundingClientRect(),
       margin = 8,
       width = view.innerWidth ?? 1280,
       height = view.innerHeight ?? 800;
-    const left = target.dataset.help
-      ? target.dataset.helpAlign === 'start'
-        ? box.left
-        : box.right - size.width
-      : box.left + box.width / 2 - size.width / 2;
-    let top = box.bottom + 6;
-    if (top + size.height > height - margin) top = box.top - size.height - 6;
-    bubble.style.left = Math.round(Math.max(margin, Math.min(left, width - size.width - margin))) + 'px';
-    bubble.style.top = Math.round(Math.max(margin, Math.min(top, height - size.height - margin))) + 'px';
+    let top = box.top - size.height - 8;
+    if (top < margin) top = box.bottom + 8;
+    const left = Math.round(Math.max(margin, Math.min(box.left + box.width / 2 - size.width / 2, width - size.width - margin)));
+    top = Math.round(Math.max(margin, Math.min(top, height - size.height - margin)));
+    set(left, top);
+    // In a window of glass (the settings), « fixed » is counted from that window, not from the
+    // screen: the bubble landed far from its control. Where it really is says by how much.
+    const real = bubble.getBoundingClientRect();
+    if (Math.abs(real.left - left) > 0.5 || Math.abs(real.top - top) > 0.5)
+      set(left - (real.left - left), top - (real.top - top));
   }
   function show(target) {
     clearTimeout(timer);

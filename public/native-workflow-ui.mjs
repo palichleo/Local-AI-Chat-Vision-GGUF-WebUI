@@ -488,7 +488,6 @@ export function setupNativeWorkflows(options) {
     dot.setAttribute('role', 'img');
     dot.setAttribute('aria-label', 'État : ' + stateText);
     dot.dataset.help = stateText;
-    dot.dataset.helpAlign = 'start';
     const main = node('div', 'workflow-main'),
       head = node('div', 'workflow-head'),
       sentence = sentenceOf(record, stateName, stateText),
