@@ -142,6 +142,21 @@ test('the model in its capsule: one icon ⏻ whatever its state, a dot says it, 
   assert.match(app, /opener\.classList\.toggle\('has-update', state\.updateAvailable\);/);
 });
 
+test('the window of the pencil: its name, its project in a menu, drawn like the window of a project', async () => {
+  const html = await read('index.html'),
+    css = await read('moodix.css');
+  const dialog = html.match(/<dialog id="conversation-dialog"[^]*?<\/dialog>/)?.[0] ?? '';
+  assert.match(dialog, /<h2 id="conversation-dialog-title">Renommer ou déplacer la conversation<\/h2>/);
+  assert.match(dialog, /<label for="conversation-name">Nom<\/label><input id="conversation-name" type="text" maxlength="120"/);
+  // « Projet » is a menu, not a field to type in.
+  assert.match(dialog, /<label for="conversation-project">Projet<\/label><select id="conversation-project"><\/select>/);
+  assert.match(dialog, /<button id="conversation-save" type="submit" class="primary">Enregistrer<\/button>/);
+  // Centred and framed as the window of a project: the same rules, not a copy of them.
+  assert.match(css, /#project-dialog,\n#conversation-dialog \{\n {2}position: fixed;\n {2}inset: 0;\n {2}margin: auto;/);
+  assert.match(css, /#project-dialog footer,\n#conversation-dialog footer \{\n {2}display: flex;/);
+  assert.match(css, /#project-name,\n#conversation-name,\n#conversation-project \{\n {2}min-height: 42px;/);
+});
+
 test('nothing left of the panel of files in the styles', async () => {
   for (const name of ['moodix.css']) {
     const css = (await read(name)).replace(/\/\*[^]*?\*\//g, '');

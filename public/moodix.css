@@ -5529,7 +5529,8 @@ dialog,
   color: var(--muted);
 }
 
-#project-dialog {
+#project-dialog,
+#conversation-dialog {
   position: fixed;
   inset: 0;
   margin: auto;
@@ -5547,13 +5548,15 @@ dialog,
     inset 0 1px 0 var(--metal-edge),
     0 20px 70px var(--shadow);
 }
-#project-form {
+#project-form,
+#conversation-form {
   display: flex;
   flex-direction: column;
   gap: 22px;
   min-width: 0;
 }
-#project-dialog h2 {
+#project-dialog h2,
+#conversation-dialog h2 {
   font-size: 21px;
   font-weight: 550;
   letter-spacing: -0.4px;
@@ -5561,37 +5564,55 @@ dialog,
   margin: 0;
 }
 #project-dialog .field-group,
-#project-error {
+#project-error,
+#conversation-dialog .field-group,
+#conversation-error {
   margin: 0;
 }
-#project-name {
+#project-name,
+#conversation-name,
+#conversation-project {
   min-height: 42px;
   border-radius: 8px;
   font-size: var(--size-1);
 }
-#project-name:focus-visible {
+#project-name:focus-visible,
+#conversation-name:focus-visible,
+#conversation-project:focus-visible {
   outline: 2px solid var(--line-strong);
   outline-offset: 2px;
 }
-#project-dialog footer {
+#project-dialog footer,
+#conversation-dialog footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
 }
-#project-dialog footer button {
+#project-dialog footer button,
+#conversation-dialog footer button {
   font-size: var(--size-1);
   min-height: 36px;
   padding: 8px 14px;
 }
 @media (max-width: 480px) {
-  #project-dialog {
+  #project-dialog,
+  #conversation-dialog {
     padding: 21px;
     border-radius: 16px;
   }
-  #project-form {
+  #project-form,
+  #conversation-form {
     gap: 20px;
   }
 }
+#conversation-dialog .field-group label {
+  display: block;
+  margin: 0 0 8px;
+  color: var(--text-2);
+  font-size: var(--size-1);
+  font-weight: 500;
+}
+
 @media (max-width: 1150px) {
   .sidebar {
     width: 230px;
