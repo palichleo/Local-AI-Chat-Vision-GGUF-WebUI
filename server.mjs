@@ -90,6 +90,7 @@ const staticFiles = new Map([
   ['/copy.mjs', ['copy.mjs', 'text/javascript; charset=utf-8']],
   ['/thumbnails.mjs', ['thumbnails.mjs', 'text/javascript; charset=utf-8']],
   ['/live-preview.mjs', ['live-preview.mjs', 'text/javascript; charset=utf-8']],
+  ['/take-flux.mjs', ['take-flux.mjs', 'text/javascript; charset=utf-8']],
   ['/transcript.mjs', ['transcript.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-guard.mjs', ['settings-guard.mjs', 'text/javascript; charset=utf-8']],
   ['/context-meter.mjs', ['context-meter.mjs', 'text/javascript; charset=utf-8']],

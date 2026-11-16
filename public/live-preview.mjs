@@ -1,16 +1,20 @@
 /**
  * What the generator has so far, shown in the frame of a creation in progress: the picture goes
  * under the moving background (which `has-preview` dims for it). No grain over it: the grain is
- * of the interface, never of a picture. The same in a conversation and in the Studio.
+ * of the interface, never of a picture. The same in a conversation and in the Studio. `onLoad`:
+ * each picture once it is there (the Flux of a take in progress draws from it).
  */
-export function livePreview(node, frame) {
+export function livePreview(node, frame, { onLoad = null } = {}) {
   const picture = node('img', 'live-preview');
   picture.alt = '';
   picture.decoding = 'async';
   picture.setAttribute('aria-hidden', 'true');
   let wanted = '';
   // Shown once the first picture is there; the browser keeps a picture until the next has loaded.
-  picture.onload = () => frame.classList.add('has-preview');
+  picture.onload = () => {
+    frame.classList.add('has-preview');
+    onLoad?.(picture);
+  };
   return {
     /** The address of the picture so far; the same address twice changes nothing. */
     show(url) {

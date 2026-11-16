@@ -810,7 +810,9 @@ function updateControls() {
     : proposing
     ? 'Proposition dans le Studio · un message la refuse'
     : toolBusy
-    ? s.toolJob.progress || 'Génération en cours…'
+    ? Number.isFinite(s.toolJob.fraction)
+      ? Math.floor(Math.min(1, Math.max(0, s.toolJob.fraction)) * 100) + '\u202f%'
+      : s.toolJob.progress || 'Génération en cours…'
     : state.preparing
       ? 'Préparation des images…'
       : state.waitingForModel

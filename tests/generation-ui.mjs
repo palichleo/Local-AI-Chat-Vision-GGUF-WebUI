@@ -255,7 +255,7 @@ test('restoring a long conversation defers originals, serializes transfers and r
   assert.doesNotMatch(second.children[0].src || '', /^blob:/, 'late completion cannot resurrect a disposed original');
 });
 
-test('video output uses the original streaming URL, has controls, and never buffers a full clip in the chat', async () => {
+test('video output uses the original streaming URL, plays from its round button, and never buffers a full clip in the chat', async () => {
   const container = new Element(),
     record = {
       id: 'run',
@@ -287,7 +287,13 @@ test('video output uses the original streaming URL, has controls, and never buff
     video = wrapper.children.find(node => node.tag === 'video');
   assert.ok(video);
   assert.equal(video.poster, 'compressed-preview');
+  // Its picture and a round play button (capture 14); the controls of the player once it plays.
+  const play = wrapper.children.find(node => node.cls === 'take-play');
+  assert.equal(video.controls, false);
+  assert.equal(play.attributes['aria-label'], 'Lire la vidéo');
+  play.onclick();
   assert.equal(video.controls, true);
+  assert.equal(play.hidden, true);
   assert.equal(video.preload, 'none');
   assert.equal(video.src, '/media/generated/signed');
   assert.match(label.textContent, /Brouillon/);
@@ -468,13 +474,21 @@ test('a creation of the Studio is a card: what it is, and « Ouvrir », which le
   };
   card.image({ record, index: 0 });
   card.finish({ record });
-  // Made: its first picture as it is (no grain over it), and « Ouvrir » puts it on the screen.
-  const [shown] = figure.children[0].children;
+  // Made: its first picture as it is (no grain over it) and its round play button; « Ouvrir » puts
+  // it on the screen.
+  const [shown, play] = figure.children[0].children;
   assert.equal(shown.tag, 'img');
   assert.equal(shown.src, '/thumb.jpg');
-  assert.equal(figure.children[0].children.length, 1);
+  assert.equal(figure.children[0].children.length, 2);
+  assert.equal(play.cls, 'take-play');
   find('card-open').onclick();
   assert.deepEqual(opened, [null, 'r']);
+  // Played where it is: the player, with its controls, in place of the picture.
+  play.onclick();
+  const [video] = figure.children[0].children;
+  assert.equal(video.tag, 'video');
+  assert.equal(video.src, '/clip.mp4');
+  assert.equal(video.controls, true);
 });
 
 test('a card of the Studio shows its thumbnail, or its file once, and never downloads its original again', () => {

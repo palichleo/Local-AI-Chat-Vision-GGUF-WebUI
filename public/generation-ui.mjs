@@ -1,6 +1,7 @@
 import { comparedSource, imageCompare, loadSource } from './image-compare.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
 import { livePreview } from './live-preview.mjs';
+import { takeFlux } from './take-flux.mjs';
 import { formatOf } from './formats.mjs';
 
 const KINDS = { image: 'IMAGE', video: 'VIDÉO', audio: 'SON' };
@@ -95,10 +96,12 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       caption = node('figcaption', 'generation-caption'),
       label = node('span', 'sr-only', 'Préparation de la génération…'),
       progress = node('div', 'generation-progress');
-    if (request.mediaType === 'video')
+    if (request.mediaType === 'video') {
       label.textContent =
         'En attente de confirmation · ' + (request.plan?.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale');
-    else if (request.mediaType === 'audio') {
+      // A clip in progress has the size of its format from the start.
+      figure.classList.add('is-video');
+    } else if (request.mediaType === 'audio') {
       label.textContent = 'En attente de confirmation · Son';
       figure.classList.add('is-audio');
     }
@@ -115,6 +118,11 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
           : 'Génération d’image en cours',
     );
     caption.append(progress, label);
+    // Over a take in progress in a conversation (capture 13): « VIDÉO · LTX 2.5 », then its stage.
+    caption.setAttribute(
+      'data-kind',
+      [KINDS[request.mediaType] ?? KINDS.image, request.workflowName].filter(Boolean).join(' · '),
+    );
     figure.append(frame);
     let title = null,
       meta = null,
@@ -146,11 +154,21 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       record,
       controller = new AbortController();
     const slots = new Map(),
+      // In a conversation, the Flux of the take in progress, drawn from the picture so far: the start
+      // image of a clip until the generator has one.
+      flux = compact ? null : takeFlux(frame, { node }),
       // What the generator has so far, in the first tile.
-      live = livePreview(node, frame);
+      live = livePreview(node, frame, { onLoad: picture => flux?.source(picture) });
+    const references = request.plan?.references ?? [],
+      start = references.find(ref => ref.role === 'start_image' && ref.preview) ?? references.find(ref => ref.preview);
+    // A take from words alone: the Flux on the colours of the room until the first picture.
+    if (start) flux?.source(start.preview);
+    else flux?.neutral();
     function dimensions(width, height, target = first) {
       if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return;
       target.frame.style.aspectRatio = `${width} / ${height}`;
+      // A clip in a conversation takes the size of its format (moodix.css, --take-ratio).
+      target.figure.style.setProperty?.('--take-ratio', (width / height).toFixed(4));
       onResize();
     }
     function caption(text, shown = false) {
@@ -163,6 +181,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       }
     }
     function settle() {
+      flux?.stop();
       live.clear();
       for (const target of tiles) {
         unwatch(target.figure);
@@ -186,11 +205,15 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
     }
     followSize();
     frame.classList.add('is-paused');
-    watch(figure, visible => frame.classList.toggle('is-paused', !visible));
+    watch(figure, visible => {
+      frame.classList.toggle('is-paused', !visible);
+      flux?.visible(visible);
+    });
     function progress(value, fraction, preview) {
       if (disposed || finished) return;
       followSize();
       if (preview && !record) live.show(preview);
+      if (Number.isFinite(fraction)) flux?.progress(fraction);
       // A real fraction replaces the indeterminate shimmer as soon as the job reports one.
       if (Number.isFinite(fraction)) {
         const percent = Math.round(Math.min(1, Math.max(0, fraction)) * 1000) / 10;
@@ -324,6 +347,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
     function image({ record: outputRecord, index, blob }) {
       if (disposed || slots.has(index)) return;
       record = outputRecord;
+      flux?.stop();
       live.clear();
       const target = slots.size ? tile(container, request, compact) : first,
         { frame } = target;
@@ -371,8 +395,24 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
         shown.onclick = () => openOutput(record, index);
         target.figure.classList.add('is-video');
         target.figure.append(buttons(record, index));
-        slots.set(index, { index, button: shown, img: shown, isVideo: true, tile: target });
-        frame.replaceChildren(shown);
+        const slot = { index, button: shown, img: shown, isVideo: true, tile: target },
+          play = node('button', 'take-play');
+        slots.set(index, slot);
+        // A take of the Studio in a conversation plays there too, from its round button (capture 14).
+        play.type = 'button';
+        play.setAttribute('aria-label', 'Lire la vidéo');
+        play.title = 'Lire la vidéo';
+        play.onclick = () => {
+          const video = node('video');
+          Object.assign(video, { controls: true, playsInline: true, preload: 'auto' });
+          if (poster) video.poster = poster;
+          video.setAttribute('aria-label', 'Vidéo originale · ' + record.workflowName);
+          video.src = output.originalUrl || '';
+          frame.replaceChildren(video);
+          slot.button = slot.img = video;
+          void video.play?.()?.catch?.(() => {});
+        };
+        frame.replaceChildren(shown, play);
         frame.classList.add('has-image');
         frame.setAttribute('aria-busy', 'false');
         onResize();
@@ -381,8 +421,22 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       if (record.mediaType === 'video') {
         const output = record.outputs?.[index],
           wrapper = node('div', 'video-original'),
-          video = node('video');
-        video.controls = true;
+          video = node('video'),
+          play = node('button', 'take-play');
+        // Its picture and a round play button (capture 14); the controls of the player once it plays.
+        video.controls = false;
+        play.type = 'button';
+        play.setAttribute('aria-label', 'Lire la vidéo');
+        play.title = 'Lire la vidéo';
+        play.onclick = () => {
+          play.hidden = true;
+          video.controls = true;
+          void video.play?.()?.catch?.(() => {});
+        };
+        video.onplay = () => {
+          play.hidden = true;
+          video.controls = true;
+        };
         video.preload = 'none';
         video.playsInline = true;
         video.setAttribute('aria-label', 'Vidéo originale · ' + record.workflowName);
@@ -390,7 +444,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
         if (poster) video.poster = poster;
         video.onloadedmetadata = () => dimensions(video.videoWidth, video.videoHeight, target);
         video.onloadeddata = () => void thumbnailOf(api, record, index, video);
-        wrapper.append(video);
+        wrapper.append(video, play);
         target.figure.append(buttons(record, index));
         const slot = { index, button: wrapper, img: video, isVideo: true, tile: target };
         slots.set(index, slot);
@@ -502,6 +556,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
     }
     function dispose() {
       disposed = true;
+      flux?.stop();
       controller.abort();
       for (const target of tiles) unwatch(target.figure);
       for (const slot of slots.values()) {
