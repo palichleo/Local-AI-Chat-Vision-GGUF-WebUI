@@ -20,21 +20,23 @@ export async function installFromButton({
       break;
     } catch (error) {
       if (!error?.busy || Date.now() > startBy) throw error;
-      onProgress(`${error.message} La mise à jour démarrera ensuite.`);
+      onProgress(`${error.message} La mise à jour démarrera ensuite.`, 'download');
       await pause();
     }
   }
   const deadline = Date.now() + 360000;
-  onProgress('Téléchargement et préparation de la mise à jour…');
+  // Its steps as the panel shows them (etats-maquette.md, 56): download, install, restart.
+  onProgress('Téléchargement et préparation de la mise à jour…', 'download');
   while (Date.now() < deadline) {
     let status;
     try {
       status = await (await api('updates/install')).json();
     } catch {
-      /* The old server closes during replacement. */
+      /* The old server closes during replacement: the application restarts. */
+      onProgress('Redémarrage de l’application…', 'restart');
     }
     if (status?.state === 'error') throw new Error(status.error || 'La mise à jour a échoué.');
-    if (status?.state === 'restarting') onProgress('Installation et redémarrage de l’application…');
+    if (status?.state === 'restarting') onProgress('Installation et redémarrage de l’application…', 'install');
     try {
       const next = await bootstrap();
       if (next.token && next.token !== token && !next.updating) {
@@ -47,7 +49,7 @@ export async function installFromButton({
     await pause();
   }
   throw new Error(
-    'Redémarrage non confirmé. Le brouillon reste dans cette page. Consulte data/update-status.json et relance l’application si nécessaire.',
+    'Redémarrage non confirmé. Votre brouillon reste dans cette page. Si Moodix ne revient pas, relancez-le avec Lancer-Windows.cmd.',
   );
 }
 

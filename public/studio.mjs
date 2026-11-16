@@ -475,6 +475,10 @@ export function setupStudio({
   // reaches it (inert), and nothing stops the pointer. It is the user's again when the pointer rests
   // on « Générer » (settings, « Refuser », « Générer »), or when the proposal goes.
   let aiWorking = false;
+  // The last picture of a take in progress: veiled on the screen when the card stays held (54).
+  let seenPreview = '';
+  // « GPU libéré. Le modèle peut redémarrer. » in place of the step, until then (54).
+  let freedUntil = 0;
   function lockStudio(on) {
     aiWorking = on;
     const view = $('studio-view');
@@ -1613,6 +1617,15 @@ export function setupStudio({
    * and its length, « 16:9 - 05.17 S »; an image, its format; a sound, its length. Whether it is
    * a draft or a final is said in the details of the creation (a click in the Sortie).
    */
+  /** Under the empty frame (55): « 1:1 · 1024 × 1024 », the format and the size the settings have. */
+  function blankSize(workflow = current()) {
+    if (!workflow || mode === 'audio') return '';
+    const draft = drafts[mode],
+      kept = /^\d+x\d+$/.test(draft.size ?? '') ? draft.size.split('x').map(Number) : null,
+      first = workflow.limits ? sizing(workflow).sizes[0] : null,
+      [width, height] = kept ?? (first ? [first.width, first.height] : []);
+    return [shapeOf().label, width && height ? `${width} × ${height}` : ''].filter(Boolean).join(' · ');
+  }
   function readoutText(workflow = current()) {
     if (!workflow) return '';
     const shape = shapeOf(),
@@ -1634,6 +1647,8 @@ export function setupStudio({
   function readout() {
     const text = document.querySelector?.('.studio-readout');
     if (text) text.textContent = readoutText();
+    const blank = document.querySelector?.('#studio-view .studio-blank-size');
+    if (blank) blank.textContent = blankSize();
     paintSave();
   }
   /** The room the frame has: its stage, less a margin; a default before the stage is laid out. */
@@ -1668,9 +1683,13 @@ export function setupStudio({
         'studio-frame' +
           (mode === 'audio' ? ' is-audio' : '') +
           (working ? ' is-busy' : '') +
-          (last ? ' has-result' : ''),
+          (last ? ' has-result' : '') +
+          (!last && !working && !gpuBlocked() ? ' is-empty' : '') +
+          (gpuBlocked() && !working ? ' is-held' : ''),
       ),
-      next = screenShape(last);
+      // The card held: the take that held it is drawn at the format chosen for it (54).
+      shaped = gpuBlocked() && !working ? null : last,
+      next = screenShape(shaped);
     const take = last?.outputs?.[0]?.take,
       numbered = Number.isInteger(take),
       // While a take is made: the number it will have, in the accent, instead of its format.
@@ -1693,10 +1712,48 @@ export function setupStudio({
       }
       frame.append(bars);
     }
-    if (last) {
+    if (gpuBlocked() && !working) {
+      // The card stays held by the last generation (etats-maquette.md, 54): its take veiled, at its
+      // format, « ÉCHEC » (nothing was kept) and « ARRÊTÉE », and what to do.
+      if (seenPreview) {
+        const picture = node('img', 'studio-held-picture');
+        Object.assign(picture, { src: seenPreview, alt: '', draggable: false });
+        frame.append(picture);
+      }
+      const veil = node('div', 'studio-held-veil');
+      veil.setAttribute('role', 'alert');
+      veil.append(
+        node('p', 'studio-held-kicker', 'Arrêtée'),
+        node(
+          'p',
+          'studio-held-text',
+          'La carte graphique est restée prise par la dernière génération. Libérez-la pour continuer.',
+        ),
+      );
+      frame.append(node('span', 'studio-failed-chip', 'Échec'), veil);
+    } else if (last) {
       const shownTake = result(last);
       frame.append(shownTake);
       if (shownTake.playButton) frame.append(shownTake.playButton);
+    } else if (!working) {
+      // Nothing made in this mode yet (etats-maquette.md, 55): the Éclipse small, where the first take
+      // will come, how to begin, and the format with its size, which follow the settings.
+      const blank = node('div', 'studio-blank'),
+        sign = mark?.();
+      if (sign) {
+        sign.classList?.add('studio-blank-mark');
+        blank.append(sign);
+      }
+      blank.append(
+        node('p', 'studio-blank-title', 'Votre première prise apparaîtra ici.'),
+        node(
+          'p',
+          'studio-blank-text',
+          'Écrivez un prompt à gauche, ou laissez Moodix AI régler le Studio avec la moitié droite du bouton.',
+        ),
+        node('p', 'studio-blank-size', blankSize()),
+      );
+      frame.append(blank);
     } else frame.setAttribute('aria-hidden', 'true');
     const shown = node('span', 'studio-readout', readoutText());
     shown.setAttribute('aria-hidden', 'true');
@@ -1716,7 +1773,7 @@ export function setupStudio({
     watching?.disconnect();
     if (typeof ResizeObserver === 'function') {
       // Called once the stage is laid out, then at every change of its size.
-      watching = new ResizeObserver(() => reshape(frame, screenShape(last), over));
+      watching = new ResizeObserver(() => reshape(frame, screenShape(shaped), over));
       watching.observe(box);
     }
     return { screen, box, frame };
@@ -1926,6 +1983,15 @@ export function setupStudio({
   const improves = () =>
     current()?.follows ? Boolean(sceneInputs()) : drafts[mode].prompt.trim().length >= IMPROVE_MIN;
   /** The button follows what is typed, without drawing the Studio again (the field keeps its focus). */
+  /** « Générer » as the prompt is typed: greyed while it is empty (55), without drawing the Studio again. */
+  function goable() {
+    const go = document.querySelector?.('#studio-view .studio-go');
+    if (!go || working || enriching || answering() || checking || current()?.unavailable) return;
+    const blank = !drafts[mode].prompt.trim();
+    go.disabled = blank;
+    go.classList.toggle('is-blank', blank);
+    go.title = blank ? 'Écrivez un prompt pour générer' : `Générer (${MODIFIER}+Entrée)`;
+  }
   function improvable() {
     const go = document.querySelector?.('#studio-view .studio-enrich-go');
     if (!go || enriching) return;
@@ -2281,6 +2347,7 @@ export function setupStudio({
   /** Updates the button and the screen alone: the form keeps its focus while a generation runs. */
   function progress() {
     if (!working) return;
+    if (working.preview) seenPreview = working.preview;
     const go = document.querySelector?.('#studio-view .studio-go'),
       line = $('studio-progress');
     const known = Number.isFinite(working.fraction) && working.fraction !== null,
@@ -2916,9 +2983,10 @@ export function setupStudio({
   // What the Sortie shows: the kind of the mode (16/11); its button at the right, the whole project.
   const SORTS = [
     { id: 'all', icon: 'grid', label: 'Tout', none: 'Aucune création dans ce projet pour l’instant' },
-    { id: 'image', icon: 'image', label: 'Images', none: 'Aucune image dans ce projet pour l’instant' },
-    { id: 'video', icon: 'video', label: 'Vidéos', none: 'Aucune vidéo dans ce projet pour l’instant' },
-    { id: 'audio', icon: 'wave', label: 'Sons', none: 'Aucun son dans ce projet pour l’instant' },
+    // A mode without takes (etats-maquette.md, 55): what the Sortie will hold, the last at the left.
+    { id: 'image', icon: 'image', label: 'Images', none: 'Rien pour l’instant. Vos images apparaîtront ici, la dernière à gauche.' },
+    { id: 'video', icon: 'video', label: 'Vidéos', none: 'Rien pour l’instant. Vos vidéos apparaîtront ici, la dernière à gauche.' },
+    { id: 'audio', icon: 'wave', label: 'Sons', none: 'Rien pour l’instant. Vos sons apparaîtront ici, la dernière à gauche.' },
   ];
   let sortieAll = false, // the Sortie shows the whole project, not only the kind of the mode
     sortieMode = null; // the mode it was drawn for (another mode: its kind again)
@@ -3317,7 +3385,7 @@ export function setupStudio({
     section.setAttribute('aria-label', 'Sortie');
     if (!runs.length) {
       const empty = node('div', 'studio-empty-strip');
-      empty.append(icon(about.icon), node('span', '', own.none));
+      empty.append(node('span', '', own.none));
       section.append(empty);
       return section;
     }
@@ -3326,7 +3394,7 @@ export function setupStudio({
     section.append(row);
     if (!shown.length) {
       const empty = node('div', 'studio-empty-strip');
-      empty.append(icon(sort.icon), node('span', '', sort.none));
+      empty.append(node('span', '', sort.none));
       row.append(empty, sortButton(own));
       return section;
     }
@@ -3645,8 +3713,9 @@ export function setupStudio({
             : 'Décrivez votre son…',
       value => {
         draft.prompt = value;
-        // « Améliorer le prompt » waits for a few words.
+        // « Améliorer le prompt » waits for a few words; « Générer », for one.
         improvable();
+        goable();
       },
     );
     prompt.id = 'studio-prompt';
@@ -3749,12 +3818,18 @@ export function setupStudio({
     // The preview, its formats and the button.
     const { screen } = stage(),
       head = node('div', 'studio-screen-head'),
-      step = node('p', 'studio-progress', working?.label ?? ''),
+      heldGpu = gpuBlocked() && !working,
+      freed = !heldGpu && !working && Date.now() < freedUntil,
+      step = node(
+        'p',
+        'studio-progress' + (heldGpu ? ' is-alert' : ''),
+        heldGpu ? 'Carte graphique encore prise' : freed ? 'GPU libéré. Le modèle peut redémarrer.' : (working?.label ?? ''),
+      ),
       setting = node('p', 'studio-ai-line', 'Moodix AI règle le Studio');
     // Image · Vidéo · Son at the left, the step under way in the middle, Moodix AI at the right.
     step.id = 'studio-progress';
     step.setAttribute('role', 'status');
-    step.hidden = !working;
+    step.hidden = !working && !heldGpu && !freed;
     setting.hidden = !(answering() || ai);
     if (kindsBar()) head.append(kindsBar());
     head.append(step, setting);
@@ -3762,7 +3837,7 @@ export function setupStudio({
     const bar = node('div', 'studio-actionbar');
     // The actions of the take on the screen; held while Moodix AI proposes or a take is made.
     const onScreen = working ? (kept[mode] ?? runs.find(item => mediaOf(item) === mode) ?? null) : onStage();
-    if (onScreen && mode !== 'audio' && !extending) {
+    if (onScreen && mode !== 'audio' && !extending && !heldGpu) {
       const row = takeActions(onScreen, 0);
       row.inert = answering() || Boolean(working);
       if (row.inert) row.classList.add('is-held');
@@ -3776,7 +3851,13 @@ export function setupStudio({
     // While the creation is made, « Génération · 42 % » alone, over the bar that fills the button.
     go.append(label, fill);
     go.title = (answering() ? 'Générer la proposition de Moodix AI' : 'Générer') + ` (${MODIFIER}+Entrée)`;
-    go.disabled = enriching || Boolean(working) || Boolean(workflow.unavailable);
+    // Nothing to make without a prompt (55): greyed, said in its tooltip; the half Agent stays.
+    const blank = !draft.prompt.trim() && !answering() && !checking;
+    go.disabled = enriching || Boolean(working) || Boolean(workflow.unavailable) || blank;
+    if (blank && !working) {
+      go.title = 'Écrivez un prompt pour générer';
+      go.classList.add('is-blank');
+    }
     // The only model of this mode cannot run here: « Générer » is greyed and says why.
     if (workflow.unavailable) {
       go.title = workflow.unavailable;
@@ -3825,24 +3906,32 @@ export function setupStudio({
       group.replaceChildren(no, ...group.children);
       group.classList.add('is-proposal');
     }
+    if (heldGpu) {
+      // The only thing to do (54): « Libérer le GPU » in place of Générer, the same glass and size.
+      const free = button(
+        'studio-go studio-recover',
+        '',
+        async () => {
+          free.disabled = true;
+          await recoverGPU();
+          freedUntil = Date.now() + 4000;
+          render();
+          setTimeout(() => render(), 4100);
+        },
+        'chip',
+      );
+      free.append(node('span', 'studio-go-label', 'Libérer le GPU'));
+      free.title = 'La carte graphique est restée prise par la dernière génération : la libérer';
+      group.replaceChildren(free);
+      group.classList.add('is-held');
+    }
     bar.append(group);
     preview.append(bar);
-    if (failure) {
+    // The card held, its state says it all (54): no line of error beside it.
+    if (failure && !heldGpu) {
       const alert = node('p', 'studio-error', failure);
       alert.setAttribute('role', 'alert');
       preview.append(alert);
-    }
-    // On the generation that held it (parametres-maquette.md): the card, given back from here.
-    if (gpuBlocked() && !working) {
-      const held = node('div', 'studio-held'),
-        free = button('secondary studio-recover', 'Libérer le GPU', async () => {
-          free.disabled = true;
-          await recoverGPU();
-          render();
-        });
-      held.setAttribute('role', 'alert');
-      held.append(node('span', '', 'La carte graphique est restée prise par la dernière génération.'), free);
-      preview.append(held);
     }
 
     desk.append(...[write, preview, settings].map(grained), grained(outputs()));

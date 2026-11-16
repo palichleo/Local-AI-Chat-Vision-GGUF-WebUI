@@ -68,7 +68,39 @@ const requestMeta = request => {
  * as it is, what it is (« VIDÉO · 16:9 · 05 S ») and « Ouvrir », which shows it on the
  * Studio's screen (`onOpen`); its output buttons stay under it.
  */
-export function setupGenerationUI({ api, node, openOutput, actions = null, onResize = () => {}, onOpen = null }) {
+// The stage a take failed at, said as a sentence (« Échec pendant le décodage de la vidéo »).
+const ARTICLES = {
+  Chargement: 'le ',
+  Lecture: 'la ',
+  Préparation: 'la ',
+  Repérage: 'le ',
+  Agrandissement: 'l’',
+  Affinage: 'l’',
+  Décodage: 'le ',
+  Enregistrement: 'l’',
+  Envoi: 'l’',
+  Composition: 'la ',
+  Génération: 'la ',
+};
+export function failedDuring(stage = '') {
+  const words = String(stage).replace(/…$/, '').replace(/ · \d+\/\d+$/, '').trim().split(' '),
+    article = ARTICLES[words[0]];
+  return article ? 'Échec pendant ' + article + words.join(' ').replace(/^./, letter => letter.toLowerCase()) : 'Échec de la génération';
+}
+
+/**
+ * `onAgain(request, { edit, figure, container })`: a take that failed is made again (« Relancer »),
+ * or its proposal shown first (« Modifier la proposition », `edit`).
+ */
+export function setupGenerationUI({
+  api,
+  node,
+  openOutput,
+  actions = null,
+  onResize = () => {},
+  onOpen = null,
+  onAgain = null,
+}) {
   const cards = new Set(),
     watched = new Map();
   let downloads = Promise.resolve();
@@ -151,6 +183,8 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       tiles = [first];
     let disposed = false,
       finished = false,
+      // The last stage said: where a take that fails stopped.
+      lastStage = '',
       record,
       controller = new AbortController();
     const slots = new Map(),
@@ -235,6 +269,9 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
           : request.mediaType === 'audio'
             ? 'Génération du son…'
             : 'Génération de l’image…';
+      if (named) lastStage = text;
+      // The video memory ran short and it tries again: its point is amber (etats-maquette.md, 52).
+      for (const target of tiles) target.figure.classList.toggle('is-warned', /^Mémoire vidéo insuffisante/.test(text));
       // A named stage (loading, step 3/11, decoding…) is worth showing; the generic line is not.
       caption(text, named && !/^Génération (de la vidéo|de l’image|du son|en cours)…$/.test(text));
     }
@@ -532,6 +569,51 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       caption(message || 'Génération interrompue.');
       onResize();
     }
+    /**
+     * A take that failed (etats-maquette.md, 52): it stays at its place and its format, veiled (the
+     * last picture, blurred and dark), ringed in amber, « ÉCHEC » in place of its number (nothing was
+     * kept). In the middle what failed, « Relancer » and « Modifier la proposition »; over it, the
+     * stage it stopped at, with an amber point.
+     */
+    function failed(message) {
+      if (disposed) return;
+      finished = true;
+      flux?.stop();
+      for (const target of tiles) {
+        unwatch(target.figure);
+        target.figure.classList.remove('is-warned');
+        target.figure.classList.add('is-failed');
+        target.frame.hidden = false;
+        target.frame.setAttribute('aria-busy', 'false');
+        target.frame.classList.add('is-finished');
+        target.progress.classList.add('is-complete');
+        target.progress.setAttribute('aria-hidden', 'true');
+        const veil = node('div', 'generation-failure'),
+          reason = String(message || 'La génération a échoué.').trim();
+        veil.setAttribute('role', 'alert');
+        veil.append(
+          node('p', 'generation-failure-kicker', 'La génération a échoué'),
+          node('p', 'generation-failure-reason', /enregistré/.test(reason) ? reason : reason + ' Rien n’a été enregistré.'),
+        );
+        if (onAgain && request.requestId) {
+          const row = node('div', 'generation-failure-actions'),
+            again = node('button', 'generation-again'),
+            edit = node('button', 'generation-edit', 'Modifier la proposition');
+          again.type = edit.type = 'button';
+          again.append(node('span', 'generation-again-play'), node('span', '', 'Relancer'));
+          again.title = 'Relancer avec les mêmes réglages';
+          edit.title = 'Rouvrir la proposition pour la modifier';
+          again.onclick = () => onAgain(request, { edit: false, figure: target.figure, container });
+          edit.onclick = () => onAgain(request, { edit: true, figure: target.figure, container });
+          row.append(again, edit);
+          veil.append(row);
+        }
+        target.frame.append(node('span', 'generation-failed-chip', 'Échec'), veil);
+        if (target.open) target.open.disabled = true;
+      }
+      caption(failedDuring(lastStage), true);
+      onResize();
+    }
     // Declined (a new message, « Refuser » in the Studio, « Annuler » of a card): the proposal goes
     // without a trace, no card, no line (16/11); « Annuler » alone leaves its own (proposal-card.mjs).
     function withdraw() {
@@ -545,6 +627,8 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
     function finish(result) {
       if (disposed) return;
       if (result.denied) return withdraw();
+      // Failed with nothing made: veiled, its last picture kept under the veil (52).
+      if (result.failed && !result.record && !record) return failed(result.error);
       finished = true;
       settle();
       if (result.record) record = result.record;
@@ -580,6 +664,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       progress,
       image,
       fail,
+      failed,
       finish,
       dispose,
       async load(conversationId, runId) {

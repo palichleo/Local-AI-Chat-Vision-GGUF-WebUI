@@ -1731,90 +1731,6 @@ dialog::backdrop {
   --update-light: #427da7;
 }
 
-#update-dialog {
-  position: fixed;
-  inset: 0;
-  margin: auto;
-  width: 430px;
-  max-width: calc(100% - 32px);
-  height: fit-content;
-  min-height: 0;
-  max-height: calc(100dvh - 32px);
-  overflow: auto;
-  padding: 27px;
-  border: 1px solid var(--line-strong);
-  border-radius: 20px;
-  box-shadow:
-    inset 0 1px 0 var(--edge),
-    0 24px 70px var(--shadow);
-}
-.update-dialog-heading {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-}
-.update-emblem {
-  display: grid;
-  place-items: center;
-  flex: 0 0 40px;
-  width: 40px;
-  height: 40px;
-  color: var(--update-ink);
-  border: 1px solid var(--update-line);
-  border-radius: 12px;
-  background: linear-gradient(145deg, var(--update-tint), var(--surface));
-  box-shadow: inset 0 1px 0 var(--edge);
-}
-.update-emblem svg {
-  width: 20px;
-  height: 20px;
-}
-#update-dialog h2 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 550;
-  letter-spacing: -0.5px;
-}
-#update-dialog p {
-  margin: 16px 0 0;
-  color: var(--muted);
-  font-size: var(--size-1);
-  line-height: 1.8;
-}
-#update-progress {
-  color: var(--ink) !important;
-}
-.update-activity {
-  position: relative;
-  height: 4px;
-  margin-top: 19px;
-  overflow: hidden;
-  border-radius: 99px;
-  background: var(--line);
-}
-.update-activity::after {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 38%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, transparent, var(--update-light), var(--update-ink));
-  animation: update-activity 2.2s ease-in-out infinite;
-}
-@keyframes update-activity {
-  from {
-    transform: translateX(-115%);
-  }
-  to {
-    transform: translateX(275%);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .update-activity::after {
-    animation: none;
-    left: 28%;
-  }
-}
 
 .settings-footer .app-shutdown {
   margin-right: auto;
@@ -13656,25 +13572,6 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   }
 }
 
-/* « Libérer le GPU » (16/11): on the generation that held the card — under the Double verre of the
-   Studio, in the composer of the chat — no longer in the settings. */
-#studio-view .studio-held {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  margin: 10px 0 0;
-  color: var(--text-2);
-  font: 400 13px/1.4 var(--font-ui);
-}
-#studio-view .studio-held .studio-recover,
-.composer-recover {
-  min-height: 30px;
-  padding: 4px 12px;
-  border-radius: 8px;
-  font: 400 13px/1 var(--font-ui);
-  white-space: nowrap;
-}
 
 /* « Projet » in the window of the pencil (16/11): a field that opens a menu as those of the fil,
    under it, the chosen project marked. */
@@ -14289,4 +14186,789 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
 /* A workflow of the user's own: its name in ivory as the others, « VOUS » says whose it is. */
 #settings .workflow-settings .workflow-card[data-origin='user'] .workflow-name {
   color: var(--text-1);
+}
+
+/* ------------------------------------------------------------------ the states (etats-maquette.md, 16/11) */
+/* One colour of alert, the amber of the missing file of the Workflows; never red. */
+:root {
+  --alert: #e7b76a;
+}
+/* The dot of the capsule: green ready, amber that pulses while it loads, amber still when paused. */
+#top .engine-button.is-running.is-busy::after,
+#top .engine-button.is-paused::after {
+  background: var(--alert);
+}
+
+/* 50 · Before the first message: a card of the same size and glass in place of the message box, two
+   steps (the engine, the LLM); no shortcuts, no « Reprendre ». */
+body[data-setup='incomplete'] #chat-form,
+body[data-setup='incomplete'] .suggestions,
+body[data-setup='incomplete'] #resume-last {
+  display: none !important;
+}
+.setup-card {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 20px 24px 18px;
+  border: 1px solid rgba(238, 232, 222, 0.09);
+  border-radius: 16px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(24px) saturate(1.15);
+  backdrop-filter: blur(24px) saturate(1.15);
+}
+.setup-card[hidden] {
+  display: none;
+}
+.setup-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(238, 232, 222, 0.07);
+}
+.setup-kicker {
+  color: var(--text-3);
+  font: 600 var(--size-label, 10.5px) / 1 var(--font-ui);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+.setup-count {
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+.setup-step {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 0;
+  border-bottom: 1px solid rgba(238, 232, 222, 0.07);
+}
+.setup-ring {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 21px;
+  height: 21px;
+  border: 1.5px solid rgba(238, 232, 222, 0.32);
+  border-radius: 50%;
+}
+.setup-ring.is-current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.setup-ring.is-done {
+  border-color: #78c08f;
+  background: color-mix(in srgb, #78c08f 20%, transparent);
+  color: #a9e0b9;
+}
+.setup-ring svg {
+  width: 11px;
+  height: 11px;
+}
+.setup-title {
+  margin: 0 0 4px;
+  color: var(--text-1);
+  font: 400 15px/1.3 var(--font-ui);
+}
+.setup-step.is-done .setup-title {
+  color: var(--text-2);
+}
+.setup-text {
+  margin: 0;
+  color: var(--text-3);
+  font: 400 13px/1.55 var(--font-ui);
+}
+.setup-error {
+  margin: 6px 0 0;
+  color: var(--alert);
+  font: 400 13px/1.5 var(--font-ui);
+}
+.setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.setup-actions button {
+  white-space: nowrap;
+}
+.setup-progress {
+  width: 220px;
+}
+.setup-progress-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: var(--text-2);
+  font: 400 11px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.setup-progress-line {
+  display: block;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(238, 232, 222, 0.12);
+}
+.setup-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.setup-progress-line.is-indeterminate .setup-progress-fill {
+  width: 35% !important;
+  animation: setup-sweep 1.4s ease-in-out infinite;
+}
+@keyframes setup-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .setup-progress-line.is-indeterminate .setup-progress-fill {
+    animation: none;
+  }
+}
+.setup-foot {
+  margin: 14px 0 0;
+  color: var(--text-3);
+  font: 400 12.5px/1.4 var(--font-ui);
+}
+
+/* 51 · The model loads under a message sent: « LE MODÈLE SE CHARGE · 0:42 » beside the name, the line
+   under it; failed, the line in amber with « Réessayer ». The box: « EN ATTENTE » and « Annuler ». */
+#messages .message-loading {
+  margin-left: 14px;
+  color: var(--text-3);
+  font: 400 11px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+#messages .message-waiting {
+  margin: 0;
+  color: var(--text-3);
+  font: 400 15px/1.6 var(--font-ui);
+}
+#messages .message-waiting.is-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
+  color: var(--alert);
+}
+#messages .message-retry {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-1);
+  font: 500 14px/1.4 var(--font-ui);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+#chat-form .compose-state.is-waiting {
+  color: var(--text-3);
+  font: 400 11px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+#chat-form .cancel-button .cancel-word {
+  display: none;
+}
+#chat-form .cancel-button.is-word {
+  width: auto;
+  padding: 0 10px;
+  background: transparent;
+}
+#chat-form .cancel-button.is-word svg {
+  display: none;
+}
+#chat-form .cancel-button.is-word .cancel-word {
+  display: inline;
+  color: var(--text-2);
+  font: 400 14px/1 var(--font-ui);
+}
+#chat-form .cancel-button.is-word:hover .cancel-word {
+  color: var(--text-1);
+}
+
+/* 55 · The Studio empty: the frame at the format chosen (a rule at 10 %), the Éclipse small at 45 %,
+   « Votre première prise apparaîtra ici. » in Gloock, how to begin, the format and its size in mono;
+   « Générer » greyed (45 %) while the prompt is empty. */
+#studio-view .studio-frame.is-empty {
+  border: 1px solid rgba(238, 232, 222, 0.1);
+  background: rgba(0, 0, 0, 0.12);
+}
+#studio-view .studio-frame.is-empty :is(.studio-frame-label, .studio-readout) {
+  display: none;
+}
+#studio-view .studio-blank {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 16px;
+  text-align: center;
+}
+#studio-view .studio-blank-mark {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 4px;
+  opacity: 0.45;
+}
+#studio-view .studio-blank-title {
+  margin: 0;
+  color: var(--text-1);
+  font: 400 23px/1.2 var(--font-display, 'Gloock', serif);
+  opacity: 0.8;
+}
+#studio-view .studio-blank-text {
+  max-width: 360px;
+  margin: 0;
+  color: var(--text-3);
+  font: 400 13.5px/1.55 var(--font-ui);
+}
+#studio-view .studio-blank-size {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font: 400 11px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  opacity: 0.75;
+}
+#studio-view .studio-go.is-blank,
+#studio-view .studio-go-group .studio-go.is-blank :is(.studio-go-label, svg) {
+  color: rgba(238, 232, 222, 0.45);
+}
+#studio-view .studio-empty-strip {
+  justify-content: flex-start;
+  color: var(--text-3);
+}
+
+/* 56 · An update installs: the page in « mise au point », a panel of glass of 440 px in the middle,
+   the Éclipse that breathes, « Mise à jour vers 0.6.20 », three steps and a line; no button. Failed,
+   the same panel says it in amber with « Réessayer ». */
+#update-dialog.update-panel {
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: 440px;
+  max-width: calc(100% - 32px);
+  height: fit-content;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 30px 30px 26px;
+  overflow: auto;
+  border: 1px solid rgba(238, 232, 222, 0.1);
+  border-radius: 18px;
+  background: rgba(22, 20, 26, 0.84);
+  color: var(--text-1);
+  -webkit-backdrop-filter: blur(24px) saturate(1.15);
+  backdrop-filter: blur(24px) saturate(1.15);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+.update-mark {
+  display: block;
+  width: 30px;
+  height: 30px;
+}
+.update-mark svg {
+  width: 100%;
+  height: 100%;
+}
+#update-dialog h2 {
+  margin: 16px 0 22px;
+  color: var(--text-1);
+  font: 400 27px/1.15 var(--font-display, 'Gloock', serif);
+  letter-spacing: -0.01em;
+}
+.update-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.update-steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  color: var(--text-3);
+  font: 400 14.5px/1.3 var(--font-ui);
+}
+.update-steps li.is-current {
+  color: var(--text-1);
+}
+.update-steps li.is-done {
+  color: var(--text-2);
+}
+.update-ring {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid rgba(238, 232, 222, 0.28);
+  border-radius: 50%;
+}
+.update-ring svg {
+  display: none;
+  width: 10px;
+  height: 10px;
+}
+.update-steps li.is-current .update-ring {
+  border-color: var(--text-1);
+  box-shadow: inset 0 0 0 3px rgba(22, 20, 26, 0.9), inset 0 0 0 8px var(--text-1);
+}
+.update-steps li.is-done .update-ring {
+  border-color: #78c08f;
+  background: color-mix(in srgb, #78c08f 20%, transparent);
+  color: #a9e0b9;
+}
+.update-steps li.is-done .update-ring svg {
+  display: block;
+}
+.update-line {
+  display: block;
+  height: 2px;
+  margin: 16px 0 18px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(238, 232, 222, 0.12);
+}
+.update-line span {
+  display: block;
+  width: 22%;
+  height: 100%;
+  background: var(--text-1);
+  transition: width 0.6s ease;
+}
+#update-dialog[data-step='1'] .update-line span {
+  width: 55%;
+}
+#update-dialog[data-step='2'] .update-line span {
+  width: 88%;
+}
+#update-dialog p.update-note {
+  margin: 0;
+  color: var(--text-3);
+  font: 400 13px/1.6 var(--font-ui);
+}
+.update-failure-title {
+  margin: 0 0 6px;
+  color: var(--alert);
+  font: 500 14.5px/1.4 var(--font-ui);
+}
+.update-failure-text {
+  margin: 0 0 16px;
+  color: var(--text-2);
+  font: 400 13px/1.6 var(--font-ui);
+}
+#update-dialog.is-failed .update-line span {
+  background: var(--alert);
+}
+#update-dialog[data-mode='restart'] :is(.update-steps, .update-line) {
+  display: none;
+}
+#update-dialog[data-mode='restart'] h2 {
+  margin-bottom: 10px;
+}
+
+/* 57 · Back after an update: a band of glass under the top bar, in the middle, a green dot and what
+   came back; it fades after 4 s. */
+.return-band {
+  position: fixed;
+  top: 86px;
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border: 1px solid rgba(238, 232, 222, 0.12);
+  border-radius: 10px;
+  background: rgba(22, 20, 26, 0.72);
+  color: var(--text-2);
+  font: 400 13.5px/1 var(--font-ui);
+  transform: translateX(-50%);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  transition: opacity 0.4s ease;
+}
+.return-band[hidden] {
+  display: none;
+}
+.return-band.is-leaving {
+  opacity: 0;
+}
+.return-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #78c08f;
+}
+#return-text strong {
+  color: var(--text-1);
+  font-weight: 500;
+}
+@media (prefers-reduced-motion: reduce) {
+  .return-band {
+    transition: none;
+  }
+}
+
+/* 52 · A take that fails in the chat: at its place and its format, veiled (its last picture blurred
+   and dark), ringed in amber, « ÉCHEC » in place of its number; in the middle what failed, « ▶
+   Relancer » (the glass of Générer) and « Modifier la proposition »; over it, the stage it stopped at
+   with an amber point. While the video memory runs short and it tries again, the point is amber. */
+#messages .generation-card.is-failed > .generation-frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--alert) 55%, transparent);
+  background: #0e0d11;
+}
+#messages .generation-card.is-failed > .generation-frame > :is(img, video, canvas, .live-preview, .take-flux) {
+  filter: blur(18px) brightness(0.35) saturate(0.8);
+  transform: scale(1.08);
+}
+#messages .generation-card.is-failed > .generation-caption,
+#studio-view .studio-progress.is-alert {
+  order: -1;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 0;
+}
+#messages .generation-card.is-failed > .generation-caption::before {
+  content: attr(data-kind);
+  flex: none;
+  color: var(--text-3);
+  font: 500 var(--size-label)/1 var(--font-ui);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+}
+#messages .generation-card.is-failed .generation-caption > span:not(.sr-only),
+#studio-view .studio-progress.is-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font: 400 13px/1 var(--font-ui);
+}
+#messages .generation-card.is-failed .generation-caption > span:not(.sr-only)::before,
+#studio-view .studio-progress.is-alert::before {
+  content: '';
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--alert);
+}
+#messages .generation-card.is-warned .generation-caption > span:not(.sr-only)::before {
+  background: var(--alert);
+}
+#messages .generation-card.is-failed .generation-progress {
+  display: none;
+}
+:is(.generation-failed-chip, .studio-failed-chip) {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  padding: 4px 7px;
+  border-radius: 5px;
+  background: rgba(10, 9, 12, 0.72);
+  color: var(--alert);
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.generation-failure,
+#studio-view .studio-held-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 32px;
+  text-align: center;
+}
+:is(.generation-failure-kicker, .studio-held-kicker) {
+  margin: 0;
+  color: var(--alert);
+  font: 600 var(--size-label)/1.5 var(--font-ui);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+}
+:is(.generation-failure-reason, .studio-held-text) {
+  max-width: 420px;
+  margin: 0;
+  color: var(--text-1);
+  font: 400 15px/1.55 var(--font-ui);
+}
+.generation-failure-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 8px;
+}
+.generation-again {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid rgba(238, 232, 222, 0.2);
+  border-radius: 9px;
+  background: rgba(238, 232, 222, 0.1);
+  color: var(--text-1);
+  font: 500 14px/1 var(--font-ui);
+  cursor: pointer;
+}
+.generation-again:hover {
+  background: rgba(238, 232, 222, 0.16);
+}
+.generation-again-play {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+}
+.generation-edit {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: 400 14px/1 var(--font-ui);
+  cursor: pointer;
+}
+.generation-edit:hover {
+  color: var(--text-1);
+}
+
+/* 54 · The card stays held: the take veiled on the screen, « ÉCHEC » and « ARRÊTÉE », « Carte graphique
+   encore prise » in place of the step, « Libérer le GPU » in place of Générer (same glass, 46 px, the
+   card in amber); in the chat, in place of Envoyer. */
+#studio-view .studio-frame.is-held {
+  border: 1px solid color-mix(in srgb, var(--alert) 45%, transparent);
+  background: #0e0d11;
+}
+#studio-view .studio-frame.is-held :is(.studio-frame-label, .studio-readout) {
+  display: none;
+}
+#studio-view .studio-held-picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(18px) brightness(0.35) saturate(0.8);
+  transform: scale(1.08);
+}
+#studio-view .studio-go-group.is-held .studio-recover {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 22px;
+}
+#studio-view .studio-go-group.is-held .studio-go.studio-recover svg,
+.composer-recover svg {
+  width: 17px;
+  height: 17px;
+  color: var(--alert);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+.composer-recover {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(238, 232, 222, 0.16);
+  border-radius: 10px;
+  background: rgba(238, 232, 222, 0.08);
+  color: var(--text-1);
+  font: 500 13.5px/1 var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.composer-recover[hidden] {
+  display: none;
+}
+.composer-recover:hover {
+  background: rgba(238, 232, 222, 0.14);
+}
+
+/* 53 · A file is missing: the sentence of Moodix, then a card on the model of the proposal card;
+   each file with an amber point, its name in mono and its size; « Annuler » and « Télécharger »
+   (glass); while it downloads, a line in the accent, « 3,4 / 28,6 GO » and « Arrêter ». */
+#messages .missing-say {
+  flex: 0 0 100%;
+  margin: 0 0 4px;
+  color: var(--text-1);
+  font: 400 16px/1.65 var(--font-ui);
+}
+#messages .missing-card {
+  flex: 0 0 100%;
+  box-sizing: border-box;
+  padding: 16px 18px 14px;
+  border-radius: 14px;
+  background: var(--glass, var(--surface));
+  -webkit-backdrop-filter: blur(24px) saturate(1.15);
+  backdrop-filter: blur(24px) saturate(1.15);
+  box-shadow: inset 0 0 0 1px var(--glass-line, var(--line));
+}
+.missing-head {
+  margin: 0 0 14px;
+  color: var(--text-3);
+  font: 600 var(--size-label)/1 var(--font-ui);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+}
+.missing-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.missing-file {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 3px 0;
+}
+.missing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--alert);
+}
+.missing-name {
+  overflow: hidden;
+  color: var(--text-1);
+  font: 400 13px/1.4 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.missing-size {
+  color: var(--text-2);
+  font: 400 12.5px/1 var(--font-mono);
+}
+.missing-note {
+  margin: 6px 0 0 18px;
+  color: var(--text-3);
+  font: 400 13px/1.55 var(--font-ui);
+}
+.missing-error {
+  margin: 8px 0 0 18px;
+  color: var(--alert);
+  font: 400 13px/1.5 var(--font-ui);
+}
+.missing-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  margin-top: 14px;
+}
+.missing-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid rgba(238, 232, 222, 0.2);
+  border-radius: 9px;
+  background: rgba(238, 232, 222, 0.1);
+  color: var(--text-1);
+  font: 500 14px/1 var(--font-ui);
+  cursor: pointer;
+}
+.missing-go:hover {
+  background: rgba(238, 232, 222, 0.16);
+}
+.missing-go svg {
+  width: 15px;
+  height: 15px;
+}
+.missing-progress {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 14px;
+  margin-left: 18px;
+}
+.missing-line {
+  display: block;
+  flex: 1 1 auto;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(238, 232, 222, 0.12);
+}
+.missing-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.6s ease;
+}
+.missing-count {
+  color: var(--text-2);
+  font: 400 11.5px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.missing-done {
+  margin: 0;
+  color: var(--text-2);
+  font: 400 13.5px/1.4 var(--font-ui);
+}
+:is(.missing-cancel, .missing-stop) {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: 400 14px/1 var(--font-ui);
+  cursor: pointer;
+}
+:is(.missing-cancel, .missing-stop):hover {
+  color: var(--text-1);
+}
+
+/* The picture of a take that failed, under its veil (52): the frame no longer hides it. */
+#messages .generation-card.is-failed > .generation-frame > .live-preview {
+  z-index: 0;
+  opacity: 1;
+}
+#messages .generation-card.is-failed .generation-caption > span:not(.sr-only) {
+  white-space: normal;
+  line-height: 1.4;
+}
+/* The panels of the states take no ring of focus: nothing in them is to type. */
+#update-dialog:focus,
+#update-dialog:focus-visible {
+  outline: none;
+}
+#messages .generation-card.is-failed > .generation-frame::before {
+  opacity: 0;
 }

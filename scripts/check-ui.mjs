@@ -12,7 +12,7 @@
  */
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -45,6 +45,19 @@ if (!browser) {
 
 const data = await mkdtemp(join(tmpdir(), 'moodix-check-data-')),
   profile = await mkdtemp(join(tmpdir(), 'moodix-check-browser-'));
+// A LLM registered, so that the message box is there (without one, the card of the first launch
+// takes its place: tests/etats.mjs). Its files need not exist: nothing starts it here.
+await writeFile(
+  join(data, 'config.json'),
+  JSON.stringify({
+    enginePath: join(data, 'llama-server.exe'),
+    modelPath: join(data, 'modele.gguf'),
+    projectorPath: '',
+    contextSize: 8192,
+    maxOutputTokens: 4096,
+    gpuLayers: 999,
+  }),
+);
 // The server in a process of its own: its work in the background (status, folders) must not hold
 // up the messages of the browser here.
 const serverFile = pathToFileURL(fileURLToPath(new URL('../server.mjs', import.meta.url))).href;
@@ -148,12 +161,18 @@ try {
   };
   const click = selector => js(`(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!element) return false; element.click(); return true; })()`);
   const size = width => send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
-  const results = [];
-  /** One step: what it does, then what the page must show. */
-  async function run(name, action, expected) {
+  const results = [],
+    // What a step may load in vain (its answer may come after it): left out of the report.
+    allowances = [];
+  /**
+   * One step: what it does, then what the page must show. `allowed`: what this step may load in
+   * vain, said beside it (the page answers it as it should).
+   */
+  async function run(name, action, expected, { allowed = null } = {}) {
     step = name;
     const done = await action();
     await wait(700);
+    if (allowed) allowances.push([name, allowed]);
     const shown = expected ? await expected() : true;
     // An unexpected error said to the user (app.js) is one too.
     const said = await js(`document.getElementById('notice')?.hidden === false ? document.getElementById('notice-text').textContent : ''`);
@@ -219,7 +238,8 @@ try {
   await run('Échap (Configuration)', () => key('Escape', 'Escape', 27), noDialog);
   await run('nouveau projet', () => fromMenu('#thread-project', '.thread-action'), dialog('project-dialog'));
   await run('Échap (projet)', () => key('Escape', 'Escape', 27), noDialog);
-  await run('bouton du modèle', () => click('#toggle-engine'));
+  // The LLM registered here has no files: its start is refused (400), and the page says so.
+  await run('bouton du modèle', () => click('#toggle-engine'), null, { allowed: /\/api\/start$/ });
   await run('Échap', () => key('Escape', 'Escape', 27), noDialog);
   await size(900);
   await wait(400);
@@ -228,6 +248,10 @@ try {
   await size(1280);
   await run('rechargement', () => send('Page.reload').then(() => wait(2000)), view('chat'));
   console.log(`Vérification de l’interface (${browser.split(/[\\/]/).pop()}) : ${results.filter(([, ok]) => ok).length}/${results.length} étapes.`);
+  for (const [name, allowed] of allowances)
+    for (let index = problems.length - 1; index >= 0; index--)
+      if (problems[index][0] === name && problems[index][1] === 'chargement' && allowed.test(problems[index][2]))
+        problems.splice(index, 1);
   if (problems.length) {
     console.error('Erreurs de la page :');
     for (const [where, kind, what] of problems) console.error(`  · ${where} [${kind}] ${what}`);

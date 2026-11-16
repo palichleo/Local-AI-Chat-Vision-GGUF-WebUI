@@ -117,9 +117,13 @@ test('download failure keeps configuration, file selection and composer controls
         value: '',
         textContent: '',
         open: false,
+        hidden: false,
+        children: [],
+        dataset: {},
         classList: { toggle() {}, contains: () => false },
         setAttribute() {},
         replaceChildren() {},
+        append() {},
         close() {
           this.open = false;
         },
@@ -156,6 +160,7 @@ test('download failure keeps configuration, file selection and composer controls
     labels: { stopped: 'Stopped' },
     icon: () => ({}),
     node: () => ({}),
+    moodixMark: () => [],
     workflowsUI: { setBusy() {} },
     persistConversation: async () => true,
     historyWrite: Promise.resolve(),
@@ -173,5 +178,9 @@ test('download failure keeps configuration, file selection and composer controls
   for (const id of ['settings-open', 'settings-close', 'image-input', 'model-path', 'prompt', 'send'])
     assert.equal(!!get(id).disabled, id === 'send', id + ' availability after failure');
   assert.equal(state.updating, false);
-  assert.equal(get('update-dialog').open, false);
+  // The failure stays in the panel, with « Réessayer » (etats-maquette.md, 56); closing it, the
+  // page is as it was.
+  assert.equal(get('update-dialog').open, true);
+  assert.equal(get('update-failure').hidden, false);
+  assert.equal(get('update-failure-text').textContent, 'Download failed');
 });

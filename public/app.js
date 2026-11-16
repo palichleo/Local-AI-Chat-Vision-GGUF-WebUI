@@ -29,6 +29,8 @@ import { setupStudio } from './studio.mjs';
 import { proposalCard } from './proposal-card.mjs';
 import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
+import { setupFirstLaunch } from './first-launch.mjs';
+import { missingFileCard } from './missing-file.mjs';
 import { outputActions } from './output-actions.mjs';
 import { fillCopies, forgetCopies, needsCopies, rememberCopy, remakeOutputCopy, withoutCopies } from './session-copies.mjs';
 
@@ -143,6 +145,48 @@ function thoughtFor(view, reasoning, output, done = false) {
 /** The mark of a reply moves while its model thinks: reasoning has come, the answer not yet. */
 function markThinking(view, thinking) {
   view.article.querySelector('.message-avatar')?.classList.toggle('is-thinking', thinking);
+}
+/**
+ * A message sent while the model loads (etats-maquette.md, 51): beside « MOODIX », « LE MODÈLE SE
+ * CHARGE · 0:42 », the time gone by; under it, what happens. Failed, the same line says why in
+ * amber, with « Réessayer ».
+ */
+function modelLoading(view) {
+  const label = node('span', 'message-loading'),
+    line = node('p', 'message-waiting');
+  let timer = null,
+    since = 0;
+  const tick = () => {
+    const seconds = Math.floor((performance.now() - since) / 1000);
+    label.textContent = `Le modèle se charge · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  };
+  return {
+    show() {
+      if (timer) return;
+      since = performance.now();
+      tick();
+      timer = setInterval(tick, 1000);
+      view.article.querySelector('.message-header')?.append(label);
+      line.textContent =
+        'Votre message partira dès que Moodix AI sera prêt. Le premier chargement peut prendre quelques minutes.';
+      view.body.replaceChildren(line);
+    },
+    stop() {
+      clearInterval(timer);
+      timer = null;
+      label.remove();
+      line.remove();
+    },
+    fail(message, retry) {
+      const again = node('button', 'text-button message-retry', 'Réessayer');
+      again.type = 'button';
+      again.onclick = retry;
+      line.className = 'message-waiting is-failed';
+      line.setAttribute('role', 'alert');
+      line.replaceChildren(node('span', '', message), again);
+      view.body.replaceChildren(line);
+    },
+  };
 }
 
 function notice(message) {
@@ -570,7 +614,27 @@ async function restoreUpdate() {
   }
   const result = await (await api('updates/install')).json();
   if (result.state === 'rolled-back' || result.state === 'error') notice(result.error);
-  else $('live-status').textContent = 'Mise à jour installée. Conversation restaurée.';
+  else returnBand();
+}
+/**
+ * Back after an update (etats-maquette.md, 57): a band of glass under the top bar, a green dot
+ * and what came back; it fades after 4 s. The only band of the application.
+ */
+function returnBand() {
+  const band = $('return-band');
+  $('return-text').replaceChildren(
+    node('strong', '', 'Moodix ' + state.version),
+    node('span', 'return-what', ' · conversation et brouillon restaurés'),
+  );
+  band.hidden = false;
+  band.classList.remove('is-leaving');
+  clearTimeout(state.returnTimer);
+  state.returnTimer = setTimeout(() => {
+    band.classList.add('is-leaving');
+    state.returnTimer = setTimeout(() => {
+      band.hidden = true;
+    }, 400);
+  }, 4000);
 }
 
 /** A conversation and its draft as a page kept them (an update, « Redémarrer », another version). */
@@ -625,7 +689,7 @@ async function resumeAfterRestart() {
   $('thinking').setAttribute('aria-pressed', String(state.thinking));
   renderAttachments();
   resizePrompt();
-  $('live-status').textContent = 'Application mise à jour. Brouillon et conversation repris.';
+  returnBand();
   if (kept.view === 'studio') showStudio();
   else if (kept.view === 'library') showLibrary();
 }
@@ -637,7 +701,8 @@ async function installUpdate({ confirmed = false } = {}) {
   state.updating = true;
   updateControls();
   $('settings').close();
-  $('update-dialog').showModal();
+  updatePanel('download');
+  if (!$('update-dialog').open) $('update-dialog').showModal();
   try {
     if (!(await persistConversation()))
       throw new Error('La sauvegarde de la conversation a échoué. La mise à jour n’a pas commencé.');
@@ -655,9 +720,7 @@ async function installUpdate({ confirmed = false } = {}) {
         thinking: state.thinking,
         title: $('conversation-title').textContent,
       }),
-      onProgress: text => {
-        $('update-progress').textContent = text;
-      },
+      onProgress: (text, step) => updatePanel(step, text),
       reload: () => {
         state.updateReload = true;
         location.reload();
@@ -666,10 +729,39 @@ async function installUpdate({ confirmed = false } = {}) {
   } catch (error) {
     state.updating = false;
     state.updateReload = false;
-    $('update-dialog').close();
-    notice(error.message);
+    // In the same panel (56): what failed in amber, and « Réessayer »; Échap or a click beside closes it.
+    updatePanel('failed', error.message);
     await refreshStatus();
   }
+}
+/**
+ * The panel of an update (etats-maquette.md, 56): the Éclipse that breathes, « Mise à jour vers
+ * 0.6.20 », three steps (download, install, restart) and a line; nothing to press while it
+ * installs. `step`: the one under way, or 'failed' with the reason (`text`).
+ */
+function updatePanel(step, text = '') {
+  const panel = $('update-dialog'),
+    order = ['download', 'install', 'restart'],
+    at = order.indexOf(step),
+    failed = step === 'failed';
+  panel.dataset.mode = 'update';
+  panel.classList.toggle('is-failed', failed);
+  $('update-title').textContent = state.updateVersion ? 'Mise à jour vers ' + state.updateVersion : 'Mise à jour';
+  if (!$('update-mark').firstChild) $('update-mark').append(...moodixMark());
+  $('update-mark').classList.toggle('is-thinking', !failed);
+  if (!failed) panel.dataset.step = String(Math.max(0, at));
+  for (const item of $('update-steps').children) {
+    const place = order.indexOf(item.dataset.step),
+      now = Number(panel.dataset.step || 0);
+    item.className = place < now ? 'is-done' : place === now ? 'is-current' : '';
+  }
+  // A server busy for a moment says so in place of the sentence; the sentence otherwise.
+  $('update-progress').textContent = /démarrera ensuite\.$/.test(text)
+    ? text
+    : 'Votre conversation et votre brouillon seront restaurés. Moodix revient tout seul dans un instant.';
+  $('update-progress').hidden = failed;
+  $('update-failure').hidden = !failed;
+  $('update-failure-text').textContent = failed ? text : '';
 }
 
 function applyTheme(theme) {
@@ -686,6 +778,34 @@ async function toggleTheme() {
   await changePreferences({ theme: state.theme === 'dark' ? 'light' : 'dark' });
 }
 
+let firstLaunch = null;
+/** The card of the first launch, made once: its steps save the engine and the LLM as Paramètres does. */
+function firstLaunchCard() {
+  firstLaunch ??= setupFirstLaunch({
+    api,
+    node,
+    icon,
+    host: $('setup-card'),
+    config: () => state.config,
+    onConfig: (config, models) => {
+      state.config = config;
+      if (models) state.models = models;
+      updateControls();
+    },
+    // Both steps done: the message box comes back and the model loads.
+    onDone: () => {
+      api('start', {})
+        .then(response => response.json())
+        .then(status => {
+          state.status = status;
+          updateControls();
+          $('prompt').focus();
+        })
+        .catch(error => notice(error.message));
+    },
+  });
+  return firstLaunch;
+}
 function updateControls() {
   const s = state.status;
   projectUI.sync();
@@ -769,8 +889,12 @@ function updateControls() {
   // aside to free the GPU: a stop square in amber, reloaded by itself afterwards.
   const paused = toolBusy && !running,
     engineLabel = paused
-      ? 'Modèle en pause pendant la génération · il redémarre ensuite'
-      : running
+      ? held
+        ? 'Modèle en pause : la carte graphique est encore prise'
+        : 'Modèle en pause pendant la génération · il redémarre ensuite'
+      : s.state === 'loading'
+        ? 'Le modèle se charge…'
+        : running
         ? `Arrêter le modèle · ${text}`
         : state.config.modelPath
           ? 'Démarrer le modèle'
@@ -805,6 +929,15 @@ function updateControls() {
   // proposal waiting for the user (a card, the Studio) runs nothing: a new message declines it.
   $('cancel').hidden = proposing || (!state.generating && (!toolBusy || s.toolJob.blocked));
   const cancelLabel = state.waitingForModel ? 'Annuler le message en attente' : 'Interrompre la réponse';
+  // The model loading under a message sent: « EN ATTENTE » and « Annuler », in words (51).
+  $('cancel').classList.toggle('is-word', Boolean(state.waitingForModel));
+  // Before the first message (etats-maquette.md, 50): no engine or no LLM, the card in place of
+  // the message box, without shortcuts nor « Reprendre ».
+  if (state.booted) {
+    const setup = !(state.config.enginePath && state.config.modelPath);
+    document.body.dataset.setup = setup ? 'incomplete' : 'done';
+    firstLaunchCard().sync(setup);
+  }
   $('cancel').setAttribute('aria-label', cancelLabel);
   $('cancel').title = cancelLabel;
   $('thinking').disabled = state.generating;
@@ -824,12 +957,13 @@ function updateControls() {
     : state.preparing
       ? 'Préparation des images…'
       : state.waitingForModel
-        ? 'Chargement… message en attente'
+        ? 'En attente'
         : state.generating
           ? 'Réponse en cours…'
           : s.state === 'loading'
             ? 'Le modèle se charge…'
             : '';
+  $('compose-state').classList.toggle('is-waiting', $('compose-state').textContent === 'En attente');
   workflowsUI.setBusy(
     s.busy || toolBusy || state.generating || state.operation || state.settingsLoading || !state.connected,
   );
@@ -884,6 +1018,7 @@ async function checkUpdates({ refresh = false } = {}) {
     const update = await (await api(refresh ? 'updates?refresh=1' : 'updates')).json();
     // Offered only when newer than the version installed (16/11): no box, no dot otherwise.
     state.updateAvailable = update.available === true && newerThanInstalled(update.version);
+    state.updateVersion = state.updateAvailable ? update.version : '';
     // Under « Version installée » (capture 48): when it was looked for, at the launch or since.
     const at = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     $('settings-update-checked').textContent = (refresh ? 'Vérifié aujourd’hui à ' : 'Vérifié au lancement, aujourd’hui à ') + at + '.';
@@ -1563,6 +1698,9 @@ async function restartApplication({ confirmed = false } = {}) {
     await historyWrite;
     $('settings').close();
     $('update-title').textContent = 'Redémarrage';
+    $('update-dialog').dataset.mode = 'restart';
+    $('update-failure').hidden = true;
+    $('update-progress').hidden = false;
     $('update-progress').textContent = 'Redémarrage de l’application…';
     $('update-dialog').showModal();
     await api('relaunch', {
@@ -1594,7 +1732,7 @@ async function restartApplication({ confirmed = false } = {}) {
         // Between the two instances: nothing answers for a moment.
       }
     }
-    throw Error('Redémarrage non confirmé. Si l’application ne revient pas, relance-la avec Lancer-Windows.cmd.');
+    throw Error('Redémarrage non confirmé. Si Moodix ne revient pas, relancez-le avec Lancer-Windows.cmd.');
   } catch (error) {
     state.closingApp = false;
     $('update-dialog').close();
@@ -1834,7 +1972,7 @@ function turnActions() {
       takeBack(false),
     ),
   );
-  if (reply?.classList.contains('assistant'))
+  if (reply?.classList.contains('assistant') && !reply.querySelector('.message-waiting.is-failed'))
     reply.append(
       action('Régénérer', 'update', 'Renvoyer le même message pour obtenir une autre réponse', () => takeBack(true)),
     );
@@ -1914,12 +2052,17 @@ function proposalChoice(view, proposal, abort) {
   const asked = proposal.mediaType === 'video' || proposal.mediaType === 'audio';
   if (proposal.autoAllow) return asked ? 'once' : undefined;
   if (!asked) return 'once';
+  return cardChoice(view.generations, proposal, abort);
+}
+/** The card of a proposal in `host`, until the user answers (`delay`: the count of a video). */
+function cardChoice(host, proposal, abort, delay) {
   const pending = proposalCard({
-    host: view.generations,
+    host,
     request: proposal,
     signal: abort,
     node,
     api,
+    ...(delay !== undefined ? { delay } : {}),
     composer: $('prompt'),
     // « + » on an input of the card: « Créations du projet » in the card; a file dropped or pasted on
     // it is kept as a reference of the project first. The image goes in its case, without a message.
@@ -1933,6 +2076,109 @@ function proposalChoice(view, proposal, abort) {
     if (state.proposalCard === pending) state.proposalCard = null;
     updateControls();
   });
+}
+
+// What the request was for, in the sentence of a missing file (53).
+const MISSING_FOR = {
+  create_image: 'Pour créer cette image',
+  create_video: 'Pour tourner ce plan',
+  extend_video: 'Pour prolonger ce plan',
+  replace_character: 'Pour remplacer un personnage',
+  create_audio: 'Pour composer ce son',
+  create_sound: 'Pour créer ce son',
+  upscale: 'Pour agrandir et affiner',
+  interpolate: 'Pour rendre la vidéo plus fluide',
+};
+/**
+ * A request whose workflow lacks a file (etats-maquette.md, 53): the sentence of Moodix (written by
+ * the application, which knows the file), then the card that downloads it. The file there, the
+ * same message is sent again, if it is still the last one of this conversation and nothing runs.
+ */
+function missingFile(view, request, history) {
+  const many = request.missing.files.length > 1,
+    sentence =
+      `${MISSING_FOR[request.tool] ?? 'Pour cette création'}, il me faut ${request.workflowName}, et il lui manque ` +
+      `${many ? 'des fichiers' : 'un fichier'}. Dès qu’${many ? 'ils sont' : 'il est'} là, je reprends votre demande.`,
+    conversationId = state.conversationId,
+    asked = JSON.stringify(history.findLast(message => message.role === 'user' && !message.internal)?.content ?? '');
+  view.generations.append(node('p', 'missing-say', sentence));
+  missingFileCard({
+    host: view.generations,
+    request,
+    node,
+    icon,
+    api,
+    onReady: () => {
+      const index = lastExchange(state.messages);
+      if (state.conversationId !== conversationId || index < 0 || JSON.stringify(state.messages[index].content) !== asked)
+        return;
+      if (state.generating || state.preparing || state.status.toolJob)
+        return notice('Le fichier est là : renvoyez votre message quand vous voulez.');
+      void takeBack(true);
+    },
+  });
+  scrollToBottom();
+}
+/**
+ * A take that failed, made again (etats-maquette.md, 52): « Relancer » runs its proposal again with
+ * the same settings at once (the click confirms it); « Modifier la proposition » shows its card first,
+ * without a count. In the message where it failed; the conversation keeps the call and its result.
+ */
+async function againTake(failed, { edit = false, figure = null, container }) {
+  if (state.generating || state.preparing || state.loadingHistory || state.status.toolJob)
+    return notice('Attendez la fin de la réponse ou de la génération en cours.');
+  state.generating = true;
+  let endTurn;
+  state.turnEnded = new Promise(resolve => {
+    endTurn = resolve;
+  });
+  turnActions();
+  state.controller = new AbortController();
+  const signal = state.controller.signal,
+    history = [...state.messages];
+  updateControls();
+  try {
+    const request = await (await api('tools/again', { requestId: failed.requestId }, { signal })).json();
+    figure?.remove();
+    const generation = generationUI.mount(container, request);
+    let result;
+    try {
+      result = await workflowsUI.requestTool(
+        request,
+        signal,
+        (progress, fraction, preview) => {
+          generation.progress(progress, fraction, preview);
+          scrollToBottom();
+        },
+        image => generation.image(image),
+        edit ? { approve: (proposal, abort) => cardChoice(container, proposal, abort, 0) } : { confirmed: true },
+      );
+      generation.finish(result);
+    } catch (error) {
+      if (signal.aborted) generation.fail(error.message);
+      else generation.failed(error.message);
+      throw error;
+    }
+    history.push(
+      { role: 'assistant', content: '', tool_calls: [request.call] },
+      { role: 'tool', tool_call_id: request.call.id, content: result.content },
+    );
+    if (result.record || result.failed) state.status = await (await api('status')).json();
+  } catch (error) {
+    if (!signal.aborted) notice(error.message);
+  } finally {
+    if (history.length > state.messages.length) {
+      state.messages = archiveMessages(history);
+      state.archiveSnapshot = { messages: [...state.messages], incomplete: false };
+      await persistConversation();
+    }
+    state.generating = false;
+    state.controller = null;
+    endTurn();
+    state.studio?.invalidate?.();
+    turnActions();
+    updateControls();
+  }
 }
 
 /**
@@ -2212,15 +2458,20 @@ async function sendMessage(event) {
       persistConversation();
     }
   }
-  const started = performance.now();
+  const started = performance.now(),
+    loading = modelLoading(view);
   try {
-    view.body.replaceChildren(node('span', 'pending-message', 'Démarrage du modèle… Votre message est en attente.'));
+    // Moodix waits: its Éclipse breathes; the model loading, its line says so (etats-maquette.md, 51).
+    view.body.replaceChildren();
+    markThinking(view, true);
     if (!(await persistConversation()))
       throw Error('Impossible de sauvegarder ce message. Vérifiez le dossier history ou désactivez l’historique.');
     await waitForModel(api, signal, status => {
       state.status = status;
+      if (status.state !== 'ready') loading.show();
       updateControls();
     });
+    loading.stop();
     state.waitingForModel = false;
     updateControls();
     let allowTools = true,
@@ -2558,6 +2809,24 @@ async function sendMessage(event) {
         finishReason = '';
         continue;
       }
+      if (request.missing) {
+        // Its workflow lacks a file (etats-maquette.md, 53): Moodix says it in a sentence, the card
+        // offers the download, and the message goes again once the file is there. The turn ends here.
+        view.generation = true;
+        missingFile(view, request, history);
+        history.push({
+          role: 'tool',
+          tool_call_id: request.call.id,
+          content: JSON.stringify({
+            status: 'missing_file',
+            workflow: request.workflowName,
+            message:
+              'Il manque un fichier à ce workflow : l’application propose de le télécharger, puis renvoie la demande. N’écris rien de plus.',
+          }),
+        });
+        complete = true;
+        break;
+      }
       iterations++;
       view.generation = true;
       // From the Studio (its agent's chat), a creation is set in the Studio: the pointer of Moodix
@@ -2608,7 +2877,9 @@ async function sendMessage(event) {
         if (viaStudio) void state.studio.settled(result);
       } catch (error) {
         if (viaStudio) void state.studio.settled({ error: signal.aborted ? 'Génération arrêtée.' : error.message });
-        generation.fail(error.message);
+        // Stopped by the user: said; failed: the take veiled, to make again (52).
+        if (signal.aborted) generation.fail(error.message);
+        else generation.failed(error.message);
         history.push({
           role: 'tool',
           tool_call_id: request.call.id,
@@ -2663,7 +2934,8 @@ async function sendMessage(event) {
       }
       if (result.failed && state.status.state !== 'ready')
         throw Error(result.error || 'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
-      view.note.textContent = result.failed ? result.error || 'Analyse indisponible.' : '';
+      // A take that failed says why on itself (52): no second line under the message.
+      view.note.textContent = result.failed && result.record ? result.error || 'Analyse indisponible.' : '';
       if (result.denied || result.failed || iterations >= (state.generation?.maxIterations || 10)) allowTools = false;
       // After a refusal or a failure the model explains it: it does not go on inspecting outputs.
       if (result.denied || result.failed) resourceReads = 8;
@@ -2675,8 +2947,15 @@ async function sendMessage(event) {
       finishReason = '';
     }
   } catch (error) {
-    const canceled = signal.aborted;
-    if (output || reasoning || usedTool) {
+    const canceled = signal.aborted,
+      // The model did not come (51): the message stays in the thread, the line says why.
+      unloaded = !canceled && state.waitingForModel && !(output || reasoning || usedTool);
+    loading.stop();
+    if (unloaded) {
+      loading.fail(error.message || 'Le modèle n’a pas démarré.', () => void takeBack(true));
+      state.messages = archiveMessages(history);
+      state.archiveSnapshot = { messages: [...state.messages], incomplete: false };
+    } else if (output || reasoning || usedTool) {
       render();
       view.note.textContent = canceled ? 'Opération interrompue à votre demande.' : error.message;
       if (!canceled) view.note.classList.add('error');
@@ -2688,7 +2967,7 @@ async function sendMessage(event) {
       renderAttachments();
       $('welcome').hidden = state.messages.length > 0;
     }
-    if (!canceled) notice(error.message || 'La connexion a été interrompue.');
+    if (!canceled && !unloaded) notice(error.message || 'La connexion a été interrompue.');
   } finally {
     if (output || reasoning || usedTool) {
       if (output || reasoning) {
@@ -3115,6 +3394,8 @@ const generationUI = setupGenerationUI({
   onResize: scrollToBottom,
   // « Ouvrir » on a card: the creation on the Studio's screen.
   onOpen: record => showInStudio(record),
+  // A take that failed: « Relancer », « Modifier la proposition » (etats-maquette.md, 52).
+  onAgain: (request, options) => void againTake(request, options),
 });
 const workflowsUI = setupNativeWorkflows({
   api,
@@ -3287,7 +3568,14 @@ $('hf-token').addEventListener('keydown', event => {
   event.preventDefault();
   $('hf-token-save').click();
 });
-$('update-dialog').addEventListener('cancel', event => event.preventDefault());
+// Nothing stops an update while it installs; failed, Échap or a click beside the panel closes it (56).
+$('update-dialog').addEventListener('cancel', event => {
+  if (!$('update-dialog').classList.contains('is-failed')) event.preventDefault();
+});
+$('update-dialog').addEventListener('click', event => {
+  if (event.target === $('update-dialog') && $('update-dialog').classList.contains('is-failed')) $('update-dialog').close();
+});
+$('update-retry').onclick = () => void installUpdate({ confirmed: true });
 $('shutdown-app').onclick = shutdownApplication;
 $('restart-app').onclick = restartApplication;
 $('settings-close').onclick = () => requestSettingsClose();
@@ -3696,6 +3984,8 @@ try {
   });
   tokenKnown();
   state.version = initial.version || '';
+  // The configuration is known: the card of the first launch may show (updateControls).
+  state.booted = true;
   if (initial.version) $('settings-version').textContent = initial.version;
   void checkUpdates();
   applyTheme(initial.preferences?.theme);

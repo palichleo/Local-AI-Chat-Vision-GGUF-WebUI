@@ -94,6 +94,8 @@ const staticFiles = new Map([
   ['/interface-settings.mjs', ['interface-settings.mjs', 'text/javascript; charset=utf-8']],
   ['/take-flux.mjs', ['take-flux.mjs', 'text/javascript; charset=utf-8']],
   ['/take-player.mjs', ['take-player.mjs', 'text/javascript; charset=utf-8']],
+  ['/first-launch.mjs', ['first-launch.mjs', 'text/javascript; charset=utf-8']],
+  ['/missing-file.mjs', ['missing-file.mjs', 'text/javascript; charset=utf-8']],
   ['/transcript.mjs', ['transcript.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-guard.mjs', ['settings-guard.mjs', 'text/javascript; charset=utf-8']],
   ['/context-meter.mjs', ['context-meter.mjs', 'text/javascript; charset=utf-8']],
@@ -506,6 +508,8 @@ export async function createApplication({
     persist: () => preferences.saveHistory,
     clientFactory: () => generation.client(),
     timing: new ProgressHistory(join(dataDir, 'generation-timing.json')),
+    // What a shipped workflow lacks, to download from the chat (etats-maquette.md, 53).
+    offerOf: async workflow => (await generation.downloads.offers([workflow]))[workflow.id] ?? null,
     sourceMedia: async (ref, conversationId) => {
       if (ref.attachment) return { ...(await history.attachment(conversationId, ref.attachment)), name: 'Image jointe' };
       if (ref.resource_id) {
@@ -1715,6 +1719,11 @@ export async function createApplication({
         return send(200, runtime.cancel(body));
       }
       if (path === '/api/tools/revise') return send(200, await runtime.revise(body));
+      // A creation that failed, proposed again with the same settings (« Relancer », 52).
+      if (path === '/api/tools/again') {
+        if (engine.busy) throw problem('Une réponse est en cours. Attendez sa fin.', 409);
+        return send(200, await runtime.again(body));
+      }
       // Output buttons (Upscale, Interpoler): the same proposal a model call would make, without the model.
       if (path === '/api/tools/action') {
         if (clearingHistory || savingGeneration || savingSettings || pickingFile)
@@ -2383,7 +2392,14 @@ export async function createApplication({
                       400,
                     );
                   const { character, ...rest } = given;
-                  await emit({
+                  // Its workflow lacks a file (53): said first, before an image is made for it.
+                  const lacking = await runtime.lackingFile(calls, {
+                    conversationId: body.conversationId,
+                    turnId: body.turnId,
+                    messages: body.messages,
+                  });
+                  if (lacking) request = lacking;
+                  else await emit({
                     local_tool_request: {
                       kind: 'character',
                       call,

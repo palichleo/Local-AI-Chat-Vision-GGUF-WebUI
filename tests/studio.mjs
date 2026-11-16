@@ -1299,8 +1299,9 @@ test('the creations of the former Studio are no longer shown, nothing chooses th
     // moodix-design.md 7 bis 7: no « Cette conversation / Ancien Studio »; their files stay in output.
     assert.deepEqual(body.find('studio-source-pick'), []);
     assert.equal(body.find('studio-item').length, 0);
+    // What the Sortie will hold, in words alone (etats-maquette.md, 55).
     const [empty] = body.find('studio-empty-strip');
-    assert.equal(empty.children[1].textContent, 'Aucune image dans ce projet pour l’instant');
+    assert.equal(empty.children[0].textContent, 'Rien pour l’instant. Vos images apparaîtront ici, la dernière à gauche.');
   } finally {
     restore();
   }
@@ -1842,6 +1843,14 @@ test('a model this computer cannot run is greyed in the list with its reason, an
     assert.equal(usable.disabled, undefined);
     assert.deepEqual([greyed.disabled, greyed.title], [true, reason]);
     assert.equal(studio.body.find('studio-model-note')[0].textContent, reason);
+    // « Générer » waits for a prompt only (55), not for the model greyed in the list.
+    assert.deepEqual(
+      [studio.body.find('studio-go')[0].disabled, studio.body.find('studio-go')[0].title],
+      [true, 'Écrivez un prompt pour générer'],
+    );
+    studio.prompt().value = 'un phare';
+    studio.prompt().oninput();
+    studio.studio.render();
     assert.equal(studio.body.find('studio-go')[0].disabled, false);
   } finally {
     studio.restore();
@@ -1894,7 +1903,14 @@ test('Ctrl + Entrée generates from anywhere in the Studio, and the button says 
     assert.equal(go.children[0].glyph, 'play');
     assert.equal(go.children[1].textContent, 'Générer');
     assert.equal(body.find('studio-go-key').length, 0);
-    assert.match(go.title, /^Générer \((Ctrl|⌘)\+Entrée\)$/);
+    // Nothing typed, it is greyed and says why (55); a prompt typed, the keys are in its tooltip.
+    assert.deepEqual([go.disabled, go.title], [true, 'Écrivez un prompt pour générer']);
+    studio.prompt().value = 'un phare';
+    studio.prompt().oninput();
+    studio.studio.render();
+    assert.match(body.find('studio-go')[0].title, /^Générer \((Ctrl|⌘)\+Entrée\)$/);
+    studio.prompt().value = '';
+    studio.prompt().oninput();
     // Nothing typed: a prompt is asked for, nothing starts.
     page['studio-view'].onkeydown(key());
     await settle();
@@ -3098,7 +3114,10 @@ test('the Sortie follows the mode; the button at its right shows the whole proje
   try {
     const { body } = page;
     assert.equal(body.find('studio-item').length, 0);
-    assert.equal(body.find('studio-empty-strip')[0].children[1].textContent, 'Aucune image dans ce projet pour l’instant');
+    assert.equal(
+      body.find('studio-empty-strip')[0].children[0].textContent,
+      'Rien pour l’instant. Vos images apparaîtront ici, la dernière à gauche.',
+    );
     body.find('studio-sort-go')[0].onclick();
     assert.deepEqual(body.find('studio-item').map(tile => tile.dataset.id), ['s1']);
   } finally {

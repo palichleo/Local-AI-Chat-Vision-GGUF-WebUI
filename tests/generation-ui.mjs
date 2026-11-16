@@ -338,9 +338,46 @@ test('a proposal declined goes without a trace: no card, no line, nothing left t
   ui.clear();
 });
 
-test('failed and cancelled generations hide the empty preview and its dimensions', async t => {
+test('a take that fails stays veiled at its format: « ÉCHEC », what failed, « Relancer » and « Modifier la proposition » (52)', () => {
+  const container = new Element(),
+    again = [];
+  const ui = setupGenerationUI({
+    node: (...args) => new Element(...args),
+    api: async () => {
+      throw Error('No request expected');
+    },
+    openOutput() {},
+    onAgain: (request, options) => again.push([request.requestId, options.edit]),
+  });
+  const card = ui.mount(container, { requestId: 'r1', mediaType: 'video', workflowName: 'LTX 2.5', resolution: { width: 768, height: 448 } }),
+    figure = container.children[0],
+    [frame, caption] = figure.children;
+  card.progress('Mémoire vidéo insuffisante : nouvel essai, plus lent…');
+  assert.equal(figure.classList.contains('is-warned'), true, 'its point amber while it tries again');
+  card.progress('Décodage de la vidéo…');
+  assert.equal(figure.classList.contains('is-warned'), false);
+  card.finish({ failed: true, error: 'La mémoire de la carte graphique a manqué au décodage.' });
+  assert.equal(frame.hidden, false, 'at its place and its format');
+  assert.equal(figure.classList.contains('is-failed'), true);
+  const [chip, veil] = frame.children.slice(-2);
+  assert.equal(chip.textContent, 'Échec');
+  assert.deepEqual(veil.children.slice(0, 2).map(item => item.textContent), [
+    'La génération a échoué',
+    'La mémoire de la carte graphique a manqué au décodage. Rien n’a été enregistré.',
+  ]);
+  assert.equal(caption.children[1].textContent, 'Échec pendant le décodage de la vidéo');
+  const [relaunch, edit] = veil.children[2].children;
+  relaunch.onclick();
+  edit.onclick();
+  assert.deepEqual(again, [
+    ['r1', false],
+    ['r1', true],
+  ]);
+  ui.clear();
+});
+
+test('cancelled generations hide the empty preview and its dimensions', async t => {
   for (const [name, settle] of [
-    ['failed', card => card.finish({ failed: true, error: 'ComfyUI unavailable' })],
     ['cancelled', card => card.fail('Generation cancelled')],
     ['missing original', card => card.finish({ record: { outputs: [] } })],
   ])
