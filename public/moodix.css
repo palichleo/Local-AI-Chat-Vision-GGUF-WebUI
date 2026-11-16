@@ -6631,7 +6631,7 @@ body[data-view='studio'] #studio-kinds .kind-tab[aria-selected='true'] {
   box-shadow: none;
 }
 .ai-mark {
-  background: url('/assets/moodix-mark.svg?v=3') center / contain no-repeat;
+  background: url('/assets/moodix-mark.svg?v=4') center / contain no-repeat;
 }
 @media (max-width: 1039px) {
   :root {
@@ -6690,10 +6690,11 @@ body[data-view='studio'] .suggestions {
   font-size: var(--size-2);
   font-weight: 800;
 }
-/* Moodix AI in the chat, at the size of a line: at rest its file; while the model thinks, the
-   same cells drawn in the page, each at its own pace (moodix-mark-thinking.svg), the two laid one
-   over the other and passing from one to the other in 0.5 s. The movement stops, frozen, as the
-   answer starts; with less motion asked, the mark stays at rest. */
+/* Moodix AI in the chat (claude_design/maquettes/logo.md, Éclipse): a sphere lit from below and the
+   light ring that draws the rest of it, drawn in the page (app.js, moodixMark). While the model
+   thinks it breathes: the shadow withdraws to the middle and the white fills the sphere, then the
+   shadow comes back from the middle, in 4.2 s; at rest it does not move, nor with less motion asked.
+   Nothing leaves the circle; only the white and the black play. */
 .message-avatar {
   position: relative;
   display: block;
@@ -6701,127 +6702,45 @@ body[data-view='studio'] .suggestions {
   height: 20px;
   padding: 0;
 }
-.message-avatar > .moodix-mark-rest,
-.message-avatar > .moodix-mark-thinking {
-  position: absolute;
-  inset: 0;
+.eclipse {
   display: block;
   width: 100%;
   height: 100%;
-  transition: opacity 0.5s ease;
+  overflow: visible;
 }
-.message-avatar > .moodix-mark-thinking {
-  opacity: 0;
+.eclipse-ring {
   fill: none;
-  stroke: none;
+  stroke: var(--mark, #eee8de);
+  stroke-opacity: 0.22;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
-.message-avatar.is-thinking > .moodix-mark-thinking {
-  opacity: 1;
+.eclipse-sphere {
+  fill: var(--mark, #eee8de);
 }
-.message-avatar.is-thinking > .moodix-mark-rest {
-  opacity: 0;
+.is-thinking .eclipse-shadow {
+  animation: eclipse-breath 4.2s cubic-bezier(0.55, 0, 0.35, 1) infinite;
 }
-.moodix-mark-thinking rect {
-  stroke: none;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation-name: moodix-think;
-  animation-duration: 2.5s;
-  animation-timing-function: ease-in-out;
-  animation-iteration-count: infinite;
-  animation-play-state: paused;
-}
-.message-avatar.is-thinking .moodix-mark-thinking rect {
-  animation-play-state: running;
-}
-.moodix-mark-thinking rect:nth-child(1) {
-  animation-duration: 1.9s;
-  animation-delay: 0s;
-}
-.moodix-mark-thinking rect:nth-child(2) {
-  animation-duration: 2.56s;
-  animation-delay: -1.55s;
-}
-.moodix-mark-thinking rect:nth-child(3) {
-  animation-duration: 3.03s;
-  animation-delay: -3.1s;
-}
-.moodix-mark-thinking rect:nth-child(4) {
-  animation-duration: 3.4s;
-  animation-delay: -1.24s;
-}
-.moodix-mark-thinking rect:nth-child(5) {
-  animation-duration: 3.53s;
-  animation-delay: -2.17s;
-}
-.moodix-mark-thinking rect:nth-child(6) {
-  animation-duration: 1.9s;
-  animation-delay: -0.31s;
-}
-.moodix-mark-thinking rect:nth-child(7) {
-  animation-duration: 2.56s;
-  animation-delay: -1.86s;
-}
-.moodix-mark-thinking rect:nth-child(8) {
-  animation-duration: 3.03s;
-  animation-delay: 0s;
-}
-.moodix-mark-thinking rect:nth-child(9) {
-  animation-duration: 3.16s;
-  animation-delay: -0.93s;
-}
-.moodix-mark-thinking rect:nth-child(10) {
-  animation-duration: 3.53s;
-  animation-delay: -2.48s;
-}
-.moodix-mark-thinking rect:nth-child(11) {
-  animation-duration: 1.9s;
-  animation-delay: -0.62s;
-}
-.moodix-mark-thinking rect:nth-child(12) {
-  animation-duration: 2.56s;
-  animation-delay: -2.17s;
-}
-.moodix-mark-thinking rect:nth-child(13) {
-  animation-duration: 2.3s;
-  animation-delay: -3.1s;
-}
-.moodix-mark-thinking rect:nth-child(14) {
-  animation-duration: 3.16s;
-  animation-delay: -1.24s;
-}
-.moodix-mark-thinking rect:nth-child(15) {
-  animation-duration: 3.53s;
-  animation-delay: -2.79s;
-}
-.moodix-mark-thinking rect:nth-child(16) {
-  animation-duration: 1.9s;
-  animation-delay: -0.93s;
-}
-@keyframes moodix-think {
+@keyframes eclipse-breath {
   0%,
+  10% {
+    cy: 11.6px;
+    r: 11.4px;
+  }
+  44%,
+  56% {
+    cy: 16px;
+    r: 0px;
+  }
+  90%,
   100% {
-    transform: scale(0.48);
-    opacity: 0.45;
-  }
-  45% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  70% {
-    transform: scale(0.72);
-    opacity: 0.75;
+    cy: 11.6px;
+    r: 11.4px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .message-avatar.is-thinking > .moodix-mark-thinking {
-    opacity: 0;
-  }
-  .message-avatar.is-thinking > .moodix-mark-rest {
-    opacity: 1;
-  }
-  .moodix-mark-thinking rect {
-    animation-name: none;
+  .is-thinking .eclipse-shadow {
+    animation: none;
   }
 }
 
@@ -11394,4 +11313,362 @@ body[data-view='library'] .chat-panel {
 :focus-visible {
   outline-color: var(--focus) !important;
   outline-width: 2px !important;
+}
+
+/* ============================================================ part 4: Salle obscure (0.6.0) */
+/*
+ * La direction « Salle obscure » (claude_design/maquettes, reference-maquettes.md fait foi) : un fond
+ * très sombre réglable, du verre fumé, le grain derrière le verre (jamais sur les images), la lumière
+ * de la dernière prise, un tramage contre les bandes ; une couleur d'accent par salle ; Gloock pour
+ * les titres et le logo, Jost pour l'interface, JetBrains Mono pour les données. Le mode Jour garde
+ * son ancienne palette (à décider) : ce qui suit vaut hors de lui. La salle elle-même (sa lumière, la
+ * texture de son grain) est dans room.mjs.
+ */
+@font-face {
+  font-family: 'Gloock';
+  src: url('/fonts/Gloock-latin.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Gloock';
+  src: url('/fonts/Gloock-latin-ext.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Jost';
+  src: url('/fonts/Jost-latin.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Jost';
+  src: url('/fonts/Jost-latin-ext.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Une salle : son fond, son verre (r, g, b), son menu opaque (entre les deux), son accent et l'encre
+   posée dessus, ses trois gris (secondaire, tertiaire, discret). Le texte principal reste l'ivoire. */
+:root:not([data-theme='light']) {
+  --ivory: #eee8de;
+  /* The mark (logo.md): ivory in the dark, ink on a light ground. */
+  --mark: var(--ivory);
+  --room-bg: #0c0b0e;
+  --room-glass: 22, 20, 28;
+  --room-menu: #121116;
+  --accent: #d0cadd;
+  --on-accent: #171320;
+  --grey-1: #aaa7af;
+  --grey-2: #8b8891;
+  --grey-3: #615e67;
+}
+:root[data-room='ecran']:not([data-theme='light']) {
+  --room-bg: #16151a;
+  --room-glass: 32, 30, 38;
+  --room-menu: #1b1a20;
+  --accent: #d4d3d9;
+  --on-accent: #161320;
+  --grey-1: #a9a8ad;
+  --grey-2: #8a898f;
+  --grey-3: #605f65;
+}
+:root[data-room='nuit']:not([data-theme='light']) {
+  --room-bg: #0a0d14;
+  --room-glass: 18, 22, 32;
+  --room-menu: #0e121a;
+  --accent: #b7c9eb;
+  --on-accent: #131820;
+  --grey-1: #a3a9b2;
+  --grey-2: #838996;
+  --grey-3: #59606b;
+}
+:root[data-room='velours']:not([data-theme='light']) {
+  --room-bg: #130b10;
+  --room-glass: 30, 19, 26;
+  --room-menu: #190f15;
+  --accent: #e7c1d2;
+  --on-accent: #201319;
+  --grey-1: #b1a5aa;
+  --grey-2: #93858c;
+  --grey-3: #695b62;
+}
+:root[data-room='tirage']:not([data-theme='light']) {
+  --room-bg: #0f0d0b;
+  --room-glass: 27, 24, 21;
+  --room-menu: #151210;
+  --accent: #e6cfb3;
+  --on-accent: #201a13;
+  --grey-1: #b2aca4;
+  --grey-2: #958d84;
+  --grey-3: #6a635a;
+}
+:root[data-room='lavande']:not([data-theme='light']) {
+  --room-bg: #110f18;
+  --room-glass: 28, 25, 38;
+  --room-menu: #17141f;
+  --accent: #c4b8ee;
+  --on-accent: #17131f;
+  --grey-1: #aca6b2;
+  --grey-2: #8c8794;
+  --grey-3: #615c68;
+}
+/* Les jetons que la feuille emploie déjà, pris dans la salle : ce qui n'est pas encore redessiné en
+   prend les couleurs et les polices. Les quatre couleurs « Beaubourg » s'effacent devant l'accent. */
+:root:not([data-theme='light']) {
+  color-scheme: dark;
+  --bg: var(--room-bg);
+  --sidebar: var(--room-bg);
+  --frame: var(--room-bg);
+  --window: transparent;
+  --surface: var(--room-menu);
+  --surface-raised: rgb(var(--room-glass));
+  --field: var(--room-menu);
+  --input: var(--room-menu);
+  --screen: #08070a;
+  --tint: rgba(238, 232, 222, 0.06);
+  --hover: rgba(238, 232, 222, 0.07);
+  --chip: rgba(238, 232, 222, 0.07);
+  --line: rgba(238, 232, 222, 0.08);
+  --line-strong: rgba(238, 232, 222, 0.16);
+  --field-line: rgba(238, 232, 222, 0.1);
+  --title-line: rgba(238, 232, 222, 0.06);
+  --text-1: var(--ivory);
+  --text-2: var(--grey-1);
+  --text-3: var(--grey-2);
+  --text-4: var(--grey-3);
+  --accent-hover: var(--accent);
+  --link: var(--accent);
+  --button: var(--accent);
+  --button-hover: var(--accent);
+  --selected: rgba(238, 232, 222, 0.1);
+  --on-selected: var(--ivory);
+  --fn-input: var(--accent);
+  --fn-action: var(--accent);
+  --fn-settings: var(--accent);
+  --fn-output: var(--accent);
+  --fn-input-text: var(--accent);
+  --fn-settings-text: var(--accent);
+  --fn-output-text: var(--accent);
+  --fn-action-text: var(--accent);
+  --on-action: var(--on-accent);
+  --window-line: rgba(238, 232, 222, 0.06);
+  --focus: var(--accent);
+  --font-ui: 'Jost', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Gloock', Georgia, serif;
+  /* La règle des formes : coins de 10 px à partir de 38 px de haut, de 8 px en dessous. */
+  --radius-l: 10px;
+  --radius-s: 8px;
+  /* Le verre fumé (direction-artistique.md, « Matière »). */
+  --glass: rgba(var(--room-glass), 0.5);
+  --glass-line: rgba(238, 232, 222, 0.05);
+}
+html:not([data-theme='light']) {
+  background: var(--room-bg);
+}
+/* La salle est derrière la page : le corps ne la couvre pas. */
+:root:not([data-theme='light']) body {
+  background: transparent;
+  font-family: var(--font-ui);
+}
+
+/* ------------------------------------------------------------------ the room behind the page */
+.room {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--room-bg);
+}
+:root[data-theme='light'] .room,
+:root[data-theme='light'] .room-dither {
+  display: none;
+}
+/* La lumière de la dernière prise : deux images opaques de 128 px agrandies (room.mjs), un voile
+   en multiply et une lumière en screen ; sa force selon l'éclairage, sans la recalculer. */
+.room-veil,
+.room-glow {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  width: 1280px;
+  height: 1280px;
+  translate: -50% -50%;
+}
+.room-veil[hidden],
+.room-glow[hidden] {
+  display: none;
+}
+.room-veil {
+  mix-blend-mode: multiply;
+  filter: invert(1) brightness(var(--light-strength, 1)) invert(1);
+}
+.room-glow {
+  mix-blend-mode: screen;
+  filter: brightness(var(--light-strength, 1));
+}
+/* Plusieurs sources : un halo couleur de l'accent en haut à gauche, un halo ivoire en bas à droite,
+   le faisceau du haut ; des courbes douces en plusieurs paliers, sans flou. */
+.room-halos {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse 34% 60% at 50% -12%,
+      color-mix(in srgb, var(--accent) 6%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 5.2%, transparent) 20%,
+      color-mix(in srgb, var(--accent) 3.4%, transparent) 42%,
+      color-mix(in srgb, var(--accent) 1.6%, transparent) 64%,
+      color-mix(in srgb, var(--accent) 0.4%, transparent) 84%,
+      transparent 100%
+    ),
+    radial-gradient(
+      circle 56vmax at 6% 4%,
+      color-mix(in srgb, var(--accent) 7%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 6%, transparent) 18%,
+      color-mix(in srgb, var(--accent) 3.8%, transparent) 40%,
+      color-mix(in srgb, var(--accent) 1.7%, transparent) 62%,
+      color-mix(in srgb, var(--accent) 0.4%, transparent) 84%,
+      transparent 100%
+    ),
+    radial-gradient(
+      circle 48vmax at 96% 100%,
+      rgba(238, 232, 222, 0.04) 0%,
+      rgba(238, 232, 222, 0.034) 18%,
+      rgba(238, 232, 222, 0.022) 40%,
+      rgba(238, 232, 222, 0.01) 62%,
+      rgba(238, 232, 222, 0.002) 84%,
+      transparent 100%
+    );
+}
+:root:not([data-light='plusieurs']) .room-halos {
+  display: none;
+}
+/* Le vignettage, en S : 0,55 avec plusieurs sources, 0,32 avec une, 0,18 discret. */
+.room-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse 78% 74% at 50% 46%,
+    transparent 0%,
+    transparent 38%,
+    rgb(0 0 0 / calc(var(--vignette, 0.55) * 0.05)) 50%,
+    rgb(0 0 0 / calc(var(--vignette, 0.55) * 0.2)) 62%,
+    rgb(0 0 0 / calc(var(--vignette, 0.55) * 0.46)) 74%,
+    rgb(0 0 0 / calc(var(--vignette, 0.55) * 0.76)) 87%,
+    rgb(0 0 0 / var(--vignette, 0.55)) 100%
+  );
+}
+/* Le grain, derrière le verre : 24 i/s, dix positions de la tuile en 0,4167 s ; figé si demandé,
+   pendant une génération, derrière une fenêtre, quand la page est cachée, ou avec moins
+   d'animations. Opacité = base × dose (room.mjs). */
+.room-grain {
+  position: absolute;
+  inset: -256px;
+  background-image: var(--grain-image, url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'256'%20height%3D'256'%3E%3Cfilter%20id%3D'g'%20x%3D'0'%20y%3D'0'%20width%3D'100%25'%20height%3D'100%25'%20color-interpolation-filters%3D'sRGB'%3E%3CfeTurbulence%20type%3D'fractalNoise'%20baseFrequency%3D'1.25'%20numOctaves%3D'1'%20stitchTiles%3D'stitch'%2F%3E%3CfeColorMatrix%20type%3D'saturate'%20values%3D'0'%2F%3E%3CfeComponentTransfer%3E%3CfeFuncA%20type%3D'table'%20tableValues%3D'1%201'%2F%3E%3C%2FfeComponentTransfer%3E%3CfeGaussianBlur%20stdDeviation%3D'0.6'%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D'256'%20height%3D'256'%20filter%3D'url(%23g)'%2F%3E%3C%2Fsvg%3E"));
+  background-size: 256px 256px;
+  opacity: var(--grain-opacity, 0.2);
+  mix-blend-mode: var(--grain-blend, overlay);
+  animation: room-grain 0.4167s steps(1, end) infinite;
+}
+@keyframes room-grain {
+  0% {
+    transform: translate(0, 0);
+  }
+  10% {
+    transform: translate(-83px, 41px);
+  }
+  20% {
+    transform: translate(57px, -112px);
+  }
+  30% {
+    transform: translate(-129px, -38px);
+  }
+  40% {
+    transform: translate(102px, 87px);
+  }
+  50% {
+    transform: translate(-21px, 133px);
+  }
+  60% {
+    transform: translate(141px, -61px);
+  }
+  70% {
+    transform: translate(-97px, -121px);
+  }
+  80% {
+    transform: translate(29px, 66px);
+  }
+  90% {
+    transform: translate(-58px, -9px);
+  }
+}
+:root[data-motion='fige'] .room-grain,
+:root[data-page-hidden='true'] .room-grain,
+:root[data-generating='true'] .room-grain,
+body:has(dialog[open]) .room-grain {
+  animation-play-state: paused;
+}
+:root[data-grain='aucun'] .room-grain {
+  display: none;
+}
+/* Centre clair : le grain s'efface au milieu. */
+:root[data-filters~='centre'] .room-grain {
+  -webkit-mask-image: radial-gradient(ellipse 58% 54% at 50% 46%, transparent 30%, #000 82%);
+  mask-image: radial-gradient(ellipse 58% 54% at 50% 46%, transparent 30%, #000 82%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .room-grain {
+    animation: none;
+  }
+}
+/* Le tramage, au-dessus de tout : une tuile de bruit bleu à 1,8 %, fixe, jamais animée ; ±1 niveau,
+   invisible, qui casse les marches des dégradés sombres. */
+.room-dither {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  background: url('/assets/tramage-64.png') repeat;
+  opacity: 0.018;
+}
+
+/* ------------------------------------------------------------------ glass and shapes */
+/* Le verre fumé : translucide, il floute ce qui est derrière lui (24 px, saturation 1,15), liseré
+   clair à 5 %. Pas de verre dans du verre : un verre posé dans un autre ne floute plus. */
+.glass {
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(24px) saturate(1.15);
+  backdrop-filter: blur(24px) saturate(1.15);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+.glass .glass {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: rgba(var(--room-glass), 0.35);
+}
+/* Ce qui se clique est un carré arrondi : 8 px sous 38 px de haut (tous les boutons d'icône), 10 px
+   à partir de 38 px ; chaque écran prend les siens en étant redessiné. */
+:root:not([data-theme='light']) .icon-button {
+  border-radius: var(--radius-s);
+}
+/* Le filet aux quatre couleurs de l'ancienne fenêtre n'a plus sa place dans la salle. */
+.mdx-filet {
+  display: none;
+}
+:root[data-theme='light'] {
+  --mark: #0c0b0e;
+}
+:root[data-theme='light'] .ai-mark {
+  background-image: url('/assets/moodix-mark-encre.svg?v=4');
 }

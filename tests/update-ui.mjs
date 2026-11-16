@@ -149,6 +149,8 @@ test('download failure keeps configuration, file selection and composer controls
     state,
     $: get,
     document: {
+      // The room reads on the root whether a generation runs (0.6.0).
+      documentElement: { dataset: {} },
       querySelectorAll: selector => (selector === 'button,input,textarea,select' ? [...nodes.values()] : []),
     },
     labels: { stopped: 'Stopped' },

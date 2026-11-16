@@ -190,7 +190,7 @@ test('the button beside the logo, and each icon named for its tooltip', async ()
   assert.match(button, /aria-expanded="true"/);
   assert.match(button, /data-tip="Replier la barre \(Ctrl\+B\)"/);
   assert.ok(html.indexOf('id="sidebar-toggle"') > html.indexOf('class="brand-rule"'), 'at the right of the logo');
-  assert.match(html, /<img class="sidebar-mark" src="\/assets\/moodix-mark\.svg\?v=3"/);
+  assert.match(html, /<img class="sidebar-mark" src="\/assets\/moodix-mark\.svg\?v=4"/);
   assert.match(html, /<symbol id="i-panel" viewBox="0 0 24 24"><rect x="3\.5" y="4\.5" width="17" height="15" rx="3"\/><path d="M9\.5 4\.5v15"\/><\/symbol>/);
   for (const [id, tip] of [
     ['new-chat', 'Nouveau chat'],
@@ -244,7 +244,7 @@ test('the sidebar spans the window: the logo at its top edge, the actions at its
   assert.doesNotMatch(folded, /align-self/);
   // The small logo's squares (from 4.6 of 32, at 24 px: 3.45 px) 2 px above the middle: 20 + 6 - 2 + 3.45.
   assert.match(css, /:root\[data-sidebar='collapsed'\] \.sidebar-toggle \.sidebar-mark \{[^}]*transform: translateY\(-2px\);/);
+  // The mark is the Éclipse now (0.6.0), drawn on the same 32 units.
   const mark = await read('assets/moodix-mark.svg');
   assert.match(mark, /viewBox="0 0 32 32"/);
-  assert.equal(Math.min(...[...mark.matchAll(/<rect[^>]* y="([\d.]+)"/g)].map(found => Number(found[1]))), 4.6);
 });

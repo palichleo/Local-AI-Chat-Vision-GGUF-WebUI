@@ -1,4 +1,5 @@
 import { followWindow } from './filet.mjs';
+import { refreshLight, showTakeReady } from './room.mjs';
 import { setupSidebarFold } from './sidebar-fold.mjs';
 import { withReference, withoutReference } from './reference-tokens.mjs';
 import { markReferences, removedNotice, setupReferencePeek, setupReferencePicker } from './reference-picker.mjs';
@@ -107,33 +108,24 @@ function icon(name) {
   return svg;
 }
 
-// The « matrice d'attention » of Moodix AI (moodix-design.md 1, Petit logo): four rows of four cells,
-// one colour a row, in the order of the pipes. At rest, its file (the full logo, its 16 cells whole;
-// ?v=3: the browsers kept the earlier one, a still of the movement); while the model thinks, the same
-// cells drawn in the page, so that they move everywhere (their pace is in moodix.css: the page
-// takes no style of its own). Both are laid one over the other; .is-thinking passes from one to the
-// other.
-const MARK_COLOURS = ['#3D6BF5', '#22A060', '#F6C343', '#E8402F'];
+// The mark of Moodix AI (claude_design/maquettes/logo.md, Éclipse): a sphere in the dark, lit from
+// below, and the light ring that draws the rest of it. While the model thinks it breathes: the shadow
+// withdraws to the middle and the white fills the sphere, then the shadow comes back from the middle
+// (its pace is in moodix.css). Each mark has a mask of its own, so that each breathes alone.
+let eclipseCount = 0;
 function moodixMark() {
-  const rest = node('img', 'moodix-mark-rest');
-  rest.src = '/assets/moodix-mark.svg?v=3';
-  rest.alt = '';
-  const thinking = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  thinking.setAttribute('class', 'moodix-mark-thinking');
-  thinking.setAttribute('viewBox', '0 0 32 32');
-  thinking.setAttribute('aria-hidden', 'true');
-  for (let row = 0; row < 4; row++)
-    for (let column = 0; column < 4; column++) {
-      const cell = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      cell.setAttribute('x', (4.6 + column * 5.95).toFixed(2));
-      cell.setAttribute('y', (4.6 + row * 5.95).toFixed(2));
-      cell.setAttribute('width', '5');
-      cell.setAttribute('height', '5');
-      cell.setAttribute('rx', '1.1');
-      cell.setAttribute('fill', MARK_COLOURS[row]);
-      thinking.append(cell);
-    }
-  return [rest, thinking];
+  const id = `eclipse-${++eclipseCount}`,
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'eclipse');
+  svg.setAttribute('viewBox', '0 0 32 32');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML =
+    `<defs><mask id="${id}" maskUnits="userSpaceOnUse" x="-8" y="-8" width="48" height="48">` +
+    '<rect x="-8" y="-8" width="48" height="48" fill="#000"/><circle cx="16" cy="16" r="12.5" fill="#fff"/>' +
+    '<circle class="eclipse-shadow" cx="16" cy="11.6" r="11.4" fill="#000"/></mask></defs>' +
+    '<circle class="eclipse-ring" cx="16" cy="16" r="12.5"/>' +
+    `<circle class="eclipse-sphere" cx="16" cy="16" r="12.5" mask="url(#${id})"/>`;
+  return [svg];
 }
 /** The mark of a reply moves while its model thinks: reasoning has come, the answer not yet. */
 function markThinking(view, thinking) {
@@ -682,6 +674,9 @@ function updateControls() {
   // good. The server refuses while it is busy, and the page asks again (installFromButton).
   $('settings-update-install').disabled = state.updating || state.closingApp || !state.connected;
   const toolBusy = !!s.toolJob;
+  // A generation runs (the model's answer or a take): the room stops its grain, so that the page
+  // takes nothing from the GPU while it works (moodix.css, part 4).
+  document.documentElement.dataset.generating = String(Boolean(state.generating || toolBusy));
   $('generation-recover').hidden = !s.toolJob?.blocked;
   const running = ['loading', 'ready', 'stopping'].includes(s.state);
   const text = state.connected ? labels[s.state] || 'État inconnu' : 'Connexion interrompue';
@@ -1074,11 +1069,14 @@ async function refreshStatus() {
     const previous = state.status.state;
     const runnerBefore = state.status.runner?.state;
     const wasConnected = state.connected;
+    const jobBefore = state.status.toolJob?.id;
     // The server was out of reach: back, it may be another one (restarted, a new key). The key is
     // asked for first, so that the question is not refused (0.5.128).
     if (!wasConnected && state.token) await serverRestarted();
     state.status = await (await api('status', undefined, { signal: AbortSignal.timeout(5000) })).json();
     workflowsUI.updateRunner?.(state.status.runner);
+    // A generation has just ended: the room takes the light of the new take (room.mjs).
+    if (jobBefore && state.status.toolJob?.id !== jobBefore) state.onTakeDone?.();
     // The generation engine has just become ready: the Studio reads again what it offers.
     if (state.status.runner?.state === 'ready' && runnerBefore !== 'ready') {
       state.studio?.invalidate?.({ tools: true });
@@ -3486,6 +3484,17 @@ try {
   notice(error.message);
   updateControls();
 }
+// The room (« Salle obscure », room.mjs): the light of the latest take behind the page, made once per
+// take; a take ready while the page is out of sight lights a dot on the icon of its tab (logo.md).
+let newestTake;
+state.onTakeDone = async () => {
+  const newest = await refreshLight(api);
+  if (newest && newestTake !== undefined && newest !== newestTake && document.hidden) showTakeReady();
+  if (newest !== undefined) newestTake = newest;
+};
+void refreshLight(api).then(newest => {
+  if (newestTake === undefined && newest !== undefined) newestTake = newest;
+});
 // The filet over the window: its four colours along the top, at the window's size.
 followWindow(document.querySelector('.mdx-filet'), document.querySelector('.workspace'));
 // The references of the project at hand: « # » in the message box lists them, « #ref3 » in a

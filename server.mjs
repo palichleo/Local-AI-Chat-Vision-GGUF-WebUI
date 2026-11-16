@@ -51,12 +51,13 @@ const maxBody = 20 * 1024 * 1024;
 const staticFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
-  // The small logo (moodix-design.md 1): its fallback, its icon for a phone's home screen, a large one, and
-  // the mark of Moodix AI in the chat.
+  // The small logo (claude_design/maquettes/logo.md, Éclipse): its fallback, its icon for a phone's home
+  // screen, a large one, and the mark of Moodix AI, in ivory and in ink.
   ['/favicon.ico', ['favicon.ico', 'image/x-icon']],
   ['/apple-touch-icon.png', ['apple-touch-icon.png', 'image/png']],
   ['/icon-512.png', ['icon-512.png', 'image/png']],
   ['/assets/moodix-mark.svg', ['assets/moodix-mark.svg', 'image/svg+xml']],
+  ['/assets/moodix-mark-encre.svg', ['assets/moodix-mark-encre.svg', 'image/svg+xml']],
   ['/assets/metallic-grain.png', ['assets/metallic-grain.png', 'image/png']],
   ['/update-ui.mjs', ['update-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/material-light.mjs', ['material-light.mjs', 'text/javascript; charset=utf-8']],
@@ -70,6 +71,13 @@ const staticFiles = new Map([
   ['/unexpected-errors.mjs', ['unexpected-errors.mjs', 'text/javascript; charset=utf-8']],
   ['/sidebar-state.js', ['sidebar-state.js', 'text/javascript; charset=utf-8']],
   ['/moodix.css', ['moodix.css', 'text/css; charset=utf-8']],
+  // « Salle obscure » (0.6.0): the room behind the page, its two fonts, the tile of its dithering.
+  ['/room.mjs', ['room.mjs', 'text/javascript; charset=utf-8']],
+  ['/fonts/Gloock-latin.woff2', ['fonts/Gloock-latin.woff2', 'font/woff2']],
+  ['/fonts/Gloock-latin-ext.woff2', ['fonts/Gloock-latin-ext.woff2', 'font/woff2']],
+  ['/fonts/Jost-latin.woff2', ['fonts/Jost-latin.woff2', 'font/woff2']],
+  ['/fonts/Jost-latin-ext.woff2', ['fonts/Jost-latin-ext.woff2', 'font/woff2']],
+  ['/assets/tramage-64.png', ['assets/tramage-64.png', 'image/png']],
   ['/assets/mdx-white.png', ['assets/mdx-white.png', 'image/png']],
   ['/fonts/Michroma-Regular.ttf', ['fonts/Michroma-Regular.ttf', 'font/ttf']],
   ['/fonts/Manrope-Variable.ttf', ['fonts/Manrope-Variable.ttf', 'font/ttf']],

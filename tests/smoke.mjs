@@ -112,13 +112,22 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async t => {
       assert.equal(icon.status, 200);
       assert.equal(icon.headers.get('content-type'), 'image/svg+xml');
       assert.match(await page.text(), /<link rel="icon"[^>]*href="\/favicon\.svg(\?v=\d+)?"/);
-      assert.match(await icon.text(), /<svg[^>]*viewBox="0 0 32 32"/);
+      // The tile of the Éclipse, drawn for 16 px (claude_design/maquettes/logo.md).
+      assert.match(await icon.text(), /<svg[^>]*viewBox="0 0 16 16"/);
       // The small logo, its fallback and its large sizes, and the mark of Moodix AI in the chat.
       for (const [path, type] of [
         ['/favicon.ico', 'image/x-icon'],
         ['/apple-touch-icon.png', 'image/png'],
         ['/icon-512.png', 'image/png'],
         ['/assets/moodix-mark.svg', 'image/svg+xml'],
+        ['/assets/moodix-mark-encre.svg', 'image/svg+xml'],
+        // « Salle obscure »: the room, its fonts, the tile of its dithering.
+        ['/room.mjs', 'text/javascript; charset=utf-8'],
+        ['/fonts/Gloock-latin.woff2', 'font/woff2'],
+        ['/fonts/Gloock-latin-ext.woff2', 'font/woff2'],
+        ['/fonts/Jost-latin.woff2', 'font/woff2'],
+        ['/fonts/Jost-latin-ext.woff2', 'font/woff2'],
+        ['/assets/tramage-64.png', 'image/png'],
       ]) {
         const served = await fetch(base + path);
         assert.equal(served.status, 200, path);

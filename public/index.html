@@ -1,19 +1,22 @@
 <!doctype html>
-<html lang="fr" data-theme="dark">
+<html lang="fr" data-theme="dark" data-room="salle" data-light="plusieurs" data-grain="poudre" data-motion="24" data-filters="diffusion lumiere">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <title>Moodix</title>
-  <link rel="icon" href="/favicon.ico?v=3" sizes="16x16 32x32 48x48">
-  <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png?v=3">
-  <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg?v=3">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
+  <link rel="icon" href="/favicon.ico?v=4" sizes="16x16 32x32 48x48">
+  <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png?v=4">
+  <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg?v=4">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4">
   <script src="/sidebar-state.js"></script>
   <link rel="stylesheet" href="/moodix.css">
+  <link rel="preload" href="/fonts/Jost-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/Gloock-latin.woff2" as="font" type="font/woff2" crossorigin>
   <script type="module" src="/app.js"></script>
 </head>
 <body data-view="chat">
+  <div class="room" aria-hidden="true"><img class="room-veil" alt="" hidden><img class="room-glow" alt="" hidden><div class="room-halos"></div><div class="room-vignette"></div><div class="room-grain"></div></div>
   <svg class="icon-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
     
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3Z"/></symbol>
@@ -58,7 +61,7 @@
   </svg>
   <button id="navigation-scrim" type="button" class="nav-scrim" aria-label="Fermer le menu" tabindex="-1"></button>
   <aside id="sidebar" class="sidebar" aria-label="Navigation">
-    <div class="sidebar-top"><a id="brand-home" class="brand" href="/" aria-label="Moodix, retour au chat"><img class="brand-logo" src="/assets/mdx-white.png" alt="Moodix" width="106" height="28"><span class="brand-rule" aria-hidden="true"><span></span><span></span><span></span><span></span></span></a><button id="sidebar-toggle" type="button" class="sidebar-toggle" aria-label="Replier la barre" aria-controls="sidebar" aria-expanded="true" data-tip="Replier la barre (Ctrl+B)"><img class="sidebar-mark" src="/assets/moodix-mark.svg?v=3" alt="" width="24" height="24"><svg class="sidebar-panel" aria-hidden="true"><use href="#i-panel"/></svg></button><button id="navigation-close" type="button" class="icon-button nav-close" aria-label="Fermer le menu"><svg><use href="#i-close"/></svg></button></div>
+    <div class="sidebar-top"><a id="brand-home" class="brand" href="/" aria-label="Moodix, retour au chat"><img class="brand-logo" src="/assets/mdx-white.png" alt="Moodix" width="106" height="28"><span class="brand-rule" aria-hidden="true"><span></span><span></span><span></span><span></span></span></a><button id="sidebar-toggle" type="button" class="sidebar-toggle" aria-label="Replier la barre" aria-controls="sidebar" aria-expanded="true" data-tip="Replier la barre (Ctrl+B)"><img class="sidebar-mark" src="/assets/moodix-mark.svg?v=4" alt="" width="24" height="24"><svg class="sidebar-panel" aria-hidden="true"><use href="#i-panel"/></svg></button><button id="navigation-close" type="button" class="icon-button nav-close" aria-label="Fermer le menu"><svg><use href="#i-close"/></svg></button></div>
     <button class="new-chat" id="new-chat" data-tip="Nouveau chat"><svg><use href="#i-plus"/></svg><span>Nouveau chat</span></button>
     <div class="sidebar-section"><nav class="sidebar-nav" aria-label="Sections"><button id="chat-open" type="button" class="home-button" aria-controls="chat-area" data-tip="Chat"><svg aria-hidden="true"><use href="#i-chat"/></svg><span>Chat</span></button><div class="studio-nav"><button id="studio-open" type="button" class="home-button" aria-controls="studio-view" data-tip="Studio"><svg aria-hidden="true"><use href="#i-studio"/></svg><span>Studio</span></button><div id="studio-kinds" class="kind-tabs" role="tablist" aria-label="Type de création"></div></div><button id="library-open" type="button" class="home-button" aria-controls="library-view" data-tip="Bibliothèque"><svg aria-hidden="true"><use href="#i-library"/></svg><span>Bibliothèque</span></button></nav><div class="project-nav-heading"><span>Projets</span><button id="project-create" type="button" class="icon-button" aria-label="Nouveau projet" title="Nouveau projet"><svg><use href="#i-plus"/></svg></button></div><span id="conversation-title" hidden>Nouveau chat</span><section id="history-section"><nav id="history-list" class="history-list" aria-label="Projets et conversations"></nav></section></div>
     <div class="sidebar-bottom"><div class="sidebar-actions"><button id="toggle-engine" type="button" class="engine-button is-off" aria-label="Démarrer le modèle" title="Démarrer le modèle"><svg aria-hidden="true"><use href="#i-play"/></svg></button><button id="new-chat-mobile" class="icon-button mobile-new" aria-label="Nouveau chat"><svg><use href="#i-plus"/></svg></button><button id="settings-open" class="settings-button" aria-label="Configuration" title="Configuration"><svg><use href="#i-settings"/></svg></button></div></div>
@@ -159,5 +162,6 @@
   <dialog id="update-dialog" aria-labelledby="update-title"><div class="update-dialog-heading"><span class="update-emblem" aria-hidden="true"><svg><use href="#i-update"/></svg></span><h2 id="update-title">Mise à jour</h2></div><p id="update-progress" role="status">Préparation…</p><div class="update-activity" aria-hidden="true"></div><p>Votre conversation et votre brouillon seront restaurés après le redémarrage.</p></dialog>
   <div class="sr-only" id="live-status" role="status" aria-live="polite"></div>
   <div id="ai-cursor" class="ai-cursor" aria-hidden="true" hidden><span class="ai-cursor-halo"></span><span class="ai-cursor-ring"></span><svg class="ai-cursor-arrow" viewBox="0 0 24 24"><path d="M4 3l15 8-6.5 1.6L9 19z"/></svg><span class="ai-cursor-label"><strong>Moodix AI</strong><span id="ai-cursor-text"></span></span></div>
+  <div class="room-dither" aria-hidden="true"></div>
 </body>
 </html>
