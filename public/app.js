@@ -32,6 +32,7 @@ import { waitForModel } from './model-ready.mjs';
 import { setupFirstLaunch } from './first-launch.mjs';
 import { missingFileCard } from './missing-file.mjs';
 import { setupGlassSelects } from './glass-menu.mjs';
+import { reflection, thoughtTime } from './reflection.mjs';
 import { outputActions } from './output-actions.mjs';
 import { fillCopies, forgetCopies, needsCopies, rememberCopy, remakeOutputCopy, withoutCopies } from './session-copies.mjs';
 
@@ -129,19 +130,6 @@ function moodixMark() {
     '<circle class="eclipse-ring" cx="16" cy="16" r="12.5"/>' +
     `<circle class="eclipse-sphere" cx="16" cy="16" r="12.5" mask="url(#${id})"/>`;
   return [svg];
-}
-/**
- * How long the model thought, said in its summary (« Réflexion · 4 s »): from its first thought to
- * the first words of its answer (or the end of the turn, `done`).
- */
-function thoughtFor(view, reasoning, output, done = false) {
-  if (!reasoning) return;
-  view.thoughtFrom ??= performance.now();
-  if ((output || done) && view.thoughtSeconds === undefined) {
-    view.thoughtSeconds = Math.max(1, Math.round((performance.now() - view.thoughtFrom) / 1000));
-    const label = view.summary?.querySelector?.('.reasoning-label');
-    if (label) label.textContent = `Réflexion · ${view.thoughtSeconds}\u00a0s`;
-  }
 }
 /** The mark of a reply moves while its model thinks: reasoning has come, the answer not yet. */
 function markThinking(view, thinking) {
@@ -597,8 +585,11 @@ function renderTranscript(messages, incomplete = false) {
             view.generations.append(node('p', 'proposal-cancelled', 'Proposition annulée.'));
         } catch {}
       }
-      view.reasoning.hidden = !message.reasoning_content;
-      view.thoughts.textContent = message.reasoning_content || '';
+      if (view.thought) view.thought.restore(message.reasoning_content || '', message.reasoning_seconds);
+      else {
+        view.reasoning.hidden = !message.reasoning_content;
+        view.thoughts.textContent = message.reasoning_content || '';
+      }
       if (incomplete && index === messages.length - 1) view.note.textContent = 'Réponse partielle restaurée.';
     }
   }
@@ -2017,21 +2008,27 @@ async function takeBack(resend) {
 function assistantMessage(parent = null) {
   const article = parent?.article || node('article', 'message assistant');
   article.setAttribute('aria-label', 'Réponse du modèle');
+  let header = null;
   if (!parent) {
-    const header = node('div', 'message-header');
+    header = node('div', 'message-header');
     const avatar = node('span', 'message-avatar');
     avatar.setAttribute('aria-hidden', 'true');
     avatar.append(...moodixMark());
     header.append(avatar, node('span', 'message-name', 'Moodix'));
     article.append(header);
   }
-  const reasoning = node('details', 'reasoning');
-  reasoning.hidden = true;
-  const summary = node('summary');
-  summary.append(icon('spark'), node('span', 'reasoning-label', 'Réflexion'));
-  summary.setAttribute('aria-label', 'Réflexion du modèle');
-  const thoughts = node('div', 'reasoning-content');
-  reasoning.append(summary, thoughts);
+  // Its reflection (reflection.mjs; reflexion-maquette.md): « · RÉFLEXION 3 S » on the line of the
+  // signature, its text under it. A later step of the same turn has its label on a line of its own.
+  const thought = reflection({ node, onChange: () => scrollToBottom() }),
+    reasoning = thought.element,
+    summary = thought.label,
+    thoughts = thought.content;
+  if (header) header.append(summary);
+  else {
+    const line = node('div', 'reasoning-line');
+    line.append(summary);
+    article.append(line);
+  }
   const body = node('div', 'message-body');
   const note = node('div', 'message-note');
   const generations = parent?.generations || node('div', 'generation-grid');
@@ -2040,14 +2037,16 @@ function assistantMessage(parent = null) {
     article.append(generations);
     $('messages').append(article);
   }
-  return { article, reasoning, summary, thoughts, body, note, generations };
+  return { article, reasoning, summary, thoughts, thought, body, note, generations };
 }
 /**
- * How long a turn took (« 116.3 s »): at the top right of its message (16/11), on the line of its
+ * How long a turn took (« 17.3 s », « 1:56 »): at the top right of its message (16/11), on the line of its
  * takes when it has some (moodix.css: `data-time` on their grid), else on the line of « MOODIX ».
  */
 function turnTime(view, started) {
-  const text = `${((performance.now() - started) / 1000).toFixed(1)} s`;
+  // As the lengths are written (16/11): « 17.3 s » under a minute, « 1:56 » past it.
+  const took = (performance.now() - started) / 1000,
+    text = took >= 59.95 ? thoughtTime(took) : `${took.toFixed(1)} s`;
   view.note.textContent = text;
   view.note.classList?.add('is-time');
   view.generations?.setAttribute?.('data-time', text);
@@ -2486,13 +2485,16 @@ async function sendMessage(event) {
   notice('');
   scrollToBottom();
   state.onChatSent?.();
+  // What a message keeps of the reflection of Moodix: its text, and how long it took once known.
+  const thoughtOf = (view, reasoning) =>
+    reasoning
+      ? { reasoning_content: reasoning, ...(view?.thought?.seconds?.() ? { reasoning_seconds: view.thought.seconds() } : {}) }
+      : {};
   function snapshot() {
     return {
       messages: [
         ...archiveMessages(history),
-        ...(output || reasoning
-          ? [{ role: 'assistant', content: output, ...(reasoning ? { reasoning_content: reasoning } : {}) }]
-          : []),
+        ...(output || reasoning ? [{ role: 'assistant', content: output, ...thoughtOf(view, reasoning) }] : []),
       ],
       incomplete: true,
     };
@@ -2501,9 +2503,11 @@ async function sendMessage(event) {
     if (silent) return;
     // « Réflexion en cours… »: the mark of Moodix AI thinks with it, until the answer is written.
     markThinking(view, Boolean(view.waiting) && !output);
-    thoughtFor(view, reasoning, output);
-    view.reasoning.hidden = !reasoning;
-    view.thoughts.textContent = reasoning;
+    if (view.thought) view.thought.show(reasoning, Boolean(output));
+    else {
+      view.reasoning.hidden = !reasoning;
+      view.thoughts.textContent = reasoning;
+    }
     if (output) renderText(view.body, output);
     else view.body.replaceChildren();
     if (output) showLastReply(output);
@@ -2607,6 +2611,7 @@ async function sendMessage(event) {
         view.silent = true;
         view.body.replaceChildren();
         view.reasoning.hidden = true;
+        view.thought?.hide();
         complete = true;
         turnTime(view, started);
         break;
@@ -2659,10 +2664,12 @@ async function sendMessage(event) {
       await historyWrite;
       usedTool = true;
       if (!resumed) {
+        // It thought and called a tool without a word: its reflection is over all the same.
+        view.thought?.end();
         history.push({
           role: 'assistant',
           content: output,
-          ...(reasoning ? { reasoning_content: reasoning } : {}),
+          ...thoughtOf(view, reasoning),
           tool_calls: [request.call],
         });
         if (!output) view.body.replaceChildren();
@@ -3081,7 +3088,8 @@ async function sendMessage(event) {
       if (output || reasoning) {
         render();
         if (!output) view.body.replaceChildren(node('div', 'text-block', 'Aucune réponse finale reçue.'));
-        history.push({ role: 'assistant', content: output, ...(reasoning ? { reasoning_content: reasoning } : {}) });
+        view.thought?.end();
+        history.push({ role: 'assistant', content: output, ...thoughtOf(view, reasoning) });
       } else if (usedTool && !view.generation && !view.silent)
         view.body.replaceChildren(
           node('div', 'text-block', complete ? 'Aucune réponse finale reçue.' : 'Opération interrompue.'),
@@ -3091,7 +3099,7 @@ async function sendMessage(event) {
       setConversationTitle(text || 'Une image à explorer');
     }
     // The turn is over, answered, failed or stopped: the mark is at rest, its thought timed.
-    thoughtFor(view, reasoning, output, true);
+    view.thought?.end();
     markThinking(view, false);
     await persistConversation();
     state.generating = false;

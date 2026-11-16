@@ -6,6 +6,7 @@ import { readSSE } from '../public/stream.mjs';
 import * as sessionCopies from '../public/session-copies.mjs';
 import * as chatVideos from '../public/chat-videos.mjs';
 import * as transcript from '../public/transcript.mjs';
+import { reflection, thoughtTime } from '../public/reflection.mjs';
 const png = 'data:image/png;base64,iVBORw0KGgo=';
 const call = {
   id: 'call_1',
@@ -81,6 +82,8 @@ async function exchange({
     ...sessionCopies,
     ...chatVideos,
     ...transcript,
+    reflection,
+    thoughtTime,
     turnActions() {},
     showLastReply() {},
     views,
@@ -425,6 +428,9 @@ test('restored generations share a response until the next real user message', a
     ...sessionCopies,
     ...chatVideos,
     ...transcript,
+    reflection,
+    thoughtTime,
+    scrollToBottom() {},
     turnActions() {},
     showLastReply() {},
     state: { conversationId: 'saved' },

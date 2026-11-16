@@ -483,12 +483,19 @@ test('the time of a turn is written at the top right of its message, on the line
       note: { textContent: '', classList: { add: name => classes.push(name) } },
       generations: { setAttribute: (name, value) => (attributes[name] = value) },
     };
-  const context = { performance: { now: () => 118300 } };
+  const { thoughtTime } = await import('../public/reflection.mjs');
+  const context = { performance: { now: () => 118300 }, thoughtTime };
   runInNewContext(source + '\nthis.turnTime = turnTime;', context);
   context.turnTime(view, 2000);
-  assert.equal(view.note.textContent, '116.3 s');
+  // 116.3 s: past a minute, as the lengths are written (16/11).
+  assert.equal(view.note.textContent, '1:56');
   assert.deepEqual(classes, ['is-time']);
-  assert.deepEqual(attributes, { 'data-time': '116.3 s' });
+  assert.deepEqual(attributes, { 'data-time': '1:56' });
+  // Under a minute, in seconds as before.
+  context.turnTime(view, 101000);
+  assert.equal(view.note.textContent, '17.3 s');
+  context.turnTime(view, 58340);
+  assert.equal(view.note.textContent, '1:00', 'never « 60.0 s »');
   // Both ends of a turn go through it; nothing else writes a time under the message.
   assert.equal(app.match(/turnTime\(view, started\)/g).length, 3);
   assert.doesNotMatch(app.replace(source, ''), /toFixed\(1\)\} s`/);
