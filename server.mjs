@@ -4,7 +4,7 @@ import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
 import { citedMessage, citedUnused, citedNumbers } from './lib/cited-resources.mjs';
-import { briefMessage, briefMissing } from './lib/video-brief.mjs';
+import { briefMessage, briefMissing, cardBrief } from './lib/video-brief.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
 import { THIN_NOTE, passedImages, thinPrompt } from './lib/thin-prompt.mjs';
@@ -2294,8 +2294,8 @@ export async function createApplication({
             if (unseen.length && (resourceTurns.get(body.turnId) || 0) + unseen.length <= 8) {
               resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + unseen.length);
               if (resourceTurns.size > 256) resourceTurns.delete(resourceTurns.keys().next().value);
-              // For a video not agreed on yet, the plan put to the user is written right after.
-              const brief = briefMissing(body.messages, call);
+              // The model makes its call again once it has seen them: a video not talked over yet
+              // is then proposed with its words (below).
               await emit({
                 local_tool_request: {
                   kind: 'resource',
@@ -2303,23 +2303,10 @@ export async function createApplication({
                   resourceId: unseen[0].id,
                   resourceIds: unseen.map(item => item.id),
                   workflowName: unseen.map(item => item.label + ' · ' + item.name).join(', '),
-                  note: brief
-                    ? 'You now see the images below. ' +
-                      briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []))
-                    : SEEN_NOTE,
-                  brief,
+                  note: SEEN_NOTE,
                 },
               });
             }
-            // A video is agreed on first: the model writes its short plan and its questions.
-            else if (briefMissing(body.messages, call))
-              await emit({
-                local_tool_request: {
-                  kind: 'brief',
-                  call,
-                  message: briefMessage(await runtime.tools.lengths(call.function.name).catch(() => [])),
-                },
-              });
             // A prompt of two lines: sent back once, with the images it is about shown again.
             else if (fullPrompts && thinPrompt(body.messages, call)) {
               const images =
@@ -2428,6 +2415,14 @@ export async function createApplication({
                     turnId: body.turnId,
                     messages: body.messages,
                   });
+                  // A video not talked over yet (lib/video-brief.mjs): proposed all the same, with what
+                  // Moodix is to say of it. In the Chat its words come over the card of the proposal,
+                  // which waits for the user (`cardBrief`); in the Studio its plan comes first and the
+                  // user's answer sets the Studio (`brief`). The page knows where it is.
+                  if (request && !request.missing && briefMissing(body.messages, call)) {
+                    request.brief = briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []));
+                    request.cardBrief = cardBrief();
+                  }
                   // Said where the user confirms: what the prompt was written from.
                   if (replacing && request)
                     request.notes = [

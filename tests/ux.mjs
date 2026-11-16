@@ -475,7 +475,8 @@ test('the time of a turn is written at the top right of its message, on the line
   const { runInNewContext } = await import('node:vm');
   const read = async name => (await readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   const app = await read('app.js'),
-    source = app.slice(app.indexOf('function turnTime(view, started)'), app.indexOf('function assistantMessage('));
+    from = app.indexOf('function turnTime(view, started)'),
+    source = app.slice(from, app.indexOf('\n}\n', from) + 3);
   const classes = [],
     attributes = {},
     view = {

@@ -2014,16 +2014,6 @@ async function takeBack(resend) {
   if (resend) $('chat-form').requestSubmit();
   else $('prompt').focus();
 }
-/**
- * How long a turn took (« 116.3 s »): at the top right of its message (16/11), on the line of its
- * takes when it has some (moodix.css: `data-time` on their grid), else on the line of « MOODIX ».
- */
-function turnTime(view, started) {
-  const text = `${((performance.now() - started) / 1000).toFixed(1)} s`;
-  view.note.textContent = text;
-  view.note.classList?.add('is-time');
-  view.generations?.setAttribute?.('data-time', text);
-}
 function assistantMessage(parent = null) {
   const article = parent?.article || node('article', 'message assistant');
   article.setAttribute('aria-label', 'Réponse du modèle');
@@ -2052,6 +2042,16 @@ function assistantMessage(parent = null) {
   }
   return { article, reasoning, summary, thoughts, body, note, generations };
 }
+/**
+ * How long a turn took (« 116.3 s »): at the top right of its message (16/11), on the line of its
+ * takes when it has some (moodix.css: `data-time` on their grid), else on the line of « MOODIX ».
+ */
+function turnTime(view, started) {
+  const text = `${((performance.now() - started) / 1000).toFixed(1)} s`;
+  view.note.textContent = text;
+  view.note.classList?.add('is-time');
+  view.generations?.setAttribute?.('data-time', text);
+}
 
 /**
  * A proposal of Moodix in the Chat (direction-artistique.md, « La proposition vidéo »): an image is
@@ -2065,11 +2065,32 @@ async function projectTakes() {
     (state.conversationId ? '&conversation=' + encodeURIComponent(state.conversationId) : '');
   return (await (await api(route)).json()).runs ?? [];
 }
+/**
+ * In the Chat (16/11): an image is made at once, a video (a new one, a continuation, a character
+ * replaced) or a sound always waits for the user on its card, which never starts by itself. What the
+ * settings allow to start alone is the agent's of the Studio, not the Chat's.
+ */
 function proposalChoice(view, proposal, abort) {
   const asked = proposal.mediaType === 'video' || proposal.mediaType === 'audio';
-  if (proposal.autoAllow) return asked ? 'once' : undefined;
   if (!asked) return 'once';
-  return cardChoice(view.generations, proposal, abort);
+  return cardChoice(view.generations, proposal, abort, 0);
+}
+/** Whether a creation asked in this turn is set in the Studio (its agent's chat) rather than in the Chat. */
+const setInStudio = request =>
+  state.view === 'studio' && Boolean(state.studio?.accepts?.(request.tool || request.call?.function?.name));
+// What stands over the card when the model wrote nothing, or said the video was there.
+const PLAN_FALLBACK =
+  'Voici ce que je propose : la carte ci-dessous montre la durée, le format et le prompt. Modifiez ce que vous ' +
+  'voulez, puis appuyez sur « Générer » si cela vous convient ; rien ne part sans votre accord.';
+/**
+ * The words of Moodix over the card of a video it proposes, as they may stand there: never « here is
+ * the video » (nothing is made yet: the chat model wrote it more than once), never nothing.
+ */
+function planWords(text) {
+  const said = String(text || '').trim(),
+    made = /\bvid[ée]o\b[^.!?\n]{0,40}\b(?:est|a été)\s+(?:prête|faite|générée|créée|terminée|envoyée)\b/i,
+    here = /\b(?:voici|voil[àa])\s+(?:la|ta|votre|une)\s+vid[ée]o\b|\bhere(?:'s|’s| is)\s+(?:the|your|a)\s+video\b/i;
+  return !said || made.test(said) || (said.length < 160 && here.test(said)) ? PLAN_FALLBACK : said;
 }
 /** The card of a proposal in `host`, until the user answers (`delay`: the count of a video). */
 function cardChoice(host, proposal, abort, delay) {
@@ -2191,7 +2212,7 @@ async function againTake(failed, { edit = false, figure = null, container }) {
       );
       generation.finish(result);
     } catch (error) {
-      if (signal.aborted) generation.fail(error.message);
+      if (signal.aborted) generation.withdraw();
       else generation.failed(error.message);
       throw error;
     }
@@ -2515,6 +2536,8 @@ async function sendMessage(event) {
       invalidCalls = 0,
       resourceReads = 0,
       briefing = false,
+      // The proposal of a video whose words Moodix is writing, its card to come under them.
+      planFor = null,
       reviewRecord = null;
     while (true) {
       signal.throwIfAborted();
@@ -2602,6 +2625,31 @@ async function sendMessage(event) {
           notice(`Analyse de galerie non enregistrée : ${error.message}`);
         }
       }
+      // Moodix has just said what the video it proposes will be: its words join the call they are
+      // about (the note it was given for them leaves the conversation), and the card comes under them.
+      let resumed = false;
+      if (!request && planFor) {
+        const held = planFor;
+        planFor = null;
+        ({ allowTools, resourceReads } = held);
+        briefing = false;
+        if (history.at(-1)?.role === 'tool' && history.at(-1).tool_call_id === held.request.call.id) history.pop();
+        // After what it had written with its call, if anything (`lead`, still on the page above them).
+        const words = [held.lead.trim(), planWords(output.slice(held.lead.length))].filter(Boolean).join('\n\n');
+        if (words !== output) {
+          output = words;
+          render();
+        }
+        const calling = history.at(-1);
+        calling.content = words;
+        calling.planned = true;
+        output = '';
+        reasoning = '';
+        request = held.request;
+        resumed = true;
+        state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+        await persistConversation();
+      }
       if (!request) {
         complete = true;
         if (finishReason === 'length') view.note.textContent = 'Limite de sortie atteinte.';
@@ -2610,15 +2658,40 @@ async function sendMessage(event) {
       }
       await historyWrite;
       usedTool = true;
-      history.push({
-        role: 'assistant',
-        content: output,
-        ...(reasoning ? { reasoning_content: reasoning } : {}),
-        tool_calls: [request.call],
-      });
-      if (!output) view.body.replaceChildren();
-      output = '';
-      reasoning = '';
+      if (!resumed) {
+        history.push({
+          role: 'assistant',
+          content: output,
+          ...(reasoning ? { reasoning_content: reasoning } : {}),
+          tool_calls: [request.call],
+        });
+        if (!output) view.body.replaceChildren();
+        output = '';
+        reasoning = '';
+      }
+      // A video not talked over yet. In the Studio its plan comes first, as before: the user's answer
+      // sets the Studio. In the Chat (16/11) Moodix says in a few lines what the clip will be, and the
+      // card of the proposal comes under those words, where the user agrees.
+      if (!resumed && request.brief && request.requestId && !request.missing) {
+        if (setInStudio(request)) request = { kind: 'brief', call: request.call, message: request.brief };
+        else if (request.cardBrief) {
+          history.push({
+            role: 'tool',
+            tool_call_id: request.call.id,
+            content: JSON.stringify({ status: 'waiting_for_user', message: request.cardBrief }),
+          });
+          // Its words go on in the same place, over where the card will come (after what it wrote
+          // with its call, if anything).
+          const lead = String(history.at(-2)?.content || '').trim() ? history.at(-2).content.trimEnd() + '\n\n' : '';
+          planFor = { request, allowTools, resourceReads, lead };
+          allowTools = false;
+          resourceReads = 8;
+          briefing = true;
+          output = lead;
+          finishReason = '';
+          continue;
+        }
+      }
       if (request.kind === 'retry') {
         // Sent back before any generation with what to improve: the model makes its call again.
         history.push({
@@ -2831,12 +2904,6 @@ async function sendMessage(event) {
           if (signal.aborted) throw error;
           view.note.textContent = error.message;
         }
-        if (request.brief) {
-          // The images were shown before a video not agreed on yet: the model now writes its plan.
-          allowTools = false;
-          resourceReads = 8;
-          briefing = true;
-        }
         state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
         await persistConversation();
         view = assistantMessage(view);
@@ -2866,8 +2933,7 @@ async function sendMessage(event) {
       // From the Studio (its agent's chat), a creation is set in the Studio: the pointer of Moodix
       // sets it there and « Générer » is the user's answer. In the Chat, a video or a sound is a card
       // of the message (an image is made at once): proposalChoice below.
-      const viaStudio =
-        state.view === 'studio' && Boolean(state.studio?.accepts?.(request.tool || request.call?.function?.name));
+      const viaStudio = setInStudio(request);
       const generation = generationUI.mount(view.generations, request, { compact: viaStudio });
       // A video is commented by the model only when the user chose it in the settings: the
       // reload and the analysis take about a minute. An image too, by its own choice. Otherwise
@@ -2911,8 +2977,9 @@ async function sendMessage(event) {
         if (viaStudio) void state.studio.settled(result);
       } catch (error) {
         if (viaStudio) void state.studio.settled({ error: signal.aborted ? 'Génération arrêtée.' : error.message });
-        // Stopped by the user: said; failed: the take veiled, to make again (52).
-        if (signal.aborted) generation.fail(error.message);
+        // Stopped by the user: the take goes and the message says it, once, in French (16/11: the
+        // take repeated it in the browser's words); failed: the take veiled, to make again (52).
+        if (signal.aborted) generation.withdraw();
         else generation.failed(error.message);
         history.push({
           role: 'tool',
@@ -3077,8 +3144,10 @@ function syncViews() {
  * replacement): set in the Studio by the pointer and started at once, followed by a card in the
  * conversation. Returns the result, as for a creation of the chat.
  */
-async function runForTurn(proposal, { view, signal }) {
-  proposal.autoAllow = true;
+async function runForTurn(proposal, { view, signal, auto = false }) {
+  // The image of a character starts at once (the user checks it right after); the video itself
+  // starts alone only as the settings of the Studio's agent say (16/11), else on « Générer ».
+  if (auto) proposal.autoAllow = true;
   view.generation = true;
   const generation = generationUI.mount(view.generations, proposal, { compact: true });
   try {
@@ -3111,7 +3180,9 @@ async function runForTurn(proposal, { view, signal }) {
     return result;
   } catch (error) {
     void state.studio.settled({ error: signal.aborted ? 'Génération arrêtée.' : error.message });
-    generation.fail(error.message);
+    // Stopped by the user: said once, by the message (not again by the take, in the browser's words).
+    if (signal.aborted) generation.withdraw();
+    else generation.fail(error.message);
     throw error;
   }
 }
@@ -3139,7 +3210,7 @@ async function replaceWithCharacter(request, { view, signal }) {
   for (let tries = 0; tries < 20 && !image; tries++) {
     said('Image du personnage…');
     const size = state.studio.imageSize?.(request.sourceSize) ?? null;
-    const made = await runForTurn(await action('create_image', { prompt, ...(size ?? {}) }), { view, signal });
+    const made = await runForTurn(await action('create_image', { prompt, ...(size ?? {}) }), { view, signal, auto: true });
     if (!made.record) {
       said(made.error || 'L’image du personnage n’a pas pu être faite.');
       return { content: JSON.stringify({ status: 'error', message: made.error || 'Image du personnage non faite.' }) };

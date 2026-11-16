@@ -5,8 +5,9 @@ const KINDS = { video: 'Vidéo', audio: 'Son', image: 'Image' };
 /**
  * The proposal of Moodix, in its message (direction-artistique.md, « La proposition vidéo »;
  * captures 11 and 12): a card that arrives with the plan, editable in place, instead of a window.
- * - A video starts by itself after `delay`: the glass of « Générer » fills with the accent from left
- *   to right, « DÉPART DANS 18 S » at the top right of the card.
+ * - With a `delay` (none in the Chat since 16/11: a video always waits for the user there, « EN
+ *   ATTENTE DE VOTRE ACCORD »), a video starts by itself after it: the glass of « Générer » fills
+ *   with the accent from left to right, « DÉPART DANS 18 S » at the top right of the card.
  * - The count pauses while the pointer is on the card or while something is written in the message
  *   box (« EN PAUSE »), and stops for good at a click or a key in the card (« EN ATTENTE DE VOTRE
  *   ACCORD »): then only « Générer » starts it. A sound waits for « Générer » (no count).
@@ -54,6 +55,37 @@ export function proposalCard({
 
   let form = null,
     saving = false;
+  /**
+   * « Paramètres avancés » and « Prompt » unfold and fold back softly (16/11): their height and their
+   * margin go from nothing to their own in 0.22 s, the words fading in; at once with less motion
+   * asked, or where the page cannot animate.
+   */
+  function unfold(panel, open) {
+    const still = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    panel.moving?.cancel?.();
+    panel.moving = null;
+    if (open) panel.hidden = false;
+    if (still || typeof panel.animate !== 'function') {
+      panel.hidden = !open;
+      return onChange();
+    }
+    const height = panel.getBoundingClientRect().height,
+      gap = globalThis.getComputedStyle?.(panel).marginTop ?? '0px',
+      closed = { height: '0px', marginTop: '0px', opacity: 0 },
+      opened = { height: height + 'px', marginTop: gap, opacity: 1 };
+    panel.style.overflow = 'hidden';
+    const move = panel.animate(open ? [closed, opened] : [opened, closed], { duration: 220, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)' });
+    panel.moving = move;
+    const done = () => {
+      if (panel.moving !== move) return;
+      panel.moving = null;
+      panel.style.overflow = '';
+      if (!open) panel.hidden = true;
+      onChange();
+    };
+    move.onfinish = done;
+    move.oncancel = () => (panel.style.overflow = '');
+  }
   function render() {
     title.textContent = ['Proposition', KINDS[request.mediaType] ?? KINDS.image, request.workflowName].filter(Boolean).join(' · ');
     form = renderProposal(body, request, {
@@ -71,8 +103,9 @@ export function proposalCard({
       toggle.setAttribute('aria-expanded', 'false');
       fold.panel.hidden = true;
       toggle.onclick = () => {
-        fold.panel.hidden = !fold.panel.hidden;
-        toggle.setAttribute('aria-expanded', String(!fold.panel.hidden));
+        const open = fold.panel.hidden;
+        toggle.setAttribute('aria-expanded', String(open));
+        unfold(fold.panel, open);
       };
       toggles.append(toggle);
       panels.append(fold.panel);
@@ -227,7 +260,7 @@ export function proposalCard({
   const now = () => (globalThis.performance?.now?.() ?? Date.now());
   function say() {
     status.textContent =
-      phase === 'waiting' ? (counted ? 'En attente de votre accord' : '') : phase === 'paused' ? 'En pause' : `Départ dans ${Math.max(1, Math.ceil(left / 1000))} s`;
+      phase === 'waiting' ? (request.mediaType === 'video' ? 'En attente de votre accord' : '') : phase === 'paused' ? 'En pause' : `Départ dans ${Math.max(1, Math.ceil(left / 1000))} s`;
     card.dataset.phase = phase;
   }
   function clear() {

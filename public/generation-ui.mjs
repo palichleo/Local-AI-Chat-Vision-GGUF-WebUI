@@ -683,6 +683,7 @@ export function setupGenerationUI({
       image,
       fail,
       failed,
+      withdraw,
       finish,
       dispose,
       async load(conversationId, runId) {

@@ -15156,3 +15156,35 @@ button.glass-select::after {
 #messages .message.assistant:has(> .generation-grid[data-takes][data-time]) > .message-note.is-time {
   display: none;
 }
+
+/* ------------------------------------------------------------------ after the try of 0.6.26 (16/11) */
+/* The lists of the card of a proposal (glass-menu.mjs: a button and a menu of glass) look as its
+   lists did: a dark field of mono figures, at the right of its line, as wide as what it says; never
+   the button of the browser. A value changed turns to the accent. */
+#messages .proposal-card .proposal-field button.glass-select {
+  flex: none;
+  gap: 8px;
+  max-width: 240px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: none;
+  color: var(--text-1);
+  font: 400 13px/1.4 var(--font-mono);
+}
+#messages .proposal-card .proposal-field button.glass-select:is(:hover, :focus-visible):enabled {
+  outline: none;
+  background: rgba(238, 232, 222, 0.08);
+}
+#messages .proposal-card .proposal-field button.glass-select:disabled {
+  background: transparent;
+  color: var(--text-2);
+}
+#messages .proposal-card .proposal-field button.glass-select:disabled::after {
+  display: none;
+}
+#messages .proposal-card .proposal-field button.glass-select.is-changed {
+  color: var(--accent);
+}

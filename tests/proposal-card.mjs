@@ -253,3 +253,51 @@ test('an image dropped or pasted on the card is kept in the project, then goes i
   card.cancel.onclick();
   assert.equal(await card.answer, 'cancel');
 });
+
+test('in the Chat a video waits for the user on its card: no count, « En attente de votre accord » from the start', async () => {
+  const shown = setup(video(), { delay: 0 });
+  assert.equal(shown.status.textContent, 'En attente de votre accord');
+  assert.equal(shown.card.dataset.phase, 'waiting');
+  assert.equal(shown.go.classList.contains('is-counting'), false);
+  let settled = false;
+  void shown.answer.then(() => (settled = true));
+  await wait(120);
+  assert.equal(settled, false, 'nothing starts by itself');
+  shown.go.onclick();
+  assert.equal(await shown.answer, 'once');
+});
+
+test('« Paramètres avancés » and « Prompt » unfold softly where the page can animate, at once elsewhere', async () => {
+  // A proposal whose prompt may be changed: « Prompt » folds at the foot of its card.
+  const request = { ...video(), plan: { prompt: 'Un renard court.', parameters: { prompt: 'Un renard court.' }, editable: { prompt: true } } };
+  const { card } = setup(request, { delay: 0 });
+  const [toggle] = card.children.find(child => child.className === 'proposal-foot').children[0].children,
+    [panel] = card.children.find(child => child.className === 'proposal-panels').children;
+  assert.ok(toggle && panel, 'a fold and its panel');
+  // Nothing to animate with (these nodes): open and closed at once.
+  toggle.onclick();
+  assert.equal(panel.hidden, false);
+  assert.equal(toggle.attributes['aria-expanded'], 'true');
+  toggle.onclick();
+  assert.equal(panel.hidden, true);
+  // A page that animates: its height and its margin from nothing to their own, hidden once folded back.
+  const moves = [];
+  panel.getBoundingClientRect = () => ({ height: 148 });
+  panel.animate = (frames, options) => {
+    const move = { frames, options, cancel() {} };
+    moves.push(move);
+    return move;
+  };
+  toggle.onclick();
+  assert.equal(panel.hidden, false);
+  assert.deepEqual(moves[0].frames.map(frame => frame.height), ['0px', '148px']);
+  assert.equal(moves[0].options.duration, 220);
+  assert.equal(panel.style.overflow, 'hidden');
+  moves[0].onfinish();
+  assert.equal(panel.style.overflow, '');
+  toggle.onclick();
+  assert.equal(panel.hidden, false, 'still there while it folds back');
+  assert.deepEqual(moves[1].frames.map(frame => frame.height), ['148px', '0px']);
+  moves[1].onfinish();
+  assert.equal(panel.hidden, true);
+});

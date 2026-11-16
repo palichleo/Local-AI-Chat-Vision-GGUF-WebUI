@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { briefMessage, briefMissing } from '../lib/video-brief.mjs';
+import { briefMessage, briefMissing, cardBrief } from '../lib/video-brief.mjs';
 
 const user = content => ({ role: 'user', content });
 const says = content => ({ role: 'assistant', content });
@@ -67,4 +67,22 @@ test('images, buttons and promoted drafts are not asked for an agreement', () =>
   assert.equal(briefMissing([], call()), false, 'a button on an output: no conversation');
   assert.equal(briefMissing(undefined, call()), false);
   assert.equal(briefMissing(asked, call('create_video', { reuse_output: 'run', stage: 'final' })), false);
+});
+
+test('in the Chat the words of Moodix come over the card of its proposal: they count as spoken, and are short', () => {
+  const asked = [user('une vidéo de l’éléphant')];
+  // Its words joined the call they are about (`planned`, set by the page); the card was refused by a
+  // new message of the user: the next call is the same video, talked over.
+  const planned = { ...calls('v1'), content: 'L’éléphant lève sa trompe. Cela vous convient ?', planned: true };
+  const refused = [...asked, planned, result('v1', 'denied'), user('non, qu’il danse')];
+  assert.equal(briefMissing(refused, call()), false);
+  // Without its words (a call alone) nothing was said yet.
+  assert.equal(briefMissing([...asked, calls('v1'), result('v1', 'denied'), user('non, qu’il danse')], call()), true);
+  // Words written with a call that were not a plan do not count.
+  assert.equal(briefMissing([...asked, { ...calls('v1'), content: 'Je lance.' }, result('v1', 'denied'), user('non')], call()), true);
+  const note = cardBrief();
+  assert.match(note, /Nothing is generated yet/);
+  assert.match(note, /a card shows this proposal/);
+  assert.match(note, /Never say the video is ready, made or sent/);
+  assert.ok(note.length < briefMessage().length, 'shorter than the plan of before: the chat model follows a long note badly');
 });

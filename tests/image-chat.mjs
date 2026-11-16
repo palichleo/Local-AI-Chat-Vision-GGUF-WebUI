@@ -28,6 +28,12 @@ async function exchange({
   generationCalls = 1,
   reviewVideos = false,
   reviewImages = false,
+  // A video not talked over yet: the proposal comes with what Moodix is to say of it.
+  brief = false,
+  // The turn is the agent's of the Studio.
+  inStudio = false,
+  // Written by the model with its call.
+  callText = '',
 } = {}) {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const element = (tag = '', className = '', textContent = '') => ({
@@ -64,6 +70,7 @@ async function exchange({
     status: { state: 'ready', vision: true, busy: false },
     thinking: true,
     generation: { maxIterations: Math.max(5, generationCalls), reviewVideos, reviewImages },
+    ...(inStudio ? { view: 'studio', studio: { accepts: () => true, propose: async () => 'once', follow() {}, settled() {} } } : {}),
   };
   const requests = [],
     toolOptions = [],
@@ -151,11 +158,14 @@ async function exchange({
       const events =
         requests.length <= generationCalls
           ? [
-              { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+              { choices: [{ delta: { ...(callText ? { content: callText } : {}) }, finish_reason: 'tool_calls' }] },
               {
                 local_tool_request: {
                   call: { ...call, id: requests.length === 1 ? call.id : 'call_' + requests.length },
                   workflowName: 'Photo',
+                  ...(brief
+                    ? { requestId: 'r1', approvalToken: 't1', mediaType: 'video', brief: 'PLAN FIRST (Studio)', cardBrief: 'WORDS OVER THE CARD' }
+                    : {}),
                 },
               },
             ]
@@ -456,4 +466,82 @@ test('restored generations share a response until the next real user message', a
     ['run1', 'run2', 'run3'],
   );
   assert.equal(roots[0].children.find(item => item.className === 'message-body').textContent, 'Plan before generation');
+});
+
+test('in the Chat a video not talked over yet comes with the words of Moodix, then its card: one call, one result', async () => {
+  const plan = 'L’éléphant lève sa trompe au coucher du soleil, cinq secondes. Cela vous convient ?';
+  const result = await exchange({ mediaType: 'video', brief: true, finalText: plan });
+  // 1: the call. 2: its words, without tools nor thinking, after the note for them. 3: after the take.
+  assert.equal(result.requests.length, 3);
+  const [, wording, after] = result.requests;
+  assert.equal(wording.tools, false);
+  assert.equal(wording.thinking, false);
+  assert.deepEqual(JSON.parse(wording.messages.at(-1).content), { status: 'waiting_for_user', message: 'WORDS OVER THE CARD' });
+  // The proposal was then put to the user (requestTool: its card), once.
+  assert.equal(result.toolOptions.length, 1);
+  assert.equal(typeof result.toolOptions[0].approve, 'function');
+  // What the model is sent afterwards, and what is kept: its words on the call they are about, then
+  // the one result of that call; the note for the words is gone.
+  for (const messages of [after.messages, result.state.messages]) {
+    const calling = messages.find(message => message.tool_calls);
+    assert.equal(calling.content, plan);
+    assert.equal(calling.planned, true);
+    const results = messages.filter(message => message.role === 'tool' && message.tool_call_id === call.id);
+    assert.equal(results.length, 1);
+    assert.match(results[0].content, /success/);
+    assert.doesNotMatch(JSON.stringify(messages), /waiting_for_user|WORDS OVER THE CARD/);
+  }
+  // Its words are on the page, above the grid where the card comes: written in the first block.
+  assert.equal(result.views.length >= 1, true);
+
+  // The model answers « here is the video » (it did): never shown nor kept as such.
+  const lied = await exchange({ mediaType: 'video', brief: true, finalText: 'Voici la vidéo de l’éléphant dansant.' });
+  const said = lied.state.messages.find(message => message.tool_calls).content;
+  assert.match(said, /^Voici ce que je propose : la carte ci-dessous/);
+  assert.doesNotMatch(said, /éléphant dansant/);
+  // What it wrote with its call stays before its words.
+  const led = await exchange({ mediaType: 'video', brief: true, callText: 'Je confirme : qu’il danse.', finalText: plan });
+  assert.equal(led.state.messages.find(message => message.tool_calls).content, 'Je confirme : qu’il danse.\n\n' + plan);
+  // A video already talked over (no note with the proposal): its card at once, as before.
+  const agreed = await exchange({ mediaType: 'video' });
+  assert.equal(agreed.requests.length, 2);
+  assert.equal(agreed.state.messages.find(message => message.tool_calls).planned, undefined);
+});
+
+test('in the Studio a video not talked over yet keeps its plan first: nothing is set before the user answers', async () => {
+  const result = await exchange({ mediaType: 'video', brief: true, inStudio: true, finalText: 'Mon plan. On y va ?' });
+  assert.equal(result.requests.length, 2);
+  assert.deepEqual(JSON.parse(result.requests[1].messages.at(-1).content), { status: 'waiting_for_user', message: 'PLAN FIRST (Studio)' });
+  assert.equal(result.toolOptions.length, 0, 'no proposal put to the user yet');
+  assert.equal(result.state.messages.at(-1).content, 'Mon plan. On y va ?');
+});
+
+test('in the Chat an image starts at once and a video always waits on its card, whatever the settings allow', async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    text = source.replace(/\r\n/g, '\n'),
+    choice = text.slice(text.indexOf('function proposalChoice('), text.indexOf('/** The card of a proposal in `host`'));
+  const cards = [];
+  const context = { state: { view: 'chat' }, cardChoice: (host, proposal, abort, delay) => (cards.push([proposal.mediaType, delay]), 'card') };
+  runInNewContext(choice + '\nthis.proposalChoice = proposalChoice; this.planWords = planWords; this.setInStudio = setInStudio;', context);
+  const view = { generations: {} };
+  // « May start alone » (the settings, for the agent of the Studio) changes nothing here.
+  for (const autoAllow of [true, false]) {
+    assert.equal(context.proposalChoice(view, { autoAllow }, null), 'once', 'an image');
+    assert.equal(context.proposalChoice(view, { mediaType: 'video', autoAllow }, null), 'card');
+    assert.equal(context.proposalChoice(view, { mediaType: 'audio', autoAllow }, null), 'card');
+  }
+  // The card never starts by itself: no count.
+  assert.deepEqual(cards, [['video', 0], ['audio', 0], ['video', 0], ['audio', 0]]);
+  // Its words: a real plan stays; « here is the video » and nothing do not.
+  const plan = 'Voici la vidéo que je propose : l’éléphant marche vers la caméra pendant cinq secondes, puis lève sa trompe, et la lumière baisse doucement sur la savane. Cela vous convient ?';
+  assert.equal(context.planWords(plan), plan);
+  for (const wrong of ['', '  ', 'Voici la vidéo de l’éléphant dansant.', 'Here is your video!', 'La vidéo est prête, regardez-la.'])
+    assert.match(context.planWords(wrong), /^Voici ce que je propose : la carte ci-dessous/);
+  // A take stopped by the user goes; the message says it, once (the take said it again, in English).
+  assert.equal(text.match(/if \(signal\.aborted\) generation\.withdraw\(\);/g).length, 3);
+  assert.doesNotMatch(text, /if \(signal\.aborted\) generation\.fail\(/);
+  // The image of a character starts at once; the replacement itself as the settings of the Studio say.
+  assert.match(text, /if \(auto\) proposal\.autoAllow = true;/);
+  assert.match(text, /runForTurn\(await action\('create_image', \{ prompt, \.\.\.\(size \?\? \{\}\) \}\), \{ view, signal, auto: true \}\)/);
+  assert.match(text, /const result = await runForTurn\(proposal, \{ view, signal \}\);/);
 });

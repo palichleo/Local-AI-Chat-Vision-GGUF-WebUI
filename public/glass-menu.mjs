@@ -52,7 +52,10 @@ function enhance(select, view) {
     text = page.createElement('span'),
     menu = page.createElement('div');
   face.type = 'button';
-  face.className = (select.className + ' glass-select').trim();
+  // Its classes are the list's own (not the one that hides the list), with its own.
+  const dress = () =>
+    (face.className = (select.className.replace(/\bglass-select-native\b/, '') + ' glass-select').replace(/\s+/g, ' ').trim());
+  dress();
   face.setAttribute('aria-haspopup', 'listbox');
   face.setAttribute('aria-expanded', 'false');
   text.className = 'glass-select-text';
@@ -80,6 +83,8 @@ function enhance(select, view) {
     const chosen = select.selectedOptions?.[0] ?? select.options[select.selectedIndex];
     text.textContent = chosen?.textContent ?? '';
     face.disabled = select.disabled;
+    // Its classes are the list's, as they change (a value changed in a proposal turns to the accent).
+    dress();
     if (label) face.setAttribute('aria-label', label.trim() + ' : ' + text.textContent);
   };
   const items = () => [...menu.querySelectorAll('[role="option"]:not([aria-disabled="true"])')];
@@ -169,7 +174,7 @@ function enhance(select, view) {
     });
   }
   select.addEventListener('change', sync);
-  new view.MutationObserver(sync).observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+  new view.MutationObserver(sync).observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'class'] });
   sync();
 }
 
