@@ -5,6 +5,7 @@ import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
 import { citedMessage, citedUnused, citedNumbers } from './lib/cited-resources.mjs';
 import { briefMessage, briefMissing, cardBrief } from './lib/video-brief.mjs';
+import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
 import { THIN_NOTE, passedImages, thinPrompt } from './lib/thin-prompt.mjs';
@@ -98,6 +99,7 @@ const staticFiles = new Map([
   ['/missing-file.mjs', ['missing-file.mjs', 'text/javascript; charset=utf-8']],
   ['/glass-menu.mjs', ['glass-menu.mjs', 'text/javascript; charset=utf-8']],
   ['/reflection.mjs', ['reflection.mjs', 'text/javascript; charset=utf-8']],
+  ['/media-info.mjs', ['media-info.mjs', 'text/javascript; charset=utf-8']],
   ['/transcript.mjs', ['transcript.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-guard.mjs', ['settings-guard.mjs', 'text/javascript; charset=utf-8']],
   ['/context-meter.mjs', ['context-meter.mjs', 'text/javascript; charset=utf-8']],
@@ -510,6 +512,8 @@ export async function createApplication({
     persist: () => preferences.saveHistory,
     clientFactory: () => generation.client(),
     timing: new ProgressHistory(join(dataDir, 'generation-timing.json')),
+    // What made a creation, written in its own file (public/media-info.mjs reads it back).
+    stamp: record => stampRecord(outputDir, record, { version: applicationVersion }),
     // What a shipped workflow lacks, to download from the chat (etats-maquette.md, 53).
     offerOf: async workflow => (await generation.downloads.offers([workflow]))[workflow.id] ?? null,
     sourceMedia: async (ref, conversationId) => {

@@ -5,6 +5,7 @@ import { takeFlux } from './take-flux.mjs';
 import { outputActions } from './output-actions.mjs';
 import { setupPointer } from './studio-pointer.mjs';
 import { closePopup, openPopup } from './glass-menu.mjs';
+import { fileInfo } from './media-info.mjs';
 
 /**
  * The Studio: the creation tools of the conversation, beside the chat. Four blocks that never
@@ -269,7 +270,12 @@ export function setupStudio({
   // Per conversation, the newest take the Studio was set from, or made itself (settle).
   const lastSeen = new Map();
   // The take opened from the chat on the screen (« Afficher dans le Studio »): it stays there.
-  let pinned = null;
+  let pinned = null,
+    // A creation put on the screen to see what made it (inspect): the Studio as it was before, to
+    // come back to with the button at the right of « Image · Vidéo · Son ».
+    looked = null,
+    // The address made for a file shown from the disk itself (a sound), to give back.
+    lookedUrl = '';
   // What is shown on the screen for each mode: the last creation, or one opened from the chat.
   const kept = {};
   const blank = () => ({
@@ -1716,6 +1722,30 @@ export function setupStudio({
     }
     box.append(frame, over);
     screen.append(box);
+    // A take of the Sortie, or a file of the computer, dropped on the screen: shown there with what
+    // made it (inspect, inspectFile). Not an image of a case, which only changes case.
+    const takes = event => Boolean(carried) || (!dragged && [...(event.dataTransfer?.types ?? [])].includes('Files'));
+    box.ondragover = event => {
+      if (!takes(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+      box.classList.add('is-target');
+    };
+    box.ondragleave = () => box.classList.remove('is-target');
+    box.ondrop = event => {
+      if (!takes(event)) return;
+      event.preventDefault();
+      event.stopPropagation?.();
+      box.classList.remove('is-target');
+      carrying(null);
+      if (carried) {
+        const record = carried;
+        carried = null;
+        return inspect(record);
+      }
+      const [file] = event.dataTransfer.files ?? [];
+      if (file) void inspectFile(file);
+    };
     watching?.disconnect();
     if (typeof ResizeObserver === 'function') {
       // Called once the stage is laid out, then at every change of its size.
@@ -1778,8 +1808,10 @@ export function setupStudio({
         decoding: 'async',
         src: output.originalUrl,
       });
-      element.title = 'Voir l’original et ses paramètres';
-      element.onclick = () => viewOutput(record, 0);
+      if (!record.external) {
+        element.title = 'Voir l’original et ses paramètres';
+        element.onclick = () => viewOutput(record, 0);
+      }
       element.onload = () => measuredOnScreen(record, element.naturalWidth, element.naturalHeight);
     }
     return element;
@@ -2293,7 +2325,11 @@ export function setupStudio({
       await refresh().catch(() => {});
       // It stays on the screen, as the gallery lists it (with the addresses it is shown from).
       const record = made && runs.find(item => item.id === made);
-      if (record) kept[asked] = record;
+      if (record) {
+        kept[asked] = record;
+        // Made from what was looked at: those settings are the user's now, nothing to come back to.
+        endLook();
+      }
       settledHere();
       onChange();
       render();
@@ -2900,9 +2936,12 @@ export function setupStudio({
   const mediaOf = record => record.mediaType || 'image';
   /** A creation as an input: its run, with its conversation when it is another of the project. */
   const outputSource = record =>
-    record.conversationId && record.conversationId !== place()
-      ? { output: record.id, conversation: record.conversationId }
-      : { output: record.id };
+    // A file put on the screen, kept as a reference of the project (inspectFile).
+    record.resource
+      ? { resource: record.resource }
+      : record.conversationId && record.conversationId !== place()
+        ? { output: record.id, conversation: record.conversationId }
+        : { output: record.id };
   /** What the screen shows: the creation just made or opened from the chat, else the last of its mode. */
   /**
    * The takes of the open conversation: the screen is that conversation's (16/11), with the settings
@@ -3781,11 +3820,19 @@ export function setupStudio({
     setting.hidden = !(answering() || ai);
     if (kindsBar()) head.append(kindsBar());
     head.append(step, setting);
+    // A creation is on the screen to be looked at (inspect): back to the Studio as it was before.
+    if (looked && !answering() && !ai) {
+      const back = button('studio-look-back', 'Revenir', lookBack, 'undo');
+      back.title = 'Retirer ce média de l’écran et remettre vos réglages d’avant';
+      back.setAttribute('aria-label', 'Revenir à mes réglages : retirer ce média de l’écran');
+      back.disabled = Boolean(working);
+      head.append(back);
+    }
     preview.append(head, screen);
     const bar = node('div', 'studio-actionbar');
     // The actions of the take on the screen; held while Moodix AI proposes or a take is made.
     const onScreen = working ? (kept[mode] ?? ownRuns().find(item => mediaOf(item) === mode) ?? null) : onStage();
-    if (onScreen && mode !== 'audio' && !extending && !heldGpu) {
+    if (onScreen && mode !== 'audio' && !extending && !heldGpu && !(onScreen.external && !onScreen.resource)) {
       const row = takeActions(onScreen, 0);
       row.inert = answering() || Boolean(working);
       if (row.inert) row.classList.add('is-held');
@@ -4041,6 +4088,7 @@ export function setupStudio({
   function forget() {
     for (const key of Object.keys(kept)) delete kept[key];
     pinned = null;
+    endLook();
     extending = null;
     failure = '';
     legacy = false;
@@ -4093,11 +4141,12 @@ export function setupStudio({
   /**
    * The Studio as it was to make a take (16/11): its model, its prompt, its format and size, its
    * length, its settings, its LoRAs and its inputs, in the draft of its mode. Not its seed, drawn
-   * again, unless the user had named it (`seed_given`). An input that is no longer there (a take
+   * again, unless the user had named it (`seed_given`) or the take is looked at for what made it
+   * (`exactSeed`: inspect). An input that is no longer there (a take
    * deleted or gone to another project, a reference erased) leaves its case empty: how many is
    * returned, for the Studio to say so.
    */
-  function adopt(record) {
+  function adopt(record, { exactSeed = false } = {}) {
     const target = mediaOf(record),
       draft = drafts[target],
       made = record.parameters ?? {},
@@ -4113,7 +4162,8 @@ export function setupStudio({
     draft.workflow = workflow.id;
     // Its saved settings (« Enregistrer ») do not come over those of the take.
     presetShown[target] = true;
-    if (workflow.seeded) draft.seed = made.seed_given === true && Number.isSafeInteger(made.seed) ? String(made.seed) : '';
+    if (workflow.seeded)
+      draft.seed = (exactSeed || made.seed_given === true) && Number.isSafeInteger(made.seed) ? String(made.seed) : '';
     if (workflow.limits && made.width > 0 && made.height > 0) {
       const format = formatOf(made.width, made.height);
       if (format) Object.assign(draft, { format: format.id, size: sizeKey(made), formatChosen: true });
@@ -4220,13 +4270,103 @@ export function setupStudio({
   function settledHere() {
     if (!legacy && runsFor === where()) lastSeen.set(draftKey(), ownRuns()[0]?.id ?? null);
   }
-  /** « Ouvrir » on a card of the chat: the creation on the screen of its mode. */
-  function show(record) {
+  /** Nothing is looked at any more: no way back, the address of a file of the disk given back. */
+  function endLook() {
+    looked = null;
+    if (lookedUrl) globalThis.URL?.revokeObjectURL?.(lookedUrl);
+    lookedUrl = '';
+  }
+  /**
+   * A creation put on the screen to see what made it (16/11): dropped there from the Sortie or from
+   * the computer, or « Afficher dans le Studio » on a take of the chat. Its kind opens (Image, Vidéo,
+   * Son), it is on the screen with its actions (Agrandir, Prolonger…), and the Studio takes all that
+   * made it: model, prompt, format, settings, LoRAs, inputs and its very seed, « Plus de réglages »
+   * open. What made a file from elsewhere is not known: the settings stay as they are. The Studio as
+   * it was before is kept: « Revenir », at the right of « Image · Vidéo · Son », gives it back.
+   */
+  /** Why a creation of this kind cannot be put on the screen now, or '' when it can. */
+  function cannotLook(kind) {
+    if (working) return 'Une création est en cours : attendez sa fin pour en regarder une autre.';
+    if (proposal || ai) return 'Moodix AI est en train de proposer';
+    // A kind no model makes here has no screen: the Studio would only say so.
+    if (info && !modelsOf(kind).length)
+      return `Aucun modèle ${kind === 'audio' ? 'de son' : kind === 'video' ? 'de vidéo' : 'd’image'} n’est prêt : ce média ne peut pas être montré dans le Studio.`;
+    return '';
+  }
+  function inspect(record) {
+    const refused = cannotLook(mediaOf(record));
+    if (refused) return notice(refused);
+    looked ??= { mode, drafts: structuredClone(drafts), advanced, kept: { ...kept }, pinned, extending };
     legacy = false;
-    mode = mediaOf(record);
-    kept[mode] = record;
+    const target = mediaOf(record);
+    mode = target;
+    kept[target] = record;
     pinned = record.id;
+    extending = null;
+    formatsOpen = false;
+    failure = '';
+    if (info && modelsOf(target).some(item => item.id === record.workflowId)) {
+      const lost = adopt(record, { exactSeed: true });
+      advanced = true;
+      if (lost)
+        failure =
+          lost > 1
+            ? `${lost} images utilisées pour cette prise n’existent plus : leurs cases sont restées vides.`
+            : 'Une image utilisée pour cette prise n’existe plus : sa case est restée vide.';
+    } else if (record.external && record.workflowName)
+      // Made by Moodix, with a model this installation does not have.
+      failure = `Créé avec ${record.workflowName}, qui n’est pas disponible ici : vos réglages sont restés tels quels.`;
     render();
+  }
+  /** « Revenir »: the creation looked at leaves the screen, the Studio is as it was before. */
+  function lookBack() {
+    if (!looked || working) return;
+    const before = looked;
+    endLook();
+    for (const item of MODES) Object.assign(drafts[item.id], before.drafts[item.id]);
+    for (const key of Object.keys(kept)) delete kept[key];
+    Object.assign(kept, before.kept);
+    ({ mode, advanced, pinned, extending } = before);
+    formatsOpen = false;
+    failure = '';
+    render();
+  }
+  /**
+   * A file of the computer dropped on the screen. One Moodix made says so itself (the sheet it
+   * carries: public/media-info.mjs), whatever its name: a take of this project is that take; another
+   * is shown with what made it. An image or a clip is kept as a reference of the project, so that it
+   * can be enlarged, continued, animated; a sound is played from the file.
+   */
+  async function inspectFile(file) {
+    const type = String(file?.type || ''),
+      kind = type.startsWith('image/') ? 'image' : type.startsWith('video/') ? 'video' : type.startsWith('audio/') ? 'audio' : null;
+    if (!kind) return notice('Ce fichier n’est ni une image, ni une vidéo, ni un son.');
+    const refused = cannotLook(kind);
+    if (refused) return notice(refused);
+    const sheet = await fileInfo(file).catch(() => null),
+      known = sheet?.id ? runs.find(item => item.id === sheet.id) : null;
+    if (known) return inspect(known);
+    let resource = null;
+    if (kind !== 'audio') [resource = null] = await assets.importFiles([file], { project: project() }).catch(() => []);
+    if (working || proposal || ai) return;
+    const address = resource ? resource.originalUrl || resource.previewUrl : (globalThis.URL?.createObjectURL?.(file) ?? '');
+    if (!address) return notice('Ce fichier n’a pas pu être lu.');
+    inspect({
+      id: 'file:' + (resource?.id ?? `${file.name}:${file.size}:${file.lastModified ?? 0}`),
+      external: true,
+      ...(resource ? { resource: resource.id } : {}),
+      mediaType: kind,
+      prompt: String(sheet?.prompt ?? ''),
+      workflowId: sheet?.workflowId,
+      workflowName: sheet?.workflowName,
+      parameters: sheet?.parameters ?? {},
+      outputs: [{ originalUrl: address, thumbUrl: resource?.previewUrl || '', width: resource?.width, height: resource?.height }],
+    });
+    if (!resource) lookedUrl = address;
+  }
+  /** « Afficher dans le Studio » on a take of the chat: on the screen, with what made it (inspect). */
+  function show(record) {
+    inspect(record);
   }
 
   // Ctrl + Entrée (⌘ on a Mac) generates from anywhere in the Studio, not only from the prompt.

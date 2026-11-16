@@ -15273,3 +15273,53 @@ button.glass-select::after {
   bottom: auto;
   left: 10px;
 }
+
+/* ------------------------------------------------------------------ a creation looked at (16/11) */
+/* « Revenir », at the right of the line of « Image · Vidéo · Son »: the creation put on the screen
+   leaves it and the Studio is as it was before (studio.mjs, inspect and lookBack). */
+#studio-view .studio-look-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  min-height: 0;
+  margin: 0 0 0 auto;
+  padding: 0 12px;
+  border: 1px solid rgba(238, 232, 222, 0.14);
+  border-radius: 8px;
+  background: rgba(238, 232, 222, 0.03);
+  color: var(--text-2);
+  font: 500 14px/1 var(--font-ui);
+  cursor: pointer;
+}
+#studio-view .studio-look-back svg {
+  width: 15px;
+  height: 15px;
+}
+#studio-view .studio-look-back:is(:hover, :focus-visible):enabled {
+  outline: none;
+  border-color: rgba(238, 232, 222, 0.3);
+  color: var(--text-1);
+}
+#studio-view .studio-look-back:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* The screen takes a take of the Sortie or a file of the computer: lit while one is carried over it. */
+#studio-view .studio-desk[data-carrying] .studio-stage .studio-frame,
+#studio-view .studio-stage.is-target .studio-frame {
+  outline: 1px dashed rgba(238, 232, 222, 0.28);
+  outline-offset: 6px;
+}
+#studio-view .studio-stage.is-target .studio-frame {
+  outline: 1.5px solid var(--text-1);
+}
+/* The seed of a creation looked at is its very one: sixteen figures read whole in its field. */
+#studio-view .studio-seed {
+  grid-template-columns: 40px minmax(0, 1fr) 30px;
+}
+#studio-view .studio-seed input {
+  padding: 0 6px;
+  font-size: 12px;
+  letter-spacing: 0;
+}

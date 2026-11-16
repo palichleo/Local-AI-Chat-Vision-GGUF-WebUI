@@ -172,7 +172,8 @@ test('the record of a take says when its seed was named, not drawn: the Studio g
     parameters: { prompt: { policy: 'model', type: 'string' }, seed: { policy: 'random', type: 'integer' } },
     references: [],
   };
-  const saved = [];
+  const saved = [],
+    stamped = [];
   const engine = { busy: false, state: 'ready', stop: async () => (engine.state = 'stopped'), start: async () => (engine.state = 'ready') };
   const runtime = new ToolRuntime({
     engine,
@@ -196,7 +197,12 @@ test('the record of a take says when its seed was named, not drawn: the Studio g
         outputNodes: [],
       }),
     },
-    gallery: { put: async record => (saved.push(record), record) },
+    gallery: { put: async record => (saved.push(record), { ...record, outputs: record.outputs.map(output => ({ ...output, take: 5 })) }) },
+    // What made a creation goes into its file once it is recorded (lib/media-info.mjs): with its number.
+    stamp: async record => {
+      stamped.push([record.outputs[0].take, record.parameters.seed]);
+      if (stamped.length === 2) throw new Error('fichier pris par un autre programme');
+    },
     getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'native' }),
     engineConfig: () => ({}),
     clientFactory: () => ({
@@ -218,8 +224,17 @@ test('the record of a take says when its seed was named, not drawn: the Studio g
   };
   const named = await make({ prompt: 'boat', seed: 42 });
   assert.deepEqual([named.seed, named.seed_given], [42, true]);
-  const drawn = await make({ prompt: 'boat' });
+  const said = console.error;
+  console.error = () => {};
+  let drawn;
+  try {
+    // Its sheet could not be written this time: the creation is made all the same.
+    drawn = await make({ prompt: 'boat' });
+  } finally {
+    console.error = said;
+  }
   assert.deepEqual([drawn.seed, drawn.seed_given], [777, undefined]);
+  assert.deepEqual(stamped, [[5, 42], [5, 777]], 'each take recorded, then written in its file with its number');
 });
 
 test('native video approval shows the resolved fixed stage and cannot use global image authorization', async () => {

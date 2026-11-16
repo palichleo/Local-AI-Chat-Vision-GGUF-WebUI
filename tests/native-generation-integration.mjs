@@ -8,11 +8,17 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../server.mjs';
+import { bytesInfo, layout } from '../public/media-info.mjs';
 const fixture = fileURLToPath(new URL('./fixtures/fake-tool-engine.mjs', import.meta.url));
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=',
   'base64',
 );
+/** A PNG without the sheet Moodix writes in it (public/media-info.mjs): the image as the engine made it. */
+async function withoutSheet(bytes) {
+  const found = await layout({ size: bytes.length, read: async (at, length) => bytes.subarray(at, at + length) });
+  return Buffer.concat([bytes.subarray(0, 8), ...found.parts.filter(part => !part.mine).map(part => bytes.subarray(part.at, part.at + part.size))]);
+}
 async function checkpoint(path, tensors) {
   let offset = 0;
   const header = {};
@@ -270,12 +276,25 @@ test(
       assert.equal(job.record.parameters.seed, 99);
       assert.ok(events.indexOf('llm stopped') < events.indexOf('generate'));
       assert.ok(events.indexOf('runner released') < events.lastIndexOf('llm started'));
+      // The original served is the image the engine made, with its sheet written in it (16/11): what
+      // made it travels with the file, whatever its name becomes.
+      const served = Buffer.from(await (await api(`gallery/${conversationId}/${job.record.id}/0`)).arrayBuffer());
+      assert.deepEqual(await withoutSheet(served), png);
+      const sheet = await bytesInfo(served);
       assert.deepEqual(
-        Buffer.from(await (await api(`gallery/${conversationId}/${job.record.id}/0`)).arrayBuffer()),
-        png,
+        [sheet.moodix, sheet.id, sheet.conversationId, sheet.mediaType, sheet.parameters.seed, sheet.take],
+        [1, job.record.id, conversationId, 'image', 99, job.record.outputs[0].take],
       );
+      assert.equal(sheet.workflowId, job.record.workflowId);
+      assert.equal(typeof sheet.prompt, 'string');
+      // Nothing of this computer goes with it.
+      assert.equal(sheet.parameters.native_components, undefined);
+      assert.doesNotMatch(JSON.stringify(sheet), /safetensors|[A-Z]:\\\\/);
       await api('history/clear', { confirm: true });
-      assert.deepEqual(await readFile(join(outputDir, job.record.outputs[0].source.filename)), png);
+      // The conversation gone, the file still says what made it.
+      const kept = await readFile(join(outputDir, job.record.outputs[0].source.filename));
+      assert.deepEqual(kept, served);
+      assert.equal((await bytesInfo(kept)).id, job.record.id);
     } finally {
       await app?.close();
       await comfy.close();

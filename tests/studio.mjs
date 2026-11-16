@@ -3324,3 +3324,228 @@ test('the Sortie shows the whole project to begin with; its button released, the
     page.restore();
   }
 });
+
+// ------------------------------------------------------------------ a creation looked at on the screen (16/11)
+const lookModels = () => {
+  const krea = {
+      id: 'k',
+      name: 'Krea 2',
+      family: 'krea2',
+      seeded: true,
+      direct: true,
+      roles: { source: { count: 1, media: ['image'] } },
+      inputs: { img2img: 'source' },
+      limits: sizes,
+      size: { width: 1024, height: 1024 },
+      settings: [{ key: 'steps', type: 'number', min: 1, max: 50, default: 8 }],
+    },
+    clip = {
+      id: 'v',
+      name: 'Clip',
+      family: 'ltx25',
+      seeded: true,
+      direct: true,
+      roles: { start_image: { count: 1, media: ['image'] } },
+      inputs: { start_image: 'start_image' },
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      lengths: { seconds: [121 / 24, 193 / 24], standard: 121 / 24 },
+      settings: [],
+    };
+  const sound = { id: 's', name: 'Bruitages', roles: {}, settings: [{ key: 'seconds', type: 'number', min: 1, max: 30, default: 10 }] };
+  return { create_image: [krea], create_video: [clip], create_audio: [sound] };
+};
+const lookRuns = () => [
+  {
+    id: 'film',
+    conversationId: 'c2',
+    mediaType: 'video',
+    workflowId: 'v',
+    workflowName: 'Clip',
+    prompt: 'un renard court dans la neige',
+    parameters: { width: 1344, height: 768, frames: 193, fps: 24, seed: 777, references: [{ role: 'start_image', output_id: 'fox' }] },
+    outputs: [{ originalUrl: '/film.mp4', thumbUrl: '/film.jpg', take: 9 }],
+  },
+  {
+    id: 'fox',
+    conversationId: 'c1',
+    workflowId: 'k',
+    workflowName: 'Krea 2',
+    prompt: 'un renard',
+    parameters: { width: 768, height: 1344, steps: 20, seed: 4242 },
+    outputs: [{ originalUrl: '/fox.png', thumbUrl: '/fox.jpg', take: 3 }],
+  },
+];
+const dropOn = (page, transfer) =>
+  page.body.find('studio-stage')[0].ondrop({ preventDefault() {}, stopPropagation() {}, dataTransfer: transfer });
+const seedOf = async page => {
+  await page.body.find('studio-go')[0].onclick();
+  await settle();
+  return page.asked.findLast(([route]) => route === 'tools/action')[1].arguments;
+};
+const lookRoutes = {
+  'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+  'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+};
+
+test('a take dropped on the screen is shown there with all that made it, its very seed, « Plus de réglages » open; « Revenir » gives the Studio back', async () => {
+  const page = await studioPage(lookModels(), lookRoutes, { runs: lookRuns(), project: () => 'p1' });
+  const { body, studio, restore } = page;
+  const back = () => body.find('studio-look-back')[0],
+    onScreen = () => body.find('studio-frame-result')[0]?.src ?? null,
+    slots = () => body.find('studio-slot').map(tile => tile.children[0].children[0]?.src ?? null);
+  try {
+    // The conversation « c1 »: its image on the screen, its settings (not its seed: it was drawn).
+    assert.equal(body.dataset.mode, 'image');
+    assert.equal(onScreen(), '/fox.png');
+    assert.equal(back(), undefined, 'nothing looked at: no way back');
+    page.prompt().value = 'mon idée en cours';
+    page.prompt().oninput();
+    assert.equal(body.find('studio-rare')[0].hidden, true);
+    // The clip of another conversation of the project, dragged from the Sortie to the screen.
+    const film = body.find('studio-item').find(tile => tile.dataset.id === 'film'),
+      transfer = { files: [], types: [], setData() {} };
+    film.find('studio-item-pick')[0].ondragstart({ dataTransfer: transfer });
+    const stage = body.find('studio-stage')[0],
+      over = { preventDefault: () => (over.taken = true), dataTransfer: transfer };
+    stage.ondragover(over);
+    assert.equal(over.taken, true, 'the screen takes it');
+    dropOn(page, transfer);
+    // Its kind is open, it is on the screen, and the Studio is as it was to make it.
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(onScreen(), '/film.mp4');
+    assert.equal(page.prompt().value, 'un renard court dans la neige');
+    assert.deepEqual(slots(), ['/fox.jpg'], 'its start image back in its case');
+    assert.equal(body.find('studio-rare')[0].hidden, false, '« Plus de réglages » open');
+    // The actions of that take, on the bar of the screen.
+    assert.ok(body.find('output-actions')[0].children.length > 0);
+    let args = await seedOf(page);
+    assert.deepEqual([args.width, args.height, args.seed], [1344, 768, 777], 'its very seed');
+    assert.ok(Math.abs(args.duration - 193 / 24) < 1e-9);
+    // « Revenir », at the right of « Image · Vidéo · Son »: the clip leaves, the Studio is as before.
+    assert.equal(back().children.at(-1).textContent, 'Revenir');
+    assert.match(back().title, /remettre vos réglages d’avant/);
+    back().onclick();
+    assert.equal(body.dataset.mode, 'image');
+    assert.equal(onScreen(), '/fox.png');
+    assert.equal(page.prompt().value, 'mon idée en cours');
+    assert.equal(body.find('studio-rare')[0].hidden, true);
+    assert.equal(back(), undefined);
+    args = await seedOf(page);
+    assert.deepEqual([args.width, args.height, args.steps, args.seed], [768, 1344, 20, undefined]);
+    // « Afficher dans le Studio », from the chat: the same.
+    studio.show(lookRuns()[0]);
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(page.prompt().value, 'un renard court dans la neige');
+    assert.ok(back());
+    // Looked at twice in a row: « Revenir » still leads to the Studio of before the first.
+    studio.show(lookRuns()[1]);
+    assert.equal(page.prompt().value, 'un renard');
+    assert.equal((await seedOf(page)).seed, 4242);
+    back().onclick();
+    assert.equal(page.prompt().value, 'mon idée en cours');
+    // An image of a case is not a creation to look at: the screen leaves it.
+    const slotDrag = { preventDefault: () => (slotDrag.taken = true), dataTransfer: { types: [], files: [] } };
+    body.find('studio-stage')[0].ondragover(slotDrag);
+    assert.equal(slotDrag.taken, undefined);
+  } finally {
+    restore();
+  }
+});
+
+test('a file dropped on the screen: one Moodix made says what made it, whatever its name; one from elsewhere changes no setting', async () => {
+  const { mp4Box, pngChunk } = await import('../public/media-info.mjs');
+  const be = value => {
+      const bytes = Buffer.alloc(4);
+      bytes.writeUInt32BE(value);
+      return bytes;
+    },
+    box = (type, data) => Buffer.concat([be(8 + data.length), Buffer.from(type, 'ascii'), data]),
+    film = Buffer.concat([box('ftyp', Buffer.from('isomiso2', 'latin1')), box('mdat', Buffer.alloc(32))]),
+    signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    picture = sheet => Buffer.concat([signature, box2('IHDR', Buffer.alloc(13)), ...(sheet ? [Buffer.from(pngChunk(sheet))] : []), box2('IEND', Buffer.alloc(0))]),
+    box2 = (type, data) => Buffer.concat([be(data.length), Buffer.from(type, 'ascii'), data, be(0)]),
+    file = (bytes, name, type) => new File([bytes], name, { type });
+  const page = await studioPage(lookModels(), lookRoutes, { runs: lookRuns(), project: () => 'p1' });
+  const { body, notices, restore } = page;
+  const back = () => body.find('studio-look-back')[0],
+    onScreen = () => body.find('studio-frame-result')[0]?.src ?? null,
+    drop = async dropped => {
+      dropOn(page, { files: [dropped], types: ['Files'] });
+      await settle();
+    };
+  try {
+    page.prompt().value = 'mon idée en cours';
+    page.prompt().oninput();
+    // A clip of this project, renamed on the disk: its sheet names it; it is that take.
+    await drop(file(Buffer.concat([film, Buffer.from(mp4Box({ moodix: 1, id: 'film', mediaType: 'video' }))]), 'vacances (1).mp4', 'video/mp4'));
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(onScreen(), '/film.mp4', 'the take itself, not a copy of the file');
+    assert.equal(page.prompt().value, 'un renard court dans la neige');
+    assert.equal((await seedOf(page)).seed, 777);
+    back().onclick();
+    // An image Moodix made elsewhere (another project, another computer): kept as a reference of the
+    // project, shown from there, with what its sheet says made it.
+    const elsewhere = { moodix: 1, id: 'ailleurs', mediaType: 'image', workflowId: 'k', workflowName: 'Krea 2', prompt: 'un phare', parameters: { width: 1344, height: 768, steps: 30, seed: 99 } };
+    await drop(file(picture(elsewhere), 'phare.png', 'image/png'));
+    assert.equal(body.dataset.mode, 'image');
+    assert.equal(onScreen(), '/preview/phare.png');
+    assert.equal(page.prompt().value, 'un phare');
+    assert.equal(body.find('studio-rare')[0].hidden, false);
+    let made = await seedOf(page);
+    assert.deepEqual([made.width, made.height, made.steps, made.seed], [1344, 768, 30, 99]);
+    // Its actions take it as a reference of the project.
+    assert.ok(body.find('output-actions')[0].children.length > 0);
+    back().onclick();
+    assert.equal(page.prompt().value, 'mon idée en cours');
+    // Made with a model this installation does not have: said, the settings untouched.
+    await drop(file(picture({ ...elsewhere, workflowId: 'inconnu', workflowName: 'Flux 3' }), 'flux.png', 'image/png'));
+    assert.equal(page.prompt().value, 'mon idée en cours');
+    assert.equal(body.find('studio-error')[0].textContent, 'Créé avec Flux 3, qui n’est pas disponible ici : vos réglages sont restés tels quels.');
+    back().onclick();
+    // A photo from elsewhere: on the screen, and nothing of the settings changes.
+    await drop(file(picture(null), 'photo.png', 'image/png'));
+    assert.equal(onScreen(), '/preview/photo.png');
+    assert.equal(page.prompt().value, 'mon idée en cours');
+    assert.equal(body.find('studio-rare')[0].hidden, true);
+    assert.equal(body.find('studio-error').length, 0);
+    made = await seedOf(page);
+    assert.deepEqual([made.steps, made.seed], [20, undefined], 'the settings of before');
+    assert.ok(back());
+    back().onclick();
+    assert.equal(onScreen(), '/fox.png');
+    // A sound: its kind opens, it plays from the file itself; no action on a sound.
+    const made0 = [],
+      given = [],
+      urls = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    URL.createObjectURL = blob => (made0.push(blob), 'blob:son');
+    URL.revokeObjectURL = address => given.push(address);
+    try {
+      await drop(file(Buffer.from('RIFF\x24\0\0\0WAVEfmt ', 'latin1'), 'pluie.wav', 'audio/wav'));
+      assert.equal(body.dataset.mode, 'audio');
+      back().onclick();
+      assert.deepEqual(given, ['blob:son'], 'the address of the file given back');
+    } finally {
+      URL.createObjectURL = urls.create;
+      URL.revokeObjectURL = urls.revoke;
+    }
+    // Neither an image, a clip nor a sound: said, nothing changes.
+    await drop(file(Buffer.from('%PDF-1.7'), 'notes.pdf', 'application/pdf'));
+    assert.match(notices.at(-1), /ni une image, ni une vidéo, ni un son/);
+    assert.equal(back(), undefined);
+  } finally {
+    restore();
+  }
+  // A kind no model makes here has no screen to open: said, nothing changes, nothing is kept.
+  const { create_image } = lookModels(),
+    alone = await studioPage({ create_image }, lookRoutes, { runs: [lookRuns()[1]], project: () => 'p1' });
+  try {
+    dropOn(alone, { files: [file(Buffer.from('RIFF\x24\0\0\0WAVEfmt ', 'latin1'), 'pluie.wav', 'audio/wav')], types: ['Files'] });
+    await settle();
+    assert.equal(alone.notices.at(-1), 'Aucun modèle de son n’est prêt : ce média ne peut pas être montré dans le Studio.');
+    assert.equal(alone.body.dataset.mode, 'image');
+    assert.equal(alone.body.find('studio-look-back').length, 0);
+  } finally {
+    alone.restore();
+  }
+});
