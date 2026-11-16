@@ -12564,3 +12564,367 @@ body:not([data-view='chat']) .resume {
     padding-bottom: 46px;
   }
 }
+
+/* ------------------------------------------------------------------ the conversation (phase 2) */
+/* La conversation (captures 10 à 14) : une colonne de 760 px ; vos messages en bulle à droite ;
+   Moodix signe de l'Éclipse et de « MOODIX » en capitales espacées, sa réflexion repliée sur la
+   même ligne (« ✧ Réflexion · 4 s › »), son texte en retrait de 32 px. */
+#messages .message.user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+#messages .message.user .message-body {
+  max-width: 78%;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(238, 232, 222, 0.07);
+  color: var(--text-1);
+  font: 400 15px/1.6 var(--font-ui);
+}
+#messages .message-images {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+#messages .message-ref {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  margin: 0;
+}
+#messages .message-ref img {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-s);
+  object-fit: cover;
+  outline: 1px solid rgba(238, 232, 222, 0.16);
+  outline-offset: -1px;
+}
+#messages .message-ref figcaption {
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+}
+#messages .message.assistant .message-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 24px;
+  margin: 0;
+}
+#messages .message.assistant .message-avatar {
+  width: 22px;
+  height: 22px;
+}
+#messages .message-name {
+  color: var(--text-2);
+  font: 500 12px/1 var(--font-ui);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+/* The thought, folded on the line of the signature; open, its text under it, in grey, a rule on
+   its left, at the margin of the answer. */
+#messages .message-header + .reasoning {
+  margin: -24px 0 0 120px;
+}
+#messages .reasoning {
+  border: 0;
+  background: transparent;
+}
+#messages .reasoning > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 4px;
+  border-radius: var(--radius-s);
+  color: var(--text-3);
+  font: 400 13px/1 var(--font-ui);
+  list-style: none;
+  cursor: pointer;
+}
+#messages .reasoning > summary::-webkit-details-marker,
+#messages .reasoning > summary::marker {
+  display: none;
+  content: '';
+}
+#messages .reasoning > summary svg {
+  width: 12px;
+  height: 12px;
+}
+#messages .reasoning > summary::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  margin-left: 3px;
+  border-right: 1.2px solid currentColor;
+  border-bottom: 1.2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.2s ease;
+}
+#messages .reasoning[open] > summary::after {
+  transform: rotate(45deg);
+}
+#messages .reasoning > summary:hover {
+  color: var(--text-2);
+}
+#messages .message-header + .reasoning > .reasoning-content {
+  margin-left: -88px;
+}
+#messages .reasoning-content {
+  margin-top: 10px;
+  margin-bottom: 4px;
+  padding: 2px 0 2px 14px;
+  border: 0;
+  border-left: 1px solid rgba(238, 232, 222, 0.14);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: 400 14px/1.65 var(--font-ui);
+}
+#messages .message.assistant > :is(.message-body, .message-note, .generation-grid, .message-actions) {
+  margin-left: 32px;
+}
+#messages .message.assistant .message-body {
+  margin-top: 12px;
+  color: rgba(238, 232, 222, 0.92);
+  font: 400 15.5px/1.75 var(--font-ui);
+}
+/* « Modifier » and « Régénérer » stay, under the pointer or the keyboard (not drawn in the captures). */
+#messages .message-actions {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+#messages .message:hover .message-actions,
+#messages .message-actions:focus-within {
+  opacity: 1;
+}
+@media (hover: none) {
+  #messages .message-actions {
+    opacity: 1;
+  }
+}
+/* The box of the conversation: the share of the context is its bottom edge, its figure under the
+   pointer at its right. */
+.workspace:not(:has(#messages:empty)) .composer-region {
+  box-sizing: border-box;
+  width: min(760px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 0 0 22px;
+}
+.workspace:not(:has(#messages:empty)) #chat-form.composer {
+  min-height: 100px;
+  padding-top: 16px;
+}
+.workspace:not(:has(#messages:empty)) #chat-form .composer-tools {
+  margin-top: 10px;
+}
+.workspace:not(:has(#messages:empty)) .context-meter {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: auto;
+  height: 2px;
+  margin: -3px 12px 0;
+  padding: 0;
+  opacity: 1;
+}
+.workspace:not(:has(#messages:empty)) .context-track {
+  display: block;
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: transparent;
+}
+.workspace:not(:has(#messages:empty)) .context-track::before {
+  background: rgba(238, 232, 222, 0.55);
+}
+.workspace:not(:has(#messages:empty)) .context-figure {
+  position: absolute;
+  right: 4px;
+  bottom: 8px;
+  margin: 0;
+  opacity: 0;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+  transition: opacity 0.15s ease;
+}
+.workspace:not(:has(#messages:empty)) .context-meter:is(:hover, :focus-visible) .context-figure,
+.workspace:not(:has(#messages:empty)) #chat-form:hover ~ .context-meter .context-figure,
+.workspace:not(:has(#messages:empty)) .context-meter:is([data-warning='near'], [data-warning='full']) .context-figure {
+  opacity: 1;
+}
+/* While a generation runs: « 42 % » alone and Interrompre, in the box of the conversation. */
+#chat-form .compose-state {
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+}
+#chat-form .cancel-button {
+  background: rgba(238, 232, 222, 0.08);
+  color: var(--text-1);
+}
+
+/* ------------------------------------------------------------------ the takes in the chat (phase 2) */
+/* Les prises d'un message (captures 10 et 14) : « IMAGE · 3 PRISES · KREA 2 » au-dessus, chaque
+   prise dans son filet (ivoire à 16 %, coins de 8), « PRISE n » et son format dessous en mono ;
+   ses actions en icônes en haut à droite, sous le pointeur ou au clavier ; la durée d'un plan sur
+   son image. La dernière à gauche, comme partout. */
+#messages .generation-grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 16px;
+}
+#messages .generation-grid:empty {
+  display: none;
+}
+#messages .generation-grid[data-takes]::before {
+  content: attr(data-takes);
+  flex: 0 0 100%;
+  margin: 0 0 -2px;
+  color: var(--text-3);
+  font: 500 12px/1 var(--font-ui);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+}
+#messages .generation-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+  width: 212px;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+#messages .generation-card.is-video {
+  width: min(560px, 100%);
+}
+#messages .generation-card.is-audio {
+  width: min(420px, 100%);
+}
+#messages .generation-card .generation-frame {
+  order: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: auto;
+  aspect-ratio: auto;
+  background: rgba(238, 232, 222, 0.04);
+  margin: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  outline: 1px solid rgba(238, 232, 222, 0.16);
+  outline-offset: -1px;
+  transition: outline-color 0.15s ease;
+}
+#messages .generation-card:is(:hover, :focus-within) .generation-frame {
+  outline: 1.5px solid var(--text-1);
+}
+#messages .generation-card .generation-frame :is(img, video) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0;
+}
+/* A creation of the Studio is a take like the others: its card words are said by its line. */
+#messages .generation-card.has-take :is(.card-text, .card-open) {
+  display: none;
+}
+#messages .generation-card.has-take .generation-caption {
+  order: 2;
+}
+#messages .generation-card.has-take:has(.generation-frame.is-finished) .generation-caption {
+  display: none;
+}
+#messages .take-caption {
+  order: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+#messages .take-number {
+  color: var(--text-2);
+}
+#messages .take-duration {
+  position: absolute;
+  bottom: 31px;
+  left: 10px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: rgba(12, 11, 14, 0.72);
+  color: var(--text-1);
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+#messages .generation-card .output-actions {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  margin: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--radius-l);
+  background: rgba(18, 17, 22, 0.86);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+#messages .generation-card:is(:hover, :focus-within) .output-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  #messages .generation-card .output-actions {
+    opacity: 1;
+  }
+}
+#messages .output-action {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-1);
+}
+#messages .output-action > span {
+  display: none;
+}
+#messages .output-action svg {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+#messages .output-action:hover:enabled,
+#messages .output-action:focus-visible {
+  background: rgba(238, 232, 222, 0.12);
+}
+#messages .output-action:disabled {
+  opacity: 0.38;
+}
+/* A tooltip of two lines: the name of an action, its help under it. */
+.help-bubble {
+  white-space: pre-line;
+}

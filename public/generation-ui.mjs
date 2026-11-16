@@ -26,6 +26,31 @@ const recordMeta = record => {
     seconds: media === 'audio' ? p.seconds : p.frames && p.fps ? p.frames / p.fps : null,
   });
 };
+/**
+ * Under a take: its number in its project (« PRISE 12 ») and its format (« 1:1 », « 16:9 · 768 × 448 »
+ * for a clip, its length for a sound); `seconds`: the length written on a clip (« 06.04 S »).
+ */
+export function takeLine(record, index) {
+  const output = record.outputs?.[index] ?? {},
+    p = record.parameters ?? {},
+    media = record.mediaType || 'image',
+    width = output.width ?? p.width,
+    height = output.height ?? p.height,
+    seconds = media === 'audio' ? p.seconds : p.frames && p.fps ? p.frames / p.fps : null,
+    format = formatOf(width, height)?.id ?? (width && height ? `${width} × ${height}` : '');
+  return {
+    number: Number.isInteger(output.take) ? `PRISE ${output.take}` : '',
+    format:
+      media === 'audio'
+        ? Number.isFinite(seconds) && seconds > 0
+          ? figures(seconds)
+          : ''
+        : media === 'video' && width && height && format !== `${width} × ${height}`
+          ? `${format} · ${width} × ${height}`
+          : format,
+    seconds: media === 'video' && Number.isFinite(seconds) && seconds > 0 ? figures(seconds) : '',
+  };
+}
 const requestMeta = request => {
   const p = request.plan?.parameters ?? {},
     media = request.mediaType || 'image';
@@ -269,6 +294,33 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       const shown = record;
       target.open.onclick = () => onOpen?.(shown);
     }
+    /**
+     * A take as the captures draw it: « PRISE n » and its format under it, the length of a clip on
+     * its picture, and over the takes of the message the line of their group (« IMAGE · 3 PRISES ·
+     * KREA 2 »).
+     */
+    function dress(target, shown, index) {
+      const line = takeLine(shown, index);
+      target.takeLine ??= node('div', 'take-caption');
+      target.takeLine.replaceChildren(node('span', 'take-number', line.number), node('span', 'take-format', line.format));
+      target.figure.append(target.takeLine);
+      target.figure.classList.add('has-take');
+      target.figure.takeKind = KINDS[shown.mediaType] ?? KINDS.image;
+      target.figure.takeWorkflow = shown.workflowName || '';
+      if (line.seconds && !target.takeLength) {
+        target.takeLength = node('span', 'take-duration', line.seconds);
+        target.figure.append(target.takeLength);
+      }
+      const takes = [...container.children].filter(child => child.classList?.contains('has-take')),
+        count = takes.length,
+        // The kind and the model when the takes share them (a message can hold the Studio's, of all kinds).
+        common = key => (new Set(takes.map(child => child[key])).size === 1 ? takes[0][key] : '');
+      // Written by the sheet over the takes (an attribute: the grid keeps its takes alone).
+      container.setAttribute(
+        'data-takes',
+        [common('takeKind'), count > 1 ? `${count} prises` : '', common('takeWorkflow')].filter(Boolean).join(' · '),
+      );
+    }
     function image({ record: outputRecord, index, blob }) {
       if (disposed || slots.has(index)) return;
       record = outputRecord;
@@ -278,6 +330,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       if (target !== first) tiles.push(target);
       unwatch(target.figure);
       describe(target);
+      dress(target, record, index);
       if (record.mediaType === 'video') target.figure.classList.add('is-video');
       if (record.mediaType === 'audio') {
         // A sound: its player, and the actions on the output beside it.

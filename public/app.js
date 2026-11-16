@@ -125,6 +125,19 @@ function moodixMark() {
     `<circle class="eclipse-sphere" cx="16" cy="16" r="12.5" mask="url(#${id})"/>`;
   return [svg];
 }
+/**
+ * How long the model thought, said in its summary (« Réflexion · 4 s »): from its first thought to
+ * the first words of its answer (or the end of the turn, `done`).
+ */
+function thoughtFor(view, reasoning, output, done = false) {
+  if (!reasoning) return;
+  view.thoughtFrom ??= performance.now();
+  if ((output || done) && view.thoughtSeconds === undefined) {
+    view.thoughtSeconds = Math.max(1, Math.round((performance.now() - view.thoughtFrom) / 1000));
+    const label = view.summary?.querySelector?.('.reasoning-label');
+    if (label) label.textContent = `Réflexion · ${view.thoughtSeconds}\u00a0s`;
+  }
+}
 /** The mark of a reply moves while its model thinks: reasoning has come, the answer not yet. */
 function markThinking(view, thinking) {
   view.article.querySelector('.message-avatar')?.classList.toggle('is-thinking', thinking);
@@ -1687,13 +1700,16 @@ function userMessage(text, images, videos = []) {
   }
   if (images.length) {
     const previews = node('div', 'message-images');
-    for (const image of images) {
+    for (const [index, image] of images.entries()) {
       const img = node('img');
       // The stored original when there is one; the model's copy is not what the user attached.
       img.src = image.view || image.url;
       img.alt = image.name;
       img.decoding = 'async';
-      previews.append(img);
+      // Each under its label, as the references of a proposal (« RÉF. 1 »).
+      const figure = node('figure', 'message-ref');
+      figure.append(img, node('figcaption', '', `RÉF. ${index + 1}`));
+      previews.append(figure);
     }
     article.append(previews);
   }
@@ -1771,12 +1787,14 @@ function assistantMessage(parent = null) {
     const avatar = node('span', 'message-avatar');
     avatar.setAttribute('aria-hidden', 'true');
     avatar.append(...moodixMark());
-    header.append(avatar, node('span', '', 'Moodix AI'));
+    header.append(avatar, node('span', 'message-name', 'Moodix'));
     article.append(header);
   }
   const reasoning = node('details', 'reasoning');
   reasoning.hidden = true;
-  const summary = node('summary', '', 'Réflexion du modèle');
+  const summary = node('summary');
+  summary.append(icon('spark'), node('span', 'reasoning-label', 'Réflexion'));
+  summary.setAttribute('aria-label', 'Réflexion du modèle');
   const thoughts = node('div', 'reasoning-content');
   reasoning.append(summary, thoughts);
   const body = node('div', 'message-body');
@@ -1797,9 +1815,13 @@ function assistantMessage(parent = null) {
  * the user confirms it, the result joins the conversation as an ordinary tool call.
  */
 async function runOutputAction(record, index, action) {
-  const reference = record.id + (index ? ` (sortie ${index + 1})` : '');
-  if (action === 'extend') {
-    const line = `Pour la sortie ${reference}, continue la vidéo : `,
+  // The take by its number when it has one (the model finds it by it: « la prise 12 »).
+  const take = record.outputs?.[index]?.take,
+    reference = Number.isInteger(take) ? `la prise ${take}` : `la sortie ${record.id}` + (index ? ` (sortie ${index + 1})` : '');
+  // Prolonger and Animer write the start of a request, for the user to finish.
+  if (action === 'extend' || action === 'animate') {
+    const line =
+      action === 'extend' ? `Prolonge ${reference} : ` : `Anime ${reference} : `,
       prompt = $('prompt');
     prompt.value = line + (prompt.value.trim() ? '\n\n' + prompt.value : '');
     resizePrompt();
@@ -1813,8 +1835,8 @@ async function runOutputAction(record, index, action) {
   const video = record.mediaType === 'video',
     text =
       action === 'upscale'
-        ? `Upscale de la sortie ${reference}.`
-        : `Interpolation de la sortie ${reference} pour une vidéo plus fluide.`,
+        ? `Agrandir et affiner ${reference}.`
+        : `Interpoler ${reference} pour une vidéo plus fluide.`,
     history = [...state.messages, { role: 'user', content: text }];
   state.generating = true;
   turnActions();
@@ -2048,6 +2070,7 @@ async function sendMessage(event) {
     if (silent) return;
     // « Réflexion en cours… »: the mark of Moodix AI thinks with it, until the answer is written.
     markThinking(view, Boolean(reasoning) && !output);
+    thoughtFor(view, reasoning, output);
     view.reasoning.hidden = !reasoning;
     view.thoughts.textContent = reasoning;
     if (output) renderText(view.body, output);
@@ -2544,7 +2567,8 @@ async function sendMessage(event) {
       state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: !complete };
       setConversationTitle(text || 'Une image à explorer');
     }
-    // The turn is over, answered, failed or stopped: the mark is at rest.
+    // The turn is over, answered, failed or stopped: the mark is at rest, its thought timed.
+    thoughtFor(view, reasoning, output, true);
     markThinking(view, false);
     await persistConversation();
     state.generating = false;
@@ -2831,7 +2855,14 @@ const actionButtons = outputActions({
   node,
   onDetails: (record, index) => assetsUI.viewOutput(record, index),
   onAction: (record, index, action) => runOutputAction(record, index, action),
+  // « Afficher dans le Studio »: the take on the Studio's screen; the prompt and the settings stay.
+  onShow: record => showInStudio(record),
 });
+function showInStudio(record) {
+  void closeChat()
+    .then(() => revealStudio())
+    .then(() => record && studioUI.show(record));
+}
 const studioUI = setupStudio({
   api,
   node,
@@ -2873,11 +2904,7 @@ const generationUI = setupGenerationUI({
   openOutput: (record, index, blob) => assetsUI.viewOutput(record, index, blob),
   onResize: scrollToBottom,
   // « Ouvrir » on a card: the creation on the Studio's screen.
-  onOpen: record => {
-    void closeChat()
-      .then(() => revealStudio())
-      .then(() => record && studioUI.show(record));
-  },
+  onOpen: record => showInStudio(record),
 });
 const workflowsUI = setupNativeWorkflows({
   api,

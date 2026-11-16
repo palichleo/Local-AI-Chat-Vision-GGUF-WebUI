@@ -95,6 +95,7 @@ async function exchange({
     // The mark of Moodix AI beside its name, and its moving while the model thinks.
     moodixMark: () => [],
     markThinking() {},
+    thoughtFor() {},
     userMessage: () => element(),
     contextMeter: { pause() {}, observe() {}, schedule() {} },
     renderAttachments() {},

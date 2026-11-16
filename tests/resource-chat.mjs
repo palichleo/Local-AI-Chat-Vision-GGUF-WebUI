@@ -61,6 +61,7 @@ test('grouped resource frames retain their separate labels and never enter saved
     renderAttachments() {},
     resizePrompt() {},
     markThinking() {},
+    thoughtFor() {},
     notice() {},
     scrollToBottom() {},
     renderText() {},

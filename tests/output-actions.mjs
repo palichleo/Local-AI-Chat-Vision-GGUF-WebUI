@@ -25,41 +25,57 @@ const node = (tag, className, text) => new Element(tag, className, text);
 globalThis.document ??= { createElementNS: (_ns, tag) => new Element(tag) };
 const label = button => button.children.find(child => child.tag === 'span').textContent;
 
-test('outputs offer Détails, Upscale and, for videos, Interpoler and Prolonger', async () => {
+test('the same actions on a take everywhere: icons only, their name and help under the pointer (reference-maquettes.md)', async () => {
   const calls = [];
   const actions = outputActions({
     api: async route => {
       assert.equal(route, 'tools/actions');
-      return Response.json({ upscale: ['video'], interpolate: ['video'], extend_video: [] });
+      return Response.json({ upscale: ['video'], interpolate: ['video'], extend_video: [], animate: ['image'] });
     },
     node,
     onDetails: (...args) => calls.push(['details', ...args]),
     onAction: (...args) => calls.push(args.slice(1)),
+    onShow: (...args) => calls.push(['studio', ...args]),
   });
   const video = { id: 'run', mediaType: 'video' },
-    image = { id: 'still' };
+    image = { id: 'still' },
+    sound = { id: 'sound', mediaType: 'audio' };
   const videoRow = actions(video, 0),
     imageRow = actions(image, 0);
-  assert.deepEqual(videoRow.children.map(label), ['Détails', 'Upscale', 'Interpoler', 'Prolonger']);
-  assert.deepEqual(imageRow.children.map(label), ['Détails', 'Upscale']);
+  // Video: Ouvrir · Prolonger · Interpoler · Agrandir et affiner · Afficher dans le Studio.
+  assert.deepEqual(videoRow.children.map(label), ['Ouvrir', 'Prolonger', 'Interpoler', 'Agrandir et affiner', 'Afficher dans le Studio']);
+  // Image: Ouvrir · Agrandir et affiner · Animer · Afficher dans le Studio; a sound: Ouvrir and the Studio.
+  assert.deepEqual(imageRow.children.map(label), ['Ouvrir', 'Agrandir et affiner', 'Animer', 'Afficher dans le Studio']);
+  assert.deepEqual(actions(sound, 0).children.map(label), ['Ouvrir', 'Afficher dans le Studio']);
+  // Icons only: the name is the button's, its help under it in the tooltip.
+  assert.deepEqual(videoRow.children.map(button => button.attributes['aria-label']), videoRow.children.map(label));
+  assert.equal(imageRow.children[3].title, 'Afficher dans le Studio\nVotre prompt et vos réglages ne changent pas');
   assert.ok(
-    videoRow.children.slice(1).every(button => button.disabled),
+    videoRow.children.slice(1, 4).every(button => button.disabled),
     'disabled until the server answers',
   );
   await new Promise(setImmediate);
-  const [details, upscale, interpolate, extend] = videoRow.children;
+  const [details, extend, interpolate, upscale, studio] = videoRow.children;
   assert.equal(upscale.disabled, false);
   assert.equal(interpolate.disabled, false);
   assert.equal(extend.disabled, true);
-  assert.match(extend.title, /prolonger/);
+  assert.match(extend.title, /^Prolonger\nAucun workflow ne sait prolonger une vidéo\.$/);
   assert.equal(imageRow.children[1].disabled, true, 'no image upscaler is active');
   assert.match(imageRow.children[1].title, /upscale image/);
+  assert.equal(imageRow.children[2].disabled, false, 'a video workflow starts from an image');
   details.onclick();
   interpolate.onclick();
+  studio.onclick();
+  imageRow.children[2].onclick();
   assert.deepEqual(calls, [
     ['details', video, 0],
     [0, 'interpolate'],
+    ['studio', video, 0],
+    [0, 'animate'],
   ]);
+  // Without a way to show it in the Studio (in the Studio itself), that action is not offered.
+  const plain = outputActions({ api: async () => Response.json({}), node, onDetails() {}, onAction() {} });
+  assert.deepEqual(plain(image, 0).children.map(label), ['Ouvrir', 'Agrandir et affiner', 'Animer']);
 });
 
 test('a row drawn before a workflow became ready enables its button when the pointer comes back', async () => {
@@ -105,7 +121,8 @@ test('the server lists which media each output button can act on', async () => {
       workflow('rife', 'rife', 'video', 'source_video'),
     ],
   });
-  assert.deepEqual(await tools.actions(), { upscale: ['video'], interpolate: ['video'], extend_video: [] });
+  // « Animer »: none here, no video workflow starts from an image.
+  assert.deepEqual(await tools.actions(), { upscale: ['video'], interpolate: ['video'], extend_video: [], animate: [] });
 });
 
 test('an image upscale goes to SeedVR2 before Real-ESRGAN unless the model names a workflow', async () => {
