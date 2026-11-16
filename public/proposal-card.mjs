@@ -10,12 +10,13 @@ const KINDS = { video: 'Vidéo', audio: 'Son', image: 'Image' };
  * - The count pauses while the pointer is on the card or while something is written in the message
  *   box (« EN PAUSE »), and stops for good at a click or a key in the card (« EN ATTENTE DE VOTRE
  *   ACCORD »): then only « Générer » starts it. A sound waits for « Générer » (no count).
- * - « Annuler » leaves the line « Proposition annulée. »; a new message declines it too, and the card
- *   goes (Moodix answers with another). No « Toujours autoriser ».
+ * - « Annuler » leaves the line « Proposition annulée. » (answer 'cancel'); a new message declines it
+ *   too ('deny'): the card goes without a trace (Moodix answers with another). No « Toujours
+ *   autoriser ».
  * « + » on an input opens « Créations du projet » in the card (`takes()`: the creations of the project);
  * the image chosen goes in its case, as an image dropped or pasted on the card (`importImage(file)`:
  * kept as a reference of the project first); the server revises the proposal (`add`), no message.
- * Returns `answer` ('once' or 'deny', after the changes are sent), `decline()` and `stop()`.
+ * Returns `answer` ('once' after the changes are sent, 'deny' or 'cancel'), `decline()` and `stop()`.
  */
 export function proposalCard({
   host,
@@ -79,37 +80,27 @@ export function proposalCard({
   }
   /**
    * « Créations du projet » under the cases (as in the Studio): the images of the project, the newest
-   * at the left, 56 px; one taken goes in the case; « × » closes it. Again on the same « + »: closed.
+   * at the left, 56 px; one taken goes in the case. No × (16/11): Échap or a click beside it closes
+   * it, and again the same « + ».
    */
   let shelfRole = null;
+  function closeShelf() {
+    if (form?.shelf) form.shelf.hidden = true;
+    shelfRole = null;
+    globalThis.document?.removeEventListener?.('pointerdown', beside, true);
+  }
+  // A click beside it closes it; a case of the card (its « + ») opens or closes it itself.
+  function beside(event) {
+    if (form?.shelf?.contains?.(event.target) || event.target?.closest?.('.proposal-input')) return;
+    closeShelf();
+  }
   async function openShelf(role) {
     const shelf = form?.shelf;
     if (!shelf) return;
-    if (shelfRole === role && !shelf.hidden) {
-      shelf.hidden = true;
-      shelfRole = null;
-      return;
-    }
+    if (shelfRole === role && !shelf.hidden) return closeShelf();
     shelfRole = role;
     const head = node('p', 'proposal-shelf-title', 'Créations du projet'),
-      close = node('button', 'proposal-shelf-close'),
-      row = node('div', 'proposal-shelf-row'),
-      make = tag =>
-        globalThis.document?.createElementNS ? document.createElementNS('http://www.w3.org/2000/svg', tag) : node(tag),
-      cross = make('svg'),
-      use = make('use');
-    cross.setAttribute('aria-hidden', 'true');
-    use.setAttribute('href', '#i-close');
-    cross.append(use);
-    close.append(cross);
-    close.type = 'button';
-    close.setAttribute('aria-label', 'Fermer les créations du projet');
-    close.title = 'Fermer';
-    close.onclick = () => {
-      shelf.hidden = true;
-      shelfRole = null;
-    };
-    head.append(close);
+      row = node('div', 'proposal-shelf-row');
     row.append(node('span', 'proposal-shelf-note', takes ? 'Chargement…' : 'Glissez ou collez une image ici.'));
     shelf.replaceChildren(head, row);
     // A file of the computer, at the end (as in the Studio).
@@ -123,6 +114,7 @@ export function proposalCard({
       shelf.append(file, input);
     }
     shelf.hidden = false;
+    globalThis.document?.addEventListener?.('pointerdown', beside, true);
     if (!takes) return;
     let list = [];
     try {
@@ -305,6 +297,8 @@ export function proposalCard({
     card.removeEventListener('pointerleave', leave);
     card.removeEventListener('pointerdown', touched, true);
     card.removeEventListener('keydown', touched, true);
+    card.removeEventListener('keydown', escape);
+    globalThis.document?.removeEventListener?.('pointerdown', beside, true);
     composer?.removeEventListener?.('input', typing);
     signal?.removeEventListener?.('abort', abort);
     card.remove();
@@ -332,14 +326,21 @@ export function proposalCard({
   }
   const abort = () => finish(signal.reason || new DOMException('Annulé', 'AbortError'));
 
+  // Échap closes « Créations du projet » (16/11: no ×).
+  const escape = event => {
+    if (event.key !== 'Escape' || !shelfRole) return;
+    event.preventDefault?.();
+    closeShelf();
+  };
   render();
   say();
-  cancel.onclick = () => finish('deny', { line: true });
+  cancel.onclick = () => finish('cancel', { line: true });
   go.onclick = () => void confirm();
   card.addEventListener('pointerenter', enter);
   card.addEventListener('pointerleave', leave);
   card.addEventListener('pointerdown', touched, true);
   card.addEventListener('keydown', touched, true);
+  card.addEventListener('keydown', escape);
   composer?.addEventListener?.('input', typing);
   signal?.addEventListener?.('abort', abort, { once: true });
   if (signal?.aborted) abort();

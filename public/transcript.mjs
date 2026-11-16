@@ -41,7 +41,8 @@ export function callNote(call, result) {
   const made = MADE[name] ?? 'Génération';
   if (!data) return `${made} : génération interrompue.`;
   if (data.run_id) return '';
-  if (data.status === 'denied') return `${made} : génération refusée dans la fenêtre de confirmation.`;
+  // Declined: nothing is left of it (16/11); « Annuler » of a card leaves its own line (app.js).
+  if (data.status === 'denied') return '';
   // The image of the character Moodix AI made, seen and declined: nothing was stopped midway.
   if (data.status === 'cancelled' && data.character_image) return 'Remplacement annulé à la vérification du personnage.';
   if (data.status === 'cancelled') return `${made} : génération arrêtée avant la fin.`;

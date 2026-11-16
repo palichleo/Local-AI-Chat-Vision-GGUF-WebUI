@@ -34,7 +34,8 @@ test('a generation that left no media is told in the user’s words, not the mod
         message: 'L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.',
       }),
     ),
-    'Image : génération refusée dans la fenêtre de confirmation.',
+    // Declined: nothing is left of it (16/11); « Annuler » of a card has its line drawn by app.js.
+    '',
   );
   assert.equal(
     callNote(call('upscale'), result({ status: 'cancelled', message: 'L’utilisateur a arrêté cette génération…' })),

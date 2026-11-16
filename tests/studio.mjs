@@ -952,7 +952,8 @@ async function studioPage(tools, routes = {}, options = {}) {
     };
   }
   // What the page itself listens to: keys pressed with the focus on no field.
-  const pageKeys = [];
+  const pageKeys = [],
+    pagePointers = [];
   const globals = {
     document: {
       getElementById: id => page[id] ?? null,
@@ -965,7 +966,8 @@ async function studioPage(tools, routes = {}, options = {}) {
           })
         : () => null,
       body: {},
-      addEventListener: (type, listener) => type === 'keydown' && pageKeys.push(listener),
+      addEventListener: (type, listener) =>
+        type === 'keydown' ? pageKeys.push(listener) : type === 'pointerdown' && pagePointers.push(listener),
     },
     Option: class {},
     ResizeObserver: undefined,
@@ -1039,6 +1041,7 @@ async function studioPage(tools, routes = {}, options = {}) {
     notices,
     revealed,
     pageKeys,
+    pagePointers,
     runs,
     restore: () => Object.assign(globalThis, before),
     /** Opens a mode by its place among Image, Vidéo and Son. */
@@ -2306,31 +2309,58 @@ test('a recorded proposal replayed: the pointer does what Moodix AI proposes, in
   }
 });
 
-test('a touch of the user while Moodix AI sets the Studio: the pointer goes, the rest is set at once, the user’s value stays', async () => {
+test('while Moodix AI sets the Studio nothing in it answers the user and nothing stops it; on « Générer » all is theirs again', async () => {
   const recorded = await recordedProposal(),
     { tools, runs } = replayStudio(),
-    said = [];
+    said = [],
+    locked = [];
+  let view = null;
+  // At each word of the pointer, whether the Studio was locked then (inert: the page gives it no
+  // click, no key, no drop).
+  Object.defineProperty(said, 'push', {
+    value(label) {
+      locked.push(view?.inert === true);
+      return Array.prototype.push.call(this, label);
+    },
+  });
   const studio = await studioPage(tools, {}, { runs, cursor: said, targets: true });
   const { body, page, restore } = studio;
+  view = page['studio-view'];
+  const duration = () => body.find('studio-bar').find(bar => bar.dataset.ai === 'duration');
   try {
     const answer = studio.studio.propose(structuredClone(recorded.request), new AbortController().signal);
     await until(() => said.includes('écrit le prompt'));
-    // While it writes, the user sets the length themselves (the bar of the duration, the longest).
-    const duration = () => body.find('studio-bar').find(bar => bar.dataset.ai === 'duration');
-    page['studio-view'].listeners.pointerdown({ isTrusted: true, target: { closest: () => ({ dataset: { ai: 'duration' } }) } });
+    assert.equal(view.inert, true);
+    // A touch that would reach it anyway changes nothing: the pointer goes on, to the end, and the
+    // values are those of Moodix AI.
+    const onDuration = { closest: () => ({ dataset: { ai: 'duration' } }) };
+    view.listeners.pointerdown({ isTrusted: true, target: onDuration });
+    view.listeners.input({ isTrusted: true, type: 'input', target: onDuration });
+    await until(() => said.includes('attend votre accord') && view.inert === false);
+    assert.deepEqual(said, [
+      'passe en Vidéo',
+      'choisit LTX 2.5',
+      'écrit le prompt',
+      'pose la prise 1 en début',
+      'pose la prise 1 en début',
+      'pose la prise 1 en début',
+      'passe en 9:16',
+      'règle la durée',
+      'attend votre accord',
+    ]);
+    assert.equal(locked.length, said.length);
+    assert.ok(locked.every(Boolean), 'locked from its first step to « Générer »');
+    assert.equal(page['ai-cursor'].classList.contains('is-visible'), true);
+    assert.equal(studio.prompt().value, recorded.request.plan.prompt);
+    assert.equal(duration().attributes['aria-valuetext'], '06.04 S');
+    // Resting on « Générer »: nothing is locked any more, the settings answer.
+    assert.equal(view.inert, false);
     duration().value = '2';
     duration().oninput();
-    await settle();
-    // The pointer is gone and says nothing more; what was left is set: the whole prompt, the take in
-    // its case, 9:16; the length is the user's.
-    assert.equal(said.includes('règle la durée'), false);
-    assert.equal(said.at(-1), 'écrit le prompt');
-    assert.equal(page['ai-cursor'].classList.contains('is-visible'), false);
-    assert.equal(studio.prompt().value, recorded.request.plan.prompt);
-    assert.equal(body.find('studio-slot')[0].children[0].children[0].src, '/portrait.webp');
     assert.equal(duration().attributes['aria-valuetext'], '08.04 S');
     studio.studio.decline();
     assert.equal(await answer, 'deny');
+    assert.equal(view.inert, false);
   } finally {
     restore();
   }
@@ -3013,14 +3043,19 @@ test('a click on an empty slot opens « Créations du projet »: a take of its k
     shelf().find('studio-shelf-pick')[0].onclick();
     assert.equal(shelf(), undefined, 'closed once a take is taken');
     assert.equal(slots()[1].children[0].children[0].src, '/face.jpg');
-    // The video to follow: the clips, by their number; « × » closes it, the slot stays empty.
+    // The video to follow: the clips, by their number. No × (16/11): Échap closes it, or a click
+    // beside it; the slot stays empty.
     slots()[0].find('studio-slot-pick')[0].onclick();
     assert.deepEqual(
       shelf().find('studio-shelf-pick').map(pick => pick.title),
       ['Prise 7'],
     );
-    shelf().find('studio-shelf-close')[0].onclick();
+    assert.equal(shelf().find('studio-shelf-close').length, 0);
+    page.page['studio-view'].onkeydown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
     assert.equal(shelf(), undefined);
+    slots()[0].find('studio-slot-pick')[0].onclick();
+    page.pagePointers.forEach(listener => listener({ target: { closest: () => null } }));
+    assert.equal(shelf(), undefined, 'a click beside it');
     assert.doesNotMatch(slots()[0].className, /is-filled/);
   } finally {
     restore();

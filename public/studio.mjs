@@ -471,6 +471,15 @@ export function setupStudio({
   }
   // The take the pointer of Moodix AI carries: { id, role, index, preview, over } (over: above its case).
   let aiCarry = null;
+  // While Moodix AI sets the Studio, the whole Studio is locked (16/11): no click, no key, no drop
+  // reaches it (inert), and nothing stops the pointer. It is the user's again when the pointer rests
+  // on « Générer » (settings, « Refuser », « Générer »), or when the proposal goes.
+  let aiWorking = false;
+  function lockStudio(on) {
+    aiWorking = on;
+    const view = $('studio-view');
+    if (view) view.inert = on;
+  }
   // The slot an image is being dragged from: dropped on another, the image changes role.
   let dragged = null,
     // A creation of the Sortie dragged to a slot: it becomes that input.
@@ -679,23 +688,18 @@ export function setupStudio({
   /**
    * « Créations du projet » (studio-maquette.md): under the inputs, the takes of the project that
    * the slot takes (images, or clips), the newest at the left, 56 px; one is taken by a click or
-   * dragged to any slot; a file of the computer at the end.
+   * dragged to any slot; a file of the computer at the end. Closed by a take chosen, Échap or a click
+   * beside it.
    */
   function shelfBlock() {
     const { role, index, media } = shelf,
       takes = runs.filter(record => mediaOf(record) === media).slice(0, 40),
       block = node('div', 'studio-input-block studio-shelf'),
       head = node('p', 'studio-input-title', 'Créations du projet'),
-      row = node('div', 'studio-shelf-row'),
-      close = button('studio-shelf-close', '', () => {
-        shelf = null;
-        render();
-      }, 'close');
+      row = node('div', 'studio-shelf-row');
+    // No × (16/11): it closes as a take is chosen, with Échap (shortcut), or at a click beside it.
     block.setAttribute('role', 'group');
     block.setAttribute('aria-label', 'Créations du projet');
-    close.setAttribute('aria-label', 'Fermer les créations du projet');
-    close.title = 'Fermer';
-    head.append(close);
     for (const record of takes) {
       const output = record.outputs?.[0] ?? {},
         name = Number.isInteger(output.take) ? 'Prise ' + output.take : (KIND[media] ?? 'Création') + ' #' + numberOf(record),
@@ -2330,42 +2334,50 @@ export function setupStudio({
     const tab = document.querySelector?.(`#studio-kinds [data-mode="${proposal?.mode ?? mode}"]`);
     return tab && tab.checkVisibility?.({ visibilityProperty: true }) !== false ? tab : null;
   };
-  /** The pointer glides to `element` (0.45 s), saying what it does; false once the user took over. */
+  /**
+   * The pointer glides to `element` (0.25 s), saying what it does; false once it was stopped. The
+   * first time it appears there, without a way to go: nothing to wait for.
+   */
   async function glide(element, label, anchor) {
     if (!ai || ai.stopped) return false;
+    const travels = Boolean(pointer?.visible);
     pointer?.move(element, label, anchor);
-    await wait(pointer?.reduced() ? 0 : 460);
+    await wait(pointer?.reduced() || !travels ? 0 : 260);
     return Boolean(ai && !ai.stopped);
   }
   /**
-   * One step of the pointer: it goes (its glide, 0.45 s), it rings, it sets, it leaves a trace:
-   * about 0.6 s, the setting's own movement apart (a prompt written, a bar moved). Stops when the
-   * user takes over.
+   * One step of the pointer, the whole animation in 2 to 3 s (16/11): it goes (0.25 s), it rings, it
+   * sets, it leaves a trace. `hold`: what the change itself takes, a model or a setting 0.3 s (the
+   * ring, the new value, the trace); a bar moves in its own 0.3 s, a prompt is written in 1 s at most.
    */
-  async function stepTo(key, label, apply, { anchor } = {}) {
+  async function stepTo(key, label, apply, { anchor, hold = 0 } = {}) {
     if (!ai || ai.stopped) return false;
     // The prompt is written without a mark (studio-maquette.md): no ring, no trace on it.
     const marked = key !== 'prompt';
     ai.active = marked ? key : null;
     render();
     if (!(await glide(targetOf(key), label, anchor))) return false;
+    if (hold) await wait(hold / 2);
     await apply();
+    if (hold) {
+      render();
+      await wait(hold / 2);
+    }
     if (!ai || ai.stopped) return false;
     if (marked) ai.touched.add(key);
     ai.active = null;
     render();
     pointer?.follow(targetOf(key), anchor);
-    await wait(pointer?.reduced() ? 0 : 140);
     return Boolean(ai && !ai.stopped);
   }
-  /** The prompt written as it is typed: about 40 letters a second, 3 s at most (16/11). */
+  /** The prompt written as it is typed: about 40 letters a second, 1 s at most whatever its length (16/11). */
   async function typePrompt(draft, text, { instant = false } = {}) {
     const box = document.querySelector?.('#studio-view [data-ai="prompt"]');
     if (instant || pointer?.reduced() || !box) {
       draft.prompt = text;
       return;
     }
-    const length = Math.min(3000, (text.length / 40) * 1000),
+    const length = Math.min(1000, (text.length / 40) * 1000),
       ticks = Math.max(1, Math.round(length / 33)),
       step = Math.max(1, Math.ceil(text.length / ticks));
     for (let index = step; index < text.length + step; index += step) {
@@ -2405,7 +2417,6 @@ export function setupStudio({
     if (!(await glide(caseOf(), label))) return false;
     shelf = { role: entry.role, index: entry.index, media: 'image' };
     render();
-    await wait(220);
     if (!pickOf()) {
       shelf = null;
       put();
@@ -2419,15 +2430,14 @@ export function setupStudio({
     if (!(await glide(caseOf(), label))) return false;
     aiCarry.over = true;
     render();
-    // Held over its case long enough to be seen: the case grown, the take shown in it.
-    await wait(400);
+    // It marks 0.2 s over its case (16/11): the case grown, the take shown in it.
+    await wait(200);
     if (!ai || ai.stopped) return false;
     put();
     aiCarry = null;
     shelf = null;
     pointer.carry(null);
     render();
-    await wait(160);
     return Boolean(ai && !ai.stopped);
   }
   /**
@@ -2462,6 +2472,8 @@ export function setupStudio({
         },
       };
       signal?.addEventListener('abort', abort, { once: true });
+      // Locked from now until the pointer rests on « Générer », or the proposal goes (endPointer).
+      lockStudio(true);
       legacy = false;
       failure = '';
       const shown = reveal();
@@ -2498,7 +2510,10 @@ export function setupStudio({
       list = offered(values.verb),
       workflow = list.find(item => item.id === values.workflow) ?? list[0],
       draft = drafts[target];
-    if (!workflow) return render();
+    if (!workflow) {
+      lockStudio(false);
+      return render();
+    }
     ai = { stopped: false, active: null, touched: new Set() };
     status(true);
     // What the assistant may not change is shown at once, as it will be made.
@@ -2527,7 +2542,7 @@ export function setupStudio({
     const steps = [];
     if (mode !== target) steps.push(['kind', 'passe en ' + modeOf(target).label, () => setMode(target)]);
     if (draft.workflow !== workflow.id && list.length > 1)
-      steps.push(['model', 'choisit ' + workflow.name, () => (drafts[target].workflow = workflow.id)]);
+      steps.push(['model', 'choisit ' + workflow.name, () => (drafts[target].workflow = workflow.id), { hold: 300 }]);
     else draft.workflow = workflow.id;
     if (values.promptFree)
       steps.push(['prompt', 'écrit le prompt', options => typePrompt(draft, values.prompt, options), { anchor: { ax: 34, ay: 30 } }]);
@@ -2550,7 +2565,8 @@ export function setupStudio({
       steps.push([
         'duration',
         'règle la durée',
-        // The handle of the bar goes from where it is to the length proposed, notch after notch.
+        // The handle of the bar goes from where it is to the length proposed, notch after notch, in
+        // 0.3 s whatever their number (16/11).
         async ({ instant = false } = {}) => {
           const key = extending ? 'extension' : 'length',
             list = workflow.lengths.seconds,
@@ -2562,12 +2578,13 @@ export function setupStudio({
           values.lengthShown = near;
           if (!instant && pointer && !pointer.reduced() && from >= 0 && from !== to) {
             const way = Math.sign(to - from),
-              pause = Math.min(110, 460 / Math.abs(to - from));
-            for (let at = from + way; at !== to; at += way) {
+              pause = 300 / Math.abs(to - from);
+            for (let at = from + way; ; at += way) {
               if (!ai || ai.stopped) break;
               draft[key] = list[at];
               render();
               await wait(pause);
+              if (at === to) break;
             }
           }
           draft[key] = near;
@@ -2582,6 +2599,7 @@ export function setupStudio({
             (draft.settings[workflow.id] ??= {})[key] = value;
             if (key === 'lyrics' && value) draft.lyrics = true;
           },
+          { hold: 300 },
         ]);
     // With less motion asked, nothing moves: the end shows at once.
     const still = Boolean(pointer?.reduced());
@@ -2593,11 +2611,11 @@ export function setupStudio({
     }
     if (done < steps.length) {
       if (proposal !== current) return;
-      // Taken over (a touch of the user): the pointer is gone, what is left is set at once, and
-      // what the user touched keeps their value (16/11: the default, not yet validated).
-      const mine = current.userKeys ?? new Set();
-      for (const [key, , apply] of steps.slice(done)) if (!mine.has(key)) await apply({ instant: true });
+      // The pointer stopped before the end (« Générer » pressed from elsewhere): what is left is set
+      // at once, the proposal whole. The user cannot stop it: the Studio is locked (16/11).
+      for (const [, , apply] of steps.slice(done)) await apply({ instant: true });
       shelf = null;
+      lockStudio(false);
       return render();
     }
     if (!ai || ai.stopped || proposal !== current) return;
@@ -2614,17 +2632,19 @@ export function setupStudio({
     const auto = request.autoAllow === true;
     pointer?.move(
       targetOf('generate'),
-      auto ? 'lance la génération (autorisé dans la configuration)' : 'attend votre accord',
+      auto ? 'lance la génération (autorisé dans les Paramètres)' : 'attend votre accord',
     );
-    await wait(still ? 0 : 460);
+    await wait(still ? 0 : 260);
     if (!ai || ai.stopped || proposal !== current) return;
     status(false);
     if (auto) {
       endPointer();
       return approve();
     }
-    // It stays on « Générer », « Refuser » beside it, until the user answers (studio-maquette.md).
+    // It stays on « Générer », « Refuser » beside it, until the user answers (studio-maquette.md):
+    // the Studio is theirs again, its settings, « Refuser » and « Générer » (16/11).
     ai.waiting = true;
+    lockStudio(false);
   }
   /** The images of a proposal, each with the slot of its role: [{ role, index, item, ref }]. */
   function referenceInputs(references) {
@@ -2657,28 +2677,23 @@ export function setupStudio({
     if (ai) ai.stopped = true;
     ai = null;
     aiCarry = null;
+    lockStudio(false);
     status(false);
     pointer?.carry(null);
     pointer?.hide();
     render();
   }
-  /** « Reprendre la main », or a touch of the user while the pointer works: it stops, what it set stays. */
+  /**
+   * A touch of the user once the pointer rests on « Générer » (« Générer » itself too): the pointer
+   * goes, the proposal stays theirs to change; nothing is drawn again (a click there, or on « Refuser »,
+   * keeps the button it was pressed on). While it works nothing takes over: the Studio is locked.
+   */
   function takeOver() {
-    if (!ai) return;
-    if (proposal && !proposal.values) return;
-    // Resting on « Générer »: it only goes; nothing is drawn again (a click there, or on « Refuser »,
-    // keeps the button it was pressed on).
-    if (ai.waiting) {
-      ai.stopped = true;
-      ai = null;
-      status(false);
-      pointer?.hide();
-      return;
-    }
-    if (proposal) proposal.touched = new Set(ai.touched);
-    endPointer();
-    $('live-status') &&
-      ($('live-status').textContent = 'Vous avez repris la main ; ce que Moodix AI a réglé reste en place.');
+    if (!ai || aiWorking) return;
+    ai.stopped = true;
+    ai = null;
+    status(false);
+    pointer?.hide();
   }
   /** What the user changed in the Studio from the proposal, as the server takes it. */
   function edits() {
@@ -3558,7 +3573,7 @@ export function setupStudio({
     if (bar && !body.contains?.(bar)) body.parentElement?.insertBefore?.(bar, body);
   }
   function chooseMode(id) {
-    if (working || mode === id) return;
+    if (working || mode === id || aiWorking) return;
     if (ai) takeOver();
     setMode(id);
     release();
@@ -4003,7 +4018,15 @@ export function setupStudio({
 
   // Ctrl + Entrée (⌘ on a Mac) generates from anywhere in the Studio, not only from the prompt.
   const shortcut = event => {
-    if (!(event.ctrlKey || event.metaKey) || event.altKey || working || enriching) return;
+    // « Créations du projet » closes with Échap (16/11: no ×), as a take chosen or a click beside it.
+    if (event.key === 'Escape' && shelf && !aiWorking) {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      shelf = null;
+      render();
+      return;
+    }
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || working || enriching || aiWorking) return;
     // The message box of the chat has its own keys: these are the Studio's.
     if (event.target?.id === 'prompt') return;
     if (event.key === 'Enter') {
@@ -4018,19 +4041,16 @@ export function setupStudio({
   const view = $('studio-view');
   if (view) {
     view.onkeydown = shortcut;
-    // A touch of the user while the pointer works: it stops, what is left of the proposal is set at
-    // once, and the setting they touched keeps their value (animate).
-    const userTouch = event => {
-      const key = event.target?.closest?.('[data-ai]')?.dataset?.ai;
-      if (key && proposal && !ai.waiting) (proposal.userKeys ??= new Set()).add(key);
-      takeOver();
-    };
+    // While Moodix AI sets the Studio it is locked (inert, lockStudio): nothing of the user reaches it,
+    // nothing stops the pointer (16/11). Resting on « Générer », a touch of the user sends the pointer
+    // away; the proposal stays, theirs to change.
     const touched = event => {
-      if (event.isTrusted !== false && ai) userTouch(event);
+      if (aiWorking) return;
+      if (event.isTrusted !== false && ai) takeOver();
       else if (event.type === 'input' && !proposal) release();
     };
     view.addEventListener?.('input', touched, true);
-    view.addEventListener?.('pointerdown', event => event.isTrusted !== false && ai && userTouch(event), true);
+    view.addEventListener?.('pointerdown', event => !aiWorking && event.isTrusted !== false && ai && takeOver(), true);
     // Pointer and rings follow their setting when the page scrolls under them.
     view.addEventListener?.('scroll', () => ai?.active && pointer?.follow(targetOf(ai.active)), { passive: true });
   }
@@ -4039,6 +4059,12 @@ export function setupStudio({
   document.addEventListener?.('keydown', event => {
     if (event.target !== document.body || $('studio-view')?.offsetParent == null) return;
     if (!document.querySelector('dialog[open]')) shortcut(event);
+  });
+  // A click beside « Créations du projet » closes it (16/11: no ×); a case opens or closes it itself.
+  document.addEventListener?.('pointerdown', event => {
+    if (!shelf || aiWorking || event.target?.closest?.('#studio-view .studio-shelf, #studio-view .studio-slot')) return;
+    shelf = null;
+    render();
   });
   // A click outside « ··· » closes it.
   document.addEventListener?.('pointerdown', event => {

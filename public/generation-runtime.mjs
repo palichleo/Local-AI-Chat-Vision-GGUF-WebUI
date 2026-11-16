@@ -195,11 +195,14 @@ export function setupGenerationRuntime({
       await cancel();
       throw error;
     }
-    if (decision === 'deny') {
+    // 'cancel': « Annuler » of a card, which leaves its line in the conversation; 'deny': declined
+    // otherwise (a new message, « Refuser » in the Studio), without a trace (16/11).
+    if (decision === 'deny' || decision === 'cancel') {
       await cancel();
       return {
         content: JSON.stringify({
           status: 'denied',
+          ...(decision === 'cancel' ? { cancelled: 'card' } : {}),
           message: 'L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.',
         }),
         images: [],

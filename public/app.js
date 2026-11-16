@@ -547,6 +547,9 @@ function renderTranscript(messages, incomplete = false) {
             if (!text) view.body.replaceChildren();
             generationUI.restore(view.generations, state.conversationId, data.run_id, { compact: data.studio === true });
           }
+          // « Annuler » of a card: its line, where the card was (16/11); declined otherwise, nothing.
+          if (data?.status === 'denied' && data.cancelled === 'card')
+            view.generations.append(node('p', 'proposal-cancelled', 'Proposition annulée.'));
         } catch {}
       }
       view.reasoning.hidden = !message.reasoning_content;
@@ -798,14 +801,10 @@ function updateControls() {
     state.loadingHistory ||
     (!$('prompt').value.trim() && !state.images.length && !state.videos.length);
   $('send').hidden = (state.generating && !proposing) || toolBusy;
-  // A proposal waits in the Studio: it is cancelled from here as from the Studio's « Annuler »,
-  // and a new message declines it too.
-  $('cancel').hidden = !state.generating && (!toolBusy || s.toolJob.blocked);
-  const cancelLabel = proposing
-    ? 'Annuler la proposition de Moodix AI'
-    : state.waitingForModel
-      ? 'Annuler le message en attente'
-      : 'Interrompre la réponse';
+  // Interrompre only while something runs: Moodix thinking or writing, a generation (16/11). A
+  // proposal waiting for the user (a card, the Studio) runs nothing: a new message declines it.
+  $('cancel').hidden = proposing || (!state.generating && (!toolBusy || s.toolJob.blocked));
+  const cancelLabel = state.waitingForModel ? 'Annuler le message en attente' : 'Interrompre la réponse';
   $('cancel').setAttribute('aria-label', cancelLabel);
   $('cancel').title = cancelLabel;
   $('thinking').disabled = state.generating;
@@ -866,6 +865,16 @@ function updateControls() {
     renderLLMList();
 }
 
+/** Whether `version` (x.y.z) is newer than the one installed: an update is offered only then. */
+function newerThanInstalled(version) {
+  const parts = value => (/^\d+\.\d+\.\d+$/.test(String(value ?? '')) ? String(value).split('.').map(Number) : null),
+    next = parts(version),
+    installed = parts(state.version);
+  if (!next || !installed) return false;
+  for (let index = 0; index < 3; index++) if (next[index] !== installed[index]) return next[index] > installed[index];
+  return false;
+}
+
 /**
  * Updates live in the first tab of the settings. The server looks for one at launch; when it
  * finds one, the settings button and the tab wear a dot, and the tab offers to install it.
@@ -873,7 +882,8 @@ function updateControls() {
 async function checkUpdates({ refresh = false } = {}) {
   try {
     const update = await (await api(refresh ? 'updates?refresh=1' : 'updates')).json();
-    state.updateAvailable = update.available === true;
+    // Offered only when newer than the version installed (16/11): no box, no dot otherwise.
+    state.updateAvailable = update.available === true && newerThanInstalled(update.version);
     // Under « Version installée » (capture 48): when it was looked for, at the launch or since.
     const at = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     $('settings-update-checked').textContent = (refresh ? 'Vérifié aujourd’hui à ' : 'Vérifié au lancement, aujourd’hui à ') + at + '.';

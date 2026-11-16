@@ -532,8 +532,19 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       caption(message || 'Génération interrompue.');
       onResize();
     }
+    // Declined (a new message, « Refuser » in the Studio, « Annuler » of a card): the proposal goes
+    // without a trace, no card, no line (16/11); « Annuler » alone leaves its own (proposal-card.mjs).
+    function withdraw() {
+      finished = true;
+      settle();
+      dispose();
+      for (const target of tiles) target.figure.remove?.();
+      if (!container.children.length) container.classList.remove('generation-grid');
+      onResize();
+    }
     function finish(result) {
       if (disposed) return;
+      if (result.denied) return withdraw();
       finished = true;
       settle();
       if (result.record) record = result.record;
@@ -541,11 +552,7 @@ export function setupGenerationUI({ api, node, openOutput, actions = null, onRes
       for (const slot of slots.values())
         if (slot.isVideo && record.outputs?.[slot.index]?.analysisDataUrl)
           slot.img.poster = record.outputs[slot.index].analysisDataUrl;
-      if (result.denied)
-        fail(
-          result.revised ? 'Proposition à modifier · précisez vos changements dans le chat.' : 'Génération refusée.',
-        );
-      else if (result.record && !slots.size) fail('Original indisponible · consultez Output pour les détails.');
+      if (result.record && !slots.size) fail('Original indisponible · consultez Output pour les détails.');
       else if (result.failed) fail(result.error || 'Image produite · analyse indisponible.');
       else if (record) {
         const count = record.parameters?.reference_count;

@@ -6726,8 +6726,8 @@ video.studio-frame-result {
 }
 
 /* ------------------------------------------------------------------ the pointer of Moodix AI */
-/* A white pointer in a soft halo, with a label of what it does; it glides in 0.45 s (the steps
-   of studio.mjs wait for it: stepTo). */
+/* A white pointer in a soft halo, with a label of what it does; it glides in 0.25 s (the steps
+   of studio.mjs wait for it: glide, stepTo). */
 .ai-cursor {
   position: fixed;
   left: 0;
@@ -6737,7 +6737,7 @@ video.studio-frame-result {
   opacity: 0;
   transform: translate(var(--ai-x, 50vw), var(--ai-y, 50vh));
   transition:
-    transform 0.45s cubic-bezier(0.45, 0, 0.2, 1),
+    transform 0.25s cubic-bezier(0.45, 0, 0.2, 1),
     opacity 0.25s ease;
 }
 .ai-cursor[hidden] {
@@ -11803,25 +11803,6 @@ body[data-view='studio'][data-chat='open'] .chat-panel {
 .studio-shelf .studio-input-title {
   align-items: center;
 }
-#studio-view .studio-shelf-close {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-3);
-}
-#studio-view .studio-shelf-close:hover {
-  color: var(--text-1);
-}
-#studio-view .studio-shelf-close svg {
-  width: 13px;
-  height: 13px;
-}
 .studio-shelf-row {
   display: flex;
   gap: 8px;
@@ -13214,25 +13195,6 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   margin: 0;
   color: var(--text-2);
   font: 400 14px/1.2 var(--font-ui);
-}
-#messages .proposal-card .proposal-shelf-close {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-3);
-}
-#messages .proposal-card .proposal-shelf-close:hover {
-  color: var(--text-1);
-}
-#messages .proposal-card .proposal-shelf-close svg {
-  width: 13px;
-  height: 13px;
 }
 .proposal-shelf-row {
   display: flex;

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setupGenerationUI } from '../public/generation-ui.mjs';
+// The parent of an element, out of what is compared (not enumerable).
+const adopt = (parent, item) =>
+  item instanceof Element && Object.defineProperty(item, 'parent', { value: parent, writable: true, configurable: true });
 class Element {
   constructor(tag = '', cls = '', text = '') {
     const classes = new Set(cls.split(' '));
@@ -34,10 +37,16 @@ class Element {
     });
   }
   append(...items) {
+    for (const item of items) adopt(this, item);
     this.children.push(...items);
   }
   replaceChildren(...items) {
+    for (const item of items) adopt(this, item);
     this.children = items;
+  }
+  remove() {
+    if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this);
+    this.parent = null;
   }
   setAttribute(key, value) {
     this.attributes[key] = value;
@@ -305,10 +314,32 @@ test('video output uses the original streaming URL, plays from its round button,
   assert.equal(video.src, undefined);
 });
 
-test('refused, revised, failed and cancelled generations hide the empty preview and its dimensions', async t => {
+test('a proposal declined goes without a trace: no card, no line, nothing left to watch (16/11)', () => {
+  const container = new Element();
+  let resized = 0;
+  const ui = setupGenerationUI({
+    node: (...args) => new Element(...args),
+    api: async () => {
+      throw Error('No generation expected');
+    },
+    openOutput() {},
+    onResize() {
+      resized++;
+    },
+  });
+  container.classList.add('generation-grid');
+  const card = ui.mount(container, { mediaType: 'video', resolution: { width: 768, height: 448 } });
+  assert.equal(container.children.length, 1);
+  card.finish({ denied: true });
+  assert.deepEqual(container.children, []);
+  assert.equal(container.classList.contains('generation-grid'), false, 'no empty room left under the text');
+  assert.equal(card.finished, true);
+  assert.ok(resized > 0);
+  ui.clear();
+});
+
+test('failed and cancelled generations hide the empty preview and its dimensions', async t => {
   for (const [name, settle] of [
-    ['refused', card => card.finish({ denied: true })],
-    ['revised', card => card.finish({ denied: true, revised: true })],
     ['failed', card => card.finish({ failed: true, error: 'ComfyUI unavailable' })],
     ['cancelled', card => card.fail('Generation cancelled')],
     ['missing original', card => card.finish({ record: { outputs: [] } })],
@@ -431,7 +462,7 @@ test('loading animation pauses outside the viewport and observation stops on ref
   assert.equal(frame.classList.contains('is-paused'), true);
   card.finish({ denied: true });
   assert.equal(observed.targets.size, 0);
-  assert.equal(frame.hidden, true);
+  assert.deepEqual(container.children, [], 'declined: nothing left');
 });
 
 test('a creation of the Studio is a card: what it is, and « Ouvrir », which leads to the Studio before it exists too', () => {
@@ -524,7 +555,7 @@ test('a card of the Studio shows its thumbnail, or its file once, and never down
   }
 });
 
-test('a proposal refused or stopped leaves its card without « Ouvrir »', () => {
+test('a proposal declined leaves nothing; stopped, it leaves its card without « Ouvrir »', () => {
   const container = new Element();
   const ui = setupGenerationUI({
     api: async () => {
@@ -534,9 +565,13 @@ test('a proposal refused or stopped leaves its card without « Ouvrir »', () =>
     openOutput: () => {},
     onOpen: () => {},
   });
-  const card = ui.mount(container, { mediaType: 'video', resolution: { width: 768, height: 448 } }, { compact: true });
+  const proposal = { mediaType: 'video', resolution: { width: 768, height: 448 } };
+  const declined = ui.mount(container, proposal, { compact: true });
+  declined.finish({ denied: true });
+  assert.deepEqual(container.children, []);
+  const card = ui.mount(container, proposal, { compact: true });
   const open = container.children[0].children.find(child => child.cls === 'card-open');
   assert.equal(open.disabled, false, 'waiting: it leads to the Studio');
-  card.finish({ denied: true });
+  card.fail('Génération interrompue.');
   assert.equal(open.disabled, true);
 });

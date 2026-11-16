@@ -115,7 +115,7 @@ test('a click in the card stops the count for good: only Générer starts it', a
 test('Annuler leaves « Proposition annulée. »; a new message declines it and the card goes', async () => {
   const cancelled = setup();
   cancelled.cancel.onclick();
-  assert.equal(await cancelled.answer, 'deny');
+  assert.equal(await cancelled.answer, 'cancel', 'the line stays: the conversation knows it, opened again');
   assert.deepEqual(
     cancelled.host.children.map(child => [child.className, child.textContent]),
     [['proposal-cancelled', 'Proposition annulée.']],
@@ -190,7 +190,38 @@ test('« + » opens « Créations du projet » in the card; the image taken goes
   assert.equal(card.status.textContent, 'En attente de votre accord', 'an image put in a case stops the count');
   assert.equal(card.card.parent, card.host, 'no message: the card stays');
   card.cancel.onclick();
-  assert.equal(await card.answer, 'deny');
+  assert.equal(await card.answer, 'cancel');
+});
+
+test('« Créations du projet » of the card has no ×: Échap or a click beside it closes it', async () => {
+  const page = new Element('document');
+  globalThis.document = page;
+  try {
+    const card = setup(withInputs(), { delay: 5000, takes: async () => [] });
+    const [, body] = card.card.children,
+      media = body.children.find(child => child.className === 'proposal-media'),
+      shelf = body.children.find(child => child.className === 'proposal-shelf'),
+      [plus] = under(media).filter(item => item.className.startsWith('proposal-input is-empty'))[0].children;
+    plus.onclick();
+    await wait(0);
+    assert.equal(shelf.hidden, false);
+    assert.equal(under(shelf).some(item => String(item.className).includes('close')), false, 'no ×');
+    card.card.fire('keydown', { key: 'Escape', preventDefault() {} });
+    assert.equal(shelf.hidden, true, 'Échap closes it');
+    plus.onclick();
+    await wait(0);
+    assert.equal(shelf.hidden, false);
+    // A click in it leaves it open; a click beside it (elsewhere on the page) closes it.
+    page.fire('pointerdown', { target: shelf });
+    assert.equal(shelf.hidden, false);
+    page.fire('pointerdown', { target: new Element('main') });
+    assert.equal(shelf.hidden, true, 'a click beside it closes it');
+    assert.equal(page.listeners.pointerdown?.size ?? 0, 0, 'nothing left listening');
+    card.cancel.onclick();
+    assert.equal(await card.answer, 'cancel');
+  } finally {
+    delete globalThis.document;
+  }
 });
 
 test('an image dropped or pasted on the card is kept in the project, then goes in its case', async () => {
@@ -220,5 +251,5 @@ test('an image dropped or pasted on the card is kept in the project, then goes i
   await wait(0);
   assert.equal(kept.length, 2);
   card.cancel.onclick();
-  assert.equal(await card.answer, 'deny');
+  assert.equal(await card.answer, 'cancel');
 });
