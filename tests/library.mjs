@@ -90,7 +90,7 @@ test('a creation is of its media type, or of what its file says; the filters kee
   const runs = [
     { id: 'a', projectId: 'p1', conversationId: 'c1' },
     { id: 'b', projectId: 'inbox', conversationId: 'c2', mediaType: 'video' },
-    // Without a project: that of Conversations.
+    // Without a project: « Sans projet » (0.6.0).
     { id: 'c', conversationId: 'c3', mediaType: 'audio' },
   ];
   assert.deepEqual(filtered(runs).map(run => run.id), ['a', 'b', 'c']);
@@ -108,14 +108,14 @@ test('every project: each creation with its project and its conversation; a clic
   const grid = f.$('library-grid');
   assert.deepEqual(ids(grid), ['r1', 'r2', 'r3', 'r4']);
   assert.equal(f.$('library-total').textContent, '4');
-  assert.equal(f.$('library-heading').textContent, 'Bibliothèque');
+  assert.equal(f.$('library-heading').textContent, 'Pellicule');
   assert.equal(f.$('library-project-view').hidden, true, 'no conversations of a project above them');
   assert.equal(f.$('library-empty').hidden, true);
   assert.deepEqual(
     f.$('library-project').children.map(item => [item.value, item.textContent]),
     [
       ['all', 'Tous les projets'],
-      ['inbox', 'Conversations'],
+      ['inbox', 'Sans projet'],
       ['p1', 'Voyage'],
     ],
   );
@@ -123,7 +123,7 @@ test('every project: each creation with its project and its conversation; a clic
   // Every conversation, each with its project.
   assert.deepEqual(
     f.$('library-conversation').children.map(item => item.textContent),
-    ['Toutes les conversations', 'Plage · Voyage', 'Idées · Conversations'],
+    ['Toutes les conversations', 'Plage · Voyage', 'Idées · Sans projet'],
   );
   const [image, clip, sound, before] = grid.children;
   // The picture alone, as in the timeline (0.5.126); over its foot, under the pointer or the focus:
@@ -144,7 +144,7 @@ test('every project: each creation with its project and its conversation; a clic
     ],
   );
   assert.equal(find(image, 'library-pick').attributes['aria-label'], 'Image · Une plage · Voyage · Plage · 14 nov.');
-  assert.equal(find(sound, 'library-from').textContent, 'Voyage · Nouveau chat', 'the open one, not saved yet');
+  assert.equal(find(sound, 'library-from').textContent, 'Voyage · Nouvelle conversation', 'the open one, not saved yet');
   // The Studio of before had no conversation: « Sans conversation », and nothing to open.
   assert.equal(find(before, 'library-from').tag, 'span');
   assert.equal(find(before, 'library-from').textContent, 'Sans conversation');
@@ -155,7 +155,7 @@ test('every project: each creation with its project and its conversation; a clic
   assert.equal(find(image, 'library-badge'), undefined);
   assert.equal(find(find(clip, 'library-badge'), 'icon-video').tag, 'svg');
   assert.equal(find(find(sound, 'library-badge'), 'icon-wave').tag, 'svg');
-  assert.equal(find(clip, 'library-pick').attributes['aria-label'], 'Clip · Un clip · Conversations · Idées');
+  assert.equal(find(clip, 'library-pick').attributes['aria-label'], 'Clip · Un clip · Sans projet · Idées');
   find(image, 'library-pick').onclick();
   assert.deepEqual(f.viewed, [['r1', 0]]);
   find(clip, 'library-from').onclick();
@@ -171,7 +171,7 @@ test('on a project: its conversations above its creations, the first ones, a new
   }));
   const f = fixture({ historyItems: [...HISTORY, ...many] });
   await f.library.show({ project: 'p1' });
-  assert.equal(f.$('library-heading').textContent, 'Bibliothèque › Voyage');
+  assert.equal(f.$('library-heading').textContent, 'Pellicule › Voyage');
   assert.equal(f.$('library-project').value, 'p1');
   const view = f.$('library-project-view');
   assert.equal(view.hidden, false);
@@ -287,7 +287,7 @@ test('a project gone shows every project again; an empty library says where crea
   const broken = fixture({ fail: 'Disque illisible.' });
   await broken.library.show();
   assert.equal(broken.$('library-empty').hidden, false);
-  assert.equal(broken.$('library-empty').textContent, 'Bibliothèque illisible : Disque illisible.');
+  assert.equal(broken.$('library-empty').textContent, 'Pellicule illisible : Disque illisible.');
 });
 
 test('GET /api/library: the creations of every project, each with its own, the open one, those never saved and those of before', async () => {

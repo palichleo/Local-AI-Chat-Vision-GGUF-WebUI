@@ -60,16 +60,12 @@ const staticFiles = new Map([
   ['/assets/moodix-mark-encre.svg', ['assets/moodix-mark-encre.svg', 'image/svg+xml']],
   ['/assets/metallic-grain.png', ['assets/metallic-grain.png', 'image/png']],
   ['/update-ui.mjs', ['update-ui.mjs', 'text/javascript; charset=utf-8']],
-  ['/material-light.mjs', ['material-light.mjs', 'text/javascript; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/project-navigation.mjs', ['project-navigation.mjs', 'text/javascript; charset=utf-8']],
-  ['/filet.mjs', ['filet.mjs', 'text/javascript; charset=utf-8']],
-  ['/sidebar-fold.mjs', ['sidebar-fold.mjs', 'text/javascript; charset=utf-8']],
   ['/library.mjs', ['library.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-tokens.mjs', ['reference-tokens.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-picker.mjs', ['reference-picker.mjs', 'text/javascript; charset=utf-8']],
   ['/unexpected-errors.mjs', ['unexpected-errors.mjs', 'text/javascript; charset=utf-8']],
-  ['/sidebar-state.js', ['sidebar-state.js', 'text/javascript; charset=utf-8']],
   ['/moodix.css', ['moodix.css', 'text/css; charset=utf-8']],
   // « Salle obscure » (0.6.0): the room behind the page, its two fonts, the tile of its dithering.
   ['/room.mjs', ['room.mjs', 'text/javascript; charset=utf-8']],
@@ -78,7 +74,6 @@ const staticFiles = new Map([
   ['/fonts/Jost-latin.woff2', ['fonts/Jost-latin.woff2', 'font/woff2']],
   ['/fonts/Jost-latin-ext.woff2', ['fonts/Jost-latin-ext.woff2', 'font/woff2']],
   ['/assets/tramage-64.png', ['assets/tramage-64.png', 'image/png']],
-  ['/assets/mdx-white.png', ['assets/mdx-white.png', 'image/png']],
   ['/fonts/Michroma-Regular.ttf', ['fonts/Michroma-Regular.ttf', 'font/ttf']],
   ['/fonts/Manrope-Variable.ttf', ['fonts/Manrope-Variable.ttf', 'font/ttf']],
   ['/fonts/JetBrainsMono-Variable.ttf', ['fonts/JetBrainsMono-Variable.ttf', 'font/ttf']],
@@ -1892,6 +1887,14 @@ export async function createApplication({
         } finally {
           clearingHistory = false;
         }
+      }
+      // The pencil of the fil (0.6.0): a name the user gives, kept by the saves that follow.
+      if (path === '/api/history/rename') {
+        if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
+        if (clearingHistory || disablingHistory) throw problem('Attendez la fin de l’opération en cours.', 409);
+        const renamed = historySaves.then(() => history.rename(body?.id, body?.title));
+        historySaves = renamed.catch(() => {});
+        return send(200, { conversation: historyView(await renamed) });
       }
       if (path === '/api/history/save') {
         if (runtime.active) throw problem('Attends la fin de la génération.', 409);

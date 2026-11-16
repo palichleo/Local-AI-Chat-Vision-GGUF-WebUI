@@ -47,11 +47,13 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
   // their pictures are not loaded again.
   const cards = new Map();
   const projects = () => (state.projects?.length ? state.projects : [{ id: 'inbox', name: 'Conversations' }]);
-  const projectName = id => projects().find(project => project.id === (id || 'inbox'))?.name ?? 'Conversations';
+  // Outside any project: « Sans projet » (0.6.0), whatever the stored name of the group.
+  const projectName = id =>
+    (id || 'inbox') === 'inbox' ? 'Sans projet' : (projects().find(project => project.id === id)?.name ?? 'Sans projet');
   const conversations = () =>
     (state.historyItems || []).filter(item => filter.project === 'all' || (item.projectId || 'inbox') === filter.project);
   const titleOf = id =>
-    (state.historyItems || []).find(item => item.id === id)?.title ?? (id === state.conversationId ? 'Nouveau chat' : 'Conversation');
+    (state.historyItems || []).find(item => item.id === id)?.title ?? (id === state.conversationId ? 'Nouvelle conversation' : 'Conversation');
   const date = value => (value ? new Date(value).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '');
 
   function option(value, text, chosen) {
@@ -66,7 +68,7 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     if (gone) filter.project = 'all';
     $('library-project').replaceChildren(
       option('all', 'Tous les projets', filter.project),
-      ...projects().map(project => option(project.id, project.name, filter.project)),
+      ...projects().map(project => option(project.id, projectName(project.id), filter.project)),
     );
     $('library-project').value = filter.project;
     const list = conversations();
@@ -117,8 +119,8 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     head.append(node('h2', '', 'Conversations'), node('span', 'library-count', String(list.length)));
     const create = node('button', 'library-new');
     create.type = 'button';
-    create.append(icon('plus'), node('span', '', 'Nouveau chat'));
-    create.setAttribute('aria-label', 'Nouveau chat dans ' + projectName(filter.project));
+    create.append(icon('plus'), node('span', '', 'Nouvelle conversation'));
+    create.setAttribute('aria-label', 'Nouvelle conversation dans ' + projectName(filter.project));
     create.onclick = () => newConversation(filter.project);
     head.append(create);
     const rows = node('div', 'library-conversations');
@@ -244,13 +246,13 @@ export function setupLibrary({ $, state, node, icon, api, viewOutput, openConver
     const empty = $('library-empty');
     empty.hidden = shown.length > 0;
     empty.textContent = failed
-      ? 'Bibliothèque illisible : ' + failed
+      ? 'Pellicule illisible : ' + failed
       : filter.media !== 'all' || filter.conversation !== 'all'
         ? 'Aucune création de ce type ici.'
         : filter.project === 'all'
           ? 'Aucune création pour l’instant. Les images, vidéos et sons faits dans le Studio ou dans un chat arrivent ici.'
           : 'Aucune création dans ce projet pour l’instant.';
-    $('library-heading').textContent = filter.project === 'all' ? 'Bibliothèque' : 'Bibliothèque › ' + projectName(filter.project);
+    $('library-heading').textContent = filter.project === 'all' ? 'Pellicule' : 'Pellicule › ' + projectName(filter.project);
   }
   function render() {
     const gone = paintFilters();

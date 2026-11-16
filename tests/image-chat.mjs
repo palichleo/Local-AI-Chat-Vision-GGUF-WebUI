@@ -197,7 +197,7 @@ async function exchange({
   };
   const fn = source.slice(
     source.indexOf('async function sendMessage('),
-    source.indexOf('setupMaterialLighting(document.'),
+    source.indexOf('\nalignConversation();') + '\nalignConversation();'.length,
   );
   const helpers = source.slice(source.indexOf('function userContent('), source.indexOf('async function sendMessage('));
   const assistant = source.slice(source.indexOf('function assistantMessage('), source.indexOf('function userContent('));

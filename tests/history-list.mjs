@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setupProjectNavigation, projectGroups } from '../public/project-navigation.mjs';
+import { setupProjectNavigation, projectGroups, projectLabel, shortDate, titleFound } from '../public/project-navigation.mjs';
 import * as sessionCopies from '../public/session-copies.mjs';
 class Element {
   constructor(tag = '', className = '', textContent = '') {
@@ -17,9 +17,18 @@ class Element {
       disabled: false,
       value: '',
       scrollTop: 0,
-      classList: { remove() {} },
       style: {},
+      offsetWidth: 268,
+      offsetHeight: 200,
     });
+    const element = this;
+    this.classList = {
+      add: name => (element.className = `${element.className} ${name}`.trim()),
+      remove() {},
+    };
+  }
+  get lastChild() {
+    return this.children.at(-1);
   }
   append(...items) {
     this.children.push(...items);
@@ -31,11 +40,22 @@ class Element {
   setAttribute(name, value) {
     this.attributes[name] = value;
   }
+  getAttribute(name) {
+    return this.attributes[name] ?? null;
+  }
   addEventListener() {}
   querySelector() {
     return null;
   }
-  remove() {}
+  contains(other) {
+    return walk(this).includes(other);
+  }
+  getBoundingClientRect() {
+    return { left: 36, top: 81, right: 144, bottom: 114, width: 108, height: 33 };
+  }
+  remove() {
+    this.removed = true;
+  }
   focus() {}
   close() {
     this.open = false;
@@ -43,20 +63,27 @@ class Element {
   showModal() {
     this.open = true;
   }
-  scrollIntoView() {
-    this.revealed = true;
-  }
 }
+const walk = element => [element, ...element.children.flatMap(walk)];
 function fixture(t, patch = {}) {
   const previous = globalThis.document,
+    previousWindow = globalThis.window,
     nodes = new Map(),
+    menus = [],
     $ = id => {
       if (!nodes.has(id)) nodes.set(id, new Element());
       return nodes.get(id);
     };
-  globalThis.document = { body: { dataset: {} }, querySelectorAll: () => [] };
+  globalThis.document = {
+    body: { dataset: {}, append: element => menus.push(element) },
+    querySelectorAll: () => [],
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  globalThis.window = { innerWidth: 1440, innerHeight: 900, addEventListener() {}, removeEventListener() {} };
   t.after(() => {
     globalThis.document = previous;
+    globalThis.window = previousWindow;
   });
   $('conversation-title').textContent = 'Current conversation';
   const state = {
@@ -69,6 +96,7 @@ function fixture(t, patch = {}) {
       saveHistory: true,
       status: {},
       conversationId: 'current',
+      messages: [{ role: 'user', content: 'Hello' }],
       historyItems: [
         { id: 'past', title: 'Past', projectId: 'project', updatedAt: '2026-11-07' },
         { id: 'current', title: 'Current', projectId: 'project', updatedAt: '2026-11-08' },
@@ -83,103 +111,123 @@ function fixture(t, patch = {}) {
     icon: name => new Element('svg', name),
     api: async (route, body) => {
       calls.push([route, body]);
+      const item = state.historyItems.find(entry => entry.id === body?.id) ?? state.historyItems[0];
       return Response.json({
         project: { id: 'created', name: body?.name },
-        conversation: { ...state.historyItems[0], projectId: body?.projectId },
+        conversation: { ...item, ...(body?.title ? { title: body.title } : {}), ...(body?.projectId ? { projectId: body.projectId } : {}) },
       });
     },
-    notice: text => calls.push(['notice', text]),
     openConversation: id => calls.push(['open', id]),
     newConversation: id => calls.push(['new', id]),
     removeConversation: item => calls.push(['delete', item.id]),
-    showLibrary: options => calls.push(['library', options]),
+    setTitle: title => calls.push(['title', title]),
   });
   ui.render();
-  return { ui, state, $, calls };
+  // The menu of the fil opened by its button: the last one put on the page.
+  const open = id => {
+    $(id).onclick();
+    return menus.at(-1);
+  };
+  const lines = menu =>
+    walk(menu)
+      .filter(element => /^thread-line(\s|$)/.test(element.className))
+      .map(line => ({
+        line,
+        name: walk(line).find(element => element.className === 'thread-choice-name').textContent,
+        choice: walk(line).find(element => element.className === 'thread-choice'),
+        tool: label => walk(line).find(element => element.attributes['aria-label']?.startsWith(label)),
+        current: line.className.includes('is-current'),
+      }));
+  return { ui, state, $, calls, open, lines, menus };
 }
-const walk = element => [element, ...element.children.flatMap(walk)];
-test('one project level groups current and saved conversations without duplicates and keeps delete actions', t => {
-  const { $, calls } = fixture(t);
-  for (const id of ['history-list', 'history-list-mobile']) {
-    const groups = $(id).children;
-    assert.equal(groups.length, 2);
-    const conversations = groups[1].children[1].children;
-    assert.equal(conversations.length, 2);
-    assert.equal(conversations[0].children[0].dataset.conversationId, 'current');
-    assert.equal(conversations[0].children[0].attributes['aria-current'], 'page');
-    conversations[1].children[0].onclick();
-    conversations[0].children[1].onclick();
-  }
+test('the menu of the conversations lists those of the project once, the open one ticked, each with its pencil and bin', t => {
+  const { calls, open, lines } = fixture(t);
+  const rows = lines(open('thread-conversation'));
+  assert.deepEqual(
+    rows.map(row => [row.name, row.current]),
+    [
+      ['Current', true],
+      ['Past', false],
+    ],
+  );
+  assert.ok(rows.every(row => row.tool('Renommer la conversation') && row.tool('Supprimer la conversation')));
+  rows[1].choice.onclick();
+  rows[0].tool('Supprimer').onclick();
   assert.deepEqual(calls, [
-    ['open', 'past'],
-    ['delete', 'current'],
     ['open', 'past'],
     ['delete', 'current'],
   ]);
 });
-test('history disabled still shows the current unsaved conversation only in its project', t => {
-  const { $ } = fixture(t, { saveHistory: false, historyItems: [], conversationId: null });
-  const rows = walk($('history-list')).filter(element => element.className.startsWith('history-item'));
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].attributes['aria-current'], 'page');
-  assert.equal(
-    walk($('history-list')).filter(element => element.className.includes('history-delete-button')).length,
-    0,
+test('history disabled still shows the current unsaved conversation only in its project, without a bin', t => {
+  const { open, lines } = fixture(t, { saveHistory: false, historyItems: [], conversationId: null });
+  const rows = lines(open('thread-conversation'));
+  assert.deepEqual(
+    rows.map(row => [row.name, row.current, !!row.tool('Supprimer'), !!row.tool('Renommer')]),
+    [['Current conversation', true, false, false]],
   );
 });
-test('a click on a project opens the library on it, lit in the sidebar while it is shown (0.5.123)', t => {
-  const { ui, state, $, calls } = fixture(t);
-  const open = walk($('history-list')).find(
-    element => element.className === 'project-open' && element.attributes['aria-label'] === 'A project',
+test('choosing a project in the fil: a conversation begun stays where it is and a new one starts in that project', t => {
+  const { calls, open, lines, $ } = fixture(t);
+  const rows = lines(open('thread-project'));
+  // The projects first, « Sans projet » last; the one of the conversation ticked.
+  assert.deepEqual(
+    rows.map(row => [row.name, row.current]),
+    [
+      ['A project', true],
+      ['Sans projet', false],
+    ],
   );
-  open.onclick();
-  assert.deepEqual(calls, [['library', { project: 'project' }]]);
-  // On screen: that project lit and said current, no other; no conversation said open.
-  Object.assign(state, { view: 'library', projectId: 'inbox', libraryProject: 'project' });
-  ui.render();
-  const [inbox, project] = $('history-list').children;
-  assert.match(project.className, /is-active/);
-  assert.doesNotMatch(inbox.className, /is-active/);
-  // Its line on the ground of a line under the pointer (0.5.126).
-  assert.match(project.children[0].className, /\bis-current\b/);
-  assert.doesNotMatch(inbox.children[0].className, /is-current/);
-  assert.equal(project.children[0].children[1].attributes['aria-current'], 'page');
-  assert.equal(inbox.children[0].children[1].attributes['aria-current'], undefined);
-  assert.equal(
-    walk($('history-list')).filter(element => element.className.startsWith('history-item') && element.attributes['aria-current'])
-      .length,
-    0,
-  );
-  assert.equal(globalThis.document.body.dataset.view, 'library');
+  assert.equal($('thread-project-name').textContent, 'A project');
+  // « Sans projet » can be neither renamed nor deleted.
+  assert.equal(rows[1].tool('Renommer'), undefined);
+  assert.equal(rows[1].tool('Supprimer'), undefined);
+  rows[1].choice.onclick();
+  assert.deepEqual(calls, [['new', 'inbox']]);
 });
-test('project collapse, rename, and a new project: its « 0 » alone, opened in the library', async t => {
-  const { $, calls, state } = fixture(t);
-  const group = $('history-list').children[1];
-  group.children[0].children[0].onclick();
-  assert.equal($('history-list').children[1].children[1].hidden, true);
-  $('project-create').onclick();
-  $('project-name').value = 'A new idea';
-  await $('project-form').onsubmit({ preventDefault() {} });
-  assert.ok(state.projects.some(project => project.name === 'A new idea'));
-  // Empty, it shows its « 0 » alone: « Nouveau chat » at the top is enough (0.5.126).
-  assert.equal(
-    walk($('history-list')).find(element => element.attributes['aria-label'] === 'Nouveau chat dans A new idea'),
-    undefined,
-  );
-  const created = $('history-list').children.find(group => walk(group).some(element => element.textContent === 'A new idea'));
-  assert.equal(created.children[1].children.length, 0);
-  assert.equal(walk(created).find(element => element.className === 'project-count').textContent, '0');
-  walk(created)
-    .find(element => element.className === 'project-open')
-    .onclick();
-  assert.deepEqual(calls.at(-1), ['library', { project: 'created' }]);
-});
-test('moving an unsaved conversation changes its organization without saving chat content', async t => {
-  const { $, calls, state } = fixture(t, { conversationId: null, historyItems: [] });
-  $('conversation-project').value = 'inbox';
-  await $('conversation-project').onchange();
+test('a conversation not begun moves to the project chosen, its draft kept, nothing saved', t => {
+  const { calls, open, lines, state, $ } = fixture(t, { conversationId: null, messages: [], historyItems: [] });
+  lines(open('thread-project'))
+    .find(row => row.name === 'Sans projet')
+    .choice.onclick();
   assert.equal(state.projectId, 'inbox');
+  assert.equal($('thread-project-name').textContent, 'Sans projet');
   assert.deepEqual(calls, []);
+});
+test('a saved conversation is renamed or moved from its pencil: one request each, the open one renamed at once', async t => {
+  const { calls, open, lines, state, $ } = fixture(t);
+  lines(open('thread-conversation'))
+    .find(row => row.name === 'Current')
+    .tool('Renommer')
+    .onclick();
+  assert.equal($('conversation-dialog').open, true);
+  assert.equal($('conversation-name').value, 'Current');
+  assert.deepEqual(
+    $('conversation-project').children.map(option => [option.value, option.textContent]),
+    [
+      ['inbox', 'Sans projet'],
+      ['project', 'A project'],
+    ],
+  );
+  assert.equal($('conversation-project').value, 'project');
+  // Its name only.
+  $('conversation-name').value = '  Un   renard  ';
+  await $('conversation-form').onsubmit({ preventDefault() {} });
+  assert.deepEqual(calls, [
+    ['history/rename', { id: 'current', title: 'Un renard' }],
+    ['title', 'Un renard'],
+  ]);
+  assert.equal($('conversation-dialog').open, false);
+  // Its project only: moved, its name unchanged.
+  calls.length = 0;
+  lines(open('thread-conversation'))
+    .find(row => row.name === 'Past')
+    .tool('Renommer')
+    .onclick();
+  $('conversation-project').value = 'inbox';
+  await $('conversation-form').onsubmit({ preventDefault() {} });
+  assert.deepEqual(calls, [['projects/move', { id: 'past', projectId: 'inbox' }]]);
+  assert.equal(state.historyItems.find(item => item.id === 'past').projectId, 'inbox');
+  assert.equal(state.projectId, 'project', 'the open conversation stays in its project');
 });
 test('unknown old project associations stay visible in the default group and sorting does not mutate history', () => {
   const items = [
@@ -194,65 +242,41 @@ test('unknown old project associations stay visible in the default group and sor
   assert.equal(items[0].id, 'old');
 });
 
-test('selecting or saving an older conversation keeps both sidebar orders and projects in place', t => {
+test('opening or saving an older conversation keeps the order of the menu and of the projects', t => {
   const newer = { id: 'new', title: 'New', projectId: 'project', createdAt: '2026-11-08', updatedAt: '2026-11-08' },
     older = { id: 'old', title: 'Old', projectId: 'project', createdAt: '2026-11-07', updatedAt: '2026-11-07' };
-  const { ui, state, $, calls } = fixture(t, { conversationId: newer.id, historyItems: [newer, older] });
-  const rows = id =>
-    walk($(id))
-      .filter(element => element.className.startsWith('history-item'))
-      .map(element => element.dataset.conversationId);
-  assert.deepEqual(rows('history-list'), ['new', 'old']);
-  const projects = $('history-list').children.map(group => group.children[0].children[1].attributes['aria-label']);
-  $('history-list').scrollTop = 240;
-  $('history-list-mobile').scrollTop = 120;
-  walk($('history-list'))
-    .find(element => element.dataset.conversationId === 'old')
-    .onclick();
+  const { ui, state, calls, open, lines } = fixture(t, { conversationId: newer.id, historyItems: [newer, older] });
+  const rows = lines(open('thread-conversation'));
+  assert.deepEqual(
+    rows.map(row => row.name),
+    ['New', 'Old'],
+  );
+  const projects = lines(open('thread-project')).map(row => row.name);
+  rows[1].choice.onclick();
   assert.deepEqual(calls, [['open', 'old']]);
   state.conversationId = older.id;
   older.updatedAt = '2026-11-09';
   state.historyItems = [older, newer];
   ui.render();
-  assert.equal($('history-list').scrollTop, 240);
-  assert.equal($('history-list-mobile').scrollTop, 120);
-  for (const id of ['history-list', 'history-list-mobile']) assert.deepEqual(rows(id), ['new', 'old']);
   assert.deepEqual(
-    $('history-list').children.map(group => group.children[0].children[1].attributes['aria-label']),
+    lines(open('thread-conversation')).map(row => [row.name, row.current]),
+    [
+      ['New', false],
+      ['Old', true],
+    ],
+  );
+  assert.deepEqual(
+    lines(open('thread-project')).map(row => row.name),
     projects,
-  );
-  assert.equal(
-    walk($('history-list')).find(element => element.dataset.conversationId === 'old').attributes['aria-current'],
-    'page',
-  );
-});
-
-test('creating a conversation reveals its first row and expands a previously collapsed project', t => {
-  const { ui, state, $ } = fixture(t);
-  $('history-list').children[1].children[0].children[0].onclick();
-  assert.equal($('history-list').children[1].children[1].hidden, true);
-  state.conversationId = null;
-  ui.render();
-  const group = $('history-list').children[1];
-  assert.equal(group.children[1].hidden, false);
-  assert.equal(group.children[1].children[0].revealed, true);
-  group.children[0].children[0].onclick();
-  assert.equal(
-    $('history-list').children[1].children[1].hidden,
-    true,
-    'the user can still collapse the active draft project',
   );
 });
 
 test('a new unsaved conversation is first under its project and stays first after saving', t => {
   const past = { id: 'past', title: 'Past', projectId: 'project', createdAt: '2026-11-07', updatedAt: '2026-11-09' },
     other = { id: 'other', title: 'Other', projectId: 'inbox', createdAt: '2026-11-08', updatedAt: '2026-11-08' };
-  const { ui, state, $ } = fixture(t, { conversationId: null, historyItems: [past, other] });
-  const projectRows = () =>
-    walk($('history-list').children[1].children[1])
-      .filter(element => element.className.startsWith('history-item'))
-      .map(element => element.dataset.conversationId);
-  assert.deepEqual(projectRows(), ['', 'past']);
+  const { ui, state, open, lines } = fixture(t, { conversationId: null, historyItems: [past, other] });
+  const projectRows = () => lines(open('thread-conversation')).map(row => row.name);
+  assert.deepEqual(projectRows(), ['Current conversation', 'Past']);
   state.conversationId = 'created';
   state.historyItems.push({
     id: 'created',
@@ -262,7 +286,7 @@ test('a new unsaved conversation is first under its project and stays first afte
     updatedAt: '2026-11-09',
   });
   ui.render();
-  assert.deepEqual(projectRows(), ['created', 'past']);
+  assert.deepEqual(projectRows(), ['New', 'Past']);
   const groups = projectGroups(state.projects, [
     { id: 'b', createdAt: 'same', projectId: 'inbox' },
     { id: 'a', createdAt: 'same', projectId: 'inbox' },
@@ -277,7 +301,61 @@ test('a new unsaved conversation is first under its project and stays first afte
   );
 });
 
-test('the library keeps the current messages and draft and closes the mobile tree', async () => {
+test('a conversation not begun is not listed under « + Nouvelle conversation »: it is that line already', t => {
+  const { open, lines, $ } = fixture(t, { conversationId: null, historyItems: [] });
+  $('conversation-title').textContent = 'Nouvelle conversation';
+  const menu = open('thread-conversation');
+  assert.deepEqual(lines(menu), []);
+  const empty = walk(menu).find(element => element.className === 'thread-empty');
+  assert.equal(empty.textContent, 'Aucune conversation');
+  assert.equal(empty.hidden, false);
+});
+
+test('the search of the menu finds a conversation by its words, case and accents aside', t => {
+  const items = [
+    { id: 'a', title: 'Renard sous la neige', projectId: 'project', createdAt: '2026-11-08' },
+    { id: 'b', title: 'Été à la plage', projectId: 'project', createdAt: '2026-11-07' },
+  ];
+  const { open, lines } = fixture(t, { conversationId: 'a', historyItems: items });
+  const menu = open('thread-conversation'),
+    field = walk(menu).find(element => element.tag === 'input'),
+    empty = walk(menu).find(element => element.className === 'thread-empty');
+  assert.equal(field.placeholder, 'Rechercher…');
+  field.value = 'ete';
+  field.oninput();
+  assert.deepEqual(
+    lines(menu).map(row => [row.name, row.line.hidden]),
+    [
+      ['Renard sous la neige', true],
+      ['Été à la plage', false],
+    ],
+  );
+  field.value = 'chat';
+  field.oninput();
+  assert.equal(empty.hidden, false);
+  assert.equal(titleFound('Été à la PLAGE', ' plage '), true);
+  assert.equal(titleFound('Renard', 'neige'), false);
+});
+
+test('the date of a conversation in the menu: minutes, hours, « hier », then the day', () => {
+  const now = new Date(2026, 10, 16, 15, 30);
+  assert.equal(shortDate(new Date(2026, 10, 16, 15, 29, 40).toISOString(), now), 'à l’instant');
+  assert.equal(shortDate(new Date(2026, 10, 16, 15, 5).toISOString(), now), 'il y a 25 min');
+  assert.equal(shortDate(new Date(2026, 10, 16, 13, 10).toISOString(), now), 'il y a 2 h');
+  assert.equal(shortDate(new Date(2026, 10, 15, 23, 50).toISOString(), now), 'hier');
+  assert.equal(shortDate(new Date(2026, 10, 12, 9).toISOString(), now), '12 nov.');
+  assert.equal(shortDate(new Date(2025, 10, 12, 9).toISOString(), now), '12 nov. 2025');
+  assert.equal(shortDate('', now), '');
+  assert.equal(shortDate('pas une date', now), '');
+});
+
+test('outside any project, the conversations are « Sans projet », whatever the stored name of their group', () => {
+  assert.equal(projectLabel({ id: 'inbox', name: 'Conversations' }), 'Sans projet');
+  assert.equal(projectLabel({ id: 'p1', name: 'Clips de Noël' }), 'Clips de Noël');
+  assert.equal(projectLabel(undefined), 'Sans projet');
+});
+
+test('the Pellicule keeps the current messages and draft', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     state = {
       projectWorking: false,
@@ -289,7 +367,7 @@ test('the library keeps the current messages and draft and closes the mobile tre
     },
     prompt = { value: 'An unsent draft' },
     attributes = {},
-    document = { body: { dataset: { navOpen: 'true' } } };
+    document = { body: { dataset: {} } };
   let pending,
     saves = 0,
     renders = 0;
@@ -316,7 +394,7 @@ test('the library keeps the current messages and draft and closes the mobile tre
   };
   let shows = 0;
   runInNewContext(
-    source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
+    source.slice(source.indexOf('function showLibrary('), source.indexOf('async function newConversation(')) +
       ';this.show=showLibrary;',
     context,
   );
@@ -326,31 +404,31 @@ test('the library keeps the current messages and draft and closes the mobile tre
   assert.equal(shows, 1);
   assert.deepEqual(state.messages, [{ role: 'user', content: 'Keep' }]);
   assert.equal(prompt.value, 'An unsent draft');
-  assert.equal(document.body.dataset.navOpen, 'false');
   assert.equal(saves, 1);
   assert.equal(renders, 1);
 });
 
-test('the library keeps an unsaved conversation reachable in the sidebar, not said open', t => {
-  const { $, calls } = fixture(t, {
+test('in the Pellicule the fil is gone; the unsaved conversation is still there, not said open', t => {
+  const { $, calls, open, lines } = fixture(t, {
     view: 'library',
     conversationId: null,
     historyItems: [],
     messages: [{ role: 'user', content: 'Unsaved' }],
     saveHistory: false,
   });
-  const row = walk($('history-list')).find(element => element.className.startsWith('history-item'));
-  assert.ok(row);
-  assert.equal(row.attributes['aria-current'], undefined);
-  row.onclick();
+  assert.equal($('thread').hidden, true);
+  const [row] = lines(open('thread-conversation'));
+  assert.equal(row.current, false);
+  row.choice.onclick();
   assert.deepEqual(calls, [['open', null]]);
 });
 
-test('the library is said current in the sidebar, the conversation unchanged', t => {
+test('the Pellicule is said current in the top bar, the conversation unchanged', t => {
   const { ui, state, $ } = fixture(t),
     before = JSON.stringify(state.historyItems);
   assert.equal($('library-open').attributes['aria-current'], 'false');
   assert.equal($('chat-open').attributes['aria-current'], 'page');
+  assert.equal($('thread').hidden, false);
   state.view = 'library';
   ui.render();
   assert.equal($('library-open').attributes['aria-current'], 'page');
@@ -386,7 +464,7 @@ test('the library locks navigation while pending descriptions and saves complete
       libraryUI: { show() {} },
     };
   runInNewContext(
-    source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
+    source.slice(source.indexOf('function showLibrary('), source.indexOf('async function newConversation(')) +
       ';this.home=showLibrary;',
     context,
   );
@@ -458,7 +536,7 @@ test('Chat and Studio are two views of one conversation: switching is immediate,
       },
     };
   runInNewContext(
-    source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
+    source.slice(source.indexOf('function showLibrary('), source.indexOf('async function newConversation(')) +
       ';this.studio=showStudio;this.chat=showChat;',
     context,
   );
@@ -504,7 +582,7 @@ test('a deferred library action never hides a response that started while settin
     libraryUI: { show: () => assert.fail('nothing shown while an answer is written') },
   };
   runInNewContext(
-    source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
+    source.slice(source.indexOf('function showLibrary('), source.indexOf('async function newConversation(')) +
       ';this.home=showLibrary;',
     context,
   );
@@ -547,7 +625,7 @@ test('failed library preparation keeps the chat visible and releases navigation 
       libraryUI: { show: () => assert.fail('nothing shown when the conversation could not be kept') },
     };
     runInNewContext(
-      source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
+      source.slice(source.indexOf('function showLibrary('), source.indexOf('async function newConversation(')) +
         ';this.home=showLibrary;',
       context,
     );
@@ -560,41 +638,57 @@ test('failed library preparation keeps the chat visible and releases navigation 
   }
 });
 
-test('a project is deleted with its bin, renamed by double click, and both are in its right-click menu', async t => {
-  const { $, calls, state } = fixture(t);
-  const label = name => walk($('history-list')).find(element => element.attributes['aria-label'] === name);
-  assert.equal(label('Renommer A project'), undefined, 'the pencil is gone');
-  assert.equal(label('Supprimer Conversations'), undefined, 'the default project cannot be deleted');
-  const open = label('A project');
-  open.ondblclick({ preventDefault() {} });
+test('a project is renamed with its pencil and deleted with its bin; a right click on the fil offers both', async t => {
+  const { $, calls, state, open, lines, menus } = fixture(t);
+  const project = () => lines(open('thread-project')).find(row => row.name === 'A project');
+  project().tool('Renommer le projet').onclick();
   assert.equal($('project-dialog').open, true);
+  assert.equal($('project-dialog-title').textContent, 'Renommer le projet');
   assert.equal($('project-name').value, 'A project');
   $('project-dialog').close();
 
-  const appended = [];
-  globalThis.document.body.append = element => appended.push(element);
-  globalThis.document.addEventListener = () => {};
-  globalThis.document.removeEventListener = () => {};
-  globalThis.window = { innerWidth: 1000, innerHeight: 800, addEventListener() {}, removeEventListener() {} };
-  t.after(() => delete globalThis.window);
-  open.oncontextmenu({ preventDefault() {}, clientX: 20, clientY: 30 });
-  const menu = appended[0];
+  // The right click on the project of the fil: a shortcut of its menu.
+  $('thread-project').oncontextmenu({ preventDefault() {} });
+  const shortcut = menus.at(-1);
   assert.deepEqual(
-    menu.children.map(item => item.children[1].textContent),
-    ['Renommer', 'Supprimer'],
+    walk(shortcut)
+      .filter(element => element.className.startsWith('thread-action'))
+      .map(element => element.children[1].textContent),
+    ['Renommer', 'Supprimer le projet'],
   );
-  menu.children[1].onclick();
+  walk(shortcut)
+    .filter(element => element.className.startsWith('thread-action'))[1]
+    .onclick();
   assert.equal($('project-delete-dialog').open, true);
-  assert.match($('project-delete-description').textContent, /2 conversations seront déplacées dans Conversations/);
+  // What happens to its conversations and their takes, said before anything is done.
+  assert.match($('project-delete-description').textContent, /2 conversations seront déplacées dans « Sans projet », avec leurs prises\. Aucune conversation ni prise n’est effacée\./);
 
-  label('Supprimer A project').onclick();
+  project().tool('Supprimer le projet').onclick();
   await $('project-delete-confirm').onclick();
   assert.deepEqual(calls.at(-1), ['projects/delete', { id: 'project', confirm: true }]);
   assert.deepEqual(
-    state.projects.map(project => project.id),
+    state.projects.map(item => item.id),
     ['inbox'],
   );
   assert.equal(state.projectId, 'inbox');
+  assert.equal($('thread-project-name').textContent, 'Sans projet');
+});
+
+test('a project made from the fil is the one chosen: the conversation begun stays, a new one starts in it', async t => {
+  const { $, calls, state, open, menus } = fixture(t);
+  const menu = open('thread-project');
+  walk(menu)
+    .find(element => element.className === 'thread-action')
+    .onclick();
+  assert.equal($('project-dialog-title').textContent, 'Nouveau projet');
+  $('project-name').value = 'A new idea';
+  await $('project-form').onsubmit({ preventDefault() {} });
+  assert.ok(state.projects.some(item => item.name === 'A new idea'));
+  assert.deepEqual(calls.slice(-2), [
+    ['projects/save', { name: 'A new idea' }],
+    ['new', 'created'],
+  ]);
+  assert.ok(menus.length >= 1);
 });
 
 // The requests of the page, with what serverRestarted needs: the answers of a server started again.

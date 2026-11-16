@@ -4,7 +4,7 @@
  * own, a second late and in another style) in one bubble, one style, one delay: under the pointer
  * after 300 ms, at once on the keyboard's focus. The bubble is fixed to the window, so a scrolling
  * area never cuts it; it goes into an open dialog when the control is in one (a dialog lies above
- * the page). In the folded sidebar it stands at the right of the icon; elsewhere under the
+ * the page). It stands under the
  * control (right edges aligned for a « ? », `data-help-align="start"` for its left edges), above
  * it when the window has no room below.
  */
@@ -42,13 +42,9 @@ export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 3
         else for (const added of record.addedNodes) if (added.nodeType === 1) adoptAll(added);
     }).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['title'] });
 
-  const folded = () =>
-    page.documentElement?.dataset.sidebar === 'collapsed' && (view.matchMedia?.('(min-width: 1100px)').matches ?? true);
   /** What the bubble says for `target`: its help, or its name where it does not show it itself. */
   function textOf(target) {
     if (target.dataset.help) return target.dataset.help;
-    // A line of the sidebar says its name itself, but folded to its icon.
-    if (target.closest?.('#sidebar') && target.matches?.('.home-button, .new-chat') && !folded()) return '';
     return target.dataset.tip || '';
   }
   function place(target) {
@@ -57,19 +53,13 @@ export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 3
       margin = 8,
       width = view.innerWidth ?? 1280,
       height = view.innerHeight ?? 800;
-    let left, top;
-    if (target.closest?.('#sidebar') && folded()) {
-      left = box.right + 10;
-      top = box.top + box.height / 2 - size.height / 2;
-    } else {
-      left = target.dataset.help
-        ? target.dataset.helpAlign === 'start'
-          ? box.left
-          : box.right - size.width
-        : box.left + box.width / 2 - size.width / 2;
-      top = box.bottom + 6;
-      if (top + size.height > height - margin) top = box.top - size.height - 6;
-    }
+    const left = target.dataset.help
+      ? target.dataset.helpAlign === 'start'
+        ? box.left
+        : box.right - size.width
+      : box.left + box.width / 2 - size.width / 2;
+    let top = box.bottom + 6;
+    if (top + size.height > height - margin) top = box.top - size.height - 6;
     bubble.style.left = Math.round(Math.max(margin, Math.min(left, width - size.width - margin))) + 'px';
     bubble.style.top = Math.round(Math.max(margin, Math.min(top, height - size.height - margin))) + 'px';
   }

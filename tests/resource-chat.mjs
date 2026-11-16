@@ -130,7 +130,7 @@ test('grouped resource frames retain their separate labels and never enter saved
   const helpers = source.slice(source.indexOf('function userContent('), source.indexOf('async function sendMessage(')),
     send = source.slice(
       source.indexOf('async function sendMessage('),
-      source.indexOf('setupMaterialLighting(document.'),
+      source.indexOf('\nalignConversation();') + '\nalignConversation();'.length,
     );
   runInNewContext(helpers + send + '\nthis.send=sendMessage;', context);
   await context.send({ preventDefault() {} });

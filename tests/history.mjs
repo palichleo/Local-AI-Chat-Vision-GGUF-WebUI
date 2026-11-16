@@ -96,6 +96,68 @@ test('a conversation begun in the Studio is named by its prompt alone; old title
   assert.equal((await history.save({ id: randomUUID(), messages: [{ role: 'user', content: 'Bonjour' }] })).title, 'Bonjour');
 });
 
+test('a conversation renamed keeps its name: the saves that follow and a move do not make another one', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'atelier-history-rename-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'history'),
+    history = new History(directory),
+    id = randomUUID();
+  const first = await history.save({ id, messages: [{ role: 'user', content: 'Un renard dans la neige' }] });
+  assert.equal(first.title, 'Un renard dans la neige');
+  const renamed = await history.rename(id, '  Renard   final ');
+  assert.equal(renamed.title, 'Renard final');
+  assert.equal(renamed.updatedAt, first.updatedAt, 'renaming is not an activity: the order of the menu stays');
+  const again = await history.save({
+    id,
+    messages: [
+      { role: 'user', content: 'Un renard dans la neige' },
+      { role: 'assistant', content: 'Le voici.' },
+    ],
+  });
+  assert.equal(again.title, 'Renard final');
+  // Moved to a project, as POST /api/projects/move does it.
+  const moved = await history.save({ ...(await history.read(id)), projectId: 'inbox' });
+  assert.equal(moved.title, 'Renard final');
+  assert.equal(JSON.parse(await readFile(join(directory, id, 'conversation.json'), 'utf8')).titled, true);
+  assert.equal((await history.list()).conversations[0].title, 'Renard final');
+  // A name of 1 to 120 characters, for a conversation that exists.
+  await assert.rejects(history.rename(id, '   '), /de 1 à 120 caractères/);
+  await assert.rejects(history.rename(id, 'x'.repeat(121)), /de 1 à 120 caractères/);
+  await assert.rejects(history.rename(randomUUID(), 'Ailleurs'), { status: 404 });
+  await assert.rejects(history.rename('../x', 'Ailleurs'), /Identifiant de conversation invalide/);
+  // A name the user writes like an old title of the Studio is still the user's.
+  const studio = await history.rename(id, 'Studio · Image : Un renard dans la neige');
+  assert.equal(studio.title, 'Studio · Image : Un renard dans la neige');
+});
+
+test('POST /api/history/rename: the pencil of the fil, refused while the history is off', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'atelier-rename-api-'));
+  let app;
+  try {
+    app = await createApplication({ port: 0, dataDir });
+    const bootstrap = await (await fetch(app.url + '/api/bootstrap')).json();
+    const call = (route, body) =>
+      fetch(app.url + '/api/' + route, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bootstrap.token}` },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    const id = randomUUID();
+    await call('preferences', { saveHistory: false });
+    assert.equal((await call('history/rename', { id, title: 'Renard' })).status, 403);
+    await call('preferences', { saveHistory: true });
+    assert.equal((await call('history/save', { id, messages: [{ role: 'user', content: 'Un renard' }] })).status, 200);
+    const answer = await call('history/rename', { id, title: 'Renard final' });
+    assert.equal(answer.status, 200);
+    assert.equal((await answer.json()).conversation.title, 'Renard final');
+    assert.equal((await (await call('history')).json()).conversations.find(item => item.id === id).title, 'Renard final');
+    assert.equal((await call('history/rename', { id, title: '' })).status, 400);
+  } finally {
+    await app?.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('historique optionnel : l’original joint est conservé, les copies du modèle jamais', async () => {
   const folder = await mkdtemp(join(tmpdir(), 'atelier-history-'));
   const historyDir = join(folder, 'history');

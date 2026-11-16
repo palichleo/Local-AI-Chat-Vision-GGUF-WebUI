@@ -139,7 +139,9 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async t => {
       const textureBytes = Buffer.from(await texture.arrayBuffer());
       assert.deepEqual([...textureBytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
       assert.ok(textureBytes.length < 1500000);
-      assert.equal((await fetch(base + '/material-light.mjs')).status, 200);
+      // The sidebar and the window are gone (0.6.0): their scripts are no longer served.
+      for (const gone of ['/material-light.mjs', '/sidebar-fold.mjs', '/sidebar-state.js', '/filet.mjs'])
+        assert.equal((await fetch(base + gone)).status, 404, gone);
       assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
       assert.equal(
         (

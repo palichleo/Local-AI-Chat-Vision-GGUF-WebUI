@@ -1,14 +1,13 @@
-import { followWindow } from './filet.mjs';
 import { refreshLight, showTakeReady } from './room.mjs';
-import { setupSidebarFold } from './sidebar-fold.mjs';
 import { withReference, withoutReference } from './reference-tokens.mjs';
 import { markReferences, removedNotice, setupReferencePeek, setupReferencePicker } from './reference-picker.mjs';
 import { setupUnexpectedErrors } from './unexpected-errors.mjs';
 import { setupLibrary } from './library.mjs';
 
-/** The title of a chat before its first message gives it one (« Nouvelle conversation » before 0.5.109). */
-const UNTITLED = 'Nouveau chat';
-const untitled = title => title === UNTITLED || title === 'Nouvelle conversation';
+/** The title of a conversation before its first message gives it one (« Nouveau chat » from 0.5.109 to
+ * 0.5.129, the words of the fil again since 0.6.0). */
+const UNTITLED = 'Nouvelle conversation';
+const untitled = title => title === UNTITLED || title === 'Nouveau chat';
 import { setupProjectNavigation } from './project-navigation.mjs';
 import { setupSettingsSearch } from './settings-search.mjs';
 import { setupSettingsTabs } from './settings-tabs.mjs';
@@ -20,7 +19,6 @@ import { STUDIO_NOTE, callNote, conversationTitle, lastExchange, spokenText } fr
 import { setupSettingsGuard } from './settings-guard.mjs';
 import { setupContextMeter } from './context-meter.mjs';
 import { installFromButton, compactSession } from './update-ui.mjs';
-import { setupMaterialLighting } from './material-light.mjs';
 import { readSSE } from './stream.mjs';
 import { markdownToHtml } from './markdown.mjs';
 import { setupNativeWorkflows } from './native-workflow-ui.mjs';
@@ -35,7 +33,7 @@ import { fillCopies, forgetCopies, needsCopies, rememberCopy, remakeOutputCopy, 
 const $ = id => document.getElementById(id);
 const state = {
   view: 'chat',
-  // The project the library shows ('all': every one), lit in the sidebar.
+  // The project the Pellicule shows ('all': every one).
   libraryProject: 'all',
   studioId: null,
   projectId: 'inbox',
@@ -267,7 +265,6 @@ function renderHistory() {
 
 function setConversationTitle(title) {
   $('conversation-title').textContent = title;
-  $('chat-heading').textContent = title;
   renderHistory();
 }
 
@@ -435,7 +432,6 @@ async function loadConversation(id) {
     id === state.conversationId
   ) {
     if (state.view !== 'studio') state.view = 'chat';
-    closeNavigation();
     projectUI.render();
     $('prompt').focus();
     return;
@@ -465,7 +461,6 @@ async function loadConversation(id) {
     state.projectId = record.projectId || 'inbox';
     // Chat and Studio are two views of the same conversation: the one on screen stays.
     if (state.view !== 'studio') state.view = 'chat';
-    closeNavigation();
     state.archiveSnapshot = { messages: record.messages, incomplete: record.incomplete };
     state.historyDirty = false;
     state.images = draft.images;
@@ -756,6 +751,11 @@ function updateControls() {
   $('toggle-engine').title = engineLabel;
   // One icon whatever the state (⏻): the dot beside it says it (moodix.css, engine-button::after).
   $('toggle-engine').replaceChildren(icon('power'));
+  // The capsule of the top bar names the model beside its switch (0.6.0).
+  const model = (state.models || []).find(item => item.modelPath === state.config.modelPath);
+  $('engine-name').textContent =
+    model?.name ||
+    (state.config.modelPath ? state.config.modelPath.split(/[\\/]/).pop().replace(/\.gguf$/i, '') : 'Aucun LLM');
   const proposing = Boolean(state.studio?.proposing?.());
   $('send').disabled =
     state.projectWorking ||
@@ -781,19 +781,6 @@ function updateControls() {
   $('cancel').title = cancelLabel;
   $('thinking').disabled = state.generating;
   $('attach').disabled = state.generating || state.preparing || state.loadingHistory;
-  $('new-chat').disabled = state.projectWorking || toolBusy || state.generating || state.loadingHistory;
-  $('new-chat-mobile').disabled = state.projectWorking || toolBusy || state.generating || state.loadingHistory;
-  for (const button of document.querySelectorAll('.history-item, .history-delete-button')) {
-    button.disabled =
-      state.projectWorking ||
-      state.savingHistory ||
-      toolBusy ||
-      state.generating ||
-      state.preparing ||
-      state.loadingHistory ||
-      (button.classList.contains('history-delete-button') && $('history-clear').disabled);
-    if (button.classList.contains('history-item')) button.classList.toggle('active', button.dataset.current === 'true');
-  }
   $('prompt').disabled = state.loadingHistory;
   $('compose-state').textContent = proposing
     ? 'Proposition dans le Studio · un message la refuse'
@@ -2579,7 +2566,6 @@ function alignConversation() {
 }
 
 alignConversation();
-setupMaterialLighting(document.querySelectorAll('.composer, .model-card'));
 
 /**
  * While the chat is folded in the Studio, its « Agent » button tells what Moodix AI does: a light
@@ -2785,7 +2771,6 @@ const projectUI = setupProjectNavigation({
   node,
   icon,
   api,
-  notice,
   openConversation: id => {
     requestSettingsClose(() => loadConversation(id));
   },
@@ -2793,7 +2778,8 @@ const projectUI = setupProjectNavigation({
     requestSettingsClose(() => newConversation(id));
   },
   removeConversation: confirmHistoryDeletion,
-  showLibrary,
+  // The conversation open, renamed from the fil: its new name at once.
+  setTitle: title => setConversationTitle(title),
   // A project renamed or deleted: the library on screen says it too.
   onChange: () => {
     if (state.view === 'library') libraryUI.render();
@@ -2819,7 +2805,7 @@ const libraryUI = setupLibrary({
   viewOutput: (record, index) => assetsUI.viewOutput(record, index),
   openConversation: id => requestSettingsClose(() => loadConversation(id)),
   newConversation: id => requestSettingsClose(() => newConversation(id)),
-  // The project chosen in the library is lit in the sidebar.
+  // The project chosen in the Pellicule: the page follows it.
   onFilter: filter => {
     state.libraryProject = filter.project;
     projectUI.render();
@@ -2861,7 +2847,7 @@ const studioUI = setupStudio({
   onConversation: () => showLastReply(),
   afterMove,
   openAgent: () => void openChat(),
-  // A mode chosen in the sidebar from the Chat or the library: the Studio opens, in that mode.
+  // A mode chosen while the Studio is not on screen: the Studio opens, in that mode.
   openStudio: () => showStudio(),
 });
 state.studio = studioUI;
@@ -3077,17 +3063,9 @@ $('thinking').onclick = () => {
   $('thinking').setAttribute('aria-pressed', String(state.thinking));
   contextMeter.schedule();
 };
-function closeNavigation() {
-  const open = document.body.dataset.navOpen === 'true';
-  document.body.dataset.navOpen = 'false';
-  $('navigation-open').setAttribute('aria-expanded', 'false');
-  // The focus left in the closed drawer goes back to the button that opens it.
-  if (open && $('sidebar').contains?.(document.activeElement)) $('navigation-open').focus?.();
-}
 /**
- * The library (Bibliothèque), a page of its own outside a conversation: every creation, those of
- * one project (`project`, a click on it in the sidebar) or of every one. The conversation is kept
- * first.
+ * The library (the Pellicule since 0.6.0), a page of its own outside a conversation: every creation,
+ * those of one project (`project`) or of every one. The conversation is kept first.
  */
 function showLibrary({ project = 'all' } = {}) {
   const blocked = () =>
@@ -3111,7 +3089,6 @@ function showLibrary({ project = 'all' } = {}) {
       state.view = 'library';
       state.libraryProject = project;
       delete document.body.dataset.chat;
-      closeNavigation();
       projectUI.render();
       void libraryUI.show({ project });
     } catch (error) {
@@ -3171,7 +3148,6 @@ function revealStudio() {
   const coming = state.view !== 'studio';
   return switchView('studio', () => {
     state.view = 'studio';
-    closeNavigation();
     projectUI.render();
     syncViews();
     updateControls();
@@ -3191,7 +3167,6 @@ function showChat() {
     void switchView('chat', () => {
       state.view = 'chat';
       delete document.body.dataset.chat;
-      closeNavigation();
       projectUI.render();
       syncViews();
       updateControls();
@@ -3314,7 +3289,6 @@ async function newConversation(projectId = state.projectId || 'inbox') {
       return;
     state.projectId = typeof projectId === 'string' ? projectId : 'inbox';
     if (state.view !== 'studio') state.view = 'chat';
-    closeNavigation();
     state.messages = [];
     state.images = [];
     state.videos = [];
@@ -3340,21 +3314,9 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     $('prompt').focus();
   }
 }
-$('new-chat').onclick = () => newConversation();
-$('new-chat-mobile').onclick = () => newConversation();
-$('navigation-open').onclick = () => {
-  const open = document.body.dataset.navOpen !== 'true';
-  document.body.dataset.navOpen = String(open);
-  $('navigation-open').setAttribute('aria-expanded', String(open));
-  if (open) $('navigation-close').focus();
-};
-$('navigation-close').onclick = () => closeNavigation();
-$('navigation-scrim').onclick = () => closeNavigation();
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && document.body.dataset.navOpen === 'true' && !document.querySelector('dialog[open]'))
-    closeNavigation();
   // The chat opened over the Studio folds back into its bar.
-  else if (
+  if (
     event.key === 'Escape' &&
     document.body.dataset.chat === 'open' &&
     !event.defaultPrevented &&
@@ -3464,7 +3426,7 @@ try {
   state.saveHistory = initial.preferences?.saveHistory === true;
   await projectUI.refresh().catch(error => notice('Projets indisponibles : ' + error.message));
   await refreshHistory();
-  await assetsUI.refresh().catch(error => notice('Bibliothèque indisponible : ' + error.message));
+  await assetsUI.refresh().catch(error => notice('Pellicule indisponible : ' + error.message));
   await workflowsUI.refresh();
   await restoreUpdate();
   // A page of an older version, replaced while it was open: its draft and its conversation (0.5.128).
@@ -3495,8 +3457,6 @@ state.onTakeDone = async () => {
 void refreshLight(api).then(newest => {
   if (newestTake === undefined && newest !== undefined) newestTake = newest;
 });
-// The filet over the window: its four colours along the top, at the window's size.
-followWindow(document.querySelector('.mdx-filet'), document.querySelector('.workspace'));
 // The references of the project at hand: « # » in the message box lists them, « #ref3 » in a
 // message shows its picture under the pointer.
 const projectReferences = () => assetsUI.references(state.projectId || 'inbox');
@@ -3522,21 +3482,6 @@ setupReferencePeek({
 });
 // An error nobody caught: said in a notice instead of a button that does nothing.
 setupUnexpectedErrors({ notice, quiet: () => state.updating || state.closingApp });
-// The sidebar folds to its icons and back (its button, Ctrl+B / ⌘+B).
-setupSidebarFold({
-  root: document.documentElement,
-  toggle: $('sidebar-toggle'),
-  sidebar: $('sidebar'),
-  page: document,
-  storage: (() => {
-    try {
-      return localStorage;
-    } catch {
-      return null;
-    }
-  })(),
-  mac: /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || ''),
-});
 setInterval(() => {
   if (!document.hidden) refreshStatus();
 }, 1200);

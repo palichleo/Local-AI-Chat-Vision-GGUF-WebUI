@@ -42,7 +42,7 @@ test('quoted text retains paragraphs and line breaks without copying labels or M
 test('conversation alignment follows scrollbar changes and handles the hidden welcome scroller', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const start = source.indexOf('function alignConversation()'),
-    end = source.indexOf('setupMaterialLighting(document.', start);
+    end = source.indexOf('\nalignConversation();', start) + '\nalignConversation();'.length;
   let update, observed;
   const values = [];
   const area = { offsetWidth: 900, clientWidth: 890 };
@@ -102,10 +102,14 @@ test('under a message, only the last exchange can be taken back: nothing copies 
   assert.doesNotMatch(actions, /clipboard|Copier/);
 });
 
-test('the interface names its places in French: Bibliothèque, Jour and Nuit; no « Créations », no « Fichiers »', async () => {
+test('the interface names its places in French: Chat, Studio, Pellicule, Jour and Nuit; no « Créations », no « Fichiers »', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(html, /id="library-open"[^>]*>.*?<span>Bibliothèque<\/span>/);
+  // « Pellicule » in the texts only (0.6.0): the routes, the modules and the data keep « library ».
+  assert.match(html, /id="chat-open"[^>]*>Chat<\/button>/);
+  assert.match(html, /id="studio-open"[^>]*>Studio<\/button>/);
+  assert.match(html, /id="library-open"[^>]*>Pellicule<\/button>/);
+  assert.doesNotMatch(html, />Bibliothèque</);
   // No home page any more (0.5.123): a project opens in the library.
   assert.doesNotMatch(html, /id="home-open"|id="home-view"|>Accueil</);
   // The references are kept from the Studio and the chats of a project: no panel of files.

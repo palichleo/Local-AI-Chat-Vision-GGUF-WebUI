@@ -4,39 +4,46 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import * as sessionCopies from '../public/session-copies.mjs';
 
+// The top bar of « Salle obscure » (0.6.0), which takes the place of the sidebar (sidebar-rows.mjs
+// before): what those tests checked of the places, the library and the model, now on the top bar.
 const read = async name => (await readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
-test('the sidebar: « Nouveau chat » a line as the pages, then Chat, Studio, Bibliothèque; no Accueil', async () => {
+test('the top bar: the Éclipse and « Moodix », then Chat · Studio · Pellicule, then the model and the gear; no sidebar', async () => {
   const html = await read('index.html'),
-    sidebar = html.slice(html.indexOf('<aside id="sidebar"'), html.indexOf('</aside>'));
-  // No bordered button any more; the same id, the same words.
-  assert.match(sidebar, /<button class="new-chat" id="new-chat" data-tip="Nouveau chat"><svg><use href="#i-plus"\/><\/svg><span>Nouveau chat<\/span><\/button>/);
-  const order = ['id="new-chat"', 'id="chat-open"', 'id="studio-open"', 'id="studio-kinds"', 'id="library-open"'].map(
-    mark => sidebar.indexOf(mark),
+    top = html.slice(html.indexOf('<header id="top"'), html.indexOf('</header>', html.indexOf('<header id="top"')));
+  assert.ok(top.length > 100);
+  const order = ['id="brand-home"', 'class="top-name">Moodix<', 'id="chat-open"', 'id="studio-open"', 'id="library-open"', 'id="toggle-engine"', 'id="engine-name"', 'id="settings-open"'].map(
+    mark => top.indexOf(mark),
   );
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'in this order');
-  // No home page any more (0.5.123): the projects are opened in the library.
-  assert.doesNotMatch(sidebar, /id="home-open"|Accueil/);
+  // The mark is the Éclipse, drawn in the page (its colour follows the room).
+  assert.match(top, /<svg class="top-mark" viewBox="0 0 32 32" aria-hidden="true"><circle class="eclipse-ring" cx="16" cy="16" r="12\.5"\/><path class="eclipse-sphere" d="M4\.63 10\.81A12\.5 12\.5 0 1 0 27\.37 10\.81A11\.4 11\.4 0 0 1 4\.63 10\.81Z"\/><\/svg>/);
+  assert.match(top, /<button id="library-open" type="button" class="top-place" aria-controls="library-view">Pellicule<\/button>/);
+  // No sidebar, no drawer, no button « Nouveau chat » any more: the fil holds the conversations.
+  assert.doesNotMatch(html, /id="sidebar"|id="navigation-open"|id="new-chat"|id="sidebar-toggle"|class="mdx-filet"|sidebar-state\.js/);
+  // No home page (0.5.123), nothing left of « Fichiers ».
   assert.doesNotMatch(html, /id="home-view"|id="project-grid"|<symbol id="i-home"/);
-  assert.match(
-    sidebar,
-    /<button id="library-open" type="button" class="home-button" aria-controls="library-view" data-tip="Bibliothèque"><svg aria-hidden="true"><use href="#i-library"\/><\/svg><span>Bibliothèque<\/span><\/button><\/nav>/,
-  );
-  // At the foot, the model and Configuration only: nothing left of « Fichiers ».
-  assert.match(sidebar, /id="toggle-engine"/);
-  assert.match(sidebar, /id="settings-open"/);
   assert.doesNotMatch(html, /all-files|assets-panel|resource-file|Ressources/);
-  assert.match(html, /<symbol id="i-library" viewBox="0 0 24 24"><path d="M4 4v16"\/><path d="M8\.5 7v13"\/><path d="M13 5v15"\/><path d="m16\.5 6\.5 3\.6 13\.2"\/><\/symbol>/);
   assert.match(html, /<symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3\.5v7\.5"\/><path d="M6\.6 6\.8a7\.6 7\.6 0 1 0 10\.8 0"\/><\/symbol>/);
+  // The fil in the window, before the pages.
+  assert.ok(html.indexOf('<nav id="thread"') > html.indexOf('<div class="workspace">'));
+  assert.ok(html.indexOf('<nav id="thread"') < html.indexOf('<section id="library-view"'));
+  const css = await read('moodix.css');
+  // 72 px high, the three places in the middle; « Moodix » in Gloock 26 px, 9 px from a mark of 20 px.
+  assert.match(css, /\.top-bar \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto minmax\(0, 1fr\);[^}]*height: 72px;[^}]*padding: 0 36px;/);
+  assert.match(css, /\.top-brand \{[^}]*gap: 9px;/);
+  assert.match(css, /\.top-brand \.top-mark \{[^}]*width: 20px;[^}]*height: 20px;[^}]*transform: translateY\(-1px\);/);
+  assert.match(css, /\.top-name \{[^}]*font-family: var\(--font-display\);[^}]*font-size: 26px;/);
+  assert.match(css, /\.top-place\[aria-current='page'\]::after \{[^}]*width: 16px;[^}]*height: 1\.5px;/);
 });
 
-test('the library: a page of its own in the window, its title in the title bar, its filters on one line', async () => {
+test('the library: a page of its own, its title at its top, its filters on one line', async () => {
   const html = await read('index.html'),
     app = await read('app.js'),
     navigation = await read('project-navigation.mjs'),
     css = await read('moodix.css');
   const page = html.match(/<section id="library-view"[^]*?<\/section><\/section>/)?.[0] ?? '';
-  assert.match(page, /^<section id="library-view" class="library-view" aria-labelledby="library-title"><h1 id="library-title" class="sr-only">Bibliothèque<\/h1>/);
+  assert.match(page, /^<section id="library-view" class="library-view" aria-labelledby="library-heading"><h1 id="library-heading" class="library-heading">Pellicule<\/h1>/);
   // The conversations of a project at the top; then on one line the project, the conversation and
   // the kind; then « Créations » and the tiles (0.5.126).
   const order = ['id="library-project-view"', 'id="library-project"', 'id="library-conversation"', 'id="library-kinds"', 'id="library-creations-title"', 'id="library-grid"', 'id="library-empty"'].map(
@@ -47,14 +54,13 @@ test('the library: a page of its own in the window, its title in the title bar, 
   assert.match(page, /<div id="library-kinds" class="library-kinds" role="radiogroup" aria-label="Type de création">/);
   assert.match(page, /<span class="sr-only">Projet<\/span><select id="library-project"><\/select>/);
   assert.match(page, /<span class="sr-only">Conversation<\/span><select id="library-conversation"><\/select>/);
-  assert.match(html, /<span id="library-heading" class="library-heading">Bibliothèque<\/span>/);
   assert.match(app, /\$\('library-open'\)\.onclick = \(\) => showLibrary\(\);/);
-  // The logo goes back to the chat: there is no home page any more.
+  // The logo goes back to the chat.
   assert.match(app, /\$\('brand-home'\)\.onclick = event => \{\n {2}event\.preventDefault\(\);\n {2}showChat\(\);/);
   assert.match(html, /<body data-view="chat">/);
   assert.match(app, /\n {2}view: 'chat',\n/);
   assert.match(navigation, /\$\('library-open'\)\?\.setAttribute\('aria-current', state\.view === 'library' \? 'page' : 'false'\);/);
-  assert.match(navigation, /#studio-open,#library-open'/);
+  assert.match(navigation, /'#thread button,#chat-open,#studio-open,#library-open'/);
   assert.match(css, /body\[data-view='library'\] \.library-view \{\n {2}display: flex;/);
   assert.match(css, /\.library-note \{\n {2}margin: 0;\n {2}color: var\(--text-2\);/);
   assert.match(css, /body\[data-view='library'\] \.chat-area,\nbody\[data-view='library'\] \.composer-region,/);
@@ -94,7 +100,7 @@ test('a page of its own: the conversation kept first, then the library on screen
     projectUI: { render: () => rendered++ },
   };
   runInNewContext(
-    source.slice(source.indexOf('function closeNavigation('), source.indexOf('async function newConversation(')) +
+    source.slice(source.indexOf('function showLibrary('), source.indexOf('async function newConversation(')) +
       ';this.page=showLibrary;',
     context,
   );
@@ -104,7 +110,7 @@ test('a page of its own: the conversation kept first, then the library on screen
   assert.equal(state.libraryProject, 'all');
   assert.equal(rendered, 1);
   assert.equal(context.document.body.dataset.chat, undefined);
-  // A click on a project in the sidebar: the library on it, the project lit there.
+  // On a project: the library on it.
   await context.page({ project: 'p1' });
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(state.view, 'library');
@@ -115,57 +121,25 @@ test('a page of its own: the conversation kept first, then the library on screen
   );
 });
 
-test('every line alike: 36 px, 10 px corners; the page open, a white line on the left edge', async () => {
-  const css = await read('moodix.css'),
-    rows = css.slice(css.indexOf('sidebar, rows (0.5.108)'));
-  assert.ok(rows.length > 100);
-  assert.match(rows, /#sidebar > \.new-chat,\n#sidebar \.home-button \{[^}]*height: 36px;[^}]*padding: 0 8px;[^}]*border: 0;[^}]*border-radius: 10px;[^}]*background: transparent;[^}]*font-size: var\(--size-3\);[^}]*font-weight: 600;/);
-  // Text in the four greys of the sheet (--text-1: principal, --text-2: secondaire).
-  assert.match(rows, /--row-ink: var\(--text-2\);\n {2}--row-hover: #15171c;\n {2}--row-open: var\(--text-1\);/);
-  assert.match(rows, /:root\[data-theme='light'\] #sidebar \{\n {2}--row-ink: var\(--text-2\);\n {2}--row-hover: #eef0f3;\n {2}--row-open: var\(--text-1\);/);
-  assert.match(rows, /#sidebar > \.new-chat \{[^}]*color: var\(--row-open\);\n {2}font-weight: 700;/);
-  assert.match(rows, /#sidebar \.home-button\[aria-current='page'\],\n[^{]*\{\n {2}background: transparent;\n {2}color: var\(--row-open\);\n {2}font-weight: 800;/);
-  assert.match(
-    rows,
-    /#sidebar \.home-button\[aria-current='page'\]::after \{[^}]*top: 9px;[^}]*bottom: 9px;[^}]*left: calc\(-1 \* var\(--sidebar-inset\)\);[^}]*width: 3px;[^}]*border-radius: 0 3px 3px 0;[^}]*background: var\(--row-open\);/,
-  );
-  // The Studio without its card; its track under it, from the word (32 px), white in the Studio alone.
-  assert.match(rows, /\.studio-nav,\nbody\[data-view='studio'\] \.studio-nav,[^{]*\{[^}]*padding: 0;[^}]*background: transparent;/);
-  assert.match(rows, /#sidebar #studio-kinds\.kind-tabs \{\n {2}margin: 0 0 2px 44px;/);
-  // The icon in 24 px, 12 px from its word; the word at the left of its line.
-  assert.match(rows, /#sidebar > \.new-chat,\n#sidebar \.home-button \{[^}]*gap: 12px;/);
-  assert.match(rows, /#sidebar > \.new-chat svg,\n#sidebar \.home-button svg \{\n {2}flex: none;\n {2}width: 24px;\n {2}height: 24px;\n {2}stroke-width: 1\.75;/);
-  assert.match(rows, /#sidebar > \.new-chat > span,\n#sidebar \.home-button > span \{\n {2}text-align: left;/);
-  assert.match(css, /body\[data-view='studio'\] #studio-kinds \.kind-tab\[aria-selected='true'\] \{\n {2}background: #eceef2;\n {2}color: #0b0c0f;/);
-  // Folded: icons alone, 40 × 36.
-  assert.match(rows, /:root\[data-sidebar='collapsed'\] #sidebar > \.new-chat,[^{]*\{[^}]*height: 36px;[^}]*padding: 0 0 0 8px;/);
-});
-
-test('the model: one icon ⏻ whatever its state, a dot of 7 px says it; its name unchanged', async () => {
+test('the model in its capsule: one icon ⏻ whatever its state, a dot says it, its name beside; the gear wears the update', async () => {
   const css = await read('moodix.css'),
     app = await read('app.js');
   assert.match(app, /\$\('toggle-engine'\)\.replaceChildren\(icon\('power'\)\);/);
   assert.doesNotMatch(app, /icon\(paused \|\| running \? 'stop' : 'play'\)/);
   // Its name and tooltip as before.
   assert.match(app, /\$\('toggle-engine'\)\.setAttribute\('aria-label', engineLabel\);\n {2}\$\('toggle-engine'\)\.title = engineLabel;/);
-  assert.match(css, /#sidebar \.sidebar-actions \.engine-button svg,\n#sidebar \.sidebar-actions \.engine-button\.is-busy svg \{[^}]*stroke-width: 1\.75;[^}]*animation: none;/);
-  assert.match(
-    css,
-    /#sidebar \.sidebar-actions \.engine-button::after \{[^}]*top: 6px;[^}]*right: 7px;[^}]*width: 7px;[^}]*height: 7px;[^}]*border-radius: 50%;[^}]*box-shadow: 0 0 0 2px var\(--engine-ring\);/,
-  );
-  for (const [state, colour] of [
-    ['\\.is-off', '#4a4f59'],
-    ['\\.is-running', '#22a060'],
-    ['\\.is-running\\.is-busy,\\n#sidebar \\.sidebar-actions \\.engine-button\\.is-paused', '#f6c343'],
-  ])
-    assert.match(css, new RegExp(`#sidebar \\.sidebar-actions \\.engine-button${state} \\{\\n {2}--engine-dot: ${colour};`));
-  assert.match(css, /\.engine-button\.is-running\.is-busy::after \{\n {2}animation: mdx-engine-wait 1\.6s ease-in-out infinite;/);
-  assert.match(css, /@keyframes mdx-engine-wait \{\n {2}0%,\n {2}100% \{\n {4}opacity: 1;\n {2}\}\n {2}50% \{\n {4}opacity: 0\.4;/);
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\n {2}#sidebar \.sidebar-actions \.engine-button\.is-running\.is-busy::after \{\n {4}animation: none;/);
-  // The gear in the colour of its button (#AEB4BF, white under the pointer), as ⏻.
-  assert.match(css, /#sidebar \.sidebar-actions \.settings-button svg \{\n {2}color: inherit;\n {2}stroke-width: 1\.75;/);
-  // The foot without a box: the model at the left, Configuration at the right.
-  assert.match(css, /#sidebar \.sidebar-actions,\n:root\[data-theme='light'\] #sidebar \.sidebar-actions \{\n {2}justify-content: space-between;[^}]*padding: 0;\n {2}border: 0;[^}]*background: transparent;/);
+  // The name of the model beside it, from the library of models, or its file.
+  assert.match(app, /\$\('engine-name'\)\.textContent =\n {4}model\?\.name \|\|/);
+  assert.match(css, /#top \.engine-button::after \{[^}]*top: 5px;[^}]*right: 5px;[^}]*width: 6px;[^}]*height: 6px;[^}]*border-radius: 50%;/);
+  assert.match(css, /#top \.engine-button\.is-running::after \{\n {2}background: #78c08f;/);
+  assert.match(css, /#top \.engine-button\.is-running\.is-busy::after,\n#top \.engine-button\.is-paused::after \{\n {2}background: #e0a35c;/);
+  // While the model loads, its dot breathes; still with less motion asked.
+  assert.match(css, /#top \.engine-button\.is-running\.is-busy::after \{\n {2}animation: mdx-engine-wait 1\.6s ease-in-out infinite;/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\n {2}#top \.engine-button\.is-running\.is-busy::after \{\n {4}animation: none;/);
+  assert.match(css, /\.top-engine-name \{[^}]*font: 400 12\.5px\/1 var\(--font-mono\);/);
+  // A dot of the accent, 7 px, on the gear when an update is there.
+  assert.match(css, /#top \.top-settings\.has-update::after \{[^}]*width: 7px;[^}]*height: 7px;[^}]*background: var\(--accent\);/);
+  assert.match(app, /opener\.classList\.toggle\('has-update', state\.updateAvailable\);/);
 });
 
 test('nothing left of the panel of files in the styles', async () => {

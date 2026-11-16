@@ -165,6 +165,11 @@ try {
   const view = name => () => js(`document.body.dataset.view === ${JSON.stringify(name)}`);
   const dialog = name => () => js(`[...document.querySelectorAll('dialog[open]')].map(d => d.id).includes(${JSON.stringify(name)})`);
   const noDialog = () => js(`!document.querySelector('dialog[open]')`);
+  // A line of a menu of the fil (0.6.0): its button opens it, then the line is clicked.
+  const fromMenu = (opener, line) =>
+    click(opener).then(opened => opened && wait(200).then(() => click(`.thread-menu ${line}`)));
+  const menuOpen = () => js(`!!document.querySelector('.thread-menu')`);
+  const menuClosed = () => js(`!document.querySelector('.thread-menu')`);
 
   await send('Runtime.enable');
   await send('Log.enable');
@@ -172,38 +177,50 @@ try {
   await size(1280);
   await send('Page.navigate', { url: app.url + '/' });
   await wait(2500);
-  // At launch, with no conversation yet: « Nouveau chat » (0.5.123: no home page any more).
+  // At launch, with no conversation yet: a new conversation (0.5.123: no home page any more).
   await run('lancement', () => true, view('chat'));
   await run('chat', () => click('#chat-open'), view('chat'));
-  await run('nouveau chat depuis le chat', () => click('#new-chat'), view('chat'));
+  await run('nouvelle conversation depuis le chat', () => fromMenu('#thread-conversation', '.thread-action'), view('chat'));
   await run('studio', () => click('#studio-open'), view('studio'));
   for (const mode of ['Vidéo', 'Son', 'Image'])
     await run('mode ' + mode, () => click(`#studio-kinds .kind-tab[aria-label="${mode}"]`), view('studio'));
   await run('Agent', () => click('#studio-view .studio-agent'), () => js(`document.body.dataset.chat === 'open'`));
   await run('Échap (Agent)', () => key('Escape', 'Escape', 27), () => js(`document.body.dataset.chat !== 'open'`));
-  await run('nouveau chat depuis le Studio', () => click('#new-chat'), view('studio'));
-  await run('bibliothèque', () => click('#library-open'), () =>
+  await run('nouvelle conversation depuis le Studio', () => fromMenu('#thread-conversation', '.thread-action'), view('studio'));
+  await run('menu des projets', () => click('#thread-project'), menuOpen);
+  await run('Échap (menu des projets)', () => key('Escape', 'Escape', 27), menuClosed);
+  await run('recherche des conversations', () =>
+    click('#thread-conversation').then(() => wait(200)).then(() => js(`(() => { const f = document.querySelector('.thread-menu input'); if (!f) return false; f.value = 'renard'; f.dispatchEvent(new Event('input')); return true; })()`)),
+  () => js(`!document.querySelector('.thread-empty')?.hidden`));
+  await run('Échap (menu des conversations)', () => key('Escape', 'Escape', 27), menuClosed);
+  await run('Pellicule', () => click('#library-open'), () =>
     js(`document.body.dataset.view === 'library' && document.getElementById('library-project').value === 'all' && document.getElementById('library-project-view').hidden && !document.getElementById('library-empty').hidden`));
   await run('type Vidéos', () => click('#library-kinds [data-kind="video"]'), () =>
     js(`document.querySelector('#library-kinds [data-kind="video"]')?.getAttribute('aria-checked') === 'true'`));
-  await run('projet dans la barre', () => click('#history-list .project-open'), () =>
+  await run('projet dans la Pellicule', () => js(`(() => { const s = document.getElementById('library-project'); s.value = 'inbox'; s.dispatchEvent(new Event('change')); return true; })()`), () =>
     js(`document.body.dataset.view === 'library' && document.getElementById('library-project').value === 'inbox' && !document.getElementById('library-project-view').hidden`));
   await run('nouveau chat du projet', () => click('#library-project-view .library-new'), view('chat'));
-  await run('bibliothèque, de nouveau', () => click('#library-open'), view('library'));
-  await run('nouveau chat depuis la bibliothèque', () => click('#new-chat'), view('chat'));
-  await run('« # » dans la saisie', () => js(`(() => { const p = document.getElementById('prompt'); p.focus(); p.value = '#'; p.selectionStart = p.selectionEnd = 1; p.dispatchEvent(new Event('input')); return true; })()`));
-  await run('replier la barre', () => click('#sidebar-toggle'), () => js(`document.documentElement.dataset.sidebar === 'collapsed'`));
-  await run('Ctrl+B', () => js(`document.activeElement?.blur?.()`).then(() => key('b', 'KeyB', 66, 2)), () => js(`document.documentElement.dataset.sidebar === 'expanded'`));
+  await run('Pellicule, de nouveau', () => click('#library-open'), view('library'));
+  await run('Chat depuis la Pellicule', () => click('#chat-open'), view('chat'));
+  // Typed with a real key, as a person does: the page has had a gesture of its user, so that its
+  // « Quitter la page ? » (a draft in the box) may show at the reload below (Ctrl+B gave it that
+  // gesture until 0.6.1; Escape never does).
+  await run('« # » dans la saisie', async () => {
+    await js(`(() => { const p = document.getElementById('prompt'); p.value = ''; p.focus(); return true; })()`);
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: '#', text: '#', unmodifiedText: '#' });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: '#' });
+    return js(`document.getElementById('prompt').value === '#'`);
+  });
   await run('Configuration', () => click('#settings-open'), dialog('settings'));
   await run('Échap (Configuration)', () => key('Escape', 'Escape', 27), noDialog);
-  await run('nouveau projet', () => click('#project-create'), dialog('project-dialog'));
+  await run('nouveau projet', () => fromMenu('#thread-project', '.thread-action'), dialog('project-dialog'));
   await run('Échap (projet)', () => key('Escape', 'Escape', 27), noDialog);
   await run('bouton du modèle', () => click('#toggle-engine'));
   await run('Échap', () => key('Escape', 'Escape', 27), noDialog);
   await size(900);
   await wait(400);
-  await run('tiroir', () => click('#navigation-open'), () => js(`document.body.dataset.navOpen === 'true'`));
-  await run('Bibliothèque dans le tiroir', () => click('#library-open'), view('library'));
+  await run('Pellicule à 900 px', () => click('#library-open'), view('library'));
+  await run('Chat à 900 px', () => click('#chat-open'), view('chat'));
   await size(1280);
   await run('rechargement', () => send('Page.reload').then(() => wait(2000)), view('chat'));
   console.log(`Vérification de l’interface (${browser.split(/[\\/]/).pop()}) : ${results.filter(([, ok]) => ok).length}/${results.length} étapes.`);
