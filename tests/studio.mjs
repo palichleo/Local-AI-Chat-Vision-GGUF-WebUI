@@ -1017,7 +1017,7 @@ async function studioPage(tools, routes = {}, options = {}) {
 const sizes = { width: { min: 256, max: 2048, multipleOf: 32 }, height: { min: 256, max: 2048, multipleOf: 32 } };
 const settle = () => new Promise(resolve => setTimeout(resolve, 15));
 
-test('Image, Vidéo and Son under « Studio » in the sidebar: icons named, there from the start, opening the Studio in their mode', async () => {
+test('Image, Vidéo and Son at the top of the screen: icons named, there from the start, opening the Studio in their mode', async () => {
   const image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
     video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [] };
   const opened = [];
@@ -1030,13 +1030,13 @@ test('Image, Vidéo and Son under « Studio » in the sidebar: icons named, ther
     // Drawn before the Studio is ever opened: the sidebar shows them from the Chat too.
     const tabs = page['studio-kinds'].children;
     assert.deepEqual(
-      tabs.map(tab => [tab.attributes.role, tab.attributes['aria-label'], tab.title, tab.children.length]),
+      tabs.map(tab => [tab.attributes.role, tab.attributes['aria-label'], tab.title, tab.children.at(-1).textContent]),
       [
-        ['tab', 'Image', 'Image', 1],
-        ['tab', 'Vidéo', 'Vidéo', 1],
-        ['tab', 'Son', 'Son', 1],
+        ['tab', 'Image', 'Image', 'Image'],
+        ['tab', 'Vidéo', 'Vidéo', 'Vidéo'],
+        ['tab', 'Son', 'Son', 'Son'],
       ],
-      'an icon each, its name for screen readers and in its tooltip',
+      'an icon each and its name (shown beside it for the one chosen), for screen readers and in its tooltip',
     );
     assert.equal(tabs[0].attributes['aria-selected'], 'true');
     // From the Chat: the mode is chosen as the selector of the Studio did, and the Studio opens.
@@ -1141,6 +1141,10 @@ test('« Ouvrir » on a card puts the creation on the screen of its mode', async
     assert.equal(body.dataset.mode, 'video');
     const [shown] = body.find('studio-frame-result');
     assert.equal(shown.tag, 'video');
+    // Its picture and a round play button (capture 22); the controls once it plays.
+    assert.equal(shown.controls, false);
+    assert.equal(body.find('take-play').length, 1);
+    shown.playButton.onclick();
     assert.equal(shown.controls, true, 'a clip plays on the screen');
     assert.match(body.find('studio-item')[0].className, /is-shown/);
   } finally {
@@ -1218,9 +1222,9 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
       numbers = () => body.find('studio-item-number').map(badge => badge.textContent),
       references = () => body.find('studio-slot-badge').map(badge => badge.textContent);
     // Images, clips and sounds together, the newest at the left, numbered together (never two
-    // « #1 »); nothing written under the pictures (their names are for screen readers and in their
-    // tooltips).
-    assert.deepEqual(numbers(), ['#4', '#3', '#2', '#1']);
+    // « #1 »); under each its number (« PRISE n » once it has one), a continuation « ↳ SUITE »
+    // (studio-maquette.md); no title (their names are for screen readers and in their tooltips).
+    assert.deepEqual(numbers(), ['#4', '↳ SUITE', '#2', '#1']);
     assert.deepEqual(body.find('studio-item-title'), []);
     assert.deepEqual(body.find('studio-caption'), []);
     assert.equal(items()[0].find('studio-item-pick')[0].attributes['aria-label'], 'Image #4 · un phare');
@@ -1243,7 +1247,7 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     assert.deepEqual([strip.scrollLeft, stopped], [220, 2]);
     // The same Sortie in every mode.
     mode(1);
-    assert.deepEqual(numbers(), ['#4', '#3', '#2', '#1']);
+    assert.deepEqual(numbers(), ['#4', '↳ SUITE', '#2', '#1']);
     // A clip: its continuation said too; « Prolonger » is its round button; no « Lire ».
     assert.equal(
       items()[1].find('studio-item-pick')[0].attributes['aria-label'],
@@ -1421,17 +1425,17 @@ test('the input images: pictos and no word, start and end on a line of time, ref
     assert.equal(picks()[0].children[0].tag, 'svg');
     assert.equal(picks()[2].children[0].textContent, '@');
 
-    // The length set, on the line, in the colour of the duration bar: the shortest, blue.
+    // The length set, on the line, in the colour of the duration bar: the ivory of the room.
     const [time] = body.find('studio-span-time'),
       [line] = body.find('studio-span-line');
     assert.equal(time.textContent, '05.04 s');
-    assert.equal(time.style.color, 'rgb(61, 107, 245)');
-    // The bar moved to the longest: the line follows at once, red, without drawing the Studio again.
+    assert.equal(time.style.color, 'rgb(238, 232, 222)');
+    // The bar moved to the longest: the line follows at once, without drawing the Studio again.
     const bar = body.find('studio-bar').find(item => item.dataset.ai === 'duration');
     bar.value = '2';
     bar.oninput();
     assert.equal(time.textContent, '10.04 s');
-    assert.equal(time.style.color, 'rgb(232, 64, 47)');
+    assert.equal(time.style.color, 'rgb(238, 232, 222)');
     assert.equal(line.style.backgroundSize, '100% 100%');
 
     // A start image: its picto stays, small, in a badge; « ⇄ » swaps it to the end and back.
@@ -1789,7 +1793,7 @@ test('Ctrl + Entrée generates from anywhere in the Studio, and the button says 
   }
 });
 
-test('« Agent », left of « Générer », opens the chat as the band at the foot did; the Sortie wears the four colours', async () => {
+test('« Agent », right of « Générer » in the Double verre, opens the chat as the band at the foot did', async () => {
   const image = {
     id: 'w',
     name: 'Image',
@@ -1807,7 +1811,8 @@ test('« Agent », left of « Générer », opens the chat as the band at the fo
       [agent] = body.find('studio-agent'),
       go = body.find('studio-go')[0];
     assert.equal(agent.id, 'agent-open');
-    assert.deepEqual(group.children.slice(0, 2), [agent, go], 'just before Générer, in one group');
+    // The Double verre (studio-maquette.md): « ▶ Générer », a rule, the Agent.
+    assert.deepEqual([group.children[0], group.children[2]], [go, agent], 'Générer then the Agent, in one group');
     assert.equal(agent.find('studio-agent-word')[0].textContent, 'Agent');
     // An icon, its word, its name for screen readers and in its tooltip.
     assert.equal(agent.attributes['aria-label'], 'Agent Moodix AI');
@@ -2720,6 +2725,60 @@ test('the Sortie is the project: its creations from every conversation, one drag
     const [, action] = asked.findLast(([route]) => route === 'tools/action');
     assert.deepEqual(action.arguments.source, { output: 'clip', conversation: 'other' });
     assert.deepEqual(action.arguments.reference, { output: 'face' });
+  } finally {
+    restore();
+  }
+});
+
+test('a click on an empty slot opens « Créations du projet »: a take of its kind is taken by a click', async () => {
+  const scail = {
+      id: 's',
+      name: 'SCAIL-2',
+      verb: 'replace_character',
+      follows: true,
+      seeded: true,
+      roles: {
+        source: { count: 1, media: ['video'], many: false, required: true },
+        reference: { count: 1, media: ['image'], many: false, required: true },
+      },
+      settings: [],
+    },
+    runs = [
+      {
+        id: 'clip',
+        conversationId: 'c1',
+        mediaType: 'video',
+        prompt: 'une fille cueille une pomme',
+        outputs: [{ originalUrl: '/clip.mp4', thumbUrl: '/clip.jpg', take: 7 }],
+      },
+      { id: 'face', conversationId: 'c1', prompt: 'un joueur', outputs: [{ originalUrl: '/face.png', thumbUrl: '/face.jpg' }] },
+    ];
+  const page = await studioPage({ replace_character: [scail] }, {}, { runs, project: () => 'p1' });
+  const { body, restore } = page;
+  try {
+    page.mode(1);
+    const slots = () => body.find('studio-slot'),
+      shelf = () => body.find('studio-shelf')[0];
+    assert.equal(shelf(), undefined);
+    // The character: an image; its shelf shows the images of the project only.
+    slots()[1].find('studio-slot-pick')[0].onclick();
+    assert.equal(shelf().find('studio-input-title')[0].textContent, 'Créations du projet');
+    assert.deepEqual(
+      shelf().find('studio-shelf-pick').map(pick => pick.title),
+      ['Image #1'],
+    );
+    shelf().find('studio-shelf-pick')[0].onclick();
+    assert.equal(shelf(), undefined, 'closed once a take is taken');
+    assert.equal(slots()[1].children[0].children[0].src, '/face.jpg');
+    // The video to follow: the clips, by their number; « × » closes it, the slot stays empty.
+    slots()[0].find('studio-slot-pick')[0].onclick();
+    assert.deepEqual(
+      shelf().find('studio-shelf-pick').map(pick => pick.title),
+      ['Prise 7'],
+    );
+    shelf().find('studio-shelf-close')[0].onclick();
+    assert.equal(shelf(), undefined);
+    assert.doesNotMatch(slots()[0].className, /is-filled/);
   } finally {
     restore();
   }

@@ -1,6 +1,8 @@
 import { FORMATS, formatOf, nearestSize, sizesFor } from './formats.mjs';
 import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
 import { livePreview } from './live-preview.mjs';
+import { takeFlux } from './take-flux.mjs';
+import { outputActions } from './output-actions.mjs';
 import { setupPointer } from './studio-pointer.mjs';
 
 /**
@@ -96,6 +98,8 @@ const leaf = name =>
 // one, from the frames the model makes (5 s asked can be 5.17 s made).
 const twoFigures = value => (Math.round(Number(value) * 100) / 100).toFixed(2).padStart(5, '0');
 const seconds = value => twoFigures(value) + ' s';
+// The name a slot shows while something that it takes is carried (studio-maquette.md, « Glisser »).
+const SHORT = { start_image: 'Début', end_image: 'Fin', reference: 'Réf.', source: 'Image', source_video: 'Vidéo' };
 const figures = value => twoFigures(value) + ' S';
 const sizeKey = size => size.width + 'x' + size.height;
 // The box the format frame fits in before its stage is laid out.
@@ -231,6 +235,7 @@ export function setupStudio({
     drawn = null, // the size the frame was last drawn at, to ease from
     watching = null, // follows the size of the stage
     live = null, // { frame, preview } : the picture so far, in the frame now on the page
+    flux = null, // { frame, flux }: the Flux of the take being made, in the frame now on the page
     proposal = null, // a proposal of Moodix AI waiting for « Générer »
     checking = null, // { record, resolve }: the character Moodix AI made, waiting for the user
     ai = null, // { stopped, active, touched } while the pointer sets the Studio
@@ -327,7 +332,7 @@ export function setupStudio({
   // « Agent », left of « Générer » (moodix-design.md 15 bis): the chat of Moodix AI opens from it as
   // it did from the band at the foot. Made once and moved from one drawing to the next: the move
   // between the chat and the Studio folds the chat into it (view transition, moodix.css).
-  const agent = button('studio-agent', '', () => openAgent(), 'agent');
+  const agent = button('studio-agent', '', () => openAgent(), 'eclipse');
   agent.id = 'agent-open';
   agent.title = 'Agent Moodix AI';
   agent.setAttribute('aria-label', 'Agent Moodix AI');
@@ -338,6 +343,18 @@ export function setupStudio({
   const light = node('span', 'studio-agent-light');
   light.setAttribute('aria-hidden', 'true');
   agent.append(node('span', 'studio-agent-word', 'Agent'), light);
+  // The actions of the take on the screen, at the left of the bar (studio-maquette.md): the same
+  // icons and the same help as in the conversation (output-actions.mjs), without « Ouvrir ».
+  const takeActions = outputActions({
+    api,
+    node,
+    icon,
+    onDetails: null,
+    onAction: (record, index, id) => takeAction(record, id),
+  });
+  // Image · Vidéo · Son: drawn in the head of the screen, put back above it when there is none.
+  let kindsEl = null;
+  const kindsBar = () => (kindsEl ??= $('studio-kinds'));
   // The settings Moodix AI may change wear its tile; the one it is changing, a ring; those it
   // has set, a fine trace while it works. Once it has stopped, nothing is framed any more.
   function aiTarget(element, key) {
@@ -442,7 +459,28 @@ export function setupStudio({
   // The slot an image is being dragged from: dropped on another, the image changes role.
   let dragged = null,
     // A creation of the Sortie dragged to a slot: it becomes that input.
-    carried = null;
+    carried = null,
+    // The empty slot whose « Créations du projet » is open under the inputs: { role, index, media }.
+    shelf = null;
+  /**
+   * While something is carried, the slots that take it light up and say their name (moodix.css;
+   * studio-maquette.md, « Glisser ») : `media`, what is carried, or null once it is dropped.
+   */
+  function carrying(media) {
+    const desk = globalThis.document?.querySelector?.('#studio-view .studio-desk');
+    if (media) desk?.setAttribute?.('data-carrying', media);
+    else desk?.removeAttribute?.('data-carrying');
+  }
+  /** The file of the computer for a slot (what a click on a slot did before « Créations du projet »). */
+  function openPicker(role, index, media) {
+    picker.accept = (media === 'video' ? VIDEO_TYPES : IMAGE_TYPES).join(',');
+    picker.onchange = () => {
+      const [file] = picker.files;
+      picker.value = '';
+      void fill(role, index, file, media);
+    };
+    picker.click();
+  }
   // The model each mode showed last: another one, and the blocks of the images say so for a
   // moment (moodix-design.md 21).
   const shownModel = {};
@@ -510,14 +548,18 @@ export function setupStudio({
         return notice(
           'Les images de cette proposition sont celles de Moodix AI : demandez-lui dans le chat pour en changer.',
         );
-      picker.accept = (media === 'video' ? VIDEO_TYPES : IMAGE_TYPES).join(',');
-      picker.onchange = () => {
-        const [file] = picker.files;
-        picker.value = '';
-        void fill(role, index, file, media);
-      };
-      picker.click();
+      // Empty: « Créations du projet » opens under the inputs (studio-maquette.md); filled, the
+      // file of the computer that takes its place.
+      if (!value) {
+        shelf = shelf?.role === role && shelf.index === index ? null : { role, index, media };
+        return render();
+      }
+      openPicker(role, index, media);
     });
+    // Named for the hand that carries something here (moodix.css): « FIN », « RÉF. 2 », « REMPLACER ».
+    tile.dataset.media = media;
+    tile.dataset.name = value ? 'Remplacer' : (SHORT[role] ?? label) + (role === 'reference' ? ' ' + (index + 1) : '');
+    if (shelf?.role === role && shelf.index === index && !value) tile.classList.add('is-asking');
     pick.title = refused || (value ? label + ' · glissez-la vers un autre emplacement pour changer son rôle' : tip);
     pick.setAttribute('aria-label', value ? label + ' · ' + value.name : refused ? label + ' · ' + refused : add);
     pick.disabled = Boolean(working);
@@ -541,10 +583,12 @@ export function setupStudio({
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', label);
         tile.classList.add('is-dragged');
+        carrying(media);
       };
       pick.ondragend = () => {
         dragged = null;
         tile.classList.remove('is-dragged');
+        carrying(null);
       };
     } else if (picto) pick.append(icon(picto));
     else {
@@ -564,6 +608,7 @@ export function setupStudio({
       event.preventDefault();
       event.stopPropagation();
       tile.classList.remove('is-target');
+      carrying(null);
       if (working) return;
       if (dragged) {
         const from = dragged;
@@ -601,6 +646,63 @@ export function setupStudio({
       tile.append(remove);
     }
     return tile;
+  }
+  /**
+   * « Créations du projet » (studio-maquette.md): under the inputs, the takes of the project that
+   * the slot takes (images, or clips), the newest at the left, 56 px; one is taken by a click or
+   * dragged to any slot; a file of the computer at the end.
+   */
+  function shelfBlock() {
+    const { role, index, media } = shelf,
+      takes = runs.filter(record => mediaOf(record) === media).slice(0, 40),
+      block = node('div', 'studio-input-block studio-shelf'),
+      head = node('p', 'studio-input-title', 'Créations du projet'),
+      row = node('div', 'studio-shelf-row'),
+      close = button('studio-shelf-close', '', () => {
+        shelf = null;
+        render();
+      }, 'close');
+    block.setAttribute('role', 'group');
+    block.setAttribute('aria-label', 'Créations du projet');
+    close.setAttribute('aria-label', 'Fermer les créations du projet');
+    close.title = 'Fermer';
+    head.append(close);
+    for (const record of takes) {
+      const output = record.outputs?.[0] ?? {},
+        name = Number.isInteger(output.take) ? 'Prise ' + output.take : (KIND[media] ?? 'Création') + ' #' + numberOf(record),
+        pick = button('studio-shelf-pick', '', () => {
+          shelf = null;
+          putCreation(record, role, index);
+        }),
+        small = output.thumbUrl || (media === 'image' ? output.originalUrl : '');
+      pick.setAttribute('aria-label', 'Prendre : ' + name + (record.prompt ? ' · ' + record.prompt : ''));
+      pick.title = name;
+      if (small) {
+        const picture = node('img');
+        Object.assign(picture, { src: small, alt: '', loading: 'lazy', decoding: 'async', draggable: false });
+        pick.append(picture);
+      } else pick.append(icon(media === 'video' ? 'video' : 'image'));
+      pick.draggable = true;
+      pick.ondragstart = event => {
+        carried = record;
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.setData('text/plain', name);
+        carrying(media);
+      };
+      pick.ondragend = () => {
+        carried = null;
+        carrying(null);
+      };
+      row.append(pick);
+    }
+    if (!takes.length) row.append(node('span', 'studio-slot-hint', media === 'video' ? 'Aucune vidéo dans ce projet.' : 'Aucune image dans ce projet.'));
+    const file = button('studio-shelf-file', 'Depuis l’ordinateur…', () => {
+      shelf = null;
+      render();
+      openPicker(role, index, media);
+    });
+    block.append(head, row, file);
+    return block;
   }
   /** Whether the workflow takes images in this role. */
   const takesImages = (workflow, role) =>
@@ -683,7 +785,7 @@ export function setupStudio({
       );
     span = { line, time, workflow };
     paintSpan();
-    block.append(row);
+    block.append(node('p', 'studio-input-title', start && end ? 'Début et fin' : start ? 'Image de début' : 'Image de fin'), row);
     return block;
   }
   /**
@@ -725,12 +827,13 @@ export function setupStudio({
           tip: 'Référence : personnage, objet ou décor · glisser, coller ou cliquer',
         }),
       );
+    const head = node('p', 'studio-input-title', most > 1 ? 'Références' : 'Référence');
     if (most > 1) {
       const count = node('span', 'studio-references-count', shown.length + '/' + most);
       count.title = shown.length + ' référence' + (shown.length > 1 ? 's' : '') + ' sur ' + most;
-      row.append(count);
+      head.append(count);
     }
-    block.append(row);
+    block.append(head, row);
     return block;
   }
   /** The image to modify (and any other input image): a slot each, with its picto. */
@@ -776,6 +879,10 @@ export function setupStudio({
       );
     }
     if (!labels.length) return null;
+    // An empty single slot says how it is given (« Glisser, coller ou cliquer »).
+    if (labels.length === 1 && !workflow.follows && !(drafts[mode].inputs[Object.keys(workflow.roles ?? {}).find(role => !['start_image', 'end_image', 'reference'].includes(role) && workflow.roles[role].count)]?.[0]))
+      row.append(node('span', 'studio-slot-hint', 'Glisser, coller ou cliquer'));
+    block.append(node('p', 'studio-input-title', workflow.follows ? 'Vidéo et personnage' : labels.length > 1 ? 'Images' : labels[0]));
     block.setAttribute('role', 'group');
     block.setAttribute(
       'aria-label',
@@ -837,6 +944,8 @@ export function setupStudio({
     }
     const column = node('div', 'studio-inputs');
     column.append(...blocks);
+    if (shelf && workflow.roles?.[shelf.role]?.count && !working) column.append(shelfBlock());
+    else shelf = null;
     return aiTarget(column, 'inputs');
   }
 
@@ -871,19 +980,13 @@ export function setupStudio({
     return { key, list: lengths.seconds, value: draft[key], nearest };
   }
   // ------------------------------------------------------------------ the bars and blocks of Réglages
-  // The colours of every bar of the Studio, from its start to its end (moodix-design.md 12).
-  const STOPS = [
-    [0x3d, 0x6b, 0xf5],
-    [0x22, 0xa0, 0x60],
-    [0xf6, 0xc3, 0x43],
-    [0xe8, 0x40, 0x2f],
-  ];
-  /** The colour of a bar at a place between its ends (0 to 1). */
-  function barColour(place) {
-    const at = Math.min(1, Math.max(0, place)) * (STOPS.length - 1),
-      index = Math.min(STOPS.length - 2, Math.floor(at)),
-      part = at - index;
-    return `rgb(${STOPS[index].map((value, channel) => Math.round(value + (STOPS[index + 1][channel] - value) * part)).join(', ')})`;
+  /**
+   * The colour of a bar at a place between its ends (0 to 1): the ivory of the room all along
+   * (studio-maquette.md, « glissières à poignée ronde »; the four colours of moodix-design.md 12 are
+   * those of before).
+   */
+  function barColour() {
+    return 'rgb(238, 232, 222)';
   }
   /**
    * A thin bar (2 px, its handle 8 px) over `count` choices, at `index`: its filled part in the
@@ -1186,7 +1289,7 @@ export function setupStudio({
         list.push({ width, height });
       }
       if (list.length) {
-        const line = barLine('Taille', {
+        const line = barLine('Résolution', {
           key: 'size',
           count: list.length,
           index: Math.max(
@@ -1202,7 +1305,8 @@ export function setupStudio({
           notches: true,
         });
         line.title = mode === 'video' ? 'Plus grand : plus long à générer.' : '';
-        lines.push(line);
+        // Above the length, under the format (studio-maquette.md).
+        lines.unshift(line);
       }
     }
     if (!lines.length) return null;
@@ -1507,7 +1611,12 @@ export function setupStudio({
           (last ? ' has-result' : ''),
       ),
       next = shapeOf();
-    frame.append(node('span', 'studio-frame-fill'), node('span', 'studio-frame-label', next.label));
+    const take = last?.outputs?.[0]?.take,
+      numbered = Number.isInteger(take);
+    frame.append(
+      node('span', 'studio-frame-fill'),
+      node('span', 'studio-frame-label' + (numbered ? ' is-take' : ''), numbered ? 'PRISE ' + take : next.label),
+    );
     if (mode === 'audio') {
       const bars = node('div', 'studio-bars');
       bars.setAttribute('aria-hidden', 'true');
@@ -1518,26 +1627,18 @@ export function setupStudio({
       }
       frame.append(bars);
     }
-    if (last) frame.append(result(last));
-    else frame.setAttribute('aria-hidden', 'true');
+    if (last) {
+      const shownTake = result(last);
+      frame.append(shownTake);
+      if (shownTake.playButton) frame.append(shownTake.playButton);
+    } else frame.setAttribute('aria-hidden', 'true');
     const shown = node('span', 'studio-readout', readoutText());
     shown.setAttribute('aria-hidden', 'true');
     frame.append(shown);
     // Over the frame, at its size, never clipped by it. No « i » on the screen: a click on a
     // creation of the Sortie shows it whole with its details.
+    // The step under way is in the head of the screen, « Arrêter » in the Double verre (form).
     const over = node('div', 'studio-frame-over');
-    // While a creation is made: the step under way at the foot of the screen, « Arrêter » beside
-    // it, as the label is at its top; the bar under the screen keeps its line.
-    if (working) {
-      const step = node('p', 'studio-progress', working.label ?? '');
-      step.id = 'studio-progress';
-      step.setAttribute('role', 'status');
-      step.hidden = false;
-      const halt = button('studio-stop', '', stop, 'stop');
-      halt.setAttribute('aria-label', 'Arrêter la génération');
-      halt.title = 'Arrêter la génération';
-      over.append(step, halt);
-    }
     // Drawn at the previous shape first, so the browser has something to ease from.
     const from = drawn ?? frameSize(next.ratio);
     for (const element of [frame, over]) {
@@ -1574,8 +1675,22 @@ export function setupStudio({
     const clip = media === 'video',
       element = node(clip ? 'video' : 'img', 'studio-frame-result');
     if (clip) {
-      Object.assign(element, { controls: true, preload: 'metadata', playsInline: true, src: output.originalUrl || '' });
+      Object.assign(element, { controls: false, preload: 'metadata', playsInline: true, src: output.originalUrl || '' });
       if (output.thumbUrl) element.poster = output.thumbUrl;
+      // Its picture and a round play button (capture 22), as in the conversation; the controls of the
+      // player once it plays. Kept with the clip from one drawing to the next.
+      const play = button('take-play', '', () => {
+        play.hidden = true;
+        element.controls = true;
+        void element.play?.()?.catch?.(() => {});
+      });
+      play.setAttribute('aria-label', 'Lire la vidéo');
+      play.title = 'Lire la vidéo';
+      element.onplay = () => {
+        play.hidden = true;
+        element.controls = true;
+      };
+      element.playButton = play;
     } else {
       Object.assign(element, {
         alt: record.prompt || 'Dernière image créée',
@@ -1955,16 +2070,38 @@ export function setupStudio({
         releasing = null;
       });
   }
-  async function generate() {
+  /**
+   * An action on the take on the screen (output-actions.mjs): Prolonger and Animer set the Studio as
+   * before; Agrandir et affiner and Interpoler are made at once, from that take.
+   */
+  function takeAction(record, id) {
     if (working) return;
+    if (proposal) return notice('Moodix AI est en train de proposer');
+    if (id === 'animate') return animateImage(record);
+    if (id === 'extend') return actionsOf(record).find(action => action.id === 'extend')?.run();
+    const clip = mediaOf(record) === 'video';
+    void generate({
+      verb: id,
+      args: {
+        source: outputSource(record),
+        intention: id === 'upscale' ? `Agrandir ${clip ? 'la vidéo' : 'l’image'}.` : 'Rendre la vidéo plus fluide.',
+      },
+      edits: {},
+      styles: [],
+    });
+  }
+  async function generate(given = null) {
+    if (working) return;
+    // An action on a take brings what to make; « Générer » (a click, its keys) does not.
+    const onTake = given?.verb ? given : null;
     // The character being checked: the key that generates keeps it.
-    if (checking) return checking.resolve('ok');
-    if (answering()) return approve();
-    const reason = blocked() || current()?.unavailable;
+    if (!onTake && checking) return checking.resolve('ok');
+    if (!onTake && answering()) return approve();
+    const reason = blocked() || (onTake ? '' : current()?.unavailable);
     if (reason) return notice(reason);
     let wanted;
     try {
-      wanted = request();
+      wanted = onTake ?? request();
     } catch (error) {
       failure = error.message;
       return render();
@@ -2084,7 +2221,7 @@ export function setupStudio({
       go.classList.toggle('is-indeterminate', !known);
       go.style.setProperty('--studio-progress', known ? String(percent / 100) : '0');
       const label = go.querySelector('.studio-go-label');
-      if (label) label.textContent = known ? `Génération · ${percent} %` : 'Génération…';
+      if (label) label.textContent = known ? `En cours · ${percent} %` : 'En cours…';
       go.setAttribute('aria-valuenow', known ? String(percent) : '');
     }
     if (line) {
@@ -2094,12 +2231,27 @@ export function setupStudio({
     // A sound lights its bars as it goes.
     const bars = document.querySelectorAll?.('#studio-view .studio-bars span') ?? [];
     bars.forEach((bar, index) => bar.classList.toggle('is-lit', known && index < (percent * bars.length) / 100));
-    // What the generator has so far, on the screen; the frame is rebuilt with the page.
+    // What the generator has so far, on the screen, through the Flux (take-flux.mjs, capture 24): the
+    // start image until a picture comes, else the colours of the room. The frame is rebuilt with the page.
     const frame = document.querySelector?.('#studio-view .studio-frame');
+    if (frame && mode !== 'audio') {
+      if (flux?.frame !== frame) {
+        flux?.flux.stop();
+        flux = { frame, flux: takeFlux(frame, { node }) };
+        const start = drafts[mode].inputs.start_image?.[0]?.preview;
+        if (start) flux.flux.source(start);
+        else flux.flux.neutral();
+      }
+      if (Number.isFinite(working.fraction)) flux.flux.progress(working.fraction);
+    }
     if (frame && working.preview) {
-      if (live?.frame !== frame) live = { frame, preview: livePreview(node, frame) };
+      if (live?.frame !== frame)
+        live = { frame, preview: livePreview(node, frame, { onLoad: picture => flux?.flux.source(picture) }) };
       live.preview.show(working.preview);
     }
+    // The creation under way at the left of the Sortie says how far it is.
+    const making = document.querySelector?.('#studio-view .studio-item.is-making .studio-item-meta');
+    if (making) making.textContent = known ? percent + ' %' : '';
   }
 
   // ------------------------------------------------------------------ Moodix AI sets the Studio
@@ -2730,7 +2882,7 @@ export function setupStudio({
     control.disabled = Boolean(working);
     return control;
   }
-  function item(record) {
+  function item(record, next = null) {
     const media = mediaOf(record),
       output = record.outputs[0] ?? {},
       number = numberOf(record),
@@ -2761,9 +2913,11 @@ export function setupStudio({
       event.dataTransfer.setData('text/plain', name);
       // Carried at the size of a slot of the inputs: the whole picture hid where it would go.
       dragGhost(pick, event.dataTransfer, media);
+      carrying(media);
     };
     pick.ondragend = () => {
       carried = null;
+      carrying(null);
     };
     if (media === 'audio') {
       const wave = node('span', 'studio-thumb-wave');
@@ -2819,9 +2973,33 @@ export function setupStudio({
       }, 550);
     };
     pick.onpointerup = pick.onpointercancel = pick.onpointerleave = () => clearTimeout(holding);
-    const badge = node('span', 'studio-item-number', '#' + number);
-    badge.setAttribute('aria-hidden', 'true');
-    tile.append(pick, badge);
+    // Under it (capture 22): « PRISE n » and its length (« 06.04 S »), its format for an image; a
+    // continuation, « ↳ SUITE +04.00 S », glued to its take.
+    const take = output.take,
+      caption = node('span', 'studio-item-caption'),
+      badge = node('span', 'studio-item-number', from ? '↳ SUITE' : Number.isInteger(take) ? 'PRISE ' + take : '#' + number),
+      length = lengthOfRecord(record, Boolean(from)),
+      shape = sizeOfRecord(record);
+    caption.setAttribute('aria-hidden', 'true');
+    caption.append(
+      badge,
+      node(
+        'span',
+        'studio-item-meta',
+        media === 'image' ? (shape ? (formatOf(shape.width, shape.height)?.id ?? '') : '') : length ? (from ? '+' : '') + figures(length) : '',
+      ),
+    );
+    // A clip as wide as it is long, at the height of the strip; its picture along it as frames.
+    if (media === 'video') {
+      if (shape) tile.style.setProperty?.('--ratio', (shape.width / shape.height).toFixed(3));
+      if (length) tile.style.setProperty?.('--span', Math.min(2.4, Math.max(0.6, length / 6)).toFixed(3));
+      if (output.thumbUrl) {
+        pick.style.setProperty?.('--strip', `url("${output.thumbUrl}")`);
+        pick.classList.add('has-strip');
+      }
+    }
+    if (from && next?.id === sourceOf(record)) tile.classList.add('is-suite');
+    tile.append(pick, caption);
     const main = actions.find(action => action.id === 'extend' || action.id === 'animate');
     if (main) tile.append(onPicture(main, 'studio-item-main', name));
     // No « i » on the picture: a click on it shows its details.
@@ -2898,6 +3076,21 @@ export function setupStudio({
     }
     return tile;
   }
+  /** The length of a creation (`added`: what a continuation adds to its clip). */
+  function lengthOfRecord(record, added = false) {
+    const p = record.parameters ?? {};
+    if (Number(p.seconds) > 0) return Number(p.seconds);
+    if (!(p.frames > 0 && p.fps > 0)) return null;
+    return Math.max(0, p.frames - (added && p.overlap_frames > 0 ? p.overlap_frames : 0)) / p.fps;
+  }
+  /** The size of a creation, from its file or its settings; null when neither says it. */
+  function sizeOfRecord(record) {
+    const output = record.outputs?.[0] ?? {},
+      measuredSize = measured.get(record.id),
+      width = output.width ?? record.parameters?.width ?? measuredSize?.width,
+      height = output.height ?? record.parameters?.height ?? measuredSize?.height;
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
   // The pictures of the Sortie, kept from one drawing to the next (those of this drawing in `used`).
   const pictures = new Map();
   let used = new Set();
@@ -2931,7 +3124,18 @@ export function setupStudio({
     }
     const strip = node('div', 'studio-strip studio-timeline');
     strip.setAttribute('aria-label', sort.id === 'all' ? 'Créations du projet' : sort.label + ' du projet');
-    for (const record of shown) strip.append(item(record));
+    // The creation under way, at the far left (studio-maquette.md): dark, « EN COURS » and how far.
+    if (working && !working.external) {
+      const tile = node('div', 'studio-item is-making'),
+        pick = node('div', 'studio-item-pick'),
+        caption = node('span', 'studio-item-caption');
+      caption.append(node('span', 'studio-item-number', 'En cours'), node('span', 'studio-item-meta', ''));
+      tile.setAttribute('aria-hidden', 'true');
+      tile.append(pick, caption);
+      strip.append(tile);
+    }
+    // A continuation made just after its clip sits glued to it (« une suite reste collée à sa prise »).
+    shown.forEach((record, at) => strip.append(item(record, shown[at + 1])));
     // The wheel of a mouse scrolls it sideways, the pointer anywhere over the Sortie (a mouse has
     // no sideways wheel); a sideways move of a trackpad is left to the browser.
     section.onwheel = event => scrollSideways(strip, event);
@@ -3090,17 +3294,14 @@ export function setupStudio({
     desk.append(said, ...blocks.map(grained), grained(node('section', 'studio-block is-output')));
     return desk;
   }
-  /** A block of the Studio on its grain of old film (moodix.css): still dust and three scratches
-   *  under what the block holds, which goes above it, so that no grain is ever over a picture. */
+  /**
+   * A block of the Studio: what it holds, in its body. No grain of its own any more: the grain of the
+   * room is behind the glass, never over a picture (reference-maquettes.md).
+   */
   function grained(block) {
-    const grain = node('div', 'studio-grain'),
-      body = node('div', 'studio-block-body');
-    grain.setAttribute('aria-hidden', 'true');
-    grain.innerHTML =
-      '<svg class="studio-dust" width="100%" height="100%" focusable="false">' +
-      '<rect width="100%" height="100%" filter="url(#moodix-dust)"/></svg><div class="studio-scratches"></div>';
+    const body = node('div', 'studio-block-body');
     body.append(...block.children);
-    block.replaceChildren(grain, body);
+    block.replaceChildren(body);
     return block;
   }
   /** Image / Vidéo / Son, at the top left. */
@@ -3118,7 +3319,7 @@ export function setupStudio({
       pill.textContent = 'Studio · ' + about.label;
       pill.parentElement?.querySelector?.('use')?.setAttribute('href', '#i-' + about.icon);
     }
-    const bar = $('studio-kinds');
+    const bar = kindsBar();
     if (!bar) return;
     bar.removeAttribute('data-ai-active');
     bar.removeAttribute('data-ai-touched');
@@ -3134,7 +3335,8 @@ export function setupStudio({
           // Its name at its right when the sidebar is folded (moodix.css).
           tab.dataset.tip = item.label;
           tab.dataset.mode = item.id;
-          tab.append(icon(item.icon));
+          // Its name beside its icon when it is the one chosen (moodix.css).
+          tab.append(icon(item.icon), node('span', 'kind-tab-name', item.label));
           tab.onclick = () => {
             chooseMode(item.id);
             if (globalThis.document?.body?.dataset?.view !== 'studio') openStudio();
@@ -3305,6 +3507,12 @@ export function setupStudio({
     settings.append(modelBlock(workflow, list));
     const lacking = extending ? null : unavailableNote(list);
     if (lacking) settings.append(lacking);
+    // The format, above the resolution (studio-maquette.md: no longer under the screen).
+    if (workflow.limits && !extending && mode !== 'audio') {
+      const formats = node('div', 'studio-set-block studio-set-format');
+      formats.append(node('span', 'studio-label', 'Format'), formatChips(workflow));
+      settings.append(formats);
+    }
     const shape = shapeBlock(workflow);
     if (shape) settings.append(shape);
     const styled = workflow.styled && mode !== 'audio' && !extending && !answering();
@@ -3316,6 +3524,7 @@ export function setupStudio({
         advanced = !advanced;
         render();
       });
+      more.append(node('span', 'studio-more-word', 'Plus de réglages'));
       more.setAttribute('aria-label', 'Plus de réglages');
       more.title = 'Plus de réglages';
       more.setAttribute('aria-expanded', String(advanced));
@@ -3326,15 +3535,29 @@ export function setupStudio({
     }
 
     // The preview, its formats and the button.
-    const { screen, frame } = stage();
-    preview.append(screen);
+    const { screen } = stage(),
+      head = node('div', 'studio-screen-head'),
+      step = node('p', 'studio-progress', working?.label ?? ''),
+      setting = node('p', 'studio-ai-line', 'Moodix AI règle le Studio');
+    // Image · Vidéo · Son at the left, the step under way in the middle, Moodix AI at the right.
+    step.id = 'studio-progress';
+    step.setAttribute('role', 'status');
+    step.hidden = !working;
+    setting.hidden = !(answering() || ai);
+    if (kindsBar()) head.append(kindsBar());
+    head.append(step, setting);
+    preview.append(head, screen);
     const bar = node('div', 'studio-actionbar');
-    if (workflow.limits && !extending && mode !== 'audio') {
-      bar.append(formatChips(workflow, frame));
-      bar.classList.add('has-formats');
-    }
+    // The actions of the take on the screen; held while Moodix AI proposes or a take is made.
+    const onScreen = working ? (kept[mode] ?? runs.find(item => mediaOf(item) === mode) ?? null) : onStage();
+    if (onScreen && mode !== 'audio' && !extending) {
+      const row = takeActions(onScreen, 0);
+      row.inert = answering() || Boolean(working);
+      if (row.inert) row.classList.add('is-held');
+      bar.append(row);
+    } else bar.append(node('div', 'output-actions is-empty'));
     const go = aiTarget(button('primary studio-go', '', generate, 'play'), 'generate'),
-      label = node('span', 'studio-go-label', working ? 'Génération…' : extending ? 'Générer la suite' : 'Générer'),
+      label = node('span', 'studio-go-label', working ? 'En cours…' : extending ? 'Générer la suite' : 'Générer'),
       fill = node('span', 'studio-go-bar');
     fill.setAttribute('aria-hidden', 'true');
     // The triangle and its word, centred (moodix-design.md 7 bis 22); the keys are in its tooltip.
@@ -3353,9 +3576,17 @@ export function setupStudio({
       go.setAttribute('aria-valuemax', '100');
       go.setAttribute('aria-label', 'Génération en cours');
     }
-    // « Agent » and « Générer » (and what goes with it) together at the right: they wrap as one.
-    const group = node('div', 'studio-go-group');
-    group.append(agent, go);
+    // The Double verre (studio-maquette.md): « ▶ Générer » | the Agent; « Arrêter » in place of the
+    // Agent while a take is made.
+    const group = node('div', 'studio-go-group'),
+      rule = node('span', 'studio-go-rule');
+    rule.setAttribute('aria-hidden', 'true');
+    if (working) {
+      const halt = button('studio-stop', '', stop, 'stop');
+      halt.setAttribute('aria-label', 'Arrêter la génération');
+      halt.title = 'Arrêter la génération';
+      group.append(go, rule, halt);
+    } else group.append(go, rule, agent);
     // The character Moodix AI made, on the screen: kept, made again, or everything stopped.
     if (checking && mode === 'image' && !working) {
       // The question on a line of its own above its three answers: on one line with them, « OK »
@@ -3372,9 +3603,11 @@ export function setupStudio({
       group.replaceChildren(question, stop, again, go);
     }
     if (answering()) {
-      const no = button('secondary studio-decline', 'Annuler', () => decline());
+      // « Refuser » at the left of the Double verre; its half Agent tinted (moodix.css).
+      const no = button('secondary studio-decline', 'Refuser', () => decline());
       no.title = 'Refuser cette proposition de Moodix AI';
-      group.append(no);
+      group.replaceChildren(no, ...group.children);
+      group.classList.add('is-proposal');
     }
     bar.append(group);
     preview.append(bar);
@@ -3418,6 +3651,11 @@ export function setupStudio({
       if (strip) strip.scrollLeft = along;
     }
     if (working) progress();
+    // Nothing made any more: the Flux leaves with its frame.
+    else if (flux) {
+      flux.flux.stop();
+      flux = null;
+    }
   }
   async function refresh() {
     if (!info) return;

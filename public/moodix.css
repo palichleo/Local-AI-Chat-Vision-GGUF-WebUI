@@ -13428,3 +13428,856 @@ body:not([data-view='chat']) .resume {
   font: 400 13px/1 var(--font-ui);
   cursor: pointer;
 }
+
+/* ------------------------------------------------------------------ the Studio (phase 3) */
+/* Le Studio, mise en page B (studio-maquette.md ; captures 20 à 27) : à gauche le prompt et les
+   entrées, des blocs à la hauteur de ce qu'ils tiennent ; au milieu l'écran, Image · Vidéo · Son en
+   haut à gauche, la prise au format choisi dans son filet avec « PRISE n », les actions de la prise
+   et la Double verre en bas ; à droite les réglages ; la Sortie dessous, la dernière à gauche. Des
+   blocs de verre sur la salle, coins de 12 ; tout ce qui se clique en carré arrondi (10 à partir de
+   38 px, 8 en dessous). */
+@container studio (min-width: 900px) {
+  #studio-view .studio-desk {
+    grid-template-columns: 300px minmax(0, 1fr) 268px;
+    grid-template-rows: minmax(0, 1fr) auto;
+    column-gap: 18px;
+    row-gap: 14px;
+  }
+}
+#studio-view .studio-block {
+  border: 1px solid rgba(238, 232, 222, 0.08);
+  border-radius: 12px;
+  background: rgba(var(--room-glass), 0.46);
+  box-shadow: none;
+}
+/* The left column: its blocks one under the other, each at the height of what it holds. */
+#studio-view .studio-block.is-input {
+  align-self: start;
+  border: 0;
+  background: none;
+  --block-pad: 0;
+}
+#studio-view .studio-block.is-input > .studio-block-body {
+  gap: 14px;
+  overflow: visible;
+}
+#studio-view .studio-block.is-input .studio-prompt-field {
+  flex: none;
+  min-height: 0;
+  padding: 16px 16px 12px;
+  border: 1px solid rgba(238, 232, 222, 0.08);
+  border-radius: 12px;
+  background: rgba(var(--room-glass), 0.46);
+}
+#studio-view .studio-block.is-input .studio-prompt-field textarea {
+  flex: none;
+  height: auto;
+  min-height: 132px;
+  max-height: 46vh;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: 400 15px/1.75 var(--font-ui);
+  resize: none;
+  field-sizing: content;
+}
+#studio-view .studio-inputs {
+  gap: 14px;
+}
+#studio-view .studio-input-block {
+  gap: 12px;
+  padding: 14px 16px 16px;
+  border: 1px solid rgba(238, 232, 222, 0.08);
+  border-radius: 12px;
+  background: rgba(var(--room-glass), 0.46);
+  box-shadow: none;
+}
+.studio-input-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  color: var(--text-2);
+  font: 400 14px/1.2 var(--font-ui);
+}
+#studio-view .studio-input-title .studio-references-count {
+  margin: 0;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-ui);
+}
+.studio-slot-hint {
+  align-self: center;
+  max-width: 9em;
+  color: var(--text-3);
+  font: 400 13px/1.4 var(--font-ui);
+}
+#studio-view .studio-slot-pick {
+  border: 1px dashed rgba(238, 232, 222, 0.18);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+}
+#studio-view .studio-slot.is-filled .studio-slot-pick {
+  border: 0;
+}
+/* While something is carried: the slots that take it light up (studio-maquette.md, « Glisser »). */
+#studio-view .studio-slot.is-target .studio-slot-pick {
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  transform: scale(1.06);
+}
+
+/* The screen: a block of glass, its head, the take in the middle, its bar at the foot. */
+#studio-view .studio-block.is-preview {
+  --block-pad: 14px 16px 16px;
+  gap: 12px;
+}
+.studio-screen-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+}
+.studio-screen-head .studio-progress {
+  position: absolute;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-2);
+  font: 400 13px/1 var(--font-ui);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.studio-screen-head .studio-progress::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.studio-screen-head .studio-progress[hidden] {
+  display: none;
+}
+.studio-ai-line {
+  margin: 0 0 0 auto;
+  color: var(--accent);
+  font: 500 12px/1 var(--font-ui);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+.studio-ai-line[hidden] {
+  display: none;
+}
+/* Image · Vidéo · Son: a row of three in a dark ground; the one chosen, lighter, says its name. */
+#studio-view .studio-screen-head > #studio-kinds.kind-tabs {
+  position: static;
+  display: inline-flex;
+  flex-direction: row;
+  gap: 2px;
+  width: auto;
+  margin: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.26);
+  box-shadow: none;
+}
+#studio-view .studio-screen-head .kind-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: auto;
+  min-width: 36px;
+  height: 32px;
+  min-height: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+  font: 500 14px/1 var(--font-ui);
+}
+#studio-view .studio-screen-head .kind-tab svg {
+  width: 15px;
+  height: 15px;
+}
+#studio-view .studio-screen-head .kind-tab:hover:enabled {
+  color: var(--text-1);
+}
+#studio-view .studio-screen-head .kind-tab[aria-selected='true'] {
+  padding: 0 14px 0 12px;
+  background: rgba(238, 232, 222, 0.1);
+  color: var(--text-1);
+}
+.kind-tab-name {
+  display: none;
+}
+#studio-view .studio-screen-head .kind-tab[aria-selected='true'] .kind-tab-name {
+  display: inline;
+}
+/* The take in its filet (ivory at 16 %, corners of 8); « PRISE n » at its top left in mono. */
+#studio-view .studio-frame {
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  outline: 1px solid rgba(238, 232, 222, 0.16);
+  outline-offset: -1px;
+}
+#studio-view .studio-frame.is-audio {
+  outline: 0;
+}
+#studio-view .studio-frame-label.is-take {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 3;
+  display: block;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: rgba(12, 11, 14, 0.72);
+  color: var(--text-1);
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  pointer-events: none;
+}
+#studio-view .studio-frame:has(.studio-frame-label.is-take) .studio-readout {
+  display: none;
+}
+#studio-view .studio-readout {
+  color: var(--text-2);
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-shadow: none;
+}
+#studio-view .studio-frame-vignette {
+  display: none;
+}
+/* The bar under the screen: the actions of the take at the left, the Double verre in the middle. */
+#studio-view .studio-actionbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+#studio-view .studio-actionbar .output-actions {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+#studio-view .studio-actionbar .output-actions.is-held {
+  opacity: 0.38;
+}
+#studio-view .studio-actionbar .output-action {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid rgba(238, 232, 222, 0.14);
+  border-radius: 10px;
+  background: rgba(238, 232, 222, 0.03);
+  color: var(--text-1);
+}
+#studio-view .studio-actionbar .output-action > span {
+  display: none;
+}
+#studio-view .studio-actionbar .output-action svg {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+#studio-view .studio-actionbar .output-action:hover:enabled,
+#studio-view .studio-actionbar .output-action:focus-visible {
+  border-color: rgba(238, 232, 222, 0.3);
+  background: rgba(238, 232, 222, 0.08);
+}
+#studio-view .studio-actionbar .output-action:disabled {
+  opacity: 0.38;
+}
+/* The Double verre: « ▶ Générer » | the Agent (the Éclipse); a glass of ivory at 9 %, its edge at 24 %,
+   46 px high, corners of 10. Under way, the glass fills with the accent and « EN COURS · 46 % »;
+   « Arrêter » in place of the Agent. A proposal: « Refuser » at its left, the half Agent tinted. */
+#studio-view .studio-go-group {
+  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+}
+#studio-view .studio-go-group > :is(.studio-go, .studio-agent, .studio-stop) {
+  margin: 0;
+}
+#studio-view .studio-go-group:not(.is-checking) {
+  gap: 0;
+  height: 46px;
+  overflow: hidden;
+  border: 1px solid rgba(238, 232, 222, 0.24);
+  border-radius: 10px;
+  background: rgba(238, 232, 222, 0.09);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+#studio-view .studio-go-group.is-proposal {
+  overflow: visible;
+}
+#studio-view .studio-go-group:not(.is-checking) .studio-go {
+  min-width: 150px;
+  height: 44px;
+  padding: 0 22px 0 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: 500 15px/1 var(--font-ui);
+  gap: 11px;
+}
+#studio-view .studio-go-group:not(.is-checking) .studio-go::before {
+  display: none;
+}
+#studio-view .studio-go-group .studio-go svg {
+  width: 11px;
+  height: 11px;
+  color: var(--accent);
+}
+#studio-view .studio-go-group:not(.is-checking) .studio-go:is(:hover, :focus-visible):enabled {
+  background: rgba(238, 232, 222, 0.06);
+}
+#studio-view .studio-go-group .studio-go[role='progressbar'] .studio-go-label {
+  font: 500 12px/1 var(--font-ui);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+#studio-view .studio-go-group .studio-go-bar {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.studio-go-rule {
+  flex: none;
+  width: 1px;
+  height: 22px;
+  background: rgba(238, 232, 222, 0.2);
+}
+#studio-view .studio-go-group:not(.is-checking) :is(.studio-agent, .studio-stop) {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 44px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-1);
+}
+#studio-view .studio-go-group .studio-agent svg {
+  width: 21px;
+  height: 21px;
+}
+#studio-view .studio-go-group .studio-agent-word {
+  display: none;
+}
+#studio-view .studio-go-group:not(.is-checking) :is(.studio-agent, .studio-stop):is(:hover, :focus-visible) {
+  background: rgba(238, 232, 222, 0.06);
+}
+#studio-view .studio-go-group.is-proposal .studio-agent {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+#studio-view .studio-go-group.is-proposal > .studio-decline {
+  position: absolute;
+  right: calc(100% + 14px);
+  height: 46px;
+  min-height: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-2);
+  font: 400 15px/1 var(--font-ui);
+}
+#studio-view .studio-go-group.is-proposal {
+  position: relative;
+}
+#studio-view .studio-go-group.is-proposal > .studio-decline:hover {
+  color: var(--text-1);
+}
+
+/* The settings: one block of glass, its lines one under the other, a fine rule between them. */
+#studio-view .studio-block.is-settings {
+  align-self: start;
+  --block-pad: 0;
+}
+#studio-view .studio-block.is-settings > .studio-block-body {
+  gap: 0;
+  overflow: visible;
+}
+#studio-view .studio-set-block {
+  margin: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 1px solid rgba(238, 232, 222, 0.07);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+#studio-view .studio-block.is-settings > .studio-block-body > :last-child {
+  border-bottom: 0;
+}
+#studio-view .studio-set-model {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding-block: 10px;
+}
+#studio-view .studio-set-model :is(.studio-model-pick, .studio-model-name) {
+  color: var(--text-1);
+  font: 500 17px/1.2 var(--font-ui);
+}
+#studio-view .studio-set-model .studio-model-pick {
+  border: 0;
+  background-color: transparent;
+}
+#studio-view .studio-set-format {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+#studio-view .studio-set-format > .studio-label,
+#studio-view .studio-bar-label {
+  color: var(--text-2);
+  font: 400 14px/1 var(--font-ui);
+}
+#studio-view .studio-set-format .studio-formats-wrap {
+  position: relative;
+}
+#studio-view .studio-set-format .studio-formats {
+  display: flex;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+#studio-view .studio-set-format .studio-format {
+  min-width: 36px;
+  height: 30px;
+  min-height: 0;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+  font: 400 13px/1 var(--font-mono);
+}
+#studio-view .studio-set-format .studio-format[aria-checked='true'] {
+  background: rgba(238, 232, 222, 0.1);
+  color: var(--text-1);
+}
+#studio-view .studio-set-format .studio-format:hover:enabled {
+  color: var(--text-1);
+}
+#studio-view .studio-set-format .studio-format-menu {
+  right: 0;
+  left: auto;
+  z-index: 6;
+  background: var(--room-menu);
+}
+/* A line: its label and its value above, its bar under them, at full width. */
+#studio-view .studio-set-shape {
+  gap: 0;
+  padding-block: 4px;
+}
+#studio-view .studio-set-shape .studio-set-rule {
+  height: 1px;
+  margin: 0 -16px;
+  background: rgba(238, 232, 222, 0.07);
+}
+#studio-view .studio-bar-line {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'label value' 'bar bar';
+  row-gap: 6px;
+  padding: 12px 0 10px;
+}
+#studio-view .studio-bar-line > .studio-bar-label {
+  grid-area: label;
+}
+#studio-view .studio-bar-line > .studio-bar-track {
+  grid-area: bar;
+}
+#studio-view .studio-bar-line > .studio-bar-value {
+  grid-area: value;
+  color: var(--text-1);
+  font: 400 13px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+}
+/* Ivory bars with a round handle; the notches of a few choices, small ticks. */
+#studio-view .studio-bar {
+  --bar-rest: rgba(238, 232, 222, 0.16);
+  background: linear-gradient(
+      to right,
+      var(--text-1) calc(4px + var(--fill) * (100% - 8px)),
+      var(--bar-rest) calc(4px + var(--fill) * (100% - 8px))
+    )
+    center / 100% 2px no-repeat;
+}
+#studio-view .studio-bar::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -5px;
+  background: var(--text-1);
+}
+#studio-view .studio-bar::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: var(--text-1);
+}
+#studio-view .studio-bar-notch {
+  width: 1.5px;
+  height: 7px;
+  margin: -3.5px 0 0 -0.75px;
+  background: rgba(238, 232, 222, 0.24);
+}
+#studio-view .studio-more-pill {
+  align-self: stretch;
+  justify-content: flex-start;
+  height: 44px;
+  margin: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 0 0 12px 12px;
+  background: none;
+  color: var(--text-2);
+}
+
+/* The Sortie: a fine line above it, « SORTIE », the creations the newest at the left; under each
+   « PRISE n » and its length in mono; a clip as wide as it is long, its picture along it. */
+#studio-view .studio-block.is-output {
+  --out-h: auto;
+  height: auto;
+  padding: 12px 0 0;
+  overflow: visible;
+  border: 0;
+  border-top: 1px solid rgba(238, 232, 222, 0.08);
+  border-radius: 0;
+  background: none;
+  --block-pad: 0;
+}
+#studio-view .studio-block.is-output > .studio-block-body::before {
+  content: 'Sortie';
+  color: var(--text-3);
+  font: 500 12px/1 var(--font-ui);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+#studio-view .studio-block.is-output > .studio-block-body {
+  gap: 12px;
+}
+#studio-view .studio-strip {
+  --strip-h: 96px;
+  --strip-gap: 14px;
+  gap: var(--strip-gap);
+  align-items: flex-start;
+  padding: 2px 2px 6px;
+}
+#studio-view .studio-item {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: auto;
+  height: auto;
+}
+#studio-view .studio-item-pick {
+  width: var(--strip-h);
+  height: var(--strip-h);
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  outline: 1px solid rgba(238, 232, 222, 0.1);
+  outline-offset: -1px;
+}
+#studio-view .studio-item.is-shown .studio-item-pick,
+#studio-view .studio-item-pick:hover {
+  outline: 1.5px solid var(--text-1);
+}
+#studio-view .studio-item-pick :is(img, video) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0;
+}
+#studio-view .studio-item[style*='--ratio'] .studio-item-pick {
+  width: calc(var(--strip-h) * var(--ratio, 1.7778) * var(--span, 1));
+}
+#studio-view .studio-item-pick.has-strip {
+  background: var(--strip) left center / auto 100% repeat-x;
+}
+#studio-view .studio-item-pick.has-strip > img {
+  opacity: 0;
+}
+#studio-view .studio-item.is-suite {
+  margin-right: calc(-1 * var(--strip-gap) + 2px);
+}
+#studio-view .studio-item.is-suite .studio-item-pick {
+  border-radius: 6px 0 0 6px;
+}
+.studio-item-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+#studio-view .studio-item-number {
+  position: static;
+  padding: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  letter-spacing: inherit;
+}
+#studio-view .studio-item.is-shown .studio-item-number {
+  color: var(--text-1);
+}
+.studio-item-meta {
+  color: var(--text-4, var(--text-3));
+}
+/* Its two round buttons (Prolonger or Animer, the bin) under the pointer or the keyboard only. */
+#studio-view .studio-item :is(.studio-item-main, .studio-item-del) {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+#studio-view .studio-item:is(:hover, :focus-within) :is(.studio-item-main, .studio-item-del) {
+  opacity: 1;
+}
+
+/* Corrections after the first captures. */
+body #studio-view .studio-screen-head .kind-tab {
+  flex: none;
+}
+body #studio-view .studio-screen-head .kind-tab[aria-selected='true'] {
+  background: rgba(238, 232, 222, 0.1);
+  color: var(--text-1);
+}
+#studio-view .studio-block.is-preview .studio-screen {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+#studio-view .studio-actionbar > .output-actions {
+  display: flex;
+  grid-template-columns: none;
+}
+#studio-view .studio-actionbar > .output-actions > .output-action {
+  flex: none;
+  width: 46px;
+}
+#studio-view .studio-set-format {
+  flex-direction: row;
+  align-items: center;
+}
+#studio-view .studio-lora-heading {
+  color: var(--text-2);
+  font: 400 14px/1 var(--font-ui);
+}
+#studio-view .studio-more-pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font: 400 14px/1 var(--font-ui);
+}
+#studio-view .studio-more-pill > span:first-child {
+  color: var(--text-3);
+  letter-spacing: 0.2em;
+}
+#studio-view .studio-item.is-shown,
+#studio-view .studio-item:focus-within {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+#studio-view .studio-item-pick {
+  min-width: var(--strip-h);
+}
+#studio-view .studio-item-caption {
+  width: 0;
+  min-width: 100%;
+  letter-spacing: 0.06em;
+}
+#studio-view .studio-item-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The chat of the Agent over the Studio (capture 26): the Studio in « mise au point » (blurred 8 px,
+   at 55 %, a little back), the top of the page and the fil sharp; the chat in a panel of glass of
+   700 px, without a button to close it (Échap, or a click beside it). */
+#studio-view {
+  transition:
+    filter 0.6s ease,
+    opacity 0.6s ease,
+    transform 0.6s ease;
+}
+body[data-view='studio'][data-chat='open'] #studio-view {
+  filter: blur(8px);
+  opacity: 0.55;
+  transform: scale(0.985);
+}
+body[data-view='studio'][data-chat='open'] .chat-scrim,
+:root[data-theme='light'] body[data-view='studio'][data-chat='open'] .chat-scrim {
+  background: transparent;
+}
+body[data-view='studio'][data-chat='open'] .chat-panel {
+  width: min(700px, calc(100% - 2 * var(--pad)));
+  border: 1px solid rgba(238, 232, 222, 0.1);
+  border-radius: 18px;
+  background: rgba(16, 15, 20, 0.84);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5);
+}
+@media (prefers-reduced-motion: reduce) {
+  #studio-view {
+    transition: none;
+  }
+}
+/* Carried (capture 25): each slot that takes it lights up and says its name, in accent dots on an
+   accent ground of 7 %; a filled one says « REMPLACER »; the one under the hand grows a little and
+   draws its edge whole (.is-target). Those that do not take it stay off; nothing else. */
+#studio-view .studio-desk[data-carrying='image'] .studio-slot[data-media='image']:not(.is-blocked) .studio-slot-pick,
+#studio-view .studio-desk[data-carrying='video'] .studio-slot[data-media='video']:not(.is-blocked) .studio-slot-pick {
+  border: 1px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+#studio-view .studio-desk[data-carrying='image'] .studio-slot[data-media='image']:not(.is-blocked)::after,
+#studio-view .studio-desk[data-carrying='video'] .studio-slot[data-media='video']:not(.is-blocked)::after {
+  content: attr(data-name);
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  color: var(--accent);
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+}
+#studio-view .studio-slot-pick {
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s,
+    background-color 0.15s;
+}
+#studio-view .studio-slot.is-asking .studio-slot-pick {
+  border: 1px solid var(--text-2);
+}
+/* « Créations du projet »: under the inputs, the takes the slot takes, 56 px, the newest at the left. */
+.studio-shelf .studio-input-title {
+  align-items: center;
+}
+#studio-view .studio-shelf-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+}
+#studio-view .studio-shelf-close:hover {
+  color: var(--text-1);
+}
+#studio-view .studio-shelf-close svg {
+  width: 13px;
+  height: 13px;
+}
+.studio-shelf-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+  scrollbar-width: thin;
+}
+#studio-view .studio-shelf-pick {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  outline: 1px solid rgba(238, 232, 222, 0.1);
+  outline-offset: -1px;
+  cursor: grab;
+}
+#studio-view .studio-shelf-pick:hover,
+#studio-view .studio-shelf-pick:focus-visible {
+  outline: 1.5px solid var(--text-1);
+}
+#studio-view .studio-shelf-pick img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+#studio-view .studio-shelf-file {
+  align-self: flex-start;
+  min-height: 0;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: 400 13px/1 var(--font-ui);
+}
+#studio-view .studio-shelf-file:hover {
+  color: var(--text-1);
+}
+/* A clip of the Sortie: wide enough for its line (« PRISE 31  06.04 S »). */
+#studio-view .studio-item[style*='--ratio'] .studio-item-pick {
+  min-width: 120px;
+}
+
+/* The creation under way at the left of the Sortie (capture 24): dark, « EN COURS » and how far. */
+#studio-view .studio-item.is-making .studio-item-pick {
+  background: radial-gradient(circle at 40% 45%, rgba(238, 232, 222, 0.08), rgba(0, 0, 0, 0.35) 70%);
+}
+#studio-view .studio-item.is-making .studio-item-number {
+  color: var(--text-2);
+  text-transform: uppercase;
+}
+/* The Flux replaces the moving background of before on the screen too. */
+#studio-view .studio-frame.has-flux::before,
+#studio-view .studio-frame.has-flux::after {
+  display: none;
+  animation: none;
+}
+#studio-view .studio-frame.has-flux > .live-preview {
+  visibility: hidden;
+}
+#studio-view .studio-frame > .take-flux {
+  z-index: 1;
+}
+#studio-view .studio-item.is-making .studio-item-pick { width: 120px; }

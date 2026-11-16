@@ -66,21 +66,25 @@ const tipOf = (action, reason = '') => `${action.label}\n${reason || action.help
 /**
  * `actions(record, index)` builds the row of one take. `onAction(record, index, id)` receives
  * upscale, interpolate, extend and animate; Ouvrir calls `onDetails(record, index)`, Afficher dans
- * le Studio `onShow(record, index)` (absent: not offered, as in the Studio itself).
+ * le Studio `onShow(record, index)` (absent: not offered, as in the Studio itself). Without
+ * `onDetails`, no « Ouvrir » (the Studio: a click on the take on its screen opens it).
  */
-export function outputActions({ api, node, onDetails, onAction, onShow = null }) {
+export function outputActions({ api, node, onDetails, onAction, onShow = null, icon: drawIcon = null }) {
   let available = null,
     loaded = 0;
   function load() {
     if (!available || Date.now() - loaded > CACHE_MS) {
       loaded = Date.now();
-      available = api('tools/actions')
+      available = Promise.resolve()
+        .then(() => api('tools/actions'))
         .then(response => response.json())
         .catch(() => ({}));
     }
     return available;
   }
   function icon(name) {
+    // The Studio draws its icons itself (`icon`), as everything it shows.
+    if (drawIcon) return drawIcon(name);
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'),
       use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
     svg.setAttribute('aria-hidden', 'true');
@@ -95,7 +99,7 @@ export function outputActions({ api, node, onDetails, onAction, onShow = null })
     row.setAttribute('aria-label', 'Actions sur cette prise');
     const buttons = [];
     for (const action of ACTIONS.filter(item => item.media.includes(media))) {
-      if (action.id === 'studio' && !onShow) continue;
+      if ((action.id === 'studio' && !onShow) || (action.id === 'details' && !onDetails)) continue;
       const button = node('button', 'output-action output-action-' + action.id);
       button.type = 'button';
       button.setAttribute('aria-label', action.label);
@@ -126,7 +130,7 @@ export function outputActions({ api, node, onDetails, onAction, onShow = null })
     // Workflows can become ready after the row was drawn (relaunch, model added):
     // the row checks again when the pointer reaches it. A disabled button gets no
     // pointer events, so the listener sits on the row.
-    if (buttons.length) row.addEventListener('pointerenter', refresh);
+    if (buttons.length) row.addEventListener?.('pointerenter', refresh);
     refresh();
     return row;
   };
