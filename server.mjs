@@ -97,6 +97,7 @@ const staticFiles = new Map([
   ['/model-ready.mjs', ['model-ready.mjs', 'text/javascript; charset=utf-8']],
   ['/images.mjs', ['images.mjs', 'text/javascript; charset=utf-8']],
   ['/video-plan.mjs', ['video-plan.mjs', 'text/javascript; charset=utf-8']],
+  ['/proposal-card.mjs', ['proposal-card.mjs', 'text/javascript; charset=utf-8']],
   ['/formats.mjs', ['formats.mjs', 'text/javascript; charset=utf-8']],
   ['/output-actions.mjs', ['output-actions.mjs', 'text/javascript; charset=utf-8']],
   ['/chat-videos.mjs', ['chat-videos.mjs', 'text/javascript; charset=utf-8']],

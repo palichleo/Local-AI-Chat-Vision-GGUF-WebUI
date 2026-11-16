@@ -25,6 +25,7 @@ import { setupNativeWorkflows } from './native-workflow-ui.mjs';
 import { prepareImages } from './images.mjs';
 import { isVideo, splitVideos, withVideos } from './chat-videos.mjs';
 import { setupStudio } from './studio.mjs';
+import { proposalCard } from './proposal-card.mjs';
 import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
 import { outputActions } from './output-actions.mjs';
@@ -776,7 +777,8 @@ function updateControls() {
   $('engine-name').textContent =
     model?.name ||
     (state.config.modelPath ? state.config.modelPath.split(/[\\/]/).pop().replace(/\.gguf$/i, '') : 'Aucun LLM');
-  const proposing = Boolean(state.studio?.proposing?.());
+  // A proposal waits (in the Studio, or in a card of the conversation): a new message declines it.
+  const proposing = Boolean(state.studio?.proposing?.() || state.proposalCard);
   $('send').disabled =
     state.projectWorking ||
     toolBusy ||
@@ -802,7 +804,9 @@ function updateControls() {
   $('thinking').disabled = state.generating;
   $('attach').disabled = state.generating || state.preparing || state.loadingHistory;
   $('prompt').disabled = state.loadingHistory;
-  $('compose-state').textContent = proposing
+  $('compose-state').textContent = state.proposalCard
+    ? ''
+    : proposing
     ? 'Proposition dans le Studio · un message la refuse'
     : toolBusy
     ? s.toolJob.progress || 'Génération en cours…'
@@ -1810,6 +1814,32 @@ function assistantMessage(parent = null) {
 }
 
 /**
+ * A proposal of Moodix in the Chat (direction-artistique.md, « La proposition vidéo »): an image is
+ * made at once, a video or a sound waits in a card of its message (proposal-card.mjs); allowed in
+ * the settings, a video runs at once too. Resolves the decision of the user.
+ */
+function proposalChoice(view, proposal, abort) {
+  const asked = proposal.mediaType === 'video' || proposal.mediaType === 'audio';
+  if (proposal.autoAllow) return asked ? 'once' : undefined;
+  if (!asked) return 'once';
+  const pending = proposalCard({
+    host: view.generations,
+    request: proposal,
+    signal: abort,
+    node,
+    api,
+    composer: $('prompt'),
+    onChange: () => scrollToBottom(),
+  });
+  state.proposalCard = pending;
+  updateControls();
+  return pending.answer.finally(() => {
+    if (state.proposalCard === pending) state.proposalCard = null;
+    updateControls();
+  });
+}
+
+/**
  * Output buttons. Prolonger writes a line the model understands in the composer, for the user to
  * finish. Upscale and Interpoler run the same proposal a model call would, without a model reply:
  * the user confirms it, the result joins the conversation as an ordinary tool call.
@@ -1983,8 +2013,10 @@ async function sendMessage(event) {
   event.preventDefault();
   if ($('send').disabled) return;
   if (state.generating) {
-    // A proposal of Moodix AI waits in the Studio: this message answers it instead.
-    if (!state.studio?.decline?.()) return;
+    // A proposal of Moodix waits (a card, or the Studio): this message answers it instead, and
+    // the card goes (Moodix answers with another).
+    if (state.proposalCard) state.proposalCard.decline();
+    else if (!state.studio?.decline?.()) return;
     await state.turnEnded;
     if (state.generating) return;
   }
@@ -2426,9 +2458,11 @@ async function sendMessage(event) {
       }
       iterations++;
       view.generation = true;
-      // A creation is set in the Studio: the pointer of Moodix AI sets it there and « Générer »
-      // is the user's answer. Its card stays in the conversation.
-      const viaStudio = Boolean(state.studio?.accepts?.(request.tool || request.call?.function?.name));
+      // From the Studio (its agent's chat), a creation is set in the Studio: the pointer of Moodix
+      // sets it there and « Générer » is the user's answer. In the Chat, a video or a sound is a card
+      // of the message (an image is made at once): proposalChoice below.
+      const viaStudio =
+        state.view === 'studio' && Boolean(state.studio?.accepts?.(request.tool || request.call?.function?.name));
       const generation = generationUI.mount(view.generations, request, { compact: viaStudio });
       // A video is commented by the model only when the user chose it in the settings: the
       // reload and the analysis take about a minute. An image too, by its own choice. Otherwise
@@ -2465,7 +2499,7 @@ async function sendMessage(event) {
                   },
                   studio: kept,
                 }
-              : {}),
+              : { approve: (proposal, abort) => proposalChoice(view, proposal, abort) }),
           },
         );
         generation.finish(result);
