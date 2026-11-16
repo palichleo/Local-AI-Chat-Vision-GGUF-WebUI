@@ -158,6 +158,70 @@ test('a seed named by the user reaches the job instead of a drawn one', async ()
   ]);
 });
 
+test('the record of a take says when its seed was named, not drawn: the Studio gives back only that one', async () => {
+  const workflow = {
+    schemaVersion: 1,
+    id: 'image',
+    name: 'Image',
+    description: '',
+    digest: 'a'.repeat(64),
+    mediaType: 'image',
+    pipeline: 'krea2',
+    enabled: true,
+    ready: true,
+    parameters: { prompt: { policy: 'model', type: 'string' }, seed: { policy: 'random', type: 'integer' } },
+    references: [],
+  };
+  const saved = [];
+  const engine = { busy: false, state: 'ready', stop: async () => (engine.state = 'stopped'), start: async () => (engine.state = 'ready') };
+  const runtime = new ToolRuntime({
+    engine,
+    catalog: {
+      list: async () => [workflow],
+      read: async () => workflow,
+      prepare: async (_id, _args, options) => ({
+        workflow,
+        job: {
+          schemaVersion: 1,
+          id,
+          pipeline: 'krea2',
+          mediaType: 'image',
+          workflowId: 'image',
+          workflowDigest: workflow.digest,
+          parameters: { prompt: 'boat', seed: options.seed ?? 777, width: 512, height: 512 },
+          components: {},
+          loras: [],
+          references: [],
+        },
+        outputNodes: [],
+      }),
+    },
+    gallery: { put: async record => (saved.push(record), record) },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'native' }),
+    engineConfig: () => ({}),
+    clientFactory: () => ({
+      status: async () => ({ idle: true }),
+      preflight: async () => {},
+      run: async () => ({ outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] }),
+      free: async () => {},
+    }),
+  });
+  const make = async args => {
+    const request = await runtime.request(
+      [{ id: 'call', type: 'function', function: { name: 'create_image', arguments: JSON.stringify(args) } }],
+      { conversationId: id, turnId: id, messages: [{ role: 'user', content: 'boat' }] },
+    );
+    await runtime.execute({ requestId: request.requestId, permission: 'once' });
+    await runtime.finished;
+    assert.equal(runtime.status().state, 'done', runtime.status().error);
+    return saved.at(-1).parameters;
+  };
+  const named = await make({ prompt: 'boat', seed: 42 });
+  assert.deepEqual([named.seed, named.seed_given], [42, true]);
+  const drawn = await make({ prompt: 'boat' });
+  assert.deepEqual([drawn.seed, drawn.seed_given], [777, undefined]);
+});
+
 test('native video approval shows the resolved fixed stage and cannot use global image authorization', async () => {
   const workflow = {
     schemaVersion: 1,

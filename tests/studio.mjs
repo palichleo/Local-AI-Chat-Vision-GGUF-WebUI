@@ -156,6 +156,10 @@ test('the Studio is told, per verb, the ready workflows with their inputs, sizes
   assert.equal(named('create_image', 'MOSS').family, 'moss');
   assert.equal(krea.limits.width.max, 4096);
   assert.equal(krea.roles.source.count, 1);
+  // The name each input has in the record of a take, and the case of the Studio it goes back to.
+  assert.ok(Object.values(krea.inputs).includes('source'));
+  for (const tool of Object.values(tools).flat())
+    for (const role of Object.values(tool.inputs)) assert.ok(tool.roles[role]?.count > 0, tool.name + ' · ' + role);
 
   const h3 = named('create_video', 'MiniMax');
   assert.deepEqual(h3.size, { width: 768, height: 448 });
@@ -919,6 +923,9 @@ async function studioPage(tools, routes = {}, options = {}) {
     addEventListener(type, listener) {
       (this.listeners ??= {})[type] = listener;
     }
+    click() {
+      this.clicks = (this.clicks ?? 0) + 1;
+    }
     /** Every element under this one whose classes include `name`. */
     find(name) {
       return this.children.flatMap(child =>
@@ -1017,13 +1024,14 @@ async function studioPage(tools, routes = {}, options = {}) {
           height: 720,
         }));
       },
-      resource: id => ({ previewUrl: '/preview/' + id }),
+      resource: options.resource ?? (id => ({ previewUrl: '/preview/' + id })),
     },
     viewOutput: options.viewOutput ?? (() => {}),
     waitForModel: async () => {},
     blocked: () => '',
     onChange() {},
-    conversation: () => options.conversation?.() ?? 'c1',
+    // `null`: a conversation not begun; nothing said, « c1 ».
+    conversation: () => (options.conversation?.() === null ? null : (options.conversation?.() ?? 'c1')),
     ...(options.project ? { project: options.project } : {}),
     ensureConversation: async () => options.conversation?.() ?? 'c1',
     reveal: () => revealed.push(true),
@@ -1169,9 +1177,11 @@ test('« Ouvrir » on a card puts the creation on the screen of its mode', async
     settings: [],
     seeded: true,
   };
-  const clip = { id: 'c', mediaType: 'video', prompt: 'un renard', outputs: [{ originalUrl: '/clip.mp4' }] };
-  const { studio, body, restore } = await studioPage({ create_video: [video] }, {}, { runs: [clip] });
+  const clip = { id: 'c', mediaType: 'video', prompt: 'un renard', outputs: [{ originalUrl: '/clip.mp4' }] },
+    picture = { id: 'p', prompt: 'un terrier', outputs: [{ originalUrl: '/p.png' }] };
+  const { studio, body, restore } = await studioPage({ create_video: [video] }, {}, { runs: [picture, clip] });
   try {
+    // The Studio opens on the mode of the newest take of the conversation: an image.
     assert.equal(body.dataset.mode, 'image');
     studio.show(clip);
     assert.equal(body.dataset.mode, 'video');
@@ -1677,7 +1687,10 @@ test('the screen: its format and length at the top left, no « i » (a click in 
   );
   try {
     const readout = () => body.find('studio-readout')[0].textContent;
-    // An image: its format; a sound: its length; a clip: both (« BROUILLON » is in Détails now).
+    // The Studio opened on the mode of the last take, a clip (16/11). An image: its format; a sound:
+    // its length; a clip: both (« BROUILLON » is in Détails now).
+    assert.equal(body.dataset.mode, 'video');
+    mode(0);
     assert.equal(readout(), '1:1');
     mode(2);
     assert.equal(readout(), '10.00 S');
@@ -2296,14 +2309,12 @@ test('a recorded proposal replayed: the pointer does what Moodix AI proposes, in
     const answer = studio.studio.propose(structuredClone(recorded.request), new AbortController().signal);
     await until(() => said.includes('attend votre accord'));
     // Each setting it changes, said as it is done (studio-maquette.md): the mode, the model, the
-    // prompt written, the take carried from « Créations du projet » to its case (the case, the take,
-    // the case again), the format, the length; then « Générer ».
+    // prompt written, the take carried to its case (16/11: no « Créations du projet » any more), the
+    // format, the length; then « Générer ».
     assert.deepEqual(said, [
       'passe en Vidéo',
       'choisit LTX 2.5',
       'écrit le prompt',
-      'pose la prise 1 en début',
-      'pose la prise 1 en début',
       'pose la prise 1 en début',
       'passe en 9:16',
       'règle la durée',
@@ -2314,7 +2325,7 @@ test('a recorded proposal replayed: the pointer does what Moodix AI proposes, in
     assert.equal(body.find('studio-slot')[0].children[0].children[0].src, '/portrait.webp');
     const duration = body.find('studio-bar').find(bar => bar.dataset.ai === 'duration');
     assert.equal(duration.attributes['aria-valuetext'], '06.04 S');
-    // It stays there, « Refuser » beside it; nothing starts by itself; « Créations du projet » closed.
+    // It stays there, « Refuser » beside it; nothing starts by itself.
     assert.equal(studio.page['ai-cursor'].classList.contains('is-visible'), true);
     assert.equal(body.find('studio-decline').length, 1);
     assert.equal(body.find('studio-shelf').length, 0);
@@ -2358,8 +2369,6 @@ test('while Moodix AI sets the Studio nothing in it answers the user and nothing
       'passe en Vidéo',
       'choisit LTX 2.5',
       'écrit le prompt',
-      'pose la prise 1 en début',
-      'pose la prise 1 en début',
       'pose la prise 1 en début',
       'passe en 9:16',
       'règle la durée',
@@ -2949,49 +2958,191 @@ test('a replacement whose character Moodix AI just made: the pointer has its pro
   }
 });
 
-test('the Studio is the conversation’s: another one, or another project, changes its screen, its Sortie, its prompt and its inputs', async () => {
+test('the screen is the conversation’s, the Sortie the project’s: a new conversation shows the takes of its project below, none above', async () => {
   const image = { id: 'w', name: 'Image', roles: { source: { count: 1, media: ['image'] } }, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
     taken = { id: 'a', conversationId: 'c1', prompt: 'un phare', outputs: [{ originalUrl: '/a.png', thumbUrl: '/a.jpg', take: 3 }] },
-    elsewhere = { id: 'b', conversationId: 'c2', prompt: 'une falaise', outputs: [{ originalUrl: '/b.png', thumbUrl: '/b.jpg', take: 4 }] };
+    elsewhere = { id: 'b', conversationId: 'c2', prompt: 'une falaise', outputs: [{ originalUrl: '/b.png', thumbUrl: '/b.jpg', take: 4 }] },
+    inProject = { p1: [elsewhere, taken], p2: [] };
   let conversation = 'c1',
     project = 'p1';
-  const page = await studioPage({ create_image: [image] }, {}, { runs: [elsewhere, taken], conversation: () => conversation, project: () => project });
-  const { body, studio, restore } = page;
-  const items = () => body.find('studio-item').map(tile => tile.dataset.id);
+  const page = await studioPage({ create_image: [image] }, {}, { runs: [], conversation: () => conversation, project: () => project });
+  const { body, studio, restore, runs } = page;
+  const items = () => body.find('studio-item').map(tile => tile.dataset.id),
+    onScreen = () => body.find('studio-frame-result')[0]?.src ?? null,
+    go = async (to, into = project) => {
+      conversation = to;
+      project = into;
+      runs.splice(0, runs.length, ...inProject[into]);
+      studio.conversationChanged();
+      await settle();
+    };
   try {
-    // The conversation open: its take on the screen and in the Sortie, not the one of another.
-    assert.deepEqual(items(), ['a']);
-    assert.equal(body.find('studio-frame')[0].className.includes('has-result'), true);
-    page.prompt().value = 'un phare sous la pluie';
-    page.prompt().oninput();
-    // A conversation without takes, in another project: the Studio empty (etats-maquette.md, 55).
-    conversation = 'c9';
-    project = 'p2';
-    studio.conversationChanged();
-    await settle();
-    assert.deepEqual(items(), []);
+    await go('c1');
+    // Below, every take of the project, the newest at the left; above, the one of this conversation.
+    assert.deepEqual(items(), ['b', 'a']);
+    assert.equal(onScreen(), '/a.png');
+    // A new conversation of the project (no identifier yet): the same takes below, the screen empty.
+    await go(null);
+    assert.deepEqual(items(), ['b', 'a']);
     assert.equal(body.find('studio-frame')[0].className.includes('is-empty'), true);
     assert.equal(body.find('studio-blank-title')[0].textContent, 'Votre première prise apparaîtra ici.');
-    assert.equal(page.prompt().value, '');
-    // Back in the first one: its take, and the prompt left there.
-    conversation = 'c1';
-    project = 'p1';
-    studio.conversationChanged();
-    await settle();
-    assert.deepEqual(items(), ['a']);
-    assert.equal(page.prompt().value, 'un phare sous la pluie');
-    // Another conversation of the project: its own take, an empty prompt.
-    conversation = 'c2';
-    studio.conversationChanged();
-    await settle();
-    assert.deepEqual(items(), ['b']);
-    assert.equal(page.prompt().value, '');
+    // Another conversation of the project: its own take above, the same Sortie.
+    await go('c2');
+    assert.deepEqual(items(), ['b', 'a']);
+    assert.equal(onScreen(), '/b.png');
+    // Another project: its own takes (none), the Studio empty (etats-maquette.md, 55).
+    await go('c9', 'p2');
+    assert.deepEqual(items(), []);
+    assert.equal(body.find('studio-frame')[0].className.includes('is-empty'), true);
   } finally {
     restore();
   }
 });
 
-test('the Sortie is the conversation’s; its button shows the project, whose creations dragged into a slot become inputs', async () => {
+test('a conversation opened sets the Studio as its last take was made: model, prompt, format, settings, LoRAs, inputs; a seed only if it was named', async () => {
+  const krea = {
+      id: 'k',
+      name: 'Krea 2',
+      family: 'krea2',
+      seeded: true,
+      direct: true,
+      styled: true,
+      roles: { source: { count: 1, media: ['image'] }, reference: { count: 2, media: ['image'], many: true } },
+      inputs: { source_image: 'source', reference_image: 'reference' },
+      limits: sizes,
+      size: { width: 1024, height: 1024 },
+      settings: [{ key: 'steps', type: 'number', min: 1, max: 50, default: 8 }],
+      loras: [{ id: 'detail', name: 'Détail', on: false, assistant: true, strength: { min: 0, max: 2, default: 1 } }],
+    },
+    moss = { id: 'm', name: 'MOSS Image', family: 'moss', seeded: true, roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    made = (id, conversationId, prompt, parameters, more = {}) => ({
+      id,
+      conversationId,
+      workflowId: 'k',
+      prompt,
+      parameters: { width: 1024, height: 1024, seed: 111, ...parameters },
+      outputs: [{ originalUrl: `/${id}.png`, thumbUrl: `/${id}.jpg` }],
+      ...more,
+    }),
+    // The newest first, as the gallery lists them.
+    all = [
+      // Made from an image of the conversation, a reference of the project that is gone, and a take deleted.
+      made('wide', 'c2', 'une plage en hiver', {
+        width: 1344,
+        height: 768,
+        steps: 12,
+        seed: 4242,
+        seed_given: true,
+        loras: [{ id: 'detail', strength: 1.5 }],
+        styles: [{ name: 'a.safetensors', strength: 0.7 }, { name: 'gone.safetensors', strength: 1 }],
+        references: [
+          { input: 'edit', role: 'source_image', output_id: 'first' },
+          { input: 'subject-1', role: 'reference_image', resource_id: 'kept' },
+          { input: 'subject-2', role: 'reference_image', resource_id: 'erased' },
+        ],
+      }),
+      made('first', 'c2', 'une plage', {}),
+      // An enlargement, made by no model of the mode: the take before it gives the settings.
+      made('large', 'c1', '', { width: 2048, height: 2048 }, { workflowId: 'upscaler' }),
+      made('tall', 'c1', 'un phare la nuit', { width: 768, height: 1344, steps: 20 }),
+    ];
+  let conversation = 'c1';
+  const page = await studioPage(
+    { create_image: [moss, krea] },
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+    },
+    {
+      runs: all,
+      conversation: () => conversation,
+      project: () => 'p1',
+      resource: id => (id === 'kept' ? { id, label: '#ref2', name: 'visage.png', previewUrl: '/preview/kept', width: 800, height: 600 } : null),
+    },
+  );
+  const { body, studio, asked, restore } = page;
+  const slots = () => body.find('studio-slot').map(tile => tile.children[0].children[0]?.src ?? null),
+    sent = async () => {
+      await body.find('studio-go')[0].onclick();
+      await settle();
+      return asked.findLast(([route]) => route === 'tools/action')[1].arguments;
+    };
+  try {
+    // « c1 »: on the screen its newest take (the enlargement); the settings of the last one a model made.
+    assert.equal(body.find('studio-frame-result')[0].src, '/large.png');
+    assert.equal(page.prompt().value, 'un phare la nuit');
+    let args = await sent();
+    assert.equal(args.workflow, 'k', 'its model, not the first of the list');
+    assert.deepEqual([args.width, args.height, args.steps], [768, 1344, 20]);
+    assert.equal(args.seed, undefined, 'its seed was drawn: another is drawn');
+    assert.equal(args.source, undefined);
+    // What the user writes there stays, there.
+    page.prompt().value = 'un phare au matin';
+    page.prompt().oninput();
+    // « c2 »: the settings of its last take, its inputs in their cases; the reference that is gone
+    // leaves its case empty, said in the Studio.
+    conversation = 'c2';
+    studio.conversationChanged();
+    await settle();
+    assert.equal(page.prompt().value, 'une plage en hiver');
+    assert.deepEqual(slots(), ['/first.jpg', '/preview/kept', null]);
+    assert.equal(body.find('studio-error')[0].textContent, 'Une image utilisée pour la dernière prise n’existe plus : sa case est restée vide.');
+    args = await sent();
+    assert.deepEqual([args.width, args.height, args.steps, args.seed], [1344, 768, 12, 4242], 'the seed the user had named');
+    assert.deepEqual(args.source, { output: 'first' });
+    assert.deepEqual(args.reference, [{ resource: 'kept' }]);
+    assert.deepEqual(args.loras, { detail: { enabled: true, strength: 1.5 } });
+    // The LoRA of the user that is still in its folder, not the one that left it.
+    assert.deepEqual(asked.findLast(([route]) => route === 'tools/action')[1].styles, [{ name: 'a.safetensors', strength: 0.7 }]);
+    // Back in « c1 »: as it was left (no take made in it since), not the settings of « c2 ».
+    conversation = 'c1';
+    studio.conversationChanged();
+    await settle();
+    assert.equal(page.prompt().value, 'un phare au matin');
+    args = await sent();
+    assert.deepEqual([args.width, args.height, args.steps, args.seed], [768, 1344, 20, undefined]);
+    assert.equal(args.loras?.detail?.enabled ?? false, false);
+  } finally {
+    restore();
+  }
+});
+
+test('a take made from the chat since the Studio was last seen sets it again; one it made itself does not', async () => {
+  const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    take = (id, prompt) => ({ id, conversationId: 'c1', workflowId: 'w', prompt, parameters: { width: 1024, height: 1024 }, outputs: [{ originalUrl: `/${id}.png`, thumbUrl: `/${id}.jpg` }] });
+  const page = await studioPage(
+    { create_image: [image] },
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'done', record: { id: 'b' } }),
+    },
+    { runs: [take('a', 'un renard')], project: () => 'p1' },
+  );
+  const { body, studio, runs, restore } = page;
+  try {
+    assert.equal(page.prompt().value, 'un renard');
+    // Made here, with another prompt: the Studio keeps what the user goes on writing.
+    page.prompt().value = 'un renard dans la neige';
+    page.prompt().oninput();
+    runs.unshift(take('b', 'un renard dans la neige'));
+    await body.find('studio-go')[0].onclick();
+    await settle();
+    page.prompt().value = 'un renard qui court';
+    page.prompt().oninput();
+    await studio.open();
+    assert.equal(page.prompt().value, 'un renard qui court');
+    // Made from the chat meanwhile: the Studio takes its settings when it comes back on screen.
+    runs.unshift(take('c', 'un lièvre'));
+    studio.invalidate();
+    await studio.open();
+    assert.equal(page.prompt().value, 'un lièvre');
+    assert.equal(body.find('studio-frame-result')[0].src, '/c.png');
+  } finally {
+    restore();
+  }
+});
+
+test('the Sortie is the project’s: the creations of its other conversations dragged into a slot become inputs', async () => {
   const scail = {
       id: 's',
       name: 'SCAIL-2',
@@ -3035,9 +3186,9 @@ test('the Sortie is the conversation’s; its button shows the project, whose cr
         items()[item].find('studio-item-pick')[0].ondragstart(event);
         slots()[slot].ondrop(event);
       };
-    // In Vidéo nothing of this conversation (16/11); the button at the right shows the whole project,
-    // the clip of another conversation and the image.
-    assert.equal(items().length, 0);
+    // In Vidéo the clip of another conversation of the project (16/11: the takes are shared in it);
+    // the button at the right shows the whole project, the image with it.
+    assert.equal(items().length, 1);
     body.find('studio-sort-go')[0].onclick();
     assert.equal(items().length, 2);
     // An image is not the video to follow; the clip is.
@@ -3063,60 +3214,34 @@ test('the Sortie is the conversation’s; its button shows the project, whose cr
   }
 });
 
-test('a click on an empty slot opens « Créations du projet »: a take of its kind is taken by a click', async () => {
-  const scail = {
-      id: 's',
-      name: 'SCAIL-2',
-      verb: 'replace_character',
-      follows: true,
-      seeded: true,
-      roles: {
-        source: { count: 1, media: ['video'], many: false, required: true },
-        reference: { count: 1, media: ['image'], many: false, required: true },
-      },
+test('a click on a slot, empty or filled, opens the files of the computer: no « Créations du projet » in the Studio', async () => {
+  const image = {
+      id: 'w',
+      name: 'Image',
+      roles: { source: { count: 1, media: ['image'], many: false } },
+      limits: sizes,
+      size: { width: 1024, height: 1024 },
       settings: [],
     },
-    runs = [
-      {
-        id: 'clip',
-        conversationId: 'c1',
-        mediaType: 'video',
-        prompt: 'une fille cueille une pomme',
-        outputs: [{ originalUrl: '/clip.mp4', thumbUrl: '/clip.jpg', take: 7 }],
-      },
-      { id: 'face', conversationId: 'c1', prompt: 'un joueur', outputs: [{ originalUrl: '/face.png', thumbUrl: '/face.jpg' }] },
-    ];
-  const page = await studioPage({ replace_character: [scail] }, {}, { runs, project: () => 'p1' });
+    runs = [{ id: 'face', conversationId: 'c1', prompt: 'un joueur', outputs: [{ originalUrl: '/face.png', thumbUrl: '/face.jpg' }] }];
+  const page = await studioPage({ create_image: [image] }, {}, { runs, project: () => 'p1' });
   const { body, restore } = page;
   try {
-    page.mode(1);
-    const slots = () => body.find('studio-slot'),
-      shelf = () => body.find('studio-shelf')[0];
-    assert.equal(shelf(), undefined);
-    // The character: an image; its shelf shows the images of the project only.
-    slots()[1].find('studio-slot-pick')[0].onclick();
-    assert.equal(shelf().find('studio-input-title')[0].textContent, 'Créations du projet');
-    assert.deepEqual(
-      shelf().find('studio-shelf-pick').map(pick => pick.title),
-      ['Image #1'],
-    );
-    shelf().find('studio-shelf-pick')[0].onclick();
-    assert.equal(shelf(), undefined, 'closed once a take is taken');
-    assert.equal(slots()[1].children[0].children[0].src, '/face.jpg');
-    // The video to follow: the clips, by their number. No × (16/11): Échap closes it, or a click
-    // beside it; the slot stays empty.
-    slots()[0].find('studio-slot-pick')[0].onclick();
-    assert.deepEqual(
-      shelf().find('studio-shelf-pick').map(pick => pick.title),
-      ['Prise 7'],
-    );
-    assert.equal(shelf().find('studio-shelf-close').length, 0);
-    page.page['studio-view'].onkeydown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
-    assert.equal(shelf(), undefined);
-    slots()[0].find('studio-slot-pick')[0].onclick();
-    page.pagePointers.forEach(listener => listener({ target: { closest: () => null } }));
-    assert.equal(shelf(), undefined, 'a click beside it');
-    assert.doesNotMatch(slots()[0].className, /is-filled/);
+    const picker = page.page['studio-view'].children.find(child => child.tag === 'input'),
+      slot = () => body.find('studio-slot')[0];
+    assert.equal(picker.clicks ?? 0, 0);
+    slot().find('studio-slot-pick')[0].onclick();
+    assert.equal(picker.clicks, 1, 'the files of the computer, at once');
+    assert.equal(picker.accept, 'image/png,image/jpeg,image/webp');
+    assert.equal(body.find('studio-shelf').length, 0);
+    assert.equal(body.find('studio-input-block').length, 1, 'nothing opens under the inputs');
+    // The file chosen fills the case; a click on it again: another file.
+    picker.files = [{ name: 'visage.png', type: 'image/png' }];
+    await picker.onchange();
+    await settle();
+    assert.match(slot().className, /is-filled/);
+    slot().find('studio-slot-pick')[0].onclick();
+    assert.equal(picker.clicks, 2);
   } finally {
     restore();
   }

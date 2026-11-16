@@ -11706,57 +11706,6 @@ body[data-view='studio'][data-chat='open'] .chat-panel {
     border-color 0.15s,
     background-color 0.15s;
 }
-#studio-view .studio-slot.is-asking .studio-slot-pick {
-  border: 1px solid var(--text-2);
-}
-/* « Créations du projet »: under the inputs, the takes the slot takes, 56 px, the newest at the left. */
-.studio-shelf .studio-input-title {
-  align-items: center;
-}
-.studio-shelf-row {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 2px 2px 6px;
-  scrollbar-width: thin;
-}
-#studio-view .studio-shelf-pick {
-  flex: none;
-  width: 56px;
-  height: 56px;
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.3);
-  outline: 1px solid rgba(238, 232, 222, 0.1);
-  outline-offset: -1px;
-  cursor: grab;
-}
-#studio-view .studio-shelf-pick:hover,
-#studio-view .studio-shelf-pick:focus-visible {
-  outline: 1.5px solid var(--text-1);
-}
-#studio-view .studio-shelf-pick img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-#studio-view .studio-shelf-file {
-  align-self: flex-start;
-  min-height: 0;
-  padding: 4px 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-2);
-  font: 400 13px/1 var(--font-ui);
-}
-#studio-view .studio-shelf-file:hover {
-  color: var(--text-1);
-}
-
 /* The creation under way at the left of the Sortie (capture 24): dark, « EN COURS » and how far. */
 #studio-view .studio-item.is-making .studio-item-pick {
   background: radial-gradient(circle at 40% 45%, rgba(238, 232, 222, 0.08), rgba(0, 0, 0, 0.35) 70%);
@@ -14106,8 +14055,7 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
 /* A drag (16/11, capture 25): what is carried fades at its place (35 %); the case under the hand
    grows (106 %) and shows what comes in it. The pointer of Moodix AI carries a take the same way:
    its picture by the arrow, 104 % of a case, tilted by −3°, its shadow, « PRISE n » on it. */
-#studio-view .studio-item.is-carried .studio-item-pick,
-#studio-view .studio-shelf-pick.is-carried {
+#studio-view .studio-item.is-carried .studio-item-pick {
   opacity: 0.35;
 }
 #studio-view .studio-slot.is-target .studio-slot-pick {
@@ -15130,4 +15078,35 @@ button.glass-select::after {
 /* The screen has the format chosen: a take of another format is whole inside it, never cropped. */
 #studio-view .studio-frame-result {
   object-fit: contain;
+}
+
+/* ------------------------------------------------------------------ after the try of 0.6.24 (16/11) */
+/* The name of an input block (« Image à modifier ») stands 12 px above its cases, not against them. */
+#studio-view .studio-input-block > .studio-input-title {
+  margin-bottom: 12px;
+}
+/* The left column never goes over the Sortie: as tall as its row at most. A long prompt is what
+   gives way, it scrolls in its box; the inputs keep their height. In a window too short for them
+   all, the column scrolls. */
+@container studio (min-width: 900px) {
+  #studio-view .studio-block.is-input {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: 100%;
+    overflow: hidden auto;
+    scrollbar-width: thin;
+  }
+  #studio-view .studio-block.is-input > .studio-block-body {
+    flex: 0 1 auto;
+    min-height: 0;
+  }
+  #studio-view .studio-block.is-input .studio-prompt-field {
+    flex: 0 1 auto;
+    min-height: 124px;
+  }
+  #studio-view .studio-block.is-input .studio-prompt-field textarea {
+    flex: 0 1 auto;
+    min-height: 72px;
+  }
 }

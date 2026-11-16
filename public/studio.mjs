@@ -262,9 +262,14 @@ export function setupStudio({
     toolsAt = 0,
     toolsStale = false,
     shownMedia = null, // { key, element }: what the screen shows, kept from one drawing to the next
-    draftsKey = null; // the conversation whose prompt and inputs are in the Studio (draftKey)
-  // The prompt and the inputs of each conversation left, by mode: they come back with it (16/11).
+    draftsKey = null; // the conversation whose settings are in the Studio (draftKey)
+  // The Studio as each conversation was left (its mode, its drafts) with the newest take it had
+  // then: it comes back so, unless a take was made in it since (16/11).
   const leftDrafts = new Map();
+  // Per conversation, the newest take the Studio was set from, or made itself (settle).
+  const lastSeen = new Map();
+  // The take opened from the chat on the screen (« Afficher dans le Studio »): it stays there.
+  let pinned = null;
   // What is shown on the screen for each mode: the last creation, or one opened from the chat.
   const kept = {};
   const blank = () => ({
@@ -492,9 +497,7 @@ export function setupStudio({
   // The slot an image is being dragged from: dropped on another, the image changes role.
   let dragged = null,
     // A creation of the Sortie dragged to a slot: it becomes that input.
-    carried = null,
-    // The empty slot whose « Créations du projet » is open under the inputs: { role, index, media }.
-    shelf = null;
+    carried = null;
   /**
    * While something is carried, the slots that take it light up and say their name (moodix.css;
    * studio-maquette.md, « Glisser ») : `media`, what is carried, or null once it is dropped.
@@ -504,7 +507,7 @@ export function setupStudio({
     if (media) desk?.setAttribute?.('data-carrying', media);
     else desk?.removeAttribute?.('data-carrying');
   }
-  /** The file of the computer for a slot (what a click on a slot did before « Créations du projet »). */
+  /** The file of the computer for a slot: what a click on it opens, empty or filled. */
   function openPicker(role, index, media) {
     picker.accept = (media === 'video' ? VIDEO_TYPES : IMAGE_TYPES).join(',');
     picker.onchange = () => {
@@ -588,18 +591,13 @@ export function setupStudio({
         return notice(
           'Les images de cette proposition sont celles de Moodix AI : demandez-lui dans le chat pour en changer.',
         );
-      // Empty: « Créations du projet » opens under the inputs (studio-maquette.md); filled, the
-      // file of the computer that takes its place.
-      if (!value) {
-        shelf = shelf?.role === role && shelf.index === index ? null : { role, index, media };
-        return render();
-      }
+      // A file of the computer, empty or filled (16/11: « Créations du projet » is gone from here; a
+      // take of the project is dragged to it from the Sortie).
       openPicker(role, index, media);
     });
     // Named for the hand that carries something here (moodix.css): « FIN », « RÉF. 2 », « REMPLACER ».
     tile.dataset.media = media;
     tile.dataset.name = value ? 'Remplacer' : (SHORT[role] ?? label) + (role === 'reference' ? ' ' + (index + 1) : '');
-    if (shelf?.role === role && shelf.index === index && !value) tile.classList.add('is-asking');
     pick.title = refused || (value ? label + ' · glissez-la vers un autre emplacement pour changer son rôle' : tip);
     pick.setAttribute('aria-label', value ? label + ' · ' + value.name : refused ? label + ' · ' + refused : add);
     pick.disabled = Boolean(working);
@@ -693,62 +691,6 @@ export function setupStudio({
       tile.append(remove);
     }
     return tile;
-  }
-  /**
-   * « Créations du projet » (studio-maquette.md): under the inputs, the takes of the project that
-   * the slot takes (images, or clips), the newest at the left, 56 px; one is taken by a click or
-   * dragged to any slot; a file of the computer at the end. Closed by a take chosen, Échap or a click
-   * beside it.
-   */
-  function shelfBlock() {
-    const { role, index, media } = shelf,
-      takes = runs.filter(record => mediaOf(record) === media).slice(0, 40),
-      block = node('div', 'studio-input-block studio-shelf'),
-      head = node('p', 'studio-input-title', 'Créations du projet'),
-      row = node('div', 'studio-shelf-row');
-    // No × (16/11): it closes as a take is chosen, with Échap (shortcut), or at a click beside it.
-    block.setAttribute('role', 'group');
-    block.setAttribute('aria-label', 'Créations du projet');
-    for (const record of takes) {
-      const output = record.outputs?.[0] ?? {},
-        name = Number.isInteger(output.take) ? 'Prise ' + output.take : (KIND[media] ?? 'Création') + ' #' + numberOf(record),
-        pick = button('studio-shelf-pick' + (aiCarry?.id === record.id ? ' is-carried' : ''), '', () => {
-          shelf = null;
-          putCreation(record, role, index);
-        }),
-        small = output.thumbUrl || (media === 'image' ? output.originalUrl : '');
-      pick.setAttribute('aria-label', 'Prendre : ' + name + (record.prompt ? ' · ' + record.prompt : ''));
-      pick.title = name;
-      if (small) {
-        const picture = node('img');
-        Object.assign(picture, { src: small, alt: '', loading: 'lazy', decoding: 'async', draggable: false });
-        pick.append(picture);
-      } else pick.append(icon(media === 'video' ? 'video' : 'image'));
-      pick.dataset.run = record.id;
-      pick.draggable = true;
-      pick.ondragstart = event => {
-        carried = record;
-        event.dataTransfer.effectAllowed = 'copy';
-        event.dataTransfer.setData('text/plain', name);
-        dragGhost(pick, event.dataTransfer, media, output.take);
-        pick.classList.add('is-carried');
-        carrying(media);
-      };
-      pick.ondragend = () => {
-        carried = null;
-        pick.classList.remove('is-carried');
-        carrying(null);
-      };
-      row.append(pick);
-    }
-    if (!takes.length) row.append(node('span', 'studio-slot-hint', media === 'video' ? 'Aucune vidéo dans ce projet.' : 'Aucune image dans ce projet.'));
-    const file = button('studio-shelf-file', 'Depuis l’ordinateur…', () => {
-      shelf = null;
-      render();
-      openPicker(role, index, media);
-    });
-    block.append(head, row, file);
-    return block;
   }
   /** Whether the workflow takes images in this role. */
   const takesImages = (workflow, role) =>
@@ -989,8 +931,6 @@ export function setupStudio({
     }
     const column = node('div', 'studio-inputs');
     column.append(...blocks);
-    if (shelf && workflow.roles?.[shelf.role]?.count && !working) column.append(shelfBlock());
-    else shelf = null;
     return aiTarget(column, 'inputs');
   }
 
@@ -2354,6 +2294,7 @@ export function setupStudio({
       // It stays on the screen, as the gallery lists it (with the addresses it is shown from).
       const record = made && runs.find(item => item.id === made);
       if (record) kept[asked] = record;
+      settledHere();
       onChange();
       render();
       scrollStrip();
@@ -2486,10 +2427,9 @@ export function setupStudio({
     source_video: 'en vidéo à suivre',
   };
   /**
-   * A take of the project put in its case as the user would (studio-maquette.md, step 2): the pointer
-   * goes to the case, « Créations du projet » opens under the inputs, it takes the take there and
-   * carries it to the case (the cases that take it light up, the one under it grows and shows it),
-   * puts it down, and the panel closes. A reference that is no take is put at once.
+   * A take of the project put in its case (studio-maquette.md, step 2): the pointer goes to the case
+   * carrying the take, the case grows and shows it (0.2 s), and it is put down. A reference that is
+   * no take is put at once.
    */
   async function dragIn(draft, entry, { instant = false } = {}) {
     const put = () => ((draft.inputs[entry.role] ??= [])[entry.index] = entry.item);
@@ -2500,18 +2440,7 @@ export function setupStudio({
       return true;
     }
     const label = 'pose ' + (Number.isInteger(take) ? 'la prise ' + take : 'l’image') + ' ' + (WHERE[entry.role] ?? ''),
-      caseOf = () => document.querySelector?.(`#studio-view .studio-slot[data-slot="${entry.role}-${entry.index}"]`),
-      pickOf = () => document.querySelector?.(`#studio-view .studio-shelf-pick[data-run="${record.id}"]`);
-    if (!(await glide(caseOf(), label))) return false;
-    shelf = { role: entry.role, index: entry.index, media: 'image' };
-    render();
-    if (!pickOf()) {
-      shelf = null;
-      put();
-      render();
-      return Boolean(ai && !ai.stopped);
-    }
-    if (!(await glide(pickOf(), label))) return false;
+      caseOf = () => document.querySelector?.(`#studio-view .studio-slot[data-slot="${entry.role}-${entry.index}"]`);
     aiCarry = { id: record.id, role: entry.role, index: entry.index, preview: entry.item.preview, over: false };
     pointer.carry(entry.item.preview, Number.isInteger(take) ? 'PRISE ' + take : '');
     render();
@@ -2523,7 +2452,6 @@ export function setupStudio({
     if (!ai || ai.stopped) return false;
     put();
     aiCarry = null;
-    shelf = null;
     pointer.carry(null);
     render();
     return Boolean(ai && !ai.stopped);
@@ -2634,8 +2562,7 @@ export function setupStudio({
     else draft.workflow = workflow.id;
     if (values.promptFree)
       steps.push(['prompt', 'écrit le prompt', options => typePrompt(draft, values.prompt, options), { anchor: { ax: 34, ay: 30 } }]);
-    // Each image in its case, one after the other: a take of the project is carried there from
-    // « Créations du projet » (dragIn), as the user would.
+    // Each image in its case, one after the other: a take of the project is carried there (dragIn).
     if (values.references.length) {
       draft.inputs = {};
       for (const entry of referenceInputs(values.references))
@@ -2702,7 +2629,6 @@ export function setupStudio({
       // The pointer stopped before the end (« Générer » pressed from elsewhere): what is left is set
       // at once, the proposal whole. The user cannot stop it: the Studio is locked (16/11).
       for (const [, , apply] of steps.slice(done)) await apply({ instant: true });
-      shelf = null;
       lockStudio(false);
       return render();
     }
@@ -2960,6 +2886,8 @@ export function setupStudio({
     const external = working?.external;
     if (external) working = null;
     await refresh().catch(() => {});
+    // Made from the Studio as it is set: its settings are those of that take already.
+    settledHere();
     if (result?.record) {
       const record = runs.find(item => item.id === result.record.id) ?? result.record;
       kept[mediaOf(record)] = record;
@@ -2977,9 +2905,9 @@ export function setupStudio({
       : { output: record.id };
   /** What the screen shows: the creation just made or opened from the chat, else the last of its mode. */
   /**
-   * The takes of the open conversation: the Studio is that conversation's (16/11), its screen and its
-   * Sortie with it; those of the rest of the project are in « Créations du projet » and under the
-   * button of the Sortie. (The former Studio, read alone, has all of its own.)
+   * The takes of the open conversation: the screen is that conversation's (16/11), with the settings
+   * of its last take (adopt). The Sortie is the project's: every take of all its conversations, a new
+   * conversation included. (The former Studio, read alone, has all of its own.)
    */
   const ownRuns = () =>
     legacy ? runs : runs.filter(record => !record.conversationId || record.conversationId === conversation());
@@ -2997,6 +2925,8 @@ export function setupStudio({
       if (extending?.id === record.id) extending = null;
       for (const key of Object.keys(kept)) if (kept[key].id === record.id) delete kept[key];
       await refresh();
+      // A take deleted here leaves the settings in hand as they are (not those of the take before it).
+      settledHere();
     } catch (error) {
       notice(error.message);
     }
@@ -3032,14 +2962,7 @@ export function setupStudio({
   }
   /** A creation of the Sortie (of any conversation of the project) in a slot of the mode shown. */
   function putCreation(record, role, index = 0) {
-    const output = { ...record.outputs[0], ...measured.get(record.id) };
-    (drafts[mode].inputs[role] ??= [])[index] = {
-      source: outputSource(record),
-      preview: output.thumbUrl || output.originalUrl,
-      name: record.prompt || KIND[mediaOf(record)] || 'Création',
-      width: output.width ?? record.parameters?.width,
-      height: output.height ?? record.parameters?.height,
-    };
+    (drafts[mode].inputs[role] ??= [])[index] = creationInput(record);
     failure = '';
     followFormat(role);
     render();
@@ -3409,7 +3332,8 @@ export function setupStudio({
       about = modeOf(mode),
       own = SORTS.find(item => item.id === mode) ?? SORTS[0],
       sort = sortieAll ? SORTS[0] : own,
-      shown = sortieAll ? runs : ownRuns().filter(record => mediaOf(record) === mode);
+      // Of the whole project, whatever the conversation open (a new one too): they are shared in it.
+      shown = sortieAll ? runs : runs.filter(record => mediaOf(record) === mode);
     section.setAttribute('aria-label', 'Sortie');
     if (!runs.length) {
       const empty = node('div', 'studio-empty-strip');
@@ -4081,9 +4005,10 @@ export function setupStudio({
       if (!info) unreadable = error.message;
       notice('Studio indisponible : ' + error.message);
     }
+    const set = settle();
     // Drawn again only if what it shows has changed, once the page has stopped moving.
     await afterMove();
-    if (shown() !== drawn) render();
+    if (set || shown() !== drawn) render();
   }
   /** Where the creations shown come from: the conversation and its project. */
   const where = () => `${place()}|${legacy ? '' : project()}`;
@@ -4099,6 +4024,7 @@ export function setupStudio({
       const before = info && JSON.stringify(info);
       if (!info || toolsStale) await load();
       if (runsStale || runsFor !== where() || seenConversation !== conversation()) await refresh();
+      if (settle()) render();
       // Read again (the engine is ready): drawn again if what it offers changed.
       if (before && JSON.stringify(info) !== before && !ai && !working) {
         await afterMove();
@@ -4118,6 +4044,7 @@ export function setupStudio({
   }
   function forget() {
     for (const key of Object.keys(kept)) delete kept[key];
+    pinned = null;
     extending = null;
     failure = '';
     legacy = false;
@@ -4131,41 +4058,183 @@ export function setupStudio({
    */
   function conversationChanged() {
     const next = draftKey();
-    if (draftsKey !== null && next !== draftsKey) {
-      if (!draftsKey.startsWith('new|'))
-        leftDrafts.set(
-          draftsKey,
-          Object.fromEntries(MODES.map(item => [item.id, { prompt: drafts[item.id].prompt, inputs: drafts[item.id].inputs }])),
-        );
-      if (leftDrafts.size > 40) leftDrafts.delete(leftDrafts.keys().next().value);
-      const back = leftDrafts.get(next) ?? {};
-      for (const item of MODES) Object.assign(drafts[item.id], { prompt: back[item.id]?.prompt ?? '', inputs: back[item.id]?.inputs ?? {} });
-      shelf = null;
+    // A conversation not begun that gets its identifier while its first take is made: the same one.
+    const begun = draftsKey?.startsWith('new|') && conversation() && Boolean(working);
+    if (draftsKey !== null && next !== draftsKey && !begun) {
+      if (!draftsKey.startsWith('new|')) {
+        leftDrafts.set(draftsKey, { mode, drafts: structuredClone(drafts), newest: lastSeen.get(draftsKey) ?? null });
+        if (leftDrafts.size > 40) leftDrafts.delete(leftDrafts.keys().next().value);
+      }
+      // Empty until its takes are read (settle): the prompt and the inputs are a conversation's own.
+      for (const item of MODES) Object.assign(drafts[item.id], { prompt: '', before: null, inputs: {} });
+      lastSeen.delete(next);
     }
     draftsKey = next;
     forget();
     onConversation();
-    if (info) void refresh().then(render, () => render());
+    if (info)
+      void refresh()
+        .then(settle, () => {})
+        .then(render);
     else render();
+  }
+  /** The models a mode offers, whatever is being continued: its own and, for a video, those that follow one. */
+  const modelsOf = id => [
+    ...(info?.tools?.[modeOf(id).verb] ?? []),
+    ...(id === 'video' ? (info?.tools?.replace_character ?? []) : []),
+  ];
+  /** A take of the project as an input of the Studio (its picture, its name, its size). */
+  function creationInput(record, index = 0) {
+    const output = { ...record.outputs[index], ...measured.get(record.id) };
+    return {
+      source: { ...outputSource(record), ...(index > 0 ? { index } : {}) },
+      preview: output.thumbUrl || output.originalUrl,
+      name: record.prompt || KIND[mediaOf(record)] || 'Création',
+      width: output.width ?? record.parameters?.width,
+      height: output.height ?? record.parameters?.height,
+    };
+  }
+  /**
+   * The Studio as it was to make a take (16/11): its model, its prompt, its format and size, its
+   * length, its settings, its LoRAs and its inputs, in the draft of its mode. Not its seed, drawn
+   * again, unless the user had named it (`seed_given`). An input that is no longer there (a take
+   * deleted or gone to another project, a reference erased) leaves its case empty: how many is
+   * returned, for the Studio to say so.
+   */
+  function adopt(record) {
+    const target = mediaOf(record),
+      draft = drafts[target],
+      made = record.parameters ?? {},
+      workflow = modelsOf(target).find(item => item.id === record.workflowId) ?? null;
+    Object.assign(draft, { prompt: String(record.prompt ?? ''), before: null, inputs: {}, extension: null });
+    if (!workflow) return 0;
+    // The LoRAs of the user are of one family of models: those of the family left wait for its return.
+    const family = modelsOf(target).find(item => item.id === draft.workflow)?.family;
+    if (family !== undefined && family !== workflow.family) {
+      draft.shelved[family] = draft.styles;
+      draft.styles = draft.shelved[workflow.family] ?? [];
+    }
+    draft.workflow = workflow.id;
+    // Its saved settings (« Enregistrer ») do not come over those of the take.
+    presetShown[target] = true;
+    if (workflow.seeded) draft.seed = made.seed_given === true && Number.isSafeInteger(made.seed) ? String(made.seed) : '';
+    if (workflow.limits && made.width > 0 && made.height > 0) {
+      const format = formatOf(made.width, made.height);
+      if (format) Object.assign(draft, { format: format.id, size: sizeKey(made), formatChosen: true });
+    }
+    const lengths = workflow.lengths?.seconds ?? [],
+      // The whole clip; of a continuation, what it added to the clip it started from.
+      length = lengthOfRecord(record, Boolean(sourceOf(record)));
+    if (lengths.length && length > 0)
+      draft.length = lengths.reduce((best, value) => (Math.abs(value - length) < Math.abs(best - length) ? value : best));
+    for (const setting of workflow.settings ?? []) {
+      if (made[setting.key] === undefined || made[setting.key] === null) continue;
+      (draft.settings[workflow.id] ??= {})[setting.key] = made[setting.key];
+      if (setting.key === 'lyrics') draft.lyrics = Boolean(made[setting.key]);
+    }
+    // The LoRAs of its workflow as it had them: on with their strength, the others off.
+    if (Array.isArray(made.loras) && workflow.loras?.length) {
+      const chosen = new Map(made.loras.map(item => [item.id, item.strength]));
+      for (const item of workflow.loras) {
+        const choice = loraChoice(workflow, item, draft);
+        choice.on = chosen.has(item.id) || !item.assistant;
+        if (chosen.has(item.id) && Number.isFinite(chosen.get(item.id))) choice.strength = chosen.get(item.id);
+        loraChoice(workflow, item, draft);
+      }
+    }
+    // Those of the user, which are still in their folder.
+    if (workflow.styled && target !== 'audio')
+      draft.styles = (Array.isArray(made.styles) ? made.styles : [])
+        .filter(style => (info.styles ?? []).includes(style?.name))
+        .slice(0, MAX_STYLES)
+        .map(({ name, strength }) => ({ name, strength }));
+    // Its inputs, each in the case of its role, in their order.
+    let lost = 0;
+    const counts = {};
+    for (const ref of Array.isArray(made.references) ? made.references : []) {
+      // The role as the Studio names it: said by the workflow (`inputs`), else read from its name.
+      const named = workflow.inputs?.[ref.role] ?? (ref.role in workflow.roles ? ref.role : String(ref.role).replace(/_image$/, '')),
+        role = named === 'msr' ? 'reference' : named,
+        spec = workflow.roles?.[role],
+        index = counts[role] ?? 0;
+      // Not a case of this model (the clip a continuation started from): nothing to fill.
+      if (!spec?.count || index >= spec.count) continue;
+      const taken = ref.output_id ? runs.find(item => item.id === ref.output_id) : null,
+        resource = ref.resource_id ? assets.resource?.(ref.resource_id) : null;
+      counts[role] = index + 1;
+      if (taken && spec.media.includes(mediaOf(taken)))
+        (draft.inputs[role] ??= [])[index] = creationInput(taken, ref.output_index > 0 ? ref.output_index : 0);
+      else if (resource)
+        (draft.inputs[role] ??= [])[index] = {
+          source: { resource: resource.id },
+          preview: resource.previewUrl || resource.originalUrl,
+          name: `${resource.label} · ${resource.name}`,
+          width: resource.width,
+          height: resource.height,
+        };
+      else lost++;
+    }
+    return lost;
+  }
+  /**
+   * The creations of the conversation in hand have just been read: the Studio takes the settings of
+   * its last take, mode by mode, and shows the mode of the newest (16/11). Only when that take is
+   * new to it: one it made itself, or was set from already, changes nothing, and a conversation left
+   * comes back as it was left unless a take was made in it since. A conversation without a take keeps
+   * the model and the settings in hand, its prompt and its inputs empty. Nothing while a take is made
+   * or Moodix AI proposes: the Studio is theirs.
+   */
+  function settle() {
+    if (!info || legacy || runsFor !== where() || working || proposal || ai || checking) return false;
+    const key = draftKey(),
+      own = ownRuns(),
+      newest = own[0]?.id ?? null,
+      left = leftDrafts.get(key);
+    leftDrafts.delete(key);
+    if (!left && lastSeen.has(key) && lastSeen.get(key) === newest) return false;
+    lastSeen.set(key, newest);
+    if (lastSeen.size > 200) lastSeen.delete(lastSeen.keys().next().value);
+    if (left && left.newest === newest) {
+      for (const item of MODES) Object.assign(drafts[item.id], left.drafts[item.id]);
+      mode = left.mode;
+      return true;
+    }
+    if (!newest) return false;
+    let lost = 0;
+    for (const item of MODES) {
+      // The last take of the mode that one of its models made (not an enlargement, which has no settings).
+      const models = new Set(modelsOf(item.id).map(model => model.id)),
+        last = own.find(record => mediaOf(record) === item.id && models.has(record.workflowId));
+      if (last) lost += adopt(last);
+    }
+    // The screen shows that newest take: its mode (when a model makes that kind here), and no longer
+    // a take the Studio kept on it; one opened from the chat (« Afficher dans le Studio ») stays.
+    for (const kind of Object.keys(kept)) if (kept[kind].id !== pinned) delete kept[kind];
+    if (!pinned && modelsOf(mediaOf(own[0])).length) mode = mediaOf(own[0]);
+    extending = null;
+    failure =
+      lost > 1
+        ? `${lost} images utilisées pour la dernière prise n’existent plus : leurs cases sont restées vides.`
+        : lost
+          ? 'Une image utilisée pour la dernière prise n’existe plus : sa case est restée vide.'
+          : '';
+    return true;
+  }
+  /** The Studio has just made a take itself: its settings are already those of the newest take. */
+  function settledHere() {
+    if (!legacy && runsFor === where()) lastSeen.set(draftKey(), ownRuns()[0]?.id ?? null);
   }
   /** « Ouvrir » on a card of the chat: the creation on the screen of its mode. */
   function show(record) {
     legacy = false;
     mode = mediaOf(record);
     kept[mode] = record;
+    pinned = record.id;
     render();
   }
 
   // Ctrl + Entrée (⌘ on a Mac) generates from anywhere in the Studio, not only from the prompt.
   const shortcut = event => {
-    // « Créations du projet » closes with Échap (16/11: no ×), as a take chosen or a click beside it.
-    if (event.key === 'Escape' && shelf && !aiWorking) {
-      event.preventDefault?.();
-      event.stopPropagation?.();
-      shelf = null;
-      render();
-      return;
-    }
     if (!(event.ctrlKey || event.metaKey) || event.altKey || working || enriching || aiWorking) return;
     // The message box of the chat has its own keys: these are the Studio's.
     if (event.target?.id === 'prompt') return;
@@ -4199,12 +4268,6 @@ export function setupStudio({
   document.addEventListener?.('keydown', event => {
     if (event.target !== document.body || $('studio-view')?.offsetParent == null) return;
     if (!document.querySelector('dialog[open]')) shortcut(event);
-  });
-  // A click beside « Créations du projet » closes it (16/11: no ×); a case opens or closes it itself.
-  document.addEventListener?.('pointerdown', event => {
-    if (!shelf || aiWorking || event.target?.closest?.('#studio-view .studio-shelf, #studio-view .studio-slot')) return;
-    shelf = null;
-    render();
   });
   // A click outside « ··· » closes it.
   document.addEventListener?.('pointerdown', event => {
