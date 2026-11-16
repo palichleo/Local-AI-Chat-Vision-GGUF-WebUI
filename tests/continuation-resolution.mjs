@@ -473,6 +473,91 @@ test('the user gives an input another role: a subject reference becomes the firs
   assert.deepEqual(loras(second), [], 'a first frame needs no subject LoRA');
 });
 
+test('an image put in a case of the card joins the proposal: a free slot of its role, else in place of the one there', async () => {
+  const conversationId = '11111111-1111-4111-8111-111111111111';
+  const [imageId, endId, otherId] = [
+    '33333333-3333-4333-8333-333333333333',
+    '44444444-4444-4444-8444-444444444444',
+    '55555555-5555-4555-8555-555555555555',
+  ];
+  const shipped = validateNativeWorkflow(
+    JSON.parse(
+      readFileSync(new URL('../runner/workflows/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8'),
+    ),
+  );
+  const workflows = [{ ...shipped, ready: true }];
+  const read = [];
+  const runtime = new ToolRuntime({
+    catalog: {
+      kind: 'native',
+      list: async () => workflows,
+      read: async id => workflows.find(workflow => workflow.id === id),
+      prepare: async (id, args, options) => {
+        const workflow = workflows.find(item => item.id === id);
+        return { workflow, job: await resolveNativeWorkflow(workflow, args, assets, options), outputNodes: [] };
+      },
+    },
+    engine: { state: 'ready' },
+    gallery: {
+      get: async () => ({
+        provider: 'native',
+        mediaType: 'image',
+        workflowId: 'krea',
+        parameters: { pipeline: 'krea2', width: 1024, height: 1024 },
+        outputs: [{ source: { filename: 'tiger.png' }, width: 1024, height: 1024 }],
+      }),
+    },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5 }),
+    engineConfig: () => ({}),
+    sourceMedia: async source => {
+      read.push(source);
+      return { mime: 'image/png', name: 'Prise', handle: { close: async () => {} } };
+    },
+    clientFactory: () => ({}),
+  });
+  const first = await runtime.request(
+    [
+      {
+        id: 'call',
+        type: 'function',
+        function: {
+          name: 'create_video',
+          arguments: JSON.stringify({ prompt: 'a tiger runs', intention: 'Le tigre court.', start_image: { output: imageId } }),
+        },
+      },
+    ],
+    { conversationId, turnId: conversationId, messages: [] },
+  );
+  assert.deepEqual(first.inputRoles, ['start_image', 'end_image', 'source_video', 'msr_image', 'msr_image']);
+  const revise = (request, edits) =>
+    runtime.revise({ requestId: request.requestId, approvalToken: request.approvalToken, edits });
+  // FIN was empty: the take goes there, read from the conversation it was made in.
+  const second = await revise(first, { add: { role: 'end_image', source: { output: endId, conversation: '66666666-6666-4666-8666-666666666666' } } });
+  assert.deepEqual(
+    second.plan.references.map(ref => [ref.role, ref.input]),
+    [
+      ['start_image', 'start'],
+      ['end_image', 'end'],
+    ],
+  );
+  assert.deepEqual(second.args.references.at(-1), { input: 'end', output_id: endId, output_conversation: '66666666-6666-4666-8666-666666666666' });
+  // DÉBUT was taken: the new one takes its place.
+  const third = await revise(second, { add: { role: 'start_image', source: { output: otherId } } });
+  assert.deepEqual(
+    third.plan.references.map(ref => [ref.role, ref.output_id]),
+    [
+      ['end_image', endId],
+      ['start_image', otherId],
+    ],
+  );
+  // A reference of the project, in a free slot of its role.
+  const fourth = await revise(third, { add: { role: 'msr_image', source: { resource: '77777777-7777-4777-8777-777777777777' } } });
+  assert.deepEqual(fourth.args.references.at(-1), { input: 'subject-1', resource_id: '77777777-7777-4777-8777-777777777777' });
+  // What the workflow does not take, or what is not a source, is refused.
+  await assert.rejects(revise(fourth, { add: { role: 'nowhere', source: { output: otherId } } }), /ne prend pas d’image/);
+  await assert.rejects(revise(fourth, { add: { role: 'end_image', source: {} } }), /Entrée invalide/);
+});
+
 test('a size the workflow sets takes the format of the image the video starts from, at the profile scale', async () => {
   const args = { prompt: 'x', intention: 'y', references: [{ input: 'start', image: 0 }] };
   const sized = async (extra, options) => {

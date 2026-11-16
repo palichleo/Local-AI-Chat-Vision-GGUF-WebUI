@@ -4900,6 +4900,8 @@ dialog,
   --size-2: 13px;
   --size-3: 14px;
   --size-4: 16px;
+  /* The small capitals of the labels (« SORTIE », « PRISE 4 »), with their spacing: 10,5 px (16/11). */
+  --size-label: 10.5px;
   --accent: #eceef2;
   --accent-hover: #ffffff;
   --link: #9db4ff;
@@ -8302,8 +8304,8 @@ html[data-switch='chat']::view-transition-old(studio) {
   width: 13px;
   height: 13px;
 }
-/* The creations, and at their right the button that sorts them: the kind shown (all: the media
-   icon), unfolding downward into the others. Grey and white, as the rest of the Studio. */
+/* The creations, and the button that shows the whole project (on the line « SORTIE », at the
+   right: captures 20 to 23). */
 .studio-sortie-row {
   display: flex;
   flex: 1 1 auto;
@@ -8317,36 +8319,34 @@ html[data-switch='chat']::view-transition-old(studio) {
   flex: 1 1 auto;
   min-width: 0;
 }
-.studio-sort {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  gap: 4px;
-  padding-top: 4px;
+#studio-view .studio-block.is-output {
+  position: relative;
 }
-.studio-sort-menu {
+.studio-sort {
+  position: absolute;
+  top: 4px;
+  right: 0;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 #studio-view .studio-sort button {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   min-height: 0;
   padding: 0;
-  border: 1px solid #262a33;
+  border: 0;
   border-radius: 8px;
-  background: rgba(11, 12, 15, 0.85);
-  color: var(--text-2);
+  background: transparent;
+  color: var(--text-3);
 }
 #studio-view .studio-sort button:hover,
-#studio-view .studio-sort button:focus-visible,
-#studio-view .studio-sort.is-open .studio-sort-go {
-  border-color: #3a3f4a;
+#studio-view .studio-sort button:focus-visible {
   color: var(--text-1);
-  outline: none;
+}
+#studio-view .studio-sort button[aria-pressed='true'] {
+  background: rgba(238, 232, 222, 0.1);
+  color: var(--text-1);
 }
 #studio-view .studio-sort svg {
   width: 15px;
@@ -10274,7 +10274,7 @@ body[data-view='chat'] .workspace:has(#messages:empty) > .chat-panel {
   background: transparent;
   box-shadow: none;
   color: var(--text-2);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.2em;
   text-transform: uppercase;
   cursor: pointer;
@@ -10329,7 +10329,7 @@ body:not([data-view='chat']) .resume {
 }
 .resume-last {
   color: var(--text-3);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.3em;
   text-transform: uppercase;
 }
@@ -10405,7 +10405,7 @@ body:not([data-view='chat']) .resume {
 }
 #messages .message-ref figcaption {
   color: var(--text-3);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.1em;
 }
 #messages .message.assistant .message-header {
@@ -10421,7 +10421,7 @@ body:not([data-view='chat']) .resume {
 }
 #messages .message-name {
   color: var(--text-2);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.3em;
   text-transform: uppercase;
 }
@@ -10588,7 +10588,7 @@ body:not([data-view='chat']) .resume {
   flex: 0 0 100%;
   margin: 0 0 -2px;
   color: var(--text-3);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.25em;
   text-transform: uppercase;
 }
@@ -10655,7 +10655,7 @@ body:not([data-view='chat']) .resume {
   justify-content: space-between;
   gap: 10px;
   color: var(--text-3);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.08em;
 }
 #messages .take-number {
@@ -10669,7 +10669,7 @@ body:not([data-view='chat']) .resume {
   border-radius: 6px;
   background: rgba(12, 11, 14, 0.72);
   color: var(--text-1);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.06em;
   pointer-events: none;
 }
@@ -10740,7 +10740,7 @@ body:not([data-view='chat']) .resume {
   content: attr(data-kind);
   flex: none;
   color: var(--text-3);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.25em;
   text-transform: uppercase;
 }
@@ -10882,7 +10882,7 @@ body:not([data-view='chat']) .resume {
 .proposal-status {
   margin: 0;
   color: var(--text-3);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.24em;
   text-transform: uppercase;
 }
@@ -11052,7 +11052,7 @@ body:not([data-view='chat']) .resume {
 .proposal-input figcaption {
   min-height: 12px;
   color: var(--text-3);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -11368,7 +11368,7 @@ body:not([data-view='chat']) .resume {
 .studio-ai-line {
   margin: 0 0 0 auto;
   color: var(--accent);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.24em;
   text-transform: uppercase;
 }
@@ -11443,7 +11443,7 @@ body:not([data-view='chat']) .resume {
   border-radius: 6px;
   background: rgba(12, 11, 14, 0.72);
   color: var(--text-1);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.12em;
   pointer-events: none;
 }
@@ -11452,7 +11452,7 @@ body:not([data-view='chat']) .resume {
 }
 #studio-view .studio-readout {
   color: var(--text-2);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-shadow: none;
 }
@@ -11552,7 +11552,7 @@ body:not([data-view='chat']) .resume {
   background: rgba(238, 232, 222, 0.06);
 }
 #studio-view .studio-go-group .studio-go[role='progressbar'] .studio-go-label {
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.22em;
   text-transform: uppercase;
 }
@@ -11773,7 +11773,7 @@ body:not([data-view='chat']) .resume {
 #studio-view .studio-block.is-output > .studio-block-body::before {
   content: 'Sortie';
   color: var(--text-3);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.3em;
   text-transform: uppercase;
 }
@@ -11817,12 +11817,6 @@ body:not([data-view='chat']) .resume {
   object-fit: cover;
   border-radius: 0;
 }
-#studio-view .studio-item[style*='--ratio'] .studio-item-pick {
-  width: calc(var(--strip-h) * var(--ratio, 1.7778) * var(--span, 1));
-}
-#studio-view .studio-item-pick.has-strip {
-  background: var(--strip) left center / auto 100% repeat-x;
-}
 #studio-view .studio-item-pick.has-strip > img {
   opacity: 0;
 }
@@ -11837,7 +11831,7 @@ body:not([data-view='chat']) .resume {
   justify-content: space-between;
   gap: 8px;
   color: var(--text-3);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.1em;
   white-space: nowrap;
 }
@@ -11971,7 +11965,7 @@ body[data-view='studio'][data-chat='open'] .chat-panel {
   top: calc(100% + 5px);
   left: 0;
   color: var(--accent);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -12052,10 +12046,6 @@ body[data-view='studio'][data-chat='open'] .chat-panel {
 #studio-view .studio-shelf-file:hover {
   color: var(--text-1);
 }
-/* A clip of the Sortie: wide enough for its line (« PRISE 31  06.04 S »). */
-#studio-view .studio-item[style*='--ratio'] .studio-item-pick {
-  min-width: 120px;
-}
 
 /* The creation under way at the left of the Sortie (capture 24): dark, « EN COURS » and how far. */
 #studio-view .studio-item.is-making .studio-item-pick {
@@ -12115,7 +12105,7 @@ body[data-view='library'] #library-view .library-heading {
 .library-total {
   align-self: baseline;
   color: var(--text-3);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.24em;
   text-transform: uppercase;
 }
@@ -12222,7 +12212,7 @@ body[data-view='library'] #library-view .library-heading {
   flex: none;
   margin-right: 8px;
   color: var(--text-3);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.24em;
   text-transform: uppercase;
 }
@@ -12272,7 +12262,7 @@ body[data-view='library'] #library-view .library-heading {
   gap: 14px;
   margin: 0 0 12px;
   color: var(--text-3);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.24em;
   text-transform: uppercase;
 }
@@ -12325,7 +12315,7 @@ body[data-view='library'] #library-view .library-heading {
   border-radius: 6px;
   background: rgba(12, 11, 14, 0.72);
   color: var(--text-1);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.06em;
   transition: opacity 0.15s ease;
 }
@@ -12348,7 +12338,7 @@ body[data-view='library'] #library-view .library-heading {
   display: flex;
   justify-content: space-between;
   color: var(--text-3);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.18em;
 }
 #library-view .library-tile.is-sound .library-wave {
@@ -12588,7 +12578,7 @@ body[data-view='library'] #library-view .library-heading {
   border-radius: 6px;
   background: rgba(12, 11, 14, 0.72);
   color: var(--text-1);
-  font: 400 12px/1 var(--font-mono);
+  font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.12em;
   pointer-events: none;
 }
@@ -12613,7 +12603,7 @@ body[data-view='library'] #library-view .library-heading {
   gap: 12px;
   margin: 0;
   color: var(--text-2);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.24em;
   text-transform: uppercase;
 }
@@ -12899,7 +12889,7 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   margin: 0;
   padding: 30px 28px 0;
   color: var(--text-2);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.3em;
   text-transform: uppercase;
 }
@@ -13010,7 +13000,7 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   order: -2;
   margin: 0;
   color: var(--text-3);
-  font: 500 12px/1 var(--font-ui);
+  font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.3em;
   text-transform: uppercase;
 }
@@ -13343,3 +13333,206 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   border: 0;
 }
 #original-dialog:focus { outline: none; }
+/* The actions on a take (claude_design/icones-actions): drawn at 18 px in a button of 34 px with
+   corners of 8 over a take and in the panel of a take opened; 46 px with corners of 10 under the
+   screen of the Studio. */
+#messages .output-action,
+#library-view .output-action,
+.media-take-actions .output-action {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+#messages .output-action svg,
+#library-view .output-action svg,
+.media-take-actions .output-action svg,
+#studio-view .studio-actionbar .output-action svg {
+  width: 18px;
+  height: 18px;
+}
+/* The files of the LLM not chosen yet: their words in grey (« Aucun moteur choisi »). */
+#settings .path-input input:is(#model-path, #projector-path, #engine-path)::placeholder {
+  color: var(--text-3);
+}
+/* The Sortie: « PRISE 4 » at the left and its length at the right, whole. */
+#studio-view .studio-item-caption {
+  width: auto;
+  min-width: 100%;
+}
+#studio-view .studio-item-meta {
+  overflow: visible;
+  text-overflow: clip;
+}
+/* « EN COURS · 46 % » is the word of the button, not a small label: 13 px in mono (capture 24). */
+#studio-view .studio-go-group .studio-go[role='progressbar'] .studio-go-label {
+  font: 500 13px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+}
+
+/* « Créations du projet » in a card (16/11): under the cases, at the left of the settings, as in
+   the Studio; the image taken goes in its case. A file over the card: the empty cases in the accent. */
+.proposal-body:has(> .proposal-shelf:not([hidden])) {
+  grid-auto-flow: row dense;
+}
+.proposal-body:has(> .proposal-shelf:not([hidden])) > .proposal-grid {
+  grid-column: 2;
+  grid-row: span 2;
+}
+.proposal-body > .proposal-shelf {
+  display: grid;
+  grid-column: 1;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px 8px;
+  border: 1px solid rgba(238, 232, 222, 0.08);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+}
+.proposal-body > .proposal-shelf[hidden] {
+  display: none;
+}
+.proposal-shelf-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  color: var(--text-2);
+  font: 400 14px/1.2 var(--font-ui);
+}
+#messages .proposal-card .proposal-shelf-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+}
+#messages .proposal-card .proposal-shelf-close:hover {
+  color: var(--text-1);
+}
+#messages .proposal-card .proposal-shelf-close svg {
+  width: 13px;
+  height: 13px;
+}
+.proposal-shelf-row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+  scrollbar-width: thin;
+}
+.proposal-shelf-note {
+  color: var(--text-3);
+  font: 400 13px/1.4 var(--font-ui);
+}
+#messages .proposal-card .proposal-shelf-pick {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  outline: 1px solid rgba(238, 232, 222, 0.1);
+  outline-offset: -1px;
+}
+#messages .proposal-card .proposal-shelf-pick:hover,
+#messages .proposal-card .proposal-shelf-pick:focus-visible {
+  outline: 1.5px solid var(--text-1);
+}
+#messages .proposal-card .proposal-shelf-pick img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+#messages .proposal-card .proposal-shelf-file {
+  justify-self: start;
+  min-height: 0;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: 400 13px/1 var(--font-ui);
+}
+#messages .proposal-card .proposal-shelf-file:hover {
+  color: var(--text-1);
+}
+#messages .proposal-card.is-dropping .proposal-input.is-empty .proposal-input-frame {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The Studio (16/11). While a take is made, the number it will have, in the accent. */
+#studio-view .studio-frame-label.is-coming {
+  color: var(--accent);
+}
+/* A clip of the Sortie: a strip of its frames at its format, 30 px a second (captures 21 and 22),
+   wide enough for its line (« PRISE 31  06.04 S »); a fine dark line between two frames. */
+#studio-view .studio-item[data-media='video'] .studio-item-pick {
+  width: clamp(120px, calc(var(--seconds, 4) * 30px), 480px);
+}
+#studio-view .studio-item-pick.has-strip {
+  --frame-w: calc(var(--strip-h) * var(--ratio, 1.7778));
+  background:
+    linear-gradient(90deg, transparent calc(100% - 2px), rgba(8, 7, 10, 0.8) 0) left center / var(--frame-w) 100% repeat-x,
+    var(--strip) left center / var(--frame-w) 100% repeat-x;
+}
+/* A sound: a card (capture 23), « PRISE 29 · 30.00 S » and its kind at the top, its stripes, its
+   name at the foot; nothing under it. */
+#studio-view .studio-item.is-sound .studio-item-pick {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  width: 260px;
+  padding: 14px 14px 12px;
+  border-radius: 8px;
+  background: rgba(var(--room-glass), 0.5);
+  outline-color: rgba(238, 232, 222, 0.12);
+  text-align: left;
+}
+#studio-view .studio-item.is-sound .studio-item-caption {
+  display: none;
+}
+.studio-sound-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-3);
+  font: 400 var(--size-label)/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+#studio-view .studio-item.is-shown .studio-sound-head > :first-child {
+  color: var(--text-1);
+}
+#studio-view .studio-item.is-sound .studio-thumb-wave {
+  position: static;
+  display: block;
+  width: auto;
+  height: 16px;
+  margin: 0;
+  border-radius: 2px;
+  background: repeating-linear-gradient(90deg, rgba(238, 232, 222, 0.42) 0 2px, transparent 2px 5px);
+  -webkit-mask: linear-gradient(to bottom, transparent, #000 25% 75%, transparent);
+  mask: linear-gradient(to bottom, transparent, #000 25% 75%, transparent);
+}
+.studio-sound-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font: 400 13px/1.2 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

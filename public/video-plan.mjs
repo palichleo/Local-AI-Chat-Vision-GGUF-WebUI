@@ -70,8 +70,9 @@ const seconds = value => value.toFixed(2).replace('.', ',') + ' s';
  * the prompt folded with « Revenir au prompt de Moodix », the choice of Moodix marked « proposé »;
  * the two folds are given back (`folds`: their name and their panel) for the card to place. Its
  * inputs are pictures (DÉBUT and FIN in the shape of the format, a rule, RÉF. 1…), « + » where the
- * workflow takes one more (`onAdd`: an image joined to the next message); a changed value turns
- * to the accent (`is-changed`).
+ * workflow takes one more (`onAdd(role)`: « Créations du projet » opens under them, in the card);
+ * each case says its role (`data-role`) for an image dropped or pasted on it; a changed value turns
+ * to the accent (`is-changed`). `form.shelf`: the place of « Créations du projet ».
  */
 export function renderProposal(container, request, { node, onStage, card = false, onAdd = null } = {}) {
   container.replaceChildren();
@@ -169,8 +170,12 @@ export function renderProposal(container, request, { node, onStage, card = false
   }
 
   // In a card, the inputs as pictures, beside the settings in lines.
-  const media = card ? node('div', 'proposal-media') : null;
-  if (media) container.append(media);
+  const media = card ? node('div', 'proposal-media') : null,
+    shelf = card ? node('div', 'proposal-shelf') : null;
+  if (media) container.append(media, shelf);
+  if (shelf) shelf.hidden = true;
+  // The roles of the empty cases, in their order (an image dropped outside a case goes in the first).
+  let emptyRoles = [];
   const grid = node('div', 'proposal-grid');
   container.append(grid);
   const shown = new Set(texts.map(item => item.key));
@@ -501,7 +506,7 @@ export function renderProposal(container, request, { node, onStage, card = false
   /**
    * The inputs of a card as pictures (captures 11 and 12): the video followed, DÉBUT and FIN in the
    * shape of the format, a rule, then the references (RÉF. 1…); « + » where the workflow takes one
-   * more, to join an image to the next message (Moodix then proposes again with it).
+   * more: « Créations du projet » opens in the card, and the image chosen goes in that case.
    */
   function showMedia() {
     if (!media) return;
@@ -509,9 +514,14 @@ export function renderProposal(container, request, { node, onStage, card = false
       placed = (plan.references || []).map((ref, index) => ({ ref, role: roleOf(index) })),
       slots = request.inputRoles || [],
       ratio = numeric(size.width) && numeric(size.height) && size.height > 0 ? size.width / size.height : 16 / 9;
-    const tile = (ref, label, { shape = ratio, add = '' } = {}) => {
+    const referenceRole = slots.find(role => !SOURCES.has(role) && !PLACES[role]) ?? 'reference',
+      empties = [];
+    const tile = (ref, label, { shape = ratio, add = '', role = '' } = {}) => {
+      if (!ref && role) empties.push(role);
       const box = node('figure', 'proposal-input' + (ref ? '' : ' is-empty') + (shape ? '' : ' is-reference')),
         frame = node(ref ? 'span' : 'button', 'proposal-input-frame');
+      // An image dropped or pasted on the case goes there (proposal-card.mjs).
+      if (role && !SOURCES.has(role)) box.setAttribute('data-role', role);
       if (shape) box.style?.setProperty('--ratio', shape.toFixed(3));
       if (ref?.preview) {
         const picture = node('img');
@@ -526,27 +536,29 @@ export function renderProposal(container, request, { node, onStage, card = false
         frame.type = 'button';
         frame.textContent = '+';
         frame.setAttribute('aria-label', add);
-        frame.title = add + '\nElle part avec votre prochain message : Moodix refait sa proposition avec elle.';
+        frame.title = add + '\nUne création du projet, ou une image glissée ou collée ici.';
         frame.disabled = !onAdd;
-        frame.onclick = () => onAdd?.();
+        frame.onclick = () => onAdd?.(role);
       }
       box.append(frame, node('figcaption', '', label));
       return box;
     };
     const frames = [];
-    for (const { ref } of placed.filter(item => SOURCES.has(item.role))) frames.push(tile(ref, 'SOURCE'));
+    for (const { ref, role } of placed.filter(item => SOURCES.has(item.role))) frames.push(tile(ref, 'SOURCE', { role }));
     for (const [role, label] of Object.entries(PLACES)) {
       const found = placed.find(item => item.role === role);
-      if (found) frames.push(tile(found.ref, label));
+      if (found) frames.push(tile(found.ref, label, { role }));
       else if (slots.includes(role))
-        frames.push(tile(null, label, { add: role === 'end_image' ? 'Joindre une image de fin' : 'Joindre une image de début' }));
+        frames.push(tile(null, label, { role, add: role === 'end_image' ? 'Ajouter une image de fin' : 'Ajouter une image de début' }));
     }
     const references = placed.filter(item => !SOURCES.has(item.role) && !PLACES[item.role]),
       room = Math.min(3, slots.filter(role => !SOURCES.has(role) && !PLACES[role]).length);
-    const refs = references.map(({ ref }, index) => tile(ref, 'RÉF. ' + (index + 1), { shape: 0 }));
-    if (references.length < room) refs.push(tile(null, '', { shape: 0, add: 'Joindre une image de référence' }));
+    const refs = references.map(({ ref, role }, index) => tile(ref, 'RÉF. ' + (index + 1), { shape: 0, role }));
+    if (references.length < room)
+      refs.push(tile(null, '', { shape: 0, role: referenceRole, add: 'Ajouter une image de référence' }));
     media.replaceChildren(...frames, ...(frames.length && refs.length ? [node('span', 'proposal-media-rule')] : []), ...refs);
     media.hidden = !frames.length && !refs.length;
+    emptyRoles = empties;
   }
   showMedia();
   // A value changed in a card turns to the accent; Moodix's again, it goes back.
@@ -588,6 +600,9 @@ export function renderProposal(container, request, { node, onStage, card = false
   }
   const form = {
     folds,
+    shelf,
+    media,
+    emptyRoles: () => [...emptyRoles],
     edits() {
       const edits = {};
       if (prompt && prompt.value !== (plan.prompt || '')) {

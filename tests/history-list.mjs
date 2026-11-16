@@ -746,7 +746,7 @@ async function restartedServer({ token = 'old', version = '0.5.128', next = { to
       const key = options.headers.Authorization.slice(7);
       sent.push([url, key]);
       // The server knows its key only.
-      return key === valid ? { ok: true, status: 200 } : { ok: false, status: 401, json: async () => ({ error: 'Accès refusé. Recharge la page.' }) };
+      return key === valid ? { ok: true, status: 200 } : { ok: false, status: 401, json: async () => ({ error: 'Accès refusé. Rechargez la page.' }) };
     },
   };
   runInNewContext(

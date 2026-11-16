@@ -152,7 +152,7 @@ function notice(message) {
 
 // The page learns its token from its first request, which takes up to several seconds while the
 // model loads. Everything is already on screen: an action clicked meanwhile waits for the token
-// instead of being refused (« Accès refusé. Recharge la page. »).
+// instead of being refused (« Accès refusé. Rechargez la page. »).
 let tokenKnown;
 const pageReady = new Promise(resolve => {
   tokenKnown = resolve;
@@ -1764,7 +1764,7 @@ function turnActions() {
 /** Takes back the last message the user wrote: to edit it, or to send it again as it is. */
 async function takeBack(resend) {
   if (state.generating || state.preparing || state.loadingHistory || state.status.toolJob)
-    return notice('Attends la fin de la réponse ou de la génération en cours.');
+    return notice('Attendez la fin de la réponse ou de la génération en cours.');
   const index = lastExchange(state.messages);
   if (index < 0) return;
   const draft = savedUser(state.messages[index]),
@@ -1826,6 +1826,13 @@ function assistantMessage(parent = null) {
  * made at once, a video or a sound waits in a card of its message (proposal-card.mjs); allowed in
  * the settings, a video runs at once too. Resolves the decision of the user.
  */
+/** The creations of the project of the conversation open, the newest first (as the Studio reads them). */
+async function projectTakes() {
+  const route =
+    'project-gallery/' + encodeURIComponent(state.projectId || 'inbox') + '?images=0' +
+    (state.conversationId ? '&conversation=' + encodeURIComponent(state.conversationId) : '');
+  return (await (await api(route)).json()).runs ?? [];
+}
 function proposalChoice(view, proposal, abort) {
   const asked = proposal.mediaType === 'video' || proposal.mediaType === 'audio';
   if (proposal.autoAllow) return asked ? 'once' : undefined;
@@ -1837,8 +1844,10 @@ function proposalChoice(view, proposal, abort) {
     node,
     api,
     composer: $('prompt'),
-    // « + » on an input of the card: an image for the next message, which answers the card.
-    onAdd: () => $('image-input').click(),
+    // « + » on an input of the card: « Créations du projet » in the card; a file dropped or pasted on
+    // it is kept as a reference of the project first. The image goes in its case, without a message.
+    takes: () => projectTakes(),
+    importImage: file => assetsUI.importFiles([file], { project: state.projectId || 'inbox' }).then(list => list[0] ?? null),
     onChange: () => scrollToBottom(),
   });
   state.proposalCard = pending;
@@ -1870,8 +1879,8 @@ async function runOutputAction(record, index, action) {
     return;
   }
   if (state.generating || state.preparing || state.loadingHistory || state.status.toolJob)
-    return notice('Attends la fin de la réponse ou de la génération en cours.');
-  if (record.conversationId !== state.conversationId) return notice('Ouvre la conversation de ce résultat.');
+    return notice('Attendez la fin de la réponse ou de la génération en cours.');
+  if (record.conversationId !== state.conversationId) return notice('Ouvrez la conversation de ce résultat.');
   const video = record.mediaType === 'video',
     text =
       action === 'upscale'
@@ -2986,9 +2995,9 @@ const studioUI = setupStudio({
   // A chat answer in progress keeps the model: the Studio waits for it.
   blocked: () =>
     state.generating || state.status.busy
-      ? 'Attends la fin de la réponse en cours.'
+      ? 'Attendez la fin de la réponse en cours.'
       : state.preparing || state.loadingHistory || state.updating || state.closingApp
-        ? 'Attends la fin de l’opération en cours.'
+        ? 'Attendez la fin de l’opération en cours.'
         : '',
   onChange: () => refreshStatus(),
   onRuns: (id, legacy) => {

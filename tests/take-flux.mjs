@@ -107,7 +107,7 @@ test('without a page that draws, the Flux does nothing', () => {
   });
 });
 
-test('a picture starts it: its canvas in the frame, 12 images a second at most, nothing out of view', async () => {
+test('a picture starts it: its canvas in the frame, 24 images a second at most (the grain), nothing out of view', async () => {
   const browser = page(),
     box = frame(),
     flux = takeFlux(box, { node, win: browser.win });
@@ -118,7 +118,7 @@ test('a picture starts it: its canvas in the frame, 12 images a second at most, 
   assert.equal(box.classList.contains('has-flux'), true);
   browser.draw(1000);
   assert.equal(box.children[0].width, 56, 'drawn at the size of the frame');
-  assert.deepEqual(browser.delays, [1000 / 12]);
+  assert.deepEqual(browser.delays, [1000 / 24]);
   // Out of view: nothing waits to draw; back in view, it draws again.
   flux.visible(false);
   assert.equal(browser.timers.size + browser.frames.size, 0);

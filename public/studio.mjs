@@ -101,6 +101,11 @@ const seconds = value => twoFigures(value) + ' s';
 // The name a slot shows while something that it takes is carried (studio-maquette.md, « Glisser »).
 const SHORT = { start_image: 'Début', end_image: 'Fin', reference: 'Réf.', source: 'Image', source_video: 'Vidéo' };
 const figures = value => twoFigures(value) + ' S';
+/** The length of a sound in the Sortie (capture 23): « 08.00 S », « 1:45 » from a minute. */
+const soundFigures = value => {
+  const total = Math.round(Number(value));
+  return total >= 60 ? Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0') : figures(value);
+};
 const sizeKey = size => size.width + 'x' + size.height;
 // The box the format frame fits in before its stage is laid out.
 const FRAME = { width: 264, height: 176 };
@@ -222,6 +227,7 @@ export function setupStudio({
   let info = null,
     mode = 'image',
     runs = [],
+    nextTake = null, // the number the next take of the project will have (the server's counter)
     legacyRuns = [],
     legacy = false, // the Sortie shows, and the Studio works in, the Studio of before Moodix
     working = null, // { label, fraction, preview, controller | external } while a generation runs
@@ -334,8 +340,8 @@ export function setupStudio({
   // between the chat and the Studio folds the chat into it (view transition, moodix.css).
   const agent = button('studio-agent', '', () => openAgent(), 'eclipse');
   agent.id = 'agent-open';
-  agent.title = 'Agent Moodix AI';
-  agent.setAttribute('aria-label', 'Agent Moodix AI');
+  agent.title = 'Moodix AI · ouvrir le chat';
+  agent.setAttribute('aria-label', 'Moodix AI · ouvrir le chat');
   agent.setAttribute('aria-controls', 'chat-panel');
   // Its word leaves when the bar is just too narrow for one line (moodix.css): its name stays. No
   // colour along its foot (moodix-design.md 7 bis 22: the colour goes to Générer); a light runs
@@ -879,9 +885,8 @@ export function setupStudio({
       );
     }
     if (!labels.length) return null;
-    // An empty single slot says how it is given (« Glisser, coller ou cliquer »).
-    if (labels.length === 1 && !workflow.follows && !(drafts[mode].inputs[Object.keys(workflow.roles ?? {}).find(role => !['start_image', 'end_image', 'reference'].includes(role) && workflow.roles[role].count)]?.[0]))
-      row.append(node('span', 'studio-slot-hint', 'Glisser, coller ou cliquer'));
+    // An empty slot says how it is given on hover only (« … · glisser, coller ou cliquer »), as
+    // Début, Fin and Références (16/11).
     block.append(node('p', 'studio-input-title', workflow.follows ? 'Vidéo et personnage' : labels.length > 1 ? 'Images' : labels[0]));
     block.setAttribute('role', 'group');
     block.setAttribute(
@@ -1528,6 +1533,30 @@ export function setupStudio({
   }
 
   // ------------------------------------------------------------------ the screen
+  /**
+   * The shape of the screen (16/11): the take shown at its own format, in its filet, without bands
+   * (the format chosen in the settings is for the next creation); while one is made, or with none,
+   * the shape of what will be made.
+   */
+  function screenShape(last) {
+    if (mode === 'audio' || working || !last) return shapeOf();
+    const size = sizeOfRecord(last);
+    return size ? { ratio: size.width / size.height, label: '' } : shapeOf();
+  }
+  /** The take shown measured once its file is read (a record without its size): the screen follows. */
+  function measuredOnScreen(record, width, height) {
+    if (!(width > 0 && height > 0) || sizeOfRecord(record)) return;
+    measured.set(record.id, { width, height });
+    const page = globalThis.document,
+      frame = page?.querySelector?.('#studio-view .studio-frame');
+    if (frame && onStage()?.id === record.id)
+      reshape(frame, screenShape(record), page.querySelector('#studio-view .studio-frame-over'));
+  }
+  /** The number the take under way will have: the counter of the project, else the last one + 1. */
+  function upcomingTake() {
+    if (Number.isInteger(nextTake) && nextTake > 0) return nextTake;
+    return 1 + Math.max(0, ...runs.flatMap(record => (record.outputs ?? []).map(output => output.take ?? 0)));
+  }
   /** The shape of what will be made: a ratio, and the format it is. */
   function shapeOf() {
     if (mode === 'audio') return { ratio: 3.4, label: '' };
@@ -1594,9 +1623,9 @@ export function setupStudio({
     readout();
   }
   /**
-   * The screen: a frame in the format of what will be made, as large as the stage allows, with
-   * the last creation in it. It eases from the shape it had to the new one, across formats and
-   * across modes, and follows the window when it is resized.
+   * The screen: a frame at the format of the take shown (of what will be made while one is made,
+   * or with none), as large as the stage allows. It eases from the shape it had to the new one,
+   * across formats and across modes, and follows the window when it is resized.
    */
   function stage() {
     const screen = node('div', 'studio-screen'),
@@ -1610,12 +1639,18 @@ export function setupStudio({
           (working ? ' is-busy' : '') +
           (last ? ' has-result' : ''),
       ),
-      next = shapeOf();
+      next = screenShape(last);
     const take = last?.outputs?.[0]?.take,
-      numbered = Number.isInteger(take);
+      numbered = Number.isInteger(take),
+      // While a take is made: the number it will have, in the accent, instead of its format.
+      coming = working && !numbered ? upcomingTake() : null;
     frame.append(
       node('span', 'studio-frame-fill'),
-      node('span', 'studio-frame-label' + (numbered ? ' is-take' : ''), numbered ? 'PRISE ' + take : next.label),
+      node(
+        'span',
+        'studio-frame-label' + (numbered ? ' is-take' : coming ? ' is-take is-coming' : ''),
+        numbered ? 'PRISE ' + take : coming ? 'PRISE ' + coming : next.label,
+      ),
     );
     if (mode === 'audio') {
       const bars = node('div', 'studio-bars');
@@ -1650,7 +1685,7 @@ export function setupStudio({
     watching?.disconnect();
     if (typeof ResizeObserver === 'function') {
       // Called once the stage is laid out, then at every change of its size.
-      watching = new ResizeObserver(() => reshape(frame, shapeOf(), over));
+      watching = new ResizeObserver(() => reshape(frame, screenShape(last), over));
       watching.observe(box);
     }
     return { screen, box, frame };
@@ -1677,6 +1712,7 @@ export function setupStudio({
     if (clip) {
       Object.assign(element, { controls: false, preload: 'metadata', playsInline: true, src: output.originalUrl || '' });
       if (output.thumbUrl) element.poster = output.thumbUrl;
+      element.onloadedmetadata = () => measuredOnScreen(record, element.videoWidth, element.videoHeight);
       // Its picture and a round play button (capture 22), as in the conversation; the controls of the
       // player once it plays. Kept with the clip from one drawing to the next.
       const play = button('take-play', '', () => {
@@ -1699,6 +1735,7 @@ export function setupStudio({
       });
       element.title = 'Voir l’original et ses paramètres';
       element.onclick = () => viewOutput(record, 0);
+      element.onload = () => measuredOnScreen(record, element.naturalWidth, element.naturalHeight);
     }
     return element;
   }
@@ -1850,7 +1887,7 @@ export function setupStudio({
     sceneInputs()
       ? 'Écrire le prompt d’après la vidéo et le personnage (' + MODIFIER + '+E)'
       : current()?.follows
-        ? 'Ajoute d’abord la vidéo et le personnage'
+        ? 'Ajoutez d’abord la vidéo et le personnage'
         : drafts[mode].prompt.trim().length < IMPROVE_MIN
           ? 'Écris d’abord quelques mots'
           : 'Améliorer le prompt avec Moodix AI (' + MODIFIER + '+E)';
@@ -1871,7 +1908,7 @@ export function setupStudio({
       text = draft.prompt.trim(),
       scene = sceneInputs();
     if (!improves()) {
-      failure = current()?.follows ? 'Ajoute d’abord la vidéo et le personnage.' : 'Écris d’abord quelques mots.';
+      failure = current()?.follows ? 'Ajoutez d’abord la vidéo et le personnage.' : 'Écris d’abord quelques mots.';
       return render();
     }
     const reason = blocked();
@@ -2728,15 +2765,15 @@ export function setupStudio({
   // focus, all of them and « Détails » under a right click or a long press; a click shows it whole
   // with its details; a deletion is asked on the picture itself.
   const KIND = { video: 'Clip', image: 'Image', audio: 'Son' };
-  // What the Sortie shows (its button at the right): every creation, or one kind of them.
+  // What the Sortie shows: the kind of the mode (16/11); its button at the right, the whole project.
   const SORTS = [
     { id: 'all', icon: 'media', label: 'Tout', none: 'Aucune création dans ce projet pour l’instant' },
     { id: 'image', icon: 'image', label: 'Images', none: 'Aucune image dans ce projet pour l’instant' },
     { id: 'video', icon: 'video', label: 'Vidéos', none: 'Aucune vidéo dans ce projet pour l’instant' },
     { id: 'audio', icon: 'wave', label: 'Sons', none: 'Aucun son dans ce projet pour l’instant' },
   ];
-  let sortieKind = 'all', // the kind the Sortie shows
-    sortOpen = false; // its button unfolded
+  let sortieAll = false, // the Sortie shows the whole project, not only the kind of the mode
+    sortieMode = null; // the mode it was drawn for (another mode: its kind again)
   let menuFor = null, // the creation whose menu is open
     confirmFor = null, // the creation whose deletion waits for its confirmation
     pressed = false; // a long press opened a menu: the click that ends it selects nothing
@@ -2893,9 +2930,13 @@ export function setupStudio({
       shown = onStage()?.id === record.id,
       tile = node(
         'div',
-        'studio-item' + (extending?.id === record.id ? ' is-selected' : '') + (shown ? ' is-shown' : ''),
+        'studio-item' +
+          (media === 'audio' ? ' is-sound' : '') +
+          (extending?.id === record.id ? ' is-selected' : '') +
+          (shown ? ' is-shown' : ''),
       );
     tile.dataset.id = record.id;
+    tile.dataset.media = media;
     // The picture: a click shows it whole with its details (the screen keeps the last creation);
     // the one on the screen is ringed in white here (moodix-design.md 24). Dragged to a slot of
     // the inputs, it becomes that input.
@@ -2920,9 +2961,19 @@ export function setupStudio({
       carrying(null);
     };
     if (media === 'audio') {
-      const wave = node('span', 'studio-thumb-wave');
-      wave.setAttribute('aria-hidden', 'true');
-      pick.append(wave);
+      // A card (capture 23): « PRISE 29 · 30.00 S » and its kind, its stripes, its name.
+      const head = node('span', 'studio-sound-head'),
+        wave = node('span', 'studio-thumb-wave'),
+        sound = lengthOfRecord(record),
+        title = String(record.prompt || 'Son').split('\n')[0];
+      head.append(
+        node('span', '', [Number.isInteger(output.take) ? 'PRISE ' + output.take : '#' + number, sound ? soundFigures(sound) : '']
+          .filter(Boolean)
+          .join(' · ')),
+        node('span', '', /musi|ace-?step|song/i.test(record.workflowName || '') ? 'MUSIQUE' : 'BRUITAGE'),
+      );
+      for (const part of [head, wave]) part.setAttribute('aria-hidden', 'true');
+      pick.append(head, wave, node('span', 'studio-sound-name', title));
     } else {
       const small = output.thumbUrl,
         key = record.id + '|' + (small || output.originalUrl || '');
@@ -2989,10 +3040,11 @@ export function setupStudio({
         media === 'image' ? (shape ? (formatOf(shape.width, shape.height)?.id ?? '') : '') : length ? (from ? '+' : '') + figures(length) : '',
       ),
     );
-    // A clip as wide as it is long, at the height of the strip; its picture along it as frames.
+    // A clip as wide as it is long (30 px a second: captures 21 and 22), at the height of the strip;
+    // its picture along it as frames at its format.
     if (media === 'video') {
       if (shape) tile.style.setProperty?.('--ratio', (shape.width / shape.height).toFixed(3));
-      if (length) tile.style.setProperty?.('--span', Math.min(2.4, Math.max(0.6, length / 6)).toFixed(3));
+      if (length) tile.style.setProperty?.('--seconds', length.toFixed(2));
       if (output.thumbUrl) {
         pick.style.setProperty?.('--strip', `url("${output.thumbUrl}")`);
         pick.classList.add('has-strip');
@@ -3095,21 +3147,27 @@ export function setupStudio({
   const pictures = new Map();
   let used = new Set();
   /**
-   * The Sortie: the creations of the project, of all its conversations, images, clips and sounds
-   * together, the newest at the left (a new one pushes the others to the right); nothing written,
-   * no count; empty, its icon and a line that say so, without a frame (one would look like a place
+   * The Sortie: the creations of the project, of all its conversations, of the kind of the mode
+   * (the images in Image, the clips in Vidéo, the sounds in Son: 16/11), the newest at the left (a
+   * new one pushes the others to the right); its button at the right shows them all, until the mode
+   * changes. Empty, its icon and a line that say so, without a frame (one would look like a place
    * to drop a file: moodix-design.md 7 bis 18).
    */
   function outputs() {
     used = new Set();
+    if (sortieMode !== mode) {
+      sortieMode = mode;
+      sortieAll = false;
+    }
     const section = node('section', 'studio-block is-output studio-results'),
       about = modeOf(mode),
-      sort = SORTS.find(item => item.id === sortieKind) ?? SORTS[0],
-      shown = sort.id === 'all' ? runs : runs.filter(record => mediaOf(record) === sort.id);
+      own = SORTS.find(item => item.id === mode) ?? SORTS[0],
+      sort = sortieAll ? SORTS[0] : own,
+      shown = sortieAll ? runs : runs.filter(record => mediaOf(record) === mode);
     section.setAttribute('aria-label', 'Sortie');
     if (!runs.length) {
       const empty = node('div', 'studio-empty-strip');
-      empty.append(icon(about.icon), node('span', '', SORTS[0].none));
+      empty.append(icon(about.icon), node('span', '', own.none));
       section.append(empty);
       return section;
     }
@@ -3119,7 +3177,7 @@ export function setupStudio({
     if (!shown.length) {
       const empty = node('div', 'studio-empty-strip');
       empty.append(icon(sort.icon), node('span', '', sort.none));
-      row.append(empty, sortButton(sort));
+      row.append(empty, sortButton(own));
       return section;
     }
     const strip = node('div', 'studio-strip studio-timeline');
@@ -3139,7 +3197,7 @@ export function setupStudio({
     // The wheel of a mouse scrolls it sideways, the pointer anywhere over the Sortie (a mouse has
     // no sideways wheel); a sideways move of a trackpad is left to the browser.
     section.onwheel = event => scrollSideways(strip, event);
-    row.append(strip, sortButton(sort));
+    row.append(strip, sortButton(own));
     // Those no longer shown (another mode, a creation removed) are let go.
     for (const key of pictures.keys()) if (!used.has(key)) pictures.delete(key);
     return section;
@@ -3201,57 +3259,22 @@ export function setupStudio({
     setTimeout(() => canvas.remove(), 0);
   }
   /**
-   * The button at the right of the Sortie: the kind it shows (all of them: the media icon). A
-   * click unfolds it downward into the other kinds; one chosen, the Sortie shows only them. Échap
-   * or the focus leaving folds it.
+   * The button at the right of the Sortie: the kind of the mode it shows (its icon), or the whole
+   * project (the media icon, pressed); a click goes from one to the other.
    */
-  function sortButton(sort) {
-    const box = node('div', 'studio-sort' + (sortOpen ? ' is-open' : '')),
+  function sortButton(own) {
+    const box = node('div', 'studio-sort'),
       main = button('studio-sort-go is-current', '', () => {
-        sortOpen = !sortOpen;
+        sortieAll = !sortieAll;
         render();
         document.querySelector?.('#studio-view .studio-sort-go')?.focus?.();
-      }, sort.icon),
-      said = sort.id === 'all' ? 'tout' : sort.label.toLowerCase();
-    main.setAttribute('aria-label', 'Trier la Sortie · ' + said);
-    main.title = sort.id === 'all' ? 'Tout afficher · trier' : sort.label + ' seulement · trier';
-    main.setAttribute('aria-haspopup', 'menu');
-    main.setAttribute('aria-expanded', String(sortOpen));
+      }, 'sort');
+    main.setAttribute('aria-label', 'Trier la Sortie · ' + (sortieAll ? 'tout' : own.label.toLowerCase()));
+    main.setAttribute('aria-pressed', String(sortieAll));
+    main.title = sortieAll
+      ? 'Tout le projet · cliquez pour n’afficher que les ' + own.label.toLowerCase()
+      : own.label + ' de ce mode · cliquez pour tout afficher';
     box.append(main);
-    if (sortOpen) {
-      const menu = node('div', 'studio-sort-menu');
-      menu.setAttribute('role', 'menu');
-      menu.setAttribute('aria-label', 'Trier la Sortie');
-      for (const other of SORTS.filter(item => item.id !== sort.id)) {
-        const choice = button('studio-sort-choice', '', () => {
-          sortieKind = other.id;
-          sortOpen = false;
-          render();
-          document.querySelector?.('#studio-view .studio-sort-go')?.focus?.();
-        }, other.icon);
-        const named = other.id === 'all' ? 'Tout afficher' : other.label + ' seulement';
-        choice.setAttribute('role', 'menuitemradio');
-        choice.setAttribute('aria-checked', 'false');
-        choice.setAttribute('aria-label', named);
-        choice.title = named;
-        menu.append(choice);
-      }
-      box.append(menu);
-    }
-    box.onkeydown = event => {
-      if (event.key !== 'Escape' || !sortOpen) return;
-      event.preventDefault();
-      event.stopPropagation?.();
-      sortOpen = false;
-      render();
-      document.querySelector?.('#studio-view .studio-sort-go')?.focus?.();
-    };
-    box.onfocusout = event => {
-      if (sortOpen && !box.contains?.(event.relatedTarget)) {
-        sortOpen = false;
-        render();
-      }
-    };
     return box;
   }
   /** A turn of the wheel, as so many pixels sideways along `strip` (nothing when it all shows). */
@@ -3433,12 +3456,12 @@ export function setupStudio({
       extending
         ? 'Ce qui se passe ensuite…'
         : mode === 'image'
-          ? 'Décris ton image…'
+          ? 'Décrivez votre image…'
           : mode === 'video'
             ? workflow.follows
-              ? 'Décris la vidéo avec ton personnage…'
-              : 'Décris ta vidéo…'
-            : 'Décris ton son…',
+              ? 'Décrivez la vidéo avec votre personnage…'
+              : 'Décrivez votre vidéo…'
+            : 'Décrivez votre son…',
       value => {
         draft.prompt = value;
         // « Améliorer le prompt » waits for a few words.
@@ -3678,7 +3701,9 @@ export function setupStudio({
     const route = legacy
       ? id && `gallery/${id}?images=0`
       : `project-gallery/${encodeURIComponent(project())}?images=0` + (id ? '&conversation=' + id : '');
-    runs = route ? ((await (await api(route)).json()).runs ?? []) : [];
+    const read = route ? await (await api(route)).json() : {};
+    runs = read.runs ?? [];
+    nextTake = Number.isInteger(read.nextTake) ? read.nextTake : null;
     runsFor = where();
     runsStale = false;
     if (info.legacyId && !legacyRuns.loaded) {

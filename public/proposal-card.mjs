@@ -12,7 +12,9 @@ const KINDS = { video: 'Vidéo', audio: 'Son', image: 'Image' };
  *   ACCORD »): then only « Générer » starts it. A sound waits for « Générer » (no count).
  * - « Annuler » leaves the line « Proposition annulée. »; a new message declines it too, and the card
  *   goes (Moodix answers with another). No « Toujours autoriser ».
- * « + » on an input joins an image to the next message (`onAdd`); joining one stops the count (`stop`).
+ * « + » on an input opens « Créations du projet » in the card (`takes()`: the creations of the project);
+ * the image chosen goes in its case, as an image dropped or pasted on the card (`importImage(file)`:
+ * kept as a reference of the project first); the server revises the proposal (`add`), no message.
  * Returns `answer` ('once' or 'deny', after the changes are sent), `decline()` and `stop()`.
  */
 export function proposalCard({
@@ -23,7 +25,8 @@ export function proposalCard({
   api,
   delay = 30000,
   composer = null,
-  onAdd = null,
+  takes = null,
+  importImage = null,
   onChange = () => {},
 }) {
   const card = node('section', 'proposal-card'),
@@ -38,6 +41,7 @@ export function proposalCard({
     go = node('button', 'proposal-go'),
     counted = request.mediaType === 'video' && delay > 0;
   card.setAttribute('aria-label', 'Proposition de Moodix');
+  card.tabIndex = -1;
   status.setAttribute('aria-live', 'polite');
   cancel.type = go.type = 'button';
   go.append(node('span', 'proposal-go-play'), node('span', 'proposal-go-word', 'Générer'));
@@ -54,7 +58,7 @@ export function proposalCard({
     form = renderProposal(body, request, {
       node,
       card: true,
-      onAdd,
+      onAdd: takes || importImage ? role => void openShelf(role) : null,
       onStage: (stage, edits) => void revise({ ...edits, stage }),
     });
     // « Paramètres avancés › » and « Prompt › » at the foot, their panel opening under it.
@@ -73,6 +77,132 @@ export function proposalCard({
       panels.append(fold.panel);
     }
   }
+  /**
+   * « Créations du projet » under the cases (as in the Studio): the images of the project, the newest
+   * at the left, 56 px; one taken goes in the case; « × » closes it. Again on the same « + »: closed.
+   */
+  let shelfRole = null;
+  async function openShelf(role) {
+    const shelf = form?.shelf;
+    if (!shelf) return;
+    if (shelfRole === role && !shelf.hidden) {
+      shelf.hidden = true;
+      shelfRole = null;
+      return;
+    }
+    shelfRole = role;
+    const head = node('p', 'proposal-shelf-title', 'Créations du projet'),
+      close = node('button', 'proposal-shelf-close'),
+      row = node('div', 'proposal-shelf-row'),
+      make = tag =>
+        globalThis.document?.createElementNS ? document.createElementNS('http://www.w3.org/2000/svg', tag) : node(tag),
+      cross = make('svg'),
+      use = make('use');
+    cross.setAttribute('aria-hidden', 'true');
+    use.setAttribute('href', '#i-close');
+    cross.append(use);
+    close.append(cross);
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Fermer les créations du projet');
+    close.title = 'Fermer';
+    close.onclick = () => {
+      shelf.hidden = true;
+      shelfRole = null;
+    };
+    head.append(close);
+    row.append(node('span', 'proposal-shelf-note', takes ? 'Chargement…' : 'Glissez ou collez une image ici.'));
+    shelf.replaceChildren(head, row);
+    // A file of the computer, at the end (as in the Studio).
+    if (importImage) {
+      const file = node('button', 'proposal-shelf-file', 'Depuis l’ordinateur…'),
+        input = node('input');
+      file.type = 'button';
+      Object.assign(input, { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: true });
+      input.onchange = () => void addFile(role, input.files?.[0]);
+      file.onclick = () => input.click?.();
+      shelf.append(file, input);
+    }
+    shelf.hidden = false;
+    if (!takes) return;
+    let list = [];
+    try {
+      list = (await takes()).filter(record => !record.mediaType || record.mediaType === 'image');
+    } catch (error) {
+      row.replaceChildren(node('span', 'proposal-shelf-note', error.message));
+      return;
+    }
+    if (shelfRole !== role || done) return;
+    row.replaceChildren(
+      ...(list.length ? [] : [node('span', 'proposal-shelf-note', 'Aucune image dans ce projet pour l’instant.')]),
+      ...list.slice(0, 40).map(record => {
+        const output = record.outputs?.[0] ?? {},
+          pick = node('button', 'proposal-shelf-pick'),
+          picture = node('img');
+        pick.type = 'button';
+        const name = Number.isInteger(output.take) ? 'Prise ' + output.take : 'Image';
+        pick.setAttribute('aria-label', 'Prendre : ' + name + (record.prompt ? ' · ' + record.prompt : ''));
+        pick.title = name;
+        Object.assign(picture, { src: output.thumbUrl || output.originalUrl || '', alt: '', loading: 'lazy', decoding: 'async' });
+        pick.append(picture);
+        pick.onclick = () =>
+          void addInput(role, { output: record.id, ...(record.conversationId ? { conversation: record.conversationId } : {}) });
+        return pick;
+      }),
+    );
+  }
+  /** An image in a case of the card: the proposal revised with it. */
+  async function addInput(role, source) {
+    if (!role || done) return;
+    stop();
+    // What was already changed in the card goes with it (the card is drawn again from the answer).
+    let edits = {};
+    try {
+      edits = form?.edits() ?? {};
+    } catch (error) {
+      form?.error(error.message);
+      return;
+    }
+    shelfRole = null;
+    await revise({ ...edits, add: { role, source } });
+  }
+  /** A file dropped or pasted on the card: kept as a reference of the project, then put in its case. */
+  async function addFile(role, file) {
+    if (!importImage || !file || !/^image\/(png|jpeg|webp)$/.test(file.type || '')) return;
+    try {
+      const kept = await importImage(file);
+      if (kept?.id) await addInput(role, { resource: kept.id });
+    } catch (error) {
+      form?.error(error.message);
+    }
+  }
+  /** The case an image goes to: the one under the pointer, else the open one, else the first empty. */
+  function roleAt(target) {
+    const hit = target?.closest?.('[data-role]');
+    if (hit) return hit.getAttribute('data-role');
+    if (shelfRole) return shelfRole;
+    return form?.emptyRoles?.()[0] ?? null;
+  }
+  card.addEventListener?.('dragover', event => {
+    if (!event.dataTransfer?.types?.includes?.('Files')) return;
+    event.preventDefault();
+    card.classList.add('is-dropping');
+  });
+  card.addEventListener?.('dragleave', event => {
+    if (!card.contains(event.relatedTarget)) card.classList.remove('is-dropping');
+  });
+  card.addEventListener?.('drop', event => {
+    card.classList.remove('is-dropping');
+    const [file] = event.dataTransfer?.files ?? [];
+    if (!file) return;
+    event.preventDefault();
+    void addFile(roleAt(event.target), file);
+  });
+  card.addEventListener?.('paste', event => {
+    const file = [...(event.clipboardData?.files ?? [])].find(item => item.type?.startsWith('image/'));
+    if (!file) return;
+    event.preventDefault();
+    void addFile(roleAt(event.target), file);
+  });
   // The changes sent: the revised proposal (a new token) replaces this one.
   async function revise(edits) {
     if (saving) return false;

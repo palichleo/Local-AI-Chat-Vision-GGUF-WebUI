@@ -47,9 +47,15 @@ test('the same actions on a take everywhere: icons only, their name and help und
   // Image: Ouvrir · Agrandir et affiner · Animer · Afficher dans le Studio; a sound: Ouvrir and the Studio.
   assert.deepEqual(imageRow.children.map(label), ['Ouvrir', 'Agrandir et affiner', 'Animer', 'Afficher dans le Studio']);
   assert.deepEqual(actions(sound, 0).children.map(label), ['Ouvrir', 'Afficher dans le Studio']);
-  // Icons only: the name is the button's, its help under it in the tooltip.
-  assert.deepEqual(videoRow.children.map(button => button.attributes['aria-label']), videoRow.children.map(label));
-  assert.equal(imageRow.children[3].title, 'Afficher dans le Studio\nVotre prompt et vos réglages ne changent pas');
+  // Icons only (claude_design/icones-actions): their words under the pointer are their name too.
+  assert.deepEqual(videoRow.children.map(button => button.attributes['aria-label']), [
+    'Ouvrir : l’original, ses paramètres, Télécharger',
+    'Prolonger : la suite de cette vidéo',
+    'Interpoler : des images en plus, un mouvement plus fluide',
+    'Agrandir et affiner ce résultat',
+    'Afficher dans le Studio : votre prompt et vos réglages ne changent pas',
+  ]);
+  assert.equal(imageRow.children[3].title, 'Afficher dans le Studio : votre prompt et vos réglages ne changent pas');
   assert.ok(
     videoRow.children.slice(1, 4).every(button => button.disabled),
     'disabled until the server answers',
@@ -59,7 +65,7 @@ test('the same actions on a take everywhere: icons only, their name and help und
   assert.equal(upscale.disabled, false);
   assert.equal(interpolate.disabled, false);
   assert.equal(extend.disabled, true);
-  assert.match(extend.title, /^Prolonger\nAucun workflow ne sait prolonger une vidéo\.$/);
+  assert.match(extend.title, /^Prolonger : la suite de cette vidéo\nAucun workflow ne sait prolonger une vidéo\.$/);
   assert.equal(imageRow.children[1].disabled, true, 'no image upscaler is active');
   assert.match(imageRow.children[1].title, /upscale image/);
   assert.equal(imageRow.children[2].disabled, false, 'a video workflow starts from an image');

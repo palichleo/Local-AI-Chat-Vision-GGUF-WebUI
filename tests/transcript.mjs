@@ -185,7 +185,7 @@ test('nothing is taken back while a reply or a generation is running', async () 
   const { state, done, takeBack } = await page(exchange(), { busy: true });
   await takeBack(true);
   assert.equal(state.messages.length, 5);
-  assert.match(done[0], /^avis : Attends la fin/);
+  assert.match(done[0], /^avis : Attendez la fin/);
 });
 
 test('a title begun in the Studio is its line, without the words added for the model, even cut short', () => {

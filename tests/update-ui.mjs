@@ -46,7 +46,7 @@ test('a busy server keeps the click: the install is asked again until it can sta
       if (body) {
         asked++;
         if (asked < 3)
-          throw Object.assign(new Error('Attends la fin de l’opération en cours avant la mise à jour.'), {
+          throw Object.assign(new Error('Attendez la fin de l’opération en cours avant la mise à jour.'), {
             status: 409,
             busy: true,
           });

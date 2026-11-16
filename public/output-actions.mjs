@@ -4,23 +4,24 @@
  * - image: Ouvrir · Agrandir et affiner · Animer · Afficher dans le Studio;
  * - video: Ouvrir · Prolonger · Interpoler · Agrandir et affiner · Afficher dans le Studio;
  * - sound: Ouvrir · Afficher dans le Studio.
- * Icons only, their name and their help under the pointer. One that no active workflow can do is
- * greyed, with the reason. « Ouvrir » shows the original and its settings (« Détails » before 0.6.6).
+ * Icons only (claude_design/icones-actions: their drawing and the words under the pointer, which are
+ * their name for screen readers too). One that no active workflow can do is greyed, with the reason
+ * under its words. « Ouvrir » shows the original and its settings (« Détails » before 0.6.6).
  */
 const ACTIONS = [
   {
     id: 'details',
     label: 'Ouvrir',
-    help: 'L’original et ses réglages',
-    icon: 'open',
+    tip: 'Ouvrir : l’original, ses paramètres, Télécharger',
+    icon: 'act-open',
     media: ['image', 'video', 'audio'],
   },
   {
     id: 'extend',
     verb: 'extend_video',
     label: 'Prolonger',
-    help: 'Écrire la suite de cette vidéo pour Moodix',
-    icon: 'forward',
+    tip: 'Prolonger : la suite de cette vidéo',
+    icon: 'act-extend',
     media: ['video'],
     missing: () => 'Aucun workflow ne sait prolonger une vidéo.',
   },
@@ -28,8 +29,8 @@ const ACTIONS = [
     id: 'interpolate',
     verb: 'interpolate',
     label: 'Interpoler',
-    help: 'Des images intermédiaires, pour une vidéo plus fluide',
-    icon: 'frames',
+    tip: 'Interpoler : des images en plus, un mouvement plus fluide',
+    icon: 'act-interpolate',
     media: ['video'],
     missing: () => 'Aucun workflow d’interpolation actif.',
   },
@@ -37,8 +38,8 @@ const ACTIONS = [
     id: 'upscale',
     verb: 'upscale',
     label: 'Agrandir et affiner',
-    help: 'Une version plus grande et plus nette',
-    icon: 'upscale',
+    tip: 'Agrandir et affiner ce résultat',
+    icon: 'act-upscale',
     media: ['image', 'video'],
     missing: media => `Aucun workflow d’upscale ${media === 'video' ? 'vidéo' : 'image'} actif.`,
   },
@@ -46,22 +47,22 @@ const ACTIONS = [
     id: 'animate',
     verb: 'animate',
     label: 'Animer',
-    help: 'Une vidéo qui part de cette prise',
-    icon: 'animate',
+    tip: 'Animer : une vidéo qui part de cette prise',
+    icon: 'act-animate',
     media: ['image'],
     missing: () => 'Aucun workflow vidéo ne part d’une image.',
   },
   {
     id: 'studio',
     label: 'Afficher dans le Studio',
-    help: 'Votre prompt et vos réglages ne changent pas',
-    icon: 'panel',
+    tip: 'Afficher dans le Studio : votre prompt et vos réglages ne changent pas',
+    icon: 'act-studio',
     media: ['image', 'video', 'audio'],
   },
 ];
 const CACHE_MS = 5000;
-/** The tooltip of an action: its name, its help under it. */
-const tipOf = (action, reason = '') => `${action.label}\n${reason || action.help}`;
+/** The words of an action under the pointer; greyed, why under them. */
+const tipOf = (action, reason = '') => (reason ? `${action.tip}\n${reason}` : action.tip);
 
 /**
  * `actions(record, index)` builds the row of one take. `onAction(record, index, id)` receives
@@ -102,7 +103,7 @@ export function outputActions({ api, node, onDetails, onAction, onShow = null, i
       if ((action.id === 'studio' && !onShow) || (action.id === 'details' && !onDetails)) continue;
       const button = node('button', 'output-action output-action-' + action.id);
       button.type = 'button';
-      button.setAttribute('aria-label', action.label);
+      button.setAttribute('aria-label', action.tip);
       button.title = tipOf(action);
       button.append(icon(action.icon), node('span', '', action.label));
       button.onclick = () =>

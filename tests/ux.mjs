@@ -228,6 +228,12 @@ test('no text of the interface is smaller than 12 px', async () => {
   }
   // A bare <small> does not fall back on the browser's « smaller » (11,7 px in a 14 px page).
   assert.match(sheet, /\nsmall \{\s+font-size: var\(--size-1\);/);
+  // One exception, decided on 16/11: the small capitals of the labels (« SORTIE », « PRISE 4 »,
+  // « PROPOSITION · VIDÉO »), 10,5 px as in the maquette, always with their spacing.
+  assert.match(sheet, /--size-label: 10\.5px;/);
+  const labels = [...sheet.matchAll(/[^{}]*\{[^{}]*var\(--size-label\)[^{}]*\}/g)].map(([rule]) => rule);
+  assert.ok(labels.length > 10);
+  for (const rule of labels) assert.match(rule, /letter-spacing: 0\.\d+em/, rule);
 });
 
 test('the context meter ignores stale counts; its details are in its tooltip, its share beside the bar', async () => {

@@ -953,7 +953,7 @@ export async function createApplication({
         });
       }
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
-      if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Recharge la page.', 401);
+      if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Rechargez la page.', 401);
       if (req.method === 'GET' && path === '/api/generation') return send(200, await generation.snapshot());
       if (req.method === 'GET' && path === '/api/generation/assets')
         return send(200, { assets: await generation.assets.list() });
@@ -1144,7 +1144,8 @@ export async function createApplication({
             // A conversation that cannot be read leaves the others.
           }
         runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        return send(200, { runs: runs.map(galleryView) });
+        // The number of the take to come (« PRISE 32 » on the screen of the Studio while it is made).
+        return send(200, { runs: runs.map(galleryView), nextTake: (await takes.last(project)) + 1 });
       }
       // The Bibliothèque: the creations of every conversation of every project, the newest first,
       // each with its project; the open one too (even before it is saved, `project` its own), those
@@ -1235,7 +1236,7 @@ export async function createApplication({
       if (path.startsWith('/api/generation/')) {
         if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
         if (runtime.active || engine.busy || clearingHistory || savingSettings || savingGeneration || pickingFile)
-          throw problem('Attends la fin de l’opération en cours.', 409);
+          throw problem('Attendez la fin de l’opération en cours.', 409);
         savingGeneration = true;
         try {
           if (path === '/api/generation/config') {
@@ -1437,7 +1438,7 @@ export async function createApplication({
           clearingHistory ||
           ['loading', 'stopping'].includes(engine.state)
         )
-          throw problem('Attends la fin de l’opération en cours.', 409);
+          throw problem('Attendez la fin de l’opération en cours.', 409);
         savingSettings = true;
         saving = true;
         let finishModelOperation;
@@ -1511,12 +1512,12 @@ export async function createApplication({
       }
       if (path === '/api/resources/update') {
         if ((runtime.active || engine.busy) && ((await resources.record(body.id)).ready || !body.patch?.prepared))
-          throw problem('Attends la fin de la réponse avant de modifier une ressource.', 409);
+          throw problem('Attendez la fin de la réponse avant de modifier une ressource.', 409);
         return send(200, resourceView(await resources.update(body.id, body.patch)));
       }
       if (path === '/api/resources/delete') {
         if ((runtime.active || engine.busy) && (await resources.record(body.id)).ready)
-          throw problem('Attends la fin de la réponse avant de supprimer une ressource.', 409);
+          throw problem('Attendez la fin de la réponse avant de supprimer une ressource.', 409);
         await resources.remove(body.id);
         return send(200, { deleted: true });
       }
@@ -1554,7 +1555,7 @@ export async function createApplication({
           ['loading', 'stopping'].includes(engine.state)
         )
           // Busy: the page asks again (installFromButton) instead of dropping the click.
-          throw Object.assign(problem('Attends la fin de l’opération en cours avant la mise à jour.', 409), {
+          throw Object.assign(problem('Attendez la fin de l’opération en cours avant la mise à jour.', 409), {
             busy: true,
           });
         let snapshot;
@@ -1612,7 +1613,7 @@ export async function createApplication({
           (body.kind === 'engine' && engine.child) ||
           ['loading', 'stopping'].includes(engine.state)
         )
-          throw problem('Arrête le modèle avant de choisir un fichier.', 409);
+          throw problem('Arrêtez le modèle avant de choisir un fichier.', 409);
         pickingFile = true;
         const controller = new AbortController();
         const abort = () => controller.abort();
@@ -1644,13 +1645,13 @@ export async function createApplication({
           engine.busy ||
           clearingHistory
         )
-          throw problem('Attends la fin de l’opération en cours.', 409);
+          throw problem('Attendez la fin de l’opération en cours.', 409);
         const nextConfig = normalizeConfig(body.config),
           nextGeneration = generationConfig(body.generation),
           nextInstructions = globalContext(body.instructions === undefined ? instructions : body.instructions);
         const modelChanged = JSON.stringify(config) !== JSON.stringify(nextConfig);
         if (modelChanged && (engine.child || ['loading', 'stopping'].includes(engine.state)))
-          throw problem('Arrête le modèle avant de modifier ses réglages.', 409);
+          throw problem('Arrêtez le modèle avant de modifier ses réglages.', 409);
         const edits = body.workflowDescriptions === undefined ? [] : body.workflowDescriptions;
         if (!Array.isArray(edits) || edits.length > 1000 || new Set(edits.map(edit => edit?.id)).size !== edits.length)
           throw problem('Descriptions de workflows invalides.');
@@ -1709,7 +1710,7 @@ export async function createApplication({
       if (path === '/api/tools/action') {
         if (clearingHistory || savingGeneration || savingSettings || pickingFile)
           throw problem('Une opération est en cours.', 409);
-        if (engine.busy) throw problem('Une réponse est en cours. Attends sa fin.', 409);
+        if (engine.busy) throw problem('Une réponse est en cours. Attendez sa fin.', 409);
         // In a conversation the output buttons, and every creation of its Studio (`studio`); the
         // former Studio, which had no conversation, keeps its own identifier.
         const studio = body.studio === true || body.conversationId === STUDIO_ID;
@@ -1841,7 +1842,7 @@ export async function createApplication({
       if (path === '/api/gallery/persist') {
         if (!preferences.saveHistory || disablingHistory) throw problem('L’historique est désactivé.', 403);
         if (runtime.active || clearingHistory || persistingGallery)
-          throw problem('Attends la fin de l’opération en cours.', 409);
+          throw problem('Attendez la fin de l’opération en cours.', 409);
         persistingGallery = true;
         galleryBatch = (async () => {
           const { runs } = await gallery.list(body.conversationId);
@@ -1856,7 +1857,7 @@ export async function createApplication({
       }
       if (path === '/api/gallery/analysis' || path === '/api/gallery/review') {
         if ((runtime.active && !runtime.gpuBlocked) || clearingHistory || disablingHistory || persistingGallery)
-          throw problem('Attends la fin de l’opération en cours.', 409);
+          throw problem('Attendez la fin de l’opération en cours.', 409);
         persistingGallery = true;
         try {
           const record = await gallery.get(body.conversationId, body.id);
@@ -1920,7 +1921,7 @@ export async function createApplication({
           Object.keys(body).some(key => !['theme', 'saveHistory', 'room'].includes(key))
         )
           throw problem('Préférences invalides.');
-        if ('theme' in body && !['dark', 'light'].includes(body.theme)) throw problem('Choisis le mode jour ou nuit.');
+        if ('theme' in body && !['dark', 'light'].includes(body.theme)) throw problem('Choisissez le mode jour ou nuit.');
         if ('saveHistory' in body && typeof body.saveHistory !== 'boolean')
           throw problem('Choix d’historique invalide.');
         // Fond, éclairage, grain (Paramètres › Interface): what is valid of it, the rest by default.
@@ -1929,7 +1930,7 @@ export async function createApplication({
           body.room = roomSettings(body.room);
         }
         if ((runtime.active || persistingGallery || clearingHistory) && 'saveHistory' in body)
-          throw problem('Attends la fin de la génération.', 409);
+          throw problem('Attendez la fin de la génération.', 409);
         if (savingPreferences) throw problem('Préférences en cours d’enregistrement.', 409);
         const next = { ...preferences, ...body };
         savingPreferences = true;
@@ -1949,7 +1950,7 @@ export async function createApplication({
         return send(200, { preferences });
       }
       if (path === '/api/history/delete') {
-        if (body?.confirm !== true) throw problem('Confirme la suppression de la conversation.');
+        if (body?.confirm !== true) throw problem('Confirmez la suppression de la conversation.');
         if (
           persistingGallery ||
           runtime.active ||
@@ -1959,7 +1960,7 @@ export async function createApplication({
           engine.busy ||
           ['loading', 'stopping'].includes(engine.state)
         )
-          throw problem('Attends la fin de l’opération en cours avant de supprimer la conversation.', 409);
+          throw problem('Attendez la fin de l’opération en cours avant de supprimer la conversation.', 409);
         clearingHistory = true;
         try {
           await historySaves;
@@ -1974,7 +1975,7 @@ export async function createApplication({
         }
       }
       if (path === '/api/history/clear') {
-        if (body?.confirm !== true) throw problem('Confirme la suppression de l’historique.');
+        if (body?.confirm !== true) throw problem('Confirmez la suppression de l’historique.');
         if (
           persistingGallery ||
           runtime.active ||
@@ -1984,7 +1985,7 @@ export async function createApplication({
           engine.busy ||
           ['loading', 'stopping'].includes(engine.state)
         )
-          throw problem('Attends la fin de l’opération en cours avant de supprimer l’historique.', 409);
+          throw problem('Attendez la fin de l’opération en cours avant de supprimer l’historique.', 409);
         clearingHistory = true;
         try {
           await historySaves;
@@ -2001,11 +2002,11 @@ export async function createApplication({
       }
       if (path === '/api/projects/save') return send(200, { project: await projects.save(body) });
       if (path === '/api/projects/delete') {
-        if (body?.confirm !== true) throw problem('Confirme la suppression du projet.');
+        if (body?.confirm !== true) throw problem('Confirmez la suppression du projet.');
         projectId(body.id);
         if (body.id === 'inbox') throw problem('« Sans projet » ne peut pas être supprimé.');
         if (clearingHistory || disablingHistory || savingPreferences || runtime.active || engine.busy)
-          throw problem('Attends la fin de l’opération en cours.', 409);
+          throw problem('Attendez la fin de l’opération en cours.', 409);
         clearingHistory = true;
         try {
           await historySaves;
@@ -2032,7 +2033,7 @@ export async function createApplication({
       if (path === '/api/projects/move') {
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
         if (clearingHistory || disablingHistory || savingPreferences || runtime.active || engine.busy)
-          throw problem('Attends la fin de l’opération en cours.', 409);
+          throw problem('Attendez la fin de l’opération en cours.', 409);
         clearingHistory = true;
         try {
           await historySaves;
@@ -2055,7 +2056,7 @@ export async function createApplication({
         return send(200, { conversation: historyView(await renamed) });
       }
       if (path === '/api/history/save') {
-        if (runtime.active) throw problem('Attends la fin de la génération.', 409);
+        if (runtime.active) throw problem('Attendez la fin de la génération.', 409);
         if (clearingHistory) throw problem('Suppression de l’historique en cours.', 409);
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
         if (disablingHistory) throw problem('Désactivation de l’historique en cours.', 409);
@@ -2075,7 +2076,7 @@ export async function createApplication({
           engine.state === 'loading' ||
           engine.state === 'stopping'
         )
-          throw problem('Arrête le moteur avant de modifier sa configuration.', 409);
+          throw problem('Arrêtez le moteur avant de modifier sa configuration.', 409);
         const next = normalizeConfig(body);
         saving = true;
         try {
@@ -2089,7 +2090,7 @@ export async function createApplication({
         return send(200, { config });
       }
       if (path === '/api/start') {
-        if (runtime.active) throw problem('La génération utilise le GPU. Attends sa fin.', 409);
+        if (runtime.active) throw problem('La génération utilise le GPU. Attendez sa fin.', 409);
         if (saving || savingGeneration || pickingFile)
           throw problem('Choix de fichier ou enregistrement en cours.', 409);
         // The chat model takes the card: what the Studio left loaded in the generator leaves first.

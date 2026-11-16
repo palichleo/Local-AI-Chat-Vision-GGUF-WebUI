@@ -4,14 +4,14 @@
  * their colours from the picture so far, over that picture blurred; they slow down and the picture
  * comes forward as the take nears its end. No pixel is read (no getImageData): the colours come from
  * the picture by composition (source-in).
- * - 12 images a second at most: measured in 560 × 315, 0.6 % of the GPU and 9 % of one core, against
- *   7.5 % and 58 to 98 % at the 100 of the demo. The interface takes almost nothing from a generation.
+ * - 24 images a second at most, the rate of the grain (12 made the points jerk): measured in
+ *   560 × 327, 1.9 to 2.1 % of the GPU and 16 % of one core, against 7.5 % at the 100 of the demo.
  * - Nothing is drawn while the frame is out of view (`visible(false)`), the page hidden (no animation
  *   frame) or the motion frozen (`data-motion="fige"`); with reduced motion, the picture blurred alone.
  * - The blurred copies of a picture are made once, when it arrives, not at each image.
  * `source(picture or address)`: the picture so far (the start image until the first preview);
- * `neutral()`: before any picture, a dark field lit by the accent and the ivory of the room (the
- * moving background of before cost 3.5 to 8 % of the GPU at 100 images a second, against 1.4 % here);
+ * `neutral()`: before any picture, a dark field lit in grey, so that the points are grey until the
+ * first picture comes (the moving background of before is gone: 3.5 to 8 % of the GPU at 100 i/s);
  * `progress(fraction)`; `visible(boolean)`; `stop()`, the take being there or the generation stopped.
  */
 const LEVELS = [0, 2.5, 6, 11, 18, 28];
@@ -36,7 +36,10 @@ function vnoise(x, y) {
 }
 const smooth = p => p * p * (3 - 2 * p);
 
-export function takeFlux(frame, { node, fps = 12, win = globalThis.window } = {}) {
+/** Images a second of the Flux: those of the grain. */
+export const FPS = 24;
+
+export function takeFlux(frame, { node, fps = FPS, win = globalThis.window } = {}) {
   const canvas = node('canvas', 'take-flux');
   // Without a page that draws (the tests): nothing to show.
   if (typeof canvas.getContext !== 'function' || !win?.document)
@@ -255,18 +258,12 @@ export function takeFlux(frame, { node, fps = 12, win = globalThis.window } = {}
       if (stopped || picture) return;
       const field = make(320, 180),
         x = field.getContext('2d');
-      let accent = '#d0cadd';
-      try {
-        accent = win.getComputedStyle(frame).getPropertyValue('--accent').trim() || accent;
-      } catch {
-        // A frame outside the page: the accent of the dark room.
-      }
       x.fillStyle = DARK;
       x.fillRect(0, 0, 320, 180);
       for (const [cx, cy, radius, colour, alpha] of [
-        [96, 64, 170, accent, 0.5],
-        [236, 124, 140, '#eee8de', 0.3],
-        [180, 30, 110, '#c8925a', 0.22],
+        [96, 64, 170, '#8f8b94', 0.5],
+        [236, 124, 140, '#b4b0b8', 0.32],
+        [180, 30, 110, '#6f6c75', 0.3],
       ]) {
         const glow = x.createRadialGradient(cx, cy, 0, cx, cy, radius);
         try {
