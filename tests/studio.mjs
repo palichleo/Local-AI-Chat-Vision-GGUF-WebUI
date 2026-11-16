@@ -3549,3 +3549,42 @@ test('a file dropped on the screen: one Moodix made says what made it, whatever 
     alone.restore();
   }
 });
+
+test('the take on the screen is a little smaller than its frame and rounded on its own, whatever the format chosen', async () => {
+  const read = async name => (await (await import('node:fs/promises')).readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const css = await read('moodix.css'),
+    rule = selector => {
+      const at = css.lastIndexOf('\n' + selector + ' {\n');
+      assert.ok(at >= 0, selector);
+      return css.slice(at, css.indexOf('\n}\n', at));
+    };
+  // 8 px all around, in the middle of the frame, corners of its own.
+  const take = rule('#studio-view .studio-frame > :is(img, video).studio-frame-result');
+  assert.match(take, /width: calc\(100% - 16px\);/);
+  assert.match(take, /height: calc\(100% - 16px\);/);
+  assert.match(take, /border-radius: 10px;/);
+  assert.match(take, /top: 50%;\n  left: 50%;/);
+  assert.match(take, /transform: translate\(-50%, -50%\);/);
+  // Its box has its own shape, as large as the frame allows: rounded even in a frame of another format.
+  const shaped = rule("#studio-view .studio-frame > :is(img, video).studio-frame-result[style*='--media-ratio']");
+  assert.match(shaped, /width: min\(100cqw - 16px, \(100cqh - 16px\) \* var\(--media-ratio\)\);/);
+  assert.match(shaped, /aspect-ratio: var\(--media-ratio\);/);
+  assert.match(rule('#studio-view .studio-frame'), /container-type: size;/);
+  // That shape is said by the Studio: from the record at once, from the picture once it is read.
+  const video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [] },
+    clip = { id: 'c', mediaType: 'video', prompt: 'un renard', outputs: [{ originalUrl: '/clip.mp4' }], parameters: { width: 768, height: 448, frames: 121, fps: 24 } };
+  const page = await studioPage({ create_video: [video] }, {}, { runs: [clip] });
+  try {
+    const [shown] = page.body.find('studio-frame-result'),
+      said = [];
+    shown.style.setProperty = (name, value) => said.push([name, value]);
+    shown.videoWidth = 1024;
+    shown.videoHeight = 1024;
+    shown.onloadedmetadata();
+    assert.deepEqual(said, [['--media-ratio', '1.0000']]);
+  } finally {
+    page.restore();
+  }
+  const source = await read('studio.mjs');
+  assert.match(source, /const known = sizeOfRecord\(record\);\n    if \(known\) shaped\(known\.width, known\.height\);/);
+});

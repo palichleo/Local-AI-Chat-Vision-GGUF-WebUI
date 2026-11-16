@@ -1784,10 +1784,20 @@ export function setupStudio({
     }
     const clip = media === 'video',
       element = node(clip ? 'video' : 'img', 'studio-frame-result');
+    // Its own shape, for the sheet (moodix.css, --media-ratio): the take is always a little smaller
+    // than the frame and rounded on its own, whatever the format chosen (16/11). Known from its
+    // record at once, from the picture itself once it is read.
+    const shaped = (width, height) =>
+      width > 0 && height > 0 && element.style.setProperty?.('--media-ratio', (width / height).toFixed(4));
+    const known = sizeOfRecord(record);
+    if (known) shaped(known.width, known.height);
     if (clip) {
       Object.assign(element, { controls: false, preload: 'metadata', playsInline: true, src: output.originalUrl || '' });
       if (output.thumbUrl) element.poster = output.thumbUrl;
-      element.onloadedmetadata = () => measuredOnScreen(record, element.videoWidth, element.videoHeight);
+      element.onloadedmetadata = () => {
+        shaped(element.videoWidth, element.videoHeight);
+        measuredOnScreen(record, element.videoWidth, element.videoHeight);
+      };
       // Its picture and a round play button (capture 22), as in the conversation; the controls of the
       // player once it plays. Kept with the clip from one drawing to the next.
       const play = button('take-play', '', () => {
@@ -1812,7 +1822,10 @@ export function setupStudio({
         element.title = 'Voir l’original et ses paramètres';
         element.onclick = () => viewOutput(record, 0);
       }
-      element.onload = () => measuredOnScreen(record, element.naturalWidth, element.naturalHeight);
+      element.onload = () => {
+        shaped(element.naturalWidth, element.naturalHeight);
+        measuredOnScreen(record, element.naturalWidth, element.naturalHeight);
+      };
     }
     return element;
   }

@@ -15323,3 +15323,37 @@ button.glass-select::after {
   font-size: 12px;
   letter-spacing: 0;
 }
+
+/* ------------------------------------------------------------------ the take in its frame (16/11) */
+/* An image or a clip on the screen of the Studio is always a little smaller than its frame (8 px all
+   around) and rounded on its own, whatever the format chosen: its box has its own shape
+   (--media-ratio, set by studio.mjs), as large as the frame allows, in its middle. Until its shape is
+   known it fills the frame less its margin. The frame keeps its own corners. */
+#studio-view .studio-frame {
+  container-type: size;
+}
+#studio-view .studio-frame > :is(img, video).studio-frame-result {
+  inset: auto;
+  top: 50%;
+  left: 50%;
+  width: calc(100% - 16px);
+  height: calc(100% - 16px);
+  border-radius: 10px;
+  object-fit: contain;
+  transform: translate(-50%, -50%);
+}
+#studio-view .studio-frame > :is(img, video).studio-frame-result[style*='--media-ratio'] {
+  width: min(100cqw - 16px, (100cqh - 16px) * var(--media-ratio));
+  height: auto;
+  aspect-ratio: var(--media-ratio);
+  object-fit: cover;
+}
+/* Its number, or what will be made, at the top left of the frame: clear of the corner of the take. */
+#studio-view .studio-frame-label.is-take {
+  top: 18px;
+  left: 18px;
+}
+#studio-view .studio-frame:not(.is-audio) .studio-readout {
+  top: 18px;
+  left: 20px;
+}
