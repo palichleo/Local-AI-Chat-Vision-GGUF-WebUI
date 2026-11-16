@@ -13536,3 +13536,366 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The Paramètres (16/11). « Vos LLM » (capture 40): one LLM a line, the chosen one lit; a round
+   radio, its name and « VISION », the path of its file in mono; Modifier and Retirer as icons. */
+.llm-list {
+  display: grid;
+  gap: 2px;
+}
+.llm-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px 0 0;
+  border-radius: 10px;
+}
+.llm-row.is-chosen {
+  background: rgba(238, 232, 222, 0.06);
+}
+#settings .llm-pick {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 14px;
+  row-gap: 4px;
+  align-items: center;
+  min-height: 0;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+}
+.llm-radio {
+  grid-row: 1 / span 2;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--text-3);
+  border-radius: 50%;
+}
+.llm-row.is-chosen .llm-radio {
+  border-color: var(--text-1);
+  background: radial-gradient(circle, var(--text-1) 0 3px, transparent 3.5px);
+}
+.llm-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.llm-name {
+  overflow: hidden;
+  font: 400 15px/1.2 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.llm-tag {
+  padding: 2px 6px;
+  border: 1px solid rgba(238, 232, 222, 0.16);
+  border-radius: 4px;
+  color: var(--text-3);
+  font: 400 var(--size-label)/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.llm-path {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--text-3);
+  font: 400 12px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#settings :is(.llm-edit, .llm-remove) {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+}
+#settings :is(.llm-edit, .llm-remove):hover:enabled {
+  background: rgba(238, 232, 222, 0.06);
+  color: var(--text-1);
+}
+#settings :is(.llm-edit, .llm-remove):disabled {
+  opacity: 0.35;
+}
+#settings :is(.llm-edit, .llm-remove) svg {
+  width: 15px;
+  height: 15px;
+}
+.llm-adds {
+  display: flex;
+  gap: 24px;
+  padding: 10px 14px 0;
+}
+/* The editor of a LLM opens under the list (Modifier, Ajouter un LLM local): no « Chemins » to click. */
+#settings .model-paths > summary {
+  display: none;
+}
+#settings .model-paths[open] {
+  margin-top: 12px;
+  padding: 14px 16px 16px;
+  border: 1px solid rgba(238, 232, 222, 0.08);
+  border-radius: 12px;
+}
+
+/* Moteur et calcul in lines (capture 41): the name at the left, its setting at the right. */
+#settings :is(.engine-row, .token-field, .compute-field) {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 52px;
+  margin: 0;
+}
+#settings :is(.engine-row, .token-field, .compute-field) > label,
+#settings .token-title label {
+  margin: 0;
+  color: var(--text-1);
+  font: 400 15px/1.3 var(--font-ui);
+}
+#settings .engine-row .path-input {
+  flex: 0 1 380px;
+  min-width: 0;
+}
+#settings .token-settings {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+#settings .token-title {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 0;
+}
+#settings .token-title output {
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+}
+/* The notches on one scale: 1 K to 256 K in columns of 50 px, the rails aligned at the right; a
+   rail of 2 px, notches of 6 px (corners of 2) in the accent up to the value, the round handle of
+   14 px; the labels in mono under them, the value's lit; past the context, hollow and dotted. */
+.notch-scale {
+  position: relative;
+  flex: none;
+  width: 450px;
+  height: 34px;
+}
+.notch-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.notch-rail {
+  position: absolute;
+  top: 7px;
+  height: 2px;
+  background: rgba(238, 232, 222, 0.18);
+}
+.notch-rail.is-lit {
+  background: var(--accent);
+}
+.notch-rail.is-over {
+  height: 0;
+  border-top: 2px dotted rgba(238, 232, 222, 0.22);
+  background: none;
+}
+.notch {
+  position: absolute;
+  top: 5px;
+  box-sizing: border-box;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 2px;
+  background: rgba(238, 232, 222, 0.32);
+}
+.notch.is-lit {
+  background: var(--accent);
+}
+.notch.is-over {
+  border: 1px solid rgba(238, 232, 222, 0.3);
+  background: transparent;
+  pointer-events: auto;
+  cursor: not-allowed;
+}
+.notch-label {
+  position: absolute;
+  top: 22px;
+  color: var(--text-3);
+  font: 400 var(--size-label)/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.notch-label.is-chosen {
+  color: var(--text-1);
+}
+.notch-label.is-over {
+  opacity: 0.35;
+  pointer-events: auto;
+  cursor: not-allowed;
+}
+#settings .notch-scale .token-range {
+  position: absolute;
+  top: 1px;
+  left: var(--notch-left, 0);
+  width: var(--notch-width, 100%);
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+#settings .notch-scale .token-range::-webkit-slider-runnable-track {
+  height: 14px;
+  border: 0;
+  background: transparent;
+}
+#settings .notch-scale .token-range::-moz-range-track {
+  height: 14px;
+  border: 0;
+  background: transparent;
+}
+#settings .notch-scale .token-range::-moz-range-progress {
+  background: transparent;
+}
+#settings .notch-scale .token-range::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--text-1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  -webkit-appearance: none;
+  appearance: none;
+}
+#settings .notch-scale .token-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--text-1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+#settings .notch-scale .token-range:focus-visible {
+  outline: none;
+}
+#settings .notch-scale .token-range:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Calcul: the small group of choices at the right, the number of layers before it when chosen. */
+#settings .compute-name {
+  color: var(--text-1);
+  font: 400 15px/1.3 var(--font-ui);
+}
+#settings .compute-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#settings #custom-layers-field input {
+  width: 84px;
+  font-family: var(--font-mono);
+  text-align: right;
+}
+/* Paths and numbers in mono (règles communes); the editor of a LLM as the other lines. */
+#settings .path-input input {
+  font: 400 13px/1.3 var(--font-mono);
+}
+#settings .model-paths:not([open]) {
+  margin: 0;
+  border: 0;
+}
+#settings #llm-fields .field-group {
+  margin-bottom: 14px;
+}
+#settings #llm-fields .field-group > label {
+  margin-bottom: 7px;
+  color: var(--text-2);
+  font: 400 14px/1.2 var(--font-ui);
+}
+#settings #llm-fields .llm-editor-actions {
+  margin-top: 6px;
+}
+
+/* The line of MOSS Image (16/11): whether ComfyUI answers — ready, starting, not started, silent —
+   under its name, and « Démarrer » while it does not. */
+#settings .workflow-settings .workflow-card:has(> .workflow-comfy) {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.workflow-comfy {
+  display: flex;
+  flex: 1 0 100%;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  padding-left: 19px;
+  color: var(--text-3);
+  font: 400 13px/1.3 var(--font-ui);
+}
+.workflow-comfy-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.workflow-comfy[data-state='ready'] .workflow-comfy-dot {
+  background: var(--success);
+}
+.workflow-comfy:is([data-state='starting'], [data-state='silent']) .workflow-comfy-dot {
+  background: var(--warning);
+}
+.workflow-comfy[data-state='starting'] .workflow-comfy-dot {
+  animation: workflow-downloading 1.4s ease-in-out infinite;
+}
+#settings .workflow-comfy .workflow-comfy-start {
+  min-height: 30px;
+  margin-left: 4px;
+  padding: 4px 12px;
+  font: 400 13px/1 var(--font-ui);
+}
+@media (prefers-reduced-motion: reduce) {
+  .workflow-comfy[data-state='starting'] .workflow-comfy-dot {
+    animation: none;
+  }
+}
+
+/* « Libérer le GPU » (16/11): on the generation that held the card — under the Double verre of the
+   Studio, in the composer of the chat — no longer in the settings. */
+#studio-view .studio-held {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 10px 0 0;
+  color: var(--text-2);
+  font: 400 13px/1.4 var(--font-ui);
+}
+#studio-view .studio-held .studio-recover,
+.composer-recover {
+  min-height: 30px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font: 400 13px/1 var(--font-ui);
+  white-space: nowrap;
+}

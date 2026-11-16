@@ -694,7 +694,14 @@ function updateControls() {
   // A generation runs (the model's answer or a take): the room stops its grain, so that the page
   // takes nothing from the GPU while it works (moodix.css, part 4).
   document.documentElement.dataset.generating = String(Boolean(state.generating || toolBusy));
-  $('generation-recover').hidden = !s.toolJob?.blocked;
+  // The card held by the last generation: « Libérer le GPU » where it is seen (the composer, the
+  // Studio drawn again when that changes).
+  const held = Boolean(s.toolJob?.blocked);
+  $('composer-recover').hidden = !held;
+  if (held !== Boolean(state.gpuHeld)) {
+    state.gpuHeld = held;
+    state.studio?.render?.();
+  }
   const running = ['loading', 'ready', 'stopping'].includes(s.state);
   const text = state.connected ? labels[s.state] || 'État inconnu' : 'Connexion interrompue';
   $('settings-status').textContent = text;
@@ -808,6 +815,8 @@ function updateControls() {
   $('prompt').disabled = state.loadingHistory;
   $('compose-state').textContent = state.proposalCard
     ? ''
+    : held
+    ? 'La carte graphique est restée prise par la dernière génération.'
     : proposing
     ? 'Proposition dans le Studio · un message la refuse'
     : toolBusy
@@ -851,6 +860,11 @@ function updateControls() {
     $('detected-model').disabled ||
     state.modelAdding ||
     !state.detectedModels?.some(item => item.id === $('detected-model').value && item.id !== 'current');
+  if (
+    state.llmListKey &&
+    state.llmListKey !== [$('detected-model').disabled, !!state.modelAdding, $('detected-model').value, (state.detectedModels || []).length].join('|')
+  )
+    renderLLMList();
 }
 
 /**
@@ -1042,7 +1056,6 @@ async function checkComponents({ again = false } = {}) {
   if (state.checkingComponents || (!again && state.componentsSession === state.settingsSession)) return;
   state.componentsSession = state.settingsSession;
   state.checkingComponents = true;
-  $('components-check').disabled = true;
   $('components-status').textContent = 'Lecture des versions…';
   try {
     // Versions read for an earlier opening are still true: they are shown all the same.
@@ -1072,7 +1085,6 @@ async function checkComponents({ again = false } = {}) {
     $('components-status').textContent = error.message;
   } finally {
     state.checkingComponents = false;
-    $('components-check').disabled = false;
   }
 }
 
@@ -1180,6 +1192,71 @@ function applyModelLibrary(library) {
   $('model-paths').open = false;
   $('models-status').textContent = (library.errors || []).map(item => item.name + ' : ' + item.error).join('\n');
   $('models-status').hidden = !$('models-status').textContent;
+  renderLLMList();
+}
+/**
+ * « Vos LLM » (capture 40): one line per LLM, the chosen one lit; its name, « VISION » when it reads
+ * images, the path of its file in mono; Modifier opens its editor under the list, Retirer takes it
+ * off the list (its files stay). Local LLMs only for now. The hidden select keeps the choice.
+ */
+function renderLLMList() {
+  const list = $('llm-list'),
+    chosen = $('detected-model').value,
+    off = $('detected-model').disabled;
+  state.llmListKey = [off, !!state.modelAdding, chosen, (state.detectedModels || []).length].join('|');
+  const rows = (state.detectedModels || []).map(item => {
+    const lit = item.id === chosen && !state.modelAdding,
+      row = node('div', 'llm-row' + (lit ? ' is-chosen' : '')),
+      pick = node('button', 'llm-pick'),
+      head = node('span', 'llm-head'),
+      edit = node('button', 'llm-edit'),
+      remove = node('button', 'llm-remove');
+    pick.type = edit.type = remove.type = 'button';
+    pick.setAttribute('role', 'radio');
+    pick.setAttribute('aria-checked', String(lit));
+    head.append(node('span', 'llm-name', item.name || 'Sans nom'));
+    if (item.projectorPath) head.append(node('span', 'llm-tag', 'Vision'));
+    pick.append(node('span', 'llm-radio'), head, node('span', 'llm-path', item.modelPath || ''));
+    pick.disabled = off;
+    pick.onclick = () => chooseLLM(item.id);
+    edit.append(icon('edit'));
+    edit.title = 'Modifier';
+    edit.setAttribute('aria-label', 'Modifier ' + (item.name || 'ce LLM'));
+    edit.disabled = off;
+    edit.onclick = () => {
+      if (!chooseLLM(item.id)) return;
+      $('model-paths').open = true;
+      $('llm-name').focus();
+    };
+    remove.append(icon('trash'));
+    remove.title = 'Retirer de la liste (les fichiers restent)';
+    remove.setAttribute('aria-label', 'Retirer ' + (item.name || 'ce LLM') + ' de la liste');
+    remove.disabled = off || state.modelAdding || item.id === 'current';
+    remove.onclick = () => void removeLLM(item.id);
+    row.append(pick, edit, remove);
+    return row;
+  });
+  list.replaceChildren(
+    ...(rows.length ? rows : [node('p', 'settings-note', 'Aucun LLM pour l’instant : ajoutez le fichier GGUF du vôtre.')]),
+  );
+}
+/** A line of « Vos LLM » chosen: its paths in the editor (true once it is the one chosen). */
+function chooseLLM(id) {
+  if ($('detected-model').value !== id || state.modelAdding) {
+    $('detected-model').value = id;
+    if (state.modelAdding) {
+      if (modelEditorDirty() && !confirm('Abandonner les modifications de ce LLM ?')) {
+        $('detected-model').value = '';
+        return false;
+      }
+      state.modelAdding = false;
+      state.modelDraftBaseline = JSON.stringify({ ...modelDraft(), adding: false });
+    }
+    chooseDetectedModel();
+    // Another line chosen: its editor stays closed until Modifier.
+    if ($('detected-model').value === id) $('model-paths').open = false;
+  }
+  return $('detected-model').value === id;
 }
 function chooseDetectedModel() {
   const item = state.detectedModels.find(item => item.id === $('detected-model').value);
@@ -1193,6 +1270,7 @@ function chooseDetectedModel() {
   loadModelDraft(item);
   settingsSearch.refresh();
   updateControls();
+  renderLLMList();
 }
 function addLLM() {
   if ($('add-llm').disabled) return;
@@ -1203,6 +1281,7 @@ function addLLM() {
   $('model-paths').open = true;
   $('llm-name').focus();
   updateControls();
+  renderLLMList();
 }
 function cancelLLM() {
   if (modelEditorDirty() && !confirm('Abandonner les modifications de ce LLM ?')) return;
@@ -1215,10 +1294,14 @@ function cancelLLM() {
   loadModelDraft(current || state.detectedModels[0]);
   $('model-paths').open = false;
   updateControls();
+  renderLLMList();
 }
-async function removeLLM() {
-  if ($('remove-llm').disabled || state.operation) return;
-  const item = state.detectedModels.find(item => item.id === $('detected-model').value);
+/** Takes a LLM off the list (`id`: a line of « Vos LLM », else the one chosen); its files stay. */
+async function removeLLM(id = $('detected-model').value) {
+  if (typeof id !== 'string') id = $('detected-model').value;
+  const chosen = id === $('detected-model').value;
+  if ((chosen && $('remove-llm').disabled) || state.operation || state.modelAdding || id === 'current') return;
+  const item = state.detectedModels.find(item => item.id === id);
   if (!item) return;
   if (
     !confirm(
@@ -1302,6 +1385,7 @@ async function saveLLM({ withinSettingsSave = false } = {}) {
       settingsGuard.markPartSaved('llm');
       $('model-paths').open = false;
       $('models-status').hidden = true;
+      renderLLMList();
     }
     contextMeter.schedule();
     return true;
@@ -2205,8 +2289,8 @@ async function sendMessage(event) {
       });
       if (leaked && !output)
         output = allowTools
-          ? 'Je n’ai pas pu lancer cet outil : la génération est peut-être indisponible en ce moment (voir les réglages). Renvoie ta demande pour que je réessaie.'
-          : 'Je ne peux pas lancer d’autre génération dans ce message. Renvoie ta demande pour que je réessaie.';
+          ? 'Je n’ai pas pu lancer cet outil : la génération est peut-être indisponible en ce moment (voir les réglages). Renvoyez votre demande pour que je réessaie.'
+          : 'Je ne peux pas lancer d’autre génération dans ce message. Renvoyez votre demande pour que je réessaie.';
       if (silent && !request) {
         // Nothing true to say about an unseen image: the image itself ends the turn.
         output = '';
@@ -2993,6 +3077,8 @@ const studioUI = setupStudio({
   viewOutput: (record, index) => assetsUI.viewOutput(record, index),
   waitForModel: (...args) => waitForModel(...args),
   // A chat answer in progress keeps the model: the Studio waits for it.
+  gpuBlocked: () => Boolean(state.status.toolJob?.blocked),
+  recoverGPU: () => recoverGPU(),
   blocked: () =>
     state.generating || state.status.busy
       ? 'Attendez la fin de la réponse en cours.'
@@ -3177,7 +3263,16 @@ $('cancel-llm').onclick = cancelLLM;
 $('remove-llm').onclick = removeLLM;
 $('settings-update-check').onclick = searchUpdate;
 $('settings-update-install').onclick = installUpdate;
-$('components-check').onclick = () => checkComponents({ again: true });
+/** « Libérer le GPU » (the composer, the Studio): the engine of the last generation lets the card go. */
+async function recoverGPU() {
+  try {
+    await api('tools/recover', {});
+  } catch (error) {
+    notice(error.message);
+  }
+  await refreshStatus();
+}
+$('composer-recover').onclick = () => void recoverGPU();
 $('hf-token-save').onclick = () => {
   const token = $('hf-token').value.trim();
   if (token) void saveToken(token);

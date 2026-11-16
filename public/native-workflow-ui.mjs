@@ -293,47 +293,69 @@ export function setupNativeWorkflows(options) {
     runnerStatus();
     if (ready && $('settings').open) void refresh({ settings: false }).catch(failure => notice(failure.message));
   }
-  /** Internal: Atelier's own engine runs the family. External: ComfyUI does. */
+  /** Internal: Atelier's own engine runs the family. External: ComfyUI does (MOSS Image). */
   const engineOf = record => families.find(item => item.family === record.pipeline)?.engine || 'internal';
-  const ENGINES = [
-    ['internal', 'Moteur interne'],
-    ['external', 'Moteur externe · ComfyUI'],
-  ];
-  /** The address of ComfyUI and whether it answers, at the top of the external section. */
-  function comfyPanel() {
-    const panel = node('div', 'comfy-panel'),
-      status = node(
-        'span',
-        'native-status',
-        !comfy.enabled
-          ? 'Désactivé'
-          : comfy.reachable
-            ? 'Connecté' + (comfy.version ? ' · ComfyUI ' + comfy.version : '')
-            : 'Ne répond pas',
-      );
-    status.dataset.active = String(comfy.enabled && comfy.reachable);
-    const use = input('comfy-enabled', comfy.enabled, 'checkbox'),
-      toggle = node('label', 'history-toggle'),
-      address = input('comfy-url', comfy.baseUrl);
-    toggle.append(use, node('span', '', 'Utiliser ComfyUI'));
-    address.spellcheck = false;
-    address.placeholder = 'http://127.0.0.1:8188';
-    address.setAttribute('aria-label', 'Adresse de ComfyUI');
-    const save = button('Enregistrer', async () => {
-      try {
-        const result = await run(async signal =>
-          (await api('generation/comfy', { enabled: use.checked, baseUrl: address.value.trim() }, { signal })).json(),
-        );
-        if (result) apply(result, { settings: false });
-      } catch (failure) {
-        importStatus(failure.message, true);
+  // « Démarrer » clicked: the time ComfyUI was started, followed until it answers (2 min at most).
+  let comfyStarting = 0;
+  /**
+   * The line of a workflow ComfyUI runs (MOSS Image, 16/11): whether ComfyUI answers (ready,
+   * starting, not started, silent), and « Démarrer » while it does not.
+   */
+  function comfyLine() {
+    const starting = Boolean(comfyStarting) && !comfy.reachable,
+      silent = comfy.enabled && comfy.reason === 'silent',
+      state = comfy.reachable ? 'ready' : starting ? 'starting' : silent ? 'silent' : 'stopped',
+      line = node('div', 'workflow-comfy'),
+      text = {
+        ready: 'ComfyUI prêt' + (comfy.version ? ' · ' + comfy.version : ''),
+        starting: 'ComfyUI démarre…',
+        silent: 'ComfyUI ne répond pas',
+        stopped: 'ComfyUI n’est pas lancé',
+      }[state];
+    line.dataset.state = state;
+    line.append(node('span', 'workflow-comfy-dot'), node('span', 'workflow-comfy-text', text));
+    if (!comfy.reachable) {
+      const start = button('Démarrer', () => void startComfy(), 'secondary workflow-comfy-start');
+      start.disabled = starting;
+      start.title = comfy.app ? 'Démarrer ' + comfy.app : 'Démarrer ComfyUI, qui crée les images de MOSS Image';
+      start.dataset.nativeControl = 'true';
+      line.append(start);
+    }
+    return line;
+  }
+  /** Starts ComfyUI (the application chosen once when the server does not know which one). */
+  async function startComfy() {
+    try {
+      importStatus('');
+      let result = await (await api('generation/comfy/start', {})).json();
+      if (result.choose) {
+        const launchPath = await browse('comfy', '', controller.signal);
+        if (!launchPath) return;
+        result = await (await api('generation/comfy/start', { launchPath })).json();
       }
-    });
-    for (const control of [use, address, save]) control.dataset.nativeControl = 'true';
-    const row = node('div', 'path-input');
-    row.append(address, save);
-    panel.append(toggle, status, row);
-    return panel;
+      if (result.comfy) comfy = result.comfy;
+      comfyStarting = Date.now();
+      renderList();
+      followComfy();
+    } catch (failure) {
+      importStatus(failure.message, true);
+    }
+  }
+  /** Asks every 2 s whether ComfyUI answers; once it does (or after 2 min), the list is read again. */
+  function followComfy() {
+    const step = async () => {
+      if (!comfyStarting) return;
+      try {
+        comfy = await (await api('generation/comfy')).json();
+      } catch {
+        /* Asked again at the next step. */
+      }
+      if (!comfy.reachable && Date.now() - comfyStarting < 120000) return void setTimeout(step, 2000);
+      comfyStarting = 0;
+      if ($('settings').open) await refresh({ settings: false }).catch(() => renderList());
+      else renderList();
+    };
+    setTimeout(step, 2000);
   }
   /** What a workflow is, at a glance: a colour, and under the pointer what it means. */
   function workflowState(record) {
@@ -509,6 +531,7 @@ export function setupNativeWorkflows(options) {
     editButton.dataset.nativeControl = 'true';
     actions.append(editButton);
     card.append(dot, name, tip, actions);
+    if (engineOf(record) === 'external') card.append(comfyLine());
     if (stateName === 'downloading') {
       const bar = node('span', 'workflow-progress'),
         fill = node('span');
@@ -561,15 +584,9 @@ export function setupNativeWorkflows(options) {
   }
   function renderList() {
     $('workflow-list').replaceChildren();
-    for (const [engine, title] of ENGINES) {
-      const heading = node('div', 'workflow-section');
-      heading.append(node('h4', '', title));
-      if (engine === 'external') heading.append(comfyPanel());
-      $('workflow-list').append(heading);
-      const own = workflows.filter(record => engineOf(record) === engine);
-      if (!own.length) $('workflow-list').append(node('p', 'native-empty', 'Aucun workflow.'));
-      for (const record of own) $('workflow-list').append(workflowCard(record));
-    }
+    // One list (parametres-maquette.md): MOSS Image among the others, ComfyUI said on its line.
+    if (!workflows.length) $('workflow-list').append(node('p', 'native-empty', 'Aucun workflow.'));
+    for (const record of workflows) $('workflow-list').append(workflowCard(record));
     if (hiddenWorkflows > 0) {
       const restore = button(
         `Réafficher les workflows fournis supprimés (${hiddenWorkflows})`,
@@ -1513,15 +1530,6 @@ export function setupNativeWorkflows(options) {
       });
     } catch (failure) {
       if (!controller.signal.aborted) $('generation-status').textContent = failure.message;
-    }
-  };
-  $('generation-recover').onclick = async () => {
-    try {
-      await api('tools/recover', {});
-      options.onChange?.();
-      $('generation-status').textContent = 'GPU libéré.';
-    } catch (failure) {
-      $('generation-status').textContent = failure.message;
     }
   };
   $('workflow-add').onclick = () => edit();

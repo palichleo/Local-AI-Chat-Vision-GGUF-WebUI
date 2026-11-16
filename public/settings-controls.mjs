@@ -1,6 +1,57 @@
 export const CONTEXT_SIZES = Object.freeze([4096, 8192, 16384, 32768, 65536, 131072, 262144]);
 export const OUTPUT_LIMITS = Object.freeze([1024, 2048, 4096, 8192, 16384, 32768]);
 const format = value => `${new Intl.NumberFormat('fr-FR').format(value)} tokens`;
+// One scale for both (parametres-maquette.md, captures 41 and 42): 1 K · 2 K · … · 256 K, a column
+// of 50 px each; the round handle of 14 px.
+const COLUMN = 50,
+  THUMB = 14;
+const columnOf = tokens => Math.log2(tokens / 1024);
+const short = tokens => {
+  const thousands = tokens / 1024;
+  return (Number.isInteger(thousands) ? String(thousands) : thousands.toFixed(1).replace('.', ',')) + '\u202fK';
+};
+
+/**
+ * The notches of a control on the scale: its rail (in the accent up to the value), a notch of 6 px
+ * and its label for each choice, the value's label lit. `usable`: the choices that can be taken (the
+ * output never goes past the context): those after are hollow, their rail dotted, their labels faded.
+ * The range of the page lies over the notches it takes, its steps on theirs.
+ */
+function drawScale(control, marks, choices, { selected, usable = choices.length }) {
+  const first = columnOf(choices[0]),
+    step = choices.length > 1 ? ((columnOf(choices.at(-1)) - first) * COLUMN) / (choices.length - 1) : 0,
+    start = first * COLUMN + COLUMN / 2,
+    at = index => start + index * step;
+  control.style.setProperty('--notch-left', start - THUMB / 2 + 'px');
+  control.style.setProperty('--notch-width', Math.max(0, usable - 1) * step + THUMB + 'px');
+  const page = marks?.ownerDocument;
+  if (!page?.createElement) return;
+  const make = (className, style = {}, text = '') => {
+    const element = page.createElement('span');
+    element.className = className;
+    element.textContent = text;
+    Object.assign(element.style, style);
+    return element;
+  };
+  const parts = [
+    make('notch-rail', { left: at(0) + 'px', width: Math.max(0, usable - 1) * step + 'px' }),
+    make('notch-rail is-lit', { left: at(0) + 'px', width: selected * step + 'px' }),
+  ];
+  if (usable < choices.length)
+    parts.push(make('notch-rail is-over', { left: at(usable - 1) + 'px', width: (choices.length - usable) * step + 'px' }));
+  choices.forEach((tokens, index) => {
+    const over = index >= usable,
+      state = (index <= selected ? ' is-lit' : '') + (over ? ' is-over' : ''),
+      notch = make('notch' + state, { left: at(index) + 'px' }),
+      label = make('notch-label' + (index === selected ? ' is-chosen' : '') + (over ? ' is-over' : ''), {
+        left: at(index) + 'px',
+      }, short(tokens));
+    // Past the context: said under the pointer, and not taken.
+    if (over) notch.title = label.title = 'Pas plus que le contexte total';
+    parts.push(notch, label);
+  });
+  marks.replaceChildren(...parts);
+}
 
 export function setupTokenControls($) {
   const context = $('context-size'),
@@ -25,10 +76,8 @@ export function setupTokenControls($) {
     output.value = String(outputs.indexOf(selected));
     display(context, 'context-value', size);
     display(output, 'output-value', selected);
-    $('context-min').textContent = new Intl.NumberFormat('fr-FR').format(contexts[0]);
-    $('context-max').textContent = new Intl.NumberFormat('fr-FR').format(contexts.at(-1));
-    $('output-min').textContent = new Intl.NumberFormat('fr-FR').format(available[0]);
-    $('output-max').textContent = new Intl.NumberFormat('fr-FR').format(available.at(-1));
+    drawScale(context, $('context-marks'), contexts, { selected: contexts.indexOf(size) });
+    drawScale(output, $('output-marks'), outputs, { selected: outputs.indexOf(selected), usable: available.length });
   }
   function setValues({ contextSize = 8192, maxOutputTokens = 4096 } = {}) {
     if (
@@ -64,12 +113,33 @@ export function setupTokenControls($) {
 
 export function setupComputeControls($) {
   const mode = $('compute-mode'),
-    layers = $('gpu-layers');
+    layers = $('gpu-layers'),
+    // The choices of the select as a small group (capture 41), the select keeping the value.
+    group = $('compute-segments'),
+    choices = group?.ownerDocument
+      ? [...mode.options].map(option => {
+          const choice = group.ownerDocument.createElement('button');
+          choice.type = 'button';
+          choice.className = 'settings-segment';
+          choice.textContent = option.textContent;
+          choice.dataset.value = option.value;
+          choice.setAttribute('role', 'radio');
+          if (option.value === 'custom') choice.title = 'GPU · un nombre de couches choisi';
+          choice.onclick = () => {
+            mode.value = option.value;
+            sync();
+            if (option.value === 'custom') layers.focus?.();
+          };
+          return choice;
+        })
+      : [];
+  if (choices.length) group.replaceChildren(...choices);
   function sync() {
     const custom = mode.value === 'custom';
     $('custom-layers-field').hidden = !custom;
     layers.disabled = !custom;
     layers.required = custom;
+    for (const choice of choices) choice.setAttribute('aria-checked', String(choice.dataset.value === mode.value));
   }
   function values() {
     const text = mode.value === 'custom' ? layers.value.trim() : mode.value;

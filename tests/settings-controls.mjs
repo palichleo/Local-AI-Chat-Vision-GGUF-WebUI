@@ -15,10 +15,6 @@ function controls() {
       'output-tokens',
       'context-value',
       'output-value',
-      'context-min',
-      'context-max',
-      'output-min',
-      'output-max',
     ].map(id => [
       id,
       {

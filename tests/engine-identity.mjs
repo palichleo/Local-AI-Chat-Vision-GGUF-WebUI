@@ -24,7 +24,7 @@ test('a file that is not llama-server is named before the model is loaded', asyn
   const engine = new Engine({ spawnProcess: imitating("error: unknown command '--version'"), cacheDir: directory });
   await assert.rejects(
     engine.start({ enginePath, modelPath, projectorPath: '', contextSize: 4096, gpuLayers: 0 }),
-    /n’est pas llama-server : llama(\.exe)? répond « error: unknown command '--version' ».*Choisis llama-server/,
+    /n’est pas llama-server : llama(\.exe)? répond « error: unknown command '--version' ».*Choisissez llama-server/,
   );
   assert.equal(engine.state, 'error');
   assert.equal(engine.child, null, 'nothing is left running');

@@ -217,6 +217,9 @@ export function setupStudio({
   afterMove = () => Promise.resolve(),
   // The pace of the pointer: 1 as it is seen, 0 at once (the tests).
   pace = 1,
+  // The last generation left the card held (its engine did not say it let it go): « Libérer le GPU ».
+  gpuBlocked = () => false,
+  recoverGPU = async () => {},
   // « Agent »: opens the chat of Moodix AI, as the band at the foot of the Studio did.
   openAgent = () => {},
   // Brings the Studio on screen (as « Studio » of the sidebar does): a mode chosen from elsewhere.
@@ -1166,9 +1169,9 @@ export function setupStudio({
     disk.title = done
       ? 'Réglages enregistrés pour ' + workflow.name
       : changed
-        ? 'Enregistrer ces réglages pour ' + workflow.name + ' : ils reviendront à chaque fois que tu le choisis'
+        ? 'Enregistrer ces réglages pour ' + workflow.name + ' : ils reviendront chaque fois que vous le choisirez'
         : saved
-          ? 'Réglages de ' + workflow.name + ' enregistrés · ils reviennent à chaque fois que tu le choisis'
+          ? 'Réglages de ' + workflow.name + ' enregistrés · ils reviennent chaque fois que vous le choisissez'
           : 'Enregistrer ces réglages pour ' + workflow.name;
     disk.setAttribute('aria-label', disk.title);
   }
@@ -1889,7 +1892,7 @@ export function setupStudio({
       : current()?.follows
         ? 'Ajoutez d’abord la vidéo et le personnage'
         : drafts[mode].prompt.trim().length < IMPROVE_MIN
-          ? 'Écris d’abord quelques mots'
+          ? 'Écrivez d’abord quelques mots'
           : 'Améliorer le prompt avec Moodix AI (' + MODIFIER + '+E)';
   /** Whether « Améliorer » has what it needs: a few words, or the pictures a prompt is written from. */
   const improves = () =>
@@ -1908,7 +1911,7 @@ export function setupStudio({
       text = draft.prompt.trim(),
       scene = sceneInputs();
     if (!improves()) {
-      failure = current()?.follows ? 'Ajoutez d’abord la vidéo et le personnage.' : 'Écris d’abord quelques mots.';
+      failure = current()?.follows ? 'Ajoutez d’abord la vidéo et le personnage.' : 'Écrivez d’abord quelques mots.';
       return render();
     }
     const reason = blocked();
@@ -2007,7 +2010,7 @@ export function setupStudio({
     make.append(node('span', 'sr-only', label));
     make.setAttribute('aria-label', label);
     make.setAttribute('aria-keyshortcuts', MODIFIER === '⌘' ? 'Meta+E' : 'Control+E');
-    make.title = enriching ? 'Moodix AI réécrit ton texte…' : improveTitle();
+    make.title = enriching ? 'Moodix AI réécrit votre texte…' : improveTitle();
     if (enriching) {
       make.classList.add('is-working');
       make.setAttribute('aria-busy', 'true');
@@ -2493,7 +2496,7 @@ export function setupStudio({
     const auto = request.autoAllow === true;
     pointer?.move(
       targetOf('generate'),
-      auto ? 'lance la génération (autorisé dans la configuration)' : 'attend ton accord',
+      auto ? 'lance la génération (autorisé dans la configuration)' : 'attend votre accord',
     );
     await wait(300);
     if (!ai || ai.stopped || proposal !== current) return;
@@ -3646,6 +3649,18 @@ export function setupStudio({
       const alert = node('p', 'studio-error', failure);
       alert.setAttribute('role', 'alert');
       preview.append(alert);
+    }
+    // On the generation that held it (parametres-maquette.md): the card, given back from here.
+    if (gpuBlocked() && !working) {
+      const held = node('div', 'studio-held'),
+        free = button('secondary studio-recover', 'Libérer le GPU', async () => {
+          free.disabled = true;
+          await recoverGPU();
+          render();
+        });
+      held.setAttribute('role', 'alert');
+      held.append(node('span', '', 'La carte graphique est restée prise par la dernière génération.'), free);
+      preview.append(held);
     }
 
     desk.append(...[write, preview, settings].map(grained), grained(outputs()));

@@ -1970,7 +1970,7 @@ test('« Améliorer le prompt » rewrites what is typed, which can be taken back
     assert.equal(wand().children.at(-1).textContent, 'Améliorer le prompt');
     // Fewer than three letters: the wand waits, and says why.
     assert.equal(wand().disabled, true);
-    assert.equal(wand().title, 'Écris d’abord quelques mots');
+    assert.equal(wand().title, 'Écrivez d’abord quelques mots');
 
     // Nothing typed: nothing is asked of the model.
     await wand().onclick();

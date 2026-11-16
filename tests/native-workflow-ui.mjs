@@ -754,35 +754,54 @@ test('Krea 2 is created by Atelier’s engine: its tokenizer is asked for, and p
   assert.deepEqual(f.workflows.at(-1).components.tokenizer, { policy: 'fixed', asset: 'tokenizer-one' });
 });
 
-test('workflows are listed by engine: the built-in one, then ComfyUI with its address', async t => {
+test('one list of workflows: MOSS Image says whether ComfyUI answers, « Démarrer » while it does not', async t => {
   const f = await setup(t);
-  const list = f.$('workflow-list').children;
-  const sections = list.filter(item => item.className === 'workflow-section');
+  const list = () => f.$('workflow-list').children;
+  // No section of an external engine any more: Krea 2 alone here.
+  assert.deepEqual(list().map(item => item.className), ['workflow-card']);
+  assert.equal(f.nodes.get('comfy-url'), undefined);
+  // MOSS Image, which ComfyUI runs: its line says ComfyUI is not started, and offers to start it.
+  const moss = { ...structuredClone(f.template), id: 'moss-image', name: 'MOSS Image', pipeline: 'moss' };
+  f.workflows.push(moss);
+  const answers = {
+    'generation/comfy/start': [{ choose: true }, { started: true, app: 'Comfy Desktop.exe', comfy: { enabled: true, reachable: false, reason: 'stopped' } }],
+  };
+  const api = f.api;
+  f.api = async (route, body) => {
+    if (answers[route]) {
+      f.calls.push({ route, body: structuredClone(body) });
+      return Response.json(answers[route].shift());
+    }
+    if (route === 'files/choose') {
+      f.calls.push({ route, body: structuredClone(body) });
+      return Response.json({ path: 'D:\\Comfy\\Comfy Desktop\\Comfy Desktop.exe' });
+    }
+    return api(route, body);
+  };
+  f.ui = setupNativeWorkflows({ api: (...args) => f.api(...args), state: {}, node: f.node, notice() {} });
+  await f.ui.refresh();
+  const card = list().find(item => item.children.some(child => child.textContent === 'MOSS Image')),
+    line = card.children.at(-1);
+  assert.equal(line.className, 'workflow-comfy');
+  assert.equal(line.dataset.state, 'stopped');
+  assert.equal(line.children[1].textContent, 'ComfyUI n’est pas lancé');
+  const start = line.children.at(-1);
+  assert.equal(start.textContent, 'Démarrer');
+  // Not known which ComfyUI: the user chooses it, then it starts; the line says it is starting.
+  await start.onclick();
+  await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(
-    sections.map(section => section.children[0].textContent),
-    ['Moteur interne', 'Moteur externe · ComfyUI'],
+    f.calls.filter(call => ['generation/comfy/start', 'files/choose'].includes(call.route)).map(call => [call.route, call.body]),
+    [
+      ['generation/comfy/start', {}],
+      ['files/choose', { kind: 'comfy', initialPath: '' }],
+      ['generation/comfy/start', { launchPath: 'D:\\Comfy\\Comfy Desktop\\Comfy Desktop.exe' }],
+    ],
   );
-  // Krea 2 is the built-in engine's; nothing of ComfyUI's (MOSS Image) in this installation.
-  assert.equal(list[list.indexOf(sections[0]) + 1].className, 'workflow-card');
-  assert.equal(list.at(-1).textContent, 'Aucun workflow.');
-  const panel = sections[1].children.at(-1),
-    ids = element => [element.id, ...element.children.flatMap(ids)].filter(Boolean);
-  assert.equal(panel.className, 'comfy-panel');
-  assert.ok(ids(panel).includes('comfy-url') && ids(panel).includes('comfy-enabled'));
-  // No family is offered to be « created with Atelier's engine »: all of its own always are.
-  assert.deepEqual(
-    ids(panel).filter(id => id.startsWith('comfy-own')),
-    [],
-  );
-  assert.equal(panel.children.length, 3);
-  // Saving the address goes to the server, whose answer redraws the list.
-  f.$('comfy-url').value = ' http://127.0.0.1:7821 ';
-  f.$('comfy-enabled').checked = true;
-  await panel.children.at(-1).children.at(-1).onclick();
-  assert.deepEqual(f.calls.at(-1), {
-    route: 'generation/comfy',
-    body: { enabled: true, baseUrl: 'http://127.0.0.1:7821' },
-  });
+  const after = list().find(item => item.children.some(child => child.textContent === 'MOSS Image')).children.at(-1);
+  assert.equal(after.dataset.state, 'starting');
+  assert.equal(after.children[1].textContent, 'ComfyUI démarre…');
+  assert.equal(after.children.at(-1).disabled, true);
 });
 
 test('an existing tokenizer is never replaced by a suggestion, and families without one show no tokenizer', async t => {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ComfyClient } from '../lib/comfy-client.mjs';
@@ -700,6 +700,89 @@ test('the index of an MP4 gives its size, length and rate', async () => {
   assert.equal(mp4Bytes(png()), null);
 });
 
+test('« Démarrer »: the one ComfyUI installed starts, or the user chooses it; it is kept, MOSS Image goes to it', {
+  skip: process.platform !== 'win32',
+}, async t => {
+  const dataDir = await trial(null),
+    app = join(dataDir, 'Comfy Desktop.exe'),
+    other = join(dataDir, 'ComfyUI.exe'),
+    started = [];
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  await writeFile(app, '');
+  await writeFile(other, '');
+  let found = [];
+  const refused = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+  const service = new GenerationService({
+    root: dataDir,
+    dataDir,
+    workflowDir: join(dataDir, 'workflows'),
+    outputDir: join(dataDir, 'output'),
+    worker: { status: () => ({ state: 'ready', busy: false, capabilities: {} }), close: async () => {} },
+    environment: { close: async () => {}, status: () => ({ state: 'ready' }) },
+    comfyConnect: () => ({
+      status: async () => {
+        throw refused;
+      },
+    }),
+    findComfy: async () => found,
+    startComfyApp: path => started.push(path),
+  });
+  // Nothing kept and nothing found, or several found: the user chooses; nothing starts.
+  assert.deepEqual(await service.startComfy(), { choose: true, found: [] });
+  found = [app, other];
+  assert.deepEqual(await service.startComfy(), { choose: true, found: [app, other] });
+  assert.deepEqual(started, []);
+  // Only an application whose name says Comfy, and that is there.
+  await assert.rejects(service.startComfy({ launchPath: join(dataDir, 'notepad.exe') }), /application ComfyUI/);
+  await assert.rejects(service.startComfy({ launchPath: join(dataDir, 'Comfy absent.exe') }), /application ComfyUI/);
+  // Chosen: started, kept with the usual address, MOSS Image turned on.
+  const result = await service.startComfy({ launchPath: app });
+  assert.deepEqual(started, [app]);
+  assert.equal(result.started, true);
+  assert.equal(result.app, 'Comfy Desktop.exe');
+  assert.deepEqual(result.comfy, {
+    enabled: true,
+    baseUrl: 'http://127.0.0.1:8188',
+    reachable: false,
+    version: '',
+    reason: 'stopped',
+    app: 'Comfy Desktop.exe',
+  });
+  assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'comfy-engine.json'), 'utf8')), {
+    enabled: true,
+    baseUrl: 'http://127.0.0.1:8188',
+    launchPath: app,
+  });
+  assert.equal(service.catalog.capabilities.moss.ready, true);
+  // Next time, the one kept, without asking; an address saved keeps it.
+  found = [];
+  await service.startComfy();
+  assert.deepEqual(started, [app, app]);
+  await service.saveComfy({ enabled: true, baseUrl: 'http://127.0.0.1:8000' });
+  assert.equal(JSON.parse(await readFile(join(dataDir, 'comfy-engine.json'), 'utf8')).launchPath, app);
+});
+
+test('the ComfyUI applications installed: those of the uninstall entries of Windows, then the usual places', async () => {
+  const { findComfyApps, isComfyApp } = await import('../lib/comfy-launch.mjs');
+  assert.equal(isComfyApp('D:\\Comfy\\Comfy Desktop\\Comfy Desktop.exe', 'win32'), true);
+  assert.equal(isComfyApp('C:\\Windows\\notepad.exe', 'win32'), false);
+  assert.equal(isComfyApp('relative\\Comfy.exe', 'win32'), false);
+  assert.equal(isComfyApp('/opt/comfy/ComfyUI', 'linux'), false);
+  const there = new Set(['D:\\Comfy\\Comfy Desktop\\Comfy Desktop.exe', 'C:\\Users\\a\\AppData\\Local\\Programs\\ComfyUI\\ComfyUI.exe']);
+  const found = await findComfyApps({
+    platform: 'win32',
+    env: { LOCALAPPDATA: 'C:\\Users\\a\\AppData\\Local' },
+    // Its icon names the program, with the index of the icon; another program is left.
+    run: async () => '"D:\\Comfy\\Comfy Desktop\\Comfy Desktop.exe",0\r\nC:\\Tools\\Uninstall.exe\r\nd:\\comfy\\comfy desktop\\comfy desktop.exe\r\n',
+    exists: async path => there.has(path),
+  });
+  assert.deepEqual(found, [
+    'D:\\Comfy\\Comfy Desktop\\Comfy Desktop.exe',
+    'C:\\Users\\a\\AppData\\Local\\Programs\\ComfyUI\\ComfyUI.exe',
+  ]);
+  assert.deepEqual(await findComfyApps({ platform: 'linux' }), []);
+});
+
 test('the generation service: ComfyUI for MOSS Image, the built-in engine for everything else', async t => {
   const fake = await comfy(t),
     dataDir = await trial(null),
@@ -749,7 +832,7 @@ test('the generation service: ComfyUI for MOSS Image, the built-in engine for ev
   // ComfyUI not set: a family it alone runs (MOSS Image) cannot, the others are the built-in
   // engine's (Krea 2 among them: this worker says nothing of it, as of MiniMax).
   assert.deepEqual(await available(), { ltx25: true, rife: true, moss: false });
-  assert.match(service.catalog.capabilities.moss.reason, /ComfyUI n’est pas configuré/);
+  assert.match(service.catalog.capabilities.moss.reason, /ComfyUI n’est pas réglé/);
   let client = service.client();
   await client.preflight(ltx());
   const progress = [];
@@ -764,7 +847,7 @@ test('the generation service: ComfyUI for MOSS Image, the built-in engine for ev
   // until 2 GiB more than that are available (measured: its model then stays, its encoder goes).
   await client.free({ reserve: 8 * 1024 ** 3 });
   assert.equal(calls.at(-1), 'release, 10 GiB available');
-  await assert.rejects(service.client().preflight(moss()), /ComfyUI n’est pas configuré/);
+  await assert.rejects(service.client().preflight(moss()), /ComfyUI n’est pas réglé/);
   assert.equal(fake.seen.prompts.length + fake.seen.freed.length, 0);
 
   // Set from the settings: an address on this machine, or nothing is saved.
@@ -775,6 +858,8 @@ test('the generation service: ComfyUI for MOSS Image, the built-in engine for ev
     baseUrl: fake.baseUrl + '/',
     reachable: true,
     version: '',
+    reason: '',
+    app: '',
   });
   // ComfyUI makes MOSS Image ready and nothing else: Krea 2 and MiniMax H3 are the built-in
   // engine's, which says nothing of them here.
@@ -857,7 +942,7 @@ test('the generation service: ComfyUI for MOSS Image, the built-in engine for ev
   // MOSS Image is still ComfyUI's.
   assert.notEqual(await comfyRoute(dataDir, moss(), { connect: shared.connect }), null);
   const again = await service.saveComfy({ enabled: true, baseUrl: shared.baseUrl, own: ['krea2'] });
-  assert.deepEqual(Object.keys(again.comfy).sort(), ['baseUrl', 'enabled', 'reachable', 'version']);
+  assert.deepEqual(Object.keys(again.comfy).sort(), ['app', 'baseUrl', 'enabled', 'reachable', 'reason', 'version']);
   assert.deepEqual(Object.keys(JSON.parse(await readFile(file, 'utf8'))), ['enabled', 'baseUrl']);
 
   // A ComfyUI that is not running: said in the settings, and before anything is unloaded.

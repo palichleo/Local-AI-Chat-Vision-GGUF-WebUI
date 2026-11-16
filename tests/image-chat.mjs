@@ -327,7 +327,7 @@ test('a tool call written as text once tools are withdrawn is never shown or sto
   const only = await exchange({ failed: true, images: [], finalText: leak });
   assert.equal(only.requests[1].tools, false);
   assert.doesNotMatch(JSON.stringify(only.state.messages.at(-1)), /tool_call|function=/);
-  assert.match(only.state.messages.at(-1).content, /Renvoie ta demande/);
+  assert.match(only.state.messages.at(-1).content, /Renvoyez votre demande/);
   const after = await exchange({ failed: true, images: [], finalText: 'La génération a échoué. ' + leak });
   assert.equal(after.state.messages.at(-1).content, 'La génération a échoué.');
 });

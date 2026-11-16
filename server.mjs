@@ -117,7 +117,7 @@ async function jsonBody(req, limit = maxBody) {
   if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || ''))
     throw problem('Le format JSON est attendu.', 415);
   if (Number(req.headers['content-length'] || 0) > limit)
-    throw problem('La requête dépasse 20 Mo. Réduis le nombre d’images ou recommence une conversation.', 413);
+    throw problem('La requête dépasse 20 Mo. Réduisez le nombre d’images ou commencez une nouvelle conversation.', 413);
   const chunks = [];
   let bytes = 0;
   for await (const chunk of req) {
@@ -140,7 +140,7 @@ function chatPayload(input, vision, maxOutputTokens, countOnly = false) {
     input.messages.length > MAX_CONVERSATION_MESSAGES
   )
     throw problem(
-      `La conversation doit contenir entre 1 et ${MAX_CONVERSATION_MESSAGES} messages. Recommence une conversation si nécessaire.`,
+      `La conversation doit contenir entre 1 et ${MAX_CONVERSATION_MESSAGES} messages. Commencez une nouvelle conversation si nécessaire.`,
     );
   const messages = input.messages.map((message, index) => {
     if (
@@ -180,7 +180,7 @@ function chatPayload(input, vision, maxOutputTokens, countOnly = false) {
     const result = { role: message.role, content, ...nativeFields(message) };
     if (message.role === 'assistant' && typeof message.reasoning_content === 'string') {
       if (message.reasoning_content.length > 200000)
-        throw problem('Le raisonnement conservé est trop long. Recommence une conversation.');
+        throw problem('Le raisonnement conservé est trop long. Commencez une nouvelle conversation.');
       result.reasoning_content = message.reasoning_content;
     }
     return result;
@@ -200,7 +200,7 @@ function chatPayload(input, vision, maxOutputTokens, countOnly = false) {
     !countOnly &&
     (!['user', 'tool'].includes(last.role) || (typeof last.content === 'string' && !last.content.trim()))
   )
-    throw problem('Écris un message ou joins une image.');
+    throw problem('Écrivez un message ou joignez une image.');
   return {
     model: 'local',
     messages,
@@ -955,6 +955,8 @@ export async function createApplication({
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Rechargez la page.', 401);
       if (req.method === 'GET' && path === '/api/generation') return send(200, await generation.snapshot());
+      // Whether ComfyUI answers (the line of MOSS Image follows it while it starts).
+      if (req.method === 'GET' && path === '/api/generation/comfy') return send(200, await generation.comfyState());
       if (req.method === 'GET' && path === '/api/generation/assets')
         return send(200, { assets: await generation.assets.list() });
       if (req.method === 'GET' && path === '/api/generation/workflows')
@@ -1233,6 +1235,11 @@ export async function createApplication({
         return send(200, generation.downloads.status());
       }
       if (path === '/api/downloads/token') return send(200, { hasToken: await generation.downloads.setToken(body.token) });
+      // « Démarrer » on the line of MOSS Image: ComfyUI started on its own (lib/comfy-launch.mjs).
+      if (path === '/api/generation/comfy/start') {
+        if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
+        return send(200, await generation.startComfy(body));
+      }
       if (path.startsWith('/api/generation/')) {
         if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
         if (runtime.active || engine.busy || clearingHistory || savingSettings || savingGeneration || pickingFile)
@@ -1600,7 +1607,7 @@ export async function createApplication({
       }
       if (path === '/api/files/choose') {
         if (
-          !['engine', 'model', 'projector', 'generation', 'python', 'tokenizer', 'directory', 'workflow'].includes(
+          !['engine', 'model', 'projector', 'generation', 'python', 'tokenizer', 'directory', 'workflow', 'comfy'].includes(
             body?.kind,
           )
         )
@@ -1626,6 +1633,7 @@ export async function createApplication({
             generation: generation.folders().model,
             directory: generation.folders().model,
             workflow: join(root, 'workflow'),
+            comfy: process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Programs') : '',
           }[body.kind] ||
           '';
         try {
@@ -2525,7 +2533,7 @@ export function openBrowser(url, { platform = process.platform, spawnProcess = s
   const fallback = () => {
     if (!reported) {
       reported = true;
-      report(`Ouvre cette adresse dans ton navigateur : ${url}`);
+      report(`Ouvrez cette adresse dans votre navigateur : ${url}`);
     }
   };
   child.once('error', fallback);
