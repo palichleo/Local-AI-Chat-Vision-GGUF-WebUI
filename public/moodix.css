@@ -11735,6 +11735,13 @@ body {
   border-radius: var(--radius-s);
   color: var(--text-1);
   text-decoration: none;
+  /* Discreet, as in the captures (ivory at about 68 %): the places and the fil come first. */
+  opacity: 0.68;
+  transition: opacity 0.2s ease;
+}
+.top-brand:hover,
+.top-brand:focus-visible {
+  opacity: 1;
 }
 .top-brand .top-mark {
   width: 20px;
@@ -11924,7 +11931,11 @@ body {
 .thread-project {
   flex: none;
   max-width: 34%;
-  color: var(--text-3);
+  color: var(--text-4);
+}
+.thread-project:hover:enabled,
+.thread-project[aria-expanded='true'] {
+  color: var(--text-2);
 }
 .thread-conversation {
   color: var(--text-1);
@@ -11936,7 +11947,7 @@ body {
 }
 .thread-slash {
   flex: none;
-  padding: 0 7px;
+  padding: 0 4px;
   color: var(--text-4);
   font-size: 15px;
 }

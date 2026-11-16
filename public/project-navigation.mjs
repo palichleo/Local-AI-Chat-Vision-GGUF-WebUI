@@ -198,7 +198,13 @@ export function setupProjectNavigation({
     newConversation(project.id);
   }
 
-  // The conversation dialog: its name and its project (moving it is done here since 0.6.0).
+  /** The projects in the order of the fil: those of the user, then « Sans projet ». */
+  const ordered = () => [
+    ...projects().filter(project => project.id !== 'inbox'),
+    ...projects().filter(project => project.id === 'inbox'),
+  ];
+  // The conversation dialog: its name and its project (moving it is done here since 0.6.0), the
+  // project a menu in the order of the fil.
   let conversationEditing = null;
   function editConversation(item) {
     if (busy() || item.temporary) return;
@@ -207,7 +213,7 @@ export function setupProjectNavigation({
     $('conversation-name').value = item.title || '';
     const select = $('conversation-project');
     select.replaceChildren(
-      ...projects().map(project => {
+      ...ordered().map(project => {
         const option = node('option', '', projectLabel(project));
         option.value = project.id;
         return option;
@@ -356,8 +362,10 @@ export function setupProjectNavigation({
     row.append(pick);
     const tools = node('span', 'thread-tools');
     if (rename) {
-      const pencil = button(`Renommer ${kind} « ${label} »`, 'thread-tool', rename, 'edit');
-      pencil.dataset.tip = kind === 'la conversation' ? 'Renommer ou changer de projet' : 'Renommer';
+      // A conversation is renamed or moved to another project from the same pencil.
+      const both = kind === 'la conversation',
+        pencil = button(`${both ? 'Renommer ou déplacer' : 'Renommer'} ${kind} « ${label} »`, 'thread-tool', rename, 'edit');
+      pencil.dataset.tip = both ? 'Renommer ou déplacer' : 'Renommer';
       tools.append(pencil);
     }
     if (erase) {
@@ -383,8 +391,7 @@ export function setupProjectNavigation({
     list.append(node('p', 'thread-menu-label', 'Projets'));
     const active = currentProject()?.id;
     // The projects first, « Sans projet » last.
-    const ordered = [...projects().filter(project => project.id !== 'inbox'), ...projects().filter(project => project.id === 'inbox')];
-    for (const project of ordered)
+    for (const project of ordered())
       list.append(
         line(projectLabel(project), {
           kind: 'le projet',

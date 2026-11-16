@@ -150,7 +150,9 @@ test('the menu of the conversations lists those of the project once, the open on
       ['Past', false],
     ],
   );
-  assert.ok(rows.every(row => row.tool('Renommer la conversation') && row.tool('Supprimer la conversation')));
+  assert.ok(rows.every(row => row.tool('Renommer ou déplacer la conversation') && row.tool('Supprimer la conversation')));
+  // The pencil does both: its tooltip says it.
+  assert.equal(rows[0].tool('Renommer ou déplacer').dataset.tip, 'Renommer ou déplacer');
   rows[1].choice.onclick();
   rows[0].tool('Supprimer').onclick();
   assert.deepEqual(calls, [
@@ -204,9 +206,10 @@ test('a saved conversation is renamed or moved from its pencil: one request each
   assert.deepEqual(
     $('conversation-project').children.map(option => [option.value, option.textContent]),
     [
-      ['inbox', 'Sans projet'],
       ['project', 'A project'],
+      ['inbox', 'Sans projet'],
     ],
+    'a menu: the projects, then « Sans projet »',
   );
   assert.equal($('conversation-project').value, 'project');
   // Its name only.
