@@ -515,8 +515,36 @@ export function setupProjectNavigation({
     list.querySelector('button')?.focus();
   };
 
+  /**
+   * « Reprendre », at the foot of the welcome (direction-artistique.md): its button opens the last
+   * conversation of the project, and up to three recent ones stand beside it, each with its date.
+   * Everything opens in the Chat.
+   */
+  function renderResume() {
+    const project = currentProject()?.id || 'inbox',
+      recent = (state.saveHistory ? state.historyItems || [] : [])
+        .filter(item => (item.projectId || 'inbox') === project && item.id !== state.conversationId)
+        .sort((a, b) => (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''))
+        .slice(0, 3);
+    $('resume-list').replaceChildren(
+      ...recent.map(item => {
+        const open = node('button', 'resume-item'),
+          date = shortDate(item.updatedAt || item.createdAt);
+        open.type = 'button';
+        open.append(node('span', 'resume-title', item.title), node('span', 'resume-date', date));
+        open.setAttribute('aria-label', `${item.title}, ${date}`);
+        open.onclick = () => openConversation(item.id);
+        open.disabled = !!busy();
+        return open;
+      }),
+    );
+    $('resume-last').onclick = () => recent[0] && openConversation(recent[0].id);
+    $('resume-last').disabled = !!busy() || !recent.length;
+    $('resume').hidden = !recent.length;
+  }
   function render() {
     closeMenus();
+    renderResume();
     const project = currentProject();
     $('thread-project-name').textContent = projectLabel(project);
     $('thread-project').setAttribute('aria-label', 'Projet : ' + projectLabel(project));
@@ -539,5 +567,5 @@ export function setupProjectNavigation({
     state.projects = result.projects;
     render();
   }
-  return { render, refresh, sync, closeMenus, edit, remove };
+  return { render, refresh, sync, closeMenus, edit, remove, renderResume };
 }

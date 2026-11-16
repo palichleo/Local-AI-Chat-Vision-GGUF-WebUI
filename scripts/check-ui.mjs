@@ -180,6 +180,10 @@ try {
   // At launch, with no conversation yet: a new conversation (0.5.123: no home page any more).
   await run('lancement', () => true, view('chat'));
   await run('chat', () => click('#chat-open'), view('chat'));
+  // The welcome (0.6.5): a shortcut puts its label at the start of the box, its cross takes it off.
+  await run('raccourci « Créer une image »', () => click('.suggestions [data-label="Image"]'), () =>
+    js(`!document.getElementById('prompt-label').hidden && document.querySelector('[data-label="Image"]').getAttribute('aria-pressed') === 'true'`));
+  await run('retirer l’étiquette', () => click('#prompt-label-clear'), () => js(`document.getElementById('prompt-label').hidden`));
   await run('nouvelle conversation depuis le chat', () => fromMenu('#thread-conversation', '.thread-action'), view('chat'));
   await run('studio', () => click('#studio-open'), view('studio'));
   for (const mode of ['Vidéo', 'Son', 'Image'])

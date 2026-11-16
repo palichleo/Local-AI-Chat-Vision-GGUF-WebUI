@@ -11958,7 +11958,7 @@ body {
 }
 .thread-project {
   flex: none;
-  max-width: 34%;
+  max-width: 240px;
   color: var(--text-4);
 }
 .thread-project:hover:enabled,
@@ -12283,5 +12283,284 @@ body {
   }
   .thread {
     margin: 6px 12px 0;
+  }
+}
+
+/* ------------------------------------------------------------------ the welcome (phase 2) */
+/* L'accueil (capture 01) : au milieu de la page, le fil centré au-dessus du titre « Racontez-moi
+   votre idée. », la zone de saisie en verre, trois raccourcis ; « Reprendre » au pied de la page.
+   La page est une colonne centrée : le fil et le chat, sans rien déplacer. */
+body[data-view='chat'] .workspace:has(#messages:empty) {
+  justify-content: center;
+}
+body[data-view='chat'] .workspace:has(#messages:empty) > .thread {
+  align-self: center;
+  margin: 0 0 22px;
+}
+body[data-view='chat'] .workspace:has(#messages:empty) > .chat-panel {
+  flex: 0 1 auto;
+}
+.workspace:has(#messages:empty) .composer-region {
+  box-sizing: border-box;
+  width: min(760px, calc(100% - 40px));
+  margin: 0 auto;
+  /* The group a little above the middle, as in the capture. */
+  padding: 0 0 40px;
+}
+/* The share of the context is the conversation's: none on the welcome. */
+.workspace:has(#messages:empty) .context-meter {
+  display: none;
+}
+#welcome.welcome {
+  padding: 0 0 50px;
+  text-align: center;
+}
+#welcome h1 {
+  margin: 0;
+  color: var(--text-1);
+  font-family: var(--font-display);
+  font-size: 66px;
+  font-weight: 400;
+  letter-spacing: -0.4px;
+  line-height: 1.05;
+}
+.welcome-accent {
+  color: var(--accent);
+}
+/* La zone de saisie, en verre : le texte en haut, les outils en icônes au pied ; Joindre et Réflexion
+   de 34 px (coins de 8), Envoyer et Interrompre de 38 px (coins de 10). */
+#chat-form.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 124px;
+  padding: 18px 15px 14px;
+  border-radius: 16px;
+}
+:root:not([data-theme='light']) #chat-form.composer {
+  border: 1px solid rgba(238, 232, 222, 0.09);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(24px) saturate(1.15);
+  backdrop-filter: blur(24px) saturate(1.15);
+}
+:root:not([data-theme='light']) #chat-form.composer:focus-within {
+  border-color: rgba(238, 232, 222, 0.17);
+}
+#chat-form #prompt {
+  flex: 1 1 auto;
+  min-height: 30px;
+  padding: 2px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: 400 16px/1.5 var(--font-ui);
+}
+#chat-form #prompt::placeholder {
+  color: var(--text-3);
+}
+#chat-form .composer-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 18px;
+}
+#chat-form #attachments:empty {
+  display: none;
+}
+#chat-form .composer-options {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+#chat-form .tool-separator {
+  display: none;
+}
+#chat-form :is(#attach, #thinking) {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-2);
+}
+#chat-form :is(#attach, #thinking) svg {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+#chat-form :is(#attach, #thinking):hover:enabled {
+  background: rgba(238, 232, 222, 0.06);
+  color: var(--text-1);
+}
+/* La Réflexion active, en couleur d'accent. */
+#chat-form #thinking[aria-pressed='true'] {
+  background: rgba(238, 232, 222, 0.08);
+  color: var(--accent);
+}
+#chat-form .send-button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: var(--radius-l);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+/* Grisé tant qu'il n'y a rien à envoyer. */
+#chat-form .send-button:disabled {
+  background: rgba(238, 232, 222, 0.05);
+  color: var(--text-4);
+}
+#chat-form .send-button svg {
+  width: 16px;
+  height: 16px;
+}
+/* Une étiquette posée par un raccourci, au début de la saisie. */
+.prompt-label {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  margin: 0 0 -4px 9px;
+  padding: 0 3px 0 10px;
+  border-radius: var(--radius-s);
+  background: rgba(238, 232, 222, 0.08);
+  color: var(--text-1);
+  font: 500 13px/1 var(--font-ui);
+}
+.prompt-label button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+}
+.prompt-label button:hover {
+  color: var(--text-1);
+}
+.prompt-label button svg {
+  width: 12px;
+  height: 12px;
+}
+/* Les trois raccourcis, en capitales espacées, séparés par un filet ; celui choisi souligné. */
+.workspace:has(#messages:empty) .suggestions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 20px 0 0;
+}
+#chat-panel .suggestions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  min-height: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-2);
+  font: 500 12px/1 var(--font-ui);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+#chat-panel .suggestions button svg {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+#chat-panel .suggestions button:hover {
+  background: transparent;
+  color: var(--text-1);
+}
+#chat-panel .suggestions button[aria-pressed='true'] {
+  color: var(--text-1);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 7px;
+}
+.suggestion-rule {
+  width: 1px;
+  height: 14px;
+  background: rgba(238, 232, 222, 0.14);
+}
+/* « Reprendre », au pied de l'accueil : le bouton, puis au plus trois conversations récentes. */
+.resume {
+  position: absolute;
+  right: 0;
+  bottom: 18px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+}
+.workspace:not(:has(#messages:empty)) > .resume,
+body:not([data-view='chat']) .resume {
+  display: none;
+}
+.resume-list {
+  display: flex;
+  gap: 26px;
+}
+.resume-last,
+.resume-item {
+  min-height: 0;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  cursor: pointer;
+}
+.resume-last {
+  color: var(--text-3);
+  font: 500 12px/1 var(--font-ui);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+.resume-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-2);
+  font: 400 14px/1 var(--font-ui);
+}
+.resume-date {
+  color: var(--text-4);
+  font-size: 12px;
+}
+:is(.resume-last, .resume-item):hover:enabled {
+  color: var(--text-1);
+}
+@media (max-width: 760px) {
+  #welcome h1 {
+    font-size: 42px;
+  }
+  .resume-list .resume-item:nth-child(n + 2) {
+    display: none;
+  }
+}
+@media (max-height: 760px) {
+  #welcome.welcome {
+    padding-bottom: 30px;
+  }
+  .workspace:has(#messages:empty) .composer-region {
+    padding-bottom: 46px;
   }
 }

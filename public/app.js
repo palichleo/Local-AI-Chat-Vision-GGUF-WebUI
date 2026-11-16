@@ -303,25 +303,32 @@ async function changePreferences(patch) {
   }
 }
 
-/** The conversation open last, kept by the browser for the next launch (0.5.123). */
+/** The conversation open last, kept by the browser: its project is the one of the next launch. */
 const LAST_CONVERSATION = 'moodix.lastConversation';
 function rememberConversation(id) {
   try {
     if (id) localStorage.setItem(LAST_CONVERSATION, id);
     else localStorage.removeItem(LAST_CONVERSATION);
   } catch {
-    // Without the browser's storage, the next launch opens « Nouveau chat ».
+    // Without the browser's storage, the next launch is in « Sans projet ».
   }
 }
-/** At launch: the conversation open last, if it is still in the history; otherwise « Nouveau chat ». */
-async function reopenLastConversation() {
+/**
+ * At launch, the welcome (direction-artistique.md), in the project used last: that of the
+ * conversation open last; « Reprendre » opens it again. After « Redémarrer » or an update, the
+ * conversation and its draft are taken back instead (restoreUpdate, resumeAfterRestart).
+ */
+function welcomeInLastProject() {
+  if (state.conversationId || state.messages.length) return;
   let id = null;
   try {
     id = localStorage.getItem(LAST_CONVERSATION);
   } catch {
-    // Unreadable: « Nouveau chat ».
+    // Unreadable: « Sans projet ».
   }
-  if (!state.conversationId && id && state.historyItems.some(item => item.id === id)) await loadConversation(id);
+  const project = state.historyItems.find(item => item.id === id)?.projectId;
+  if (project && state.projects?.some(item => item.id === project)) state.projectId = project;
+  projectUI.render();
 }
 
 function persistConversation() {
@@ -3332,22 +3339,42 @@ document.addEventListener('keydown', event => {
   )
     void closeChat({ refocus: true });
 });
+/**
+ * The shortcuts under the message box (direction-artistique.md, « Zone de saisie ») put a label at
+ * the start of the box (« Image × »), the one chosen underlined: they write nothing in it any more.
+ * Sent, the message says what is asked (« Crée une image : … ») and the label goes.
+ */
+let promptLabel = null;
+function setPromptLabel(button) {
+  promptLabel = button ?? null;
+  for (const item of document.querySelectorAll('[data-prompt]')) item.setAttribute('aria-pressed', String(item === promptLabel));
+  $('prompt-label').hidden = !promptLabel;
+  $('prompt-label-text').textContent = promptLabel?.dataset.label ?? '';
+}
 document.querySelectorAll('[data-prompt]').forEach(button => {
   button.onclick = () => {
-    $('prompt').value = button.dataset.prompt;
-    resizePrompt();
+    setPromptLabel(promptLabel === button ? null : button);
     $('prompt').focus();
   };
 });
-function chooseImage() {
-  if (!state.config.projectorPath) {
-    notice('Ajoutez un projecteur de vision dans Configuration pour joindre des images.');
-    openSettings();
-  } else $('image-input').click();
-}
+$('prompt-label-clear').onclick = () => {
+  setPromptLabel(null);
+  $('prompt').focus();
+};
+// Before the message leaves (a listener of the capture: it runs before sendMessage).
+$('chat-form').addEventListener(
+  'submit',
+  () => {
+    if (!promptLabel) return;
+    const text = $('prompt').value.trim(),
+      asked = promptLabel.dataset.prompt;
+    if (text && !text.startsWith(asked.trim())) $('prompt').value = asked + text;
+    setPromptLabel(null);
+  },
+  true,
+);
 // Images need the vision projector (checked when they are added); videos go to the library.
 $('attach').onclick = () => $('image-input').click();
-$('suggest-image').onclick = chooseImage;
 $('image-input').onchange = event => {
   const files = [...event.target.files];
   event.target.value = '';
@@ -3439,8 +3466,8 @@ try {
   await restoreUpdate();
   // A page of an older version, replaced while it was open: its draft and its conversation (0.5.128).
   await resumeAfterRestart();
-  // At launch, the conversation open last (0.5.123), or « Nouveau chat » when there is none.
-  await reopenLastConversation();
+  // At launch, the welcome in the project used last (0.6.5).
+  welcomeInLastProject();
   syncViews();
   showLastReply();
   if (initial.warning) notice(initial.warning);
@@ -3454,6 +3481,16 @@ try {
   notice(error.message);
   updateControls();
 }
+// The welcome of the chat comes and goes with the first message: the words of the message box and
+// the line « Reprendre » follow it (« Écrivez à Moodix… » in a conversation).
+const followWelcome = () => {
+  $('prompt').placeholder = $('welcome').hidden
+    ? 'Écrivez à Moodix…'
+    : 'Une image, un plan, un son… quelques mots suffisent.';
+  projectUI.renderResume();
+};
+new MutationObserver(followWelcome).observe($('welcome'), { attributes: true, attributeFilter: ['hidden'] });
+followWelcome();
 // The room (« Salle obscure », room.mjs): the light of the latest take behind the page, made once per
 // take; a take ready while the page is out of sight lights a dot on the icon of its tab (logo.md).
 let newestTake;

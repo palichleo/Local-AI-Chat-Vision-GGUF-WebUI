@@ -78,17 +78,30 @@ test('conversation alignment follows scrollbar changes and handles the hidden we
   assert.deepEqual(values.at(-1), ['--chat-scrollbar', '6px']);
 });
 
-test('a new conversation suggests what the application makes: an image, a video, or starting from an image', async () => {
-  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
-  const cards = html.match(/<div class="suggestions">.*?<\/div>/s)[0];
-  const titles = [...cards.matchAll(/<strong>(.*?)<\/strong>/g)].map(match => match[1]);
-  assert.deepEqual(titles, ['Créer une image', 'Créer une vidéo', 'Partir d’une image']);
-  // Two of them start the request in the message box, the third opens the file chooser.
+test('a new conversation suggests what the application makes: an image, a shot, a sound, each as a label', async () => {
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const shortcuts = html.match(/<div class="suggestions"[^>]*>.*?<\/div>/s)[0];
+  // « Créer une image · Tourner un plan · Composer un son » (direction-artistique.md, « Récit »).
   assert.deepEqual(
-    [...cards.matchAll(/data-prompt="(.*?)"/g)].map(match => match[1]),
-    ['Crée une image : ', 'Crée une vidéo de 5 secondes : '],
+    [...shortcuts.matchAll(/<span>(.*?)<\/span><\/button>/g)].map(match => match[1]),
+    ['Créer une image', 'Tourner un plan', 'Composer un son'],
   );
-  assert.match(cards, /<button id="suggest-image">/);
+  // Each puts a label at the start of the box (« Image × »), and says what is asked when sent.
+  assert.deepEqual(
+    [...shortcuts.matchAll(/data-prompt="(.*?)" data-label="(.*?)" aria-pressed="false"/g)].map(match => [match[1], match[2]]),
+    [
+      ['Crée une image : ', 'Image'],
+      ['Crée une vidéo : ', 'Plan'],
+      ['Crée un son : ', 'Son'],
+    ],
+  );
+  assert.doesNotMatch(html, /id="suggest-image"/);
+  // Nothing written in the box any more: a label, the shortcut chosen underlined.
+  assert.doesNotMatch(app, /\$\('prompt'\)\.value = button\.dataset\.prompt/);
+  assert.match(app, /item\.setAttribute\('aria-pressed', String\(item === promptLabel\)\)/);
+  // Sent: the label becomes the start of the message, before sendMessage reads it (capture).
+  assert.match(app, /if \(text && !text\.startsWith\(asked\.trim\(\)\)\) \$\('prompt'\)\.value = asked \+ text;\n {4}setPromptLabel\(null\);\n {2}\},\n {2}true,\n\);/);
 });
 
 test('under a message, only the last exchange can be taken back: nothing copies a whole message', async () => {

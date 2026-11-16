@@ -164,15 +164,25 @@ test('nothing left of the panel of files in the styles', async () => {
   }
 });
 
-test('the chat: no logo, an invitation; a quiet message box; « 0 % » under the pointer only', async () => {
+test('the welcome: no logo, an invitation in Gloock; a box of glass; « 0 % » under the pointer only', async () => {
   const html = await read('index.html'),
     css = await read('moodix.css');
   const welcome = html.slice(html.indexOf('<div id="welcome"'), html.indexOf('<form class="composer"'));
-  assert.match(welcome, /<h1>Demandez n’importe quoi\.<\/h1>/);
+  // « Récit » (direction-artistique.md): the word « idée » in the colour of the room.
+  assert.match(welcome, /<h1>Racontez-moi votre <span class="welcome-accent">idée<\/span>\.<\/h1>/);
   assert.doesNotMatch(welcome, /welcome-logo|mdx-white|Votre modèle|Votre machine/);
-  // Being written in: 1 px a little lighter, no ring around it.
+  assert.match(css, /#welcome h1 \{[^}]*font-family: var\(--font-display\);[^}]*font-size: 66px;/);
+  assert.match(css, /\.welcome-accent \{\n {2}color: var\(--accent\);/);
+  // Its box says what to write; in a conversation, « Écrivez à Moodix… » (on vouvoie partout).
+  assert.match(html, /<textarea id="prompt" rows="1" maxlength="100000" placeholder="Une image, un plan, un son… quelques mots suffisent\."><\/textarea>/);
+  assert.match(await read('app.js'), /\? 'Écrivez à Moodix…'\n {4}: 'Une image, un plan, un son… quelques mots suffisent\.';/);
+  // Being written in: its border of 1 px a little lighter, no ring around it; the box of glass.
   assert.match(css, /\.composer:has\(textarea:focus-visible\),\n\.composer:focus-within \{\n {2}outline: none;/);
-  assert.match(css, /#chat-form\.composer:focus-within \{\n {2}border-color: #3a3f4a;/);
+  assert.match(css, /:root:not\(\[data-theme='light'\]\) #chat-form\.composer \{[^}]*background: var\(--glass\);[^}]*backdrop-filter: blur\(24px\) saturate\(1\.15\);/);
+  assert.match(css, /:root:not\(\[data-theme='light'\]\) #chat-form\.composer:focus-within \{\n {2}border-color: rgba\(238, 232, 222, 0\.17\);/);
+  // Joindre and Réflexion of 34 px (corners of 8), Envoyer of 38 px (corners of 10).
+  assert.match(css, /#chat-form :is\(#attach, #thinking\) \{[^}]*width: 34px;[^}]*height: 34px;[^}]*border-radius: var\(--radius-s\);/);
+  assert.match(css, /#chat-form \.send-button \{[^}]*width: 38px;[^}]*height: 38px;[^}]*border-radius: var\(--radius-l\);/);
   // The share of the context: hidden, its room kept; shown over the box, on focus, or nearly full.
   assert.match(css, /\.context-meter \{\n {2}opacity: 0;/);
   assert.match(css, /#chat-form:hover ~ \.context-meter,\n\.context-meter:hover,\n\.context-meter:focus-visible,\n\.context-meter\[data-warning='near'\],\n\.context-meter\[data-warning='full'\] \{\n {2}opacity: 1;/);
