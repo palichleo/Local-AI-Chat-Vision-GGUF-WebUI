@@ -916,6 +916,9 @@ async function studioPage(tools, routes = {}, options = {}) {
     querySelectorAll() {
       return [];
     }
+    addEventListener(type, listener) {
+      (this.listeners ??= {})[type] = listener;
+    }
     /** Every element under this one whose classes include `name`. */
     find(name) {
       return this.children.flatMap(child =>
@@ -928,12 +931,39 @@ async function studioPage(tools, routes = {}, options = {}) {
   const page = Object.fromEntries(
     ['studio-view', 'studio-kinds', 'studio-body', 'ai-status', 'ai-takeover'].map(id => [id, new Element()]),
   );
+  // The pointer of Moodix AI (options.cursor: the list where what it says is written).
+  if (options.cursor) {
+    const classes = new Set();
+    page['ai-cursor'] = {
+      hidden: true,
+      style: { setProperty() {} },
+      classList: {
+        add: name => classes.add(name),
+        remove: name => classes.delete(name),
+        toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)),
+        contains: name => classes.has(name),
+      },
+      querySelector: () => null,
+    };
+    page['ai-cursor-text'] = {
+      set textContent(label) {
+        if (label) options.cursor.push(label);
+      },
+    };
+  }
   // What the page itself listens to: keys pressed with the focus on no field.
   const pageKeys = [];
   const globals = {
     document: {
       getElementById: id => page[id] ?? null,
-      querySelector: () => null,
+      // A setting the pointer goes to (options.targets): somewhere on the page.
+      querySelector: options.targets
+        ? () => ({
+            getBoundingClientRect: () => ({ left: 100, top: 100, width: 40, height: 40 }),
+            scrollIntoView() {},
+            style: { setProperty() {} },
+          })
+        : () => null,
       body: {},
       addEventListener: (type, listener) => type === 'keydown' && pageKeys.push(listener),
     },
@@ -1534,13 +1564,13 @@ test('the input images: pictos and no word, start and end on a line of time, ref
     // The length set, on the line, in the colour of the duration bar: the ivory of the room.
     const [time] = body.find('studio-span-time'),
       [line] = body.find('studio-span-line');
-    assert.equal(time.textContent, '05.04 s');
+    assert.equal(time.textContent, '05.04 S');
     assert.equal(time.style.color, 'rgb(238, 232, 222)');
     // The bar moved to the longest: the line follows at once, without drawing the Studio again.
     const bar = body.find('studio-bar').find(item => item.dataset.ai === 'duration');
     bar.value = '2';
     bar.oninput();
-    assert.equal(time.textContent, '10.04 s');
+    assert.equal(time.textContent, '10.04 S');
     assert.equal(time.style.color, 'rgb(238, 232, 222)');
     assert.equal(line.style.backgroundSize, '100% 100%');
 
@@ -1579,7 +1609,7 @@ test('the input images: pictos and no word, start and end on a line of time, ref
     assert.equal(start.attributes['aria-label'], 'Image de début');
     assert.match(start.className, /is-flash/);
     assert.deepEqual(body.find('studio-swap'), []);
-    assert.equal(body.find('studio-span-time')[0].textContent, '10.04 s');
+    assert.equal(body.find('studio-span-time')[0].textContent, '10.04 S');
     // Back: the reference kept comes back with it.
     model('v');
     assert.deepEqual(badges(), ['@1']);
@@ -1745,7 +1775,7 @@ test('the floppy disk keeps the settings of the model, given back each time it i
     // Back to H3: its saved settings come back.
     model('h');
     assert.equal(duration().value, '1');
-    assert.equal(duration().attributes['aria-valuetext'], '08.04 s');
+    assert.equal(duration().attributes['aria-valuetext'], '08.04 S');
     assert.equal(body.find('studio-seed')[0].children[1].value, '42');
     assert.equal(body.find('studio-lora-switch')[0].checked, true);
     assert.equal(disk().dataset.state, 'still');
@@ -1779,7 +1809,7 @@ test('the settings saved for a model come back the first time the Studio shows i
   try {
     mode(1);
     const duration = body.find('studio-bar').find(bar => bar.dataset.ai === 'duration');
-    assert.equal(duration.attributes['aria-valuetext'], '10.04 s');
+    assert.equal(duration.attributes['aria-valuetext'], '10.04 S');
     assert.equal(body.find('studio-seed')[0].children[1].value, '7');
     assert.equal(body.find('studio-lora-row').length, 1);
   } finally {
@@ -2202,6 +2232,110 @@ function proposalOf({ prompt = 'Un renard se lève', frames = 121 } = {}) {
   return { clip, request };
 }
 
+/** A suite of tool calls recorded (tests/fixtures), replayed without a language model. */
+async function recordedProposal() {
+  const { readFile } = await import('node:fs/promises');
+  return JSON.parse(await readFile(new URL('./fixtures/moodix-ai-studio.json', import.meta.url), 'utf8'));
+}
+/** The Studio of the replay: LTX 2.5 after MiniMax H3 Omni, and the take 1 of the project. */
+function replayStudio() {
+  const ltx = {
+      id: 'ltx',
+      name: 'LTX 2.5',
+      roles: {
+        start_image: { count: 1, media: ['image'] },
+        end_image: { count: 1, media: ['image'] },
+        reference: { count: 2, media: ['image'] },
+      },
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      stages: true,
+      seeded: true,
+      lengths: { seconds: [121 / 24, 145 / 24, 193 / 24], standard: 121 / 24 },
+      settings: [],
+    },
+    minimax = { ...ltx, id: 'h3', name: 'MiniMax H3 Omni' },
+    portrait = {
+      id: 'd91877b3-e6e4-4cf8-ae95-49665e6aa1ae',
+      prompt: 'Un portrait',
+      outputs: [{ take: 1, thumbUrl: '/portrait.webp', originalUrl: '/portrait.png', width: 1024, height: 1024 }],
+    };
+  return { tools: { create_video: [minimax, ltx] }, runs: [portrait] };
+}
+const until = async (check, tries = 400) => {
+  for (let at = 0; at < tries && !check(); at++) await new Promise(resolve => setTimeout(resolve, 2));
+};
+
+test('a recorded proposal replayed: the pointer does what Moodix AI proposes, in turn, and waits on « Générer »', async () => {
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    said = [];
+  const studio = await studioPage(tools, {}, { runs, cursor: said, targets: true });
+  const { body, asked, restore } = studio;
+  try {
+    const answer = studio.studio.propose(structuredClone(recorded.request), new AbortController().signal);
+    await until(() => said.includes('attend votre accord'));
+    // Each setting it changes, said as it is done (studio-maquette.md): the mode, the model, the
+    // prompt written, the take carried from « Créations du projet » to its case (the case, the take,
+    // the case again), the format, the length; then « Générer ».
+    assert.deepEqual(said, [
+      'passe en Vidéo',
+      'choisit LTX 2.5',
+      'écrit le prompt',
+      'pose la prise 1 en début',
+      'pose la prise 1 en début',
+      'pose la prise 1 en début',
+      'passe en 9:16',
+      'règle la durée',
+      'attend votre accord',
+    ]);
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(studio.prompt().value, recorded.request.plan.prompt);
+    assert.equal(body.find('studio-slot')[0].children[0].children[0].src, '/portrait.webp');
+    const duration = body.find('studio-bar').find(bar => bar.dataset.ai === 'duration');
+    assert.equal(duration.attributes['aria-valuetext'], '06.04 S');
+    // It stays there, « Refuser » beside it; nothing starts by itself; « Créations du projet » closed.
+    assert.equal(studio.page['ai-cursor'].classList.contains('is-visible'), true);
+    assert.equal(body.find('studio-decline').length, 1);
+    assert.equal(body.find('studio-shelf').length, 0);
+    assert.equal(asked.filter(([route]) => route.startsWith('tools/')).length, 0);
+    studio.studio.decline();
+    assert.equal(await answer, 'deny');
+  } finally {
+    restore();
+  }
+});
+
+test('a touch of the user while Moodix AI sets the Studio: the pointer goes, the rest is set at once, the user’s value stays', async () => {
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    said = [];
+  const studio = await studioPage(tools, {}, { runs, cursor: said, targets: true });
+  const { body, page, restore } = studio;
+  try {
+    const answer = studio.studio.propose(structuredClone(recorded.request), new AbortController().signal);
+    await until(() => said.includes('écrit le prompt'));
+    // While it writes, the user sets the length themselves (the bar of the duration, the longest).
+    const duration = () => body.find('studio-bar').find(bar => bar.dataset.ai === 'duration');
+    page['studio-view'].listeners.pointerdown({ isTrusted: true, target: { closest: () => ({ dataset: { ai: 'duration' } }) } });
+    duration().value = '2';
+    duration().oninput();
+    await settle();
+    // The pointer is gone and says nothing more; what was left is set: the whole prompt, the take in
+    // its case, 9:16; the length is the user's.
+    assert.equal(said.includes('règle la durée'), false);
+    assert.equal(said.at(-1), 'écrit le prompt');
+    assert.equal(page['ai-cursor'].classList.contains('is-visible'), false);
+    assert.equal(studio.prompt().value, recorded.request.plan.prompt);
+    assert.equal(body.find('studio-slot')[0].children[0].children[0].src, '/portrait.webp');
+    assert.equal(duration().attributes['aria-valuetext'], '08.04 S');
+    studio.studio.decline();
+    assert.equal(await answer, 'deny');
+  } finally {
+    restore();
+  }
+});
+
 test('Moodix AI sets its proposal in the Studio and waits: « Générer » is the answer, with the user’s changes', async () => {
   const { clip, request } = proposalOf();
   const studio = await studioPage(
@@ -2221,7 +2355,7 @@ test('Moodix AI sets its proposal in the Studio and waits: « Générer » is th
     // The lengths of the model on a bar, step by step: the one proposed, written as it is made.
     const duration = () => body.find('studio-bar').find(bar => bar.dataset.ai === 'duration');
     assert.equal(duration().value, '0');
-    assert.equal(duration().attributes['aria-valuetext'], '05.04 s');
+    assert.equal(duration().attributes['aria-valuetext'], '05.04 S');
     assert.equal(studio.studio.proposing(), true);
     // Nothing starts by itself: the pointer stops on « Générer », beside a way to decline.
     assert.equal(asked.filter(([route]) => route.startsWith('tools/')).length, 0);
@@ -2230,7 +2364,7 @@ test('Moodix AI sets its proposal in the Studio and waits: « Générer » is th
     const length = duration();
     length.value = '1';
     length.oninput();
-    assert.equal(length.attributes['aria-valuetext'], '08.04 s');
+    assert.equal(length.attributes['aria-valuetext'], '08.04 S');
     await body.find('studio-go')[0].onclick();
     assert.equal(await answer, 'once');
     assert.deepEqual(asked.find(([route]) => route === 'tools/revise')[1], {

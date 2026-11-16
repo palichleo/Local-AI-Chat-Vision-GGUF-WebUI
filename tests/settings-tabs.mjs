@@ -82,8 +82,11 @@ test('while searching, tabs count their matches and the panel moves to one that 
   assert.ok(ui.tabs[0].classes.has('is-empty'));
   assert.equal(ui.tabs[1].badge.hidden, false);
   assert.equal(ui.tabs[1].badge.textContent, '2');
+  // Every panel with results shows (capture 49), the empty one does not.
+  assert.deepEqual(['update', 'llm', 'application'].map(name => ui.panel(name).hidden), [true, false, false]);
   tabs.matches(false);
   assert.equal(ui.tabs[1].badge.hidden, true);
+  assert.deepEqual(['update', 'llm', 'application'].map(name => ui.panel(name).hidden), [true, false, true]);
   assert.ok(!ui.tabs[0].classes.has('is-empty'));
   assert.equal(tabs.current(), 'llm', 'clearing the search keeps the tab');
   tabs.mark('update', true);

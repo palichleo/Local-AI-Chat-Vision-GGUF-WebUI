@@ -384,11 +384,7 @@ button svg {
 .pending-message {
   color: var(--muted);
 }
-.pending-dot {
-  display: inline-block;
-  color: var(--muted);
-  animation: pulse 1s infinite;
-}
+
 .composer-region {
   margin: 0 auto;
 }
@@ -3961,34 +3957,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 }
 
 /* Update tab: Atelier's version and update, then the versions of what it runs on. */
-.update-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px 18px;
-}
-.update-summary-text strong {
-  display: block;
-  font-size: var(--size-4);
-  font-weight: 600;
-  letter-spacing: -0.2px;
-}
-.update-summary-text p {
-  margin: 3px 0 0;
-  color: var(--muted);
-  font-size: var(--size-1);
-}
-.update-summary-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-#settings .update-summary-actions button {
-  min-height: 34px;
-  padding: 6px 13px;
-  font-size: var(--size-1);
-}
+
 #settings .update-settings:has(#settings-update-install:not([hidden])) {
   border-color: var(--update-line);
 }
@@ -4168,10 +4137,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-#settings .workflow-settings .workflow-help {
-  position: static;
-  flex-shrink: 0;
-}
+
 #settings .workflow-settings .workflow-card > .native-card-actions {
   display: flex;
   flex-shrink: 0;
@@ -5738,7 +5704,7 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   cursor: not-allowed;
 }
 .studio-slot.is-dragged {
-  opacity: 0.5;
+  opacity: 0.35;
 }
 /* What the image is, small, at its bottom left: the picto, or « @1 » for a reference. */
 .studio-slot-badge {
@@ -6771,7 +6737,7 @@ video.studio-frame-result {
   opacity: 0;
   transform: translate(var(--ai-x, 50vw), var(--ai-y, 50vh));
   transition:
-    transform 0.25s cubic-bezier(0.45, 0, 0.2, 1),
+    transform 0.45s cubic-bezier(0.45, 0, 0.2, 1),
     opacity 0.25s ease;
 }
 .ai-cursor[hidden] {
@@ -14042,4 +14008,323 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
     0 18px 48px rgba(0, 0, 0, 0.45);
   color: var(--text-1);
   font-family: var(--font-ui);
+}
+
+/* Workflows (16/11, capture 44): one workflow a line, on one column; its dot, its name and its kind
+   in mono (« VOUS » in the accent for the user's own), a sentence under them, the actions at the
+   right; « Rétablir » discreet. */
+#settings #workflow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+#settings .workflow-settings .workflow-card,
+#settings .workflow-settings .workflow-card[data-origin='user'] {
+  position: relative;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 16px;
+  min-height: 62px;
+  margin: 0;
+  padding: 10px 6px 10px 14px;
+  overflow: visible;
+  border: 0;
+  border-bottom: 1px solid rgba(238, 232, 222, 0.06);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+#settings .workflow-settings .workflow-card:last-child {
+  border-bottom: 0;
+}
+#settings .workflow-settings .workflow-card:is([data-state='missing'], [data-state='problem'], [data-state='downloading']) {
+  box-shadow: none;
+}
+#settings .workflow-settings .workflow-card .workflow-state {
+  width: 7px;
+  height: 7px;
+  box-shadow: none;
+}
+.workflow-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.workflow-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+#settings .workflow-settings .workflow-name {
+  overflow: hidden;
+  color: var(--text-1);
+  font: 400 15px/1.2 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflow-kind {
+  flex: none;
+  color: var(--text-3);
+  font: 400 var(--size-label)/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.workflow-own {
+  flex: none;
+  align-self: center;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: 4px;
+  color: var(--accent);
+  font: 400 var(--size-label)/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.workflow-line {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font: 400 13px/1.3 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflow-line.is-warning {
+  color: var(--warning);
+}
+#settings .workflow-settings .workflow-card > .native-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+#settings .workflow-settings .native-card-actions :is(.native-edit, .native-remove) {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+}
+#settings .workflow-settings .native-card-actions :is(.native-edit, .native-remove):hover:enabled {
+  background: rgba(238, 232, 222, 0.06);
+  color: var(--text-1);
+}
+#settings .workflow-settings .native-card-actions .native-remove.is-confirming {
+  width: auto;
+  padding: 0 10px;
+  color: var(--danger);
+  font: 400 13px/1 var(--font-ui);
+}
+#settings .workflow-settings .native-card-actions :is(.native-edit, .native-remove) svg {
+  width: 15px;
+  height: 15px;
+}
+#settings .workflow-settings .native-card-actions .workflow-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: 400 14px/1 var(--font-ui);
+}
+#settings .workflow-settings .native-card-actions .workflow-reset:hover:enabled {
+  color: var(--text-1);
+}
+#settings .workflow-settings .native-card-actions .workflow-reset svg {
+  width: 14px;
+  height: 14px;
+}
+#settings .workflow-settings .workflow-card .workflow-comfy {
+  padding-left: 0;
+}
+#settings .workflow-settings .workflow-card .workflow-progress {
+  position: static;
+  height: 2px;
+  margin-top: 4px;
+}
+
+/* Mise à jour (16/11, capture 48): « Version installée » and when it was looked for under it, the
+   number in mono at the right; a version waiting in a frame (a dot of accent, Installer). The
+   sentence of a component goes to the line rather than being cut. */
+.update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 52px;
+}
+.update-row-name {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--text-1);
+  font: 400 15px/1.3 var(--font-ui);
+}
+.update-row-name small {
+  color: var(--text-3);
+  font-size: 13px;
+}
+.update-version {
+  color: var(--text-1);
+  font: 400 14px/1 var(--font-mono);
+}
+.update-offer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(238, 232, 222, 0.12);
+  border-radius: 12px;
+  background: rgba(238, 232, 222, 0.04);
+}
+.update-offer[hidden] {
+  display: none;
+}
+.update-offer-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.update-offer-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.update-offer-text p {
+  margin: 0;
+  color: var(--text-1);
+  font: 400 15px/1.3 var(--font-ui);
+}
+.update-offer-text small {
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.4;
+}
+#settings .update-offer #settings-update-install {
+  flex: none;
+  min-height: 38px;
+  padding: 0 18px;
+  border-radius: 10px;
+}
+.component-detail {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+}
+
+/* The search of the settings (16/11, capture 49): « 2 réglages pour « lora » » in place of the title
+   of a tab, the settings found in every tab together, each line on its own, the word marked; the
+   titles of the tabs and the summaries of the folded parts go while it lasts. */
+.settings-results[hidden],
+.is-search-hidden {
+  display: none !important;
+}
+#settings.is-searching .settings-panel > .settings-panel-title,
+#settings.is-searching details > summary {
+  display: none;
+}
+#settings.is-searching .settings-panel + .settings-panel {
+  margin-top: 8px;
+}
+.settings-hit {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: rgba(238, 232, 222, 0.16);
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(238, 232, 222, 0.5);
+  text-underline-offset: 3px;
+}
+
+/* A drag (16/11, capture 25): what is carried fades at its place (35 %); the case under the hand
+   grows (106 %) and shows what comes in it. The pointer of Moodix AI carries a take the same way:
+   its picture by the arrow, 104 % of a case, tilted by −3°, its shadow, « PRISE n » on it. */
+#studio-view .studio-item.is-carried .studio-item-pick,
+#studio-view .studio-shelf-pick.is-carried {
+  opacity: 0.35;
+}
+#studio-view .studio-slot.is-target .studio-slot-pick {
+  position: relative;
+}
+#studio-view .studio-slot.is-target[style*='--carried'] .studio-slot-pick::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background: var(--carried) center / cover no-repeat;
+}
+.ai-cursor-carry {
+  position: absolute;
+  left: 8px;
+  top: 14px;
+  display: none;
+  width: 54px;
+  height: 54px;
+  border-radius: 6px;
+  background: #000 center / cover no-repeat;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+  transform: rotate(-3deg);
+}
+.ai-cursor.is-carrying .ai-cursor-carry {
+  display: block;
+}
+.ai-cursor-carry-take {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: rgba(12, 11, 14, 0.78);
+  color: #eee8de;
+  font: 400 8.5px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.ai-cursor-carry-take:empty {
+  display: none;
+}
+.ai-cursor.is-carrying .ai-cursor-label {
+  top: -30px;
+}
+/* The Éclipse of the Agent half, drawn with its own mask: it breathes while Moodix AI proposes. */
+#studio-view .studio-agent .eclipse {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+/* Each part of a workflow's line in its column (an older rule put every part in the first one). */
+#settings .workflow-settings .workflow-card > .workflow-state {
+  grid-column: 1;
+  grid-row: 1;
+}
+#settings .workflow-settings .workflow-card > .workflow-main {
+  grid-column: 2;
+  grid-row: 1;
+}
+#settings .workflow-settings .workflow-card > .native-card-actions {
+  grid-column: 3;
+  grid-row: 1;
+}
+/* While searching, the buttons of a section (Importer, Créer) are no result: they go. */
+#settings.is-searching .workflow-heading-actions {
+  display: none;
+}
+/* A workflow of the user's own: its name in ivory as the others, « VOUS » says whose it is. */
+#settings .workflow-settings .workflow-card[data-origin='user'] .workflow-name {
+  color: var(--text-1);
 }

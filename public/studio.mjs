@@ -97,7 +97,8 @@ const leaf = name =>
 // point, two after (« 05.17 s »); in capitals on the screen (« 05.17 S »). The value is the true
 // one, from the frames the model makes (5 s asked can be 5.17 s made).
 const twoFigures = value => (Math.round(Number(value) * 100) / 100).toFixed(2).padStart(5, '0');
-const seconds = value => twoFigures(value) + ' s';
+// A length as everywhere: « 05.17 S » (16/11: no small « s » in the settings any more).
+const seconds = value => twoFigures(value) + ' S';
 // The name a slot shows while something that it takes is carried (studio-maquette.md, « Glisser »).
 const SHORT = { start_image: 'Début', end_image: 'Fin', reference: 'Réf.', source: 'Image', source_video: 'Vidéo' };
 const figures = value => twoFigures(value) + ' S';
@@ -220,6 +221,8 @@ export function setupStudio({
   // The last generation left the card held (its engine did not say it let it go): « Libérer le GPU ».
   gpuBlocked = () => false,
   recoverGPU = async () => {},
+  // The mark of Moodix AI drawn with a mask of its own (app.js, moodixMark): it breathes.
+  mark = null,
   // « Agent »: opens the chat of Moodix AI, as the band at the foot of the Studio did.
   openAgent = () => {},
   // Brings the Studio on screen (as « Studio » of the sidebar does): a mode chosen from elsewhere.
@@ -341,7 +344,8 @@ export function setupStudio({
   // « Agent », left of « Générer » (moodix-design.md 15 bis): the chat of Moodix AI opens from it as
   // it did from the band at the foot. Made once and moved from one drawing to the next: the move
   // between the chat and the Studio folds the chat into it (view transition, moodix.css).
-  const agent = button('studio-agent', '', () => openAgent(), 'eclipse');
+  const agent = button('studio-agent', '', () => openAgent(), mark ? null : 'eclipse');
+  if (mark) agent.append(mark());
   agent.id = 'agent-open';
   agent.title = 'Moodix AI · ouvrir le chat';
   agent.setAttribute('aria-label', 'Moodix AI · ouvrir le chat');
@@ -465,6 +469,8 @@ export function setupStudio({
     const format = formatOf(image.width, image.height);
     if (format) Object.assign(draft, { format: format.id, size: null });
   }
+  // The take the pointer of Moodix AI carries: { id, role, index, preview, over } (over: above its case).
+  let aiCarry = null;
   // The slot an image is being dragged from: dropped on another, the image changes role.
   let dragged = null,
     // A creation of the Sortie dragged to a slot: it becomes that input.
@@ -548,7 +554,14 @@ export function setupStudio({
       refused = clash.length ? `Ne se combine pas avec : ${clash.map(other => ROLES[other]).join(', ')}` : '',
       // The inputs of a proposal are those Moodix AI chose: they change role, not image.
       chosenByAi = answering(),
-      tile = node('div', 'studio-slot' + (value ? ' is-filled' : '') + (refused ? ' is-blocked' : ''));
+      // The case the pointer of Moodix AI brings its take to: grown, the take shown in it.
+      aiOver = Boolean(aiCarry?.over && aiCarry.role === role && aiCarry.index === index),
+      tile = node(
+        'div',
+        'studio-slot' + (value ? ' is-filled' : '') + (refused ? ' is-blocked' : '') + (aiOver ? ' is-target' : ''),
+      );
+    tile.dataset.slot = role + '-' + index;
+    if (aiOver && aiCarry.preview) tile.style.setProperty?.('--carried', `url("${aiCarry.preview}")`);
     const pick = button('studio-slot-pick', '', () => {
       // An input that does not combine with those given says why. It still takes the image of
       // one of them, dragged here: that is how a role is changed.
@@ -588,9 +601,10 @@ export function setupStudio({
       pick.append(mark);
       pick.draggable = !working;
       pick.ondragstart = event => {
-        dragged = { role, index, media };
+        dragged = { role, index, media, preview: value.preview };
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', label);
+        dragGhost(pick, event.dataTransfer, media);
         tile.classList.add('is-dragged');
         carrying(media);
       };
@@ -611,8 +625,14 @@ export function setupStudio({
       if (dragged) event.dataTransfer.dropEffect = 'move';
       else if (carried) event.dataTransfer.dropEffect = 'copy';
       tile.classList.add('is-target');
+      // It shows what would come in it (studio-maquette.md, « Glisser »).
+      const coming = dragged?.preview || (carried && (carried.outputs?.[0]?.thumbUrl || carried.outputs?.[0]?.originalUrl));
+      if (coming) tile.style.setProperty?.('--carried', `url("${coming}")`);
     };
-    tile.ondragleave = () => tile.classList.remove('is-target');
+    tile.ondragleave = () => {
+      tile.classList.remove('is-target');
+      tile.style.removeProperty?.('--carried');
+    };
     tile.ondrop = event => {
       event.preventDefault();
       event.stopPropagation();
@@ -679,7 +699,7 @@ export function setupStudio({
     for (const record of takes) {
       const output = record.outputs?.[0] ?? {},
         name = Number.isInteger(output.take) ? 'Prise ' + output.take : (KIND[media] ?? 'Création') + ' #' + numberOf(record),
-        pick = button('studio-shelf-pick', '', () => {
+        pick = button('studio-shelf-pick' + (aiCarry?.id === record.id ? ' is-carried' : ''), '', () => {
           shelf = null;
           putCreation(record, role, index);
         }),
@@ -691,15 +711,19 @@ export function setupStudio({
         Object.assign(picture, { src: small, alt: '', loading: 'lazy', decoding: 'async', draggable: false });
         pick.append(picture);
       } else pick.append(icon(media === 'video' ? 'video' : 'image'));
+      pick.dataset.run = record.id;
       pick.draggable = true;
       pick.ondragstart = event => {
         carried = record;
         event.dataTransfer.effectAllowed = 'copy';
         event.dataTransfer.setData('text/plain', name);
+        dragGhost(pick, event.dataTransfer, media, output.take);
+        pick.classList.add('is-carried');
         carrying(media);
       };
       pick.ondragend = () => {
         carried = null;
+        pick.classList.remove('is-carried');
         carrying(null);
       };
       row.append(pick);
@@ -1398,7 +1422,7 @@ export function setupStudio({
     lock.append(icon('lock'));
     lock.setAttribute('role', 'img');
     lock.setAttribute('aria-label', 'LoRA du workflow');
-    lock.title = 'LoRA du workflow : réglé dans Configuration › Workflows';
+    lock.title = 'LoRA du workflow : réglé dans Paramètres › Workflows';
     row.append(name, track, value);
     if (lora.assistant) {
       const toggle = node('input', 'studio-lora-switch');
@@ -2306,42 +2330,105 @@ export function setupStudio({
     const tab = document.querySelector?.(`#studio-kinds [data-mode="${proposal?.mode ?? mode}"]`);
     return tab && tab.checkVisibility?.({ visibilityProperty: true }) !== false ? tab : null;
   };
+  /** The pointer glides to `element` (0.45 s), saying what it does; false once the user took over. */
+  async function glide(element, label, anchor) {
+    if (!ai || ai.stopped) return false;
+    pointer?.move(element, label, anchor);
+    await wait(pointer?.reduced() ? 0 : 460);
+    return Boolean(ai && !ai.stopped);
+  }
   /**
-   * One step of the pointer: it goes (its glide, 0.25 s), it rings, it sets, it leaves a trace:
-   * about 0.4 s. Stops when the user takes over.
+   * One step of the pointer: it goes (its glide, 0.45 s), it rings, it sets, it leaves a trace:
+   * about 0.6 s, the setting's own movement apart (a prompt written, a bar moved). Stops when the
+   * user takes over.
    */
   async function stepTo(key, label, apply, { anchor } = {}) {
     if (!ai || ai.stopped) return false;
-    ai.active = key;
+    // The prompt is written without a mark (studio-maquette.md): no ring, no trace on it.
+    const marked = key !== 'prompt';
+    ai.active = marked ? key : null;
     render();
-    pointer?.move(targetOf(key), label, anchor);
-    await wait(pointer?.reduced() ? 200 : 260);
-    if (!ai || ai.stopped) return false;
+    if (!(await glide(targetOf(key), label, anchor))) return false;
     await apply();
     if (!ai || ai.stopped) return false;
-    ai.touched.add(key);
+    if (marked) ai.touched.add(key);
     ai.active = null;
     render();
     pointer?.follow(targetOf(key), anchor);
-    await wait(pointer?.reduced() ? 200 : 140);
+    await wait(pointer?.reduced() ? 0 : 140);
     return Boolean(ai && !ai.stopped);
   }
-  /** The prompt written as it is typed: fast, the whole of it in about half a second. */
-  async function typePrompt(draft, text) {
+  /** The prompt written as it is typed: about 40 letters a second, 3 s at most (16/11). */
+  async function typePrompt(draft, text, { instant = false } = {}) {
     const box = document.querySelector?.('#studio-view [data-ai="prompt"]');
-    if (pointer?.reduced() || !box) {
+    if (instant || pointer?.reduced() || !box) {
       draft.prompt = text;
       return;
     }
-    const step = Math.max(2, Math.ceil(text.length / 36));
+    const length = Math.min(3000, (text.length / 40) * 1000),
+      ticks = Math.max(1, Math.round(length / 33)),
+      step = Math.max(1, Math.ceil(text.length / ticks));
     for (let index = step; index < text.length + step; index += step) {
       if (!ai || ai.stopped) return;
       draft.prompt = text.slice(0, index);
       box.value = draft.prompt;
       box.scrollTop = box.scrollHeight;
-      await wait(14);
+      await wait(length / ticks);
     }
     draft.prompt = text;
+  }
+  // Where a take goes, said by the pointer: « pose la prise 26 en fin ».
+  const WHERE = {
+    start_image: 'en début',
+    end_image: 'en fin',
+    reference: 'en référence',
+    source: 'à modifier',
+    source_video: 'en vidéo à suivre',
+  };
+  /**
+   * A take of the project put in its case as the user would (studio-maquette.md, step 2): the pointer
+   * goes to the case, « Créations du projet » opens under the inputs, it takes the take there and
+   * carries it to the case (the cases that take it light up, the one under it grows and shows it),
+   * puts it down, and the panel closes. A reference that is no take is put at once.
+   */
+  async function dragIn(draft, entry, { instant = false } = {}) {
+    const put = () => ((draft.inputs[entry.role] ??= [])[entry.index] = entry.item);
+    const record = entry.ref.output_id ? runs.find(item => item.id === entry.ref.output_id) : null,
+      take = record?.outputs?.[entry.ref.output_index ?? 0]?.take;
+    if (instant || !pointer || pointer.reduced() || !record) {
+      put();
+      return true;
+    }
+    const label = 'pose ' + (Number.isInteger(take) ? 'la prise ' + take : 'l’image') + ' ' + (WHERE[entry.role] ?? ''),
+      caseOf = () => document.querySelector?.(`#studio-view .studio-slot[data-slot="${entry.role}-${entry.index}"]`),
+      pickOf = () => document.querySelector?.(`#studio-view .studio-shelf-pick[data-run="${record.id}"]`);
+    if (!(await glide(caseOf(), label))) return false;
+    shelf = { role: entry.role, index: entry.index, media: 'image' };
+    render();
+    await wait(220);
+    if (!pickOf()) {
+      shelf = null;
+      put();
+      render();
+      return Boolean(ai && !ai.stopped);
+    }
+    if (!(await glide(pickOf(), label))) return false;
+    aiCarry = { id: record.id, role: entry.role, index: entry.index, preview: entry.item.preview, over: false };
+    pointer.carry(entry.item.preview, Number.isInteger(take) ? 'PRISE ' + take : '');
+    render();
+    if (!(await glide(caseOf(), label))) return false;
+    aiCarry.over = true;
+    render();
+    // Held over its case long enough to be seen: the case grown, the take shown in it.
+    await wait(400);
+    if (!ai || ai.stopped) return false;
+    put();
+    aiCarry = null;
+    shelf = null;
+    pointer.carry(null);
+    render();
+    await wait(160);
+    return Boolean(ai && !ai.stopped);
   }
   /**
    * Shows a proposal of Moodix AI in the Studio. What its workflow leaves to the assistant is
@@ -2396,7 +2483,7 @@ export function setupStudio({
           proposal = null;
           render();
           reject(
-            new Error('Le Studio n’a aucun workflow prêt pour cette création : vérifiez Configuration, Workflows.'),
+            new Error('Le Studio n’a aucun workflow prêt pour cette création : vérifiez Paramètres › Workflows.'),
           );
           return;
         }
@@ -2443,13 +2530,14 @@ export function setupStudio({
       steps.push(['model', 'choisit ' + workflow.name, () => (drafts[target].workflow = workflow.id)]);
     else draft.workflow = workflow.id;
     if (values.promptFree)
-      steps.push(['prompt', 'écrit le prompt', () => typePrompt(draft, values.prompt), { anchor: { ax: 34, ay: 30 } }]);
-    if (values.references.length)
-      steps.push([
-        'inputs',
-        values.references.length > 1 ? 'place les images' : 'place l’image',
-        () => placeReferences(draft, values.references),
-      ]);
+      steps.push(['prompt', 'écrit le prompt', options => typePrompt(draft, values.prompt, options), { anchor: { ax: 34, ay: 30 } }]);
+    // Each image in its case, one after the other: a take of the project is carried there from
+    // « Créations du projet » (dragIn), as the user would.
+    if (values.references.length) {
+      draft.inputs = {};
+      for (const entry of referenceInputs(values.references))
+        steps.push(['inputs', '', options => dragIn(draft, entry, options), { own: true }]);
+    }
     if (values.sizeFree && values.format && values.format !== draft.format && !extending)
       steps.push([
         'ratio',
@@ -2462,13 +2550,27 @@ export function setupStudio({
       steps.push([
         'duration',
         'règle la durée',
-        () => {
+        // The handle of the bar goes from where it is to the length proposed, notch after notch.
+        async ({ instant = false } = {}) => {
           const key = extending ? 'extension' : 'length',
-            near = workflow.lengths.seconds.reduce((best, value) =>
+            list = workflow.lengths.seconds,
+            near = list.reduce((best, value) =>
               Math.abs(value - values.seconds) < Math.abs(best - values.seconds) ? value : best,
-            );
-          draft[key] = near;
+            ),
+            from = list.indexOf(lengthOf(workflow)?.value),
+            to = list.indexOf(near);
           values.lengthShown = near;
+          if (!instant && pointer && !pointer.reduced() && from >= 0 && from !== to) {
+            const way = Math.sign(to - from),
+              pause = Math.min(110, 460 / Math.abs(to - from));
+            for (let at = from + way; at !== to; at += way) {
+              if (!ai || ai.stopped) break;
+              draft[key] = list[at];
+              render();
+              await wait(pause);
+            }
+          }
+          draft[key] = near;
         },
       ]);
     for (const [key, value] of Object.entries(values.settings))
@@ -2481,7 +2583,23 @@ export function setupStudio({
             if (key === 'lyrics' && value) draft.lyrics = true;
           },
         ]);
-    for (const [key, label, apply, options] of steps) if (!(await stepTo(key, label, apply, options))) return;
+    // With less motion asked, nothing moves: the end shows at once.
+    const still = Boolean(pointer?.reduced());
+    let done = 0;
+    for (const [key, label, apply, options] of steps) {
+      if (still) await apply({ instant: true });
+      else if (!(await (options?.own ? apply() : stepTo(key, label, apply, options)))) break;
+      done++;
+    }
+    if (done < steps.length) {
+      if (proposal !== current) return;
+      // Taken over (a touch of the user): the pointer is gone, what is left is set at once, and
+      // what the user touched keeps their value (16/11: the default, not yet validated).
+      const mine = current.userKeys ?? new Set();
+      for (const [key, , apply] of steps.slice(done)) if (!mine.has(key)) await apply({ instant: true });
+      shelf = null;
+      return render();
+    }
     if (!ai || ai.stopped || proposal !== current) return;
     // A character Moodix AI has just made: the pointer has the prompt written from the video and
     // that image, with the wand (the chat model comes back for it, then leaves the card again).
@@ -2498,20 +2616,20 @@ export function setupStudio({
       targetOf('generate'),
       auto ? 'lance la génération (autorisé dans la configuration)' : 'attend votre accord',
     );
-    await wait(300);
+    await wait(still ? 0 : 460);
     if (!ai || ai.stopped || proposal !== current) return;
     status(false);
     if (auto) {
       endPointer();
       return approve();
     }
-    await wait(350);
-    if (ai && !ai.stopped && proposal === current) endPointer();
+    // It stays on « Générer », « Refuser » beside it, until the user answers (studio-maquette.md).
+    ai.waiting = true;
   }
-  /** The images of a proposal, in the slots of their roles. */
-  function placeReferences(draft, references) {
-    const inputs = {};
-    references.forEach((ref, index) => {
+  /** The images of a proposal, each with the slot of its role: [{ role, index, item, ref }]. */
+  function referenceInputs(references) {
+    const counts = {};
+    return references.map((ref, index) => {
       const resource = ref.resource_id ? assets.resource?.(ref.resource_id) : null,
         record = ref.output_id ? runs.find(item => item.id === ref.output_id) : null,
         output = record?.outputs?.[ref.output_index ?? 0] ?? null,
@@ -2519,7 +2637,7 @@ export function setupStudio({
         role = ref.as ?? (ref.role in ROLES ? ref.role : ref.role === 'msr_image' ? 'reference' : ref.role),
         width = resource?.width ?? output?.width ?? record?.parameters?.width,
         height = resource?.height ?? output?.height ?? record?.parameters?.height;
-      (inputs[role] ??= []).push({
+      const item = {
         source: ref.resource_id
           ? { resource: ref.resource_id }
           : ref.output_id
@@ -2530,14 +2648,17 @@ export function setupStudio({
         ...(width > 0 && height > 0 ? { width, height } : {}),
         ref: index,
         role,
-      });
+      };
+      counts[role] = (counts[role] ?? -1) + 1;
+      return { role, index: counts[role], item, ref };
     });
-    draft.inputs = inputs;
   }
   function endPointer() {
     if (ai) ai.stopped = true;
     ai = null;
+    aiCarry = null;
     status(false);
+    pointer?.carry(null);
     pointer?.hide();
     render();
   }
@@ -2545,6 +2666,15 @@ export function setupStudio({
   function takeOver() {
     if (!ai) return;
     if (proposal && !proposal.values) return;
+    // Resting on « Générer »: it only goes; nothing is drawn again (a click there, or on « Refuser »,
+    // keeps the button it was pressed on).
+    if (ai.waiting) {
+      ai.stopped = true;
+      ai = null;
+      status(false);
+      pointer?.hide();
+      return;
+    }
     if (proposal) proposal.touched = new Set(ai.touched);
     endPointer();
     $('live-status') &&
@@ -2770,7 +2900,7 @@ export function setupStudio({
   const KIND = { video: 'Clip', image: 'Image', audio: 'Son' };
   // What the Sortie shows: the kind of the mode (16/11); its button at the right, the whole project.
   const SORTS = [
-    { id: 'all', icon: 'media', label: 'Tout', none: 'Aucune création dans ce projet pour l’instant' },
+    { id: 'all', icon: 'grid', label: 'Tout', none: 'Aucune création dans ce projet pour l’instant' },
     { id: 'image', icon: 'image', label: 'Images', none: 'Aucune image dans ce projet pour l’instant' },
     { id: 'video', icon: 'video', label: 'Vidéos', none: 'Aucune vidéo dans ce projet pour l’instant' },
     { id: 'audio', icon: 'wave', label: 'Sons', none: 'Aucun son dans ce projet pour l’instant' },
@@ -2956,11 +3086,13 @@ export function setupStudio({
       event.dataTransfer.effectAllowed = 'copy';
       event.dataTransfer.setData('text/plain', name);
       // Carried at the size of a slot of the inputs: the whole picture hid where it would go.
-      dragGhost(pick, event.dataTransfer, media);
+      dragGhost(pick, event.dataTransfer, media, output.take);
+      tile.classList.add('is-carried');
       carrying(media);
     };
     pick.ondragend = () => {
       carried = null;
+      tile.classList.remove('is-carried');
       carrying(null);
     };
     if (media === 'audio') {
@@ -3206,58 +3338,90 @@ export function setupStudio({
     return section;
   }
   /**
-   * What the pointer carries when a creation leaves the Sortie: its picture as small as a slot of
-   * the inputs (one on the screen gives the size, 52 px otherwise), cut to fill it as the slot
-   * shows it, corners rounded; a sound, its grey stripes. Drawn at once on a canvas, from the
-   * picture the tile already holds: nothing is loaded while the drag starts.
+   * What the hand carries (studio-maquette.md, « Glisser »; 16/11): the picture at the size of a slot
+   * of the inputs (one on the screen gives it, 52 px otherwise) and 104 %, tilted by −3°, with its
+   * shadow and « PRISE n » at its top left; a sound, its grey stripes. Drawn at once on a canvas from
+   * the picture the tile already holds: nothing is loaded while the drag starts.
    */
-  function dragGhost(pick, transfer, media) {
+  function dragGhost(pick, transfer, media, take = null) {
     const page = globalThis.document;
     if (!transfer?.setDragImage || !page?.createElement || !page.body) return;
     const slot = page.querySelector?.('#studio-view .studio-slot')?.getBoundingClientRect?.(),
-      width = Math.round(slot?.width || 52),
-      height = Math.round(slot?.height || 52),
+      width = Math.round((slot?.width || 52) * 1.04),
+      height = Math.round((slot?.height || 52) * 1.04),
+      // Room around it for the tilt and the shadow.
+      room = 16,
+      full = [width + room * 2, height + room * 2],
       ratio = globalThis.devicePixelRatio || 1,
       canvas = page.createElement('canvas'),
       context = canvas.getContext?.('2d');
     if (!context) return;
-    canvas.width = Math.round(width * ratio);
-    canvas.height = Math.round(height * ratio);
+    canvas.width = Math.round(full[0] * ratio);
+    canvas.height = Math.round(full[1] * ratio);
     Object.assign(canvas.style, {
       position: 'fixed',
       top: '-1000px',
       left: '-1000px',
-      width: width + 'px',
-      height: height + 'px',
+      width: full[0] + 'px',
+      height: full[1] + 'px',
       pointerEvents: 'none',
     });
-    context.beginPath();
-    if (context.roundRect) context.roundRect(0, 0, canvas.width, canvas.height, 6 * ratio);
-    else context.rect(0, 0, canvas.width, canvas.height);
-    context.clip();
+    const shape = () => {
+      context.beginPath();
+      if (context.roundRect) context.roundRect(0, 0, width, height, 6);
+      else context.rect(0, 0, width, height);
+    };
+    context.scale(ratio, ratio);
+    context.translate(full[0] / 2, full[1] / 2);
+    context.rotate((-3 * Math.PI) / 180);
+    context.translate(-width / 2, -height / 2);
+    context.save();
+    context.shadowColor = 'rgba(0, 0, 0, 0.55)';
+    context.shadowBlur = 14;
+    context.shadowOffsetY = 6;
+    shape();
     context.fillStyle = '#000';
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fill();
+    context.restore();
+    context.save();
+    shape();
+    context.clip();
     const source = pick.querySelector?.('img, video'),
       sourceWidth = source?.naturalWidth || source?.videoWidth,
       sourceHeight = source?.naturalHeight || source?.videoHeight,
       // A picture still loading has its size and no pixels yet.
       drawable = source?.tagName === 'VIDEO' ? source.readyState >= 2 : source?.complete !== false;
     if (media !== 'audio' && sourceWidth && sourceHeight && drawable) {
-      const scale = Math.max(canvas.width / sourceWidth, canvas.height / sourceHeight),
+      const scale = Math.max(width / sourceWidth, height / sourceHeight),
         drawn = [sourceWidth * scale, sourceHeight * scale];
-      context.drawImage(source, (canvas.width - drawn[0]) / 2, (canvas.height - drawn[1]) / 2, ...drawn);
+      context.drawImage(source, (width - drawn[0]) / 2, (height - drawn[1]) / 2, ...drawn);
     } else if (media === 'audio') {
       context.fillStyle = '#6e7480';
-      for (let x = 7 * ratio; x < canvas.width - 7 * ratio; x += 7 * ratio)
-        context.fillRect(x, canvas.height * 0.34, 3 * ratio, canvas.height * 0.32);
+      for (let x = 7; x < width - 7; x += 7) context.fillRect(x, height * 0.34, 3, height * 0.32);
     } else {
       // Its picture not there yet: the slot's size all the same, framed in grey.
       context.strokeStyle = '#6e7480';
-      context.lineWidth = 2 * ratio;
-      context.strokeRect(ratio, ratio, canvas.width - 2 * ratio, canvas.height - 2 * ratio);
+      context.lineWidth = 2;
+      context.strokeRect(1, 1, width - 2, height - 2);
+    }
+    context.restore();
+    // « PRISE n » at its top left, as on the screen.
+    if (Number.isInteger(take)) {
+      const word = 'PRISE ' + take,
+        mono = globalThis.getComputedStyle?.(page.documentElement)?.getPropertyValue?.('--font-mono')?.trim() || 'monospace';
+      context.font = `400 8.5px ${mono}`;
+      context.letterSpacing = '0.8px';
+      const chip = context.measureText(word).width + 10;
+      context.fillStyle = 'rgba(12, 11, 14, 0.78)';
+      context.beginPath();
+      if (context.roundRect) context.roundRect(4, 4, chip, 15, 4);
+      else context.rect(4, 4, chip, 15);
+      context.fill();
+      context.fillStyle = '#eee8de';
+      context.fillText(word, 9, 14.5);
     }
     page.body.append(canvas);
-    transfer.setDragImage(canvas, width / 2, height / 2);
+    transfer.setDragImage(canvas, full[0] / 2, full[1] / 2);
     // Its picture is taken as the drag starts: the canvas can go.
     setTimeout(() => canvas.remove(), 0);
   }
@@ -3271,12 +3435,10 @@ export function setupStudio({
         sortieAll = !sortieAll;
         render();
         document.querySelector?.('#studio-view .studio-sort-go')?.focus?.();
-      }, 'sort');
+      }, 'grid');
     main.setAttribute('aria-label', 'Trier la Sortie · ' + (sortieAll ? 'tout' : own.label.toLowerCase()));
     main.setAttribute('aria-pressed', String(sortieAll));
-    main.title = sortieAll
-      ? 'Tout le projet · cliquez pour n’afficher que les ' + own.label.toLowerCase()
-      : own.label + ' de ce mode · cliquez pour tout afficher';
+    main.title = 'Toutes les prises du projet';
     box.append(main);
     return box;
   }
@@ -3416,12 +3578,12 @@ export function setupStudio({
     const draft = drafts[mode],
       list = offered(),
       workflow = current();
-    if (!info.enabled) return message('La génération locale est désactivée : activez-la dans Configuration.');
+    if (!info.enabled) return message('La génération locale est désactivée : activez-la dans Paramètres › Génération.');
     if (!workflow)
       return message(
         mode === 'audio'
           ? 'Aucun workflow de son prêt : téléchargez les modèles de musique et de bruitages dans models\\audio.'
-          : 'Aucun workflow prêt pour cette création : vérifiez Configuration, Workflows.',
+          : 'Aucun workflow prêt pour cette création : vérifiez Paramètres › Workflows.',
       );
     // The first time a mode shows its model, the settings saved for it come back (not over a
     // proposal of Moodix AI, which sets its own).
@@ -3433,6 +3595,7 @@ export function setupStudio({
       write = node('section', 'studio-block is-input studio-write'),
       preview = node('section', 'studio-block is-preview studio-center'),
       settings = node('section', 'studio-block is-settings studio-settings');
+    if (aiCarry) desk.setAttribute('data-carrying', 'image');
     write.setAttribute('aria-label', 'Entrée');
     preview.setAttribute('aria-label', 'Aperçu et génération');
     settings.setAttribute('aria-label', 'Réglages');
@@ -3620,7 +3783,11 @@ export function setupStudio({
       halt.setAttribute('aria-label', 'Arrêter la génération');
       halt.title = 'Arrêter la génération';
       group.append(go, rule, halt);
-    } else group.append(go, rule, agent);
+    } else {
+      // Its Éclipse breathes while Moodix AI proposes: from its first setting to the user's answer.
+      agent.classList?.toggle('is-thinking', Boolean(answering() || ai));
+      group.append(go, rule, agent);
+    }
     // The character Moodix AI made, on the screen: kept, made again, or everything stopped.
     if (checking && mode === 'image' && !working) {
       // The question on a line of its own above its three answers: on one line with them, « OK »
@@ -3851,13 +4018,19 @@ export function setupStudio({
   const view = $('studio-view');
   if (view) {
     view.onkeydown = shortcut;
-    // A touch of the user while the pointer works: it stops, and leaves what it set.
+    // A touch of the user while the pointer works: it stops, what is left of the proposal is set at
+    // once, and the setting they touched keeps their value (animate).
+    const userTouch = event => {
+      const key = event.target?.closest?.('[data-ai]')?.dataset?.ai;
+      if (key && proposal && !ai.waiting) (proposal.userKeys ??= new Set()).add(key);
+      takeOver();
+    };
     const touched = event => {
-      if (event.isTrusted !== false && ai) takeOver();
+      if (event.isTrusted !== false && ai) userTouch(event);
       else if (event.type === 'input' && !proposal) release();
     };
     view.addEventListener?.('input', touched, true);
-    view.addEventListener?.('pointerdown', event => event.isTrusted !== false && ai && takeOver(), true);
+    view.addEventListener?.('pointerdown', event => event.isTrusted !== false && ai && userTouch(event), true);
     // Pointer and rings follow their setting when the page scrolls under them.
     view.addEventListener?.('scroll', () => ai?.active && pointer?.follow(targetOf(ai.active)), { passive: true });
   }

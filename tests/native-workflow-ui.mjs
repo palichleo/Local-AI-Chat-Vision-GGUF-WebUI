@@ -733,7 +733,8 @@ test('four unsupported references and three named LoRAs all appear in the editor
   assert.equal(record.loras.length, 3);
   assert.ok(Object.values(record.importDraft.files).includes('my-specific-2.safetensors'));
   const cards = f.$('workflow-list').children.filter(item => item.className === 'workflow-card');
-  await cards.at(-1).children.at(-1).children.at(-1).onclick();
+  // Its pencil (the bin follows it on a workflow of the user's own).
+  await cards.at(-1).children.at(-1).children.find(item => item.className.includes('native-edit')).onclick();
   assert.ok(f.calls.some(call => call.route === 'generation/workflows/' + record.id));
   assert.equal(f.$('native-reference-count').textContent, '4');
   assert.equal(f.$('native-value-cfg').value, 4);
@@ -761,7 +762,7 @@ test('one list of workflows: MOSS Image says whether ComfyUI answers, « Démarr
   assert.deepEqual(list().map(item => item.className), ['workflow-card']);
   assert.equal(f.nodes.get('comfy-url'), undefined);
   // MOSS Image, which ComfyUI runs: its line says ComfyUI is not started, and offers to start it.
-  const moss = { ...structuredClone(f.template), id: 'moss-image', name: 'MOSS Image', pipeline: 'moss' };
+  const moss = { ...structuredClone(f.template), id: 'moss-image', name: 'MOSS Image', pipeline: 'moss', builtin: true };
   f.workflows.push(moss);
   const answers = {
     'generation/comfy/start': [{ choose: true }, { started: true, app: 'Comfy Desktop.exe', comfy: { enabled: true, reachable: false, reason: 'stopped' } }],
@@ -780,8 +781,13 @@ test('one list of workflows: MOSS Image says whether ComfyUI answers, « Démarr
   };
   f.ui = setupNativeWorkflows({ api: (...args) => f.api(...args), state: {}, node: f.node, notice() {} });
   await f.ui.refresh();
-  const card = list().find(item => item.children.some(child => child.textContent === 'MOSS Image')),
-    line = card.children.at(-1);
+  // Its line (capture 44): the dot, its name with its kind in mono and its sentence, the actions.
+  const mossCard = () => list().find(item => item.children[1].children[0].children[0].textContent === 'MOSS Image'),
+    card = mossCard(),
+    [, main] = card.children,
+    line = main.children.at(-1);
+  assert.deepEqual(main.children[0].children.map(item => item.textContent), ['MOSS Image', 'Image']);
+  assert.equal(card.find?.('help-tip'), undefined);
   assert.equal(line.className, 'workflow-comfy');
   assert.equal(line.dataset.state, 'stopped');
   assert.equal(line.children[1].textContent, 'ComfyUI n’est pas lancé');
@@ -798,7 +804,7 @@ test('one list of workflows: MOSS Image says whether ComfyUI answers, « Démarr
       ['generation/comfy/start', { launchPath: 'D:\\Comfy\\Comfy Desktop\\Comfy Desktop.exe' }],
     ],
   );
-  const after = list().find(item => item.children.some(child => child.textContent === 'MOSS Image')).children.at(-1);
+  const after = mossCard().children[1].children.at(-1);
   assert.equal(after.dataset.state, 'starting');
   assert.equal(after.children[1].textContent, 'ComfyUI démarre…');
   assert.equal(after.children.at(-1).disabled, true);

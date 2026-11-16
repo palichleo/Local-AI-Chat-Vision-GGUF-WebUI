@@ -1,11 +1,14 @@
 /**
  * The pointer of Moodix AI: a white arrow in a soft halo, with a label of what it does
- * (« Moodix AI · règle la durée »). It glides from one setting to the next (0.25 s), and
- * leaves a clear ring on the setting it changes, then a fine trace once it is set. Nothing
- * blinks; with `prefers-reduced-motion` it does not glide, it appears where it goes.
+ * (« Moodix AI · règle la durée »). It glides from one setting to the next (0.45 s), and
+ * leaves a clear ring on the setting it changes, then a fine trace once it is set; it carries a
+ * take as the hand does (`carry`: its picture tilted, « PRISE n » on it). Nothing blinks; with
+ * `prefers-reduced-motion` it does not glide, it appears where it goes.
  */
 export function setupPointer({ cursor, text, host = globalThis }) {
   const reduced = () => Boolean(host.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const carried = cursor.querySelector?.('.ai-cursor-carry'),
+    carriedTake = cursor.querySelector?.('.ai-cursor-carry-take');
   let shown = false;
   function place(element, { ax = null, ay = null } = {}) {
     const box = element.getBoundingClientRect?.();
@@ -50,6 +53,12 @@ export function setupPointer({ cursor, text, host = globalThis }) {
       host.setTimeout?.(() => {
         if (!shown) cursor.hidden = true;
       }, 250);
+    },
+    /** Carries a picture as the hand does, « PRISE n » on it; nothing (`picture` null): put down. */
+    carry(picture, take = '') {
+      cursor.classList.toggle('is-carrying', Boolean(picture));
+      if (carried) carried.style.backgroundImage = picture ? `url("${picture}")` : '';
+      if (carriedTake) carriedTake.textContent = take;
     },
     get visible() {
       return shown;

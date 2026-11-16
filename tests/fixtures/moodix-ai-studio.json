@@ -1,0 +1,62 @@
+{
+  "note": "Une proposition de Moodix AI telle que le serveur l'envoie au chat (local_tool_request) : une vidéo LTX 2.5 de 6,04 s en 9:16 qui part de la prise 1. Rejouée par tests/studio.mjs (le pointeur règle le Studio) et par le script des captures (capture 27), sans modèle de langage.",
+  "reasoning": "L'utilisateur veut faire bouger le portrait. Je règle le Studio : LTX 2.5, le portrait en image de début, 6 secondes en 9:16.",
+  "content": "Je règle le Studio : LTX 2.5, le portrait en image de début, 6 secondes en 9:16. Dites « Générer » quand c'est bon.",
+  "request": {
+    "kind": "generation",
+    "requestId": "rejeu-1",
+    "approvalToken": "rejeu-1",
+    "tool": "create_video",
+    "mediaType": "video",
+    "workflowName": "LTX 2.5",
+    "resolution": { "width": 448, "height": 768 },
+    "call": {
+      "id": "call-rejeu-1",
+      "type": "function",
+      "function": {
+        "name": "create_video",
+        "arguments": "{\"prompt\":\"Plan fixe. La neige se met à tomber doucement ; au milieu du plan, la jeune femme lève lentement la tête vers le ciel gris, sans regarder la caméra.\",\"workflow\":\"LTX 2.5\",\"start_image\":{\"take\":1},\"seconds\":6,\"format\":\"9:16\"}"
+      }
+    },
+    "inputRoles": ["start_image", "end_image", "reference", "reference"],
+    "plan": {
+      "intention": "Un plan fixe de 6 secondes en 9:16 à partir de la prise 1.",
+      "prompt": "Plan fixe. La neige se met à tomber doucement ; au milieu du plan, la jeune femme lève lentement la tête vers le ciel gris, sans regarder la caméra.",
+      "stage": "draft",
+      "parameters": {
+        "prompt": "Plan fixe. La neige se met à tomber doucement ; au milieu du plan, la jeune femme lève lentement la tête vers le ciel gris, sans regarder la caméra.",
+        "width": 448,
+        "height": 768,
+        "frames": 145,
+        "fps": 24,
+        "seed": 18342
+      },
+      "editable": {
+        "prompt": true,
+        "stages": ["draft", "final"],
+        "parameters": [
+          { "key": "frames", "type": "integer", "value": 145, "choices": [121, 145, 193] },
+          { "key": "width", "type": "integer", "value": 448 },
+          { "key": "height", "type": "integer", "value": 768 },
+          { "key": "seed", "type": "integer", "value": 18342 }
+        ],
+        "references": [
+          [
+            { "role": "start_image", "label": "Image de début" },
+            { "role": "end_image", "label": "Image de fin" },
+            { "role": "reference", "label": "Référence" }
+          ]
+        ]
+      },
+      "references": [
+        {
+          "input": "start",
+          "role": "start_image",
+          "roleLabel": "Image de début",
+          "label": "Prise 1",
+          "output_id": "d91877b3-e6e4-4cf8-ae95-49665e6aa1ae"
+        }
+      ]
+    }
+  }
+}

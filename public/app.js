@@ -686,7 +686,6 @@ async function toggleTheme() {
 function updateControls() {
   const s = state.status;
   projectUI.sync();
-  $('settings-update-check').disabled = state.updating || !!state.checkingUpdates;
   // Never held by what the page believes: a flag left set by mistake must not lock updates for
   // good. The server refuses while it is busy, and the page asks again (installFromButton).
   $('settings-update-install').disabled = state.updating || state.closingApp || !state.connected;
@@ -875,16 +874,14 @@ async function checkUpdates({ refresh = false } = {}) {
   try {
     const update = await (await api(refresh ? 'updates?refresh=1' : 'updates')).json();
     state.updateAvailable = update.available === true;
+    // Under « Version installée » (capture 48): when it was looked for, at the launch or since.
     const at = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-    $('settings-update-status').textContent = state.updateAvailable
-      ? 'La version ' + update.version + ' est disponible.'
-      : refresh
-        ? 'Aucune mise à jour trouvée (recherche faite à ' + at + ').'
-        : 'Aucune mise à jour trouvée au lancement.';
+    $('settings-update-checked').textContent = (refresh ? 'Vérifié aujourd’hui à ' : 'Vérifié au lancement, aujourd’hui à ') + at + '.';
+    $('settings-update-status').textContent = state.updateAvailable ? 'La version ' + update.version + ' est disponible' : '';
+    $('settings-update-offer').hidden = !state.updateAvailable;
     $('settings-update-install').hidden = !state.updateAvailable;
-    $('settings-update-install').textContent = state.updateAvailable
-      ? 'Installer la version ' + update.version
-      : 'Installer la mise à jour';
+    $('settings-update-install').textContent = 'Installer';
+    $('settings-update-install').setAttribute('aria-label', state.updateAvailable ? 'Installer la version ' + update.version : 'Installer');
     const opener = $('settings-open');
     opener.classList.toggle('has-update', state.updateAvailable);
     const label = state.updateAvailable ? 'Paramètres · une mise à jour est disponible' : 'Paramètres';
@@ -893,21 +890,8 @@ async function checkUpdates({ refresh = false } = {}) {
     settingsTabs.mark('update', state.updateAvailable);
     if (refresh) $('live-status').textContent = state.updateAvailable ? 'Mise à jour disponible.' : 'Aucune mise à jour trouvée.';
   } catch {
-    /* Offline checks stay silent. */
-  }
-}
-
-async function searchUpdate() {
-  if (state.checkingUpdates) return;
-  state.checkingUpdates = true;
-  $('settings-update-check').textContent = 'Recherche…';
-  updateControls();
-  try {
-    await checkUpdates({ refresh: true });
-  } finally {
-    state.checkingUpdates = false;
-    $('settings-update-check').textContent = 'Rechercher une mise à jour';
-    updateControls();
+    // Offline: said under the version, quietly (nothing else changes).
+    $('settings-update-checked').textContent = 'Vérification impossible pour l’instant (hors ligne ?).';
   }
 }
 
@@ -1060,7 +1044,7 @@ async function checkComponents({ again = false } = {}) {
   try {
     // Versions read for an earlier opening are still true: they are shown all the same.
     const result = await (await api('components')).json();
-    $('settings-version').textContent = 'Moodix ' + result.version;
+    $('settings-version').textContent = result.version;
     $('components-list').replaceChildren(
       ...result.components.map(component => {
         const row = node('li', 'component-row');
@@ -1894,7 +1878,6 @@ function assistantMessage(parent = null) {
   const thoughts = node('div', 'reasoning-content');
   reasoning.append(summary, thoughts);
   const body = node('div', 'message-body');
-  body.append(node('span', 'pending-dot', '●'));
   const note = node('div', 'message-note');
   const generations = parent?.generations || node('div', 'generation-grid');
   article.append(reasoning, body, note);
@@ -2124,7 +2107,7 @@ async function sendMessage(event) {
     if (state.generating) return;
   }
   if (!state.config.enginePath || !state.config.modelPath) {
-    notice('Renseignez les chemins du moteur et du modèle dans Configuration avant le premier envoi.');
+    notice('Choisissez votre LLM dans Paramètres › Moodix AI avant le premier envoi.');
     return openSettings();
   }
   state.preparing = true;
@@ -2204,12 +2187,12 @@ async function sendMessage(event) {
   function render() {
     if (silent) return;
     // « Réflexion en cours… »: the mark of Moodix AI thinks with it, until the answer is written.
-    markThinking(view, Boolean(reasoning) && !output);
+    markThinking(view, Boolean(view.waiting) && !output);
     thoughtFor(view, reasoning, output);
     view.reasoning.hidden = !reasoning;
     view.thoughts.textContent = reasoning;
     if (output) renderText(view.body, output);
-    else if (reasoning) view.body.replaceChildren(node('span', 'pending-dot', 'Réflexion en cours…'));
+    else view.body.replaceChildren();
     if (output) showLastReply(output);
     scrollToBottom();
     lastRender = performance.now();
@@ -2242,7 +2225,10 @@ async function sendMessage(event) {
         // A model that wants a tool it was not given (after a failure, a refusal, the limit, or
         // while generation is unavailable) writes its call as text: that markup is never shown.
         leaked = false;
-      view.body.replaceChildren(node('span', 'pending-dot', '●'));
+      // The Éclipse of the answer breathes until its first words (logo.md, Respiration).
+      view.body.replaceChildren();
+      view.waiting = true;
+      markThinking(view, true);
       // Attached images of a reopened conversation get their compressed copy from the original.
       await fillCopies(history, { api, conversationId: state.conversationId, signal });
       const response = await api(
@@ -2287,6 +2273,9 @@ async function sendMessage(event) {
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         if (performance.now() - lastRender > 55) render();
       });
+      // The stream ended: the Éclipse rests (a tool, or the answer written).
+      view.waiting = false;
+      markThinking(view, false);
       if (leaked && !output)
         output = allowTools
           ? 'Je n’ai pas pu lancer cet outil : la génération est peut-être indisponible en ce moment (voir les réglages). Renvoyez votre demande pour que je réessaie.'
@@ -2934,6 +2923,8 @@ const settingsTabs = setupSettingsTabs({
     if (name === 'update' && $('settings').open) {
       void checkComponents();
       void refreshToken();
+      // No « Rechercher une mise à jour » any more (16/11): looked for at the launch and here.
+      void checkUpdates({ refresh: true });
     }
   },
 });
@@ -2941,6 +2932,7 @@ const settingsSearch = setupSettingsSearch({
   dialog: $('settings'),
   input: $('settings-search'),
   empty: $('settings-empty'),
+  title: $('settings-results'),
   scroller: $('settings-body'),
   onRefresh: searching => settingsTabs.matches(searching),
 });
@@ -3078,6 +3070,7 @@ const studioUI = setupStudio({
   waitForModel: (...args) => waitForModel(...args),
   // A chat answer in progress keeps the model: the Studio waits for it.
   gpuBlocked: () => Boolean(state.status.toolJob?.blocked),
+  mark: () => moodixMark()[0],
   recoverGPU: () => recoverGPU(),
   blocked: () =>
     state.generating || state.status.busy
@@ -3261,7 +3254,6 @@ $('add-llm').onclick = addLLM;
 $('save-llm').onclick = () => saveLLM();
 $('cancel-llm').onclick = cancelLLM;
 $('remove-llm').onclick = removeLLM;
-$('settings-update-check').onclick = searchUpdate;
 $('settings-update-install').onclick = installUpdate;
 /** « Libérer le GPU » (the composer, the Studio): the engine of the last generation lets the card go. */
 async function recoverGPU() {
@@ -3694,7 +3686,7 @@ try {
   });
   tokenKnown();
   state.version = initial.version || '';
-  if (initial.version) $('settings-version').textContent = 'Moodix ' + initial.version;
+  if (initial.version) $('settings-version').textContent = initial.version;
   void checkUpdates();
   applyTheme(initial.preferences?.theme);
   // The room kept (Paramètres › Interface), on the page from the start.

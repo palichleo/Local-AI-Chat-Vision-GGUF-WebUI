@@ -11,7 +11,7 @@
 import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
 
 export const KINDS = [
-  { id: 'all', icon: 'media', label: 'Tout' },
+  { id: 'all', icon: 'grid', label: 'Tout' },
   { id: 'image', icon: 'image', label: 'Images' },
   { id: 'video', icon: 'video', label: 'Vidéos' },
   { id: 'audio', icon: 'wave', label: 'Sons' },

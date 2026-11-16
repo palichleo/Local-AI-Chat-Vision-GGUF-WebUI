@@ -124,6 +124,8 @@ export function setupNativeWorkflows(options) {
     return value;
   };
   const icon = name => {
+    // A page without SVG (the tests): a plain mark in its place.
+    if (typeof document.createElementNS !== 'function') return node('span', 'icon-' + name);
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'),
       use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
     svg.setAttribute('aria-hidden', 'true');
@@ -450,6 +452,31 @@ export function setupNativeWorkflows(options) {
     }
     return start;
   }
+  /** The kind of a workflow, in mono beside its name (capture 44): IMAGE, VIDÉO, MUSIQUE, BRUITAGE. */
+  const kindOf = record =>
+    record.mediaType === 'audio'
+      ? /ace[-_]?step|musi/i.test(record.pipeline || '') ? 'Musique' : 'Bruitage'
+      : record.mediaType === 'video'
+        ? 'Vidéo'
+        : 'Image';
+  /** Its sentence under the name: what it lacks when it lacks a file, else what it does. */
+  function sentenceOf(record, stateName, stateText) {
+    const offer = downloads.offers[record.id];
+    if (stateName === 'missing' && offer?.files?.length)
+      return {
+        text: 'Il manque ' + offer.files.map(file => file.file).join(', ') + ' · ' + formatSize(offer.left ?? offer.bytes),
+        warn: true,
+      };
+    if (['missing', 'problem'].includes(stateName)) return { text: stateText, warn: true };
+    const first = String(record.description || '').split(/(?<=[.!?])\s/)[0].trim();
+    return { text: first || familyLabel(record.pipeline), warn: false };
+  }
+  /**
+   * A workflow on its line (capture 44): its dot of state, its name and its kind in mono (« VOUS »
+   * when it is the user's own), a sentence under them; at the right Télécharger when a file is
+   * missing, Rétablir when a shipped one was changed, the pencil, and the bin for the user's own.
+   * The line of MOSS Image says, under its sentence, whether ComfyUI answers.
+   */
   function workflowCard(record) {
     const card = node('article', 'workflow-card'),
       [stateName, stateText] = workflowState(record),
@@ -462,16 +489,16 @@ export function setupNativeWorkflows(options) {
     dot.setAttribute('aria-label', 'État : ' + stateText);
     dot.dataset.help = stateText;
     dot.dataset.helpAlign = 'start';
-    const name = node('strong', 'workflow-name', record.name);
-    const details = [record.description, originOf(record)].filter(Boolean).join('\n');
-    // The name says the details too, for a pointer that passes over it.
-    name.dataset.help = details;
-    name.dataset.helpAlign = 'start';
-    const tip = node('span', 'help-tip workflow-help', '?');
-    tip.tabIndex = 0;
-    tip.setAttribute('role', 'img');
-    tip.setAttribute('aria-label', 'Détails : ' + details);
-    tip.dataset.help = details;
+    const main = node('div', 'workflow-main'),
+      head = node('div', 'workflow-head'),
+      sentence = sentenceOf(record, stateName, stateText),
+      line = node('p', 'workflow-line' + (sentence.warn ? ' is-warning' : ''), sentence.text);
+    head.append(node('strong', 'workflow-name', record.name), node('span', 'workflow-kind', kindOf(record)));
+    if (!record.builtin) head.append(node('span', 'workflow-own', 'Vous'));
+    // All it does and where it comes from, under the pointer (no « ? » on each line any more).
+    line.title = [record.description, originOf(record)].filter(Boolean).join('\n');
+    main.append(head, line);
+    if (engineOf(record) === 'external') main.append(comfyLine());
     const actions = node('div', 'native-card-actions');
     if (offer?.complete) actions.append(downloadButton(record, offer));
     if (record.customized) {
@@ -487,28 +514,42 @@ export function setupNativeWorkflows(options) {
             importStatus(failure.message, true);
           }
         },
-        'text-button',
+        'text-button workflow-reset',
       );
+      reset.prepend(icon('undo'));
       reset.title = 'Revenir à la version fournie avec Atelier';
       reset.dataset.nativeControl = 'true';
       actions.append(reset);
     }
-    // Only the user's own workflows can be deleted; the shipped ones stay (an edit is restored).
+    const editButton = button('', () => edit(record), 'native-edit');
+    editButton.append(icon('edit'));
+    editButton.setAttribute('aria-label', 'Modifier ' + record.name);
+    editButton.title = 'Modifier';
+    editButton.dataset.nativeControl = 'true';
+    // Only the user's own workflows can be deleted (the bin, then « Confirmer »); the shipped ones stay.
     if (!record.builtin) {
       let confirming = false;
+      const bin = () => {
+        remove.replaceChildren(icon('trash'));
+        remove.classList.remove('is-confirming');
+        remove.setAttribute('aria-label', 'Supprimer ' + record.name);
+        remove.title = 'Supprimer';
+      };
       const cancel = button('Annuler', () => {
         confirming = false;
-        remove.textContent = 'Supprimer';
+        bin();
         cancel.hidden = true;
-      });
+      }, 'text-button');
       cancel.hidden = true;
       cancel.dataset.nativeControl = 'true';
       const remove = button(
-        'Supprimer',
+        '',
         async () => {
           if (!confirming) {
             confirming = true;
-            remove.textContent = 'Confirmer';
+            remove.replaceChildren('Confirmer');
+            remove.classList.add('is-confirming');
+            remove.setAttribute('aria-label', 'Confirmer la suppression de ' + record.name);
             cancel.hidden = false;
             return;
           }
@@ -522,23 +563,20 @@ export function setupNativeWorkflows(options) {
             importStatus(failure.message, true);
           }
         },
-        'text-button native-remove',
+        'native-remove',
       );
+      bin();
       remove.dataset.nativeControl = 'true';
-      actions.append(remove, cancel);
-    }
-    const editButton = button('Modifier', () => edit(record));
-    editButton.dataset.nativeControl = 'true';
-    actions.append(editButton);
-    card.append(dot, name, tip, actions);
-    if (engineOf(record) === 'external') card.append(comfyLine());
+      actions.append(editButton, remove, cancel);
+    } else actions.append(editButton);
     if (stateName === 'downloading') {
       const bar = node('span', 'workflow-progress'),
         fill = node('span');
       fill.style.width = (downloads.job.total ? (downloads.job.received / downloads.job.total) * 100 : 0) + '%';
       bar.append(fill);
-      card.append(bar);
+      main.append(bar);
     }
+    card.append(dot, main, actions);
     return card;
   }
   /** Follows a download while it runs; at its end, the list says again what each workflow lacks. */
