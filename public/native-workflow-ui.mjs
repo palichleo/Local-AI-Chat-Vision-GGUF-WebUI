@@ -93,8 +93,6 @@ export function setupNativeWorkflows(options) {
     runner = {},
     busy = false,
     working = false,
-    unlimited = false,
-    lastLimited = 10,
     version = 0,
     refreshVersion = 0,
     controller = new AbortController(),
@@ -212,12 +210,6 @@ export function setupNativeWorkflows(options) {
             'generation-auto-video',
             'generation-review-images',
             'generation-review',
-            'generation-iterations',
-            'generation-minus',
-            'generation-plus',
-            'generation-unlimited',
-            'generation-python',
-            'generation-python-browse',
             'generation-test',
             'workflow-add',
             'native-workflow-import',
@@ -234,7 +226,6 @@ export function setupNativeWorkflows(options) {
           continue;
         control.disabled = disabled || control.dataset.unavailable === 'true';
       }
-    $('generation-iterations').disabled = disabled || unlimited;
     $('workflow-editor').setAttribute('aria-busy', String(working));
   }
   async function run(action) {
@@ -249,15 +240,6 @@ export function setupNativeWorkflows(options) {
       setBusy(busy);
       onSettingsBusyChange(false);
     }
-  }
-  function syncLimit() {
-    const control = $('generation-iterations');
-    control.hidden = unlimited;
-    control.required = !unlimited;
-    control.disabled = busy || working || unlimited;
-    $('generation-unlimited').setAttribute('aria-pressed', String(unlimited));
-    $('generation-infinity-value').hidden = !unlimited;
-    $('generation-limit-label').textContent = unlimited ? 'Sans limite' : `${control.value} essai(s)`;
   }
   function folderValues() {
     return Object.fromEntries(
@@ -279,18 +261,16 @@ export function setupNativeWorkflows(options) {
     return (key && $(folderControls[key][0]).value.trim()) || folders[kind] || folders[role] || '';
   }
   function values() {
-    const maxIterations = unlimited ? 10000 : Number($('generation-iterations').value);
-    if (!Number.isInteger(maxIterations) || maxIterations < 1 || maxIterations > (unlimited ? 10000 : 9999))
-      throw Error('Choisissez entre 1 et 9 999 générations, ou ∞.');
+    // 100 generations a message, imposed by the server; the Python of before, kept as it is (its
+    // setting left the interface: parametres-maquette.md).
     return {
       enabled: $('generation-enabled').checked,
       autoAllow: $('generation-auto').checked,
       autoAllowVideos: $('generation-auto-video').checked,
       confirmReplacements: $('generation-confirm-replace')?.checked === true,
-      maxIterations,
       reviewImages: $('generation-review-images').checked,
       reviewVideos: $('generation-review').checked,
-      pythonPath: $('generation-python').value.trim(),
+      pythonPath: state.generation?.pythonPath || '',
       ...folderValues(),
     };
   }
@@ -635,13 +615,8 @@ export function setupNativeWorkflows(options) {
         if ($('generation-confirm-replace')) $('generation-confirm-replace').checked = config.confirmReplacements === true;
         $('generation-review-images').checked = config.reviewImages === true;
         $('generation-review').checked = config.reviewVideos === true;
-        unlimited = config.maxIterations === 10000;
-        if (!unlimited) lastLimited = config.maxIterations || 10;
-        $('generation-iterations').value = lastLimited;
-        $('generation-python').value = config.pythonPath || '';
         for (const [key, [id, role]] of Object.entries(folderControls))
           $(id).value = config[key] || folders[role] || '';
-        syncLimit();
       }
     }
     runnerStatus();
@@ -1529,42 +1504,6 @@ export function setupNativeWorkflows(options) {
     if (draft) leaveEditor();
     importStatus('');
   }
-  $('generation-iterations').oninput = () => {
-    lastLimited = Number($('generation-iterations').value) || 10;
-    syncLimit();
-  };
-  $('generation-minus').onclick = () => {
-    if (unlimited) {
-      unlimited = false;
-      lastLimited = 9999;
-    } else lastLimited = Math.max(1, Number($('generation-iterations').value) - 1);
-    $('generation-iterations').value = lastLimited;
-    syncLimit();
-  };
-  $('generation-plus').onclick = () => {
-    if (unlimited) return;
-    lastLimited = Number($('generation-iterations').value) + 1;
-    if (lastLimited >= 10000) unlimited = true;
-    else $('generation-iterations').value = lastLimited;
-    syncLimit();
-  };
-  $('generation-unlimited').onclick = () => {
-    if (!unlimited) lastLimited = Math.min(9999, Math.max(1, Number($('generation-iterations').value) || 5));
-    unlimited = !unlimited;
-    $('generation-iterations').value = lastLimited;
-    syncLimit();
-  };
-  for (const [id, kind] of [['generation-python', 'python']])
-    $(id + '-browse').onclick = async () => {
-      try {
-        await run(async signal => {
-          const path = await browse(kind, $(id).value, signal);
-          if (path) $(id).value = path;
-        });
-      } catch (failure) {
-        if (!controller.signal.aborted) $('generation-status').textContent = failure.message;
-      }
-    };
   $('generation-test').onclick = async () => {
     try {
       await run(async signal => {

@@ -60,7 +60,8 @@ test('settings save model and generation choices together without restarting a r
       generation,
     });
     assert.equal(result.status, 200);
-    assert.equal(JSON.parse(await readFile(join(dataDir, 'generation.json'))).maxIterations, 10000);
+    // 100 generations a message, imposed by the server whatever is sent (parametres-maquette.md).
+    assert.equal(JSON.parse(await readFile(join(dataDir, 'generation.json'))).maxIterations, 100);
     assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'config.json'))), config);
     assert.equal(
       (
@@ -88,14 +89,14 @@ test('settings save model and generation choices together without restarting a r
     );
     assert.equal((await api('files/choose', { kind: 'engine' })).status, 409);
     assert.equal((await (await api('bootstrap')).json()).config.modelPath, modelPath);
-    assert.equal((await api('settings', { config, generation: { ...generation, maxIterations: 1 } })).status, 200);
+    assert.equal((await api('settings', { config, generation: { ...generation, autoAllow: false } })).status, 200);
     assert.equal((await (await api('status')).json()).state, 'ready');
     assert.equal((await api('settings', { config: { ...config, contextSize: 16384 }, generation })).status, 409);
-    assert.equal(JSON.parse(await readFile(join(dataDir, 'generation.json'))).maxIterations, 1);
+    assert.equal(JSON.parse(await readFile(join(dataDir, 'generation.json'))).autoAllow, false);
     await app.close();
     app = await createApplication(options);
     initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
-    assert.equal(initial.generation.maxIterations, 1);
+    assert.equal(initial.generation.autoAllow, false);
     assert.deepEqual(initial.config, config);
   } finally {
     await app?.close();

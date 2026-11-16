@@ -104,6 +104,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
     setupHelpTips: () => ({ hide() {}, refresh() {} }),
     setupLibrary: () => ({ show: async () => {}, refresh: async () => {}, render() {}, filter: () => ({ project: 'all' }) }),
     setupSettingsTabs: () => ({ select() {}, matches() {}, mark() {}, opened() {}, current: () => 'update' }),
+    setupInterfaceSettings: () => ({ load() {}, dirty: () => false, save: async () => {}, revert() {} }),
     setupSettingsGuard,
     setupCopy() {},
     setupContextMeter: options => {

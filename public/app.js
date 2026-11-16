@@ -11,6 +11,7 @@ const untitled = title => title === UNTITLED || title === 'Nouveau chat';
 import { setupProjectNavigation } from './project-navigation.mjs';
 import { setupSettingsSearch } from './settings-search.mjs';
 import { setupSettingsTabs } from './settings-tabs.mjs';
+import { setupInterfaceSettings } from './interface-settings.mjs';
 import { setupHelpTips } from './help-tips.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
@@ -1413,6 +1414,8 @@ async function saveConfiguration() {
         workflowDescriptions: workflowsUI.workflowDescriptions(),
       })
     ).json();
+    // The room (Interface) goes with the other preferences.
+    await interfaceUI.save();
     state.config = saved.config;
     state.generation = saved.generation;
     state.globalInstructions = saved.instructions ?? $('global-instructions').value;
@@ -2831,6 +2834,10 @@ const settingsTabs = setupSettingsTabs({
   onShow: name => {
     helpTips.hide();
     $('settings-body').scrollTop = 0;
+    // Interface: the page stays sharp behind, to see each setting at once (moodix.css); its defaults
+    // come back from the foot.
+    $('settings').dataset.tab = name;
+    $('room-reset').hidden = name !== 'interface';
     if (name === 'update' && $('settings').open) {
       void checkComponents();
       void refreshToken();
@@ -2845,6 +2852,10 @@ const settingsSearch = setupSettingsSearch({
   onRefresh: searching => settingsTabs.matches(searching),
 });
 dismissSettingsOnOutsideClick($('settings'), () => requestSettingsClose());
+// Fond, éclairage, grain (the Interface tab): applied at once, kept with « Enregistrer ».
+const interfaceUI = setupInterfaceSettings({ $, node, api });
+// Closed without « Enregistrer » (Annuler, Échap, a click beside it): the room as it was kept.
+$('settings').addEventListener('close', () => interfaceUI.revert());
 const projectUI = setupProjectNavigation({
   $,
   state,
@@ -3047,19 +3058,11 @@ const settingsGuard = setupSettingsGuard({
       'generation-auto-video',
       'generation-review-images',
       'generation-review',
-      'generation-iterations',
-      'generation-python',
       'native-convert-root',
       'generation-vae-root',
       'generation-lora-root',
-    ].map(id => [
-      id,
-      id === 'generation-iterations' && $('generation-unlimited').getAttribute('aria-pressed') === 'true'
-        ? null
-        : $(id).value,
-      $(id).checked,
-    ]),
-    unlimited: $('generation-unlimited').getAttribute('aria-pressed'),
+    ].map(id => [id, $(id).value, $(id).checked]),
+    room: interfaceUI.dirty(),
     descriptions: workflowsUI.workflowDescriptions(),
     pending: workflowsUI.hasPendingImport?.() || false,
     editor: workflowsUI.editorDirty?.() || false,
@@ -3182,6 +3185,8 @@ $('update-dialog').addEventListener('cancel', event => event.preventDefault());
 $('shutdown-app').onclick = shutdownApplication;
 $('restart-app').onclick = restartApplication;
 $('settings-close').onclick = () => requestSettingsClose();
+// « Annuler » at the foot: closed as by Échap (unsaved changes are asked about).
+$('settings-cancel').onclick = () => requestSettingsClose();
 $('settings-form').onsubmit = event => {
   event.preventDefault();
   saveConfiguration();
@@ -3588,6 +3593,8 @@ try {
   if (initial.version) $('settings-version').textContent = 'Atelier ' + initial.version;
   void checkUpdates();
   applyTheme(initial.preferences?.theme);
+  // The room kept (Paramètres › Interface), on the page from the start.
+  interfaceUI.load(initial.preferences?.room);
   state.saveHistory = initial.preferences?.saveHistory === true;
   await projectUI.refresh().catch(error => notice('Projets indisponibles : ' + error.message));
   await refreshHistory();

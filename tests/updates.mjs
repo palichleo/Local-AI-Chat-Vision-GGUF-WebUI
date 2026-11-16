@@ -119,8 +119,9 @@ test('background check never blocks startup or chat status and repeated reads re
     assert.equal(calls, 1);
     const html = await (await fetch(app.url)).text();
     assert.doesNotMatch(html, /id="update-available"/, 'updates live in the settings, not in the sidebar');
-    assert.match(html, /id="settings-tab-update"[^>]*aria-selected="true"/, 'the update tab comes first');
-    assert.ok(html.indexOf('data-settings-tab="update"') < html.indexOf('data-settings-tab="generation"'));
+    // Six tabs (parametres-maquette.md): Moodix AI first, Mise à jour last.
+    assert.match(html, /id="settings-tab-ai"[^>]*aria-selected="true"/, 'Moodix AI comes first');
+    assert.ok(html.indexOf('data-settings-tab="application"') < html.indexOf('data-settings-tab="update"'));
     assert.match(html, /id="settings-update-install"[^>]+hidden/, 'install shows once an update is found');
     assert.ok(html.indexOf('id="toggle-engine"') < html.indexOf('id="settings-open"'), 'start/stop sits left of the settings');
     assert.doesNotMatch(html, /id="model-select"|id="model-card"/, 'the LLM is chosen in the settings only');

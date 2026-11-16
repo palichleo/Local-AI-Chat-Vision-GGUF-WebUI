@@ -191,14 +191,17 @@ test('only seed offers random ownership', () => {
 
 test('private setup progress refreshes without overwriting unsaved settings or blocking the editor', async t => {
   const f = await setup(t);
-  f.$('generation-python').value = 'unsaved python';
+  f.$('generation-review').checked = true;
   f.ui.updateRunner({ state: 'installing', progress: 'Installation des bibliothèques…' });
   assert.match(f.$('generation-status').textContent, /Préparation automatique.*bibliothèques/);
-  assert.equal(f.$('generation-python').value, 'unsaved python');
+  assert.equal(f.$('generation-review').checked, true);
   assert.equal(f.$('workflow-add').disabled, false);
   f.ui.updateRunner({ state: 'ready' });
   assert.match(f.$('generation-status').textContent, /Prêt/);
-  assert.equal(f.$('generation-python').value, 'unsaved python');
+  assert.equal(f.$('generation-review').checked, true);
+  // No Python of one's own nor limit of generations a message in the settings any more.
+  assert.equal(f.$('generation-python'), null);
+  assert.equal(f.$('generation-iterations'), null);
   assert.equal(f.$('generation-tokenizer'), null, 'the tokenizer is chosen per workflow, not in settings');
 });
 test('editor swaps the existing panel, saves native policies and reopens saved description', async t => {
@@ -281,7 +284,6 @@ test('settings read native generation values and descriptions come from workflow
     autoAllow: false,
     autoAllowVideos: true,
     confirmReplacements: false,
-    maxIterations: 5,
     reviewImages: false,
     reviewVideos: false,
     pythonPath: '',

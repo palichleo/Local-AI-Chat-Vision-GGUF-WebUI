@@ -193,7 +193,8 @@ test('the former application-wide tokenizer moves into existing workflows and le
   const settings = {
     enabled: true,
     autoAllow: true,
-    maxIterations: 5,
+    // 100 generations a message, imposed by the server (parametres-maquette.md).
+    maxIterations: 100,
     reviewVideos: false,
     pythonPath: '',
     modelRoot: '',

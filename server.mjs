@@ -29,6 +29,7 @@ import { chooseLocalFile } from './lib/file-picker.mjs';
 import { Gallery } from './lib/gallery.mjs';
 import { Thumbnails } from './lib/thumbnails.mjs';
 import { ToolRuntime, chatImageUrls, collectToolCalls } from './lib/tool-runtime.mjs';
+import { roomSettings } from './public/room.mjs';
 import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
 import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
@@ -90,6 +91,7 @@ const staticFiles = new Map([
   ['/copy.mjs', ['copy.mjs', 'text/javascript; charset=utf-8']],
   ['/thumbnails.mjs', ['thumbnails.mjs', 'text/javascript; charset=utf-8']],
   ['/live-preview.mjs', ['live-preview.mjs', 'text/javascript; charset=utf-8']],
+  ['/interface-settings.mjs', ['interface-settings.mjs', 'text/javascript; charset=utf-8']],
   ['/take-flux.mjs', ['take-flux.mjs', 'text/javascript; charset=utf-8']],
   ['/transcript.mjs', ['transcript.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-guard.mjs', ['settings-guard.mjs', 'text/javascript; charset=utf-8']],
@@ -1915,12 +1917,17 @@ export async function createApplication({
           typeof body !== 'object' ||
           Array.isArray(body) ||
           !Object.keys(body).length ||
-          Object.keys(body).some(key => !['theme', 'saveHistory'].includes(key))
+          Object.keys(body).some(key => !['theme', 'saveHistory', 'room'].includes(key))
         )
           throw problem('Préférences invalides.');
         if ('theme' in body && !['dark', 'light'].includes(body.theme)) throw problem('Choisis le mode jour ou nuit.');
         if ('saveHistory' in body && typeof body.saveHistory !== 'boolean')
           throw problem('Choix d’historique invalide.');
+        // Fond, éclairage, grain (Paramètres › Interface): what is valid of it, the rest by default.
+        if ('room' in body) {
+          if (!body.room || typeof body.room !== 'object' || Array.isArray(body.room)) throw problem('Réglages de l’interface invalides.');
+          body.room = roomSettings(body.room);
+        }
         if ((runtime.active || persistingGallery || clearingHistory) && 'saveHistory' in body)
           throw problem('Attends la fin de la génération.', 409);
         if (savingPreferences) throw problem('Préférences en cours d’enregistrement.', 409);
