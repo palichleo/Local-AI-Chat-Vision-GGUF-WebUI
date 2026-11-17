@@ -23,8 +23,9 @@ def room(reserve_gib):
     """
     import torch
 
-    free, _ = torch.cuda.mem_get_info()
-    return max(0.0, free / GiB - reserve_gib)
+    from runner import hardware
+
+    return max(0.0, hardware.free_bytes(torch) / GiB - reserve_gib)
 
 
 # What every job was asked to find free before the floor followed the job (0.5.43 and before): a
@@ -40,15 +41,19 @@ def require(label, working_gib, smaller, measured=None):
     the picture), `smaller` what the user may reduce.
 
     `working_gib` is an estimate, asked up to the floor only (FLOOR_GIB). `measured` is what such a
-    job was seen to hold at the least, its margin included: asked whole, since below it the job
-    fails for certain, after minutes of work (MiniMax H3 at 1920 x 1088, 17/11).
+    job was seen to hold at the least, its margin included: it is asked in place of the estimate,
+    whole. Below it the job fails for certain, after minutes of work (MiniMax H3 at 1920 x 1088);
+    above it the job runs, where the estimate refused it (the same model on a card of 8 GiB:
+    14 s at 768 x 448 asked for 7.8 GiB and holds 5.1; 17/11).
     """
     import torch
 
     # What this process holds already is its own to use: the model a generation left on the
     # card for the next (runner.models.kept) is not memory the next one lacks.
-    free = (torch.cuda.mem_get_info()[0] + torch.cuda.memory_reserved()) / GiB
-    need = max(min(working_gib, FLOOR_GIB), measured or 0)
+    from runner import hardware
+
+    free = (hardware.free_bytes(torch) + torch.cuda.memory_reserved()) / GiB
+    need = measured if measured else min(working_gib, FLOOR_GIB)
     if free < need:
         said = lambda value: f'{value:.1f}'.replace('.', ',')  # noqa: E731
         raise RuntimeError(

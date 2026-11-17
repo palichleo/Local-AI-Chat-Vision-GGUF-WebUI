@@ -59,6 +59,40 @@ class CardMemoryTest(unittest.TestCase):
         self.assertEqual(minimax_h3.too_large(video(1344, 768, 345), None), '')
 
 
+class FreeMemoryTest(unittest.TestCase):
+    """What is free on the card: PyTorch on Windows does not see what the other programs hold
+    (17/11: 4 GiB taken by another process, 10.8 GiB still said free, an image in 474 s for 30)."""
+
+    def torch(self, free_gib, total_gib=12, name='torch'):
+        cuda = SimpleNamespace(mem_get_info=lambda: (int(free_gib * 1024**3), int(total_gib * 1024**3)))
+        return SimpleNamespace(cuda=cuda, __name__=name)
+
+    def driver(self, free_gib, total_gib=12):
+        return lambda: (int(free_gib * 1024**3), int(total_gib * 1024**3))
+
+    def test_the_least_of_what_pytorch_says_and_of_what_the_driver_counts(self):
+        gib = lambda value: round(value / 1024**3, 2)  # noqa: E731
+        # Another program holds 4 GiB: the driver counts it, PyTorch does not.
+        self.assertEqual(gib(hardware.free_bytes(self.torch(10.8), self.driver(7.5))), 7.5)
+        # This process holds memory the driver counts too: PyTorch's own figure is the lower.
+        self.assertEqual(gib(hardware.free_bytes(self.torch(2.0), self.driver(3.5))), 2.0)
+
+    def test_pytorch_is_believed_when_the_driver_cannot_say(self):
+        gib = lambda value: round(value / 1024**3, 2)  # noqa: E731
+        self.assertEqual(gib(hardware.free_bytes(self.torch(10.8), lambda: None)), 10.8)
+        # Another card than the one PyTorch computes on (several cards): not its memory.
+        self.assertEqual(gib(hardware.free_bytes(self.torch(10.8), self.driver(3.0, total_gib=24))), 10.8)
+        # A stand-in for PyTorch, in a test: the driver of this computer says nothing of it.
+        stand_in = self.torch(22.5, total_gib=12, name='stand-in')
+        self.assertEqual(gib(hardware.free_bytes(stand_in, self.driver(1.0))), 22.5)
+
+    def test_every_pipeline_asks_the_same_place(self):
+        root = Path(hardware.__file__).parent
+        sources = [path for path in root.rglob('*.py') if 'tests' not in path.parts and path.name != 'bench.py']
+        asking = [path.name for path in sources if 'mem_get_info()[0]' in path.read_text(encoding='utf-8')]
+        self.assertEqual(asking, [], 'what is free is asked of runner.hardware.free_bytes')
+
+
 class CardsTest(unittest.TestCase):
     """What the driver says of this computer's NVIDIA cards, on each system."""
 

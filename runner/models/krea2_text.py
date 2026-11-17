@@ -4,6 +4,8 @@ import gc
 from collections import OrderedDict
 from pathlib import Path
 
+from runner import hardware
+
 # The conditioning of the last prompts, kept in RAM between images (the worker outlives a job):
 # the same prompt drawn again with another seed does not bring the 5 GiB encoder back.
 KEPT = OrderedDict()
@@ -89,7 +91,7 @@ def encode_prompt(plan, files, tokenizer_path, tensor, device, dtype, progress, 
         expected = {key: parameter for key, parameter in text_model.named_parameters() if key != 'lm_head.weight'}
         # In the working precision whatever the precision of its file: 7.5 GiB for Qwen3-VL-4B.
         size = sum(parameter.numel() for parameter in expected.values()) * torch.finfo(dtype).bits // 8
-        whole = size + TEXT_ROOM_GIB * 1024**3 <= torch.cuda.mem_get_info()[0]
+        whole = size + TEXT_ROOM_GIB * 1024**3 <= hardware.free_bytes(torch)
         # The file stays in RAM between images when it fits beside the model, never in its
         # place: the model is read at every step, the encoder once per prompt. Unlocked, for the
         # same reason: the share of locked RAM goes to the model (4.9 GiB of it held the 12.6 of

@@ -11,6 +11,8 @@ import os
 import sys
 import time
 
+from runner import hardware
+
 LIMIT = 512 * 1024
 
 
@@ -53,7 +55,8 @@ class Journal:
         torch = sys.modules.get('torch')
         try:
             if torch is not None and torch.cuda.is_initialized():
-                free, total = torch.cuda.mem_get_info()
+                # (As the engine reads it: the other programs counted, runner.hardware.)
+                free, total = hardware.free_bytes(torch), torch.cuda.mem_get_info()[1]
                 entry['vram'] = dict(
                     allocated=round(torch.cuda.memory_allocated() / 1024**3, 2),
                     reserved=round(torch.cuda.memory_reserved() / 1024**3, 2),

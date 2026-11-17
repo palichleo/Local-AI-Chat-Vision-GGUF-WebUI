@@ -5,6 +5,8 @@ import gc
 import sys
 import time
 
+from runner import hardware
+
 DISTILLED_SIGMAS = (1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875)
 # The second pass of a large video: its upscaled first pass, noised again to the first of
 # these levels, then three steps at the full size.
@@ -237,7 +239,7 @@ def _generate(job, config, progress, key, holder):
             data,
             seconds=round(time.perf_counter() - start, 2),
             allocated_gib=round(torch.cuda.memory_allocated() / 1024**3, 3),
-            free_gib=round(torch.cuda.mem_get_info()[0] / 1024**3, 3),
+            free_gib=round(hardware.free_bytes(torch) / 1024**3, 3),
             **memory(),
         )
         timeline.append({key: value for key, value in entry.items() if key != 'prompt'})
@@ -311,7 +313,7 @@ def _generate(job, config, progress, key, holder):
                 stores[role] = stack.enter_context(open_store(path, 'if-present' if role == 'textEncoder' else True))
         # What this process may hold: what is free, and what it holds already (the model left by
         # the last generation, which the card no longer counts as free).
-        free = (torch.cuda.mem_get_info()[0] + torch.cuda.memory_reserved()) / 1024**3
+        free = (hardware.free_bytes(torch) + torch.cuda.memory_reserved()) / 1024**3
         # The share of the DiT kept on the GPU; the rest is copied from RAM at every step, at
         # about 12 GiB/s. What the model computes with comes first (working_gib). Video memory
         # that runs out halves the speed, a smaller share costs a second per step at most.

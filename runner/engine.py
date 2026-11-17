@@ -69,7 +69,8 @@ def _vram_ceiling(torch, margin=VRAM_MARGIN):
     """
     if torch is None or not torch.cuda.is_available():
         return False
-    free, total = torch.cuda.mem_get_info()
+    # (What is free is asked of the driver too: PyTorch alone does not see the other programs.)
+    free, total = hardware.free_bytes(torch), torch.cuda.mem_get_info()[1]
     # The ceiling is on all this process holds: with what is free goes what it holds already,
     # a model left on the card by the last generation (runner.models.kept).
     free += torch.cuda.memory_reserved()

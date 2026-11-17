@@ -25,6 +25,8 @@ They can also be given, as two more references: an image and a video in flat col
 import gc
 import time
 
+from runner import hardware
+
 STEPS = 6
 SHIFT = 5.0
 MODES = ('replace',)
@@ -447,7 +449,7 @@ def generate(job, config, progress):
     GiB = 1024**3
     # The length of a segment follows the card: what a step computes with comes first, the
     # weights pass through from RAM where they do not stay.
-    free = (torch.cuda.mem_get_info()[0] + torch.cuda.memory_reserved()) / GiB
+    free = (hardware.free_bytes(torch) + torch.cuda.memory_reserved()) / GiB
     segment = segment_frames(free, height, width, p.get('segment_frames'))
     segments = scail.plan(p['frames'], segment, scail.OVERLAP)
     longest = scail.tokens(max(count for _first, count in segments), height, width)
@@ -463,7 +465,7 @@ def generate(job, config, progress):
                 {key: value for key, value in data.items() if key != 'prompt'},
                 seconds=round(time.perf_counter() - start, 2),
                 allocated_gib=round(torch.cuda.memory_allocated() / GiB, 3),
-                free_gib=round(torch.cuda.mem_get_info()[0] / GiB, 3),
+                free_gib=round(hardware.free_bytes(torch) / GiB, 3),
                 **memory(),
             )
         )
@@ -525,7 +527,7 @@ def generate(job, config, progress):
         progress(stage='references encoded', frames=len(pose), segments=[count for _first, count in segments])
 
         # 3. The segments: the model stays between them, the VAE beside it.
-        room = share_gib(torch.cuda.mem_get_info()[0] / GiB, longest, height, width, len(segments))
+        room = share_gib(hardware.free_bytes(torch) / GiB, longest, height, width, len(segments))
         budget = min(config.get('cacheGiB', 16), room)
         loaded = _Model(paths, loras_of(job), names)
         levels = scail.sigmas(steps, p.get('shift', SHIFT))

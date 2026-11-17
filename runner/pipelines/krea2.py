@@ -13,7 +13,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-from runner import preview
+from runner import hardware, preview
 from runner.media import save_image
 from runner.models.headers import header
 from runner.pipelines.sampling import applied_denoise, simple_sigmas, start_latents
@@ -159,7 +159,7 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
             seconds=round(time.perf_counter() - start, 2),
             allocated_gib=round(torch.cuda.memory_allocated() / 1024**3, 3),
             reserved_gib=round(torch.cuda.memory_reserved() / 1024**3, 3),
-            free_gib=round(torch.cuda.mem_get_info()[0] / 1024**3, 3),
+            free_gib=round(hardware.free_bytes(torch) / 1024**3, 3),
             **extra,
         )
         timeline.append({key: value for key, value in data.items() if key != 'prompt'})

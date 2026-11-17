@@ -8,6 +8,8 @@ schedule), decode, crop, then correct colours against the resized source.
 
 import time
 
+from runner import hardware
+
 MAX_SIDE = 8192
 T = 1000.0
 # The sides of the tiles the VAE works on, in pixels to encode and in latent cells to decode: the
@@ -80,7 +82,7 @@ def generate(job, config, progress):
     done = 0
     timeline = []
     with open_store(job['components']['model']) as store, torch.inference_mode():
-        budget = min(config.get('cacheGiB', 6), max(0, torch.cuda.mem_get_info()[0] / 1024**3 - 4))
+        budget = min(config.get('cacheGiB', 6), max(0, hardware.free_bytes(torch) / 1024**3 - 4))
         pool = WeightPool({'model': store}, budget)
         try:
             dit = seedvr2.load(store, pool)

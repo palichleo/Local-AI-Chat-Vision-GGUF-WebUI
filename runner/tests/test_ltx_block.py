@@ -160,6 +160,37 @@ class FusedBlockTests(unittest.TestCase):
             finally:
                 ltx25_block.HUGE = original
 
+    def test_an_attention_that_lacks_memory_is_computed_a_piece_of_its_queries_at_a_time(self):
+        torch.manual_seed(0)
+        value = lambda tokens: torch.randn(1, tokens, 4, 64, device='cuda', dtype=torch.bfloat16)  # noqa: E731
+        original = ltx25_block.PIECE, ltx25_block._whole_attention
+        try:
+            ltx25_block.PIECE = 256
+            for queries, keys in ((2000, 2000), (2000, 300), (700, 2000)):
+                with self.subTest(queries=queries, keys=keys), torch.no_grad():
+                    q, k, v = value(queries), value(keys), value(keys)
+                    expected = original[1](q, k, v)
+                    got = ltx25_block._attention_in_pieces(q.clone(), k, v)
+                    self.assertEqual(got.shape, expected.shape)
+                    self.assertLess(relative(got, expected), 5e-3)
+            # The whole call lacks memory: the pieces answer, and a call with a mask is the caller's error.
+            calls = []
+
+            def lacking(q, k, v, mask=None):
+                calls.append(q.shape[1])
+                raise torch.OutOfMemoryError('too large')
+
+            ltx25_block._whole_attention = lacking
+            with torch.no_grad():
+                q, k, v = value(2000), value(2000), value(2000)
+                expected = original[1](q, k, v)
+                self.assertLess(relative(ltx25_block._attention(q.clone(), k, v), expected), 5e-3)
+                with self.assertRaises(torch.OutOfMemoryError):
+                    ltx25_block._attention(q, k, v, torch.zeros(1, 1, 1, 2000, device='cuda', dtype=torch.bfloat16))
+            self.assertEqual(calls, [2000, 2000])
+        finally:
+            ltx25_block.PIECE, ltx25_block._whole_attention = original
+
     def test_the_rotary_modules_give_the_matrices_of_their_cos_and_sin(self):
         angle = torch.rand(1, 4, 5, 8, device='cuda')
         rope = SimpleNamespace(

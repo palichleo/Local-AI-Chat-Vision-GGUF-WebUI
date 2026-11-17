@@ -15,6 +15,7 @@ video memory:
 What cannot be known (no ``nvidia-smi`` in a Linux container that has the driver) refuses nothing.
 """
 
+import ctypes
 import os
 import subprocess
 import sys
@@ -71,6 +72,65 @@ def card_gib(run=subprocess.run, platform=sys.platform):
     if run is subprocess.run:
         _found['gib'] = found
     return found
+
+
+class _Memory(ctypes.Structure):
+    _fields_ = [('total', ctypes.c_ulonglong), ('free', ctypes.c_ulonglong), ('used', ctypes.c_ulonglong)]
+
+
+def _nvml(platform=sys.platform):
+    """The driver's own library (NVML) and its first card, opened once; None when it is not there."""
+    if 'nvml' not in _found:
+        found = None
+        try:
+            library = ctypes.CDLL('nvml.dll' if platform == 'win32' else 'libnvidia-ml.so.1')
+            count, handle = ctypes.c_uint(), ctypes.c_void_p()
+            opened = (
+                library.nvmlInit_v2() == 0
+                and library.nvmlDeviceGetCount_v2(ctypes.byref(count)) == 0
+                # Several cards: which one PyTorch computes on is not asked of the driver here.
+                and count.value == 1
+                and library.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(handle)) == 0
+            )
+            if opened:
+                found = (library, handle)
+        except (OSError, AttributeError):
+            found = None
+        _found['nvml'] = found
+    return _found['nvml']
+
+
+def device_memory():
+    """(free, total) bytes of the card as its driver counts them, every program included; None
+    when the driver cannot be asked."""
+    opened = _nvml()
+    if not opened:
+        return None
+    library, handle = opened
+    memory = _Memory()
+    if library.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)) != 0:
+        return None
+    return memory.free, memory.total
+
+
+def free_bytes(torch, device=device_memory):
+    """The video memory that is free now, in bytes: the least of what PyTorch says and of what
+    the driver counts.
+
+    On Windows PyTorch says what this process may still take of its own budget (the card less
+    a fixed share), whatever the other programs hold. With 4 GiB of a 12 GiB card taken by
+    another process it still said 10.8 GiB free: the engine filled them, the driver put the
+    overflow in the shared memory, and an image took 474 s instead of 30, without an error
+    (17/11). The driver counts every program. Every pipeline asks here, and here only.
+    (A PyTorch that is not the real one, in a test, is believed as it is; so is one whose
+    card is not the one the driver counted.)"""
+    free, total = torch.cuda.mem_get_info()
+    if getattr(torch, '__name__', None) != 'torch':
+        return free
+    counted = device()
+    if not counted or abs(counted[1] - total) > 0.05 * total:
+        return free
+    return min(free, counted[0])
 
 
 def cards():

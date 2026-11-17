@@ -11,7 +11,7 @@ import math
 import sys
 import time
 
-from runner import preview
+from runner import hardware, preview
 
 STEPS = 8
 FRAME_CHOICES = tuple(17 * n + 5 for n in range(7, 21))  # 5 to 15 seconds at 24 fps
@@ -103,8 +103,6 @@ def preflight(job, config):
 
     minimax_h3.validate(header(job['components']['model']))
     # A video the card cannot hold is said now, not after half a minute of loading.
-    from runner import hardware
-
     refused = too_large(job['parameters'], hardware.card_gib())
     if refused:
         raise RuntimeError(refused)
@@ -292,7 +290,7 @@ def generate(job, config, progress):
                 {key: value for key, value in data.items() if key != 'prompt'},
                 seconds=round(time.perf_counter() - start, 2),
                 allocated_gib=round(torch.cuda.memory_allocated() / 1024**3, 3),
-                free_gib=round(torch.cuda.mem_get_info()[0] / 1024**3, 3),
+                free_gib=round(hardware.free_bytes(torch) / 1024**3, 3),
                 **memory(),
             )
         )
@@ -443,7 +441,7 @@ def generate(job, config, progress):
         # with the video (1 GiB for a 5 s draft). Video memory that runs out halves the speed,
         # a smaller share costs a second per step at most.
         # (Sparse attention needs less at its peak: 5 widths instead of 6, measured at 1344 x 768.)
-        room = torch.cuda.mem_get_info()[0] / 1024**3 - working_gib(tokens)
+        room = hardware.free_bytes(torch) / 1024**3 - working_gib(tokens)
         budget = min(config.get('cacheGiB', 6), max(0, room - AHEAD_GIB))
         pool = WeightPool({'model': store}, budget, ahead_gib=AHEAD_GIB)
         if ahead:

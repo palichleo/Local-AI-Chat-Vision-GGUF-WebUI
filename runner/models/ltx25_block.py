@@ -43,6 +43,8 @@ PRIORITIES = 'set_priority' in inspect.signature(sdpa_kernel).parameters
 # is faster again on tensors laid out head by head, their copy included.
 LONG = 1024
 HUGE = 2 * 10**8
+# The smallest piece of the queries of an attention computed in pieces (_attention_in_pieces).
+PIECE = 1024
 # The pipeline gives the video one timestep per token: the tokens an image holds have their
 # own, all the others share the step's. From this many tokens on, and for at most this many
 # different timesteps, an embedding is computed and kept once per timestep (see _grouped).
@@ -60,7 +62,19 @@ def _attention(query, key, held, mask=None):
     5 600, 120 instead of 179 for 22 400 (four fifths of a block at that size); over the text
     0.64 instead of 0.87 ms. The same scores to 0.1 % (bfloat16's rounding). The few tokens of
     the sound among themselves are faster with the default. A kernel that cannot take the call
-    (a mask) leaves it to the next."""
+    (a mask) leaves it to the next.
+
+    When the video memory lacks for it (the refining pass of 10 s at 896 x 1600 on an 8 GiB
+    card, 17/11), the same attention a piece of its queries at a time: see _attention_in_pieces."""
+    try:
+        return _whole_attention(query, key, held, mask)
+    except torch.OutOfMemoryError:
+        if mask is not None:
+            raise
+    return _attention_in_pieces(query, key, held)
+
+
+def _whole_attention(query, key, held, mask=None):
     query, key, held = query.transpose(1, 2), key.transpose(1, 2), held.transpose(1, 2)
     queries, keys = query.shape[2], key.shape[2]
     if not PRIORITIES or max(queries, keys) < LONG:
@@ -69,6 +83,30 @@ def _attention(query, key, held, mask=None):
         query, key, held = query.contiguous(), key.contiguous(), held.contiguous()
     with sdpa_kernel(KERNELS, set_priority=True):
         return F.scaled_dot_product_attention(query, key, held, attn_mask=mask).transpose(1, 2)
+
+
+def _attention_in_pieces(query, key, held):
+    """The attention of [B, T, heads, dim] tensors when the whole does not fit: the queries a
+    piece at a time, each piece's answer written where its queries were (they are read no
+    more). Each query reads every key on its own: the answer is the one of the whole call,
+    to the rounding of the kernel. No copy of the keys and values laid out head by head
+    (what makes the whole call faster costs their size again)."""
+    from runner.models.ladder import in_pieces
+
+    keys, values = key.transpose(1, 2), held.transpose(1, 2)
+
+    def piece(start, stop):
+        rows = query[:, start:stop].transpose(1, 2)
+        if PRIORITIES and keys.shape[2] >= LONG:
+            with sdpa_kernel(KERNELS, set_priority=True):
+                answer = F.scaled_dot_product_attention(rows, keys, values)
+        else:
+            answer = F.scaled_dot_product_attention(rows, keys, values)
+        query[:, start:stop] = answer.transpose(1, 2)
+
+    rows = query.shape[1]
+    in_pieces(piece, rows, torch, unit=min(PIECE, rows), first=max(PIECE, -(-rows // 2 // PIECE) * PIECE))
+    return query
 
 
 def _modulation(table, temb, batch):

@@ -464,6 +464,11 @@ class RoomTest(unittest.TestCase):
         for made in ((768, 448, 124), (768, 448, 345), (1344, 768, 124)):
             self.assertEqual(measured(*made, 10.8), '', made)
         self.assertEqual(measured(1920, 1088, 124, 22.5), '', 'a larger card makes it')
+        # And nothing that fits is refused for an estimate that says more: on a card of 8 GiB (7.1
+        # free) 14 s at 768 x 448 hold 5.1 GiB, where the estimate asked for 7.8.
+        self.assertEqual(measured(768, 448, 345, 7.1), '')
+        self.assertEqual(measured(1344, 768, 124, 7.1), '')
+        self.assertIn('Go sont libres', measured(1344, 768, 345, 7.1))
         # An LTX video asks for what its steps need: its largest size on an 8 GiB card too.
         self.assertLess(ltx25.working_gib(dict(frames=121), 288, 512, 0), 3)
         self.assertEqual(asked(ltx25.working_gib(dict(frames=121), 896, 1600, 0), 7.0), '')
