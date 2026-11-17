@@ -3785,3 +3785,690 @@ test('what a proposal of Moodix AI says of itself is read in the Studio, at the 
     restore();
   }
 });
+
+/** An image model, a video model and what continues a clip, with a clip and an image of the conversation. */
+function continuing({ more = true } = {}) {
+  const image = { id: 'k', name: 'Krea 2', verb: 'create_image', direct: true, roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    clip = {
+      id: 'v',
+      name: 'LTX 2.5',
+      verb: 'create_video',
+      seeded: true,
+      roles: { start_image: { count: 1, media: ['image'] } },
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      lengths: { seconds: [121 / 24, 193 / 24, 241 / 24], standard: 121 / 24 },
+      settings: [],
+    },
+    // What it adds to a clip: its frames less those it takes again (9).
+    extend = { ...clip, verb: 'extend_video', roles: { source: { count: 1, media: ['video'], required: true } }, lengths: { seconds: [112 / 24, 184 / 24, 232 / 24], standard: 112 / 24 } },
+    runs = [
+      // The newest of the conversation is an image: the Studio opens in Image.
+      { id: 'fox', conversationId: 'c1', workflowId: 'k', prompt: 'un renard', parameters: { width: 1024, height: 1024 }, outputs: [{ originalUrl: '/fox.png', thumbUrl: '/fox.jpg', take: 2 }] },
+      { id: 'film', conversationId: 'c1', mediaType: 'video', workflowId: 'v', prompt: 'un renard court', parameters: { width: 1344, height: 768, frames: 121, fps: 24 }, outputs: [{ originalUrl: '/film.mp4', thumbUrl: '/film.jpg', take: 1 }] },
+    ];
+  return { tools: { create_image: [image], create_video: [clip], ...(more ? { extend_video: [extend] } : {}) }, runs };
+}
+const prolonger = (body, id = 'film') => body.find('studio-item').find(tile => tile.dataset.id === id).find('studio-item-main')[0];
+
+test('« Prolonger » on a clip of the Sortie opens Vidéo with its banner, from Image too; greyed with its reason when nothing continues a video', async () => {
+  const { tools, runs } = continuing();
+  let page = await studioPage(
+    tools,
+    { 'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }), 'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }) },
+    { runs },
+  );
+  try {
+    const { body, asked } = page;
+    // In Image, the Sortie shows the whole project: the clip is there with its « Prolonger ».
+    assert.equal(body.dataset.mode, 'image');
+    assert.equal(prolonger(body).attributes['aria-disabled'], undefined);
+    prolonger(body).onclick();
+    // A continuation is made in Vidéo: its banner with « Annuler », no format to choose.
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(body.find('studio-extending')[0].children[1].textContent, 'Suite du clip : un renard court');
+    assert.equal(body.find('studio-extending')[0].find('studio-link').length, 1);
+    assert.equal(body.find('studio-go-label')[0].textContent, 'Générer la suite');
+    page.prompt().value = 'il s’arrête';
+    page.prompt().oninput();
+    await body.find('studio-go')[0].onclick();
+    await settle();
+    const [, action] = asked.find(([route]) => route === 'tools/action');
+    assert.equal(action.name, 'extend_video');
+    assert.deepEqual(action.arguments.source, { output: 'film' });
+    // Image is as it was: its formats, « Générer ».
+    page.mode(0);
+    assert.equal(body.find('studio-formats').length, 1);
+    assert.equal(body.find('studio-go-label')[0].textContent, 'Générer');
+    assert.deepEqual(body.find('studio-extending'), []);
+  } finally {
+    page.restore();
+  }
+  // No workflow continues a video: « Prolonger » is greyed and says why; pressed, the Studio stays.
+  const alone = continuing({ more: false });
+  alone.runs.reverse();
+  page = await studioPage(alone.tools, {}, { runs: alone.runs });
+  try {
+    const { body, notices } = page;
+    assert.equal(body.dataset.mode, 'video');
+    const main = prolonger(body);
+    assert.equal(main.attributes['aria-disabled'], 'true');
+    assert.match(main.className, /is-off/);
+    assert.match(main.title, /Aucun workflow ne sait prolonger une vidéo\./);
+    main.onclick();
+    assert.equal(notices.at(-1), 'Aucun workflow ne sait prolonger une vidéo.');
+    assert.equal(body.find('studio-go').length, 1, 'the Studio is still there');
+    assert.equal(body.find('studio-item').length, 2);
+    assert.deepEqual(body.find('studio-extending'), []);
+    // In its menu too.
+    body.find('studio-item').find(tile => tile.dataset.id === 'film').oncontextmenu({ preventDefault() {} });
+    const entry = body.find('studio-menu-item').find(item => item.children.at(-1).textContent === 'Prolonger');
+    assert.equal(entry.attributes['aria-disabled'], 'true');
+    entry.onclick();
+    assert.equal(body.find('studio-go').length, 1);
+  } finally {
+    page.restore();
+  }
+});
+
+/** The continuation of the clip of `continuing()`, as Moodix AI proposes it: 193 frames, 9 of them taken again. */
+function continuation() {
+  const prompt = 'Le renard s’arrête et regarde la caméra';
+  return {
+    requestId: 'q',
+    approvalToken: 't',
+    tool: 'extend_video',
+    mediaType: 'video',
+    workflowName: 'LTX 2.5',
+    resolution: { width: 1344, height: 768 },
+    call: { id: 'call', type: 'function', function: { name: 'extend_video', arguments: '{}' } },
+    plan: {
+      prompt,
+      stage: 'final',
+      parameters: { prompt, width: 1344, height: 768, frames: 193, fps: 24, overlap_frames: 9, seed: 7 },
+      editable: {
+        prompt: true,
+        stages: [],
+        parameters: [
+          { key: 'frames', type: 'integer', value: 193, choices: [121, 193, 241] },
+          { key: 'width', type: 'integer', value: 1344, locked: 'Une continuation garde la taille de sa vidéo source.' },
+          { key: 'height', type: 'integer', value: 768, locked: 'Une continuation garde la taille de sa vidéo source.' },
+          { key: 'seed', type: 'integer', value: 7 },
+        ],
+        references: [[]],
+      },
+      references: [{ input: 'source', role: 'source_video', as: 'source', roleLabel: 'Vidéo à prolonger', label: 'Prise 1', output_id: 'film' }],
+    },
+  };
+}
+
+test('a continuation proposed by Moodix AI stays one while it waits: another mode visited, « Prolonger » on another clip, « Revenir »', async () => {
+  const { tools, runs } = continuing();
+  runs.push({ id: 'other', conversationId: 'c1', mediaType: 'video', workflowId: 'v', prompt: 'une mouette', parameters: { width: 768, height: 448, frames: 121, fps: 24 }, outputs: [{ originalUrl: '/other.mp4', thumbUrl: '/other.jpg', take: 0 }] });
+  const sent = [];
+  const page = await studioPage(tools, { 'tools/revise': ({ edits }) => (sent.push(edits), { requestId: 'q2', approvalToken: 't2' }) }, { runs });
+  const { body, studio, notices, restore } = page;
+  const shown = () => ({
+    banner: body.find('studio-extending')[0]?.children[1].textContent ?? null,
+    go: body.find('studio-go-label')[0].textContent,
+    formats: body.find('studio-formats').length,
+    duration: body.find('studio-bar').find(bar => bar.dataset.ai === 'duration')?.attributes['aria-valuetext'],
+  });
+  try {
+    // The image of the conversation is looked at first: « Revenir » is offered.
+    studio.show(runs[0]);
+    assert.equal(body.find('studio-look-back').length, 1);
+    const answer = studio.propose(continuation(), new AbortController().signal);
+    await settle();
+    const proposed = { banner: 'Suite du clip : un renard court', go: 'Générer la suite', formats: 0, duration: '07.67 S' };
+    assert.deepEqual(shown(), proposed);
+    // The other modes still work by hand: the user looks at Image, then comes back.
+    page.mode(0);
+    assert.deepEqual(body.find('studio-extending'), []);
+    // No way back to the settings of before while it waits: they would come under the proposal.
+    assert.deepEqual(body.find('studio-look-back'), []);
+    page.mode(1);
+    assert.deepEqual(shown(), proposed, 'still the continuation of its clip');
+    assert.equal(body.find('studio-decline').length, 1);
+    // « Prolonger » on another clip is held, and says why.
+    const other = prolonger(body, 'other');
+    assert.equal(other.attributes['aria-disabled'], 'true');
+    other.onclick();
+    assert.equal(notices.at(-1), 'Moodix AI est en train de proposer');
+    assert.deepEqual(shown(), proposed);
+    // Nothing touched: nothing is sent as a change of the user.
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    assert.deepEqual(sent, []);
+    await studio.settled({ record: null });
+    // Answered: the way back is offered again.
+    assert.equal(body.find('studio-look-back').length, 1);
+  } finally {
+    restore();
+  }
+});
+
+test('the images of a proposal change role as the server offers, said by its own names; answered, they are the user’s and move freely', async () => {
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    sent = [];
+  const page = await studioPage(tools, { 'tools/revise': ({ edits }) => (sent.push(edits), { requestId: 'q2', approvalToken: 't2' }) }, { runs });
+  const { body, studio, restore } = page;
+  const event = files => ({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files, setData() {} } }),
+    drag = (from, to) => {
+      body.find('studio-slot')[from].children[0].ondragstart(event([]));
+      body.find('studio-slot')[to].ondrop(event([]));
+    },
+    shown = () => body.find('studio-slot').map(tile => tile.children[0].children[0]?.src ?? null),
+    error = () => body.find('studio-error')[0]?.textContent ?? null;
+  try {
+    // The fixture lists the roles as the server does (lib/tool-runtime.mjs, referenceRoles): by the
+    // names of the slots of the family, « msr_image » for a reference of LTX 2.5.
+    assert.deepEqual(
+      recorded.request.plan.editable.references[0].map(choice => choice.role),
+      ['start_image', 'end_image', 'msr_image'],
+    );
+    let answer = studio.propose(structuredClone(recorded.request), new AbortController().signal);
+    await settle();
+    assert.deepEqual(shown(), ['/portrait.webp', null, null]);
+    // To « Référence »: a role the server offers, under its own name.
+    drag(0, 2);
+    assert.equal(error(), null);
+    assert.deepEqual(shown(), [null, null, '/portrait.webp', null]);
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    // Said to the server by the name it gave that role.
+    assert.deepEqual(sent, [{ references: [{ index: 0, role: 'msr_image' }] }]);
+    await studio.settled({ record: null });
+    // Answered: the image is the user's, it goes where they put it.
+    drag(2, 0);
+    assert.equal(error(), null);
+    assert.deepEqual(shown(), ['/portrait.webp', null, null]);
+    body.find('studio-swap')[0].onclick();
+    assert.equal(error(), null);
+    assert.deepEqual(shown(), [null, '/portrait.webp', null]);
+    // Declined instead: the same.
+    answer = studio.propose(structuredClone(recorded.request), new AbortController().signal);
+    await settle();
+    assert.deepEqual(shown(), ['/portrait.webp', null, null]);
+    studio.decline();
+    assert.equal(await answer, 'deny');
+    body.find('studio-swap')[0].onclick();
+    assert.equal(error(), null);
+    assert.deepEqual(shown(), [null, '/portrait.webp', null]);
+    // While a proposal waits, a role the server does not offer its image stays refused.
+    const narrow = structuredClone(recorded.request);
+    narrow.plan.editable.references = [[{ role: 'start_image', label: 'Image de début' }]];
+    answer = studio.propose(narrow, new AbortController().signal);
+    await settle();
+    drag(0, 1);
+    assert.equal(error(), 'Image de fin : ce rôle n’est pas possible pour cette image avec ce workflow.');
+    assert.deepEqual(shown(), ['/portrait.webp', null, null]);
+    studio.decline();
+    assert.equal(await answer, 'deny');
+  } finally {
+    restore();
+  }
+});
+
+test('a proposal that starts from an image joined to the message shows it in its slot; answered, nothing without a source is left to send', async () => {
+  const { tools } = continuing();
+  const page = await studioPage(
+    tools,
+    { 'tools/action': () => ({ requestId: 'h', plan: { parameters: {} } }), 'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }) },
+    { runs: [] },
+  );
+  const { body, studio, asked, restore } = page;
+  const prompt = 'La mer monte';
+  // As lib/tool-runtime.mjs resolves an image joined to the message: neither a take nor a reference.
+  const joined = () => ({
+    requestId: 'q',
+    approvalToken: 't',
+    tool: 'create_video',
+    mediaType: 'video',
+    workflowName: 'LTX 2.5',
+    resolution: { width: 768, height: 448 },
+    call: { id: 'call', type: 'function', function: { name: 'create_video', arguments: '{}' } },
+    plan: {
+      prompt,
+      parameters: { prompt, width: 768, height: 448, frames: 121, fps: 24, seed: 7 },
+      editable: { prompt: true, parameters: [], references: [[{ role: 'start_image', label: 'Image de début' }]] },
+      references: [
+        { input: 'start', image: 0, attachment: 'a1b2.png', original: true, label: 'Image 1', role: 'start_image', as: 'start_image', roleLabel: 'Image de début', preview: '/media/attachments/c1/a1b2.png' },
+      ],
+    },
+  });
+  const tile = () => body.find('studio-slot')[0];
+  try {
+    let answer = studio.propose(joined(), new AbortController().signal);
+    await settle();
+    // Its picture, the one the server gives for the card of the proposal.
+    assert.match(tile().className, /is-filled/);
+    assert.equal(tile().children[0].children[0].src, '/media/attachments/c1/a1b2.png');
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    await studio.settled({ record: null });
+    // Answered: the Studio cannot name that image (no take, no reference): its slot is empty again.
+    assert.doesNotMatch(tile().className, /is-filled/);
+    page.prompt().value = 'La mer monte encore';
+    page.prompt().oninput();
+    await body.find('studio-go')[0].onclick();
+    await settle();
+    const [, action] = asked.findLast(([route]) => route === 'tools/action');
+    assert.equal('start_image' in action.arguments, false, 'no input without a source is sent');
+    // Refused instead: the same.
+    answer = studio.propose(joined(), new AbortController().signal);
+    await settle();
+    assert.match(tile().className, /is-filled/);
+    studio.decline();
+    assert.equal(await answer, 'deny');
+    assert.doesNotMatch(tile().className, /is-filled/);
+  } finally {
+    restore();
+  }
+});
+
+test('on a proposal, the size chosen is what is made: its format and its size go with « final » when it is one', async () => {
+  const sent = [];
+  // As the server answers (lib/tool-runtime.mjs, revise): another version keeps the format of the
+  // size given with it and takes the size of its own profile; a size alone is taken as it is.
+  const revise = ({ edits }) => {
+    sent.push(edits);
+    const size = !edits.stage
+      ? { width: edits.width, height: edits.height }
+      : edits.width < edits.height
+        ? { width: 768, height: 1344 }
+        : { width: 1344, height: 768 };
+    return { requestId: 'q' + sent.length, approvalToken: 't' + sent.length, plan: { stage: edits.stage ?? 'draft', parameters: size } };
+  };
+  const { clip } = proposalOf();
+  const page = await studioPage({ create_video: [clip] }, { 'tools/revise': revise });
+  const { body, studio, restore } = page;
+  const size = () => body.find('studio-bar').find(bar => bar.dataset.ai === 'size'),
+    choose = place => {
+      const bar = size();
+      bar.value = String(place);
+      bar.oninput();
+    },
+    proposed = async () => {
+      const { request } = proposalOf(),
+        answer = studio.propose(request, new AbortController().signal);
+      await settle();
+      assert.equal(size().attributes['aria-valuetext'], '768 × 448');
+      return { request, answer };
+    },
+    generated = async ({ request, answer }) => {
+      await body.find('studio-go')[0].onclick();
+      assert.equal(await answer, 'once');
+      await studio.settled({ record: null });
+      return [sent.splice(0), request.requestId];
+    };
+  try {
+    // A smaller draft: its size, nothing else.
+    let waiting = await proposed();
+    choose(0);
+    assert.deepEqual(await generated(waiting), [[{ width: 512, height: 288 }], 'q1']);
+    // Another format and a size that is a final: both go with « final », and the server gives them.
+    waiting = await proposed();
+    body.find('studio-format').find(chip => chip.children.at(-1)?.textContent === '9:16').onclick();
+    choose(3);
+    assert.equal(size().attributes['aria-valuetext'], '768 × 1344');
+    assert.deepEqual(await generated(waiting), [[{ width: 768, height: 1344, stage: 'final' }], 'q1']);
+    // A final larger than its profile: the server answers with the size of the profile, the size
+    // chosen is asked again alone, and what is generated is that last proposal.
+    waiting = await proposed();
+    choose(5);
+    assert.equal(size().attributes['aria-valuetext'], '1920 × 1088');
+    assert.deepEqual(await generated(waiting), [
+      [
+        { width: 1920, height: 1088, stage: 'final' },
+        { width: 1920, height: 1088 },
+      ],
+      'q2',
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+test('what comes back late is not written elsewhere: a prompt improved for a conversation left, a file imported once another mode is shown', async () => {
+  const krea = { id: 'k', name: 'Krea 2', verb: 'create_image', direct: true, roles: { source: { count: 1, media: ['image'] } }, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    scail = {
+      id: 's',
+      name: 'SCAIL-2',
+      verb: 'replace_character',
+      follows: true,
+      roles: { source: { count: 1, media: ['video'], required: true }, reference: { count: 1, media: ['image'], required: true } },
+      settings: [],
+    },
+    runs = [
+      { id: 't2', conversationId: 'c2', workflowId: 'k', prompt: 'la prise de la conversation 2', parameters: { width: 1024, height: 1024 }, outputs: [{ originalUrl: '/t2.png', thumbUrl: '/t2.jpg', take: 1 }] },
+    ];
+  let conversation = 'c1',
+    answer = null;
+  const page = await studioPage(
+    { create_image: [krea], replace_character: [scail] },
+    {
+      'studio/enrich': () => new Promise(resolve => (answer = resolve)),
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+    },
+    { runs, conversation: () => conversation },
+  );
+  const { body, studio, notices, asked, restore } = page;
+  const event = files => ({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files, setData() {} } }),
+    slots = () => body.find('studio-slot').map(tile => [tile.dataset.slot, tile.children[0].children[0]?.src ?? null]);
+  try {
+    // « Améliorer le prompt » in the first conversation; the chat model takes its time.
+    page.prompt().value = 'un chat roux';
+    page.prompt().oninput();
+    void body.find('studio-enrich-go')[0].onclick();
+    await settle();
+    assert.equal(typeof answer, 'function');
+    // Meanwhile the second conversation is opened: its Studio is set at once, as its last take was made.
+    conversation = 'c2';
+    studio.conversationChanged();
+    await settle();
+    assert.equal(page.prompt().value, 'la prise de la conversation 2');
+    answer({ prompt: 'Un chat roux assis sur un mur de pierre, lumière dorée.' });
+    await settle();
+    // The answer is for the conversation left: nothing of it here, and it is said.
+    assert.equal(page.prompt().value, 'la prise de la conversation 2');
+    assert.deepEqual(body.find('studio-enrich')[0].find('studio-link'), [], 'no « Revenir à mon texte » either');
+    assert.equal(notices.at(-1), 'Prompt non enrichi : la conversation ou le mode a changé entre-temps.');
+    assert.equal(studio.busy(), false);
+    // The first conversation comes back as it was left.
+    conversation = 'c1';
+    studio.conversationChanged();
+    await settle();
+    assert.equal(page.prompt().value, 'un chat roux');
+    // Asked and answered in the same conversation and mode: written, as before.
+    void body.find('studio-enrich-go')[0].onclick();
+    await settle();
+    answer({ prompt: 'Un chat roux, de près.' });
+    await settle();
+    assert.equal(page.prompt().value, 'Un chat roux, de près.');
+
+    // A clip given to « Vidéo à suivre »; before its copy ends, the user is in Image, where a slot
+    // has the same name (the image to modify).
+    page.mode(1);
+    assert.deepEqual(slots(), [['source-0', null], ['reference-0', null]]);
+    body.find('studio-slot')[0].ondrop(event([{ name: 'danse.mp4', type: 'video/mp4' }]));
+    page.mode(0);
+    await settle();
+    assert.deepEqual(slots(), [['source-0', null]], 'not the image to modify');
+    assert.match(notices.at(-1), /^Vidéo gardée dans les références du projet, mais pas placée/);
+    await body.find('studio-go')[0].onclick();
+    await settle();
+    assert.equal('source' in asked.findLast(([route]) => route === 'tools/action')[1].arguments, false);
+    // Nor in another conversation.
+    body.find('studio-slot')[0].ondrop(event([{ name: 'a.png', type: 'image/png' }]));
+    conversation = 'c2';
+    studio.conversationChanged();
+    await settle();
+    assert.deepEqual(slots(), [['source-0', null]]);
+    // Given and copied with nothing changed meanwhile: in its slot.
+    body.find('studio-slot')[0].ondrop(event([{ name: 'b.png', type: 'image/png' }]));
+    await settle();
+    assert.deepEqual(slots(), [['source-0', '/preview/b.png']]);
+  } finally {
+    restore();
+  }
+});
+
+test('a creation looked at leaves with its conversation: the Studio kept is the one of before, its seed does not follow; a sound of the disk gives its address back with its place on the screen', async () => {
+  let conversation = 'c1';
+  const runs = lookRuns();
+  const page = await studioPage(lookModels(), lookRoutes, { runs, project: () => 'p1', conversation: () => conversation });
+  const { body, studio, restore } = page;
+  const back = () => body.find('studio-look-back').length,
+    seed = () => body.find('studio-seed')[0].children[1].value;
+  try {
+    page.mode(1);
+    page.prompt().value = 'mon idée de vidéo';
+    page.prompt().oninput();
+    assert.equal(seed(), '');
+    // The clip of another conversation is looked at: its settings and its very seed, a way back.
+    studio.show(runs[0]);
+    assert.equal(page.prompt().value, 'un renard court dans la neige');
+    assert.equal(seed(), '777');
+    assert.equal(back(), 1);
+    // A conversation not begun, in the same project: the look is over, nothing of it follows.
+    conversation = null;
+    studio.conversationChanged();
+    await settle();
+    assert.equal(back(), 0);
+    assert.equal(page.prompt().value, '');
+    assert.equal(seed(), '', 'the seed of a take only looked at is not the one of the next takes');
+    // The conversation left comes back as it was before the look.
+    conversation = 'c1';
+    studio.conversationChanged();
+    await settle();
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(page.prompt().value, 'mon idée de vidéo');
+    assert.equal(seed(), '');
+    assert.equal(back(), 0);
+    // The same when the page says « another conversation » for the one in hand (renamed in the fil).
+    studio.show(runs[0]);
+    assert.equal(back(), 1);
+    studio.conversationChanged();
+    await settle();
+    assert.equal(page.prompt().value, 'mon idée de vidéo');
+    assert.equal(seed(), '');
+    assert.equal(back(), 0);
+    assert.deepEqual(body.find('studio-frame-result'), [], 'the clip looked at left the screen');
+  } finally {
+    restore();
+  }
+  // A sound of the disk on the screen plays from an address made for it.
+  const made = { id: 'new', conversationId: 'c1', workflowId: 'k', prompt: 'un phare', parameters: { width: 1024, height: 1024 }, outputs: [{ originalUrl: '/new.png', thumbUrl: '/new.jpg', take: 4 }] };
+  const sounds = await studioPage(
+    lookModels(),
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => (sounds.runs.unshift(made), { id: 'j', state: 'done', record: made }),
+    },
+    { runs: [] },
+  );
+  const given = [],
+    urls = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+  let count = 0;
+  URL.createObjectURL = () => 'blob:son' + ++count;
+  URL.revokeObjectURL = address => given.push(address);
+  try {
+    const drop = async name => {
+        dropOn(sounds, { files: [new File([Buffer.from('RIFF\x24\0\0\0WAVEfmt ', 'latin1')], name, { type: 'audio/wav' })], types: ['Files'] });
+        await settle();
+      },
+      onScreen = () => sounds.body.find('studio-frame-result').map(shown => shown.src);
+    await drop('pluie.wav');
+    assert.equal(sounds.body.dataset.mode, 'audio');
+    assert.deepEqual(onScreen(), ['blob:son1']);
+    // Another one in its place: the address of the first is given back.
+    await drop('vent.wav');
+    assert.deepEqual(onScreen(), ['blob:son2']);
+    assert.deepEqual(given, ['blob:son1']);
+    // A take made in Image ends the look: the sound leaves the screen of Son with its address.
+    sounds.mode(0);
+    sounds.prompt().value = 'un phare';
+    sounds.prompt().oninput();
+    await sounds.body.find('studio-go')[0].onclick();
+    await settle();
+    assert.deepEqual(onScreen(), ['/new.png']);
+    assert.deepEqual(given, ['blob:son1', 'blob:son2']);
+    sounds.mode(2);
+    assert.deepEqual(onScreen(), [], 'no player left on an address given back');
+  } finally {
+    Object.assign(URL, { createObjectURL: urls.create, revokeObjectURL: urls.revoke });
+    sounds.restore();
+  }
+});
+
+test('a proposal made with a model of another family shelves the LoRAs of the family left; they come back with their model', async () => {
+  const krea = { id: 'k', name: 'Krea 2', verb: 'create_image', family: 'krea2', styled: true, seeded: true, direct: true, roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    moss = { ...krea, id: 'm', name: 'MOSS Image', family: 'moss' };
+  const page = await studioPage(
+    { create_image: [krea, moss] },
+    { 'tools/action': () => ({ requestId: 'h', plan: { parameters: {} } }), 'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }) },
+  );
+  const { body, studio, asked, restore } = page;
+  const loras = () => body.find('studio-lora-pick').map(pick => pick.value),
+    byHand = async () => {
+      await body.find('studio-go')[0].onclick();
+      await settle();
+      const [, action] = asked.findLast(([route]) => route === 'tools/action');
+      return [action.arguments.workflow, action.styles ?? []];
+    };
+  try {
+    // A LoRA made for Krea 2, added by hand.
+    body.find('studio-lora-plus')[0].onclick();
+    assert.deepEqual(loras(), ['a.safetensors']);
+    // Moodix AI proposes an image with MOSS Image.
+    const answer = studio.propose(
+      {
+        requestId: 'q',
+        approvalToken: 't',
+        tool: 'create_image',
+        workflowName: 'MOSS Image',
+        resolution: { width: 1024, height: 1024 },
+        call: { id: 'call', type: 'function', function: { name: 'create_image', arguments: '{}' } },
+        plan: { prompt: 'un phare', parameters: { prompt: 'un phare', width: 1024, height: 1024, seed: 3 }, editable: { prompt: true, parameters: [] }, references: [] },
+      },
+      new AbortController().signal,
+    );
+    await settle();
+    assert.equal(body.find('studio-model-pick')[0].value, 'm');
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    await studio.settled({ record: null });
+    // The Studio stays on MOSS Image, without the LoRA of the other family: none goes with it.
+    assert.equal(body.find('studio-model-pick')[0].value, 'm');
+    assert.deepEqual(loras(), []);
+    assert.deepEqual(await byHand(), ['m', []]);
+    // Krea 2 chosen again: its LoRA is back.
+    const pick = body.find('studio-model-pick')[0];
+    pick.value = 'k';
+    pick.onchange();
+    assert.deepEqual(loras(), ['a.safetensors']);
+    assert.deepEqual(await byHand(), ['k', [{ name: 'a.safetensors', strength: 1 }]]);
+  } finally {
+    restore();
+  }
+});
+
+test('a proposal whose model has a fixed length keeps it: the length left by another model is no change of the user', async () => {
+  const { clip, request } = proposalOf({ frames: 241 });
+  // Its length is « Fixe » in Configuration › Workflows: no list of lengths, no bar; the server
+  // still lists `frames` among what the user may change on the card (editableParameters).
+  const fixed = { ...clip, id: 'b', lengths: undefined },
+    free = { ...clip, id: 'a', name: 'Libre' };
+  const sent = [];
+  const page = await studioPage({ create_video: [free, fixed] }, { 'tools/revise': ({ edits }) => (sent.push(edits), { requestId: 'q2', approvalToken: 't2' }) });
+  const { body, studio, restore } = page;
+  const duration = () => body.find('studio-bar').filter(bar => bar.dataset.ai === 'duration');
+  try {
+    // Vidéo was shown with the other model: its length (05.04 S) is in the draft.
+    page.mode(1);
+    assert.equal(duration()[0].attributes['aria-valuetext'], '05.04 S');
+    const answer = studio.propose(request, new AbortController().signal);
+    await settle();
+    assert.equal(body.find('studio-model-pick')[0].value, 'b');
+    assert.deepEqual(duration(), [], 'no length to set');
+    // Nothing touched: nothing is sent, the 241 frames proposed are made.
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    assert.deepEqual(sent, []);
+  } finally {
+    restore();
+  }
+});
+
+test('while a character waits for its check, « Générer » from another mode is no answer: the question comes back', async () => {
+  const { tools } = continuing(),
+    runs = [{ id: 'made', conversationId: 'c1', workflowId: 'k', prompt: 'A full-length photo of a player', parameters: {}, outputs: [{ originalUrl: '/made.png', thumbUrl: '/made.jpg' }] }];
+  const page = await studioPage(tools, { 'tools/action': () => ({ requestId: 'h', plan: { parameters: {} } }) }, { runs });
+  const { body, studio, notices, asked, restore } = page;
+  try {
+    let answered = null;
+    const check = studio.checkCharacter(runs[0], new AbortController().signal);
+    void check.then(answer => (answered = answer));
+    await settle();
+    assert.equal(body.find('studio-check-question').length, 1);
+    // The user goes to Vidéo: no question there, the button reads « Générer ».
+    page.mode(1);
+    assert.equal(body.find('studio-check-question').length, 0);
+    assert.equal(body.find('studio-go-label')[0].textContent, 'Générer');
+    page.prompt().value = 'une mouette au-dessus du port';
+    page.prompt().oninput();
+    await body.find('studio-go')[0].onclick();
+    await settle();
+    // Not taken for « OK », and nothing generated: the question is back, in Image.
+    assert.equal(answered, null);
+    assert.equal(asked.filter(([route]) => route === 'tools/action').length, 0);
+    assert.equal(body.dataset.mode, 'image');
+    assert.equal(body.find('studio-check-question').length, 1);
+    assert.equal(notices.at(-1), 'Ce personnage vous convient ? Répondez d’abord : OK, Autre image ou Annuler.');
+    // There, « OK » (the same button) keeps the character.
+    await body.find('studio-go')[0].onclick();
+    assert.deepEqual((await check).decision, 'ok');
+  } finally {
+    restore();
+  }
+});
+
+test('« Modifier » chooses a model that takes an image when the one in hand takes none; held while Moodix AI proposes an image', async () => {
+  const moss = { id: 'm', name: 'MOSS Image', verb: 'create_image', family: 'moss', direct: true, roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    krea = { ...moss, id: 'k', name: 'Krea 2', family: 'krea2', roles: { source: { count: 1, media: ['image'] } } },
+    runs = [{ id: 'fox', conversationId: 'c1', workflowId: 'x', prompt: 'un renard', parameters: {}, outputs: [{ originalUrl: '/fox.png', thumbUrl: '/fox.jpg', take: 3 }] }];
+  const page = await studioPage({ create_image: [moss, krea] }, {}, { runs });
+  const { body, studio, notices, restore } = page;
+  const modify = () => {
+      body.find('studio-item')[0].oncontextmenu({ preventDefault() {} });
+      return body.find('studio-menu-item').find(item => item.children.at(-1).textContent === 'Modifier');
+    },
+    slots = () => body.find('studio-slot').map(tile => tile.children[0].children[0]?.src ?? null);
+  try {
+    // MOSS Image is in hand: it takes no image. Krea 2 does.
+    assert.equal(body.find('studio-model-pick')[0].value, 'm');
+    assert.deepEqual(slots(), []);
+    modify().onclick();
+    // The model that takes it is chosen, the image is in its slot.
+    assert.equal(body.find('studio-model-pick')[0].value, 'k');
+    assert.deepEqual(slots(), ['/fox.jpg']);
+    // While Moodix AI proposes an image, the slots are those of its proposal: held, and said.
+    const answer = studio.propose(
+      {
+        requestId: 'q',
+        approvalToken: 't',
+        tool: 'create_image',
+        workflowName: 'Krea 2',
+        resolution: { width: 1024, height: 1024 },
+        call: { id: 'call', type: 'function', function: { name: 'create_image', arguments: '{}' } },
+        plan: { prompt: 'un phare', parameters: { prompt: 'un phare', width: 1024, height: 1024, seed: 3 }, editable: { prompt: true, parameters: [] }, references: [] },
+      },
+      new AbortController().signal,
+    );
+    await settle();
+    assert.deepEqual(slots(), [null], 'the slots of the proposal: it has no image');
+    const held = modify();
+    assert.equal(held.attributes['aria-disabled'], 'true');
+    held.onclick();
+    assert.equal(notices.at(-1), 'Moodix AI est en train de proposer');
+    assert.deepEqual(slots(), [null]);
+    studio.decline();
+    assert.equal(await answer, 'deny');
+  } finally {
+    restore();
+  }
+  // No model takes an image to modify: « Modifier » is not offered.
+  const alone = await studioPage({ create_image: [moss] }, {}, { runs });
+  try {
+    alone.body.find('studio-item')[0].oncontextmenu({ preventDefault() {} });
+    assert.deepEqual(
+      alone.body.find('studio-menu-item').map(item => item.children.at(-1).textContent),
+      ['Détails', 'Supprimer'],
+    );
+  } finally {
+    alone.restore();
+  }
+});

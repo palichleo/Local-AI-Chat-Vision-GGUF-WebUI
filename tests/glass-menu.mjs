@@ -76,7 +76,15 @@ class Element {
   getBoundingClientRect() {
     return { left: 10, top: 10, right: 110, bottom: 38, width: 100, height: 28 };
   }
-  focus() {}
+  contains(other) {
+    for (let node = other; node; node = node.parent) if (node === this) return true;
+    return false;
+  }
+  // As in a page: the one focused is the page's active element, and is told so.
+  focus() {
+    page.activeElement = this;
+    this.dispatchEvent({ type: 'focus' });
+  }
 }
 class Select extends Element {
   constructor(options, value) {
@@ -160,7 +168,7 @@ test('a list of the system becomes a button of glass that says its choice and fo
   assert.equal(face.children[0].textContent, 'Finale');
   select.className = 'studio-model-pick glass-select-native is-changed';
   const following = observers.find(observer => observer.target === select);
-  assert.deepEqual(following.options.attributeFilter, ['disabled', 'class']);
+  assert.deepEqual(following.options.attributeFilter, ['disabled', 'class', 'title', 'data-tip']);
   following.callback();
   assert.equal(face.className, 'studio-model-pick is-changed glass-select');
   // Open: its choices from top to bottom, the chosen one marked, one that cannot be chosen greyed.
@@ -186,6 +194,94 @@ test('a list of the system becomes a button of glass that says its choice and fo
   face.onclick();
   menu.children[2].onclick();
   assert.equal(select.value, 'draft');
+});
+
+test('what the page says of a choice (« proposé ») is shown beside its name in the menu, and said with it', () => {
+  // The card of a proposal marked the choice of Moodix when its list was pressed: under a menu of
+  // glass the list is never pressed, and nothing was marked any more. It carries a note instead.
+  const root = new Element('div'),
+    select = new Select([['16:9', '16:9 · Paysage'], ['3:2', '3:2'], ['1:1', '1:1 · Carré']], '16:9');
+  select.options[1].dataset.note = 'proposé';
+  root.append(select);
+  setupGlassSelects(root);
+  const [, face, menu] = root.children;
+  face.onclick();
+  const [first, second] = menu.children;
+  assert.equal(second.textContent, '3:2');
+  assert.deepEqual(
+    second.children.map(part => [part.tagName, part.className, part.textContent]),
+    [['SPAN', 'glass-menu-note', 'proposé']],
+  );
+  assert.equal(second.attributes['aria-label'], '3:2, proposé');
+  // A choice the page says nothing of: its name alone.
+  assert.deepEqual(first.children, []);
+  assert.equal(first.attributes['aria-label'], undefined);
+  // Chosen, the menu closed: the button shows the value alone.
+  second.onclick();
+  assert.equal(menu.hidden, true);
+  assert.equal(face.children[0].textContent, '3:2');
+});
+
+test('the focus goes from the unseen list to its button, and after a choice stays where `change` put it', () => {
+  const root = new Element('div'),
+    select = new Select([['krea', 'Image · Krea 2'], ['ltx', 'Vidéo · LTX']], 'krea'),
+    answer = new Element('button');
+  root.append(select, answer);
+  setupGlassSelects(root);
+  const [, face, menu] = root.children;
+  // A click on its label, `focus()` from the page (« Garder mes réglages » gives it back to the
+  // list of the engines): kept by the unseen list, no focus was to be seen and the keys changed
+  // the list without its menu.
+  select.focus();
+  assert.equal(page.activeElement, face);
+  // A choice: the menu closes and its button has the focus again.
+  face.onclick();
+  menu.children[1].focus();
+  menu.children[1].onclick();
+  assert.equal(select.value, 'ltx');
+  assert.equal(menu.hidden, true);
+  assert.equal(page.activeElement, face);
+  // A choice that opens a question (« Changer de moteur… »), whose first answer takes the focus:
+  // it keeps it, the button of the list does not take it back.
+  select.addEventListener('change', () => answer.focus());
+  face.onclick();
+  menu.children[0].focus();
+  menu.children[0].onclick();
+  assert.equal(select.value, 'krea');
+  assert.equal(menu.hidden, true);
+  assert.equal(page.activeElement, answer);
+});
+
+test('the tip of a list goes to its button, and follows it when the page sets it again', () => {
+  const root = new Element('div'),
+    select = new Select([['alpha', 'alpha'], ['beta', 'beta']], 'alpha');
+  select.setAttribute('title', 'alpha.safetensors');
+  root.append(select);
+  setupGlassSelects(root);
+  const [, face, menu] = root.children,
+    following = observers.find(observer => observer.target === select);
+  assert.equal(face.dataset.tip, 'alpha.safetensors');
+  assert.equal(select.attributes.title, undefined, 'the unseen list keeps no tip of its own');
+  // Another LoRA chosen in the Studio: its name is set as the title of the list by what hears
+  // `change`. The button kept the name of before; it says the new one before the focus is back.
+  select.addEventListener('change', () => select.setAttribute('title', select.value + '.safetensors'));
+  face.onclick();
+  menu.children[1].onclick();
+  assert.equal(face.children[0].textContent, 'beta');
+  assert.equal(face.dataset.tip, 'beta.safetensors');
+  assert.equal(select.attributes.title, undefined);
+  // Set at any other time, the list hears of it; turned meanwhile into a tip by the bubble of the
+  // page (help-tips.mjs, which answers first), it is taken all the same.
+  select.setAttribute('title', 'gamma.safetensors');
+  following.callback();
+  assert.equal(face.dataset.tip, 'gamma.safetensors');
+  select.dataset.tip = 'delta.safetensors';
+  following.callback();
+  assert.equal(face.dataset.tip, 'delta.safetensors');
+  assert.equal(select.dataset.tip, undefined);
+  // Nothing new said: the button keeps its tip.
+  following.callback();
+  assert.equal(face.dataset.tip, 'delta.safetensors');
 });
 
 test('no source of the page or of the server holds a control character (an escape lost on its way into a file)', async () => {

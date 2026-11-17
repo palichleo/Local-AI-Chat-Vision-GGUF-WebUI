@@ -10,7 +10,7 @@ export function setupSettingsTabs({ list, onShow = () => {} }) {
   let current = tabs.find(tab => tab.getAttribute('aria-selected') === 'true') || tabs[0],
     searching = false;
 
-  function select(name, { focus = false } = {}) {
+  function select(name, { focus = false, reveal = true } = {}) {
     const next = tabs.find(tab => tab.dataset.settingsTab === name);
     if (!next) return;
     current = next;
@@ -20,10 +20,12 @@ export function setupSettingsTabs({ list, onShow = () => {} }) {
       tab.tabIndex = selected ? 0 : -1;
       if (!searching) panelOf(tab).hidden = !selected;
     }
-    // Searching: every panel with results shows; the one chosen comes into view.
-    if (searching) panelOf(next).scrollIntoView?.({ block: 'start' });
     if (focus) next.focus();
     onShow(name);
+    // Searching: every panel with results shows; the one chosen comes into view. After `onShow`,
+    // which puts the settings back at their top (app.js): told last, it undid the move and the tab
+    // led nowhere (16/11). `reveal` false: a tab taken for the user while they type (matches).
+    if (searching && reveal) panelOf(next).scrollIntoView?.({ block: 'start' });
   }
 
   /** Counts on the tabs while searching (the settings found, settings-search.mjs); none otherwise. */
@@ -50,8 +52,9 @@ export function setupSettingsTabs({ list, onShow = () => {} }) {
       tab.classList.toggle('is-empty', searching && !count);
     }
     if (searching && !counts.get(current)) {
+      // The results stay at their top, under their heading: nothing was asked to come into view.
       const found = tabs.find(tab => counts.get(tab) > 0);
-      if (found) select(found.dataset.settingsTab);
+      if (found) select(found.dataset.settingsTab, { reveal: false });
     }
     // The search cleared: one panel again, the tab chosen.
     if (was && !searching) select(current.dataset.settingsTab);

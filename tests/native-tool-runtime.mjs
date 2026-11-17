@@ -504,9 +504,26 @@ test('draft promotion retains seed and writable choices while final profile rema
   assert.equal(request.plan.parameters.width, 768);
   assert.equal(args.prompt, 'same prompt');
   assert.deepEqual(args.loras, prior.parameters.replay_args.loras);
-  await assert.rejects(
-    runtime.request(call({ prompt: 'different' }), { conversationId: id, turnId: id, messages: [] }),
-  );
+  // The tool makes every call carry a prompt and a duration (both are `required`): on a promotion
+  // they are left aside, the draft's prompt and length kept. Refused, no draft could be promoted.
+  const place = { conversationId: id, turnId: id, messages: [] };
+  const conforming = await runtime.request(call({ prompt: 'same prompt', duration: null }), place);
+  assert.equal(args.prompt, 'same prompt');
+  assert.equal(args.duration, undefined);
+  assert.equal(args.frames, undefined, 'no length is worked out from the call');
+  assert.equal(conforming.notes, undefined, 'the same prompt: nothing to say');
+  const reworded = await runtime.request(call({ prompt: 'different', duration: 8 }), place);
+  assert.equal(args.prompt, 'same prompt', 'the prompt of the draft is the one rendered');
+  assert.equal(args.frames, undefined);
+  assert.equal(options.seed, 987);
+  assert.deepEqual(reworded.notes, ['Version finale du brouillon : son prompt est repris tel quel.']);
+  // Anything else is still refused, and so is another stage.
+  for (const changes of [{ seed: 3 }, { start_image: { image: 0 } }, { stage: 'draft' }])
+    await assert.rejects(
+      runtime.request(call(changes), place),
+      /seuls le profil final et l’intention sont à fournir/,
+      JSON.stringify(changes),
+    );
 });
 
 test('an enhanced prompt is kept with the image, and only when enhancement ran', async () => {

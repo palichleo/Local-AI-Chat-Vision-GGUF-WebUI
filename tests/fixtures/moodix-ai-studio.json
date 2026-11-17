@@ -18,7 +18,7 @@
         "arguments": "{\"prompt\":\"Plan fixe. La neige se met à tomber doucement ; au milieu du plan, la jeune femme lève lentement la tête vers le ciel gris, sans regarder la caméra.\",\"workflow\":\"LTX 2.5\",\"start_image\":{\"take\":1},\"seconds\":6,\"format\":\"9:16\"}"
       }
     },
-    "inputRoles": ["start_image", "end_image", "reference", "reference"],
+    "inputRoles": ["start_image", "end_image", "source_video", "msr_image", "msr_image"],
     "plan": {
       "intention": "Un plan fixe de 6 secondes en 9:16 à partir de la prise 1.",
       "prompt": "Plan fixe. La neige se met à tomber doucement ; au milieu du plan, la jeune femme lève lentement la tête vers le ciel gris, sans regarder la caméra.",
@@ -44,7 +44,7 @@
           [
             { "role": "start_image", "label": "Image de début" },
             { "role": "end_image", "label": "Image de fin" },
-            { "role": "reference", "label": "Référence" }
+            { "role": "msr_image", "label": "Référence de sujet" }
           ]
         ]
       },

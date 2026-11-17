@@ -1859,7 +1859,11 @@ async function addFiles(files) {
   if (!files.length) return;
   // Dropped or pasted while a creation is made (the « + » stays within reach): said, not lost in silence.
   if (state.status.toolJob && !state.generating)
-    return notice('Attendez la fin de la génération en cours pour joindre un fichier.');
+    return notice(
+      state.status.toolJob.blocked
+        ? 'Libérez d’abord la carte graphique pour joindre un fichier.'
+        : 'Attendez la fin de la génération en cours pour joindre un fichier.',
+    );
   if (
     state.projectWorking ||
     state.status.toolJob ||
@@ -2505,7 +2509,9 @@ async function sendMessage(event) {
     usedTool = false,
     // After an output the assistant has not seen (an image, or a video without the automatic
     // analysis), it may only chain another tool: any text is withheld.
-    silent = false;
+    silent = false,
+    // The proposal of a video whose words Moodix is writing, its card to come under them.
+    planFor = null;
   state.generating = true;
   let endTurn;
   state.turnEnded = new Promise(resolve => {
@@ -2581,8 +2587,6 @@ async function sendMessage(event) {
       invalidCalls = 0,
       resourceReads = 0,
       briefing = false,
-      // The proposal of a video whose words Moodix is writing, its card to come under them.
-      planFor = null,
       reviewRecord = null;
     while (true) {
       signal.throwIfAborted();
@@ -3043,6 +3047,9 @@ async function sendMessage(event) {
         );
         generation.finish(result);
         if (viaStudio) void state.studio.settled(result);
+        // Made from the Chat: the Studio reads its takes again when it is shown next (its Sortie and
+        // its screen did not know of the take until another conversation was opened).
+        else if (result.record) state.studio?.invalidate?.();
       } catch (error) {
         if (viaStudio) void state.studio.settled({ error: signal.aborted ? 'Génération arrêtée.' : error.message });
         // Stopped by the user: the take goes and the message says it, once, in French (16/11: the
@@ -3147,13 +3154,37 @@ async function sendMessage(event) {
     }
     if (!canceled && !unloaded) notice(error.message || 'La connexion a été interrompue.');
   } finally {
+    // Stopped or failed while Moodix wrote its words over a card: the card never came. What it had
+    // written stays on its call (once, and on the page); the note for those words (« a card shows
+    // this proposal ») leaves for the result of a proposal that was never shown, and the proposal
+    // the server kept for the card is let go.
+    let unshown = false;
+    if (planFor) {
+      const { request } = planFor;
+      planFor = null;
+      if (history.at(-1)?.role === 'tool' && history.at(-1).tool_call_id === request.call.id) history.pop();
+      if (history.at(-1)?.tool_calls) history.at(-1).content = output.trim();
+      history.push({
+        role: 'tool',
+        tool_call_id: request.call.id,
+        content: JSON.stringify({
+          status: 'cancelled',
+          message:
+            'La réponse a été interrompue avant que cette proposition soit montrée à l’utilisateur : rien n’a été produit. S’il la redemande, refais le même appel d’outil.',
+        }),
+      });
+      void api('tools/cancel', { requestId: request.requestId }).catch(() => {});
+      unshown = Boolean(output.trim());
+      output = '';
+      reasoning = '';
+    }
     if (output || reasoning || usedTool) {
       if (output || reasoning) {
         render();
         if (!output) view.body.replaceChildren(node('div', 'text-block', 'Aucune réponse finale reçue.'));
         view.thought?.end();
         history.push({ role: 'assistant', content: output, ...thoughtOf(view, reasoning) });
-      } else if (usedTool && !view.generation && !view.silent)
+      } else if (usedTool && !view.generation && !view.silent && !unshown)
         view.body.replaceChildren(
           node('div', 'text-block', complete ? 'Aucune réponse finale reçue.' : 'Opération interrompue.'),
         );

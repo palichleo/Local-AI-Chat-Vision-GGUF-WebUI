@@ -92,3 +92,28 @@ test('while searching, tabs count their matches and the panel moves to one that 
   tabs.mark('update', true);
   assert.ok(ui.tabs[0].classes.has('has-news'));
 });
+
+test('while searching, a tab chosen brings its results into view, after the settings were told of it', () => {
+  const ui = fakeTabs(['update', 'llm', 'application'], { update: 0, llm: 2, application: 1 });
+  const done = [];
+  for (const name of ['update', 'llm', 'application']) ui.panel(name).scrollIntoView = () => done.push('view ' + name);
+  // The page answers a tab shown by putting the settings back at their top (app.js): told after
+  // the move, it undid it, and a tab clicked among the results led nowhere.
+  const tabs = setupSettingsTabs({ list: ui.list, onShow: name => done.push('top (' + name + ')') });
+  tabs.matches(true);
+  // Typing: the first tab that has results is taken for the user; the results stay at their top.
+  assert.equal(tabs.current(), 'llm');
+  assert.deepEqual(done, ['top (llm)']);
+  done.length = 0;
+  ui.tabs[2].clicks[0]();
+  assert.deepEqual(done, ['top (application)', 'view application']);
+  // On the keyboard too.
+  done.length = 0;
+  ui.keydown({ target: ui.tabs[2], key: 'ArrowUp', preventDefault() {} });
+  assert.deepEqual(done, ['top (llm)', 'view llm']);
+  // The search cleared: one panel again, nothing to bring into view.
+  done.length = 0;
+  tabs.matches(false);
+  ui.tabs[2].clicks[0]();
+  assert.deepEqual(done, ['top (llm)', 'top (application)']);
+});

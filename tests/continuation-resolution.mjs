@@ -528,7 +528,8 @@ test('an image put in a case of the card joins the proposal: a free slot of its 
     ],
     { conversationId, turnId: conversationId, messages: [] },
   );
-  assert.deepEqual(first.inputRoles, ['start_image', 'end_image', 'source_video', 'msr_image', 'msr_image']);
+  // The cases of the card are the slots a new video fills: not the one of a video to continue.
+  assert.deepEqual(first.inputRoles, ['start_image', 'end_image', 'msr_image', 'msr_image']);
   const revise = (request, edits) =>
     runtime.revise({ requestId: request.requestId, approvalToken: request.approvalToken, edits });
   // FIN was empty: the take goes there, read from the conversation it was made in.

@@ -224,8 +224,13 @@ export function setupAssets({
     $('media-position').textContent = at >= 0 && list.length ? `${at + 1} / ${list.length}` : '';
     $('media-take').textContent = take;
     $('media-take').hidden = !take || media === 'audio';
+    // What has the focus, read before the arrows change: hidden, an arrow is no longer said to have it.
+    const held = document.activeElement;
     $('media-prev').hidden = !(at > 0);
     $('media-next').hidden = !(at >= 0 && at < list.length - 1);
+    // The arrow that had the focus is gone (the first take, the last one): the take itself takes it.
+    // Left on the page, the focus sent the keys there, and ← → no longer reached this window.
+    if ([$('media-prev'), $('media-next')].some(arrow => arrow.hidden && arrow === held)) $('original-dialog').focus?.();
     // Where it was made: a click opens the conversation.
     const where = describe(record);
     $('media-conversation').textContent = where?.conversation ?? '';

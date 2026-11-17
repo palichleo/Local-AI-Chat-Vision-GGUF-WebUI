@@ -347,3 +347,18 @@ test('the addresses of the media keep their key from one launch to the next (0.5
     await elsewhere.close();
   }
 });
+
+test('the thumbnails of one creation leave with it; those of the others of its conversation stay', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'atelier-thumbs-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const thumbs = await new Thumbnails(join(directory, 'thumbnails')).load(),
+    kept = 'd4444444-4444-4444-8444-444444444444';
+  for (const key of [Thumbnails.key(conversation, run, 0), Thumbnails.key(conversation, run, 1), Thumbnails.key(conversation, kept, 0), Thumbnails.key(other, run, 0)])
+    await thumbs.write(key, jpeg);
+  await thumbs.forget(conversation, run);
+  assert.deepEqual(
+    [Thumbnails.key(conversation, run, 0), Thumbnails.key(conversation, run, 1), Thumbnails.key(conversation, kept, 0), Thumbnails.key(other, run, 0)].map(key => thumbs.has(key)),
+    [false, false, true, true],
+  );
+  assert.deepEqual((await readdir(join(directory, 'thumbnails'))).sort(), [Thumbnails.key(conversation, kept, 0) + '.jpg', Thumbnails.key(other, run, 0) + '.jpg'].sort());
+});

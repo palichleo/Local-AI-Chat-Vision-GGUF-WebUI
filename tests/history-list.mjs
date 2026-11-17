@@ -115,7 +115,8 @@ function fixture(t, patch = {}) {
       if (route.startsWith('takes/preview')) return Response.json(state.preview ?? { count: 4, first: 33, last: 36 });
       const item = state.historyItems.find(entry => entry.id === body?.id) ?? state.historyItems[0];
       return Response.json({
-        project: { id: 'created', name: body?.name },
+        // Renamed, a project keeps its id (lib/projects.mjs); a new one gets its own.
+        project: { id: route === 'projects/save' && body?.id ? body.id : 'created', name: body?.name },
         conversation: { ...item, ...(body?.title ? { title: body.title } : {}), ...(body?.projectId ? { projectId: body.projectId } : {}) },
       });
     },
@@ -704,6 +705,33 @@ test('a project is renamed with its pencil and deleted with its bin; a right cli
   );
   assert.equal(state.projectId, 'inbox');
   assert.equal($('thread-project-name').textContent, 'Sans projet');
+});
+
+test('a renamed project keeps its place in the lists; only a new one is added, last', async t => {
+  const { $, calls, state, open, lines } = fixture(t, {
+    projects: [
+      { id: 'inbox', name: 'Conversations' },
+      { id: 'project', name: 'Alpha' },
+      { id: 'second', name: 'Bravo' },
+      { id: 'third', name: 'Charlie' },
+    ],
+  });
+  lines(open('thread-project'))
+    .find(row => row.name === 'Alpha')
+    .tool('Renommer le projet')
+    .onclick();
+  $('project-name').value = 'Alpha 2';
+  await $('project-form').onsubmit({ preventDefault() {} });
+  assert.deepEqual(calls.at(-1), ['projects/save', { id: 'project', name: 'Alpha 2' }]);
+  // The server renames it where it is: put last here, it went back to its place at the next launch.
+  assert.deepEqual(
+    state.projects.map(item => item.name),
+    ['Conversations', 'Alpha 2', 'Bravo', 'Charlie'],
+  );
+  assert.deepEqual(
+    lines(open('thread-project')).map(row => row.name),
+    ['Alpha 2', 'Bravo', 'Charlie', 'Sans projet'],
+  );
 });
 
 test('a project made from the fil is the one chosen: the conversation begun stays, a new one starts in it', async t => {

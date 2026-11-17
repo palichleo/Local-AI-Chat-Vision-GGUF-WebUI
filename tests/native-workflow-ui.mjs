@@ -67,7 +67,15 @@ function fixture() {
     element.hidden = /\bhidden(?:\s|$)/.test(match[2]);
   }
   const $ = id => nodes.get(id) || null;
-  const document = { getElementById: $, createElement: tag => new Element(tag), activeElement: $('workflow-add') };
+  // The page hears the keys too (Échap in the editor): `press` sends it one.
+  const heard = {};
+  const document = {
+    getElementById: $,
+    createElement: tag => new Element(tag),
+    activeElement: $('workflow-add'),
+    addEventListener: (type, fn) => (heard[type] ??= []).push(fn),
+    press: event => (heard.keydown ?? []).forEach(fn => fn(event)),
+  };
   const template = {
     schemaVersion: 1,
     id: 'image-test',
@@ -252,6 +260,79 @@ test('dirty back stays in the same panel until discard and restores focus', asyn
   f.$('native-workflow-discard').onclick();
   assert.equal(f.ui.isEditing(), false);
   assert.equal(f.$('workflow-add').focused, true);
+});
+test('Échap in the editor is answered at the key: the question, then « Continuer à modifier », never the settings closed', async t => {
+  const f = await setup(t);
+  f.$('settings').open = true;
+  await f.ui.edit(f.template);
+  f.$('native-workflow-name').value = 'Portrait de nuit';
+  const press = (extra = {}) => {
+    const event = {
+      key: 'Escape',
+      defaultPrevented: false,
+      stopped: false,
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+      stopPropagation() {
+        this.stopped = true;
+      },
+      ...extra,
+    };
+    f.document.press(event);
+    return event;
+  };
+  // A page may refuse a close request only once per user activation, and Échap is not one: pressed
+  // twice, it closed the settings and the workflow was lost. Prevented at the key, none is made.
+  let event = press();
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.stopped, true, 'the guard of the settings does not hear it');
+  assert.equal(f.$('native-workflow-unsaved').hidden, false);
+  // Again, on the question: « Continuer à modifier »; the editor stays, with what was typed.
+  event = press();
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(f.$('native-workflow-unsaved').hidden, true);
+  assert.equal(f.ui.isEditing(), true);
+  assert.equal(f.$('native-workflow-name').value, 'Portrait de nuit');
+  // Answered already (a list of glass closes on Échap), another key, another window over the
+  // settings: not the editor's.
+  for (const extra of [{ defaultPrevented: true }, { key: 'Enter' }, { isComposing: true }, { target: { closest: () => ({}) } }]) {
+    event = press(extra);
+    assert.equal(event.stopped, false);
+    assert.equal(f.$('native-workflow-unsaved').hidden, true);
+    assert.equal(f.ui.isEditing(), true);
+  }
+  // Nothing changed: Échap leaves the editor for the list, the settings stay open.
+  f.$('native-workflow-name').value = f.template.name;
+  event = press({ target: { closest: () => f.$('settings') } });
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(f.ui.isEditing(), false);
+  assert.equal(f.$('workflow-editor').hidden, true);
+  assert.equal(f.$('settings').open, true);
+  // No workflow being edited: the key is the settings' (their guard answers it).
+  event = press();
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(event.stopped, false);
+});
+test('the engine of the workflow being edited stays shown when the workflows are read again', async t => {
+  const f = await setup(t),
+    list = f.$('native-workflow-pipeline'),
+    rebuild = list.replaceChildren.bind(list);
+  // As a list of the page: its choices replaced, it shows the first one.
+  list.replaceChildren = (...options) => {
+    rebuild(...options);
+    list.value = options[0]?.value ?? '';
+  };
+  await f.ui.edit(f.template);
+  assert.equal(list.value, 'krea2');
+  // The generation engine just ready, a download ended, ComfyUI answering: read again from the server.
+  await f.ui.refresh({ settings: false });
+  assert.equal(list.value, 'krea2', 'not « Choisir un moteur… » for a workflow that has its engine');
+  assert.equal(f.ui.isEditing(), true);
+  // No workflow open: the list is left on its first line, as before.
+  f.ui.requestBack();
+  await f.ui.refresh({ settings: false });
+  assert.equal(list.value, '');
 });
 test('LoRA enable and strength policies remain independent', async t => {
   const f = await setup(t),
@@ -756,6 +837,9 @@ test('Krea 2 is created by Atelier’s engine: its tokenizer is asked for, and p
 });
 
 test('one list of workflows: MOSS Image says whether ComfyUI answers, « Démarrer » while it does not', async t => {
+  // « Démarrer » asks every 2 s whether ComfyUI answers, for 2 min: left to the real clock, that
+  // wait kept this file from ending for as long (cancelled by the limit of a run).
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = await setup(t);
   const list = () => f.$('workflow-list').children;
   // No section of an external engine any more: Krea 2 alone here.

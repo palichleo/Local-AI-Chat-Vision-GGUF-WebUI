@@ -163,7 +163,7 @@ test('a clip length the model made up is recognised: nobody spoke of a length', 
   for (const text of ['fais une vidéo d’un chien qui court sur la plage', 'elle marche le long de la rivière'])
     assert.equal(inventedLength([user(text)]), true, text);
   assert.equal(inventedLength([user([{ type: 'text', text: request }])]), true);
-  // Any number or word about time keeps the model's answer, here or earlier in the conversation.
+  // A number or a word about time keeps the model's answer, here or earlier in the conversation.
   for (const text of [
     'une vidéo de 8 secondes',
     'huit secondes de pluie',
@@ -173,6 +173,47 @@ test('a clip length the model made up is recognised: nobody spoke of a length', 
     'un long plan',
     'a short clip',
     'durée libre',
+    'une vidéo de 8',
+  ])
+    assert.equal(inventedLength([user(text)]), false, text);
+  // A number that names something says nothing of a length: the label of a reference, the number of
+  // a take, a format, a size, a factor. (« Any number » kept the ten seconds the model made up for
+  // « anime #ref1 »: requests name references and takes by their number.)
+  for (const text of [
+    'Anime #ref1, la caméra avance lentement',
+    'anime la ref 3',
+    'pars de la référence n°3 et finis sur la Ref 12',
+    'avec les refs 1 et 2',
+    'Anime la prise 12',
+    'reprends les PRISES 12 et 13',
+    'une vidéo en 9:16',
+    'au format 16/9',
+    'en 1152 × 2048',
+    'en 1152x2048',
+    'une vidéo en 4K',
+    'en 1080p',
+    'agrandis-la x2 puis anime-la',
+    // The model asked for by its name (the request of the 16/11: « en 9:16 sur ltx »).
+    'je veux prolonger cette vidéo en 9:16 sur ltx, brouillon pour l’instant',
+    'prolonge-la avec LTX 2.5',
+    'une vidéo avec MiniMax H3 Omni',
+    'anime-la sur ltx-2.5',
+    'pars de l’image faite avec Krea 2',
+    'avec H3',
+  ])
+    assert.equal(inventedLength([user(text)]), true, text);
+  // A length said beside one of them is still a length.
+  for (const text of [
+    'Anime #ref1 pendant 8 secondes',
+    'anime #ref1, 8',
+    'la prise 12, 8 s',
+    'prise 3 et 5s',
+    'en 9:16, dix secondes',
+    'en 1080p sur 6 s',
+    '#ref2 : plus longue',
+    'sur LTX 2.5, 8 secondes',
+    'avec MiniMax H3 pendant 6 s',
+    'LTX 2.5 10',
   ])
     assert.equal(inventedLength([user(text)]), false, text);
   assert.equal(inventedLength([user('10 secondes'), { role: 'assistant', content: 'ok' }, user('refais-la')]), false);

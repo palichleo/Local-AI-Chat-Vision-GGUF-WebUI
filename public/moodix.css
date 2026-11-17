@@ -14974,6 +14974,14 @@ button.glass-select::after {
   opacity: 0.55;
   cursor: default;
 }
+/* What the page says of a choice (« proposé »: the one Moodix proposed, in a card), after its name
+   and quieter: the colour of its line, whatever the theme and whether the line is in hand. */
+.glass-menu-note {
+  margin-left: 10px;
+  color: inherit;
+  font-size: 12px;
+  opacity: 0.6;
+}
 /* The screen has the format chosen: a take of another format is whole inside it, never cropped. */
 #studio-view .studio-frame-result {
   object-fit: contain;

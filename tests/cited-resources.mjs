@@ -116,3 +116,10 @@ test('an image shown to the model in the user’s name is not what the user wrot
   assert.equal(citedSaid(told), true);
   assert.deepEqual(citedUnused(told, catalog, startOnly), []);
 });
+
+test('a draft promoted is not asked for the image the user names: it takes the inputs of the draft', () => {
+  const promote = call({ reuse_output: 'c3333333-3333-4333-8333-333333333333', stage: 'final', intention: 'x', prompt: 'p', duration: null });
+  assert.deepEqual(citedUnused([user('fais la version finale, avec la ref6')], catalog, promote), []);
+  // The same request without a draft is still asked for it.
+  assert.deepEqual(citedUnused([user('fais la version finale, avec la ref6')], catalog, startOnly), [stairs]);
+});

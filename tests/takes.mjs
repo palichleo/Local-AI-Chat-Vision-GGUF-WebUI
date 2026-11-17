@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -165,4 +165,36 @@ test('the server: earlier takes numbered once at launch; a move and a deleted pr
   } finally {
     await again?.close();
   }
+});
+
+test('counters that cannot be read at that instant are read again, never counted from nothing nor written over', async t => {
+  const root = await folder(t, 'takes-unread'),
+    path = join(root, 'takes.json');
+  await writeFile(path, JSON.stringify({ version: 1, projects: { inbox: 3, film: 7 } }));
+  // The file cannot be read for a moment (held by another program): here, a folder in its place.
+  const real = await readFile(path);
+  await rm(path);
+  await mkdir(path);
+  const takes = new Takes(path);
+  await assert.rejects(takes.next('inbox', 1));
+  // Readable again: the real counters, the numbers that follow.
+  await rm(path, { recursive: true });
+  await writeFile(path, real);
+  assert.deepEqual(await takes.next('inbox', 2), [4, 5]);
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')).projects, { inbox: 5, film: 7 });
+});
+
+test('a manifest that is being read is still given its new numbers (the replacement is tried again)', async t => {
+  const root = await folder(t, 'gallery-held'),
+    gallery = new Gallery({ historyDir: join(root, 'history'), numbering: async (_, count) => Array.from({ length: count }, (_, index) => index + 1) }),
+    conversation = randomUUID(),
+    made = run(conversation, '2026-11-16T10:00:00.000Z', 2);
+  await gallery.put(made, { persist: true });
+  const manifest = join(root, 'history', conversation, 'generated', made.id, 'manifest.json');
+  // Held open as a reader holds it (on Windows the file cannot be replaced meanwhile), then let go.
+  const reader = await open(manifest, 'r');
+  const release = new Promise(resolve => setTimeout(() => resolve(reader.close()), 120));
+  await gallery.setTakes(conversation, made.id, [8, 9]);
+  await release;
+  assert.deepEqual(JSON.parse(await readFile(manifest, 'utf8')).outputs.map(output => output.take), [8, 9]);
 });

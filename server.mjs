@@ -1794,6 +1794,8 @@ export async function createApplication({
       if (path === '/api/studio/delete') {
         if (runtime.active || clearingHistory || persistingGallery) throw problem('Une opération est en cours.', 409);
         await gallery.remove(body.conversationId ?? STUDIO_ID, body.id);
+        // Its thumbnail goes with it (it would stay the cover of its conversation).
+        await thumbnails.forget(body.conversationId ?? STUDIO_ID, body.id).catch(() => {});
         return send(200, { removed: body.id });
       }
       // « Enregistrer » of the Studio: the settings of a model as the Studio has them, kept apart
@@ -2056,17 +2058,19 @@ export async function createApplication({
         try {
           await historySaves;
           await projects.require(body.id);
-          // Nothing is erased: the project's conversations go back to Conversations.
+          // Nothing is erased: the project's conversations go back to Conversations. Their takes
+          // take the numbers that follow in « Sans projet », in their order of creation: first, so
+          // that a deletion stopped there is made whole when asked again.
+          const leaving = (await history.list()).conversations.filter(item => item.projectId === body.id);
+          await renumber(
+            leaving.map(item => item.id),
+            'inbox',
+          );
           const moved = [];
-          for (const item of (await history.list()).conversations.filter(item => item.projectId === body.id)) {
+          for (const item of leaving) {
             const conversation = await history.read(item.id);
             moved.push(historyView(await history.save({ ...conversation, projectId: 'inbox' })));
           }
-          // Their takes take the numbers that follow in « Sans projet », in their order of creation.
-          await renumber(
-            moved.map(item => item.id),
-            'inbox',
-          );
           // Its references follow its conversations.
           await resources.moveProject(body.id, 'inbox');
           await projects.remove(body.id);
@@ -2084,9 +2088,11 @@ export async function createApplication({
           await historySaves;
           await projects.require(body.projectId);
           const conversation = await history.read(body.id);
-          const moved = historyView(await history.save({ ...conversation, projectId: body.projectId }));
-          // Its takes take the numbers that follow in the project it joins.
+          // Its takes take the numbers that follow in the project it joins: first, so that a move
+          // stopped there is still to be made (asked again, it is made whole; saved first, it was
+          // « already there » and its takes kept numbers the project had given to others).
           if ((conversation.projectId || 'inbox') !== body.projectId) await renumber([body.id], body.projectId);
+          const moved = historyView(await history.save({ ...conversation, projectId: body.projectId }));
           return send(200, { conversation: moved });
         } finally {
           clearingHistory = false;

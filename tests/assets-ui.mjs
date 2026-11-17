@@ -178,6 +178,56 @@ test('output details expose full prompts, workflow, seed and available parameter
   assert.equal($('original-dialog').open, false);
 });
 
+test('the arrow that had the focus gone (the first take, the last): the take itself takes it, the keys still move', async t => {
+  const { ui, $ } = await fixture(t),
+    record = {
+      id: 'run',
+      conversationId: 'conversation',
+      workflowName: 'Workflow',
+      prompt: 'Prompt',
+      parameters: {},
+      outputs: [{ source: { filename: 'result.png' }, analysisDataUrl: 'data:image/png;base64,AA==', take: 2 }],
+    },
+    list = [{ ...record, id: 'newer' }, record, { ...record, id: 'older' }],
+    dialog = $('original-dialog'),
+    tick = () => new Promise(resolve => setTimeout(resolve, 0)),
+    press = key => dialog.listeners.keydown.forEach(fn => fn({ key, target: document.activeElement }));
+  // As in a page: what is hidden no longer has the focus, the page has it (seen in Brave: read after
+  // the arrow was hidden, `activeElement` was already the body).
+  let focused = dialog;
+  const body = new Element('body');
+  Object.defineProperty(document, 'activeElement', { get: () => (focused.hidden ? body : focused), set: element => (focused = element) });
+  dialog.focus = () => (focused = dialog);
+  await ui.viewOutput(record, 0, undefined, { list: () => list, at: () => 1 });
+  // ‹ clicked (it has the focus) up to the first take: hidden there. Its focus fell on the page,
+  // and the keys of the keyboard no longer reached the window of the take.
+  document.activeElement = $('media-prev');
+  $('media-prev').onclick();
+  await tick();
+  assert.equal($('media-position').textContent, '1 / 3');
+  assert.equal($('media-prev').hidden, true);
+  assert.equal(document.activeElement, dialog);
+  press('ArrowRight');
+  await tick();
+  assert.equal($('media-position').textContent, '2 / 3');
+  // An arrow that stays shown keeps the focus it has.
+  document.activeElement = $('media-prev');
+  $('media-next').onclick();
+  await tick();
+  assert.equal($('media-position').textContent, '3 / 3');
+  assert.equal($('media-next').hidden, true);
+  assert.equal(document.activeElement, $('media-prev'));
+  // › with the focus, on the last take: the same.
+  $('media-prev').onclick();
+  await tick();
+  document.activeElement = $('media-next');
+  $('media-next').onclick();
+  await tick();
+  assert.equal($('media-next').hidden, true);
+  assert.equal(document.activeElement, dialog);
+  $('original-close').onclick();
+});
+
 test('chat details reuse the displayed original blob and persisted original dimensions', async t => {
   const { ui, $, calls } = await fixture(t),
     original = new Blob(['Original'], { type: 'image/png' }),

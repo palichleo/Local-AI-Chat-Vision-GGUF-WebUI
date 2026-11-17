@@ -12,6 +12,9 @@ import { STUDIO_ID } from '../lib/studio.mjs';
 class Element {
   constructor(tag = '', className = '', textContent = '') {
     Object.assign(this, { tag, className, textContent, children: [], dataset: {}, attributes: {}, hidden: false, value: '' });
+    // The classes it gains and loses while shown (« is-playing » on the button of a sound).
+    const marks = (this.marks = new Set());
+    this.classList = { add: name => marks.add(name), remove: name => marks.delete(name) };
   }
   append(...items) {
     this.children.push(...items);
@@ -270,6 +273,53 @@ test('the kind and the conversation narrow the creations; ← → move between t
   await f.library.show({ project: 'inbox' });
   assert.deepEqual(f.library.filter(), { project: 'inbox', media: 'all', conversation: 'all' });
   assert.deepEqual(tiles(f.$('library-grid')), ['r2', 'r4']);
+});
+
+test('a sound plays in its card, and stops when its card leaves the sheet', async () => {
+  const sounds = [];
+  const f = fixture({
+    node: (tag, ...rest) => {
+      const element = new Element(tag, ...rest);
+      if (tag !== 'audio') return element;
+      sounds.push(element);
+      return Object.assign(element, {
+        paused: true,
+        play() {
+          this.paused = false;
+          return Promise.resolve();
+        },
+        pause() {
+          this.paused = true;
+        },
+      });
+    },
+  });
+  await f.library.show();
+  const kinds = f.$('library-kinds'),
+    kind = id => kinds.children.find(item => item.dataset.kind === id),
+    listen = () => find(card(f, 'r3'), 'library-listen');
+  listen().onclick();
+  assert.equal(sounds.length, 1);
+  assert.equal(sounds[0].paused, false);
+  assert.ok(listen().marks.has('is-playing'));
+  // Still on the sheet under another filter (its project, the sounds alone): it plays on.
+  project(f, 'p1').onclick();
+  kind('audio').onclick();
+  assert.equal(sounds[0].paused, false);
+  // Another kind: its card is gone, and nothing on screen could stop it any more. It stops.
+  kind('image').onclick();
+  assert.deepEqual(tiles(f.$('library-grid')), ['r1']);
+  assert.equal(sounds[0].paused, true);
+  // Back among the sounds: its button is a ▶ again, and plays it from a new start.
+  kind('audio').onclick();
+  assert.ok(!listen().marks.has('is-playing'));
+  listen().onclick();
+  assert.equal(sounds.length, 2);
+  assert.equal(sounds[1].paused, false);
+  // Another project, where it is not: stopped too. Leaving the Pellicule stops it as before.
+  project(f, 'inbox').onclick();
+  assert.equal(sounds[1].paused, true);
+  f.library.hush();
 });
 
 test('a creation of a conversation never saved says so, and opens nothing', async () => {

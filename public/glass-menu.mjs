@@ -6,6 +6,9 @@
  *   the same dark glass: the choices from top to bottom, the chosen one marked, one that cannot be
  *   chosen greyed with its reason under the pointer; arrows, Entrée and Échap on the keyboard. The
  *   `<select>` stays in the page, unseen: its value, its `change` and its options are still the truth.
+ *   What the page says of a choice (`data-note` on its option: « proposé ») is shown beside its name;
+ *   the tip of the list follows to the button whenever it is set; given the focus, the list passes
+ *   it on to its button.
  */
 const MARGIN = 8,
   GAP = 6;
@@ -66,14 +69,20 @@ function enhance(select, view) {
   // Its name, its tip and what the pointer of Moodix AI aims at go to the button: the list is unseen.
   const label = select.getAttribute('aria-label') || (select.id && page.querySelector(`label[for="${select.id}"]`)?.textContent) || '';
   if (label) face.setAttribute('aria-label', label.trim());
-  const tip = select.getAttribute('title') || select.dataset.tip;
-  if (tip) face.dataset.tip = tip;
+  // Its tip, now and whenever the page sets it again (the name of a LoRA follows its list in the
+  // Studio): a title, or the tip the bubble of the page made of it (help-tips.mjs). Left on the
+  // unseen list, nothing showed it, and the button kept the tip of before.
+  const carryTip = () => {
+    const tip = select.getAttribute('title') || select.dataset.tip;
+    if (!tip) return;
+    face.dataset.tip = tip;
+    select.removeAttribute('title');
+    delete select.dataset.tip;
+  };
   for (const name of [...select.getAttributeNames()].filter(name => name.startsWith('data-ai'))) {
     face.setAttribute(name, select.getAttribute(name));
     select.removeAttribute(name);
   }
-  select.removeAttribute('title');
-  delete select.dataset.tip;
   select.classList.add('glass-select-native');
   select.tabIndex = -1;
   select.setAttribute('aria-hidden', 'true');
@@ -85,6 +94,7 @@ function enhance(select, view) {
     face.disabled = select.disabled;
     // Its classes are the list's, as they change (a value changed in a proposal turns to the accent).
     dress();
+    carryTip();
     if (label) face.setAttribute('aria-label', label.trim() + ' : ' + text.textContent);
   };
   const items = () => [...menu.querySelectorAll('[role="option"]:not([aria-disabled="true"])')];
@@ -106,7 +116,9 @@ function enhance(select, view) {
       select.dispatchEvent(new view.Event('change', { bubbles: true }));
     }
     sync();
-    close({ refocus: true });
+    // The button takes the focus back only if it is still in the menu: what `change` did may have
+    // put it elsewhere (the question a choice opens, « Changer de moteur… », its first answer in hand).
+    close({ refocus: menu.contains(page.activeElement) });
   }
   function open() {
     if (!menu.hidden || select.disabled) return;
@@ -118,6 +130,16 @@ function enhance(select, view) {
         item.setAttribute('role', 'option');
         item.setAttribute('aria-selected', String(option.selected));
         item.textContent = option.textContent;
+        // What the page says of this choice (`data-note`: « proposé » in a card, the one Moodix
+        // proposed), after its name and quieter; a screen reader says it with the name.
+        const note = option.dataset.note;
+        if (note) {
+          const said = page.createElement('span');
+          said.className = 'glass-menu-note';
+          said.textContent = note;
+          item.append(said);
+          item.setAttribute('aria-label', option.textContent + ', ' + note);
+        }
         if (option.disabled) item.setAttribute('aria-disabled', 'true');
         // Why it cannot be chosen, under the pointer.
         const reason = option.getAttribute('title') || option.dataset.tip;
@@ -174,7 +196,16 @@ function enhance(select, view) {
     });
   }
   select.addEventListener('change', sync);
-  new view.MutationObserver(sync).observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'class'] });
+  // Unseen, the list can still be given the focus (a click on its label, `focus()` from the page):
+  // it passes it on to its button. Kept, it left no focus to see, and the keys changed the list
+  // without its menu.
+  select.addEventListener('focus', () => face.focus());
+  new view.MutationObserver(sync).observe(select, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['disabled', 'class', 'title', 'data-tip'],
+  });
   sync();
 }
 

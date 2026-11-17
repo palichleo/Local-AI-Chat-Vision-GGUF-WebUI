@@ -277,9 +277,15 @@ export function setupLibrary({
       button.classList.remove('is-playing');
       if (playing?.audio === audio) playing = null;
     };
-    playing = { audio, button };
+    playing = { audio, button, id: record.id };
     button.classList.add('is-playing');
     void audio.play?.()?.catch?.(() => button.classList.remove('is-playing'));
+  }
+  /** The sound that plays stops (the Pellicule left, its card gone from the sheet). */
+  function hush() {
+    playing?.audio.pause();
+    playing?.button.classList.remove('is-playing');
+    playing = null;
   }
   /**
    * A tile: the picture alone (a click shows it whole), at its format; the length of a clip at its
@@ -397,6 +403,9 @@ export function setupLibrary({
   /** The contact sheet: a section a day, its line and its number, its takes in a row that wraps. */
   function paintGrid() {
     shown = filtered(runs, filter);
+    // The card of the sound that plays leaves the sheet (another kind chosen, another project): it
+    // stops. It went on with nothing on screen to stop it.
+    if (playing && !shown.some(record => record.id === playing.id)) hush();
     const days = [];
     for (const record of shown) {
       const day = dayOf(record.createdAt);
@@ -503,10 +512,6 @@ export function setupLibrary({
     render,
     filter: () => ({ ...filter }),
     /** Leaving the Pellicule: the sound that plays stops. */
-    hush() {
-      playing?.audio.pause();
-      playing?.button.classList.remove('is-playing');
-      playing = null;
-    },
+    hush,
   };
 }

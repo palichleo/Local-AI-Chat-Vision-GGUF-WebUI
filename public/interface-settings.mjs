@@ -63,10 +63,27 @@ export function setupInterfaceSettings({ $, node, api, root = globalThis.documen
     const none = current.grain === 'aucun';
     for (const row of $('settings-panel-interface')?.querySelectorAll?.('.room-grain-more') ?? []) row.classList.toggle('is-faded', none);
   }
+  /**
+   * The choice that has the focus, as a way to give it back once the choices are drawn again (its
+   * group, its place in it); null when the focus is elsewhere. Read before they are drawn: replaced,
+   * a button is no longer the one focused.
+   */
+  function held() {
+    const active = globalThis.document?.activeElement;
+    for (const id of ['room-choices', 'room-light', 'room-grain', 'room-motion', 'room-filters']) {
+      const at = active ? [...($(id).children ?? [])].indexOf(active) : -1;
+      if (at >= 0) return () => $(id).children[at]?.focus?.();
+    }
+    return null;
+  }
   function change(patch) {
     current = roomSettings({ ...current, ...patch });
     if (root) applyRoom(current, root);
+    // Made on the keyboard, a choice keeps the focus, on the button drawn in its place: lost, it
+    // went back to the top of the settings at each choice.
+    const back = held();
     paint();
+    back?.();
   }
   $('room-dose').oninput = () => change({ dose: Number($('room-dose').value) });
   $('room-reset').onclick = () => change({ ...DEFAULTS, filters: [...DEFAULTS.filters] });

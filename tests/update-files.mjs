@@ -123,3 +123,18 @@ test('a status reader can keep polling while atomic updates complete', async t =
   }
   assert.deepEqual(JSON.parse(await readFile(target, 'utf8')), { step: 20 });
 });
+
+test('a temporary file left behind by a write that never ended does not block the next ones', async t => {
+  const { root } = await fixture(t),
+    target = join(root, 'data', 'projects.json');
+  await module.atomicJson(target, [{ id: 'a' }]);
+  // As a process killed between the write and the rename left it (before 0.6.32: « projects.json.tmp »).
+  await writeFile(target + '.tmp', '[{"id":"half');
+  await module.atomicJson(target, [{ id: 'a' }, { id: 'b' }]);
+  assert.deepEqual(JSON.parse(await readFile(target, 'utf8')), [{ id: 'a' }, { id: 'b' }]);
+  // Nothing of its own is left; a write that fails leaves nothing either.
+  const left = () => readdir(join(root, 'data')).then(names => names.filter(name => name.endsWith('.tmp') && name !== 'projects.json.tmp'));
+  assert.deepEqual(await left(), []);
+  await assert.rejects(module.atomicJson(target, [], async () => { throw Object.assign(Error('no'), { code: 'EINVAL' }); }));
+  assert.deepEqual(await left(), []);
+});

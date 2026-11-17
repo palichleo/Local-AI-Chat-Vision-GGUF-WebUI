@@ -657,6 +657,9 @@ export function setupNativeWorkflows(options) {
         option('', 'Choisir un moteur…'),
         ...families.map(item => option(item.family, familyLabel(item.family))),
       );
+      // A list rebuilt shows its first line: read again while a workflow is edited (the engine just
+      // ready, a download ended), it said « Choisir un moteur… » for a workflow that has one.
+      if (draft) $('native-workflow-pipeline').value = draft.pipeline;
     }
     runner = result.runner || runner;
     const config = result.config;
@@ -1599,6 +1602,22 @@ export function setupNativeWorkflows(options) {
     },
     true,
   );
+  // Échap is answered at the key itself (16/11): the browser lets a page refuse a close request
+  // (`cancel`, above) only once per user activation, and Échap is not one. Pressed again on « Enregistrer
+  // les modifications de ce workflow ? », it closed the settings and the workflow was lost. A key
+  // prevented is never a close request. Heard on the page: after what answers Échap itself in the
+  // editor (a list of glass stops it), before the guard of the settings (on the window), and with the
+  // focus lost too (the key then goes to the page, not to the settings).
+  document.addEventListener?.('keydown', event => {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || !draft || !$('settings').open) return;
+    // Another window open over the settings: the key is its own.
+    const within = event.target?.closest?.('dialog[open]');
+    if (within && within !== $('settings')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!$('native-workflow-unsaved').hidden) $('native-workflow-keep').onclick();
+    else requestBack();
+  });
   $('native-workflow-add-lora').onclick = () => {
     addLora({
       id: crypto.randomUUID(),

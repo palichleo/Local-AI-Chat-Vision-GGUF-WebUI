@@ -327,4 +327,17 @@ test('in the card of the conversation: the length in one click, version and seed
   assert.deepEqual(marked(), ['3:2']);
   format.onblur();
   assert.deepEqual(marked(), []);
+  // In the page a list is a menu of glass (glass-menu.mjs) and is never pressed itself: the choice
+  // of Moodix carries its note, which that menu shows; the sizes too, rebuilt with each format.
+  const noted = control => control.options.filter(option => option.dataset?.note === 'proposé').map(option => option.value),
+    resolution = labelled(box, 'Résolution');
+  assert.deepEqual(noted(format), ['3:2']);
+  assert.deepEqual(noted(resolution), ['384x256']);
+  format.value = '16:9';
+  format.onchange();
+  assert.deepEqual(noted(format), ['3:2']);
+  assert.deepEqual(noted(resolution), [], 'no size of another format is the one proposed');
+  format.value = '3:2';
+  format.onchange();
+  assert.deepEqual(noted(resolution), ['384x256']);
 });

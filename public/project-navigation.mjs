@@ -164,7 +164,11 @@ export function setupProjectNavigation({
       const { project } = await (
         await api('projects/save', { ...(editing ? { id: editing.id } : {}), name: $('project-name').value })
       ).json();
-      state.projects = state.projects.filter(item => item.id !== project.id).concat(project);
+      // Renamed, a project keeps its place, as on the server: put last, it went back to it at the next
+      // launch. Only a new one is added.
+      state.projects = state.projects.some(item => item.id === project.id)
+        ? state.projects.map(item => (item.id === project.id ? project : item))
+        : state.projects.concat(project);
       $('project-dialog').close();
       if (creating) created = project;
       render();

@@ -272,6 +272,12 @@ export function setupStudio({
   const leftDrafts = new Map();
   // Per conversation, the newest take the Studio was set from, or made itself (settle).
   const lastSeen = new Map();
+  // Counts the conversations the drafts were handed to (conversationChanged): the drafts are the
+  // same objects from one conversation to the next, so what was asked for one and comes back later
+  // (a prompt being improved, a file being imported) is told apart by this count, and not written.
+  let draftsEpoch = 0,
+    // The count when « Améliorer le prompt » was asked: it holds settle for its own conversation only.
+    enrichEpoch = -1;
   // The take opened from the chat on the screen (« Afficher dans le Studio »): it stays there.
   let pinned = null,
     // A creation put on the screen to see what made it (inspect): the Studio as it was before, to
@@ -463,12 +469,25 @@ export function setupStudio({
       return notice('Cette case attend une vidéo MP4 ou WebM.');
     if (media === 'image' && VIDEO_TYPES.includes(file.type))
       return notice('Cette case attend une image, pas une vidéo.');
+    const epoch = draftsEpoch,
+      asked = mode;
     // Kept as a reference of the project (« #ref3 »), shared with its chats.
     const imported = await assets.importFiles([file], { project: project() });
     if (!imported.length)
       return notice(
         (media === 'video' ? 'Vidéo non importée' : 'Image non importée') +
           ' : la bibliothèque est occupée ou le fichier est illisible.',
+      );
+    // Its copy took a moment (a clip): another conversation or another mode is shown by now, or
+    // Moodix AI proposes there. The slot of that name on the page is no longer the one it was given
+    // to (a clip dropped on « Vidéo à suivre » became the image to modify of Image): not placed.
+    if (epoch !== draftsEpoch || asked !== mode || answering())
+      return notice(
+        (media === 'video' ? 'Vidéo gardée' : 'Image gardée') +
+          ' dans les références du projet, mais pas placée : ' +
+          (epoch === draftsEpoch && asked === mode
+            ? 'Moodix AI propose une création ici.'
+            : 'la conversation ou le mode a changé entre-temps. Déposez-la de nouveau dans sa case.'),
       );
     const [resource] = imported;
     (drafts[mode].inputs[role] ??= [])[index] = {
@@ -541,6 +560,15 @@ export function setupStudio({
     // The line from the start to the end: its colour and its figure follow the duration bar.
     span = null;
   /**
+   * The role of the verb an input of the workflow takes, from the name of its slot in the family
+   * (« msr_image », « reference_image » → « reference »): said by the workflow (`inputs`), else read
+   * from the name. The server names the roles an image of a proposal may take by those slots.
+   */
+  function roleOfSlot(workflow, name) {
+    const named = workflow?.inputs?.[name] ?? (name in (workflow?.roles ?? {}) ? name : String(name).replace(/_image$/, ''));
+    return named === 'msr' ? 'reference' : named;
+  }
+  /**
    * Moves an image to another slot; the two swap when that slot is taken. Refused, with the
    * reason, when the inputs would no longer combine (MiniMax: references, or start and end).
    */
@@ -552,14 +580,19 @@ export function setupStudio({
     (draft.inputs[to.role] ??= [])[to.index] = image;
     draft.inputs[from.role][from.index] = other;
     const clash = [...exclusiveWith(workflow, to.role), ...(other ? exclusiveWith(workflow, from.role) : [])];
-    // An input of a proposal takes only the roles its workflow offers it.
-    const refused = [image, other].some(
-      item =>
-        item?.ref !== undefined &&
-        !(proposal?.values.roleChoices[item.ref] ?? []).some(
-          choice => choice.role === (item === image ? to.role : from.role),
-        ),
-    );
+    // An input of a proposal takes only the roles its workflow offers it, while that proposal waits
+    // (answered, its images are the user's: releaseInputs). The server lists those roles by the
+    // names of the slots (« msr_image »), a case here is named by the role of the verb (« reference »).
+    const offeredRoles = proposal?.mode === mode ? proposal.values?.roleChoices : null;
+    const refused =
+      Boolean(offeredRoles) &&
+      [image, other].some(
+        item =>
+          item?.ref !== undefined &&
+          !(offeredRoles[item.ref] ?? []).some(
+            choice => roleOfSlot(workflow, choice.role) === (item === image ? to.role : from.role),
+          ),
+      );
     if (clash.length || refused) {
       draft.inputs[to.role][to.index] = other;
       draft.inputs[from.role][from.index] = image;
@@ -2025,7 +2058,15 @@ export function setupStudio({
     }
     const reason = blocked();
     if (reason) return notice(reason);
+    // What it is asked for: the verb, the conversation and the mode in hand now. The chat model may
+    // take seconds to come back and to write: the user may open another conversation meanwhile.
+    const verb = verbOf(),
+      home = place(),
+      epoch = draftsEpoch,
+      asked = mode,
+      moved = () => epoch !== draftsEpoch || asked !== mode;
     enriching = true;
+    enrichEpoch = epoch;
     failure = '';
     render();
     const controller = new AbortController();
@@ -2033,14 +2074,23 @@ export function setupStudio({
       // The chat model is started when it is not running, once it has finished leaving.
       await releasing;
       await waitForModel(api, controller.signal, () => {});
-      const result = await (
-        await api('studio/enrich', {
-          prompt: text,
-          verb: verbOf(),
-          // Its video or its character made in the conversation are found there.
-          ...(scene ? { ...scene, conversationId: place() } : {}),
-        })
-      ).json();
+      const result = moved()
+        ? null
+        : await (
+            await api('studio/enrich', {
+              prompt: text,
+              verb,
+              // Its video or its character made in the conversation are found there.
+              ...(scene ? { ...scene, conversationId: home } : {}),
+            })
+          ).json();
+      // Answered once another conversation or another mode is shown: the drafts are theirs now (the
+      // same objects, emptied and set again), and the prompt of the one it was asked in is no
+      // longer in the Studio. Written all the same, it replaced the prompt of the conversation open.
+      if (moved()) {
+        notice('Prompt non enrichi : la conversation ou le mode a changé entre-temps.');
+        return;
+      }
       draft.before = text;
       // The text rewritten writes itself in the box, in half a second (at once with less motion).
       const box = document.querySelector?.('#studio-view [data-ai="prompt"]');
@@ -2174,7 +2224,8 @@ export function setupStudio({
     if (extending) args.source = outputSource(extending);
     for (const [role, spec] of Object.entries(workflow.roles)) {
       if (extending && role === 'source') continue;
-      const chosen = (draft.inputs[role] ?? []).filter(Boolean).map(item => item.source);
+      // Never an input without a source (an image of a proposal that was joined to its message).
+      const chosen = (draft.inputs[role] ?? []).filter(item => item?.source).map(item => item.source);
       // What the model cannot do without is asked for here, in the user's words.
       if (spec.required && spec.count && !chosen.length)
         throw Error(
@@ -2245,8 +2296,14 @@ export function setupStudio({
     if (working) return;
     // An action on a take brings what to make; « Générer » (a click, its keys) does not.
     const onTake = given?.verb ? given : null;
-    // The character being checked: the key that generates keeps it.
-    if (!onTake && checking) return checking.resolve('ok');
+    // The character being checked: the key that generates keeps it, where the question is asked
+    // (Image, the button reads « OK »). From another mode, where it reads « Générer », it is no
+    // answer: the question comes back on screen instead of being taken for a yes.
+    if (!onTake && checking) {
+      if (mode === 'image') return checking.resolve('ok');
+      setMode('image');
+      return notice('Ce personnage vous convient ? Répondez d’abord : OK, Autre image ou Annuler.');
+    }
     if (!onTake && answering()) return approve();
     const reason = blocked() || (onTake ? '' : current()?.unavailable);
     if (reason) return notice(reason);
@@ -2533,10 +2590,11 @@ export function setupStudio({
         settle();
         proposal = null;
         failure = '';
+        releaseInputs(mine);
         render();
         reject(signal.reason || new DOMException('Annulé', 'AbortError'));
       };
-      proposal = {
+      const mine = {
         request,
         mode: target,
         values: null,
@@ -2547,6 +2605,7 @@ export function setupStudio({
           resolve(decision);
         },
       };
+      proposal = mine;
       signal?.addEventListener('abort', abort, { once: true });
       // Locked from now until the pointer rests on « Générer », or the proposal goes (endPointer).
       lockStudio(true);
@@ -2608,6 +2667,9 @@ export function setupStudio({
       kept[target] = extending;
       pinned = extending.id;
     } else if (target === 'video') extending = null;
+    // Kept with the proposal: it stays the continuation of that clip whatever mode the user looks
+    // at while it waits (setMode gives it back with Vidéo).
+    current.extending = target === 'video' ? extending : null;
     if (!values.sizeFree && values.size && !extending) {
       draft.format = values.format ?? draft.format;
       draft.size = values.size;
@@ -2629,9 +2691,10 @@ export function setupStudio({
       if (!values.settingsFree[key]) (draft.settings[workflow.id] ??= {})[key] = value;
     const steps = [];
     if (mode !== target) steps.push(['kind', 'passe en ' + modeOf(target).label, () => setMode(target)]);
+    // Its model, with the LoRAs of its family (takeModel), as when the user chooses it in the list.
     if (draft.workflow !== workflow.id && list.length > 1)
-      steps.push(['model', 'choisit ' + workflow.name, () => (drafts[target].workflow = workflow.id), { hold: 300 }]);
-    else draft.workflow = workflow.id;
+      steps.push(['model', 'choisit ' + workflow.name, () => takeModel(draft, target, workflow), { hold: 300 }]);
+    else takeModel(draft, target, workflow);
     if (values.promptFree)
       steps.push(['prompt', 'écrit le prompt', options => typePrompt(draft, values.prompt, options), { anchor: { ax: 34, ay: 30 } }]);
     // Its cases are those of the proposal, and no other: an image the user had left in a case is not
@@ -2733,6 +2796,20 @@ export function setupStudio({
     ai.waiting = true;
     lockStudio(false);
   }
+  /**
+   * The model of a draft set without the list (a proposal of Moodix AI): the LoRAs the user added
+   * follow their family, as in choose(). Left in place, those made for Krea 2 stayed on under MOSS
+   * Image and went with the next « Générer » by hand.
+   */
+  function takeModel(draft, target, workflow) {
+    const models = modelsOf(target),
+      held = models.find(item => item.id === draft.workflow) ?? models.find(item => !item.unavailable) ?? models[0];
+    if (held && held.family !== workflow.family) {
+      draft.shelved[held.family] = draft.styles;
+      draft.styles = draft.shelved[workflow.family] ?? [];
+    }
+    draft.workflow = workflow.id;
+  }
   /** The images of a proposal, each with the slot of its role: [{ role, index, item, ref }]. */
   function referenceInputs(references) {
     const counts = {};
@@ -2750,7 +2827,10 @@ export function setupStudio({
           : ref.output_id
             ? { output: ref.output_id, ...(ref.output_conversation ? { conversation: ref.output_conversation } : {}) }
             : null,
-        preview: resource?.previewUrl || resource?.originalUrl || output?.thumbUrl || output?.originalUrl || '',
+        // An image joined to the message is neither a take nor a reference of the project: its
+        // picture is the one the server gives for the card of the proposal (`preview`).
+        preview:
+          resource?.previewUrl || resource?.originalUrl || output?.thumbUrl || output?.originalUrl || ref.preview || '',
         name: ref.label || ref.roleLabel || ROLES[role] || 'Entrée',
         ...(width > 0 && height > 0 ? { width, height } : {}),
         ref: index,
@@ -2801,15 +2881,19 @@ export function setupStudio({
       items.has('height') &&
       !extending
     ) {
-      const stage = workflow?.stages ? stageOf(workflow, draft.size) : null;
+      const stage = workflow?.stages ? stageOf(workflow, draft.size) : null,
+        [width, height] = draft.size.split('x').map(Number);
+      // The size chosen goes in any case, and with it the version it belongs to when that changes
+      // (a large picture is a final). « final » alone gave the size of that profile in the format
+      // of the proposal: not the format, nor the size, the Studio showed.
+      Object.assign(changes, { width, height });
       if (stage && values.stage && stage !== values.stage && plan.editable?.stages?.includes(stage))
         changes.stage = stage;
-      else {
-        const [width, height] = draft.size.split('x').map(Number);
-        Object.assign(changes, { width, height });
-      }
     }
-    if (values.seconds !== null && items.has('frames') && values.fps) {
+    // Only when the pointer set the length of this proposal on its bar (`lengthShown`): a workflow
+    // whose length is « Fixe » shows no bar, and what the draft holds then is the length of another
+    // model, which went as a change of the user (241 frames proposed, 121 made).
+    if (values.lengthShown !== undefined && values.seconds !== null && items.has('frames') && values.fps) {
       const wanted = draft[extending ? 'extension' : 'length'];
       if (Number.isFinite(wanted) && wanted !== values.lengthShown && Math.abs(wanted - values.seconds) > 0.01) {
         let frames = Math.round(wanted * values.fps) + values.overlap;
@@ -2836,13 +2920,37 @@ export function setupStudio({
       if (!item || item.locked || value === undefined || String(value) === String(values.settings[key])) continue;
       changes[key] = item.type === 'string' ? String(value) : Number(value);
     }
-    // An image dragged to another slot changes role.
+    // An image dragged to another slot changes role: said by the name the server gave that role
+    // (the slot of the family, « msr_image » for a reference of LTX 2.5), the one it takes back.
     const roles = [];
     for (const [role, list] of Object.entries(draft.inputs))
-      for (const item of list ?? [])
-        if (item?.ref !== undefined && item.role !== role) roles.push({ index: item.ref, role });
+      for (const item of list ?? []) {
+        if (item?.ref === undefined || item.role === role) continue;
+        const choice = (values.roleChoices[item.ref] ?? []).find(option => roleOfSlot(workflow, option.role) === role);
+        roles.push({ index: item.ref, role: choice?.role ?? role });
+      }
     if (roles.length) changes.references = roles;
     return changes;
+  }
+  /**
+   * The proposal is answered (generated, refused, stopped with its turn): the images it put in the
+   * slots are the user's from now on. They no longer carry what tied them to it (`ref`, `role`: an
+   * image of a proposal changes role only as its workflow offers), and move like any other: kept,
+   * « Inverser début et fin » and every drag were refused for good once the proposal was gone.
+   */
+  function releaseInputs(answered) {
+    const inputs = drafts[answered.mode].inputs;
+    for (const [role, list] of Object.entries(inputs))
+      inputs[role] = (list ?? []).map(item => {
+        // An image joined to the message was the proposal's alone: the Studio has nothing to name it
+        // by (no take, no reference). Left in its slot, « Générer » by hand sent it as `null`, which
+        // the server refuses at each try.
+        if (!item?.source) return null;
+        const own = { ...item };
+        delete own.ref;
+        delete own.role;
+        return own;
+      });
   }
   /** « Générer » on a proposal: the user's changes are sent, then the generation is theirs to watch. */
   async function approve() {
@@ -2862,14 +2970,29 @@ export function setupStudio({
     render();
     if (Object.keys(changes).length)
       try {
-        const revised = await (
-          await api('tools/revise', {
-            requestId: request.requestId,
-            approvalToken: request.approvalToken,
-            edits: changes,
-          })
-        ).json();
-        Object.assign(request, revised);
+        // Each answer is the proposal anew, under another identifier and another token.
+        const revise = async changed => {
+          const revised = await (
+            await api('tools/revise', {
+              requestId: request.requestId,
+              approvalToken: request.approvalToken,
+              edits: changed,
+            })
+          ).json();
+          Object.assign(request, revised);
+          return revised;
+        };
+        const made = (await revise(changes)).plan?.parameters ?? {};
+        // Another version has its own scale for the server: asked with a size, it keeps the format
+        // of that size and gives the size of its profile. When that is not the size chosen here, it
+        // is asked again, alone (as « Générer » by hand asks it): what is made is what is shown.
+        if (
+          changes.stage &&
+          Number.isInteger(made.width) &&
+          Number.isInteger(made.height) &&
+          (made.width !== changes.width || made.height !== changes.height)
+        )
+          await revise({ width: changes.width, height: changes.height });
       } catch (error) {
         working = null;
         failure = error.message;
@@ -2879,6 +3002,7 @@ export function setupStudio({
     proposal = null;
     if (extending) extending = null;
     giveBackSeed(current);
+    releaseInputs(current);
     current.resolve('once');
   }
   /**
@@ -2935,6 +3059,7 @@ export function setupStudio({
     extending = null;
     failure = '';
     giveBackSeed(current);
+    releaseInputs(current);
     current.resolve('deny');
     render();
     return true;
@@ -2991,8 +3116,12 @@ export function setupStudio({
     if (working) return null;
     return kept[mode] ?? ownRuns().find(item => mediaOf(item) === mode) ?? null;
   }
-  /** Whether some ready workflow of this verb takes an input in this role. */
-  const takes = (verb, role) => (info?.tools?.[verb] ?? []).some(item => item.roles[role]?.count);
+  /** The image model « Modifier » works with: the one in hand when it takes an image to modify, else the first that does. */
+  function editor() {
+    const list = offered('create_image').filter(item => !item.unavailable && takesImages(item, 'source')),
+      held = modelsOf('image').find(item => item.id === drafts.image.workflow);
+    return list.find(item => item.id === held?.id) ?? list[0] ?? null;
+  }
   const sourceOf = record => record.parameters?.references?.find(ref => ref.role === 'source_video')?.output_id;
   async function remove(record) {
     try {
@@ -3034,6 +3163,20 @@ export function setupStudio({
     setMode(target);
     extending = null;
     putCreation(record, role, index);
+    $('studio-view')?.scrollTo?.({ top: 0, behavior: 'smooth' });
+  }
+  /**
+   * « Modifier »: the image is the one to modify of the next image. The model in hand may take none
+   * (MOSS Image) while another does (Krea 2): that one is then chosen, as « Animer » chooses its
+   * video model; left in hand, the image went into a slot no one saw and nothing happened.
+   */
+  function editImage(record) {
+    const model = editor();
+    if (!model || working) return;
+    if (proposal?.mode === 'image') return notice('Moodix AI est en train de proposer');
+    setMode('image');
+    if (current()?.id !== model.id) choose(model.id);
+    putCreation(record, 'source', 0);
     $('studio-view')?.scrollTo?.({ top: 0, behavior: 'smooth' });
   }
   /** A creation of the Sortie (of any conversation of the project) in a slot of the mode shown. */
@@ -3105,17 +3248,38 @@ export function setupStudio({
     render();
     document.querySelector?.(`#studio-view .studio-item[data-id="${record.id}"] .studio-item-pick`)?.focus?.();
   }
+  /**
+   * Why a clip cannot be continued now, or '' when it can: a proposal of Moodix AI waits (the Studio
+   * shows what it will make, as for « Animer »), or no workflow continues a video here. Then
+   * « Prolonger » is greyed with that reason, as on the bar of the screen (output-actions.mjs): set
+   * all the same, it left the Studio with « Aucun workflow prêt » and nothing to come back with.
+   */
+  function cannotExtend() {
+    if (proposal) return 'Moodix AI est en train de proposer';
+    const list = info?.tools?.extend_video ?? [];
+    if (list.some(item => !item.unavailable)) return '';
+    return list[0]?.unavailable || 'Aucun workflow ne sait prolonger une vidéo.';
+  }
   /** What can be done with a creation: Prolonger or Animer first, then Modifier, Détails, Supprimer. */
   function actionsOf(record) {
     const media = mediaOf(record),
       list = [];
-    if (media === 'video')
+    if (media === 'video') {
+      const held = cannotExtend();
       list.push({
         id: 'extend',
         label: 'Prolonger',
         glyph: 'act-extend',
-        title: 'Prolonger · écrire la suite de ce clip',
+        title: held ? 'Prolonger · écrire la suite de ce clip\n' + held : 'Prolonger · écrire la suite de ce clip',
+        off: Boolean(held),
         run: () => {
+          if (working) return;
+          const refused = cannotExtend();
+          if (refused) return notice(refused);
+          // A continuation is made in Vidéo. The Sortie shows the whole project in every mode: pressed
+          // from Image or Son, the clip made of that mode a continuation without its banner (no
+          // « Annuler », no format, « Générer la suite » sending the clip as the source of an image).
+          if (mode !== 'video') setMode('video');
           extending = record;
           failure = '';
           menuFor = confirmFor = null;
@@ -3123,6 +3287,7 @@ export function setupStudio({
           $('studio-view')?.scrollTo?.({ top: 0, behavior: 'smooth' });
         },
       });
+    }
     if (media === 'image' && animation())
       list.push({
         id: 'animate',
@@ -3132,14 +3297,16 @@ export function setupStudio({
         off: Boolean(proposal),
         run: () => animateImage(record),
       });
-    // Not in the design, kept: an image starts the next one, with a model that takes one.
-    if (media === 'image' && takes('create_image', 'source'))
+    // Not in the design, kept: an image starts the next one, with a model that takes one. Held while
+    // Moodix AI proposes an image: the slots of Image are those of its proposal.
+    if (media === 'image' && editor())
       list.push({
         id: 'edit',
         label: 'Modifier',
         glyph: 'edit',
-        title: 'Modifier · repartir de cette image',
-        run: () => useImage(record, 'image', 'source'),
+        title: proposal?.mode === 'image' ? 'Moodix AI est en train de proposer' : 'Modifier · repartir de cette image',
+        off: proposal?.mode === 'image',
+        run: () => editImage(record),
       });
     list.push({ id: 'details', label: 'Détails', glyph: 'info', title: 'Détails', run: () => showDetails(record) });
     list.push({
@@ -3675,6 +3842,9 @@ export function setupStudio({
     failure = '';
     formatsOpen = false;
     if (next !== 'video') extending = null;
+    // Back in Vidéo while a proposal of Moodix AI waits there: the clip it continues is its own, not
+    // lost with a look at Image or Son (it was then shown, and its length sent, as a new video's).
+    else if (proposal?.mode === 'video' && proposal.values) extending = proposal.extending ?? null;
     render();
   }
   /**
@@ -3864,7 +4034,9 @@ export function setupStudio({
     if (kindsBar()) head.append(kindsBar());
     head.append(step, setting);
     // A creation is on the screen to be looked at (inspect): back to the Studio as it was before.
-    if (looked && !answering() && !ai) {
+    // Not while Moodix AI proposes or has a character checked, in whatever mode: the settings of
+    // before would come under what it proposes (lookBack).
+    if (looked && !proposal && !checking && !ai) {
       const back = button('studio-look-back', 'Revenir', lookBack, 'undo');
       back.title = 'Retirer ce média de l’écran et remettre vos réglages d’avant';
       back.setAttribute('aria-label', 'Revenir à mes réglages : retirer ce média de l’écran');
@@ -4129,9 +4301,11 @@ export function setupStudio({
     if (tools) toolsStale = true;
   }
   function forget() {
+    // A creation was being looked at: the Studio is first as it was before (leaveLook), not left
+    // with the settings of that creation and no way back.
+    leaveLook();
     for (const key of Object.keys(kept)) delete kept[key];
     pinned = null;
-    endLook();
     extending = null;
     failure = '';
     legacy = false;
@@ -4144,6 +4318,10 @@ export function setupStudio({
    * conversation has none: the Studio empty (etats-maquette.md, 55).
    */
   function conversationChanged() {
+    // A creation was being looked at: the look ends as « Revenir » ends it, before anything is kept
+    // of the conversation left. Kept as they were, its drafts were those of the take looked at (its
+    // very seed with them, which followed into the conversation opened) and the user's own were lost.
+    leaveLook();
     const next = draftKey();
     // A conversation not begun that gets its identifier while its first take is made: the same one.
     const begun = draftsKey?.startsWith('new|') && conversation() && Boolean(working);
@@ -4155,6 +4333,7 @@ export function setupStudio({
       // Empty until its takes are read (settle): the prompt and the inputs are a conversation's own.
       for (const item of MODES) Object.assign(drafts[item.id], { prompt: '', before: null, inputs: {} });
       lastSeen.delete(next);
+      draftsEpoch++;
     }
     draftsKey = next;
     forget();
@@ -4298,6 +4477,9 @@ export function setupStudio({
    */
   function settle() {
     if (!info || legacy || runsFor !== where() || working || proposal || ai || checking) return false;
+    // Nor while the prompt of this conversation is being improved: its answer would be written over
+    // the settings taken here. (Asked in a conversation left since, it is dropped: nothing to wait for.)
+    if (enriching && enrichEpoch === draftsEpoch) return false;
     const key = draftKey(),
       own = ownRuns(),
       newest = own[0]?.id ?? null,
@@ -4339,8 +4521,35 @@ export function setupStudio({
   /** Nothing is looked at any more: no way back, the address of a file of the disk given back. */
   function endLook() {
     looked = null;
-    if (lookedUrl) globalThis.URL?.revokeObjectURL?.(lookedUrl);
+    if (!lookedUrl) return;
+    // The file shown from that address leaves the screen with it: given back while a mode still
+    // showed it (a sound looked at, then a take made in Image), it left there a player that could
+    // no longer read anything.
+    for (const key of Object.keys(kept))
+      if (kept[key].outputs?.[0]?.originalUrl === lookedUrl) {
+        if (pinned === kept[key].id) pinned = null;
+        delete kept[key];
+      }
+    globalThis.URL?.revokeObjectURL?.(lookedUrl);
     lookedUrl = '';
+  }
+  /**
+   * The Studio as it was before the look: its drafts, its screen, its mode, « Plus de réglages »;
+   * the look is over. Nothing is drawn. What the take looked at added to a draft and was not there
+   * before (the format said chosen) leaves with it.
+   */
+  function leaveLook() {
+    if (!looked) return;
+    const before = looked;
+    endLook();
+    for (const item of MODES) {
+      const draft = drafts[item.id];
+      for (const key of Object.keys(draft)) if (!(key in before.drafts[item.id])) delete draft[key];
+      Object.assign(draft, before.drafts[item.id]);
+    }
+    for (const key of Object.keys(kept)) delete kept[key];
+    Object.assign(kept, before.kept);
+    ({ mode, advanced, pinned, extending } = before);
   }
   /**
    * A creation put on the screen to see what made it (16/11): dropped there from the Sortie or from
@@ -4386,13 +4595,10 @@ export function setupStudio({
   }
   /** « Revenir »: the creation looked at leaves the screen, the Studio is as it was before. */
   function lookBack() {
-    if (!looked || working) return;
-    const before = looked;
-    endLook();
-    for (const item of MODES) Object.assign(drafts[item.id], before.drafts[item.id]);
-    for (const key of Object.keys(kept)) delete kept[key];
-    Object.assign(kept, before.kept);
-    ({ mode, advanced, pinned, extending } = before);
+    // Held while a proposal of Moodix AI waits, as a look is (cannotLook): the drafts of before,
+    // put back under it, went with « Générer » as changes of the user.
+    if (!looked || working || proposal || checking || ai) return;
+    leaveLook();
     formatsOpen = false;
     failure = '';
     render();
@@ -4431,7 +4637,11 @@ export function setupStudio({
             outputs: [{ originalUrl: address, thumbUrl: '' }],
           },
     );
-    if (!resource) lookedUrl = address;
+    if (!resource) {
+      // Another file of the disk was on the screen: it left it for this one, its address is given back.
+      if (lookedUrl && lookedUrl !== address) globalThis.URL?.revokeObjectURL?.(lookedUrl);
+      lookedUrl = address;
+    }
   }
   /** « Afficher dans le Studio » on a take of the chat: on the screen, with what made it (inspect). */
   function show(record) {

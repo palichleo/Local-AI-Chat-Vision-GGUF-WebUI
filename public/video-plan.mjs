@@ -314,11 +314,18 @@ export function renderProposal(container, request, { node, onStage, card = false
   /**
    * « proposé » beside the choice of Moodix while a menu of a card opens (at the press of the pointer
    * or of a key); closed, the menu shows the value alone (« 16:9 · Paysage », « 768 × 448 »).
+   * The lists of the page are menus of glass (glass-menu.mjs): the list of the system under one is
+   * never pressed, and nothing was marked any more (16/11). The choice of Moodix carries its note
+   * (`data-note`), which the menu of glass shows beside its name; the words added to the option stay
+   * for a page without that menu.
    */
   function proposedMark(control, proposed) {
     const show = open => {
-      for (const option of control.options || [])
+      for (const option of control.options || []) {
         option.text = option.text.replace(/ · proposé$/, '') + (open && option.value === proposed ? ' · proposé' : '');
+        if (option.value === proposed) (option.dataset ??= {}).note = 'proposé';
+        else if (option.dataset) delete option.dataset.note;
+      }
     };
     control.onmousedown = control.onkeydown = () => show(true);
     control.onblur = () => show(false);
