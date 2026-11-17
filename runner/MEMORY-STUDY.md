@@ -108,3 +108,47 @@ One change at a time, each proven by measurements that alternate the old and the
 4. **Against ComfyUI** in its dynamic mode: same files, same seed, alternating the two engines, cold and warm.
 5. **The changes**, where a measurement justifies them: one estimate for every family, read from the table; one ladder of fallbacks, and the end of the retry without a ceiling; a share of the weights that shrinks while sampling; the shared memory of Windows detected.
 6. **Every kind of machine**, afterwards: the choice of the device taken out of the 24 files that write it. The published evidence for Macs and for a processor alone is thin: no result is promised there.
+
+## 5. Results
+
+### The sweep of the limits (17 November 2026, engine 0.6.76)
+
+21 creations at the largest sizes and lengths the interface offers, each in a process of its own, outside the application, on the development machine (10.8 GiB of the card free at the start of each: other programs held 1.2). The pipeline was called under the ceiling of the engine, without the general retry « without the ceiling ». Recorded at every mark of the pipeline: the most memory allocated since the last, what was reserved, what was free.
+
+| Case | Result | Time | Peak allocated | Weights kept on the card |
+| --- | --- | --- | --- | --- |
+| Krea 2, 1024 × 1024 | made | 32 s | 8.8 GiB | 7.3 GiB |
+| Krea 2, 1536 × 1536 | made | 46 s | 8.8 | 6.7 |
+| Krea 2, 1920 × 1088 | made | 39 s | 8.8 | 6.8 |
+| Krea 2, 1536 × 1536, image to modify | made | 43 s | 8.8 | 6.7 |
+| SeedVR2, 1024² to 2048² | made | 15 s | 7.8 | |
+| SeedVR2, 1536² to 3072² | **out of memory** after 3 s, encoding the image (`seedvr2_vae.py`) | | 9.7 | |
+| LTX 2.5, 896 × 1600, 5 s | made | 105 s | 8.6 | 5.3 |
+| LTX 2.5, 896 × 1600, 10 s | made | 203 s | 9.0 | 3.3 |
+| LTX 2.5, 896 × 1600, 10 s, start image | made | 218 s | 9.1 | 2.7 |
+| LTX 2.5, 896 × 1600, 10 s, start and end images | made | 223 s | 9.1 | 2.7 |
+| LTX 2.5, 1088 × 1920, 5 s, start image | made | 144 s | 8.8 | 3.7 |
+| LTX 2.5, 1088 × 1920, 10 s, start image | **out of memory** after 452 s, decoding the video | | 9.6 | 0.7 |
+| LTX 2.5, 1536 × 1536, 10 s | **out of memory** after 294 s, decoding the video (4.57 GiB asked at once) | | 8.5 | 0.5 |
+| LTX 2.5, 896 × 1600, continuation of 5 s | made | 99 s | 8.8 | 4.8 |
+| LTX 2.5, 768 × 448, 10 s (one pass) | made | 58 s | 9.1 | 6.6 |
+| MiniMax H3, 768 × 448, 5 s | made | 77 s | 6.8 | 4.2 |
+| MiniMax H3, 768 × 448, 14 s | made | 170 s | 8.5 | 2.4 |
+| MiniMax H3, 1344 × 768, 5 s | made | 179 s | 8.7 | 2.2 |
+| MiniMax H3, 1344 × 768, 14 s | **out of memory** after 27 s, in the attention, before the first step | | 9.5 | |
+| MiniMax H3, 1920 × 1088, 5 s | **out of memory** after 87 s, in the attention, at the first step | | 9.7 | |
+| MiniMax H3, 1344 × 768, 10 s, three references | **out of memory** after 31 s, in the attention, before the first step | | 8.7 | |
+
+What it shows:
+
+- **Six failures of 21, from three causes**, none of them in the weights:
+  - **the video decoder of LTX 2.5** puts the whole decoded video together on the card. The sampling of a video of 63 000 and of 71 000 tokens went to its end, and the creation was lost after five to seven minutes;
+  - **the attention of MiniMax H3** (the INT8 kernel over the whole sequence) has no fallback, and the room left for it is a fixed reserve that does not follow the size;
+  - **the VAE of SeedVR2** encodes the image in one piece.
+- **The share of the weights does follow the size**: for LTX 2.5 it goes from 6.6 GiB at 10 000 tokens to 0.5 at 71 000, and the peak stays between 8.2 and 8.9 GiB. Sampling never failed.
+- **The formula of LTX 2.5 reserves more than is used**: at the peak of the refining pass, 0.7 to 2 GiB of what it set aside were not allocated. (The peak counts the weights passing through as well as the computation: the true need of the computation is lower still.)
+- **The refining pass dominates a large video**: at 896 × 1600 for 10 s, 3.3 s for each of the eight steps at half size, 30 s for each of the three at full size; 60 s a step at 1088 × 1920, 70 s at 1536 × 1536.
+- **The card's own memory was never full**: Windows counted 11.1 GiB of 12 at most. The ceiling keeps PyTorch out of the shared memory.
+- **A counter that cannot be used as it is**: Windows' « shared usage » of the card rose by 12 to 14 GiB during every large job. It counts the page-locked RAM the engine keeps the files in, not a spill.
+
+Not covered: SCAIL-2, the sounds, Real-ESRGAN, RIFE, the subject references of LTX 2.5, any card other than this one.
