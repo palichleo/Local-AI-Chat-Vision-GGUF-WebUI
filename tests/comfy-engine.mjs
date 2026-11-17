@@ -664,6 +664,49 @@ test('an image result takes its real size, and the prompt it was really made fro
   assert.deepEqual([made.outputs[0].width, made.outputs[0].height], [2048, 1536]);
 });
 
+test('a creation named by the application goes in the folder of its kind, never over another', async t => {
+  const fake = await comfy(t),
+    dataDir = await trial(),
+    outputDir = join(dataDir, 'output'),
+    manifestDir = join(dataDir, 'output-manifests'),
+    client = fake.connect(fake.baseUrl),
+    name = '2026-11-17_14-32-05_moss-image_a3f9';
+  const work = krea({ outputName: name }),
+    names = await comfyNames(client, work);
+  const first = (await runOnComfy(work, { client, names, outputDir, manifestDir })).outputs[0];
+  assert.deepEqual([first.subfolder, first.filename], ['image', name + '.png']);
+  assert.deepEqual(await readFile(join(outputDir, 'image', first.filename)), fake.seen.film);
+  // The same name asked again: another suffix, the first creation as it was.
+  const second = (await runOnComfy(work, { client, names, outputDir, manifestDir })).outputs[0];
+  assert.equal(second.subfolder, 'image');
+  assert.match(second.filename, /^2026-11-17_14-32-05_moss-image_[0-9a-f]{4}\.png$/);
+  assert.notEqual(second.filename, first.filename);
+  // A video goes with the videos.
+  const film = ltx({ outputName: '2026-11-17_14-40-11_ltx-2-5_07c2' }),
+    video = (await runOnComfy(film, { client, names: await comfyNames(client, film), outputDir, manifestDir })).outputs[0];
+  assert.deepEqual([video.subfolder, video.filename], ['video', '2026-11-17_14-40-11_ltx-2-5_07c2.mp4']);
+  // The folder of the outputs holds the folders and nothing else (no temporary file, no manifest);
+  // each manifest is with the others, under the name of its creation.
+  assert.deepEqual((await readdir(outputDir)).sort(), ['image', 'video']);
+  assert.deepEqual((await readdir(join(outputDir, 'image'))).sort(), [first.filename, second.filename].sort());
+  assert.deepEqual(await readdir(join(outputDir, 'video')), [video.filename]);
+  assert.deepEqual(
+    (await readdir(manifestDir)).sort(),
+    [first, second, video].map(output => output.filename.replace(/\.\w+$/, '.json')).sort(),
+  );
+
+  // A name that is not a plain one is refused before anything is sent or written.
+  const sent = fake.seen.prompts.length;
+  for (const outputName of ['..', '../up', 'a/b', 'a\\b', join(dataDir, 'elsewhere'), 'C:name', 'a.png', 'Name', '', 5])
+    await assert.rejects(
+      runOnComfy(krea({ outputName }), { client, names, outputDir, manifestDir }),
+      /Nom de sortie invalide/,
+      String(outputName),
+    );
+  assert.equal(fake.seen.prompts.length, sent);
+  assert.deepEqual((await readdir(dataDir)).sort(), ['comfy-engine.json', 'output', 'output-manifests']);
+});
+
 test('steps are counted over every pass, then the decoding is said once', async () => {
   const dataDir = await trial(),
     seen = [];
@@ -911,7 +954,9 @@ test('the generation service: ComfyUI for MOSS Image, the built-in engine for ev
   assert.deepEqual(calls, ['unload', 'release']);
   // The video memory is given back; the models stay in main memory while there is room.
   assert.deepEqual(fake.seen.freed, [{ unload_models: true }]);
-  assert.equal((await readdir(outputDir)).length, 2);
+  // The folder of the outputs holds the creation alone: its manifest is with those of the built-in engine.
+  assert.deepEqual(await readdir(outputDir), [result.outputs[0].filename]);
+  assert.deepEqual(await readdir(join(dataDir, 'output-manifests')), [result.outputs[0].filename.replace('.png', '.json')]);
 
   // On a machine short of memory, ComfyUI lets go of everything.
   const tight = await comfy(t, { available: 1024 ** 3 });

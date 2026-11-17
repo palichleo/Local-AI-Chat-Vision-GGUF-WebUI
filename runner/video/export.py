@@ -2,8 +2,6 @@
 
 import json
 import os
-from pathlib import Path
-import uuid
 import subprocess
 import wave
 
@@ -11,19 +9,21 @@ import wave
 def save_video(pixels, config, job, metadata, audio=None):
     import imageio.v3 as iio
 
-    destination = Path(config['outputRoot']).resolve()
-    destination.mkdir(parents=True, exist_ok=True)
-    name = uuid.uuid4().hex
+    from runner.media import manifest_path, output_place, subfolder
+
+    # The finished file in the folder of the videos (runner.media.output_place); what is written
+    # meanwhile in the folder of the outputs itself.
+    destination, output = output_place(config, job, 'video', '.mp4')
+    name = output.stem
     temporary = destination / (name + '.tmp.mp4')
-    output = destination / (name + '.mp4')
     wave_path = destination / (name + '.tmp.wav')
     muxed = destination / (name + '.mux.mp4')
-    from runner.media import manifest_path
 
     manifest = manifest_path(config, name)
     temporary_manifest = manifest.with_name(manifest.name + '.tmp')
     p = job['parameters']
-    descriptor = dict(filename=output.name, subfolder='', type='output', width=p['width'], height=p['height'])
+    folder = subfolder(config, output)
+    descriptor = dict(filename=output.name, subfolder=folder, type='output', width=p['width'], height=p['height'])
     result = dict(jobId=job['id'], outputs=[descriptor], metadata=metadata)
     try:
         if len(pixels) != p['frames'] or pixels.shape[1:3] != (p['height'], p['width']):

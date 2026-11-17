@@ -72,10 +72,12 @@ class TransformTests(unittest.TestCase):
     def tearDown(self):
         self.folder.cleanup()
 
-    def run_job(self, family, media, component, weights, parameters, role, source):
+    def run_job(self, family, media, component, weights, parameters, role, source, name=None):
         from runner.engine import generate
 
         job = dict(
+            # The name the application asks for the file, when it gives one.
+            **({} if name is None else dict(outputName=name)),
             schemaVersion=1,
             id='job',
             pipeline=family,
@@ -88,7 +90,55 @@ class TransformTests(unittest.TestCase):
             references=[dict(input='source', role=role, path=str(source))],
         )
         result = generate(job, self.config, lambda **_: None)
-        return result['outputs'][0], self.output / result['outputs'][0]['filename']
+        descriptor = result['outputs'][0]
+        return descriptor, self.output / descriptor['subfolder'] / descriptor['filename']
+
+    def test_named_transforms_go_in_the_folder_of_their_kind(self):
+        from PIL import Image
+
+        from runner.video.stream import probe
+
+        names = [f'2026-11-17_09-00-0{index}_transform_00a{index}' for index in range(3)]
+        image, image_path = self.run_job(
+            'realesrgan_image', 'image', 'upscaler', self.upscaler, {'tile': 16}, 'source_image', self.image, names[0]
+        )
+        video, video_path = self.run_job(
+            'realesrgan_video', 'video', 'upscaler', self.upscaler, {}, 'source_video', self.video, names[1]
+        )
+        smooth, smooth_path = self.run_job(
+            'rife', 'video', 'interpolator', self.interpolator, {'multiplier': 2}, 'source_video', self.video, names[2]
+        )
+        self.assertEqual(
+            [(item['subfolder'], item['filename']) for item in (image, video, smooth)],
+            [('image', names[0] + '.png'), ('video', names[1] + '.mp4'), ('video', names[2] + '.mp4')],
+        )
+        with Image.open(image_path) as upscaled:
+            self.assertEqual(upscaled.size, (120, 80))
+        self.assertEqual(probe(video_path)['frames'], 8)
+        self.assertEqual(probe(smooth_path)['frames'], 15)
+        # Nothing but them under the folder of the outputs: no temporary file is left beside, and
+        # each manifest (no folder is named for them here) is beside the folders, as before.
+        found = sorted(path.relative_to(self.output).as_posix() for path in self.output.rglob('*') if path.is_file())
+        self.assertEqual(
+            found,
+            sorted(
+                [f'image/{names[0]}.png', f'video/{names[1]}.mp4', f'video/{names[2]}.mp4']
+                + [name + '.json' for name in names]
+            ),
+        )
+
+    def test_a_named_transform_that_fails_leaves_nothing_in_the_folders(self):
+        from unittest import mock
+
+        # It stops between two frames, its video half written.
+        with mock.patch('runner.models.rife.between', side_effect=RuntimeError('stopped')):
+            with self.assertRaises(Exception):
+                self.run_job(
+                    'rife', 'video', 'interpolator', self.interpolator, {'multiplier': 2}, 'source_video', self.video,
+                    '2026-11-17_09-00-09_transform_00a9',
+                )  # fmt: skip
+        for folder in ('image', 'video', 'son'):
+            self.assertEqual(list((self.output / folder).glob('*')), [], folder)
 
     def test_image_upscale_doubles_and_respects_the_maximum_side(self):
         from PIL import Image

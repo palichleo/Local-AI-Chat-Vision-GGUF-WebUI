@@ -98,6 +98,14 @@ def absolute(value, label):
     return value
 
 
+def output_name(value):
+    """The name the application asks for a creation (`outputName` of a job): the time, the model
+    and a short suffix, plain. With neither a folder nor an extension, it stays where it is put."""
+    if not isinstance(value, str) or len(value) > 96 or not re.fullmatch('[a-z0-9]+(?:[_-][a-z0-9]+)*', value):
+        raise ValueError('Invalid output name')
+    return value
+
+
 def number(value, label, low, high, integer=False):
     if type(value) not in ((int,) if integer else (int, float)) or not math.isfinite(value) or not low <= value <= high:
         raise ValueError('Invalid ' + label)
@@ -141,9 +149,11 @@ def validate_job(job):
         'loras',
         'references',
     )
-    fields(job, (*required, 'promptExpansion'), required, label='resolved job')
+    fields(job, (*required, 'promptExpansion', 'outputName'), required, label='resolved job')
     if type(job['schemaVersion']) is not int or job['schemaVersion'] != 1:
         raise ValueError('Unsupported job schema version')
+    if 'outputName' in job:
+        output_name(job['outputName'])
     for key in ('id', 'workflowId'):
         text(job[key], key)
     if not isinstance(job['workflowDigest'], str) or not re.fullmatch('[a-f0-9]{64}', job['workflowDigest']):

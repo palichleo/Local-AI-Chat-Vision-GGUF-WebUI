@@ -65,6 +65,11 @@ class FramesTests(unittest.TestCase):
     def test_only_a_video_of_the_outputs_is_read(self):
         result = engine.frames(dict(path=str(self.video), count=2, side=64), self.config)
         self.assertEqual(len(result['frames']), 2)
+        # One written in the folder of the videos (runner.media.output_place) is one of the outputs too.
+        named = self.root / 'video' / '2026-11-17_14-40-11_ltx-2-5_07c2.mp4'
+        named.parent.mkdir()
+        named.write_bytes(self.video.read_bytes())
+        self.assertEqual(len(engine.frames(dict(path=str(named), count=2, side=64), self.config)['frames']), 2)
         with tempfile.TemporaryDirectory() as elsewhere:
             outside = Path(elsewhere) / 'clip.mp4'
             write_video(outside, count=6)

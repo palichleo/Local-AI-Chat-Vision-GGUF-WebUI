@@ -121,6 +121,97 @@ class VideoTests(unittest.TestCase):
                 save_video(np.zeros((8, 64, 64, 3), dtype=np.uint8), {'outputRoot': folder}, job(), {})
             self.assertEqual(list(Path(folder).iterdir()), [])
 
+    def named_config(self, folder):
+        from runner.contracts import validate_config
+
+        root = Path(folder)
+        return validate_config(
+            {'cacheRoot': str(root / 'cache'), 'outputRoot': str(root / 'output'), 'manifestRoot': str(root / 'lists')}
+        )
+
+    def files(self, folder):
+        return sorted(path.relative_to(folder).as_posix() for path in Path(folder).rglob('*') if path.is_file())
+
+    def test_a_named_creation_goes_in_the_folder_of_its_kind_and_says_where(self):
+        import numpy as np
+        from runner.media import save_audio, save_image
+        from runner.video.export import save_video
+
+        with tempfile.TemporaryDirectory() as folder:
+            config = self.named_config(folder)
+            names = [f'2026-11-17_14-32-0{index}_model-{index}_a3f9' for index in range(3)]
+            jobs = [validate_job(job() | {'outputName': name}) for name in names]
+            made = [
+                save_video(np.zeros((9, 64, 64, 3), dtype=np.uint8), config, jobs[0], dict(seed=1)),
+                save_image(np.zeros((32, 32, 3), dtype=np.uint8), config, jobs[1], dict(seed=2)),
+                save_audio(np.zeros((1, 801), dtype=np.float32), 8000, config, jobs[2], dict(seed=3)),
+            ]
+            said = [(result['outputs'][0]['subfolder'], result['outputs'][0]['filename']) for result in made]
+            self.assertEqual(
+                said, [('video', names[0] + '.mp4'), ('image', names[1] + '.png'), ('son', names[2] + '.wav')]
+            )
+            # Each file where its descriptor says, nothing else in the folder of the outputs (no
+            # temporary file), and its manifest under its name with the others.
+            self.assertEqual(self.files(Path(folder) / 'output'), sorted(f'{sub}/{name}' for sub, name in said))
+            self.assertEqual(self.files(Path(folder) / 'lists'), sorted(name + '.json' for name in names))
+
+            # The same name asked again: another suffix, and the first creation as it was.
+            first = (Path(folder) / 'output' / 'image' / (names[1] + '.png')).read_bytes()
+            again = save_image(np.full((32, 32, 3), 9, dtype=np.uint8), config, jobs[1], {})['outputs'][0]
+            self.assertEqual(again['subfolder'], 'image')
+            self.assertNotEqual(again['filename'], names[1] + '.png')
+            self.assertRegex(again['filename'], r'^2026-11-17_14-32-01_model-1_[0-9a-f]{4}\.png$')
+            self.assertEqual((Path(folder) / 'output' / 'image' / (names[1] + '.png')).read_bytes(), first)
+            self.assertTrue((Path(folder) / 'output' / 'image' / again['filename']).is_file())
+
+    def test_a_job_without_a_name_is_written_as_before(self):
+        import numpy as np
+        from runner.media import save_audio, save_image
+        from runner.video.export import save_video
+
+        with tempfile.TemporaryDirectory() as folder:
+            config = self.named_config(folder)
+            value = validate_job(job())
+            made = [
+                save_video(np.zeros((9, 64, 64, 3), dtype=np.uint8), config, value, {})['outputs'][0],
+                save_image(np.zeros((32, 32, 3), dtype=np.uint8), config, value, {})['outputs'][0],
+                save_audio(np.zeros((1, 801), dtype=np.float32), 8000, config, value, {})['outputs'][0],
+            ]
+            for item, extension in zip(made, ('mp4', 'png', 'wav')):
+                self.assertEqual(item['subfolder'], '')
+                self.assertRegex(item['filename'], r'^[0-9a-f]{32}\.' + extension + '$')
+            # Flat, in the folder of the outputs itself: none of the three folders is made.
+            self.assertEqual(self.files(Path(folder) / 'output'), sorted(item['filename'] for item in made))
+            self.assertEqual([path.name for path in (Path(folder) / 'output').iterdir() if path.is_dir()], [])
+
+    def test_a_name_that_is_not_plain_is_refused_and_writes_nothing(self):
+        import numpy as np
+        from runner.media import save_image
+
+        with tempfile.TemporaryDirectory() as folder:
+            config = self.named_config(folder)
+            absolute = str(Path(folder).resolve() / 'elsewhere')
+            odd = ('..', '../up', 'a/b', 'a\\b', absolute, 'C:name', 'a.png', 'Name', 'a b', '', '_a', 'a_', 'x' * 97, 5)
+            for name in odd:
+                value = job() | {'outputName': name}
+                with self.subTest(name=name):
+                    with self.assertRaises(ValueError):
+                        validate_job(value)
+                    with self.assertRaises(ValueError):
+                        save_image(np.zeros((32, 32, 3), dtype=np.uint8), config, value, {})
+            self.assertEqual(self.files(folder), [])
+
+    def test_a_named_creation_that_fails_leaves_nothing_in_the_folders(self):
+        import numpy as np
+        from runner.video.export import save_video
+
+        with tempfile.TemporaryDirectory() as folder:
+            config = self.named_config(folder)
+            value = job() | {'outputName': '2026-11-17_14-32-05_model_a3f9'}
+            with self.assertRaises(ValueError):
+                save_video(np.zeros((8, 64, 64, 3), dtype=np.uint8), config, value, {})
+            self.assertEqual(self.files(folder), [])
+
     def test_audio_export_and_continuation_use_exact_timebase_without_duplicate_overlap(self):
         import numpy as np
         import av

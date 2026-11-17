@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, mkdir, open, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir, open, readFile, readdir, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,10 +50,13 @@ async function tokenizerFolder(root) {
 }
 /**
  * Atelier's own engine as far as these tests go: it runs Krea 2, and answers each job with one
- * image saved in the output folder.
+ * image saved in the output folder: as the engine does (runner/media.py), under the name the
+ * application asks for, in the folder of the images. `flat`: as every creation was written before
+ * the three folders, under a random name in the folder of the outputs itself.
  */
-function fakeEngine(outputDir, { onGenerate = () => {}, onRelease = () => {} } = {}) {
+function fakeEngine(outputDir, { onGenerate = () => {}, onRelease = () => {}, flat = false } = {}) {
   return {
+    flat,
     state: 'stopped',
     status() {
       return {
@@ -76,11 +80,13 @@ function fakeEngine(outputDir, { onGenerate = () => {}, onRelease = () => {} } =
     async request(method, job) {
       if (method !== 'generate') return {};
       onGenerate(job);
-      const filename = randomUUID().replaceAll('-', '') + '.png';
-      await writeFile(join(outputDir, filename), png);
+      const subfolder = this.flat ? '' : 'image',
+        filename = (this.flat ? randomUUID().replaceAll('-', '') : job.outputName) + '.png';
+      await mkdir(join(outputDir, subfolder), { recursive: true });
+      await writeFile(join(outputDir, subfolder, filename), png);
       return {
         jobId: job.id,
-        outputs: [{ filename, subfolder: '', type: 'output', width: 1, height: 1 }],
+        outputs: [{ filename, subfolder, type: 'output', width: 1, height: 1 }],
         metadata: {},
       };
     },
@@ -152,7 +158,7 @@ test(
   { timeout: 20000 },
   async () => {
     const root = await mkdtemp(join(tmpdir(), 'native-http-'));
-    let app;
+    let app, named;
     const events = [];
     // A ComfyUI is set and answers: Atelier's engine makes the image all the same.
     const comfy = await fakeComfy(() => assert.fail('a graph was sent to ComfyUI'));
@@ -162,6 +168,12 @@ test(
       onGenerate(job) {
         events.push('generate');
         assert.equal(job.parameters.seed, 99);
+        // The name of its file: the local time it starts, its model (« Native image »), a short suffix.
+        assert.match(job.outputName, /^\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d_native-image_[0-9a-f]{4}$/);
+        const [day, time] = job.outputName.split('_'),
+          at = new Date(`${day}T${time.replaceAll('-', ':')}`);
+        assert.ok(Math.abs(Date.now() - at) < 60000, 'the time it is now, here');
+        named = job.outputName;
       },
       onRelease: () => events.push('runner released'),
     });
@@ -274,6 +286,8 @@ test(
       assert.equal(job.state, 'done', job.error);
       assert.equal(job.record.provider, 'native');
       assert.equal(job.record.parameters.seed, 99);
+      // Its record says where the engine wrote it: the folder of the images, under the name asked.
+      assert.deepEqual(job.record.outputs[0].source, { filename: named + '.png', subfolder: 'image', type: 'output' });
       assert.ok(events.indexOf('llm stopped') < events.indexOf('generate'));
       assert.ok(events.indexOf('runner released') < events.lastIndexOf('llm started'));
       // The original served is the image the engine made, with its sheet written in it (16/11): what
@@ -292,9 +306,12 @@ test(
       assert.doesNotMatch(JSON.stringify(sheet), /safetensors|[A-Z]:\\\\/);
       await api('history/clear', { confirm: true });
       // The conversation gone, the file still says what made it.
-      const kept = await readFile(join(outputDir, job.record.outputs[0].source.filename));
+      const kept = await readFile(join(outputDir, 'image', job.record.outputs[0].source.filename));
       assert.deepEqual(kept, served);
       assert.equal((await bytesInfo(kept)).id, job.record.id);
+      // Nothing else in the folder of the outputs: the image in its folder, and no temporary file.
+      assert.deepEqual(await readdir(outputDir), ['image']);
+      assert.deepEqual(await readdir(join(outputDir, 'image')), [named + '.png']);
     } finally {
       await app?.close();
       await comfy.close();
@@ -311,7 +328,12 @@ test(
     const outputDir = join(root, 'output');
     await mkdir(outputDir);
     let app;
-    const worker = fakeEngine(outputDir);
+    // Each job with the files of its sources as the engine reads them (they are removed afterwards).
+    const jobs = [];
+    const worker = fakeEngine(outputDir, {
+      flat: true,
+      onGenerate: job => jobs.push({ ...job, staged: job.references.map(ref => readFileSync(ref.path)) }),
+    });
     try {
       app = await createApplication({
         // The scripted model writes three-word prompts: the length of a prompt is tested apart.
@@ -514,6 +536,46 @@ test(
       assert.equal(written.kind, 'invalid');
       assert.match(written.message, /n’est pas transmise à l’outil.*\(image à modifier : source\)\.$/);
       assert.equal(written.requestId, undefined);
+
+      // A take written before the three folders (in the folder of the outputs itself, under a random
+      // name) is given to the engine as itself: its own file, with the sheet written in it.
+      const run = async proposal => {
+        await api('tools/execute', { requestId: proposal.requestId, permission: 'once' }, 202);
+        const done = await until(async () => {
+          const j = await (await api('tools/job')).json();
+          return j && ['done', 'error'].includes(j.state) && j;
+        });
+        assert.equal(done.state, 'done', done.error);
+        await until(async () => (await (await api('status')).json()).state === 'ready');
+        return done.record;
+      };
+      const proposed = async text => (await chat(text)).find(e => e.local_tool_request).local_tool_request;
+      assert.match(job.record.outputs[0].source.filename, /^[0-9a-f]{32}\.png$/);
+      assert.equal(job.record.outputs[0].source.subfolder, '');
+      await run(await proposed('generate from ' + job.record.id));
+      assert.equal(jobs.at(-1).references.length, 1);
+      assert.deepEqual(await withoutSheet(jobs.at(-1).staged[0]), png);
+      assert.equal((await bytesInfo(jobs.at(-1).staged[0])).id, job.record.id);
+      // From now on the engine writes where the application asks: the folder of the images. A take
+      // made there is a source like the others.
+      worker.flat = false;
+      const named = await run(await proposed('generate a boat'));
+      assert.equal(named.outputs[0].source.subfolder, 'image');
+      assert.match(named.outputs[0].source.filename, /^\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d_krea-2_[0-9a-f]{4}\.png$/);
+      const fromNamed = await proposed('generate from ' + named.id);
+      assert.equal(fromNamed.referenceCount, 1);
+      await run(fromNamed);
+      assert.equal((await bytesInfo(jobs.at(-1).staged[0])).id, named.id);
+      // Both are listed, and served at their address: the old ones where they were, the new ones in
+      // their folder.
+      const { runs } = await (await api(`gallery/${conversationId}?images=0`)).json();
+      assert.deepEqual(runs.map(made => made.outputs[0].source.subfolder).sort(), ['', '', 'image', 'image']);
+      for (const made of runs) {
+        const original = await fetch(app.url + made.outputs[0].originalUrl);
+        assert.equal(original.status, 200, made.outputs[0].source.filename);
+        assert.equal((await bytesInfo(Buffer.from(await original.arrayBuffer()))).id, made.id);
+      }
+      assert.deepEqual((await readdir(outputDir)).filter(name => !/^[0-9a-f]{32}\.png$/.test(name)), ['image']);
     } finally {
       await app?.close();
       await rm(root, { recursive: true, force: true });

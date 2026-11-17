@@ -14,19 +14,51 @@ def manifest_path(config, name):
     return root / (name + '.json')
 
 
+# The folder of each kind of creation, under the folder of the outputs.
+FOLDERS = dict(image='image', video='video', audio='son')
+
+
+def output_place(config, job, kind, extension):
+    """Where a new creation of `kind` (image, video, audio) is written: (root, output).
+
+    `root` is the folder of the outputs, where the temporary files go: a creation that fails or is
+    stopped leaves nothing in the folders of the creations. `output` is the finished file. Named by
+    the application (`outputName` of the job: the time, the model, a short suffix), it goes in the
+    folder of its kind under that name, or under the same with another suffix when a creation has
+    it already. Without a name (an older caller), a random one in the folder of the outputs itself,
+    as before.
+    """
+    from runner.registry import output_name
+
+    root = Path(config['outputRoot']).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    name = job.get('outputName')
+    if name is None:
+        return root, root / (uuid.uuid4().hex + extension)
+    output_name(name)
+    folder = root / FOLDERS[kind]
+    folder.mkdir(exist_ok=True)
+    while (folder / (name + extension)).exists() or manifest_path(config, name).exists():
+        name = name.rsplit('_', 1)[0] + '_' + uuid.uuid4().hex[:4]
+    return root, folder / (name + extension)
+
+
+def subfolder(config, output):
+    """The folder of a creation as its descriptor names it: '' for the folder of the outputs itself."""
+    return '' if output.parent == Path(config['outputRoot']).resolve() else output.parent.name
+
+
 def save_image(pixels, config, job, metadata):
     from PIL import Image, PngImagePlugin
 
-    destination = Path(config['outputRoot']).resolve()
-    destination.mkdir(parents=True, exist_ok=True)
-    filename = uuid.uuid4().hex + '.png'
-    output = destination / filename
+    destination, output = output_place(config, job, 'image', '.png')
+    filename = output.name
     manifest = manifest_path(config, output.stem)
     temporary = destination / (filename + '.tmp')
     temporary_manifest = manifest.with_name(manifest.name + '.tmp')
     descriptor = dict(
         filename=filename,
-        subfolder='',
+        subfolder=subfolder(config, output),
         type='output',
         width=int(pixels.shape[1]),
         height=int(pixels.shape[0]),
@@ -86,13 +118,11 @@ def save_audio(samples, sample_rate, config, job, metadata):
     # Interleaved little-endian 24-bit integers, three bytes each.
     scaled = np.ascontiguousarray(np.round(np.clip(samples.T, -1.0, 1.0) * 8388607.0).astype('<i4'))
     pcm = scaled.view(np.uint8).reshape(length, channels, 4)[:, :, :3].tobytes()
-    destination = Path(config['outputRoot']).resolve()
-    destination.mkdir(parents=True, exist_ok=True)
-    output = destination / (uuid.uuid4().hex + '.wav')
+    destination, output = output_place(config, job, 'audio', '.wav')
     temporary = destination / (output.name + '.tmp')
     descriptor = dict(
         filename=output.name,
-        subfolder='',
+        subfolder=subfolder(config, output),
         type='output',
         seconds=round(length / sample_rate, 3),
         sampleRate=int(sample_rate),

@@ -4,7 +4,6 @@ from fractions import Fraction
 import os
 from pathlib import Path
 import subprocess
-import uuid
 
 MAX_FRAMES = 36000
 
@@ -120,11 +119,14 @@ class VideoWriter:
                 muxed.unlink(missing_ok=True)
 
 
-def output_paths(config, extension):
-    """A fresh (final, temporary, manifest) triple under the trusted output folder."""
-    destination = Path(config['outputRoot']).resolve()
-    destination.mkdir(parents=True, exist_ok=True)
-    name = uuid.uuid4().hex
-    from runner.media import manifest_path
+def output_paths(config, extension, job=None):
+    """A fresh (final, temporary, manifest) triple under the trusted output folder.
 
-    return destination / (name + extension), destination / (name + '.tmp' + extension), manifest_path(config, name)
+    With the job, the final file is where the application asks for it (runner.media.output_place:
+    the folder of the videos, under the name of the job); the temporary one stays in the folder of
+    the outputs itself."""
+    from runner.media import manifest_path, output_place
+
+    destination, output = output_place(config, job or {}, 'video', extension)
+    name = output.stem
+    return output, destination / (name + '.tmp' + extension), manifest_path(config, name)

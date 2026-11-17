@@ -86,12 +86,12 @@ def generate(job, config, progress):
             metadata['peak_vram_gib'] = round(torch.cuda.max_memory_allocated() / 1024**3, 3)
         return save_image(output, config, job, metadata)
 
-    from runner.media import publish
+    from runner.media import publish, subfolder
     from runner.video.stream import VideoWriter, frames, output_paths, probe
 
     info = probe(source)
     width, height = _target(info['width'], info['height'], model.scale, max_side)
-    output, temporary, manifest = output_paths(config, '.mp4')
+    output, temporary, manifest = output_paths(config, '.mp4', job)
     writer = VideoWriter(temporary, width, height, info['fps'])
     try:
         for index, pixels in enumerate(frames(source)):
@@ -110,5 +110,6 @@ def generate(job, config, progress):
     )
     if device == 'cuda':
         metadata['peak_vram_gib'] = round(torch.cuda.max_memory_allocated() / 1024**3, 3)
-    descriptor = dict(filename=output.name, subfolder='', type='output', width=width, height=height)
+    folder = subfolder(config, output)
+    descriptor = dict(filename=output.name, subfolder=folder, type='output', width=width, height=height)
     return publish(temporary, output, manifest, dict(jobId=job['id'], outputs=[descriptor], metadata=metadata))

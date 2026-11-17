@@ -22,7 +22,7 @@ def preflight(job, config):
 def generate(job, config, progress):
     import torch
 
-    from runner.media import publish
+    from runner.media import publish, subfolder
     from runner.models import rife
     from runner.video.stream import VideoWriter, frames, output_paths, probe
 
@@ -39,7 +39,7 @@ def generate(job, config, progress):
     info = probe(source)
     # Smooth keeps the duration (and the audio) at a higher frame rate; slow motion keeps the frame rate.
     fps = info['fps'] * multiplier if mode == 'smooth' else info['fps']
-    output, temporary, manifest = output_paths(config, '.mp4')
+    output, temporary, manifest = output_paths(config, '.mp4', job)
     writer = VideoWriter(temporary, info['width'], info['height'], fps)
 
     def tensor(pixels):
@@ -78,5 +78,6 @@ def generate(job, config, progress):
     )
     if device == 'cuda':
         metadata['peak_vram_gib'] = round(torch.cuda.max_memory_allocated() / 1024**3, 3)
-    descriptor = dict(filename=output.name, subfolder='', type='output', width=info['width'], height=info['height'])
+    folder = subfolder(config, output)
+    descriptor = dict(filename=output.name, subfolder=folder, type='output', width=info['width'], height=info['height'])
     return publish(temporary, output, manifest, dict(jobId=job['id'], outputs=[descriptor], metadata=metadata))
