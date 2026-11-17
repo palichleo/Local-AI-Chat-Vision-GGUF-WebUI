@@ -15972,3 +15972,23 @@ button.glass-select::after {
   max-width: 320px;
   color: var(--danger);
 }
+
+/* ------------------------------------------------------------------ a failed take, wide enough for its words (17/11) */
+/* A take that failed says why in its frame (52). An upright clip (202 px wide) or a still (212 px)
+   is too narrow for these words: their title ran under « ÉCHEC » and the second action was cut.
+   Failed, a take is as wide as 340 px at least, its frame no taller than an upright clip (360 px);
+   the two actions go on two lines where one does not hold them. */
+#messages .generation-card.is-failed:not(.is-audio) {
+  width: min(560px, 100%, calc(360px * max(var(--take-ratio, 1), 0.9444)));
+}
+#messages .generation-card.is-failed:not(.is-audio) > .generation-frame {
+  aspect-ratio: max(var(--take-ratio, 1), 0.9444) !important;
+}
+#messages .generation-failure {
+  padding: 38px 22px 22px;
+}
+#messages .generation-failure-actions {
+  flex-wrap: wrap;
+  justify-content: center;
+  row-gap: 12px;
+}

@@ -988,6 +988,10 @@ test('a frame named on an image is the image itself, and a picture that cannot b
   const picture = await video({ resource: added.id, frame: 'first' }, 'call-2');
   assert.deepEqual(picture.args.references, [{ input: 'start', resource_id: added.id }]);
   assert.deepEqual(asked, []);
+  // A file of the user's is named in the card as they name it in the chat, not by its file name
+  // (17/11: « Rôle de 297e3b9ff713460… »).
+  assert.equal(picture.plan.references[0].label, (await library.list(PROJECT)).find(item => item.id === added.id).label);
+  assert.match(picture.plan.references[0].label, /^#ref\d+$/);
   // The video cannot be read: said in the user's words, as a call the model can correct (400).
   await assert.rejects(video({ output: CLIP, frame: 'last' }, 'call-3'), {
     status: 400,

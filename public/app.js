@@ -2149,12 +2149,14 @@ function assistantMessage(parent = null) {
   }
   const body = node('div', 'message-body');
   const note = node('div', 'message-note');
-  const generations = parent?.generations || node('div', 'generation-grid');
-  article.append(reasoning, body, note);
-  if (!parent) {
-    article.append(generations);
-    $('messages').append(article);
-  }
+  // The cards of a step go under its words (17/11: a video proposed after a reference was read
+  // stood above the text that proposed it). A later step of the turn takes the grid of the turn
+  // while it is empty, moved under its words; a grid of its own once that one holds a card.
+  const kept = parent && !parent.generations.children?.length ? parent.generations : null,
+    generations = kept || node('div', 'generation-grid');
+  kept?.remove?.();
+  article.append(reasoning, body, note, generations);
+  if (!parent) $('messages').append(article);
   return { article, reasoning, summary, thoughts, thought, body, note, generations };
 }
 /**
@@ -2167,7 +2169,9 @@ function turnTime(view, started) {
     text = took >= 59.95 ? thoughtTime(took) : `${took.toFixed(1)} s`;
   view.note.textContent = text;
   view.note.classList?.add('is-time');
-  view.generations?.setAttribute?.('data-time', text);
+  // On the line of the last takes of the turn: a step may have a grid of its own (assistantMessage).
+  const grids = [...(view.article?.querySelectorAll?.('.generation-grid[data-takes]') ?? [])];
+  (grids.at(-1) ?? view.generations)?.setAttribute?.('data-time', text);
 }
 
 /**

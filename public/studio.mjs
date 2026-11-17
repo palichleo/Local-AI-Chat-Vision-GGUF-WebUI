@@ -121,13 +121,14 @@ function fineValue(setting, value) {
  * one the engine only reads with an input (`onlyWith`: the denoise of Krea 2 with an image to
  * modify) is none of a creation made without it, whose record then says another value (1).
  */
-const settingRead = (setting, roles) => !setting.onlyWith || roles.includes(setting.onlyWith.role);
+const onlyRoles = setting => (setting.onlyWith ? (setting.onlyWith.roles ?? [setting.onlyWith.role]) : []);
+const settingRead = (setting, roles) => !setting.onlyWith || onlyRoles(setting).some(role => roles.includes(role));
 /**
  * The case of the input a setting is only read with (by the role the Studio gives that input:
  * `inputs` of its workflow), or null for a setting read whatever the inputs.
  */
-const onlyRole = (workflow, setting) =>
-  setting.onlyWith ? (workflow.inputs?.[setting.onlyWith.role] ?? setting.onlyWith.role) : null;
+const onlyInputs = (workflow, setting) => onlyRoles(setting).map(role => workflow.inputs?.[role] ?? role);
+const onlyRole = (workflow, setting) => onlyInputs(workflow, setting)[0] ?? null;
 /** The settings on a bar of a model that « Enregistrer » keeps. */
 const keptSettings = workflow =>
   (workflow.settings ?? []).filter(setting => KEPT_SETTINGS.includes(setting.key) && fineSetting(setting));
@@ -1550,7 +1551,7 @@ export function setupStudio({
       list = [];
     for (let step = 0; low + step * 0.01 <= high + 1e-9; step++) list.push(Math.round((low + step * 0.01) * 100) / 100);
     const role = onlyRole(workflow, setting),
-      idle = Boolean(role) && !(draft.inputs[role] ?? []).some(Boolean),
+      idle = Boolean(role) && !onlyInputs(workflow, setting).some(input => (draft.inputs[input] ?? []).some(Boolean)),
       label = SETTINGS[setting.key] || setting.key,
       said = idle
         ? (ONLY_WITH[role] ?? `Sert seulement avec l’entrée « ${ROLES[role] ?? role} ».`)
@@ -2354,7 +2355,7 @@ export function setupStudio({
       if (value === undefined || value === '') continue;
       // Read only with an input that does not go with this creation (« Débruitage » without an
       // image to modify): greyed here, and not sent.
-      if (setting.onlyWith && args[onlyRole(workflow, setting)] === undefined) continue;
+      if (setting.onlyWith && onlyInputs(workflow, setting).every(input => args[input] === undefined)) continue;
       args[setting.key] = setting.type === 'string' ? value : Number(value);
     }
     // The LoRAs of the workflow left to the assistant, as chosen here.

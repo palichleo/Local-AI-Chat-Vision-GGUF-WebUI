@@ -137,7 +137,9 @@
     "overlap_frames": {
       "type": "integer",
       "choices": [22, 39, 56],
-      "note": "Images reprises de la vidéo source (17n+5)."
+      "note": "Images reprises de la vidéo source (17n+5).",
+      "onlyWith": { "role": "source_video" },
+      "help": "Images de la vidéo source reprises au début de la suite, pour la raccorder. Sans vidéo à prolonger, ce réglage n’est pas lu."
     },
     "attention": {
       "type": "string",

@@ -94,12 +94,13 @@ test('a setting the editor leaves open changes the job of every shipped workflow
       if (name === 'expandPrompt' && alternative) changed.promptExpansion ??= manifest.promptExpansionDefault;
       // A setting the engine only reads with an input (the denoise of Krea 2 with an image to
       // modify) is tried with that input: without it, it changes nothing, and its help says so.
-      const slot = spec.onlyWith && workflow.references.find(item => item.role === spec.onlyWith.role),
+      const roles = spec.onlyWith ? (spec.onlyWith.roles ?? [spec.onlyWith.role]) : [],
+        slot = workflow.references.find(item => roles.includes(item.role)),
         given = slot ? { references: [{ input: slot.id, resource_id: RESOURCE }] } : undefined;
       if (spec.onlyWith) {
         assert.ok(slot, `${where}: no input for it in this workflow`);
         assert.equal(sent(await resolve(changed)), base, `${where}: read without its input`);
-        assert.match(spec.help, /Sans image/, where);
+        assert.match(spec.help, /Sans (image|vidéo)/, where);
       }
       const reason =
           inertSetting(manifest, workflow, name, 'value') || inertSetting(manifest, workflow, name, 'parameter'),

@@ -486,3 +486,51 @@ test('a parameter its family marks unused is no setting to change before a creat
     /cannot be edited/,
   );
 });
+
+test('LTX 2.5: a setting read with an input only is a setting of the takes that have that input', async () => {
+  // 17/11: the card of a video that started from an image offered « Force de l’image de fin » and
+  // « Chevauchement », which the engine reads with an end image and with a video to continue only
+  // (runner/pipelines/ltx25.py), and the record of the take listed them.
+  const shipped = JSON.parse(
+    await readFile(new URL('../runner/workflows/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8'),
+  );
+  const here = { resolve: async id => ({ path: join(tmpdir(), id) }) };
+  const slot = role => shipped.references.find(item => item.role === role).id,
+    given = (...roles) => roles.map((role, image) => ({ input: slot(role), image }));
+  const conditional = ['start_strength', 'end_strength', 'image_compression', 'overlap_frames'];
+  const cases = [
+    [[], []],
+    [['start_image'], ['start_strength', 'image_compression']],
+    [['end_image'], ['end_strength', 'image_compression']],
+    [['start_image', 'end_image'], ['start_strength', 'end_strength', 'image_compression']],
+    [['source_video'], ['overlap_frames']],
+  ];
+  for (const [roles, read] of cases) {
+    const references = given(...roles),
+      unread = unreadParameters(shipped, references);
+    assert.deepEqual(Object.keys(unread).sort(), conditional.filter(key => !read.includes(key)).sort(), roles.join('+'));
+    // None has a value of its own without its input: it is no part of the job.
+    assert.ok(Object.values(unread).every(value => value === undefined));
+    const all = { ...Object.fromEntries(conditional.map(key => [key, shipped.parameters[key].value])), frames: 121, seed: 1 };
+    const offered = editableParameters(shipped, all, { references }).map(item => item.key);
+    for (const key of conditional) assert.equal(offered.includes(key), read.includes(key), `${roles.join('+')}: ${key}`);
+  }
+  // With no word of the inputs (the editor of a workflow), every setting is there.
+  const everything = editableParameters(shipped, { start_strength: 0.7, end_strength: 0.7, overlap_frames: 9 }).map(item => item.key);
+  assert.deepEqual(everything, ['start_strength', 'end_strength', 'overlap_frames']);
+  // The job of a video from a start image: its strength and the compression of the image, and
+  // nothing of an end image nor of a continuation; a value typed for one of them is left aside.
+  const { parameters } = await resolveNativeWorkflow(
+    shipped,
+    { prompt: 'a boat', intention: 'x', references: given('start_image') },
+    here,
+    { seed: 1, allowPendingReferences: true, overrides: { end_strength: 0.2, start_strength: 0.9 } },
+  );
+  assert.equal(parameters.start_strength, 0.9);
+  assert.equal(parameters.image_compression, 18);
+  assert.equal('end_strength' in parameters, false);
+  assert.equal('overlap_frames' in parameters, false);
+  // What says why is said in the editor of the workflow and under the setting in a proposal.
+  for (const key of conditional) assert.match(family('ltx25').parameters[key].help, /^.*Sans (image|vidéo)[^.]*, ce réglage n’est pas lu\.$/);
+  assert.deepEqual(family('minimax_h3').parameters.overlap_frames.onlyWith, { role: 'source_video' });
+});

@@ -469,7 +469,13 @@ test('the user gives an input another role: a subject reference becomes the firs
   assert.equal(second.plan.references[0].input, 'start');
   assert.equal(second.plan.references[0].roleLabel, 'Image de début');
   assert.equal(second.args.references[0].input, 'start');
-  assert.equal(second.plan.parameters.start_strength, first.plan.parameters.start_strength);
+  // The strength of a start image is a setting of the proposal once it has one (0.6.75): read by
+  // the engine with that image only, it was no part of the first, which had a subject alone.
+  assert.equal(first.plan.parameters.start_strength, undefined);
+  assert.equal(first.plan.editable.parameters.some(item => item.key === 'start_strength'), false);
+  assert.equal(second.plan.parameters.start_strength, 0.7);
+  assert.equal(second.plan.editable.parameters.some(item => item.key === 'start_strength'), true);
+  assert.equal(second.plan.editable.parameters.some(item => item.key === 'end_strength'), false);
   assert.deepEqual(loras(second), [], 'a first frame needs no subject LoRA');
 });
 

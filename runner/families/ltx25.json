@@ -142,21 +142,29 @@
     "start_strength": {
       "type": "number",
       "min": 0,
-      "max": 1
+      "max": 1,
+      "onlyWith": { "role": "start_image" },
+      "help": "À quel point la vidéo suit l’image de début (1 : au plus près). Quand la vidéo est faite en deux passages, l’affinage en pleine taille reprend toujours cette image exactement. Sans image de début, ce réglage n’est pas lu."
     },
     "end_strength": {
       "type": "number",
       "min": 0,
-      "max": 1
+      "max": 1,
+      "onlyWith": { "role": "end_image" },
+      "help": "À quel point la vidéo arrive sur l’image de fin (1 : au plus près). Sans image de fin, ce réglage n’est pas lu."
     },
     "image_compression": {
       "type": "integer",
       "min": 0,
-      "max": 51
+      "max": 51,
+      "onlyWith": { "roles": ["start_image", "end_image"] },
+      "help": "Compression (CRF) appliquée à l’image de début et à l’image de fin avant de les donner au modèle : 0, aucune. Sans image de début ni de fin, ce réglage n’est pas lu."
     },
     "overlap_frames": {
       "type": "integer",
-      "choices": [1, 9, 17, 25, 33]
+      "choices": [1, 9, 17, 25, 33],
+      "onlyWith": { "role": "source_video" },
+      "help": "Images de la vidéo source reprises au début de la suite, pour la raccorder. Sans vidéo à prolonger, ce réglage n’est pas lu."
     },
     "msr_frames": {
       "type": "integer",
