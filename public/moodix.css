@@ -9300,12 +9300,12 @@ body {
 .thread-menu .thread-search input:focus-visible {
   box-shadow: none;
 }
-/* La marque de 20 px, « Moodix » en Gloock 26 px, 9 px entre les deux, la marque remontée de 1 px. */
+/* « Moodix » en Gloock 26 px, l'Éclipse à la place du premier « o » (Logo E, « Dans le nom »,
+   17/11) : plus de marque à part. */
 .top-brand {
   justify-self: start;
   display: inline-flex;
   align-items: center;
-  gap: 9px;
   min-width: 0;
   border-radius: var(--radius-s);
   color: var(--text-1);
@@ -9318,12 +9318,16 @@ body {
 .top-brand:focus-visible {
   opacity: 1;
 }
-.top-brand .top-mark {
-  width: 20px;
-  height: 20px;
+/* The Éclipse of the word follows its size: 0.556 of it wide, 0.03 on each side, 0.022 lower than
+   the line (14.5 px, 0.8 px and -0.6 px at 26 px). Fuller than the mark (radii 15.2 and 14): not
+   eclipse.svg. In currentColor, the room's and the Jour mode's. */
+.brand-eclipse {
+  display: inline-block;
+  width: 0.556em;
+  height: 0.556em;
+  margin: 0 0.03em;
   overflow: visible;
-  stroke: none;
-  transform: translateY(-1px);
+  vertical-align: -0.022em;
 }
 .top-name {
   font-family: var(--font-display);
@@ -9852,8 +9856,9 @@ body {
   .top-bar {
     padding: 0 12px;
   }
+  /* The word stays (it is the mark now), smaller: its Éclipse follows. */
   .top-name {
-    display: none;
+    font-size: 20px;
   }
   .thread {
     margin: 6px 12px 0;
