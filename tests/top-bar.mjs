@@ -8,16 +8,21 @@ import * as sessionCopies from '../public/session-copies.mjs';
 // before): what those tests checked of the places, the library and the model, now on the top bar.
 const read = async name => (await readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
-test('the top bar: the Éclipse and « Moodix », then Chat · Studio · Pellicule, then the model and the gear; no sidebar', async () => {
+test('the top bar: « Moodix » with the Éclipse for its first « o », then Chat · Studio · Pellicule, then the model and the gear; no sidebar', async () => {
   const html = await read('index.html'),
     top = html.slice(html.indexOf('<header id="top"'), html.indexOf('</header>', html.indexOf('<header id="top"')));
   assert.ok(top.length > 100);
-  const order = ['id="brand-home"', 'class="top-name">Moodix<', 'id="chat-open"', 'id="studio-open"', 'id="library-open"', 'id="toggle-engine"', 'id="engine-name"', 'id="settings-open"'].map(
+  const order = ['id="brand-home"', 'class="top-name brand-word" aria-label="Moodix">M<svg', 'id="chat-open"', 'id="studio-open"', 'id="library-open"', 'id="toggle-engine"', 'id="engine-name"', 'id="settings-open"'].map(
     mark => top.indexOf(mark),
   );
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'in this order');
-  // The mark is the Éclipse, drawn in the page (its colour follows the room).
-  assert.match(top, /<svg class="top-mark" viewBox="0 0 32 32" aria-hidden="true"><circle class="eclipse-ring" cx="16" cy="16" r="12\.5"\/><path class="eclipse-sphere" d="M4\.63 10\.81A12\.5 12\.5 0 1 0 27\.37 10\.81A11\.4 11\.4 0 0 1 4\.63 10\.81Z"\/><\/svg>/);
+  // The Éclipse in the word (Logo E, « Dans le nom », 17/11): fuller than the mark (radii 15.2 and
+  // 14), in currentColor; no mark apart any more.
+  assert.match(
+    top,
+    /aria-label="Moodix">M<svg class="brand-eclipse" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15\.2" fill="none" stroke="currentColor" stroke-opacity="0\.22" stroke-width="1" vector-effect="non-scaling-stroke"\/><path d="M2\.01 10\.06A15\.2 15\.2 0 1 0 29\.99 10\.06A14 14 0 0 1 2\.01 10\.06Z" fill="currentColor"\/><\/svg>odix<\/span><\/a>/,
+  );
+  assert.doesNotMatch(top, /top-mark|eclipse-ring|eclipse\.svg/);
   assert.match(top, /<button id="library-open" type="button" class="top-place" aria-controls="library-view">Pellicule<\/button>/);
   // No sidebar, no drawer, no button « Nouveau chat » any more: the fil holds the conversations.
   assert.doesNotMatch(html, /id="sidebar"|id="navigation-open"|id="new-chat"|id="sidebar-toggle"|class="mdx-filet"|sidebar-state\.js/);
@@ -29,10 +34,13 @@ test('the top bar: the Éclipse and « Moodix », then Chat · Studio · Pellicu
   assert.ok(html.indexOf('<nav id="thread"') > html.indexOf('<div class="workspace">'));
   assert.ok(html.indexOf('<nav id="thread"') < html.indexOf('<section id="library-view"'));
   const css = await read('moodix.css');
-  // 72 px high, the three places in the middle; « Moodix » in Gloock 26 px, 9 px from a mark of 20 px.
+  // 72 px high, the three places in the middle; « Moodix » in Gloock 26 px, its Éclipse in em.
   assert.match(css, /\.top-bar \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto minmax\(0, 1fr\);[^}]*height: 72px;[^}]*padding: 0 36px;/);
-  assert.match(css, /\.top-brand \{[^}]*gap: 9px;/);
-  assert.match(css, /\.top-brand \.top-mark \{[^}]*width: 20px;[^}]*height: 20px;[^}]*transform: translateY\(-1px\);/);
+  assert.match(
+    css,
+    /\.brand-eclipse \{[^}]*width: 0\.556em;[^}]*height: 0\.556em;[^}]*margin: 0 0\.03em;[^}]*vertical-align: -0\.022em;/,
+  );
+  assert.doesNotMatch(css, /\.top-mark/);
   assert.match(css, /\.top-name \{[^}]*font-family: var\(--font-display\);[^}]*font-size: 26px;/);
   // One line under the tab of the view, which glides to the tab chosen (16/11).
   assert.match(css, /\.top-line \{[^}]*width: 16px;[^}]*height: 1\.5px;[^}]*transition: transform 0\.2s cubic-bezier\(0\.2, 0\.7, 0\.2, 1\);/);

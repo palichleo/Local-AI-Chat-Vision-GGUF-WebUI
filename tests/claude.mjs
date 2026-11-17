@@ -10,7 +10,7 @@ import { createApplication } from '../server.mjs';
 import { readSSE } from '../public/stream.mjs';
 import { collectToolCalls } from '../lib/tool-runtime.mjs';
 import { CLAUDE_DEFAULT, ClaudeAccess, claudeChunks, claudeMessages, claudeRequest } from '../lib/claude.mjs';
-import { choiceLabel } from '../public/model-choice.mjs';
+import { effortState, modelLabel } from '../public/model-choice.mjs';
 import { fakeAnthropic } from './fixtures/fake-anthropic.mjs';
 
 /**
@@ -225,21 +225,38 @@ test('the events of Claude read as the chat reads llama.cpp: words, reflection, 
   );
 });
 
-test('the label of the bar of the chat: the model and its effort, or the reflection of the local model', () => {
-  assert.equal(choiceLabel({ remote: null }, null, true), 'Réflexion');
-  assert.equal(choiceLabel({ remote: null }, null, false), 'Sans réflexion');
+test('the two buttons of the bar of the chat: the model, then its reflection (17/11)', () => {
+  // The local model: its name, with or without reflection.
+  assert.equal(modelLabel({ remote: null }, null, 'Qwen 3.5'), 'Qwen 3.5');
+  assert.equal(modelLabel({ remote: null }, null, ''), 'Aucun LLM');
+  assert.deepEqual(effortState({ remote: null }, null, true), { label: 'Réflexion', off: false, why: '' });
+  assert.deepEqual(effortState({ remote: null }, null, false), { label: 'Sans réflexion', off: true, why: '' });
   const status = { remote: { id: 'x', model: 'claude-opus-5-5', effort: 'high' } };
-  assert.equal(choiceLabel(status, null, true), 'claude-opus-5-5 · Élevée');
+  assert.equal(modelLabel(status, null), 'claude-opus-5-5');
+  assert.equal(effortState(status, null, false).label, 'Réflexion élevée', 'a remote model: the effort, not the local switch');
   // The name from the listing; the effort the one kept for the connection (the one sent).
-  assert.equal(
-    choiceLabel(
-      { remote: { ...status.remote, effort: 'xhigh' } },
-      { model: 'claude-opus-5-5', effort: 'high', models: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }] },
-      true,
-    ),
-    'Claude Opus 5.5 · Très élevée',
-  );
-  assert.equal(choiceLabel({ remote: { model: 'openrouter/free', effort: '' } }, null, true), 'openrouter/free');
+  const listed = { model: 'claude-opus-5-5', effort: 'high', efforts: ['low', 'high', 'xhigh'], models: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }] };
+  assert.equal(modelLabel(status, listed), 'Claude Opus 5.5');
+  assert.equal(effortState({ remote: { ...status.remote, effort: 'xhigh' } }, listed, true).label, 'Réflexion très élevée');
+  // None chosen yet: none is sent, the service decides; « Aucune »: none goes, greyed.
+  assert.deepEqual(effortState({ remote: { model: 'openrouter/free', effort: '' } }, null, true), {
+    label: 'Réflexion',
+    off: false,
+    why: 'Aucune force choisie : le service décide.',
+  });
+  assert.equal(effortState({ remote: { ...status.remote, effort: 'none' } }, listed, true).label, 'Aucune réflexion');
+  assert.equal(effortState({ remote: { ...status.remote, effort: 'none' } }, listed, true).off, true);
+  // A model that lists no effort and none kept, a service that refuses the one chosen: greyed, and
+  // why. One kept still goes (the server sends it): said.
+  assert.equal(effortState(status, { ...listed, efforts: [] }, true).label, 'Réflexion élevée');
+  assert.deepEqual(effortState({ remote: { ...status.remote, effort: '' } }, { ...listed, efforts: [] }, true), {
+    label: 'Réflexion',
+    off: true,
+    why: 'Ce modèle ne propose pas de réglage de la réflexion.',
+  });
+  assert.equal(effortState(status, { ...listed, ignored: true }, true).off, true);
+  // A listing that failed: the effort kept, which still goes, is said.
+  assert.equal(effortState(status, { models: [], efforts: [], error: 'erreur 503' }, true).label, 'Réflexion élevée');
 });
 
 test('without its library, Claude says so and offers to install it; npm is asked as package-lock.json says', async t => {

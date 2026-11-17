@@ -203,6 +203,15 @@ try {
   await run('raccourci « Créer une image »', () => click('.suggestions [data-label="Image"]'), () =>
     js(`!document.getElementById('prompt-label').hidden && document.querySelector('[data-label="Image"]').getAttribute('aria-pressed') === 'true'`));
   await run('retirer l’étiquette', () => click('#prompt-label-clear'), () => js(`document.getElementById('prompt-label').hidden`));
+  // « Modèle » and « Réflexion », two buttons of the bar (0.6.64): one menu at a time.
+  await run('menu du modèle', () => click('#model-choice'), () =>
+    js(`!document.getElementById('model-choice-menu').hidden && document.getElementById('model-choice-text').textContent.length > 0`));
+  await run('menu de la réflexion', () => click('#effort-choice'), () =>
+    js(`document.getElementById('model-choice-menu').hidden && !document.getElementById('effort-choice-menu').hidden`));
+  await run('sans réflexion', () => click('#effort-choice-menu [data-key="thinking:false"]'), () =>
+    js(`document.getElementById('effort-choice-menu').hidden && document.getElementById('effort-choice-text').textContent === 'Sans réflexion'`));
+  await run('avec réflexion', () => click('#effort-choice').then(() => wait(200)).then(() => click('#effort-choice-menu [data-key="thinking:true"]')), () =>
+    js(`document.getElementById('effort-choice-text').textContent === 'Réflexion'`));
   await run('nouvelle conversation depuis le chat', () => fromMenu('#thread-conversation', '.thread-action'), view('chat'));
   await run('studio', () => click('#studio-open'), view('studio'));
   for (const mode of ['Vidéo', 'Son', 'Image'])
