@@ -3,10 +3,19 @@
  * is a line of the list beside the local LLMs, tagged API, its address and its model in mono, its
  * key never shown. « Ajouter une API » opens its editor under the list (a service, an address, a
  * key, a model, whether it sees images, « Tester la connexion »); « Continuer avec ChatGPT » signs
- * in to the account of the user, without a key. What leaves the computer is said where the
- * connection is saved, and saving it chooses it for the chat.
+ * in to the account of the user, without a key; « Se connecter à OpenRouter » makes a key of the
+ * user's OpenRouter account without copying it, then opens the editor of that connection to choose
+ * its model. What leaves the computer is said where the connection is saved, and saving it
+ * chooses it for the chat.
  */
 const POLL_MS = 1500;
+/** Said before the page of OpenRouter opens: what the key is, where it stays, what it may spend. */
+export const OPENROUTER_NOTICE =
+  'Moodix va ouvrir OpenRouter dans votre navigateur. Si vous acceptez, OpenRouter crée une clé d’API de votre compte pour Moodix : ' +
+  'cette clé sera gardée sur cet ordinateur (dans le dossier de données de Moodix). Elle dépense vos crédits OpenRouter si vous choisissez un modèle payant ; ' +
+  'les modèles gratuits n’en demandent pas. Vous pourrez la supprimer à tout moment dans votre compte OpenRouter (Keys). Continuer ?';
+const FREE_HINT =
+  ' Ceux qui finissent par :free sont gratuits (50 demandes par jour tant qu’aucun crédit n’est acheté) ; openrouter/free en choisit un pour vous.';
 const near = host => /^(localhost|127\.|\[::1\]|::1)/i.test(host);
 
 export function setupRemoteModels({
@@ -18,7 +27,7 @@ export function setupRemoteModels({
   onStatus = () => {},
   onChange = () => {},
 }) {
-  let view = { connections: [], active: null, presets: {}, chatgpt: {} },
+  let view = { connections: [], active: null, presets: {}, chatgpt: {}, openrouter: {} },
     editing = null,
     baseline = '',
     off = false,
@@ -143,7 +152,8 @@ export function setupRemoteModels({
       if (editing?.preset === 'chatgpt' && !fields.model.value && models[0]) fields.model.value = models[0].id;
       say(
         models.length
-          ? `${models.length} modèle${models.length > 1 ? 's' : ''} proposé${models.length > 1 ? 's' : ''} dans le champ Modèle.`
+          ? `${models.length} modèle${models.length > 1 ? 's' : ''} proposé${models.length > 1 ? 's' : ''} dans le champ Modèle.` +
+              (fields.preset.value === 'openrouter' && editing?.preset !== 'chatgpt' ? FREE_HINT : '')
           : 'Ce service ne liste pas ses modèles : écrivez le nom exact.',
       );
       return true;
@@ -190,9 +200,15 @@ export function setupRemoteModels({
   }
   async function remove(id) {
     const item = view.connections.find(connection => connection.id === id);
-    if (!item || !confirmFn(`Retirer « ${item.name} » de la liste ? Sa clé est effacée de cet ordinateur.`)) return;
+    const still =
+      item?.preset === 'openrouter' && item.hasKey
+        ? ' Elle reste valable dans votre compte OpenRouter tant que vous ne l’y supprimez pas (Keys).'
+        : '';
+    if (!item || !confirmFn(`Retirer « ${item.name} » de la liste ? Sa clé est effacée de cet ordinateur.${still}`))
+      return;
     await act(async () => {
       view = await (await api('remote/remove', { id })).json();
+      renderOpenRouter();
       if (editing?.id === id) close();
       onStatus(view.status);
       onChange();
@@ -255,21 +271,76 @@ export function setupRemoteModels({
     $('chatgpt-error').hidden = !account.error;
     for (const id of ['chatgpt-signin', 'chatgpt-cancel', 'chatgpt-signout']) $(id).disabled = off;
   }
+  /** The line of « Se connecter à OpenRouter »: the sign-in waiting, what stopped it, the connection made. */
+  function renderOpenRouter() {
+    const sign = view.openrouter ?? {},
+      made = !sign.pending && view.connections.some(item => item.id === sign.created);
+    $('openrouter-signin').hidden = Boolean(sign.pending);
+    $('openrouter-cancel').hidden = !sign.pending;
+    $('openrouter-link').hidden = !sign.pending || !$('openrouter-link').href;
+    $('openrouter-status').textContent = sign.pending
+      ? 'Terminez la connexion dans la page d’OpenRouter ouverte dans votre navigateur.'
+      : made
+        ? 'La clé de votre compte OpenRouter est gardée sur cet ordinateur : la connexion est dans la liste.'
+        : 'Avec votre compte OpenRouter, sans copier de clé : ses modèles gratuits, ou les autres avec vos crédits.';
+    $('openrouter-error').textContent = sign.error || '';
+    $('openrouter-error').hidden = !sign.error;
+    for (const id of ['openrouter-signin', 'openrouter-cancel']) $(id).disabled = off;
+  }
+  function renderAccounts() {
+    renderAccount();
+    renderOpenRouter();
+  }
   async function poll() {
     clearTimeout(polling);
     polling = null;
     try {
-      const before = view.chatgpt?.connected;
+      const before = view.chatgpt?.connected,
+        waiting = view.openrouter?.pending;
       view = await (await api('remote')).json();
-      renderAccount();
+      renderAccounts();
       onChange();
       // Signed in: its model to choose, then Enregistrer.
       if (!before && view.chatgpt?.connected && !view.connections.some(item => item.preset === 'chatgpt'))
         open(null, 'chatgpt');
+      // Back from OpenRouter with a key: the editor of the connection it made, its models listed.
+      const made =
+        waiting &&
+        !view.openrouter?.pending &&
+        view.connections.find(item => item.id === view.openrouter?.created && item.preset === 'openrouter');
+      if (made && !dirty()) {
+        open(made);
+        void listModels().then(() => fields.model.focus());
+      }
     } catch {
       // Asked again below.
     }
-    if (view.chatgpt?.pending) polling = setTimeout(poll, POLL_MS);
+    if (view.chatgpt?.pending || view.openrouter?.pending) polling = setTimeout(poll, POLL_MS);
+  }
+  async function openRouterSignIn() {
+    if (off || !confirmFn(OPENROUTER_NOTICE)) return;
+    setBusy(true);
+    try {
+      const { url } = await (await api('remote/openrouter/start', {})).json();
+      $('openrouter-link').href = url;
+      view.openrouter = { pending: true, error: '', created: null };
+    } catch (error) {
+      view.openrouter = { ...view.openrouter, pending: false, error: error.message };
+    } finally {
+      setBusy(false);
+    }
+    if (view.openrouter.pending) void poll();
+  }
+  async function cancelOpenRouter() {
+    clearTimeout(polling);
+    await act(async () => {
+      view = await (await api('remote/openrouter/cancel', {})).json();
+      renderAccounts();
+      onChange();
+      // A sign-in of ChatGPT still waiting is followed again.
+      if (view.chatgpt?.pending) void poll();
+      return true;
+    });
   }
   async function signIn() {
     await act(async () => {
@@ -285,7 +356,9 @@ export function setupRemoteModels({
     clearTimeout(polling);
     await act(async () => {
       view = await (await api('remote/chatgpt/cancel', {})).json();
-      renderAccount();
+      renderAccounts();
+      // A sign-in of OpenRouter still waiting is followed again.
+      if (view.openrouter?.pending) void poll();
       return true;
     });
   }
@@ -319,7 +392,7 @@ export function setupRemoteModels({
       $('api-remove-key'),
     ])
       control.disabled = value;
-    renderAccount();
+    renderAccounts();
   }
   /** The services of the list, as the server knows them (ChatGPT apart: it has its own button). */
   function renderPresets() {
@@ -336,8 +409,8 @@ export function setupRemoteModels({
   async function load() {
     view = await (await api('remote')).json();
     renderPresets();
-    renderAccount();
-    if (view.chatgpt?.pending && !polling) void poll();
+    renderAccounts();
+    if ((view.chatgpt?.pending || view.openrouter?.pending) && !polling) void poll();
     onChange();
     return view;
   }
@@ -370,6 +443,8 @@ export function setupRemoteModels({
   $('chatgpt-signin').onclick = () => void signIn();
   $('chatgpt-cancel').onclick = () => void cancelSignIn();
   $('chatgpt-signout').onclick = () => void signOut();
+  $('openrouter-signin').onclick = () => void openRouterSignIn();
+  $('openrouter-cancel').onclick = () => void cancelOpenRouter();
 
   return {
     load,
@@ -383,7 +458,15 @@ export function setupRemoteModels({
     /** Locked while the page works elsewhere (a save, a generation). */
     lock(value) {
       $('add-api').disabled = value;
-      if (!off) for (const id of ['chatgpt-signin', 'chatgpt-cancel', 'chatgpt-signout']) $(id).disabled = value;
+      if (!off)
+        for (const id of [
+          'chatgpt-signin',
+          'chatgpt-cancel',
+          'chatgpt-signout',
+          'openrouter-signin',
+          'openrouter-cancel',
+        ])
+          $(id).disabled = value;
     },
     active: () => view.active,
     connections: () => view.connections,

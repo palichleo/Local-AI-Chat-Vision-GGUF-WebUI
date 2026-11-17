@@ -37,6 +37,7 @@ import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
 import { ChatModel, estimateContext, listModels, testConnection } from './lib/chat-model.mjs';
 import { PRESETS, RemoteModels, apiKey, connectionOf } from './lib/remote-models.mjs';
 import { ChatGPTAccount } from './lib/chatgpt.mjs';
+import { OpenRouterSignIn } from './lib/openrouter.mjs';
 import { relocate } from './lib/relocate.mjs';
 import { FOLDER_KEYS, GenerationService, generationConfig } from './lib/generation-service.mjs';
 import { convertLongForge } from './lib/longforge-conversion.mjs';
@@ -274,6 +275,8 @@ export async function createApplication({
   openUrl = url => openBrowser(url, { report: () => {} }),
   // « Continuer avec ChatGPT » (lib/chatgpt.mjs); tests pass one that talks to their own server.
   chatgpt: givenChatGPT = null,
+  // « Se connecter à OpenRouter » (lib/openrouter.mjs): where its pages are; tests pass their own server.
+  openrouter: openrouterOptions = {},
 } = {}) {
   // Keep HTML, scripts and styles paired with this running backend until restart.
   const frontend = new Map(
@@ -389,9 +392,15 @@ export async function createApplication({
   // chat, the Studio and the generations ask. `engine` stays for what only concerns llama.cpp.
   const remotes = new RemoteModels(dataDir);
   const chatgpt = givenChatGPT ?? new ChatGPTAccount({ dataDir, openUrl });
+  const openrouter = new OpenRouterSignIn({ remotes, openUrl, ...openrouterOptions });
   const chat = await new ChatModel({ engine, remotes, chatgpt }).load();
-  /** What the settings show of the remote models: the connections (whether a key is kept), the account. */
-  const remoteView = async () => ({ ...(await remotes.list()), presets: PRESETS, chatgpt: await chatgpt.status() });
+  /** What the settings show of the remote models: the connections (whether a key is kept), the accounts. */
+  const remoteView = async () => ({
+    ...(await remotes.list()),
+    presets: PRESETS,
+    chatgpt: await chatgpt.status(),
+    openrouter: openrouter.status(),
+  });
   let componentsCheck = null;
   let savingSettings = false;
   let modelOperation = Promise.resolve();
@@ -1526,6 +1535,12 @@ export async function createApplication({
           return send(200, await remoteView());
         }
         if (path === '/api/remote/chatgpt/signout') return send(200, { ...(await chatgpt.signOut()), ...(await remoteView()) });
+        // A key of the user's OpenRouter account, made without copying it: the connection is saved once back.
+        if (path === '/api/remote/openrouter/start') return send(200, await openrouter.start());
+        if (path === '/api/remote/openrouter/cancel') {
+          openrouter.cancel();
+          return send(200, await remoteView());
+        }
         throw problem('Route introuvable.', 404);
       }
       if (path === '/api/models/add' || path === '/api/models/select' || path === '/api/models/remove') {
@@ -2603,6 +2618,7 @@ export async function createApplication({
       await runtime.close();
       await generation.close();
       chatgpt.close?.();
+      openrouter.close();
       await chat.stop();
       await engine.stop();
       await projects.pending;
