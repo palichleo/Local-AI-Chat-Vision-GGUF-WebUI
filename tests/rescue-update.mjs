@@ -16,10 +16,10 @@ import { latestVersion, downloadArchive } from '../scripts/rescue-update.mjs';
 // The rescue update (scripts/rescue-update.mjs) on a real installation of the application, with
 // GitHub answered by the test: nothing is downloaded.
 const project = fileURLToPath(new URL('../', import.meta.url));
-const repository = 'palichleo/Local-AI-Chat-Vision-GGUF-WebUI';
+const repository = 'palichleo/Moodix-AI';
 const sha = '0123456789abcdef0123456789abcdef01234567';
 const addresses = {
-  commit: `https://api.github.com/repos/${repository}/commits/main`,
+  commit: 'https://api.github.com/repositories/1449534927/commits/main',
   version: `https://raw.githubusercontent.com/${repository}/${sha}/package.json`,
   archive: `https://codeload.github.com/${repository}/tar.gz/${sha}`,
 };
@@ -166,7 +166,7 @@ function github(bytes, version) {
     calls,
     async fetchUpdate(url, options) {
       calls.push(url);
-      assert.equal(options.redirect, 'error');
+      assert.equal(options.redirect, 'manual');
       if (url === addresses.commit) return new Response(sha);
       if (url === addresses.version) return new Response(manifest(version));
       if (url === addresses.archive) return new Response(bytes);

@@ -31,7 +31,7 @@ test('preparation pins the download to a commit and stages sources without repla
     port: 8787,
     fetchUpdate: async (url, options) => {
       urls.push(url);
-      assert.equal(options.redirect, 'error');
+      assert.equal(options.redirect, 'manual');
       assert.equal(options.body, undefined);
       return urls.length === 1
         ? new Response(sha)
@@ -45,8 +45,8 @@ test('preparation pins the download to a commit and stages sources without repla
     },
   });
   assert.deepEqual(urls, [
-    'https://api.github.com/repos/palichleo/Local-AI-Chat-Vision-GGUF-WebUI/commits/main',
-    `https://codeload.github.com/palichleo/Local-AI-Chat-Vision-GGUF-WebUI/tar.gz/${sha}`,
+    'https://api.github.com/repositories/1449534927/commits/main',
+    `https://codeload.github.com/palichleo/Moodix-AI/tar.gz/${sha}`,
   ]);
   assert.equal(await readFile(join(root, 'server.mjs'), 'utf8'), 'old server');
   assert.equal(await readFile(join(root, 'runner/pyproject.toml'), 'utf8'), 'old requirements');

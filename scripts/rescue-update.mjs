@@ -15,16 +15,34 @@ import { newerVersion } from '../lib/updates.mjs';
 // of the NEW version. Started by Mettre-a-jour-Windows.cmd, mettre-a-jour-linux.sh or
 // `node scripts/rescue-update.mjs` (--port=8787, --no-open, --reinstall).
 
-const repository = 'palichleo/Local-AI-Chat-Vision-GGUF-WebUI';
+// The repository, by its number where GitHub takes one (its name can change: lib/updates.mjs).
+const repository = 'palichleo/Moodix-AI';
+const repositoryId = 1449534927;
+const GITHUB_HOSTS = new Set(['api.github.com', 'codeload.github.com', 'raw.githubusercontent.com']);
 const stableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const never = new AbortController().signal;
 
 // The requests of prepareUpdate (lib/update-install.mjs): same addresses, headers and size limits
 // (tests/rescue-update.mjs compares them). Written again here so that a broken installer cannot
 // break this one too.
+/** No redirect followed, except between the hosts of GitHub, twice at most (githubFetch there). */
+async function githubFetch(fetchUpdate, url, options) {
+  for (let hop = 0; ; hop++) {
+    const response = await fetchUpdate(url, { ...options, redirect: 'manual' });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    await response.body?.cancel();
+    const location = response.headers.get('location');
+    let next = null;
+    try {
+      if (location) next = new URL(location, url);
+    } catch {}
+    if (hop >= 2 || next?.protocol !== 'https:' || !GITHUB_HOSTS.has(next.hostname))
+      throw new Error('Redirection de la mise à jour refusée.');
+    url = next.href;
+  }
+}
 async function download(url, limit, signal, fetchUpdate, accept = 'application/octet-stream') {
-  const response = await fetchUpdate(url, {
-    redirect: 'error',
+  const response = await githubFetch(fetchUpdate, url, {
     signal,
     headers: { Accept: accept, 'User-Agent': 'AtelierLocal-updater' },
   });
@@ -46,7 +64,7 @@ async function download(url, limit, signal, fetchUpdate, accept = 'application/o
 export async function latestVersion({ fetchUpdate = fetch, signal = never } = {}) {
   const sha = (
     await download(
-      `https://api.github.com/repos/${repository}/commits/main`,
+      `https://api.github.com/repositories/${repositoryId}/commits/main`,
       128,
       signal,
       fetchUpdate,

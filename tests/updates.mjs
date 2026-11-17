@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { newerVersion, checkForUpdates } from '../lib/updates.mjs';
+import { REPOSITORY, REPOSITORY_ID, checkForUpdates, githubFetch, newerVersion } from '../lib/updates.mjs';
 import { createApplication } from '../server.mjs';
 
 test('stable versions compare numerically and ignore older, equal, preview or malformed versions', () => {
@@ -31,10 +31,10 @@ test('update check reads only fixed public metadata, never sends local data or i
       calls++;
       assert.equal(
         url,
-        'https://raw.githubusercontent.com/palichleo/Local-AI-Chat-Vision-GGUF-WebUI/main/package.json',
+        'https://raw.githubusercontent.com/palichleo/Moodix-AI/main/package.json',
       );
       assert.equal(options.body, undefined);
-      assert.equal(options.redirect, 'error');
+      assert.equal(options.redirect, 'manual');
       assert.equal(options.headers.Authorization, undefined);
       assert.equal(options.headers.Cookie, undefined);
       assert.ok(options.signal instanceof AbortSignal);
@@ -204,5 +204,79 @@ test('the update button checks again on demand, and a failed check keeps a known
   } finally {
     await app?.close();
     await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test('a redirect is followed between the hosts of GitHub only, twice at most', async () => {
+  // 17/11: the repository renamed, GitHub answered the request that pins the commit by a redirect;
+  // refused like any other, it stopped every update of every copy installed.
+  const moved = (location, status = 301) => new Response(null, { status, headers: { location } });
+  const asked = [];
+  const github = answers => async (url, options) => {
+    asked.push(url);
+    assert.equal(options.redirect, 'manual', 'never followed by fetch itself');
+    return answers[url] ?? new Response('not found', { status: 404 });
+  };
+  const start = 'https://api.github.com/repos/someone/old-name/commits/main';
+  // The same repository under its number, then its archive on another host of GitHub.
+  const followed = await githubFetch(
+    github({
+      [start]: moved('https://api.github.com/repositories/1/commits/main'),
+      'https://api.github.com/repositories/1/commits/main': moved('/repositories/1/commits/abc', 302),
+      'https://api.github.com/repositories/1/commits/abc': new Response('abc'),
+    }),
+    start,
+    { headers: { Accept: 'text/plain' } },
+  );
+  assert.equal(await followed.text(), 'abc');
+  assert.equal(asked.length, 3);
+  // Anywhere else, in clear, or once too many: refused, and nothing more is asked.
+  const refused = {
+    'another host': moved('https://example.com/main'),
+    'a host that looks like one': moved('https://api.github.com.example.com/main'),
+    'in clear': moved('http://api.github.com/repositories/1/commits/main'),
+    'no address': new Response(null, { status: 302 }),
+  };
+  for (const [name, answer] of Object.entries(refused)) {
+    asked.length = 0;
+    await assert.rejects(githubFetch(github({ [start]: answer }), start, {}), /Redirection de la mise à jour refusée/, name);
+    assert.equal(asked.length, 1, name);
+  }
+  asked.length = 0;
+  const loop = github({ [start]: moved(start) });
+  await assert.rejects(githubFetch(loop, start, {}), /Redirection de la mise à jour refusée/);
+  assert.equal(asked.length, 3);
+  // A check of the version that meets a refused redirect says nothing is available, as for any failure.
+  const none = await checkForUpdates({ currentVersion: '0.2.0', fetchVersion: github({}) });
+  assert.deepEqual(none, { available: false });
+  const elsewhere = await checkForUpdates({
+    currentVersion: '0.2.0',
+    fetchVersion: async () => moved('https://example.com/package.json'),
+  });
+  assert.deepEqual(elsewhere, { available: false });
+  // And one moved inside GitHub is read.
+  const read = await checkForUpdates({
+    currentVersion: '0.2.0',
+    fetchVersion: async url =>
+      url.includes('/Moodix-AI/')
+        ? moved('https://raw.githubusercontent.com/palichleo/another-name/main/package.json')
+        : Response.json({ name: 'atelier-local', version: '0.2.1' }),
+  });
+  assert.deepEqual(read, { available: true, version: '0.2.1' });
+});
+
+test('the commit to install is asked by the number of the repository, which no renaming changes', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const read = name => readFile(new URL('../' + name, import.meta.url), 'utf8');
+  const [install, rescue] = await Promise.all([read('lib/update-install.mjs'), read('scripts/rescue-update.mjs')]);
+  assert.equal(REPOSITORY_ID, 1449534927);
+  assert.equal(REPOSITORY, 'palichleo/Moodix-AI');
+  assert.match(install, /`https:\/\/api\.github\.com\/repositories\/\$\{REPOSITORY_ID\}\/commits\/main`/);
+  // The rescue update is written apart (a broken installer must not break it): the same repository.
+  assert.match(rescue, /const repository = 'palichleo\/Moodix-AI';\r?\nconst repositoryId = 1449534927;/);
+  assert.match(rescue, /`https:\/\/api\.github\.com\/repositories\/\$\{repositoryId\}\/commits\/main`/);
+  for (const source of [install, rescue]) {
+    assert.doesNotMatch(source, /api\.github\.com\/repos\//, 'no request by the name where the number is taken');
+    assert.doesNotMatch(source, /redirect: 'error'|redirect: 'follow'/);
   }
 });
