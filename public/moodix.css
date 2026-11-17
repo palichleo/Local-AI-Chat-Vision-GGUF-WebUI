@@ -15508,35 +15508,59 @@ button.glass-select::after {
   border-color: rgba(224, 163, 92, 0.36);
   color: #e0a35c;
 }
-.chatgpt-connect {
+/* The providers of « Vos LLM » (0.6.38): the line chosen as a local one, what it says under its
+   name, its actions at the right (associate, sign out); the key of Claude and what failed under it. */
+.llm-row.is-provider {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.provider-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
-  margin-top: 10px;
-  padding: 12px 14px;
-  border: 1px solid rgba(238, 232, 222, 0.08);
-  border-radius: 12px;
+  justify-content: flex-end;
+  gap: 10px;
 }
-.chatgpt-status {
-  flex: 1 1 240px;
-  margin: 0;
-  color: var(--text-2);
-  font: 400 13.5px/1.4 var(--font-ui);
-}
-.chatgpt-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-}
-#settings .chatgpt-actions .text-button {
+#settings .provider-actions .text-button {
   margin-left: 0;
   color: var(--text-2);
 }
-.chatgpt-connect .config-error {
-  flex-basis: 100%;
-  margin: 0;
+#settings .provider-actions .secondary {
+  min-height: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.provider-working {
+  color: var(--text-3);
+  font: 400 13px/1 var(--font-ui);
+}
+.provider-key {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 12px 42px;
+}
+.provider-key input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+.provider-key input::placeholder {
+  color: var(--text-3);
+}
+.llm-row .provider-error {
+  grid-column: 1 / -1;
+  margin: 0 14px 12px 42px;
+}
+.llm-group {
+  margin: 14px 14px 2px;
+  color: var(--text-3);
+  font: 400 var(--size-label)/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.remote-privacy {
+  margin: 10px 14px 0;
+  color: var(--text-3);
 }
 #settings .api-editor .field-group {
   margin-bottom: 12px;
@@ -15554,4 +15578,86 @@ button.glass-select::after {
 /* The fields of an API waiting for words are not something missing: their hint in grey. */
 #settings .api-editor .path-input input::placeholder {
   color: var(--text-3);
+}
+/* The model and its reflection in the bar of the chat (model-choice.mjs, 0.6.38): one compact
+   button beside « Joindre » (its name cut short, never the box taller), its menu of glass. */
+#chat-form #model-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 230px;
+  height: 34px;
+  min-height: 0;
+  padding: 0 10px 0 9px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--accent);
+  font: 400 13px/1 var(--font-ui);
+}
+#chat-form #model-choice svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+#chat-form #model-choice.is-off {
+  color: var(--text-2);
+}
+#chat-form #model-choice:hover:enabled {
+  background: rgba(238, 232, 222, 0.06);
+}
+.model-choice-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 520px) {
+  #chat-form #model-choice {
+    max-width: 150px;
+  }
+}
+.model-choice-menu {
+  min-width: 260px;
+}
+.glass-menu-title {
+  margin: 8px 10px 4px;
+  color: var(--text-3);
+  font: 400 var(--size-label)/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.glass-menu-title:first-child {
+  margin-top: 4px;
+}
+.glass-menu-filter {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 32px;
+  margin: 2px 0 4px;
+  padding: 0 10px;
+  border: 1px solid rgba(238, 232, 222, 0.12);
+  border-radius: 8px;
+  background: rgba(238, 232, 222, 0.04);
+  color: var(--text-1);
+  font: 400 13px/1 var(--font-ui);
+}
+.glass-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow: auto;
+}
+.glass-menu-empty,
+.glass-menu-error {
+  margin: 6px 10px;
+  color: var(--text-3);
+  font: 400 13px/1.4 var(--font-ui);
+  white-space: normal;
+}
+.glass-menu-error {
+  max-width: 320px;
+  color: var(--danger);
 }

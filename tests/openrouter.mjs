@@ -298,21 +298,34 @@ test(
     );
     assert.equal(JSON.stringify(view).includes(fake.seen.key), false, 'the key never reaches the page');
 
-    // The editor of that connection: its models listed with the kept key, one chosen, saved, chosen for the chat.
-    const draft = { id: made.id, preset: 'openrouter', name: made.name, baseUrl: made.baseUrl, model: made.model };
+    // Chosen for the chat (its line in the settings, 0.6.38), then its model in the bar of the chat:
+    // its models listed with the kept key, the free ones first.
+    const chosen = await api('remote/provider', { provider: 'openrouter' });
     assert.deepEqual(
-      (await api('remote/models', draft)).models.map(item => item.id),
-      ['open/model:free', FREE_ROUTER, 'paid/model'],
+      [chosen.status.state, chosen.status.remote.name, chosen.status.remote.model, chosen.active],
+      ['ready', 'OpenRouter', FREE_ROUTER, made.id],
+    );
+    const { options } = await api('remote/options');
+    assert.deepEqual(
+      options.models.map(item => item.id),
+      [FREE_ROUTER, 'open/model:free', 'paid/model'],
     );
     assert.deepEqual(fake.seen.listed, [fake.seen.key]);
-    assert.deepEqual(await api('remote/test', { ...draft, model: 'open/model:free' }), { ok: true, said: 'OK' });
-    const { saved } = await api('remote/save', { ...draft, model: 'open/model:free' });
-    assert.equal(saved.hasKey, true, 'saved without a key written: the one from OpenRouter stays');
-    const { status } = await api('remote/select', { id: saved.id });
+    const { status } = await api('remote/choice', { model: 'open/model:free' });
     assert.deepEqual(
       [status.state, status.remote.name, status.remote.model],
       ['ready', 'OpenRouter', 'open/model:free'],
     );
+    assert.equal(
+      (await api('remote/choice', { model: 'unknown/model' }, 400)).error,
+      'Ce modèle n’est pas proposé par ce service.',
+    );
+    // Signed in again: the same connection, its model kept, its key replaced.
+    const again = await api('remote/openrouter/start', {});
+    assert.equal((await fake.browse(again.url)).status, 200);
+    const after = await api('remote');
+    assert.equal(after.connections.length, 1);
+    assert.deepEqual([after.connections[0].id, after.connections[0].model], [made.id, 'open/model:free']);
 
     // A turn of the chat: answered by the model chosen, with the key OpenRouter gave.
     const frames = await fetch(app.url + '/api/chat', {
@@ -331,6 +344,10 @@ test(
     assert.equal(events.map(event => event.choices?.[0]?.delta?.content ?? '').join(''), 'Bonjour');
     assert.equal(fake.seen.chats.at(-1).model, 'open/model:free');
     assert.equal(spawned.length, 0, 'llama.cpp was never started');
+    // Signed out: the key goes from this computer, the chat comes back to the local model.
+    const gone = await api('remote/forget', { provider: 'openrouter' });
+    assert.deepEqual([gone.connections.length, gone.active, gone.status.remote], [0, null, null]);
+    await assert.rejects(readFile(join(dataDir, 'remote-llm-keys.json'), 'utf8'));
   },
 );
 
@@ -372,7 +389,7 @@ function fakePage() {
   return { $, node, icon: () => element() };
 }
 
-test('the button of the settings: told first what the key is, then the editor of the connection made', async () => {
+test('the line of OpenRouter in the settings: told first what the key is, then chosen for the chat once back', async () => {
   const { $, node, icon } = fakePage();
   const made = {
     id: randomUUID(),
@@ -388,9 +405,17 @@ test('the button of the settings: told first what the key is, then the editor of
     openrouter: { name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', key: true },
     custom: { name: 'Autre', baseUrl: '', key: false },
   };
-  let server = { connections: [], active: null, presets, chatgpt: {}, openrouter: { pending: false, error: '' } };
+  let server = {
+    connections: [],
+    active: null,
+    presets,
+    chatgpt: {},
+    openrouter: { pending: false, error: '' },
+    claude: { library: 'ready', error: '' },
+  };
   const calls = [],
-    asked = [];
+    asked = [],
+    statuses = [];
   let accept = false;
   const api = async (path, body) => {
     calls.push([path, body]);
@@ -399,7 +424,13 @@ test('the button of the settings: told first what the key is, then the editor of
       server = { ...server, connections: [made], openrouter: { pending: false, error: '', created: made.id } };
       return Response.json({ url: 'https://openrouter.ai/auth?state=x' });
     }
-    if (path === 'remote/models') return Response.json({ models: [{ id: FREE_ROUTER }, { id: 'open/model:free' }] });
+    if (path === 'remote/provider') {
+      server = { ...server, active: made.id };
+      return Response.json({
+        ...server,
+        status: { state: 'ready', remote: { id: made.id, name: 'OpenRouter', model: FREE_ROUTER } },
+      });
+    }
     if (path === 'remote') return Response.json(server);
     throw Error('unexpected ' + path);
   };
@@ -412,13 +443,19 @@ test('the button of the settings: told first what the key is, then the editor of
       asked.push(text);
       return accept;
     },
+    onStatus: status => statuses.push(status),
   });
   await remote.load();
-  assert.equal($('openrouter-signin').hidden, false);
-  assert.match($('openrouter-status').textContent, /sans copier de clé/);
+  // ChatGPT, Claude, OpenRouter, in that order; no name nor model to write.
+  const line = () => remote.rows(false)[2];
+  assert.deepEqual(
+    remote.rows(false).map(row => row.children[0].children[1].children[0].textContent),
+    ['ChatGPT', 'Claude', 'OpenRouter'],
+  );
+  assert.match(line().children[0].children[2].textContent, /sans copier de clé/);
 
   // Told before anything opens: a key of their OpenRouter account, kept on this computer.
-  $('openrouter-signin').onclick();
+  line().children[0].onclick();
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.deepEqual(asked, [OPENROUTER_NOTICE]);
   assert.match(OPENROUTER_NOTICE, /clé d’API de votre compte/);
@@ -426,24 +463,19 @@ test('the button of the settings: told first what the key is, then the editor of
   assert.match(OPENROUTER_NOTICE, /dépense vos crédits OpenRouter/);
   assert.equal(calls.filter(([path]) => path === 'remote/openrouter/start').length, 0, 'declined: nothing opens');
 
+  // Accepted: back from OpenRouter, the provider is chosen for the chat at once.
   accept = true;
-  $('openrouter-signin').onclick();
+  line().children[0].onclick();
+  for (let i = 0; i < 100 && !calls.some(([path]) => path === 'remote/provider'); i++)
+    await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(calls.find(([path]) => path === 'remote/provider')[1], { provider: 'openrouter' });
+  assert.equal(statuses.at(-1).remote.id, made.id);
   await new Promise(resolve => setTimeout(resolve, 5));
-  assert.equal($('openrouter-link').href, 'https://openrouter.ai/auth?state=x');
-  // Back: the editor opens on the connection made, its models listed for the field Modèle.
-  for (let i = 0; i < 100 && !$('api-editor').open; i++) await new Promise(resolve => setTimeout(resolve, 10));
-  await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal($('api-editor').open, true);
+  assert.match(line().className, /is-chosen/);
+  assert.match(line().children[0].children[2].textContent, /Connecté/);
+  // Its action now: to sign out.
   assert.deepEqual(
-    [$('api-name').value, $('api-model').value, $('api-preset').value],
-    ['OpenRouter', FREE_ROUTER, 'openrouter'],
+    line().children[1].children.map(item => item.textContent),
+    ['Se déconnecter'],
   );
-  assert.match($('api-key').placeholder, /Clé enregistrée/);
-  const listing = calls.find(([path]) => path === 'remote/models');
-  assert.equal(listing[1].id, made.id, 'listed with the kept key');
-  assert.equal($('api-models').children.length, 2);
-  assert.match($('api-status').textContent, /:free sont gratuits/);
-  assert.equal($('api-model').focused, true);
-  assert.equal($('openrouter-signin').hidden, false);
-  assert.match($('openrouter-status').textContent, /gardée sur cet ordinateur/);
 });

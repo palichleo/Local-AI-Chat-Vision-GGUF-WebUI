@@ -30,6 +30,7 @@ import { proposalCard } from './proposal-card.mjs';
 import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
 import { setupRemoteModels } from './remote-llm-ui.mjs';
+import { setupModelChoice } from './model-choice.mjs';
 import { setupFirstLaunch } from './first-launch.mjs';
 import { missingFileCard } from './missing-file.mjs';
 import { setupGlassSelects } from './glass-menu.mjs';
@@ -967,8 +968,9 @@ function updateControls() {
   $('cancel').setAttribute('aria-label', cancelLabel);
   $('cancel').title = cancelLabel;
   $('thinking').disabled = state.generating;
-  // A remote service whose reflection cannot be switched: no switch.
-  $('thinking').hidden = Boolean(s.remote) && !s.remote.thinking;
+  // The model and its reflection, chosen in the bar of the chat (model-choice.mjs): never while it answers.
+  $('model-choice').disabled = state.generating || toolBusy || !state.connected;
+  state.modelChoice?.render();
   // A card of Moodix waits: an image may go with the message that answers it.
   $('attach').disabled = (state.generating && !state.proposalCard) || state.preparing || state.loadingHistory;
   $('prompt').disabled = state.loadingHistory;
@@ -2442,7 +2444,8 @@ function chatRequest(messages, tools = true, resources = true) {
       // The consigne of a creation that failed is for the message it failed in, not the next ones.
       ...settledNotes(messages),
     ],
-    thinking: state.thinking,
+    // The switch of the local model; a remote one reflects with the effort chosen for it (model-choice.mjs).
+    thinking: state.status?.remote ? true : state.thinking,
     tools,
     resources,
     // The references the model knows are those of the conversation's project.
@@ -3706,6 +3709,8 @@ state.remoteUI = setupRemoteModels({
     if (status) state.status = status;
     contextMeter.schedule();
     updateControls();
+    // Another provider, another list of models in the bar of the chat.
+    void state.modelChoice?.refresh();
   },
   onChange: () => renderLLMList(),
 });
@@ -3874,6 +3879,25 @@ $('thinking').onclick = () => {
   $('thinking').setAttribute('aria-pressed', String(state.thinking));
   contextMeter.schedule();
 };
+// The model and its reflection in the bar of the chat (17/11): the reflection of the local model,
+// or the model and the effort of a remote one, kept by the server as the last choice.
+state.modelChoice = setupModelChoice({
+  $,
+  api,
+  node,
+  getStatus: () => state.status,
+  getThinking: () => state.thinking,
+  setThinking: on => {
+    state.thinking = on;
+    $('thinking').setAttribute('aria-pressed', String(on));
+    contextMeter.schedule();
+  },
+  onStatus: status => {
+    if (status) state.status = status;
+    updateControls();
+  },
+  notice,
+});
 /**
  * The library (the Pellicule since 0.6.0), a page of its own outside a conversation: every creation,
  * those of one project (`project`) or of every one. The conversation is kept first.

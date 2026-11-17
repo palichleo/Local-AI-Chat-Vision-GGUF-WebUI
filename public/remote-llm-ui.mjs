@@ -1,12 +1,14 @@
 /**
- * The remote chat models in Paramètres › Moodix AI (parametres-maquette.md, « Vos LLM »): each API
- * is a line of the list beside the local LLMs, tagged API, its address and its model in mono, its
- * key never shown. « Ajouter une API » opens its editor under the list (a service, an address, a
- * key, a model, whether it sees images, « Tester la connexion »); « Continuer avec ChatGPT » signs
- * in to the account of the user, without a key; « Se connecter à OpenRouter » makes a key of the
- * user's OpenRouter account without copying it, then opens the editor of that connection to choose
- * its model. What leaves the computer is said where the connection is saved, and saving it
- * chooses it for the chat.
+ * The remote chat models in Paramètres › Moodix AI (parametres-maquette.md, « Vos LLM »). The
+ * settings choose the provider and associate its account, nothing more (the model and the effort
+ * are chosen in the bar of the chat, model-choice.mjs):
+ * - ChatGPT: « Continuer avec ChatGPT », the plan of the user, without a key;
+ * - Claude: the key of the Claude Console (Anthropic lets no application sign in with a Claude.ai
+ *   account), Anthropic's library installed the first time;
+ * - OpenRouter: « Se connecter », a key of the user's account made without copying it.
+ * Under « Autre service (adresse) », discreet, any server « compatible OpenAI » (OpenAI by key,
+ * Mistral, Groq, Ollama, LM Studio…): its address, its key, its model, whether it sees images.
+ * Choosing a line chooses it for the chat; what leaves the computer is said under the list.
  */
 const POLL_MS = 1500;
 /** Said before the page of OpenRouter opens: what the key is, where it stays, what it may spend. */
@@ -14,9 +16,20 @@ export const OPENROUTER_NOTICE =
   'Moodix va ouvrir OpenRouter dans votre navigateur. Si vous acceptez, OpenRouter crée une clé d’API de votre compte pour Moodix : ' +
   'cette clé sera gardée sur cet ordinateur (dans le dossier de données de Moodix). Elle dépense vos crédits OpenRouter si vous choisissez un modèle payant ; ' +
   'les modèles gratuits n’en demandent pas. Vous pourrez la supprimer à tout moment dans votre compte OpenRouter (Keys). Continuer ?';
-const FREE_HINT =
-  ' Ceux qui finissent par :free sont gratuits (50 demandes par jour tant qu’aucun crédit n’est acheté) ; openrouter/free en choisit un pour vous.';
+/** The providers of the list, in their order. */
+export const PROVIDER_LINES = Object.freeze([
+  { id: 'chatgpt', name: 'ChatGPT', tag: 'Abonnement' },
+  { id: 'claude', name: 'Claude', tag: 'Clé' },
+  { id: 'openrouter', name: 'OpenRouter', tag: 'Compte' },
+]);
 const near = host => /^(localhost|127\.|\[::1\]|::1)/i.test(host);
+const host = url => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '';
+  }
+};
 
 export function setupRemoteModels({
   $,
@@ -27,15 +40,19 @@ export function setupRemoteModels({
   onStatus = () => {},
   onChange = () => {},
 }) {
-  let view = { connections: [], active: null, presets: {}, chatgpt: {}, openrouter: {} },
+  let view = { connections: [], active: null, presets: {}, chatgpt: {}, openrouter: {}, claude: {} },
     editing = null,
     baseline = '',
     off = false,
     polling = null,
-    listed = [];
+    // The provider the user chose before its account was associated: chosen once it is.
+    waiting = null,
+    // The field of the key of Claude, open under its line.
+    keyOpen = false;
+  const links = { chatgpt: '', openrouter: '' },
+    errors = {};
   const fields = {
     preset: $('api-preset'),
-    name: $('api-name'),
     url: $('api-url'),
     key: $('api-key'),
     model: $('api-model'),
@@ -45,17 +62,24 @@ export function setupRemoteModels({
     $('api-status').textContent = text;
     $('api-status').classList.toggle('is-error', error);
   };
-
-  function presetOf(id) {
-    return view.presets[id] ?? { name: 'Autre', baseUrl: '', key: false };
+  const presetOf = id => view.presets[id] ?? { name: 'Autre', baseUrl: '', key: false };
+  const ofProvider = id => view.connections.find(item => item.preset === id);
+  /** Whether the account of a provider is associated with this computer. */
+  function associated(id) {
+    if (id === 'chatgpt') return Boolean(view.chatgpt?.connected);
+    return Boolean(ofProvider(id)?.hasKey);
   }
-  /** What the editor holds, as the server takes it. */
+  const others = () => view.connections.filter(item => !PROVIDER_LINES.some(line => line.id === item.preset));
+
+  /** What the editor of « Autre service » holds, as the server takes it. */
   function draft() {
     if (!editing) return null;
+    const preset = fields.preset.value;
     return {
       ...(editing.id ? { id: editing.id } : {}),
-      preset: editing.preset === 'chatgpt' ? 'chatgpt' : fields.preset.value,
-      name: fields.name.value,
+      preset,
+      // Its name: the one of its service, or its address for another.
+      name: preset === 'custom' ? host(fields.url.value) || presetOf(preset).name : presetOf(preset).name,
       baseUrl: fields.url.value,
       model: fields.model.value,
       vision: fields.vision.checked,
@@ -63,42 +87,29 @@ export function setupRemoteModels({
     };
   }
   const dirty = () => Boolean(editing) && JSON.stringify(draft()) !== baseline;
-  function host(url) {
-    try {
-      return new URL(url).host;
-    } catch {
-      return '';
-    }
-  }
-  /** What leaves the computer with this connection, said beside Enregistrer. */
   function privacy() {
-    const chatgpt = editing?.preset === 'chatgpt',
-      where = chatgpt ? 'OpenAI (ChatGPT)' : host(fields.url.value);
+    const where = host(fields.url.value);
     $('api-privacy').textContent = !where
       ? ''
-      : !chatgpt && near(where)
+      : near(where)
         ? 'Ce serveur tourne sur cet ordinateur : rien ne quitte l’ordinateur.'
-        : `En l’enregistrant, vous le choisissez pour le chat : vos messages, les images jointes et les références montrées au modèle partiront chez ${where}.` +
-          (chatgpt ? ' Votre abonnement compte ce que vous lui demandez.' : ' La clé reste sur cet ordinateur.');
+        : `En l’enregistrant, vous le choisissez pour le chat : vos messages, les images jointes et les références montrées au modèle partiront chez ${where}. La clé reste sur cet ordinateur.`;
   }
   function fillModels(items) {
-    listed = items;
     $('api-models').replaceChildren(
       ...items.map(item => {
         const option = node('option');
         option.value = item.id;
-        if (item.name && item.name !== item.id) option.label = item.name;
         return option;
       }),
     );
   }
-  /** The editor opened on `item` (a connection), or on a new one of `preset`. */
-  function open(item, preset = 'openrouter') {
-    const chosen = item?.preset ?? preset,
-      service = presetOf(chosen);
-    editing = { id: item?.id, preset: chosen };
-    fields.preset.value = chosen === 'chatgpt' ? 'custom' : chosen;
-    fields.name.value = item?.name ?? service.name;
+  /** The editor of « Autre service » opened on `item`, or on a new one. */
+  function open(item) {
+    const preset = item?.preset ?? 'ollama',
+      service = presetOf(preset);
+    editing = { id: item?.id };
+    fields.preset.value = preset;
     fields.url.value = item?.baseUrl ?? service.baseUrl;
     fields.key.value = '';
     fields.key.placeholder = item?.hasKey
@@ -107,17 +118,13 @@ export function setupRemoteModels({
         ? 'Collez votre clé'
         : 'Aucune clé (serveur local)';
     fields.model.value = item?.model ?? '';
-    fields.vision.checked = item?.vision ?? chosen === 'chatgpt';
+    fields.vision.checked = item?.vision ?? false;
     $('api-remove-key').hidden = !item?.hasKey;
-    // ChatGPT has no address nor key: its account answers.
-    for (const id of ['api-preset-field', 'api-url-field', 'api-key-field']) $(id).hidden = chosen === 'chatgpt';
-    $('api-list').hidden = false;
     $('api-editor').open = true;
     fillModels([]);
     say('');
     privacy();
     baseline = JSON.stringify(draft());
-    if (chosen === 'chatgpt') void listModels();
     onChange();
   }
   function close() {
@@ -128,259 +135,369 @@ export function setupRemoteModels({
     onChange();
   }
   function cancel() {
-    if (dirty() && !confirmFn('Abandonner les modifications de cette API ?')) return false;
+    if (dirty() && !confirmFn('Abandonner les modifications de ce service ?')) return false;
     close();
     return true;
   }
-  async function act(task, working) {
+  /** One action at a time; what stops it is said where it was asked (`where`: a provider, else the editor). */
+  async function act(task, { working = '', where = null } = {}) {
     if (off) return false;
     setBusy(true);
-    if (working) say(working);
+    if (where) delete errors[where];
+    else if (working) say(working);
     try {
       return await task();
     } catch (error) {
-      say(error.message, true);
+      if (where) errors[where] = error.message;
+      else say(error.message, true);
       return false;
     } finally {
       setBusy(false);
+      onChange();
     }
   }
-  async function listModels() {
-    return act(async () => {
-      const { models } = await (await api('remote/models', draft())).json();
-      fillModels(models);
-      if (editing?.preset === 'chatgpt' && !fields.model.value && models[0]) fields.model.value = models[0].id;
-      say(
-        models.length
-          ? `${models.length} modèle${models.length > 1 ? 's' : ''} proposé${models.length > 1 ? 's' : ''} dans le champ Modèle.` +
-              (fields.preset.value === 'openrouter' && editing?.preset !== 'chatgpt' ? FREE_HINT : '')
-          : 'Ce service ne liste pas ses modèles : écrivez le nom exact.',
-      );
-      return true;
-    }, 'Lecture des modèles…');
-  }
-  async function test() {
-    return act(async () => {
-      const { said } = await (await api('remote/test', draft())).json();
-      say(`Connexion réussie${said ? ` : le modèle répond « ${said} »` : ''}.`);
-      return true;
-    }, 'Essai de la connexion…');
-  }
-  /** Saves the connection of the editor and chooses it for the chat (true once done). */
+  const take = (result, status = true) => {
+    view = result;
+    if (status && result.status) onStatus(result.status);
+  };
+
+  // « Autre service »: listing, testing, saving (which chooses it).
+  const listModels = () =>
+    act(
+      async () => {
+        const { models } = await (await api('remote/models', draft())).json();
+        fillModels(models);
+        say(
+          models.length
+            ? `${models.length} modèle${models.length > 1 ? 's' : ''} proposé${models.length > 1 ? 's' : ''} dans le champ Modèle.`
+            : 'Ce service ne liste pas ses modèles : écrivez le nom exact.',
+        );
+        return true;
+      },
+      { working: 'Lecture des modèles…' },
+    );
+  const test = () =>
+    act(
+      async () => {
+        const { said } = await (await api('remote/test', draft())).json();
+        say(`Connexion réussie${said ? ` : le modèle répond « ${said} »` : ''}.`);
+        return true;
+      },
+      { working: 'Essai de la connexion…' },
+    );
   async function save() {
     if (!editing) return true;
-    return act(async () => {
-      const saved = await (await api('remote/save', draft())).json();
-      const chosen = await (await api('remote/select', { id: saved.saved.id })).json();
-      view = chosen;
-      onStatus(chosen.status);
-      close();
-      return true;
-    }, 'Enregistrement…');
+    return act(
+      async () => {
+        const saved = await (await api('remote/save', draft())).json();
+        take(await (await api('remote/select', { id: saved.saved.id })).json());
+        close();
+        return true;
+      },
+      { working: 'Enregistrement…' },
+    );
   }
   async function removeKey() {
     if (!editing?.id) return;
     await act(async () => {
-      view = await (await api('remote/save', { ...draft(), key: '' })).json();
+      take(await (await api('remote/save', { ...draft(), key: '' })).json(), false);
       fields.key.placeholder = 'Aucune clé';
       $('api-remove-key').hidden = true;
       baseline = JSON.stringify(draft());
       say('Clé retirée de cet ordinateur.');
-      onChange();
       return true;
     });
   }
-  async function select(id) {
-    return act(async () => {
-      view = await (await api('remote/select', { id })).json();
-      onStatus(view.status);
-      onChange();
-      return true;
-    });
-  }
+  /** A line of « Autre service » chosen for the chat, or none (null: the local model). */
+  const select = id => act(async () => (take(await (await api('remote/select', { id })).json()), true));
   async function remove(id) {
     const item = view.connections.find(connection => connection.id === id);
-    const still =
-      item?.preset === 'openrouter' && item.hasKey
-        ? ' Elle reste valable dans votre compte OpenRouter tant que vous ne l’y supprimez pas (Keys).'
-        : '';
-    if (!item || !confirmFn(`Retirer « ${item.name} » de la liste ? Sa clé est effacée de cet ordinateur.${still}`))
-      return;
+    if (!item || !confirmFn(`Retirer « ${item.name} » de la liste ? Sa clé est effacée de cet ordinateur.`)) return;
     await act(async () => {
-      view = await (await api('remote/remove', { id })).json();
-      renderOpenRouter();
+      take(await (await api('remote/remove', { id })).json());
       if (editing?.id === id) close();
-      onStatus(view.status);
-      onChange();
       return true;
-    });
-  }
-  /** One line of « Vos LLM » per connection; `busy`: the list is locked. */
-  function rows(busy) {
-    return view.connections.map(item => {
-      const lit = item.id === view.active,
-        row = node('div', 'llm-row is-api' + (lit ? ' is-chosen' : '')),
-        pick = node('button', 'llm-pick'),
-        head = node('span', 'llm-head'),
-        edit = node('button', 'llm-edit'),
-        removing = node('button', 'llm-remove');
-      pick.type = edit.type = removing.type = 'button';
-      pick.setAttribute('role', 'radio');
-      pick.setAttribute('aria-checked', String(lit));
-      head.append(
-        node('span', 'llm-name', item.name),
-        node('span', 'llm-tag is-api', item.preset === 'chatgpt' ? 'ChatGPT' : 'API'),
-      );
-      if (item.vision) head.append(node('span', 'llm-tag', 'Vision'));
-      pick.append(node('span', 'llm-radio'), head, node('span', 'llm-path', `${host(item.baseUrl)} · ${item.model}`));
-      pick.disabled = busy || off;
-      pick.onclick = () => void select(item.id);
-      edit.append(icon('edit'));
-      edit.title = 'Modifier';
-      edit.setAttribute('aria-label', 'Modifier ' + item.name);
-      edit.disabled = busy || off;
-      edit.onclick = () => {
-        if (dirty() && !confirmFn('Abandonner les modifications de cette API ?')) return;
-        open(item);
-        fields.name.focus();
-      };
-      removing.append(icon('trash'));
-      removing.title = 'Retirer de la liste';
-      removing.setAttribute('aria-label', 'Retirer ' + item.name + ' de la liste');
-      removing.disabled = busy || off;
-      removing.onclick = () => void remove(item.id);
-      row.append(pick, edit, removing);
-      return row;
     });
   }
 
-  /** The line of the ChatGPT account: sign in, the sign-in waiting, signed in (its email). */
-  function renderAccount() {
-    const account = view.chatgpt ?? {};
-    $('chatgpt-signin').hidden = account.connected || account.pending;
-    $('chatgpt-cancel').hidden = !account.pending;
-    $('chatgpt-signout').hidden = !account.connected;
-    $('chatgpt-link').hidden = !account.pending || !$('chatgpt-link').href;
-    $('chatgpt-status').textContent = account.pending
-      ? 'Terminez la connexion dans la page de ChatGPT ouverte dans votre navigateur.'
-      : account.connected
-        ? `Connecté à ChatGPT${account.email ? ` (${account.email})` : ''}.` +
-          (account.plan ? '' : ' L’usage de l’abonnement n’est pas autorisé.')
-        : 'Avec votre abonnement ChatGPT Plus ou Pro, sans clé d’API.';
-    $('chatgpt-error').textContent = account.error || '';
-    $('chatgpt-error').hidden = !account.error;
-    for (const id of ['chatgpt-signin', 'chatgpt-cancel', 'chatgpt-signout']) $(id).disabled = off;
+  // The providers: their account associated, then chosen.
+  const useProvider = (id, extra = {}) =>
+    act(
+      async () => {
+        take(await (await api('remote/provider', { provider: id, ...extra })).json());
+        waiting = null;
+        if (id === 'claude') keyOpen = false;
+        return true;
+      },
+      { where: id },
+    );
+  async function signInChatGPT() {
+    await act(
+      async () => {
+        const { url } = await (await api('remote/chatgpt/start', {})).json();
+        links.chatgpt = url;
+        view.chatgpt = { ...view.chatgpt, pending: true, error: '' };
+        waiting = 'chatgpt';
+        return true;
+      },
+      { where: 'chatgpt' },
+    );
+    void poll();
   }
-  /** The line of « Se connecter à OpenRouter »: the sign-in waiting, what stopped it, the connection made. */
-  function renderOpenRouter() {
-    const sign = view.openrouter ?? {},
-      made = !sign.pending && view.connections.some(item => item.id === sign.created);
-    $('openrouter-signin').hidden = Boolean(sign.pending);
-    $('openrouter-cancel').hidden = !sign.pending;
-    $('openrouter-link').hidden = !sign.pending || !$('openrouter-link').href;
-    $('openrouter-status').textContent = sign.pending
-      ? 'Terminez la connexion dans la page d’OpenRouter ouverte dans votre navigateur.'
-      : made
-        ? 'La clé de votre compte OpenRouter est gardée sur cet ordinateur : la connexion est dans la liste.'
-        : 'Avec votre compte OpenRouter, sans copier de clé : ses modèles gratuits, ou les autres avec vos crédits.';
-    $('openrouter-error').textContent = sign.error || '';
-    $('openrouter-error').hidden = !sign.error;
-    for (const id of ['openrouter-signin', 'openrouter-cancel']) $(id).disabled = off;
+  async function signInOpenRouter() {
+    if (off || !confirmFn(OPENROUTER_NOTICE)) return;
+    await act(
+      async () => {
+        const { url } = await (await api('remote/openrouter/start', {})).json();
+        links.openrouter = url;
+        view.openrouter = { pending: true, error: '', created: null };
+        waiting = 'openrouter';
+        return true;
+      },
+      { where: 'openrouter' },
+    );
+    void poll();
   }
-  function renderAccounts() {
-    renderAccount();
-    renderOpenRouter();
+  const cancelSignIn = id =>
+    act(
+      async () => {
+        take(await (await api(`remote/${id}/cancel`, {})).json(), false);
+        if (waiting === id) waiting = null;
+        return true;
+      },
+      { where: id },
+    );
+  async function forget(id) {
+    const question = {
+      chatgpt:
+        'Se déconnecter de ChatGPT ? Moodix ne pourra plus utiliser votre abonnement jusqu’à la prochaine connexion.',
+      claude:
+        'Retirer la clé de Claude de cet ordinateur ? Elle reste valable dans votre Claude Console tant que vous ne l’y supprimez pas.',
+      openrouter:
+        'Se déconnecter d’OpenRouter ? La clé est effacée de cet ordinateur ; elle reste valable dans votre compte OpenRouter tant que vous ne l’y supprimez pas (Keys).',
+    }[id];
+    if (!confirmFn(question)) return;
+    await act(
+      async () => {
+        const result = await (await api('remote/forget', { provider: id })).json();
+        take(result);
+        if (id === 'chatgpt' && result.revoked === false)
+          errors.chatgpt =
+            'Déconnecté ici ; OpenAI n’a pas confirmé la fin de la session (vous pouvez retirer Moodix dans les réglages de ChatGPT).';
+        return true;
+      },
+      { where: id },
+    );
+  }
+  const installClaude = () =>
+    act(
+      async () => {
+        take(await (await api('remote/claude/install', {})).json(), false);
+        waiting = 'claude';
+        void poll();
+        return true;
+      },
+      { where: 'claude' },
+    );
+  /** A line of a provider chosen: chosen at once when its account is associated, else its association begins. */
+  function choose(id) {
+    if (associated(id)) return void useProvider(id);
+    if (id === 'chatgpt') return void signInChatGPT();
+    if (id === 'openrouter') return void signInOpenRouter();
+    if (view.claude?.library === 'ready') {
+      keyOpen = true;
+      onChange();
+      return;
+    }
+    if (view.claude?.library !== 'installing') void installClaude();
   }
   async function poll() {
     clearTimeout(polling);
     polling = null;
     try {
-      const before = view.chatgpt?.connected,
-        waiting = view.openrouter?.pending;
       view = await (await api('remote')).json();
-      renderAccounts();
-      onChange();
-      // Signed in: its model to choose, then Enregistrer.
-      if (!before && view.chatgpt?.connected && !view.connections.some(item => item.preset === 'chatgpt'))
-        open(null, 'chatgpt');
-      // Back from OpenRouter with a key: the editor of the connection it made, its models listed.
-      const made =
-        waiting &&
-        !view.openrouter?.pending &&
-        view.connections.find(item => item.id === view.openrouter?.created && item.preset === 'openrouter');
-      if (made && !dirty()) {
-        open(made);
-        void listModels().then(() => fields.model.focus());
+      // Associated meanwhile: the provider the user chose is chosen now.
+      if (waiting === 'chatgpt' && !view.chatgpt?.pending) {
+        if (view.chatgpt?.connected) await useProvider('chatgpt');
+        else waiting = null;
+      } else if (waiting === 'openrouter' && !view.openrouter?.pending) {
+        if (associated('openrouter')) await useProvider('openrouter');
+        else waiting = null;
+      } else if (waiting === 'claude' && view.claude?.library !== 'installing') {
+        waiting = null;
+        if (view.claude?.library === 'ready') keyOpen = true;
       }
+      onChange();
     } catch {
       // Asked again below.
     }
-    if (view.chatgpt?.pending || view.openrouter?.pending) polling = setTimeout(poll, POLL_MS);
+    if (view.chatgpt?.pending || view.openrouter?.pending || view.claude?.library === 'installing')
+      polling = setTimeout(poll, POLL_MS);
   }
-  async function openRouterSignIn() {
-    if (off || !confirmFn(OPENROUTER_NOTICE)) return;
-    setBusy(true);
-    try {
-      const { url } = await (await api('remote/openrouter/start', {})).json();
-      $('openrouter-link').href = url;
-      view.openrouter = { pending: true, error: '', created: null };
-    } catch (error) {
-      view.openrouter = { ...view.openrouter, pending: false, error: error.message };
-    } finally {
-      setBusy(false);
+
+  /** What the line of a provider says under its name. */
+  function said(id) {
+    const chosen = ofProvider(id);
+    if (id === 'chatgpt') {
+      const account = view.chatgpt ?? {};
+      if (account.pending) return 'Terminez la connexion dans la page de ChatGPT ouverte dans votre navigateur.';
+      if (account.connected)
+        return (
+          `Connecté${account.email ? ` · ${account.email}` : ''}` +
+          (account.plan ? '' : ' · usage de l’abonnement non autorisé')
+        );
+      return 'Votre abonnement Plus ou Pro, sans clé d’API';
     }
-    if (view.openrouter.pending) void poll();
+    if (id === 'claude') {
+      const library = view.claude?.library;
+      if (library === 'installing') return 'Installation de la bibliothèque officielle d’Anthropic…';
+      if (library === 'missing' || library === 'outdated')
+        return 'La bibliothèque officielle d’Anthropic s’installe au premier choix (environ 17 Mo)';
+      if (chosen?.hasKey) return 'Clé de la Claude Console enregistrée sur cet ordinateur';
+      return 'Votre clé d’API de la Claude Console (pas de connexion par abonnement Claude)';
+    }
+    if (view.openrouter?.pending)
+      return 'Terminez la connexion dans la page d’OpenRouter ouverte dans votre navigateur.';
+    if (chosen?.hasKey) return 'Connecté · clé de votre compte gardée sur cet ordinateur';
+    return 'Votre compte OpenRouter, sans copier de clé : modèles gratuits ou avec vos crédits';
   }
-  async function cancelOpenRouter() {
-    clearTimeout(polling);
-    await act(async () => {
-      view = await (await api('remote/openrouter/cancel', {})).json();
-      renderAccounts();
-      onChange();
-      // A sign-in of ChatGPT still waiting is followed again.
-      if (view.chatgpt?.pending) void poll();
-      return true;
+  function button(text, onclick, className = 'text-button') {
+    const element = node('button', className, text);
+    element.type = 'button';
+    element.disabled = off;
+    element.onclick = onclick;
+    return element;
+  }
+  /** What can be done on the line of a provider: associate, sign out, cancel a sign-in. */
+  function actions(id) {
+    const box = node('div', 'provider-actions');
+    if (id === 'chatgpt') {
+      const account = view.chatgpt ?? {};
+      if (account.pending) {
+        if (links.chatgpt) {
+          const link = node('a', 'text-button', 'Ouvrir la page');
+          link.href = links.chatgpt;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          box.append(link);
+        }
+        box.append(button('Annuler', () => void cancelSignIn('chatgpt')));
+      } else if (account.connected) box.append(button('Se déconnecter', () => void forget('chatgpt')));
+      else box.append(button('Continuer avec ChatGPT', () => void signInChatGPT(), 'secondary'));
+    } else if (id === 'claude') {
+      const library = view.claude?.library;
+      if (library === 'installing') box.append(node('span', 'provider-working', 'Installation…'));
+      else if (library !== 'ready') box.append(button('Installer', () => void installClaude(), 'secondary'));
+      else if (ofProvider('claude')?.hasKey) {
+        box.append(button('Changer la clé', () => ((keyOpen = true), onChange())));
+        box.append(button('Retirer', () => void forget('claude')));
+      } else if (!keyOpen) box.append(button('Associer une clé', () => ((keyOpen = true), onChange()), 'secondary'));
+    } else if (view.openrouter?.pending) {
+      if (links.openrouter) {
+        const link = node('a', 'text-button', 'Ouvrir la page');
+        link.href = links.openrouter;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        box.append(link);
+      }
+      box.append(button('Annuler', () => void cancelSignIn('openrouter')));
+    } else if (ofProvider('openrouter')?.hasKey) box.append(button('Se déconnecter', () => void forget('openrouter')));
+    else box.append(button('Se connecter', () => void signInOpenRouter(), 'secondary'));
+    return box;
+  }
+  /** The field of the key of Claude, under its line. */
+  function keyField() {
+    const box = node('div', 'provider-key'),
+      input = node('input'),
+      keep = button(
+        'Enregistrer',
+        () => input.value.trim() && void useProvider('claude', { key: input.value.trim() }),
+        'primary',
+      ),
+      leave = button('Annuler', () => {
+        keyOpen = false;
+        delete errors.claude;
+        onChange();
+      });
+    input.type = 'password';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.placeholder = 'sk-ant-…  (console.anthropic.com › API Keys)';
+    input.setAttribute('aria-label', 'Clé d’API de la Claude Console');
+    input.disabled = off;
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        keep.click();
+      }
     });
+    box.append(input, keep, leave);
+    queueMicrotask(() => input.focus?.());
+    return box;
   }
-  async function signIn() {
-    await act(async () => {
-      const { url } = await (await api('remote/chatgpt/start', {})).json();
-      $('chatgpt-link').href = url;
-      view.chatgpt = { ...view.chatgpt, pending: true, error: '' };
-      renderAccount();
-      void poll();
-      return true;
-    });
-  }
-  async function cancelSignIn() {
-    clearTimeout(polling);
-    await act(async () => {
-      view = await (await api('remote/chatgpt/cancel', {})).json();
-      renderAccounts();
-      // A sign-in of OpenRouter still waiting is followed again.
-      if (view.openrouter?.pending) void poll();
-      return true;
-    });
-  }
-  async function signOut() {
+  /** The line of a provider: chosen or not, what it says, what can be done there. */
+  function providerRow(line, busy) {
+    const chosen = ofProvider(line.id),
+      lit = Boolean(chosen) && chosen.id === view.active,
+      row = node('div', 'llm-row is-provider' + (lit ? ' is-chosen' : '')),
+      pick = node('button', 'llm-pick'),
+      head = node('span', 'llm-head');
+    pick.type = 'button';
+    pick.setAttribute('role', 'radio');
+    pick.setAttribute('aria-checked', String(lit));
+    head.append(node('span', 'llm-name', line.name), node('span', 'llm-tag is-api', line.tag));
+    pick.append(node('span', 'llm-radio'), head, node('span', 'llm-path', said(line.id)));
+    pick.disabled = busy || off;
+    pick.onclick = () => choose(line.id);
+    row.append(pick, actions(line.id));
+    if (line.id === 'claude' && keyOpen && view.claude?.library === 'ready') row.append(keyField());
     if (
-      !confirmFn(
-        'Se déconnecter de ChatGPT ? Moodix ne pourra plus utiliser votre abonnement jusqu’à la prochaine connexion.',
-      )
+      errors[line.id] ||
+      (line.id === 'chatgpt' && view.chatgpt?.error) ||
+      (line.id === 'openrouter' && view.openrouter?.error)
     )
-      return;
-    await act(async () => {
-      const result = await (await api('remote/chatgpt/signout', {})).json();
-      view = result;
-      renderAccount();
-      $('chatgpt-error').textContent = result.revoked
-        ? ''
-        : 'Déconnecté ici ; OpenAI n’a pas confirmé la fin de la session (vous pouvez retirer Moodix dans les réglages de ChatGPT).';
-      $('chatgpt-error').hidden = result.revoked;
-      onChange();
-      return true;
-    });
+      row.append(node('p', 'config-error provider-error', errors[line.id] || view[line.id]?.error));
+    return row;
   }
+  /** A line of « Autre service »: its address and its model in mono. */
+  function otherRow(item, busy) {
+    const lit = item.id === view.active,
+      row = node('div', 'llm-row is-api' + (lit ? ' is-chosen' : '')),
+      pick = node('button', 'llm-pick'),
+      head = node('span', 'llm-head'),
+      edit = node('button', 'llm-edit'),
+      removing = node('button', 'llm-remove');
+    pick.type = edit.type = removing.type = 'button';
+    pick.setAttribute('role', 'radio');
+    pick.setAttribute('aria-checked', String(lit));
+    head.append(node('span', 'llm-name', item.name), node('span', 'llm-tag is-api', 'API'));
+    if (item.vision) head.append(node('span', 'llm-tag', 'Vision'));
+    pick.append(node('span', 'llm-radio'), head, node('span', 'llm-path', `${host(item.baseUrl)} · ${item.model}`));
+    pick.disabled = edit.disabled = removing.disabled = busy || off;
+    pick.onclick = () => void select(item.id);
+    edit.append(icon('edit'));
+    edit.title = 'Modifier';
+    edit.setAttribute('aria-label', 'Modifier ' + item.name);
+    edit.onclick = () => {
+      if (dirty() && !confirmFn('Abandonner les modifications de ce service ?')) return;
+      open(item);
+    };
+    removing.append(icon('trash'));
+    removing.title = 'Retirer de la liste';
+    removing.setAttribute('aria-label', 'Retirer ' + item.name + ' de la liste');
+    removing.onclick = () => void remove(item.id);
+    row.append(pick, edit, removing);
+    return row;
+  }
+  /** The lines of « Vos LLM » after the local ones; `busy`: the list is locked. */
+  function rows(busy) {
+    const rest = others();
+    return [
+      ...PROVIDER_LINES.map(line => providerRow(line, busy)),
+      ...(rest.length ? [node('p', 'llm-group', 'Autres services'), ...rest.map(item => otherRow(item, busy))] : []),
+    ];
+  }
+
   function setBusy(value) {
     off = value;
     for (const control of [
@@ -392,13 +509,12 @@ export function setupRemoteModels({
       $('api-remove-key'),
     ])
       control.disabled = value;
-    renderAccounts();
   }
-  /** The services of the list, as the server knows them (ChatGPT apart: it has its own button). */
+  /** The services of « Autre service », as the server knows them (the three providers apart). */
   function renderPresets() {
     fields.preset.replaceChildren(
       ...Object.entries(view.presets)
-        .filter(([id]) => id !== 'chatgpt')
+        .filter(([id]) => !PROVIDER_LINES.some(line => line.id === id))
         .map(([id, service]) => {
           const option = node('option', '', service.name);
           option.value = id;
@@ -409,19 +525,18 @@ export function setupRemoteModels({
   async function load() {
     view = await (await api('remote')).json();
     renderPresets();
-    renderAccounts();
-    if ((view.chatgpt?.pending || view.openrouter?.pending) && !polling) void poll();
+    if ((view.chatgpt?.pending || view.openrouter?.pending || view.claude?.library === 'installing') && !polling)
+      void poll();
     onChange();
     return view;
   }
 
-  // A service chosen: its address and its name, unless the user wrote their own.
+  // A service chosen: its address, unless the user wrote their own.
   let former = fields.preset.value;
   fields.preset.addEventListener('change', () => {
     const before = presetOf(former),
       next = presetOf(fields.preset.value);
     if (!fields.url.value || fields.url.value === before.baseUrl) fields.url.value = next.baseUrl;
-    if (!fields.name.value || fields.name.value === before.name) fields.name.value = next.name;
     if (!editing?.id) fields.key.placeholder = next.key ? 'Collez votre clé' : 'Aucune clé (serveur local)';
     former = fields.preset.value;
     fillModels([]);
@@ -430,21 +545,16 @@ export function setupRemoteModels({
   fields.preset.addEventListener('focus', () => (former = fields.preset.value));
   fields.url.addEventListener('input', privacy);
   $('add-api').onclick = () => {
-    if (dirty() && !confirmFn('Abandonner les modifications de cette API ?')) return;
+    if (dirty() && !confirmFn('Abandonner les modifications de ce service ?')) return;
     open(null);
     former = fields.preset.value;
-    fields.name.focus();
+    fields.url.focus?.();
   };
   $('api-cancel').onclick = () => cancel();
   $('api-save').onclick = () => void save();
   $('api-test').onclick = () => void test();
   $('api-list').onclick = () => void listModels();
   $('api-remove-key').onclick = () => void removeKey();
-  $('chatgpt-signin').onclick = () => void signIn();
-  $('chatgpt-cancel').onclick = () => void cancelSignIn();
-  $('chatgpt-signout').onclick = () => void signOut();
-  $('openrouter-signin').onclick = () => void openRouterSignIn();
-  $('openrouter-cancel').onclick = () => void cancelOpenRouter();
 
   return {
     load,
@@ -458,18 +568,8 @@ export function setupRemoteModels({
     /** Locked while the page works elsewhere (a save, a generation). */
     lock(value) {
       $('add-api').disabled = value;
-      if (!off)
-        for (const id of [
-          'chatgpt-signin',
-          'chatgpt-cancel',
-          'chatgpt-signout',
-          'openrouter-signin',
-          'openrouter-cancel',
-        ])
-          $(id).disabled = value;
     },
     active: () => view.active,
     connections: () => view.connections,
-    models: () => listed,
   };
 }

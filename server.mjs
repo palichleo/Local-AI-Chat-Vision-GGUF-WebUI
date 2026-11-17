@@ -37,7 +37,8 @@ import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
 import { ChatModel, estimateContext, listModels, testConnection } from './lib/chat-model.mjs';
 import { PRESETS, RemoteModels, apiKey, connectionOf } from './lib/remote-models.mjs';
 import { ChatGPTAccount } from './lib/chatgpt.mjs';
-import { OpenRouterSignIn } from './lib/openrouter.mjs';
+import { OpenRouterSignIn, openRouterModels } from './lib/openrouter.mjs';
+import { CLAUDE_DEFAULT, ClaudeAccess } from './lib/claude.mjs';
 import { relocate } from './lib/relocate.mjs';
 import { FOLDER_KEYS, GenerationService, generationConfig } from './lib/generation-service.mjs';
 import { convertLongForge } from './lib/longforge-conversion.mjs';
@@ -111,6 +112,7 @@ const staticFiles = new Map([
   ['/stream.mjs', ['stream.mjs', 'text/javascript; charset=utf-8']],
   ['/model-ready.mjs', ['model-ready.mjs', 'text/javascript; charset=utf-8']],
   ['/remote-llm-ui.mjs', ['remote-llm-ui.mjs', 'text/javascript; charset=utf-8']],
+  ['/model-choice.mjs', ['model-choice.mjs', 'text/javascript; charset=utf-8']],
   ['/images.mjs', ['images.mjs', 'text/javascript; charset=utf-8']],
   ['/video-plan.mjs', ['video-plan.mjs', 'text/javascript; charset=utf-8']],
   ['/proposal-card.mjs', ['proposal-card.mjs', 'text/javascript; charset=utf-8']],
@@ -277,6 +279,8 @@ export async function createApplication({
   chatgpt: givenChatGPT = null,
   // « Se connecter à OpenRouter » (lib/openrouter.mjs): where its pages are; tests pass their own server.
   openrouter: openrouterOptions = {},
+  // Claude (lib/claude.mjs): where its API is, how its library loads; tests pass their own.
+  claude: claudeOptions = {},
 } = {}) {
   // Keep HTML, scripts and styles paired with this running backend until restart.
   const frontend = new Map(
@@ -392,15 +396,58 @@ export async function createApplication({
   // chat, the Studio and the generations ask. `engine` stays for what only concerns llama.cpp.
   const remotes = new RemoteModels(dataDir);
   const chatgpt = givenChatGPT ?? new ChatGPTAccount({ dataDir, openUrl });
-  const openrouter = new OpenRouterSignIn({ remotes, openUrl, ...openrouterOptions });
-  const chat = await new ChatModel({ engine, remotes, chatgpt }).load();
+  // `chat` is made below: the sign-in only tells it once a key comes back.
+  const openrouter = new OpenRouterSignIn({ remotes, openUrl, onSaved: id => chat.changed(id), ...openrouterOptions });
+  // Claude by the key of its Console, through Anthropic's library installed on demand (lib/claude.mjs).
+  const claude = new ClaudeAccess({ root, ...claudeOptions });
+  const chat = await new ChatModel({
+    engine,
+    remotes,
+    chatgpt,
+    claude,
+    openrouterModels: (connection, options) => openRouterModels(connection, { ...options, ...openrouterOptions.listing }),
+  }).load();
   /** What the settings show of the remote models: the connections (whether a key is kept), the accounts. */
   const remoteView = async () => ({
     ...(await remotes.list()),
     presets: PRESETS,
     chatgpt: await chatgpt.status(),
     openrouter: openrouter.status(),
+    claude: await claude.status(),
   });
+  /**
+   * The provider `name` of the list chosen for the chat (Paramètres › Moodix AI): its connection, made
+   * the first time with a model it offers, once its account is associated (ChatGPT signed in, the
+   * key of Claude checked, OpenRouter signed in).
+   */
+  async function useProvider(name, { key } = {}) {
+    if (!['chatgpt', 'claude', 'openrouter'].includes(name)) throw problem('Fournisseur inconnu.');
+    const existing = await remotes.provider(name);
+    let model = existing?.model;
+    if (name === 'chatgpt') {
+      if (!(await chatgpt.status()).connected) throw problem('Connectez-vous d’abord à ChatGPT (Continuer avec ChatGPT).', 409);
+      model ??= (await chatgpt.models())[0]?.id;
+      if (!model) throw problem('Votre compte ChatGPT ne propose aucun modèle utilisable ici.', 502);
+    } else if (name === 'claude') {
+      const kept = typeof key === 'string' && key.trim() ? apiKey(key) : existing?.key;
+      if (!kept) throw problem('Collez d’abord votre clé d’API Claude (console.anthropic.com › API Keys).', 409);
+      // The key checked by the list of its models, before it is kept.
+      const listed = await claude.models(kept, { signal: AbortSignal.timeout(30000) });
+      model = listed.some(item => item.id === model) ? model : (listed.find(item => item.id === CLAUDE_DEFAULT) ?? listed[0])?.id;
+      key = kept;
+    } else if (!existing?.key) throw problem('Connectez-vous d’abord à OpenRouter (Se connecter à OpenRouter).', 409);
+    const { key: _kept, ...rest } = existing ?? {};
+    const saved = await remotes.save({
+      ...rest,
+      preset: name,
+      model: model ?? existing.model,
+      vision: existing?.vision ?? name !== 'openrouter',
+      ...(name === 'claude' ? { key } : {}),
+    });
+    await chat.changed(saved.id);
+    await chat.use(saved.id);
+    return saved;
+  }
   let componentsCheck = null;
   let savingSettings = false;
   let modelOperation = Promise.resolve();
@@ -1097,6 +1144,9 @@ export async function createApplication({
       if (path === '/api/models' && req.method === 'GET')
         return send(200, { models: await models.list(), ...(await models.scan()) });
       if (path === '/api/remote' && req.method === 'GET') return send(200, await remoteView());
+      // What the bar of the chat offers for the remote model in use (its models, their efforts); null for the local one.
+      if (path === '/api/remote/options' && req.method === 'GET')
+        return send(200, { options: await chat.options({ again: requestURL.searchParams.get('again') === '1' }) });
       if (path === '/api/status' && req.method === 'GET') return send(200, status());
       if (req.method === 'GET' && path === '/api/resources')
         return send(200, { resources: (await resources.list()).map(resourceView) });
@@ -1493,9 +1543,40 @@ export async function createApplication({
         })();
         return send(202, llamaBuilds.status());
       }
-      // The chat models reached by an address (Paramètres › Moodix AI › Ajouter une API) and the
-      // ChatGPT account of the user. Keys and tokens stay here: the page only learns whether one is kept.
+      // The chat models reached by an address (Paramètres › Moodix AI) and the accounts of the user.
+      // Keys and tokens stay here: the page only learns whether one is kept.
       if (path.startsWith('/api/remote/')) {
+        // ChatGPT, Claude or OpenRouter chosen for the chat (its account associated: a key for Claude).
+        if (path === '/api/remote/provider') {
+          if (runtime.active || savingSettings || saving) throw problem('Attendez la fin de l’opération en cours.', 409);
+          await useProvider(body.provider, { key: body.key });
+          return send(200, { ...(await remoteView()), status: status() });
+        }
+        // The account of a provider taken off this computer: its connection (and its key) go; the
+        // chat comes back to the local model if it was the one in use.
+        if (path === '/api/remote/forget') {
+          if (!['claude', 'openrouter', 'chatgpt'].includes(body.provider)) throw problem('Fournisseur inconnu.');
+          const kept = await remotes.provider(body.provider);
+          if (kept && chat.connection?.id === kept.id && (chat.busy || runtime.active))
+            throw problem('Attendez la fin de la réponse avant de retirer ce compte.', 409);
+          const revoked = body.provider === 'chatgpt' ? await chatgpt.signOut() : {};
+          if (kept) {
+            await remotes.remove(kept.id);
+            chat.forget(kept.id);
+          }
+          return send(200, { ...revoked, ...(await remoteView()), status: status() });
+        }
+        // The model and the effort chosen in the bar of the chat, kept as the last choice.
+        if (path === '/api/remote/choice') {
+          if (runtime.active) throw problem('Attendez la fin de la génération.', 409);
+          const options = await chat.choose({ model: body.model, effort: body.effort });
+          return send(200, { options, status: status() });
+        }
+        // Anthropic's library, installed on demand the first time Claude is chosen.
+        if (path === '/api/remote/claude/install') {
+          void claude.install();
+          return send(202, await remoteView());
+        }
         if (path === '/api/remote/save') {
           const saved = await remotes.save(body);
           await chat.changed(saved.id);
@@ -1534,7 +1615,18 @@ export async function createApplication({
           chatgpt.cancelSignIn();
           return send(200, await remoteView());
         }
-        if (path === '/api/remote/chatgpt/signout') return send(200, { ...(await chatgpt.signOut()), ...(await remoteView()) });
+        if (path === '/api/remote/chatgpt/signout') {
+          // Signed out: its connection goes too, and the chat comes back to the local model if it used it.
+          const kept = await remotes.provider('chatgpt');
+          if (kept && chat.connection?.id === kept.id && (chat.busy || runtime.active))
+            throw problem('Attendez la fin de la réponse avant de vous déconnecter.', 409);
+          const result = await chatgpt.signOut();
+          if (kept) {
+            await remotes.remove(kept.id);
+            chat.forget(kept.id);
+          }
+          return send(200, { ...result, ...(await remoteView()), status: status() });
+        }
         // A key of the user's OpenRouter account, made without copying it: the connection is saved once back.
         if (path === '/api/remote/openrouter/start') return send(200, await openrouter.start());
         if (path === '/api/remote/openrouter/cancel') {

@@ -71,6 +71,27 @@ FFmpeg comes with two of these packages, and neither copy is distributed with At
 
 An archive that shipped this Python environment together with Atelier would therefore distribute GPL libraries combined with the engine, which a noncommercial or proprietary license does not fit: the environment must stay a download made on the user's computer, or video reading must first go through the FFmpeg executable. This is the project's own reading, not legal advice.
 
+### npm packages (Claude, optional)
+
+Claude is asked through Anthropic's official library. It is not distributed with the sources: the application installs it with npm into `node_modules/` the first time the user chooses Claude (Paramètres › Moodix AI), at the versions locked in `package-lock.json`, without running any install script.
+
+| Package                 | Version | License    |
+| ----------------------- | ------- | ---------- |
+| @anthropic-ai/sdk       | 1.4.0   | Apache-2.0 |
+| @opentelemetry/api      | 1.10.0  | Apache-2.0 |
+| standardwebhooks        | 1.1.1   | MIT        |
+| @stablelib/base64       | 1.0.1   | MIT        |
+| fast-sha256             | 1.3.0   | Unlicense  |
+| json-schema-to-ts       | 3.1.1   | MIT        |
+| ts-algebra              | 2.0.0   | MIT        |
+| @babel/runtime          | 7.29.14 | MIT        |
+
+None of them is under a GPL or AGPL license (checked on 17 November 2026).
+
+### Remote chat models (optional)
+
+When the user chooses one in Paramètres › Moodix AI, the chat is answered by an online service under that service's own terms, with the user's own account: ChatGPT (the user's ChatGPT Plus or Pro plan, through OpenAI's [ChatGPT plan usage for open-source and locally hosted apps](https://developers.openai.com/siwc/token-sharing-open-source); offering it in a paid application requires OpenAI's interest form first), Claude (an API key of the user's Claude Console: Anthropic does not permit third-party applications to sign in with a Claude.ai account or to use Claude subscription plans), OpenRouter (a key of the user's account made by its official OAuth PKCE sign-in), or any server « compatible OpenAI » with its own key. Moodix never reuses the identity of another tool (Codex, Claude Code…).
+
 ## Models
 
 Checkpoints, text encoders, VAEs, LoRAs, tokenizers and GGUF files are never distributed with Atelier. For a workflow it ships, Atelier can download the missing files when the user asks for it, from the repositories listed in `runner/downloads.json` (Hugging Face, and GitHub for Real-ESRGAN): the files go from their publisher to the user's computer, and a file behind a license gate needs the user's own Hugging Face account. Each model keeps its own license, which may restrict commercial use, or the countries where the model may be used, independently of Atelier's license. Before a download, the application shows the license of each file (its name, a link to its text and its limits, as written in `runner/downloads.json` after the table below), and asks the user to confirm those with conditions (LTX 2.5, MiniMax H3, Krea 2, SAM 3.1); the choice stays the user's.

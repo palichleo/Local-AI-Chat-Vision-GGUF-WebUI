@@ -1,10 +1,10 @@
 {
   "name": "atelier-local",
-  "version": "0.6.37",
+  "version": "0.6.38",
   "private": true,
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
-  "description": "Assistant GGUF local qui pilote la génération native d’images et de vidéos, sans dépendances npm.",
+  "description": "Assistant GGUF local qui pilote la génération native d’images et de vidéos ; une seule dépendance npm, facultative, installée au premier choix de Claude.",
   "engines": {
     "node": ">=22"
   },
@@ -14,5 +14,8 @@
     "test": "node --test tests/*.mjs",
     "check:ui": "node scripts/check-ui.mjs",
     "ship-workflows": "node scripts/ship-workflows.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.4.0"
   }
 }

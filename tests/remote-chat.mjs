@@ -561,7 +561,10 @@ test('« Continuer avec ChatGPT »: the registration of the open-source way, the
     [kept.client_id, kept.subject, kept.access_token, kept.ext_agent_host_id],
     ['oaiapp_test', 'user-1', 'access-1', asked.get('ext_agent_host_id')],
   );
-  assert.deepEqual(await account.models(), [{ id: 'gpt-test', name: 'GPT Test' }]);
+  // Each with the efforts it takes (the usual three when its listing says none) and whether it sees images.
+  assert.deepEqual(await account.models(), [
+    { id: 'gpt-test', name: 'GPT Test', efforts: ['low', 'medium', 'high'], vision: true },
+  ]);
 
   // An answer: instructions, input, store false, no temperature nor length; read as chat completions.
   const answer = await account.respond(
@@ -980,13 +983,19 @@ test(
     assert.equal((await fake.back()).status, 200);
     const view = await (await made.api('remote')).json();
     assert.deepEqual([view.chatgpt.connected, view.chatgpt.email], [true, 'reader@example.com']);
-    assert.deepEqual((await (await made.api('remote/models', { preset: 'chatgpt' })).json()).models, [
-      { id: 'gpt-test', name: 'GPT Test' },
-    ]);
-    const { saved } = await (
-      await made.api('remote/save', { preset: 'chatgpt', name: 'ChatGPT', model: 'gpt-test', vision: true })
-    ).json();
-    const { status } = await (await made.api('remote/select', { id: saved.id })).json();
+    // Its line chosen in the settings (0.6.38): its connection made with the first model of the
+    // account, named ChatGPT whatever is asked; then the effort chosen in the bar of the chat.
+    const chosen = await (await made.api('remote/provider', { provider: 'chatgpt' })).json();
+    const saved = chosen.connections.find(item => item.preset === 'chatgpt');
+    assert.deepEqual([saved.name, saved.model, chosen.active], ['ChatGPT', 'gpt-test', saved.id]);
+    const { options } = await (await made.api('remote/options')).json();
+    assert.deepEqual(
+      [options.model, options.effort, options.efforts],
+      ['gpt-test', 'medium', ['low', 'medium', 'high']],
+    );
+    const { status } = await (await made.api('remote/choice', { effort: 'high' })).json();
+    assert.equal(status.remote.effort, 'high');
+    await made.api('remote/choice', { effort: 'max' }, 400);
     assert.deepEqual(
       [status.remote.kind, status.remote.host, status.remote.leaves, status.remote.thinking],
       ['chatgpt', 'api.openai.com', true, true],
@@ -995,6 +1004,7 @@ test(
 
     const said = await made.chat('bonjour');
     assert.equal(said.map(event => event.choices?.[0]?.delta?.content ?? '').join(''), 'Bonjour');
+    assert.equal(fake.seen.responses.at(-1).body.reasoning.effort, 'high', 'the effort chosen goes with the message');
     const proposal = (await made.chat('generate a boat')).find(event => event.local_tool_request).local_tool_request;
     assert.equal(proposal.call.function.name, 'create_image');
     assert.equal(proposal.call.id, 'call_cloud_1', 'the first call only');
@@ -1002,5 +1012,47 @@ test(
     const sent = fake.seen.responses.at(-1).body;
     assert.equal(sent.tools[0].name, 'moodix');
     assert.equal(made.spawned.length, 0);
+  },
+);
+
+const claudeInstalled = await import('node:fs/promises')
+  .then(fs => fs.access(fileURLToPath(new URL('../node_modules/@anthropic-ai/sdk/package.json', import.meta.url))))
+  .then(
+    () => true,
+    () => false,
+  );
+test(
+  'a turn of the chat with Claude: an image proposed by a call of Claude and made at once, the card free for it',
+  {
+    timeout: 30000,
+    ...(claudeInstalled ? {} : { skip: 'la bibliothèque @anthropic-ai/sdk n’est pas installée (npm ci)' }),
+  },
+  async t => {
+    const { fakeAnthropic } = await import('./fixtures/fake-anthropic.mjs');
+    const key = 'sk-ant-test-' + randomUUID();
+    const fake = await fakeAnthropic(key);
+    t.after(() => fake.close());
+    const { api, chat, spawned } = await moodix(t, { claude: { baseURL: fake.base, retries: 0 } });
+    await api('remote/provider', { provider: 'claude', key });
+    const conversationId = randomUUID();
+    const proposal = (await chat('generate a boat', { conversationId })).find(
+      event => event.local_tool_request,
+    ).local_tool_request;
+    assert.equal(proposal.call.function.name, 'create_image');
+    assert.equal(proposal.call.id, 'toolu_boat');
+    assert.equal(JSON.parse(proposal.call.function.arguments).prompt, 'A red boat');
+    // The tools of Moodix as Claude takes them, one call at a time.
+    const sent = fake.seen.messages.at(-1).body;
+    assert.ok(sent.tools.some(tool => tool.name === 'create_image' && tool.input_schema));
+    assert.deepEqual(sent.tool_choice, { type: 'auto', disable_parallel_tool_use: true });
+    await api('tools/execute', { requestId: proposal.requestId, permission: 'once' }, 202);
+    const job = await until(async () => {
+      const current = await (await api('tools/job')).json();
+      return current && ['done', 'error'].includes(current.state) && current;
+    });
+    assert.equal(job.state, 'done', job.error);
+    assert.equal(spawned.length, 0, 'llama.cpp was never started');
+    // Claude is still the chat model: nothing was stopped nor started again around the creation.
+    assert.equal((await (await api('status')).json()).remote.kind, 'claude');
   },
 );
