@@ -36,6 +36,10 @@ For a release that changes the libraries, update `pyproject.toml`, regenerate `u
 
 The worker starts offline (`HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`) and with `-s`, apart from the user's own Python packages. It downloads nothing: model files are downloaded by the Node server, and only when the user asks.
 
+## How it manages memory
+
+[MEMORY-STUDY.md](MEMORY-STUDY.md) records what a proven engine does (ComfyUI, observed), what is published, where this engine stands, and the experiments made on it, with their results.
+
 ## Diagnosis
 
 Each stage of a generation (time, video memory, what failed) is appended to `data/generation-journal.jsonl` as it happens, so a generation that hangs, fails or is cancelled can be read afterwards; the file keeps the recent ones. `data/runner-errors.log` keeps the tracebacks.
