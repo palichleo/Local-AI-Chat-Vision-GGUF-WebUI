@@ -124,9 +124,9 @@ test('a request for a service leaves out what only llama.cpp knows, and its answ
   for (const key of ['top_k', 'reasoning_format', 'chat_template_kwargs']) assert.equal(key in sent, false, key);
   assert.equal(sent.messages[1].reasoning_content, undefined);
   assert.equal(body.messages[1].reasoning_content, 'pensée gardée', 'the conversation itself keeps it');
-  // OpenAI wants its own word for the length; Mistral refuses what it does not know.
+  // OpenAI wants its own word for the length (room for a reflection, 0.6.39); Mistral refuses what it does not know.
   const openai = remoteBody(body, { preset: 'openai', model: 'gpt-4.1' });
-  assert.deepEqual([openai.max_tokens, openai.max_completion_tokens], [undefined, 4096]);
+  assert.deepEqual([openai.max_tokens, openai.max_completion_tokens], [undefined, 16000]);
   assert.equal('stream_options' in remoteBody(body, { preset: 'mistral', model: 'm' }), false);
   assert.deepEqual(Object.keys(minimalBody(sent)).sort(), ['messages', 'model', 'stream', 'tool_choice', 'tools']);
 
@@ -170,7 +170,7 @@ test('a request for a service leaves out what only llama.cpp knows, and its answ
   );
   assert.match(
     normalizedEvent({ error: { message: 'Rate limit exceeded' } }, 'openrouter.ai').error,
-    /^openrouter\.ai : Rate limit exceeded/,
+    /^openrouter\.ai a interrompu la réponse : Rate limit exceeded/,
   );
 });
 
@@ -618,15 +618,19 @@ test('« Continuer avec ChatGPT »: the registration of the open-source way, the
   assert.equal(fake.seen.tokens.at(-1).grant_type, 'refresh_token');
   assert.equal(fake.seen.tokens.at(-1).client_id, 'oaiapp_test');
 
-  // Signed out: revoked at OpenAI, the tokens gone, the registration kept for the next sign-in.
+  // Signed out: revoked at OpenAI, the tokens and the account gone (another may sign in next,
+  // registered anew, 0.6.39), this computer kept.
   assert.deepEqual(await account.signOut(), { revoked: true });
   assert.equal(fake.seen.revoked[0].token, 'refresh-2');
   const after = JSON.parse(await readFile(join(data, 'chatgpt-account.json'), 'utf8'));
-  assert.deepEqual([after.access_token, after.refresh_token, after.client_id], [undefined, undefined, 'oaiapp_test']);
+  assert.deepEqual(
+    [after.access_token, after.refresh_token, after.client_id, after.email, after.ext_agent_host_id],
+    [undefined, undefined, undefined, undefined, asked.get('ext_agent_host_id')],
+  );
   await account.signIn();
   assert.deepEqual(
     [fake.seen.authorize.get('client_id'), fake.seen.authorize.get('agent_name_hint')],
-    ['oaiapp_test', null],
+    ['dynamic_agent_client', 'Moodix'],
   );
   assert.equal((await fake.back({ error: 'access_denied' })).status, 400);
   assert.match((await account.status()).error, /Connexion refusée dans la page de ChatGPT/);
@@ -895,7 +899,7 @@ test(
     );
     assert.deepEqual(
       await (await api('remote/test', { preset: 'custom', baseUrl: address, model: 'test-model', key })).json(),
-      { ok: true, said: '' },
+      { ok: true, said: 'OK' },
     );
     assert.match(
       (

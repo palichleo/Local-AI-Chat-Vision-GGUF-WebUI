@@ -35,7 +35,7 @@ import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
 import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
 import { ChatModel, estimateContext, listModels, testConnection } from './lib/chat-model.mjs';
-import { PRESETS, RemoteModels, apiKey, connectionOf } from './lib/remote-models.mjs';
+import { PRESETS, RemoteModels, apiKey, connectionOf, hostOf } from './lib/remote-models.mjs';
 import { ChatGPTAccount } from './lib/chatgpt.mjs';
 import { OpenRouterSignIn, openRouterModels } from './lib/openrouter.mjs';
 import { CLAUDE_DEFAULT, ClaudeAccess } from './lib/claude.mjs';
@@ -145,6 +145,23 @@ async function jsonBody(req, limit = maxBody) {
   } catch {
     throw problem('Le JSON reçu est invalide.');
   }
+}
+
+/**
+ * A request for a remote model that does not see images: the images of the conversation said in
+ * words in their place. Refused, every turn of a conversation that once had an image would fail.
+ */
+function withoutImages(input) {
+  if (!Array.isArray(input?.messages)) return input;
+  const said = { type: 'text', text: '[Image jointe non montrée : ce modèle ne voit pas les images.]' };
+  return {
+    ...input,
+    messages: input.messages.map(message =>
+      Array.isArray(message?.content) && message.content.some(part => part?.type === 'image_url')
+        ? { ...message, content: message.content.map(part => (part?.type === 'image_url' ? said : part)) }
+        : message,
+    ),
+  };
 }
 
 function chatPayload(input, vision, maxOutputTokens, countOnly = false) {
@@ -1599,7 +1616,12 @@ export async function createApplication({
           const listing = path === '/api/remote/models',
             draft = connectionOf({ ...body, key: undefined, model: listing ? body.model || '-' : body.model }),
             kept = typeof body.id === 'string' ? await remotes.get(body.id).catch(() => null) : null,
-            connection = { ...draft, key: typeof body.key === 'string' && body.key ? apiKey(body.key) : (kept?.key ?? '') },
+            // A kept key goes only to the server it was given for: another address, no key.
+            sameHost = kept && hostOf(kept.baseUrl) === hostOf(draft.baseUrl),
+            connection = {
+              ...draft,
+              key: typeof body.key === 'string' && body.key ? apiKey(body.key) : sameHost ? kept.key : '',
+            },
             signal = AbortSignal.timeout(30000);
           if (listing)
             return send(200, {
@@ -2037,7 +2059,9 @@ export async function createApplication({
           // said as such, not as an unexpected local error.
           if (error.name === 'TimeoutError')
             throw problem(
-              `Le modèle n’a pas répondu en ${Math.round(enrichTimeoutMs / 1000)} secondes : la carte graphique est peut-être occupée par un autre programme. Réessayez une fois qu’elle est libre.`,
+              chat.local
+                ? `Le modèle n’a pas répondu en ${Math.round(enrichTimeoutMs / 1000)} secondes : la carte graphique est peut-être occupée par un autre programme. Réessayez une fois qu’elle est libre.`
+                : `Le modèle distant n’a pas répondu en ${Math.round(enrichTimeoutMs / 1000)} secondes. Réessayez dans un moment.`,
               504,
             );
           throw error;
@@ -2329,7 +2353,12 @@ export async function createApplication({
         return send(200, status());
       }
       if (path === '/api/context') {
-        const payload = chatPayload(body, chat.seesImages(config), config.maxOutputTokens, true);
+        const payload = chatPayload(
+          !chat.local && !chat.seesImages(config) ? withoutImages(body) : body,
+          chat.seesImages(config),
+          config.maxOutputTokens,
+          true,
+        );
         const limits = chat.limits(config);
         if (chat.state !== 'ready' || chat.busy || runtime.active)
           return send(200, { ...limits, used: null, precision: 'unavailable' });
@@ -2362,7 +2391,8 @@ export async function createApplication({
       if (clearingHistory) throw problem('Suppression de l’historique en cours.', 409);
       if (chat.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
       if (chat.busy) throw problem('Une réponse est déjà en cours.', 409);
-      const payload = chatPayload(body, chat.vision, config.maxOutputTokens);
+      // A remote model that does not see images: those of the conversation said in words.
+      const payload = chatPayload(!chat.local && !chat.vision ? withoutImages(body) : body, chat.vision, config.maxOutputTokens);
       const controller = new AbortController();
       chat.activeRequest = controller;
       chat.busy = true;

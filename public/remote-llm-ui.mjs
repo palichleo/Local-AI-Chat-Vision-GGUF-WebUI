@@ -87,7 +87,24 @@ export function setupRemoteModels({
     };
   }
   const dirty = () => Boolean(editing) && JSON.stringify(draft()) !== baseline;
+  /**
+   * What the field of the key says: the kept one, only for the address it was given for. Another
+   * address, and it is not sent there: a key of that server is asked for.
+   */
+  function keyHint() {
+    const item = editing?.id ? view.connections.find(connection => connection.id === editing.id) : null,
+      same = Boolean(item?.hasKey) && host(item.baseUrl) === host(fields.url.value);
+    fields.key.placeholder = same
+      ? 'Clé enregistrée · collez-en une autre pour la remplacer'
+      : item?.hasKey
+        ? 'Nouvelle adresse : collez sa clé (la clé enregistrée ne lui sera pas envoyée)'
+        : presetOf(fields.preset.value).key
+          ? 'Collez votre clé'
+          : 'Aucune clé (serveur local)';
+    $('api-remove-key').hidden = !same;
+  }
   function privacy() {
+    keyHint();
     const where = host(fields.url.value);
     $('api-privacy').textContent = !where
       ? ''
@@ -112,14 +129,8 @@ export function setupRemoteModels({
     fields.preset.value = preset;
     fields.url.value = item?.baseUrl ?? service.baseUrl;
     fields.key.value = '';
-    fields.key.placeholder = item?.hasKey
-      ? 'Clé enregistrée · collez-en une autre pour la remplacer'
-      : service.key
-        ? 'Collez votre clé'
-        : 'Aucune clé (serveur local)';
     fields.model.value = item?.model ?? '';
     fields.vision.checked = item?.vision ?? false;
-    $('api-remove-key').hidden = !item?.hasKey;
     $('api-editor').open = true;
     fillModels([]);
     say('');
@@ -537,7 +548,6 @@ export function setupRemoteModels({
     const before = presetOf(former),
       next = presetOf(fields.preset.value);
     if (!fields.url.value || fields.url.value === before.baseUrl) fields.url.value = next.baseUrl;
-    if (!editing?.id) fields.key.placeholder = next.key ? 'Collez votre clé' : 'Aucune clé (serveur local)';
     former = fields.preset.value;
     fillModels([]);
     privacy();

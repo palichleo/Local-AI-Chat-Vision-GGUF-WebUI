@@ -27,6 +27,13 @@ const server = http.createServer(async (req, res) => {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const body = JSON.parse(Buffer.concat(chunks));
+  // Asked without a stream (a test of the connection, a prompt of the Studio): one answer in JSON, as a service gives it.
+  if (body.stream === false) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(
+      JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }] }),
+    );
+  }
   if (body.messages.at(-1).content === 'inspect tool context') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     send(res, { local_test_payload: body });
@@ -92,11 +99,11 @@ const server = http.createServer(async (req, res) => {
               ? // The identifier of an image written in the prompt, the image itself left out.
                 { prompt: 'A red boat like ' + text.slice(16, 52) }
               : text.startsWith('generate from take ')
-              ? // A take named by its number, as the user says it (« la prise 12 »).
-                { prompt: 'A red boat', source: { take: Number(text.slice(19)) } }
-              : text.startsWith('generate from ')
-              ? { prompt: 'A red boat', source: { output: text.slice(14) } }
-              : { prompt: 'A red boat' },
+                ? // A take named by its number, as the user says it (« la prise 12 »).
+                  { prompt: 'A red boat', source: { take: Number(text.slice(19)) } }
+                : text.startsWith('generate from ')
+                  ? { prompt: 'A red boat', source: { output: text.slice(14) } }
+                  : { prompt: 'A red boat' },
       );
   const middle = Math.floor(argumentsText.length / 2);
   send(res, { choices: [{ delta: { reasoning_content: 'I will use the registered workflow.' } }] });

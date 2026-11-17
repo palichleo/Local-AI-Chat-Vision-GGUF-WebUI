@@ -285,6 +285,7 @@ test(
         name: 'Claude Opus 5.5',
         efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         vision: true,
+        context: 1000000,
       },
       { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', efforts: ['low', 'medium', 'high', 'max'], vision: true },
     ]);
@@ -372,7 +373,9 @@ test(
     );
     const { options } = await (await api('remote/options')).json();
     assert.deepEqual([options.effort, options.efforts], ['medium', ['low', 'medium', 'high', 'xhigh', 'max']]);
-    assert.equal((await (await api('remote/choice', { effort: 'xhigh' })).json()).status.remote.effort, 'xhigh');
+    const picked = (await (await api('remote/choice', { effort: 'xhigh' })).json()).status.remote;
+    // The effort kept, and what the model keeps in mind, as its listing says (the gauge follows).
+    assert.deepEqual([picked.effort, picked.contextSize], ['xhigh', 1000000]);
 
     const chat = async text =>
       (

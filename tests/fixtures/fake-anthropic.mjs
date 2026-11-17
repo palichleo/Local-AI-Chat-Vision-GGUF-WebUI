@@ -34,6 +34,7 @@ export async function fakeAnthropic(key) {
             id: 'claude-opus-5-5',
             display_name: 'Claude Opus 5.5',
             created_at: '2026-10-01T00:00:00Z',
+            max_input_tokens: 1000000,
             capabilities: caps(true, ['low', 'medium', 'high', 'xhigh', 'max']),
           },
           {
