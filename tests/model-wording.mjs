@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer as netServer } from 'node:net';
 import { createApplication } from '../server.mjs';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
-import { resourceCatalogPrompt, resourceTool } from '../lib/resources.mjs';
+import { refsToIds, resourceCatalogPrompt, resourceTool } from '../lib/resources.mjs';
 import { outputToolFor } from '../lib/output-tools.mjs';
 import { briefMessage, cardBrief } from '../lib/video-brief.mjs';
 import { THIN_NOTE } from '../lib/thin-prompt.mjs';
@@ -431,23 +431,26 @@ test('a capable model gets the consigne of Moodix in place of the local line, th
 });
 
 test('the tools of a capable model are contracts: no plan agreed in words, every argument said, workflows by name', async () => {
-  const catalog = await shippedCatalog();
+  const catalog = await shippedCatalog(),
+    generic = await catalog.definitions(undefined, { wording: CAPABLE });
   for (const [context, available] of Object.entries(CONTEXTS)) {
     const tools = await catalog.definitions(available, { wording: CAPABLE }),
-      rails = await catalog.definitions(available);
-    // The same tools and arguments as the local model's, said otherwise.
-    assert.deepEqual(
-      tools.map(tool => [
+      rails = await catalog.definitions();
+    // Whatever the conversation holds, the same definitions, to the character: the cache of the
+    // provider keeps them from one request to the next, one project to another, after a creation.
+    assert.equal(JSON.stringify(tools), JSON.stringify(generic), context);
+    // The tools and arguments of the local model when nothing narrows them, sources by number.
+    const shape = list =>
+      list.map(tool => [
         tool.function.name,
         Object.keys(tool.function.parameters.properties),
         tool.function.parameters.required,
-      ]),
-      rails.map(tool => [
-        tool.function.name,
-        Object.keys(tool.function.parameters.properties),
-        tool.function.parameters.required,
-      ]),
-      context,
+      ]);
+    assert.deepEqual(shape(tools), shape(rails), context);
+    assert.doesNotMatch(
+      JSON.stringify(tools),
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
+      'no identifier',
     );
     const text = JSON.stringify(tools);
     for (const staging of [
@@ -488,6 +491,42 @@ test('the tools of a capable model are contracts: no plan agreed in words, every
     tool => tool.function.name === 'create_audio',
   ).function;
   assert.ok(audio.parameters.properties.workflow.enum.every(value => /^[0-9a-f-]{36}$/.test(value)));
+  // Sources by their numbers: a take, a reference (#ref2 is 2), a frame of a video reference.
+  const source = video.parameters.properties.start_image;
+  assert.deepEqual(Object.keys(source.properties), ['take', 'ref', 'frame', 'image', 'output', 'index']);
+  assert.match(video.description, /\{"ref": n\} the reference #refN/);
+});
+
+test('a reference named by its number is made the reference of the project, a number that is none refused', () => {
+  const catalog = [
+    { id: R1, reference: 1, label: '#ref1' },
+    { id: R2, reference: 2, label: '#ref2' },
+  ];
+  assert.deepEqual(
+    JSON.parse(
+      refsToIds(
+        JSON.stringify({ prompt: 'p', start_image: { ref: 2, frame: 1 }, reference: [{ ref: 1 }, { take: 3 }] }),
+        catalog,
+      ),
+    ),
+    { prompt: 'p', start_image: { frame: 1, resource: R2 }, reference: [{ resource: R1 }, { take: 3 }] },
+  );
+  assert.deepEqual(JSON.parse(refsToIds('{"refs":[2,1]}', catalog)), { resource_ids: [R2, R1] });
+  // Without a number, the arguments come back as they were, to the character.
+  const plain = '{"prompt":"p","source":{"resource":"' + R1 + '"}}';
+  assert.equal(refsToIds(plain, catalog), plain);
+  assert.equal(refsToIds('pas du JSON', catalog), 'pas du JSON');
+  assert.throws(() => refsToIds('{"refs":[9]}', catalog), /La référence #ref9 n’existe pas dans ce projet\./);
+  assert.throws(() => refsToIds('{"source":{"ref":9}}', catalog), /#ref9/);
+  // Told to a capable model by its number, to the local one by its id.
+  assert.match(
+    citedMessage([{ label: '#ref2', id: R2, reference: 2 }], null, { byNumber: true }),
+    /#ref2 \(\{"ref": 2\}\)/,
+  );
+  assert.match(
+    citedMessage([{ label: '#ref2', id: R2, reference: 2 }]),
+    new RegExp(`#ref2 \\(\\{"resource": "${R2}"\\}\\)`),
+  );
 });
 
 test(
@@ -499,6 +538,13 @@ test(
     assert.ok(capable.messages[0].content.endsWith('Tout en noir et blanc.'));
     assert.equal(JSON.parse(capable.messages[3].content).note, undefined);
     assert.doesNotMatch(capable.tools[0].function.description, /Workflows:\n- rails-image:/);
+    // Its two readings by number, and not one identifier in its tools: the same at every request.
+    assert.deepEqual(
+      capable.tools.slice(-2).map(tool => tool.function.name),
+      ['local_read_resource', 'local_read_output'],
+    );
+    assert.deepEqual(Object.keys(capable.tools.at(-2).function.parameters.properties), ['refs']);
+    assert.doesNotMatch(JSON.stringify(capable.tools), /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
     // Another service « compatible OpenAI » keeps the words of the local model, to the character.
     const other = await localRequest(t, 'custom'),
       kept = (await snapshot()).request;
