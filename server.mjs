@@ -824,7 +824,7 @@ export async function createApplication({
       // The words of the small local model, or those of a large remote one (lib/model-wording.mjs).
       wording = wordingOf(chat.connection);
     // A large model gets its own consigne and the facts of the results (the page's history unchanged).
-    if (wording === CAPABLE) payload.messages = capableMessages(payload.messages);
+    if (wording === CAPABLE) payload.messages = capableMessages(payload.messages, { vision: chat.vision });
     // A message answered (not a count of the context): too many references for the model's
     // list, the least used are removed from the disk (copies, never the user's originals), and
     // `prune` is told which.

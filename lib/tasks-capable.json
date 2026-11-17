@@ -1,7 +1,7 @@
 {
   "create_image": {
     "summary": "Make a new image from a description, or change an existing image.",
-    "guidance": "Call it when the user asks for an image to be made or changed: it starts at once. Not for writing or improving a prompt only, nor for the character to put in a video (replace_character makes that image). The image model only sees the images passed in source and reference.",
+    "guidance": "Call it when the user asks for an image to be made or changed. Not for writing or improving a prompt only, nor for the character to put in a video (replace_character makes that image). The image model only sees the images passed in source and reference.",
     "prompt": "The whole image in English, for an image model that knows nothing of this conversation: three to six sentences with the subject and its concrete look (age, expression, pose, clothes, colours, materials), the place and what is behind, the framing and angle, the light and colours, and the kind of picture (photo with its lens and film, illustration, painting, 3D render). Text to show in the image goes in quotes, in the language asked. Keep everything the user asked for.",
     "roles": {
       "source": { "description": "Image to change. Omit it to make a new image." },
@@ -10,7 +10,7 @@
   },
   "create_video": {
     "summary": "Propose a video clip made from a description, optionally starting or ending on given images, or keeping subjects from reference images.",
-    "guidance": "Call it as soon as the user asks for a video, with your best proposal: they see it as a card, can edit it and confirm it before anything runs, so do not ask for their agreement in text first. To put the character of an image in place of someone in an existing video, use replace_character. The video model only sees the images passed in start_image, end_image and reference: pass every image the request involves, each in the role that fits.",
+    "guidance": "Call it as soon as the user asks for a video, with your best proposal: the user can edit it and confirms it before anything runs, so do not ask for their agreement in text first. To put the character of an image in place of someone in an existing video, use replace_character. The video model only sees the images passed in start_image, end_image and reference: pass every image the request involves, each in the role that fits.",
     "prompt": "The whole clip in English, for a video model that knows nothing of this conversation: one paragraph of five to eight sentences, present tense, in the order things happen. Who or what is seen and how they look, the place, the time of day and the light; what happens, beat by beat, with the pace of the gestures; how the camera moves and how it ends; the look of the picture; and the sound, since the clip has sound (ambience, noises, spoken words in quotes, in the language they are spoken). With a start image, describe it in one sentence, then what moves and changes. Keep everything the user asked for, in their order. Not the length: it goes in duration.",
     "roles": {
       "start_image": {
@@ -26,7 +26,7 @@
   },
   "extend_video": {
     "summary": "Propose a continuation of an existing video: a new shot that follows its last frames.",
-    "guidance": "Call it as soon as the user asks for a video to go on, with your best proposal: they see it as a card, can edit it and confirm it before anything runs.",
+    "guidance": "Call it as soon as the user asks for a video to go on, with your best proposal: the user can edit it and confirms it before anything runs.",
     "prompt": "What happens next in English, for a video model that only sees the last frames of the source: three to six sentences, present tense. Who or what is on screen in a few words, then the new action beat by beat, how the camera moves and ends, and the sound (ambience, noises, spoken words in quotes, in the language they are spoken).",
     "roles": {
       "source": { "description": "Video to continue." },
@@ -40,7 +40,7 @@
     "prompt": "One or two sentences in English: who replaces whom, and what the user asked beyond the replacement itself (a detail to keep, a change). The application writes the full prompt from the pictures."
   },
   "create_audio": {
-    "guidance": "Call it when the user asks for music, a song or a sound effect to be made: they see it as a card and confirm it before anything runs. You cannot hear the result. For a song, write the lyrics in full yourself unless the user gave them, and pass them in lyrics."
+    "guidance": "Call it when the user asks for music, a song or a sound effect to be made: the user confirms it before anything runs. You cannot hear the result. For a song, write the lyrics in full yourself unless the user gave them, and pass them in lyrics."
   },
   "upscale": {
     "guidance": "Call it when the user wants a larger or sharper version of an image or a video."

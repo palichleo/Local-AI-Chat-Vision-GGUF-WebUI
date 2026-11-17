@@ -17,6 +17,7 @@ import { SEEN_NOTE } from '../lib/seen-resources.mjs';
 import { citedMessage } from '../lib/cited-resources.mjs';
 import { FAILED_NOTE, FAILED_SETTLED, UNANSWERED } from '../public/transcript.mjs';
 import {
+  BLIND,
   CAPABLE,
   CAPABLE_CARD,
   CAPABLE_SYSTEM,
@@ -420,6 +421,13 @@ test('a capable model gets the consigne of Moodix in place of the local line, th
   for (const name of ['create_', 'extend_video', 'replace_character', 'upscale', 'interpolate', 'local_read'])
     assert.equal(CAPABLE_SYSTEM.includes(name), false, name);
   assert.ok(CAPABLE_SYSTEM.length < 4000, 'a few hundred tokens');
+  // Nothing of what follows a call: a small model wrote it in place of the call (« La carte est prête »).
+  assert.doesNotMatch(CAPABLE_SYSTEM, /as soon as you call|asks you for|card/i);
+  // A model that sees no image is told so, after the consigne.
+  assert.equal(
+    capableMessages([{ role: 'system', content: LOCAL_LINE }], { vision: false })[0].content,
+    CAPABLE_SYSTEM + BLIND,
+  );
 });
 
 test('the tools of a capable model are contracts: no plan agreed in words, every argument said, workflows by name', async () => {
