@@ -9,6 +9,7 @@ import * as sessionCopies from '../public/session-copies.mjs';
 import * as chatVideos from '../public/chat-videos.mjs';
 import * as transcript from '../public/transcript.mjs';
 import { reflection, thoughtTime } from '../public/reflection.mjs';
+import { runSeries } from '../public/image-series.mjs';
 import { History, MAX_CONVERSATION_MESSAGES } from '../lib/history.mjs';
 import { nativeFields } from '../lib/native-messages.mjs';
 import { problem } from '../lib/engine.mjs';
@@ -148,7 +149,8 @@ async function historyStore(t) {
  * `state`: what the page holds when the test begins; `routes`: the other answers of the server;
  * `waitForModel`: the model coming (a turn may be stopped there). What the page did is kept beside
  * its state: `requests` (/api/chat), `saves` (history/save), `notices`, `takes`, `views`, `cancelled`
- * (tools/cancel), `lines`.
+ * (tools/cancel), `lines`, `drawn` (the navigation drawn whole, « all », or its line « Reprendre »
+ * alone, « resume »).
  */
 function page({
   chat = () => said('ok'),
@@ -180,7 +182,7 @@ function page({
     ...given,
   };
   // `lines`: the view the line under the tabs was drawn for, each time it was drawn.
-  const seen = { requests: [], saves: [], notices: [], takes: [], restored: [], views: [], failures: [], cancelled: [], lines: [], cited: [] };
+  const seen = { requests: [], saves: [], notices: [], takes: [], restored: [], views: [], failures: [], cancelled: [], lines: [], cited: [], drawn: [] };
   const node = (tag, className, words) => new El(tag, className, words);
   const context = {
     ...sessionCopies,
@@ -189,6 +191,7 @@ function page({
     reflection,
     thoughtTime,
     readSSE,
+    runSeries,
     state,
     $,
     node,
@@ -230,7 +233,7 @@ function page({
     waitForModel,
     contextMeter: { pause() {}, observe() {}, schedule() {} },
     settingsGuard: { isDirty: () => false },
-    projectUI: { render() {}, sync() {} },
+    projectUI: { render: () => seen.drawn.push('all'), sync() {}, renderResume: () => seen.drawn.push('resume') },
     assetsUI: { flush: async () => true, refresh: async () => {}, importFiles: async () => [] },
     // The takes a reply names, under it (cited-takes.mjs): what is asked of it, in its order.
     citedTakes: { show: () => seen.cited.push('show'), forget: () => seen.cited.push('forget') },
@@ -754,6 +757,271 @@ test('a conversation is named once, by its first message: the next ones leave it
   await store.rename(ID, 'Sur la plage');
   await filmed.send('Prolonge-la');
   assert.equal(filmed.$('conversation-title').textContent, 'Sur la plage');
+});
+
+/** Waits for what the page does behind a turn (the name of the conversation, asked beside it). */
+async function eventually(check) {
+  for (let tries = 0; tries < 200 && !check(); tries++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(check(), 'attendu en vain');
+}
+
+test('the name the model gives a conversation is written where it shows, without the navigation drawn again', async () => {
+  const asked = [];
+  let release;
+  const held = new Promise(resolve => (release = resolve));
+  const named = page({
+    routes: {
+      'history/title': async body => {
+        asked.push(plain(body));
+        await held;
+        return Response.json({ conversation: { id: ID, title: 'Renard bleu' } });
+      },
+    },
+  });
+  await named.send('Un renard en pull bleu, de face');
+  // The turn is over and its name is being asked: meanwhile the user opens a list of the fil.
+  await eventually(() => asked.length === 1);
+  assert.deepEqual(asked[0], { id: ID, contents: ['Un renard en pull bleu, de face'] });
+  const before = named.drawn.length;
+  release();
+  await eventually(() => named.$('conversation-title').textContent === 'Renard bleu');
+  // Only what the name changes: the bar, the label of its button, the list of the history and the
+  // line « Reprendre ». The navigation drawn whole closed the menu open meanwhile, with what was
+  // typed in its search field.
+  assert.deepEqual(named.drawn.slice(before), ['resume']);
+  assert.equal(named.$('thread-conversation').getAttribute('aria-label'), 'Conversation : Renard bleu');
+  assert.equal(named.state.historyItems.find(item => item.id === ID).title, 'Renard bleu');
+  // Named: not asked again at the next message.
+  await named.send('plus sombre');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(asked.length, 1);
+
+  // In the Pellicule the button of the fil says another name (the conversation shown there): left.
+  const elsewhere = page({
+    routes: { 'history/title': async () => Response.json({ conversation: { id: ID, title: 'Renard bleu' } }) },
+  });
+  elsewhere.$('conversation-title').hidden = true;
+  elsewhere.$('thread-conversation').setAttribute('aria-label', 'Conversation : Toutes les conversations');
+  await elsewhere.send('Un renard en pull bleu');
+  await eventually(() => elsewhere.$('conversation-title').textContent === 'Renard bleu');
+  assert.equal(elsewhere.$('thread-conversation').getAttribute('aria-label'), 'Conversation : Toutes les conversations');
+});
+
+test('a conversation is named after the first of its messages that has words, asked again while there is none', async () => {
+  const asked = [];
+  let answer = { later: true };
+  const { context, state } = page({
+    routes: {
+      'history/title': async body => {
+        asked.push(plain(body));
+        return Response.json(answer);
+      },
+    },
+  });
+  const picture = { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+    studio = 'Studio · Image : \n\n' + transcript.STUDIO_NOTE,
+    made = [
+      // A creation of the Studio made without a prompt: nothing to name the conversation from.
+      { role: 'user', internal: true, content: studio },
+      { role: 'assistant', content: '', tool_calls: [functionCall('create_image')] },
+      { role: 'tool', tool_call_id: 'call_1', content: '{"status":"success"}' },
+    ],
+    written = [
+      ...made,
+      { role: 'user', content: [{ type: 'text', text: 'Rends-la plus sombre' }, picture] },
+      // What the application writes for the model is not a message of the user: never a name.
+      { role: 'user', internal: true, content: [{ type: 'text', text: 'Voici les copies réduites des sorties.' }, picture] },
+      { role: 'user', internal: true, resourceId: 'r1', content: [{ type: 'text', text: 'Référence visuelle' }, picture] },
+      { role: 'assistant', content: 'Voilà.' },
+    ];
+  await context.nameConversation(made, ID);
+  assert.deepEqual(asked, [{ id: ID, contents: [studio] }]);
+  // Nothing to name it from yet (`later`): asked again at the end of the next turn, with the words
+  // written since. The first message goes as it is; of the next ones, the words alone.
+  await context.nameConversation(written, ID);
+  assert.deepEqual(asked[1], { id: ID, contents: [studio, [{ type: 'text', text: 'Rends-la plus sombre' }]] });
+  // Not to be asked again (`named: false`: the model answered no name twice, or is not asked).
+  answer = { named: false };
+  await context.nameConversation(written, ID);
+  await context.nameConversation(written, ID);
+  assert.equal(asked.length, 3);
+  assert.equal(state.named.has(ID), true);
+  // Beyond its first three messages, a conversation keeps the name it has.
+  const long = Array.from({ length: 4 }, (_, at) => ({ role: 'user', content: 'message ' + at }));
+  await context.nameConversation(long, 'f6666666-6666-4666-8666-666666666666');
+  assert.equal(asked.length, 3);
+});
+
+test('a series of images in the Chat is kept after each image, with one result for its call, and never handed whole to the model', async t => {
+  const store = await historyStore(t),
+    prompts = ['A red fox in fresh snow.', 'A blue whale at dusk.', 'A barn owl at night.'],
+    call = functionCall('create_image', 'call_1', JSON.stringify({ prompt: prompts[0], series: prompts.slice(1) })),
+    proposal = index => ({ call, workflowName: 'Krea', requestId: 'r' + index, autoAllow: true, series: { id: 's1', index, total: 3 } }),
+    runOf = index => `${String(index).repeat(8)}-1111-4111-8111-111111111111`;
+  // The third image waits for the test: the application is « closed » while it is being made.
+  let reached, let3;
+  const atThird = new Promise(resolve => (reached = resolve)),
+    gate = new Promise(resolve => (let3 = resolve)),
+    given = [],
+    asked = [];
+  const requestTool = async (request, signal, onProgress, onImage, options) => {
+    given.push(options);
+    const index = request.series?.index ?? 1;
+    if (request.series && index === 3) {
+      reached();
+      await gate;
+    }
+    return {
+      content: JSON.stringify({
+        status: 'success',
+        run_id: runOf(index),
+        takes: [index],
+        workflow: 'Krea',
+        prompt: prompts[index - 1],
+        media_type: 'image',
+        parameters: { seed: index },
+        note: 'Image générée et affichée à l’utilisateur.',
+      }),
+      images: ['data:image/png;base64,AAA' + index],
+      record: { id: runOf(index), conversationId: ID, mediaType: 'image' },
+    };
+  };
+  // The user chose that the model looks at each image made.
+  const looking = { generation: { maxIterations: 5, reviewImages: true } };
+  const first = page({
+    store,
+    state: looking,
+    requestTool,
+    chat: (body, n) => (n === 1 ? called(proposal(1)) : said('')),
+    routes: {
+      'tools/series': body => {
+        asked.push(plain(body));
+        return Response.json(body.end ? { ended: true } : proposal(asked.filter(item => !item.end).length + 1));
+      },
+    },
+  });
+  const turn = first.send('Fais trois images à l’aquarelle');
+  await atThird;
+  // Two images are made, the third is running. What the disk holds: the call and, for it, one
+  // result that says what is made so far (the next image takes its place).
+  const kept = first.saves.at(-1),
+    partial = JSON.parse(kept.messages[2].content);
+  assert.deepEqual(roles(kept.messages), ['user', 'assistant', 'tool']);
+  assert.deepEqual([partial.status, partial.made, partial.asked], ['partial', 2, 3]);
+  assert.deepEqual(partial.images.map(image => image.run_id), [runOf(1), runOf(2)]);
+  assert.match(partial.message, /^Série interrompue avant sa fin : 2 images sur 3/);
+  assert.equal(kept.incomplete, true);
+  for (const saved of first.saves) {
+    assert.ok(saved.messages.filter(message => message.role === 'tool').length <= 1, 'one result for the call, at most');
+    assert.doesNotThrow(() => accepted(nextMessage(saved.messages)));
+  }
+  assert.deepEqual(
+    first.saves.filter(saved => saved.messages[2]).map(saved => JSON.parse(saved.messages[2].content).made),
+    [1, 2],
+    'saved after the first image, then after the second',
+  );
+  // The application closed there, and opened again: the images made so far are shown, the
+  // conversation is taken as it is.
+  const reopened = page({ store, chat: body => (accepted(body.messages), said('Il manque la troisième.')) });
+  await reopened.context.loadConversation(ID);
+  assert.deepEqual(reopened.restored.map(item => item.runId), [runOf(1), runOf(2)]);
+  assert.doesNotMatch(reopened.$('messages').words, /interrompue|non aboutie/);
+  await reopened.send('Où en est la série ?');
+  assert.deepEqual(reopened.notices.filter(Boolean), []);
+
+  // In the first page the series goes to its end: the result of the whole takes the place of what
+  // was kept, in the page, on the disk and in what the model is told.
+  let3();
+  await turn;
+  assert.deepEqual(asked, [{ series: 's1' }, { series: 's1' }]);
+  for (const messages of [first.state.messages, first.saves.at(-1).messages, first.requests.at(-1).messages.slice(1)]) {
+    const results = messages.filter(message => message.role === 'tool');
+    assert.equal(results.length, 1);
+    const told = JSON.parse(results[0].content);
+    assert.deepEqual([told.status, told.made, told.takes], ['success', 3, [1, 2, 3]]);
+    assert.equal(results[0].content.includes(prompts[1]), false, 'the prompts stay in the call');
+  }
+  assert.equal(first.saves.at(-1).incomplete, false);
+  assert.equal(first.takes.length, 3, 'a card for each image');
+  // Never handed to the model by themselves, though the user chose it for an image: three copies in
+  // one message here, up to twenty. Each image is run without that look, and nothing is joined.
+  assert.deepEqual(given.map(options => options.reviewImages), [false, false, false]);
+  assert.equal(first.requests.length, 2);
+  assert.equal(JSON.stringify(first.requests[1].messages).includes('image_url'), false);
+  assert.equal(JSON.stringify(first.requests[1].messages).includes('copies réduites'), false);
+
+  // A single image keeps the look the user chose: its copy goes to the model with its result.
+  const seen = [];
+  const single = page({
+    state: looking,
+    requestTool: async (request, signal, onProgress, onImage, options) => (seen.push(options), requestTool(request, signal, onProgress, onImage, options)),
+    chat: (body, n) => (n === 1 ? called({ call: functionCall('create_image'), workflowName: 'Krea', requestId: 'r9' }) : said('Un renard roux.')),
+  });
+  await single.send('Une image de renard');
+  assert.equal(seen[0].reviewImages, true);
+  assert.equal(JSON.stringify(single.requests[1].messages).includes('data:image/png;base64,AAA1'), true);
+});
+
+test('a series stopped by the user keeps one result for its call: what was made, in place of what was kept', async t => {
+  const store = await historyStore(t),
+    call = functionCall('create_image', 'call_1', '{"prompt":"A fox.","series":["A whale.","An owl."]}'),
+    proposal = index => ({ call, workflowName: 'Krea', requestId: 'r' + index, autoAllow: true, series: { id: 's1', index, total: 3 } }),
+    asked = [];
+  let stop;
+  const stopped = page({
+    store,
+    chat: () => called(proposal(1)),
+    // The second image is being made when the user presses « Interrompre ».
+    requestTool: async (request, signal) => {
+      if (request.series.index === 2) {
+        stop();
+        signal.throwIfAborted();
+      }
+      return made(IMAGE, 'image');
+    },
+    routes: {
+      'tools/series': body => {
+        asked.push(plain(body));
+        return Response.json(body.end ? { ended: true } : proposal(2));
+      },
+    },
+  });
+  stop = () => stopped.state.controller.abort();
+  await stopped.send('Fais trois images');
+  // The server is told the series is over (it lets its prompts go, the chat model comes back).
+  assert.deepEqual(asked, [{ series: 's1' }, { series: 's1', end: true }]);
+  for (const messages of [stopped.state.messages, stopped.saves.at(-1).messages]) {
+    const results = messages.filter(message => message.role === 'tool');
+    assert.equal(results.length, 1);
+    const told = JSON.parse(results[0].content);
+    assert.deepEqual([told.status, told.made, told.asked], ['partial', 1, 3]);
+    assert.match(told.message, /^Série arrêtée par l’utilisateur : 1 image sur 3 a été faite\.$/);
+    assert.doesNotThrow(() => accepted(nextMessage(messages)));
+  }
+
+  // A series whose first image fails goes no further: the server is told as well (it would keep
+  // its prompts for hours), before the model is written to.
+  asked.length = 0;
+  const order = [];
+  const failing = page({
+    chat: (body, n) => (order.push('chat ' + n), n === 1 ? called(proposal(1)) : said('La première image a échoué.')),
+    requestTool: async () => ({
+      content: JSON.stringify({ status: 'error', message: 'Mémoire vidéo insuffisante.' }),
+      images: [],
+      failed: true,
+      error: 'Mémoire vidéo insuffisante.',
+    }),
+    routes: {
+      'tools/series': body => {
+        asked.push(plain(body));
+        order.push('series over');
+        return Response.json({ ended: true });
+      },
+    },
+  });
+  await failing.send('Fais trois images');
+  assert.deepEqual(asked, [{ series: 's1', end: true }]);
+  assert.deepEqual(order, ['chat 1', 'series over', 'chat 2']);
 });
 
 test('a send that fails before any answer gives the whole draft back: its text, its images, its videos', async () => {

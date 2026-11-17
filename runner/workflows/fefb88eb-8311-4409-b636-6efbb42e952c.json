@@ -62,7 +62,7 @@
     },
     "denoise": {
       "policy": "fixed",
-      "value": 1
+      "value": 0.75
     },
     "expandPrompt": {
       "policy": "fixed",

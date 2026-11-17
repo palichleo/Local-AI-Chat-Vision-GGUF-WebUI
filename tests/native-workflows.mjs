@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   NativeWorkflowCatalog,
+  editableParameters,
   validateNativeWorkflow,
   resolveNativeWorkflow,
   nativeWorkflowReferences,
@@ -350,4 +351,86 @@ test('an optional component whose file is absent is left out; the workflow still
   assert.ok(without.components.model, 'the required components are still there');
   // A file that is there but is not an upscaler is an error to show, not something to skip.
   await assert.rejects(resolve(wrong), /incompatible kind/);
+});
+
+test('Krea 2: the denoise applies to an image to modify only, and the job says the one really used', async () => {
+  const shipped = JSON.parse(
+    await readFile(new URL('../runner/workflows/fefb88eb-8311-4409-b636-6efbb42e952c.json', import.meta.url), 'utf8'),
+  );
+  const here = { resolve: async id => ({ path: join(tmpdir(), id) }) };
+  const image = [{ input: 'source', image: 0 }];
+  const made = async (workflow, references, overrides = {}) =>
+    (
+      await resolveNativeWorkflow(workflow, { prompt: 'a boat', ...(references ? { references } : {}) }, here, {
+        seed: 1,
+        allowPendingReferences: true,
+        overrides,
+      })
+    ).parameters.denoise;
+  // The shipped workflow: an image given to modify counts (0.75), and without one the picture is
+  // made from pure noise, which is what the engine does (runner/pipelines/sampling.py).
+  assert.deepEqual(shipped.parameters.denoise, { policy: 'fixed', value: 0.75 });
+  assert.equal(family('krea2').parameters.denoise.onlyWith.role, 'img2img');
+  assert.ok(shipped.references.some(slot => slot.id === 'source' && slot.role === 'img2img'));
+  assert.equal(await made(shipped, image), 0.75);
+  assert.equal(await made(shipped, null), 1);
+  // A workflow of the user's fixed at 1 with an image stays at 1: their choice.
+  const own = { ...fixture(), references: [{ id: 'source', role: 'img2img', required: false }] };
+  assert.equal(await made(own, image), 1);
+  // One of theirs lower than 1 applies to the image, and to nothing without one.
+  own.parameters.denoise.value = 0.5;
+  assert.equal(await made(own, image), 0.5);
+  assert.equal(await made(own, null), 1);
+  // Left to the assistant, the same.
+  own.parameters.denoise = { policy: 'model', type: 'number', default: 0.6 };
+  assert.equal(await made(own, image), 0.6);
+  assert.equal(await made(own, null), 1);
+  // A value typed before confirming: used with the image, without effect without one.
+  assert.equal(await made(shipped, image, { denoise: 0.4 }), 0.4);
+  assert.equal(await made(shipped, null, { denoise: 0.4 }), 1);
+  // Beside the setting, on the card and in the Studio: what it is, and when it applies.
+  const job = await resolveNativeWorkflow(shipped, { prompt: 'a boat', references: image }, here, {
+    allowPendingReferences: true,
+  });
+  const item = editableParameters(shipped, job.parameters).find(entry => entry.key === 'denoise');
+  assert.equal(item.value, 0.75);
+  assert.match(item.note, /quand une image est donnée à modifier.*Sans image, l’image part toujours de zéro\./);
+});
+
+test('a parameter its family marks unused is no setting to change before a creation', async () => {
+  for (const name of ['krea2', 'ltx25']) assert.ok(family(name).parameters.attention.unused, name);
+  const workflow = fixture();
+  workflow.parameters.attention = { policy: 'fixed', value: 'pytorch' };
+  const job = await resolveNativeWorkflow(workflow, { prompt: 'test' }, assets, { seed: 1 });
+  // It still reaches the job as the workflow stores it (the engine does not read it)...
+  assert.equal(job.parameters.attention, 'pytorch');
+  // ...and is not offered on the approval card nor in the Studio, where the others are.
+  const keys = editableParameters(workflow, job.parameters).map(item => item.key);
+  assert.ok(!keys.includes('attention'));
+  assert.deepEqual(keys.toSorted(), ['cfg', 'denoise', 'height', 'seed', 'steps', 'width']);
+  // A video workflow of before that still holds it (LTX 2.5): the same.
+  const ltx = JSON.parse(
+    await readFile(new URL('../runner/workflows/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8'),
+  );
+  assert.equal(ltx.pipeline, 'ltx25');
+  ltx.parameters.attention = { policy: 'fixed', value: 'pytorch' };
+  const video = await resolveNativeWorkflow(
+    ltx,
+    { prompt: 'a boat', intention: 'x', ...(ltx.parameters.stage?.policy === 'model' ? { stage: 'draft' } : {}) },
+    { resolve: async id => ({ path: join(tmpdir(), id) }) },
+    { allowPendingReferences: true },
+  );
+  const offered = editableParameters(ltx, video.parameters).map(item => item.key);
+  assert.ok(offered.includes('steps') && !offered.includes('attention'), offered.join(' '));
+  // An edit of it kept from an earlier take is left aside, not refused; an unknown one still is.
+  const edited = await resolveNativeWorkflow(workflow, { prompt: 'test' }, assets, {
+    seed: 1,
+    overrides: { attention: 'comfy_kitchen', steps: 9 },
+  });
+  assert.equal(edited.parameters.attention, 'pytorch');
+  assert.equal(edited.parameters.steps, 9);
+  await assert.rejects(
+    resolveNativeWorkflow(workflow, { prompt: 'test' }, assets, { overrides: { sampler: 'euler' } }),
+    /cannot be edited/,
+  );
 });

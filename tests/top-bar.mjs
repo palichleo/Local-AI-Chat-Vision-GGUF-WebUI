@@ -267,3 +267,25 @@ test('the Éclipse of the word « Moodix » is a filled shape: not the stroke of
   // (More specific than `.top-bar svg`, which gives every picture of the bar a stroke of 1.7.)
   assert.match(css, /\.top-brand \.brand-eclipse \{\r?\n  stroke: none;\r?\n\}/);
 });
+
+test('a very narrow window: the word « Moodix » never goes over « Chat »; under 400 px its Éclipse alone', async () => {
+  const css = await read('moodix.css');
+  // 520 px or less: the word smaller (20 px, some 76 px wide), its Éclipse with it.
+  assert.match(css, /@media \(max-width: 520px\) \{\n {2}\.top-bar \{\n {4}padding: 0 12px;\n {2}\}[^]*?\n {2}\.top-name \{\n {4}font-size: 20px;\n {2}\}/);
+  // The bar then: 12 px on each side, two gaps of 8 px, the three places in the middle (some
+  // 190 px); each side column has half of what is left. The word fits down to some 382 px of
+  // window; under it, it went over « Chat » (nothing cut it).
+  assert.match(css, /@media \(max-width: 760px\) \{\n {2}\.top-bar \{\n {4}gap: 8px;/);
+  const side = width => (width - 2 * 12 - 2 * 8 - 190) / 2;
+  assert.ok(side(401) >= 76, 'the word still fits where it is kept');
+  assert.ok(side(360) < 76, 'and no longer in a narrower window');
+  // 400 px or less: the letters take no room, the Éclipse alone (18 px) is the link to the chat.
+  assert.match(
+    css,
+    /@media \(max-width: 400px\) \{\n {2}\.top-name \{\n {4}font-size: 0;\n {2}\}\n {2}\.top-name \.brand-eclipse \{\n {4}width: 18px;\n {4}height: 18px;\n {4}margin: 0;\n {2}\}\n\}/,
+  );
+  assert.ok(side(280) >= 18);
+  // Nothing changes in a wide window: the rules of the word outside those two blocks are as they were.
+  assert.equal(css.match(/\.top-name \{/g).length, 3);
+  assert.match(css, /\n\.top-name \{\n {2}font-family: var\(--font-display\);\n {2}font-size: 26px;\n {2}font-weight: 400;\n {2}line-height: 1;\n {2}white-space: nowrap;\n\}/);
+});

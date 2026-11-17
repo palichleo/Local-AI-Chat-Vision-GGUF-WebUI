@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { NativeWorkflowCatalog, workflowFingerprint } from '../lib/native-workflows.mjs';
 
 const shippedFile = new URL('../runner/workflows/5e1b8c3a-9d2f-4a6e-b7c4-1f0d6e3a9b85.json', import.meta.url);
@@ -117,6 +118,61 @@ test('copies left by older versions: unedited ones go, edited ones stay without 
   await writeFile(join(f.user, f.original.id + '.json'), JSON.stringify({ ...f.original, description: 'Édité.' }));
   assert.deepEqual(await f.catalog.adoptShipped(), { removed: [], kept: [f.original.id] });
   assert.deepEqual(await f.names(), [[f.original.name, true, true, false]]);
+});
+
+test('Krea 2 at a denoise of 0.75 reaches the installed copies: an untouched one follows, an edited one is kept', async t => {
+  const id = 'fefb88eb-8311-4409-b636-6efbb42e952c';
+  const current = JSON.parse(await readFile(new URL(`../runner/workflows/${id}.json`, import.meta.url), 'utf8'));
+  // The version shipped before: the same workflow at a denoise of 1 (the image to modify was ignored).
+  const before = structuredClone(current);
+  before.parameters.denoise.value = 1;
+  const historyPath = new URL('../runner/workflow-history.json', import.meta.url);
+  const versions = JSON.parse(await readFile(historyPath, 'utf8')).workflows[id];
+  assert.equal(current.parameters.denoise.value, 0.75);
+  assert.ok(versions.includes(workflowFingerprint(before)), 'the version before is in the history');
+  assert.equal(versions.at(-1), workflowFingerprint(current));
+  const root = await mkdtemp(join(tmpdir(), 'atelier-catalog-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const builtin = join(root, 'shipped'),
+    user = join(root, 'workflow');
+  await mkdir(builtin);
+  await mkdir(user);
+  const ship = workflow => writeFile(join(builtin, id + '.json'), JSON.stringify(workflow));
+  const catalog = new NativeWorkflowCatalog(user, {
+    assets,
+    capabilities: { krea2: true },
+    builtin,
+    statePath: join(root, 'data', 'workflow-natives.json'),
+    historyPath: fileURLToPath(historyPath),
+  });
+  const denoise = async key => (await catalog.read(key)).parameters.denoise.value;
+  await ship(current);
+  // A copy an earlier version left in the user's folder, never edited: it goes, and the workflow is the new one.
+  await writeFile(join(user, id + '.json'), JSON.stringify(before));
+  assert.deepEqual(await catalog.adoptShipped(), { removed: [id], kept: [] });
+  assert.deepEqual(await readdir(user), []);
+  assert.equal(await denoise(id), 0.75);
+  // The same copy with a change of the user's: kept as it is, at their denoise.
+  await writeFile(join(user, id + '.json'), JSON.stringify({ ...before, description: 'Mon Krea.' }));
+  assert.deepEqual(await catalog.adoptShipped(), { removed: [], kept: [id] });
+  assert.equal(await denoise(id), 1);
+  assert.equal((await catalog.read(id)).description, 'Mon Krea.');
+  // Edited from the settings while 1 was shipped: the update never replaces it, and lists the new
+  // version beside it (« Krea 2 V2 »).
+  await catalog.reset(id);
+  await ship(before);
+  await catalog.save({ ...before, description: 'Mon Krea.' });
+  await ship(current);
+  const listed = await catalog.list();
+  assert.deepEqual(
+    listed.map(item => [item.name, item.customized ?? false, item.update ?? false, item.parameters.denoise.value]),
+    [
+      [current.name, true, false, 1],
+      [current.name + ' V2', false, true, 0.75],
+    ],
+  );
+  // Never written to: an update replaces that folder.
+  assert.deepEqual(await readdir(builtin), [id + '.json']);
 });
 
 test('a workflow whose file is missing is listed unavailable, in words', async t => {

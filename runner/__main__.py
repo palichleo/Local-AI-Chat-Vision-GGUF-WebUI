@@ -23,10 +23,13 @@ def main():
     parser.add_argument('--config', required=True, type=Path)
     args = parser.parse_args()
     from runner.contracts import validate_config
+    from runner.media import sweep
     from runner.models.headers import unique_object
     from runner.protocol import serve
 
     config = validate_config(json.loads(args.config.read_text(encoding='utf-8-sig'), object_pairs_hook=unique_object))
+    # The temporary files a worker killed half-way left in the folder of the outputs (old ones only).
+    sweep(config)
     serve(config)
 
 

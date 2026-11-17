@@ -165,15 +165,27 @@ try {
     // What a step may load in vain (its answer may come after it): left out of the report.
     allowances = [];
   /**
-   * One step: what it does, then what the page must show. `allowed`: what this step may load in
-   * vain, said beside it (the page answers it as it should).
+   * Asks the page for a condition until it holds, every 50 ms and `ceiling` ms at most, in place
+   * of a fixed wait: its last answer (false when it never held).
    */
-  async function run(name, action, expected, { allowed = null } = {}) {
+  async function until(condition, ceiling) {
+    for (const end = Date.now() + ceiling; ; await wait(50)) {
+      const answer = await condition();
+      if (answer !== false || Date.now() >= end) return answer;
+    }
+  }
+  /**
+   * One step: what it does, then what the page must show. `allowed`: what this step may load in
+   * vain, said beside it (the page answers it as it should). `within`: the page is asked for what
+   * the step expects until it shows it, that many milliseconds at most, where the others wait
+   * 700 ms and ask once.
+   */
+  async function run(name, action, expected, { allowed = null, within = 0 } = {}) {
     step = name;
     const done = await action();
-    await wait(700);
+    if (!within) await wait(700);
     if (allowed) allowances.push([name, allowed]);
-    const shown = expected ? await expected() : true;
+    const shown = expected ? await (within ? until(expected, within) : expected()) : true;
     // An unexpected error said to the user (app.js) is one too.
     const said = await js(`document.getElementById('notice')?.hidden === false ? document.getElementById('notice-text').textContent : ''`);
     if (/inattendue/i.test(said)) problems.push([name, 'notice', said]);
@@ -253,25 +265,25 @@ try {
   // the wheel as to the keys, and its foot (« Enregistrer le workflow ») stays in sight.
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
   const editorBody = `document.getElementById('native-workflow-body')`;
-  await run('onglet Workflows', () => click('#settings-tab-workflows'), () => js(`!document.getElementById('workflow-add').hidden`));
-  await run('éditeur de workflow', () => click('#workflow-add'), () =>
-    js(`!document.getElementById('workflow-editor').hidden && ${editorBody}.scrollHeight > ${editorBody}.clientHeight + 200`));
+  // These steps ask the page until it shows what they expect (`within`: the time each one waited
+  // before, at most) instead of waiting that time every run: some seven seconds less.
+  await run('onglet Workflows', () => click('#settings-tab-workflows'), () => js(`!document.getElementById('workflow-add').hidden`), { within: 700 });
+  // « Ajouter » answers once the settings have read their workflows (greyed until then).
+  await run('éditeur de workflow', () => until(() => js(`!document.getElementById('workflow-add').disabled`), 700).then(() => click('#workflow-add')), () =>
+    js(`!document.getElementById('workflow-editor').hidden && ${editorBody}.scrollHeight > ${editorBody}.clientHeight + 200`), { within: 700 });
   await run('éditeur : molette', async () => {
     await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 640, y: 400, deltaX: 0, deltaY: 600 });
-  }, () => js(`${editorBody}.scrollTop > 100`));
+  }, () => js(`${editorBody}.scrollTop > 100`), { within: 700 });
   await run('éditeur : touche Fin', async () => {
     await js(`${editorBody}.focus()`);
     await key('End', 'End', 35);
-    await wait(800);
-  }, () => js(`${editorBody}.scrollTop >= ${editorBody}.scrollHeight - ${editorBody}.clientHeight - 2`));
-  await run('éditeur : touche Début', async () => {
-    await key('Home', 'Home', 36);
-    await wait(800);
-  }, () => js(`${editorBody}.scrollTop === 0`));
-  await run('éditeur : pied en vue', () => true, () =>
-    js(`(() => { const save = document.getElementById('native-workflow-save').getBoundingClientRect(), frame = document.getElementById('settings').getBoundingClientRect(); return save.height > 0 && save.bottom <= frame.bottom && save.bottom <= innerHeight; })()`));
-  await run('quitter l’éditeur', () => click('#native-workflow-back').then(() => wait(200)).then(() => click('#native-workflow-discard')), () =>
-    js(`document.getElementById('workflow-editor').hidden && !document.getElementById('settings-form').hidden`));
+  }, () => js(`${editorBody}.scrollTop >= ${editorBody}.scrollHeight - ${editorBody}.clientHeight - 2`), { within: 1500 });
+  // Back at the top, the foot is in sight (it never left: the body alone scrolls).
+  await run('éditeur : touche Début, pied en vue', () => key('Home', 'Home', 36), () =>
+    js(`(() => { const save = document.getElementById('native-workflow-save').getBoundingClientRect(), frame = document.getElementById('settings').getBoundingClientRect(); return ${editorBody}.scrollTop === 0 && save.height > 0 && save.bottom <= frame.bottom && save.bottom <= innerHeight; })()`), { within: 1500 });
+  // « Retour » asks whether to leave what was not saved; the answer is clicked once it is asked.
+  await run('quitter l’éditeur', () => click('#native-workflow-back').then(() => until(() => js(`!document.getElementById('native-workflow-unsaved').hidden`), 200)).then(() => click('#native-workflow-discard')), () =>
+    js(`document.getElementById('workflow-editor').hidden && !document.getElementById('settings-form').hidden`), { within: 700 });
   await size(1280);
   await run('Échap (Configuration)', () => key('Escape', 'Escape', 27), noDialog);
   await run('nouveau projet', () => fromMenu('#thread-project', '.thread-action'), dialog('project-dialog'));

@@ -11,6 +11,7 @@ import sys
 from runner import hardware
 from runner.contracts import validate_config
 from runner.journal import Journal
+from runner.media import sweep
 from runner.registry import capabilities, family, pipeline, validate_job
 
 
@@ -85,6 +86,8 @@ def _kept():
 def generate(job, config, progress):
     preflight(job, config)
     module, config = pipeline(job['pipeline']), validate_config(config)
+    # What a worker killed half-way left in the folder of the outputs, once it is old enough.
+    sweep(config)
     journal = Journal(config, job)
     kept = _kept()
     if kept is not None and kept.only(job['pipeline']):

@@ -6,6 +6,7 @@ import { outputActions } from './output-actions.mjs';
 import { setupPointer } from './studio-pointer.mjs';
 import { closePopup, openPopup } from './glass-menu.mjs';
 import { fileInfo } from './media-info.mjs';
+import { forgetCitedTakes } from './cited-takes.mjs';
 
 /**
  * The Studio: the creation tools of the conversation, beside the chat. Four blocks that never
@@ -3149,6 +3150,8 @@ export function setupStudio({
     try {
       // A creation of another conversation of the project leaves that conversation.
       await api('studio/delete', { id: record.id, conversationId: record.conversationId ?? place() });
+      // A later reply of the chat that names it no longer draws it from what was read before.
+      forgetCitedTakes();
       if (extending?.id === record.id) extending = null;
       for (const key of Object.keys(kept)) if (kept[key].id === record.id) delete kept[key];
       await refresh();
@@ -4427,16 +4430,18 @@ export function setupStudio({
    * length, its settings, its LoRAs and its inputs, in the draft of its mode. Not its seed, drawn
    * again, unless the user had named it (`seed_given`) or the take is looked at for what made it
    * (`exactSeed`: inspect). An input that is no longer there (a take
-   * deleted or gone to another project, a reference erased) leaves its case empty: how many is
-   * returned, for the Studio to say so.
+   * deleted or gone to another project, a reference erased) leaves its case empty, and a LoRA of
+   * the user whose file left its folder is not put back: how many inputs (`lost`) and which LoRAs
+   * (`gone`, by their files) are returned, for the Studio to say so.
    */
   function adopt(record, { exactSeed = false } = {}) {
     const target = mediaOf(record),
       draft = drafts[target],
       made = record.parameters ?? {},
-      workflow = modelsOf(target).find(item => item.id === record.workflowId) ?? null;
+      workflow = modelsOf(target).find(item => item.id === record.workflowId) ?? null,
+      gone = [];
     Object.assign(draft, { prompt: String(record.prompt ?? ''), before: null, inputs: {}, extension: null });
-    if (!workflow) return 0;
+    if (!workflow) return { lost: 0, gone };
     // The LoRAs of the user are of one family of models: those of the family left wait for its return.
     const family = modelsOf(target).find(item => item.id === draft.workflow)?.family;
     if (family !== undefined && family !== workflow.family) {
@@ -4472,12 +4477,15 @@ export function setupStudio({
         loraChoice(workflow, item, draft);
       }
     }
-    // Those of the user, which are still in their folder.
-    if (workflow.styled && target !== 'audio')
-      draft.styles = (Array.isArray(made.styles) ? made.styles : [])
-        .filter(style => (info.styles ?? []).includes(style?.name))
+    // Those of the user, which are still in their folder; the others are named to the user.
+    if (workflow.styled && target !== 'audio') {
+      const had = (Array.isArray(made.styles) ? made.styles : []).filter(style => style?.name);
+      draft.styles = had
+        .filter(style => (info.styles ?? []).includes(style.name))
         .slice(0, MAX_STYLES)
         .map(({ name, strength }) => ({ name, strength }));
+      gone.push(...had.filter(style => !(info.styles ?? []).includes(style.name)).map(style => leaf(style.name)));
+    }
     // Its inputs, each in the case of its role, in their order.
     let lost = 0;
     const counts = {};
@@ -4504,7 +4512,19 @@ export function setupStudio({
         };
       else lost++;
     }
-    return lost;
+    return { lost, gone };
+  }
+  /**
+   * What the Studio says of the LoRAs a take was made with whose files are no longer in their
+   * folder (`of`: « cette prise », « la dernière prise »), each once; '' when none is missing.
+   */
+  function goneLoras(names, of) {
+    const files = [...new Set(names)];
+    return files.length > 1
+      ? `${files.length} LoRA de ${of} ne sont plus dans le dossier loras : ${files.join(', ')}.`
+      : files.length
+        ? `Un LoRA de ${of} n’est plus dans le dossier loras : ${files[0]}.`
+        : '';
   }
   /**
    * The creations of the conversation in hand have just been read: the Studio takes the settings of
@@ -4534,23 +4554,32 @@ export function setupStudio({
     }
     if (!newest) return false;
     let lost = 0;
+    const gone = [];
     for (const item of MODES) {
       // The last take of the mode that one of its models made (not an enlargement, which has no settings).
       const models = new Set(modelsOf(item.id).map(model => model.id)),
         last = own.find(record => mediaOf(record) === item.id && models.has(record.workflowId));
-      if (last) lost += adopt(last);
+      if (!last) continue;
+      const missing = adopt(last);
+      lost += missing.lost;
+      gone.push(...missing.gone);
     }
     // The screen shows that newest take: its mode (when a model makes that kind here), and no longer
     // a take the Studio kept on it; one opened from the chat (« Afficher dans le Studio ») stays.
     for (const kind of Object.keys(kept)) if (kept[kind].id !== pinned) delete kept[kind];
     if (!pinned && modelsOf(mediaOf(own[0])).length) mode = mediaOf(own[0]);
     extending = null;
-    failure =
+    // What could not be put back as the take had it, said: the settings shown are not all its own.
+    failure = [
       lost > 1
         ? `${lost} images utilisées pour la dernière prise n’existent plus : leurs cases sont restées vides.`
         : lost
           ? 'Une image utilisée pour la dernière prise n’existe plus : sa case est restée vide.'
-          : '';
+          : '',
+      goneLoras(gone, 'la dernière prise'),
+    ]
+      .filter(Boolean)
+      .join(' ');
     return true;
   }
   /** The Studio has just made a take itself: its settings are already those of the newest take. */
@@ -4620,13 +4649,18 @@ export function setupStudio({
     formatsOpen = false;
     failure = '';
     if (info && modelsOf(target).some(item => item.id === record.workflowId)) {
-      const lost = adopt(record, { exactSeed: true });
+      const { lost, gone } = adopt(record, { exactSeed: true });
       advanced = true;
-      if (lost)
-        failure =
-          lost > 1
-            ? `${lost} images utilisées pour cette prise n’existent plus : leurs cases sont restées vides.`
-            : 'Une image utilisée pour cette prise n’existe plus : sa case est restée vide.';
+      failure = [
+        lost > 1
+          ? `${lost} images utilisées pour cette prise n’existent plus : leurs cases sont restées vides.`
+          : lost
+            ? 'Une image utilisée pour cette prise n’existe plus : sa case est restée vide.'
+            : '',
+        goneLoras(gone, 'cette prise'),
+      ]
+        .filter(Boolean)
+        .join(' ');
     } else if (record.external && record.workflowName)
       // Made by Moodix, with a model this installation does not have.
       failure = `Créé avec ${record.workflowName}, qui n’est pas disponible ici : vos réglages sont restés tels quels.`;

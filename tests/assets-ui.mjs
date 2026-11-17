@@ -279,6 +279,100 @@ test('› clicked up to the last take then once more at the same place: the take
   assert.equal(dialog.open, false);
 });
 
+test('where ‹ and › stand is read from the arrows themselves while they are shown: a change of their style is followed', async t => {
+  const { ui, $ } = await fixture(t),
+    record = {
+      id: 'run',
+      conversationId: 'conversation',
+      workflowName: 'Workflow',
+      prompt: 'Prompt',
+      parameters: {},
+      outputs: [{ source: { filename: 'result.png' }, analysisDataUrl: 'data:image/png;base64,AA==', take: 2 }],
+    },
+    list = [{ ...record, id: 'newer' }, record, { ...record, id: 'older' }],
+    dialog = $('original-dialog'),
+    tick = () => new Promise(resolve => setTimeout(resolve, 0)),
+    press = (x, y) => {
+      for (const name of ['pointerdown', 'click']) dialog.listeners[name].forEach(fn => fn({ clientX: x, clientY: y, target: dialog }));
+    };
+  // As if moodix.css had changed: 56 px wide and high, 20 px from a side of the window (500 px
+  // wide and high here), where it said 40 px and 4 px.
+  let box = { left: 0, top: 0, right: 500, bottom: 500 };
+  const arrow = from => () => {
+    const left = from === 'left' ? box.left + 20 : box.right - 76,
+      top = (box.top + box.bottom) / 2 - 28;
+    return { left, right: left + 56, top, bottom: top + 56, width: 56, height: 56 };
+  };
+  dialog.getBoundingClientRect = () => box;
+  $('media-prev').getBoundingClientRect = arrow('left');
+  $('media-next').getBoundingClientRect = arrow('right');
+  await ui.viewOutput(record, 0, undefined, { list: () => list, at: () => 1 });
+  $('media-next').onclick();
+  await tick();
+  assert.equal($('media-next').hidden, true);
+  // Where › stood, 4 px more around: not a margin (the 48 px and 24 px of before stopped at 452 and 274).
+  press(430, 250);
+  press(478, 280);
+  assert.equal(dialog.open, true);
+  // The window moved since: counted from its sides and the middle of its height, not from where
+  // the arrow was on the screen.
+  box = { left: 100, top: 100, right: 600, bottom: 600 };
+  press(530, 350);
+  assert.equal(dialog.open, true);
+  press(430, 250);
+  assert.equal(dialog.open, false);
+  // Beside where it stood, the margin of the window closes the take as before.
+  await ui.viewOutput(list[2], 0, undefined, { list: () => list, at: () => 2 });
+  press(510, 350);
+  assert.equal(dialog.open, false);
+  // ‹ too, from its own side.
+  await ui.viewOutput(list[0], 0, undefined, { list: () => list, at: () => 0 });
+  assert.equal($('media-prev').hidden, true);
+  press(178, 350);
+  assert.equal(dialog.open, true);
+  press(190, 350);
+  assert.equal(dialog.open, false);
+});
+
+test('the file of a take opened is said with its sub-folder of the output folder; it is downloaded under its name alone', async t => {
+  const { ui, $ } = await fixture(t),
+    take = source => ({
+      id: 'run',
+      conversationId: 'conversation',
+      workflowName: 'Workflow',
+      prompt: 'Prompt',
+      parameters: {},
+      outputs: [{ source, width: 1024, height: 1024 }],
+    }),
+    file = () => {
+      const more = $('media-more-list').children.map(item => item.textContent);
+      return more[more.indexOf('Fichier') + 1];
+    },
+    saved = [],
+    click = Element.prototype.click;
+  // The link « Télécharger » makes and clicks: the name it gives the file.
+  Element.prototype.click = function () {
+    saved.push(this.download);
+  };
+  t.after(() => {
+    Element.prototype.click = click;
+  });
+  // A take of today: in « image/ », « video/ » or « son/ » of the output folder.
+  await ui.viewOutput(take({ filename: 'Moodix_00012_.png', subfolder: 'image' }), 0, new Blob(['x'], { type: 'image/png' }));
+  assert.equal(file(), 'image/Moodix_00012_.png');
+  $('media-download').onclick();
+  assert.deepEqual(saved, ['Moodix_00012_.png']);
+  // A folder written as the disk writes it: one forward slash all the same.
+  await ui.viewOutput(take({ filename: 'clip.mp4', subfolder: 'video\\' }), 0, new Blob(['x'], { type: 'image/png' }));
+  assert.equal(file(), 'video/clip.mp4');
+  // A take of before the sub-folders: its name alone.
+  for (const source of [{ filename: 'ancien.png', subfolder: '' }, { filename: 'ancien.png' }]) {
+    await ui.viewOutput(take(source), 0, new Blob(['x'], { type: 'image/png' }));
+    assert.equal(file(), 'ancien.png');
+  }
+  $('original-close').onclick();
+});
+
 test('chat details reuse the displayed original blob and persisted original dimensions', async t => {
   const { ui, $, calls } = await fixture(t),
     original = new Blob(['Original'], { type: 'image/png' }),

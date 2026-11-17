@@ -13,6 +13,7 @@ import { readSSE } from '../public/stream.mjs';
 import { collectToolCalls, ToolRuntime } from '../lib/tool-runtime.mjs';
 import { RemoteModels, connectionOf, nearbyHost, onThisComputer, serviceUrl } from '../lib/remote-models.mjs';
 import {
+  BRIEF_TOKENS,
   ChatModel,
   estimateContext,
   minimalBody,
@@ -22,6 +23,7 @@ import {
   remoteRequest,
 } from '../lib/chat-model.mjs';
 import { ChatGPTAccount, chatgptFailure, responseChunks, responsesRequest } from '../lib/chatgpt.mjs';
+import { claudeRequest } from '../lib/claude.mjs';
 
 /**
  * The chat model reached by an address instead of llama.cpp (0.6.36): the connections and their
@@ -235,6 +237,81 @@ test('a service that refuses a field it does not know is asked again once with t
     used: 104,
     precision: 'rough',
   });
+});
+
+test('a few words asked beside the conversation cost a remote service little: a short answer, its lowest effort, and the conversation’s own requests unchanged', async t => {
+  // What /api/history/title asks (server.mjs): the name of a conversation.
+  const body = {
+    messages: [
+      { role: 'system', content: 'You name conversations.' },
+      { role: 'user', content: 'Un renard court dans la neige' },
+    ],
+    stream: false,
+    max_tokens: 40,
+    temperature: 0.2,
+    reasoning_format: 'deepseek',
+    chat_template_kwargs: { enable_thinking: false },
+  };
+  const talk = { messages: body.messages, stream: true, max_tokens: 4096, chat_template_kwargs: { enable_thinking: true } };
+
+  // A service « compatible OpenAI »: a limit to its answer, where the conversation asks for none.
+  const router = { preset: 'openrouter', model: 'anthropic/claude-x', effort: 'high' };
+  const brief = remoteBody(body, router, { brief: true });
+  assert.equal(brief.max_tokens, BRIEF_TOKENS);
+  assert.ok(BRIEF_TOKENS <= 1000, 'a few words, and room for a short reflection that cannot be left out');
+  // OpenRouter: no reflection at all for a model that reflects, nothing said to one that does not.
+  assert.deepEqual(brief.reasoning, { effort: 'none' });
+  assert.equal('reasoning' in remoteBody(body, { ...router, effort: '' }, { brief: true }), false);
+  // OpenAI names that limit otherwise (its models that reflect refuse the former name).
+  const openai = remoteBody(body, { preset: 'openai', model: 'gpt-x' }, { brief: true });
+  assert.deepEqual([openai.max_completion_tokens, openai.max_tokens], [BRIEF_TOKENS, undefined]);
+  // The same body without `brief`, and a message of the conversation: as before, no limit, the
+  // effort chosen (the lowest for a quick decision).
+  assert.deepEqual([remoteBody(body, router).max_tokens, remoteBody(body, router).reasoning], [undefined, { effort: 'low' }]);
+  assert.deepEqual([remoteBody(talk, router).max_tokens, remoteBody(talk, router).reasoning], [undefined, { effort: 'high' }]);
+
+  // ChatGPT (its plan takes no limit): the lowest effort its model takes, no summary of a
+  // reflection nothing shows; nothing made up when its efforts are not known.
+  const plan = responsesRequest(body, 'gpt-x', 'high', 'minimal', { brief: true });
+  assert.deepEqual(plan.reasoning, { effort: 'minimal' });
+  assert.equal('max_output_tokens' in plan || 'tools' in plan, false);
+  assert.equal('reasoning' in responsesRequest(body, 'gpt-x', 'high', '', { brief: true }), false);
+  assert.deepEqual(responsesRequest(talk, 'gpt-x', 'high', 'minimal').reasoning, { effort: 'high', summary: 'auto' });
+  assert.deepEqual(responsesRequest(body, 'gpt-x', 'high', 'minimal').reasoning, { effort: 'minimal', summary: 'auto' });
+
+  // Claude: a short answer at the lowest effort, nothing written to the cache for one request. Its
+  // reflection stays adaptive (several of its models refuse a request that turns it off).
+  const claude = claudeRequest(body, { model: 'claude-opus-5-5', effort: 'high', brief: true });
+  assert.deepEqual([claude.max_tokens, claude.output_config.effort, claude.thinking.type], [BRIEF_TOKENS, 'low', 'adaptive']);
+  assert.equal('cache_control' in claude || 'tools' in claude, false);
+  assert.equal(claudeRequest({ ...body, chat_template_kwargs: undefined }, { model: 'claude-x', effort: 'high', brief: true }).output_config.effort, 'low');
+  const usual = claudeRequest(talk, { model: 'claude-opus-5-5', effort: 'high' });
+  assert.deepEqual([usual.max_tokens, usual.output_config.effort, usual.cache_control], [64000, 'high', { type: 'ephemeral' }]);
+  assert.equal(claudeRequest(body, { model: 'claude-opus-5-5', effort: 'high' }).max_tokens, 16000);
+
+  // Through the chat model in use: the option reaches the service, and a service that refuses the
+  // limit is asked in a lighter form for this request only (the conversation keeps its own form,
+  // and the effort it sends).
+  const data = await folder(t),
+    remotes = new RemoteModels(data),
+    sent = [];
+  const fetchImpl = async (url, options) => {
+    const asked = JSON.parse(options.body);
+    sent.push(asked);
+    if ('max_tokens' in asked) return new Response('{"error":{"message":"Unsupported parameter: max_tokens"}}', { status: 400 });
+    return Response.json({ choices: [{ index: 0, message: { role: 'assistant', content: 'Renard dans la neige' }, finish_reason: 'stop' }] });
+  };
+  const chat = await new ChatModel({ engine: { state: 'stopped', busy: false, stop: async () => {} }, remotes, fetchImpl }).load();
+  const saved = await remotes.save({ preset: 'custom', name: 'Service', baseUrl: 'https://models.example.com/v1', model: 'm', key: 'k-123456789' });
+  await chat.use(saved.id);
+  const named = await (await chat.request(body, { brief: true })).json();
+  assert.equal(named.choices[0].message.content, 'Renard dans la neige');
+  assert.equal(sent[0].max_tokens, BRIEF_TOKENS);
+  assert.equal('max_tokens' in sent.at(-1), false);
+  assert.equal(chat.lighter.size, 0, 'what a brief request had to leave out is not kept for the conversation');
+  sent.length = 0;
+  await chat.request({ ...body, max_tokens: 700 });
+  assert.deepEqual([sent.length, sent[0].temperature, 'max_tokens' in sent[0]], [1, 0.2, false]);
 });
 
 test('the chat model in use: the local engine, or a remote connection that loads nothing and keeps the card free', async t => {

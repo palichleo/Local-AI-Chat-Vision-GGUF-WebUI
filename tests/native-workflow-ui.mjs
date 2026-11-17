@@ -1231,16 +1231,90 @@ test('a music engine takes no reference: the button is greyed, and said why', as
   assert.match(f.$('native-reference-note').textContent, /ACE-Step 1.5 ne prend pas d’image ni de vidéo de référence\./);
   assert.equal(f.$('native-reference-note').hidden, false);
 });
-test('a prompt is a line, never a switch: a fixed one, refused at each creation, is saved as written each time', async t => {
+test('a prompt is a line, never a switch: a fixed one is shown, kept by an untouched save, and leaves with a change', async t => {
+  const { workflowFingerprint } = await import('../lib/native-workflows.mjs');
   const f = await setup(t),
     record = structuredClone(f.template);
   record.parameters.prompt = { policy: 'fixed', value: 'Un portrait' };
   await f.ui.edit(record);
   assert.equal(f.$('native-policy-prompt'), null);
   assert.equal(f.$('native-value-prompt'), null);
+  // Its text is there to be read and copied, not to be changed; the line under it says what becomes of it.
+  const stored = f.$('native-prompt-stored');
+  assert.equal(stored.value, 'Un portrait');
+  assert.equal(stored.readOnly, true);
+  const said = stored.parent.parent.children.at(-1).textContent;
+  assert.match(said, /Un prompt fixe est refusé à chaque création/);
+  assert.match(said, /c’est désormais l’assistant qui écrit le prompt/);
+  assert.match(said, /retiré du workflow dès que vous enregistrerez une modification/);
+  // Opened and saved without a change: not dirty, and the workflow is the one that was stored.
+  assert.equal(f.ui.editorDirty(false), false);
+  assert.equal(await f.ui.saveEditor(), true, f.$('native-workflow-error').textContent);
+  const untouched = f.calls.findLast(call => call.route === 'generation/workflows').body;
+  assert.deepEqual(untouched.parameters.prompt, { policy: 'fixed', value: 'Un portrait' });
+  // Nor is a setting it never had added to it (« Améliorer le prompt », off).
+  assert.equal(untouched.parameters.expandPrompt, undefined);
+  assert.equal(workflowFingerprint(untouched), workflowFingerprint(record));
+  // With a change of the user's, it is written at each creation from then on.
+  await f.ui.edit(structuredClone(untouched));
+  assert.equal(f.$('native-prompt-stored').value, 'Un portrait', 'still shown when opened again');
+  f.$('native-workflow-description').value = 'Portraits serrés';
+  assert.equal(f.ui.editorDirty(false), true);
+  assert.equal(await f.ui.saveEditor(), true, f.$('native-workflow-error').textContent);
+  const changed = f.calls.findLast(call => call.route === 'generation/workflows').body;
+  assert.deepEqual(changed.parameters.prompt, { policy: 'model', type: 'string' });
+  await f.ui.edit(structuredClone(changed));
+  const shown = f.$('native-workflow-parameters').querySelectorAll().map(control => control.id);
+  assert.ok(shown.includes('native-value-width') && !shown.includes('native-prompt-stored'), 'no longer shown');
+});
+test('a prompt left to the assistant shows the default and the instruction stored with it, and keeps them', async t => {
+  const f = await setup(t),
+    record = structuredClone(f.template);
+  await f.ui.edit(record);
+  assert.equal(f.$('native-prompt-default'), null, 'nothing stored, nothing shown');
+  assert.equal(f.$('native-prompt-description'), null);
+  f.$('native-workflow-back').onclick();
+  record.parameters.prompt = {
+    policy: 'model',
+    type: 'string',
+    maxLength: 4000,
+    default: 'Un chat roux',
+    description: 'Décris la scène en anglais.',
+  };
+  await f.ui.edit(record);
+  assert.equal(f.$('native-prompt-default').value, 'Un chat roux');
+  assert.equal(f.$('native-prompt-default').readOnly, true);
+  assert.equal(f.$('native-prompt-description').value, 'Décris la scène en anglais.');
+  assert.equal(f.$('native-prompt-stored'), null);
+  assert.equal(f.ui.editorDirty(false), false);
+  f.$('native-workflow-description').value = 'Chats';
   assert.equal(await f.ui.saveEditor(), true, f.$('native-workflow-error').textContent);
   const saved = f.calls.findLast(call => call.route === 'generation/workflows').body;
-  assert.deepEqual(saved.parameters.prompt, { policy: 'model', type: 'string' });
+  assert.deepEqual(saved.parameters.prompt, record.parameters.prompt);
+});
+test('the prompt of an imported graph is shown in its draft, and the draft saved untouched keeps it', async t => {
+  const f = await setup(t),
+    sourceText = JSON.stringify({
+      1: { class_type: 'CLIPTextEncode', inputs: { text: 'a red fox in the snow' } },
+      2: { class_type: 'KSampler', inputs: { steps: 22, cfg: 4, seed: 42, positive: ['1', 0] } },
+    });
+  await f.$('native-workflow-file').onchange({
+    target: { files: [{ name: 'Graph.json', size: sourceText.length, text: async () => sourceText }], value: 'x' },
+  });
+  assert.equal(f.ui.isEditing(), true);
+  assert.equal(f.$('native-prompt-stored').value, 'a red fox in the snow');
+  assert.equal(await f.ui.saveEditor(), true, f.$('native-workflow-error').textContent);
+  const saved = f.calls.findLast(call => call.route === 'generation/workflows').body;
+  assert.ok(saved.importDraft);
+  assert.deepEqual(saved.parameters.prompt, { policy: 'fixed', value: 'a red fox in the snow' });
+  // Opened again and saved as it is: the same draft, to the last setting.
+  const { workflowFingerprint } = await import('../lib/native-workflows.mjs');
+  await f.ui.edit(structuredClone(saved));
+  assert.equal(f.ui.editorDirty(false), false);
+  assert.equal(await f.ui.saveEditor(), true, f.$('native-workflow-error').textContent);
+  const again = f.calls.findLast(call => call.route === 'generation/workflows').body;
+  assert.notEqual(again, saved);
+  assert.equal(workflowFingerprint(again), workflowFingerprint(saved));
 });
 test('the seed is fixed or drawn; a seed left to the assistant stays shown, to be changed', async t => {
   const f = await setup(t);
@@ -1262,11 +1336,26 @@ test('the seed is fixed or drawn; a seed left to the assistant stays shown, to b
 test('Krea 2: a denoise of 1 with an image to modify is said to ignore it, until it is lowered', async t => {
   const f = await setup(t);
   await f.ui.edit(await shippedWorkflow('krea2'));
-  const note = noteOf(f.$('native-value-denoise'));
+  const control = f.$('native-value-denoise'),
+    note = noteOf(control),
+    typed = value => {
+      control.value = value;
+      for (const listener of control.listeners.input) listener();
+    };
+  // The shipped workflow keeps a part of the image (0.75): nothing to warn of.
+  assert.equal(control.value, 0.75);
+  assert.equal(note.hidden, true);
+  // What the setting is, and that it only applies to an image given, is said whatever its value.
+  const card = note.parent,
+    help = card.children[card.children.indexOf(note) - 1];
+  assert.equal(help.className, 'field-help');
+  assert.match(help.textContent, /quand une image est donnée à modifier/);
+  assert.match(help.textContent, /Sans image, l’image part toujours de zéro\./);
+  // A workflow of the user's at 1: the image would be replaced entirely, and it is said.
+  typed('1');
   assert.equal(note.hidden, false);
   assert.match(note.textContent, /image à modifier est ignorée/);
-  assert.equal(f.$('native-value-denoise').dataset.unavailable, 'false', 'a warning, not greyed');
-  f.$('native-value-denoise').value = '0.7';
-  for (const listener of f.$('native-value-denoise').listeners.input) listener();
+  assert.equal(control.dataset.unavailable, 'false', 'a warning, not greyed');
+  typed('0.7');
   assert.equal(note.hidden, true);
 });

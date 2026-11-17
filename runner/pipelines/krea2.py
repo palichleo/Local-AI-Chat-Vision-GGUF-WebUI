@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from runner import preview
 from runner.media import save_image
 from runner.models.headers import header
-from runner.pipelines.sampling import simple_sigmas
+from runner.pipelines.sampling import applied_denoise, simple_sigmas, start_latents
 
 
 # Video memory left beside the weights of the model, in GiB: a fixed part and what a step's own
@@ -203,7 +203,8 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
         height, width = plan['height'] // 8, plan['width'] // 8
         generator = torch.Generator('cpu').manual_seed(plan['seed'])
         noise = torch.randn((1, 16, height, width), generator=generator).to(device)
-        source = torch.zeros_like(noise)
+        # The latents of the image to modify, when one is given.
+        source = None
         if plan['image']:
             image = ImageOps.fit(
                 Image.open(plan['image']).convert('RGB'),
@@ -289,11 +290,12 @@ def _generate(args, plan, files, job, config, progress_callback, cleanup):
 
             install(transformer)
         steps = plan['steps']
-        denoise = plan['denoise']
-        if not 0 < denoise <= 1:
-            raise ValueError('Denoise must be in (0,1]')
+        # Denoise only applies to an image to modify: without one the picture is made from pure
+        # noise whatever the workflow says (the application resolves the job the same way). The
+        # record of the picture says the denoise really used.
+        denoise = plan['denoise'] = applied_denoise(plan['denoise'], source is not None)
         sigmas = torch.tensor(simple_sigmas(steps, denoise, torch), device=device)
-        latents = noise * sigmas[0] + source * (1 - sigmas[0])
+        latents = start_latents(noise, source, sigmas[0])
         del noise, source
         gh, gw = (height + 1) // 2, (width + 1) // 2
         positions = Krea2Pipeline.prepare_position_ids(conditioning.shape[1], gh, gw, device)

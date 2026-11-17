@@ -573,3 +573,216 @@ test('a workflow that takes no image says so of the image the user named', async
   assert.deepEqual(revised.notes, proposal.notes);
   assert.deepEqual(revised.cited, proposal.cited);
 });
+
+/**
+ * A series of images asked in the Chat (one call of create_image with `series`) with the local chat
+ * model: what the chat engine and the generator are asked, in their order (`order`: stop and start
+ * of the model; run, keep — its models left loaded — and free of the generator). `idle`: how long
+ * the runtime waits for a next image; `run`: what the generator answers to a job.
+ */
+function seriesFixture({ idle = 60000, local, run = async () => ({ outputs: [{ filename: 'x.png', subfolder: '', type: 'output' }] }) } = {}) {
+  const order = [];
+  const workflow = nativeWorkflow({ id: 'wf', name: 'Images', digest: 'one' });
+  const engine = {
+    state: 'ready',
+    busy: false,
+    ...(local === undefined ? {} : { local }),
+    async stop() {
+      order.push('stop');
+      engine.state = 'stopped';
+    },
+    async start() {
+      order.push('start');
+      engine.state = 'ready';
+    },
+  };
+  const client = {
+    status: async () => ({ idle: true }),
+    preflight: async () => {},
+    run: async job => {
+      order.push('run');
+      return run(job);
+    },
+    free: async options => {
+      order.push(options?.keep ? 'keep' : 'free');
+      return { kept: options?.keep === true };
+    },
+  };
+  const rt = new ToolRuntime({
+    engine,
+    catalog: { list: async () => [workflow], read: async () => workflow, prepare: async () => nativePrepared(workflow) },
+    gallery: { put: async record => record },
+    getConfig: () => ({ enabled: true, autoAllow: true, maxIterations: 50 }),
+    engineConfig: () => ({}),
+    clientFactory: () => client,
+    seriesIdleMs: idle,
+  });
+  const ask = (count = 3, options = {}) =>
+    rt.request(
+      [
+        {
+          id: 'call_1',
+          type: 'function',
+          function: {
+            name: 'create_image',
+            arguments: JSON.stringify({ prompt: 'image 1', series: Array.from({ length: count - 1 }, (_, at) => 'image ' + (at + 2)) }),
+          },
+        },
+      ],
+      { conversationId: id, turnId: id, messages: [], ...options },
+    );
+  /** An image run to its end, as the page does: its job. */
+  const make = async (proposal, options = {}) => {
+    await rt.execute({ requestId: proposal.requestId, permission: 'once', ...options });
+    await rt.finished;
+    return rt.job;
+  };
+  const until = async check => {
+    for (let tries = 0; tries < 200 && !check(); tries++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.ok(check(), 'attendu en vain');
+  };
+  return { rt, engine, order, ask, make, until };
+}
+
+test('between two images of a series the chat model stays out and the generator keeps its models: loaded again once, after the last', async () => {
+  const { rt, engine, order, ask, make } = seriesFixture();
+  const first = await ask(3);
+  assert.equal((await make(first)).state, 'done');
+  // Not loaded to be unloaded at once for the next image; the generator was told to keep its models.
+  assert.deepEqual(order, ['stop', 'run', 'keep']);
+  assert.deepEqual([engine.state, rt.active], ['stopped', false]);
+  const second = await rt.next({ series: first.series.id });
+  assert.equal((await make(second)).state, 'done');
+  assert.deepEqual(order.slice(3), ['stop', 'run', 'keep']);
+  assert.equal(engine.state, 'stopped');
+  // The last image hands the card back as any creation: the generator freed, the model started.
+  const third = await rt.next({ series: first.series.id });
+  const job = await make(third);
+  assert.deepEqual([job.state, job.progress], ['done', 'Image prête pour vérification.']);
+  assert.deepEqual(order.slice(6), ['stop', 'run', 'free', 'free', 'start']);
+  assert.equal(order.filter(step => step === 'start').length, 1, 'one reload for three images');
+  assert.deepEqual([engine.state, rt.owed, rt.series.size], ['ready', null, 0]);
+  // (A single image, as before: unloaded, made, freed, loaded again.)
+  const single = seriesFixture();
+  const alone = await single.rt.request(
+    [{ id: 'call_2', type: 'function', function: { name: 'create_image', arguments: '{"prompt":"seule"}' } }],
+    { conversationId: id, turnId: id, messages: [] },
+  );
+  await single.make(alone);
+  assert.deepEqual(single.order, ['stop', 'run', 'free', 'start']);
+});
+
+test('a series that stops before its last image gives the chat model back at once: an image failed, the page’s word, a proposal let go', async () => {
+  // An image that fails hands the card back itself, as any creation that failed.
+  let runs = 0;
+  const failing = seriesFixture({
+    run: async () => {
+      if (++runs === 2) throw Error('Mémoire vidéo insuffisante');
+      return { outputs: [{ filename: 'x.png', subfolder: '', type: 'output' }] };
+    },
+  });
+  const first = await failing.ask(3);
+  await failing.make(first);
+  const failed = await failing.make(await failing.rt.next({ series: first.series.id }));
+  assert.equal(failed.state, 'error');
+  assert.deepEqual(failing.order.slice(3), ['stop', 'run', 'free', 'free', 'start']);
+  assert.deepEqual([failing.engine.state, failing.rt.owed], ['ready', null]);
+  // The page then says the series is over: its prompts are let go, nothing is started twice.
+  assert.deepEqual(await failing.rt.endSeries({ series: first.series.id }), { ended: true });
+  assert.equal(failing.rt.series.size, 0);
+  assert.equal(failing.order.filter(step => step === 'start').length, 1);
+  await assert.rejects(failing.rt.next({ series: first.series.id }), /terminée/);
+
+  // Stopped between two images (the user's stop, an image refused): the page says so, and its
+  // answer comes once the model is back.
+  const stopped = seriesFixture();
+  const begun = await stopped.ask(4);
+  await stopped.make(begun);
+  assert.equal(stopped.engine.state, 'stopped');
+  assert.deepEqual(await stopped.rt.endSeries({ series: begun.series.id }), { ended: true });
+  assert.deepEqual(stopped.order.slice(3), ['free', 'start']);
+  assert.deepEqual([stopped.engine.state, stopped.rt.owed, stopped.rt.series.size], ['ready', null, 0]);
+  // Said twice, or of a series that is not known: nothing more.
+  assert.deepEqual(await stopped.rt.endSeries({ series: begun.series.id }), { ended: false });
+  assert.deepEqual(await stopped.rt.endSeries({}), { ended: false });
+  assert.equal(stopped.order.filter(step => step === 'start').length, 1);
+
+  // The proposal of its next image let go (refused in the Studio): the same.
+  const refused = seriesFixture();
+  const opened = await refused.ask(3);
+  await refused.make(opened);
+  const next = await refused.rt.next({ series: opened.series.id });
+  refused.rt.cancel({ requestId: next.requestId });
+  await refused.until(() => refused.engine.state === 'ready');
+  assert.deepEqual([refused.rt.owed, refused.rt.series.size], [null, 0]);
+
+  // The first proposal let go before anything ran (left out for an image the user named): its
+  // prompts and the conversation kept with them are not held for hours.
+  const unused = seriesFixture();
+  const proposed = await unused.ask(3);
+  assert.equal(unused.rt.series.size, 1);
+  unused.rt.cancel({ requestId: proposed.requestId });
+  assert.equal(unused.rt.series.size, 0);
+  assert.deepEqual(unused.order, []);
+});
+
+test('a page gone in the middle of a series does not leave the application without its chat model', async () => {
+  const { rt, engine, order, ask, make, until } = seriesFixture({ idle: 30 });
+  const first = await ask(3);
+  await make(first);
+  assert.equal(engine.state, 'stopped');
+  // No next image, no word of the page: after a while the model comes back by itself.
+  await until(() => engine.state === 'ready');
+  assert.deepEqual(order.slice(3), ['free', 'start']);
+  assert.equal(rt.owed, null);
+  // The page was only slow: its series goes on, each image an ordinary creation again.
+  const second = await rt.next({ series: first.series.id });
+  assert.equal((await make(second)).state, 'done');
+  assert.deepEqual(order.slice(5), ['stop', 'run', 'keep']);
+  // The model started meanwhile by a message of the user is not started a second time.
+  engine.state = 'ready';
+  await until(() => rt.owed === null);
+  assert.equal(order.filter(step => step === 'start').length, 1);
+  // Closing with a series left midway: nothing is started behind the application.
+  const closing = seriesFixture({ idle: 20 });
+  const begun = await closing.ask(3);
+  await closing.make(begun);
+  await closing.rt.close();
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(closing.order.includes('start'), false);
+});
+
+test('a series made in the Studio or with a remote chat model keeps its hand-back: nothing is owed', async () => {
+  // From the Studio the chat model stays unloaded anyway, and comes back with the next message.
+  const studio = seriesFixture({ idle: 20 });
+  const first = await studio.ask(2);
+  await studio.make(first, { studio: true });
+  assert.deepEqual([studio.order, studio.rt.owed], [['stop', 'run', 'keep'], null]);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(studio.order.includes('start'), false);
+  // A remote model holds nothing on the card: never stopped, never started.
+  const remote = seriesFixture({ idle: 20, local: false });
+  const begun = await remote.ask(2);
+  await remote.make(begun);
+  await remote.make(await remote.rt.next({ series: begun.series.id }));
+  assert.deepEqual([remote.order, remote.rt.owed], [['run', 'keep', 'run', 'keep'], null]);
+});
+
+test('a failed creation made again by itself is no longer an image of its series', async () => {
+  let runs = 0;
+  const { rt, order, ask, make } = seriesFixture({
+    run: async () => {
+      if (++runs === 1) throw Error('échec');
+      return { outputs: [{ filename: 'x.png', subfolder: '', type: 'output' }] };
+    },
+  });
+  const first = await ask(3);
+  assert.equal((await make(first)).state, 'error');
+  // « Relancer » on the first image, its series still known to the server: an ordinary creation,
+  // the chat model loaded again after it (it was left out, with no next image to bring it back).
+  const again = await rt.again({ requestId: first.requestId });
+  assert.equal(again.series, undefined);
+  assert.equal((await make(again)).state, 'done');
+  assert.deepEqual(order.slice(-4), ['stop', 'run', 'free', 'start']);
+  assert.equal(rt.owed, null);
+});

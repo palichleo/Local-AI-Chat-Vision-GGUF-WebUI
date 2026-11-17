@@ -17,7 +17,7 @@ import { setupHelpTips } from './help-tips.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
-import { STUDIO_NOTE, callNote, closedCalls, conversationTitle, lastExchange, settledNotes, spokenText } from './transcript.mjs';
+import { STUDIO_LINE, STUDIO_NOTE, callNote, closedCalls, conversationTitle, lastExchange, settledNotes, spokenText } from './transcript.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
 import { setupContextMeter } from './context-meter.mjs';
 import { installFromButton, compactSession } from './update-ui.mjs';
@@ -327,20 +327,44 @@ function setConversationTitle(title, { unnamed = false } = {}) {
  * (POST /api/history/title, lib/conversation-title.mjs): the picture it opened on described, or its
  * first words summed up. Asked at the end of its first three turns at most, until the model is free
  * to answer; the name made of the first message stays meanwhile, and whenever it cannot.
+ * Named after the first of its three first messages that gives something to name it from (the
+ * server chooses): a conversation that opened on pictures alone, or on a creation of the Studio
+ * made without a prompt, was never named, whatever was written next.
  */
 async function nameConversation(messages, conversationId) {
   if (!state.saveHistory || !conversationId || state.named?.has(conversationId)) return;
-  const said = messages.filter(message => message?.role === 'user' && !message.resourceId && !message.outputId);
+  // What the user wrote and what they made in the Studio (its prompt): not what the application
+  // writes for the model (the copies of a creation it looks at).
+  const said = messages.filter(
+    message =>
+      message?.role === 'user' &&
+      !message.resourceId &&
+      !message.outputId &&
+      (!message.internal || (typeof message.content === 'string' && STUDIO_LINE.test(message.content))),
+  );
   if (!said.length || said.filter(message => !message.internal).length > 3) return;
+  // The first as it is (a picture it opens on names it); of the next two, the words alone.
+  const words = message =>
+    typeof message.content === 'string' ? message.content : (message.content ?? []).filter(part => part?.type === 'text');
   try {
-    const answer = await (await api('history/title', { id: conversationId, content: said[0].content })).json();
+    const answer = await (
+      await api('history/title', { id: conversationId, contents: [said[0].content, ...said.slice(1, 3).map(words)] })
+    ).json();
     if (answer.later) return;
     (state.named ??= new Set()).add(conversationId);
     const named = answer.conversation;
     if (!named?.title) return;
     state.historyItems = (state.historyItems || []).map(item => (item.id === named.id ? { ...item, title: named.title } : item));
-    if (state.conversationId === named.id) $('conversation-title').textContent = named.title;
-    renderHistory();
+    // Only what its name changes is drawn again: the whole navigation drawn anew closed the menu
+    // open meanwhile (a list of conversations and what was typed in its search field). A list open
+    // on the former name keeps it until it is opened next.
+    if (state.conversationId === named.id) {
+      $('conversation-title').textContent = named.title;
+      // The button of the fil says it too, unless the Pellicule shows another name in its place.
+      if (!$('conversation-title').hidden)
+        $('thread-conversation').setAttribute('aria-label', 'Conversation : ' + named.title);
+    }
+    projectUI.renderResume();
   } catch {
     // The name made of the first message stays.
   }
@@ -3079,9 +3103,11 @@ async function sendMessage(event) {
       const generation = generationUI.mount(view.generations, request, { compact: viaStudio });
       // A video is commented by the model only when the user chose it in the settings: the
       // reload and the analysis take about a minute. An image too, by its own choice. Otherwise
-      // the creation ends the turn; a sound always does.
+      // the creation ends the turn; a sound always does. Never the images of a series: every copy
+      // went to the model in one message (up to twenty: more than a local context holds), and what
+      // it wrote was kept as the analysis of the last one alone. It looks at one when asked to.
       const review = state.generation?.reviewVideos === true,
-        lookAtImage = !request.mediaType && state.generation?.reviewImages === true;
+        lookAtImage = !request.mediaType && state.generation?.reviewImages === true && !request.series;
       // Made from the Studio, the generator keeps its models for the next creation, and the chat
       // model comes back with the next message: unless it has a creation to look at.
       const kept = viaStudio && !(review && request.mediaType === 'video') && !lookAtImage;
@@ -3122,6 +3148,13 @@ async function sendMessage(event) {
         // its screen did not know of the take until another conversation was opened).
         else if (outcome.record) state.studio?.invalidate?.();
       };
+      // The result of the call in the conversation: one for its call at any time. A series keeps
+      // what it has made so far after each image, which the next result takes the place of.
+      const answer = content => {
+        const last = history.at(-1);
+        if (last?.role === 'tool' && last.tool_call_id === request.call.id) last.content = content;
+        else history.push({ role: 'tool', tool_call_id: request.call.id, content });
+      };
       try {
         result = await runOn(request, generation);
         generation.finish(result);
@@ -3134,13 +3167,26 @@ async function sendMessage(event) {
             mount: proposal => generationUI.mount(view.generations, proposal, { compact: viaStudio }),
             run: runOn,
             settle,
+            // Saved after each image: closed in the middle of a series, the application shows the
+            // images made so far when the conversation is opened again (their `run_id`).
+            keep: async made => {
+              answer(made);
+              state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+              await persistConversation();
+            },
           });
+        // A series that goes no further than its first image (refused, failed): the server is told,
+        // lets its prompts go, and the chat model its image may have left out is back before the
+        // model is written to.
+        else if (request.series) await api('tools/series', { series: request.series.id, end: true }).catch(() => {});
       } catch (error) {
+        // (The same when its first image is stopped or breaks: runSeries says it for the next ones.)
+        if (request.series && !error.series) void api('tools/series', { series: request.series.id, end: true }).catch(() => {});
         if (viaStudio) void state.studio.settled({ error: signal.aborted ? 'Génération arrêtée.' : error.message });
         // Stopped or broken after the first image of a series: its card said it, and the result of
         // the call says what was made (the first card stays as it is).
         if (error.series) {
-          history.push({ role: 'tool', tool_call_id: request.call.id, content: error.series });
+          answer(error.series);
           throw error;
         }
         // Stopped by the user: the take goes and the message says it, once, in French (16/11: the
@@ -3162,7 +3208,7 @@ async function sendMessage(event) {
         });
         throw error;
       }
-      history.push({ role: 'tool', tool_call_id: request.call.id, content: result.content });
+      answer(result.content);
       if (result.record || result.failed) state.status = await (await api('status')).json();
       if (kept && !result.denied) {
         // The creation is on the Studio's screen; the chat model stays unloaded until the next message.

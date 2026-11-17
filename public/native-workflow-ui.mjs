@@ -1191,7 +1191,9 @@ export function setupNativeWorkflows(options) {
       note = node('p', 'field-help native-inert');
     heading.className += ' native-parameter-heading';
     note.hidden = true;
-    card.append(heading, defaultLabel, valueField, bounds, description, note);
+    // What the family says of the setting whatever its value (when the denoise of Krea 2 applies).
+    const help = spec.help ? [node('p', 'field-help', spec.help)] : [];
+    card.append(heading, defaultLabel, valueField, bounds, description, ...help, note);
     value.setAttribute('aria-label', title);
     valueField.children[0].className = 'sr-only';
     let reasons = {};
@@ -1535,7 +1537,12 @@ export function setupNativeWorkflows(options) {
         );
     };
   }
-  function promptCard() {
+  /**
+   * The prompt of a workflow: a line, no setting. What the workflow stores of one is shown, to be
+   * read and copied: a fixed text (an imported graph, a workflow of before) and, for a prompt left
+   * to the assistant, its default and what was said of it. Nothing of it is dropped unseen.
+   */
+  function promptCard(policy) {
     const card = node('div', 'native-parameter'),
       heading = node('div', 'field-group native-parameter-heading');
     heading.append(node('label', '', labels.prompt));
@@ -1543,6 +1550,36 @@ export function setupNativeWorkflows(options) {
       heading,
       node('p', 'field-help', 'Écrit à chaque création : par l’assistant dans le chat, par vous dans le Studio.'),
     );
+    const stored = (id, label, value, help) => {
+      const area = element('textarea', id);
+      area.value = value;
+      area.readOnly = true;
+      area.rows = 3;
+      card.append(field(label, area), node('p', 'field-help', help));
+    };
+    if (policy.policy === 'fixed')
+      stored(
+        'native-prompt-stored',
+        'Prompt fixé dans ce workflow',
+        String(policy.value ?? ''),
+        'Un prompt fixe est refusé à chaque création : c’est désormais l’assistant qui écrit le prompt, ou vous dans le Studio. Ce texte n’est donc plus utilisé. Copiez-le si vous voulez le garder : il sera retiré du workflow dès que vous enregistrerez une modification.',
+      );
+    else {
+      if (typeof policy.default === 'string' && policy.default)
+        stored(
+          'native-prompt-default',
+          'Prompt par défaut de ce workflow',
+          policy.default,
+          'Gardé avec le workflow : utilisé seulement quand aucun prompt n’est écrit à la création.',
+        );
+      if (policy.description)
+        stored(
+          'native-prompt-description',
+          'Consigne enregistrée pour ce prompt',
+          policy.description,
+          'Gardée avec le workflow. L’assistant reçoit la consigne de Moodix pour écrire un prompt, pas celle-ci.',
+        );
+    }
     return card;
   }
   /** Greys what changes nothing in the workflow as it stands now, and says why (inertSetting). */
@@ -1621,8 +1658,9 @@ export function setupNativeWorkflows(options) {
       }
       // Written at each creation, by the assistant or in the Studio: a fixed prompt was refused at
       // each one (a locked parameter cannot be overridden), and what was said of it reached no one.
+      // The card shows what is stored; a fixed text leaves with the first change saved (saveEditor).
       if (name === 'prompt') {
-        $('native-workflow-parameters').append(promptCard());
+        $('native-workflow-parameters').append(promptCard(policy));
         readParameters.push([name, () => (policy.policy === 'model' ? policy : { policy: 'model', type: 'string' })]);
         continue;
       }
@@ -1696,7 +1734,13 @@ export function setupNativeWorkflows(options) {
     );
     readEnhance = () => {
       const value = toggle.value;
-      if (value === 'off') return { parameter: { policy: 'fixed', value: false }, expansion: draft.promptExpansion };
+      // Off in a workflow that never had the setting: nothing is added to it (saved untouched, it
+      // stays as it was stored).
+      if (value === 'off')
+        return {
+          parameter: policy || draft.promptExpansion ? { policy: 'fixed', value: false } : undefined,
+          expansion: draft.promptExpansion,
+        };
       if (template.value.split('{{prompt}}').length !== 2)
         throw Error('La consigne d’amélioration doit contenir {{prompt}} exactement une fois.');
       return {
@@ -1724,7 +1768,7 @@ export function setupNativeWorkflows(options) {
     if (readProfiles.length) record.profiles = Object.fromEntries(readProfiles.map(([stage, read]) => [stage, read()]));
     if (readEnhance) {
       const { parameter, expansion } = readEnhance();
-      record.parameters.expandPrompt = parameter;
+      if (parameter) record.parameters.expandPrompt = parameter;
       if (expansion) record.promptExpansion = expansion;
       else delete record.promptExpansion;
     }
@@ -1821,6 +1865,10 @@ export function setupNativeWorkflows(options) {
     const session = version;
     try {
       const record = readEditor();
+      // Saved untouched, a workflow stays as it was stored (the same fingerprint): the fixed prompt
+      // the editor shows without offering it only leaves with a change of the user's.
+      if (draft.parameters.prompt?.policy === 'fixed' && JSON.stringify(record) === baseline)
+        record.parameters.prompt = structuredClone(draft.parameters.prompt);
       if (!record.name || (!record.importDraft && !record.description))
         throw Error('Ajoutez un nom et une description indiquant quand utiliser ce workflow.');
       if (!record.importDraft || record.enabled) {

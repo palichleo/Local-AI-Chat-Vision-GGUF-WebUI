@@ -1,5 +1,6 @@
 """RIFE frame interpolation: a smoother video at a higher frame rate, or a slow-motion version."""
 
+from contextlib import closing
 import time
 
 MAX_FPS = 240
@@ -51,19 +52,22 @@ def generate(job, config, progress):
     total = max(info['frames'] - 1, 1)
     try:
         previous = previous_pixels = None
-        for index, pixels in enumerate(frames(source)):
-            current = tensor(pixels)
-            if previous is not None:
-                writer.write(previous_pixels)
-                for step in range(1, multiplier):
-                    writer.write(array(rife.between(model, previous, current, step / multiplier)))
-                progress(step=index, total=max(total, index))
-            previous, previous_pixels = current, pixels
+        # The source is closed as soon as the loop ends, however it ends.
+        with closing(frames(source)) as reader:
+            for index, pixels in enumerate(reader):
+                current = tensor(pixels)
+                if previous is not None:
+                    writer.write(previous_pixels)
+                    for step in range(1, multiplier):
+                        writer.write(array(rife.between(model, previous, current, step / multiplier)))
+                    progress(step=index, total=max(total, index))
+                previous, previous_pixels = current, pixels
         if previous_pixels is not None:
             writer.write(previous_pixels)
         writer.close(audio_from=source if info['audio'] and mode == 'smooth' else None)
     except BaseException:
-        temporary.unlink(missing_ok=True)
+        # Failed or stopped half-way: the encoder is closed, then its file removed (VideoWriter.abort).
+        writer.abort()
         raise
     metadata = dict(
         job=job,

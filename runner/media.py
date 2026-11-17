@@ -3,6 +3,8 @@
 import json
 import os
 from pathlib import Path
+import re
+import time
 import uuid
 
 
@@ -46,6 +48,48 @@ def output_place(config, job, kind, extension):
 def subfolder(config, output):
     """The folder of a creation as its descriptor names it: '' for the folder of the outputs itself."""
     return '' if output.parent == Path(config['outputRoot']).resolve() else output.parent.name
+
+
+# What this engine writes in the folder of the outputs while a creation is made, and nothing else:
+# the name of a creation (the one the application gives, a date and a time first, or 32 hexadecimal
+# digits without one: see output_place), then the ending of one of its temporary files (save_image
+# and save_audio here, runner.video.stream.output_paths and VideoWriter, runner.video.export).
+TEMPORARY = re.compile(
+    r'(?:[0-9a-f]{32}|\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d_[a-z0-9]+(?:[_-][a-z0-9]+)*)'
+    r'(?:\.tmp\.mp4|\.tmp\.wav|\.tmp\.mux\.mp4|\.mux\.mp4|\.png\.tmp|\.wav\.tmp)'
+)
+# A temporary file older than this belongs to no creation in progress: one being written changes
+# all the time, and the longest step that leaves it alone (the sound added to a video) takes minutes.
+STALE_SECONDS = 3600
+
+
+def sweep(config, older_than=STALE_SECONDS):
+    """Removes the temporary files a stopped engine left in the folder of the outputs, and returns
+    their names. A creation that fails removes its own; a worker that is killed cannot.
+
+    Only regular files of the folder of the outputs itself (never those of its folders `image`,
+    `video` and `son`), named like a temporary file of this engine, and old. One that cannot be
+    read or removed is left for the next time: nothing here stops a creation."""
+    removed = []
+    now = time.time()
+    try:
+        entries = list(os.scandir(config['outputRoot']))
+    except (OSError, KeyError, TypeError, ValueError):
+        # No folder of the outputs yet, or none named: nothing to sweep.
+        return removed
+    for entry in entries:
+        try:
+            if not TEMPORARY.fullmatch(entry.name) or not entry.is_file(follow_symlinks=False):
+                continue
+            # Asked of the file itself: what Windows keeps in the folder is only brought up to date
+            # when a file is closed.
+            if now - os.lstat(entry.path).st_mtime < older_than:
+                continue
+            os.unlink(entry.path)
+            removed.append(entry.name)
+        except OSError:
+            continue
+    return removed
 
 
 def save_image(pixels, config, job, metadata):

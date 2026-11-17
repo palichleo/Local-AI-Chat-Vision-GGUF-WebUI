@@ -406,3 +406,21 @@ test('the application lists, serves, thumbnails and removes a take of either for
   for (const path of [join(output, OLD.filename), join(output, 'image', NEW.filename), join(data, 'secret.png')])
     assert.deepEqual(await readFile(path), png, path);
 });
+
+test('a creation stopped with its engine leaves nothing half-written: only the files of its own name go', async t => {
+  const { leftTemporaries } = await import('../lib/generation-service.mjs');
+  const root = await mkdtemp(join(tmpdir(), 'moodix-left-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const name = '2026-11-17_14-32-05_rife_a3f9',
+    other = '2026-11-17_14-40-11_ltx-2-5_07c2';
+  await mkdir(join(root, 'video'));
+  const kept = [`${other}.tmp.mp4`, 'mes vacances.tmp.mp4', `${name}.mp4`, join('video', `${name}.mp4`)],
+    gone = [`${name}.tmp.mp4`, `${name}.tmp.mux.mp4`, `${name}.mux.mp4`, `${name}.png.tmp`, `${name}.wav.tmp`, `${name}.tmp.wav`];
+  for (const file of [...kept, ...gone]) await writeFile(join(root, file), 'x');
+  await leftTemporaries(root, name);
+  const left = (await readdir(root, { recursive: true })).filter(item => item.includes('.')).map(item => item.replaceAll(sep, '/'));
+  assert.deepEqual(left.sort(), kept.map(item => item.replaceAll(sep, '/')).sort());
+  // A name that is not one of a creation removes nothing (no folder, no dot, nothing above).
+  for (const bad of ['../' + other, other + '.tmp', '', undefined, 'video/' + other]) await leftTemporaries(root, bad);
+  assert.equal((await readdir(root)).includes(`${other}.tmp.mp4`), true);
+});

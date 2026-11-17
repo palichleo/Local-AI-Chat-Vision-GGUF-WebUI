@@ -25,8 +25,20 @@ const NEXT = new RegExp(
     NOT_A_TAKE,
   'iuy',
 );
+// A word after a number, on its line: what makes of a number a count (« 2 personnages »).
+const WORD = /[^\S\r\n]+\p{L}/uy;
 // Code is not read: a block between fences (one still being written too), a word between backticks.
 const CODE = /```[\s\S]*?(?:```|$)|`[^`\n]*`/g;
+// Every set of cited takes of the page (one, in app.js): what deletes a take tells them all.
+const SETS = new Set();
+/**
+ * A take was deleted (the Sortie of the Studio): what was read of the projects is forgotten, and
+ * read again at the next reply that names a take. Without it, a later reply of the conversation
+ * left open still drew the take from what was read before.
+ */
+export function forgetCitedTakes() {
+  for (const forget of SETS) forget();
+}
 
 /** What a text names, in its order, each once: `{ kind: 'take' | 'ref', number }`. */
 export function citedIn(text) {
@@ -62,7 +74,15 @@ export function citedIn(text) {
       const next = NEXT.exec(source);
       if (!next) break;
       const number = Number(next[4]),
-        spaced = next[1].length + next[3].length;
+        spaced = next[1].length + next[3].length,
+        after = NEXT.lastIndex;
+      // After one take (« la prise 3 »), a comma then a bare number is another take only in what is
+      // plainly a list (« la prise 3, 4 et 7 », « prise 3, 4 »): followed by a word that joins no
+      // other number, it is a count (« la prise 3, 2 personnages »). (« la prise 3, la 4 » names it.)
+      if (!several && next[2] === ',' && /^\d/.test(next[0].slice(spaced + 1))) {
+        WORD.lastIndex = NEXT.lastIndex = after;
+        if (WORD.test(source) && !NEXT.test(source)) break;
+      }
       // A dash joins two takes written tight (« prises 3-5 »), or with a space on each side after
       // « prises » (« prises 3 – 5 »); else it sets what follows apart (« La prise 12 - 16:9, 6 s »).
       if (/^[-–]$/.test(next[2]) && spaced && !(several && next[1].length <= 1 && next[3].length <= 1)) break;
@@ -70,7 +90,7 @@ export function citedIn(text) {
         for (let between = last + 1; between <= number; between++) add('take', between);
       else add('take', number);
       last = number;
-      end = NEXT.lastIndex;
+      end = after;
     }
     at = end - 1;
   }
@@ -216,14 +236,13 @@ export function setupCitedTakes({ node, icon, load, project, references, viewOut
     const records = found.filter(item => item.kind === 'take').map(item => item.found.record);
     view.cited.replaceChildren(...found.map(item => tile(item, records)));
   }
-  return {
-    show,
-    /** Takes made or removed since: read again at the next reply that names one. */
-    forget() {
-      known = { project: null, takes: new Map() };
-      // A read in flight may be from before: its answer is not kept.
-      loading = null;
-      missed.clear();
-    },
-  };
+  /** Takes made or removed since: read again at the next reply that names one. */
+  function forget() {
+    known = { project: null, takes: new Map() };
+    // A read in flight may be from before: its answer is not kept.
+    loading = null;
+    missed.clear();
+  }
+  SETS.add(forget);
+  return { show, forget };
 }

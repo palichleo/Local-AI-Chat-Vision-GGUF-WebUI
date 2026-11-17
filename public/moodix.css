@@ -9927,6 +9927,19 @@ body {
     margin: 6px 12px 0;
   }
 }
+/* 400 px or less: the columns beside the three places (some 190 px, with 40 px of margins and
+   gaps) are narrower than the word (some 76 px at 20 px), which went over « Chat ». Its Éclipse
+   alone then, 18 px: the letters take no room, the link to the chat stays. */
+@media (max-width: 400px) {
+  .top-name {
+    font-size: 0;
+  }
+  .top-name .brand-eclipse {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+  }
+}
 
 /* ------------------------------------------------------------------ the welcome (phase 2) */
 /* L'accueil (capture 01) : au milieu de la page, le fil centré au-dessus du titre « Racontez-moi
@@ -13595,6 +13608,13 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   mask-image: linear-gradient(to bottom, transparent, #000);
   pointer-events: none;
 }
+/* Workflow editor: a prompt kept in the workflow and shown as it is, not a field to fill. */
+#workflow-editor textarea[readonly] {
+  color: var(--text-2);
+  background: rgba(238, 232, 222, 0.03);
+  cursor: default;
+  resize: none;
+}
 /* The last line above the actions keeps clear of their blur when nothing scrolls. */
 #original-dialog .media-information > .media-more {
   margin-bottom: 14px;
@@ -15826,6 +15846,46 @@ button.glass-select::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The bar of the chat stays on one line, whatever it says (17/11): « Joindre », the two buttons,
+   « Studio » in the Studio, then what Moodix is doing and « Envoyer ». What gives way, in this
+   order: the name of the model (whole in its tip), then the reflection, then the sentence at the
+   right, each cut short; « Joindre », « Envoyer », « Interrompre » and « Libérer le GPU » never.
+   --bar-left is what the left side keeps at the least: « Joindre » (34 px), the model down to
+   72 px and the reflection down to 96 px, 2 px between them (206 px); with « Studio », 2 px and
+   the 80 px kept for it more (288 px). The right side never takes that: its sentence is cut
+   instead. The reflection keeps its width as long as the model has more than its 72 px.
+   A window of 520 px or less: the buttons go to a second line, as before. */
+@media (min-width: 521px) {
+  #chat-form .composer-tools {
+    --bar-left: 206px;
+  }
+  #chat-form .composer-tools:has(#composer-context:not([hidden])) {
+    --bar-left: 288px;
+  }
+  #chat-form .composer-options {
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+  }
+  #chat-form :is(#attach, .composer-context),
+  #chat-form .send-tools > button {
+    flex: none;
+  }
+  #chat-form #effort-choice {
+    max-width: min(190px, calc(100% - var(--bar-left) + 96px));
+  }
+  #chat-form .send-tools {
+    max-width: calc(100% - 10px - var(--bar-left));
+  }
+  /* (3 px above and under: the line is as tall as its letters, their accents and tails are not cut.) */
+  #chat-form .compose-state {
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 3px 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
 @media (max-width: 520px) {
   #chat-form #model-choice {
     max-width: 110px;
@@ -15843,6 +15903,26 @@ button.glass-select::after {
 }
 .model-choice-menu {
   min-width: 260px;
+}
+/* A name longer than the menu is wide (a file of the user's without a name of its own, some fifty
+   characters) is cut short in it: never a bar to scroll the menu sideways. Under the pointer or
+   the keyboard its line shows it whole, on as many lines as it takes (no bubble: the one of the
+   page is drawn under a menu, which is in the top layer). */
+.model-choice-menu,
+.model-choice-menu .glass-menu-list {
+  overflow-x: hidden;
+}
+.model-choice-menu .glass-menu-item {
+  flex-shrink: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-choice-menu .glass-menu-item:is(:hover, :focus-visible) {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .glass-menu-title {
   margin: 8px 10px 4px;

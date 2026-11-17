@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { citedIn, MOST, setupCitedTakes } from '../public/cited-takes.mjs';
+import { citedIn, forgetCitedTakes, MOST, setupCitedTakes } from '../public/cited-takes.mjs';
 
 const takes = text => citedIn(text).map(item => (item.kind === 'take' ? item.number : '#ref' + item.number));
 
@@ -39,6 +39,23 @@ test('a number that is a length, a format, a size, a count or a day is not a tak
   assert.deepEqual(takes('Voici la prise 3\n- 2 personnages'), [3]);
   assert.deepEqual(takes('Voici la prise 3\r\n- 2 personnages'), [3]);
   assert.deepEqual(takes('les prises 3,\n4 personnages'), [3]);
+  // After one take, a comma then a number that a word follows is a count, not another take.
+  assert.deepEqual(takes('la prise 3, 2 personnages'), [3]);
+  assert.deepEqual(takes('La prise 3, 3 plans et un travelling.'), [3]);
+  assert.deepEqual(takes('take 3, 2 characters'), [3]);
+  assert.deepEqual(takes('la prise 3, 4, 2 personnages'), [3, 4]);
+  assert.deepEqual(takes('la prise 3, 4 et plus'), [3]);
+  // A list plainly one: another number joined after it, or nothing more on its line.
+  assert.deepEqual(takes('la prise 3, 4 et 7'), [3, 4, 7]);
+  assert.deepEqual(takes('prise 3, 4'), [3, 4]);
+  assert.deepEqual(takes('la prise 3, 4.'), [3, 4]);
+  assert.deepEqual(takes('(prise 3, 4) puis la suite'), [3, 4]);
+  assert.deepEqual(takes('la prise 3, 4, 7 ou 9'), [3, 4, 7, 9]);
+  assert.deepEqual(takes('la prise 3, 4\npersonnages'), [3, 4]);
+  // A take named after the comma is one, whatever follows; several takes are a list already.
+  assert.deepEqual(takes('la prise 3, la 4 est plus nette'), [3, 4]);
+  assert.deepEqual(takes('la prise 3, prise 4 ensuite'), [3, 4]);
+  assert.deepEqual(takes('les prises 3, 4 sont prêtes'), [3, 4]);
   // Still takes.
   assert.deepEqual(takes('la prise 12'), [12]);
   assert.deepEqual(takes('les prises 3 à 5'), [3, 4, 5]);
@@ -242,4 +259,14 @@ test('forgotten (a conversation opened again), a take deleted since is no longer
   await tick();
   assert.equal(loads, 2);
   assert.deepEqual(labels(after), ['PRISE 12']);
+  // A take deleted while the conversation stays open (the Sortie of the Studio says so to every set
+  // of the page): the next reply reads the project again.
+  runs = [];
+  forgetCitedTakes();
+  const later = { body: new Element('div') };
+  cited.show(later, 'La prise 12.');
+  assert.equal(labels(later), undefined);
+  await tick();
+  assert.equal(loads, 3);
+  assert.equal(labels(later), undefined);
 });

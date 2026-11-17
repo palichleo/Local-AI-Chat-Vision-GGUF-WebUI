@@ -140,6 +140,61 @@ class TransformTests(unittest.TestCase):
         for folder in ('image', 'video', 'son'):
             self.assertEqual(list((self.output / folder).glob('*')), [], folder)
 
+    def test_a_video_stopped_half_way_leaves_no_temporary_file(self):
+        import importlib
+        import shutil
+        from unittest import mock
+
+        def stopping(target, error, after=2):
+            """`target` as it is, until its call number `after` + 1 raises `error`."""
+            module, name = target.rsplit('.', 1)
+            real, calls = getattr(importlib.import_module(module), name), []
+
+            def stop(*args, **kwargs):
+                calls.append(1)
+                if len(calls) > after:
+                    raise error
+                return real(*args, **kwargs)
+
+            return mock.patch(target, side_effect=stop)
+
+        cases = (
+            ('rife', 'interpolator', self.interpolator, {'multiplier': 2}, 'runner.models.rife.between'),
+            ('realesrgan_video', 'upscaler', self.upscaler, {}, 'runner.models.rrdbnet.upscale'),
+        )
+        for family, component, weights, parameters, target in cases:
+            # By an error of the engine, then by a stop asked for while it works.
+            for index, error in enumerate((RuntimeError('stopped'), KeyboardInterrupt())):
+                source = Path(self.folder.name) / f'{family}-{index}.mp4'
+                shutil.copyfile(self.video, source)
+                name = f'2026-11-17_09-0{index}-00_{family.replace("_", "-")}_00a{index}'
+                with stopping(target, error), self.assertRaises(type(error)) as caught:
+                    self.run_job(family, 'video', component, weights, parameters, 'source_video', source, name)
+                # The error that stopped it, not a refusal to delete a file the encoder still held.
+                self.assertIs(caught.exception, error, family)
+                # Frames were written before it stopped, and nothing of them is left: neither in the
+                # folder of the outputs, where the temporary file was, nor in its folders.
+                left = [path.relative_to(self.output).as_posix() for path in self.output.rglob('*') if path.is_file()]
+                self.assertEqual(left, [], family)
+                # The source was closed too: it can be removed at once (Windows refuses an open file).
+                source.unlink()
+
+    def test_a_generation_sweeps_the_old_temporary_files_of_a_killed_worker(self):
+        import os
+        import time
+
+        self.output.mkdir()
+        stale = self.output / '2026-11-16_22-10-00_rife_0f3c.tmp.mp4'
+        recent = self.output / '2026-11-17_08-59-00_rife_1a2b.tmp.mp4'
+        for path in (stale, recent):
+            path.write_bytes(b'half a video')
+        old = time.time() - 2 * 3600
+        os.utime(stale, (old, old))
+        self.run_job('realesrgan_image', 'image', 'upscaler', self.upscaler, {'tile': 16}, 'source_image', self.image)
+        self.assertFalse(stale.exists())
+        # One written a moment ago may be the creation of another worker: left alone.
+        self.assertTrue(recent.exists())
+
     def test_image_upscale_doubles_and_respects_the_maximum_side(self):
         from PIL import Image
 
@@ -193,6 +248,61 @@ class TransformTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, 'Real-ESRGAN'):
             preflight(job, self.config)
+
+
+class SweepTests(unittest.TestCase):
+    """What a killed worker left in the folder of the outputs (runner.media.sweep)."""
+
+    def test_old_temporary_files_of_the_engine_go_and_nothing_else(self):
+        import os
+        import time
+
+        from runner.media import STALE_SECONDS, sweep
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder) / 'out'
+            named, random = '2026-11-16_22-10-00_rife_0f3c', '0123456789abcdef0123456789abcdef'
+            old = time.time() - STALE_SECONDS - 60
+
+            def put(path, at=old):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'half a file')
+                os.utime(path, (at, at))
+                return path
+
+            # Every temporary file the engine writes there, under a name of the application or a
+            # random one (a creation without a name).
+            endings = ('.tmp.mp4', '.tmp.wav', '.tmp.mux.mp4', '.mux.mp4', '.png.tmp', '.wav.tmp')
+            stale = [put(root / (name + ending)) for name in (named, random) for ending in endings]
+            kept = [
+                # Written less than an hour ago: maybe a creation in progress.
+                put(root / '2026-11-17_08-59-00_rife_1a2b.tmp.mp4', time.time() - STALE_SECONDS + 600),
+                # Files of the user, old as they are: not the names of the engine.
+                put(root / 'vacances.tmp.mp4'),
+                put(root / 'Mon film.tmp.mp4'),
+                put(root / 'notes.tmp'),
+                put(root / (named + '.tmp.mov')),
+                # Finished creations and their manifests, as before the folders of each kind.
+                put(root / (random + '.mp4')),
+                put(root / (random + '.png')),
+                put(root / (random + '.json')),
+                # Nothing of the three folders is looked at, whatever its name.
+                put(root / 'video' / (named + '.tmp.mp4')),
+                put(root / 'image' / (named + '.png.tmp')),
+                put(root / 'son' / (named + '.wav.tmp')),
+            ]
+            # A folder named like a temporary file is no file.
+            folder_named = root / '2026-11-15_10-00-00_rife_aaaa.tmp.mp4'
+            put(folder_named / 'inside.mp4')
+            os.utime(folder_named, (old, old))
+            removed = sweep(dict(outputRoot=str(root)))
+            self.assertEqual(sorted(removed), sorted(path.name for path in stale))
+            self.assertEqual([path for path in stale if path.exists()], [])
+            self.assertEqual([path for path in kept if not path.exists()], [])
+            self.assertTrue((folder_named / 'inside.mp4').exists())
+            # Nothing left to remove, and a folder of the outputs that does not exist yet is no error.
+            self.assertEqual(sweep(dict(outputRoot=str(root))), [])
+            self.assertEqual(sweep(dict(outputRoot=str(root / 'absent'))), [])
 
 
 if __name__ == '__main__':

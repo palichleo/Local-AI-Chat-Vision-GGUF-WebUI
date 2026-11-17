@@ -124,15 +124,35 @@ export function setupAssets({
   // Beside the take and its panel closes it, in the margins of its window too: the window keeps its
   // width (1180 px), a narrow take (9:16) leaves wide empty margins in it (17/11). Not the take, its
   // panel nor the arrows.
-  // Where ‹ and › stand, shown or not (moodix.css, « .media-step »: 40 px wide and high, 4 px from a
-  // side of the window, at the middle of its height; a few pixels more here). › clicked up to the
-  // last take is hidden under the pointer: the next click at the same place, on the window itself,
-  // closed the take.
-  const onArrow = event => {
+  // Where ‹ and › stand, shown or not, a few pixels more around. › clicked up to the last take is
+  // hidden under the pointer: the next click at the same place, on the window itself, closed the take.
+  // Read from the arrows themselves while they are shown (`stood`: how far each reaches from its
+  // side of the window, how far above and under the middle of its height), so that a change of
+  // moodix.css is followed; until one was measured, what « .media-step » says there: 40 px wide
+  // and high, 4 px from a side of the window, at the middle of its height.
+  const ARROWS = ['media-prev', 'media-next'],
+    AROUND = 4,
+    stood = {};
+  function noteArrows() {
     const box = $('original-dialog').getBoundingClientRect(),
+      middle = (box.top + box.bottom) / 2;
+    ARROWS.forEach((id, right) => {
+      const rect = $(id).hidden ? null : $(id).getBoundingClientRect?.();
+      // (Laid out only: an arrow of a window not shown yet has no size.)
+      if (rect?.width > 0 && rect.height > 0)
+        stood[id] = { reach: right ? box.right - rect.left : rect.right - box.left, above: middle - rect.top, below: rect.bottom - middle };
+    });
+    return { box, middle };
+  }
+  const onArrow = event => {
+    const { box, middle } = noteArrows(),
       x = event?.clientX,
       y = event?.clientY;
-    return x >= box.left && x <= box.right && Math.abs(y - (box.top + box.bottom) / 2) <= 24 && (x - box.left <= 48 || box.right - x <= 48);
+    if (!(x >= box.left && x <= box.right)) return false;
+    return ARROWS.some((id, right) => {
+      const { reach, above, below } = stood[id] ?? { reach: 44, above: 20, below: 20 };
+      return (right ? box.right - x : x - box.left) <= reach + AROUND && y >= middle - above - AROUND && y <= middle + below + AROUND;
+    });
   };
   dismissSettingsOnOutsideClick($('original-dialog'), undefined, {
     empty: (target, event) =>
@@ -281,6 +301,8 @@ export function setupAssets({
     $('media-take').hidden = !take || media === 'audio';
     // What has the focus, read before the arrows change: hidden, an arrow is no longer said to have it.
     const held = document.activeElement;
+    // Where the arrows stand, read before one is hidden (onArrow).
+    noteArrows();
     $('media-prev').hidden = !(at > 0);
     $('media-next').hidden = !(at >= 0 && at < list.length - 1);
     // The arrow that had the focus is gone (the first take, the last one): the take itself takes it.
@@ -323,7 +345,10 @@ export function setupAssets({
     if (media === 'video') row('Version', parameters.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale', { more: true });
     if (expanded) row('Prompt amélioré (utilisé pour l’image)', expanded, { more: true });
     if (parameters.expandPrompt !== undefined) row('Prompt enhance', expanded ? 'Activé' : 'Désactivé', { more: true });
-    row('Fichier', output.source.filename, { more: true });
+    // Its file as it lies in the output folder: in its sub-folder (image/, video/, son/) when it has
+    // one (a take of before them has none). Downloaded under its name alone.
+    const folder = String(output.source.subfolder ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    row('Fichier', folder ? `${folder}/${output.source.filename}` : output.source.filename, { more: true });
     row('Identifiant', record.id, { more: true });
     const other = Object.fromEntries(
       Object.entries(parameters).filter(

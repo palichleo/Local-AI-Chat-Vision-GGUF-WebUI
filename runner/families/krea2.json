@@ -96,7 +96,9 @@
       "type": "number",
       "min": 0,
       "max": 1,
-      "exclusiveMin": true
+      "exclusiveMin": true,
+      "onlyWith": { "role": "img2img", "otherwise": 1 },
+      "help": "Part de l’image refaite quand une image est donnée à modifier : 1 la remplace entièrement, plus bas il en reste davantage. Sans image, l’image part toujours de zéro."
     },
     "expandPrompt": {
       "type": "boolean"
@@ -200,7 +202,7 @@
       },
       "denoise": {
         "policy": "fixed",
-        "value": 1
+        "value": 0.75
       },
       "expandPrompt": {
         "policy": "fixed",

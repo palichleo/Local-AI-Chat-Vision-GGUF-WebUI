@@ -89,9 +89,18 @@ test('a setting the editor leaves open changes the job of every shipped workflow
       changed.parameters[name][key] = alternative;
       // « Prompt enhance » (its own section): switched on, with the instruction the family proposes.
       if (name === 'expandPrompt' && alternative) changed.promptExpansion ??= manifest.promptExpansionDefault;
+      // A setting the engine only reads with an input (the denoise of Krea 2 with an image to
+      // modify) is tried with that input: without it, it changes nothing, and its help says so.
+      const slot = spec.onlyWith && workflow.references.find(item => item.role === spec.onlyWith.role),
+        given = slot ? { references: [{ input: slot.id, resource_id: RESOURCE }] } : undefined;
+      if (spec.onlyWith) {
+        assert.ok(slot, `${where}: no input for it in this workflow`);
+        assert.equal(sent(await resolve(changed)), base, `${where}: read without its input`);
+        assert.match(spec.help, /Sans image/, where);
+      }
       const reason =
           inertSetting(manifest, workflow, name, 'value') || inertSetting(manifest, workflow, name, 'parameter'),
-        moved = sent(await resolve(changed)) !== base;
+        moved = sent(await resolve(changed, given)) !== (given ? sent(await resolve(workflow, given)) : base);
       assert.equal(moved, !reason, verdict(where, moved, reason));
       if (reason) greyed++;
       else open++;
@@ -148,6 +157,16 @@ test('what LTX 2.5 and MiniMax H3 did not use is greyed, and said why', async ()
 
 test('every parameter a family declares is read by its engine, unless the family says it is not', () => {
   const sources = {};
+  // What a pipeline hands on is read further down: the models and the video tools of the engine.
+  const beside = ['models', 'video']
+    .flatMap(name => {
+      const folder = new URL(`../runner/${name}/`, import.meta.url);
+      return readdirSync(folder)
+        .filter(file => file.endsWith('.py'))
+        .map(file => readFileSync(new URL(file, folder), 'utf8'));
+    })
+    .join('\n');
+  assert.ok(beside.length > 10000, 'runner/models and runner/video are read');
   for (const manifest of Object.values(families())) {
     // MOSS Image is made by ComfyUI: its graph is built in lib/comfy-graphs.mjs.
     const path =
@@ -156,12 +175,18 @@ test('every parameter a family declares is read by its engine, unless the family
         : new URL(`../runner/pipelines/${manifest.module ?? manifest.family}.py`, import.meta.url);
     const source = (sources[path] ??= readFileSync(path, 'utf8'));
     for (const [name, spec] of Object.entries(manifest.parameters)) {
-      const read = new RegExp(`['"]${name}['"]|\\bp\\.${name}\\b`).test(source);
+      const named = new RegExp(`['"]${name}['"]|\\bp\\.${name}\\b`),
+        read = named.test(source);
       if (spec.unused) {
+        // In its own pipeline only: the models are shared, and another family may read that name there.
         assert.equal(read, false, `${manifest.family}.${name} is read: it is not « unused »`);
         assert.equal(inertSetting(manifest, { parameters: {} }, name, 'parameter'), spec.unused);
       } else if (spec.choices?.length !== 1)
-        assert.equal(read, true, `${manifest.family}.${name} is offered in the editor and read by no engine`);
+        assert.equal(
+          read || (manifest.engine !== 'external' && named.test(beside)),
+          true,
+          `${manifest.family}.${name} is offered in the editor and read by no engine`,
+        );
     }
   }
   // `attention` served ComfyUI: the engine of Moodix runs LTX 2.5 and Krea 2 without reading it.
@@ -269,15 +294,19 @@ test('the LoRA of the subject images of LTX ignores its default and its descript
 test('at a denoise of 1 the image to modify of Krea 2 is ignored: the editor says so', () => {
   const krea = shipped.find(({ workflow }) => workflow.pipeline === 'krea2').workflow,
     manifest = family('krea2');
-  // runner/pipelines/krea2.py: latents = noise * sigmas[0] + source * (1 - sigmas[0]); at a denoise
-  // of 1, the first sigma of simple_sigmas (sampling.py) is the last point of its grid, 1.0.
-  const source = readFileSync(new URL('../runner/pipelines/krea2.py', import.meta.url), 'utf8');
-  assert.match(source, /latents = noise \* sigmas\[0\] \+ source \* \(1 - sigmas\[0\]\)/);
-  assert.equal(krea.parameters.denoise.value, 1);
+  // runner/pipelines/sampling.py (start_latents, which krea2.py calls): noise * sigma + source *
+  // (1 - sigma); at a denoise of 1, the first sigma of simple_sigmas is the last point of its
+  // grid, 1.0.
+  const sampling = readFileSync(new URL('../runner/pipelines/sampling.py', import.meta.url), 'utf8'),
+    source = readFileSync(new URL('../runner/pipelines/krea2.py', import.meta.url), 'utf8');
+  assert.match(sampling, /return noise \* sigma \+ source \* \(1 - sigma\)/);
+  assert.match(source, /latents = start_latents\(noise, source, sigmas\[0\]\)/);
+  // The shipped workflow keeps a part of the image: nothing to warn of. One of the user's at 1 is.
+  assert.deepEqual(krea.parameters.denoise, { policy: 'fixed', value: 0.75 });
   assert.ok(krea.references.some(slot => slot.role === 'img2img'));
-  assert.match(settingWarning(manifest, krea, 'denoise'), /image à modifier est ignorée/);
-  const lower = structuredClone(krea);
-  lower.parameters.denoise.value = 0.7;
-  assert.equal(settingWarning(manifest, lower, 'denoise'), '');
-  assert.equal(settingWarning(manifest, { ...krea, references: [] }, 'denoise'), '', 'no image, nothing to warn of');
+  assert.equal(settingWarning(manifest, krea, 'denoise'), '');
+  const whole = structuredClone(krea);
+  whole.parameters.denoise.value = 1;
+  assert.match(settingWarning(manifest, whole, 'denoise'), /image à modifier est ignorée/);
+  assert.equal(settingWarning(manifest, { ...whole, references: [] }, 'denoise'), '', 'no image, nothing to warn of');
 });

@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createApplication } from '../server.mjs';
+import { setupCitedTakes } from '../public/cited-takes.mjs';
 
 /** The project each file dropped in the Studio was kept in (« #ref3 » of that project). */
 const importedInto = [];
@@ -1447,11 +1448,32 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     ask.find('studio-confirm-no')[0].onclick();
     assert.deepEqual(body.find('studio-item-confirm'), []);
     assert.equal(asked.filter(([route]) => route === 'studio/delete').length, 0);
+    // A reply of the chat named a take meanwhile (cited-takes.mjs): the project was read for it, once.
+    let reads = 0;
+    const cited = setupCitedTakes({
+        node: () => assert.fail('nothing to draw'),
+        icon: () => null,
+        load: async () => (reads++, []),
+        project: () => 'p1',
+        references: () => [],
+        viewOutput() {},
+      }),
+      reply = { body: {} };
+    cited.show(reply, 'la prise 99');
+    await settle();
+    cited.show(reply, 'la prise 99.');
+    await settle();
+    assert.equal(reads, 1);
     // The bin, then the light one: it goes.
     items()[0].find('studio-item-del')[0].onclick();
     body.find('studio-confirm-yes')[0].onclick();
     await settle();
     assert.equal(asked.find(([route]) => route === 'studio/delete')[1].id, 'c2');
+    // What the replies read of the project is forgotten with it: the next one that names a take
+    // reads the project again, and no longer draws the take deleted.
+    cited.show(reply, 'la prise 99.');
+    await settle();
+    assert.equal(reads, 2);
 
     // « Animer »: the picture goes to the references of the first video model, once.
     mode(0);
@@ -3188,7 +3210,12 @@ test('a conversation opened sets the Studio as its last take was made: model, pr
     await settle();
     assert.equal(page.prompt().value, 'une plage en hiver');
     assert.deepEqual(slots(), ['/first.jpg', '/preview/kept', null]);
-    assert.equal(body.find('studio-error')[0].textContent, 'Une image utilisée pour la dernière prise n’existe plus : sa case est restée vide.');
+    // Its LoRA whose file left the folder is not put back either, and named: what the Studio shows
+    // is not all that made the take.
+    assert.equal(
+      body.find('studio-error')[0].textContent,
+      'Une image utilisée pour la dernière prise n’existe plus : sa case est restée vide. Un LoRA de la dernière prise n’est plus dans le dossier loras : gone.',
+    );
     args = await sent();
     assert.deepEqual([args.width, args.height, args.steps, args.seed], [1344, 768, 12, 4242], 'the seed the user had named');
     assert.deepEqual(args.source, { output: 'first' });
@@ -3204,6 +3231,24 @@ test('a conversation opened sets the Studio as its last take was made: model, pr
     args = await sent();
     assert.deepEqual([args.width, args.height, args.steps, args.seed], [768, 1344, 20, undefined]);
     assert.equal(args.loras?.detail?.enabled ?? false, false);
+    // « Afficher dans le Studio » on a take made with LoRAs that left the folder: each named by its
+    // file, without its folder nor « .safetensors »; the one still there is put back.
+    const styled = styles => made('styled', 'c1', 'un phare', { styles });
+    studio.show(
+      styled([
+        { name: 'styles\\70sSCiFiKrea2Raw.safetensors', strength: 0.8 },
+        { name: 'a.safetensors', strength: 0.6 },
+        { name: 'old/gone.safetensors', strength: 1 },
+      ]),
+    );
+    assert.equal(body.find('studio-error')[0].textContent, '2 LoRA de cette prise ne sont plus dans le dossier loras : 70sSCiFiKrea2Raw, gone.');
+    await sent();
+    assert.deepEqual(asked.findLast(([route]) => route === 'tools/action')[1].styles, [{ name: 'a.safetensors', strength: 0.6 }]);
+    studio.show(styled([{ name: 'styles\\70sSCiFiKrea2Raw.safetensors', strength: 0.8 }]));
+    assert.equal(body.find('studio-error')[0].textContent, 'Un LoRA de cette prise n’est plus dans le dossier loras : 70sSCiFiKrea2Raw.');
+    // All of them still there: nothing to say.
+    studio.show(styled([{ name: 'a.safetensors', strength: 1 }]));
+    assert.deepEqual(body.find('studio-error'), []);
   } finally {
     restore();
   }
@@ -4059,7 +4104,12 @@ test('the images of a proposal change role as the server offers, said by its own
       body.find('studio-slot')[to].ondrop(event([]));
     },
     shown = () => body.find('studio-slot').map(tile => tile.children[0].children[0]?.src ?? null),
-    error = () => body.find('studio-error')[0]?.textContent ?? null;
+    error = () => body.find('studio-error')[0]?.textContent ?? null,
+    // The pointer has set the whole proposal (several short waits, which a busy machine stretches:
+    // « Générer » pressed before its end sent the size the Studio had as a change of the user).
+    rested = async () => {
+      for (let turn = 0; turn < 8; turn++) await settle();
+    };
   try {
     // The fixture lists the roles as the server does (lib/tool-runtime.mjs, referenceRoles): by the
     // names of the slots of the family, « msr_image » for a reference of LTX 2.5.
@@ -4068,7 +4118,7 @@ test('the images of a proposal change role as the server offers, said by its own
       ['start_image', 'end_image', 'msr_image'],
     );
     let answer = studio.propose(structuredClone(recorded.request), new AbortController().signal);
-    await settle();
+    await rested();
     assert.deepEqual(shown(), ['/portrait.webp', null, null]);
     // To « Référence »: a role the server offers, under its own name.
     drag(0, 2);
@@ -4088,7 +4138,7 @@ test('the images of a proposal change role as the server offers, said by its own
     assert.deepEqual(shown(), [null, '/portrait.webp', null]);
     // Declined instead: the same.
     answer = studio.propose(structuredClone(recorded.request), new AbortController().signal);
-    await settle();
+    await rested();
     assert.deepEqual(shown(), ['/portrait.webp', null, null]);
     studio.decline();
     assert.equal(await answer, 'deny');
@@ -4099,7 +4149,7 @@ test('the images of a proposal change role as the server offers, said by its own
     const narrow = structuredClone(recorded.request);
     narrow.plan.editable.references = [[{ role: 'start_image', label: 'Image de début' }]];
     answer = studio.propose(narrow, new AbortController().signal);
-    await settle();
+    await rested();
     drag(0, 1);
     assert.equal(error(), 'Image de fin : ce rôle n’est pas possible pour cette image avec ce workflow.');
     assert.deepEqual(shown(), ['/portrait.webp', null, null]);

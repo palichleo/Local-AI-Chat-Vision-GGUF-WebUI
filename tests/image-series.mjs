@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
 import { ToolRuntime, collectToolCalls } from '../lib/tool-runtime.mjs';
-import { nativeFields } from '../lib/native-messages.mjs';
+import { MAX_CALL_ARGUMENTS, nativeFields } from '../lib/native-messages.mjs';
 import { resolveNativeWorkflow, validateNativeWorkflow } from '../lib/native-workflows.mjs';
 import { CAPABLE, CAPABLE_SYSTEM, capableResult } from '../lib/model-wording.mjs';
 
@@ -126,6 +126,49 @@ test('a call of twenty prompts fits in the stream and in the history', () => {
   assert.doesNotThrow(() => nativeFields({ role: 'assistant', tool_calls: calls }));
 });
 
+test('the largest call the tool allows is not cut in its stream, nor refused when the conversation is read again', async () => {
+  // What the schema of create_image allows (lib/tasks.json): a prompt of 8 000 characters and
+  // nineteen others of 3 000, 65 000 in all: more than the 64 000 a call could hold.
+  const definition = (await new ToolCatalog({ list: async () => shipped() }).definitions()).find(
+    tool => tool.function.name === 'create_image',
+  ).function.parameters.properties;
+  const series = definition.series;
+  assert.deepEqual([definition.prompt.maxLength, series.maxItems, series.items.maxLength], [8000, 19, 3000]);
+  const text = length => 'A lighthouse, "seen" from the sea.\n'.repeat(Math.ceil(length / 35)).slice(0, length);
+  const largest = {
+    prompt: text(definition.prompt.maxLength),
+    series: Array(series.maxItems).fill(text(series.items.maxLength)),
+    source: { resource: uid(7) },
+    format: '16:9',
+  };
+  const args = JSON.stringify(largest);
+  assert.ok(args.length > 65000, 'with its quotes and line ends written as JSON does');
+  assert.ok(args.length <= MAX_CALL_ARGUMENTS);
+  // Streamed in pieces, as a model writes it.
+  const calls = [];
+  for (let at = 0; at < args.length; at += 4000)
+    collectToolCalls(calls, {
+      tool_calls: [{ index: 0, ...(at ? {} : { id: 'call_1' }), function: { ...(at ? {} : { name: 'create_image' }), arguments: args.slice(at, at + 4000) } }],
+    });
+  assert.equal(calls[0].function.arguments, args);
+  assert.doesNotThrow(() => nativeFields({ role: 'assistant', tool_calls: calls }));
+  // Proposed as any series (its prompts are within what a prompt may be).
+  const { runtime } = world();
+  const { source, format, ...asked } = largest;
+  const first = await runtime.request([call('create_image', asked)], { conversationId: A, turnId: turn, messages: [] });
+  assert.deepEqual([first.series.index, first.series.total], [1, 20]);
+  // Beyond the limit, a call is still stopped: in its stream, and when the conversation is read.
+  const beyond = JSON.stringify({ prompt: 'x'.repeat(MAX_CALL_ARGUMENTS) });
+  assert.throws(
+    () => collectToolCalls([], { tool_calls: [{ index: 0, id: 'c', function: { name: 'create_image', arguments: beyond } }] }),
+    /trop longs/,
+  );
+  assert.throws(
+    () => nativeFields({ role: 'assistant', tool_calls: [{ id: 'c', type: 'function', function: { name: 'create_image', arguments: beyond } }] }),
+    /invalide/,
+  );
+});
+
 // ——— La page : les images après la première, une par une ———
 
 const made = (take, prompt, seed) => ({
@@ -178,9 +221,14 @@ function page(outcomes) {
 const request = { call: { id: 'call-1' }, series: { id: 's1', index: 1, total: 3 } };
 
 test('the images of a series one after another, then one result for the call: every take, said once', async () => {
-  const { runSeries, seriesContent } = await import('../public/image-series.mjs');
+  const { runSeries, seriesContent, SERIES_MADE } = await import('../public/image-series.mjs');
   const { asked, cards, options } = page([() => made(13, 'A whale.', 2), () => made(14, 'An owl.', 3)]);
+  // What the page is given to keep in the conversation after each image but the last, with the
+  // cards on screen at that time.
+  const keeps = [];
+  options.keep = async content => keeps.push([cards.length, JSON.parse(content)]);
   const result = await runSeries(request, made(12, 'A fox.', 1), options);
+  // (Made to its last image: the server has let the series go by itself, nothing more is said.)
   assert.deepEqual(asked, [
     ['tools/series', { series: 's1' }],
     ['tools/series', { series: 's1' }],
@@ -192,13 +240,32 @@ test('the images of a series one after another, then one result for the call: ev
   const told = JSON.parse(result.content);
   assert.deepEqual([told.status, told.made, told.asked, told.takes], ['success', 3, 3, [12, 13, 14]]);
   assert.deepEqual(
-    told.images.map(image => [image.takes[0], image.prompt, image.seed]),
+    told.images.map(image => [image.takes[0], image.seed, image.status]),
     [
-      [12, 'A fox.', 1],
-      [13, 'A whale.', 2],
-      [14, 'An owl.', 3],
+      [12, 1, 'success'],
+      [13, 2, 'success'],
+      [14, 3, 'success'],
     ],
   );
+  // The prompts are in the call already, in this order: not written a second time in its result.
+  assert.equal(JSON.stringify(told).includes('A whale.'), false);
+  assert.equal(told.images.some(image => 'prompt' in image) || 'prompt' in told, false);
+  // The images are not handed to the model by themselves: it is told so, and how to look at one.
+  assert.equal(told.note, SERIES_MADE);
+  assert.match(SERIES_MADE, /Tu ne les as pas vues/);
+  assert.match(SERIES_MADE, /une image à la fois avec local_read_output/);
+  // After the first image and after the second, before the next is asked for: what is made so far,
+  // as a series left unfinished would be read (the application closed between two images).
+  assert.deepEqual(
+    keeps.map(([shown, kept]) => [shown, kept.status, kept.made, kept.asked, kept.takes, kept.images.map(image => image.run_id)]),
+    [
+      [0, 'partial', 1, 3, [12], ['run-12']],
+      [1, 'partial', 2, 3, [12, 13], ['run-12', 'run-13']],
+    ],
+  );
+  assert.match(keeps[1][1].message, /^Série interrompue avant sa fin : 2 images sur 3 ont été faites\.$/);
+  assert.match(keeps[0][1].message, /1 image sur 3 a été faite/);
+  assert.match(keeps[1][1].note, /Ne refais jamais celles qui existent/);
   assert.equal(told.workflow, 'Z-Image');
   assert.equal('seed' in told.parameters, false, 'the seed is each image’s own');
   // Each image keeps its identifier: the conversation reopened shows them all again by it (left
@@ -225,7 +292,12 @@ test('a series stops at an image refused or failed; stopped by the user, the cal
   let { asked, options } = page([() => failed, () => made(14, 'An owl.', 3)]);
   let result = await runSeries(request, made(12, 'A fox.', 1), options);
   let told = JSON.parse(result.content);
-  assert.equal(asked.length, 1, 'nothing asked after the failure');
+  // No other image is asked for after the failure; the server is told the series is over (it lets
+  // its prompts go and brings the chat model back), and the page waits for its answer.
+  assert.deepEqual(asked, [
+    ['tools/series', { series: 's1' }],
+    ['tools/series', { series: 's1', end: true }],
+  ]);
   assert.deepEqual([told.status, told.made, told.takes], ['partial', 1, [12]]);
   assert.match(told.message, /image 2 a échoué/);
   // Not the note of a single failed image (« rien n’a été produit », then « refais le même appel »):
@@ -238,6 +310,20 @@ test('a series stops at an image refused or failed; stopped by the user, the cal
   ({ asked, options } = page([() => ({ content: '{"status":"denied"}', images: [], denied: true })]));
   told = JSON.parse((await runSeries(request, made(12, 'A fox.', 1), options)).content);
   assert.match(told.message, /image 2 a été refusée/);
+  assert.deepEqual(asked.at(-1), ['tools/series', { series: 's1', end: true }]);
+
+  // An image made, then an error (its copy for the model, the hand-back of the card): it is one of
+  // the images made and shown, as the count says. It was said to have « failed », while counted.
+  const flawed = { ...made(13, 'A whale.', 2), failed: true, error: 'Copie pour l’analyse indisponible.' };
+  flawed.content = JSON.stringify({ ...JSON.parse(flawed.content), status: 'generated', warning: flawed.error });
+  ({ asked, options } = page([() => flawed, () => made(14, 'An owl.', 3)]));
+  result = await runSeries(request, made(12, 'A fox.', 1), options);
+  told = JSON.parse(result.content);
+  assert.deepEqual([told.status, told.made, told.takes], ['partial', 2, [12, 13]]);
+  assert.equal(told.message, 'L’image 2 est faite, mais une erreur a suivi (Copie pour l’analyse indisponible) : la série s’arrête là.');
+  assert.deepEqual([result.record.id, result.images.length, result.stopped, result.failed], ['run-13', 2, true, false]);
+  assert.match(told.note, /^Série incomplète : 2 images sur 3 sont faites et montrées/);
+  assert.equal(asked.filter(([, body]) => !body.end).length, 1, 'the third image is not asked for');
 
   const stop = new AbortController();
   const stopped = page([
@@ -255,4 +341,14 @@ test('a series stops at an image refused or failed; stopped by the user, the cal
   told = JSON.parse(error.series);
   assert.deepEqual([told.status, told.made, told.takes], ['partial', 2, [12, 13]]);
   assert.match(told.message, /arrêtée par l’utilisateur : 2 images sur 3/);
+  // Asked for the rest later, the model makes the images that are missing, not those that exist.
+  assert.match(told.note, /^Série incomplète : 2 images sur 3 .*Ne refais jamais celles qui existent/);
+  // The server is told there too, without the turn waiting for it; a page that cannot keep the
+  // conversation does not stop the series (it says so itself).
+  assert.deepEqual(stopped.asked.at(-1), ['tools/series', { series: 's1', end: true }]);
+  const unsaved = page([() => made(13, 'A whale.', 2), () => made(14, 'An owl.', 3)]);
+  unsaved.options.keep = async () => {
+    throw Error('disque plein');
+  };
+  assert.equal(JSON.parse((await runSeries(request, made(12, 'A fox.', 1), unsaved.options)).content).made, 3);
 });

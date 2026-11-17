@@ -1102,6 +1102,59 @@ test('every image of a series asked in the Chat has the LoRAs saved for its mode
   assert.deepEqual(second.notes, ['LoRA enregistré pour Krea 2 : detail · 1.']);
 });
 
+test('a LoRA saved for a model whose file is gone is left out, and the proposal says which', async () => {
+  const list = shipped(),
+    krea = of(list, 'krea2'),
+    detail = { name: 'detail.safetensors', strength: 1 },
+    gone = { name: 'styles\\70sSCiFiKrea2Raw.safetensors', strength: 0.8 },
+    other = { name: 'old/Grain_v2.SAFETENSORS', strength: 0.5 };
+  let found = { kept: [detail], missing: [gone] };
+  const { runtime, saved } = world({ workflows: list, savedStyles: async () => found });
+  let turns = 3;
+  const ask = (options = {}) =>
+    runtime.request([call('create_image', { prompt: 'A lighthouse at night.', workflow: krea.id }, 'call-' + turns)], {
+      conversationId: A,
+      turnId: uid(turns++),
+      messages: [],
+      saved: true,
+      ...options,
+    });
+  // One kept, one gone: made with the first, the second named beside it, by its file alone.
+  const mixed = await ask();
+  assert.deepEqual(mixed.styles, [detail]);
+  assert.deepEqual(mixed.notes, [
+    'LoRA enregistré pour Krea 2 : detail · 1.',
+    'LoRA enregistré introuvable dans le dossier loras : 70sSCiFiKrea2Raw.',
+  ]);
+  await runtime.execute({ requestId: mixed.requestId, permission: 'once', approvalToken: mixed.approvalToken });
+  await runtime.finished;
+  assert.deepEqual(saved.at(-1).parameters.styles, [detail], 'the take is made with those found only');
+  // Every one gone: made without any, said in the plural.
+  found = { kept: [], missing: [gone, other] };
+  const none = await ask();
+  assert.equal(none.styles, undefined);
+  assert.deepEqual(none.notes, ['LoRA enregistrés introuvables dans le dossier loras : 70sSCiFiKrea2Raw, Grain_v2.']);
+  // The note stays through a change of the proposal; styles chosen on it are the user's: no note.
+  assert.deepEqual((await revise(runtime, none, { prompt: 'A lighthouse at dawn.' })).notes, none.notes);
+  assert.equal((await revise(runtime, await ask(), { styles: [detail] })).notes, undefined);
+  // Nothing gone, in either form the application may answer: nothing more is said.
+  found = { kept: [detail], missing: [] };
+  assert.deepEqual((await ask()).notes, ['LoRA enregistré pour Krea 2 : detail · 1.']);
+  found = [detail];
+  assert.deepEqual((await ask()).notes, ['LoRA enregistré pour Krea 2 : detail · 1.']);
+  // From the Studio (no `saved`), the saved ones are not read: nothing is said of them.
+  found = { kept: [], missing: [gone] };
+  assert.equal((await ask({ saved: false })).notes, undefined);
+  // Each image of a series says it, as it says those it is made with.
+  const first = await runtime.request(
+    [call('create_image', { prompt: 'A fox.', series: ['A whale.'], workflow: krea.id })],
+    { conversationId: A, turnId: uid(turns++), messages: [], saved: true },
+  );
+  const second = await runtime.next({ series: first.series.id });
+  const said = ['LoRA enregistré introuvable dans le dossier loras : 70sSCiFiKrea2Raw.'];
+  assert.deepEqual([first.notes, second.notes], [said, said]);
+});
+
 test('a draft promoted to its final keeps the LoRAs of the user it was made with', async () => {
   const list = shipped(),
     ltx = of(list, 'ltx25'),

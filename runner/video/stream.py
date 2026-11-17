@@ -4,8 +4,24 @@ from fractions import Fraction
 import os
 from pathlib import Path
 import subprocess
+import time
 
 MAX_FRAMES = 36000
+
+
+def remove(path, attempts=20, pause=0.1):
+    """Deletes a temporary file and says whether it is gone. On Windows a file cannot be deleted
+    while a program holds it, and the encoder that wrote it may hold it a moment after it is
+    closed: tried again for two seconds. What still stays is swept later (runner.media.sweep)."""
+    path = Path(path)
+    for attempt in range(attempts):
+        try:
+            path.unlink(missing_ok=True)
+            return True
+        except OSError:
+            if attempt + 1 < attempts:
+                time.sleep(pause)
+    return False
 
 
 def probe(path):
@@ -87,6 +103,16 @@ class VideoWriter:
         self._writer.send(frame)
         self.count += 1
 
+    def abort(self):
+        """Stops the encoder and removes what it wrote: nothing stays of a video that failed or was
+        stopped half-way. The encoder is closed first: while it holds the file, Windows refuses to
+        delete it (and that refusal took the place of the error that stopped the video)."""
+        try:
+            self._writer.close()
+        except Exception:
+            pass
+        remove(self.path)
+
     def close(self, audio_from=None):
         self._writer.close()
         if audio_from:
@@ -116,7 +142,7 @@ class VideoWriter:
                 )
                 os.replace(muxed, self.path)
             finally:
-                muxed.unlink(missing_ok=True)
+                remove(muxed)
 
 
 def output_paths(config, extension, job=None):

@@ -245,5 +245,59 @@ class StreamedEncoderTests(unittest.TestCase):
         self.assertTrue(all(parameter.is_meta for parameter in model.parameters()))
 
 
+class DenoiseTests(unittest.TestCase):
+    """What the first step reads (runner.pipelines.sampling), on small tensors: no model here."""
+
+    def start(self, denoise, source, steps=8):
+        import torch
+
+        from runner.pipelines.sampling import applied_denoise, simple_sigmas, start_latents
+
+        noise = torch.randn((1, 16, 4, 4), generator=torch.Generator('cpu').manual_seed(3))
+        used = applied_denoise(denoise, source is not None)
+        sigmas = torch.tensor(simple_sigmas(steps, used, torch))
+        return used, sigmas, noise, start_latents(noise, source, sigmas[0])
+
+    def test_an_image_to_modify_is_kept_in_part_below_a_denoise_of_one(self):
+        import torch
+
+        source = torch.full((1, 16, 4, 4), 2.0)
+        used, sigmas, noise, latents = self.start(0.75, source)
+        self.assertEqual((used, len(sigmas)), (0.75, 9))
+        # The shipped workflow (8 steps, 0.75): the first sigma leaves a share of the image.
+        self.assertTrue(0.9 < float(sigmas[0]) < 0.95, float(sigmas[0]))
+        self.assertTrue(torch.allclose(latents, noise * sigmas[0] + source * (1 - sigmas[0])))
+        kept = (latents - noise * sigmas[0]) / source
+        self.assertTrue(torch.allclose(kept, torch.full_like(kept, 1 - float(sigmas[0])), atol=1e-6))
+        self.assertGreater(float(kept.mean()), 0.05)
+        # The lower the denoise, the more of the image is left.
+        self.assertLess(float(self.start(0.5, source)[1][0]), float(sigmas[0]))
+        # At 1, their own choice in a workflow, the image is entirely replaced.
+        used, sigmas, noise, latents = self.start(1, source)
+        self.assertEqual((used, float(sigmas[0])), (1, 1.0))
+        self.assertTrue(torch.equal(latents, noise))
+
+    def test_without_an_image_the_picture_starts_from_pure_noise_whatever_the_denoise(self):
+        import torch
+
+        for denoise in (1, 0.75, 0.3):
+            used, sigmas, noise, latents = self.start(denoise, None)
+            self.assertEqual((used, float(sigmas[0]), float(sigmas[-1])), (1, 1.0, 0.0), denoise)
+            self.assertTrue(torch.equal(latents, noise), denoise)
+        with self.assertRaisesRegex(ValueError, 'Denoise'):
+            self.start(0, None)
+        with self.assertRaisesRegex(ValueError, 'Denoise'):
+            self.start(1.5, torch.zeros((1, 16, 4, 4)))
+
+    def test_the_engine_of_krea_2_starts_from_these_functions(self):
+        import inspect
+
+        code = inspect.getsource(krea2._generate)
+        for call in ("applied_denoise(plan['denoise'], source is not None)", 'start_latents(noise, source, sigmas[0])'):
+            self.assertTrue(call in code, 'krea2._generate no longer calls ' + call)
+        # No image to modify is no image at all, not one of zeros to mix with the noise.
+        self.assertFalse('zeros_like(noise)' in code)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,5 +1,6 @@
 """Real-ESRGAN upscaling of an original image, or of a video frame by frame with its audio kept."""
 
+from contextlib import closing
 import time
 
 MAX_IMAGE_SIDE = 16384
@@ -94,12 +95,15 @@ def generate(job, config, progress):
     output, temporary, manifest = output_paths(config, '.mp4', job)
     writer = VideoWriter(temporary, width, height, info['fps'])
     try:
-        for index, pixels in enumerate(frames(source)):
-            writer.write(upscale(pixels))
-            progress(step=index + 1, total=max(info['frames'], index + 1))
+        # The source is closed as soon as the loop ends, however it ends.
+        with closing(frames(source)) as reader:
+            for index, pixels in enumerate(reader):
+                writer.write(upscale(pixels))
+                progress(step=index + 1, total=max(info['frames'], index + 1))
         writer.close(audio_from=source if info['audio'] else None)
     except BaseException:
-        temporary.unlink(missing_ok=True)
+        # Failed or stopped half-way: the encoder is closed, then its file removed (VideoWriter.abort).
+        writer.abort()
         raise
     metadata.update(
         seconds=round(time.perf_counter() - start, 2),

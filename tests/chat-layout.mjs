@@ -106,6 +106,68 @@ test('a new conversation suggests what the application makes: an image, a shot, 
   assert.match(app, /if \(text && !text\.startsWith\(asked\.trim\(\)\)\) \$\('prompt'\)\.value = asked \+ text;\n {4}setPromptLabel\(null\);\n {2}\},\n {2}true,\n\);/);
 });
 
+test('the bar of the chat stays on one line: the name of the model gives way first, then the reflection, then the sentence at the right', async () => {
+  const css = (await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8')).replace(/\r\n/g, '\n'),
+    from = css.indexOf('@media (min-width: 521px) {\n  #chat-form .composer-tools {'),
+    bar = css.slice(from, css.indexOf('\n}\n', from));
+  assert.ok(from > 0 && bar.length > 200);
+  // One line: the left side takes what the right side leaves, and nothing in it but the model
+  // shrinks by itself; « Joindre », « Studio » and the buttons at the right keep their width.
+  assert.match(bar, /#chat-form \.composer-options \{\n {4}flex: 0 1 auto;\n {4}flex-wrap: nowrap;\n {2}\}/);
+  assert.match(bar, /#chat-form :is\(#attach, \.composer-context\),\n {2}#chat-form \.send-tools > button \{\n {4}flex: none;\n {2}\}/);
+  assert.match(css, /#chat-form :is\(#model-choice, #effort-choice\) \{[^}]*flex: 0 1 auto;[^}]*min-width: 0;[^}]*max-width: 210px;/);
+  assert.match(css, /#chat-form #effort-choice \{\n {2}flex-shrink: 0;\n {2}max-width: 190px;/);
+  // The sentence at the right is cut short, in the room its side has.
+  assert.match(bar, /#chat-form \.compose-state \{\n {4}flex: 0 1 auto;\n {4}min-width: 0;\n {4}padding: 3px 0;\n {4}overflow: hidden;\n {4}text-overflow: ellipsis;\n {4}white-space: nowrap;\n {2}\}/);
+  // What the left side keeps at the least: « Joindre », the model down to 72 px, the reflection
+  // down to 96 px, 2 px between them; with « Studio », 2 px and the 80 px kept for it more.
+  const JOIN = 34,
+    GAP = 2,
+    MODEL = 72,
+    EFFORT = 96,
+    STUDIO = 80,
+    BETWEEN = 10,
+    left = Number(bar.match(/#chat-form \.composer-tools \{\n {4}--bar-left: (\d+)px;/)[1]),
+    withStudio = Number(bar.match(/#chat-form \.composer-tools:has\(#composer-context:not\(\[hidden\]\)\) \{\n {4}--bar-left: (\d+)px;/)[1]);
+  assert.equal(left, JOIN + GAP + MODEL + GAP + EFFORT);
+  assert.equal(withStudio, left + GAP + STUDIO);
+  assert.match(css, /#chat-form \.composer-tools \{[^}]*gap: 10px;/);
+  assert.match(css, /#chat-form \.composer-options \{[^}]*gap: 2px;/);
+  assert.match(bar, /#chat-form #effort-choice \{\n {4}max-width: min\(190px, calc\(100% - var\(--bar-left\) \+ 96px\)\);\n {2}\}/);
+  assert.match(bar, /#chat-form \.send-tools \{\n {4}max-width: calc\(100% - 10px - var\(--bar-left\)\);\n {2}\}/);
+  // The widths those rules give to a bar `width` px wide: the right side first (never more than
+  // the bar less what the left side keeps), the left side in the rest; in it the reflection as
+  // long as the model has its 72 px, the model in what is left.
+  const lay = ({ width, model, effort, studio = 0, sentence, buttons }) => {
+    const kept = studio ? withStudio : left,
+      natural = JOIN + GAP + model + GAP + effort + (studio ? GAP + studio : 0),
+      right = Math.min(sentence + buttons, width - BETWEEN - kept),
+      options = Math.min(natural, width - BETWEEN - right),
+      reflection = Math.min(effort, 190, options - kept + EFFORT),
+      name = Math.min(model, options - JOIN - GAP - GAP - reflection - (studio ? GAP + studio : 0));
+    return { model: name, effort: reflection, sentence: right - buttons, room: width - BETWEEN - right - (natural - model - effort + name + reflection) };
+  };
+  // The longest of each: a name at the 210 px of its button, « Réflexion très élevée » at its 190 px,
+  // « Proposition dans le Studio · un message la refuse » (49 characters of 7.2 px in mono 12 px:
+  // 353 px), then 13 px and « Envoyer » (38 px).
+  const longest = { model: 210, effort: 190, sentence: 353, buttons: 13 + 38 };
+  // The box of the chat, 760 px: 728 px inside its border (1 px) and its padding (15 px). The
+  // sentence whole, the reflection whole, the name of the model in 86 px (50 px of letters).
+  assert.deepEqual(lay({ width: 728, ...longest }), { model: 86, effort: 190, sentence: 353, room: 0 });
+  // « Réflexion moyenne » (some 155 px): the name has 121 px.
+  assert.deepEqual(lay({ width: 728, ...longest, effort: 155 }), { model: 121, effort: 155, sentence: 353, room: 0 });
+  // The panel of the Agent over the Studio, 700 px: the box 658 px, 626 px inside; « Studio » there
+  // (some 72 px). All three at their least: the sentence cut at 277 px, never a second line.
+  assert.deepEqual(lay({ width: 626, ...longest, studio: 72 }), { model: 80, effort: 96, sentence: 277, room: 0 });
+  // The same panel while a take is made (« Génération en cours… », 144 px): only the name gives way.
+  assert.deepEqual(lay({ width: 626, ...longest, studio: 72, sentence: 144 }), { model: 119, effort: 190, sentence: 144, room: 0 });
+  // Nothing said at the right (the box at rest): nothing is cut, room is left.
+  assert.deepEqual(lay({ width: 626, ...longest, studio: 72, sentence: 0 }), { model: 210, effort: 190, sentence: 0, room: 53 });
+  // A window of 520 px or less keeps its second line (the buttons narrower), as before.
+  assert.match(css, /\.composer-options \{\n {2}min-width: 0;\n {2}flex-wrap: wrap;\n {2}row-gap: 6px;\n\}/);
+  assert.match(css, /@media \(max-width: 520px\) \{\n {2}#chat-form #model-choice \{\n {4}max-width: 110px;/);
+});
+
 test('under a message, only the last exchange can be taken back: nothing copies a whole message', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const actions = source.slice(source.indexOf('function turnActions('), source.indexOf('async function takeBack('));

@@ -17,7 +17,7 @@ import { CAPABLE, CAPABLE_CARD, CAPABLE_STUDIO, capableMessages, takesContext, w
 import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
-import { THIN_NOTE, passedImages, thinPrompt } from './lib/thin-prompt.mjs';
+import { passedImages, thinNote } from './lib/thin-prompt.mjs';
 import { capableOutputTool, outputToolFor, readOutput } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
 import { generatedFile } from './lib/generated-media.mjs';
@@ -587,7 +587,9 @@ export async function createApplication({
   // launch to the next (0.5.128). A page left open through a restart takes the new key of the page
   // by itself (public/app.js) and goes on showing and playing what it shows.
   const mediaSecret = await keptSecret(join(dataDir, 'media-secret')),
-    resourceTurns = new Map();
+    resourceTurns = new Map(),
+    // How many times the chat model was asked to name each conversation (/api/history/title).
+    titleTries = new Map();
   const mediaKey = (id, part) =>
     createHmac('sha256', mediaSecret)
       .update(id + '/' + part)
@@ -630,12 +632,16 @@ export async function createApplication({
     extractStill: (path, at) => generation.videoStill(path, at),
     projectOf: conversationId => projectFor(conversationId),
     // The LoRAs kept for a model with « Enregistrer », those whose file is still listed (one gone
-    // would fail the creation): a creation asked in the Chat is made with them.
+    // would fail the creation): a creation asked in the Chat is made with them. Those gone are
+    // given apart (`missing`): the proposal says which it is made without.
     savedStyles: async id => {
       const kept = (await studioPresets.all())[id]?.styles ?? [];
       if (!kept.length) return [];
       const listed = new Set(await generation.styles());
-      return kept.filter(style => listed.has(style.name));
+      return {
+        kept: kept.filter(style => listed.has(style.name)),
+        missing: kept.filter(style => !listed.has(style.name)),
+      };
     },
     sourceMedia: async (ref, conversationId) => {
       if (ref.attachment) return { ...(await history.attachment(conversationId, ref.attachment)), name: 'Image jointe' };
@@ -1994,6 +2000,9 @@ export async function createApplication({
       }
       // The next image of a series the model asked in one call (create_image with `series`).
       if (path === '/api/tools/series') {
+        // The page says the series stopped before its last image (`end`): its prompts are let go,
+        // and the answer comes once the chat model its images left out is back (endSeries).
+        if (body?.end === true) return send(200, await runtime.endSeries(body));
         if (runtime.active) throw problem('Une génération est déjà en cours.', 409);
         return send(200, await runtime.next(body));
       }
@@ -2354,7 +2363,8 @@ export async function createApplication({
       }
       // The name of a conversation in four words at most, asked to the chat model once it has
       // answered (lib/conversation-title.mjs). `later`: the model is not free now (a reply, a
-      // creation, a model loading), the page asks again at the end of a next turn.
+      // creation, a model loading), there is nothing to name it from yet, or its first answer was
+      // no name: the page asks again at the end of a next turn. `named: false`: not to be asked again.
       if (path === '/api/history/title') {
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
         if (clearingHistory || disablingHistory || runtime.active || chat.state !== 'ready' || chat.busy)
@@ -2365,11 +2375,27 @@ export async function createApplication({
         // (some 11 000 tokens with the tools). Not measured yet: the name made of the first
         // message stays there until it is.
         if (!localTitles && wordingOf(chat.connection) !== CAPABLE) return send(200, { named: false });
-        const asked = titleRequest(body?.content, { vision: chat.vision });
-        if (!asked) return send(200, { named: false });
+        // Named after the first of its messages that gives something to name it from, among the
+        // first three (`contents`, as the page sends them; `content`: the first alone). A message
+        // without words (pictures alone for a model that sees none, a creation of the Studio made
+        // without a prompt) answered « nothing to name » for good, whatever was written next.
+        const given = Array.isArray(body?.contents) ? body.contents.slice(0, 3) : [body?.content];
+        let asked = null;
+        for (const content of given) if ((asked = titleRequest(content, { vision: chat.vision }))) break;
+        // Nothing yet: a next message may have words.
+        if (!asked) return send(200, { later: true });
+        // Asked twice already, for no name (an empty answer, a refusal, a failure of the service):
+        // the name made of its first message stays, and the model is not asked a third time.
+        const tries = titleTries.get(body?.id) || 0;
+        if (tries >= 2) return send(200, { named: false });
+        titleTries.delete(body?.id);
+        titleTries.set(body?.id, tries + 1);
+        if (titleTries.size > 256) titleTries.delete(titleTries.keys().next().value);
         let said = '';
         try {
-          // Its own request, beside the conversation's: no tool, no reflection, a few words.
+          // Its own request, beside the conversation's: no tool, no reflection, a few words. A
+          // remote service is told it is one (`brief`): a short answer at its lowest effort is all
+          // it may cost (lib/chat-model.mjs), where the conversation's requests have no limit.
           const upstream = await chat.request(
             {
               messages: asked,
@@ -2379,14 +2405,14 @@ export async function createApplication({
               reasoning_format: 'deepseek',
               chat_template_kwargs: { enable_thinking: false },
             },
-            { signal: AbortSignal.timeout(30000) },
+            { signal: AbortSignal.timeout(30000), brief: true },
           );
           if (upstream.ok) said = (await upstream.json()).choices?.[0]?.message?.content;
         } catch {
-          // Unanswered (a remote service, a model stopped for a creation): asked again later.
+          // Unanswered (a remote service, a model stopped for a creation): asked again later, once.
         }
         const title = shortTitle(said);
-        if (!title) return send(200, { later: true });
+        if (!title) return send(200, tries ? { named: false } : { later: true });
         // The application is closing (an update, « Quitter »): its history is already written.
         if (closing || relaunching) return send(200, { later: true });
         const renamed = historySaves.then(() => history.rename(body.id, title, { auto: true }));
@@ -2632,6 +2658,7 @@ export async function createApplication({
               chat.vision && body.resources !== false && /^[0-9a-f-]{36}$/.test(body.turnId || '')
                 ? unseenResources(body.messages, await resources.catalog(projectOf(body.project)), call)
                 : [];
+            const thin = fullPrompts ? thinNote(body.messages, call) : '';
             if (unseen.length && (resourceTurns.get(body.turnId) || 0) + unseen.length <= 8) {
               resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + unseen.length);
               if (resourceTurns.size > 256) resourceTurns.delete(resourceTurns.keys().next().value);
@@ -2648,8 +2675,9 @@ export async function createApplication({
                 },
               });
             }
-            // A prompt of two lines: sent back once, with the images it is about shown again.
-            else if (fullPrompts && thinPrompt(body.messages, call)) {
+            // A prompt of two lines: sent back once, with the images it is about shown again. For a
+            // series, each of its prompts: the answer names those to write again (thinNote).
+            else if (thin) {
               const images =
                 chat.vision && body.resources !== false
                   ? passedImages(await resources.catalog(projectOf(body.project)), call)
@@ -2657,6 +2685,7 @@ export async function createApplication({
               const room = /^[0-9a-f-]{36}$/.test(body.turnId || '') && (resourceTurns.get(body.turnId) || 0) + images.length <= 8;
               if (images.length && room) {
                 resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + images.length);
+                if (resourceTurns.size > 256) resourceTurns.delete(resourceTurns.keys().next().value);
                 await emit({
                   local_tool_request: {
                     kind: 'resource',
@@ -2664,10 +2693,10 @@ export async function createApplication({
                     resourceId: images[0].id,
                     resourceIds: images.map(item => item.id),
                     workflowName: images.map(item => item.label + ' · ' + item.name).join(', '),
-                    note: THIN_NOTE,
+                    note: thin,
                   },
                 });
-              } else await emit({ local_tool_request: { kind: 'retry', call, message: THIN_NOTE } });
+              } else await emit({ local_tool_request: { kind: 'retry', call, message: thin } });
             } else
               try {
                 if (takeError) throw takeError;

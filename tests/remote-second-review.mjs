@@ -527,6 +527,23 @@ test('6 · many models said so, the effort never hidden by a long name, no tip o
   const css = await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8');
   assert.match(css, /#chat-form #effort-choice\s*\{[^}]*flex-shrink:\s*0/);
   assert.match(css, /\.model-choice-text\s*\{[^}]*text-overflow:\s*ellipsis/);
+  // (Once the name is at its least, the reflection gives way too, then the sentence at the right:
+  // the bar never takes a second line; its arithmetic is in tests/chat-layout.mjs.)
+  assert.match(css, /#chat-form \.composer-options\s*\{\s*flex: 0 1 auto;\s*flex-wrap: nowrap;/);
+  // In the menu, a name longer than the menu is wide (a local file of some fifty characters) is
+  // cut short on its line, with no bar to scroll the menu sideways; under the pointer or the
+  // keyboard its line shows it whole, on as many lines as it takes.
+  assert.match(css, /\.glass-menu \{[^}]*max-width: min\(420px, calc\(100vw - 16px\)\);/);
+  assert.match(css, /\.glass-menu-item \{[^}]*white-space: nowrap;/);
+  assert.match(css, /\.model-choice-menu,\s*\.model-choice-menu \.glass-menu-list \{\s*overflow-x: hidden;\s*\}/);
+  assert.match(
+    css,
+    /\.model-choice-menu \.glass-menu-item \{\s*flex-shrink: 0;\s*max-width: 100%;\s*overflow: hidden;\s*text-overflow: ellipsis;\s*\}/,
+  );
+  assert.match(
+    css,
+    /\.model-choice-menu \.glass-menu-item:is\(:hover, :focus-visible\) \{\s*padding-top: 8px;\s*padding-bottom: 8px;\s*white-space: normal;\s*overflow-wrap: anywhere;\s*\}/,
+  );
   ui.button.onclick();
   await settled();
   assert.ok(
