@@ -75,6 +75,7 @@ test('grouped resource frames retain their separate labels and never enter saved
     historyWrite: Promise.resolve(),
     refreshStatus: async () => {},
     setConversationTitle() {},
+    nameConversation() {},
     waitForModel: async () => {},
     persistConversation: async () => {
       snapshots.push(JSON.stringify(state.archiveSnapshot));

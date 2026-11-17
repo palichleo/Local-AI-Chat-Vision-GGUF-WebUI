@@ -12,6 +12,7 @@ import {
 } from './lib/resources.mjs';
 import { citedImages, citedMessage, citedSaid, citedUnused, citedNumbers } from './lib/cited-resources.mjs';
 import { briefMissing, cardBrief, studioBrief } from './lib/video-brief.mjs';
+import { shortTitle, titleRequest } from './lib/conversation-title.mjs';
 import { CAPABLE, CAPABLE_CARD, CAPABLE_STUDIO, capableMessages, takesContext, wordingOf } from './lib/model-wording.mjs';
 import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
@@ -2345,6 +2346,40 @@ export async function createApplication({
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
         if (clearingHistory || disablingHistory) throw problem('Attendez la fin de l’opération en cours.', 409);
         const renamed = historySaves.then(() => history.rename(body?.id, body?.title));
+        historySaves = renamed.catch(() => {});
+        return send(200, { conversation: historyView(await renamed) });
+      }
+      // The name of a conversation in four words at most, asked to the chat model once it has
+      // answered (lib/conversation-title.mjs). `later`: the model is not free now (a reply, a
+      // creation, a model loading), the page asks again at the end of a next turn.
+      if (path === '/api/history/title') {
+        if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
+        if (clearingHistory || disablingHistory || runtime.active || chat.state !== 'ready' || chat.busy)
+          return send(200, { later: true });
+        if (await history.named(body?.id)) return send(200, { named: true });
+        const asked = titleRequest(body?.content, { vision: chat.vision });
+        if (!asked) return send(200, { named: false });
+        let said = '';
+        try {
+          // Its own request, beside the conversation's: no tool, no reflection, a few words.
+          const upstream = await chat.request(
+            {
+              messages: asked,
+              stream: false,
+              max_tokens: 40,
+              temperature: 0.2,
+              reasoning_format: 'deepseek',
+              chat_template_kwargs: { enable_thinking: false },
+            },
+            { signal: AbortSignal.timeout(30000) },
+          );
+          if (upstream.ok) said = (await upstream.json()).choices?.[0]?.message?.content;
+        } catch {
+          // Unanswered (a remote service, a model stopped for a creation): asked again later.
+        }
+        const title = shortTitle(said);
+        if (!title) return send(200, { later: true });
+        const renamed = historySaves.then(() => history.rename(body.id, title, { auto: true }));
         historySaves = renamed.catch(() => {});
         return send(200, { conversation: historyView(await renamed) });
       }
