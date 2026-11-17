@@ -892,3 +892,77 @@ test('a video made in another conversation of the project is continued from its 
   assert.ok(looked.length > 0);
   assert.ok(looked.every(([conversation]) => conversation === other));
 });
+
+test('a generation the card has no memory for fails in the user’s words, the chat model given back', async () => {
+  const workflow = {
+    schemaVersion: 1,
+    id: 'image',
+    name: 'Image',
+    description: '',
+    digest: 'a'.repeat(64),
+    mediaType: 'image',
+    pipeline: 'krea2',
+    enabled: true,
+    ready: true,
+    parameters: { prompt: { policy: 'model', type: 'string' } },
+    references: [],
+  };
+  const events = [];
+  const engine = {
+    busy: false,
+    state: 'ready',
+    stop: async () => (engine.state = 'stopped'),
+    start: async () => {
+      events.push('llm started');
+      engine.state = 'ready';
+    },
+  };
+  const said = 'CUDA driver error: device not ready\nThe CUDA driver logged these messages, which may provide useful details:\nFailed to create GPU mapping\n';
+  const runtime = new ToolRuntime({
+    engine,
+    catalog: {
+      list: async () => [workflow],
+      read: async () => workflow,
+      prepare: async () => ({
+        workflow,
+        job: {
+          schemaVersion: 1,
+          id,
+          pipeline: 'krea2',
+          mediaType: 'image',
+          workflowId: 'image',
+          workflowDigest: workflow.digest,
+          parameters: { prompt: 'boat', seed: 1, width: 2048, height: 2048 },
+          components: {},
+          loras: [],
+          references: [],
+        },
+        outputNodes: [],
+      }),
+    },
+    gallery: { put: async record => record },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'native' }),
+    engineConfig: () => ({}),
+    clientFactory: () => ({
+      status: async () => ({ idle: true }),
+      preflight: async () => {},
+      run: async () => {
+        throw new Error(said);
+      },
+      free: async () => events.push('gpu released'),
+    }),
+  });
+  const request = await runtime.request(
+    [{ id: 'call', type: 'function', function: { name: 'create_image', arguments: JSON.stringify({ prompt: 'boat' }) } }],
+    { conversationId: id, turnId: id, messages: [{ role: 'user', content: 'boat' }] },
+  );
+  await runtime.execute({ requestId: request.requestId, permission: 'once' });
+  await runtime.finished;
+  const job = runtime.status();
+  assert.equal(job.state, 'error');
+  assert.equal(
+    job.error,
+    'La carte graphique n’a pas assez de mémoire pour cette image (2048 × 2048). Choisissez une taille plus petite, ou fermez les programmes qui se servent de la carte.',
+  );
+  assert.deepEqual(events, ['gpu released', 'llm started'], 'the card is given back, the chat model comes back');
+});

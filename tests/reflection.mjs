@@ -126,6 +126,15 @@ test('while Moodix thinks it is open and counts its time; it folds by itself whe
   assert.deepEqual(moves[0].frames.map(frame => frame.height), ['63px', '0px']);
   assert.equal(moves[0].options.duration, 200);
   assert.equal(thought.element.hidden, false, 'still there while it folds');
+  // The words of the answer keep coming while it folds (each one shows the reflection again, the
+  // turn ends): the fold begun goes to its end, it does not start over at each of them.
+  let cancelled = 0;
+  moves[0].cancel = () => cancelled++;
+  thought.show('L’utilisateur demande un plan.\n\nUn scénario simple.', true);
+  thought.show('L’utilisateur demande un plan.\n\nUn scénario simple.', true);
+  thought.end();
+  assert.equal(moves.length, 1, 'one fold');
+  assert.equal(cancelled, 0);
   moves[0].onfinish();
   assert.equal(thought.element.hidden, true);
   assert.equal(thought.state(), 'closed');
@@ -198,6 +207,29 @@ test('a turn stopped while Moodix thinks: its reflection ends with the time it t
   assert.equal(time.textContent, '1:05');
   assert.equal(moves.length, 0, 'no fold drawn');
   assert.deepEqual([thought.state(), thought.element.hidden], ['closed', true]);
+});
+
+test('a second click while it folds back changes nothing; read back during a fold, it is simply folded', () => {
+  const { thought, moves } = setup({ animated: true });
+  thought.restore('Une pensée.', 3);
+  thought.label.onclick();
+  moves[0].onfinish();
+  assert.equal(thought.state(), 'open');
+  thought.label.onclick();
+  assert.equal(moves.length, 2, 'it folds back');
+  thought.label.onclick();
+  thought.label.onclick();
+  assert.equal(moves.length, 2, 'the fold begun goes to its end');
+  assert.equal(thought.state(), 'open', 'open until that fold is over');
+  // The conversation is read again meanwhile: folded, nothing left of the move, and it opens again.
+  let cancelled = 0;
+  moves[1].cancel = () => cancelled++;
+  thought.restore('Une pensée.', 3);
+  assert.equal(cancelled, 1);
+  assert.deepEqual([thought.state(), thought.element.hidden], ['closed', true]);
+  thought.label.onclick();
+  assert.equal(thought.state(), 'open');
+  assert.equal(moves.length, 3);
 });
 
 test('a conversation keeps how long Moodix thought, and its words over the card of a video', async t => {

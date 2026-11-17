@@ -5801,6 +5801,17 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   height: 16px;
   color: var(--soft);
 }
+/* What a proposal of Moodix AI says of itself, under its inputs. */
+.studio-proposal-note {
+  flex: none;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--surface-raised);
+  font-size: var(--size-2);
+  line-height: 1.4;
+  color: var(--soft);
+}
 /* The kind of sound, in the settings. */
 .studio-kinds {
   display: grid;

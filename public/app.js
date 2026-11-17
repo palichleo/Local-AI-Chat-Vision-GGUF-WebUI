@@ -16,7 +16,7 @@ import { setupHelpTips } from './help-tips.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
-import { STUDIO_NOTE, callNote, conversationTitle, lastExchange, spokenText } from './transcript.mjs';
+import { STUDIO_NOTE, callNote, closedCalls, conversationTitle, lastExchange, settledNotes, spokenText } from './transcript.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
 import { setupContextMeter } from './context-meter.mjs';
 import { installFromButton, compactSession } from './update-ui.mjs';
@@ -311,7 +311,9 @@ function renderHistory() {
   projectUI.render();
 }
 
-function setConversationTitle(title) {
+/** `unnamed`: only while the conversation has no name yet (it is named once, by its first message). */
+function setConversationTitle(title, { unnamed = false } = {}) {
+  if (unnamed && !untitled($('conversation-title').textContent)) return;
   $('conversation-title').textContent = title;
   renderHistory();
 }
@@ -405,6 +407,9 @@ function persistConversation() {
       );
       if (state.conversationId === id && (!state.archiveSnapshot || state.archiveSnapshot === snapshot))
         state.historyDirty = false;
+      // The bar says the name the history keeps (the one given by the user, else its first message).
+      if (state.conversationId === id && typeof conversation.title === 'string' && conversation.title)
+        $('conversation-title').textContent = conversation.title;
       renderHistory();
       return true;
     } catch (error) {
@@ -477,6 +482,18 @@ function savedUser(message) {
   };
 }
 
+/**
+ * The Chat in place of the Pellicule, for a conversation opened or begun from there (the Studio on
+ * screen stays): as by its tab, the sound playing in the Pellicule stops and the line goes under
+ * « Chat ». (Set by hand, the view changed and the sound went on with nothing left to stop it.)
+ */
+function leaveLibrary() {
+  if (state.view === 'studio') return;
+  if (state.view === 'library') state.hushLibrary?.();
+  state.view = 'chat';
+  tabLine();
+}
+
 async function loadConversation(id) {
   if (
     !state.projectWorking &&
@@ -486,7 +503,7 @@ async function loadConversation(id) {
     !state.status.toolJob &&
     id === state.conversationId
   ) {
-    if (state.view !== 'studio') state.view = 'chat';
+    leaveLibrary();
     projectUI.render();
     $('prompt').focus();
     return;
@@ -504,7 +521,8 @@ async function loadConversation(id) {
     )
       return;
     const record = await (await api(`history/${id}`)).json();
-    const messages = [...record.messages];
+    // One saved with a call left without its result (before 0.6.31) is read with one.
+    const messages = closedCalls(record.messages);
     const draft =
       record.incomplete && messages.at(-1)?.role === 'user' && !messages.at(-1).internal
         ? savedUser(messages.pop())
@@ -515,7 +533,7 @@ async function loadConversation(id) {
     state.messages = messages;
     state.projectId = record.projectId || 'inbox';
     // Chat and Studio are two views of the same conversation: the one on screen stays.
-    if (state.view !== 'studio') state.view = 'chat';
+    leaveLibrary();
     state.archiveSnapshot = { messages: record.messages, incomplete: record.incomplete };
     state.historyDirty = false;
     state.images = draft.images;
@@ -583,6 +601,9 @@ function renderTranscript(messages, incomplete = false) {
           // « Annuler » of a card: its line, where the card was (16/11); declined otherwise, nothing.
           if (data?.status === 'denied' && data.cancelled === 'card')
             view.generations.append(node('p', 'proposal-cancelled', 'Proposition annulée.'));
+          // A card left without an answer (the page closed while it waited): said where it was.
+          if (data?.status === 'cancelled' && data.unanswered === true && text)
+            view.generations.append(node('p', 'proposal-cancelled', 'Proposition restée sans réponse.'));
         } catch {}
       }
       if (view.thought) view.thought.restore(message.reasoning_content || '', message.reasoning_seconds);
@@ -631,7 +652,7 @@ function returnBand() {
 
 /** A conversation and its draft as a page kept them (an update, « Redémarrer », another version). */
 function restoreSession(saved) {
-  state.messages = saved.messages;
+  state.messages = closedCalls(saved.messages);
   state.conversationId = saved.conversationId;
   state.conversationInstructions = saved.conversationInstructions ?? (saved.messages.length ? '' : null);
   state.archiveSnapshot = saved.archiveSnapshot;
@@ -1835,8 +1856,11 @@ function unwriteReference(label) {
  * the model in the message as well, when it can see (its projector of vision).
  */
 async function addFiles(files) {
+  if (!files.length) return;
+  // Dropped or pasted while a creation is made (the « + » stays within reach): said, not lost in silence.
+  if (state.status.toolJob && !state.generating)
+    return notice('Attendez la fin de la génération en cours pour joindre un fichier.');
   if (
-    !files.length ||
     state.projectWorking ||
     state.status.toolJob ||
     (state.generating && !state.proposalCard) ||
@@ -2002,8 +2026,12 @@ async function takeBack(resend) {
   updateControls();
   contextMeter.schedule();
   await persistConversation();
-  if (resend) $('chat-form').requestSubmit();
-  else $('prompt').focus();
+  if (resend) {
+    // Sent again as it was: the label chosen for the next message is not for it.
+    state.resent = true;
+    $('chat-form').requestSubmit();
+    state.resent = false;
+  } else $('prompt').focus();
 }
 function assistantMessage(parent = null) {
   const article = parent?.article || node('article', 'message assistant');
@@ -2170,7 +2198,9 @@ function missingFile(view, request, history) {
       state.videos = [...draft.videos];
       renderAttachments();
       resizePrompt();
+      state.resent = true;
       $('chat-form').requestSubmit();
+      state.resent = false;
     },
   });
   scrollToBottom();
@@ -2312,7 +2342,10 @@ async function runOutputAction(record, index, action) {
       );
       generation.finish(result);
     } catch (error) {
-      generation.fail(error.message);
+      // Stopped by the user: said once, by the line of the message (not again by the take, in the
+      // browser's words).
+      if (signal.aborted) generation.withdraw();
+      else generation.fail(error.message);
       history.push({
         role: 'tool',
         tool_call_id: request.call.id,
@@ -2336,6 +2369,9 @@ async function runOutputAction(record, index, action) {
       await persistConversation();
     }
     state.generating = false;
+    // Its controller ends with it: kept, « Interrompre » aborted it again in place of cancelling
+    // the next creation of the Studio.
+    state.controller = null;
     state.studio?.invalidate?.();
     turnActions();
     updateControls();
@@ -2355,8 +2391,12 @@ function userContent(text, images) {
     : text;
 }
 
+/**
+ * What is kept of a conversation: without the pictures read for one turn, and every call followed by
+ * its result (closedCalls: the card of a video that waits is saved before its answer, 0.6.27).
+ */
 function archiveMessages(messages) {
-  return messages.filter(message => !message.resourceId && !message.outputId);
+  return closedCalls(messages.filter(message => !message.resourceId && !message.outputId));
 }
 
 function chatRequest(messages, tools = true, resources = true) {
@@ -2372,7 +2412,8 @@ function chatRequest(messages, tools = true, resources = true) {
           'Tu es un assistant local utile. Réponds dans la langue de l’utilisateur. Décris honnêtement les images et signale tes incertitudes.' +
           instructions,
       },
-      ...messages,
+      // The consigne of a creation that failed is for the message it failed in, not the next ones.
+      ...settledNotes(messages),
     ],
     thinking: state.thinking,
     tools,
@@ -2600,7 +2641,8 @@ async function sendMessage(event) {
       // The stream ended: the Éclipse rests (a tool, or the answer written).
       view.waiting = false;
       markThinking(view, false);
-      if (leaked && !output)
+      // (While it writes its words over a card, nothing is said in their place: planWords has its own.)
+      if (leaked && !output && !planFor)
         output = allowTools
           ? 'Je n’ai pas pu lancer cet outil : la génération est peut-être indisponible en ce moment (voir les réglages). Renvoyez votre demande pour que je réessaie.'
           : 'Je ne peux pas lancer d’autre génération dans ce message. Renvoyez votre demande pour que je réessaie.';
@@ -2757,7 +2799,26 @@ async function sendMessage(event) {
         // replacement runs with it. The chat model leaves the card to the image as for any
         // creation, and comes back once it is kept to write the prompt of the video from it.
         iterations++;
-        const outcome = await replaceWithCharacter(request, { view, signal });
+        let outcome;
+        try {
+          outcome = await replaceWithCharacter(request, { view, signal });
+        } catch (error) {
+          // Stopped, or failed before its end: its call keeps a result, as any other creation.
+          history.push({
+            role: 'tool',
+            tool_call_id: request.call.id,
+            content: JSON.stringify(
+              signal.aborted
+                ? {
+                    status: 'cancelled',
+                    message:
+                      'L’utilisateur a arrêté ce remplacement avant la fin : rien n’a été produit. S’il demande de recommencer, refais le même appel d’outil.',
+                  }
+                : { status: 'error', message: error.message },
+            ),
+          });
+          throw error;
+        }
         history.push({ role: 'tool', tool_call_id: request.call.id, content: outcome.content });
         if (outcome.record) state.status = await (await api('status')).json();
         complete = true;
@@ -3079,6 +3140,8 @@ async function sendMessage(event) {
       view.article.remove();
       $('prompt').value = text + ($('prompt').value ? `\n\n${$('prompt').value}` : '');
       state.images = images;
+      // The videos joined come back with it (the text kept their « #ref », not their chip).
+      state.videos = videos;
       renderAttachments();
       $('welcome').hidden = state.messages.length > 0;
     }
@@ -3096,7 +3159,10 @@ async function sendMessage(event) {
         );
       state.messages = archiveMessages(history);
       state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: !complete };
-      setConversationTitle(text || 'Une image à explorer');
+      // Named once, by its first message, as the history names it (persistConversation gives its
+      // name back): at every turn the bar took the whole text of the last message, and lost the name
+      // the user had given.
+      setConversationTitle(conversationTitle(text).slice(0, 120) || 'Une image à explorer', { unnamed: true });
     }
     // The turn is over, answered, failed or stopped: the mark is at rest, its thought timed.
     view.thought?.end();
@@ -4048,7 +4114,7 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     )
       return;
     state.projectId = typeof projectId === 'string' ? projectId : 'inbox';
-    if (state.view !== 'studio') state.view = 'chat';
+    leaveLibrary();
     state.messages = [];
     state.images = [];
     state.videos = [];
@@ -4110,7 +4176,8 @@ $('prompt-label-clear').onclick = () => {
 $('chat-form').addEventListener(
   'submit',
   () => {
-    if (!promptLabel) return;
+    // A message sent again (« Régénérer », « Reprendre la demande ») keeps its own words.
+    if (!promptLabel || state.resent) return;
     const text = $('prompt').value.trim(),
       asked = promptLabel.dataset.prompt;
     if (text && !text.startsWith(asked.trim())) $('prompt').value = asked + text;

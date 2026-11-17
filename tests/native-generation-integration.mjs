@@ -455,6 +455,65 @@ test(
       const unknown = (await chat('generate from take 99')).find(e => e.local_tool_request).local_tool_request;
       assert.equal(unknown.kind, 'invalid');
       assert.equal(unknown.message, 'La prise 99 n’existe pas dans ce projet.');
+
+      // An image of the project the user names (« ref1 ») and the model leaves out: the model is
+      // told once, with the argument to pass…
+      const uploaded = await fetch(app.url + '/api/resources/upload', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + boot.token,
+          'Content-Type': 'image/png',
+          'X-Resource-Name': encodeURIComponent('stairs.png'),
+        },
+        body: png,
+      });
+      assert.equal(uploaded.status, 201, await uploaded.clone().text());
+      const stairs = await (
+        await api('resources/update', {
+          id: (await uploaded.json()).id,
+          patch: {
+            description: 'Stairs in the sky',
+            prepared: { width: 1, height: 1, frames: [{ url: 'data:image/png;base64,' + png.toString('base64'), time: null }] },
+          },
+        })
+      ).json();
+      assert.equal(stairs.label, '#ref1');
+      const wish = 'generate a boat like ref1, whatever is said',
+        told = (await chat(wish)).find(e => e.local_tool_request).local_tool_request;
+      assert.equal(told.kind, 'invalid');
+      assert.match(told.message, new RegExp(`#ref1 \\(\\{"resource": "${stairs.id}"\\}\\) : ce qu’il cite n’est pas transmise à l’outil`));
+      assert.match(told.message, /image de fin, référence ou image de départ/);
+      // … and its next call stands, whatever it decides: the proposal then says to the user that
+      // the image they named does not reach the generator.
+      const stands = (
+        await (
+          await api('chat', {
+            messages: [
+              { role: 'user', content: wish },
+              { role: 'assistant', content: '', tool_calls: [told.call] },
+              { role: 'tool', tool_call_id: told.call.id, content: JSON.stringify({ status: 'error', message: told.message }) },
+            ],
+            conversationId,
+            turnId: randomUUID(),
+          })
+        ).text()
+      )
+        .split(/\r?\n\r?\n/)
+        .filter(s => s.startsWith('data: ') && s !== 'data: [DONE]')
+        .map(s => JSON.parse(s.slice(6)))
+        .find(e => e.local_tool_request).local_tool_request;
+      assert.equal(stands.kind, undefined, stands.message);
+      assert.ok(stands.requestId, 'a proposal the user can approve');
+      assert.deepEqual(stands.notes, [
+        '#ref1 n’est pas transmise. Le générateur ne la verra pas, seul le prompt peut la décrire.',
+      ]);
+      assert.deepEqual(stands.cited, { left: [{ id: stairs.id, label: '#ref1' }], roles: ['source'] });
+      // Its identifier written in the prompt is not the image passed: seen once the call is resolved,
+      // the model is told then (its workflow has a place for it), and nothing is left to approve.
+      const written = (await chat(`generate naming ${stairs.id} for ref1`)).find(e => e.local_tool_request).local_tool_request;
+      assert.equal(written.kind, 'invalid');
+      assert.match(written.message, /n’est pas transmise à l’outil.*\(image à modifier : source\)\.$/);
+      assert.equal(written.requestId, undefined);
     } finally {
       await app?.close();
       await rm(root, { recursive: true, force: true });

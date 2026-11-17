@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { setupSettingsGuard } from '../public/settings-guard.mjs';
 import * as sessionCopies from '../public/session-copies.mjs';
+import * as transcript from '../public/transcript.mjs';
 
 const tick = () => new Promise(setImmediate);
 const savedConfig = {
@@ -90,6 +91,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
   };
   const context = {
     ...sessionCopies,
+    ...transcript,
     console,
     AbortController,
     AbortSignal,

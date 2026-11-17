@@ -20,6 +20,60 @@ const LOOKED = {
   local_read_resource: 'A regardé une ressource de la bibliothèque.',
 };
 
+/**
+ * What a creation that failed tells the model while its message is answered: no tool is left for
+ * that message, the model says what failed…
+ */
+export const FAILED_NOTE =
+  'La génération a échoué et rien n’a été produit. Aucun outil n’est disponible pour la suite de ce message : explique l’échec à l’utilisateur en une ou deux phrases, sans écrire d’appel d’outil. Il relancera s’il le souhaite.';
+/**
+ * … and what is left of it once the user has written again. Kept as it was, « no tool, no call » was
+ * read at each later message, when the tools are back: asked anything, the model answered « je
+ * relance » and called nothing (16/11), and a creation made in the Studio never had the message that
+ * consigne was for (the chat model stays unloaded after it).
+ */
+export const FAILED_SETTLED =
+  'La génération a échoué et rien n’a été produit. Si l’utilisateur demande de recommencer, refais le même appel d’outil.';
+const inJSON = text => JSON.stringify(text).slice(1, -1);
+/** The messages as the model reads them: the consigne of a failure before the user's last message, settled. */
+export function settledNotes(messages) {
+  const last = messages.findLastIndex(message => message?.role === 'user' && !message.internal),
+    now = inJSON(FAILED_NOTE);
+  return messages.map((message, index) =>
+    index < last && message?.role === 'tool' && typeof message.content === 'string' && message.content.includes(now)
+      ? { ...message, content: message.content.replace(now, inJSON(FAILED_SETTLED)) }
+      : message,
+  );
+}
+
+/** What a call left without its result is given in its place: nothing was made of it. */
+export const UNANSWERED =
+  'Cette demande n’a pas abouti : rien n’a été produit. Si l’utilisateur la redemande, refais le même appel d’outil.';
+/**
+ * The messages with every call followed by its result. A call left without one (the page closed
+ * while its card waited for an answer, a creation stopped before its result was written) made the
+ * conversation refused at every message (« Résultat d’outil manquant. »), with no way out but
+ * taking the last message back: it is given the result of a demand that came to nothing.
+ */
+export function closedCalls(messages) {
+  const closed = [];
+  for (const [index, message] of messages.entries()) {
+    closed.push(message);
+    if (message?.role !== 'assistant' || !Array.isArray(message.tool_calls) || !message.tool_calls.length) continue;
+    // Its results follow it at once, one for each call.
+    const answered = new Set();
+    for (let next = index + 1; messages[next]?.role === 'tool'; next++) answered.add(messages[next].tool_call_id);
+    for (const call of message.tool_calls)
+      if (!answered.has(call?.id))
+        closed.push({
+          role: 'tool',
+          tool_call_id: call?.id,
+          content: JSON.stringify({ status: 'cancelled', unanswered: true, message: UNANSWERED }),
+        });
+  }
+  return closed;
+}
+
 /** A saved reply without the tool call the model wrote as text instead of making it. */
 export function spokenText(content) {
   if (typeof content !== 'string') return '';
@@ -45,14 +99,21 @@ export function callNote(call, result) {
   if (data.status === 'denied') return '';
   // The image of the character Moodix AI made, seen and declined: nothing was stopped midway.
   if (data.status === 'cancelled' && data.character_image) return 'Remplacement annulé à la vérification du personnage.';
+  // Left without a result (closedCalls): nothing was stopped midway, nothing was made.
+  if (data.status === 'cancelled' && data.unanswered) return `${made} : demande restée sans suite.`;
   if (data.status === 'cancelled') return `${made} : génération arrêtée avant la fin.`;
   if (data.status === 'error')
     return `${made} : génération non aboutie` + (data.message ? ` (${String(data.message).replace(/\.$/, '')}).` : '.');
   return '';
 }
 
-// What the application writes for the user when a button under a creation is pressed.
-const DIRECT_ACTION = /^(?:Upscale|Interpolation) de la sortie [0-9a-f]{8}-/;
+// What the application writes for the user when a button under a creation is pressed (app.js,
+// runOutputAction): « Agrandir et affiner la prise 4. », « Interpoler la sortie 1a2b… pour une vidéo
+// plus fluide. »; « Upscale de la sortie … » before 0.6.0. Not a message to take back or send again.
+const TAKEN = '(?:la prise \\d+|la sortie [0-9a-f]{8}-)';
+const DIRECT_ACTION = new RegExp(
+  `^(?:(?:Upscale|Interpolation) de la sortie [0-9a-f]{8}-|Agrandir et affiner ${TAKEN}|Interpoler ${TAKEN})`,
+);
 // What it writes for the model when the user makes something in the Studio.
 export const STUDIO_LINE = /^Studio · (?:Image|Vidéo|Son) : /;
 // The words it adds after that line, for the model only: not what the user reads.

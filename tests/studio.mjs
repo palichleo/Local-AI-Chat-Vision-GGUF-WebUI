@@ -3588,3 +3588,200 @@ test('the take on the screen is a little smaller than its frame and rounded on i
   const source = await read('studio.mjs');
   assert.match(source, /const known = sizeOfRecord\(record\);\n    if \(known\) shaped\(known\.width, known\.height\);/);
 });
+
+test('Moodix AI continues a clip of the disk (« #ref1 »): the Studio shows that clip being continued, not the empty cases of a new video', async () => {
+  // As the application describes them: a new video with LTX 2.5 takes a start, an end and references;
+  // a continuation takes its clip alone.
+  const create = {
+      id: 'ltx',
+      name: 'LTX 2.5',
+      verb: 'create_video',
+      roles: { start_image: { count: 1, media: ['image'] }, end_image: { count: 1, media: ['image'] }, reference: { count: 2, media: ['image'], many: true } },
+      exclusive: [['source'], ['reference']],
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      stages: true,
+      seeded: true,
+      lengths: { seconds: [121 / 24, 145 / 24], standard: 121 / 24 },
+      settings: [],
+    },
+    extend = {
+      ...create,
+      verb: 'extend_video',
+      roles: { source: { count: 1, media: ['video'], many: false, required: true }, reference: { count: 0, media: [], many: true } },
+      lengths: { seconds: [4, 5, 6], standard: 5 },
+    },
+    view = { id: '5126b40d', name: 'view.mp4', label: '#ref1', width: 1152, height: 2048, originalUrl: '/media/view/original', previewUrl: '/media/view/preview' },
+    request = {
+      requestId: 'q1',
+      approvalToken: 't1',
+      tool: 'extend_video',
+      mediaType: 'video',
+      workflowName: 'LTX 2.5',
+      resolution: { width: 1152, height: 2048 },
+      call: { id: 'call1', type: 'function', function: { name: 'extend_video', arguments: '{}' } },
+      plan: {
+        prompt: 'The video ends with a cut to a distant staircase climbing through clouds.',
+        stage: 'draft',
+        parameters: { width: 1152, height: 2048, frames: 129, fps: 24, seed: 5936987926593958, overlap_frames: 9 },
+        editable: { prompt: true, stages: [], parameters: [{ key: 'frames', type: 'integer', value: 129 }], references: [[]] },
+        references: [{ input: 'source', role: 'source_video', as: 'source', resource_id: '5126b40d', label: '#ref1 · view.mp4', roleLabel: 'Vidéo à prolonger' }],
+        loras: [],
+      },
+    };
+  const said = [];
+  const page = await studioPage(
+    { create_video: [create], extend_video: [extend] },
+    {},
+    { runs: [], cursor: said, targets: true, resource: id => (id === view.id ? view : null) },
+  );
+  const { body, studio, restore } = page;
+  try {
+    const answer = studio.propose(structuredClone(request), new AbortController().signal);
+    await until(() => said.includes('attend votre accord'));
+    assert.equal(body.dataset.mode, 'video');
+    // The clip continued is named, and on the screen: it is not a take of the Sortie.
+    assert.equal(body.find('studio-extending')[0].children[1].textContent, 'Suite du clip : view.mp4');
+    const [shown] = body.find('studio-frame-result');
+    assert.deepEqual([shown.tag, shown.src, shown.poster], ['video', '/media/view/original', '/media/view/preview']);
+    assert.equal(body.find('studio-go-label')[0].textContent, 'Générer la suite');
+    // Not the cases of a new video (« Début et fin », « Références »), which have nothing to do with it.
+    const titles = body.find('studio-input-title').map(title => title.textContent);
+    assert.equal(titles.includes('Début et fin'), false, titles.join(' | '));
+    assert.equal(titles.some(title => title.startsWith('Références')), false, titles.join(' | '));
+    // Nor an empty case for « the video to follow »: the clip continued is named above, it is not asked again.
+    assert.deepEqual(body.find('studio-slot').map(tile => tile.dataset.slot), [], titles.join(' | '));
+    assert.equal(page.prompt().value, request.plan.prompt);
+    studio.decline();
+    assert.equal(await answer, 'deny');
+  } finally {
+    restore();
+  }
+});
+
+test('a proposal without images shows empty cases: an image left there by the user is not part of what will be made', async () => {
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    said = [];
+  // The same proposal, with no image at all.
+  const request = structuredClone(recorded.request);
+  request.plan.references = [];
+  request.plan.editable.references = [];
+  const page = await studioPage(tools, {}, { runs, cursor: said, targets: true });
+  const { body, studio, restore } = page;
+  const filled = () => body.find('studio-slot').filter(tile => tile.className.includes('is-filled')).map(tile => tile.dataset.slot);
+  try {
+    // The user had put the take of the project as a start image, by hand.
+    page.mode(1);
+    const event = { preventDefault() {}, stopPropagation() {}, dataTransfer: { files: [], types: [], setData() {} } };
+    body.find('studio-item')[0].find('studio-item-pick')[0].ondragstart(event);
+    body.find('studio-slot')[0].ondrop(event);
+    assert.equal(filled().length, 1);
+    const answer = studio.propose(request, new AbortController().signal);
+    await until(() => said.includes('attend votre accord'));
+    assert.deepEqual(filled(), [], 'nothing shown that the proposal does not use');
+    assert.equal(said.some(word => word.startsWith('pose ')), false);
+    studio.decline();
+    assert.equal(await answer, 'deny');
+  } finally {
+    restore();
+  }
+});
+
+test('a clip of the disk is continued with the model chosen in the Studio, which is said to the server', async () => {
+  const roles = { source: { count: 1, media: ['video'], many: false, required: true }, reference: { count: 0, media: [], many: true } },
+    lengths = { seconds: [4, 5, 6], standard: 5 },
+    base = { limits: sizes, size: { width: 768, height: 448 }, seeded: true, settings: [], lengths },
+    create = [
+      { ...base, id: 'h3', name: 'MiniMax H3 Omni', verb: 'create_video', roles: {} },
+      { ...base, id: 'ltx', name: 'LTX 2.5', verb: 'create_video', roles: {} },
+    ],
+    extend = create.map(model => ({ ...model, verb: 'extend_video', roles }));
+  const page = await studioPage(
+    { create_video: create, extend_video: extend },
+    {
+      'tools/actions': () => ({ extend_video: ['video'] }),
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+    },
+    { runs: [], project: () => 'p1' },
+  );
+  const { body, asked, restore } = page;
+  try {
+    // A video of the computer dropped on the screen: kept as a reference of the project.
+    const film = Buffer.concat([Buffer.from([0, 0, 0, 16]), Buffer.from('ftypisomiso2'), Buffer.from([0, 0, 0, 12]), Buffer.from('mdat'), Buffer.alloc(4)]);
+    page.mode(1);
+    body.find('studio-stage')[0].ondrop({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files: [new File([film], 'view.mp4', { type: 'video/mp4' })], types: ['Files'] } });
+    await settle();
+    assert.equal(body.find('studio-frame-result')[0].src, '/preview/view.mp4');
+    // « Prolonger », on the bar of the screen.
+    await settle();
+    const extendIt = body.find('output-action-extend')[0];
+    assert.ok(extendIt, 'the action is offered for a clip of the disk');
+    extendIt.onclick();
+    assert.equal(body.find('studio-extending')[0].children[1].textContent, 'Suite du clip : view.mp4');
+    assert.equal(body.find('studio-go-label')[0].textContent, 'Générer la suite');
+    // No model made this clip: the list of the models that can continue one, to choose from.
+    const [model] = body.find('studio-model-pick');
+    assert.ok(model, 'the model is chosen');
+    model.value = 'ltx';
+    model.onchange();
+    page.prompt().value = 'La caméra recule et découvre la vallée.';
+    page.prompt().oninput();
+    await body.find('studio-go')[0].onclick();
+    await settle();
+    const [, action] = asked.findLast(([route]) => route === 'tools/action');
+    assert.equal(action.name, 'extend_video');
+    assert.deepEqual(action.arguments.source, { resource: 'r1' });
+    assert.equal(action.arguments.workflow, 'ltx', 'the model chosen, not the first of the list');
+  } finally {
+    restore();
+  }
+  // A clip made here keeps the model that made it: not chosen, not named (the server knows it).
+  const made = { id: 'c', mediaType: 'video', workflowId: 'ltx', prompt: 'un renard', outputs: [{ originalUrl: '/c.mp4', thumbUrl: '/c.jpg' }] };
+  const own = await studioPage(
+    { create_video: create, extend_video: extend },
+    { 'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }), 'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }) },
+    { runs: [made] },
+  );
+  try {
+    own.body.find('studio-item')[0].find('studio-item-main')[0].onclick();
+    assert.equal(own.body.find('studio-extending').length, 1);
+    assert.equal(own.body.find('studio-model-pick').length, 0);
+    own.prompt().value = 'Il saute.';
+    own.prompt().oninput();
+    await own.body.find('studio-go')[0].onclick();
+    await settle();
+    const [, action] = own.asked.findLast(([route]) => route === 'tools/action');
+    assert.deepEqual([action.arguments.source, action.arguments.workflow], [{ output: 'c' }, undefined]);
+  } finally {
+    own.restore();
+  }
+});
+
+test('what a proposal of Moodix AI says of itself is read in the Studio, at the head of its column, while it waits', async () => {
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    said = [];
+  const request = structuredClone(recorded.request),
+    note = '#ref2 n’est pas transmise : LTX 2.5 ne prend pas d’image pour la suite d’une vidéo. Le générateur ne la verra pas, seul le prompt peut la décrire.';
+  request.notes = [note, 'Durée ajoutée : 10 s → 8 s, la plus proche que LTX 2.5 permet.'];
+  const page = await studioPage(tools, {}, { runs, cursor: said, targets: true });
+  const { body, studio, restore } = page;
+  const notes = () => body.find('studio-proposal-note').map(line => line.textContent);
+  try {
+    assert.deepEqual(notes(), [], 'nothing to say without a proposal');
+    const answer = studio.propose(request, new AbortController().signal);
+    await until(() => said.includes('attend votre accord'));
+    assert.deepEqual(notes(), request.notes);
+    // In the column of the inputs, before the prompt: read without scrolling it.
+    const [write] = body.find('studio-write')[0].find('studio-block-body'),
+      at = name => write.children.findIndex(child => String(child.className).includes(name));
+    assert.ok(at('studio-proposal-note') >= 0 && at('studio-proposal-note') < at('studio-prompt-field'), 'above the prompt');
+    studio.decline();
+    assert.equal(await answer, 'deny');
+    assert.deepEqual(notes(), [], 'gone with the proposal');
+  } finally {
+    restore();
+  }
+});

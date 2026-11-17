@@ -1,6 +1,7 @@
 import { renderProposal } from './video-plan.mjs';
 import { prepareStoryboard } from './resource-preparation.mjs';
 import { compressImage } from './images.mjs';
+import { FAILED_NOTE } from './transcript.mjs';
 
 /**
  * Chat-side generation flow: asks for approval, follows the job and prepares compressed
@@ -306,7 +307,8 @@ export function setupGenerationRuntime({
           content: JSON.stringify({
             status: 'error',
             message: job.error,
-            note: 'La génération a échoué et rien n’a été produit. Aucun outil n’est disponible pour la suite de ce message : explique l’échec à l’utilisateur en une ou deux phrases, sans écrire d’appel d’outil. Il relancera s’il le souhaite.',
+            // For the message being answered only: settled at the next one (transcript.mjs).
+            note: FAILED_NOTE,
           }),
           images: [],
           failed: true,

@@ -64,7 +64,8 @@ export function reflection({
     seconds = null,
     stop = null,
     whole = false,
-    moving = null;
+    moving = null,
+    folding = false; // it folds by itself, the answer begun: until that fold is over
 
   function set(next) {
     state = next;
@@ -111,6 +112,12 @@ export function reflection({
     };
     move.oncancel = () => (element.style.overflow = '');
   }
+  /** A fold under way is dropped: what follows says how it stands (read back, or hidden). */
+  function halt() {
+    moving?.cancel?.();
+    moving = null;
+    folding = false;
+  }
   function open() {
     if (state !== 'closed' || !text) return;
     set('open');
@@ -119,9 +126,11 @@ export function reflection({
     slide(true);
   }
   function close() {
-    if (state !== 'open') return;
+    if (state !== 'open' || folding) return;
     whole = false;
+    folding = true;
     slide(false, () => {
+      folding = false;
       set('closed');
       measure();
     });
@@ -133,8 +142,14 @@ export function reflection({
     if (seconds === null)
       seconds = Number.isFinite(given) && given > 0 ? Math.round(given) : from === null ? null : Math.max(1, Math.round((now() - from) / 1000));
     time.textContent = seconds ? thoughtTime(seconds) : '';
-    if (state !== 'live') return;
-    slide(false, () => set('closed'));
+    // Folded once: the words of the answer keep coming while it folds (each one calls this again),
+    // and the fold begun must go to its end, not start over at each of them.
+    if (state !== 'live' || folding) return;
+    folding = true;
+    slide(false, () => {
+      folding = false;
+      set('closed');
+    });
   }
   const tick = () => (time.textContent = thoughtTime((now() - from) / 1000, true));
 
@@ -172,6 +187,7 @@ export function reflection({
       write(String(saved ?? ''));
       stop?.();
       stop = null;
+      halt();
       seconds = Number.isFinite(kept) && kept > 0 ? Math.round(kept) : null;
       time.textContent = seconds ? thoughtTime(seconds) : '';
       label.hidden = !text;
@@ -182,6 +198,7 @@ export function reflection({
     hide() {
       stop?.();
       stop = null;
+      halt();
       label.hidden = element.hidden = true;
     },
     /** How long it took, once known. */

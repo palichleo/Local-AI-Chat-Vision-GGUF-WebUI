@@ -3,7 +3,7 @@ import { Projects, projectId } from './lib/projects.mjs';
 import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
-import { citedMessage, citedUnused, citedNumbers } from './lib/cited-resources.mjs';
+import { citedImages, citedMessage, citedSaid, citedUnused, citedNumbers } from './lib/cited-resources.mjs';
 import { briefMessage, briefMissing, cardBrief } from './lib/video-brief.mjs';
 import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
@@ -317,6 +317,9 @@ export async function createApplication({
     const saved = JSON.parse(await readFile(preferencesPath, 'utf8'));
     if (['dark', 'light'].includes(saved?.theme)) preferences.theme = saved.theme;
     if (typeof saved?.saveHistory === 'boolean') preferences.saveHistory = saved.saveHistory;
+    // Fond, éclairage, grain (Paramètres › Interface): read back too. Left out, they came back to
+    // their defaults at every start, and the next preference saved wrote the file without them.
+    if (saved?.room && typeof saved.room === 'object' && !Array.isArray(saved.room)) preferences.room = roomSettings(saved.room);
   } catch {
     /* Missing or damaged preferences use the default appearance. */
   }
@@ -332,6 +335,24 @@ export async function createApplication({
   const studioPresets = new StudioPresets(join(dataDir, 'studio-presets.json'));
   const attachmentUrl = (conversationId, file) =>
     `/media/attachments/${conversationId}/${file}?key=${mediaKey(conversationId + '/' + file, 'attachment')}`;
+  /** A session taken back: each attached image links to its stored file, as in a conversation read from the history. */
+  const sessionView = saved => {
+    if (!saved?.conversationId) return saved;
+    const seen = part =>
+      part.type === 'image_url' && part.file ? { ...part, view: attachmentUrl(saved.conversationId, part.file) } : part,
+      linked = list =>
+        list.map(message => (Array.isArray(message.content) ? { ...message, content: message.content.map(seen) } : message));
+    return {
+      ...saved,
+      messages: linked(saved.messages),
+      ...(saved.archiveSnapshot
+        ? { archiveSnapshot: { ...saved.archiveSnapshot, messages: linked(saved.archiveSnapshot.messages) } }
+        : {}),
+      images: saved.images.map(item =>
+        item.file ? { ...item, view: attachmentUrl(saved.conversationId, item.file) } : item,
+      ),
+    };
+  };
   const historyView = record => ({
     ...record,
     ...(record.preview
@@ -1022,7 +1043,7 @@ export async function createApplication({
         return send(200, installState);
       }
       if (path === '/api/updates/session' && req.method === 'GET')
-        return send(200, applyingUpdate ? null : await readUpdateSession(dataDir));
+        return send(200, applyingUpdate ? null : sessionView(await readUpdateSession(dataDir)));
       if (path === '/api/updates' && req.method === 'GET') {
         // Asked again from the update button: a failed check (offline) never hides a known update.
         if (requestURL.searchParams.get('refresh') === '1' && updateChecker && !applyingUpdate) {
@@ -2336,7 +2357,8 @@ export async function createApplication({
               try {
                 if (takeError) throw takeError;
                 // An image the user named by its label and the model left out: said once.
-                const unused = citedUnused(body.messages, await resources.catalog(projectOf(body.project)), call);
+                const active = await resources.catalog(projectOf(body.project)),
+                  unused = citedUnused(body.messages, active, call);
                 if (unused.length) throw problem(citedMessage(unused), 400);
                 // A character put in a video: its prompt is written here from the frames of the
                 // video and the character, which the model no longer has under its eyes.
@@ -2415,11 +2437,21 @@ export async function createApplication({
                     } catch {
                       // The call keeps the prompt it came with.
                     }
-                  request = await runtime.request(calls, {
+                  const made = await runtime.request(calls, {
                     conversationId: body.conversationId,
                     turnId: body.turnId,
                     messages: body.messages,
+                    // The images the user names: one the proposal leaves out is said on it.
+                    cited: citedImages(body.messages, active),
                   });
+                  // Left out though the workflow that serves has a place for it, and the model not
+                  // told yet (a continuation is not asked before its routing: the workflow that
+                  // continues the clip decides whether an image can go with it): told once.
+                  if (made?.cited?.roles?.length && !citedSaid(body.messages)) {
+                    runtime.cancel({ requestId: made.requestId });
+                    throw problem(citedMessage(made.cited.left, made.cited.roles), 400);
+                  }
+                  request = made;
                   // A video not talked over yet (lib/video-brief.mjs): proposed all the same, with what
                   // Moodix is to say of it. In the Chat its words come over the card of the proposal,
                   // which waits for the user (`cardBrief`); in the Studio its plan comes first and the

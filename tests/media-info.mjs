@@ -252,3 +252,55 @@ test('every file of a record gets its sheet when the creation is recorded; one t
   assert.deepEqual([first.output, first.take, second.output, second.take], [0, 10, 1, 11]);
   assert.equal(first.id, record.id);
 });
+
+test('the engine’s notes leave a PNG whatever chunk holds them: Pillow writes iTXt as soon as the prompt is not Latin-1', async t => {
+  const folder = await mkdtemp(join(tmpdir(), 'moodix-info-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  // keyword, 0, compression flag, compression method, language, 0, translated keyword, 0, text
+  const job = '{"job":{"prompt":"l’éléphant — heure dorée","components":{"model":"D:\\\\models\\\\krea2.safetensors"}}}',
+    international = chunk('iTXt', Buffer.concat([Buffer.from('atelier\0\0\0\0\0', 'latin1'), Buffer.from(job, 'utf8')])),
+    compressed = chunk('zTXt', Buffer.concat([Buffer.from('atelier\0\0', 'latin1'), deflateSync(Buffer.from(job, 'latin1'))])),
+    // A keyword that only begins the same way is someone else's: kept.
+    other = chunk('tEXt', Buffer.from('atelier-notes\0bonjour', 'latin1')),
+    plain = png({ engine: false });
+  for (const [name, engine] of [['i', international], ['z', compressed]]) {
+    const path = join(folder, name + '.png'),
+      // After IHDR (8 + 25 bytes), as Pillow places it.
+      bytes = Buffer.concat([plain.subarray(0, 33), engine, other, plain.subarray(33)]);
+    await writeFile(path, bytes);
+    assert.equal(await stamp(path, { moodix: 1, id: 'x', prompt: 'été' }), true);
+    const after = await readFile(path);
+    assert.doesNotMatch(after.toString('latin1'), /atelier\0|krea2\.safetensors|D:\\\\models/, name + ': nothing of the job stays');
+    assert.match(after.toString('latin1'), /atelier-notes\0bonjour/, 'the note of another program stays');
+    assert.deepEqual(await readFileInfo(path), { moodix: 1, id: 'x', prompt: 'été' });
+  }
+});
+
+test('a sound whose data has an odd length and no pad byte still carries a sheet that is read back', async t => {
+  const folder = await mkdtemp(join(tmpdir(), 'moodix-info-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  // As Python’s « wave » writes a mono sound of 24 bits with an odd number of samples: no byte after it.
+  const padded = wav(),
+    bare = Buffer.from(padded.subarray(0, padded.length - 1));
+  bare.writeUInt32LE(bare.length - 8, 4);
+  assert.equal(bare.length % 2, 1);
+  const path = join(folder, 'impair.wav'),
+    info = { moodix: 1, id: 'son', prompt: 'une porte qui grince' };
+  await writeFile(path, bare);
+  assert.equal(await stamp(path, info), true);
+  const after = await readFile(path);
+  assert.deepEqual(after.subarray(8, bare.length), bare.subarray(8), 'the sound as it was');
+  assert.equal(after[bare.length], 0, 'the pad byte RIFF asks for');
+  assert.equal(after.subarray(bare.length + 1, bare.length + 5).toString('ascii'), 'MDIX', 'the sheet on an even place');
+  assert.equal(after.readUInt32LE(4), after.length - 8);
+  assert.equal(after.length % 2, 0);
+  assert.deepEqual(await readFileInfo(path), info);
+  assert.deepEqual(await bytesInfo(after), info);
+  // Written again (the same take recorded twice): replaced, not added.
+  assert.equal(await stamp(path, { ...info, prompt: 'une autre' }), true);
+  const again = await readFile(path);
+  assert.equal(again.toString('latin1').split('MDIX').length, 2, 'one sheet');
+  assert.equal(again.length % 2, 0);
+  assert.equal(again.readUInt32LE(4), again.length - 8);
+  assert.deepEqual((await readFileInfo(path)).prompt, 'une autre');
+});

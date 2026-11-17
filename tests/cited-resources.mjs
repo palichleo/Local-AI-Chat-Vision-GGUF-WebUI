@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { citedMessage, citedUnused } from '../lib/cited-resources.mjs';
+import { citedImages, citedMessage, citedNote, citedSaid, citedUnused } from '../lib/cited-resources.mjs';
 
 const girl = { id: '3c037171-3a50-48bc-9705-9bcbfb223f6a', type: 'image', reference: 5, label: 'Ref 5' },
   stairs = { id: 'a34fed7a-57f5-49cc-a0bd-7955eb05d5d2', type: 'image', reference: 6, label: 'Ref 6' },
@@ -46,4 +46,73 @@ test('only the last request counts, only images, only generations, and only once
   ];
   assert.deepEqual(citedUnused(told, catalog, startOnly), []);
   assert.deepEqual(citedUnused([], catalog, startOnly), []);
+});
+
+test('a continuation is not asked before its routing: which workflow continues decides', () => {
+  // Left to the proposal (lib/tool-runtime.mjs): LTX 2.5 continues a clip without any image, and a
+  // model told to pass one there was sent to another model, or to an error.
+  const messages = [user('Prolonge #ref7 avec un cut final sur #ref6')],
+    args = { prompt: 'A distant staircase', source: { resource: film.id } };
+  assert.deepEqual(citedUnused(messages, catalog, call(args, 'extend_video')), []);
+  assert.deepEqual(citedImages(messages, catalog), [stairs], 'the images named, the video is not one');
+  assert.deepEqual(citedImages([user('sans rien citer')], catalog), []);
+  assert.deepEqual(citedImages(undefined, catalog), []);
+  assert.equal(citedSaid(messages), false);
+  const told = [
+    ...messages,
+    { role: 'assistant', content: '', tool_calls: [call(args, 'extend_video')] },
+    { role: 'tool', tool_call_id: 'c1', content: JSON.stringify({ status: 'error', message: citedMessage([stairs]) }) },
+  ];
+  assert.equal(citedSaid(told), true);
+  assert.equal(citedSaid([...told, user('et la ref6 ?')]), false, 'a new request: said again if need be');
+  // The roles its workflow has a place left in, each with its argument.
+  assert.match(citedMessage([stairs], ['reference']), /convient à sa demande \(référence : reference\)\.$/);
+  assert.match(
+    citedMessage([stairs], ['start_image', 'end_image', 'reference']),
+    /\(image de départ : start_image, image de fin : end_image ou référence : reference\)\.$/,
+  );
+});
+
+test('what the user reads on a proposal that leaves out an image they named', () => {
+  const ref2 = { id: stairs.id, label: '#ref2' },
+    ref3 = { id: girl.id, label: '#ref3' };
+  // The continuation of a video by a model that takes no image with it, another one that would.
+  assert.equal(
+    citedNote([ref2], { workflow: 'LTX 2.5', none: true, other: 'MiniMax H3 Omni', continues: true }),
+    '#ref2 n’est pas transmise : LTX 2.5 ne prend pas d’image pour la suite d’une vidéo. ' +
+      'Le générateur ne la verra pas, seul le prompt peut la décrire. MiniMax H3 Omni peut la recevoir.',
+  );
+  assert.equal(
+    citedNote([ref2], { workflow: 'MOSS Image', none: true }),
+    '#ref2 n’est pas transmise : MOSS Image ne prend pas d’image. Le générateur ne la verra pas, seul le prompt peut la décrire.',
+  );
+  // Its places taken by other images.
+  assert.equal(
+    citedNote([ref2, ref3], { workflow: 'MiniMax H3 Omni' }),
+    '#ref2 et #ref3 ne sont pas transmises : MiniMax H3 Omni n’a pas de place pour elles avec les autres entrées. ' +
+      'Le générateur ne les verra pas, seul le prompt peut les décrire.',
+  );
+  // A place was left and the model, told, kept its call: no reason to give, no other model to name.
+  assert.equal(
+    citedNote([ref2], { workflow: 'Krea 2', here: ['reference'], other: 'Autre' }),
+    '#ref2 n’est pas transmise. Le générateur ne la verra pas, seul le prompt peut la décrire.',
+  );
+});
+
+test('an image shown to the model in the user’s name is not what the user wrote', () => {
+  // The page adds it (internal) when the model reads a reference: it carries that reference’s label.
+  const shown = { role: 'user', internal: true, content: [{ type: 'text', text: 'Référence visuelle {"label":"#ref6","name":"escalier.png"}' }] },
+    messages = [user('une vidéo qui part de la ref5 et finit sur la ref6'), { role: 'assistant', content: '', tool_calls: [startOnly] }, { role: 'tool', tool_call_id: 'c1', content: '{"status":"resource_loaded"}' }, shown];
+  // Both images named are still looked for: the one left out is found.
+  assert.deepEqual(citedImages(messages, catalog), [girl, stairs]);
+  assert.deepEqual(citedUnused(messages, catalog, startOnly), [stairs]);
+  // Said once, even when an image is shown after it.
+  const told = [
+    user('avec la ref6'),
+    { role: 'assistant', content: '', tool_calls: [startOnly] },
+    { role: 'tool', tool_call_id: 'c1', content: JSON.stringify({ status: 'error', message: citedMessage([stairs]) }) },
+    shown,
+  ];
+  assert.equal(citedSaid(told), true);
+  assert.deepEqual(citedUnused(told, catalog, startOnly), []);
 });

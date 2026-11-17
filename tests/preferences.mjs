@@ -85,3 +85,43 @@ test('un fichier de préférences endommagé revient au mode night', async () =>
     await rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test('les réglages d’interface (salle, grain…) sont relus au redémarrage et gardés quand une autre préférence change', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'atelier-interface-'));
+  const room = { room: 'lavande', light: 'discret', grain: 'film', dose: 75, motion: 'fige', filters: ['centre'] };
+  let app;
+  try {
+    app = await createApplication({ port: 0, dataDir });
+    let initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
+    const save = (body, token) =>
+      fetch(`${app.url}/api/preferences`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    const kept = (await (await save({ room }, initial.token)).json()).preferences.room;
+    // Ce que le serveur en retient (ce qui est valide), et ce n'est pas la salle par défaut.
+    assert.equal(kept.room, 'lavande');
+    assert.deepEqual([kept.light, kept.grain, kept.dose, kept.motion], ['discret', 'film', 75, 'fige']);
+    assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'preferences.json'), 'utf8')).room, kept);
+    // Au redémarrage : la même salle (elle revenait aux réglages par défaut).
+    await app.close();
+    app = await createApplication({ port: 0, dataDir });
+    initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
+    assert.deepEqual(initial.preferences.room, kept);
+    // Une autre préférence enregistrée ensuite ne l'efface pas du fichier.
+    const changed = await save({ saveHistory: false }, initial.token);
+    assert.equal(changed.status, 200);
+    assert.deepEqual((await changed.json()).preferences.room, kept);
+    assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'preferences.json'), 'utf8')).room, kept);
+    // Un fichier dont la salle est abîmée : ses valeurs valides, le reste par défaut, jamais un refus de démarrer.
+    await app.close();
+    await writeFile(join(dataDir, 'preferences.json'), JSON.stringify({ theme: 'dark', saveHistory: true, room: { room: 'inconnue', dose: 'beaucoup', grain: 'gros' } }));
+    app = await createApplication({ port: 0, dataDir });
+    initial = await (await fetch(`${app.url}/api/bootstrap`)).json();
+    assert.deepEqual([initial.preferences.room.room, initial.preferences.room.grain, initial.preferences.room.dose], ['salle', 'gros', 40]);
+  } finally {
+    await app?.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});

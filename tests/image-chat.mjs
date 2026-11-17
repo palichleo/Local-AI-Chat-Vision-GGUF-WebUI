@@ -543,8 +543,9 @@ test('in the Chat an image starts at once and a video always waits on its card, 
   assert.equal(context.planWords(plan), plan);
   for (const wrong of ['', '  ', 'Voici la vidéo de l’éléphant dansant.', 'Here is your video!', 'La vidéo est prête, regardez-la.'])
     assert.match(context.planWords(wrong), /^Voici ce que je propose : la carte ci-dessous/);
-  // A take stopped by the user goes; the message says it, once (the take said it again, in English).
-  assert.equal(text.match(/if \(signal\.aborted\) generation\.withdraw\(\);/g).length, 3);
+  // A take stopped by the user goes; the message says it, once (the take said it again, in English):
+  // in a turn of the chat, in the Studio, for a character, and for an action on a take (0.6.31).
+  assert.equal(text.match(/if \(signal\.aborted\) generation\.withdraw\(\);/g).length, 4);
   assert.doesNotMatch(text, /if \(signal\.aborted\) generation\.fail\(/);
   // The image of a character starts at once; the replacement itself as the settings of the Studio say.
   assert.match(text, /if \(auto\) proposal\.autoAllow = true;/);

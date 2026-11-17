@@ -180,6 +180,9 @@ export function proposedValues(request, offered = []) {
     loras: Array.isArray(plan.loras) ? plan.loras : null,
     roleChoices: editable.references || [],
     source: source?.output_id ?? null,
+    // The clip continued is a file of the disk kept as a reference of the project (« #ref1 »), not a take.
+    sourceResource: source && !source.output_id ? (source.resource_id ?? null) : null,
+    sourceLabel: String(source?.label ?? ''),
   };
 }
 
@@ -324,9 +327,10 @@ export function setupStudio({
       // one in hand only when no other can be.
       usable = list.filter(item => !item.unavailable),
       first = usable[0] ?? list[0] ?? null;
-    // A continuation stays with the workflow that made the clip when it can.
+    // A continuation stays with the workflow that made the clip when it can. A clip of the disk was
+    // made by none of them: the one chosen here (in the list, or by the proposal just answered).
     if (mode === 'video' && extending && !proposal)
-      return usable.find(item => item.id === extending.workflowId) ?? first;
+      return usable.find(item => item.id === (extending.workflowId ?? draft.workflow)) ?? first;
     return usable.find(item => item.id === draft.workflow) ?? first;
   }
   // A proposal of Moodix AI is answered from its own mode: the others still work by hand.
@@ -837,6 +841,9 @@ export function setupStudio({
       labels = [];
     for (const [role, spec] of Object.entries(workflow.roles ?? {})) {
       if (['start_image', 'end_image', 'reference'].includes(role)) continue;
+      // A continuation: its clip is the one named above the prompt (« Suite du clip »), never asked
+      // again in an empty case that « Générer » would not read.
+      if (role === 'source' && mode === 'video' && extending) continue;
       // The video a character is replaced in: a slot like an image's, which takes a video.
       const video = takesVideo(workflow, role);
       if (!video && !takesImages(workflow, role)) continue;
@@ -1177,7 +1184,9 @@ export function setupStudio({
   /** Bloc Modèle: the model chosen (a list when there are several), its own block. */
   function modelBlock(workflow, list) {
     const block = node('div', 'studio-set-block studio-set-model');
-    if (list.length > 1 && !extending) {
+    // A clip made here is continued with the model that made it, never chosen; one of the disk has
+    // none of its own: its model is chosen like that of a new video.
+    if (list.length > 1 && (!extending || !extending.workflowId)) {
       const model = select(
         list.map(item => [item.id, item.unavailable ? item.name + ' · indisponible' : item.name]),
         workflow.id,
@@ -2152,7 +2161,9 @@ export function setupStudio({
     const args = { prompt },
       edits = {};
     // Named when its verb has several: the models of another verb of the list are not its rivals.
-    if (offered(verb).length > 1 && !extending) args.workflow = workflow.id;
+    // A continuation is not named (the server gives it the model of its clip), unless its clip is a
+    // file of the disk, which no model made: the one chosen here.
+    if (offered(verb).length > 1 && (!extending || !extending.workflowId)) args.workflow = workflow.id;
     if (mode === 'video')
       args.intention = extending
         ? 'Suite demandée dans le Studio.'
@@ -2584,7 +2595,19 @@ export function setupStudio({
     // What the assistant may not change is shown at once, as it will be made.
     if (values.source)
       extending = runs.find(item => item.id === values.source) ?? { id: values.source, prompt: '', parameters: {} };
-    else if (target === 'video') extending = null;
+    else if (values.sourceResource) {
+      // A clip of the disk (« #ref1 »): continued like a take. It is not in the Sortie, so it is put
+      // on the screen, where the user sees what is continued. (Left out, the Studio showed the cases
+      // of a new video, all empty, while the proposal continued that clip.)
+      const size = request.resolution ?? {};
+      extending = resourceRecord(assets.resource?.(values.sourceResource) ?? { id: values.sourceResource }, 'video', {
+        name: values.sourceLabel,
+        width: size.width,
+        height: size.height,
+      });
+      kept[target] = extending;
+      pinned = extending.id;
+    } else if (target === 'video') extending = null;
     if (!values.sizeFree && values.size && !extending) {
       draft.format = values.format ?? draft.format;
       draft.size = values.size;
@@ -2611,12 +2634,13 @@ export function setupStudio({
     else draft.workflow = workflow.id;
     if (values.promptFree)
       steps.push(['prompt', 'écrit le prompt', options => typePrompt(draft, values.prompt, options), { anchor: { ax: 34, ay: 30 } }]);
-    // Each image in its case, one after the other: a take of the project is carried there (dragIn).
-    if (values.references.length) {
-      draft.inputs = {};
-      for (const entry of referenceInputs(values.references))
-        steps.push(['inputs', '', options => dragIn(draft, entry, options), { own: true }]);
-    }
+    // Its cases are those of the proposal, and no other: an image the user had left in a case is not
+    // part of what will be made, and shown there it said the contrary (a proposal without images
+    // left them all in place). Each image of the proposal then goes in its case, one after the other:
+    // a take of the project is carried there (dragIn).
+    draft.inputs = {};
+    for (const entry of referenceInputs(values.references))
+      steps.push(['inputs', '', options => dragIn(draft, entry, options), { own: true }]);
     if (values.sizeFree && values.format && values.format !== draft.format && !extending)
       steps.push([
         'ratio',
@@ -3689,7 +3713,7 @@ export function setupStudio({
     write.append(named);
     if (mode === 'video' && extending) {
       const banner = node('div', 'studio-extending');
-      banner.append(icon('forward'), node('span', '', 'Suite du clip : ' + (extending.prompt || '').slice(0, 90)));
+      banner.append(icon('forward'), node('span', '', 'Suite du clip : ' + (extending.prompt || extending.name || '').slice(0, 90)));
       if (!answering())
         banner.append(
           button('studio-link', 'Annuler', () => {
@@ -3699,6 +3723,12 @@ export function setupStudio({
         );
       write.append(banner);
     }
+    // What a proposal of Moodix AI says of itself, as on its card in the chat: an image the user
+    // named that it does not transmit (the continuation of a video by LTX 2.5 takes none), a model
+    // used in place of the one asked for. Nothing else showed it here. At the head of the column:
+    // under the cases it was out of sight in a window of 720 px (the column scrolls in itself).
+    if (answering())
+      for (const note of proposal.request.notes ?? []) write.append(node('p', 'studio-proposal-note', String(note)));
     const prompt = textarea(
       draft.prompt,
       8,
@@ -4140,6 +4170,29 @@ export function setupStudio({
     ...(info?.tools?.[modeOf(id).verb] ?? []),
     ...(id === 'video' ? (info?.tools?.replace_character ?? []) : []),
   ];
+  /**
+   * A reference of the project (an image or a clip of the disk, « #ref1 ») as a creation: what the
+   * screen shows and what the actions and a continuation take as their source (`outputSource`).
+   * `sheet`: what Moodix wrote in the file, when it made it; `name`, `width`, `height`: what is known
+   * of it when the page has not its reference at hand.
+   */
+  function resourceRecord(resource, kind, { sheet = null, name = '', width, height } = {}) {
+    const wide = resource.width ?? width,
+      high = resource.height ?? height;
+    return {
+      id: 'file:' + resource.id,
+      external: true,
+      resource: resource.id,
+      mediaType: kind,
+      prompt: String(sheet?.prompt ?? ''),
+      // How it is named where a clip continued is named (« Suite du clip : view.mp4 »).
+      name: resource.name || name || '',
+      workflowId: sheet?.workflowId,
+      workflowName: sheet?.workflowName,
+      parameters: sheet?.parameters ?? (wide > 0 && high > 0 ? { width: wide, height: high } : {}),
+      outputs: [{ originalUrl: resource.originalUrl || resource.previewUrl || '', thumbUrl: resource.previewUrl || '', width: wide, height: high }],
+    };
+  }
   /** A take of the project as an input of the Studio (its picture, its name, its size). */
   function creationInput(record, index = 0) {
     const output = { ...record.outputs[index], ...measured.get(record.id) };
@@ -4364,17 +4417,20 @@ export function setupStudio({
     if (working || proposal || ai) return;
     const address = resource ? resource.originalUrl || resource.previewUrl : (globalThis.URL?.createObjectURL?.(file) ?? '');
     if (!address) return notice('Ce fichier n’a pas pu être lu.');
-    inspect({
-      id: 'file:' + (resource?.id ?? `${file.name}:${file.size}:${file.lastModified ?? 0}`),
-      external: true,
-      ...(resource ? { resource: resource.id } : {}),
-      mediaType: kind,
-      prompt: String(sheet?.prompt ?? ''),
-      workflowId: sheet?.workflowId,
-      workflowName: sheet?.workflowName,
-      parameters: sheet?.parameters ?? {},
-      outputs: [{ originalUrl: address, thumbUrl: resource?.previewUrl || '', width: resource?.width, height: resource?.height }],
-    });
+    inspect(
+      resource
+        ? resourceRecord(resource, kind, { sheet })
+        : {
+            id: `file:${file.name}:${file.size}:${file.lastModified ?? 0}`,
+            external: true,
+            mediaType: kind,
+            prompt: String(sheet?.prompt ?? ''),
+            workflowId: sheet?.workflowId,
+            workflowName: sheet?.workflowName,
+            parameters: sheet?.parameters ?? {},
+            outputs: [{ originalUrl: address, thumbUrl: '' }],
+          },
+    );
     if (!resource) lookedUrl = address;
   }
   /** « Afficher dans le Studio » on a take of the chat: on the screen, with what made it (inspect). */

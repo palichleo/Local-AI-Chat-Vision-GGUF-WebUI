@@ -2,7 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-import { STUDIO_NOTE, callNote, conversationTitle, lastExchange, spokenText, withoutStudioNote } from '../public/transcript.mjs';
+import {
+  FAILED_NOTE,
+  FAILED_SETTLED,
+  STUDIO_NOTE,
+  callNote,
+  conversationTitle,
+  lastExchange,
+  settledNotes,
+  spokenText,
+  withoutStudioNote,
+} from '../public/transcript.mjs';
 import * as chatVideos from '../public/chat-videos.mjs';
 
 const call = (name, id = 'c1') => ({ id, type: 'function', function: { name, arguments: '{}' } });
@@ -209,4 +219,30 @@ test('a conversation is named by its words; a creation of the Studio by its prom
   assert.equal(conversationTitle('Studio · Image : un lac\n\n' + STUDIO_NOTE.slice(0, 12)), 'un lac');
   assert.equal(conversationTitle('Bonjour, Studio · Image : rien'), 'Bonjour, Studio · Image : rien');
   assert.equal(conversationTitle(undefined), '');
+});
+
+test('the consigne of a creation that failed is for the message it failed in, not for the next ones', () => {
+  const failed = { role: 'tool', tool_call_id: 'c1', content: JSON.stringify({ status: 'error', message: 'La carte graphique n’a pas assez de mémoire.', note: FAILED_NOTE }) },
+    asked = { role: 'user', content: 'prolonge cette vidéo' },
+    call = { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'extend_video', arguments: '{}' } }] };
+  // While its message is answered (the model explains, its tools off), it reads the consigne whole.
+  const during = [asked, call, failed];
+  assert.deepEqual(settledNotes(during), during);
+  // What the application adds for the model in that message is not the user writing again.
+  const looking = [...during, { role: 'user', internal: true, content: 'Voici les copies réduites…' }];
+  assert.deepEqual(settledNotes(looking), looking);
+  // The user writes again: « no tool is left, write no call » is no longer said; what failed, and
+  // what to do when asked to make it again, still are.
+  const after = settledNotes([...during, { role: 'user', content: 'test' }]),
+    kept = JSON.parse(after[2].content);
+  assert.equal(kept.note, FAILED_SETTLED);
+  assert.equal(kept.message, 'La carte graphique n’a pas assez de mémoire.');
+  assert.doesNotMatch(after[2].content, /Aucun outil|sans écrire d’appel/);
+  assert.match(kept.note, /refais le même appel d’outil/);
+  assert.equal(failed.content.includes('Aucun outil'), true, 'the history itself is left as it was');
+  assert.deepEqual([after[0], after[1], after[3]], [asked, call, { role: 'user', content: 'test' }]);
+  // Any other result is left alone; nothing to read, nothing to settle.
+  const done = { role: 'tool', tool_call_id: 'c2', content: JSON.stringify({ status: 'success', note: 'Image générée.' }) };
+  assert.deepEqual(settledNotes([asked, done, asked]), [asked, done, asked]);
+  assert.deepEqual(settledNotes([]), []);
 });

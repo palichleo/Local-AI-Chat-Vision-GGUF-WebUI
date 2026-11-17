@@ -98,8 +98,9 @@ export async function layout(source) {
   if (!kind) return null;
   const parts = [];
   let info = null,
+    count = 0,
     at = kind === 'png' ? 8 : kind === 'wav' ? 12 : 0;
-  for (let count = 0; at < source.size && count < 8192; count++) {
+  for (; at < source.size && count < 8192; count++) {
     if (kind === 'png') {
       if (at + 12 > source.size) return null;
       const header = await source.read(at, 8),
@@ -109,11 +110,14 @@ export async function layout(source) {
       if (at + size > source.size) return null;
       let mine = false,
         engine = false;
-      if ((type === 'iTXt' || type === 'tEXt') && length <= MAX_INFO * 8) {
-        const start = await source.read(at + 8, Math.min(length, KEYWORD.length + 1));
+      if (type === 'iTXt' || type === 'tEXt' || type === 'zTXt') {
+        const start = await source.read(at + 8, Math.min(length, 8));
         mine = type === 'iTXt' && ascii(start, 0, KEYWORD.length) === KEYWORD && start[KEYWORD.length] === 0;
         // What the engine wrote of its own (the paths of its files among it): replaced by the sheet.
-        engine = type === 'tEXt' && ascii(start, 0, 7) === 'atelier';
+        // Whatever the chunk and its length: Pillow writes « tEXt » only when the text is Latin-1, and
+        // « iTXt » as soon as the prompt holds « ’ », « — », « œ » or an emoji (kept as « tEXt » alone,
+        // the whole job stayed in those images, the paths of the models with it).
+        engine = ascii(start, 0, 7) === 'atelier' && start[7] === 0;
         if (mine && length <= MAX_INFO) {
           const data = await source.read(at + 8, length);
           // keyword, 0, compression flag, compression method, language, 0, translated keyword, 0, text
@@ -158,6 +162,8 @@ export async function layout(source) {
       at += size;
     }
   }
+  // Not read to its end (more pieces than any file Moodix makes): not a file to write in.
+  if (count >= 8192 && at < source.size) return null;
   return { kind, parts, info };
 }
 

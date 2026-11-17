@@ -511,3 +511,65 @@ test('a verb with no matching workflow explains which inputs are available', asy
     /Aucun workflow|start_image/,
   );
 });
+
+test('an image the user named and a proposal leaves out is said on it, until it is given', async () => {
+  const stairs = { id: 'c3333333-3333-4333-8333-333333333333', label: '#ref2' },
+    chair = { id: 'd4444444-4444-4444-8444-444444444444', label: '#ref3' };
+  const fixture = runtimeFixture(),
+    { rt } = fixture;
+  rt.resources = { activeRecord: async () => ({ mime: 'image/png' }) };
+  rt.sourceMedia = async ref => ({ mime: 'image/png', name: ref.resource_id + '.png', handle: { close: async () => {} } });
+  const ask = (args, options = {}) =>
+    rt.request(
+      [{ id: 'call_1', type: 'function', function: { name: 'create_image', arguments: JSON.stringify({ prompt: 'portrait', ...args }) } }],
+      { conversationId: id, turnId: id, messages: [], ...options },
+    );
+  // Nothing named, or the image named given: nothing to say.
+  assert.equal((await ask({})).cited, undefined);
+  const given = await ask({ source: { resource: stairs.id } }, { cited: [stairs] });
+  assert.deepEqual([given.cited, given.notes], [undefined, undefined]);
+  // Named and left out, a place free in its workflow: the roles it could take (the model is told).
+  const left = await ask({}, { cited: [stairs] });
+  assert.deepEqual(left.cited, { left: [stairs], roles: ['source'] });
+  assert.deepEqual(left.notes, ['#ref2 n’est pas transmise. Le générateur ne la verra pas, seul le prompt peut la décrire.']);
+  // Its only place taken by another image: no role left, the reason said to the user.
+  const taken = await ask({ source: { resource: chair.id } }, { cited: [stairs, chair] });
+  assert.deepEqual(taken.cited, { left: [stairs], roles: [] });
+  assert.deepEqual(taken.notes, [
+    '#ref2 n’est pas transmise : Portrait n’a pas de place pour elle avec les autres entrées. ' +
+      'Le générateur ne la verra pas, seul le prompt peut la décrire.',
+  ]);
+  // An image passed by its position among those attached may be the one named: nothing is claimed.
+  const attached = await ask({ source: { image: 0 } }, {
+    cited: [stairs],
+    messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } }] }],
+  });
+  assert.deepEqual([attached.cited, attached.notes], [undefined, undefined]);
+  // A verb that makes nothing from images (an upscale) says nothing of them.
+  assert.equal(rt.pending.size > 0, true);
+});
+
+test('a workflow that takes no image says so of the image the user named', async () => {
+  const stairs = { id: 'c3333333-3333-4333-8333-333333333333', label: '#ref2' };
+  const workflow = nativeWorkflow({ id: 'wf', name: 'Affiche', digest: 'one' });
+  const rt = new ToolRuntime({
+    engine: { state: 'ready', busy: false, stop: async () => {}, start: async () => {} },
+    catalog: { list: async () => [workflow], read: async () => workflow, prepare: async () => nativePrepared(workflow) },
+    gallery: { put: async record => record },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 3 }),
+    engineConfig: () => ({}),
+    clientFactory: () => ({}),
+  });
+  const proposal = await rt.request(
+    [{ id: 'call_1', type: 'function', function: { name: 'create_image', arguments: '{"prompt":"une affiche"}' } }],
+    { conversationId: id, turnId: id, messages: [], cited: [stairs] },
+  );
+  assert.deepEqual(proposal.cited, { left: [stairs], roles: [] });
+  assert.deepEqual(proposal.notes, [
+    '#ref2 n’est pas transmise : Affiche ne prend pas d’image. Le générateur ne la verra pas, seul le prompt peut la décrire.',
+  ]);
+  // The proposal revised by the user (its prompt): the note is worked out again, said once.
+  const revised = await rt.revise({ requestId: proposal.requestId, approvalToken: proposal.approvalToken, edits: { prompt: 'une autre affiche' } });
+  assert.deepEqual(revised.notes, proposal.notes);
+  assert.deepEqual(revised.cited, proposal.cited);
+});

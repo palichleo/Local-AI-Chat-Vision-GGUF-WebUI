@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { readSSE } from '../public/stream.mjs';
 import * as sessionCopies from '../public/session-copies.mjs';
 import * as chatVideos from '../public/chat-videos.mjs';
+import * as transcript from '../public/transcript.mjs';
 test('grouped resource frames retain their separate labels and never enter saved conversation snapshots', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     png = 'data:image/png;base64,iVBORw0KGgo=';
@@ -38,6 +39,7 @@ test('grouped resource frames retain their separate labels and never enter saved
   const context = {
     ...sessionCopies,
     ...chatVideos,
+    ...transcript,
     turnActions() {},
     showLastReply() {},
     generationUI: { mount: () => ({ progress() {}, image() {}, finish() {}, fail() {} }) },
@@ -158,6 +160,7 @@ test('a failed description save keeps the composer intact and never sends a chat
   const context = {
     ...sessionCopies,
     ...chatVideos,
+    ...transcript,
     turnActions() {},
     showLastReply() {},
     generationUI: { mount: () => ({ progress() {}, image() {}, finish() {}, fail() {} }) },

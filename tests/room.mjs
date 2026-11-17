@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { DEFAULTS, ROOMS, grainImage, refreshLight, roomSettings, roomStyle, showTakeReady } from '../public/room.mjs';
 
-const read = name => readFile(new URL('../public/' + name, import.meta.url), 'utf8');
+// Read as the page is written, whatever the ends of line of this copy (a checkout on Windows has CRLF).
+const read = async name => (await readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replaceAll(String.fromCharCode(13, 10), String.fromCharCode(10));
 const drawn = image => decodeURIComponent(image.slice('url("data:image/svg+xml,'.length, -2));
 
 test('a saved setting is completed, and kept within its choices', () => {

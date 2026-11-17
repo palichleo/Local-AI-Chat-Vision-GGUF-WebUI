@@ -502,3 +502,60 @@ test('an output of another conversation of the project keeps its conversation; a
     /conversation goes only with an output/,
   );
 });
+
+test('one more image: where a proposal still has a place for it, and which other workflow would', async () => {
+  const minimax = {
+      ...video('minimax-next', [
+        slot('clip', 'source_video', true),
+        slot('r1', 'reference_image'),
+        slot('r2', 'reference_image'),
+      ]),
+      pipeline: 'minimax_h3',
+    },
+    ltx = video('ltx-next', [slot('clip', 'source_video', true), slot('a', 'msr_image')]),
+    clip = [{ input: 'clip' }];
+  // LTX 2.5 continues a clip without any image; MiniMax H3 takes subject references with it.
+  assert.deepEqual(await catalogOf([minimax, ltx]).room('extend_video', ltx, clip), {
+    here: [],
+    none: true,
+    other: 'minimax-next',
+  });
+  assert.deepEqual(await catalogOf([ltx]).room('extend_video', ltx, clip), { here: [], none: true, other: null });
+  assert.deepEqual(await catalogOf([minimax, ltx]).room('extend_video', minimax, clip), {
+    here: ['reference'],
+    none: false,
+    other: null,
+  });
+  // Its two references given: no place left, and LTX would not take them either.
+  const full = [{ input: 'clip' }, { input: 'r1' }, { input: 'r2' }];
+  assert.deepEqual(await catalogOf([minimax, ltx]).room('extend_video', minimax, full), {
+    here: [],
+    none: false,
+    other: null,
+  });
+  // A new video: the roles left free, those the family does not combine with the ones given left out.
+  const keys = video('keyframes', [slot('first', 'start_image'), slot('last', 'end_image')]),
+    subject = video('subject', [slot('first', 'start_image'), slot('a', 'msr_image')]),
+    omni = {
+      ...video('omni', [slot('s', 'start_image'), slot('e', 'end_image'), slot('r1', 'reference_image')]),
+      pipeline: 'minimax_h3',
+    };
+  const tools = catalogOf([keys, subject, omni]);
+  assert.deepEqual((await tools.room('create_video', keys, [])).here, ['start_image', 'end_image']);
+  assert.deepEqual((await tools.room('create_video', keys, [{ input: 'first' }])).here, ['end_image']);
+  const taken = await tools.room('create_video', keys, [{ input: 'first' }, { input: 'last' }]);
+  assert.deepEqual(taken, { here: [], none: false, other: null }, 'two key images and a third: no workflow here');
+  // MiniMax H3: a reference does not go with a start image; an end image does.
+  assert.deepEqual((await tools.room('create_video', omni, [{ input: 's' }])).here, ['end_image']);
+  assert.deepEqual((await tools.room('create_video', omni, [{ input: 'r1' }])).here, []);
+  // … which LTX 2.5 takes together: a reference, and the image as the one the clip starts on.
+  assert.equal((await tools.room('create_video', omni, [{ input: 'r1' }])).other, 'subject');
+  // A workflow without any image, beside one that takes a start image.
+  const plain = video('t2v', []);
+  assert.deepEqual(await catalogOf([plain, keys]).room('create_video', plain, []), {
+    here: [],
+    none: true,
+    other: 'keyframes',
+  });
+  assert.deepEqual(await tools.room('nothing', keys, []), { here: [], none: true, other: null });
+});

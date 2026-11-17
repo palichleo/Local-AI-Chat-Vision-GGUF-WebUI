@@ -32,7 +32,10 @@ const server = http.createServer(async (req, res) => {
     send(res, { local_test_payload: body });
     return res.end('data: [DONE]\n\n');
   }
-  const last = body.messages.at(-1).content;
+  // A model that makes its call again whatever the tool answered (« whatever is said »).
+  const asked = body.messages.findLast(message => message.role === 'user')?.content,
+    insists = typeof asked === 'string' && asked.includes('whatever is said');
+  const last = insists ? asked : body.messages.at(-1).content;
   const text =
     typeof last === 'string'
       ? last
@@ -41,7 +44,7 @@ const server = http.createServer(async (req, res) => {
           .map(part => part.text)
           .join(' ');
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-  if (body.messages.some(message => message.role === 'tool')) {
+  if (body.messages.some(message => message.role === 'tool') && !insists) {
     const native = body.messages.find(message => message.role === 'assistant' && message.tool_calls);
     const result = body.messages.find(message => message.role === 'tool');
     const review = Array.isArray(last) && last.some(part => part.type === 'image_url');
@@ -85,7 +88,10 @@ const server = http.createServer(async (req, res) => {
           : text.includes('invented source')
             ? // What a small model does with an optional source it cannot fill: copy the placeholder.
               { prompt: 'A red boat', source: { output: 'run_id' } }
-            : text.startsWith('generate from take ')
+            : text.startsWith('generate naming ')
+              ? // The identifier of an image written in the prompt, the image itself left out.
+                { prompt: 'A red boat like ' + text.slice(16, 52) }
+              : text.startsWith('generate from take ')
               ? // A take named by its number, as the user says it (« la prise 12 »).
                 { prompt: 'A red boat', source: { take: Number(text.slice(19)) } }
               : text.startsWith('generate from ')
