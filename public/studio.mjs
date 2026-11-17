@@ -3122,7 +3122,16 @@ export function setupStudio({
       held = modelsOf('image').find(item => item.id === drafts.image.workflow);
     return list.find(item => item.id === held?.id) ?? list[0] ?? null;
   }
-  const sourceOf = record => record.parameters?.references?.find(ref => ref.role === 'source_video')?.output_id;
+  // Agrandie (Real-ESRGAN) or interpolée (RIFE): made from a clip too (its « source_video »), but the
+  // whole clip again, not its continuation (17/11: they were said « ↳ SUITE », their length « + »).
+  const TRANSFORMED = { realesrgan_video: 'AGRANDIE', rife: 'INTERPOLÉE' };
+  const transformOf = record => TRANSFORMED[record.parameters?.pipeline] ?? null;
+  /** The clip a continuation goes on from; none for anything else. */
+  const sourceOf = record =>
+    transformOf(record) ? undefined : record.parameters?.references?.find(ref => ref.role === 'source_video')?.output_id;
+  /** The clip an upscale or an interpolation was made from. */
+  const transformedFrom = record =>
+    transformOf(record) ? record.parameters?.references?.find(ref => ref.role === 'source_video')?.output_id : undefined;
   async function remove(record) {
     try {
       // A creation of another conversation of the project leaves that conversation.
@@ -3335,7 +3344,17 @@ export function setupStudio({
       number = numberOf(record),
       name = (KIND[media] ?? 'Création') + ' #' + number,
       from = media === 'video' && sourceOf(record) ? numberOf({ id: sourceOf(record), mediaType: 'video' }) : null,
-      said = [name, from ? 'suite du clip #' + from : '', record.prompt || ''].filter(Boolean).join(' · '),
+      // An upscale or an interpolation of a clip: the clip it was made from.
+      transform = media === 'video' ? transformOf(record) : null,
+      origin = transform && transformedFrom(record) ? numberOf({ id: transformedFrom(record), mediaType: 'video' }) : null,
+      said = [
+        name,
+        from ? 'suite du clip #' + from : '',
+        transform ? (transform === 'AGRANDIE' ? 'agrandissement' : 'interpolation') + (origin ? ' du clip #' + origin : '') : '',
+        record.prompt || '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
       actions = actionsOf(record),
       shown = onStage()?.id === record.id,
       tile = node(
@@ -3437,10 +3456,15 @@ export function setupStudio({
     };
     pick.onpointerup = pick.onpointercancel = pick.onpointerleave = () => clearTimeout(holding);
     // Under it (capture 22): « PRISE n » and its length (« 06.04 S »), its format for an image; a
-    // continuation, « ↳ SUITE +04.00 S », glued to its take.
+    // continuation, « ↳ SUITE +04.00 S », glued to its take; an upscale or an interpolation,
+    // « ↳ AGRANDIE » or « ↳ INTERPOLÉE » and its whole length.
     const take = output.take,
       caption = node('span', 'studio-item-caption'),
-      badge = node('span', 'studio-item-number', from ? '↳ SUITE' : Number.isInteger(take) ? 'PRISE ' + take : '#' + number),
+      badge = node(
+        'span',
+        'studio-item-number',
+        from ? '↳ SUITE' : transform ? '↳ ' + transform : Number.isInteger(take) ? 'PRISE ' + take : '#' + number,
+      ),
       length = lengthOfRecord(record, Boolean(from)),
       shape = sizeOfRecord(record);
     caption.setAttribute('aria-hidden', 'true');

@@ -78,6 +78,12 @@ test('the Pellicule: a page of its own, headed by the fil of the Chat and the St
   // « Tous les projets » alone; the number of takes of a line of the menus in mono.
   assert.match(css, /\.thread\[data-scope='all'\] :is\(\.thread-slash, \.thread-conversation\) \{\n {2}display: none;/);
   assert.match(css, /\.thread-choice-count \{[^}]*font: 400 12px\/1 var\(--font-mono\);/);
+  // A narrow take (9:16): its actions in one column at its right edge, not in stretched rows (17/11).
+  assert.match(css, /#library-view \.library-tile \{\r?\n {2}container: library-tile \/ inline-size;/);
+  assert.match(
+    css,
+    /@container library-tile \(max-width: 200px\) \{\r?\n {2}#library-view \.library-tile \.output-actions \{\r?\n {4}flex-direction: column;/,
+  );
   // The words of a tile over its foot, under the pointer or the keyboard's focus only.
   assert.match(css, /\.library-veil \{[^}]*opacity: 0;[^}]*pointer-events: none;/);
   assert.match(css, /\.library-tile:hover \.library-veil,\n\.library-tile:focus-within \.library-veil \{\n {2}opacity: 1;/);

@@ -1468,6 +1468,74 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
   }
 });
 
+test('in the Sortie, an upscale or an interpolation of a clip is said so, with its whole length, not « ↳ SUITE »', async () => {
+  const video = {
+      id: 'v',
+      name: 'Clip',
+      styled: true,
+      limits: sizes,
+      size: { width: 768, height: 448 },
+      settings: [],
+      seeded: true,
+      roles: { start_image: { count: 1, media: ['image'] } },
+    },
+    from = id => [{ role: 'source_video', output_id: id }],
+    runs = [
+      // Interpolated from the upscale, then a real continuation of it, then the upscale of the first.
+      {
+        id: 'c4',
+        mediaType: 'video',
+        prompt: 'un renard qui court',
+        outputs: [{ originalUrl: '/c4.mp4', take: 24 }],
+        parameters: { pipeline: 'ltx25', frames: 121, fps: 24, overlap_frames: 25, references: from('c3') },
+      },
+      {
+        id: 'c3',
+        mediaType: 'video',
+        prompt: 'un renard qui court',
+        outputs: [{ originalUrl: '/c3.mp4', take: 23 }],
+        parameters: { pipeline: 'rife', mode: 'smooth', frames: 241, fps: 48, references: from('c2') },
+      },
+      {
+        id: 'c2',
+        mediaType: 'video',
+        prompt: 'un renard qui court',
+        outputs: [{ originalUrl: '/c2.mp4', take: 22 }],
+        parameters: { pipeline: 'realesrgan_video', frames: 121, fps: 24, references: from('c1') },
+      },
+      {
+        id: 'c1',
+        mediaType: 'video',
+        prompt: 'un renard qui court',
+        outputs: [{ originalUrl: '/c1.mp4', take: 21 }],
+        parameters: { pipeline: 'ltx25', frames: 121, fps: 24 },
+      },
+    ];
+  const { body, restore, mode } = await studioPage({ create_video: [video] }, {}, { runs });
+  try {
+    body.find('studio-sort-go')[0].onclick();
+    mode(1);
+    const items = body.find('studio-item'),
+      captions = items.map(item => item.find('studio-item-caption')[0].children.map(part => part.textContent));
+    assert.deepEqual(captions, [
+      ['↳ SUITE', '+04.00 S'],
+      ['↳ INTERPOLÉE', '05.02 S'],
+      ['↳ AGRANDIE', '05.04 S'],
+      ['PRISE 21', '05.04 S'],
+    ]);
+    assert.deepEqual(
+      items.slice(0, 3).map(item => item.find('studio-item-pick')[0].attributes['aria-label']),
+      [
+        'Clip #4 · suite du clip #3 · un renard qui court',
+        'Clip #3 · interpolation du clip #2 · un renard qui court',
+        'Clip #2 · agrandissement du clip #1 · un renard qui court',
+      ],
+    );
+  } finally {
+    restore();
+  }
+});
+
 test('an image dragged to another slot changes role; a move that would not combine is refused', async () => {
   const video = {
     id: 'v',

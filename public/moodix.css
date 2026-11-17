@@ -11936,6 +11936,24 @@ body[data-view='library'] .library-view {
 #library-view .output-action:disabled {
   opacity: 0.38;
 }
+/* A narrow take (a 9:16 one is 110 px wide): its actions in one column down its right edge, at their
+   size, rather than in rows stretched over its picture (17/11). */
+#library-view .library-tile {
+  container: library-tile / inline-size;
+}
+#library-view .library-tile .output-action {
+  flex: none;
+}
+@container library-tile (max-width: 200px) {
+  #library-view .library-tile .output-actions {
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+  /* Its prompt and where it was made beside the column, not under it. */
+  #library-view .library-veil {
+    padding-right: 54px;
+  }
+}
 /* A project with nothing in it (capture 39): in the middle of the page, its sentence in Gloock, a
    line, one way to begin (« + Nouvelle conversation », in glass). */
 #library-view > .library-creations:has(> .library-empty:not([hidden])) {
