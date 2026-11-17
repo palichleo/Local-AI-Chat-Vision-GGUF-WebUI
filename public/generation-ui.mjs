@@ -8,14 +8,33 @@ const KINDS = { image: 'IMAGE', video: 'VIDÉO', audio: 'SON' };
 /** A length as the Studio writes it everywhere (moodix-design.md 27): « 05.04 S » in capitals. */
 const twoFigures = value => (Math.round(Number(value) * 100) / 100).toFixed(2).padStart(5, '0');
 const figures = value => twoFigures(value) + ' S';
+/**
+ * The length of a clip in seconds, from its settings. The file of a continuation holds the clip it
+ * continues, then what it adds: its length is that of both (`continuation`, written by the engine),
+ * not the frames it generated, overlap included (a suite of 5 s of a clip of 5 s read « 05.38 S »
+ * while its file plays 10 s).
+ */
+export function clipSeconds(p = {}) {
+  if (!(p.fps > 0)) return null;
+  const made = p.continuation;
+  if (made?.sourceFrames > 0 && made?.newFrames > 0) return (made.sourceFrames + made.newFrames) / p.fps;
+  return p.frames > 0 ? p.frames / p.fps : null;
+}
 /** What a card says of a creation: its kind, its format and its length (« VIDÉO · 16:9 · 05.04 S »). */
-export function cardMeta({ media = 'image', width, height, seconds } = {}) {
+export function cardMeta({ media = 'image', width, height, seconds, added = false } = {}) {
   const format =
     media === 'audio' ? '' : (formatOf(width, height)?.id ?? (width && height ? width + '×' + height : ''));
-  return [KINDS[media] ?? KINDS.image, format, Number.isFinite(seconds) && seconds > 0 ? figures(seconds) : '']
+  // (`added`: the length a continuation adds to its clip, « SUITE · + 05.00 S ».)
+  return [
+    added ? 'Suite' : (KINDS[media] ?? KINDS.image),
+    format,
+    Number.isFinite(seconds) && seconds > 0 ? (added ? '+ ' : '') + figures(seconds) : '',
+  ]
     .filter(Boolean)
     .join(' · ');
 }
+/** Whether a proposal continues a clip (its video to follow among its inputs). */
+const continues = request => (request.plan?.references ?? []).some(ref => ref?.role === 'source_video');
 const recordMeta = record => {
   const p = record.parameters ?? {},
     output = record.outputs?.[0] ?? {},
@@ -24,7 +43,7 @@ const recordMeta = record => {
     media,
     width: p.width ?? output.width,
     height: p.height ?? output.height,
-    seconds: media === 'audio' ? p.seconds : p.frames && p.fps ? p.frames / p.fps : null,
+    seconds: media === 'audio' ? p.seconds : clipSeconds(p),
   });
 };
 /**
@@ -37,7 +56,7 @@ export function takeLine(record, index) {
     media = record.mediaType || 'image',
     width = output.width ?? p.width,
     height = output.height ?? p.height,
-    seconds = media === 'audio' ? p.seconds : p.frames && p.fps ? p.frames / p.fps : null,
+    seconds = media === 'audio' ? p.seconds : clipSeconds(p),
     format = formatOf(width, height)?.id ?? (width && height ? `${width} × ${height}` : '');
   return {
     number: Number.isInteger(output.take) ? `PRISE ${output.take}` : '',
@@ -64,7 +83,14 @@ const requestMeta = request => {
     media,
     width: request.resolution?.width ?? p.width,
     height: request.resolution?.height ?? p.height,
-    seconds: media === 'audio' ? p.seconds : p.frames && p.fps ? p.frames / p.fps : null,
+    // A continuation proposed: what it adds to its clip (the frames it shares with it left out).
+    seconds:
+      media === 'audio'
+        ? p.seconds
+        : p.frames && p.fps
+          ? (p.frames - (continues(request) && p.overlap_frames > 0 ? p.overlap_frames : 0)) / p.fps
+          : null,
+    added: continues(request),
   });
 };
 

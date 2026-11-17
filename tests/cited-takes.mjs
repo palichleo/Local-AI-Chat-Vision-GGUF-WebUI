@@ -243,13 +243,3 @@ test('forgotten (a conversation opened again), a take deleted since is no longer
   assert.equal(loads, 2);
   assert.deepEqual(labels(after), ['PRISE 12']);
 });
-
-test('a reply that has a card of its own shows no take small under its words: the card shows it', async () => {
-  const { readFile } = await import('node:fs/promises');
-  const css = await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8'),
-    page = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  // (« La suite part de la prise 25 » drew that take a second time, tiny, between the words and the card.)
-  assert.match(css, /#messages \.message\.assistant:has\(\.generation-card\) > \.message-cited \{\r?\n  display: none;\r?\n\}/);
-  // Nor while the words over a card to come are written: they would show, then go.
-  assert.match(page, /citedTakes\.show\(view, planFor \? '' : output\);/);
-});

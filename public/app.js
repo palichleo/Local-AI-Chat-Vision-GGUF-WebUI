@@ -2606,9 +2606,8 @@ async function sendMessage(event) {
     }
     if (output) renderText(view.body, output);
     else view.body.replaceChildren();
-    // The takes it names, small under its words, as soon as it names them. Not for the words
-    // written over a card that comes next (`planFor`): they would show, then go as it arrives.
-    citedTakes.show(view, planFor ? '' : output);
+    // The takes it names, small under its words, as soon as it names them.
+    citedTakes.show(view, output);
     if (output) showLastReply(output);
     scrollToBottom();
     lastRender = performance.now();

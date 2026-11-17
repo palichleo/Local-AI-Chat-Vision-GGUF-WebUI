@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setupGenerationUI, takeLine } from '../public/generation-ui.mjs';
+import { cardMeta, clipSeconds, setupGenerationUI, takeLine } from '../public/generation-ui.mjs';
 // The parent of an element, out of what is compared (not enumerable).
 const adopt = (parent, item) =>
   item instanceof Element && Object.defineProperty(item, 'parent', { value: parent, writable: true, configurable: true });
@@ -670,4 +670,24 @@ test('a clip put back in a conversation takes the shape its record says, before 
     other = ui.mount(larger, {});
   other.image({ record: big, index: 0 });
   assert.equal(larger.children[0].children[0].style.aspectRatio, '1152 / 2048');
+});
+
+test('a continuation says the length of its file under its take, and what it adds on its proposal', () => {
+  // As the engine records it: 120 new frames after the 121 of its clip, 9 of them shared.
+  const parameters = {
+    width: 896,
+    height: 1600,
+    frames: 129,
+    fps: 24,
+    overlap_frames: 9,
+    continuation: { overlapFrames: 9, sourceFrames: 121, newFrames: 120 },
+  };
+  // Its file plays its clip, then the suite: 241 frames (it read « 05.38 S »).
+  assert.equal(clipSeconds(parameters), 241 / 24);
+  assert.equal(takeLine({ mediaType: 'video', parameters, outputs: [{ take: 28 }] }, 0).seconds, '10.04 S');
+  // A clip that continues nothing: its frames.
+  assert.equal(clipSeconds({ frames: 121, fps: 24 }), 121 / 24);
+  assert.equal(clipSeconds({ frames: 121 }), null);
+  // On the card of a proposal: « Suite », and the 5 s it adds.
+  assert.equal(cardMeta({ media: 'video', width: 896, height: 1600, seconds: 5, added: true }), 'Suite · 9:16 · + 05.00 S');
 });
