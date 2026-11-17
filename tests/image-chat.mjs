@@ -126,6 +126,7 @@ async function exchange({
     historyWrite: Promise.resolve(),
     refreshStatus: async () => {},
     setConversationTitle() {},
+    nameConversation() {},
     workflowsUI: {
       requestTool: async (...args) => ({
         ...(toolOptions.push(args[4]) && proposals.push({ ...args[0] }) && {}),

@@ -322,6 +322,30 @@ function setConversationTitle(title, { unnamed = false } = {}) {
   renderHistory();
 }
 
+/**
+ * The name of the conversation in four words at most, asked to the chat model once it has answered
+ * (POST /api/history/title, lib/conversation-title.mjs): the picture it opened on described, or its
+ * first words summed up. Asked at the end of its first three turns at most, until the model is free
+ * to answer; the name made of the first message stays meanwhile, and whenever it cannot.
+ */
+async function nameConversation(messages, conversationId) {
+  if (!state.saveHistory || !conversationId || state.named?.has(conversationId)) return;
+  const said = messages.filter(message => message?.role === 'user' && !message.resourceId && !message.outputId);
+  if (!said.length || said.filter(message => !message.internal).length > 3) return;
+  try {
+    const answer = await (await api('history/title', { id: conversationId, content: said[0].content })).json();
+    if (answer.later) return;
+    (state.named ??= new Set()).add(conversationId);
+    const named = answer.conversation;
+    if (!named?.title) return;
+    state.historyItems = (state.historyItems || []).map(item => (item.id === named.id ? { ...item, title: named.title } : item));
+    if (state.conversationId === named.id) $('conversation-title').textContent = named.title;
+    renderHistory();
+  } catch {
+    // The name made of the first message stays.
+  }
+}
+
 async function refreshHistory() {
   if (!state.saveHistory) {
     state.historyItems = [];
@@ -3276,6 +3300,8 @@ async function sendMessage(event) {
     contextMeter.schedule();
     showLastReply();
     $('prompt').focus();
+    // Answered: its name in a few words, asked beside it (the pictures still in their copies here).
+    if (complete) void nameConversation(history, state.conversationId);
   }
 }
 
