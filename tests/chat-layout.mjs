@@ -80,7 +80,9 @@ test('conversation alignment follows scrollbar changes and handles the hidden we
 
 test('a new conversation suggests what the application makes: an image, a shot, a sound, each as a label', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
-    app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+    // Read with the line endings of the checkout taken out (CRLF on a fresh copy under Windows):
+    // the last pattern below spans several lines.
+    app = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   const shortcuts = html.match(/<div class="suggestions"[^>]*>.*?<\/div>/s)[0];
   // « Créer une image · Tourner un plan · Composer un son » (direction-artistique.md, « Récit »).
   assert.deepEqual(
