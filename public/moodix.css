@@ -15707,53 +15707,76 @@ button.glass-select::after {
 #settings .api-editor .path-input input::placeholder {
   color: var(--text-3);
 }
-/* The model and its reflection in the bar of the chat (model-choice.mjs, 0.6.38): one compact
-   button beside « Joindre » (its name cut short, never the box taller), its menu of glass. */
-#chat-form #model-choice {
+/* The model and its reflection in the bar of the chat (model-choice.mjs): two compact buttons
+   beside « Joindre » (17/11; one until then), « Modèle ⌄ » in grey, « ✦ Réflexion moyenne » in the
+   accent; a name too long cut short, never the box taller; each its menu of glass. */
+#chat-form :is(#model-choice, #effort-choice) {
   display: inline-flex;
+  flex: 0 1 auto;
   align-items: center;
   gap: 7px;
   min-width: 0;
-  max-width: 230px;
+  max-width: 210px;
   height: 34px;
   min-height: 0;
   padding: 0 10px 0 9px;
   border: 0;
   border-radius: var(--radius-s);
   background: transparent;
-  color: var(--accent);
+  color: var(--text-2);
   font: 400 13px/1 var(--font-ui);
 }
-#chat-form #model-choice svg {
+#chat-form #effort-choice {
+  flex-shrink: 0;
+  max-width: 190px;
+  color: var(--accent);
+}
+#chat-form :is(#model-choice, #effort-choice) svg {
   flex: none;
   width: 16px;
   height: 16px;
   margin: 0;
 }
-#chat-form #model-choice.is-off {
-  color: var(--text-2);
+#chat-form #model-choice .model-choice-chevron {
+  width: 10px;
+  height: 10px;
+  color: var(--text-4);
+  stroke-width: 2;
+  transform: rotate(90deg);
 }
-#chat-form #model-choice:hover:enabled {
+/* No effort goes, or none can be chosen (the reason under the pointer): greyed. */
+#chat-form #effort-choice.is-off {
+  color: var(--text-3);
+}
+#chat-form :is(#model-choice, #effort-choice):hover:enabled,
+#chat-form :is(#model-choice, #effort-choice)[aria-expanded='true'] {
   background: rgba(238, 232, 222, 0.06);
+  color: var(--text-1);
 }
-/* The name of the model cut short, never its effort (0.6.40). */
+#chat-form #effort-choice:not(.is-off):hover:enabled,
+#chat-form #effort-choice:not(.is-off)[aria-expanded='true'] {
+  color: var(--accent);
+}
 .model-choice-text {
-  display: flex;
-  min-width: 0;
-  white-space: nowrap;
-}
-.model-choice-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.model-choice-effort {
-  flex: none;
+  white-space: nowrap;
 }
 @media (max-width: 520px) {
   #chat-form #model-choice {
-    max-width: 150px;
+    max-width: 110px;
   }
+  #chat-form #effort-choice {
+    max-width: 130px;
+  }
+}
+/* « Changer de service… »: under a filet, at the foot of the menu of the model. */
+.glass-menu-rule {
+  height: 1px;
+  margin: 6px 4px;
+  border: 0;
+  background: rgba(238, 232, 222, 0.08);
 }
 .model-choice-menu {
   min-width: 260px;

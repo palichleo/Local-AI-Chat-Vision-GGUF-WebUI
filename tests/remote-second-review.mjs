@@ -105,6 +105,7 @@ class FakeNode {
         else names.delete(name);
         self.className = [...names].join(' ');
       },
+      contains: name => self.className.split(/\s+/).includes(name),
     };
   }
   get ownerDocument() {
@@ -189,22 +190,35 @@ function press(page, key) {
   for (const at of chain)
     for (const { listener, capture } of at.listeners.keydown ?? []) if (!capture && !event.stopped) listener(event);
 }
-/** The button and the menu of the model in a page of their own; `options()` answers /api/remote/options. */
-function modelMenu({ status, options, choice = async () => ({}), view = { innerHeight: 720, innerWidth: 1280 } }) {
+/**
+ * The two buttons of the bar of the chat, « Modèle » and « Réflexion », and their menus, in a page of
+ * their own; `options()` answers /api/remote/options.
+ */
+function modelMenu({
+  status,
+  options,
+  choice = async () => ({}),
+  view = { innerHeight: 720, innerWidth: 1280 },
+  thinking = true,
+  localName = 'Qwen 3.5',
+  openModels = null,
+}) {
   const page = new FakeNode(null, '#document');
   page.page = page;
   page.activeElement = null;
   page.body = new FakeNode(page, 'body');
   page.body.parent = page;
-  const ids = {
-    'model-choice': new FakeNode(page, 'button', 'model-choice'),
-    'model-choice-text': new FakeNode(page, 'span'),
-    'model-choice-menu': new FakeNode(page, 'div', 'glass-menu'),
-  };
-  ids['model-choice'].append(ids['model-choice-text']);
-  ids['model-choice-menu'].hidden = true;
-  page.body.append(ids['model-choice'], ids['model-choice-menu']);
-  let current = status;
+  const ids = {};
+  for (const prefix of ['model-choice', 'effort-choice']) {
+    ids[prefix] = new FakeNode(page, 'button', prefix);
+    ids[prefix + '-text'] = new FakeNode(page, 'span');
+    ids[prefix + '-menu'] = new FakeNode(page, 'div', 'glass-menu');
+    ids[prefix].append(ids[prefix + '-text']);
+    ids[prefix + '-menu'].hidden = true;
+    page.body.append(ids[prefix], ids[prefix + '-menu']);
+  }
+  let current = status,
+    reflecting = thinking;
   const asked = [];
   const api = async (path, body) => {
     asked.push([path, body]);
@@ -220,28 +234,21 @@ function modelMenu({ status, options, choice = async () => ({}), view = { innerH
     api,
     node: (tag, className = '', text = '') => new FakeNode(page, tag, className, text),
     getStatus: () => current,
-    getThinking: () => true,
-    setThinking() {},
+    getThinking: () => reflecting,
+    setThinking: on => (reflecting = on),
+    getLocalName: () => localName,
+    openModels,
     onStatus: next => (current = next),
     view,
   });
-  return {
-    page,
-    control,
-    asked,
-    button: ids['model-choice'],
-    text: ids['model-choice-text'],
-    menu: ids['model-choice-menu'],
-    // What the button says, its parts joined.
-    said: () =>
-      ids['model-choice-text'].children.length
-        ? ids['model-choice-text'].children
-            .filter(item => !item.hidden)
-            .map(item => item.textContent)
-            .join('')
-        : ids['model-choice-text'].textContent,
-    texts: () => [...ids['model-choice-menu'].walk()].map(item => item.textContent),
-  };
+  const part = prefix => ({
+    button: ids[prefix],
+    text: ids[prefix + '-text'],
+    menu: ids[prefix + '-menu'],
+    said: () => ids[prefix + '-text'].textContent,
+    texts: () => [...ids[prefix + '-menu'].walk()].map(item => item.textContent),
+  });
+  return { page, control, asked, thinking: () => reflecting, ...part('model-choice'), effort: part('effort-choice') };
 }
 const optionsOf = (model, models, extra = {}) => ({
   preset: 'openrouter',
@@ -389,7 +396,7 @@ const twoModels = [
 ];
 const remoteOf = (model, effort = 'medium') => ({ id: 'c1', name: 'OpenRouter', model, effort });
 
-test('3 · the menu of the model by the keyboard: the focus stays in it after a choice; Échap closes it, even while it reads', async () => {
+test('3 · the menu of the model by the keyboard: a choice kept closes it, the focus back on its button; Échap closes it, even while it reads', async () => {
   let kept = 'm1';
   const ui = modelMenu({
     status: { state: 'ready', remote: remoteOf('m1') },
@@ -406,13 +413,34 @@ test('3 · the menu of the model by the keyboard: the focus stays in it after a 
   ui.menu.querySelectorAll('button').find(item => item.textContent === 'Modèle 2').onclick();
   await settled();
   assert.equal(kept, 'm2');
-  assert.ok(ui.menu.contains(ui.page.activeElement), 'the focus stays in the menu after a choice');
+  assert.equal(ui.menu.hidden, true, 'kept: the menu closes');
+  assert.equal(ui.page.activeElement, ui.button, 'the focus back on its button');
+  assert.equal(ui.said(), 'Modèle 2');
+  ui.button.onclick();
+  await settled();
   const before = ui.page.activeElement;
+  assert.ok(ui.menu.contains(before), 'opened, the focus in it');
   press(ui.page, 'ArrowDown');
-  assert.notEqual(ui.page.activeElement, before, 'the arrows still move in it');
+  assert.notEqual(ui.page.activeElement, before, 'the arrows move in it');
   press(ui.page, 'Escape');
   assert.equal(ui.menu.hidden, true);
   assert.equal(ui.page.activeElement, ui.button, 'closed, the focus is back on its button');
+
+  // A choice refused: the menu stays, the focus on the one chosen.
+  const refused = modelMenu({
+    status: { state: 'ready', remote: remoteOf('m1') },
+    options: () => Response.json({ options: optionsOf('m1', twoModels) }),
+    choice: async () => {
+      throw Error('Refusé.');
+    },
+  });
+  await settled();
+  refused.button.onclick();
+  await settled();
+  refused.menu.querySelectorAll('button').find(item => item.textContent === 'Modèle 2').onclick();
+  await settled();
+  assert.equal(refused.menu.hidden, false);
+  assert.equal(refused.page.activeElement?.textContent, 'Modèle 1');
 
   // While its models are read, and when they cannot be: Échap closes it all the same.
   for (const options of [
@@ -453,21 +481,19 @@ test('4 · the menu placed again at each drawing: as tall as the room beside its
   await settled();
   // 720 high: 400 above its button, 284 below; the menu fits in the room above (24 px of margin).
   assert.equal(ui.menu.style.maxHeight, '376px');
-  // A model chosen (the bar moved meanwhile): placed again, never as it was at the opening.
+  // A filter typed (the bar moved meanwhile): placed again, never as it was at the opening; the
+  // list gets narrower, the menu does not jump.
   ui.button.rect = { top: 300, bottom: 336, left: 600, right: 700, width: 100, height: 36 };
-  ui.menu.querySelectorAll('button').find(item => item.textContent === 'Modèle 2').onclick();
-  await settled();
-  // Now 300 above, 384 below: the side with more room.
-  assert.equal(ui.menu.style.maxHeight, '360px');
-  // A filter typed: the list gets narrower, the menu does not jump.
   ui.menu.width = 260;
   const field = ui.menu.querySelector('.glass-menu-filter');
   field.value = 'Modèle 1';
   for (const { listener } of field.listeners.input) listener();
+  // Now 300 above, 384 below: the side with more room.
+  assert.equal(ui.menu.style.maxHeight, '360px');
   assert.equal(ui.menu.style.minWidth, '420px');
 });
 
-test('5 · as soon as the page opens, the button says the name of the model and its effort', async () => {
+test('5 · as soon as the page opens, the buttons say the name of the model and its effort', async () => {
   const ui = modelMenu({
     status: { state: 'ready', remote: { id: 'c1', name: 'ChatGPT', model: 'gpt-5.2', effort: 'high' } },
     options: () =>
@@ -484,7 +510,9 @@ test('5 · as soon as the page opens, the button says the name of the model and 
   });
   await settled();
   assert.equal(ui.menu.hidden, true, 'nothing opened');
-  assert.equal(ui.said(), 'GPT-5.2 · Élevée');
+  assert.equal(ui.said(), 'GPT-5.2');
+  assert.equal(ui.effort.said(), 'Réflexion élevée');
+  assert.equal(ui.button.attributes['aria-label'] ?? ui.button.getAttribute?.('aria-label'), 'Modèle : GPT-5.2 · ChatGPT');
 });
 
 test('6 · many models said so, the effort never hidden by a long name, no tip over the open menu, ↑ to the last, a failure said alone', async () => {
@@ -494,11 +522,11 @@ test('6 · many models said so, the effort never hidden by a long name, no tip o
     options: () => Response.json({ options: { ...optionsOf('vendor/model-0', many), effort: 'high' } }),
   });
   await settled();
-  // The effort in an element of its own, which the CSS never shrinks (the name is cut instead).
-  const effort = ui.text.children.find(item => /model-choice-effort/.test(item.className));
-  assert.equal(effort?.textContent, ' · Élevée');
+  // The effort on a button of its own, which the CSS never shrinks (the name of the model is cut instead).
+  assert.equal(ui.effort.said(), 'Réflexion élevée');
   const css = await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8');
-  assert.match(css, /\.model-choice-effort\s*\{[^}]*flex:\s*none/);
+  assert.match(css, /#chat-form #effort-choice\s*\{[^}]*flex-shrink:\s*0/);
+  assert.match(css, /\.model-choice-text\s*\{[^}]*text-overflow:\s*ellipsis/);
   ui.button.onclick();
   await settled();
   assert.ok(
@@ -521,6 +549,91 @@ test('6 · many models said so, the effort never hidden by a long name, no tip o
   await settled();
   assert.ok(failed.texts().includes('OpenRouter ne donne pas la liste de ses modèles (erreur 503).'));
   assert.equal(failed.texts().includes('Aucun modèle trouvé.'), false, 'the failure is said alone');
+});
+
+test('6 · « Modèle » and « Réflexion »: one menu at a time; the efforts of the model; greyed with why; the local model', async () => {
+  const models = [
+    { id: 'm1', name: 'Modèle 1', efforts: ['low', 'medium', 'high'] },
+    { id: 'm2', name: 'Modèle 2', efforts: [] },
+  ];
+  let kept = { model: 'm1', effort: 'medium' };
+  const settings = [];
+  const ui = modelMenu({
+    status: { state: 'ready', remote: { ...remoteOf('m1'), effort: 'medium' } },
+    options: () => Response.json({ options: { ...optionsOf(kept.model, models), effort: kept.effort } }),
+    choice: async change => {
+      kept = { ...kept, ...change, ...(change.model === 'm2' ? { effort: '' } : {}) };
+      return {
+        options: { ...optionsOf(kept.model, models), effort: kept.effort },
+        status: { state: 'ready', remote: { ...remoteOf(kept.model), effort: kept.effort } },
+      };
+    },
+    openModels: () => settings.push('ai'),
+  });
+  await settled();
+  assert.deepEqual([ui.said(), ui.effort.said()], ['Modèle 1', 'Réflexion moyenne']);
+  // The menu of the model, then that of the reflection: the first closes.
+  ui.button.onclick();
+  await settled();
+  assert.equal(ui.texts().includes('Faible'), false, 'no effort in the menu of the model');
+  assert.ok(ui.texts().includes('Changer de service…'));
+  ui.effort.button.onclick();
+  await settled();
+  assert.equal(ui.menu.hidden, true, 'one menu at a time');
+  assert.equal(ui.effort.menu.hidden, false);
+  assert.deepEqual(
+    ui.effort.menu.querySelectorAll('button').map(item => [item.textContent, item.attributes['aria-checked']]),
+    [
+      ['Faible', 'false'],
+      ['Moyenne', 'true'],
+      ['Élevée', 'false'],
+    ],
+  );
+  ui.effort.menu.querySelectorAll('button').find(item => item.textContent === 'Élevée').onclick();
+  await settled();
+  assert.deepEqual(ui.asked.at(-1), ['remote/choice', { effort: 'high' }]);
+  assert.equal(ui.effort.menu.hidden, true, 'kept: closed');
+  assert.equal(ui.effort.said(), 'Réflexion élevée');
+  // A model that lists no effort: the reflection greyed, and why.
+  ui.button.onclick();
+  await settled();
+  ui.menu.querySelectorAll('button').find(item => item.textContent === 'Modèle 2').onclick();
+  await settled();
+  assert.equal(ui.said(), 'Modèle 2');
+  assert.equal(ui.effort.said(), 'Réflexion');
+  assert.equal(ui.effort.button.classList.contains('is-off'), true);
+  assert.equal(ui.effort.button.attributes['aria-label'], 'Ce modèle ne propose pas de réglage de la réflexion.');
+  ui.effort.button.onclick();
+  await settled();
+  assert.ok(ui.effort.texts().includes('Ce modèle ne propose pas de réglage de la réflexion.'));
+  press(ui.page, 'Escape');
+  // « Changer de service… »: the settings, the menu closed.
+  ui.button.onclick();
+  await settled();
+  ui.menu.querySelectorAll('button').find(item => item.textContent === 'Changer de service…').onclick();
+  assert.deepEqual(settings, ['ai']);
+  assert.equal(ui.menu.hidden, true);
+
+  // The local model: its name, « Changer de modèle… »; the reflection, with or without; nothing asked.
+  const local = modelMenu({ status: { state: 'ready', remote: null }, options: () => assert.fail('no listing'), openModels: () => settings.push('local') });
+  await settled();
+  assert.deepEqual([local.said(), local.effort.said()], ['Qwen 3.5', 'Réflexion']);
+  local.button.onclick();
+  await settled();
+  assert.deepEqual(
+    local.menu.querySelectorAll('button').map(item => item.textContent),
+    ['Qwen 3.5', 'Changer de modèle…'],
+  );
+  local.menu.querySelectorAll('button').at(-1).onclick();
+  assert.deepEqual(settings, ['ai', 'local']);
+  local.effort.button.onclick();
+  await settled();
+  local.effort.menu.querySelectorAll('button').find(item => item.textContent === 'Sans réflexion').onclick();
+  assert.equal(local.thinking(), false);
+  assert.equal(local.effort.said(), 'Sans réflexion');
+  assert.equal(local.effort.button.classList.contains('is-off'), true);
+  assert.equal(local.effort.menu.hidden, true);
+  assert.deepEqual(local.asked, []);
 });
 
 // ——— Côté serveur ———

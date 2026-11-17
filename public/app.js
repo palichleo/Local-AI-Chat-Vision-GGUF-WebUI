@@ -982,7 +982,7 @@ function updateControls() {
   $('cancel').title = cancelLabel;
   $('thinking').disabled = state.generating;
   // The model and its reflection, chosen in the bar of the chat (model-choice.mjs): never while it answers.
-  $('model-choice').disabled = state.generating || toolBusy || !state.connected;
+  $('model-choice').disabled = $('effort-choice').disabled = state.generating || toolBusy || !state.connected;
   state.modelChoice?.render();
   // A card of Moodix waits: an image may go with the message that answers it.
   $('attach').disabled = (state.generating && !state.proposalCard) || state.preparing || state.loadingHistory;
@@ -3927,12 +3927,26 @@ $('thinking').onclick = () => {
 };
 // The model and its reflection in the bar of the chat (17/11): the reflection of the local model,
 // or the model and the effort of a remote one, kept by the server as the last choice.
+/** The name of the local model, as the top bar says it: the one given in « Vos LLM », else its file. */
+function localModelName() {
+  const model = (state.models || []).find(item => item.modelPath === state.config?.modelPath);
+  return (
+    model?.name ||
+    (state.config?.modelPath ? state.config.modelPath.split(/[\\/]/).pop().replace(/\.gguf$/i, '') : 'Aucun LLM')
+  );
+}
 state.modelChoice = setupModelChoice({
   $,
   api,
   node,
   getStatus: () => state.status,
   getThinking: () => state.thinking,
+  getLocalName: () => localModelName(),
+  // « Changer de modèle… », « Changer de service… »: Paramètres › Moodix AI, where they are chosen.
+  openModels: () => {
+    openSettings();
+    settingsTabs.select('ai');
+  },
   setThinking: on => {
     state.thinking = on;
     $('thinking').setAttribute('aria-pressed', String(on));
