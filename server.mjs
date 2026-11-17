@@ -122,6 +122,7 @@ const staticFiles = new Map([
   ['/model-ready.mjs', ['model-ready.mjs', 'text/javascript; charset=utf-8']],
   ['/remote-llm-ui.mjs', ['remote-llm-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/model-choice.mjs', ['model-choice.mjs', 'text/javascript; charset=utf-8']],
+  ['/image-series.mjs', ['image-series.mjs', 'text/javascript; charset=utf-8']],
   ['/images.mjs', ['images.mjs', 'text/javascript; charset=utf-8']],
   ['/video-plan.mjs', ['video-plan.mjs', 'text/javascript; charset=utf-8']],
   ['/proposal-card.mjs', ['proposal-card.mjs', 'text/javascript; charset=utf-8']],
@@ -1990,6 +1991,11 @@ export async function createApplication({
       if (path === '/api/tools/again') {
         if (chat.busy) throw problem('Une réponse est en cours. Attendez sa fin.', 409);
         return send(200, await runtime.again(body));
+      }
+      // The next image of a series the model asked in one call (create_image with `series`).
+      if (path === '/api/tools/series') {
+        if (runtime.active) throw problem('Une génération est déjà en cours.', 409);
+        return send(200, await runtime.next(body));
       }
       // Output buttons (Upscale, Interpoler): the same proposal a model call would make, without the model.
       if (path === '/api/tools/action') {

@@ -104,7 +104,10 @@ const server = http.createServer(async (req, res) => {
                   { prompt: 'A red boat', source: { take: Number(text.slice(19)) } }
                 : text.startsWith('generate from ')
                   ? { prompt: 'A red boat', source: { output: text.slice(14) } }
-                  : { prompt: 'A red boat' },
+                  : text.startsWith('generate series')
+                    ? // Several images asked at once: every prompt prepared in the one call.
+                      { prompt: 'A red boat', series: ['A blue boat', 'A green boat'] }
+                    : { prompt: 'A red boat' },
       );
   const middle = Math.floor(argumentsText.length / 2);
   send(res, { choices: [{ delta: { reasoning_content: 'I will use the registered workflow.' } }] });

@@ -90,7 +90,9 @@ When the assistant calls a generation tool:
 
 After an image, the assistant receives the result's metadata only; it can look at a compressed copy with `local_read_output` when you ask for a check or it has a reason to. For videos it receives a few compressed, timestamped frames: enough to describe content, not to judge continuous motion. Originals are written to `output/`; deleting conversations never deletes them.
 
-The default limit is five generations per user message (1 to 9,999, or ∞).
+Several images in one message (« fais 10 images de ce style », « trois variantes ») are one call: the assistant prepares every prompt at once (up to 20 images), and Atelier makes them one after another with the same inputs and settings, each on its own card, without asking the assistant between two; it then gets one result with every take. A series stops at an image that fails or that you refuse, and when you stop the message.
+
+A message makes at most 100 generations, a limit set by the server.
 
 ## Resources, Output and history
 

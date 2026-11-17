@@ -80,6 +80,17 @@
          "maximum": 4096,
          "multipleOf": 16,
          "default": 1024
+        },
+        "series": {
+         "type": "array",
+         "minItems": 1,
+         "maxItems": 19,
+         "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000
+         },
+         "description": "Only when the user asks for several images at once (« fais 10 images de ce style »): the prompts of the other images, one per image, each complete and written like prompt, which is the first image. All are made one after another with the same source, references and settings, in one call. Leave it out for a single image."
         }
        },
        "required": [
@@ -843,6 +854,17 @@
          "maximum": 4096,
          "multipleOf": 16,
          "default": 1024
+        },
+        "series": {
+         "type": "array",
+         "minItems": 1,
+         "maxItems": 19,
+         "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000
+         },
+         "description": "Only when the user asks for several images at once (« fais 10 images de ce style »): the prompts of the other images, one per image, each complete and written like prompt, which is the first image. All are made one after another with the same source, references and settings, in one call. Leave it out for a single image."
         }
        },
        "required": [
@@ -1123,6 +1145,17 @@
          "maximum": 4096,
          "multipleOf": 16,
          "default": 1024
+        },
+        "series": {
+         "type": "array",
+         "minItems": 1,
+         "maxItems": 19,
+         "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000
+         },
+         "description": "Only when the user asks for several images at once (« fais 10 images de ce style »): the prompts of the other images, one per image, each complete and written like prompt, which is the first image. All are made one after another with the same source, references and settings, in one call. Leave it out for a single image."
         }
        },
        "required": [
@@ -2354,6 +2387,17 @@
         "minLength": 1,
         "maxLength": 8000,
         "description": "The whole image, written for an image model that knows nothing of this conversation: three to six sentences in English. Say the subject with its concrete look (age, expression, pose, clothes, colours, materials), the place and what is behind, the framing (how close, from which angle, what is in the foreground), the light and the colours, and the kind of picture (photo with its lens and film look, illustration, painting, 3D render). Text to write in the image goes in quotes, in the language asked. Only concrete, visible things: a word like \"beautiful\" or \"high quality\" alone says nothing. Keep everything the user asked for."
+       },
+       "series": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 19,
+        "items": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 3000
+        },
+        "description": "Only when the user asks for several images at once (« fais 10 images de ce style »): the prompts of the other images, one per image, each complete and written like prompt, which is the first image. All are made one after another with the same source, references and settings, in one call. Leave it out for a single image."
        }
       },
       "required": [

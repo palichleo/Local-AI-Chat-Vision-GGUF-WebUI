@@ -11,6 +11,15 @@
         "many": true,
         "description": "Images whose subject, character or style must be reused."
       }
+    },
+    "arguments": {
+      "series": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 19,
+        "items": { "type": "string", "minLength": 1, "maxLength": 3000 },
+        "description": "Only when the user asks for several images at once (« fais 10 images de ce style »): the prompts of the other images, one per image, each complete and written like prompt, which is the first image. All are made one after another with the same source, references and settings, in one call. Leave it out for a single image."
+      }
     }
   },
   "create_video": {

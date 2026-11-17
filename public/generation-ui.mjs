@@ -275,18 +275,22 @@ export function setupGenerationUI({
         }
       }
       const named = typeof value === 'string' && !value.trim().startsWith('{');
-      const text = named
+      const said = named
         ? value
         : request.mediaType === 'video'
           ? 'Génération de la vidéo…'
           : request.mediaType === 'audio'
             ? 'Génération du son…'
             : 'Génération de l’image…';
-      if (named) lastStage = text;
+      if (named) lastStage = said;
+      // An image of a series says which one it is (image-series.mjs).
+      const series = request.series,
+        text = series ? `Image ${series.index} sur ${series.total} · ${said}` : said;
       // The video memory ran short and it tries again: its point is amber (etats-maquette.md, 52).
-      for (const target of tiles) target.figure.classList.toggle('is-warned', /^Mémoire vidéo insuffisante/.test(text));
-      // A named stage (loading, step 3/11, decoding…) is worth showing; the generic line is not.
-      caption(text, named && !/^Génération (de la vidéo|de l’image|du son|en cours)…$/.test(text));
+      for (const target of tiles) target.figure.classList.toggle('is-warned', /^Mémoire vidéo insuffisante/.test(said));
+      // A named stage (loading, step 3/11, decoding…) is worth showing; the generic line is not,
+      // unless it says which image of a series this is.
+      caption(text, Boolean(series) || (named && !/^Génération (de la vidéo|de l’image|du son|en cours)…$/.test(said)));
     }
     function release(slot) {
       slot.controller?.abort();
