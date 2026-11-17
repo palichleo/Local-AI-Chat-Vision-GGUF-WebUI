@@ -1,0 +1,322 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { createApplication } from '../server.mjs';
+import { ToolCatalog } from '../lib/tool-catalog.mjs';
+import { resourceCatalogPrompt, resourceTool } from '../lib/resources.mjs';
+import { outputToolFor } from '../lib/output-tools.mjs';
+import { briefMessage, cardBrief } from '../lib/video-brief.mjs';
+import { THIN_NOTE } from '../lib/thin-prompt.mjs';
+import { SEEN_NOTE } from '../lib/seen-resources.mjs';
+import { citedMessage } from '../lib/cited-resources.mjs';
+import { FAILED_NOTE, FAILED_SETTLED, UNANSWERED } from '../public/transcript.mjs';
+
+/**
+ * What the small local model is given (« rails ») does not change by a character when the remote
+ * models get their own wording: the definitions of the tools for the workflows shipped with Moodix,
+ * the notes the application writes for it, and a whole request as llama.cpp receives it, compared
+ * with what 0.6.39 sent (tests/fixtures/rails-wording.json). `UPDATE_RAILS=1` writes it again: only
+ * when a change for the local model is meant.
+ */
+const snapshotPath = fileURLToPath(new URL('./fixtures/rails-wording.json', import.meta.url));
+const fixture = fileURLToPath(new URL('./fixtures/fake-tool-engine.mjs', import.meta.url));
+const shipped = fileURLToPath(new URL('../runner/workflows/', import.meta.url));
+
+const R1 = '11111111-1111-4111-8111-111111111111',
+  R2 = '22222222-2222-4222-8222-222222222222',
+  O1 = '33333333-3333-4333-8333-333333333333',
+  O2 = '44444444-4444-4444-8444-444444444444';
+/** What a conversation of the project can name, as server.mjs (includeTools) describes it. */
+const CONTEXTS = {
+  generic: undefined,
+  fresh: { images: 0, resources: [], takes: [], outputs: [] },
+  rich: {
+    images: 1,
+    resources: [
+      { id: R1, type: 'image' },
+      { id: R2, type: 'video' },
+    ],
+    takes: [
+      { take: 1, mediaType: 'image' },
+      { take: 2, mediaType: 'video' },
+      { take: 3, mediaType: 'video' },
+    ],
+    outputs: [
+      { id: O1, mediaType: 'video', count: 1, workflowId: 'e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f', draft: true },
+      { id: O2, mediaType: 'image', count: 2, workflowId: 'fefb88eb-8311-4409-b636-6efbb42e952c', draft: false },
+    ],
+  },
+};
+
+/** The workflows shipped with Moodix, every one ready, as on a computer that has all their files. */
+export async function shippedCatalog() {
+  const workflows = [];
+  for (const file of (await readdir(shipped)).filter(name => name.endsWith('.json')).sort())
+    workflows.push({ ...JSON.parse(await readFile(join(shipped, file), 'utf8')), ready: true, builtin: true });
+  return new ToolCatalog({ list: async () => workflows });
+}
+
+/** Everything the application says to the local model that does not depend on a conversation. */
+async function railsWording(definitionsOf = (catalog, available) => catalog.definitions(available)) {
+  const catalog = await shippedCatalog();
+  const definitions = {};
+  for (const [name, available] of Object.entries(CONTEXTS)) definitions[name] = await definitionsOf(catalog, available);
+  const catalogEntries = [
+    { id: R1, reference: 1, label: '#ref1', name: 'renard.png', description: 'Un renard roux', mime: 'image/png' },
+    { id: R2, reference: 2, label: '#ref2', name: 'neige.mp4', description: '', mime: 'video/mp4', duration: 4 },
+  ];
+  return {
+    definitions,
+    resourceTool,
+    outputTool: outputToolFor([{ id: O1, outputs: [{}] }]),
+    resourceCatalog: resourceCatalogPrompt(catalogEntries, { cited: [1] }),
+    brief: briefMessage(await catalog.lengths('create_video')),
+    briefExtend: briefMessage(await catalog.lengths('extend_video')),
+    cardBrief: cardBrief(),
+    thin: THIN_NOTE,
+    seen: SEEN_NOTE,
+    cited: citedMessage([{ label: '#ref1', id: R1 }], ['start_image', 'reference']),
+    failed: [FAILED_NOTE, FAILED_SETTLED, UNANSWERED],
+  };
+}
+
+/** A safetensors file whose header says these shapes, its data left sparse. */
+async function checkpoint(path, tensors) {
+  let offset = 0;
+  const header = {};
+  for (const [key, shape] of Object.entries(tensors)) {
+    const length = shape.reduce((a, b) => a * b, 1);
+    header[key] = { dtype: 'I8', shape, data_offsets: [offset, offset + length] };
+    offset += length;
+  }
+  const body = Buffer.from(JSON.stringify(header)),
+    prefix = Buffer.alloc(8);
+  prefix.writeBigUInt64LE(BigInt(body.length));
+  const handle = await open(path, 'w');
+  try {
+    await handle.write(Buffer.concat([prefix, body]));
+    await handle.truncate(8 + body.length + offset);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function snapshot() {
+  return JSON.parse(await readFile(snapshotPath, 'utf8'));
+}
+
+/** Moodix with llama.cpp replaced by the scripted engine, which gives back the request it gets. */
+async function localMoodix(t) {
+  const root = await mkdtemp(join(tmpdir(), 'moodix-rails-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const outputDir = join(root, 'output');
+  await mkdir(outputDir);
+  const worker = {
+    state: 'stopped',
+    status() {
+      return { state: this.state, error: '', capabilities: { krea2: { ready: true, mediaType: 'image', reason: '' } } };
+    },
+    async unload() {},
+    async start() {
+      this.state = 'ready';
+      return this.status();
+    },
+    async close() {
+      this.state = 'stopped';
+    },
+    async release() {
+      return { released: true, allocatedGiB: 0, kept: false };
+    },
+    async request() {
+      return {};
+    },
+  };
+  const app = await createApplication({
+    fullPrompts: false,
+    port: 0,
+    dataDir: root,
+    outputDir,
+    generationWorker: worker,
+    openUrl: () => {},
+    spawnProcess: (_command, args, options) => spawn(process.execPath, [fixture, ...args], options),
+  });
+  t.after(() => app.close());
+  const boot = await (await fetch(app.url + '/api/bootstrap')).json();
+  const api = async (path, body, status = 200) => {
+    const response = await fetch(app.url + '/api/' + path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { Authorization: 'Bearer ' + boot.token, 'Content-Type': 'application/json' },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    assert.equal(response.status, status, await response.clone().text());
+    return response;
+  };
+  // The files of a Krea 2 workflow, as small as the checks of their headers allow.
+  const tensors = {
+    model: { 'first.weight': [6144, 64], 'blocks.0.attn.wq.weight': [6144, 6144] },
+    textEncoder: { 'model.embed_tokens.weight': [1, 2560] },
+    vae: { 'encoder.conv1.weight': [1, 3, 1, 1, 1], 'decoder.conv1.weight': [1, 16, 1, 1, 1] },
+  };
+  for (const [kind, shape] of Object.entries(tensors)) {
+    const path = join(root, kind + '.safetensors');
+    await checkpoint(path, shape);
+    await api('generation/assets', { id: kind, path, kind, family: 'krea2' });
+  }
+  const tokenizer = join(root, 'tokenizer');
+  await mkdir(tokenizer);
+  await writeFile(join(tokenizer, 'tokenizer_config.json'), '{}');
+  await writeFile(join(tokenizer, 'vocab.json'), '{"a":0}');
+  await writeFile(join(tokenizer, 'merges.txt'), '');
+  await api('generation/assets', { id: 'tokenizer', path: tokenizer, kind: 'tokenizer', family: 'krea2' });
+  await api('generation/config', { enabled: true, autoAllow: false, maxIterations: 5, pythonPath: process.execPath });
+  await api('generation/workflows', {
+    schemaVersion: 1,
+    id: 'rails-image',
+    name: 'Image locale',
+    description: 'Creer une image',
+    enabled: true,
+    pipeline: 'krea2',
+    mediaType: 'image',
+    components: Object.fromEntries(
+      ['model', 'textEncoder', 'tokenizer', 'vae'].map(k => [k, { policy: 'fixed', asset: k }]),
+    ),
+    parameters: {
+      prompt: { policy: 'model', type: 'string' },
+      seed: { policy: 'fixed', value: 5 },
+      width: { policy: 'fixed', value: 512 },
+      height: { policy: 'fixed', value: 512 },
+      steps: { policy: 'fixed', value: 8 },
+      cfg: { policy: 'fixed', value: 1 },
+      denoise: { policy: 'fixed', value: 1 },
+    },
+    loras: [],
+    references: [],
+  });
+  const modelPath = join(root, 'llm.gguf');
+  await writeFile(modelPath, 'GGUF\x03\0\0\0');
+  await api('config', {
+    enginePath: process.execPath,
+    modelPath,
+    projectorPath: '',
+    contextSize: 8192,
+    maxOutputTokens: 4096,
+    gpuLayers: 0,
+  });
+  await api('start', {}, 202);
+  for (let i = 0; i < 400 && (await (await api('status')).json()).state !== 'ready'; i++)
+    await new Promise(resolve => setTimeout(resolve, 25));
+  return { api };
+}
+
+/** A conversation as the page sends it: its line, a creation made, a video waiting on its card, a failure. */
+export function pageConversation(system) {
+  const made = {
+      id: 'call_image_1',
+      type: 'function',
+      function: { name: 'create_image', arguments: '{"prompt":"A red fox in the snow"}' },
+    },
+    video = {
+      id: 'call_video_1',
+      type: 'function',
+      function: {
+        name: 'create_video',
+        arguments: '{"prompt":"A fox runs","duration":5,"intention":"Un renard court."}',
+      },
+    };
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: 'Fais une image d’un renard dans la neige.' },
+    { role: 'assistant', content: '', tool_calls: [made] },
+    {
+      role: 'tool',
+      tool_call_id: made.id,
+      content: JSON.stringify({
+        status: 'success',
+        run_id: O2,
+        takes: [4],
+        takes_note:
+          'Pour l’utilisateur, ces prises s’appellent « PRISE n » (takes, une par sortie) : nomme-les par ce numéro, jamais par run_id. Pour en reprendre une, {"take": n} suffit.',
+        use_as_source: { output: O2 },
+        workflow: 'Krea 2',
+        prompt: 'A red fox in the snow',
+        workflow_id: 'fefb88eb-8311-4409-b636-6efbb42e952c',
+        workflow_digest: 'abc',
+        media_type: 'image',
+        parameters: { seed: 7, width: 1024, height: 1024 },
+        reference_default_count: 0,
+        reference_defaults: [],
+        reference_count: 0,
+        reference_capacity: 1,
+        reference_mode: 'pixels',
+        outputs: [{ filename: 'a.png', subfolder: '', type: 'output' }],
+        note: 'Image générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché.',
+      }),
+    },
+    { role: 'user', content: 'Fais une vidéo de 5 secondes : un renard court dans la neige.' },
+    { role: 'assistant', content: 'Un renard roux traverse la neige.', planned: true, tool_calls: [video] },
+    {
+      role: 'tool',
+      tool_call_id: video.id,
+      content: JSON.stringify({
+        status: 'denied',
+        cancelled: 'card',
+        message: 'L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.',
+      }),
+    },
+    { role: 'user', content: 'inspect tool context' },
+  ];
+}
+const LOCAL_LINE =
+  'Tu es un assistant local utile. Réponds dans la langue de l’utilisateur. Décris honnêtement les images et signale tes incertitudes.';
+
+/** What llama.cpp receives for that conversation: its messages and its tools. */
+async function localRequest(t) {
+  const { api } = await localMoodix(t);
+  const streamed = await (
+    await api('chat', {
+      messages: pageConversation(
+        LOCAL_LINE +
+          '\n\nContexte fourni par l’utilisateur au démarrage de cette conversation :\nTout en noir et blanc.',
+      ),
+      conversationId: '55555555-5555-4555-8555-555555555555',
+      turnId: '66666666-6666-4666-8666-666666666666',
+      thinking: false,
+      project: 'inbox',
+    })
+  ).text();
+  const payload = streamed
+    .split(/\r?\n\r?\n/)
+    .filter(frame => frame.startsWith('data: ') && frame !== 'data: [DONE]')
+    .map(frame => JSON.parse(frame.slice(6)))
+    .find(event => event.local_test_payload).local_test_payload;
+  return { messages: payload.messages, tools: payload.tools, tool_choice: payload.tool_choice };
+}
+
+test('the local model gets the definitions, notes and consigne of 0.6.39, to the character', async () => {
+  if (process.env.UPDATE_RAILS === '1') return;
+  const kept = await snapshot();
+  assert.deepEqual(JSON.parse(JSON.stringify(await railsWording())), kept.wording);
+});
+
+test('a whole request of the chat reaches llama.cpp as it did in 0.6.39', { timeout: 30000 }, async t => {
+  const request = await localRequest(t);
+  if (process.env.UPDATE_RAILS === '1') {
+    await writeFile(
+      snapshotPath,
+      JSON.stringify(
+        { version: '0.6.39', wording: JSON.parse(JSON.stringify(await railsWording())), request },
+        null,
+        1,
+      ) + '\n',
+    );
+    return;
+  }
+  assert.deepEqual(request, (await snapshot()).request);
+});
+
+export { railsWording, LOCAL_LINE, CONTEXTS, localMoodix };
