@@ -970,6 +970,10 @@ async function studioPage(tools, routes = {}, options = {}) {
             getBoundingClientRect: () => ({ left: 100, top: 100, width: 40, height: 40 }),
             scrollIntoView() {},
             style: { setProperty() {} },
+            // « Générer » itself, while a creation it started runs.
+            classList: { toggle() {} },
+            querySelector: () => null,
+            setAttribute() {},
           })
         : () => null,
       body: {},
@@ -4470,5 +4474,35 @@ test('« Modifier » chooses a model that takes an image when the one in hand ta
     );
   } finally {
     alone.restore();
+  }
+});
+
+test('an image of a series the user asked for goes by itself in the Studio, the setting off; the pointer says which', async () => {
+  const krea = { id: 'k', name: 'Krea 2', verb: 'create_image', family: 'krea2', seeded: true, direct: true, roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] };
+  const said = [];
+  const page = await studioPage({ create_image: [krea] }, {}, { runs: [], cursor: said, targets: true });
+  const { studio, restore } = page;
+  try {
+    const answer = studio.propose(
+      {
+        requestId: 'q2',
+        approvalToken: 't',
+        tool: 'create_image',
+        workflowName: 'Krea 2',
+        // Marked so by the server for every image of a series (lib/tool-runtime.mjs, beginSeries).
+        autoAllow: true,
+        series: { id: 's', index: 2, total: 3 },
+        resolution: { width: 1024, height: 1024 },
+        call: { id: 'call', type: 'function', function: { name: 'create_image', arguments: '{}' } },
+        plan: { prompt: 'a whale', parameters: { prompt: 'a whale', width: 1024, height: 1024, seed: 3 }, editable: { prompt: true, parameters: [] }, references: [] },
+      },
+      new AbortController().signal,
+    );
+    // No « Générer » to press: it starts once set.
+    assert.equal(await answer, 'once');
+    assert.ok(said.includes('lance l’image 2 sur 3 demandée'), said.join(' | '));
+    assert.equal(said.includes('attend votre accord'), false);
+  } finally {
+    restore();
   }
 });

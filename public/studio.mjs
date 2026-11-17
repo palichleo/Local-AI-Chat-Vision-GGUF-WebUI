@@ -2782,7 +2782,12 @@ export function setupStudio({
     const auto = request.autoAllow === true;
     pointer?.move(
       targetOf('generate'),
-      auto ? 'lance la génération (autorisé dans les Paramètres)' : 'attend votre accord',
+      // An image of a series the user asked for goes by itself whatever the settings (image-series.mjs).
+      request.series
+        ? `lance l’image ${request.series.index} sur ${request.series.total} demandée`
+        : auto
+          ? 'lance la génération (autorisé dans les Paramètres)'
+          : 'attend votre accord',
     );
     await wait(still ? 0 : 260);
     if (!ai || ai.stopped || proposal !== current) return;

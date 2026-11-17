@@ -82,6 +82,9 @@ test('several images in one call: the first proposed at once, the others one aft
   });
   assert.deepEqual([first.series.index, first.series.total], [1, 3]);
   assert.ok(first.plan.prompt.includes(prompts[0]));
+  // Asked for by the user: every image runs by itself, in the Studio too, whatever the settings say
+  // (« lancer seules les images » is off in this world).
+  assert.equal(first.autoAllow, true);
   // The call of the model is kept as it was asked (the conversation shows it).
   assert.deepEqual(JSON.parse(first.call.function.arguments).series, prompts.slice(1));
 
@@ -90,6 +93,7 @@ test('several images in one call: the first proposed at once, the others one aft
   assert.ok(second.plan.prompt.includes(prompts[1]));
   assert.equal(second.call.id, first.call.id, 'one call of the model, one result for it');
   assert.equal(second.args.workflow_id, first.args.workflow_id, 'the same workflow and settings');
+  assert.equal(second.autoAllow, true);
   assert.notEqual(second.requestId, first.requestId);
   const third = await runtime.next({ series: first.series.id });
   assert.ok(third.plan.prompt.includes(prompts[2]));
