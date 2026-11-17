@@ -8754,6 +8754,12 @@ body[data-view='library'] .chat-panel {
 #messages .message.assistant > .message-cited {
   margin-left: 32px;
 }
+/* Not under a reply that has a card of its own (a proposal, a take it made): the card is what
+   the reply is about, and shows the take it names (« la suite part de la prise 25 » drew that
+   take a second time, tiny, between the words and the card, their two legends one on the other). */
+#messages .message.assistant:has(.generation-card) > .message-cited {
+  display: none;
+}
 .message-cited {
   display: flex;
   flex-wrap: wrap;
