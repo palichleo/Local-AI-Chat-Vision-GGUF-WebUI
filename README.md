@@ -54,6 +54,8 @@ Open **Configuration** to pick the llama.cpp engine and the chat model. Detected
 
 In the bar of the chat, the button beside **Joindre** shows the model and its reflection: with a remote model, its models (a search field when there are many) and the efforts the chosen one takes (*Faible*, *Moyenne*, *Élevée*…), kept as your last choice; with the local model, *Avec réflexion* or *Sans réflexion*.
 
+ChatGPT, Claude and OpenRouter are spoken to as large models (`lib/model-wording.mjs`): a consigne that says what Moodix is, tools described as contracts (`lib/tasks-capable.json`: a video is proposed at once, its card is where the user agrees), and the results of the tools reduced to facts. The local model and the other services keep the wording written for a small model, unchanged to the character (`tests/model-wording.mjs`).
+
 Choosing a provider chooses it for the chat; **Distant** then shows beside its name in the top bar. Your messages, the images you attach and the references shown to the model go to that provider; conversations, references and creations stay in this folder. Keys and ChatGPT tokens are kept in `data/` (`remote-llm-keys.json`, `chatgpt-account.json`), never sent back to the page nor written in a log. With a remote model the graphics card is left entirely to generation: nothing is unloaded or reloaded around a creation. Choosing a local LLM in the list brings the chat back to llama.cpp.
 
 Some Qwen3.5 GGUF exports declare an MTP layer without its tensors; the app detects this and uses an in-memory metadata fix, or a compatibility copy in `data/model-cache` when needed. The original file is never modified.

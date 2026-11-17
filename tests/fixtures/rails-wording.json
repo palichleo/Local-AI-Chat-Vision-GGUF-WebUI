@@ -1,0 +1,2369 @@
+{
+ "version": "0.6.39",
+ "wording": {
+  "definitions": {
+   "generic": [
+    {
+     "type": "function",
+     "function": {
+      "name": "create_image",
+      "description": "Create a new image from a description, or modify an image. Use only when the user asks for an image to be produced or changed (not the character to put in a video: replace_character makes it); writing or improving a prompt alone does not mean generating. The image model only sees the images passed in source and reference: an image that is only described in the prompt is not used.\nWorkflows:\n- 3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36: MOSS Image. Créer une image avec MOSS Image : affiches, mises en page et texte écrit dans l’image. (accepts: prompt only)\n- fefb88eb-8311-4409-b636-6efbb42e952c: Krea 2. Créer une image : photo, illustration, ou retouche d’une image existante. Modèle d’image par défaut, rapide. (accepts: source)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "The whole image, written for an image model that knows nothing of this conversation: three to six sentences in English. Say the subject with its concrete look (age, expression, pose, clothes, colours, materials), the place and what is behind, the framing (how close, from which angle, what is in the foreground), the light and the colours, and the kind of picture (photo with its lens and film look, illustration, painting, 3D render). Text to write in the image goes in quotes, in the language asked. Only concrete, visible things: a word like \"beautiful\" or \"high quality\" alone says nothing. Keep everything the user asked for."
+        },
+        "source": {
+         "type": "object",
+         "properties": {
+          "image": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Position of an image the user attached (0 = first)."
+          },
+          "resource": {
+           "type": "string",
+           "description": "ID of an active resource."
+          },
+          "frame": {
+           "type": "integer",
+           "minimum": 0,
+           "maximum": 2,
+           "description": "Frame of a video resource used as an image."
+          },
+          "output": {
+           "type": "string",
+           "description": "run_id of an earlier result in this conversation."
+          },
+          "index": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Output position within that run (default 0)."
+          },
+          "take": {
+           "type": "integer",
+           "minimum": 1,
+           "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+          }
+         },
+         "additionalProperties": false,
+         "description": "Image to modify. Omit to create a new image."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36",
+          "fefb88eb-8311-4409-b636-6efbb42e952c"
+         ],
+         "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match. Pass 3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36 for a poster, a page layout, or text written in the picture."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "width": {
+         "type": "integer",
+         "minimum": 64,
+         "maximum": 4096,
+         "multipleOf": 16,
+         "default": 1024
+        },
+        "height": {
+         "type": "integer",
+         "minimum": 64,
+         "maximum": 4096,
+         "multipleOf": 16,
+         "default": 1024
+        }
+       },
+       "required": [
+        "prompt"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "create_video",
+      "description": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images. Propose a video only when the user asks for one. To put the character of an image in place of someone in an existing video, the tool is replace_character, not this one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits. Before generating, agree on the video with the user in one short spoken message, without a tool: five lines at most, plain sentences, no headings, no lists, no bold. Say how you understand the clip, the length in seconds, what each image is for, then ask one to three questions only about what is still open or could be read two ways, and ask for their go. Do not write the full prompt there. Call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: start_image, end_image, reference)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "The whole clip, written for a video model that knows nothing of this conversation: one paragraph of five to eight sentences in English, present tense, in the order things happen. Say what is seen (who or what, with their look: age, hair, clothes, colours, materials; the place, the time of day, the light), then what happens beat by beat with the gestures and their pace, then how the camera moves (from where to where, how fast, how it ends), the look of the picture (live action, animation, film grain, lens), and the sound, since the clip has sound: ambience, noises, and any spoken words in quotes, in the language they are spoken. With a start image, still describe in a sentence what that image shows, then put the detail on what moves, what changes and where the camera goes. Only concrete, visible or audible things: a word like \"cinematic\" or \"smooth\" alone says nothing. Keep everything the user asked for, in their order. Naming an image here does not show it to the video model."
+        },
+        "start_image": {
+         "type": "object",
+         "properties": {
+          "image": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Position of an image the user attached (0 = first)."
+          },
+          "resource": {
+           "type": "string",
+           "description": "ID of an active resource."
+          },
+          "frame": {
+           "type": "integer",
+           "minimum": 0,
+           "maximum": 2,
+           "description": "Frame of a video resource used as an image."
+          },
+          "output": {
+           "type": "string",
+           "description": "run_id of an earlier result in this conversation."
+          },
+          "index": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Output position within that run (default 0)."
+          },
+          "take": {
+           "type": "integer",
+           "minimum": 1,
+           "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+          }
+         },
+         "additionalProperties": false,
+         "description": "Image the video starts on, as its first frame: the choice to animate an image or to make a video from it."
+        },
+        "end_image": {
+         "type": "object",
+         "properties": {
+          "image": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Position of an image the user attached (0 = first)."
+          },
+          "resource": {
+           "type": "string",
+           "description": "ID of an active resource."
+          },
+          "frame": {
+           "type": "integer",
+           "minimum": 0,
+           "maximum": 2,
+           "description": "Frame of a video resource used as an image."
+          },
+          "output": {
+           "type": "string",
+           "description": "run_id of an earlier result in this conversation."
+          },
+          "index": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Output position within that run (default 0)."
+          },
+          "take": {
+           "type": "integer",
+           "minimum": 1,
+           "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+          }
+         },
+         "additionalProperties": false,
+         "description": "Image the clip must end on exactly, as its last frame. Only when the user asks for that in so many words (an end image, a last frame, \"finit sur cette image\"). A place, an object or a person the camera goes to, reveals or discovers during the clip is not an end image: pass it in reference."
+        },
+        "reference": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "image": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Position of an image the user attached (0 = first)."
+           },
+           "resource": {
+            "type": "string",
+            "description": "ID of an active resource."
+           },
+           "frame": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "Frame of a video resource used as an image."
+           },
+           "output": {
+            "type": "string",
+            "description": "run_id of an earlier result in this conversation."
+           },
+           "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Output position within that run (default 0)."
+           },
+           "take": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+           }
+          },
+          "additionalProperties": false
+         },
+         "maxItems": 3,
+         "description": "Images of a person, a character, an object or a place that must appear in the clip, kept as they look: also what the camera goes to or reveals during the clip (the camera then turns to a door: the image of that door is a reference). They are not frames of the clip: to animate an image, use start_image. Between end_image and reference, choose reference unless the user asked for an exact last frame."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f",
+          "eaec4e2f-0649-4e56-9bd9-809dc9390452"
+         ],
+         "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match."
+        },
+        "duration": {
+         "type": [
+          "number",
+          "null"
+         ],
+         "minimum": 0.5,
+         "maximum": 120,
+         "description": "Clip length in seconds: the length the user asked for, or null when they gave none. Never write the length in the prompt. Rounded to the closest length the workflow allows."
+        },
+        "format": {
+         "type": "string",
+         "enum": [
+          "16:9",
+          "9:16",
+          "1:1",
+          "4:3",
+          "3:4",
+          "3:2",
+          "2:3",
+          "21:9"
+         ],
+         "description": "Picture format, only when the user asks for one (\"vertical\" or \"portrait\" is 9:16, \"paysage\" 16:9, \"carré\" 1:1). Omit it otherwise: a video that starts from an image takes the format of that image."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "stage": {
+         "type": "string",
+         "enum": [
+          "draft",
+          "final"
+         ],
+         "default": "draft"
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        },
+        "reuse_output": {
+         "type": "string",
+         "description": "run_id of an approved draft to render again with the final profile: pass it with stage=final and intention. The draft keeps its prompt, its length and its inputs: what prompt and duration say is then not used, and no other argument is accepted."
+        }
+       },
+       "required": [
+        "prompt",
+        "duration",
+        "intention"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "extend_video",
+      "description": "Continue an existing video with a new shot that follows its last frames. Every video is shown to the user, who can edit it before it runs. Before generating, agree with the user in one short spoken message, without a tool (five lines at most, plain sentences, no lists), on what happens next and for how many seconds; call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: source, reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: source)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "What happens next, written for a video model that only sees the last frames of the source: three to six sentences in English, present tense. Say who or what is on screen in a few words, then the new action beat by beat, how the camera moves and ends, and the sound (ambience, noises, spoken words in quotes, in the language they are spoken). Only concrete, visible or audible things."
+        },
+        "source": {
+         "type": "object",
+         "properties": {
+          "image": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Position of an image the user attached (0 = first)."
+          },
+          "resource": {
+           "type": "string",
+           "description": "ID of an active resource."
+          },
+          "output": {
+           "type": "string",
+           "description": "run_id of an earlier result in this conversation."
+          },
+          "index": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Output position within that run (default 0)."
+          },
+          "take": {
+           "type": "integer",
+           "minimum": 1,
+           "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+          }
+         },
+         "additionalProperties": false,
+         "description": "Video to continue."
+        },
+        "reference": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "image": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Position of an image the user attached (0 = first)."
+           },
+           "resource": {
+            "type": "string",
+            "description": "ID of an active resource."
+           },
+           "frame": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "Frame of a video resource used as an image."
+           },
+           "output": {
+            "type": "string",
+            "description": "run_id of an earlier result in this conversation."
+           },
+           "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Output position within that run (default 0)."
+           },
+           "take": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+           }
+          },
+          "additionalProperties": false
+         },
+         "maxItems": 3,
+         "description": "Images of a person, a character, an object or a place that must appear in the continuation, kept as they look: someone who enters the shot, or what the camera turns to. Not frames of the clip."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f",
+          "eaec4e2f-0649-4e56-9bd9-809dc9390452"
+         ],
+         "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match."
+        },
+        "duration": {
+         "type": [
+          "number",
+          "null"
+         ],
+         "minimum": 0.5,
+         "maximum": 120,
+         "description": "Seconds of new footage to add after the source video: the length the user asked for, or null when they gave none. Never write the length in the prompt. Rounded to the closest length the workflow allows."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "stage": {
+         "type": "string",
+         "enum": [
+          "draft",
+          "final"
+         ],
+         "default": "draft"
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        },
+        "reuse_output": {
+         "type": "string",
+         "description": "run_id of an approved draft to render again with the final profile: pass it with stage=final and intention. The draft keeps its prompt, its length and its inputs: what prompt and duration say is then not used, and no other argument is accepted."
+        }
+       },
+       "required": [
+        "prompt",
+        "source",
+        "duration",
+        "intention"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "replace_character",
+      "description": "Replace a person of an existing video with the character of an image: the new video keeps the motion, the framing, the scene and the sound of the source video. Use when the user gives a video and wants a character in it in place of someone (\"remplace le pingouin par un joueur de volley\", \"mets la femme de cette image à sa place\"). Call it at once, without asking the user anything first. If the user gave an image of the character, pass it in reference. If not, never make one with create_image: describe the character in character, and the application makes its image, shows it to the user to keep or redo, then runs the replacement. The character takes the place, the size and the moves of the one replaced: it cannot be drawn bigger, say so if asked. To change a replacement already made, call this tool again with the same source (the video followed, not the result) and the same reference, with the change in prompt; extend_video only continues a video in time. Not to create a video from a description (create_video). The new video lasts as long as its source, up to ten seconds, and keeps its format.\nWorkflows:\n- c4a7d2e9-3f61-4b8a-9e25-7d1c0f6b3a94: Wan 2.1 SCAIL-2. Remplacer une personne d’une vidéo par le personnage d’une image : le mouvement, le cadrage, le décor et le son restent ceux de la vidéo. La vidéo dure autant que celle qu’elle suit (dix secondes au plus) et garde sa forme. (accepts: source, reference)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "One or two sentences in English: who replaces whom, and what the user asked beyond the replacement itself (a detail to keep, a change). The application writes the full prompt from the pictures."
+        },
+        "source": {
+         "type": "object",
+         "properties": {
+          "image": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Position of an image the user attached (0 = first)."
+          },
+          "resource": {
+           "type": "string",
+           "description": "ID of an active resource."
+          },
+          "output": {
+           "type": "string",
+           "description": "run_id of an earlier result in this conversation."
+          },
+          "index": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Output position within that run (default 0)."
+          },
+          "take": {
+           "type": "integer",
+           "minimum": 1,
+           "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+          }
+         },
+         "additionalProperties": false,
+         "description": "Video whose motion, scene and sound are kept: the person to replace is in it."
+        },
+        "reference": {
+         "type": "object",
+         "properties": {
+          "image": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Position of an image the user attached (0 = first)."
+          },
+          "resource": {
+           "type": "string",
+           "description": "ID of an active resource."
+          },
+          "frame": {
+           "type": "integer",
+           "minimum": 0,
+           "maximum": 2,
+           "description": "Frame of a video resource used as an image."
+          },
+          "output": {
+           "type": "string",
+           "description": "run_id of an earlier result in this conversation."
+          },
+          "index": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Output position within that run (default 0)."
+          },
+          "take": {
+           "type": "integer",
+           "minimum": 1,
+           "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+          }
+         },
+         "additionalProperties": false,
+         "description": "Image of the character who takes that person’s place, kept as they look. Leave it out and use character when the user has no image of them."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "subject": {
+         "type": "string",
+         "maxLength": 200,
+         "minLength": 1,
+         "description": "Who is replaced in the source video, in one to three English words a detector can find in every frame (\"girl\", \"man in red jacket\"). After a comma, an object in their hands that must stay as it is (\"girl, handkerchief\").",
+         "default": "person"
+        },
+        "reference_subject": {
+         "type": "string",
+         "maxLength": 200,
+         "minLength": 1,
+         "description": "Who the character is in the reference image, in one or two English words (\"woman\", \"robot\", \"cartoon cat\").",
+         "default": "person"
+        },
+        "character": {
+         "type": "string",
+         "minLength": 3,
+         "maxLength": 600,
+         "description": "Only when there is no image of the character: who to draw, in English, as they look (kind, age, hair, clothes with their colours), e.g. a male volleyball player with short dark hair, a blue jersey and white shorts. The application makes the image, the user checks it."
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        }
+       },
+       "required": [
+        "prompt",
+        "source",
+        "intention"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "create_audio",
+      "description": "Create music (a song with sung lyrics, or an instrumental piece) or sound effects from a description. Use only when the user asks for music or a sound to be produced; writing lyrics alone does not mean generating. Every sound is shown to the user, who can edit it before it runs. You cannot hear the result: to judge it, ask the user. For a song, write the lyrics in full yourself unless the user gave them, and pass them in lyrics.\nWorkflows:\n- 84390db5-e4b9-413c-9352-bbac225fe79c: Bruitages (MOSS-SoundEffect v2). Créer un bruitage ou une ambiance avec MOSS-SoundEffect v2 : de 1 à 30 secondes, mono 48 kHz, sans musique ni voix chantée. (accepts: prompt only)\n- 8a2e5baf-0c02-4077-b36c-482b4e54bb13: Musique (ACE-Step 1.5 XL). Composer une musique avec ACE-Step 1.5 XL : chanson aux paroles chantées ou morceau instrumental, de 10 secondes à 10 minutes, en stéréo 48 kHz. (accepts: prompt only)",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "The sound, written for an audio model that knows nothing of this conversation, in English. For music: a comma-separated list of tags, then one sentence: genre and era, mood, tempo in BPM, key if it matters, the instruments, the voice (female or male, its tone, sung or rapped) or \"instrumental\", and the production (lo-fi, live room, polished studio). For a sound effect: one or two sentences saying what makes the sound, the material, the action and its rhythm, the place and its acoustics (small room, open field, street), how near it is, and what comes before or after. Only concrete, audible things: a word like \"epic\" or \"beautiful\" alone says little. Never put the lyrics here."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "84390db5-e4b9-413c-9352-bbac225fe79c",
+          "8a2e5baf-0c02-4077-b36c-482b4e54bb13"
+         ],
+         "description": "The workflow that makes what the user asked for. Pass 84390db5-e4b9-413c-9352-bbac225fe79c for sound effects, noises and ambiences, without music or singing. Pass 8a2e5baf-0c02-4077-b36c-482b4e54bb13 for music: a song with sung lyrics, or an instrumental piece."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "seconds": {
+         "type": "number",
+         "minimum": 1,
+         "maximum": 600,
+         "description": "Length in seconds: the length the user asked for, 30 at most. About 3 for a single hit or a short effect, 10 for an action, 20 to 30 for an ambience. For 8a2e5baf-0c02-4077-b36c-482b4e54bb13: Length in seconds: the length the user asked for. About 60 to 90 for a short song with a verse and a chorus, 150 to 240 for a full song; 30 when the user wants a short loop or jingle.",
+         "default": 10
+        },
+        "lyrics": {
+         "type": "string",
+         "maxLength": 8000,
+         "description": "The words to sing, in the language set in language, one line per sung line, with section tags on their own line: [Intro], [Verse], [Pre-Chorus], [Chorus], [Bridge], [Outro]. Write them in full when the user wants a song (their own words if they gave any). Empty for an instrumental piece. Never put the style here. Only for: 8a2e5baf-0c02-4077-b36c-482b4e54bb13.",
+         "default": ""
+        },
+        "language": {
+         "type": "string",
+         "enum": [
+          "en",
+          "fr",
+          "es",
+          "de",
+          "it",
+          "pt",
+          "nl",
+          "ru",
+          "pl",
+          "zh",
+          "ja",
+          "ko",
+          "ar",
+          "hi",
+          "unknown"
+         ],
+         "description": "Language the lyrics are sung in (fr for French). Ignored for an instrumental piece. Only for: 8a2e5baf-0c02-4077-b36c-482b4e54bb13.",
+         "default": "en"
+        }
+       },
+       "required": [
+        "prompt",
+        "workflow"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "upscale",
+      "description": "Increase the resolution and sharpness of an existing image or video. Use when the user wants a larger or sharper version of an existing result.\nWorkflows:\n- 2c7e9a41-5b3d-4f8a-a1c6-7d0e3b9f2a58: Upscale vidéo (Real-ESRGAN ×2). Agrandir une vidéo ×2 image par image avec Real-ESRGAN, en gardant son son. Rapide et fidèle. (accepts: source)\n- 5e1b8c3a-9d2f-4a6e-b7c4-1f0d6e3a9b85: Upscale rapide (Real-ESRGAN ×4). Agrandir une image ×4 avec Real-ESRGAN, sans diffusion. Seulement quand l’utilisateur demande un agrandissement rapide ou simple : SeedVR2 est l’agrandissement par défaut. (accepts: source)\n- 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87: Upscale SeedVR2. Agrandir et restaurer une image avec SeedVR2 7B : détails plus nets sans aspect plastique, couleurs de l’original gardées. Une passe ×2 par défaut ; échelle, passes, étapes et correction des couleurs suivent la demande. (accepts: source)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "source": {
+         "type": "object",
+         "properties": {
+          "image": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Position of an image the user attached (0 = first)."
+          },
+          "resource": {
+           "type": "string",
+           "description": "ID of an active resource."
+          },
+          "frame": {
+           "type": "integer",
+           "minimum": 0,
+           "maximum": 2,
+           "description": "Frame of a video resource used as an image."
+          },
+          "output": {
+           "type": "string",
+           "description": "run_id of an earlier result in this conversation."
+          },
+          "index": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Output position within that run (default 0)."
+          },
+          "take": {
+           "type": "integer",
+           "minimum": 1,
+           "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+          }
+         },
+         "additionalProperties": false,
+         "description": "Image or video to upscale."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "2c7e9a41-5b3d-4f8a-a1c6-7d0e3b9f2a58",
+          "5e1b8c3a-9d2f-4a6e-b7c4-1f0d6e3a9b85",
+          "6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87"
+         ],
+         "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "max_side": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 16384,
+         "description": "Largest output side in pixels (3840 = 4K). For 5e1b8c3a-9d2f-4a6e-b7c4-1f0d6e3a9b85: Largest output side in pixels (0 = no limit).",
+         "default": 3840
+        },
+        "scale": {
+         "type": "number",
+         "minimum": 1,
+         "maximum": 4,
+         "description": "Enlargement per pass (2 doubles the size). Only change it if the user asks for a size. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
+         "default": 2
+        },
+        "passes": {
+         "type": "integer",
+         "enum": [
+          1,
+          2,
+          3
+         ],
+         "description": "Repeat the upscale; 1 unless the user wants a much larger or stronger result. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
+         "default": 1
+        },
+        "steps": {
+         "type": "integer",
+         "enum": [
+          1,
+          2,
+          3,
+          4
+         ],
+         "description": "Restoration steps; 1 is the natural distilled setting, more adds invented detail. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
+         "default": 1
+        },
+        "color_correction": {
+         "type": "string",
+         "enum": [
+          "lab",
+          "wavelet",
+          "adain",
+          "none"
+         ],
+         "description": "How colours are taken back from the original: lab (faithful), wavelet, adain (light), none. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
+         "default": "lab"
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        }
+       },
+       "required": [
+        "source"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "interpolate",
+      "description": "Make an existing video smoother by adding intermediate frames. Use when the user wants a smoother or slow-motion version of an existing video.\nWorkflows:\n- 9f3c6a2e-4d1b-4e8f-8c7a-3b5d0e2f6a19: Interpoler (RIFE 4.26). Ajouter des images intermédiaires avec RIFE 4.26 : mouvement plus fluide à durée égale, ou ralenti. (accepts: source)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "source": {
+         "type": "object",
+         "properties": {
+          "image": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Position of an image the user attached (0 = first)."
+          },
+          "resource": {
+           "type": "string",
+           "description": "ID of an active resource."
+          },
+          "output": {
+           "type": "string",
+           "description": "run_id of an earlier result in this conversation."
+          },
+          "index": {
+           "type": "integer",
+           "minimum": 0,
+           "description": "Output position within that run (default 0)."
+          },
+          "take": {
+           "type": "integer",
+           "minimum": 1,
+           "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+          }
+         },
+         "additionalProperties": false,
+         "description": "Video to make smoother."
+        },
+        "multiplier": {
+         "type": "integer",
+         "enum": [
+          2,
+          4
+         ],
+         "description": "2 for smoother motion, 4 for very smooth or strong slow motion.",
+         "default": 2
+        },
+        "mode": {
+         "type": "string",
+         "enum": [
+          "smooth",
+          "slow_motion"
+         ],
+         "description": "smooth keeps the duration; slow_motion slows the video down.",
+         "default": "smooth"
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        }
+       },
+       "required": [
+        "source",
+        "intention"
+       ],
+       "additionalProperties": false
+      }
+     }
+    }
+   ],
+   "fresh": [
+    {
+     "type": "function",
+     "function": {
+      "name": "create_image",
+      "description": "Create a new image from a description, or modify an image. Use only when the user asks for an image to be produced or changed (not the character to put in a video: replace_character makes it); writing or improving a prompt alone does not mean generating. The image model only sees the images passed in source and reference: an image that is only described in the prompt is not used.\nWorkflows:\n- 3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36: MOSS Image. Créer une image avec MOSS Image : affiches, mises en page et texte écrit dans l’image. (accepts: prompt only)\n- fefb88eb-8311-4409-b636-6efbb42e952c: Krea 2. Créer une image : photo, illustration, ou retouche d’une image existante. Modèle d’image par défaut, rapide. (accepts: source)",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "The whole image, written for an image model that knows nothing of this conversation: three to six sentences in English. Say the subject with its concrete look (age, expression, pose, clothes, colours, materials), the place and what is behind, the framing (how close, from which angle, what is in the foreground), the light and the colours, and the kind of picture (photo with its lens and film look, illustration, painting, 3D render). Text to write in the image goes in quotes, in the language asked. Only concrete, visible things: a word like \"beautiful\" or \"high quality\" alone says nothing. Keep everything the user asked for."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36",
+          "fefb88eb-8311-4409-b636-6efbb42e952c"
+         ],
+         "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match. Pass 3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36 for a poster, a page layout, or text written in the picture."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "width": {
+         "type": "integer",
+         "minimum": 64,
+         "maximum": 4096,
+         "multipleOf": 16,
+         "default": 1024
+        },
+        "height": {
+         "type": "integer",
+         "minimum": 64,
+         "maximum": 4096,
+         "multipleOf": 16,
+         "default": 1024
+        }
+       },
+       "required": [
+        "prompt"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "create_video",
+      "description": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images. Propose a video only when the user asks for one. To put the character of an image in place of someone in an existing video, the tool is replace_character, not this one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits. Before generating, agree on the video with the user in one short spoken message, without a tool: five lines at most, plain sentences, no headings, no lists, no bold. Say how you understand the clip, the length in seconds, what each image is for, then ask one to three questions only about what is still open or could be read two ways, and ask for their go. Do not write the full prompt there. Call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: start_image, end_image, reference)",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "The whole clip, written for a video model that knows nothing of this conversation: one paragraph of five to eight sentences in English, present tense, in the order things happen. Say what is seen (who or what, with their look: age, hair, clothes, colours, materials; the place, the time of day, the light), then what happens beat by beat with the gestures and their pace, then how the camera moves (from where to where, how fast, how it ends), the look of the picture (live action, animation, film grain, lens), and the sound, since the clip has sound: ambience, noises, and any spoken words in quotes, in the language they are spoken. With a start image, still describe in a sentence what that image shows, then put the detail on what moves, what changes and where the camera goes. Only concrete, visible or audible things: a word like \"cinematic\" or \"smooth\" alone says nothing. Keep everything the user asked for, in their order. Naming an image here does not show it to the video model."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f",
+          "eaec4e2f-0649-4e56-9bd9-809dc9390452"
+         ],
+         "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match."
+        },
+        "duration": {
+         "type": [
+          "number",
+          "null"
+         ],
+         "minimum": 0.5,
+         "maximum": 120,
+         "description": "Clip length in seconds: the length the user asked for, or null when they gave none. Never write the length in the prompt. Rounded to the closest length the workflow allows."
+        },
+        "format": {
+         "type": "string",
+         "enum": [
+          "16:9",
+          "9:16",
+          "1:1",
+          "4:3",
+          "3:4",
+          "3:2",
+          "2:3",
+          "21:9"
+         ],
+         "description": "Picture format, only when the user asks for one (\"vertical\" or \"portrait\" is 9:16, \"paysage\" 16:9, \"carré\" 1:1). Omit it otherwise: a video that starts from an image takes the format of that image."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "stage": {
+         "type": "string",
+         "enum": [
+          "draft",
+          "final"
+         ],
+         "default": "draft"
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        }
+       },
+       "required": [
+        "prompt",
+        "duration",
+        "intention"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "create_audio",
+      "description": "Create music (a song with sung lyrics, or an instrumental piece) or sound effects from a description. Use only when the user asks for music or a sound to be produced; writing lyrics alone does not mean generating. Every sound is shown to the user, who can edit it before it runs. You cannot hear the result: to judge it, ask the user. For a song, write the lyrics in full yourself unless the user gave them, and pass them in lyrics.\nWorkflows:\n- 84390db5-e4b9-413c-9352-bbac225fe79c: Bruitages (MOSS-SoundEffect v2). Créer un bruitage ou une ambiance avec MOSS-SoundEffect v2 : de 1 à 30 secondes, mono 48 kHz, sans musique ni voix chantée. (accepts: prompt only)\n- 8a2e5baf-0c02-4077-b36c-482b4e54bb13: Musique (ACE-Step 1.5 XL). Composer une musique avec ACE-Step 1.5 XL : chanson aux paroles chantées ou morceau instrumental, de 10 secondes à 10 minutes, en stéréo 48 kHz. (accepts: prompt only)",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "The sound, written for an audio model that knows nothing of this conversation, in English. For music: a comma-separated list of tags, then one sentence: genre and era, mood, tempo in BPM, key if it matters, the instruments, the voice (female or male, its tone, sung or rapped) or \"instrumental\", and the production (lo-fi, live room, polished studio). For a sound effect: one or two sentences saying what makes the sound, the material, the action and its rhythm, the place and its acoustics (small room, open field, street), how near it is, and what comes before or after. Only concrete, audible things: a word like \"epic\" or \"beautiful\" alone says little. Never put the lyrics here."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "84390db5-e4b9-413c-9352-bbac225fe79c",
+          "8a2e5baf-0c02-4077-b36c-482b4e54bb13"
+         ],
+         "description": "The workflow that makes what the user asked for. Pass 84390db5-e4b9-413c-9352-bbac225fe79c for sound effects, noises and ambiences, without music or singing. Pass 8a2e5baf-0c02-4077-b36c-482b4e54bb13 for music: a song with sung lyrics, or an instrumental piece."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "seconds": {
+         "type": "number",
+         "minimum": 1,
+         "maximum": 600,
+         "description": "Length in seconds: the length the user asked for, 30 at most. About 3 for a single hit or a short effect, 10 for an action, 20 to 30 for an ambience. For 8a2e5baf-0c02-4077-b36c-482b4e54bb13: Length in seconds: the length the user asked for. About 60 to 90 for a short song with a verse and a chorus, 150 to 240 for a full song; 30 when the user wants a short loop or jingle.",
+         "default": 10
+        },
+        "lyrics": {
+         "type": "string",
+         "maxLength": 8000,
+         "description": "The words to sing, in the language set in language, one line per sung line, with section tags on their own line: [Intro], [Verse], [Pre-Chorus], [Chorus], [Bridge], [Outro]. Write them in full when the user wants a song (their own words if they gave any). Empty for an instrumental piece. Never put the style here. Only for: 8a2e5baf-0c02-4077-b36c-482b4e54bb13.",
+         "default": ""
+        },
+        "language": {
+         "type": "string",
+         "enum": [
+          "en",
+          "fr",
+          "es",
+          "de",
+          "it",
+          "pt",
+          "nl",
+          "ru",
+          "pl",
+          "zh",
+          "ja",
+          "ko",
+          "ar",
+          "hi",
+          "unknown"
+         ],
+         "description": "Language the lyrics are sung in (fr for French). Ignored for an instrumental piece. Only for: 8a2e5baf-0c02-4077-b36c-482b4e54bb13.",
+         "default": "en"
+        }
+       },
+       "required": [
+        "prompt",
+        "workflow"
+       ],
+       "additionalProperties": false
+      }
+     }
+    }
+   ],
+   "rich": [
+    {
+     "type": "function",
+     "function": {
+      "name": "create_image",
+      "description": "Create a new image from a description, or modify an image. Use only when the user asks for an image to be produced or changed (not the character to put in a video: replace_character makes it); writing or improving a prompt alone does not mean generating. The image model only sees the images passed in source and reference: an image that is only described in the prompt is not used.\nWorkflows:\n- 3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36: MOSS Image. Créer une image avec MOSS Image : affiches, mises en page et texte écrit dans l’image. (accepts: prompt only)\n- fefb88eb-8311-4409-b636-6efbb42e952c: Krea 2. Créer une image : photo, illustration, ou retouche d’une image existante. Modèle d’image par défaut, rapide. (accepts: source)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "The whole image, written for an image model that knows nothing of this conversation: three to six sentences in English. Say the subject with its concrete look (age, expression, pose, clothes, colours, materials), the place and what is behind, the framing (how close, from which angle, what is in the foreground), the light and the colours, and the kind of picture (photo with its lens and film look, illustration, painting, 3D render). Text to write in the image goes in quotes, in the language asked. Only concrete, visible things: a word like \"beautiful\" or \"high quality\" alone says nothing. Keep everything the user asked for."
+        },
+        "source": {
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "image": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Position of an image the user attached (0 = first).",
+             "maximum": 0
+            }
+           },
+           "required": [
+            "image"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "resource": {
+             "type": "string",
+             "enum": [
+              "11111111-1111-4111-8111-111111111111",
+              "22222222-2222-4222-8222-222222222222"
+             ],
+             "description": "ID of an active resource."
+            },
+            "frame": {
+             "type": "integer",
+             "minimum": 0,
+             "maximum": 2,
+             "description": "Frame of a video resource used as an image."
+            }
+           },
+           "required": [
+            "resource"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "output": {
+             "type": "string",
+             "enum": [
+              "44444444-4444-4444-8444-444444444444"
+             ],
+             "description": "run_id of an earlier result in this conversation."
+            },
+            "index": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Output position within that run (default 0).",
+             "maximum": 1
+            }
+           },
+           "required": [
+            "output"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "take": {
+             "type": "integer",
+             "enum": [
+              1
+             ],
+             "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+            }
+           },
+           "required": [
+            "take"
+           ],
+           "additionalProperties": false
+          }
+         ],
+         "description": "Image to modify. Omit to create a new image."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36",
+          "fefb88eb-8311-4409-b636-6efbb42e952c"
+         ],
+         "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match. Pass 3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36 for a poster, a page layout, or text written in the picture."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "width": {
+         "type": "integer",
+         "minimum": 64,
+         "maximum": 4096,
+         "multipleOf": 16,
+         "default": 1024
+        },
+        "height": {
+         "type": "integer",
+         "minimum": 64,
+         "maximum": 4096,
+         "multipleOf": 16,
+         "default": 1024
+        }
+       },
+       "required": [
+        "prompt"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "create_video",
+      "description": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images. Propose a video only when the user asks for one. To put the character of an image in place of someone in an existing video, the tool is replace_character, not this one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits. Before generating, agree on the video with the user in one short spoken message, without a tool: five lines at most, plain sentences, no headings, no lists, no bold. Say how you understand the clip, the length in seconds, what each image is for, then ask one to three questions only about what is still open or could be read two ways, and ask for their go. Do not write the full prompt there. Call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: start_image, end_image, reference)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "The whole clip, written for a video model that knows nothing of this conversation: one paragraph of five to eight sentences in English, present tense, in the order things happen. Say what is seen (who or what, with their look: age, hair, clothes, colours, materials; the place, the time of day, the light), then what happens beat by beat with the gestures and their pace, then how the camera moves (from where to where, how fast, how it ends), the look of the picture (live action, animation, film grain, lens), and the sound, since the clip has sound: ambience, noises, and any spoken words in quotes, in the language they are spoken. With a start image, still describe in a sentence what that image shows, then put the detail on what moves, what changes and where the camera goes. Only concrete, visible or audible things: a word like \"cinematic\" or \"smooth\" alone says nothing. Keep everything the user asked for, in their order. Naming an image here does not show it to the video model."
+        },
+        "start_image": {
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "image": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Position of an image the user attached (0 = first).",
+             "maximum": 0
+            }
+           },
+           "required": [
+            "image"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "resource": {
+             "type": "string",
+             "enum": [
+              "11111111-1111-4111-8111-111111111111",
+              "22222222-2222-4222-8222-222222222222"
+             ],
+             "description": "ID of an active resource."
+            },
+            "frame": {
+             "type": "integer",
+             "minimum": 0,
+             "maximum": 2,
+             "description": "Frame of a video resource used as an image."
+            }
+           },
+           "required": [
+            "resource"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "output": {
+             "type": "string",
+             "enum": [
+              "44444444-4444-4444-8444-444444444444"
+             ],
+             "description": "run_id of an earlier result in this conversation."
+            },
+            "index": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Output position within that run (default 0).",
+             "maximum": 1
+            }
+           },
+           "required": [
+            "output"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "take": {
+             "type": "integer",
+             "enum": [
+              1
+             ],
+             "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+            }
+           },
+           "required": [
+            "take"
+           ],
+           "additionalProperties": false
+          }
+         ],
+         "description": "Image the video starts on, as its first frame: the choice to animate an image or to make a video from it."
+        },
+        "end_image": {
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "image": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Position of an image the user attached (0 = first).",
+             "maximum": 0
+            }
+           },
+           "required": [
+            "image"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "resource": {
+             "type": "string",
+             "enum": [
+              "11111111-1111-4111-8111-111111111111",
+              "22222222-2222-4222-8222-222222222222"
+             ],
+             "description": "ID of an active resource."
+            },
+            "frame": {
+             "type": "integer",
+             "minimum": 0,
+             "maximum": 2,
+             "description": "Frame of a video resource used as an image."
+            }
+           },
+           "required": [
+            "resource"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "output": {
+             "type": "string",
+             "enum": [
+              "44444444-4444-4444-8444-444444444444"
+             ],
+             "description": "run_id of an earlier result in this conversation."
+            },
+            "index": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Output position within that run (default 0).",
+             "maximum": 1
+            }
+           },
+           "required": [
+            "output"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "take": {
+             "type": "integer",
+             "enum": [
+              1
+             ],
+             "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+            }
+           },
+           "required": [
+            "take"
+           ],
+           "additionalProperties": false
+          }
+         ],
+         "description": "Image the clip must end on exactly, as its last frame. Only when the user asks for that in so many words (an end image, a last frame, \"finit sur cette image\"). A place, an object or a person the camera goes to, reveals or discovers during the clip is not an end image: pass it in reference."
+        },
+        "reference": {
+         "type": "array",
+         "items": {
+          "anyOf": [
+           {
+            "type": "object",
+            "properties": {
+             "image": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Position of an image the user attached (0 = first).",
+              "maximum": 0
+             }
+            },
+            "required": [
+             "image"
+            ],
+            "additionalProperties": false
+           },
+           {
+            "type": "object",
+            "properties": {
+             "resource": {
+              "type": "string",
+              "enum": [
+               "11111111-1111-4111-8111-111111111111",
+               "22222222-2222-4222-8222-222222222222"
+              ],
+              "description": "ID of an active resource."
+             },
+             "frame": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Frame of a video resource used as an image."
+             }
+            },
+            "required": [
+             "resource"
+            ],
+            "additionalProperties": false
+           },
+           {
+            "type": "object",
+            "properties": {
+             "output": {
+              "type": "string",
+              "enum": [
+               "44444444-4444-4444-8444-444444444444"
+              ],
+              "description": "run_id of an earlier result in this conversation."
+             },
+             "index": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Output position within that run (default 0).",
+              "maximum": 1
+             }
+            },
+            "required": [
+             "output"
+            ],
+            "additionalProperties": false
+           },
+           {
+            "type": "object",
+            "properties": {
+             "take": {
+              "type": "integer",
+              "enum": [
+               1
+              ],
+              "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+             }
+            },
+            "required": [
+             "take"
+            ],
+            "additionalProperties": false
+           }
+          ]
+         },
+         "maxItems": 3,
+         "description": "Images of a person, a character, an object or a place that must appear in the clip, kept as they look: also what the camera goes to or reveals during the clip (the camera then turns to a door: the image of that door is a reference). They are not frames of the clip: to animate an image, use start_image. Between end_image and reference, choose reference unless the user asked for an exact last frame."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f",
+          "eaec4e2f-0649-4e56-9bd9-809dc9390452"
+         ],
+         "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match."
+        },
+        "duration": {
+         "type": [
+          "number",
+          "null"
+         ],
+         "minimum": 0.5,
+         "maximum": 120,
+         "description": "Clip length in seconds: the length the user asked for, or null when they gave none. Never write the length in the prompt. Rounded to the closest length the workflow allows."
+        },
+        "format": {
+         "type": "string",
+         "enum": [
+          "16:9",
+          "9:16",
+          "1:1",
+          "4:3",
+          "3:4",
+          "3:2",
+          "2:3",
+          "21:9"
+         ],
+         "description": "Picture format, only when the user asks for one (\"vertical\" or \"portrait\" is 9:16, \"paysage\" 16:9, \"carré\" 1:1). Omit it otherwise: a video that starts from an image takes the format of that image."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "stage": {
+         "type": "string",
+         "enum": [
+          "draft",
+          "final"
+         ],
+         "default": "draft"
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        },
+        "reuse_output": {
+         "type": "string",
+         "enum": [
+          "33333333-3333-4333-8333-333333333333"
+         ],
+         "description": "run_id of an approved draft to render again with the final profile: pass it with stage=final and intention. The draft keeps its prompt, its length and its inputs: what prompt and duration say is then not used, and no other argument is accepted."
+        }
+       },
+       "required": [
+        "prompt",
+        "duration",
+        "intention"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "extend_video",
+      "description": "Continue an existing video with a new shot that follows its last frames. Every video is shown to the user, who can edit it before it runs. Before generating, agree with the user in one short spoken message, without a tool (five lines at most, plain sentences, no lists), on what happens next and for how many seconds; call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: source, reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: source)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "What happens next, written for a video model that only sees the last frames of the source: three to six sentences in English, present tense. Say who or what is on screen in a few words, then the new action beat by beat, how the camera moves and ends, and the sound (ambience, noises, spoken words in quotes, in the language they are spoken). Only concrete, visible or audible things."
+        },
+        "source": {
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "resource": {
+             "type": "string",
+             "enum": [
+              "22222222-2222-4222-8222-222222222222"
+             ],
+             "description": "ID of an active resource."
+            }
+           },
+           "required": [
+            "resource"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "output": {
+             "type": "string",
+             "enum": [
+              "33333333-3333-4333-8333-333333333333"
+             ],
+             "description": "run_id of an earlier result in this conversation."
+            },
+            "index": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Output position within that run (default 0).",
+             "maximum": 0
+            }
+           },
+           "required": [
+            "output"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "take": {
+             "type": "integer",
+             "enum": [
+              2,
+              3
+             ],
+             "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+            }
+           },
+           "required": [
+            "take"
+           ],
+           "additionalProperties": false
+          }
+         ],
+         "description": "Video to continue."
+        },
+        "reference": {
+         "type": "array",
+         "items": {
+          "anyOf": [
+           {
+            "type": "object",
+            "properties": {
+             "image": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Position of an image the user attached (0 = first).",
+              "maximum": 0
+             }
+            },
+            "required": [
+             "image"
+            ],
+            "additionalProperties": false
+           },
+           {
+            "type": "object",
+            "properties": {
+             "resource": {
+              "type": "string",
+              "enum": [
+               "11111111-1111-4111-8111-111111111111",
+               "22222222-2222-4222-8222-222222222222"
+              ],
+              "description": "ID of an active resource."
+             },
+             "frame": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Frame of a video resource used as an image."
+             }
+            },
+            "required": [
+             "resource"
+            ],
+            "additionalProperties": false
+           },
+           {
+            "type": "object",
+            "properties": {
+             "output": {
+              "type": "string",
+              "enum": [
+               "44444444-4444-4444-8444-444444444444"
+              ],
+              "description": "run_id of an earlier result in this conversation."
+             },
+             "index": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Output position within that run (default 0).",
+              "maximum": 1
+             }
+            },
+            "required": [
+             "output"
+            ],
+            "additionalProperties": false
+           },
+           {
+            "type": "object",
+            "properties": {
+             "take": {
+              "type": "integer",
+              "enum": [
+               1
+              ],
+              "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+             }
+            },
+            "required": [
+             "take"
+            ],
+            "additionalProperties": false
+           }
+          ]
+         },
+         "maxItems": 3,
+         "description": "Images of a person, a character, an object or a place that must appear in the continuation, kept as they look: someone who enters the shot, or what the camera turns to. Not frames of the clip."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f",
+          "eaec4e2f-0649-4e56-9bd9-809dc9390452"
+         ],
+         "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match."
+        },
+        "duration": {
+         "type": [
+          "number",
+          "null"
+         ],
+         "minimum": 0.5,
+         "maximum": 120,
+         "description": "Seconds of new footage to add after the source video: the length the user asked for, or null when they gave none. Never write the length in the prompt. Rounded to the closest length the workflow allows."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "stage": {
+         "type": "string",
+         "enum": [
+          "draft",
+          "final"
+         ],
+         "default": "draft"
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        },
+        "reuse_output": {
+         "type": "string",
+         "enum": [
+          "33333333-3333-4333-8333-333333333333"
+         ],
+         "description": "run_id of an approved draft to render again with the final profile: pass it with stage=final and intention. The draft keeps its prompt, its length and its inputs: what prompt and duration say is then not used, and no other argument is accepted."
+        }
+       },
+       "required": [
+        "prompt",
+        "source",
+        "duration",
+        "intention"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "replace_character",
+      "description": "Replace a person of an existing video with the character of an image: the new video keeps the motion, the framing, the scene and the sound of the source video. Use when the user gives a video and wants a character in it in place of someone (\"remplace le pingouin par un joueur de volley\", \"mets la femme de cette image à sa place\"). Call it at once, without asking the user anything first. If the user gave an image of the character, pass it in reference. If not, never make one with create_image: describe the character in character, and the application makes its image, shows it to the user to keep or redo, then runs the replacement. The character takes the place, the size and the moves of the one replaced: it cannot be drawn bigger, say so if asked. To change a replacement already made, call this tool again with the same source (the video followed, not the result) and the same reference, with the change in prompt; extend_video only continues a video in time. Not to create a video from a description (create_video). The new video lasts as long as its source, up to ten seconds, and keeps its format.\nWorkflows:\n- c4a7d2e9-3f61-4b8a-9e25-7d1c0f6b3a94: Wan 2.1 SCAIL-2. Remplacer une personne d’une vidéo par le personnage d’une image : le mouvement, le cadrage, le décor et le son restent ceux de la vidéo. La vidéo dure autant que celle qu’elle suit (dix secondes au plus) et garde sa forme. (accepts: source, reference)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "One or two sentences in English: who replaces whom, and what the user asked beyond the replacement itself (a detail to keep, a change). The application writes the full prompt from the pictures."
+        },
+        "source": {
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "resource": {
+             "type": "string",
+             "enum": [
+              "22222222-2222-4222-8222-222222222222"
+             ],
+             "description": "ID of an active resource."
+            }
+           },
+           "required": [
+            "resource"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "output": {
+             "type": "string",
+             "enum": [
+              "33333333-3333-4333-8333-333333333333"
+             ],
+             "description": "run_id of an earlier result in this conversation."
+            },
+            "index": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Output position within that run (default 0).",
+             "maximum": 0
+            }
+           },
+           "required": [
+            "output"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "take": {
+             "type": "integer",
+             "enum": [
+              2,
+              3
+             ],
+             "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+            }
+           },
+           "required": [
+            "take"
+           ],
+           "additionalProperties": false
+          }
+         ],
+         "description": "Video whose motion, scene and sound are kept: the person to replace is in it."
+        },
+        "reference": {
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "image": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Position of an image the user attached (0 = first).",
+             "maximum": 0
+            }
+           },
+           "required": [
+            "image"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "resource": {
+             "type": "string",
+             "enum": [
+              "11111111-1111-4111-8111-111111111111",
+              "22222222-2222-4222-8222-222222222222"
+             ],
+             "description": "ID of an active resource."
+            },
+            "frame": {
+             "type": "integer",
+             "minimum": 0,
+             "maximum": 2,
+             "description": "Frame of a video resource used as an image."
+            }
+           },
+           "required": [
+            "resource"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "output": {
+             "type": "string",
+             "enum": [
+              "44444444-4444-4444-8444-444444444444"
+             ],
+             "description": "run_id of an earlier result in this conversation."
+            },
+            "index": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Output position within that run (default 0).",
+             "maximum": 1
+            }
+           },
+           "required": [
+            "output"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "take": {
+             "type": "integer",
+             "enum": [
+              1
+             ],
+             "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+            }
+           },
+           "required": [
+            "take"
+           ],
+           "additionalProperties": false
+          }
+         ],
+         "description": "Image of the character who takes that person’s place, kept as they look. Leave it out and use character when the user has no image of them."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "subject": {
+         "type": "string",
+         "maxLength": 200,
+         "minLength": 1,
+         "description": "Who is replaced in the source video, in one to three English words a detector can find in every frame (\"girl\", \"man in red jacket\"). After a comma, an object in their hands that must stay as it is (\"girl, handkerchief\").",
+         "default": "person"
+        },
+        "reference_subject": {
+         "type": "string",
+         "maxLength": 200,
+         "minLength": 1,
+         "description": "Who the character is in the reference image, in one or two English words (\"woman\", \"robot\", \"cartoon cat\").",
+         "default": "person"
+        },
+        "character": {
+         "type": "string",
+         "minLength": 3,
+         "maxLength": 600,
+         "description": "Only when there is no image of the character: who to draw, in English, as they look (kind, age, hair, clothes with their colours), e.g. a male volleyball player with short dark hair, a blue jersey and white shorts. The application makes the image, the user checks it."
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        }
+       },
+       "required": [
+        "prompt",
+        "source",
+        "intention"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "create_audio",
+      "description": "Create music (a song with sung lyrics, or an instrumental piece) or sound effects from a description. Use only when the user asks for music or a sound to be produced; writing lyrics alone does not mean generating. Every sound is shown to the user, who can edit it before it runs. You cannot hear the result: to judge it, ask the user. For a song, write the lyrics in full yourself unless the user gave them, and pass them in lyrics.\nWorkflows:\n- 84390db5-e4b9-413c-9352-bbac225fe79c: Bruitages (MOSS-SoundEffect v2). Créer un bruitage ou une ambiance avec MOSS-SoundEffect v2 : de 1 à 30 secondes, mono 48 kHz, sans musique ni voix chantée. (accepts: prompt only)\n- 8a2e5baf-0c02-4077-b36c-482b4e54bb13: Musique (ACE-Step 1.5 XL). Composer une musique avec ACE-Step 1.5 XL : chanson aux paroles chantées ou morceau instrumental, de 10 secondes à 10 minutes, en stéréo 48 kHz. (accepts: prompt only)",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "prompt": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 8000,
+         "description": "The sound, written for an audio model that knows nothing of this conversation, in English. For music: a comma-separated list of tags, then one sentence: genre and era, mood, tempo in BPM, key if it matters, the instruments, the voice (female or male, its tone, sung or rapped) or \"instrumental\", and the production (lo-fi, live room, polished studio). For a sound effect: one or two sentences saying what makes the sound, the material, the action and its rhythm, the place and its acoustics (small room, open field, street), how near it is, and what comes before or after. Only concrete, audible things: a word like \"epic\" or \"beautiful\" alone says little. Never put the lyrics here."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "84390db5-e4b9-413c-9352-bbac225fe79c",
+          "8a2e5baf-0c02-4077-b36c-482b4e54bb13"
+         ],
+         "description": "The workflow that makes what the user asked for. Pass 84390db5-e4b9-413c-9352-bbac225fe79c for sound effects, noises and ambiences, without music or singing. Pass 8a2e5baf-0c02-4077-b36c-482b4e54bb13 for music: a song with sung lyrics, or an instrumental piece."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "seconds": {
+         "type": "number",
+         "minimum": 1,
+         "maximum": 600,
+         "description": "Length in seconds: the length the user asked for, 30 at most. About 3 for a single hit or a short effect, 10 for an action, 20 to 30 for an ambience. For 8a2e5baf-0c02-4077-b36c-482b4e54bb13: Length in seconds: the length the user asked for. About 60 to 90 for a short song with a verse and a chorus, 150 to 240 for a full song; 30 when the user wants a short loop or jingle.",
+         "default": 10
+        },
+        "lyrics": {
+         "type": "string",
+         "maxLength": 8000,
+         "description": "The words to sing, in the language set in language, one line per sung line, with section tags on their own line: [Intro], [Verse], [Pre-Chorus], [Chorus], [Bridge], [Outro]. Write them in full when the user wants a song (their own words if they gave any). Empty for an instrumental piece. Never put the style here. Only for: 8a2e5baf-0c02-4077-b36c-482b4e54bb13.",
+         "default": ""
+        },
+        "language": {
+         "type": "string",
+         "enum": [
+          "en",
+          "fr",
+          "es",
+          "de",
+          "it",
+          "pt",
+          "nl",
+          "ru",
+          "pl",
+          "zh",
+          "ja",
+          "ko",
+          "ar",
+          "hi",
+          "unknown"
+         ],
+         "description": "Language the lyrics are sung in (fr for French). Ignored for an instrumental piece. Only for: 8a2e5baf-0c02-4077-b36c-482b4e54bb13.",
+         "default": "en"
+        }
+       },
+       "required": [
+        "prompt",
+        "workflow"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "upscale",
+      "description": "Increase the resolution and sharpness of an existing image or video. Use when the user wants a larger or sharper version of an existing result.\nWorkflows:\n- 2c7e9a41-5b3d-4f8a-a1c6-7d0e3b9f2a58: Upscale vidéo (Real-ESRGAN ×2). Agrandir une vidéo ×2 image par image avec Real-ESRGAN, en gardant son son. Rapide et fidèle. (accepts: source)\n- 5e1b8c3a-9d2f-4a6e-b7c4-1f0d6e3a9b85: Upscale rapide (Real-ESRGAN ×4). Agrandir une image ×4 avec Real-ESRGAN, sans diffusion. Seulement quand l’utilisateur demande un agrandissement rapide ou simple : SeedVR2 est l’agrandissement par défaut. (accepts: source)\n- 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87: Upscale SeedVR2. Agrandir et restaurer une image avec SeedVR2 7B : détails plus nets sans aspect plastique, couleurs de l’original gardées. Une passe ×2 par défaut ; échelle, passes, étapes et correction des couleurs suivent la demande. (accepts: source)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "source": {
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "image": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Position of an image the user attached (0 = first).",
+             "maximum": 0
+            }
+           },
+           "required": [
+            "image"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "resource": {
+             "type": "string",
+             "enum": [
+              "11111111-1111-4111-8111-111111111111",
+              "22222222-2222-4222-8222-222222222222"
+             ],
+             "description": "ID of an active resource."
+            },
+            "frame": {
+             "type": "integer",
+             "minimum": 0,
+             "maximum": 2,
+             "description": "Frame of a video resource used as an image."
+            }
+           },
+           "required": [
+            "resource"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "output": {
+             "type": "string",
+             "enum": [
+              "33333333-3333-4333-8333-333333333333",
+              "44444444-4444-4444-8444-444444444444"
+             ],
+             "description": "run_id of an earlier result in this conversation."
+            },
+            "index": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Output position within that run (default 0).",
+             "maximum": 1
+            }
+           },
+           "required": [
+            "output"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "take": {
+             "type": "integer",
+             "enum": [
+              1,
+              2,
+              3
+             ],
+             "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+            }
+           },
+           "required": [
+            "take"
+           ],
+           "additionalProperties": false
+          }
+         ],
+         "description": "Image or video to upscale."
+        },
+        "workflow": {
+         "type": "string",
+         "enum": [
+          "2c7e9a41-5b3d-4f8a-a1c6-7d0e3b9f2a58",
+          "5e1b8c3a-9d2f-4a6e-b7c4-1f0d6e3a9b85",
+          "6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87"
+         ],
+         "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match."
+        },
+        "seed": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 9007199254740991,
+         "description": "Only when the user gives a seed number: exactly that number. Omit it otherwise; the application draws one."
+        },
+        "max_side": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 16384,
+         "description": "Largest output side in pixels (3840 = 4K). For 5e1b8c3a-9d2f-4a6e-b7c4-1f0d6e3a9b85: Largest output side in pixels (0 = no limit).",
+         "default": 3840
+        },
+        "scale": {
+         "type": "number",
+         "minimum": 1,
+         "maximum": 4,
+         "description": "Enlargement per pass (2 doubles the size). Only change it if the user asks for a size. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
+         "default": 2
+        },
+        "passes": {
+         "type": "integer",
+         "enum": [
+          1,
+          2,
+          3
+         ],
+         "description": "Repeat the upscale; 1 unless the user wants a much larger or stronger result. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
+         "default": 1
+        },
+        "steps": {
+         "type": "integer",
+         "enum": [
+          1,
+          2,
+          3,
+          4
+         ],
+         "description": "Restoration steps; 1 is the natural distilled setting, more adds invented detail. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
+         "default": 1
+        },
+        "color_correction": {
+         "type": "string",
+         "enum": [
+          "lab",
+          "wavelet",
+          "adain",
+          "none"
+         ],
+         "description": "How colours are taken back from the original: lab (faithful), wavelet, adain (light), none. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
+         "default": "lab"
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        }
+       },
+       "required": [
+        "source"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    {
+     "type": "function",
+     "function": {
+      "name": "interpolate",
+      "description": "Make an existing video smoother by adding intermediate frames. Use when the user wants a smoother or slow-motion version of an existing video.\nWorkflows:\n- 9f3c6a2e-4d1b-4e8f-8c7a-3b5d0e2f6a19: Interpoler (RIFE 4.26). Ajouter des images intermédiaires avec RIFE 4.26 : mouvement plus fluide à durée égale, ou ralenti. (accepts: source)\nSources: {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "source": {
+         "anyOf": [
+          {
+           "type": "object",
+           "properties": {
+            "resource": {
+             "type": "string",
+             "enum": [
+              "22222222-2222-4222-8222-222222222222"
+             ],
+             "description": "ID of an active resource."
+            }
+           },
+           "required": [
+            "resource"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "output": {
+             "type": "string",
+             "enum": [
+              "33333333-3333-4333-8333-333333333333"
+             ],
+             "description": "run_id of an earlier result in this conversation."
+            },
+            "index": {
+             "type": "integer",
+             "minimum": 0,
+             "description": "Output position within that run (default 0).",
+             "maximum": 0
+            }
+           },
+           "required": [
+            "output"
+           ],
+           "additionalProperties": false
+          },
+          {
+           "type": "object",
+           "properties": {
+            "take": {
+             "type": "integer",
+             "enum": [
+              2,
+              3
+             ],
+             "description": "Number of a take of this project, as the user sees it (« PRISE 12 », « la prise 12 »)."
+            }
+           },
+           "required": [
+            "take"
+           ],
+           "additionalProperties": false
+          }
+         ],
+         "description": "Video to make smoother."
+        },
+        "multiplier": {
+         "type": "integer",
+         "enum": [
+          2,
+          4
+         ],
+         "description": "2 for smoother motion, 4 for very smooth or strong slow motion.",
+         "default": 2
+        },
+        "mode": {
+         "type": "string",
+         "enum": [
+          "smooth",
+          "slow_motion"
+         ],
+         "description": "smooth keeps the duration; slow_motion slows the video down.",
+         "default": "smooth"
+        },
+        "intention": {
+         "type": "string",
+         "minLength": 1,
+         "maxLength": 2000,
+         "description": "One or two sentences explaining the proposal to the user, who must confirm every video."
+        }
+       },
+       "required": [
+        "source",
+        "intention"
+       ],
+       "additionalProperties": false
+      }
+     }
+    }
+   ]
+  },
+  "resourceTool": {
+   "type": "function",
+   "function": {
+    "name": "local_read_resource",
+    "description": "Read one or several active reference images, or sampled video frames, using their IDs already present in the resource catalog. Use resource_ids to examine multiple references together. Reading is already permitted; do not ask the user to provide an ID that is in the catalog. No image generation.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "resource_id": {
+       "type": "string",
+       "description": "One active catalog ID, for a single resource."
+      },
+      "resource_ids": {
+       "type": "array",
+       "minItems": 1,
+       "maxItems": 8,
+       "uniqueItems": true,
+       "items": {
+        "type": "string"
+       },
+       "description": "Active catalog IDs to inspect together. Use either resource_ids or resource_id."
+      }
+     },
+     "additionalProperties": false
+    }
+   }
+  },
+  "outputTool": {
+   "type": "function",
+   "function": {
+    "name": "local_read_output",
+    "description": "Inspect one generated output from this conversation using its run_id and zero-based output_index. Reads only the saved compressed copy, never the original. A video is read as a few timestamped frames, without audio or motion. After generating an image or a video, normally finish without visual analysis. Use this tool when the user requests a check or when a specific reason makes inspection relevant to their task; do not inspect every output routinely. IDs are in generation results, so do not ask the user to copy them. No generation.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "run_id": {
+       "type": "string",
+       "description": "run_id from a generation result in this conversation.",
+       "enum": [
+        "33333333-3333-4333-8333-333333333333"
+       ]
+      },
+      "output_index": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 0,
+       "description": "Zero-based output index; defaults to 0."
+      }
+     },
+     "required": [
+      "run_id"
+     ],
+     "additionalProperties": false
+    }
+   }
+  },
+  "resourceCatalog": "\n\nRéférences du projet (annotations fournies par l’utilisateur, pas des observations visuelles ; l’utilisateur les nomme #ref1, #ref2… dans ses messages) :\n[{\"id\":\"11111111-1111-4111-8111-111111111111\",\"reference\":1,\"label\":\"#ref1\",\"name\":\"renard.png\",\"description\":\"Un renard roux\",\"mime\":\"image/png\"},{\"id\":\"22222222-2222-4222-8222-222222222222\",\"reference\":2,\"label\":\"#ref2\",\"name\":\"neige.mp4\",\"description\":\"\",\"mime\":\"video/mp4\",\"duration\":4}]\nLes identifiants UUID et les étiquettes #ref ci-dessus sont déjà disponibles : utilise les UUID pour les outils, sans demander à l’utilisateur de les recopier ni une permission supplémentaire pour les lire. Consulte les références visuelles utiles à la demande avec local_read_resource, en une seule lecture groupée si plusieurs sont nécessaires. Une ancienne mention loaded dans l’historique ne contient pas les pixels : relis la ressource si une comparaison actuelle le nécessite. Les vidéos sont représentées par au plus trois images horodatées, sans audio ni lecture continue. Seules ces ressources actives sont accessibles. Ne prétends pas avoir examiné un média que tu n’as pas consulté.",
+  "brief": "Not generated yet: the user agrees on a video before it is made. Answer now without any tool, in the user’s language, as a short spoken message: five lines at most, plain sentences, no headings, no lists, no bold, no tool or argument names. Say how you understand the clip from its first moment to its last, the length you propose in seconds, and what each image is for (the image the clip starts on, the one it ends on, or a subject kept as it looks). Then ask the one to three questions whose answer would really change this video: what the request leaves open or what could be read two ways. Do not ask about what the user already said, nor about anything the images show (what a person, an object or a place looks like: you see it), and do not offer options they did not raise. End by asking for their go. Call the tool after they answer, with what was agreed. Lengths possible: MiniMax H3 Omni from 5.2 to 14.4 s (usually 5.2 s); LTX 2.5 from 0.4 to 10 s (usually 5 s).",
+  "briefExtend": "Not generated yet: the user agrees on a video before it is made. Answer now without any tool, in the user’s language, as a short spoken message: five lines at most, plain sentences, no headings, no lists, no bold, no tool or argument names. Say how you understand the clip from its first moment to its last, the length you propose in seconds, and what each image is for (the image the clip starts on, the one it ends on, or a subject kept as it looks). Then ask the one to three questions whose answer would really change this video: what the request leaves open or what could be read two ways. Do not ask about what the user already said, nor about anything the images show (what a person, an object or a place looks like: you see it), and do not offer options they did not raise. End by asking for their go. Call the tool after they answer, with what was agreed. Lengths possible: MiniMax H3 Omni from 4.3 to 13.5 s (usually 5 s); LTX 2.5 from 0.3 to 9.7 s (usually 5 s).",
+  "cardBrief": "Nothing is generated yet. Under your next words a card shows this proposal to the user (its length, its format, its prompt) with « Générer » and « Annuler »: they decide there. Write to them now, without any tool, in their language: two to four plain sentences that say what happens in the clip from its first moment to its last, then ask whether it suits them. Never say the video is ready, made or sent: it does not exist yet. No headings, no lists, no bold, no tool or argument names.",
+  "thin": "Nothing was generated: the prompt is too thin for a generator that knows nothing of this conversation. Write it again in full, as the description of the prompt argument asks: what is seen, with its concrete look, the place and the light; what happens, beat by beat; the camera; the look of the picture; and for a video the sound. Take the details from the images when some are shown. Keep everything that was agreed with the user, then make the same call again.",
+  "seen": "Nothing was generated: you had not looked at these images yet. They are shown below. Make your call again now, writing the prompt from what you actually see in them.",
+  "cited": "L’utilisateur cite #ref1 ({\"resource\": \"11111111-1111-4111-8111-111111111111\"}) : ce qu’il cite n’est pas transmise à l’outil. Décrire une image dans le prompt ne la montre pas au générateur. Refais l’appel en la passant dans le rôle qui convient à sa demande (image de départ : start_image ou référence : reference).",
+  "failed": [
+   "La génération a échoué et rien n’a été produit. Aucun outil n’est disponible pour la suite de ce message : explique l’échec à l’utilisateur en une ou deux phrases, sans écrire d’appel d’outil. Il relancera s’il le souhaite.",
+   "La génération a échoué et rien n’a été produit. Si l’utilisateur demande de recommencer, refais le même appel d’outil.",
+   "Cette demande n’a pas abouti : rien n’a été produit. Si l’utilisateur la redemande, refais le même appel d’outil."
+  ]
+ },
+ "request": {
+  "messages": [
+   {
+    "role": "system",
+    "content": "Tu es un assistant local utile. Réponds dans la langue de l’utilisateur. Décris honnêtement les images et signale tes incertitudes.\n\nContexte fourni par l’utilisateur au démarrage de cette conversation :\nTout en noir et blanc."
+   },
+   {
+    "role": "user",
+    "content": "Fais une image d’un renard dans la neige."
+   },
+   {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+     {
+      "id": "call_image_1",
+      "type": "function",
+      "function": {
+       "name": "create_image",
+       "arguments": "{\"prompt\":\"A red fox in the snow\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "content": "{\"status\":\"success\",\"run_id\":\"44444444-4444-4444-8444-444444444444\",\"takes\":[4],\"takes_note\":\"Pour l’utilisateur, ces prises s’appellent « PRISE n » (takes, une par sortie) : nomme-les par ce numéro, jamais par run_id. Pour en reprendre une, {\\\"take\\\": n} suffit.\",\"use_as_source\":{\"output\":\"44444444-4444-4444-8444-444444444444\"},\"workflow\":\"Krea 2\",\"prompt\":\"A red fox in the snow\",\"workflow_id\":\"fefb88eb-8311-4409-b636-6efbb42e952c\",\"workflow_digest\":\"abc\",\"media_type\":\"image\",\"parameters\":{\"seed\":7,\"width\":1024,\"height\":1024},\"reference_default_count\":0,\"reference_defaults\":[],\"reference_count\":0,\"reference_capacity\":1,\"reference_mode\":\"pixels\",\"outputs\":[{\"filename\":\"a.png\",\"subfolder\":\"\",\"type\":\"output\"}],\"note\":\"Image générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché.\"}",
+    "tool_call_id": "call_image_1"
+   },
+   {
+    "role": "user",
+    "content": "Fais une vidéo de 5 secondes : un renard court dans la neige."
+   },
+   {
+    "role": "assistant",
+    "content": "Un renard roux traverse la neige.",
+    "tool_calls": [
+     {
+      "id": "call_video_1",
+      "type": "function",
+      "function": {
+       "name": "create_video",
+       "arguments": "{\"prompt\":\"A fox runs\",\"duration\":5,\"intention\":\"Un renard court.\"}"
+      }
+     }
+    ]
+   },
+   {
+    "role": "tool",
+    "content": "{\"status\":\"denied\",\"cancelled\":\"card\",\"message\":\"L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.\"}",
+    "tool_call_id": "call_video_1"
+   },
+   {
+    "role": "user",
+    "content": "inspect tool context"
+   }
+  ],
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "create_image",
+     "description": "Create a new image from a description, or modify an image. Use only when the user asks for an image to be produced or changed (not the character to put in a video: replace_character makes it); writing or improving a prompt alone does not mean generating. The image model only sees the images passed in source and reference: an image that is only described in the prompt is not used.\nWorkflows:\n- rails-image: Image locale. Creer une image (accepts: prompt only)",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 8000,
+        "description": "The whole image, written for an image model that knows nothing of this conversation: three to six sentences in English. Say the subject with its concrete look (age, expression, pose, clothes, colours, materials), the place and what is behind, the framing (how close, from which angle, what is in the foreground), the light and the colours, and the kind of picture (photo with its lens and film look, illustration, painting, 3D render). Text to write in the image goes in quotes, in the language asked. Only concrete, visible things: a word like \"beautiful\" or \"high quality\" alone says nothing. Keep everything the user asked for."
+       }
+      },
+      "required": [
+       "prompt"
+      ],
+      "additionalProperties": false
+     }
+    }
+   }
+  ],
+  "tool_choice": "auto"
+ }
+}

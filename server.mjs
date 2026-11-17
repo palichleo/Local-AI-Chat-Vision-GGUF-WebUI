@@ -2,14 +2,22 @@ import { appSources } from './lib/app-sources.mjs';
 import { Projects, projectId } from './lib/projects.mjs';
 import { globalContext } from './lib/global-context.mjs';
 import { ModelLibrary, modelFolderName } from './lib/models.mjs';
-import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
+import {
+  Resources,
+  capableResourceTool,
+  refsToIds,
+  resourceCatalogPrompt,
+  resourceTool,
+  resourceReadIds,
+} from './lib/resources.mjs';
 import { citedImages, citedMessage, citedSaid, citedUnused, citedNumbers } from './lib/cited-resources.mjs';
 import { briefMessage, briefMissing, cardBrief } from './lib/video-brief.mjs';
+import { CAPABLE, CAPABLE_CARD, capableMessages, wordingOf } from './lib/model-wording.mjs';
 import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
 import { THIN_NOTE, passedImages, thinPrompt } from './lib/thin-prompt.mjs';
-import { outputToolFor, readOutput } from './lib/output-tools.mjs';
+import { capableOutputTool, outputToolFor, readOutput } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
 import { generatedFile } from './lib/generated-media.mjs';
 import { countContext } from './lib/context-count.mjs';
@@ -826,7 +834,11 @@ export async function createApplication({
   async function includeTools(payload, body, { prune = null } = {}) {
     // The references of the conversation's project; those it names stay in the list.
     const project = projectOf(body?.project),
-      cited = citedNumbers(body?.messages);
+      cited = citedNumbers(body?.messages),
+      // The words of the small local model, or those of a large remote one (lib/model-wording.mjs).
+      wording = wordingOf(chat.connection);
+    // A large model gets its own consigne and the facts of the results (the page's history unchanged).
+    if (wording === CAPABLE) payload.messages = capableMessages(payload.messages, { vision: chat.vision });
     // A message answered (not a count of the context): too many references for the model's
     // list, the least used are removed from the disk (copies, never the user's originals), and
     // `prune` is told which.
@@ -838,8 +850,22 @@ export async function createApplication({
       if (removed.length) prune(removed);
     }
     const active = await resources.catalog(project);
-    const context = resourceCatalogPrompt(active, { cited });
-    if (context) {
+    const context = resourceCatalogPrompt(active, { cited, wording });
+    if (context && wording === CAPABLE) {
+      // A capable model: at the end of the user's last message, after the consigne, the tools and
+      // the history its provider keeps in cache. In the consigne, each project changed the start
+      // of every request (0.6.44: nothing read again from the cache on going to another project).
+      const last = (body.messages ?? []).findLastIndex(message => message?.role === 'user' && !message.internal),
+        said = payload.messages[last];
+      if (said)
+        payload.messages[last] = {
+          ...said,
+          content:
+            typeof said.content === 'string'
+              ? said.content + context
+              : [...said.content, { type: 'text', text: context.trimStart() }],
+        };
+    } else if (context) {
       if (payload.messages[0]?.role === 'system')
         payload.messages[0] = { ...payload.messages[0], content: payload.messages[0].content + context };
       else payload.messages.unshift({ role: 'system', content: context });
@@ -880,10 +906,15 @@ export async function createApplication({
               draft:
                 run.mediaType === 'video' && run.parameters?.stage === 'draft' && Boolean(run.parameters?.replay_args),
             })),
-        })),
+        }, { wording })),
       );
     }
-    if (active.length && chat.vision && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8) {
+    // A capable model reads by number, with the same two definitions at every request of every
+    // conversation (the cache of its provider); the server answers a number or a run_id that is none.
+    if (wording === CAPABLE) {
+      if (chat.vision && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8)
+        definitions.push(capableResourceTool, capableOutputTool);
+    } else if (active.length && chat.vision && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8) {
       const definition = structuredClone(resourceTool),
         ids = active.map(item => item.id);
       definition.function.parameters.properties.resource_id.enum = ids;
@@ -891,7 +922,7 @@ export async function createApplication({
       definition.function.parameters.properties.resource_ids.maxItems = 8 - (resourceTurns.get(body.turnId) || 0);
       definitions.push(definition);
     }
-    const outputDefinition = outputToolFor(runs);
+    const outputDefinition = wording === CAPABLE ? null : outputToolFor(runs);
     if (chat.vision && outputDefinition && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8)
       definitions.push(outputDefinition);
     if (definitions.length) {
@@ -2497,12 +2528,25 @@ export async function createApplication({
               });
             }
           } else if (calls[0].function.name === 'local_read_resource') {
+            // References named by their number (a capable model, « refs »): their ids in the project.
+            let refError = null;
+            try {
+              calls[0].function.arguments = refsToIds(calls[0].function.arguments, await resources.catalog(projectOf(body.project)));
+            } catch (error) {
+              refError = error;
+            }
             const call = nativeFields({ role: 'assistant', tool_calls: calls }).tool_calls[0];
             let args;
             try {
               args = JSON.parse(call.function.arguments);
             } catch {
               throw problem('Paramètres de ressource invalides.', 502);
+            }
+            // A number that is none: said to the model, which can read another or answer.
+            if (refError) {
+              await rejectCall(call, refError);
+              res.write('data: [DONE]\n\n');
+              return res.end();
             }
             const ids = resourceReadIds(args);
             if (
@@ -2528,6 +2572,8 @@ export async function createApplication({
             let takeError = null;
             try {
               calls[0].function.arguments = await withTakes(calls[0].function.arguments, body.conversationId, projectOf(body.project));
+              // « Anime #ref2 » : a reference named by its number (a capable model), its id in the project.
+              calls[0].function.arguments = refsToIds(calls[0].function.arguments, await resources.catalog(projectOf(body.project)));
             } catch (error) {
               takeError = error;
             }
@@ -2580,7 +2626,7 @@ export async function createApplication({
                 // An image the user named by its label and the model left out: said once.
                 const active = await resources.catalog(projectOf(body.project)),
                   unused = citedUnused(body.messages, active, call);
-                if (unused.length) throw problem(citedMessage(unused), 400);
+                if (unused.length) throw problem(citedMessage(unused, null, { byNumber: wordingOf(chat.connection) === CAPABLE }), 400);
                 // A character put in a video: its prompt is written here from the frames of the
                 // video and the character, which the model no longer has under its eyes.
                 const replacing = call.function.name === 'replace_character';
@@ -2670,7 +2716,7 @@ export async function createApplication({
                   // continues the clip decides whether an image can go with it): told once.
                   if (made?.cited?.roles?.length && !citedSaid(body.messages)) {
                     runtime.cancel({ requestId: made.requestId });
-                    throw problem(citedMessage(made.cited.left, made.cited.roles), 400);
+                    throw problem(citedMessage(made.cited.left, made.cited.roles, { byNumber: wordingOf(chat.connection) === CAPABLE }), 400);
                   }
                   request = made;
                   // A video not talked over yet (lib/video-brief.mjs): proposed all the same, with what
@@ -2679,7 +2725,7 @@ export async function createApplication({
                   // user's answer sets the Studio (`brief`). The page knows where it is.
                   if (request && !request.missing && briefMissing(body.messages, call)) {
                     request.brief = briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []));
-                    request.cardBrief = cardBrief();
+                    request.cardBrief = wordingOf(chat.connection) === CAPABLE ? CAPABLE_CARD : cardBrief();
                   }
                   // Said where the user confirms: what the prompt was written from.
                   if (replacing && request)

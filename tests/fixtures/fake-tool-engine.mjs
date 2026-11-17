@@ -34,7 +34,8 @@ const server = http.createServer(async (req, res) => {
       JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }] }),
     );
   }
-  if (body.messages.at(-1).content === 'inspect tool context') {
+  // (Its start: a remote model may find the references of the project added after it.)
+  if (String(body.messages.at(-1).content).startsWith('inspect tool context')) {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     send(res, { local_test_payload: body });
     return res.end('data: [DONE]\n\n');
