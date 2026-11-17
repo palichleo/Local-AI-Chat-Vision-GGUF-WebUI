@@ -191,7 +191,8 @@ class VideoTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             config = self.named_config(folder)
             absolute = str(Path(folder).resolve() / 'elsewhere')
-            odd = ('..', '../up', 'a/b', 'a\\b', absolute, 'C:name', 'a.png', 'Name', 'a b', '', '_a', 'a_', 'x' * 97, 5)
+            odd = ('..', '../up', 'a/b', 'a\\b', absolute, 'C:name', 'a.png', 'Name', 'a b')
+            odd += ('', '_a', 'a_', 'x' * 97, 5)
             for name in odd:
                 value = job() | {'outputName': name}
                 with self.subTest(name=name):
