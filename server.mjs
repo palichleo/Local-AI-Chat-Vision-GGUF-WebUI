@@ -463,7 +463,14 @@ export async function createApplication({
     });
     await chat.changed(saved.id);
     await chat.use(saved.id);
-    return saved;
+    // What the model takes (images, its context, its efforts) from its listing, as when it is chosen
+    // in the bar of the chat; a listing that does not answer leaves what was kept.
+    try {
+      await chat.choose({ model: saved.model });
+    } catch (error) {
+      console.error(`Modèles de ${name} :`, error.message);
+    }
+    return remotes.get(saved.id);
   }
   let componentsCheck = null;
   let savingSettings = false;
@@ -1163,7 +1170,13 @@ export async function createApplication({
       if (path === '/api/remote' && req.method === 'GET') return send(200, await remoteView());
       // What the bar of the chat offers for the remote model in use (its models, their efforts); null for the local one.
       if (path === '/api/remote/options' && req.method === 'GET')
-        return send(200, { options: await chat.options({ again: requestURL.searchParams.get('again') === '1' }) });
+        return send(200, {
+          options: await chat.options({
+            again: requestURL.searchParams.get('again') === '1',
+            // A service that never answers leaves the menu with what stopped it, not waiting.
+            signal: AbortSignal.timeout(30000),
+          }),
+        });
       if (path === '/api/status' && req.method === 'GET') return send(200, status());
       if (req.method === 'GET' && path === '/api/resources')
         return send(200, { resources: (await resources.list()).map(resourceView) });
@@ -1576,11 +1589,12 @@ export async function createApplication({
           const kept = await remotes.provider(body.provider);
           if (kept && chat.connection?.id === kept.id && (chat.busy || runtime.active))
             throw problem('Attendez la fin de la réponse avant de retirer ce compte.', 409);
-          const revoked = body.provider === 'chatgpt' ? await chatgpt.signOut() : {};
+          // The connection first: if it cannot be removed, the account stays signed in (nothing half done).
           if (kept) {
             await remotes.remove(kept.id);
             chat.forget(kept.id);
           }
+          const revoked = body.provider === 'chatgpt' ? await chatgpt.signOut() : {};
           return send(200, { ...revoked, ...(await remoteView()), status: status() });
         }
         // The model and the effort chosen in the bar of the chat, kept as the last choice.
@@ -1642,11 +1656,12 @@ export async function createApplication({
           const kept = await remotes.provider('chatgpt');
           if (kept && chat.connection?.id === kept.id && (chat.busy || runtime.active))
             throw problem('Attendez la fin de la réponse avant de vous déconnecter.', 409);
-          const result = await chatgpt.signOut();
+          // The connection first: if it cannot be removed, the account stays signed in (nothing half done).
           if (kept) {
             await remotes.remove(kept.id);
             chat.forget(kept.id);
           }
+          const result = await chatgpt.signOut();
           return send(200, { ...result, ...(await remoteView()), status: status() });
         }
         // A key of the user's OpenRouter account, made without copying it: the connection is saved once back.

@@ -126,7 +126,8 @@ test('a request for a service leaves out what only llama.cpp knows, and its answ
   assert.equal(body.messages[1].reasoning_content, 'pensée gardée', 'the conversation itself keeps it');
   // OpenAI wants its own word for the length (room for a reflection, 0.6.39); Mistral refuses what it does not know.
   const openai = remoteBody(body, { preset: 'openai', model: 'gpt-4.1' });
-  assert.deepEqual([openai.max_tokens, openai.max_completion_tokens], [undefined, 16000]);
+  // No length of answer asked: the service's own (a floor could pass what its model can write).
+  assert.deepEqual([openai.max_tokens, openai.max_completion_tokens], [undefined, undefined]);
   assert.equal('stream_options' in remoteBody(body, { preset: 'mistral', model: 'm' }), false);
   assert.deepEqual(Object.keys(minimalBody(sent)).sort(), ['messages', 'model', 'stream', 'tool_choice', 'tools']);
 
@@ -441,7 +442,12 @@ async function fakeChatGPT() {
     if (url.pathname === '/v1/models')
       return json({
         models: [
-          { slug: 'gpt-test', display_name: 'GPT Test', visibility: 'list' },
+          {
+            slug: 'gpt-test',
+            display_name: 'GPT Test',
+            visibility: 'list',
+            supported_reasoning_levels: [{ effort: 'low' }, { effort: 'medium' }, { effort: 'high' }],
+          },
           { slug: 'internal', visibility: 'hide' },
         ],
       });
@@ -561,7 +567,7 @@ test('« Continuer avec ChatGPT »: the registration of the open-source way, the
     [kept.client_id, kept.subject, kept.access_token, kept.ext_agent_host_id],
     ['oaiapp_test', 'user-1', 'access-1', asked.get('ext_agent_host_id')],
   );
-  // Each with the efforts it takes (the usual three when its listing says none) and whether it sees images.
+  // Each with the efforts its listing says (none invented) and whether it sees images.
   assert.deepEqual(await account.models(), [
     { id: 'gpt-test', name: 'GPT Test', efforts: ['low', 'medium', 'high'], vision: true },
   ]);
@@ -584,7 +590,8 @@ test('« Continuer avec ChatGPT »: the registration of the open-source way, the
       max_tokens: 4096,
       chat_template_kwargs: { enable_thinking: false },
     },
-    { model: 'gpt-test' },
+    // A quick turn: the lowest effort of its listing, as the chat gives it.
+    { model: 'gpt-test', quick: 'low' },
   );
   const events = await chunksOf(answer.body);
   const sent = fake.seen.responses.at(-1).body;
