@@ -844,7 +844,21 @@ export async function createApplication({
     }
     const active = await resources.catalog(project);
     const context = resourceCatalogPrompt(active, { cited, wording });
-    if (context) {
+    if (context && wording === CAPABLE) {
+      // A capable model: at the end of the user's last message, after the consigne, the tools and
+      // the history its provider keeps in cache. In the consigne, each project changed the start
+      // of every request (0.6.44: nothing read again from the cache on going to another project).
+      const last = (body.messages ?? []).findLastIndex(message => message?.role === 'user' && !message.internal),
+        said = payload.messages[last];
+      if (said)
+        payload.messages[last] = {
+          ...said,
+          content:
+            typeof said.content === 'string'
+              ? said.content + context
+              : [...said.content, { type: 'text', text: context.trimStart() }],
+        };
+    } else if (context) {
       if (payload.messages[0]?.role === 'system')
         payload.messages[0] = { ...payload.messages[0], content: payload.messages[0].content + context };
       else payload.messages.unshift({ role: 'system', content: context });

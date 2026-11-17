@@ -249,7 +249,30 @@ async function localMoodix(t, { remote = null } = {}) {
   } else await api('start', {}, 202);
   for (let i = 0; i < 400 && (await (await api('status')).json()).state !== 'ready'; i++)
     await new Promise(resolve => setTimeout(resolve, 25));
-  return { api };
+  // A reference of the project (#ref1), as the page adds one.
+  const reference = async () => {
+    const uploaded = await fetch(app.url + '/api/resources/upload', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + boot.token,
+        'Content-Type': 'image/png',
+        'X-Resource-Name': encodeURIComponent('escalier.png'),
+      },
+      body: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=',
+        'base64',
+      ),
+    });
+    assert.equal(uploaded.status, 201, await uploaded.clone().text());
+    // Prepared as the page prepares it (its copy for the model): ready, in the list of the model.
+    const png =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
+    await api('resources/update', {
+      id: (await uploaded.json()).id,
+      patch: { description: 'Un escalier', prepared: { width: 1, height: 1, frames: [{ url: png, time: null }] } },
+    });
+  };
+  return { api, reference };
 }
 async function freePort() {
   const probe = netServer();
@@ -319,8 +342,9 @@ function pageConversation(system) {
 }
 
 /** What llama.cpp (or the service of `remote`) receives for that conversation: its messages and its tools. */
-async function localRequest(t, remote = null) {
-  const { api } = await localMoodix(t, { remote });
+async function localRequest(t, remote = null, { withReference = false } = {}) {
+  const { api, reference } = await localMoodix(t, { remote });
+  if (withReference) await reference();
   const streamed = await (
     await api('chat', {
       messages: pageConversation(
@@ -533,9 +557,21 @@ test(
   'through the application: OpenRouter gets the capable wording, another service the local one',
   { timeout: 60000 },
   async t => {
-    const capable = await localRequest(t, 'openrouter');
+    const capable = await localRequest(t, 'openrouter', { withReference: true });
     assert.ok(capable.messages[0].content.startsWith(CAPABLE_SYSTEM));
     assert.ok(capable.messages[0].content.endsWith('Tout en noir et blanc.'));
+    // The references of the project at the end of the user's last message, without their ids: the
+    // consigne, the tools and the history stay the same from one project to another.
+    const asked = capable.messages.at(-1).content;
+    assert.match(
+      asked,
+      /^inspect tool context\n\n\[References of the project, added by Moodix .*"label":"#ref1".*Un escalier.*\]$/s,
+    );
+    assert.doesNotMatch(asked, /"id":/);
+    assert.equal(
+      capable.messages.filter(message => /References of the project/.test(JSON.stringify(message.content))).length,
+      1,
+    );
     assert.equal(JSON.parse(capable.messages[3].content).note, undefined);
     assert.doesNotMatch(capable.tools[0].function.description, /Workflows:\n- rails-image:/);
     // Its two readings by number, and not one identifier in its tools: the same at every request.
