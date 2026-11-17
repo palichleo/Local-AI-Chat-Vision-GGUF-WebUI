@@ -11,10 +11,9 @@ history/
 *.pth
 *.bin
 
-# Local Python experiment inputs and generated files.
-experiments/krea2-python/local.json
-experiments/krea2-python/outputs/
-experiments/krea2-python/__pycache__/
+# The first Python experiment (Krea 2) left the repository in 0.6.73: it stays on the branch
+# experiment/krea2-python. What a checkout still holds of it is local.
+experiments/
 
 # Native runner user data. Shipped workflows are in runner/workflows/; workflow/ holds the
 # user's own workflows and edits (publish them with npm run ship-workflows).

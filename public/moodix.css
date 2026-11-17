@@ -4604,14 +4604,6 @@ dialog,
   font-style: normal;
   font-display: swap;
 }
-/* The name of the mode on the switch (-CHAT, -STUDIO): width 62 to 125 %, weight 100 to 900. */
-@font-face {
-  font-family: 'Archivo';
-  src: url('/assets/fonts/Archivo-Variable.ttf') format('truetype');
-  font-weight: 100 900;
-  font-stretch: 62% 125%;
-  font-display: swap;
-}
 
 /* ------------------------------------------------------------------ tokens */
 :root {

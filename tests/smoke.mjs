@@ -133,14 +133,17 @@ test('smoke local sans modèle réel', { timeout: 30000 }, async t => {
         assert.equal(served.status, 200, path);
         assert.equal(served.headers.get('content-type'), type, path);
       }
-      const texture = await fetch(base + '/assets/metallic-grain.png');
-      assert.equal(texture.status, 200);
-      assert.equal(texture.headers.get('content-type'), 'image/png');
-      const textureBytes = Buffer.from(await texture.arrayBuffer());
-      assert.deepEqual([...textureBytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
-      assert.ok(textureBytes.length < 1500000);
-      // The sidebar and the window are gone (0.6.0): their scripts are no longer served.
-      for (const gone of ['/material-light.mjs', '/sidebar-fold.mjs', '/sidebar-state.js', '/filet.mjs'])
+      // The sidebar and the window are gone (0.6.0): their scripts are no longer served. Nor are
+      // the metal of the former interface and the font of its switch, which no page loaded (0.6.73).
+      for (const gone of [
+        '/material-light.mjs',
+        '/sidebar-fold.mjs',
+        '/sidebar-state.js',
+        '/filet.mjs',
+        '/assets/metallic-grain.png',
+        '/assets/metallic-surface.svg',
+        '/assets/fonts/Archivo-Variable.ttf',
+      ])
         assert.equal((await fetch(base + gone)).status, 404, gone);
       assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
       assert.equal(

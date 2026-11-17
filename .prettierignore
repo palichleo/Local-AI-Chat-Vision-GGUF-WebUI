@@ -4,4 +4,3 @@ output/
 history/
 experiments/
 workflow/
-tests/fixtures/*.html
