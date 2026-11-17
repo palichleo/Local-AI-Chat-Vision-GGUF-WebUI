@@ -5,3 +5,7 @@
 if git diff --cached --name-only | grep -qE '^(public/|server\.mjs|lib/)'; then
   node scripts/check-ui.mjs || exit 1
 fi
+# What is committed must still be installable by the copies already installed: their own check of an
+# update is run on it (scripts/check-update.mjs). A « dependency » added to package.json in 0.6.38
+# stopped every update, the rescue one too.
+node scripts/check-update.mjs || exit 1

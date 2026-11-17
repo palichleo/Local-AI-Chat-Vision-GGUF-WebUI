@@ -1,6 +1,6 @@
 {
   "name": "atelier-local",
-  "version": "0.6.46",
+  "version": "0.6.47",
   "private": true,
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
@@ -15,7 +15,7 @@
     "check:ui": "node scripts/check-ui.mjs",
     "ship-workflows": "node scripts/ship-workflows.mjs"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "@anthropic-ai/sdk": "1.4.0"
   }
 }
