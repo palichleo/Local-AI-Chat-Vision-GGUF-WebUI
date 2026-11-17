@@ -1,6 +1,6 @@
 # Third-party components
 
-Atelier local is licensed under PolyForm Noncommercial 1.0.0 (see `LICENSE`). This file lists the components it relies on and their licenses.
+Moodix is licensed under PolyForm Noncommercial 1.0.0 (see `LICENSE`). This file lists the components it relies on and their licenses.
 
 ## Code included in this repository
 
@@ -64,12 +64,12 @@ These are not distributed with the sources. Node.js is provided by the user. lla
 
 The other packages of `runner/uv.lock` are dependencies of those above. None declares a GPL or AGPL license on PyPI (71 packages checked on 17 November 2026); certifi is under MPL-2.0 and tqdm under MPL-2.0 and MIT.
 
-FFmpeg comes with two of these packages, and neither copy is distributed with Atelier:
+FFmpeg comes with two of these packages, and neither copy is distributed with Moodix:
 
 - the executable of imageio-ffmpeg is run as a separate program, to write and convert videos;
 - the libraries of PyAV, with libx264 and libx265 (GPL), are loaded into the engine's own process, to read videos and sound.
 
-An archive that shipped this Python environment together with Atelier would therefore distribute GPL libraries combined with the engine, which a noncommercial or proprietary license does not fit: the environment must stay a download made on the user's computer, or video reading must first go through the FFmpeg executable. This is the project's own reading, not legal advice.
+An archive that shipped this Python environment together with Moodix would therefore distribute GPL libraries combined with the engine, which a noncommercial or proprietary license does not fit: the environment must stay a download made on the user's computer, or video reading must first go through the FFmpeg executable. This is the project's own reading, not legal advice.
 
 ### npm packages (Claude, optional)
 
@@ -94,7 +94,7 @@ When the user chooses one in Paramètres › Moodix AI, the chat is answered by 
 
 ## Models
 
-Checkpoints, text encoders, VAEs, LoRAs, tokenizers and GGUF files are never distributed with Atelier. For a workflow it ships, Atelier can download the missing files when the user asks for it, from the repositories listed in `runner/downloads.json` (Hugging Face, and GitHub for Real-ESRGAN): the files go from their publisher to the user's computer, and a file behind a license gate needs the user's own Hugging Face account. Each model keeps its own license, which may restrict commercial use, or the countries where the model may be used, independently of Atelier's license. Before a download, the application shows the license of each file (its name, a link to its text and its limits, as written in `runner/downloads.json` after the table below), and asks the user to confirm those with conditions (LTX 2.5, MiniMax H3, Krea 2, SAM 3.1); the choice stays the user's.
+Checkpoints, text encoders, VAEs, LoRAs, tokenizers and GGUF files are never distributed with Moodix. For a workflow it ships, Moodix can download the missing files when the user asks for it, from the repositories listed in `runner/downloads.json` (Hugging Face, and GitHub for Real-ESRGAN): the files go from their publisher to the user's computer, and a file behind a license gate needs the user's own Hugging Face account. Each model keeps its own license, which may restrict commercial use, or the countries where the model may be used, independently of Atelier's license. Before a download, the application shows the license of each file (its name, a link to its text and its limits, as written in `runner/downloads.json` after the table below), and asks the user to confirm those with conditions (LTX 2.5, MiniMax H3, Krea 2, SAM 3.1); the choice stays the user's.
 
 The licenses below were read at their source on 17 November 2026. A license can change with a new version of a model: read it again before relying on it. The last column is a summary, not legal advice; the text of each license prevails.
 
@@ -116,4 +116,4 @@ The licenses below were read at their source on 17 November 2026. A license can 
 
 The acceptable use policies that the LTX and Krea licenses refer to are part of them and are not summarised here. The chat model is the user's choice and keeps the license of its publisher.
 
-The two sound models chosen for Atelier's own engine allow commercial use without a revenue or usage cap: [ACE-Step 1.5 XL](https://huggingface.co/ACE-Step/acestep-v15-xl-sft-diffusers) (music, MIT) and [MOSS-SoundEffect v2](https://huggingface.co/OpenMOSS-Team/MOSS-SoundEffect-v2.0) (sound effects, Apache-2.0, with a Qwen3-1.7B text encoder under Apache-2.0).
+The two sound models chosen for Moodix's own engine allow commercial use without a revenue or usage cap: [ACE-Step 1.5 XL](https://huggingface.co/ACE-Step/acestep-v15-xl-sft-diffusers) (music, MIT) and [MOSS-SoundEffect v2](https://huggingface.co/OpenMOSS-Team/MOSS-SoundEffect-v2.0) (sound effects, Apache-2.0, with a Qwen3-1.7B text encoder under Apache-2.0).

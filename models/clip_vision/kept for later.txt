@@ -1,1 +1,0 @@
-Not used by Atelier yet. Kept so that this folder is sorted as ComfyUI sorts its own.

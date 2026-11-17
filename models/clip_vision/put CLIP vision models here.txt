@@ -1,0 +1,3 @@
+Put CLIP vision models here (.safetensors), as in ComfyUI:
+CLIP ViT-H (clip_vision_h.safetensors), used by Wan 2.1 SCAIL-2 (character replacement).
+Weights are local only and ignored by Git.
