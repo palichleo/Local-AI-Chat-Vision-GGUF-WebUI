@@ -24,7 +24,7 @@ Open **http://127.0.0.1:8787** if the browser does not open by itself. Keep the 
 
 ## Models
 
-Weights are never downloaded or moved by the app, and Git ignores them. Each folder under `models/` contains a short placement guide.
+Git ignores weights, and the app never moves them. For a workflow shipped with Atelier whose files are missing, the app offers to download them from their publisher (Hugging Face, or GitHub for Real-ESRGAN): nothing is downloaded before you ask, and files behind a license gate need your own Hugging Face account and token. Every model keeps its own license, and some restrict commercial use or the countries where the model may be used (MiniMax H3 is not licensed in the European Union, the United Kingdom, South Korea and the United States): see the [table of model licenses](THIRD_PARTY_NOTICES.md#models). Each folder under `models/` contains a short placement guide.
 
 | Folder                          | Contents                                                            |
 | ------------------------------- | ------------------------------------------------------------------- |
@@ -129,4 +129,4 @@ The Node suite uses simulated llama.cpp and generation workers; it checks behavi
 - [llama.cpp](https://github.com/ggml-org/llama.cpp) and its [server documentation](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)
 - [Source distribution notes](DISTRIBUTION.md) and [third-party components](THIRD_PARTY_NOTICES.md)
 
-Atelier local is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE): you may download, use, modify and share it for any noncommercial purpose. Commercial use requires separate permission. Engines, Python libraries, models and projectors are supplied separately and keep their own licenses.
+Atelier local is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE): you may download, use, modify and share it for any noncommercial purpose. Commercial use requires separate permission. Engines, Python libraries, models and projectors are supplied separately and keep their own licenses. What you may do with a generated image, video or sound depends on the license of the model that made it, not on Atelier's: the [third-party components](THIRD_PARTY_NOTICES.md#models) list each one with its limits (revenue thresholds, excluded countries, mentions to show).
