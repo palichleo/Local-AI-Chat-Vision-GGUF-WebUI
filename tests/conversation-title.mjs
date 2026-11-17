@@ -116,6 +116,8 @@ test('through the application: the chat model names the conversation once, besid
     openUrl: () => {},
     // The scripted engine answers « OK » to a request without a stream.
     spawnProcess: (_command, args, options) => spawn(process.execPath, [fixture, ...args], options),
+    // (The local model is not asked by default: see the test after this one.)
+    localTitles: true,
   });
   t.after(() => app.close());
   const boot = await (await fetch(app.url + '/api/bootstrap')).json();
@@ -164,4 +166,36 @@ test('through the application: the chat model names the conversation once, besid
   const other = randomUUID();
   await api('history/save', { id: other, messages: [{ role: 'user', content: 'Bonjour' }] });
   assert.deepEqual(await api('history/title', { id: other, content: '' }), { named: false });
+});
+
+test('an answer that is no name names nothing: a refusal, a sentence, a reflection left open, something that is not words', () => {
+  for (const said of [
+    [{ type: 'text', text: 'Renard' }],
+    { text: 'Renard' },
+    'Je suis désolé, je ne peux pas identifier cette image.',
+    'Désolé, je ne vois pas d’image.',
+    'I’m sorry, but I can’t help with that.',
+    "I can't name this conversation.",
+    '<think>Le sujet est un chat',
+    'Ceci est une phrase entière qui décrit longuement ce que la conversation contient vraiment',
+    '',
+    null,
+  ])
+    assert.equal(shortTitle(said), '', JSON.stringify(said));
+  // What it says before the name is left out; a name with a colon of its own is kept whole.
+  assert.equal(shortTitle('Voici un titre : Renard dans la neige'), 'Renard dans la neige');
+  assert.equal(shortTitle('Sure! Here is a title: Fox'), 'Fox');
+  assert.equal(shortTitle('<think>x</think>Chat sur un toit'), 'Chat sur un toit');
+  assert.equal(shortTitle('Paris : la nuit'), 'Paris : la nuit');
+  // Five to eight words: its four first, as before.
+  assert.equal(shortTitle('Un escalier ancien dans les nuages'), 'Un escalier ancien dans...');
+});
+
+test('the local chat model is not asked for a name unless the application is told to', async () => {
+  const source = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
+  // Its one slot would lose the prompt of the conversation to that request: off until measured.
+  assert.match(source, /\n  localTitles = false,\r?\n/);
+  assert.match(source, /if \(!localTitles && wordingOf\(chat\.connection\) !== CAPABLE\) return send\(200, \{ named: false \}\);/);
+  // And nothing is written once the application is closing.
+  assert.match(source, /if \(closing \|\| relaunching\) return send\(200, \{ later: true \}\);/);
 });

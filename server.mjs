@@ -284,6 +284,9 @@ export async function createApplication({
   outputDir = dataDir === join(root, 'data') ? join(root, 'output') : join(dataDir, 'output'),
   generationWorker,
   spawnProcess,
+  // Whether the local chat model is asked to name a conversation (/api/history/title). Off: its
+  // single slot would lose the prompt of the conversation to that request (not measured yet).
+  localTitles = false,
   filePicker = chooseLocalFile,
   updateChecker = null,
   updateInstaller = null,
@@ -2357,6 +2360,11 @@ export async function createApplication({
         if (clearingHistory || disablingHistory || runtime.active || chat.state !== 'ready' || chat.busy)
           return send(200, { later: true });
         if (await history.named(body?.id)) return send(200, { named: true });
+        // Not with the local model for now: llama.cpp has one slot, and a request beside the
+        // conversation takes its place there, so the next message would read the whole prompt again
+        // (some 11 000 tokens with the tools). Not measured yet: the name made of the first
+        // message stays there until it is.
+        if (!localTitles && wordingOf(chat.connection) !== CAPABLE) return send(200, { named: false });
         const asked = titleRequest(body?.content, { vision: chat.vision });
         if (!asked) return send(200, { named: false });
         let said = '';
@@ -2379,6 +2387,8 @@ export async function createApplication({
         }
         const title = shortTitle(said);
         if (!title) return send(200, { later: true });
+        // The application is closing (an update, « Quitter »): its history is already written.
+        if (closing || relaunching) return send(200, { later: true });
         const renamed = historySaves.then(() => history.rename(body.id, title, { auto: true }));
         historySaves = renamed.catch(() => {});
         return send(200, { conversation: historyView(await renamed) });

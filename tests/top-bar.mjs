@@ -260,3 +260,10 @@ test('the logo opens the accueil, a new conversation in the project in hand, fro
   runInNewContext(source + '\nthis.goHome = goHome;', busy);
   busy.goHome();
 });
+
+test('the Éclipse of the word « Moodix » is a filled shape: not the stroke of the pictures of the bar', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const css = await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8');
+  // (More specific than `.top-bar svg`, which gives every picture of the bar a stroke of 1.7.)
+  assert.match(css, /\.top-brand \.brand-eclipse \{\r?\n  stroke: none;\r?\n\}/);
+});

@@ -3290,6 +3290,8 @@ async function sendMessage(event) {
     view.thought?.end();
     markThinking(view, false);
     await persistConversation();
+    // The conversation this turn was in: another may be opened before its name is asked.
+    const answered = state.conversationId;
     state.generating = false;
     state.waitingForModel = false;
     state.controller = null;
@@ -3301,7 +3303,7 @@ async function sendMessage(event) {
     showLastReply();
     $('prompt').focus();
     // Answered: its name in a few words, asked beside it (the pictures still in their copies here).
-    if (complete) void nameConversation(history, state.conversationId);
+    if (complete) void nameConversation(history, answered);
   }
 }
 

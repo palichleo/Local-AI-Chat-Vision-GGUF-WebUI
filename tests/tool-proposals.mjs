@@ -1125,3 +1125,21 @@ test('a draft promoted to its final keeps the LoRAs of the user it was made with
   assert.deepEqual(final.styles, styles);
   assert.equal(final.notes, undefined);
 });
+
+test('a length asked in seconds is counted at the rate of the profile the clip is made with, not at the value it replaces', async () => {
+  const list = shipped(),
+    stored = of(list, 'ltx25');
+  // Its two profiles set to 30 images a second; the value of the workflow, which they replace, left at 24.
+  const ltx = structuredClone(stored);
+  for (const profile of Object.values(ltx.profiles)) profile.parameters.fps = 30;
+  assert.equal(ltx.parameters.fps?.value ?? ltx.parameters.fps?.default ?? 24, 24);
+  const { runtime } = world({ workflows: list.map(workflow => (workflow.id === ltx.id ? ltx : workflow)) });
+  const asked = await runtime.request(
+    [call('create_video', { prompt: 'A red boat.', intention: 'x', duration: 5, workflow: ltx.id })],
+    { conversationId: A, turnId: turn, messages: [] },
+  );
+  const { frames, fps } = asked.plan.parameters;
+  assert.equal(fps, 30);
+  // Five seconds asked: five seconds made (counted at 24, they were 121 images: 4 s at 30).
+  assert.ok(Math.abs(frames / fps - 5) < 0.2, `${frames} images à ${fps}/s`);
+});

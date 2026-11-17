@@ -204,6 +204,9 @@ export function setupModelChoice({
     } finally {
       working = false;
       render();
+      // The other menu, opened while this choice was being kept (« Réflexion » right after a
+      // model): it was drawn greyed, with the levels of the model before; drawn again as it is now.
+      for (const open of popups) if (open !== self && !open.menu.hidden) open.draw();
       if (!self.menu.hidden) {
         // Kept: the menu closes. Refused: it stays, said, the focus on the one chosen.
         if (done) self.close({ refocus: true });
@@ -326,7 +329,8 @@ export function setupModelChoice({
         ? reflection.why || `Réflexion : ${EFFORT_NAMES[status.remote.effort] ?? ''}`
         : `Réflexion du modèle local : ${getThinking() ? 'oui' : 'non'}`;
     efforts.text.textContent = reflection.label;
-    efforts.button.setAttribute('aria-label', effortTip);
+    // Its name first for whoever hears it: the reason alone did not say which button it is.
+    efforts.button.setAttribute('aria-label', reflection.why ? 'Réflexion. ' + reflection.why : effortTip);
     efforts.button.classList.toggle('is-off', reflection.off);
     // No tip over a menu open under its button.
     for (const [popupOf, tip] of [

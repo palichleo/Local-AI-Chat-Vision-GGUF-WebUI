@@ -602,7 +602,7 @@ test('6 · « Modèle » and « Réflexion »: one menu at a time; the efforts o
   assert.equal(ui.said(), 'Modèle 2');
   assert.equal(ui.effort.said(), 'Réflexion');
   assert.equal(ui.effort.button.classList.contains('is-off'), true);
-  assert.equal(ui.effort.button.attributes['aria-label'], 'Ce modèle ne propose pas de réglage de la réflexion.');
+  assert.equal(ui.effort.button.attributes['aria-label'], 'Réflexion. Ce modèle ne propose pas de réglage de la réflexion.');
   ui.effort.button.onclick();
   await settled();
   assert.ok(ui.effort.texts().includes('Ce modèle ne propose pas de réglage de la réflexion.'));

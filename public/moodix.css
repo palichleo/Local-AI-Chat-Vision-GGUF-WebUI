@@ -9378,6 +9378,12 @@ body {
 /* The Éclipse of the word follows its size: 0.556 of it wide, 0.03 on each side, 0.022 lower than
    the line (14.5 px, 0.8 px and -0.6 px at 26 px). Fuller than the mark (radii 15.2 and 14): not
    eclipse.svg. In currentColor, the room's and the Jour mode's. */
+/* Its sphere is a filled shape: without the stroke every picture of the bar is drawn with
+   (`.top-bar svg`), which made it some 0.4 px fatter on each edge, its horns rounded. Its ring
+   keeps the stroke it names itself. */
+.top-brand .brand-eclipse {
+  stroke: none;
+}
 .brand-eclipse {
   display: inline-block;
   width: 0.556em;
