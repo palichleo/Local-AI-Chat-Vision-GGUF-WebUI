@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
-import { ToolRuntime } from '../lib/tool-runtime.mjs';
+import { ToolRuntime, takesStyles } from '../lib/tool-runtime.mjs';
 import { resolveNativeWorkflow, validateNativeWorkflow } from '../lib/native-workflows.mjs';
 
 /**
@@ -668,4 +668,52 @@ test('a seed typed on a proposal stays the user’s through the changes that fol
   const back = await revise(runtime, await revise(runtime, again, { seed: 7 }), { seed: again.plan.parameters.seed });
   assert.equal(back.plan.edited, undefined);
   assert.equal(back.plan.parameters.seed, again.plan.parameters.seed);
+});
+
+test('the LoRAs of the user shown with a proposal go with it: kept through later changes, said by the take, none where the family takes none', async () => {
+  const list = shipped(),
+    ltx = of(list, 'ltx25'),
+    minimax = of(list, 'minimax_h3'),
+    { runtime, saved } = world({ workflows: list });
+  const boat = (id, workflow = ltx) =>
+    runtime.request([call('create_video', { prompt: 'A red boat.', intention: 'x', workflow: workflow.id }, id)], {
+      conversationId: A,
+      turnId: uid(4 + saved.length),
+      messages: [],
+    });
+  // A proposal of Moodix AI comes without any.
+  const first = await boat('call-1');
+  assert.equal(first.styles, undefined);
+  // Those the Studio shows for its family, sent with « Générer ».
+  const styles = [{ name: 'sub\\grain.safetensors', strength: 0.8 }];
+  const styled = await revise(runtime, first, { styles });
+  assert.deepEqual(styled.styles, styles);
+  // Another change afterwards says nothing of them: they stay.
+  const reworded = await revise(runtime, styled, { prompt: 'A blue boat.' });
+  assert.deepEqual(reworded.styles, styles);
+  await runtime.execute({ requestId: reworded.requestId, permission: 'once', approvalToken: reworded.approvalToken });
+  await runtime.finished;
+  assert.deepEqual(saved.at(-1).parameters.styles, styles, 'the take says what it was made with');
+  // Taken out on the proposal: none goes, and the take names none.
+  const second = await revise(runtime, await revise(runtime, await boat('call-2'), { styles }), { styles: [] });
+  assert.equal(second.styles, undefined);
+  await runtime.execute({ requestId: second.requestId, permission: 'once', approvalToken: second.approvalToken });
+  await runtime.finished;
+  assert.equal(saved.at(-1).parameters.styles, undefined);
+  // Checked as those of a creation by hand.
+  const third = await boat('call-3');
+  await assert.rejects(
+    revise(runtime, third, { styles: [1, 2, 3, 4].map(n => ({ name: n + '.safetensors', strength: 1 })) }),
+    /trois LoRA au plus/,
+  );
+  // A family whose engine takes none (MiniMax H3): never kept, by hand or on a proposal, so that
+  // no take says it was made with a LoRA that was left out.
+  assert.equal(takesStyles(minimax), false);
+  assert.equal(takesStyles(ltx), true);
+  const plain = await runtime.request(
+    [call('create_video', { prompt: 'A red boat.', intention: 'x', workflow: minimax.id }, 'call-4')],
+    { conversationId: A, turnId: uid(9), messages: [], styles },
+  );
+  assert.equal(plain.styles, undefined);
+  assert.equal((await revise(runtime, plain, { styles })).styles, undefined);
 });

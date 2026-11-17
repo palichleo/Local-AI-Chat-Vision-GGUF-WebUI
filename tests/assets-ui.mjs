@@ -249,3 +249,27 @@ test('chat details reuse the displayed original blob and persisted original dime
   $('original-close').onclick();
 });
 
+test('a take made with LoRAs of the user names them among its settings, by their file and their strength', async t => {
+  const { ui, $ } = await fixture(t);
+  const record = {
+    id: 'run',
+    conversationId: 'conversation',
+    workflowName: 'Krea 2',
+    prompt: 'un phare',
+    createdAt: '2026-01-02T12:00:00Z',
+    parameters: {
+      seed: 42,
+      width: 1024,
+      height: 1024,
+      styles: [
+        { name: 'styles\\70sSCiFiKrea2Raw.safetensors', strength: 0.8 },
+        { name: 'krea2_detail_slider.safetensors', strength: 1 },
+      ],
+    },
+    outputs: [{ source: { filename: 'result.png' }, analysisDataUrl: 'data:image/png;base64,AA==', take: 3 }],
+  };
+  await ui.viewOutput(record, 0, undefined, { list: () => [record], at: () => 0 });
+  const texts = $('media-metadata').children.map(item => item.textContent);
+  assert.deepEqual(texts.filter((_, at) => at % 2 === 0), ['Modèle', 'Format', 'Résolution', 'LoRA', 'Seed', 'Date']);
+  assert.equal(texts[texts.indexOf('LoRA') + 1], '70sSCiFiKrea2Raw · 0,8\nkrea2_detail_slider · 1');
+});

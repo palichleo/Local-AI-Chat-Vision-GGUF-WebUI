@@ -2909,6 +2909,14 @@ export function setupStudio({
       if (!Number.isSafeInteger(number) || number < 0) throw Error('Seed : un entier positif.');
       changes.seed = number;
     }
+    // The LoRAs of the user for this family, shown with the proposal (added, taken out or left as
+    // they were): it is made with them, as « Générer » by hand makes it. Moodix AI proposes none
+    // itself: left out here, what the Studio showed was not what was made, and the settings of
+    // that take then emptied the list.
+    if (workflow?.styled && proposal.mode !== 'audio' && !extending) {
+      const styles = draft.styles.filter(style => style.name).map(({ name, strength }) => ({ name, strength }));
+      if (JSON.stringify(styles) !== JSON.stringify(request.styles ?? [])) changes.styles = styles;
+    }
     // The LoRAs of the workflow switched or set here.
     if (proposal.lorasShown !== undefined && workflow) {
       const now = loraArgs(workflow, draft);
@@ -4020,7 +4028,8 @@ export function setupStudio({
     }
     const shape = shapeBlock(workflow);
     if (shape) settings.append(shape);
-    const styled = workflow.styled && mode !== 'audio' && !extending && !answering();
+    // Those of the user show on a proposal of Moodix AI too: it is made with them (edits).
+    const styled = workflow.styled && mode !== 'audio' && !extending;
     const loras = loraBlock(workflow, styled);
     if (loras) settings.append(loras);
     const rare = rareLines(workflow);

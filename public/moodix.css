@@ -12258,6 +12258,11 @@ body[data-view='library'] .library-view {
   text-align: right;
   white-space: nowrap;
 }
+/* Several values under one name (the LoRAs of a take): one a line, a long file name cut. */
+#original-dialog #media-metadata dd.media-lines {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
 .media-more > summary {
   display: inline-flex;
   align-items: center;

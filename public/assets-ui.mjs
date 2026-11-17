@@ -262,6 +262,9 @@ export function setupAssets({
     const resolution = media === 'audio' ? null : row('Résolution', width && height ? `${width} × ${height}` : null);
     const length = media === 'image' ? null : row('Durée', seconds ? duration(seconds) : null);
     for (const [label, value] of inputsOf(parameters, list)) row(label, value);
+    // The LoRAs the user had added, by their file, with their strength.
+    if (Array.isArray(parameters.styles) && parameters.styles.length)
+      row('LoRA', parameters.styles.map(style => `${String(style?.name ?? '').split(/[\\/]/).pop().replace(/\.safetensors$/i, '')} · ${String(style?.strength ?? 1).replace('.', ',')}`).join('\n')).classList?.add('media-lines');
     row('Seed', parameters.seed);
     row('Date', record.createdAt ? new Date(record.createdAt).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null);
     // « Plus de détails »: the workflow, the version, the prompt made better, the file…

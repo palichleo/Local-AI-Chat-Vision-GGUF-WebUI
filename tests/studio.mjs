@@ -4540,3 +4540,54 @@ test('« Modifier » chooses a model that takes an image when the one in hand ta
     alone.restore();
   }
 });
+
+test('the LoRAs of the user show on a proposal of Moodix AI and go with « Générer »; with none in the Studio, none is sent', async () => {
+  const krea = { id: 'k', name: 'Krea 2', verb: 'create_image', family: 'krea2', styled: true, seeded: true, direct: true, roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    sent = [];
+  const page = await studioPage(
+    { create_image: [krea] },
+    {
+      'tools/revise': ({ edits }) => (
+        sent.push(edits), { requestId: 'q' + sent.length, approvalToken: 't' + sent.length, ...(edits.styles?.length ? { styles: edits.styles } : {}) }
+      ),
+    },
+  );
+  const { body, studio, restore } = page;
+  const loras = () => body.find('studio-lora-pick').map(pick => pick.value),
+    proposed = id =>
+      studio.propose(
+        {
+          requestId: id,
+          approvalToken: 't-' + id,
+          tool: 'create_image',
+          workflowName: 'Krea 2',
+          resolution: { width: 1024, height: 1024 },
+          call: { id: 'call-' + id, type: 'function', function: { name: 'create_image', arguments: '{}' } },
+          plan: { prompt: 'un phare', parameters: { prompt: 'un phare', width: 1024, height: 1024, seed: 3 }, editable: { prompt: true, parameters: [] }, references: [] },
+        },
+        new AbortController().signal,
+      );
+  try {
+    // A LoRA the user added by hand, then Moodix AI proposes an image with the same model.
+    body.find('studio-lora-plus')[0].onclick();
+    const first = proposed('a');
+    await settle();
+    // It shows on the proposal (it was hidden there, and the image was made without it).
+    assert.deepEqual(loras(), ['a.safetensors']);
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await first, 'once');
+    assert.deepEqual(sent, [{ styles: [{ name: 'a.safetensors', strength: 1 }] }]);
+    await studio.settled({ record: null });
+    // Taken out on the next proposal: nothing to say to the server, which has none for it.
+    const second = proposed('b');
+    await settle();
+    assert.deepEqual(loras(), ['a.safetensors']);
+    body.find('studio-lora-drop')[0].onclick();
+    assert.deepEqual(loras(), []);
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await second, 'once');
+    assert.equal(sent.length, 1, 'no LoRA in the Studio: nothing revised');
+  } finally {
+    restore();
+  }
+});
