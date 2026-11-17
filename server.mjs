@@ -284,9 +284,13 @@ export async function createApplication({
   outputDir = dataDir === join(root, 'data') ? join(root, 'output') : join(dataDir, 'output'),
   generationWorker,
   spawnProcess,
-  // Whether the local chat model is asked to name a conversation (/api/history/title). Off: its
-  // single slot would lose the prompt of the conversation to that request (not measured yet).
-  localTitles = false,
+  // Whether the local chat model is asked to name a conversation (/api/history/title): 'gpu', when
+  // it runs on the card; true, always; false, never. Measured (17/11, RTX 4070 SUPER, a 9B model
+  // with its projector, a prompt of 12 786 tokens): the request beside the conversation takes
+  // 0.45 s, and the next message reads 188 tokens in 0.11 s, as without it — llama.cpp keeps the
+  // prompt of the conversation aside and takes it back. Were it lost, that prompt would be read
+  // again once (3.4 s on that card; far longer on a processor alone, hence 'gpu').
+  localTitles = 'gpu',
   filePicker = chooseLocalFile,
   updateChecker = null,
   updateInstaller = null,
@@ -2370,11 +2374,10 @@ export async function createApplication({
         if (clearingHistory || disablingHistory || runtime.active || chat.state !== 'ready' || chat.busy)
           return send(200, { later: true });
         if (await history.named(body?.id)) return send(200, { named: true });
-        // Not with the local model for now: llama.cpp has one slot, and a request beside the
-        // conversation takes its place there, so the next message would read the whole prompt again
-        // (some 11 000 tokens with the tools). Not measured yet: the name made of the first
-        // message stays there until it is.
-        if (!localTitles && wordingOf(chat.connection) !== CAPABLE) return send(200, { named: false });
+        // The local model is asked when it runs on the card (`localTitles`, measured there): on a
+        // processor alone, a prompt read again would cost far more than a name is worth.
+        const localNamed = localTitles === true || (localTitles === 'gpu' && config.gpuLayers !== 0);
+        if (wordingOf(chat.connection) !== CAPABLE && !localNamed) return send(200, { named: false });
         // Named after the first of its messages that gives something to name it from, among the
         // first three (`contents`, as the page sends them; `content`: the first alone). A message
         // without words (pictures alone for a model that sees none, a creation of the Studio made

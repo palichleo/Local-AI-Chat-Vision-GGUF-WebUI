@@ -368,11 +368,13 @@ test('an answer that is no name names nothing: a refusal, a sentence, a reflecti
   assert.equal(shortTitle('Un escalier ancien dans les nuages'), 'Un escalier ancien dans...');
 });
 
-test('the local chat model is not asked for a name unless the application is told to', async () => {
+test('the local chat model is asked for a name when it runs on the card, not on a processor alone', async () => {
   const source = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
-  // Its one slot would lose the prompt of the conversation to that request: off until measured.
-  assert.match(source, /\n  localTitles = false,\r?\n/);
-  assert.match(source, /if \(!localTitles && wordingOf\(chat\.connection\) !== CAPABLE\) return send\(200, \{ named: false \}\);/);
+  // Measured on the card: the name costs under half a second and the conversation keeps its
+  // prompt. On a processor alone a prompt read again would cost far more: not asked there.
+  assert.match(source, /\n  localTitles = 'gpu',\r?\n/);
+  assert.match(source, /const localNamed = localTitles === true \|\| \(localTitles === 'gpu' && config\.gpuLayers !== 0\);/);
+  assert.match(source, /if \(wordingOf\(chat\.connection\) !== CAPABLE && !localNamed\) return send\(200, \{ named: false \}\);/);
   // And nothing is written once the application is closing.
   assert.match(source, /if \(closing \|\| relaunching\) return send\(200, \{ later: true \}\);/);
 });
