@@ -61,7 +61,10 @@ function otherValue(spec, current) {
   if (spec.type === 'boolean') return !current;
   if (spec.type === 'string') return current === 'a' ? 'b' : 'a';
   const step = spec.multipleOf ?? (spec.type === 'integer' ? 1 : 0.125);
-  return [current + step, current - step].find(value => fits(spec, value));
+  // (Between two close bounds, the denoise of Krea 2 from 0.6 to 0.7: one of its ends.)
+  return [current + step, current - step, spec.max, spec.min].find(
+    value => value !== undefined && value !== current && fits(spec, value),
+  );
 }
 const verdict = (where, moved, reason) =>
   `${where}: ${moved ? 'changes the job, yet greyed: ' + reason : 'changes nothing, yet left open'}`;
@@ -301,12 +304,18 @@ test('at a denoise of 1 the image to modify of Krea 2 is ignored: the editor say
     source = readFileSync(new URL('../runner/pipelines/krea2.py', import.meta.url), 'utf8');
   assert.match(sampling, /return noise \* sigma \+ source \* \(1 - sigma\)/);
   assert.match(source, /latents = start_latents\(noise, source, sigmas\[0\]\)/);
-  // The shipped workflow keeps a part of the image: nothing to warn of. One of the user's at 1 is.
-  assert.deepEqual(krea.parameters.denoise, { policy: 'fixed', value: 0.6 });
+  // The shipped workflow keeps a part of the image, at the choice of the assistant between 0.6 and
+  // 0.7: nothing to warn of. One of the user's at 1 is, fixed there or left to the assistant.
+  assert.deepEqual(
+    { ...krea.parameters.denoise, description: undefined },
+    { policy: 'model', type: 'number', default: 0.6, min: 0.6, max: 0.7, description: undefined },
+  );
   assert.ok(krea.references.some(slot => slot.role === 'img2img'));
   assert.equal(settingWarning(manifest, krea, 'denoise'), '');
   const whole = structuredClone(krea);
-  whole.parameters.denoise.value = 1;
+  whole.parameters.denoise = { policy: 'fixed', value: 1 };
   assert.match(settingWarning(manifest, whole, 'denoise'), /image à modifier est ignorée/);
   assert.equal(settingWarning(manifest, { ...whole, references: [] }, 'denoise'), '', 'no image, nothing to warn of');
+  whole.parameters.denoise = { policy: 'model', type: 'number', default: 1 };
+  assert.match(settingWarning(manifest, whole, 'denoise'), /image à modifier est ignorée/);
 });

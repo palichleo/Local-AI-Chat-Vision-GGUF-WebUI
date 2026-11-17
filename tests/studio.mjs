@@ -4702,3 +4702,317 @@ test('an image of a series the user asked for goes by itself in the Studio, the 
     restore();
   }
 });
+
+/**
+ * Krea 2 as the Studio is told of it (lib/tool-catalog.mjs, studio): its denoise left to the
+ * assistant between 0.6 and 0.7, read by the model only with an image to modify.
+ */
+const kreaWithDenoise = () => ({
+  id: 'k',
+  name: 'Krea 2',
+  verb: 'create_image',
+  family: 'krea2',
+  seeded: true,
+  direct: true,
+  styled: true,
+  roles: { source: { count: 1, media: ['image'], many: false } },
+  inputs: { img2img: 'source' },
+  limits: sizes,
+  size: { width: 1024, height: 1024 },
+  settings: [{ key: 'denoise', type: 'number', min: 0.6, max: 0.7, default: 0.6, onlyWith: { role: 'img2img', otherwise: 1 } }],
+  loras: [],
+});
+const denoiseBar = body => body.find('studio-bar').find(bar => bar.dataset.ai === 'setting-denoise');
+/** « Débruitage » as the Studio shows it: its value, whether it answers, what is said under it. */
+const denoiseShown = body => {
+  const [line] = body.find('studio-fine');
+  return [denoiseBar(body).attributes['aria-valuetext'], !denoiseBar(body).disabled, line.find('studio-fine-note')[0].textContent];
+};
+const DENOISE_HELP = '0,6 garde la composition et change l’ambiance ; 0,7 laisse la composition changer.',
+  DENOISE_IDLE = 'Sert seulement avec une image à modifier.';
+const pasteImage = async (body, name = 'a.png') => {
+  body.find('studio-write')[0].onpaste({ clipboardData: { files: [{ name, type: 'image/png' }] }, preventDefault() {} });
+  await settle();
+};
+const handRoutes = {
+  'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+  'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+};
+
+test('« Débruitage » of Krea 2 in « Plus de réglages »: greyed with its reason while no image is to modify, live with one, sent by hand only then', async () => {
+  const page = await studioPage({ create_image: [kreaWithDenoise()] }, handRoutes);
+  const { body, asked, restore } = page;
+  const sent = async () => {
+    await body.find('studio-go')[0].onclick();
+    await settle();
+    return asked.findLast(([route]) => route === 'tools/action')[1].arguments;
+  };
+  try {
+    page.prompt().value = 'un escalier la nuit';
+    page.prompt().oninput();
+    body.find('studio-more-pill')[0].onclick();
+    // Among the rare settings, on a bar from 0,60 to 0,70 by hundredths, with the mark of what
+    // Moodix AI may set. No image to modify: greyed, and why, never hidden.
+    const [line] = body.find('studio-rare')[0].find('studio-fine');
+    const [label] = line.find('studio-bar-label');
+    assert.equal(label.textContent, 'Débruitage');
+    assert.equal(label.find('ai-mark').length, 1);
+    assert.deepEqual([denoiseBar(body).min, denoiseBar(body).max], ['0', '10']);
+    assert.deepEqual(denoiseShown(body), ['0,60', false, DENOISE_IDLE]);
+    assert.match(line.className, /is-idle/);
+    assert.equal(line.find('studio-bar-line')[0].title, DENOISE_IDLE);
+    let args = await sent();
+    assert.deepEqual([args.source, args.denoise], [undefined, undefined]);
+    // An image put in « image à modifier »: the bar answers, and says what its ends do.
+    await pasteImage(body);
+    assert.match(body.find('studio-slot')[0].className, /is-filled/);
+    assert.deepEqual(denoiseShown(body), ['0,60', true, DENOISE_HELP]);
+    assert.doesNotMatch(body.find('studio-fine')[0].className, /is-idle/);
+    // Left as it is, the workflow's own value is used: nothing to send. Moved, it goes with « Générer ».
+    args = await sent();
+    assert.deepEqual([args.source, args.denoise], [{ resource: 'r1' }, undefined]);
+    denoiseBar(body).value = '5';
+    denoiseBar(body).oninput();
+    assert.deepEqual(denoiseShown(body), ['0,65', true, DENOISE_HELP]);
+    args = await sent();
+    assert.deepEqual([args.source, args.denoise], [{ resource: 'r1' }, 0.65]);
+    denoiseBar(body).value = '10';
+    denoiseBar(body).oninput();
+    assert.equal((await sent()).denoise, 0.7);
+    // The image taken back: greyed again at the value it keeps, and no longer sent.
+    body.find('studio-slot-remove')[0].onclick();
+    assert.deepEqual(denoiseShown(body), ['0,70', false, DENOISE_IDLE]);
+    args = await sent();
+    assert.deepEqual([args.source, args.denoise], [undefined, undefined]);
+    await pasteImage(body, 'b.png');
+    assert.deepEqual(denoiseShown(body), ['0,70', true, DENOISE_HELP]);
+    assert.equal((await sent()).denoise, 0.7);
+  } finally {
+    restore();
+  }
+});
+
+test('a decimal setting between two close bounds is a bar; a wider one, or one fixed in its workflow, is not', async () => {
+  const krea = kreaWithDenoise();
+  // (A workflow of the user's: the denoise fixed there is no setting of the Studio at all.)
+  const fixed = { ...kreaWithDenoise(), id: 'f', name: 'Krea fixe', settings: [{ key: 'steps', type: 'number', min: 1, max: 50, default: 8 }] };
+  const { body, restore } = await studioPage({ create_image: [krea, fixed] });
+  try {
+    body.find('studio-more-pill')[0].onclick();
+    assert.equal(body.find('studio-fine').length, 1);
+    const pick = body.find('studio-model-pick')[0];
+    pick.value = 'f';
+    pick.onchange();
+    assert.equal(body.find('studio-fine').length, 0);
+    assert.equal(denoiseBar(body), undefined);
+    assert.equal(body.find('studio-rare')[0].find('studio-field').length, 1, 'its steps, in their field as before');
+  } finally {
+    restore();
+  }
+});
+
+/** A proposal of Moodix AI for Krea 2, as lib/tool-runtime.mjs describes it: with an image to modify, or none. */
+function kreaProposal({ denoise = 0.7, image = true, id = 'q' } = {}) {
+  const prompt = 'The same staircase at night.';
+  return {
+    requestId: id,
+    approvalToken: 't-' + id,
+    tool: 'create_image',
+    workflowName: 'Krea 2',
+    resolution: { width: 1024, height: 1024 },
+    call: { id: 'call-' + id, type: 'function', function: { name: 'create_image', arguments: '{}' } },
+    plan: {
+      prompt,
+      // Without an image the job says the denoise really used, 1, and lists no such setting.
+      parameters: { prompt, width: 1024, height: 1024, seed: 7, steps: 8, denoise: image ? denoise : 1 },
+      editable: {
+        prompt: true,
+        stages: [],
+        parameters: [
+          { key: 'width', type: 'integer', value: 1024 },
+          { key: 'height', type: 'integer', value: 1024 },
+          { key: 'seed', type: 'integer', value: 7 },
+          ...(image ? [{ key: 'denoise', type: 'number', value: denoise, min: 0.6, max: 0.7 }] : []),
+        ],
+        references: image ? [[{ role: 'img2img', label: 'Image à modifier' }]] : [],
+      },
+      references: image
+        ? [{ input: 'source', resource_id: 'kept', role: 'img2img', as: 'source', roleLabel: 'Image à modifier', label: '#ref2' }]
+        : [],
+    },
+  };
+}
+
+test('a proposal of Moodix AI sets « Débruitage » with the pointer; changed by the user, it goes with « Générer »; without an image it is left alone', async () => {
+  const said = [];
+  const page = await studioPage(
+    { create_image: [kreaWithDenoise()] },
+    { 'tools/revise': ({ edits }) => ({ requestId: 'q2', approvalToken: 't2', revised: edits }) },
+    { runs: [], cursor: said, targets: true },
+  );
+  const { body, studio, asked, restore } = page;
+  const revisions = () => asked.filter(([route]) => route === 'tools/revise').map(([, sent]) => sent.edits);
+  try {
+    // 0.7 proposed with its image: the pointer sets the bar, as its other settings.
+    let answer = studio.propose(kreaProposal({ denoise: 0.7 }), new AbortController().signal);
+    await until(() => said.includes('attend votre accord'));
+    assert.ok(said.includes('règle débruitage'), said.join(' | '));
+    // « Plus de réglages » was opened for it: the pointer goes to nothing folded, and the user sees it.
+    assert.equal(body.find('studio-rare')[0].hidden, false);
+    assert.equal(body.find('studio-more-pill')[0].attributes['aria-expanded'], 'true');
+    assert.match(body.find('studio-slot')[0].className, /is-filled/);
+    assert.deepEqual(denoiseShown(body), ['0,70', true, DENOISE_HELP]);
+    // The user lowers it before « Générer »: sent as their change, and nothing else.
+    denoiseBar(body).value = '6';
+    denoiseBar(body).oninput();
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    assert.deepEqual(revisions(), [{ denoise: 0.66 }]);
+    await studio.settled({ record: null });
+
+    // Proposed at the value the Studio shows already: nothing to move, nothing to send.
+    said.length = 0;
+    answer = studio.propose(kreaProposal({ denoise: 0.66, id: 'r' }), new AbortController().signal);
+    await until(() => said.includes('attend votre accord'));
+    assert.equal(said.includes('règle débruitage'), false, said.join(' | '));
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    assert.equal(revisions().length, 1);
+    await studio.settled({ record: null });
+
+    // A proposal without an image to modify (its job says 1): the Studio keeps its own value,
+    // greyed, and sends nothing of it.
+    said.length = 0;
+    answer = studio.propose(kreaProposal({ image: false, id: 's' }), new AbortController().signal);
+    await until(() => said.includes('attend votre accord'));
+    assert.equal(said.includes('règle débruitage'), false);
+    assert.deepEqual(denoiseShown(body), ['0,66', false, DENOISE_IDLE]);
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    assert.equal(revisions().length, 1);
+  } finally {
+    restore();
+  }
+});
+
+test('the settings of a take: one made without an image does not give its denoise of 1 to the Studio, one made from an image gives its own back', async () => {
+  const take = (id, denoise, references = []) => ({
+    id,
+    conversationId: 'c1',
+    workflowId: 'k',
+    prompt: 'un escalier',
+    parameters: { width: 1024, height: 1024, seed: 5, denoise, references },
+    outputs: [{ originalUrl: `/${id}.png`, thumbUrl: `/${id}.jpg` }],
+  });
+  const from = [{ input: 'source', role: 'img2img', resource_id: 'kept' }];
+  // The newest first: the conversation opens on a take made from nothing.
+  const page = await studioPage({ create_image: [kreaWithDenoise()] }, handRoutes, {
+    runs: [take('alone', 1)],
+    resource: id => ({ id, label: '#ref2', name: 'escalier.png', previewUrl: '/preview/' + id, width: 1024, height: 1024 }),
+  });
+  const { body, studio, asked, restore } = page;
+  try {
+    body.find('studio-more-pill')[0].onclick();
+    // Its record says 1 (the picture was made from nothing): no setting, the default stays.
+    assert.deepEqual(denoiseShown(body), ['0,60', false, DENOISE_IDLE]);
+    // A take made from an image at 0.65: its image back in its case, its denoise on the bar.
+    studio.show(take('edited', 0.65, from));
+    assert.match(body.find('studio-slot')[0].className, /is-filled/);
+    assert.deepEqual(denoiseShown(body), ['0,65', true, DENOISE_HELP]);
+    await body.find('studio-go')[0].onclick();
+    await settle();
+    const args = asked.findLast(([route]) => route === 'tools/action')[1].arguments;
+    assert.deepEqual([args.source, args.denoise], [{ resource: 'kept' }, 0.65]);
+    // A take made from nothing looked at after it: the Studio keeps 0,65, greyed (not 1, nor 0,70).
+    studio.show(take('alone', 1));
+    assert.doesNotMatch(body.find('studio-slot')[0].className, /is-filled/);
+    assert.deepEqual(denoiseShown(body), ['0,65', false, DENOISE_IDLE]);
+    // One made from an image by an older workflow, at a denoise beyond the bounds of today: the nearest.
+    studio.show(take('older', 0.75, from));
+    assert.deepEqual(denoiseShown(body), ['0,70', true, DENOISE_HELP]);
+    studio.show(take('lower', 0.5, from));
+    assert.deepEqual(denoiseShown(body), ['0,60', true, DENOISE_HELP]);
+  } finally {
+    restore();
+  }
+});
+
+test('« Enregistrer » keeps « Débruitage » with the other settings of the model, the case empty or not, and gives it back within its bounds', async () => {
+  const posted = [];
+  const save = {
+    'studio/preset': request => {
+      posted.push(request);
+      return { workflow: request.workflow, preset: { ...request.preset, savedAt: 'maintenant' } };
+    },
+  };
+  const first = await studioPage({ create_image: [kreaWithDenoise()] }, save);
+  try {
+    const { body } = first,
+      disk = () => body.find('studio-save')[0];
+    body.find('studio-more-pill')[0].onclick();
+    // Not set yet: the disk is quiet. Set with an image: something to save.
+    assert.equal(disk().dataset.state, 'still');
+    await pasteImage(body);
+    assert.equal(disk().dataset.state, 'still', 'an image in its case is no setting of the model');
+    denoiseBar(body).value = '5';
+    denoiseBar(body).oninput();
+    assert.equal(disk().dataset.state, 'changed');
+    // The image taken back, then saved: kept all the same, a setting of the model.
+    body.find('studio-slot-remove')[0].onclick();
+    assert.deepEqual(denoiseShown(body), ['0,65', false, DENOISE_IDLE]);
+    await disk().onclick();
+    await settle();
+    assert.deepEqual(posted[0], {
+      workflow: 'k',
+      preset: { format: '1:1', size: '1024x1024', seed: '', styles: [], settings: { denoise: 0.65 } },
+    });
+    assert.equal(disk().dataset.state, 'saved');
+  } finally {
+    first.restore();
+  }
+  // Never set: nothing of it is kept (the workflow's own value is used).
+  const untouched = await studioPage({ create_image: [kreaWithDenoise()] }, save);
+  try {
+    await untouched.body.find('studio-save')[0].onclick();
+    await settle();
+    assert.deepEqual(Object.keys(posted[1].preset), ['format', 'size', 'seed', 'styles']);
+  } finally {
+    untouched.restore();
+  }
+  // Given back the first time the model is shown, the case empty: greyed at that value.
+  const shownWith = async settings => {
+    const page = await studioPage({ create_image: [kreaWithDenoise()] }, save, {
+      presets: {
+        k: { format: '1:1', size: '1024x1024', seed: '7', styles: [], ...(settings ? { settings } : {}), savedAt: 'hier' },
+      },
+    });
+    try {
+      page.body.find('studio-more-pill')[0].onclick();
+      assert.equal(page.body.find('studio-seed')[0].children[1].value, '7');
+      return [...denoiseShown(page.body), page.body.find('studio-save')[0].dataset.state];
+    } finally {
+      page.restore();
+    }
+  };
+  assert.deepEqual(await shownWith({ denoise: 0.68 }), ['0,68', false, DENOISE_IDLE, 'still']);
+  // Saved when the workflow allowed more: within the bounds of today (no longer what is saved).
+  assert.deepEqual(await shownWith({ denoise: 0.9 }), ['0,70', false, DENOISE_IDLE, 'changed']);
+  // Settings saved before the denoise was one of them: its default, and nothing « changed ».
+  assert.deepEqual(await shownWith(null), ['0,60', false, DENOISE_IDLE, 'still']);
+});
+
+test('the settings kept for a model: the length of a sound and the denoise, each checked; nothing else', async () => {
+  const { checkPreset } = await import('../lib/studio-presets.mjs');
+  assert.deepEqual(checkPreset({ settings: { denoise: 0.65 } }), { settings: { denoise: 0.65 } });
+  assert.deepEqual(checkPreset({ settings: { seconds: 12 } }), { settings: { seconds: 12 } });
+  assert.deepEqual(checkPreset({ seed: '7', settings: { seconds: 12, denoise: 1, steps: 40, prompt: 'non' } }), {
+    seed: '7',
+    settings: { seconds: 12, denoise: 1 },
+  });
+  for (const denoise of [0, -0.2, 1.01, '0.6', null, NaN, Infinity, [0.6]])
+    assert.throws(() => checkPreset({ settings: { denoise } }), { status: 400, message: 'Débruitage invalide.' }, String(denoise));
+  for (const settings of [{}, { steps: 40 }, { seconds: 0 }, { seconds: 'dix', denoise: 0.6 }, [], 'non', null])
+    assert.throws(() => checkPreset({ settings }), { status: 400, message: 'Réglages invalides.' }, JSON.stringify(settings));
+  // What was kept before stays as it was: a preset without settings has none.
+  assert.deepEqual(checkPreset({ length: 5, seed: '' }), { length: 5, seed: '' });
+});

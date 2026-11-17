@@ -1,6 +1,8 @@
 import { formatOf, formatsFor, nearestSize, sizesFor } from './formats.mjs';
 
-const LABELS = {
+// (Read by the server too, which names a setting as this form does when it refuses a value of it:
+// lib/native-workflows.mjs.)
+export const LABELS = {
   width: 'Largeur',
   height: 'Hauteur',
   frames: 'Images',
@@ -58,6 +60,8 @@ const numeric = value => typeof value === 'number' && Number.isFinite(value);
 const PLACES = { start_image: 'DÉBUT', end_image: 'FIN' };
 const SOURCES = new Set(['source_video', 'driving_video', 'source_image', 'img2img']);
 const seconds = value => value.toFixed(2).replace('.', ',') + ' s';
+// A limit as it is said to the user: « 0,6 ».
+const decimal = value => String(value).replace('.', ',');
 
 /**
  * A proposal as one form: everything the user may change is editable in place, the common
@@ -650,7 +654,7 @@ export function renderProposal(container, request, { node, onStage, card = false
           if (!text || !Number.isFinite(value) || (item.type === 'integer' && !Number.isSafeInteger(value)))
             throw Error(`${label} : nombre invalide.`);
           if ((item.min !== undefined && value < item.min) || (item.max !== undefined && value > item.max))
-            throw Error(`${label} : entre ${item.min ?? '…'} et ${item.max ?? '…'}.`);
+            throw Error(`${label} : entre ${decimal(item.min ?? '…')} et ${decimal(item.max ?? '…')}.`);
           if (item.multipleOf && value % item.multipleOf) throw Error(`${label} : multiple de ${item.multipleOf}.`);
         }
         if (value !== undefined && value !== item.value) edits[key] = value;

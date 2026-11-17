@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { ToolCatalog, serves } from '../lib/tool-catalog.mjs';
+import { CAPABLE } from '../lib/model-wording.mjs';
 
 const video = (id, references, extra = {}) => ({
   schemaVersion: 1,
@@ -558,4 +559,92 @@ test('one more image: where a proposal still has a place for it, and which other
     other: 'keyframes',
   });
   assert.deepEqual(await tools.room('nothing', keys, []), { here: [], none: true, other: null });
+});
+
+test('Krea 2: the denoise is the assistant’s with an image to modify, from 0.6 to 0.7, and said in its tool only', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const shippedOf = async id => ({
+    ...JSON.parse(await readFile(new URL(`../runner/workflows/${id}.json`, import.meta.url), 'utf8')),
+    ready: true,
+  });
+  const krea = await shippedOf('fefb88eb-8311-4409-b636-6efbb42e952c'),
+    moss = await shippedOf('3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36'),
+    catalog = catalogOf([moss, krea]);
+  const toolOf = async (tools, available, options) =>
+    (await tools.definitions(available, options)).find(item => item.function.name === 'create_image').function
+      .parameters;
+  // Offered with its bounds, both included, and what each end does: the model is told there, and
+  // nowhere else (lib/model-wording.mjs and lib/tasks.json say nothing of it).
+  const generic = await toolOf(catalog);
+  assert.deepEqual(Object.keys(generic.properties), [
+    'prompt',
+    'source',
+    'workflow',
+    'seed',
+    'width',
+    'height',
+    'denoise',
+    'series',
+  ]);
+  assert.deepEqual(generic.required, ['prompt']);
+  const { description, ...schema } = generic.properties.denoise;
+  assert.deepEqual(schema, { type: 'number', minimum: 0.6, maximum: 0.7, default: 0.6 });
+  assert.equal(
+    description,
+    'Only with an image to modify (source): how much of that image is redone. 0.6 keeps its composition and changes its mood, light or colours; 0.7 also lets the composition change (another framing, a farther view). Omit it otherwise: 0.6 is used. Only for: fefb88eb-8311-4409-b636-6efbb42e952c.',
+  );
+  assert.equal(description, `${krea.parameters.denoise.description} Only for: ${krea.id}.`);
+  for (const file of ['../lib/model-wording.mjs', '../lib/tasks.json', '../lib/tasks-capable.json'])
+    assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), 'utf8'), /denoise/i, file);
+  // A conversation that holds nothing to modify: no source to pass, and not a word of the denoise.
+  const empty = { images: 0, resources: [], takes: [], outputs: [] };
+  const fresh = (await toolOf(catalog, empty)).properties;
+  assert.deepEqual([fresh.source, fresh.denoise], [undefined, undefined]);
+  const attached = (await toolOf(catalog, { ...empty, images: 1 })).properties;
+  assert.ok(attached.source && attached.denoise);
+  // A capable model: the same words, the workflow by its name.
+  const capable = (await toolOf(catalog, undefined, { wording: CAPABLE })).properties.denoise;
+  assert.equal(capable.description, `${krea.parameters.denoise.description} Only for: Krea 2.`);
+  assert.deepEqual([capable.minimum, capable.maximum], [0.6, 0.7]);
+  // A workflow that fixes its denoise offers no such argument.
+  const fixed = structuredClone(krea);
+  fixed.parameters.denoise = { policy: 'fixed', value: 0.6 };
+  const held = catalogOf([moss, fixed]);
+  assert.equal((await toolOf(held)).properties.denoise, undefined);
+  // Nor does one that takes no image to modify, whatever it says of its denoise.
+  const slotless = { ...structuredClone(krea), id: 'krea-sans-image', name: 'Krea sans image', references: [] };
+  assert.equal((await toolOf(catalogOf([moss, slotless]))).properties.denoise, undefined);
+  assert.ok((await toolOf(catalogOf([slotless, krea]))).properties.denoise.description.endsWith(`Only for: ${krea.id}.`));
+
+  // Routed: kept within the bounds, brought back to the nearest one beyond them, and said.
+  // (The router writes the media of a source on it: a new one for each call.)
+  const route = (args, tools = catalog) => tools.route('create_image', { prompt: 'x', ...structuredClone(args) }, media),
+    source = { image: 0 };
+  let routed = await route({ source, denoise: 0.7 });
+  assert.equal(routed.workflow.id, krea.id);
+  assert.deepEqual([routed.args.denoise, routed.notes], [0.7, []]);
+  routed = await route({ source, denoise: 0.65 });
+  assert.deepEqual([routed.args.denoise, routed.notes], [0.65, []]);
+  routed = await route({ source, denoise: 0.9 });
+  assert.deepEqual([routed.args.denoise, routed.notes], [0.7, ['denoise : 0.9 → 0.7, la limite de Krea 2.']]);
+  routed = await route({ source, denoise: 0.3 });
+  assert.deepEqual([routed.args.denoise, routed.notes], [0.6, ['denoise : 0.3 → 0.6, la limite de Krea 2.']]);
+  // Without an image to modify: left aside without a word, whatever its value.
+  for (const denoise of [0.7, 0.9, 0.3]) {
+    routed = await route({ denoise });
+    assert.equal(routed.workflow.id, krea.id);
+    assert.deepEqual([Object.hasOwn(routed.args, 'denoise'), routed.notes], [false, []], String(denoise));
+  }
+  // The workflow that fixes it: ignored and said, never an error.
+  routed = await route({ source, denoise: 0.7 }, held);
+  assert.equal(Object.hasOwn(routed.args, 'denoise'), false);
+  assert.match(routed.notes.join(), /denoise ignoré : fixé par le workflow Krea 2\./);
+
+  // The Studio: a setting of the model, with its bounds and the input it is only read with.
+  const shown = (await catalog.studio()).create_image.find(item => item.id === krea.id);
+  assert.deepEqual(shown.settings, [
+    { key: 'denoise', type: 'number', min: 0.6, max: 0.7, default: 0.6, onlyWith: { role: 'img2img', otherwise: 1 } },
+  ]);
+  assert.equal(shown.inputs.img2img, 'source');
+  assert.deepEqual((await held.studio()).create_image.find(item => item.id === krea.id).settings, []);
 });

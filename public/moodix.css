@@ -7781,6 +7781,22 @@ html[data-switch='open']::view-transition-old(chat) {
   padding-top: 10px;
   border-top: 1px solid #1a1d24;
 }
+/* A setting on a bar among them (« Débruitage »): the mark of Moodix AI beside its name, what its
+   values do under it. Greyed while the input it is only read with is missing, its reason left
+   readable. */
+.studio-fine .studio-bar-label .ai-mark {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.studio-fine-note {
+  display: block;
+  line-height: 1.45;
+}
+.studio-fine.is-idle .studio-bar-label,
+.studio-fine.is-idle .studio-bar-value {
+  opacity: 0.45;
+}
 .studio-seed {
   grid-template-columns: 52px minmax(0, 1fr) 30px;
 }

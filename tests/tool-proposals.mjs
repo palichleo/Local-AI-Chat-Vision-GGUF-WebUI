@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -1195,4 +1196,122 @@ test('a length asked in seconds is counted at the rate of the profile the clip i
   assert.equal(fps, 30);
   // Five seconds asked: five seconds made (counted at 24, they were 121 images: 4 s at 30).
   assert.ok(Math.abs(frames / fps - 5) < 0.2, `${frames} images à ${fps}/s`);
+});
+
+test('Krea 2: the denoise the assistant passes with an image to modify stays from 0.6 to 0.7, may be changed there, and is in the record of the take', async () => {
+  const list = shipped(),
+    krea = of(list, 'krea2'),
+    SOURCE = uid(7),
+    OTHER = uid(8),
+    { runtime, saved } = world({
+      workflows: list,
+      resources: { [SOURCE]: picture('escalier.png'), [OTHER]: picture('plage.png') },
+    });
+  let calls = 0;
+  const ask = args =>
+    runtime.request([call('create_image', { prompt: 'The same staircase at night.', ...args }, 'call-' + ++calls)], {
+      conversationId: A,
+      turnId: randomUUID(),
+      messages: [],
+    });
+  const made = async request => {
+    await runtime.execute({ requestId: request.requestId, permission: 'once', approvalToken: request.approvalToken });
+    await runtime.finished;
+    assert.equal(runtime.status().state, 'done', runtime.status().error);
+    return saved.at(-1).parameters;
+  };
+  const source = () => ({ resource: SOURCE }),
+    setting = request => request.plan.editable.parameters.find(item => item.key === 'denoise');
+
+  // 0.7 asked with an image to modify: proposed, listed with its bounds, made and recorded at 0.7.
+  let proposal = await ask({ source: source(), denoise: 0.7 });
+  assert.equal(proposal.workflowName, krea.name);
+  assert.equal(proposal.plan.parameters.denoise, 0.7);
+  assert.deepEqual(
+    [setting(proposal).value, setting(proposal).min, setting(proposal).max, setting(proposal).locked],
+    [0.7, 0.6, 0.7, undefined],
+  );
+  assert.deepEqual([proposal.notes, proposal.plan.edited], [undefined, undefined], 'the choice of the assistant, no change of the user');
+  let record = await made(proposal);
+  assert.equal(record.denoise, 0.7);
+  assert.equal(record.replay_args.denoise, 0.7, 'made again, it keeps it');
+  assert.equal(record.user_overrides, undefined);
+  // Nothing asked: 0.6.
+  proposal = await ask({ source: source() });
+  assert.deepEqual([proposal.plan.parameters.denoise, setting(proposal).value], [0.6, 0.6]);
+  assert.equal((await made(proposal)).denoise, 0.6);
+  // Beyond the bounds: brought to the nearest one (as the router does for every number left to the
+  // model), said on the proposal, never refused.
+  proposal = await ask({ source: source(), denoise: 0.9 });
+  assert.equal(proposal.plan.parameters.denoise, 0.7);
+  assert.deepEqual(proposal.notes, ['denoise : 0.9 → 0.7, la limite de Krea 2.']);
+  assert.equal(proposal.plan.edited, undefined);
+  assert.equal((await made(proposal)).denoise, 0.7);
+  proposal = await ask({ source: source(), denoise: 0.3 });
+  assert.equal(proposal.plan.parameters.denoise, 0.6);
+  assert.deepEqual(proposal.notes, ['denoise : 0.3 → 0.6, la limite de Krea 2.']);
+  assert.equal((await made(proposal)).denoise, 0.6);
+
+  // Passed without an image to modify: no error, nothing said, the picture made from nothing (1),
+  // and no setting to change there.
+  for (const denoise of [0.7, 0.9]) {
+    proposal = await ask({ denoise });
+    assert.equal(proposal.plan.parameters.denoise, 1);
+    assert.equal(setting(proposal), undefined);
+    assert.ok(proposal.plan.editable.parameters.some(item => item.key === 'width'));
+    assert.deepEqual([proposal.notes, proposal.plan.edited, proposal.args.denoise], [undefined, undefined, undefined]);
+    record = await made(proposal);
+    assert.deepEqual([record.denoise, record.user_overrides, record.replay_args.denoise], [1, undefined, undefined]);
+  }
+  // An edit of it there is left aside: not made with it, not said « modifié par vous ».
+  proposal = await ask({});
+  let revised = await revise(runtime, proposal, { denoise: 0.65 });
+  assert.equal(revised.plan.parameters.denoise, 1);
+  assert.equal(revised.plan.edited, undefined);
+  assert.equal((await made(revised)).user_overrides, undefined);
+  // An image put in its case on the card: the setting is there, at the value of the workflow.
+  proposal = await ask({});
+  revised = await revise(runtime, proposal, { add: { role: 'source', source: { resource: OTHER } } });
+  assert.deepEqual(rolesOf(revised), ['img2img']);
+  assert.deepEqual([revised.plan.parameters.denoise, setting(revised).value, setting(revised).max], [0.6, 0.6, 0.7]);
+  revised = await revise(runtime, revised, { denoise: 0.68 });
+  assert.equal((await made(revised)).denoise, 0.68);
+
+  // On a proposal with its image, the user sets it within the bounds: said as their change, made
+  // with it, and kept in the record of the take.
+  proposal = await ask({ source: source() });
+  revised = await revise(runtime, proposal, { denoise: 0.65 });
+  assert.equal(revised.plan.parameters.denoise, 0.65);
+  assert.deepEqual(revised.plan.edited, ['denoise']);
+  assert.equal(setting(revised).value, 0.65);
+  // Outside them: refused in plain words, and the proposal is still the one to confirm.
+  for (const denoise of [0.75, 0.5, 1])
+    await assert.rejects(revise(runtime, revised, { denoise }), { status: 400, message: 'Débruitage : entre 0,6 et 0,7.' });
+  await assert.rejects(revise(runtime, revised, { denoise: '0.65' }), /denoise must be a finite number/);
+  // Both ends are values like the others.
+  revised = await revise(runtime, revised, { denoise: 0.7 });
+  assert.equal(revised.plan.parameters.denoise, 0.7);
+  record = await made(revised);
+  assert.equal(record.denoise, 0.7);
+  assert.deepEqual(record.user_overrides, { denoise: 0.7 });
+  // Set back to what the assistant gave, it is no change any more.
+  proposal = await ask({ source: source(), denoise: 0.7 });
+  revised = await revise(runtime, proposal, { denoise: 0.65 });
+  revised = await revise(runtime, revised, { denoise: 0.7 });
+  assert.deepEqual([revised.plan.parameters.denoise, revised.plan.edited], [0.7, undefined]);
+
+  // A workflow of the user's that fixes it: the argument is said ignored, and the user may still
+  // type any denoise the family takes (the policies restrict the model, not the owner).
+  const { ready, digest, ...stored } = krea,
+    fixed = { ...validateNativeWorkflow({ ...stored, parameters: { ...stored.parameters, denoise: { policy: 'fixed', value: 0.5 } } }), ready: true },
+    own = world({ workflows: [fixed], resources: { [SOURCE]: picture('escalier.png') } });
+  const held = await own.runtime.request([call('create_image', { prompt: 'x', source: source(), denoise: 0.7 })], {
+    conversationId: A,
+    turnId: randomUUID(),
+    messages: [],
+  });
+  assert.equal(held.plan.parameters.denoise, 0.5);
+  assert.deepEqual(held.notes, ['denoise ignoré : fixé par le workflow Krea 2.']);
+  assert.deepEqual([setting(held).min, setting(held).max], [0, 1]);
+  assert.equal((await revise(own.runtime, held, { denoise: 0.4 })).plan.parameters.denoise, 0.4);
 });

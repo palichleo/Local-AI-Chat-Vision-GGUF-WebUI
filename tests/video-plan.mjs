@@ -341,3 +341,44 @@ test('in the card of the conversation: the length in one click, version and seed
   format.onchange();
   assert.deepEqual(noted(resolution), ['384x256']);
 });
+
+test('an image made from another: « Débruitage » among the advanced settings with its bounds; without an image the server lists none', () => {
+  // As lib/tool-runtime.mjs describes a proposal of Krea 2 (its denoise left between 0.6 and 0.7).
+  const image = source => ({
+    workflowName: 'Krea 2',
+    plan: {
+      prompt: 'The same staircase at night.',
+      parameters: { width: 1024, height: 1024, seed: 7, steps: 8, denoise: source ? 0.6 : 1 },
+      references: source ? [{ input: 'source', role: 'img2img', roleLabel: 'Image à modifier', label: '#ref1' }] : [],
+      editable: {
+        prompt: true,
+        stages: [],
+        references: source ? [[{ role: 'img2img', label: 'Image à modifier' }]] : [],
+        parameters: [
+          { key: 'width', value: 1024, type: 'integer', min: 64, max: 4096, multipleOf: 16 },
+          { key: 'height', value: 1024, type: 'integer', min: 64, max: 4096, multipleOf: 16 },
+          { key: 'seed', value: 7, type: 'integer', min: 0, max: 9007199254740991 },
+          ...(source ? [{ key: 'denoise', value: 0.6, type: 'number', min: 0.6, max: 0.7, note: 'Part de l’image refaite.' }] : []),
+        ],
+      },
+    },
+  });
+  const box = node('section');
+  const form = renderProposal(box, image(true), { node });
+  const denoise = labelled(box, 'Débruitage');
+  assert.deepEqual([denoise.type, denoise.value, denoise.min, denoise.max, denoise.step], ['number', '0.6', '0.6', '0.7', 'any']);
+  assert.match(text(box), /Part de l’image refaite\./);
+  assert.deepEqual(form.edits(), {});
+  denoise.value = '0.65';
+  assert.deepEqual(form.edits(), { denoise: 0.65 });
+  // Outside its bounds: said in words before anything is sent.
+  for (const value of ['0.75', '0.5']) {
+    denoise.value = value;
+    assert.throws(() => form.edits(), { message: 'Débruitage : entre 0,6 et 0,7.' });
+  }
+  // Without an image to modify the picture is made from nothing: no such setting to change.
+  const alone = node('section');
+  renderProposal(alone, image(false), { node });
+  assert.equal(labelled(alone, 'Débruitage'), undefined);
+  assert.ok(labelled(alone, 'Largeur'));
+});

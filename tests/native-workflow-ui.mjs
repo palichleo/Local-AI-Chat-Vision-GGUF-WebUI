@@ -1342,9 +1342,14 @@ test('Krea 2: a denoise of 1 with an image to modify is said to ignore it, until
       control.value = value;
       for (const listener of control.listeners.input) listener();
     };
-  // The shipped workflow keeps a part of the image (0.6): nothing to warn of.
+  // The shipped workflow keeps a part of the image (0.6): nothing to warn of. It opens on
+  // « Assistant », between 0.6 and 0.7, with what the assistant is told of it.
   assert.equal(control.value, 0.6);
   assert.equal(note.hidden, true);
+  assert.equal(f.$('native-policy-denoise').value, 'model');
+  assert.deepEqual([f.$('native-min-denoise').value, f.$('native-max-denoise').value], [0.6, 0.7]);
+  assert.match(f.$('native-description-denoise').value, /^Only with an image to modify \(source\)/);
+  assert.equal(f.$('native-description-denoise').hidden, false);
   // What the setting is, and that it only applies to an image given, is said whatever its value.
   const card = note.parent,
     help = card.children[card.children.indexOf(note) - 1];
@@ -1358,4 +1363,9 @@ test('Krea 2: a denoise of 1 with an image to modify is said to ignore it, until
   assert.equal(control.dataset.unavailable, 'false', 'a warning, not greyed');
   typed('0.7');
   assert.equal(note.hidden, true);
+  // Saved as it was opened, the setting is written as it is shipped.
+  typed('0.6');
+  assert.equal(await f.ui.saveEditor(), true, f.$('native-workflow-error').textContent);
+  const saved = f.calls.findLast(call => call.route === 'generation/workflows').body;
+  assert.deepEqual(saved.parameters.denoise, (await shippedWorkflow('krea2')).parameters.denoise);
 });

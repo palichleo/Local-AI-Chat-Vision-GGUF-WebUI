@@ -12,6 +12,7 @@ import {
   resolveNativeWorkflow,
   nativeWorkflowReferences,
   referenceLora,
+  unreadParameters,
   workflowSchema,
 } from '../lib/native-workflows.mjs';
 
@@ -368,8 +369,12 @@ test('Krea 2: the denoise applies to an image to modify only, and the job says t
       })
     ).parameters.denoise;
   // The shipped workflow: an image given to modify counts (0.6, measured: see the commit of 0.6.69), and without one the picture is
-  // made from pure noise, which is what the engine does (runner/pipelines/sampling.py).
-  assert.deepEqual(shipped.parameters.denoise, { policy: 'fixed', value: 0.6 });
+  // made from pure noise, which is what the engine does (runner/pipelines/sampling.py). Left to the
+  // assistant and to the user between 0.6 (the mood changes) and 0.7 (the composition too).
+  const { description, ...policy } = shipped.parameters.denoise;
+  assert.deepEqual(policy, { policy: 'model', type: 'number', default: 0.6, min: 0.6, max: 0.7 });
+  assert.match(description, /^Only with an image to modify \(source\).*0\.6 keeps.*0\.7 also lets.*Omit it otherwise/);
+  assert.deepEqual(familyTemplate(family('krea2')).parameters.denoise, shipped.parameters.denoise);
   assert.equal(family('krea2').parameters.denoise.onlyWith.role, 'img2img');
   assert.ok(shipped.references.some(slot => slot.id === 'source' && slot.role === 'img2img'));
   assert.equal(await made(shipped, image), 0.6);
@@ -385,16 +390,63 @@ test('Krea 2: the denoise applies to an image to modify only, and the job says t
   own.parameters.denoise = { policy: 'model', type: 'number', default: 0.6 };
   assert.equal(await made(own, image), 0.6);
   assert.equal(await made(own, null), 1);
-  // A value typed before confirming: used with the image, without effect without one.
-  assert.equal(await made(shipped, image, { denoise: 0.4 }), 0.4);
-  assert.equal(await made(shipped, null, { denoise: 0.4 }), 1);
+  // A value typed before confirming: used with the image, without effect without one. A workflow
+  // that fixes it takes any the family allows (the policies restrict the model, not the owner).
+  own.parameters.denoise = { policy: 'fixed', value: 0.5 };
+  assert.equal(await made(own, image, { denoise: 0.4 }), 0.4);
+  assert.equal(await made(own, null, { denoise: 0.4 }), 1);
+  // The shipped one keeps what is typed within its bounds, both ends included (the family leaves
+  // out its own minimum, 0: not one the workflow raises)...
+  for (const value of [0.6, 0.65, 0.7]) assert.equal(await made(shipped, image, { denoise: value }), value);
+  // ...refuses the rest in the user's words, and leaves an edit aside when no image is given.
+  for (const value of [0.3, 0.59, 0.71, 1])
+    await assert.rejects(made(shipped, image, { denoise: value }), { status: 400, message: 'Débruitage : entre 0,6 et 0,7.' });
+  assert.equal(await made(shipped, null, { denoise: 0.65 }), 1);
+  assert.equal(await made(shipped, null, { denoise: 0.3 }), 1);
+  // What the assistant passes: within the bounds or refused (the router brings it back before, tests/tool-catalog.mjs).
+  const asked = (denoise, references) =>
+    resolveNativeWorkflow(shipped, { prompt: 'a boat', denoise, ...(references ? { references } : {}) }, here, {
+      seed: 1,
+      allowPendingReferences: true,
+    });
+  assert.equal((await asked(0.7, image)).parameters.denoise, 0.7);
+  assert.equal((await asked(0.6, image)).parameters.denoise, 0.6);
+  assert.equal((await asked(0.7, null)).parameters.denoise, 1);
+  await assert.rejects(asked(0.9, image), /outside the supported range/);
   // Beside the setting, on the card and in the Studio: what it is, and when it applies.
   const job = await resolveNativeWorkflow(shipped, { prompt: 'a boat', references: image }, here, {
     allowPendingReferences: true,
   });
   const item = editableParameters(shipped, job.parameters).find(entry => entry.key === 'denoise');
   assert.equal(item.value, 0.6);
+  assert.deepEqual([item.min, item.max, item.exclusiveMin], [0.6, 0.7, undefined]);
   assert.match(item.note, /quand une image est donnée à modifier.*Sans image, l’image part toujours de zéro\./);
+  assert.match(item.note, /l’assistant choisit entre 0,6 \(ambiance\) et 0,7 \(composition\)/);
+  // With the inputs of a proposal: listed when the image to modify is among them, not without it
+  // (nothing to set: the picture is made from nothing, and its record says 1).
+  const listed = (parameters, references) =>
+    editableParameters(shipped, parameters, { references }).map(entry => entry.key);
+  assert.ok(listed(job.parameters, job.references).includes('denoise'));
+  const alone = await resolveNativeWorkflow(shipped, { prompt: 'a boat' }, here, { allowPendingReferences: true });
+  assert.equal(alone.parameters.denoise, 1);
+  assert.ok(!listed(alone.parameters, alone.references).includes('denoise'));
+  assert.ok(listed(alone.parameters, alone.references).includes('width'));
+  assert.deepEqual(unreadParameters(shipped, []), { denoise: 1 });
+  assert.deepEqual(unreadParameters(shipped, image), {});
+  // The tool: its bounds as they are, both included, and what it is for.
+  const schema = workflowSchema(shipped).properties.denoise;
+  assert.deepEqual(
+    [schema.type, schema.minimum, schema.maximum, schema.exclusiveMinimum, schema.default],
+    ['number', 0.6, 0.7, undefined, 0.6],
+  );
+  assert.equal(schema.description, description);
+  // The minimum of the family itself stays left out: a denoise of 0 makes nothing.
+  own.parameters.denoise = { policy: 'model', type: 'number', default: 0.6 };
+  assert.equal(workflowSchema(own).properties.denoise.exclusiveMinimum, 0);
+  assert.throws(
+    () => validateNativeWorkflow({ ...own, parameters: { ...own.parameters, denoise: { policy: 'model', min: 0, default: 0 } } }),
+    /denoise/i,
+  );
 });
 
 test('a parameter its family marks unused is no setting to change before a creation', async () => {

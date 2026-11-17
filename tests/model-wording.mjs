@@ -37,7 +37,9 @@ import {
  * the notes the application writes for it, and a whole request as llama.cpp receives it, compared
  * with what 0.6.39 sent (tests/fixtures/rails-wording.json). `UPDATE_RAILS=1` writes it again: only
  * when a change for the local model is meant (0.6.48: the `series` of create_image, several images
- * in one call).
+ * in one call; 17/11: the `denoise` of create_image, from 0.6 to 0.7 for Krea 2, offered where an
+ * image to modify can be passed). Written again, it loses `brief` and `briefExtend`, which the
+ * first test leaves aside: they were put back, so that the fixture changed by that argument alone.
  */
 const snapshotPath = fileURLToPath(new URL('./fixtures/rails-wording.json', import.meta.url));
 const fixture = fileURLToPath(new URL('./fixtures/fake-tool-engine.mjs', import.meta.url));

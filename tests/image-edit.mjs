@@ -76,8 +76,14 @@ test('an image proposal can be edited by the user too, then confirmed without a 
   assert.equal(second.plan.parameters.steps, 12);
   assert.equal(second.plan.parameters.seed, first.plan.parameters.seed);
   assert.deepEqual(second.plan.edited.sort(), ['steps', 'width']);
+  // Outside its limits: refused in the words of the form (public/video-plan.mjs), not in English.
   await assert.rejects(
     runtime.revise({ requestId: second.requestId, approvalToken: second.approvalToken, edits: { width: 100 } }),
-    /range/,
+    { status: 400, message: 'Largeur : entre 256 et 2048.' },
+  );
+  // (A value of another kind is still said by the check of the workflow.)
+  await assert.rejects(
+    runtime.revise({ requestId: second.requestId, approvalToken: second.approvalToken, edits: { width: 300.5 } }),
+    /width must be a finite integer/,
   );
 });

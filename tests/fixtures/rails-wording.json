@@ -81,6 +81,13 @@
          "multipleOf": 16,
          "default": 1024
         },
+        "denoise": {
+         "type": "number",
+         "minimum": 0.6,
+         "maximum": 0.7,
+         "description": "Only with an image to modify (source): how much of that image is redone. 0.6 keeps its composition and changes its mood, light or colours; 0.7 also lets the composition change (another framing, a farther view). Omit it otherwise: 0.6 is used. Only for: fefb88eb-8311-4409-b636-6efbb42e952c.",
+         "default": 0.6
+        },
         "series": {
          "type": "array",
          "minItems": 1,
@@ -1145,6 +1152,13 @@
          "maximum": 4096,
          "multipleOf": 16,
          "default": 1024
+        },
+        "denoise": {
+         "type": "number",
+         "minimum": 0.6,
+         "maximum": 0.7,
+         "description": "Only with an image to modify (source): how much of that image is redone. 0.6 keeps its composition and changes its mood, light or colours; 0.7 also lets the composition change (another framing, a farther view). Omit it otherwise: 0.6 is used. Only for: fefb88eb-8311-4409-b636-6efbb42e952c.",
+         "default": 0.6
         },
         "series": {
          "type": "array",

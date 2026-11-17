@@ -120,17 +120,27 @@ test('copies left by older versions: unedited ones go, edited ones stay without 
   assert.deepEqual(await f.names(), [[f.original.name, true, true, false]]);
 });
 
-test('Krea 2 at a denoise below 1 reaches the installed copies: an untouched one follows, an edited one is kept', async t => {
+test('Krea 2 with its denoise left to the assistant reaches the installed copies: an untouched one follows, an edited one is kept', async t => {
   const id = 'fefb88eb-8311-4409-b636-6efbb42e952c';
   const current = JSON.parse(await readFile(new URL(`../runner/workflows/${id}.json`, import.meta.url), 'utf8'));
-  // The version shipped before: the same workflow at a denoise of 1 (the image to modify was ignored).
-  const before = structuredClone(current);
-  before.parameters.denoise.value = 1;
+  // The versions shipped before: the same workflow at a fixed denoise, of 1 (the image to modify
+  // was ignored), then 0.75, then 0.6.
+  const fixedAt = value => {
+    const copy = structuredClone(current);
+    copy.parameters.denoise = { policy: 'fixed', value };
+    return copy;
+  };
+  const before = fixedAt(1);
   const historyPath = new URL('../runner/workflow-history.json', import.meta.url);
   const versions = JSON.parse(await readFile(historyPath, 'utf8')).workflows[id];
-  assert.equal(current.parameters.denoise.value, 0.6);
-  assert.ok(versions.includes(workflowFingerprint(before)), 'the version before is in the history');
+  assert.deepEqual(
+    [current.parameters.denoise.policy, current.parameters.denoise.default, current.parameters.denoise.min, current.parameters.denoise.max],
+    ['model', 0.6, 0.6, 0.7],
+  );
+  for (const value of [1, 0.75, 0.6])
+    assert.ok(versions.includes(workflowFingerprint(fixedAt(value))), `the version fixed at ${value} is in the history`);
   assert.equal(versions.at(-1), workflowFingerprint(current));
+  assert.equal(new Set(versions).size, versions.length);
   const root = await mkdtemp(join(tmpdir(), 'atelier-catalog-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const builtin = join(root, 'shipped'),
@@ -145,18 +155,27 @@ test('Krea 2 at a denoise below 1 reaches the installed copies: an untouched one
     statePath: join(root, 'data', 'workflow-natives.json'),
     historyPath: fileURLToPath(historyPath),
   });
-  const denoise = async key => (await catalog.read(key)).parameters.denoise.value;
+  // The denoise of a workflow as it is set: its fixed value, or « assistant » with its bounds.
+  const said = policy => (policy.policy === 'fixed' ? policy.value : `assistant ${policy.min}–${policy.max}`);
+  const denoise = async key => said((await catalog.read(key)).parameters.denoise);
   await ship(current);
-  // A copy an earlier version left in the user's folder, never edited: it goes, and the workflow is the new one.
-  await writeFile(join(user, id + '.json'), JSON.stringify(before));
-  assert.deepEqual(await catalog.adoptShipped(), { removed: [id], kept: [] });
-  assert.deepEqual(await readdir(user), []);
-  assert.equal(await denoise(id), 0.6);
+  // A copy an earlier version left in the user's folder, never edited (fixed at 1, at 0.75 or at
+  // 0.6): it goes, and the workflow is the new one.
+  for (const value of [1, 0.75, 0.6]) {
+    await writeFile(join(user, id + '.json'), JSON.stringify(fixedAt(value)));
+    assert.deepEqual(await catalog.adoptShipped(), { removed: [id], kept: [] }, String(value));
+    assert.deepEqual(await readdir(user), []);
+    assert.equal(await denoise(id), 'assistant 0.6–0.7');
+  }
   // The same copy with a change of the user's: kept as it is, at their denoise.
   await writeFile(join(user, id + '.json'), JSON.stringify({ ...before, description: 'Mon Krea.' }));
   assert.deepEqual(await catalog.adoptShipped(), { removed: [], kept: [id] });
   assert.equal(await denoise(id), 1);
   assert.equal((await catalog.read(id)).description, 'Mon Krea.');
+  // A copy of the user's fixed at a denoise that was never shipped (0.65): theirs, kept too.
+  await writeFile(join(user, id + '.json'), JSON.stringify(fixedAt(0.65)));
+  assert.deepEqual(await catalog.adoptShipped(), { removed: [], kept: [id] });
+  assert.equal(await denoise(id), 0.65);
   // Edited from the settings while 1 was shipped: the update never replaces it, and lists the new
   // version beside it (« Krea 2 V2 »).
   await catalog.reset(id);
@@ -165,12 +184,17 @@ test('Krea 2 at a denoise below 1 reaches the installed copies: an untouched one
   await ship(current);
   const listed = await catalog.list();
   assert.deepEqual(
-    listed.map(item => [item.name, item.customized ?? false, item.update ?? false, item.parameters.denoise.value]),
+    listed.map(item => [item.name, item.customized ?? false, item.update ?? false, said(item.parameters.denoise)]),
     [
       [current.name, true, false, 1],
-      [current.name + ' V2', false, true, 0.6],
+      [current.name + ' V2', false, true, 'assistant 0.6–0.7'],
     ],
   );
+  // Opened and saved as the editor writes it (the keys in its own order): still the shipped one.
+  await catalog.reset(id);
+  const { description, ...policy } = current.parameters.denoise;
+  await catalog.save({ ...current, parameters: { ...current.parameters, denoise: { description, ...policy } } });
+  assert.deepEqual(await readdir(user), []);
   // Never written to: an update replaces that folder.
   assert.deepEqual(await readdir(builtin), [id + '.json']);
 });

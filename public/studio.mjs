@@ -63,7 +63,14 @@ const SETTINGS = {
   language: 'Langue',
   subject: 'Qui remplacer',
   reference_subject: 'Qui dessiner',
+  denoise: 'Débruitage',
 };
+// What the values of a setting on a bar do, said under it (measured on Krea 2, 17/11).
+const BAR_HELP = { denoise: '0,6 garde la composition et change l’ambiance ; 0,7 laisse la composition changer.' };
+// Why a setting the model only reads with an input is greyed while the case of that input is empty.
+const ONLY_WITH = { source: 'Sert seulement avec une image à modifier.' };
+// The settings on a bar that « Enregistrer » keeps for a model (lib/studio-presets.mjs checks each).
+const KEPT_SETTINGS = ['denoise'];
 // Who is who, for a character put in a video: said in a few words beside the inputs, not
 // among the rare settings. Read by a detector that knows English words.
 const WHO = {
@@ -91,6 +98,39 @@ const MAIN_FORMATS = ['1:1', '16:9', '9:16'];
 // The key that goes with Entrée to generate, as the keyboard names it.
 const MODIFIER = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘' : 'Ctrl';
 const strengthText = value => (Math.round(value * 100) / 100).toFixed(2).replace('.', ',');
+/**
+ * A decimal setting between two close bounds (the denoise of Krea 2, 0.6 to 0.7): the Studio shows
+ * it on a bar, by hundredths. A wider one, or a whole number, keeps its field.
+ */
+const fineSetting = setting =>
+  setting.type === 'number' &&
+  !setting.choices &&
+  Number.isFinite(setting.min) &&
+  Number.isFinite(setting.max) &&
+  setting.max > setting.min &&
+  setting.max - setting.min <= 1;
+/** A value of such a setting within its bounds, at a hundredth; its default when there is none. */
+function fineValue(setting, value) {
+  const given = value === undefined || value === null || value === '' ? (setting.default ?? setting.min) : value,
+    number = Number(given);
+  if (!Number.isFinite(number)) return setting.min;
+  return Math.round(Math.min(setting.max, Math.max(setting.min, number)) * 100) / 100;
+}
+/**
+ * Whether a setting is read with these inputs (`roles`: their roles, as the family names its slots):
+ * one the engine only reads with an input (`onlyWith`: the denoise of Krea 2 with an image to
+ * modify) is none of a creation made without it, whose record then says another value (1).
+ */
+const settingRead = (setting, roles) => !setting.onlyWith || roles.includes(setting.onlyWith.role);
+/**
+ * The case of the input a setting is only read with (by the role the Studio gives that input:
+ * `inputs` of its workflow), or null for a setting read whatever the inputs.
+ */
+const onlyRole = (workflow, setting) =>
+  setting.onlyWith ? (workflow.inputs?.[setting.onlyWith.role] ?? setting.onlyWith.role) : null;
+/** The settings on a bar of a model that « Enregistrer » keeps. */
+const keptSettings = workflow =>
+  (workflow.settings ?? []).filter(setting => KEPT_SETTINGS.includes(setting.key) && fineSetting(setting));
 const leaf = name =>
   String(name)
     .split(/[\\/]/)
@@ -154,9 +194,12 @@ export function proposedValues(request, offered = []) {
     overlap = source && Number.isFinite(parameters.overlap_frames) ? parameters.overlap_frames : 0,
     width = parameters.width ?? request.resolution?.width,
     height = parameters.height ?? request.resolution?.height;
-  const settings = {};
+  const settings = {},
+    roles = references.map(ref => ref.role);
+  // (Not a setting read only with an input the proposal does not have: the Studio keeps its own.)
   for (const setting of workflow?.settings ?? [])
-    if (parameters[setting.key] !== undefined) settings[setting.key] = parameters[setting.key];
+    if (parameters[setting.key] !== undefined && settingRead(setting, roles))
+      settings[setting.key] = parameters[setting.key];
   return {
     verb: request.tool || request.call?.function?.name || 'create_image',
     workflow: workflow?.id ?? null,
@@ -1122,6 +1165,11 @@ export function setupStudio({
       const value = Number(draft.settings[workflow.id]?.seconds ?? sound.default);
       if (value > 0) values.settings = { seconds: value };
     }
+    // Its settings on a bar (« Débruitage »), once set here: kept whatever the inputs of the moment.
+    for (const setting of keptSettings(workflow)) {
+      const value = draft.settings[workflow.id]?.[setting.key];
+      if (value !== undefined && value !== '') (values.settings ??= {})[setting.key] = fineValue(setting, value);
+    }
     return values;
   }
   /** Gives a model its saved settings back: those its workflow leaves free, as they still fit. */
@@ -1160,6 +1208,10 @@ export function setupStudio({
         Number(sound.max ?? Infinity),
         Math.max(Number(sound.min ?? 0), saved.settings.seconds),
       );
+    // Within the bounds the workflow gives today.
+    for (const setting of keptSettings(workflow))
+      if (Number.isFinite(saved.settings?.[setting.key]))
+        (draft.settings[workflow.id] ??= {})[setting.key] = fineValue(setting, saved.settings[setting.key]);
   }
   /**
    * The floppy disk (moodix-design.md 7, 15 ter): 32 px at the right of the model's name, its
@@ -1486,6 +1538,50 @@ export function setupStudio({
     return row;
   }
   /**
+   * A decimal setting on its bar, by hundredths (« Débruitage », 0,60 to 0,70), what its values do
+   * said under it. One the model only reads with an input (an image to modify) is greyed while
+   * the case of that input is empty, and says why in place of that help: never hidden.
+   */
+  function fineLine(workflow, setting) {
+    const draft = drafts[mode],
+      store = (draft.settings[workflow.id] ??= {}),
+      low = setting.min,
+      high = setting.max,
+      list = [];
+    for (let step = 0; low + step * 0.01 <= high + 1e-9; step++) list.push(Math.round((low + step * 0.01) * 100) / 100);
+    const role = onlyRole(workflow, setting),
+      idle = Boolean(role) && !(draft.inputs[role] ?? []).some(Boolean),
+      label = SETTINGS[setting.key] || setting.key,
+      said = idle
+        ? (ONLY_WITH[role] ?? `Sert seulement avec l’entrée « ${ROLES[role] ?? role} ».`)
+        : (BAR_HELP[setting.key] ?? ''),
+      line = barLine(label, {
+        key: 'setting-' + setting.key,
+        count: list.length,
+        index: Math.max(0, list.indexOf(fineValue(setting, store[setting.key]))),
+        share: place => (list[place] - low) / (high - low),
+        text: place => strengthText(list[place]),
+        onInput: place => {
+          store[setting.key] = list[place];
+        },
+        disabled: idle,
+      }),
+      wrapper = node('div', 'studio-fine' + (idle ? ' is-idle' : '')),
+      mark = node('span', 'ai-mark');
+    // Left to the assistant: its mark beside the name, as on the other settings.
+    mark.setAttribute('role', 'img');
+    mark.setAttribute('aria-label', 'Moodix AI peut régler ce paramètre');
+    mark.title = 'Moodix AI peut régler ce paramètre';
+    line.children[0].append(mark);
+    wrapper.append(line);
+    if (said) {
+      const note = node('small', 'field-help studio-fine-note', said);
+      line.title = said;
+      wrapper.append(note);
+    }
+    return wrapper;
+  }
+  /**
    * The rare settings, under « ··· » (moodix-design.md 10, 20, 28): the seed (a field, empty for
    * one drawn at each creation, and a die), then the workflow's own settings; one line each.
    */
@@ -1527,6 +1623,10 @@ export function setupStudio({
       if (WHO[setting.key] && setting.type === 'string') continue;
       // A sound's length is on the bar of Durée.
       if (setting.key === 'seconds' && setting.type === 'number') continue;
+      if (fineSetting(setting)) {
+        lines.push(fineLine(workflow, setting));
+        continue;
+      }
       // Kept per workflow: a song's length is not a sound effect's.
       const store = (draft.settings[workflow.id] ??= {}),
         value = store[setting.key] ?? setting.default ?? '',
@@ -2252,6 +2352,9 @@ export function setupStudio({
     for (const setting of workflow.settings) {
       const value = draft.settings[workflow.id]?.[setting.key];
       if (value === undefined || value === '') continue;
+      // Read only with an input that does not go with this creation (« Débruitage » without an
+      // image to modify): greyed here, and not sent.
+      if (setting.onlyWith && args[onlyRole(workflow, setting)] === undefined) continue;
       args[setting.key] = setting.type === 'string' ? value : Number(value);
     }
     // The LoRAs of the workflow left to the assistant, as chosen here.
@@ -2497,10 +2600,13 @@ export function setupStudio({
    * sets, it leaves a trace. `hold`: what the change itself takes, a model or a setting 0.3 s (the
    * ring, the new value, the trace); a bar moves in its own 0.3 s, a prompt is written in 1 s at most.
    */
-  async function stepTo(key, label, apply, { anchor, hold = 0 } = {}) {
+  async function stepTo(key, label, apply, { anchor, hold = 0, rare = false } = {}) {
     if (!ai || ai.stopped) return false;
     // The prompt is written without a mark (studio-maquette.md): no ring, no trace on it.
     const marked = key !== 'prompt';
+    // `rare`: a setting under « Plus de réglages », opened for it: the pointer does not go to what
+    // is folded, and the user sees the value it sets, theirs to change before « Générer ».
+    if (rare) advanced = true;
     ai.active = marked ? key : null;
     render();
     if (!(await glide(targetOf(key), label, anchor))) return false;
@@ -2742,16 +2848,27 @@ export function setupStudio({
           draft[key] = near;
         },
       ]);
+    // (A setting on a bar, « Débruitage », shows its default until it is set: proposed at that
+    // value, nothing moves. Set, « Plus de réglages » opens on it: see stepTo.)
+    const onBar = key => {
+      const setting = workflow.settings.find(item => item.key === key);
+      return setting && fineSetting(setting) ? setting : null;
+    };
+    const shown = key => {
+      const value = draft.settings[workflow.id]?.[key];
+      return onBar(key) ? fineValue(onBar(key), value) : (value ?? '');
+    };
     for (const [key, value] of Object.entries(values.settings))
-      if (values.settingsFree[key] && String(draft.settings[workflow.id]?.[key] ?? '') !== String(value))
+      if (values.settingsFree[key] && String(shown(key)) !== String(value))
         steps.push([
           'setting-' + key,
           'règle ' + (SETTINGS[key] || key).toLowerCase(),
           () => {
             (draft.settings[workflow.id] ??= {})[key] = value;
             if (key === 'lyrics' && value) draft.lyrics = true;
+            if (onBar(key)) advanced = true;
           },
-          { hold: 300 },
+          { hold: 300, rare: Boolean(onBar(key)) },
         ]);
     // With less motion asked, nothing moves: the end shows at once.
     const still = Boolean(pointer?.reduced());
@@ -4462,9 +4579,16 @@ export function setupStudio({
       length = lengthOfRecord(record, Boolean(sourceOf(record)));
     if (lengths.length && length > 0)
       draft.length = lengths.reduce((best, value) => (Math.abs(value - length) < Math.abs(best - length) ? value : best));
+    // The roles of its inputs, as its record names them (those of the family: « img2img »).
+    const given = (Array.isArray(made.references) ? made.references : []).map(ref => ref?.role);
     for (const setting of workflow.settings ?? []) {
       if (made[setting.key] === undefined || made[setting.key] === null) continue;
-      (draft.settings[workflow.id] ??= {})[setting.key] = made[setting.key];
+      // Read only with an input the take did not have (an image made from nothing says a denoise
+      // of 1, which is no setting): the Studio keeps the one it has.
+      if (!settingRead(setting, given)) continue;
+      (draft.settings[workflow.id] ??= {})[setting.key] = fineSetting(setting)
+        ? fineValue(setting, made[setting.key])
+        : made[setting.key];
       if (setting.key === 'lyrics') draft.lyrics = Boolean(made[setting.key]);
     }
     // The LoRAs of its workflow as it had them: on with their strength, the others off.
