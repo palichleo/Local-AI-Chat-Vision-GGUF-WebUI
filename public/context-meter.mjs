@@ -30,7 +30,8 @@ export function setupContextMeter({
     last = result;
     const { contextSize: capacity = 8192 } = getConfig(),
       budget = contextBudget({ ...result, capacity });
-    const qualifier = budget.precision === 'text-only' ? '≥ ' : budget.precision === 'estimated' ? '≈ ' : '';
+    const qualifier =
+      budget.precision === 'text-only' ? '≥ ' : ['estimated', 'rough'].includes(budget.precision) ? '≈ ' : '';
     const percent = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(budget.occupied);
     const usage =
       budget.used === null
@@ -51,7 +52,9 @@ export function setupContextMeter({
           ? 'Texte compté ; le coût des images est inconnu et s’ajoute à cette valeur.'
           : budget.precision === 'estimated'
             ? 'Estimation avec le template et le tokenizer du moteur.'
-            : 'Messages envoyés et réponses, avec les consignes et outils inclus dans cette conversation.';
+            : budget.precision === 'rough'
+              ? 'Estimation d’après la longueur du texte : le service distant donne le compte exact après chaque réponse.'
+              : 'Messages envoyés et réponses, avec les consignes et outils inclus dans cette conversation.';
     const warning =
       budget.warning === 'full' ? 'Contexte saturé.' : budget.warning === 'near' ? 'Contexte presque rempli.' : '';
     box.title = [usage, detail, warning].filter(Boolean).join('\n');

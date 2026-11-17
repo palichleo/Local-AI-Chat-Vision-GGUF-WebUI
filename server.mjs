@@ -34,6 +34,9 @@ import { roomSettings } from './public/room.mjs';
 import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
 import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
+import { ChatModel, estimateContext, listModels, testConnection } from './lib/chat-model.mjs';
+import { PRESETS, RemoteModels, apiKey, connectionOf } from './lib/remote-models.mjs';
+import { ChatGPTAccount } from './lib/chatgpt.mjs';
 import { relocate } from './lib/relocate.mjs';
 import { FOLDER_KEYS, GenerationService, generationConfig } from './lib/generation-service.mjs';
 import { convertLongForge } from './lib/longforge-conversion.mjs';
@@ -106,6 +109,7 @@ const staticFiles = new Map([
   ['/context-meter.mjs', ['context-meter.mjs', 'text/javascript; charset=utf-8']],
   ['/stream.mjs', ['stream.mjs', 'text/javascript; charset=utf-8']],
   ['/model-ready.mjs', ['model-ready.mjs', 'text/javascript; charset=utf-8']],
+  ['/remote-llm-ui.mjs', ['remote-llm-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/images.mjs', ['images.mjs', 'text/javascript; charset=utf-8']],
   ['/video-plan.mjs', ['video-plan.mjs', 'text/javascript; charset=utf-8']],
   ['/proposal-card.mjs', ['proposal-card.mjs', 'text/javascript; charset=utf-8']],
@@ -266,6 +270,10 @@ export async function createApplication({
   chatHeartbeatMs = 10000,
   // How long the chat model may take to enrich a prompt for the Studio.
   enrichTimeoutMs = 90000,
+  // Opens a page in the browser of the system (the sign-in of ChatGPT); tests pass their own.
+  openUrl = url => openBrowser(url, { report: () => {} }),
+  // « Continuer avec ChatGPT » (lib/chatgpt.mjs); tests pass one that talks to their own server.
+  chatgpt: givenChatGPT = null,
 } = {}) {
   // Keep HTML, scripts and styles paired with this running backend until restart.
   const frontend = new Map(
@@ -377,6 +385,13 @@ export async function createApplication({
   });
   const token = randomBytes(32).toString('hex');
   const engine = new Engine({ spawnProcess, cacheDir: join(dataDir, 'model-cache') });
+  // The chat model of Moodix AI, the one of llama.cpp or a remote one (lib/chat-model.mjs): what the
+  // chat, the Studio and the generations ask. `engine` stays for what only concerns llama.cpp.
+  const remotes = new RemoteModels(dataDir);
+  const chatgpt = givenChatGPT ?? new ChatGPTAccount({ dataDir, openUrl });
+  const chat = await new ChatModel({ engine, remotes, chatgpt }).load();
+  /** What the settings show of the remote models: the connections (whether a key is kept), the account. */
+  const remoteView = async () => ({ ...(await remotes.list()), presets: PRESETS, chatgpt: await chatgpt.status() });
   let componentsCheck = null;
   let savingSettings = false;
   let modelOperation = Promise.resolve();
@@ -524,7 +539,7 @@ export async function createApplication({
     worker: generationWorker,
   }).init();
   const runtime = new ToolRuntime({
-    engine,
+    engine: chat,
     catalog: generation.catalog,
     gallery,
     resources,
@@ -648,7 +663,7 @@ export async function createApplication({
       }
     });
   const status = () => ({
-    ...engine.status(),
+    ...chat.status(),
     toolJob: runtime.active ? runtime.status() : null,
     runner: generation.status(),
   });
@@ -664,7 +679,7 @@ export async function createApplication({
     const job = llamaBuilds.job;
     Object.assign(job, { state: 'switching', step: 'Mise en service dès que le modèle est libre…' });
     const until = Date.now() + 15 * 60000;
-    while (engine.busy || runtime.active || savingSettings || ['loading', 'stopping'].includes(engine.state)) {
+    while (chat.busy || runtime.active || savingSettings || ['loading', 'stopping'].includes(engine.state)) {
       if (closing || Date.now() > until)
         throw Object.assign(job, { state: 'error', error: 'Le modèle est resté occupé : llama.cpp n’a pas été mis en service.' });
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -788,7 +803,7 @@ export async function createApplication({
         })),
       );
     }
-    if (active.length && engine.vision && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8) {
+    if (active.length && chat.vision && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8) {
       const definition = structuredClone(resourceTool),
         ids = active.map(item => item.id);
       definition.function.parameters.properties.resource_id.enum = ids;
@@ -797,7 +812,7 @@ export async function createApplication({
       definitions.push(definition);
     }
     const outputDefinition = outputToolFor(runs);
-    if (engine.vision && outputDefinition && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8)
+    if (chat.vision && outputDefinition && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8)
       definitions.push(outputDefinition);
     if (definitions.length) {
       payload.tools = definitions;
@@ -1072,6 +1087,7 @@ export async function createApplication({
         return send(200, { job: generation.downloads.status(), hasToken: await generation.downloads.hasToken() });
       if (path === '/api/models' && req.method === 'GET')
         return send(200, { models: await models.list(), ...(await models.scan()) });
+      if (path === '/api/remote' && req.method === 'GET') return send(200, await remoteView());
       if (path === '/api/status' && req.method === 'GET') return send(200, status());
       if (req.method === 'GET' && path === '/api/resources')
         return send(200, { resources: (await resources.list()).map(resourceView) });
@@ -1276,7 +1292,7 @@ export async function createApplication({
       }
       if (path.startsWith('/api/generation/')) {
         if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
-        if (runtime.active || engine.busy || clearingHistory || savingSettings || savingGeneration || pickingFile)
+        if (runtime.active || chat.busy || clearingHistory || savingSettings || savingGeneration || pickingFile)
           throw problem('Attendez la fin de l’opération en cours.', 409);
         savingGeneration = true;
         try {
@@ -1382,7 +1398,7 @@ export async function createApplication({
       const occupied = () =>
         closing ||
         relaunching ||
-        engine.busy ||
+        chat.busy ||
         runtime.active ||
         savingSettings ||
         saving ||
@@ -1468,6 +1484,50 @@ export async function createApplication({
         })();
         return send(202, llamaBuilds.status());
       }
+      // The chat models reached by an address (Paramètres › Moodix AI › Ajouter une API) and the
+      // ChatGPT account of the user. Keys and tokens stay here: the page only learns whether one is kept.
+      if (path.startsWith('/api/remote/')) {
+        if (path === '/api/remote/save') {
+          const saved = await remotes.save(body);
+          await chat.changed(saved.id);
+          return send(200, { saved, ...(await remoteView()), status: status() });
+        }
+        if (path === '/api/remote/remove') {
+          if (chat.connection?.id === body.id && (chat.busy || runtime.active))
+            throw problem('Attendez la fin de la réponse avant de retirer ce modèle.', 409);
+          await remotes.remove(body.id);
+          chat.forget(body.id);
+          return send(200, { ...(await remoteView()), status: status() });
+        }
+        if (path === '/api/remote/select') {
+          if (runtime.active || savingSettings || saving) throw problem('Attendez la fin de l’opération en cours.', 409);
+          await chat.use(body.id ?? null);
+          return send(200, { ...(await remoteView()), status: status() });
+        }
+        if (path === '/api/remote/test' || path === '/api/remote/models') {
+          // What the editor holds, saved or not; its kept key when none is written.
+          const listing = path === '/api/remote/models',
+            draft = connectionOf({ ...body, key: undefined, model: listing ? body.model || '-' : body.model }),
+            kept = typeof body.id === 'string' ? await remotes.get(body.id).catch(() => null) : null,
+            connection = { ...draft, key: typeof body.key === 'string' && body.key ? apiKey(body.key) : (kept?.key ?? '') },
+            signal = AbortSignal.timeout(30000);
+          if (listing)
+            return send(200, {
+              models:
+                connection.preset === 'chatgpt'
+                  ? await chatgpt.models()
+                  : (await listModels(connection, { signal })).map(id => ({ id, name: id })),
+            });
+          return send(200, await testConnection(connection, { chatgpt, signal }));
+        }
+        if (path === '/api/remote/chatgpt/start') return send(200, await chatgpt.signIn());
+        if (path === '/api/remote/chatgpt/cancel') {
+          chatgpt.cancelSignIn();
+          return send(200, await remoteView());
+        }
+        if (path === '/api/remote/chatgpt/signout') return send(200, { ...(await chatgpt.signOut()), ...(await remoteView()) });
+        throw problem('Route introuvable.', 404);
+      }
       if (path === '/api/models/add' || path === '/api/models/select' || path === '/api/models/remove') {
         if (
           savingSettings ||
@@ -1475,7 +1535,7 @@ export async function createApplication({
           savingGeneration ||
           pickingFile ||
           runtime.active ||
-          engine.busy ||
+          chat.busy ||
           clearingHistory ||
           ['loading', 'stopping'].includes(engine.state)
         )
@@ -1529,6 +1589,8 @@ export async function createApplication({
           }
           const selected = await models.get(body.id),
             next = { ...config, modelPath: selected.modelPath, projectorPath: selected.projectorPath };
+          // A local LLM chosen: the chat leaves the remote model it used.
+          await chat.use(null);
           if (next.modelPath === config.modelPath && next.projectorPath === config.projectorPath)
             return send(200, { config, modelName: selected.name, status: status() });
           const restart = engine.state === 'ready';
@@ -1552,12 +1614,12 @@ export async function createApplication({
         }
       }
       if (path === '/api/resources/update') {
-        if ((runtime.active || engine.busy) && ((await resources.record(body.id)).ready || !body.patch?.prepared))
+        if ((runtime.active || chat.busy) && ((await resources.record(body.id)).ready || !body.patch?.prepared))
           throw problem('Attendez la fin de la réponse avant de modifier une ressource.', 409);
         return send(200, resourceView(await resources.update(body.id, body.patch)));
       }
       if (path === '/api/resources/delete') {
-        if ((runtime.active || engine.busy) && (await resources.record(body.id)).ready)
+        if ((runtime.active || chat.busy) && (await resources.record(body.id)).ready)
           throw problem('Attendez la fin de la réponse avant de supprimer une ressource.', 409);
         await resources.remove(body.id);
         return send(200, { deleted: true });
@@ -1584,7 +1646,7 @@ export async function createApplication({
         if (
           resources.busy ||
           runtime.active ||
-          engine.busy ||
+          chat.busy ||
           saving ||
           savingSettings ||
           savingGeneration ||
@@ -1650,7 +1712,7 @@ export async function createApplication({
           throw problem('Un choix de fichier ou un enregistrement est déjà en cours.', 409);
         if (
           runtime.active ||
-          engine.busy ||
+          chat.busy ||
           (body.kind === 'engine' && engine.child) ||
           ['loading', 'stopping'].includes(engine.state)
         )
@@ -1684,7 +1746,7 @@ export async function createApplication({
           savingGeneration ||
           saving ||
           runtime.active ||
-          engine.busy ||
+          chat.busy ||
           clearingHistory
         )
           throw problem('Attendez la fin de l’opération en cours.', 409);
@@ -1750,14 +1812,14 @@ export async function createApplication({
       if (path === '/api/tools/revise') return send(200, await runtime.revise(body));
       // A creation that failed, proposed again with the same settings (« Relancer », 52).
       if (path === '/api/tools/again') {
-        if (engine.busy) throw problem('Une réponse est en cours. Attendez sa fin.', 409);
+        if (chat.busy) throw problem('Une réponse est en cours. Attendez sa fin.', 409);
         return send(200, await runtime.again(body));
       }
       // Output buttons (Upscale, Interpoler): the same proposal a model call would make, without the model.
       if (path === '/api/tools/action') {
         if (clearingHistory || savingGeneration || savingSettings || pickingFile)
           throw problem('Une opération est en cours.', 409);
-        if (engine.busy) throw problem('Une réponse est en cours. Attendez sa fin.', 409);
+        if (chat.busy) throw problem('Une réponse est en cours. Attendez sa fin.', 409);
         // In a conversation the output buttons, and every creation of its Studio (`studio`); the
         // former Studio, which had no conversation, keeps its own identifier.
         const studio = body.studio === true || body.conversationId === STUDIO_ID;
@@ -1788,7 +1850,7 @@ export async function createApplication({
       // the image and video models kept between generations stay (unlike /api/stop).
       if (path === '/api/studio/release') {
         const released =
-          ['ready', 'loading', 'stopping'].includes(engine.state) && !engine.busy && !runtime.active && !savingSettings;
+          ['ready', 'loading', 'stopping'].includes(engine.state) && !chat.busy && !runtime.active && !savingSettings;
         if (released) await engine.stop();
         return send(200, { released, status: status() });
       }
@@ -1811,11 +1873,11 @@ export async function createApplication({
         if (typeof body.prompt !== 'string' || (!body.prompt.trim() && !fromPictures))
           throw problem('Écrivez d’abord quelques mots à enrichir.');
         if (runtime.active) throw problem('La génération utilise le GPU.', 409);
-        if (engine.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
-        if (engine.busy) throw problem('Une réponse est déjà en cours.', 409);
+        if (chat.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
+        if (chat.busy) throw problem('Une réponse est déjà en cours.', 409);
         const controller = new AbortController();
-        engine.activeRequest = controller;
-        engine.busy = true;
+        chat.activeRequest = controller;
+        chat.busy = true;
         const onClose = () => controller.abort();
         res.once('close', onClose);
         try {
@@ -1830,7 +1892,7 @@ export async function createApplication({
               drafted = typeof body.draft === 'string' ? body.draft.trim().slice(0, 4000) : '',
               written = await withScenePrompt(given, {
                 resources,
-                engine,
+                engine: chat,
                 thumbnails,
                 outputFrames,
                 conversationId: typeof body.conversationId === 'string' ? body.conversationId : null,
@@ -1840,16 +1902,14 @@ export async function createApplication({
               });
             if (written !== given) return send(200, { prompt: written.prompt, seen: true });
             throw problem(
-              engine.vision
+              chat.vision
                 ? 'Le prompt n’a pas pu être écrit d’après la vidéo et l’image. Réessayez.'
                 : 'Ce modèle de chat ne voit pas les images : écrivez le prompt vous-même, en décrivant ce que la vidéo montre.',
               502,
             );
           }
-          const upstream = await fetch(`${engine.base}/v1/chat/completions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${engine.apiKey}` },
-            body: JSON.stringify({
+          const upstream = await chat.request(
+            {
               // The global instructions of the user say how he wants his prompts (length, language).
               messages: enrichMessages(body.prompt, { verb: body.verb, preferences: instructions }),
               stream: false,
@@ -1857,9 +1917,9 @@ export async function createApplication({
               temperature: 0.7,
               reasoning_format: 'deepseek',
               chat_template_kwargs: { enable_thinking: false },
-            }),
-            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(enrichTimeoutMs)]),
-          });
+            },
+            { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(enrichTimeoutMs)]) },
+          );
           if (!upstream.ok)
             throw problem(`Le moteur refuse la requête (${upstream.status}). ${(await upstream.text()).slice(0, 500)}`, 502);
           const prompt = enrichedPrompt((await upstream.json()).choices?.[0]?.message?.content);
@@ -1876,9 +1936,9 @@ export async function createApplication({
           throw error;
         } finally {
           res.off('close', onClose);
-          if (engine.activeRequest === controller) {
-            engine.activeRequest = null;
-            engine.busy = false;
+          if (chat.activeRequest === controller) {
+            chat.activeRequest = null;
+            chat.busy = false;
           }
         }
       }
@@ -2006,7 +2066,7 @@ export async function createApplication({
           clearingHistory ||
           disablingHistory ||
           savingPreferences ||
-          engine.busy ||
+          chat.busy ||
           ['loading', 'stopping'].includes(engine.state)
         )
           throw problem('Attendez la fin de l’opération en cours avant de supprimer la conversation.', 409);
@@ -2031,7 +2091,7 @@ export async function createApplication({
           clearingHistory ||
           disablingHistory ||
           savingPreferences ||
-          engine.busy ||
+          chat.busy ||
           ['loading', 'stopping'].includes(engine.state)
         )
           throw problem('Attendez la fin de l’opération en cours avant de supprimer l’historique.', 409);
@@ -2054,7 +2114,7 @@ export async function createApplication({
         if (body?.confirm !== true) throw problem('Confirmez la suppression du projet.');
         projectId(body.id);
         if (body.id === 'inbox') throw problem('« Sans projet » ne peut pas être supprimé.');
-        if (clearingHistory || disablingHistory || savingPreferences || runtime.active || engine.busy)
+        if (clearingHistory || disablingHistory || savingPreferences || runtime.active || chat.busy)
           throw problem('Attendez la fin de l’opération en cours.', 409);
         clearingHistory = true;
         try {
@@ -2083,7 +2143,7 @@ export async function createApplication({
       }
       if (path === '/api/projects/move') {
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
-        if (clearingHistory || disablingHistory || savingPreferences || runtime.active || engine.busy)
+        if (clearingHistory || disablingHistory || savingPreferences || runtime.active || chat.busy)
           throw problem('Attendez la fin de l’opération en cours.', 409);
         clearingHistory = true;
         try {
@@ -2147,35 +2207,39 @@ export async function createApplication({
         if (saving || savingGeneration || pickingFile)
           throw problem('Choix de fichier ou enregistrement en cours.', 409);
         // The chat model takes the card: what the Studio left loaded in the generator leaves first.
-        await runtime.yieldGpu();
-        await engine.start(config);
-        return send(202, engine.status());
+        // A remote one takes nothing of it.
+        if (chat.local) await runtime.yieldGpu();
+        await chat.start(config);
+        return send(202, chat.status());
       }
       if (path === '/api/stop') {
         if (savingSettings) throw problem('Changement de modèle en cours.', 409);
         if (runtime.active) throw problem('Annule la génération avec le bouton d’interruption.', 409);
-        await engine.stop();
+        await chat.stop();
         // Stopped by hand: the image and video models kept between generations leave RAM and VRAM too.
         await runtime.yieldGpu();
         await generation.unload().catch(error => console.error('Déchargement des modèles :', error.message));
         return send(200, status());
       }
       if (path === '/api/context') {
-        const payload = chatPayload(body, Boolean(config.projectorPath), config.maxOutputTokens, true);
-        const limits = { capacity: config.contextSize, reserved: config.maxOutputTokens };
-        if (engine.state !== 'ready' || engine.busy || runtime.active)
+        const payload = chatPayload(body, chat.seesImages(config), config.maxOutputTokens, true);
+        const limits = chat.limits(config);
+        if (chat.state !== 'ready' || chat.busy || runtime.active)
           return send(200, { ...limits, used: null, precision: 'unavailable' });
         const controller = new AbortController();
         const abort = () => controller.abort();
         res.once('close', abort);
         try {
           await includeTools(payload, body);
-          const result = await countContext({
-            base: engine.base,
-            apiKey: engine.apiKey,
-            payload,
-            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
-          });
+          // A remote service has no route to count: the length of what is sent, then its own usage.
+          const result = chat.local
+            ? await countContext({
+                base: engine.base,
+                apiKey: engine.apiKey,
+                payload,
+                signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
+              })
+            : estimateContext(payload);
           return send(200, { ...limits, ...result });
         } catch {
           if (!res.destroyed) return send(200, { ...limits, used: null, precision: 'unavailable' });
@@ -2189,12 +2253,12 @@ export async function createApplication({
         throw problem('Enregistrement des réglages en cours.', 409);
       if (runtime.active) throw problem('La génération utilise le GPU.', 409);
       if (clearingHistory) throw problem('Suppression de l’historique en cours.', 409);
-      if (engine.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
-      if (engine.busy) throw problem('Une réponse est déjà en cours.', 409);
-      const payload = chatPayload(body, engine.vision, config.maxOutputTokens);
+      if (chat.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
+      if (chat.busy) throw problem('Une réponse est déjà en cours.', 409);
+      const payload = chatPayload(body, chat.vision, config.maxOutputTokens);
       const controller = new AbortController();
-      engine.activeRequest = controller;
-      engine.busy = true;
+      chat.activeRequest = controller;
+      chat.busy = true;
       const onClose = () => controller.abort();
       res.once('close', onClose);
       let streamHeartbeat;
@@ -2207,12 +2271,9 @@ export async function createApplication({
               encodeURIComponent(JSON.stringify(removed.map(({ label, name }) => ({ label, name })))),
             ),
         });
-        const upstream = await fetch(`${engine.base}/v1/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${engine.apiKey}` },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
+        // The model that answers, here or remote (lib/chat-model.mjs): a remote refusal is thrown in
+        // the user's words; the local engine's is said below.
+        const upstream = await chat.request(payload, { signal: controller.signal });
         if (!upstream.ok) {
           const detail = (await upstream.text()).slice(0, 3000);
           throw problem(`Le moteur refuse la requête (${upstream.status}). ${detail}`, 502);
@@ -2322,7 +2383,7 @@ export async function createApplication({
             let request;
             // Images passed to the generator and never looked at: the model sees them first.
             const unseen =
-              engine.vision && body.resources !== false && /^[0-9a-f-]{36}$/.test(body.turnId || '')
+              chat.vision && body.resources !== false && /^[0-9a-f-]{36}$/.test(body.turnId || '')
                 ? unseenResources(body.messages, await resources.catalog(projectOf(body.project)), call)
                 : [];
             if (unseen.length && (resourceTurns.get(body.turnId) || 0) + unseen.length <= 8) {
@@ -2344,7 +2405,7 @@ export async function createApplication({
             // A prompt of two lines: sent back once, with the images it is about shown again.
             else if (fullPrompts && thinPrompt(body.messages, call)) {
               const images =
-                engine.vision && body.resources !== false
+                chat.vision && body.resources !== false
                   ? passedImages(await resources.catalog(projectOf(body.project)), call)
                   : [];
               const room = /^[0-9a-f-]{36}$/.test(body.turnId || '') && (resourceTurns.get(body.turnId) || 0) + images.length <= 8;
@@ -2395,7 +2456,7 @@ export async function createApplication({
                     : '';
                 const places = {
                   resources,
-                  engine,
+                  engine: chat,
                   asked: askedSince(body.messages),
                   messages: body.messages,
                   thumbnails,
@@ -2488,9 +2549,9 @@ export async function createApplication({
       } finally {
         clearInterval(streamHeartbeat);
         res.off('close', onClose);
-        if (engine.activeRequest === controller) {
-          engine.activeRequest = null;
-          engine.busy = false;
+        if (chat.activeRequest === controller) {
+          chat.activeRequest = null;
+          chat.busy = false;
         }
       }
     } catch (error) {
@@ -2520,8 +2581,8 @@ export async function createApplication({
       .then(() => updateChecker({ signal: updateController.signal }))
       .catch(() => ({ available: false }));
   // Launched as the application (not as a test server): the registered LLM starts by itself.
-  if (managed && config.enginePath && config.modelPath && engine.state === 'stopped')
-    void engine.start(config).catch(error => console.error('Démarrage automatique du modèle :', error.message));
+  if (managed && chat.state === 'stopped' && (!chat.local || (config.enginePath && config.modelPath)))
+    void chat.start(config).catch(error => console.error('Démarrage automatique du modèle :', error.message));
   let closing,
     relaunching = false;
   if (managed) {
@@ -2541,6 +2602,8 @@ export async function createApplication({
       await models.pending;
       await runtime.close();
       await generation.close();
+      chatgpt.close?.();
+      await chat.stop();
       await engine.stop();
       await projects.pending;
       await historySaves;

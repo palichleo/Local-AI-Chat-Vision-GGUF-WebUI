@@ -29,6 +29,7 @@ import { setupStudio } from './studio.mjs';
 import { proposalCard } from './proposal-card.mjs';
 import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { waitForModel } from './model-ready.mjs';
+import { setupRemoteModels } from './remote-llm-ui.mjs';
 import { setupFirstLaunch } from './first-launch.mjs';
 import { missingFileCard } from './missing-file.mjs';
 import { setupGlassSelects } from './glass-menu.mjs';
@@ -915,7 +916,7 @@ function updateControls() {
         ? 'Le modèle se charge…'
         : running
         ? `Arrêter le modèle · ${text}`
-        : state.config.modelPath
+        : s.remote || state.config.modelPath
           ? 'Démarrer le modèle'
           : 'Aucun LLM enregistré · ouvrir les paramètres';
   $('toggle-engine').className =
@@ -925,8 +926,13 @@ function updateControls() {
   $('toggle-engine').title = engineLabel;
   // One icon whatever the state (⏻): the dot beside it says it (moodix.css, engine-button::after).
   $('toggle-engine').replaceChildren(icon('power'));
-  // The capsule of the top bar names the model beside its switch (0.6.0).
-  const model = (state.models || []).find(item => item.modelPath === state.config.modelPath);
+  // The capsule of the top bar names the model beside its switch (0.6.0); a remote one says so,
+  // whatever leaves the computer with it (remote-llm-ui.mjs).
+  const model = s.remote ? { name: s.remote.name } : (state.models || []).find(item => item.modelPath === state.config.modelPath);
+  $('engine-remote').hidden = !s.remote?.leaves;
+  $('engine-remote').title = s.remote?.leaves
+    ? `Modèle de chat distant : vos messages partent chez ${s.remote.kind === 'chatgpt' ? 'OpenAI (ChatGPT)' : s.remote.host}.`
+    : '';
   $('engine-name').textContent =
     model?.name ||
     (state.config.modelPath ? state.config.modelPath.split(/[\\/]/).pop().replace(/\.gguf$/i, '') : 'Aucun LLM');
@@ -953,13 +959,16 @@ function updateControls() {
   // Before the first message (etats-maquette.md, 50): no engine or no LLM, the card in place of
   // the message box, without shortcuts nor « Reprendre ».
   if (state.booted) {
-    const setup = !(state.config.enginePath && state.config.modelPath);
+    // A remote model chosen (remote-llm-ui.mjs) needs neither engine nor file.
+    const setup = !s.remote && !(state.config.enginePath && state.config.modelPath);
     document.body.dataset.setup = setup ? 'incomplete' : 'done';
     firstLaunchCard().sync(setup);
   }
   $('cancel').setAttribute('aria-label', cancelLabel);
   $('cancel').title = cancelLabel;
   $('thinking').disabled = state.generating;
+  // A remote service whose reflection cannot be switched: no switch.
+  $('thinking').hidden = Boolean(s.remote) && !s.remote.thinking;
   // A card of Moodix waits: an image may go with the message that answers it.
   $('attach').disabled = (state.generating && !state.proposalCard) || state.preparing || state.loadingHistory;
   $('prompt').disabled = state.loadingHistory;
@@ -1004,6 +1013,7 @@ function updateControls() {
     !state.connected ||
     !state.settingsReady;
   $('global-instructions').disabled = $('add-llm').disabled;
+  state.remoteUI?.lock($('add-llm').disabled);
   $('detected-model').disabled = $('add-llm').disabled || ['loading', 'stopping'].includes(s.state);
   $('llm-fields').disabled = $('add-llm').disabled || ['loading', 'stopping'].includes(s.state);
   $('save-llm').disabled = $('llm-fields').disabled;
@@ -1353,7 +1363,8 @@ function renderLLMList() {
     off = $('detected-model').disabled;
   state.llmListKey = [off, !!state.modelAdding, chosen, (state.detectedModels || []).length].join('|');
   const rows = (state.detectedModels || []).map(item => {
-    const lit = item.id === chosen && !state.modelAdding,
+    // A remote model in use: its own line is lit, not the local one kept in the configuration.
+    const lit = item.id === chosen && !state.modelAdding && !state.status?.remote,
       row = node('div', 'llm-row' + (lit ? ' is-chosen' : '')),
       pick = node('button', 'llm-pick'),
       head = node('span', 'llm-head'),
@@ -1366,7 +1377,9 @@ function renderLLMList() {
     if (item.projectorPath) head.append(node('span', 'llm-tag', 'Vision'));
     pick.append(node('span', 'llm-radio'), head, node('span', 'llm-path', item.modelPath || ''));
     pick.disabled = off;
-    pick.onclick = () => chooseLLM(item.id);
+    // Chosen while a remote model answers: the chat comes back to the local model at once.
+    pick.onclick = () =>
+      state.status?.remote ? void state.remoteUI?.select(null).then(done => done && chooseLLM(item.id)) : chooseLLM(item.id);
     edit.append(icon('edit'));
     edit.title = 'Modifier';
     edit.setAttribute('aria-label', 'Modifier ' + (item.name || 'ce LLM'));
@@ -1384,8 +1397,12 @@ function renderLLMList() {
     row.append(pick, edit, remove);
     return row;
   });
+  // The APIs after the local LLMs, in the same list (parametres-maquette.md).
+  const remote = state.remoteUI?.rows(off) ?? [];
   list.replaceChildren(
-    ...(rows.length ? rows : [node('p', 'settings-note', 'Aucun LLM pour l’instant : ajoutez le fichier GGUF du vôtre.')]),
+    ...(rows.length || remote.length
+      ? [...rows, ...remote]
+      : [node('p', 'settings-note', 'Aucun LLM pour l’instant : ajoutez le fichier GGUF du vôtre, ou une API.')]),
   );
 }
 /** A line of « Vos LLM » chosen: its paths in the editor (true once it is the one chosen). */
@@ -1574,6 +1591,8 @@ function openSettings() {
     api('bootstrap').then(response => response.json()),
     workflowsUI.refresh(),
     api('models').then(response => response.json()),
+    // The APIs and the ChatGPT account: a failure leaves the rest of the settings.
+    state.remoteUI?.load().catch(() => null),
   ])
     .then(([initial, , library]) => {
       if (session !== state.settingsSession || !$('settings').open) return;
@@ -1626,6 +1645,8 @@ async function saveConfiguration() {
   $('config-error').hidden = true;
   updateControls();
   try {
+    // An API being written is saved (and chosen) first, as a local LLM being written is.
+    if (state.remoteUI?.dirty() && !(await state.remoteUI.save())) return false;
     const selectionChanged =
       $('model-path').value !== (state.config.modelPath || '') ||
       $('projector-path').value !== (state.config.projectorPath || '');
@@ -1765,7 +1786,8 @@ async function restartApplication({ confirmed = false } = {}) {
 async function toggleEngine(stopOnly = false) {
   if (state.operation) return;
   const running = ['loading', 'ready', 'stopping'].includes(state.status.state);
-  if (!running && !stopOnly && (!state.config.enginePath || !state.config.modelPath)) return openSettings();
+  if (!running && !stopOnly && !state.status?.remote && (!state.config.enginePath || !state.config.modelPath))
+    return openSettings();
   state.operation = true;
   updateControls();
   try {
@@ -1895,7 +1917,8 @@ async function addFiles(files) {
       if (isVideo(file)) state.videos.push({ id: reference.id, label: reference.label, name: reference.name });
       else images.push({ file, reference });
     }
-    if (images.length && state.config.projectorPath) {
+    // Shown to the model when it sees: its projector of vision, or its connection (remote-llm-ui.mjs).
+    if (images.length && (state.status?.remote ? state.status.remote.vision === true : state.config.projectorPath)) {
       const refs = [...state.images.map(image => image.ref), ...images.map(item => item.reference.label)],
         ids = [...state.images.map(image => image.resource), ...images.map(item => item.reference.id)];
       state.images = (await prepareImages([...state.images, ...images.map(item => item.file)])).map((image, index) =>
@@ -2463,7 +2486,8 @@ async function sendMessage(event) {
     await state.turnEnded;
     if (state.generating) return;
   }
-  if (!state.config.enginePath || !state.config.modelPath) {
+  // A remote model chosen (remote-llm-ui.mjs) needs neither engine nor file.
+  if (!state.status?.remote && (!state.config.enginePath || !state.config.modelPath)) {
     notice('Choisissez votre LLM dans Paramètres › Moodix AI avant le premier envoi.');
     return openSettings();
   }
@@ -3647,6 +3671,8 @@ const settingsGuard = setupSettingsGuard({
   save: saveConfiguration,
   readDraft: () => ({
     llm: modelDraft(),
+    // An API being written (remote-llm-ui.mjs): closing asks before it is lost.
+    api: state.remoteUI?.draft() ?? null,
     fields: [
       'global-instructions',
       'engine-path',
@@ -3669,10 +3695,25 @@ const settingsGuard = setupSettingsGuard({
     editor: workflowsUI.editorDirty?.() || false,
   }),
 });
+// The APIs of Paramètres › Moodix AI, beside the local LLMs (remote-llm-ui.mjs).
+state.remoteUI = setupRemoteModels({
+  $,
+  api,
+  node,
+  icon,
+  // A connection chosen, saved or removed: the model of the chat changes, and its top bar with it.
+  onStatus: status => {
+    if (status) state.status = status;
+    contextMeter.schedule();
+    updateControls();
+  },
+  onChange: () => renderLLMList(),
+});
 const contextMeter = setupContextMeter({
   $,
   api,
-  getConfig: () => state.config,
+  // What a remote model holds is its own (its connection), not the context of llama.cpp.
+  getConfig: () => (state.status?.remote ? { ...state.config, contextSize: state.status.remote.contextSize } : state.config),
   isReady: () => state.connected && state.status.state === 'ready',
   isBusy: () => state.generating || !!state.status.toolJob,
   getRequest: () => {

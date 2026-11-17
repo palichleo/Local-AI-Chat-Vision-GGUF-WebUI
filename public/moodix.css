@@ -15485,3 +15485,73 @@ button.glass-select::after {
   top: 18px;
   left: 20px;
 }
+
+/* A remote chat model (remote-llm-ui.mjs, 0.6.36). In the top bar, « DISTANT » beside its name when
+   what is written leaves the computer; in « Vos LLM », its tag and the line of the ChatGPT account. */
+.top-engine-remote {
+  margin: 0 10px 0 -4px;
+  padding: 3px 6px;
+  border: 1px solid rgba(224, 163, 92, 0.42);
+  border-radius: 4px;
+  color: #e0a35c;
+  font: 400 var(--size-label)/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .top-engine-remote {
+    margin-left: 0;
+  }
+}
+.llm-tag.is-api {
+  border-color: rgba(224, 163, 92, 0.36);
+  color: #e0a35c;
+}
+.chatgpt-connect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(238, 232, 222, 0.08);
+  border-radius: 12px;
+}
+.chatgpt-status {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--text-2);
+  font: 400 13.5px/1.4 var(--font-ui);
+}
+.chatgpt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+#settings .chatgpt-actions .text-button {
+  margin-left: 0;
+  color: var(--text-2);
+}
+.chatgpt-connect .config-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+#settings .api-editor .field-group {
+  margin-bottom: 12px;
+}
+.api-privacy {
+  color: var(--text-2);
+}
+#api-status.is-error {
+  color: var(--danger);
+}
+#settings .api-editor .path-input .text-button {
+  margin-left: 8px;
+  white-space: nowrap;
+}
+/* The fields of an API waiting for words are not something missing: their hint in grey. */
+#settings .api-editor .path-input input::placeholder {
+  color: var(--text-3);
+}

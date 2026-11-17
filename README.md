@@ -1,6 +1,6 @@
 # Atelier local
 
-A local assistant that chats, looks at images and generates images and videos on your own computer. A GGUF language model (run by llama.cpp) talks with you, decides when a generation is useful and drives the generation engines through tool calls. Nothing is sent to a cloud service: no remote API, telemetry or web assets.
+A local assistant that chats, looks at images and generates images and videos on your own computer. A GGUF language model (run by llama.cpp) talks with you, decides when a generation is useful and drives the generation engines through tool calls. By default nothing is sent to a cloud service: no remote API, telemetry or web assets. You may choose a remote chat model instead (see [Remote chat model](#remote-chat-model-optional)): then, and only then, what you write is sent to that service; generation always stays on your computer.
 
 The interface runs in your browser and uses French labels; their names are quoted below to help you find the controls. A small Node.js server (no npm dependencies) owns the language model and the generation worker.
 
@@ -42,6 +42,15 @@ Git ignores weights, and the app never moves them. For a workflow shipped with A
 The generation folders carry the names ComfyUI gives its own. **Configuration > Workflows > Dossier des modèles de génération** takes one path: leave it empty for this `models/` folder, or point it to the `models` folder of a ComfyUI, which is read the same way. A workflow that fixes no file for a component takes, in the folder of that kind, the file that fits its model, whatever its name; a file chosen in the workflow editor always comes first. Files left under the former names (`checkpoints`, `VAE`, `LoRa`, text encoders in `LLMs`) are still found.
 
 Open **Configuration** to pick the llama.cpp engine and the chat model. Detected folders are listed; **Ajouter un LLM** adds one by path. Use a model and chat template that support **native tool calls**: generation is only possible through real tool calls, never through text that imitates one. The engine starts with `--jinja`, in offline mode.
+
+### Remote chat model (optional)
+
+**Paramètres › Moodix AI › Vos LLM** also lists remote chat models, tagged **API**:
+
+- **Ajouter une API**: any service that speaks the OpenAI chat completions protocol, with presets for OpenRouter, OpenAI, Mistral, Groq, and the local servers Ollama and LM Studio (which need no key). Fill in the address, the key if the service asks for one, and the exact model name; **Voir les modèles** lists what the service offers, **Tester la connexion** asks the model one word. Tick **Ce modèle voit les images** when it reads images.
+- **Continuer avec ChatGPT**: your ChatGPT Plus or Pro plan, without an API key. This follows OpenAI's [ChatGPT plan usage for open-source and locally hosted apps](https://developers.openai.com/siwc/token-sharing-open-source): the sign-in page of OpenAI opens in your browser, Moodix registers itself in your account, and its usage counts against your plan (manage it in ChatGPT › Settings › Usage). Free ChatGPT accounts are not eligible.
+
+Saving a remote model chooses it for the chat; **Distant** then shows beside its name in the top bar. Your messages, the images you attach and the references shown to the model go to that service; conversations, references and creations stay in this folder. Keys and ChatGPT tokens are kept in `data/` (`remote-llm-keys.json`, `chatgpt-account.json`), never sent back to the page nor written in a log. With a remote model the graphics card is left entirely to generation: nothing is unloaded or reloaded around a creation. Choosing a local LLM in the list brings the chat back to llama.cpp.
 
 Some Qwen3.5 GGUF exports declare an MTP layer without its tensors; the app detects this and uses an in-memory metadata fix, or a compatibility copy in `data/model-cache` when needed. The original file is never modified.
 
