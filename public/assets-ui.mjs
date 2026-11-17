@@ -121,7 +121,12 @@ export function setupAssets({
   }
   $('original-close').onclick = () => $('original-dialog').close();
   $('original-dialog').addEventListener('close', cleanViewer);
-  dismissSettingsOnOutsideClick($('original-dialog'));
+  // Beside the take and its panel closes it, in the margins of its window too: the window keeps its
+  // width (1180 px), a narrow take (9:16) leaves wide empty margins in it (17/11). Not the take, its
+  // panel nor the arrows.
+  dismissSettingsOnOutsideClick($('original-dialog'), undefined, {
+    empty: target => target === $('original-dialog') || target?.classList?.contains('media-details-layout'),
+  });
   // ‹ › and the arrows of the keyboard go from one take to the next of what was shown.
   let around = null,
     shownTake = null;

@@ -158,16 +158,21 @@ export function setupComputeControls($) {
   return { setValues, values };
 }
 
-export function dismissSettingsOnOutsideClick(dialog, requestClose = () => dialog.close()) {
+/**
+ * A window closed by a click beside it: pressed and released outside its box. `empty`: an element
+ * of the window that counts as beside it too (a part of its box with nothing in it).
+ */
+export function dismissSettingsOnOutsideClick(dialog, requestClose = () => dialog.close(), { empty = () => false } = {}) {
   let startedOutside = false;
   const outside = event => {
     const bounds = dialog.getBoundingClientRect();
     return (
-      event.target === dialog &&
-      (event.clientX < bounds.left ||
-        event.clientX > bounds.right ||
-        event.clientY < bounds.top ||
-        event.clientY > bounds.bottom)
+      (event.target === dialog &&
+        (event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom)) ||
+      empty(event.target)
     );
   };
   dialog.addEventListener('pointerdown', event => {

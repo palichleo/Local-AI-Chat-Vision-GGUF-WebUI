@@ -93,6 +93,42 @@ test('settings close on a backdrop click and stay open after inside clicks or sl
   listeners.click(event(20, 10));
   assert.equal(closed, 1);
 });
+test('a take opened closes on a click in the empty margins of its window, not on the take, its panel or its arrows', () => {
+  const listeners = {};
+  let closed = 0;
+  const dialog = {
+      addEventListener(name, fn) {
+        listeners[name] = fn;
+      },
+      // The window of 1180 px around a narrow take (9:16) and its panel.
+      getBoundingClientRect: () => ({ left: 115, right: 1295, top: 60, bottom: 830 }),
+      close: () => closed++,
+    },
+    layout = { classList: { contains: name => name === 'media-details-layout' } },
+    inside = { classList: { contains: () => false } };
+  dismissSettingsOnOutsideClick(dialog, undefined, {
+    empty: target => target === dialog || target?.classList?.contains('media-details-layout'),
+  });
+  const press = (x, y, target) => {
+    listeners.pointerdown({ clientX: x, clientY: y, target });
+    listeners.click({ clientX: x, clientY: y, target });
+  };
+  // The take, its panel, an arrow: it stays.
+  press(500, 400, inside);
+  assert.equal(closed, 0);
+  // Its margins: the padding of the window (the window itself) and the grid around the take.
+  press(160, 400, dialog);
+  assert.equal(closed, 1);
+  press(260, 400, layout);
+  assert.equal(closed, 2);
+  // Pressed on the take and released in a margin (a selection, a drag): it stays.
+  listeners.pointerdown({ clientX: 500, clientY: 400, target: inside });
+  listeners.click({ clientX: 260, clientY: 400, target: layout });
+  assert.equal(closed, 2);
+  // Outside its box, as before.
+  press(20, 10, dialog);
+  assert.equal(closed, 3);
+});
 
 function computeControls() {
   const nodes = new Map([
