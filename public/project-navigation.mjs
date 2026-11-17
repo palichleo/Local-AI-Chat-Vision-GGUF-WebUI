@@ -57,6 +57,9 @@ export const titleFound = (title, query) => plain(title).includes(plain(query).t
  * it (a conversation not begun yet just changes project, its draft kept). The conversation: those
  * of the project with a search, « + Nouvelle conversation » first, the newest first with their
  * date. A pencil and a bin on each line, under the pointer or the keyboard; deleting asks first.
+ * In the Pellicule (pellicule-fil-maquette.md, captures 35 to 39), the same fil heads the sheet
+ * (`useLibrary`): « Tous les projets » alone, or « test / Toutes les conversations »; its menus say
+ * the takes of each line and choose what the sheet shows, they open nothing.
  */
 export function setupProjectNavigation({
   $,
@@ -84,6 +87,24 @@ export function setupProjectNavigation({
     !!state.status.toolJob;
   const projects = () => (state.projects?.length ? state.projects : [{ id: 'inbox', name: 'Conversations' }]);
   const currentProject = () => projects().find(project => project.id === (state.projectId || 'inbox')) ?? projects()[0];
+  // The Pellicule, once it is there (`useLibrary`): its filter and its numbers of takes. The fil is
+  // its own while it is on screen.
+  let library = null,
+    home = null;
+  const shelf = () => (state.view === 'library' && library ? library : null);
+  /** The project the fil says: the one of the conversation, or the one the Pellicule shows (none: all). */
+  const shownProject = () => {
+    const shown = shelf();
+    if (!shown) return currentProject();
+    const id = shown.filter().project;
+    return id === 'all' ? null : (projects().find(project => project.id === id) ?? null);
+  };
+  /** A line of a menu chosen in the Pellicule: the sheet narrowed, nothing opened. */
+  function narrow(change) {
+    if (busy() || !library) return;
+    closeMenus();
+    library.choose(change);
+  }
   function button(label, cls, action, symbol) {
     const element = node('button', cls);
     element.type = 'button';
@@ -191,6 +212,8 @@ export function setupProjectNavigation({
   function choose(project) {
     if (busy()) return;
     closeMenus();
+    // In the Pellicule, the project shown.
+    if (shelf()) return void narrow({ project: project.id });
     const begun = state.conversationId || state.messages?.length;
     if (!begun) {
       state.projectId = project.id;
@@ -441,16 +464,21 @@ export function setupProjectNavigation({
     window.addEventListener('resize', resized);
     window.addEventListener('blur', resized);
   }
-  /** A line of a menu: its choice, and its pencil and bin (under the pointer or the keyboard). */
-  function line(label, { current = false, date = '', choose: action, rename, remove: erase, kind }) {
-    const row = node('div', 'thread-line' + (current ? ' is-current' : ''));
+  /**
+   * A line of a menu: its choice, and its pencil and bin (under the pointer or the keyboard). In
+   * the Pellicule, its number of takes at its right (`count`), which stays beside them.
+   */
+  function line(label, { current = false, date = '', count = null, choose: action, rename, remove: erase, kind }) {
+    const row = node('div', 'thread-line' + (current ? ' is-current' : '') + (count === null ? '' : ' has-count'));
     const pick = node('button', 'thread-choice');
     pick.type = 'button';
     pick.append(node('span', 'thread-choice-name', label));
     if (date) pick.append(node('span', 'thread-choice-date', date));
-    const tick = icon('check');
-    tick.classList.add('thread-tick');
-    pick.append(tick);
+    if (count === null) {
+      const tick = icon('check');
+      tick.classList.add('thread-tick');
+      pick.append(tick);
+    } else pick.append(node('span', 'thread-choice-count', String(count)));
     if (current) pick.setAttribute('aria-current', 'true');
     pick.onclick = action;
     pick.disabled = !!busy();
@@ -480,25 +508,81 @@ export function setupProjectNavigation({
     return item;
   }
   function projectMenu() {
-    const list = node('div', 'thread-menu');
+    const shown = shelf(),
+      list = node('div', 'thread-menu' + (shown ? ' is-shelf' : '')),
+      // A long list scrolls, « + Nouveau projet » stays under it.
+      rows = node('div', 'thread-lines');
     list.setAttribute('role', 'dialog');
     list.setAttribute('aria-label', 'Projets');
-    list.append(node('p', 'thread-menu-label', 'Projets'));
-    const active = currentProject()?.id;
+    const active = shown ? shown.filter().project : currentProject()?.id;
+    // In the Pellicule (capture 36): « Tous les projets » first, each line with its number of takes.
+    if (shown)
+      list.append(
+        line('Tous les projets', { current: active === 'all', count: shown.count(), choose: () => narrow({ project: 'all' }) }),
+        node('hr', 'thread-rule'),
+      );
+    else list.append(node('p', 'thread-menu-label', 'Projets'));
     // The projects first, « Sans projet » last.
     for (const project of ordered())
-      list.append(
+      rows.append(
         line(projectLabel(project), {
           kind: 'le projet',
           current: project.id === active,
+          ...(shown ? { count: shown.count({ project: project.id }) } : {}),
           choose: () => choose(project),
           ...(project.id === 'inbox' ? {} : { rename: () => edit(project), remove: () => remove(project) }),
         }),
       );
-    list.append(node('hr', 'thread-rule'), action('Nouveau projet', 'plus', () => edit()));
+    list.append(rows, node('hr', 'thread-rule'), action('Nouveau projet', 'plus', () => edit()));
+    return list;
+  }
+  /**
+   * The conversations in the Pellicule (capture 38): « Toutes les conversations » first, then those
+   * of the project that made takes, each with its number; one chosen narrows the sheet (the Chat
+   * does not open). « + Nouvelle conversation » at the foot opens the welcome in this project.
+   */
+  function shelfMenu(shown) {
+    const { project, conversation } = shown.filter(),
+      list = node('div', 'thread-menu is-conversations is-shelf'),
+      rows = node('div', 'thread-lines');
+    list.setAttribute('role', 'dialog');
+    list.setAttribute('aria-label', 'Conversations · ' + projectLabel(shownProject()));
+    list.append(
+      line('Toutes les conversations', {
+        current: conversation === 'all',
+        count: shown.count({ project }),
+        choose: () => narrow({ conversation: 'all' }),
+      }),
+      node('hr', 'thread-rule'),
+    );
+    const group = projectGroups(projects(), state.historyItems || []).find(item => item.id === project);
+    for (const item of group?.conversations ?? []) {
+      // Those without a take, of any kind, have nothing to show here.
+      if (!shown.count({ project, conversation: item.id, media: 'all' })) continue;
+      rows.append(
+        line(item.title, {
+          kind: 'la conversation',
+          current: item.id === conversation,
+          count: shown.count({ project, conversation: item.id }),
+          choose: () => narrow({ conversation: item.id }),
+          ...(state.saveHistory
+            ? { rename: () => editConversation(item), remove: () => (closeMenus(), removeConversation(item)) }
+            : {}),
+        }),
+      );
+    }
+    list.append(
+      rows,
+      node('hr', 'thread-rule'),
+      action('Nouvelle conversation', 'plus', () => {
+        closeMenus();
+        newConversation(project);
+      }),
+    );
     return list;
   }
   function conversationMenu() {
+    if (shelf()) return shelfMenu(shelf());
     const list = node('div', 'thread-menu is-conversations'),
       project = currentProject(),
       label = projectLabel(project);
@@ -562,18 +646,24 @@ export function setupProjectNavigation({
     if (menu && opener === $('thread-project')) return closeMenus();
     if (busy()) return;
     open(projectMenu(), $('thread-project'));
-    menu.querySelector('.thread-line.is-current .thread-choice, .thread-choice')?.focus();
+    // The line chosen, even far down a list that scrolls; else the first.
+    (menu.querySelector('.thread-line.is-current .thread-choice') ?? menu.querySelector('.thread-choice'))?.focus();
   };
   $('thread-conversation').onclick = () => {
     if (menu && opener === $('thread-conversation')) return closeMenus();
     if (busy()) return;
     open(conversationMenu(), $('thread-conversation'));
-    menu.querySelector('input')?.focus();
+    // The search; in the Pellicule (no search), the line chosen.
+    (
+      menu.querySelector('input') ??
+      menu.querySelector('.thread-line.is-current .thread-choice') ??
+      menu.querySelector('.thread-choice')
+    )?.focus();
   };
   // A right click on the project: rename it or delete it at once, a shortcut of its menu.
   $('thread-project').oncontextmenu = event => {
     event.preventDefault();
-    const project = currentProject();
+    const project = shownProject();
     if (busy() || !project || project.id === 'inbox') return;
     const list = node('div', 'thread-menu is-small');
     list.setAttribute('role', 'dialog');
@@ -614,18 +704,44 @@ export function setupProjectNavigation({
   function render() {
     closeMenus();
     renderResume();
-    const project = currentProject();
-    $('thread-project-name').textContent = projectLabel(project);
-    $('thread-project').setAttribute('aria-label', 'Projet : ' + projectLabel(project));
-    $('thread-conversation').setAttribute('aria-label', 'Conversation : ' + $('conversation-title').textContent);
+    const shown = shelf(),
+      project = shownProject(),
+      // Every project in the Pellicule: one link, « Tous les projets ».
+      name = project ? projectLabel(project) : 'Tous les projets';
+    $('thread-project-name').textContent = name;
+    $('thread-project').setAttribute('aria-label', 'Projet : ' + name);
+    // In the Pellicule, the conversation shown or all of them; the title of the one open is kept.
+    const talk = shown?.filter().conversation,
+      talkName =
+        talk && talk !== 'all'
+          ? ((state.historyItems || []).find(item => item.id === talk)?.title ?? 'Conversation')
+          : 'Toutes les conversations';
+    $('conversation-title').hidden = !!shown;
+    $('thread-shown').hidden = !shown;
+    $('thread-shown').textContent = shown ? talkName : '';
+    $('thread').dataset.scope = shown ? (project ? 'project' : 'all') : '';
+    $('thread-conversation').setAttribute(
+      'aria-label',
+      'Conversation : ' + (shown ? talkName : $('conversation-title').textContent),
+    );
     $('chat-open')?.setAttribute('aria-current', state.view === 'chat' ? 'page' : 'false');
     $('studio-open').setAttribute('aria-current', state.view === 'studio' ? 'page' : 'false');
     $('library-open')?.setAttribute('aria-current', state.view === 'library' ? 'page' : 'false');
     $('studio-view').hidden = state.view !== 'studio';
-    // The fil, the same in the Chat and the Studio; the Pellicule has its own title.
-    $('thread').hidden = !['chat', 'studio'].includes(state.view || 'chat');
+    // The fil, the same in the Chat, the Studio and the Pellicule: there, it heads the sheet.
+    $('thread').hidden = !['chat', 'studio'].includes(state.view || 'chat') && !shown;
+    settle(!!shown);
     document.body.dataset.view = state.view || 'chat';
     sync();
+  }
+  /** The fil in the head of the Pellicule (`#library-thread`), or back above the Chat and the Studio. */
+  function settle(inLibrary) {
+    const thread = $('thread'),
+      slot = $('library-thread');
+    if (!thread.parentNode || !slot) return;
+    home ??= { parent: thread.parentNode, next: thread.nextSibling };
+    if (inLibrary && thread.parentNode !== slot) slot.append(thread);
+    else if (!inLibrary && thread.parentNode !== home.parent) home.parent.insertBefore(thread, home.next);
   }
   function sync() {
     for (const control of document.querySelectorAll('#thread button,#chat-open,#studio-open,#library-open'))
@@ -636,5 +752,9 @@ export function setupProjectNavigation({
     state.projects = result.projects;
     render();
   }
-  return { render, refresh, sync, closeMenus, edit, remove, renderResume };
+  /** The Pellicule (library.mjs): its `filter`, `count` and `choose`, read by the fil while it is shown. */
+  function useLibrary(shown) {
+    library = shown;
+  }
+  return { render, refresh, sync, closeMenus, edit, remove, renderResume, useLibrary };
 }

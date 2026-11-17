@@ -450,6 +450,8 @@ async function clearHistory() {
       state.studio?.conversationChanged?.();
     }
     renderHistory();
+    // Deleted from the fil of the Pellicule: its takes leave the sheet.
+    if (state.view === 'library') void libraryUI.refresh();
     notice('');
     $('live-status').textContent = target ? 'Conversation supprimée.' : 'Historique supprimé.';
     $('history-delete-dialog').close();
@@ -3485,7 +3487,9 @@ const projectUI = setupProjectNavigation({
   openConversation: id => {
     requestSettingsClose(() => loadConversation(id));
   },
+  // From the Pellicule, the welcome in that project, with the passage of the views (as the logo).
   newConversation: id => {
+    if (state.view === 'library') return goHome(id);
     requestSettingsClose(() => newConversation(id));
   },
   removeConversation: confirmHistoryDeletion,
@@ -3533,7 +3537,8 @@ const libraryUI = setupLibrary({
   // `around`: the takes shown, which ‹ › of the take opened go through.
   viewOutput: (record, index, blob, around) => assetsUI.viewOutput(record, index, blob, around),
   openConversation: id => requestSettingsClose(() => loadConversation(id)),
-  newConversation: id => requestSettingsClose(() => newConversation(id)),
+  // « + Nouvelle conversation » of an empty project: the welcome in it, as the logo opens it.
+  newConversation: id => goHome(id),
   // The project chosen in the Pellicule: the page follows it.
   onFilter: filter => {
     state.libraryProject = filter.project;
@@ -3541,17 +3546,10 @@ const libraryUI = setupLibrary({
   },
   // On a take, the actions of the conversation (Ouvrir, Prolonger…), done in its conversation.
   actions: (record, index) => libraryActions(record, index),
-  // The projects live here too (pellicule-maquette.md): « + Nouveau projet », « ··· » on one.
-  onNewProject: () => projectUI.edit(),
-  onRenameProject: project => projectUI.edit(project),
-  onDeleteProject: project => projectUI.remove(project),
-  // « Ouvrir le Studio » on a project with nothing in it: the Studio of that project.
-  openStudio: project =>
-    requestSettingsClose(async () => {
-      if ((state.projectId || 'inbox') !== project) await newConversation(project);
-      showStudio();
-    }),
 });
+// The fil heads the Pellicule (pellicule-fil-maquette.md): its menus choose the project and the
+// conversation shown, with their numbers of takes; projects are made, renamed and deleted there.
+projectUI.useLibrary(libraryUI);
 const viewerActions = outputActions({
   api,
   node,
@@ -4168,15 +4166,18 @@ $('studio-open').onclick = () => showStudio();
 $('library-open').onclick = () => showLibrary();
 /**
  * The logo, from any view (16/11): the accueil, a new conversation in the project in hand (the one
- * the Pellicule shows, when it shows one).
+ * the Pellicule shows, when it shows one), or in `chosen` (« + Nouvelle conversation » of the
+ * Pellicule).
  */
-function goHome() {
+function goHome(chosen = null) {
   if (state.updating || state.closingApp || state.loadingHistory) return;
   requestSettingsClose(async () => {
     const project =
-      state.view === 'library' && state.libraryProject && state.libraryProject !== 'all'
-        ? state.libraryProject
-        : state.projectId || 'inbox';
+      typeof chosen === 'string'
+        ? chosen
+        : state.view === 'library' && state.libraryProject && state.libraryProject !== 'all'
+          ? state.libraryProject
+          : state.projectId || 'inbox';
     await switchView('chat', () => {
       state.view = 'chat';
       delete document.body.dataset.chat;

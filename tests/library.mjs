@@ -5,13 +5,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { filtered, mediaOf, setupLibrary } from '../public/library.mjs';
+import { setupProjectNavigation } from '../public/project-navigation.mjs';
 import { createApplication } from '../server.mjs';
 import { Gallery } from '../lib/gallery.mjs';
 import { STUDIO_ID } from '../lib/studio.mjs';
 
 class Element {
   constructor(tag = '', className = '', textContent = '') {
-    Object.assign(this, { tag, className, textContent, children: [], dataset: {}, attributes: {}, hidden: false, value: '' });
+    Object.assign(this, { tag, className, textContent, children: [], dataset: {}, attributes: {}, hidden: false, value: '', style: {} });
     // The classes it gains and loses while shown (« is-playing » on the button of a sound).
     const marks = (this.marks = new Set());
     this.classList = { add: name => marks.add(name), remove: name => marks.delete(name) };
@@ -25,15 +26,36 @@ class Element {
   setAttribute(name, value) {
     this.attributes[name] = String(value);
   }
+  getAttribute(name) {
+    return this.attributes[name] ?? null;
+  }
+  // What the fil and its menus ask of an element (project-navigation.mjs).
+  addEventListener() {}
+  querySelector() {
+    return null;
+  }
+  contains(other) {
+    return walk(this).includes(other);
+  }
+  getBoundingClientRect() {
+    return { left: 36, top: 90, right: 180, bottom: 123, width: 144, height: 33 };
+  }
+  remove() {
+    this.removed = true;
+  }
+  focus() {}
+  showModal() {
+    this.open = true;
+  }
+  close() {
+    this.open = false;
+  }
 }
 const walk = element => [element, ...element.children.flatMap(walk)];
 const find = (element, className) => walk(element).find(item => item.className === className);
 const tiles = element => walk(element).filter(item => item.className?.startsWith?.('library-tile')).map(item => item.dataset.id);
-const pills = row =>
-  row.children
-    .filter(item => item.className?.split?.(' ')[0] === 'library-pill' && !item.className.includes('is-new'))
-    .map(item => [item.children[0].textContent, item.children[1]?.textContent, item.attributes['aria-pressed']]);
-const project = (f, id) => f.$('library-projects').children.find(item => item.dataset.project === id);
+// A project chosen in the fil of the Pellicule (its menu calls `choose`, see the test of the fil below).
+const project = (f, id) => ({ onclick: () => f.library.choose({ project: id }) });
 const card = (f, id) => walk(f.$('library-grid')).find(item => item.className?.startsWith?.('library-tile') && item.dataset.id === id);
 
 const PROJECTS = [
@@ -126,15 +148,9 @@ test('every project: each creation with its project and its conversation; a clic
   const grid = f.$('library-grid');
   assert.deepEqual(tiles(grid), ['r1', 'r2', 'r3', 'r4']);
   assert.equal(f.$('library-total').textContent, '4 prises');
-  assert.deepEqual(f.$('library-heading').children.map(item => item.textContent), ['Pellicule']);
-  assert.equal(f.$('library-conversations').hidden, true, 'no conversations of a project above them');
   assert.equal(f.$('library-empty').hidden, true);
-  // The projects in pills, each with its number of takes; « Sans projet » after the projects.
-  assert.deepEqual(pills(f.$('library-projects')), [
-    ['Tous les projets', '4', 'true'],
-    ['Voyage', '2', 'false'],
-    ['Sans projet', '2', 'false'],
-  ]);
+  // The numbers the menus of the fil say: every project, each project (« Sans projet » too).
+  assert.deepEqual([f.library.count(), f.library.count({ project: 'p1' }), f.library.count({ project: 'inbox' })], [4, 2, 2]);
   // The sheet by day: the line of a day, then its takes; those without a date together.
   assert.deepEqual(
     grid.children.map(day => find(day, 'library-day-count').textContent),
@@ -182,47 +198,199 @@ test('every project: each creation with its project and its conversation; a clic
   assert.deepEqual(f.opened, ['c2']);
 });
 
-test('on a project: its conversations in pills under its own, a new chat in it, « ··· » to rename or delete it', async () => {
-  const many = Array.from({ length: 8 }, (_, i) => ({
-    id: 'k' + i,
-    title: 'Chat ' + i,
-    projectId: 'p1',
-    createdAt: `2026-11-0${i + 1}T10:00:00.000Z`,
-  }));
-  const renamed = [],
-    deleted = [];
-  const f = fixture({ historyItems: [...HISTORY, ...many], onRenameProject: project => renamed.push(project.id), onDeleteProject: project => deleted.push(project.id) });
+test('on a project: its takes, its conversations counted, one of them chosen, then all of them again', async () => {
+  const f = fixture();
   await f.library.show({ project: 'p1' });
-  assert.deepEqual(f.$('library-heading').children.slice(0, 2).map(item => item.textContent), ['Pellicule ›', 'Voyage']);
   assert.equal(f.$('library-total').textContent, '2 prises');
-  assert.equal(pills(f.$('library-projects'))[1][2], 'true', 'Voyage chosen');
-  const row = f.$('library-conversations');
-  assert.equal(row.hidden, false);
-  // Those of its conversations that hold its takes, each with its number; a new one at the end.
-  assert.equal(row.children[0].textContent, 'Conversations');
-  assert.deepEqual(pills(row), [
-    ['Toutes les conversations', '2', 'true'],
-    ['Plage', '1', 'false'],
-  ]);
-  row.children.find(item => item.dataset.id === 'c1').onclick();
+  assert.deepEqual(f.library.filter(), { project: 'p1', media: 'all', conversation: 'all' });
+  // Each conversation with its number of takes; the open one, not saved yet, has its own.
+  assert.deepEqual(
+    [f.library.count({ project: 'p1', conversation: 'c1' }), f.library.count({ project: 'p1', conversation: 'open' })],
+    [1, 1],
+  );
+  f.library.choose({ conversation: 'c1' });
   assert.deepEqual(tiles(f.$('library-grid')), ['r1']);
+  assert.equal(f.$('library-total').textContent, '1 prise');
   assert.deepEqual(f.filters.at(-1), { project: 'p1', media: 'all', conversation: 'c1' });
-  row.children.at(-1).onclick();
-  assert.deepEqual(f.created, ['p1']);
+  assert.deepEqual(f.opened, [], 'the Chat does not open');
   // Its creations only, the open conversation's among them, without the project in their line.
-  row.children[1].onclick();
+  f.library.choose({ conversation: 'all' });
   assert.deepEqual(tiles(f.$('library-grid')), ['r1', 'r3']);
   assert.equal(find(f.$('library-grid'), 'library-from').textContent, 'Plage');
-  // « ··· » beside its name: Renommer, Supprimer le projet.
-  const more = f.$('library-heading').children.find(item => item.className === 'library-project-more');
-  more.onclick();
-  const menu = f.$('library-heading').children.find(item => item.className === 'library-project-menu');
-  assert.deepEqual(menu.children.map(item => item.textContent), ['Renommer', 'Supprimer le projet']);
-  menu.children[0].onclick();
-  assert.deepEqual(renamed, ['p1']);
-  f.$('library-heading').children.find(item => item.className === 'library-project-more').onclick();
-  f.$('library-heading').children.find(item => item.className === 'library-project-menu').children[1].onclick();
-  assert.deepEqual(deleted, ['p1']);
+  // A conversation of another project is not one of this one: all of them again.
+  f.library.choose({ conversation: 'c2' });
+  assert.equal(f.library.filter().conversation, 'all');
+});
+
+/**
+ * The fil of the Chat and the Studio heading the Pellicule (pellicule-fil-maquette.md, captures 35
+ * to 39): the module of the fil itself, on the Pellicule itself.
+ */
+function filFixture(t, options = {}) {
+  const f = fixture({ historyItems: HISTORY_FIL, ...options }),
+    previous = [globalThis.document, globalThis.window],
+    menus = [],
+    calls = [];
+  globalThis.document = {
+    body: { dataset: {}, append: element => menus.push(element) },
+    querySelectorAll: () => [],
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  globalThis.window = { innerWidth: 1280, innerHeight: 720, addEventListener() {}, removeEventListener() {} };
+  t.after(() => ([globalThis.document, globalThis.window] = previous));
+  Object.assign(f.state, { view: 'library', saveHistory: true, status: {}, messages: [] });
+  f.$('conversation-title').textContent = 'Nouvelle conversation';
+  const fil = setupProjectNavigation({
+    $: f.$,
+    state: f.state,
+    node: (...args) => new Element(...args),
+    icon: name => new Element('svg', 'icon-' + name),
+    api: async () => Response.json({}),
+    openConversation: id => calls.push(['open', id]),
+    newConversation: id => calls.push(['new', id]),
+    removeConversation: item => calls.push(['delete', item.id]),
+  });
+  fil.useLibrary(f.library);
+  // As app.js: the Pellicule filtered, the fil says it.
+  f.filters.push = filter => fil.render(filter);
+  const open = id => (f.$(id).onclick(), menus.at(-1));
+  const lines = menu =>
+    walk(menu)
+      .filter(item => /^thread-line(\s|$)/.test(item.className))
+      .map(line => ({
+        name: walk(line).find(item => item.className === 'thread-choice-name').textContent,
+        count: walk(line).find(item => item.className === 'thread-choice-count')?.textContent,
+        current: line.className.includes('is-current'),
+        tools: walk(line)
+          .filter(item => /^thread-tool(\s|$)/.test(item.className ?? ''))
+          .map(item => item.dataset.tip),
+        choose: () => walk(line).find(item => item.className === 'thread-choice').onclick(),
+        tool: tip => walk(line).find(item => item.dataset.tip === tip).onclick(),
+      }));
+  const said = () => [
+    f.$('thread').dataset.scope,
+    f.$('thread-project-name').textContent,
+    f.$('thread-shown').textContent,
+    f.$('library-total').textContent,
+  ];
+  return { ...f, fil, calls, menus, open, lines, said };
+}
+const HISTORY_FIL = [
+  ...HISTORY,
+  // Another conversation of the project with a take, one without any.
+  { id: 'c3', title: 'Croquis', projectId: 'p1', createdAt: '2026-11-15T10:00:00.000Z' },
+  { id: 'c4', title: 'Sans prise', projectId: 'p1', createdAt: '2026-11-16T10:00:00.000Z' },
+];
+const RUNS_FIL = [{ id: 'r5', conversationId: 'c3', projectId: 'p1', prompt: 'Un croquis', createdAt: '2026-11-15T10:00:00.000Z', outputs: [output('c3', 'r5')] }, ...RUNS];
+
+test('in the Pellicule, the fil heads the sheet: « Tous les projets » alone, its menu with the takes of each project', async t => {
+  const f = filFixture(t, { runs: RUNS_FIL });
+  await f.library.show();
+  // One link, « Tous les projets », then the number of takes.
+  assert.deepEqual(f.said(), ['all', 'Tous les projets', 'Toutes les conversations', '5 prises']);
+  assert.equal(f.$('thread').hidden, false);
+  assert.equal(f.$('conversation-title').hidden, true, 'the title of the conversation open is kept, not shown');
+  assert.equal(f.$('thread-shown').hidden, false);
+  // Capture 36: « Tous les projets » first, the projects and « Sans projet » with their takes; the
+  // pencil and the bin on a project only; « + Nouveau projet » at the foot.
+  const menu = f.open('thread-project');
+  assert.deepEqual(
+    f.lines(menu).map(line => [line.name, line.count, line.current, line.tools]),
+    [
+      ['Tous les projets', '5', true, []],
+      ['Voyage', '3', false, ['Renommer', 'Supprimer']],
+      ['Sans projet', '2', false, []],
+    ],
+  );
+  assert.equal(walk(menu).filter(item => item.className === 'thread-lines').length, 1, 'the projects scroll');
+  assert.deepEqual(walk(menu.children.at(-1)).map(item => item.textContent).filter(Boolean), ['Nouveau projet']);
+  // A project chosen: « Voyage / Toutes les conversations », its takes; nothing opens.
+  f.lines(menu)[1].choose();
+  assert.deepEqual(f.said(), ['project', 'Voyage', 'Toutes les conversations', '3 prises']);
+  assert.deepEqual(tiles(f.$('library-grid')), ['r5', 'r1', 'r3']);
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.state.projectId, 'p1', 'the project of the conversation open is not changed');
+  // Back to every project from the first line.
+  f.lines(f.open('thread-project'))[0].choose();
+  assert.deepEqual(f.said(), ['all', 'Tous les projets', 'Toutes les conversations', '5 prises']);
+});
+
+test('in the Pellicule, a conversation chosen in the fil filters the takes and does not open the Chat', async t => {
+  const f = filFixture(t, { runs: RUNS_FIL });
+  await f.library.show({ project: 'p1' });
+  assert.deepEqual(f.said(), ['project', 'Voyage', 'Toutes les conversations', '3 prises']);
+  // Capture 38: « Toutes les conversations » first, then those that made takes, each with its number
+  // (the one without a take is not there), the pencil and the bin; « + Nouvelle conversation » at the foot.
+  const menu = f.open('thread-conversation');
+  assert.equal(menu.attributes['aria-label'], 'Conversations · Voyage');
+  assert.deepEqual(
+    f.lines(menu).map(line => [line.name, line.count, line.current, line.tools]),
+    [
+      ['Toutes les conversations', '3', true, []],
+      ['Croquis', '1', false, ['Renommer ou déplacer', 'Supprimer']],
+      ['Plage', '1', false, ['Renommer ou déplacer', 'Supprimer']],
+    ],
+  );
+  assert.equal(walk(menu).some(item => item.tag === 'input'), false, 'no search here');
+  f.lines(menu)[2].choose();
+  // The takes of « Plage » only; the fil says it; the Chat is not opened.
+  assert.deepEqual(tiles(f.$('library-grid')), ['r1']);
+  assert.deepEqual(f.said(), ['project', 'Voyage', 'Plage', '1 prise']);
+  assert.deepEqual(f.library.filter(), { project: 'p1', media: 'all', conversation: 'c1' });
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.state.view, 'library');
+  assert.equal(f.$('thread-conversation').attributes['aria-label'], 'Conversation : Plage');
+  // Marked in its menu; the kind narrows it further, its number follows.
+  assert.deepEqual(
+    f.lines(f.open('thread-conversation')).filter(line => line.current).map(line => line.name),
+    ['Plage'],
+  );
+  f.library.choose({ media: 'video' });
+  assert.deepEqual(tiles(f.$('library-grid')), []);
+  assert.deepEqual(
+    f.lines(f.open('thread-conversation')).map(line => [line.name, line.count]),
+    [
+      ['Toutes les conversations', '0'],
+      ['Croquis', '0'],
+      ['Plage', '0'],
+    ],
+  );
+  f.library.choose({ media: 'all' });
+  // Its pencil opens the window of the conversation (rename or move), its bin asks first.
+  f.lines(f.open('thread-conversation'))[1].tool('Renommer ou déplacer');
+  assert.equal(f.$('conversation-dialog').open, true);
+  assert.equal(f.$('conversation-name').value, 'Croquis');
+  f.lines(f.open('thread-conversation'))[1].tool('Supprimer');
+  assert.deepEqual(f.calls, [['delete', 'c3']]);
+  // « Toutes les conversations » again; « + Nouvelle conversation » asks for the welcome in the project.
+  f.lines(f.open('thread-conversation'))[0].choose();
+  assert.deepEqual(f.said(), ['project', 'Voyage', 'Toutes les conversations', '3 prises']);
+  const create = f.open('thread-conversation').children.at(-1);
+  assert.equal(create.className, 'thread-action');
+  create.onclick();
+  assert.deepEqual(f.calls.at(-1), ['new', 'p1']);
+  // Another project: every conversation of it.
+  f.lines(f.open('thread-conversation'))[1].choose();
+  f.lines(f.open('thread-project'))[2].choose();
+  assert.deepEqual(f.said(), ['project', 'Sans projet', 'Toutes les conversations', '2 prises']);
+});
+
+test('back in the Chat, the fil is that of the conversation open again, its menus as before', async t => {
+  const f = filFixture(t, { runs: RUNS_FIL });
+  await f.library.show({ project: 'inbox' });
+  f.state.view = 'chat';
+  f.fil.render();
+  assert.equal(f.$('thread').dataset.scope, '');
+  assert.equal(f.$('thread-project-name').textContent, 'Voyage', 'the project of the conversation open');
+  assert.equal(f.$('conversation-title').hidden, false);
+  assert.equal(f.$('thread-shown').hidden, true);
+  const menu = f.open('thread-conversation');
+  assert.equal(walk(menu).some(item => item.tag === 'input'), true, 'the search of the Chat');
+  assert.equal(walk(menu).some(item => item.className === 'thread-choice-count'), false);
+  // A conversation chosen here opens it.
+  f.lines(menu)[0].choose();
+  assert.deepEqual(f.calls, [['open', 'c4']]);
 });
 
 test('the kind and the conversation narrow the creations; ← → move between the kinds; a project keeps the kind', async () => {
@@ -245,11 +413,8 @@ test('the kind and the conversation narrow the creations; ← → move between t
   assert.equal(kind('video').attributes['aria-checked'], 'true');
   assert.deepEqual(f.filters.at(-1), { project: 'all', media: 'video', conversation: 'all' });
   // The numbers of the projects follow the kind.
-  assert.deepEqual(pills(f.$('library-projects')).map(([name, number]) => [name, number]), [
-    ['Tous les projets', '1'],
-    ['Voyage', '0'],
-    ['Sans projet', '1'],
-  ]);
+  assert.deepEqual([f.library.count(), f.library.count({ project: 'p1' }), f.library.count({ project: 'inbox' })], [1, 0, 1]);
+  assert.equal(f.library.count({ project: 'p1', media: 'all' }), 2, 'or the kind asked');
   kinds.onkeydown({ key: 'ArrowRight', preventDefault() {} });
   assert.deepEqual(tiles(f.$('library-grid')), ['r3']);
   kinds.onkeydown({ key: 'ArrowRight', preventDefault() {} });
@@ -260,7 +425,7 @@ test('the kind and the conversation narrow the creations; ← → move between t
   assert.deepEqual(tiles(f.$('library-grid')), ['r1', 'r4']);
   project(f, 'p1').onclick();
   assert.deepEqual(tiles(f.$('library-grid')), ['r1']);
-  f.$('library-conversations').children.find(item => item.dataset.id === 'c1').onclick();
+  f.library.choose({ conversation: 'c1' });
   assert.deepEqual(tiles(f.$('library-grid')), ['r1']);
   kind('audio').onclick();
   assert.deepEqual(tiles(f.$('library-grid')), []);
@@ -346,28 +511,29 @@ test('the tiles are kept from one drawing to the next: their pictures are not lo
   assert.deepEqual(f.viewed, [['r1', 0]]);
 });
 
-test('a project gone shows every project again; an empty project offers two ways to begin; an error is said', async () => {
-  const opened = [];
-  const f = fixture({ runs: [], conversationId: null, openStudio: project => opened.push(project) });
+test('a project gone shows every project again; an empty project offers one way to begin; an error is said', async () => {
+  const f = fixture({ runs: [], conversationId: null });
   await f.library.show({ project: 'p1' });
   // No conversation open: only the saved ones.
   assert.deepEqual(f.asked, ['library?images=0']);
-  // A project with nothing in it (capture 34): its sentence, a line, the Studio or a new chat.
+  // A project with nothing in it (capture 39): its sentence, a line, « + Nouvelle conversation » alone.
   const empty = f.$('library-empty');
   assert.equal(empty.hidden, false);
+  assert.equal(f.$('library-total').textContent, '0 prise');
+  assert.deepEqual(
+    empty.children.map(item => item.className),
+    ['library-empty-title', 'library-empty-text', 'library-door'],
+  );
   assert.equal(empty.children[0].textContent, 'Rien dans ce projet pour l’instant.');
-  const doors = find(empty, 'library-doors').children;
-  assert.deepEqual(doors.map(item => item.textContent), ['Ouvrir le Studio', 'Nouvelle conversation']);
-  doors[0].onclick();
-  doors[1].onclick();
-  assert.deepEqual([opened, f.created], [['p1'], ['p1']]);
-  // Its conversations: « + Nouvelle conversation » only.
-  assert.deepEqual(f.$('library-conversations').children.map(item => item.className), ['library-pills-label', 'library-pill is-new']);
+  const begin = empty.children[2];
+  assert.deepEqual(begin.children.map(item => item.className || item.textContent), ['icon-plus', 'Nouvelle conversation']);
+  assert.equal(begin.attributes['aria-label'], 'Nouvelle conversation dans Voyage');
+  begin.onclick();
+  assert.deepEqual(f.created, ['p1']);
   f.state.projects = f.state.projects.filter(item => item.id !== 'p1');
   f.library.render();
   assert.equal(f.library.filter().project, 'all');
   assert.deepEqual(f.filters.at(-1), { project: 'all', media: 'all', conversation: 'all' });
-  assert.equal(f.$('library-conversations').hidden, true);
   assert.match(f.$('library-empty').children[0].textContent, /^Aucune création pour l’instant\. Les images, vidéos et sons/);
   const broken = fixture({ fail: 'Disque illisible.' });
   await broken.library.show();

@@ -8381,8 +8381,7 @@ body {
    the timeline (0.5.126): 16:9, 6 px corners, the badge of a clip or a sound at its top right; its
    prompt, where it was made and when come over its foot under the pointer or the keyboard's focus.
    The newest first. */
-.library-view,
-.library-heading {
+.library-view {
   display: none;
 }
 body[data-view='library'] .library-view {
@@ -8600,15 +8599,6 @@ button.library-from:hover {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 12px;
   }
-}
-body[data-view='library'] .library-heading {
-  display: inline;
-  color: var(--text-1);
-  font-size: var(--size-3);
-  font-weight: 800;
-}
-:root[data-theme='light'] body[data-view='library'] .library-heading {
-  color: var(--ink);
 }
 body[data-view='library'] .chat-area,
 body[data-view='library'] .composer-region {
@@ -9485,6 +9475,10 @@ body {
 .thread-menu.is-conversations {
   width: 338px;
 }
+/* In the Pellicule, its two menus at one width (captures 36 and 38). */
+.thread-menu.is-shelf {
+  width: 310px;
+}
 .thread-menu.is-small {
   width: auto;
   min-width: 190px;
@@ -9590,6 +9584,23 @@ body {
 }
 .thread-line:is(:hover, :focus-within):has(.thread-tools) .thread-choice {
   padding-right: 64px;
+}
+/* In the Pellicule, its number of takes in mono at the right; the pencil and the bin come beside it. */
+.thread-choice-count {
+  flex: none;
+  min-width: 24px;
+  color: var(--text-4);
+  font: 400 12px/1 var(--font-mono);
+  text-align: right;
+}
+.thread-line.has-count .thread-tools {
+  right: 42px;
+}
+.thread-line.has-count:is(:hover, :focus-within):has(.thread-tools) .thread-choice {
+  padding-right: 10px;
+}
+.thread-line.has-count:is(:hover, :focus-within):has(.thread-tools) .thread-choice-name {
+  margin-right: 60px;
 }
 .thread-tool {
   display: grid;
@@ -9697,12 +9708,6 @@ body {
   margin: 8px 10px 6px;
   color: var(--text-3);
   font-size: 13px;
-}
-/* La Pellicule a son propre titre, en haut à gauche comme le fil (redessinée en phase 4). */
-#library-view > .library-heading {
-  margin: 0 0 14px;
-  color: var(--text-1);
-  font: 400 15px/33px var(--font-ui);
 }
 /* Image · Vidéo · Son, en haut du Studio (en haut à gauche de l'écran en phase 3). */
 #studio-view > #studio-kinds.kind-tabs {
@@ -11634,7 +11639,7 @@ body[data-view='studio'][data-chat='open'] .chat-panel {
    dernière en haut à gauche ; un son en carte qui joue ; au survol le voile et les actions. */
 body[data-view='library'] .library-view {
   gap: 0;
-  padding: 28px 36px 48px;
+  padding: 18px 36px 48px;
 }
 .library-head {
   display: flex;
@@ -11642,76 +11647,36 @@ body[data-view='library'] .library-view {
   gap: 18px;
   margin: 0 0 16px;
 }
-body[data-view='library'] #library-view .library-heading {
-  position: relative;
+/* The fil of the Chat and the Studio, moved here (pellicule-fil-maquette.md): « Tous les projets ⌄ »
+   alone in ivory, or « test ⌄ / Toutes les conversations ⌄ »; its first word at the left edge of the
+   sheet. */
+.library-thread {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin: 0;
-  color: var(--text-1);
-  font: inherit;
+  flex: 0 1 auto;
+  min-width: 0;
 }
-.library-crumb {
-  color: var(--text-2);
-  font: 400 15px/1 var(--font-ui);
+.library-thread > .thread {
+  min-width: 0;
+  margin: 0 0 0 -9px;
 }
-.library-title {
+.thread[data-scope='all'] :is(.thread-slash, .thread-conversation) {
+  display: none;
+}
+.thread[data-scope='all'] .thread-project {
+  max-width: none;
   color: var(--text-1);
-  font: 400 34px/1.1 'Gloock', var(--font-display, serif);
-  letter-spacing: -0.01em;
+  font-weight: 500;
+}
+.thread-button span[hidden] {
+  display: none;
 }
 .library-total {
-  align-self: baseline;
+  flex: none;
+  align-self: center;
   color: var(--text-3);
   font: 400 var(--size-label)/1 var(--font-mono);
   letter-spacing: 0.24em;
   text-transform: uppercase;
-}
-/* « ··· » beside the name of a project: Renommer, Supprimer le projet. */
-.library-project-more {
-  align-self: center;
-  width: 32px;
-  height: 32px;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-3);
-  font: 400 16px/1 var(--font-ui);
-  letter-spacing: 0.1em;
-}
-.library-project-more:hover,
-.library-project-more[aria-expanded='true'] {
-  background: rgba(238, 232, 222, 0.08);
-  color: var(--text-1);
-}
-.library-project-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 8;
-  display: flex;
-  flex-direction: column;
-  min-width: 190px;
-  padding: 6px;
-  border: 1px solid rgba(238, 232, 222, 0.1);
-  border-radius: 10px;
-  background: var(--room-menu);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
-}
-.library-project-action {
-  min-height: 0;
-  padding: 9px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-1);
-  font: 400 14px/1.2 var(--font-ui);
-  text-align: left;
-}
-.library-project-action:hover {
-  background: rgba(238, 232, 222, 0.08);
 }
 /* Tout · Images · Vidéos · Sons: the same small group as Image · Vidéo · Son in the Studio. */
 #library-view .library-kinds {
@@ -11750,63 +11715,6 @@ body[data-view='library'] #library-view .library-heading {
 }
 #library-view .library-kind[aria-checked='true'] .library-kind-name {
   display: inline;
-}
-/* The projects, then the conversations of the one chosen: pills of 32 px, corners of 8. */
-.library-pills {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 10px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.library-pills[hidden] {
-  display: none;
-}
-.library-pills.is-conversations {
-  margin-bottom: 18px;
-}
-.library-pills-label {
-  flex: none;
-  margin-right: 8px;
-  color: var(--text-3);
-  font: 500 var(--size-label)/1 var(--font-ui);
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-}
-.library-pill {
-  display: inline-flex;
-  flex: none;
-  align-items: baseline;
-  gap: 8px;
-  height: 32px;
-  min-height: 0;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-2);
-  font: 400 14px/32px var(--font-ui);
-  white-space: nowrap;
-}
-.library-pill:hover {
-  color: var(--text-1);
-}
-.library-pill.is-chosen {
-  background: rgba(238, 232, 222, 0.1);
-  color: var(--text-1);
-}
-.library-pill-count {
-  color: var(--text-3);
-  font: 400 12px/1 var(--font-mono);
-}
-.library-pill.is-new {
-  align-items: center;
-  color: var(--text-2);
-}
-.library-pill.is-new svg {
-  width: 13px;
-  height: 13px;
 }
 /* The sheet: a day, its line with its rule and its number, its takes. */
 .library-sheet {
@@ -12028,13 +11936,21 @@ body[data-view='library'] #library-view .library-heading {
 #library-view .output-action:disabled {
   opacity: 0.38;
 }
-/* A project with nothing in it (capture 34): its sentence in Gloock, a line, two ways to begin. */
+/* A project with nothing in it (capture 39): in the middle of the page, its sentence in Gloock, a
+   line, one way to begin (« + Nouvelle conversation », in glass). */
+#library-view > .library-creations:has(> .library-empty:not([hidden])) {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
 .library-empty {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
-  padding: 40px 0;
+  margin: auto 0;
+  padding: 40px 0 80px;
+  text-align: center;
 }
 .library-empty[hidden] {
   display: none;
@@ -12049,11 +11965,10 @@ body[data-view='library'] #library-view .library-heading {
   color: var(--text-2);
   font: 400 15px/1.5 var(--font-ui);
 }
-.library-doors {
-  display: flex;
-  gap: 10px;
-}
 .library-door {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   height: 40px;
   min-height: 0;
   padding: 0 18px;
@@ -12062,6 +11977,13 @@ body[data-view='library'] #library-view .library-heading {
   background: rgba(238, 232, 222, 0.05);
   color: var(--text-1);
   font: 400 14px/1 var(--font-ui);
+}
+.library-door svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
 }
 .library-door:hover {
   border-color: rgba(238, 232, 222, 0.32);
