@@ -31,6 +31,9 @@ export function seriesContent(contents, total, { stopped = '' } = {}) {
     takes: made.flatMap(result => result.takes ?? []),
     images: results.map(result => ({
       status: result.status,
+      // Each image is a creation of its own: the conversation shows it again by this, and the
+      // model looks at it by this (left out, a series was gone from its conversation once reopened).
+      ...(typeof result.run_id === 'string' ? { run_id: result.run_id } : {}),
       ...(result.takes ? { takes: result.takes } : {}),
       ...(typeof result.prompt === 'string' ? { prompt: result.prompt } : {}),
       ...(result.parameters?.seed !== undefined ? { seed: result.parameters.seed } : {}),
@@ -38,10 +41,21 @@ export function seriesContent(contents, total, { stopped = '' } = {}) {
     })),
     ...(parameters ? { parameters: settings } : {}),
     ...(stopped ? { message: stopped } : {}),
-    // A failure is settled at the next message as any other (transcript.mjs).
-    ...(failure?.note ? { note: failure.note } : {}),
+    // A failure before any image is settled at the next message as any other (transcript.mjs).
+    // After some were made, the note of a single image (« rien n’a été produit », then « refais le
+    // même appel ») would have the whole series made again, those already there included.
+    ...(failure && made.length
+      ? { note: seriesNote(made.length, total) }
+      : failure?.note
+        ? { note: failure.note }
+        : {}),
   });
 }
+
+/** What the model is told of a series that stopped midway. */
+export const seriesNote = (made, total) =>
+  `Série incomplète : ${made} image${made > 1 ? 's' : ''} sur ${total} ${made > 1 ? 'sont faites et montrées' : 'est faite et montrée'} à l’utilisateur, ` +
+  'les autres non. Ne refais jamais celles qui existent. Si l’utilisateur demande la suite, appelle l’outil pour celles qui manquent seulement.';
 
 const stoppedAfter = (made, total) =>
   `Série arrêtée par l’utilisateur : ${made} image${made > 1 ? 's' : ''} sur ${total} ${made > 1 ? 'ont été faites' : 'a été faite'}.`;
@@ -97,5 +111,7 @@ export async function runSeries(request, first, { api, signal, mount, run, settl
     images,
     failed: false,
     denied: false,
+    // An image refused or failed ended it: the model does not call again in this message.
+    stopped: Boolean(stopped),
   };
 }

@@ -606,6 +606,11 @@ function renderTranscript(messages, incomplete = false) {
             if (!text) view.body.replaceChildren();
             generationUI.restore(view.generations, state.conversationId, data.run_id, { compact: data.studio === true });
           }
+          // Several images made in one call (its `series`): each of them, in their order.
+          else if (Array.isArray(data?.images) && data.images.some(image => typeof image?.run_id === 'string')) {
+            if (!text) view.body.replaceChildren();
+            for (const image of data.images) if (typeof image?.run_id === 'string') generationUI.restore(view.generations, state.conversationId, image.run_id, { compact: data.studio === true });
+          }
           // « Annuler » of a card: its line, where the card was (16/11); declined otherwise, nothing.
           if (data?.status === 'denied' && data.cancelled === 'card')
             view.generations.append(node('p', 'proposal-cancelled', 'Proposition annulée.'));
@@ -3175,7 +3180,7 @@ async function sendMessage(event) {
       }
       // A take that failed says why on itself (52): no second line under the message.
       view.note.textContent = result.failed && result.record ? result.error || 'Analyse indisponible.' : '';
-      if (result.denied || result.failed || iterations >= (state.generation?.maxIterations || 10)) allowTools = false;
+      if (result.denied || result.failed || result.stopped || iterations >= (state.generation?.maxIterations || 10)) allowTools = false;
       // After a refusal or a failure the model explains it: it does not go on inspecting outputs.
       if (result.denied || result.failed) resourceReads = 8;
       // Not seen (no analysis chosen for it): its text would only repeat what the user sees.

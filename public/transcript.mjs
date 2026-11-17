@@ -95,6 +95,8 @@ export function callNote(call, result) {
   const made = MADE[name] ?? 'Génération';
   if (!data) return `${made} : génération interrompue.`;
   if (data.run_id) return '';
+  // A series of images: those made are shown under the message.
+  if (Array.isArray(data.images) && data.images.some(image => typeof image?.run_id === 'string')) return '';
   // Declined: nothing is left of it (16/11); « Annuler » of a card leaves its own line (app.js).
   if (data.status === 'denied') return '';
   // The image of the character Moodix AI made, seen and declined: nothing was stopped midway.

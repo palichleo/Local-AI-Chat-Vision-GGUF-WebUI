@@ -459,6 +459,17 @@ test('restored generations share a response until the next real user message', a
     { role: 'user', content: 'Another image' },
     { role: 'assistant', content: '', tool_calls: [call] },
     { role: 'tool', tool_call_id: call.id, content: JSON.stringify({ run_id: 'run3' }) },
+    // Several images made in one call (its `series`), the last of which failed: those made come back.
+    { role: 'user', content: 'Three more' },
+    { role: 'assistant', content: '', tool_calls: [call] },
+    {
+      role: 'tool',
+      tool_call_id: call.id,
+      content: JSON.stringify({
+        status: 'partial',
+        images: [{ status: 'success', run_id: 'run4' }, { status: 'success', run_id: 'run5' }, { status: 'error' }],
+      }),
+    },
   ];
   const assistant = source.slice(source.indexOf('function assistantMessage('), source.indexOf('function userContent(')),
     render = source.slice(
@@ -467,12 +478,12 @@ test('restored generations share a response until the next real user message', a
     );
   runInNewContext(assistant + render + ';this.draw=renderTranscript;', context);
   context.draw(messages);
-  assert.equal(roots.length, 2);
+  assert.equal(roots.length, 3);
   assert.equal(restored[0].container, restored[1].container);
   assert.notEqual(restored[1].container, restored[2].container);
   assert.deepEqual(
     restored.map(item => item.run),
-    ['run1', 'run2', 'run3'],
+    ['run1', 'run2', 'run3', 'run4', 'run5'],
   );
   assert.equal(roots[0].children.find(item => item.className === 'message-body').textContent, 'Plan before generation');
 });

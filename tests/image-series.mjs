@@ -197,6 +197,14 @@ test('the images of a series one after another, then one result for the call: ev
   );
   assert.equal(told.workflow, 'Z-Image');
   assert.equal('seed' in told.parameters, false, 'the seed is each image’s own');
+  // Each image keeps its identifier: the conversation reopened shows them all again by it (left
+  // out, the message came back empty), and the line of an interrupted creation is not written.
+  assert.deepEqual(told.images.map(image => image.run_id), ['run-12', 'run-13', 'run-14']);
+  assert.equal(told.run_id, undefined);
+  const { callNote } = await import('../public/transcript.mjs');
+  const call = { id: 'call-1', type: 'function', function: { name: 'create_image', arguments: '{}' } };
+  assert.equal(callNote(call, { role: 'tool', tool_call_id: 'call-1', content: result.content }), '');
+  assert.equal(result.stopped, false);
   // A large model reads its facts: no identifier.
   const facts = JSON.parse(capableResult(result.content));
   assert.equal('use_as_source' in facts || 'workflow_id' in facts || 'takes_note' in facts, false);
@@ -216,8 +224,12 @@ test('a series stops at an image refused or failed; stopped by the user, the cal
   assert.equal(asked.length, 1, 'nothing asked after the failure');
   assert.deepEqual([told.status, told.made, told.takes], ['partial', 1, [12]]);
   assert.match(told.message, /image 2 a échoué/);
-  assert.equal(told.note, 'settled later');
+  // Not the note of a single failed image (« rien n’a été produit », then « refais le même appel »):
+  // it would have the images already made done again.
+  assert.match(told.note, /^Série incomplète : 1 image sur 3 est faite et montrée à l’utilisateur/);
+  assert.match(told.note, /Ne refais jamais celles qui existent/);
   assert.equal(result.failed, false, 'what was made stays: the turn goes on');
+  assert.equal(result.stopped, true, 'and the model does not call again in this message');
 
   ({ asked, options } = page([() => ({ content: '{"status":"denied"}', images: [], denied: true })]));
   told = JSON.parse((await runSeries(request, made(12, 'A fox.', 1), options)).content);
