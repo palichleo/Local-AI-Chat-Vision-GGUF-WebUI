@@ -19,7 +19,7 @@
     "prompt": "The whole clip in English, for a video model that knows nothing of this conversation: one paragraph of five to eight sentences, present tense, in the order things happen. Who or what is seen and how they look, the place, the time of day and the light; what happens, beat by beat, with the pace of the gestures; how the camera moves and how it ends; the look of the picture; and the sound, since the clip has sound (ambience, noises, spoken words in quotes, in the language they are spoken). With a start image, describe it in one sentence, then what moves and changes. Keep everything the user asked for, in their order. Not the length: it goes in duration.",
     "roles": {
       "start_image": {
-        "description": "Image the clip starts on, as its first frame: to animate an image, or make a video from it."
+        "description": "Image the clip starts on, as its first frame: to animate an image, or make a video from it. A video take with \"frame\": \"last\" starts a new clip where that take ends."
       },
       "end_image": {
         "description": "Image the clip must end on exactly, as its last frame. Only when the user asks for an end image or a last frame in so many words: a place, an object or a person the camera goes to or reveals is a reference."
@@ -30,8 +30,8 @@
     }
   },
   "extend_video": {
-    "summary": "Propose a continuation of an existing video: a new shot that follows its last frames.",
-    "guidance": "Call it as soon as the user asks for a video to go on, with your best proposal: the user can edit it and confirms it before anything runs.",
+    "summary": "Propose a continuation of an existing video: the same clip made longer. The result plays the source clip, then a new part that follows its last frames.",
+    "guidance": "Call it only when the user asks for a clip to go on or to be longer (« la suite », « continue », « prolonge »), with your best proposal: the user can edit it and confirms it before anything runs. Not to make a video again, and not to start a new clip on the last image of another: both are create_video (the take with \"frame\": \"last\" as its start_image for the second).",
     "prompt": "What happens next in English, for a video model that only sees the last frames of the source: three to six sentences, present tense. Who or what is on screen in a few words, then the new action beat by beat, how the camera moves and ends, and the sound (ambience, noises, spoken words in quotes, in the language they are spoken).",
     "roles": {
       "source": { "description": "Video to continue." },

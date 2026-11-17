@@ -497,7 +497,15 @@ test('a capable model gets the consigne of Moodix in place of the local line, th
   // was answered with an image, « la dernière prise » read as the one before), with the takes.
   const takes = CAPABLE_SYSTEM.slice(CAPABLE_SYSTEM.indexOf('Takes and references'), CAPABLE_SYSTEM.indexOf('Writing to the user'));
   assert.match(takes, /\n- A remark on a result the user does not name is about the take on their screen, else the latest take/);
-  assert.match(takes, /that same kind of thing again, from the same inputs \(a remark on a video asks for a video\), unless they say otherwise/);
+  assert.match(takes, /that same kind of thing again \(a remark on a video asks for a video\), unless they say otherwise/);
+  // (« From the same inputs » is gone: read on a continuation, it had « on recommence » answered by
+  // another continuation, where the user meant the video made again from its start image.)
+  assert.doesNotMatch(takes, /from the same inputs/);
+  // A video made again is a new clip from the image its clip started on, never a continuation; one
+  // that starts where a take ends takes the last image of that take.
+  assert.match(takes, /« recommence », « on recommence », « refais la vidéo »\) is a new clip, made with the video tool from the image the clip started on/);
+  assert.match(takes, /Never a continuation: that tool is only for a clip the user wants longer \(« la suite », « continue », « prolonge »\)/);
+  assert.match(takes, /is a new video whose start image is that take with "frame": "last"\. Not a continuation\./);
   assert.match(takes, /« La dernière prise » is the latest take, whatever its kind\./);
 });
 
