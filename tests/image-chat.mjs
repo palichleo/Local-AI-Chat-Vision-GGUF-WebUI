@@ -75,6 +75,8 @@ async function exchange({
   };
   const requests = [],
     toolOptions = [],
+    // Each proposal put to the user, as it was then.
+    proposals = [],
     reviews = [],
     views = [],
     generationContainers = [];
@@ -126,7 +128,7 @@ async function exchange({
     setConversationTitle() {},
     workflowsUI: {
       requestTool: async (...args) => ({
-        ...(toolOptions.push(args[4]) && {}),
+        ...(toolOptions.push(args[4]) && proposals.push({ ...args[0] }) && {}),
         content: JSON.stringify({ status: denied ? 'denied' : failed ? 'generated' : 'success' }),
         images,
         failed,
@@ -169,7 +171,7 @@ async function exchange({
                   call: { ...call, id: requests.length === 1 ? call.id : 'call_' + requests.length },
                   workflowName: 'Photo',
                   ...(brief
-                    ? { requestId: 'r1', approvalToken: 't1', mediaType: 'video', brief: 'PLAN FIRST (Studio)', cardBrief: 'WORDS OVER THE CARD' }
+                    ? { requestId: 'r1', approvalToken: 't1', mediaType: 'video', autoAllow: true, brief: true, cardBrief: 'WORDS OVER THE CARD', studioBrief: 'WORDS BEFORE THE STUDIO' }
                     : {}),
                 },
               },
@@ -228,7 +230,7 @@ async function exchange({
     context,
   );
   await context.sendMessage({ preventDefault() {} });
-  return { state, requests, toolOptions, reviews, views, generationContainers, messages: $('messages') };
+  return { state, requests, toolOptions, proposals, reviews, views, generationContainers, messages: $('messages') };
 }
 
 test('without vision, generated outputs are explained without marking them visually reviewed', async () => {
@@ -528,12 +530,43 @@ test('in the Chat a video not talked over yet comes with the words of Moodix, th
   assert.equal(agreed.state.messages.find(message => message.tool_calls).planned, undefined);
 });
 
-test('in the Studio a video not talked over yet keeps its plan first: nothing is set before the user answers', async () => {
-  const result = await exchange({ mediaType: 'video', brief: true, inStudio: true, finalText: 'Mon plan. On y va ?' });
+test('in the Studio a video not seen yet comes with the words of Moodix too, then is set there and waits: one call, one result', async () => {
+  const plan = 'L’éléphant lève sa trompe au coucher du soleil, cinq secondes. Cela vous convient ?';
+  const result = await exchange({ mediaType: 'video', brief: true, inStudio: true, finalText: plan });
+  // 1: the call. 2: its words, without tools nor thinking, after the note of the Studio (not the
+  // long plan of before, nor the note of a card). No request after the take: made from the Studio,
+  // the chat model stays away.
   assert.equal(result.requests.length, 2);
-  assert.deepEqual(JSON.parse(result.requests[1].messages.at(-1).content), { status: 'waiting_for_user', message: 'PLAN FIRST (Studio)' });
-  assert.equal(result.toolOptions.length, 0, 'no proposal put to the user yet');
-  assert.equal(result.state.messages.at(-1).content, 'Mon plan. On y va ?');
+  const wording = result.requests[1];
+  assert.equal(wording.tools, false);
+  assert.equal(wording.thinking, false);
+  assert.deepEqual(JSON.parse(wording.messages.at(-1).content), { status: 'waiting_for_user', message: 'WORDS BEFORE THE STUDIO' });
+  // The proposal is then put to the user in the Studio, once, and the pointer is not to start it:
+  // the server allowed it (the settings), the page takes that back for a proposal with its words.
+  assert.equal(result.toolOptions.length, 1);
+  assert.equal(typeof result.toolOptions[0].approve, 'function');
+  assert.equal(result.toolOptions[0].studio, true);
+  assert.equal(result.proposals[0].autoAllow, false);
+  // What is kept: its words on the call they are about, then the one result of that call.
+  const calling = result.state.messages.find(message => message.tool_calls);
+  assert.equal(calling.content, plan);
+  assert.equal(calling.planned, true);
+  const results = result.state.messages.filter(message => message.role === 'tool' && message.tool_call_id === call.id);
+  assert.equal(results.length, 1);
+  assert.match(results[0].content, /success/);
+  assert.doesNotMatch(JSON.stringify(result.state.messages), /waiting_for_user|WORDS BEFORE THE STUDIO/);
+  // « Here is the video », or nothing: its own words, which name the Studio and no card.
+  const lied = await exchange({ mediaType: 'video', brief: true, inStudio: true, finalText: 'Voici la vidéo de l’éléphant dansant.' });
+  assert.match(lied.state.messages.find(message => message.tool_calls).content, /^Voici ce que je propose : le Studio montre la durée/);
+  // The same proposal come back after the user's answer (no note with it): set at once, and started
+  // by the pointer if the settings allow it, as the server says.
+  const again = await exchange({ mediaType: 'video', inStudio: true });
+  assert.equal(again.requests.length, 1);
+  assert.equal(again.state.messages.find(message => message.tool_calls).planned, undefined);
+  // An image is never held back by this.
+  const image = await exchange({ inStudio: true });
+  assert.equal(image.requests.length, 1);
+  assert.equal(image.proposals[0].autoAllow, undefined);
 });
 
 test('in the Chat an image starts at once and a video always waits on its card, whatever the settings allow', async () => {

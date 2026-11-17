@@ -4760,6 +4760,16 @@ export function setupStudio({
     },
     /** Whether a proposal of Moodix AI waits for « Générer », or a character for its check. */
     proposing: () => Boolean(proposal || checking),
+    /**
+     * The take on the screen (« PRISE n » at its top left), for what Moodix AI is told of it:
+     * { take, media }, or null when the screen shows none (nothing made, a file of the disk, a
+     * creation being made).
+     */
+    screenTake: () => {
+      const record = onStage(),
+        take = record?.outputs?.[0]?.take;
+      return Number.isInteger(take) ? { take, media: mediaOf(record) } : null;
+    },
     /** The verbs the Studio answers for Moodix AI. */
     accepts: name => name in MODE_OF_VERB,
   };

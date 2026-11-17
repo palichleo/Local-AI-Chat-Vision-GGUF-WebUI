@@ -717,3 +717,27 @@ test('the LoRAs of the user shown with a proposal go with it: kept through later
   assert.equal(plain.styles, undefined);
   assert.equal((await revise(runtime, plain, { styles })).styles, undefined);
 });
+
+test('an image made from another keeps its format: a portrait is not fitted into the square of the profile', async () => {
+  const list = shipped(),
+    krea = of(list, 'krea2'),
+    PORTRAIT = uid(7),
+    { runtime } = world({ workflows: list, resources: { [PORTRAIT]: picture('escalier.png', 1536, 2728) } });
+  const edit = (args, id) =>
+    runtime.request([call('create_image', { prompt: 'The same staircase at night.', workflow: krea.id, ...args }, id)], {
+      conversationId: A,
+      turnId: turn,
+      messages: [],
+    });
+  // No size asked: the format of the source, at the number of pixels of the profile.
+  const followed = await edit({ source: { resource: PORTRAIT } }, 'call-1');
+  const { width, height } = followed.resolution;
+  assert.ok(height > width, `${width}x${height}`);
+  assert.ok(Math.abs(width / height - 9 / 16) < 0.02, `${width}x${height}`);
+  assert.ok(Math.abs(width * height - 1024 * 1024) / (1024 * 1024) < 0.1, `${width}x${height}`);
+  // A size asked for is kept, and an image without a source keeps the size of its profile.
+  const asked = await edit({ source: { resource: PORTRAIT }, width: 1024, height: 1024 }, 'call-2');
+  assert.deepEqual(asked.resolution, { width: 1024, height: 1024 });
+  const alone = await edit({}, 'call-3');
+  assert.deepEqual(alone.resolution, { width: 1024, height: 1024 });
+});

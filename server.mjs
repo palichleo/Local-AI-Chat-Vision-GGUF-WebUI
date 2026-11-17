@@ -11,8 +11,8 @@ import {
   resourceReadIds,
 } from './lib/resources.mjs';
 import { citedImages, citedMessage, citedSaid, citedUnused, citedNumbers } from './lib/cited-resources.mjs';
-import { briefMessage, briefMissing, cardBrief } from './lib/video-brief.mjs';
-import { CAPABLE, CAPABLE_CARD, capableMessages, wordingOf } from './lib/model-wording.mjs';
+import { briefMissing, cardBrief, studioBrief } from './lib/video-brief.mjs';
+import { CAPABLE, CAPABLE_CARD, CAPABLE_STUDIO, capableMessages, takesContext, wordingOf } from './lib/model-wording.mjs';
 import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
@@ -853,21 +853,8 @@ export async function createApplication({
     }
     const active = await resources.catalog(project);
     const context = resourceCatalogPrompt(active, { cited, wording });
-    if (context && wording === CAPABLE) {
-      // A capable model: at the end of the user's last message, after the consigne, the tools and
-      // the history its provider keeps in cache. In the consigne, each project changed the start
-      // of every request (0.6.44: nothing read again from the cache on going to another project).
-      const last = (body.messages ?? []).findLastIndex(message => message?.role === 'user' && !message.internal),
-        said = payload.messages[last];
-      if (said)
-        payload.messages[last] = {
-          ...said,
-          content:
-            typeof said.content === 'string'
-              ? said.content + context
-              : [...said.content, { type: 'text', text: context.trimStart() }],
-        };
-    } else if (context) {
+    // (A capable model is given it below, with what it is told of the takes.)
+    if (context && wording !== CAPABLE) {
       if (payload.messages[0]?.role === 'system')
         payload.messages[0] = { ...payload.messages[0], content: payload.messages[0].content + context };
       else payload.messages.unshift({ role: 'system', content: context });
@@ -886,6 +873,25 @@ export async function createApplication({
     // Not saved yet, the conversation is in the project the page names (its takes are numbered there).
     if (conversationId) namedProjects.set(conversationId, project);
     const runs = conversationId ? (await gallery.list(conversationId, { includeImages: false })).runs : [];
+    if (wording === CAPABLE) {
+      // A capable model: at the end of the user's last message, after the consigne, the tools and
+      // the history its provider keeps in cache. In the consigne, each project changed the start
+      // of every request (0.6.44: nothing read again from the cache on going to another project).
+      // After the references, the latest take of the conversation and the one on the user's screen
+      // (`screen`, from the page): told nowhere, « la dernière prise » was read as the one before,
+      // and a remark on a video just made was answered with an image (17/11).
+      const told = context + takesContext(runs, body.messages, body.screen),
+        last = (body.messages ?? []).findLastIndex(message => message?.role === 'user' && !message.internal),
+        said = payload.messages[last];
+      if (told && said)
+        payload.messages[last] = {
+          ...said,
+          content:
+            typeof said.content === 'string'
+              ? said.content + told
+              : [...said.content, { type: 'text', text: told.trimStart() }],
+        };
+    }
     if (
       toolConfig.enabled &&
       body.tools !== false &&
@@ -2726,13 +2732,15 @@ export async function createApplication({
                     throw problem(citedMessage(made.cited.left, made.cited.roles, { byNumber: wordingOf(chat.connection) === CAPABLE }), 400);
                   }
                   request = made;
-                  // A video not talked over yet (lib/video-brief.mjs): proposed all the same, with what
-                  // Moodix is to say of it. In the Chat its words come over the card of the proposal,
-                  // which waits for the user (`cardBrief`); in the Studio its plan comes first and the
-                  // user's answer sets the Studio (`brief`). The page knows where it is.
-                  if (request && !request.missing && briefMissing(body.messages, call)) {
-                    request.brief = briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []));
-                    request.cardBrief = wordingOf(chat.connection) === CAPABLE ? CAPABLE_CARD : cardBrief();
+                  // A video the user has not had under their eyes yet (lib/video-brief.mjs): proposed
+                  // with what Moodix is to say of it (`brief`), and it waits for the user. Its words come
+                  // over the card of the proposal in the Chat (`cardBrief`), before the Studio is set
+                  // in the Studio (`studioBrief`). The page knows where it is.
+                  const capable = wordingOf(chat.connection) === CAPABLE;
+                  if (request && !request.missing && briefMissing(body.messages, call, { talked: !capable })) {
+                    request.brief = true;
+                    request.cardBrief = capable ? CAPABLE_CARD : cardBrief();
+                    request.studioBrief = capable ? CAPABLE_STUDIO : studioBrief();
                   }
                   // Said where the user confirms: what the prompt was written from.
                   if (replacing && request)

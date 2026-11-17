@@ -12,6 +12,7 @@ import { reflection, thoughtTime } from '../public/reflection.mjs';
 import { History, MAX_CONVERSATION_MESSAGES } from '../lib/history.mjs';
 import { nativeFields } from '../lib/native-messages.mjs';
 import { problem } from '../lib/engine.mjs';
+import { briefMissing } from '../lib/video-brief.mjs';
 
 /**
  * A turn of the chat from its first word to what is kept of it (0.6.31): the page (slices of
@@ -126,8 +127,9 @@ const videoProposal = (id = 'call_1') => ({
   requestId: 'r1',
   approvalToken: 't1',
   mediaType: 'video',
-  brief: 'PLAN FIRST (Studio)',
+  brief: true,
   cardBrief: 'WORDS OVER THE CARD',
+  studioBrief: 'WORDS BEFORE THE STUDIO',
 });
 const PLAN = 'Le renard court dans la neige pendant cinq secondes, la caméra le suit. Cela vous convient ?';
 const ID = 'a1111111-1111-4111-8111-111111111111';
@@ -395,6 +397,199 @@ test('a video card that waits is saved with a result for its call: reopened, the
     assert.doesNotThrow(() => accepted(nextMessage(messages)));
   }
   assert.equal(first.saves.at(-1).incomplete, false);
+});
+
+// What the server answers to a video the model calls for (server.mjs): its proposal, which may start
+// alone as the settings of the Studio allow by default, with what Moodix is to say of it when the
+// user has not had it under their eyes yet (the rule itself: lib/video-brief.mjs).
+const FOX = '{"prompt":"un renard court dans la neige","duration":5}';
+const videoAnswer = (body, id, args = FOX) => {
+  const call = functionCall('create_video', id, args);
+  return called({
+    call,
+    workflowName: 'LTX',
+    requestId: 'r-' + id,
+    approvalToken: 't-' + id,
+    mediaType: 'video',
+    autoAllow: true,
+    ...(briefMissing(body.messages, call) ? { brief: true, cardBrief: 'WORDS OVER THE CARD', studioBrief: 'WORDS BEFORE THE STUDIO' } : {}),
+  });
+};
+// A generation as generation-runtime.mjs runs it: the answer of the user first, where the page asks for it.
+const asApproved = async (request, signal, onProgress, onImage, options) =>
+  (await options.approve(request, signal)) === 'once'
+    ? made()
+    : { content: JSON.stringify({ status: 'denied', message: 'L’utilisateur a refusé cette génération. Ne réessaie pas sans nouvelle demande.' }), images: [], denied: true };
+/**
+ * The Studio as the page drives it (public/studio.mjs): each proposal set there is kept as it came
+ * (`proposed`); the pointer presses « Générer » itself when it may, else it rests there until
+ * `generate()` (the user's click) or `decline()` (« Refuser », a new message). `screen`: the take on its screen.
+ */
+function studioOf({ screen = null } = {}) {
+  let answer = null;
+  const give = decision => {
+    const resolve = answer;
+    answer = null;
+    resolve(decision);
+  };
+  const studio = {
+    proposed: [],
+    accepts: () => true,
+    follow() {},
+    settled: async () => {},
+    screenTake: () => screen,
+    propose: proposal => {
+      studio.proposed.push(plain(proposal));
+      return proposal.autoAllow === true ? Promise.resolve('once') : new Promise(resolve => (answer = resolve));
+    },
+    waiting: () => Boolean(answer),
+    generate: () => give('once'),
+    decline: () => Boolean(answer) && (give('deny'), true),
+  };
+  return studio;
+}
+/** The cards of the Chat (proposal-card.mjs) of a page: each waits for `generate()` or `decline()`. */
+function cardsOf(target) {
+  const cards = [];
+  target.context.proposalCard = ({ request }) => {
+    let give;
+    const card = { request: plain(request), answer: new Promise(resolve => (give = resolve)), generate: () => give('once'), decline: () => give('deny') };
+    cards.push(card);
+    return card;
+  };
+  return cards;
+}
+const resultsOf = (messages, id) => messages.filter(message => message.role === 'tool' && message.tool_call_id === id).map(message => JSON.parse(message.content));
+
+test('in the Studio a video the user has not seen is set there with the words of Moodix and waits on « Générer »: one click, one result', async t => {
+  const store = await historyStore(t),
+    studio = studioOf({ screen: { take: 4, media: 'video' } });
+  const agent = page({
+    store,
+    state: { view: 'studio', studio },
+    chat: (body, n) => (n === 1 ? videoAnswer(body, 'call_1') : said(PLAN)),
+    requestTool: asApproved,
+  });
+  const turn = agent.send('Fais une vidéo d’un renard');
+  await until(() => studio.waiting());
+  // 1: its call. 2: its words, without tools, after the note of the Studio (no plan to answer by « go »).
+  assert.equal(agent.requests.length, 2);
+  assert.equal(agent.requests[1].tools, false);
+  assert.deepEqual(JSON.parse(agent.requests[1].messages.at(-1).content), { status: 'waiting_for_user', message: 'WORDS BEFORE THE STUDIO' });
+  // The proposal is in the Studio, once, and the pointer rests on « Générer »: the settings allow a
+  // video to start alone (`autoAllow` from the server), not one the user sees for the first time.
+  assert.equal(studio.proposed.length, 1);
+  assert.equal(studio.proposed[0].call.id, 'call_1');
+  assert.equal(studio.proposed[0].autoAllow, false);
+  // While it waits the disk holds the words on their call, and a result for it (the page may close).
+  const waited = agent.saves.at(-1).messages;
+  assert.deepEqual(roles(waited), ['user', 'assistant', 'tool']);
+  assert.equal(waited[1].content, PLAN);
+  assert.equal(waited[1].planned, true);
+  assert.equal(resultsOf(waited, 'call_1')[0].unanswered, true);
+  assert.doesNotMatch(JSON.stringify(waited), /waiting_for_user|WORDS BEFORE THE STUDIO/);
+  // « Générer »: the video is made, without another word of the model.
+  studio.generate();
+  await turn;
+  assert.equal(agent.requests.length, 2, 'no second call of the model');
+  for (const messages of [agent.state.messages, agent.saves.at(-1).messages, (await store.read(ID)).messages]) {
+    assert.deepEqual(roles(messages), ['user', 'assistant', 'tool']);
+    assert.deepEqual(resultsOf(messages, 'call_1').map(result => result.status), ['success']);
+    assert.doesNotMatch(JSON.stringify(messages), /unanswered|waiting_for_user/);
+    assert.equal(messages[1].content, PLAN);
+    assert.doesNotThrow(() => accepted(nextMessage(messages)));
+  }
+  assert.equal(agent.saves.at(-1).incomplete, false);
+  // What its screen showed as the user wrote goes with every request of the turn.
+  assert.deepEqual(agent.requests.map(request => request.screen), [{ take: 4, media: 'video' }, { take: 4, media: 'video' }]);
+
+  // « Refuser » instead: one result too, and the turn ends there.
+  const other = studioOf(),
+    refused = page({ state: { view: 'studio', studio: other }, chat: (body, n) => (n === 1 ? videoAnswer(body, 'call_1') : said(PLAN)), requestTool: asApproved });
+  const declined = refused.send('Fais une vidéo d’un renard');
+  await until(() => other.waiting());
+  other.decline();
+  await declined;
+  assert.equal(refused.requests.length, 2);
+  assert.deepEqual(resultsOf(refused.state.messages, 'call_1').map(result => result.status), ['denied']);
+  // A screen without a take says nothing.
+  assert.ok(refused.requests.every(request => !('screen' in request)));
+});
+
+test('in the Studio the same proposal sent again after the user answered in words starts as the settings allow; another one waits again', async () => {
+  const studio = studioOf();
+  const agent = page({
+    state: { view: 'studio', studio },
+    // The model proposes, writes its words, then makes the same call again once the user wrote « go ».
+    chat: (body, n) => (n === 2 ? said(PLAN) : videoAnswer(body, 'call_' + n)),
+    requestTool: asApproved,
+  });
+  const turn = agent.send('Fais une vidéo d’un renard');
+  await until(() => studio.waiting());
+  // Their message declines the proposal that waited; the answer of the model is the same proposal.
+  await agent.send('go');
+  await turn;
+  assert.equal(agent.requests.length, 3, 'no words asked a second time');
+  assert.deepEqual(
+    studio.proposed.map(proposal => [proposal.call.id, proposal.autoAllow]),
+    [['call_1', false], ['call_3', true]],
+  );
+  assert.deepEqual(roles(agent.state.messages), ['user', 'assistant', 'tool', 'user', 'assistant', 'tool']);
+  assert.deepEqual(resultsOf(agent.state.messages, 'call_1').map(result => result.status), ['denied']);
+  assert.deepEqual(resultsOf(agent.state.messages, 'call_3').map(result => result.status), ['success']);
+  assert.equal(agent.state.messages[1].planned, true);
+  assert.equal(agent.state.messages[4].planned, undefined);
+
+  // A correction instead of « go »: the call that comes is a proposal nobody saw (another length).
+  // It comes with its words and waits in its turn (17/11: it started by itself).
+  const other = studioOf();
+  const corrected = page({
+    state: { view: 'studio', studio: other },
+    chat: (body, n) =>
+      n % 2 === 0 ? said(PLAN) : videoAnswer(body, 'call_' + n, n === 1 ? FOX : '{"prompt":"un renard court dans la neige","duration":8}'),
+    requestTool: asApproved,
+  });
+  const begun = corrected.send('Fais une vidéo d’un renard');
+  await until(() => other.waiting());
+  const next = corrected.send('Non, plutôt 8 secondes');
+  await until(() => other.proposed.length === 2 && other.waiting());
+  assert.equal(corrected.requests.length, 4);
+  assert.deepEqual(JSON.parse(corrected.requests[3].messages.at(-1).content), { status: 'waiting_for_user', message: 'WORDS BEFORE THE STUDIO' });
+  assert.deepEqual(other.proposed.map(proposal => proposal.autoAllow), [false, false]);
+  other.generate();
+  await Promise.all([begun, next]);
+  assert.deepEqual(resultsOf(corrected.state.messages, 'call_3').map(result => result.status), ['success']);
+  assert.equal(corrected.requests.length, 4);
+});
+
+test('in the Chat nothing changes: the card with the words of Moodix at the first call, the card alone when the same call comes back', async () => {
+  const chat = page({
+    chat: (body, n) => (n === 1 || n === 3 ? videoAnswer(body, 'call_' + n) : n === 2 ? said(PLAN) : said('')),
+    requestTool: asApproved,
+  });
+  const cards = cardsOf(chat);
+  const turn = chat.send('Fais une vidéo d’un renard');
+  await until(() => cards.length === 1);
+  assert.equal(chat.requests.length, 2);
+  assert.deepEqual(JSON.parse(chat.requests[1].messages.at(-1).content), { status: 'waiting_for_user', message: 'WORDS OVER THE CARD' });
+  assert.equal(chat.state.messages.length, 0, 'the turn waits on its card');
+  // The user answers in words: the card goes, and the same call of the model brings it back alone.
+  const next = chat.send('go');
+  await until(() => cards.length === 2);
+  assert.equal(chat.requests.length, 3, 'no words asked for the card that comes back');
+  assert.equal(cards[1].request.call.id, 'call_3');
+  // It waits there whatever the settings allow: in the Chat a video never starts by itself.
+  assert.equal(chat.state.generating, true);
+  cards[1].generate();
+  await Promise.all([turn, next]);
+  const messages = chat.state.messages;
+  assert.deepEqual(roles(messages), ['user', 'assistant', 'tool', 'user', 'assistant', 'tool']);
+  assert.deepEqual([messages[1].planned, messages[1].content], [true, PLAN]);
+  assert.deepEqual([messages[4].planned, messages[4].content], [undefined, '']);
+  assert.deepEqual(resultsOf(messages, 'call_1').map(result => result.status), ['denied']);
+  assert.deepEqual(resultsOf(messages, 'call_3').map(result => result.status), ['success']);
+  // From the Chat nothing is said of a screen.
+  assert.ok(chat.requests.every(request => !('screen' in request)));
 });
 
 // A character to put in a video, with no image of them (replace_character with a description): the

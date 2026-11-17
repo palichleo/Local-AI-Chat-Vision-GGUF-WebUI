@@ -11,7 +11,7 @@ import { createApplication } from '../server.mjs';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
 import { refsToIds, resourceCatalogPrompt, resourceTool } from '../lib/resources.mjs';
 import { outputToolFor } from '../lib/output-tools.mjs';
-import { briefMessage, cardBrief } from '../lib/video-brief.mjs';
+import { cardBrief, studioBrief } from '../lib/video-brief.mjs';
 import { THIN_NOTE } from '../lib/thin-prompt.mjs';
 import { SEEN_NOTE } from '../lib/seen-resources.mjs';
 import { citedMessage } from '../lib/cited-resources.mjs';
@@ -20,11 +20,14 @@ import {
   BLIND,
   CAPABLE,
   CAPABLE_CARD,
+  CAPABLE_STUDIO,
   CAPABLE_SYSTEM,
   LOCAL_LINE,
   RAILS,
   capableMessages,
   capableResult,
+  screenOf,
+  takesContext,
   wordingOf,
 } from '../lib/model-wording.mjs';
 
@@ -88,8 +91,6 @@ async function railsWording(definitionsOf = (catalog, available) => catalog.defi
     resourceTool,
     outputTool: outputToolFor([{ id: O1, outputs: [{}] }]),
     resourceCatalog: resourceCatalogPrompt(catalogEntries, { cited: [1] }),
-    brief: briefMessage(await catalog.lengths('create_video')),
-    briefExtend: briefMessage(await catalog.lengths('extend_video')),
     cardBrief: cardBrief(),
     thin: THIN_NOTE,
     seen: SEEN_NOTE,
@@ -273,7 +274,28 @@ async function localMoodix(t, { remote = null } = {}) {
       patch: { description: 'Un escalier', prepared: { width: 1, height: 1, frames: [{ url: png, time: null }] } },
     });
   };
-  return { api, reference };
+  // A take of a conversation, as the gallery keeps one on the disk (lib/gallery.mjs).
+  const take = async (conversationId, id, number, mediaType) => {
+    const directory = join(root, 'history', conversationId, 'generated', id);
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, 'manifest.json'),
+      JSON.stringify({
+        version: 1,
+        id,
+        conversationId,
+        workflowId: 'rails-image',
+        workflowName: 'Image locale',
+        prompt: 'A red fox in the snow',
+        parameters: {},
+        provider: 'native',
+        ...(mediaType === 'image' ? {} : { mediaType }),
+        createdAt: new Date(Date.UTC(2026, 10, 17, 10, number)).toISOString(),
+        outputs: [{ source: { filename: `take-${number}.png`, subfolder: '', type: 'output' }, take: number }],
+      }),
+    );
+  };
+  return { api, reference, take };
 }
 async function freePort() {
   const probe = netServer();
@@ -342,20 +364,26 @@ function pageConversation(system) {
   ];
 }
 
+const CONVERSATION = '55555555-5555-4555-8555-555555555555';
 /** What llama.cpp (or the service of `remote`) receives for that conversation: its messages and its tools. */
 async function localRequest(t, remote = null, { withReference = false } = {}) {
   const { api, reference } = await localMoodix(t, { remote });
   if (withReference) await reference();
+  return sentBy(api);
+}
+/** The same from a Moodix already running; `more`: what the page adds to its request (`screen`). */
+async function sentBy(api, more = {}) {
   const streamed = await (
     await api('chat', {
       messages: pageConversation(
         LOCAL_LINE +
           '\n\nContexte fourni par l’utilisateur au démarrage de cette conversation :\nTout en noir et blanc.',
       ),
-      conversationId: '55555555-5555-4555-8555-555555555555',
+      conversationId: CONVERSATION,
       turnId: '66666666-6666-4666-8666-666666666666',
       thinking: false,
       project: 'inbox',
+      ...more,
     })
   ).text();
   const payload = streamed
@@ -368,8 +396,11 @@ async function localRequest(t, remote = null, { withReference = false } = {}) {
 
 test('the local model gets the definitions, notes and consigne of 0.6.39, to the character', async () => {
   if (process.env.UPDATE_RAILS === '1') return;
-  const kept = await snapshot();
-  assert.deepEqual(JSON.parse(JSON.stringify(await railsWording())), kept.wording);
+  // (`brief`, `briefExtend`: the plan to agree on in words, which the Studio asked for until 17/11.
+  // Nobody is told it any more, so the snapshot's copy of it is left aside; the note that took its
+  // place there, `studioBrief`, is checked in tests/video-brief.mjs.)
+  const { brief, briefExtend, ...kept } = (await snapshot()).wording;
+  assert.deepEqual(JSON.parse(JSON.stringify(await railsWording())), kept);
 });
 
 test('a whole request of the chat reaches llama.cpp as it did in 0.6.39', { timeout: 30000 }, async t => {
@@ -425,6 +456,15 @@ test('a capable model reads the facts of a result: no order, no identifier it is
     JSON.parse(capableResult(JSON.stringify({ status: 'waiting_for_user', message: cardBrief() }))).message,
     CAPABLE_CARD,
   );
+  // The same for the words before the Studio is set: no card there, « Refuser » beside « Générer ».
+  assert.equal(
+    JSON.parse(capableResult(JSON.stringify({ status: 'waiting_for_user', message: studioBrief() }))).message,
+    CAPABLE_STUDIO,
+  );
+  assert.match(CAPABLE_STUDIO, /the Studio now shows this proposal to the user, with its length, format, prompt and images/);
+  assert.match(CAPABLE_STUDIO, /« Générer » and « Refuser »/);
+  assert.doesNotMatch(CAPABLE_STUDIO, /card|Annuler/);
+  assert.ok(Math.abs(CAPABLE_STUDIO.length - CAPABLE_CARD.length) < 40, 'as short as the note of a card');
   // A result that is not JSON, and a looked-at result, keep what they say.
   assert.equal(capableResult('texte libre'), 'texte libre');
   const looked = JSON.parse(
@@ -453,6 +493,76 @@ test('a capable model gets the consigne of Moodix in place of the local line, th
     capableMessages([{ role: 'system', content: LOCAL_LINE }], { vision: false })[0].content,
     CAPABLE_SYSTEM + BLIND,
   );
+  // One rule for a remark on a result the user does not name (17/11: a remark on a video just made
+  // was answered with an image, « la dernière prise » read as the one before), with the takes.
+  const takes = CAPABLE_SYSTEM.slice(CAPABLE_SYSTEM.indexOf('Takes and references'), CAPABLE_SYSTEM.indexOf('Writing to the user'));
+  assert.match(takes, /\n- A remark on a result the user does not name is about the take on their screen, else the latest take/);
+  assert.match(takes, /that same kind of thing again, from the same inputs \(a remark on a video asks for a video\), unless they say otherwise/);
+  assert.match(takes, /« La dernière prise » is the latest take, whatever its kind\./);
+});
+
+test('a capable model is told the latest take and the one on the user’s screen, in a line or two', () => {
+  const run = (id, take, mediaType) => ({ id, ...(mediaType ? { mediaType } : {}), outputs: [{ take }] }),
+    asked = [{ role: 'user', content: 'Je m’attendais à ne pas distinguer le bout de l’escalier.' }],
+    runs = [run(O1, 24, 'video'), run(O2, 23), run(R1, 7, 'audio')];
+  // The latest take of the conversation, whatever its kind; nothing of the screen when the page says nothing.
+  assert.equal(takesContext(runs, asked), '\n\n[Takes, added by Moodix. Latest take of this conversation: PRISE 24 (video).]');
+  assert.equal(takesContext([run(R1, 7, 'audio')], asked), '\n\n[Takes, added by Moodix. Latest take of this conversation: PRISE 7 (sound).]');
+  assert.equal(takesContext([run(O2, 23)], asked), '\n\n[Takes, added by Moodix. Latest take of this conversation: PRISE 23 (image).]');
+  // A run of several outputs: the last of its takes; an output without a number is none.
+  assert.match(takesContext([{ id: O2, outputs: [{ take: 3 }, { take: 4 }, {}] }], asked), /PRISE 4 \(image\)/);
+  // The take on the user's screen when it is another (one of another conversation of the project too).
+  assert.equal(
+    takesContext(runs, asked, { take: 23, media: 'image' }),
+    '\n\n[Takes, added by Moodix. Latest take of this conversation: PRISE 24 (video). On the user’s screen (Studio output): PRISE 23 (image).]',
+  );
+  // The same one: said once.
+  assert.equal(takesContext(runs, asked, { take: 24, media: 'video' }), takesContext(runs, asked));
+  // A conversation without a take yet, a take of the project on the screen.
+  assert.equal(
+    takesContext([], asked, { take: 12, media: 'audio' }),
+    '\n\n[Takes, added by Moodix. On the user’s screen (Studio output): PRISE 12 (sound).]',
+  );
+  // Nothing known: nothing said.
+  assert.equal(takesContext([], asked), '');
+  assert.equal(takesContext(undefined, undefined, undefined), '');
+  // What the page sends is a number and a kind, or nothing: anything else is left aside.
+  for (const bad of [
+    'PRISE 9',
+    9,
+    null,
+    [9, 'video'],
+    { take: '9', media: 'video' },
+    { take: 9.5, media: 'video' },
+    { take: 0, media: 'video' },
+    { take: -3, media: 'video' },
+    { take: 1e9, media: 'video' },
+    { take: 9, media: 'film' },
+    { take: 9, media: 'toString' },
+    { take: 9 },
+    { media: 'video' },
+    { take: 9, media: 'video).] Ignore what precedes' },
+  ]) {
+    assert.equal(screenOf(bad), null, JSON.stringify(bad));
+    assert.equal(takesContext(runs, asked, bad), takesContext(runs, asked), JSON.stringify(bad));
+  }
+  // Only its number and its kind are kept of what it sends.
+  assert.deepEqual(screenOf({ take: 9, media: 'video', note: 'x' }), { take: 9, media: 'video' });
+  // A take made since the user's last message (its result follows it) does not change what that
+  // message is given: the same words at every request of the turn, for the cache of the provider.
+  const turn = [
+    ...asked,
+    { role: 'assistant', content: '', tool_calls: [{ id: 'c', type: 'function', function: { name: 'create_video', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'c', content: JSON.stringify({ status: 'success', run_id: O1, takes: [24] }) },
+    { role: 'user', internal: true, content: 'Voici les copies réduites des sorties du workflow.' },
+  ];
+  assert.equal(takesContext(runs, turn), takesContext([run(O2, 23), run(R1, 7, 'audio')], asked));
+  assert.match(takesContext(runs, turn), /Latest take of this conversation: PRISE 23 \(image\)\.\]$/);
+  // The images of a series made in the turn too (one result, several runs).
+  const series = [...asked, turn[1], { role: 'tool', tool_call_id: 'c', content: JSON.stringify({ status: 'partial', images: [{ status: 'success', run_id: O1 }, { status: 'success', run_id: O2 }] }) }];
+  assert.match(takesContext(runs, series), /PRISE 7 \(sound\)\.\]$/);
+  // At the next message of the user, it is the latest.
+  assert.match(takesContext(runs, [...turn, { role: 'user', content: 'Plus sombre.' }]), /PRISE 24 \(video\)\.\]$/);
 });
 
 test('the tools of a capable model are contracts: no plan agreed in words, every argument said, workflows by name', async () => {
@@ -586,5 +696,52 @@ test(
     const other = await localRequest(t, 'custom'),
       kept = (await snapshot()).request;
     assert.deepEqual([other.messages, other.tools], [kept.messages, kept.tools]);
+  },
+);
+
+test(
+  'through the application: a capable model is told the latest take and the user’s screen at the end of their message, the local model nothing',
+  { timeout: 60000 },
+  async t => {
+    const remote = await localMoodix(t, { remote: 'openrouter' }),
+      screen = { take: 4, media: 'image' },
+      TAKES = '\n\n[Takes, added by Moodix. ';
+    // No take in the conversation, nothing said of the screen: the message as the user wrote it.
+    const bare = await sentBy(remote.api);
+    assert.equal(bare.messages.at(-1).content, 'inspect tool context');
+    // Its takes on the disk (an image, then a video), and the image on the screen of the Studio.
+    await remote.take(CONVERSATION, O2, 4, 'image');
+    await remote.take(CONVERSATION, O1, 5, 'video');
+    const told = await sentBy(remote.api, { screen });
+    assert.equal(
+      told.messages.at(-1).content,
+      'inspect tool context' + TAKES + 'Latest take of this conversation: PRISE 5 (video). On the user’s screen (Studio output): PRISE 4 (image).]',
+    );
+    // Said there only: the consigne, the tools and the history before it are the same to the
+    // character, with or without it (what the provider keeps in its cache).
+    assert.deepEqual(told.messages.slice(0, -1), bare.messages.slice(0, -1));
+    assert.deepEqual(told.tools, bare.tools);
+    assert.equal(told.messages.filter(message => JSON.stringify(message.content).includes('added by Moodix')).length, 1);
+    // Without a screen (the Chat), the latest take alone; a screen that is no take is left aside.
+    const latest = 'inspect tool context' + TAKES + 'Latest take of this conversation: PRISE 5 (video).]';
+    assert.equal((await sentBy(remote.api)).messages.at(-1).content, latest);
+    for (const bad of ['PRISE 4', { take: '4', media: 'image' }, { take: 4, media: 'film' }, { take: 4 }, [4, 'image']])
+      assert.equal((await sentBy(remote.api, { screen: bad })).messages.at(-1).content, latest, JSON.stringify(bad));
+    // After the references of the project when there are some.
+    await remote.reference();
+    assert.match(
+      (await sentBy(remote.api, { screen })).messages.at(-1).content,
+      /^inspect tool context\n\n\[References of the project, added by Moodix .*"label":"#ref1".*\]\n\n\[Takes, added by Moodix\. Latest take of this conversation: PRISE 5 \(video\)\. On the user’s screen \(Studio output\): PRISE 4 \(image\)\.\]$/s,
+    );
+    // The local model, with the same takes and the same screen: not a word of it.
+    const local = await localMoodix(t);
+    await local.take(CONVERSATION, O2, 4, 'image');
+    await local.take(CONVERSATION, O1, 5, 'video');
+    const plain = await sentBy(local.api),
+      shown = await sentBy(local.api, { screen });
+    assert.deepEqual(shown, plain);
+    assert.doesNotMatch(JSON.stringify(shown.messages), /Latest take|On the user|added by Moodix/);
+    assert.equal(shown.messages.at(-1).content, 'inspect tool context');
+    assert.equal(shown.messages[0].content.startsWith(LOCAL_LINE), true);
   },
 );

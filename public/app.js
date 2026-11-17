@@ -2151,15 +2151,21 @@ const setInStudio = request =>
 const PLAN_FALLBACK =
   'Voici ce que je propose : la carte ci-dessous montre la durée, le format et le prompt. Modifiez ce que vous ' +
   'voulez, puis appuyez sur « Générer » si cela vous convient ; rien ne part sans votre accord.';
+// The same when the proposal is set in the Studio: there is no card under those words.
+const PLAN_FALLBACK_STUDIO =
+  'Voici ce que je propose : le Studio montre la durée, le format et le prompt. Modifiez ce que vous ' +
+  'voulez, puis appuyez sur « Générer » si cela vous convient ; rien ne part sans votre accord.';
 /**
  * The words of Moodix over the card of a video it proposes, as they may stand there: never « here is
  * the video » (nothing is made yet: the chat model wrote it more than once), never nothing.
+ * `inStudio`: the proposal is set in the Studio, not on a card.
  */
-function planWords(text) {
+function planWords(text, inStudio = false) {
   const said = String(text || '').trim(),
     made = /\bvid[ée]o\b[^.!?\n]{0,40}\b(?:est|a été)\s+(?:prête|faite|générée|créée|terminée|envoyée)\b/i,
     here = /\b(?:voici|voil[àa])\s+(?:la|ta|votre|une)\s+vid[ée]o\b|\bhere(?:'s|’s| is)\s+(?:the|your|a)\s+video\b/i;
-  return !said || made.test(said) || (said.length < 160 && here.test(said)) ? PLAN_FALLBACK : said;
+  if (said && !made.test(said) && !(said.length < 160 && here.test(said))) return said;
+  return inStudio ? PLAN_FALLBACK_STUDIO : PLAN_FALLBACK;
 }
 /** The card of a proposal in `host`, until the user answers (`delay`: the count of a video). */
 function cardChoice(host, proposal, abort, delay) {
@@ -2538,6 +2544,9 @@ async function sendMessage(event) {
     userView = userMessage(text, images, videos);
   state.conversationInstructions ??= state.messages.length ? '' : state.globalInstructions || '';
   const turnId = crypto.randomUUID();
+  // The take on the Studio's screen as the user writes, when the Studio is the view: a model told
+  // it (server.mjs, a capable one) reads « celle-ci » as that take. The same at every request of the turn.
+  const screen = state.view === 'studio' ? (state.studio?.screenTake?.() ?? null) : null;
   state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
   let view = assistantMessage(),
     output = '',
@@ -2649,6 +2658,7 @@ async function sendMessage(event) {
           // Only deciding whether to chain another tool: thinking would cost seconds for nothing shown.
           // A plan put to the user before a video is a few lines: no thinking either.
           ...(silent || briefing ? { thinking: false } : {}),
+          ...(screen ? { screen } : {}),
           conversationId: state.conversationId,
           turnId,
         },
@@ -2728,7 +2738,7 @@ async function sendMessage(event) {
         briefing = false;
         if (history.at(-1)?.role === 'tool' && history.at(-1).tool_call_id === held.request.call.id) history.pop();
         // After what it had written with its call, if anything (`lead`, still on the page above them).
-        const words = [held.lead.trim(), planWords(output.slice(held.lead.length))].filter(Boolean).join('\n\n');
+        const words = [held.lead.trim(), planWords(output.slice(held.lead.length), setInStudio(held.request))].filter(Boolean).join('\n\n');
         if (words !== output) {
           output = words;
           render();
@@ -2739,6 +2749,10 @@ async function sendMessage(event) {
         output = '';
         reasoning = '';
         request = held.request;
+        // It came with its words: it waits for the user. Set in the Studio, the pointer rests on
+        // « Générer » whatever the settings allow; a video starts by itself only when this very
+        // proposal comes back after the user answered it in words (lib/video-brief.mjs).
+        request.autoAllow = false;
         resumed = true;
         state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
         await persistConversation();
@@ -2764,16 +2778,17 @@ async function sendMessage(event) {
         output = '';
         reasoning = '';
       }
-      // A video not talked over yet. In the Studio its plan comes first, as before: the user's answer
-      // sets the Studio. In the Chat (16/11) Moodix says in a few lines what the clip will be, and the
-      // card of the proposal comes under those words, where the user agrees.
+      // A video the user has not had under their eyes yet (lib/video-brief.mjs): Moodix says in a few
+      // sentences what the clip will be, then the proposal is put to them, and waits. In the Chat
+      // (16/11) its card comes under those words; in the Studio (17/11) the pointer sets it and rests
+      // on « Générer »: the plan used to come alone there, and the user had to write « go » to it.
       if (!resumed && request.brief && request.requestId && !request.missing) {
-        if (setInStudio(request)) request = { kind: 'brief', call: request.call, message: request.brief };
-        else if (request.cardBrief) {
+        const note = setInStudio(request) ? request.studioBrief : request.cardBrief;
+        if (note) {
           history.push({
             role: 'tool',
             tool_call_id: request.call.id,
-            content: JSON.stringify({ status: 'waiting_for_user', message: request.cardBrief }),
+            content: JSON.stringify({ status: 'waiting_for_user', message: note }),
           });
           // Its words go on in the same place, over where the card will come (after what it wrote
           // with its call, if anything).
@@ -2794,22 +2809,6 @@ async function sendMessage(event) {
           tool_call_id: request.call.id,
           content: JSON.stringify({ status: 'nothing_generated', message: request.message }),
         });
-        state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
-        await persistConversation();
-        finishReason = '';
-        continue;
-      }
-      if (request.kind === 'brief') {
-        // A video is agreed on before it is generated: the model now writes its short plan and
-        // its questions, without tools, and the user's answer starts the generation.
-        history.push({
-          role: 'tool',
-          tool_call_id: request.call.id,
-          content: JSON.stringify({ status: 'waiting_for_user', message: request.message }),
-        });
-        allowTools = false;
-        resourceReads = 8;
-        briefing = true;
         state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
         await persistConversation();
         finishReason = '';

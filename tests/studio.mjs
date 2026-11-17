@@ -1222,6 +1222,8 @@ test('the screen takes the format chosen, the take whole in it, « PRISE n » on
     const [label] = body.find('studio-frame-label');
     assert.equal(label.textContent, 'PRISE 4');
     assert.equal(label.className, 'studio-frame-label is-take');
+    // The same take is what Moodix AI is told the user has on their screen (app.js, `screen`).
+    assert.deepEqual(studio.screenTake(), { take: 4, media: 'video' });
     // The readout says the format chosen, which the screen has.
     assert.match(body.find('studio-readout')[0].textContent, /^16:9/);
   } finally {
@@ -1252,10 +1254,13 @@ test('the screen takes the format chosen, the take whole in it, « PRISE n » on
     const [label] = body.find('studio-frame-label');
     assert.equal(label.textContent, 'PRISE 32', 'its counter, not the last take + 1 (a take deleted keeps its number)');
     assert.equal(label.className, 'studio-frame-label is-take is-coming');
+    // A take being made is not one the user can speak of yet.
+    assert.equal(page.studio.screenTake(), null);
     finish();
     await made;
     await settle();
     assert.equal(body.find('studio-frame-label')[0].textContent, 'PRISE 30', 'done: the last take again');
+    assert.deepEqual(page.studio.screenTake(), { take: 30, media: 'image' });
   } finally {
     page.restore();
   }
