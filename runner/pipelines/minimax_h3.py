@@ -28,6 +28,12 @@ RAM_RESERVE_GIB = 4
 LOCK_MARGIN_GIB = 0.5
 # Weights copied to the GPU in advance, while it computes the layers before them (WeightPool).
 AHEAD_GIB = 0.5
+# What is asked free beyond what the steps were measured to hold (least_gib): the margin of the
+# engine (1 GiB) and half a gigabyte. With less, a video of 1920 x 1088 failed one time of two,
+# after five minutes (17/11).
+EDGE_GIB = 1.5
+# What the video VAE's pixels are normalised by (ImageNet's, as the library's pipeline says).
+PIXEL_MEAN, PIXEL_STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
 
 
 def grid_of(parameters):
@@ -40,6 +46,32 @@ def working_gib(tokens):
     the allocator's slack, the engine's margin) plus the activations, which grow with the video
     (1 GiB for a 5 s draft)."""
     return 5 + tokens * 7168 * 2 * 6 / 1024**3
+
+
+def least_gib(tokens):
+    """Video memory the steps hold at the least, in GiB: with none of the weights kept on the
+    card, and the dense attention in pieces. Measured on the sweep of 17/11 (RTX 4070 SUPER,
+    INT8 model): 2.6 for 12 900 tokens, 5.1 for 34 800, 5.3 for 37 800, 9.7 for 76 000."""
+    return 1.2 + 0.112 * tokens / 1000
+
+
+def too_large(parameters, card_gib):
+    """Why this video cannot be made on a card of `card_gib`, in the user's words; '' when it can,
+    or when the card is not known. Said before anything is unloaded for it: at 1344 x 768 for
+    14 s the steps alone hold more than a 12 GiB card has, and the generation failed after
+    half a minute, whatever was closed (17/11)."""
+    if not card_gib:
+        return ''
+    need = least_gib(math.prod(grid_of(parameters)) + 512)
+    # The engine keeps 1 GiB of the card free (runner.engine).
+    if need <= card_gib - 1:
+        return ''
+    said = lambda value: f'{value:.0f}'  # noqa: E731
+    return (
+        f'MiniMax H3 ne peut pas faire cette vidéo sur cette carte graphique ({said(card_gib)} Go) : '
+        f'{parameters["width"]} × {parameters["height"]} pendant {round(parameters["frames"] / 24)} s '
+        f'demande environ {said(need)} Go pour le calcul seul. Réduisez la durée ou la résolution.'
+    )
 
 
 def check(job, family):
@@ -70,6 +102,12 @@ def preflight(job, config):
     from runner.models import minimax_h3
 
     minimax_h3.validate(header(job['components']['model']))
+    # A video the card cannot hold is said now, not after half a minute of loading.
+    from runner import hardware
+
+    refused = too_large(job['parameters'], hardware.card_gib())
+    if refused:
+        raise RuntimeError(refused)
     # A source video of another size or frame rate is refused here, before the chat model is unloaded.
     for ref in job['references']:
         if ref['role'] == 'source_video':
@@ -88,7 +126,10 @@ def _stage(block_name, components, state, **inputs):
     """
     from diffusers.modular_pipelines import MiniMaxH3Blocks
 
-    block = MiniMaxH3Blocks().sub_blocks[block_name]
+    # (« decode.audio »: a step of a block, when another of its steps is done here.)
+    block = MiniMaxH3Blocks()
+    for name in block_name.split('.'):
+        block = block.sub_blocks[name]
     pipe = block.init_pipeline()
     needed = {spec.name for spec in block.expected_components} | {spec.name for spec in block.expected_configs}
     pipe.update_components(**{name: value for name, value in components.items() if name in needed})
@@ -215,6 +256,7 @@ def _encode_tail(vae, audio_vae, path, tail, plan, parameters):
 
 
 def generate(job, config, progress):
+    import numpy
     import torch
     from PIL import Image
     from diffusers import MiniMaxH3Scheduler
@@ -222,6 +264,7 @@ def generate(job, config, progress):
     from diffusers.modular_pipelines.minimax_h3.references import MiniMaxH3ImageReference
     from runner.models.headers import header
     from runner.models import conditioning, minimax_h3, minimax_h3_text, minimax_h3_vae
+    from runner.models.ladder import smaller
     from runner.models.ltx25 import WeightPool
     from runner.models.pool import require
     from runner.models.residency import RESIDENCY, open_store, prefetch, use_order
@@ -236,6 +279,7 @@ def generate(job, config, progress):
         'MiniMax H3',
         working_gib(math.prod(grid_of(job['parameters'])) + 512),
         'la taille ou la durée de la vidéo',
+        measured=least_gib(math.prod(grid_of(job['parameters'])) + 512) + EDGE_GIB,
     )
     start = time.perf_counter()
     torch.cuda.reset_peak_memory_stats()
@@ -508,27 +552,36 @@ def generate(job, config, progress):
     vae = minimax_h3_vae.video_vae(paths['vae'], 'decoder')
     audio_vae = minimax_h3_vae.audio_vae(paths['audioVae'])
     with torch.inference_mode():
-        try:
-            decoded = _stage('decode', dict(vae=vae, audio_vae=audio_vae), state, output_type='pt')
-        except torch.OutOfMemoryError:
-            decoded = None
-        if decoded is None:
-            # The decoder with the whole video in float32 (6.3 GiB for a 5 s draft, whatever the
-            # files of the model) did not fit under the engine's ceiling, 1 GiB below what the card
-            # had free: an 8 GiB card. Decoded again with all of the card, where the engine would
-            # run the whole video again.
-            _free(scope={})
+
+        def frames_of():
+            """The frames, uint8 [frames, height, width, 3], off the GPU as each stretch of them
+            is decoded (minimax_h3_vae.decode_chunks): the block of the library joined the whole
+            video on the GPU, several times as 32-bit floats."""
+            scale = lambda values: torch.tensor(values, device='cuda').view(1, -1, 1, 1, 1)  # noqa: E731
+            latents = state.get('latents') * scale(vae.config.latents_std) + scale(vae.config.latents_mean)
+            made = []
+            for chunk in minimax_h3_vae.decode_chunks(vae, latents):
+                # As the block does: back from the VAE's normalisation (ImageNet's), in [0, 1].
+                chunk = (chunk.float() * scale(PIXEL_STD) + scale(PIXEL_MEAN)).clamp(0, 1)
+                made.append((chunk[0] * 255).round().byte().permute(1, 2, 3, 0).cpu().numpy())
+                del chunk
+            return numpy.concatenate(made)
+
+        def unbound():
+            # A clip that does not fit under the engine's ceiling (1 GiB below what the card had
+            # free): with all of the card, where the engine would run the whole video again.
             torch.cuda.set_per_process_memory_fraction(1.0)
             progress(stage='decoding video again without the video memory ceiling')
-            decoded = _stage('decode', dict(vae=vae, audio_vae=audio_vae), state, output_type='pt')
-    state = decoded
-    videos, audio, rate = state.get('videos'), state.get('audio'), state.get('sampling_rate')
-    del vae, audio_vae
+            return frames_of()
+
+        pixels = smaller([frames_of, unbound], torch)
+        del vae
+        _free(scope={})
+        state = _stage('decode.audio', dict(audio_vae=audio_vae), state)
+    audio, rate = state.get('audio'), state.get('sampling_rate')
+    del audio_vae
     _free(scope={})
     progress(stage='video decoded')
-    video = videos[0] if isinstance(videos, (list, tuple)) else videos[0]
-    # [frames, channels, height, width] float in [0, 1] -> uint8 [frames, height, width, 3]
-    pixels = (video.float().clamp(0, 1) * 255).round().byte().permute(0, 2, 3, 1).cpu().numpy()
     if len(pixels) != p['frames']:
         raise RuntimeError(f'Decoded {len(pixels)} frames, expected {p["frames"]}')
     generated_audio = None

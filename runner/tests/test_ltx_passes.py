@@ -84,6 +84,35 @@ class PassTests(unittest.TestCase):
         # The whole length of a 121-frame video in 384-pixel tiles, measured the fastest that fits 12 GiB.
         self.assertEqual(count(plan_tiles(*final, 110_000), final)[0], 1)
 
+    def test_a_video_too_large_to_be_joined_whole_is_decoded_a_group_of_frames_at_a_time(self):
+        # 17/11: 241 frames of 1536 x 1536 (121 x 192 x 192 cells). Joined whole on the GPU the
+        # decoded video held 7.9 GiB: nothing fitted beside it, the smallest tiles were tried, and
+        # the decode failed where they were joined.
+        video = (121, 192, 192)
+        cell, slab = 3600 * 2 * 4, 2.5 * 2 * 1536 * 1536 * 3 * 2
+        fits = lambda plan, spare: (  # noqa: E731
+            plan['frames'][0] * plan['height'][0] * plan['width'][0] * cell + plan['frames'][0] * slab <= spare
+        )
+        smallest = plan_tiles(*video, 0)
+        # Nothing beside the whole video (`cells` at 0), 6 GiB for the tiles and one group of frames.
+        spare = 6 * 1024**3
+        plan = plan_tiles(*video, 0, groups=(spare, cell, slab))
+        self.assertLess(plan['frames'][0], 121, 'several groups of frames')
+        self.assertTrue(fits(plan, spare))
+        self.assertGreater(plan['height'][0] * plan['width'][0], smallest['height'][0] * smallest['width'][0])
+        # The more room, the less is decoded twice.
+        computed = lambda found: math.prod(  # noqa: E731
+            size * len(equal_tiles(length, size, stride)) for (size, stride), length in zip(found.values(), video)
+        )
+        self.assertLessEqual(computed(plan_tiles(*video, 0, groups=(8 * 1024**3, cell, slab))), computed(plan))
+        self.assertLessEqual(computed(plan), computed(smallest))
+        # Not even a group of the smallest tiles: the smallest, as before, and the decode tries them.
+        self.assertEqual(plan_tiles(*video, 0, groups=(1024**2, cell, slab)), smallest)
+        # A video that fits whole keeps the plan it had: what `groups` says is not asked.
+        final = (61, 200, 112)
+        for cells in (30_000, 110_000, 200_000):
+            self.assertEqual(plan_tiles(*final, cells, groups=(10**12, 1, 1)), plan_tiles(*final, cells))
+
     def test_decode_tiles_are_equal_cover_the_video_and_share_a_seam(self):
         for length in range(1, 260):
             for largest, overlap in ((32, 4), (32, 8), (16, 4)):

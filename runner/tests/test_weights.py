@@ -447,6 +447,23 @@ class RoomTest(unittest.TestCase):
         self.assertGreater(large, module.FLOOR_GIB)
         self.assertEqual(asked(large, 9.0), '')
         self.assertIn('environ 9,0 Go', asked(large, 8.9))
+        # What a job was measured to hold at the least is asked whole (17/11: at 1920 x 1088 the steps
+        # held 9.7 GiB with none of the weights on the card, and failed one time of two after five
+        # minutes with 10.8 free). Nothing that ran is refused by it.
+        def measured(width, height, frames, free_gib):
+            tokens = math.prod(minimax_h3.grid_of(dict(frames=frames, width=width, height=height))) + 512
+            need = minimax_h3.least_gib(tokens) + minimax_h3.EDGE_GIB
+            with patch.dict(sys.modules, torch=card(free_gib)):
+                try:
+                    module.require('MiniMax H3', minimax_h3.working_gib(tokens), 'la taille', measured=need)
+                except RuntimeError as error:
+                    return str(error)
+            return ''
+
+        self.assertIn('demande environ 11,2 Go de mémoire vidéo libre', measured(1920, 1088, 124, 10.8))
+        for made in ((768, 448, 124), (768, 448, 345), (1344, 768, 124)):
+            self.assertEqual(measured(*made, 10.8), '', made)
+        self.assertEqual(measured(1920, 1088, 124, 22.5), '', 'a larger card makes it')
         # An LTX video asks for what its steps need: its largest size on an 8 GiB card too.
         self.assertLess(ltx25.working_gib(dict(frames=121), 288, 512, 0), 3)
         self.assertEqual(asked(ltx25.working_gib(dict(frames=121), 896, 1600, 0), 7.0), '')

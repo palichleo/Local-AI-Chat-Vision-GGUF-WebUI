@@ -751,10 +751,16 @@ TILE = dict(frames=32, side=32, overlap_frames=4, overlap_side=4)
 TILE_TOKEN_BYTES = 3600
 
 
-def plan_tiles(frames, height, width, cells, tile=None):
+def plan_tiles(frames, height, width, cells, tile=None, groups=None):
     """The tiles of the decode, (tile, stride) in cells for each axis: the ones that compute
     the least of what tiles share, none holding more than `cells` cells; the smallest (TILE) when
     even those hold more.
+
+    `cells` is what is left beside the whole decoded video. When nothing fits beside it, the
+    video is decoded a group of frames at a time (ltx25_decoder.decode_groups) and the tiles
+    are the ones that fit beside one group: `groups` is (the bytes free for the tiles and a
+    group, the bytes a cell of a tile holds, the bytes a cell of frames of the whole picture
+    holds while its group is joined). The plans of the videos that fitted whole are unchanged.
 
     What two tiles share is decoded twice: 256-pixel tiles of 64 frames decode 1.4 times a
     video. Measured on an RTX 4070 Super, 121 frames: 288 x 512 in one tile 3.0 s instead of
@@ -772,16 +778,23 @@ def plan_tiles(frames, height, width, cells, tile=None):
             tiling(width, largest_side, tile['overlap_side']),
         )
 
-    best = None
-    for largest_frames in sizes(frames, tile['frames']):
-        for largest_side in sizes(max(height, width), tile['side']):
-            found = plan(largest_frames, largest_side)
-            held, computed = 1, 1
-            for (size, stride), length in zip(found, (frames, height, width)):
-                held *= size
-                computed *= size * len(equal_tiles(length, size, stride))
-            if held <= cells and (best is None or (computed, held) < best[:2]):
-                best = (computed, held, found)
+    def search(fits):
+        best = None
+        for largest_frames in sizes(frames, tile['frames']):
+            for largest_side in sizes(max(height, width), tile['side']):
+                found = plan(largest_frames, largest_side)
+                held, computed = 1, 1
+                for (size, stride), length in zip(found, (frames, height, width)):
+                    held *= size
+                    computed *= size * len(equal_tiles(length, size, stride))
+                if fits(found, held) and (best is None or (computed, held) < best[:2]):
+                    best = (computed, held, found)
+        return best
+
+    best = search(lambda found, held: held <= cells)
+    if best is None and groups:
+        spare, cell, slab = groups
+        best = search(lambda found, held: held * cell + found[0][0] * slab <= spare)
     return dict(zip(('frames', 'height', 'width'), best[2] if best else plan(tile['frames'], tile['side'])))
 
 
@@ -814,7 +827,7 @@ def configure_decode(vae, shape, free_gib=0.0):
     # Cells of the grid the tiles are cut on, from the latent size.
     frames = ((shape[2] - 1) * ratio_frames + 1 + cell_frames - 1) // cell_frames
     height, width = shape[3] * ratio_side // cell_side, shape[4] * ratio_side // cell_side
-    cells = 0
+    cells, groups = 0, None
     if fused:
         # In bfloat16: the features of the whole video, its last frames repeated for the border
         # of the attention, and two and a half times its pixels while the tiles are joined.
@@ -822,8 +835,15 @@ def configure_decode(vae, shape, free_gib=0.0):
         features = (frames + ghost) * height * width * decoder.upsamples[-1].proj.in_features * 2
         pixels = frames * cell_frames * height * cell_side * width * cell_side * decoder.out_channels * 2
         spare = free_gib * 1024**3 - features - 2.5 * pixels
-        cells = int(spare / TILE_TOKEN_BYTES) // (cell_frames * (cell_side // decoder.patch_size) ** 2)
-    plan = plan_tiles(frames, height, width, cells)
+        cell = TILE_TOKEN_BYTES * cell_frames * (cell_side // decoder.patch_size) ** 2
+        cells = int(spare / cell)
+        # A video too large to be joined whole on the GPU is decoded a group of frames at a
+        # time: a group holds the same two and a half times, of its own pixels, and its own
+        # features (twice while they are made: ltx25_decoder.Features); the video keeps what
+        # the features are made from, an eighth of them.
+        slab = 2.5 * pixels / frames + 2 * features / (frames + ghost)
+        groups = (free_gib * 1024**3 - features / 8, cell, slab)
+    plan = plan_tiles(frames, height, width, cells, groups=groups)
     library._tile_intervals = equal_tiles
     vae.enable_tiling(
         tile_sample_min_height=plan['height'][0] * cell_side,
@@ -843,7 +863,9 @@ def decode_pixels(job, headers, latents, progress):
     """Video latents to frames (uint8, frames × height × width × 3), tile by tile."""
     import numpy
     import torch
+    from runner.models.ladder import smaller
     from runner.models.ltx25 import validate_layout, WeightPool, load_streamed
+    from runner.models.ltx25_decoder import decode_groups
     from runner.models.pool import RECENT, room
     from runner.models.residency import open_store
 
@@ -874,36 +896,32 @@ def decode_pixels(job, headers, latents, progress):
             vae.decoder.denoise = counted
 
             def decode(free_gib):
+                """The frames, off the GPU as each group of them is decoded (decode_groups)."""
                 nonlocal done, total
                 plan = configure_decode(vae, latents.shape, free_gib)
                 progress(stage='decoding video', tiles=plan)
                 done, total = 0, plan['frames']['tiles'] * plan['height']['tiles'] * plan['width']['tiles']
+                made = []
                 with torch._dynamo.config.patch(recompile_limit=64, fail_on_recompile_limit_hit=True):
-                    return vae.decode(
-                        latents.to('cuda', dtype=torch.bfloat16),
-                        generator=torch.Generator('cuda').manual_seed(seed),
-                    ).sample
+                    groups = decode_groups(
+                        vae, latents.to('cuda', dtype=torch.bfloat16), torch.Generator('cuda').manual_seed(seed)
+                    )
+                    for group in groups:
+                        # A few frames at a time: a group as 32-bit floats would not fit beside itself.
+                        for start in range(0, group.shape[2], 8):
+                            part = group[0, :, start : start + 8].float()
+                            if not torch.isfinite(part).all():
+                                raise RuntimeError('Non-finite decoded video; no output saved')
+                            part = ((part.clamp(-1, 1) + 1) * 127.5).round().byte()
+                            made.append(part.permute(1, 2, 3, 0).cpu().numpy())
+                        del group, part
+                return made
 
-            try:
-                # What is free below the engine's margin, less half a gigabyte and the decoder's
-                # weights: all of them when they stay on the GPU, else the last layers used.
-                decoded = decode(room(1.5) - (kept or RECENT / 1024**3))
-            except torch.OutOfMemoryError:
-                decoded = None
-            if decoded is None:
-                # The tiles held more than was counted for them: again with the smallest, once
-                # what the failed attempt held is gone (the error itself kept it until here).
-                gc.collect()
-                torch.cuda.empty_cache()
-                decoded = decode(0)
-            # A few frames at a time: the whole video as 32-bit floats would not fit beside itself.
-            frames = []
-            for start in range(0, decoded.shape[2], 8):
-                part = decoded[0, :, start : start + 8].float()
-                if not torch.isfinite(part).all():
-                    raise RuntimeError('Non-finite decoded video; no output saved')
-                frames.append(((part.clamp(-1, 1) + 1) * 127.5).round().byte().permute(1, 2, 3, 0).cpu().numpy())
-            del decoded, part
+            # What is free below the engine's margin, less half a gigabyte and the decoder's
+            # weights: all of them when they stay on the GPU, else the last layers used. Then,
+            # when the tiles held more than was counted for them, the smallest ones.
+            wide = room(1.5) - (kept or RECENT / 1024**3)
+            frames = smaller([lambda: decode(wide), lambda: decode(0)], torch)
             progress(stage='video decoded')
         finally:
             del vae

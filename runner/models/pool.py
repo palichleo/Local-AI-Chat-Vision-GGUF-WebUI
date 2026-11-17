@@ -32,19 +32,23 @@ def room(reserve_gib):
 FLOOR_GIB = 9
 
 
-def require(label, working_gib, smaller):
+def require(label, working_gib, smaller, measured=None):
     """Refuses, in the user's words, a job whose own tensors would not find their place in the
     video memory that is free now. The weights are not counted: a share of them stays on the card
     where there is room, the rest passes through, so a model in smaller files fits a smaller card.
     `working_gib` is what the pipeline itself sets aside beside them for this job (it grows with
     the picture), `smaller` what the user may reduce.
+
+    `working_gib` is an estimate, asked up to the floor only (FLOOR_GIB). `measured` is what such a
+    job was seen to hold at the least, its margin included: asked whole, since below it the job
+    fails for certain, after minutes of work (MiniMax H3 at 1920 x 1088, 17/11).
     """
     import torch
 
     # What this process holds already is its own to use: the model a generation left on the
     # card for the next (runner.models.kept) is not memory the next one lacks.
     free = (torch.cuda.mem_get_info()[0] + torch.cuda.memory_reserved()) / GiB
-    need = min(working_gib, FLOOR_GIB)
+    need = max(min(working_gib, FLOOR_GIB), measured or 0)
     if free < need:
         said = lambda value: f'{value:.1f}'.replace('.', ',')  # noqa: E731
         raise RuntimeError(

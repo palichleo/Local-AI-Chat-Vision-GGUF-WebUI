@@ -10,6 +10,10 @@ import time
 
 MAX_SIDE = 8192
 T = 1000.0
+# The sides of the tiles the VAE works on, in pixels to encode and in latent cells to decode: the
+# whole image first (up to 4096 pixels), then smaller each time the video memory lacks.
+ENCODE_TILES = (4096, 2048, 1024)
+DECODE_TILES = (512, 256, 128)
 
 
 def check(job, family):
@@ -55,6 +59,7 @@ def generate(job, config, progress):
     from PIL import Image
 
     from runner.media import save_image
+    from runner.models.ladder import smaller
     from runner.models import seedvr2, seedvr2_color, seedvr2_vae
     from runner.models.ltx25 import WeightPool
     from runner.models.residency import RESIDENCY, open_store
@@ -86,7 +91,15 @@ def generate(job, config, progress):
                 pad_h, pad_w = -height % 16, -width % 16
                 pixels = torch.nn.functional.pad(reference, (0, pad_w, 0, pad_h)) * 2 - 1
                 progress(stage='encoding', step=done, total=total)
-                latent = seedvr2_vae.tiled(vae.encode, pixels.to(torch.bfloat16), 1 / 8, 4096, 256)
+                # Whole where it fits (tiles see other statistics of the group norms), else in
+                # tiles of 2048 pixels, then of 1024: 3072 x 3072 did not fit 12 GiB whole (17/11).
+                source = pixels.to(torch.bfloat16)
+                encoders = [
+                    lambda side=side: seedvr2_vae.tiled(vae.encode, source, 1 / 8, side, 256)
+                    for side in ENCODE_TILES
+                ]
+                latent = smaller(encoders, torch)
+                del source
                 latent = latent[0].permute(1, 2, 0)[None].to(torch.bfloat16)  # (1, h, w, 16)
                 condition = torch.cat([latent, torch.ones_like(latent[..., :1])], dim=-1)
                 generator = torch.Generator('cuda').manual_seed(seed + index)
@@ -114,7 +127,12 @@ def generate(job, config, progress):
                 torch.cuda.empty_cache()
                 # Whole images up to 4096 px: the strip decoder keeps the VRAM low without tile
                 # seams. Beyond, tiles bound the middle attention (quadratic in the latent area).
-                decoded = seedvr2_vae.tiled(vae.decode, x[0].permute(2, 0, 1)[None], 8, 512, 32)
+                final = x[0].permute(2, 0, 1)[None]
+                decoders = [
+                    lambda side=side: seedvr2_vae.tiled(vae.decode, final, 8, side, 32) for side in DECODE_TILES
+                ]
+                decoded = smaller(decoders, torch)
+                del final
                 decoded = ((decoded[:, :, :height, :width].float() + 1) / 2).clamp(0, 1)
                 corrected = seedvr2_color.correct(decoded, reference, method)
                 current = Image.fromarray(

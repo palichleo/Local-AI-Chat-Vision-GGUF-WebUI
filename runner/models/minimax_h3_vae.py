@@ -212,3 +212,52 @@ def audio_vae(path):
     model.register_to_config(latents_mean=list(meta['latents_mean']), latents_std=list(meta['latents_std']))
     _fill(model, tensors, torch.float32)
     return model.eval()
+
+
+def decode_chunks(vae, latents):
+    """The frames of the video, [B, C, frames, H, W] on the GPU, a stretch of frames at a time: what
+    the VAE's own decode returns in one piece, to the bit (the same clips, the same cross-fades).
+
+    diffusers keeps every decoded clip on the GPU and joins them there; the pipeline then holds the
+    whole video several times as 32-bit floats: 6.3 GiB for a draft of 5 s, and a video of
+    1920 x 1088 sampled to its end was lost there (17/11). The caller takes each stretch off the GPU
+    before the next clip is decoded. Derived from diffusers' AutoencoderKLMiniMaxH3._decode
+    (Apache-2.0). The frames decoded from the latents repeated to fill the last clip are cut off the
+    end: as many frames as that are kept back until the end."""
+    import torch
+    from diffusers.models.modeling_utils import get_parameter_dtype
+
+    z = latents.to(get_parameter_dtype(vae.post_quant_conv))
+    size, drop, ratio = vae.tokens_chunk_size, vae.config.token_drop, vae.temporal_compression_ratio
+    frames = size * ratio
+    tokens = z.shape[2] + drop
+    pad = (-tokens) % size
+    clips = (tokens + pad) // size - int(drop > 0)
+    cut = 0
+    if pad > 0:
+        tail, before = vae.config.clip_length % ratio, z.shape[2]
+        cut = sum(tail if tail and (before + k) % size == 0 else ratio for k in range(pad))
+        z = torch.cat([z, z[:, :, -1:].repeat(1, 1, pad, 1, 1)], dim=2)
+    pending, waiting, overlap = [], 0, None
+    for place in range(clips):
+        start = place * size
+        clip = vae._decode_clip(z[:, :, start : start + size + vae.token_overlap])
+        for part in range(int(drop > 0) + 1):
+            chunk = clip[:, :, part * frames : (part + 1) * frames][:, :, vae.frame_pre_padding :]
+            if part:
+                overlap = chunk
+                continue
+            if overlap is not None:
+                chunk = vae._blend(overlap, chunk, vae.frame_overlap, dim=-3)
+            pending.append(chunk)
+            waiting += chunk.shape[2]
+        del clip, chunk
+        # Given once enough frames wait behind it for the cut of the end.
+        while pending and waiting - pending[0].shape[2] >= cut:
+            waiting -= pending[0].shape[2]
+            yield pending.pop(0)
+    if overlap is not None:
+        pending.append(overlap)
+    last = pending[0] if len(pending) == 1 else torch.cat(pending, dim=2)
+    yield last[:, :, : last.shape[2] - cut] if cut else last
+

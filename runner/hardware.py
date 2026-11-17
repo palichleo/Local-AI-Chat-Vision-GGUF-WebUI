@@ -47,6 +47,32 @@ def nvidia_cards(run=subprocess.run, platform=sys.platform, exists=os.path.exist
     return [line.strip() for line in answer.stdout.splitlines() if line.strip()]
 
 
+MEMORY = ['nvidia-smi', '--query-gpu=memory.total', '--format=csv,noheader,nounits']
+
+
+def card_gib(run=subprocess.run, platform=sys.platform):
+    """The video memory of the first NVIDIA card, in GiB, as its driver says it (PyTorch is not
+    loaded for it, and nothing is taken on the card); None when it cannot be known."""
+    if 'gib' in _found and run is subprocess.run:
+        return _found['gib']
+    found = None
+    try:
+        answer = run(
+            MEMORY,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0) if platform == 'win32' else 0,
+        )
+        if not answer.returncode:
+            found = float(answer.stdout.split()[0]) / 1024
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        found = None
+    if run is subprocess.run:
+        _found['gib'] = found
+    return found
+
+
 def cards():
     """``nvidia_cards()``, asked once per process."""
     if 'cards' not in _found:

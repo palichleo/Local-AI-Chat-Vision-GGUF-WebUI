@@ -194,6 +194,11 @@ def _chunked_feed_forward(self, hidden_states, chunk=8192):
     return out.reshape(*hidden_states.shape[:-1], -1)
 
 
+# The smallest piece of the queries of a dense attention computed in pieces: whole blocks of
+# the 128 rows the kernel quantizes together.
+PIECE = 128 * 32
+
+
 class Int8Attention:
     """Attention through comfy-kitchen's INT8 kernel, the method of SageAttention: queries, keys
     and values are quantized to 8 bits for the tensor cores and the softmax stays in FP32.
@@ -209,15 +214,45 @@ class Int8Attention:
         if measure is not None:
             measure(key, value)
         # The kernel reads [batch, heads, sequence, head]; the model keeps heads third.
-        result = comfy_kitchen.int8_attention(
-            query.transpose(1, 2),
-            key.transpose(1, 2),
-            value.transpose(1, 2),
-            attn_mask=attention_mask,
-        )
+        try:
+            result = comfy_kitchen.int8_attention(
+                query.transpose(1, 2),
+                key.transpose(1, 2),
+                value.transpose(1, 2),
+                attn_mask=attention_mask,
+            )
+        except torch.OutOfMemoryError:
+            if attention_mask is not None:
+                raise
+            result = None
+        if result is None:
+            result = self.in_pieces(query, key, value).type_as(hidden_states)
+            return attn.to_out[1](attn.to_out[0](result))
         del query, key, value
         result = result.transpose(1, 2).flatten(2, 3).type_as(hidden_states)
         return attn.to_out[1](attn.to_out[0](result))
+
+    @staticmethod
+    def in_pieces(query, key, value):
+        """The same attention when the kernel's own buffers do not fit beside the sequence (a
+        video of 1920 x 1088, or of 1344 x 768 with three references, on a 12 GiB card): the
+        queries a piece at a time, each piece's answer written where its queries were (they
+        are read no more). The kernel holds no quantized queries and no answer of the whole
+        sequence: a width and a half less. Pieces are whole blocks of the kernel's queries
+        (128 rows share a scale), so the answer is the one of the whole call."""
+        import comfy_kitchen
+
+        from runner.models.ladder import in_pieces
+
+        keys, values = key.transpose(1, 2), value.transpose(1, 2)
+
+        def piece(start, stop):
+            answer = comfy_kitchen.int8_attention(query[:, start:stop].transpose(1, 2), keys, values)
+            query[:, start:stop] = answer.transpose(1, 2)
+
+        rows = query.shape[1]
+        in_pieces(piece, rows, torch, unit=PIECE, first=-(-rows // 2 // PIECE) * PIECE)
+        return query.flatten(2, 3)
 
 
 # Queries and keys normalised and turned by one comfy-kitchen kernel, in place in the fused

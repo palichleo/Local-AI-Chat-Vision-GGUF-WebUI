@@ -79,5 +79,87 @@ class NeighborhoodKernelsTests(unittest.TestCase):
             ltx25_decoder.KERNELS = original
 
 
+@unittest.skipUnless(CUDA, 'the neighborhood kernels run on the GPU')
+class GroupsOfFramesTests(unittest.TestCase):
+    """The decode a group of frames at a time (17/11: a video of 10 s at 1088 x 1920 was sampled to
+    its end and lost in the decode, which joined the whole video on the GPU)."""
+
+    def decoder(self):
+        from diffusers.models.autoencoders.ltx2_diffusion_decoder import LTX2VideoDiffusionDecoderModel
+
+        torch.manual_seed(0)
+        vae = LTX2VideoDiffusionDecoderModel(
+            latent_channels=8,
+            decoder_head_dim=16,
+            decoder_stage_channels=(64, 32, 16, 16, 16),
+            decoder_stage_depths=(1, 1, 1, 1, 1),
+            decoder_stage_kernels=((3, 3, 3),) * 4,
+            decoder_upsample_channel_reductions=(2, 2, 1, 1),
+            decoder_stage5_kernel=(3, 3, 3),
+            decoder_t_emb_dim=32,
+        )
+        vae = vae.eval().to('cuda', torch.bfloat16)
+        self.assertTrue(ltx25_decoder.fuse(vae))
+        return vae
+
+    def tiles(self, vae, frames, side, stride_frames, stride_side):
+        vae.enable_tiling(
+            tile_sample_min_height=side,
+            tile_sample_min_width=side,
+            tile_sample_min_num_frames=frames,
+            tile_sample_stride_height=stride_side,
+            tile_sample_stride_width=stride_side,
+            tile_sample_stride_num_frames=stride_frames,
+        )
+
+    def test_the_groups_are_the_video_the_library_decodes_in_one_piece(self):
+        vae = self.decoder()
+        latents = torch.randn(1, 8, 9, 3, 4, device='cuda', dtype=torch.bfloat16)
+        seeded = lambda: torch.Generator('cuda').manual_seed(7)  # noqa: E731
+        # Tiles in time alone, in time and space, without anything shared, and one tile for the whole video.
+        for name, plan in dict(
+            time=(16, 256, 12, 256), both=(16, 64, 12, 48), apart=(16, 64, 16, 64), whole=(128, 256, 128, 256)
+        ).items():
+            with self.subTest(name), torch.no_grad():
+                self.tiles(vae, *plan)
+                expected = vae.decode(latents, generator=seeded()).sample
+                groups = [group.clone() for group in ltx25_decoder.decode_groups(vae, latents, seeded())]
+                self.assertTrue(torch.equal(torch.cat(groups, dim=2), expected))
+                if name in ('time', 'both', 'apart'):
+                    self.assertGreater(len(groups), 1, 'several groups of frames')
+                self.assertEqual(sum(group.shape[2] for group in groups), (9 - 1) * 8 + 1)
+
+    def test_the_features_of_a_stretch_of_frames_are_those_of_the_whole_video(self):
+        vae = self.decoder()
+        latents = torch.randn(1, 8, 9, 3, 4, device='cuda', dtype=torch.bfloat16)
+        with torch.no_grad():
+            whole = vae.decoder.forward_stages_1_to_3(latents)
+            features = ltx25_decoder.Features(vae.decoder, latents)
+            self.assertEqual((features.frames, features.height, features.width), tuple(whole.shape[1:4]))
+            for start, stop in ((0, whole.shape[1]), (0, 5), (1, 6), (4, 9), (7, whole.shape[1]), (10, 11)):
+                with self.subTest(start=start, stop=stop):
+                    self.assertTrue(torch.equal(features.stretch(start, stop), whole[:, start:stop]))
+
+    def test_a_group_leaves_the_card_before_the_next_is_decoded(self):
+        vae = self.decoder()
+        latents = torch.randn(1, 8, 17, 3, 4, device='cuda', dtype=torch.bfloat16)
+        self.tiles(vae, 16, 256, 12, 256)
+        with torch.no_grad():
+            whole = vae.decode(latents, generator=torch.Generator('cuda').manual_seed(7)).sample
+            pixels = whole.numel() * whole.element_size()
+            del whole
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+            before = torch.cuda.memory_allocated()
+            frames = 0
+            for group in ltx25_decoder.decode_groups(vae, latents, torch.Generator('cuda').manual_seed(7)):
+                frames += group.shape[2]
+                del group
+            held = torch.cuda.max_memory_allocated() - before
+        self.assertEqual(frames, (17 - 1) * 8 + 1)
+        # Never the whole video at once: less than its pixels, where the library held them several times.
+        self.assertLess(held, pixels)
+
+
 if __name__ == '__main__':
     unittest.main()

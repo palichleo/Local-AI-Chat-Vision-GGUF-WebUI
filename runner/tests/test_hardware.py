@@ -21,6 +21,44 @@ def missing(*args, **kwargs):
     raise FileNotFoundError('nvidia-smi')
 
 
+class CardMemoryTest(unittest.TestCase):
+    """How much video memory the card has, asked of its driver: a video that cannot fit is said
+    before anything is unloaded for it."""
+
+    def test_the_memory_of_the_first_card_in_gib(self):
+        self.assertAlmostEqual(hardware.card_gib(run=answer('12282\n')), 12282 / 1024)
+        self.assertAlmostEqual(hardware.card_gib(run=answer('24564\n8192\n')), 24564 / 1024)
+
+    def test_what_is_not_known_is_not_guessed(self):
+        self.assertIsNone(hardware.card_gib(run=answer('No devices were found\n', returncode=6)))
+        self.assertIsNone(hardware.card_gib(run=answer('\n')))
+        self.assertIsNone(hardware.card_gib(run=answer('[N/A]\n')))
+
+        def missing(*args, **kwargs):
+            raise FileNotFoundError('nvidia-smi')
+
+        self.assertIsNone(hardware.card_gib(run=missing))
+
+    def test_a_video_of_minimax_the_card_cannot_hold_is_refused_with_what_to_reduce(self):
+        from runner.pipelines import minimax_h3
+
+        video = lambda width, height, frames: dict(width=width, height=height, frames=frames)  # noqa: E731
+        # The sweep of 17/11 on a 12 GiB card: what was made, and what was made at the edge.
+        for made in (video(768, 448, 124), video(768, 448, 345), video(1344, 768, 124), video(1920, 1088, 124)):
+            self.assertEqual(minimax_h3.too_large(made, 12), '', made)
+        # 1344 x 768 for 14 s: 12.7 GiB for the steps alone.
+        refused = minimax_h3.too_large(video(1344, 768, 345), 12)
+        self.assertIn('MiniMax H3 ne peut pas faire cette vidéo sur cette carte graphique (12 Go)', refused)
+        self.assertIn('1344 × 768 pendant 14 s', refused)
+        self.assertIn('Réduisez la durée ou la résolution.', refused)
+        # A larger card makes it; a smaller one refuses what a 12 GiB card makes at its limit.
+        self.assertEqual(minimax_h3.too_large(video(1344, 768, 345), 24), '')
+        self.assertNotEqual(minimax_h3.too_large(video(1344, 768, 124), 6), '')
+        self.assertEqual(minimax_h3.too_large(video(768, 448, 124), 6), '')
+        # A card that is not known refuses nothing.
+        self.assertEqual(minimax_h3.too_large(video(1344, 768, 345), None), '')
+
+
 class CardsTest(unittest.TestCase):
     """What the driver says of this computer's NVIDIA cards, on each system."""
 
