@@ -44,6 +44,8 @@ test('grouped resource frames retain their separate labels and never enter saved
     showLastReply() {},
     generationUI: { mount: () => ({ progress() {}, image() {}, finish() {}, fail() {} }) },
     assetsUI: { flush: async () => true },
+    // The takes a reply names, under it (cited-takes.mjs).
+    citedTakes: { show() {}, forget() {} },
     state,
     $,
     AbortController,
@@ -167,6 +169,7 @@ test('a failed description save keeps the composer intact and never sends a chat
     state,
     $: id => (id === 'send' ? send : prompt),
     assetsUI: { flush: async () => false },
+    citedTakes: { show() {}, forget() {} },
     updateControls() {},
     notice: text => {
       warning = text;

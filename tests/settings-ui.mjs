@@ -115,6 +115,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
       select: async () => true,
       lock() {},
     }),
+    setupCitedTakes: () => ({ show() {}, forget() {} }),
     setupLibrary: () => ({
       show: async () => {},
       refresh: async () => {},

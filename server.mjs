@@ -81,6 +81,7 @@ const staticFiles = new Map([
   ['/library.mjs', ['library.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-tokens.mjs', ['reference-tokens.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-picker.mjs', ['reference-picker.mjs', 'text/javascript; charset=utf-8']],
+  ['/cited-takes.mjs', ['cited-takes.mjs', 'text/javascript; charset=utf-8']],
   ['/unexpected-errors.mjs', ['unexpected-errors.mjs', 'text/javascript; charset=utf-8']],
   ['/moodix.css', ['moodix.css', 'text/css; charset=utf-8']],
   // « Salle obscure » (0.6.0): the room behind the page, its two fonts, the tile of its dithering.

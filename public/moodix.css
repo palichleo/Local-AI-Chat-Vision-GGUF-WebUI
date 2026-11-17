@@ -8748,6 +8748,87 @@ body[data-view='library'] .chat-panel {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The takes a reply names (« la prise 12 », « #ref4 »), small under its words (17/11): each at its
+   format, 64 px high, in the filet of the takes, « PRISE 12 » under it as in the Sortie; a click
+   opens a take. Under the words of the reply, at their left edge. */
+#messages .message.assistant > .message-cited {
+  margin-left: 32px;
+}
+.message-cited {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+.message-cited-item {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.message-cited-item.is-ref {
+  cursor: default;
+}
+.message-cited-picture {
+  display: grid;
+  place-items: center;
+  width: clamp(36px, calc(64px * var(--ratio, 1)), 128px);
+  height: 64px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(238, 232, 222, 0.16);
+}
+.message-cited-item.is-ref .message-cited-picture {
+  width: auto;
+  min-width: 36px;
+  max-width: 128px;
+}
+.message-cited-picture :is(img, video) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.message-cited-item.is-ref .message-cited-picture img {
+  width: auto;
+  max-width: 128px;
+}
+.message-cited-item.is-sound .message-cited-picture {
+  width: 64px;
+}
+.message-cited-picture svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+.message-cited-label {
+  color: var(--text-3);
+  font: 400 var(--size-label)/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+button.message-cited-item:hover .message-cited-picture,
+button.message-cited-item:focus-visible .message-cited-picture {
+  box-shadow: inset 0 0 0 1.5px var(--text-1);
+}
+button.message-cited-item:hover .message-cited-label,
+button.message-cited-item:focus-visible .message-cited-label {
+  color: var(--text-1);
+}
+button.message-cited-item:focus-visible {
+  outline: none;
+}
 :root[data-theme='light'] .ref-picker,
 :root[data-theme='light'] .ref-peek {
   border-color: #d5d9e0;

@@ -3,6 +3,7 @@ import { withReference, withoutReference } from './reference-tokens.mjs';
 import { markReferences, removedNotice, setupReferencePeek, setupReferencePicker } from './reference-picker.mjs';
 import { setupUnexpectedErrors } from './unexpected-errors.mjs';
 import { setupLibrary } from './library.mjs';
+import { setupCitedTakes } from './cited-takes.mjs';
 
 /** The title of a conversation before its first message gives it one (« Nouveau chat » from 0.5.109 to
  * 0.5.129, the words of the fil again since 0.6.0). */
@@ -590,6 +591,8 @@ function renderTranscript(messages, incomplete = false) {
         view.body.textContent = message.content
           ? 'Le modèle a écrit un appel d’outil au lieu de le lancer : rien n’a été généré.'
           : 'Aucune réponse finale reçue.';
+      // The takes it names, small under its words.
+      if (text) citedTakes.show(view, text);
       if (message.tool_calls?.some(isGeneration)) {
         const call = message.tool_calls.find(isGeneration),
           result = messages[index + 1];
@@ -2586,6 +2589,8 @@ async function sendMessage(event) {
     }
     if (output) renderText(view.body, output);
     else view.body.replaceChildren();
+    // The takes it names, small under its words, as soon as it names them.
+    citedTakes.show(view, output);
     if (output) showLastReply(output);
     scrollToBottom();
     lastRender = performance.now();
@@ -3550,6 +3555,15 @@ const libraryUI = setupLibrary({
 // The fil heads the Pellicule (pellicule-fil-maquette.md): its menus choose the project and the
 // conversation shown, with their numbers of takes; projects are made, renamed and deleted there.
 projectUI.useLibrary(libraryUI);
+// The takes a reply names (« la prise 12 », « #ref4 »), small under its words; a click opens one.
+const citedTakes = setupCitedTakes({
+  node,
+  icon,
+  load: () => projectTakes(),
+  project: () => state.projectId || 'inbox',
+  references: () => projectReferences(),
+  viewOutput: (record, index, blob, around) => assetsUI.viewOutput(record, index, blob, around),
+});
 const viewerActions = outputActions({
   api,
   node,

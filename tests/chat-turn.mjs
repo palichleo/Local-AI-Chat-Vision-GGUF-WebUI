@@ -230,6 +230,8 @@ function page({
     settingsGuard: { isDirty: () => false },
     projectUI: { render() {}, sync() {} },
     assetsUI: { flush: async () => true, refresh: async () => {}, importFiles: async () => [] },
+    // The takes a reply names, under it (cited-takes.mjs).
+    citedTakes: { show() {}, forget() {} },
     generationUI: {
       // A take of the message: what the page tells it is kept (`told`).
       mount(container, request, options) {

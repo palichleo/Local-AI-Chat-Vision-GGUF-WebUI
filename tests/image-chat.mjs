@@ -94,6 +94,8 @@ async function exchange({
       },
     },
     assetsUI: { flush: async () => true },
+    // The takes a reply names, under it (cited-takes.mjs).
+    citedTakes: { show() {}, forget() {} },
     state,
     $,
     AbortController,
@@ -443,6 +445,7 @@ test('restored generations share a response until the next real user message', a
     renderText(container, text) {
       container.textContent = text;
     },
+    citedTakes: { show() {} },
     generationUI: { restore: (container, _, run) => restored.push({ container, run }) },
   };
   const messages = [
