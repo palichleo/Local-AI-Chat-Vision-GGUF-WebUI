@@ -11,13 +11,16 @@ cost a step as much as the INT8 products (profiled on a 288 x 512 draft: 325 ms 
 - a feed-forward's GELU is applied inside the INT8 product that follows it, and the wide
   intermediate (four times the tokens) is never written out;
 - a branch's last product adds itself to the stream: residual + gate * linear(x);
-- the attentions over the video run through cuDNN's kernel (see _attention).
+- the attentions over the video run through cuDNN's kernel (see _attention);
+- the embedding of a timestep is kept once per different timestep, not once per token
+  (see _grouped).
 
 A fused kernel rounds once where the separate steps rounded each time: on real inputs a block's
 result differs from diffusers' by 0.2 % (cosine 0.999998), the noise of bfloat16 itself.
 """
 
 import inspect
+from types import SimpleNamespace
 
 import comfy_kitchen
 import torch
@@ -40,6 +43,13 @@ PRIORITIES = 'set_priority' in inspect.signature(sdpa_kernel).parameters
 # is faster again on tensors laid out head by head, their copy included.
 LONG = 1024
 HUGE = 2 * 10**8
+# The pipeline gives the video one timestep per token: the tokens an image holds have their
+# own, all the others share the step's. From this many tokens on, and for at most this many
+# different timesteps, an embedding is computed and kept once per timestep (see _grouped).
+SHARED = 1024
+GROUPS = 16
+# The modules that embed the video's timesteps: the first one says which tokens share one.
+TIMES = ('time_embed', 'av_cross_attn_video_scale_shift', 'av_cross_attn_video_a2v_gate')
 
 
 def _attention(query, key, held, mask=None):
@@ -69,6 +79,45 @@ def _modulation(table, temb, batch):
 
 def _modulated(norm, value, scale, shift):
     return comfy_kitchen.rms_adaln(value, scale, shift, norm.eps)
+
+
+def _spread(value, index, groups):
+    """What is kept once per group of tokens ([B, groups, D]), read for each token ([B, T, D]).
+
+    Made where it is read and dropped after: one such tensor is 274 MiB for a 896 x 1600 video
+    of 8 s. One group alone is every token's, and is left as it is: it goes into the products.
+    So is what already has a row per token (a module left as diffusers computes it)."""
+    if index is None or groups < 2 or value.ndim != 3 or value.shape[1] != groups:
+        return value
+    return value.index_select(1, index)
+
+
+def _grouped(self, timestep, *args, **kwargs):
+    """A module that embeds the video's timesteps, computed once per different timestep.
+
+    diffusers embeds every token's timestep and gives each block the result: nine values per
+    channel and per token for the first module, which each block then adds its table to. For a
+    896 x 1600 video of 8 s (35 000 tokens of 4 096 channels) these copies took 7.5 of the
+    card's 12 GiB, and its refining pass could not run (17/11) - for two different timesteps,
+    the tokens an image holds and all the others. Here the blocks get one row per different
+    timestep, and `shared.index` says which row is each token's (see _spread). The second
+    result of the first module is read once after the blocks, per token: given per token.
+    A batch of one sequence only (`shared.active`): rows of several sequences would mix."""
+    shared = self._shared
+    if self._leads:
+        shared.index, shared.groups = None, 0
+    if not shared.active or timestep.ndim != 1 or timestep.numel() < SHARED:
+        return self._reference_forward(timestep, *args, **kwargs)
+    values, index = torch.unique(timestep, return_inverse=True)
+    if values.numel() > GROUPS:
+        return self._reference_forward(timestep, *args, **kwargs)
+    if self._leads:
+        shared.index, shared.groups = index, values.numel()
+    elif shared.index is None or not torch.equal(index, shared.index):
+        # Not the groups the blocks were told of: per token, as diffusers computes it.
+        return self._reference_forward(timestep, *args, **kwargs)
+    rows, embedded = self._reference_forward(values, *args, **kwargs)
+    return rows, embedded.index_select(0, index) if self._leads else embedded
 
 
 def _rotations(self, coords, device=None):
@@ -119,12 +168,15 @@ def _joined(linear, value, residual, gate, act=None, own=True):
     return residual.addcmul_(result, gate) if own else torch.addcmul(residual, result, gate)
 
 
-def _feed(ff, value, residual, gate):
-    """residual + gate * feed-forward(value); `residual` is this block's and may be written."""
+def _feed(ff, value, residual, gate, index=None, groups=0):
+    """residual + gate * feed-forward(value); `residual` is this block's and may be written.
+    `index`: the row of `gate` that is each token's, when it has one per group of `groups`
+    (see _spread)."""
     ff = getattr(ff, 'inner', ff)
     proj, out = ff.net[0].proj, ff.net[2]
     if value.shape[1] <= ROWS:
-        return _joined(out, proj(value), residual, gate, act='gelu_tanh')
+        return _joined(out, proj(value), residual, _spread(gate, index, groups), act='gelu_tanh')
+    grouped = index is not None and groups > 1 and gate.ndim == 3 and gate.shape[1] == groups
     # In slices, each written back in the place of the rows it was added to.
     for start in range(0, value.shape[1], ROWS):
         rows = slice(start, start + ROWS)
@@ -132,7 +184,7 @@ def _feed(ff, value, residual, gate):
             out,
             proj(value[:, rows]),
             residual[:, rows],
-            gate if gate.shape[1] == 1 else gate[:, rows],
+            gate.index_select(1, index[rows]) if grouped else gate if gate.shape[1] == 1 else gate[:, rows],
             act='gelu_tanh',
             own=False,
         )
@@ -175,17 +227,23 @@ def _block_forward(
     """
     batch = hidden_states.size(0)
     video, audio = hidden_states, audio_hidden_states
+    # The embeddings of the video's timesteps may come once per group of tokens (see _grouped).
+    shared = getattr(self, '_shared', None)
+    index, groups = (shared.index, shared.groups) if shared is not None else (None, 0)
+
+    def each(value):
+        return _spread(value, index, groups)
 
     # 1. Self-attention.
     params = _modulation(self.scale_shift_table, temb, batch)
     shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = params[:6]
     out = _attend(
         self.attn1,
-        _modulated(self.norm1, video, scale_msa, shift_msa),
+        _modulated(self.norm1, video, each(scale_msa), each(shift_msa)),
         rotation=video_rotary_emb,
         mask=self_attention_mask,
     )
-    video = _joined(self.attn1.to_out[0], out, video, gate_msa, own=False)
+    video = _joined(self.attn1.to_out[0], out, video, each(gate_msa), own=False)
     if self.video_cross_attn_adaln:
         shift_text_q, scale_text_q, gate_text_q = params[6:9]
 
@@ -215,11 +273,11 @@ def _block_forward(
         audio_encoder_hidden_states = audio_encoder_hidden_states * (1 + audio_scale_kv) + audio_shift_kv
 
     if self.video_cross_attn_adaln:
-        normed = _modulated(self.norm2, video, scale_text_q, shift_text_q)
+        normed = _modulated(self.norm2, video, each(scale_text_q), each(shift_text_q))
     else:
         normed, gate_text_q = self.norm2(video), video.new_ones(video.shape[-1])
     out = _attend(self.attn2, normed, context=encoder_hidden_states, mask=encoder_attention_mask)
-    video = _joined(self.attn2.to_out[0], out, video, gate_text_q)
+    video = _joined(self.attn2.to_out[0], out, video, each(gate_text_q))
 
     if self.audio_cross_attn_adaln:
         normed = _modulated(self.audio_norm2, audio, audio_scale_text_q, audio_shift_text_q)
@@ -242,7 +300,7 @@ def _block_forward(
         if use_a2v_cross_attention:
             out = _attend(
                 self.audio_to_video_attn,
-                _modulated(self.audio_to_video_norm, video_before, a2v_scale, a2v_shift),
+                _modulated(self.audio_to_video_norm, video_before, each(a2v_scale), each(a2v_shift)),
                 context=_modulated(self.video_to_audio_norm, audio_before, audio_a2v_scale, audio_a2v_shift),
                 rotation=ca_video_rotary_emb,
                 key_rotation=ca_audio_rotary_emb,
@@ -250,13 +308,13 @@ def _block_forward(
             )
             # Not in place while the other direction still has this stream to read.
             video = _joined(
-                self.audio_to_video_attn.to_out[0], out, video, a2v_gate, own=not use_v2a_cross_attention
+                self.audio_to_video_attn.to_out[0], out, video, each(a2v_gate), own=not use_v2a_cross_attention
             )
         if use_v2a_cross_attention:
             out = _attend(
                 self.video_to_audio_attn,
                 _modulated(self.video_to_audio_norm, audio_before, audio_v2a_scale, audio_v2a_shift),
-                context=_modulated(self.audio_to_video_norm, video_before, v2a_scale, v2a_shift),
+                context=_modulated(self.audio_to_video_norm, video_before, each(v2a_scale), each(v2a_shift)),
                 rotation=ca_audio_rotary_emb,
                 key_rotation=ca_video_rotary_emb,
                 mask=v2a_cross_attention_mask,
@@ -264,7 +322,9 @@ def _block_forward(
             audio = _joined(self.video_to_audio_attn.to_out[0], out, audio, v2a_gate)
 
     # 4. Feed-forward.
-    video = _feed(self.ff, _modulated(self.norm3, video, scale_mlp, shift_mlp), video, gate_mlp)
+    normed = _modulated(self.norm3, video, each(scale_mlp), each(shift_mlp))
+    video = _feed(self.ff, normed, video, gate_mlp, index, groups)
+    del normed
     audio = _feed(
         self.audio_ff, _modulated(self.audio_norm3, audio, audio_scale_mlp, audio_shift_mlp), audio, audio_gate_mlp
     )
@@ -277,7 +337,10 @@ def _forward(self, *args, **kwargs):
     The connectors fill the padding of a prompt with learned registers: every one of its tokens
     is read, and the mask the pipeline still passes is all zeros. Given to the attention, it is
     a matrix as large as the scores added to them for nothing, in each of the 96 text
-    attentions of a step. Looked at once per mask (reading it waits for the GPU)."""
+    attentions of a step. Looked at once per mask (reading it waits for the GPU).
+
+    And the embeddings of the video's timesteps kept once per timestep for the time of this
+    call, for one sequence (see _grouped)."""
     for name in ('encoder_attention_mask', 'audio_encoder_attention_mask'):
         mask = kwargs.get(name)
         if mask is None:
@@ -289,7 +352,15 @@ def _forward(self, *args, **kwargs):
             seen = self._masks[name] = (mask, reads_all)
         if seen[1]:
             kwargs[name] = None
-    return self._reference_forward(*args, **kwargs)
+    shared = getattr(self, '_shared', None)
+    if shared is None:
+        return self._reference_forward(*args, **kwargs)
+    hidden = kwargs.get('hidden_states', args[0] if args else None)
+    shared.active = hidden is not None and hidden.shape[0] == 1
+    try:
+        return self._reference_forward(*args, **kwargs)
+    finally:
+        shared.active, shared.index, shared.groups = False, None, 0
 
 
 def fusable(transformer):
@@ -323,6 +394,17 @@ def fuse(transformer, dtype=torch.bfloat16):
         rope._reference_forward = rope.forward
         rope._rotation_dtype = dtype
         rope.forward = _rotations.__get__(rope)
+    # Which tokens share a timestep, said by the first module to the others and to the blocks.
+    shared = SimpleNamespace(active=False, index=None, groups=0)
+    for block in transformer.transformer_blocks:
+        block._shared = shared
+    for name in TIMES:
+        module = getattr(transformer, name, None)
+        if module is None:
+            continue
+        module._reference_forward, module._shared, module._leads = module.forward, shared, name == TIMES[0]
+        module.forward = _grouped.__get__(module)
+    transformer._shared = shared
     transformer._reference_forward = transformer.forward
     transformer._masks = {}
     transformer.forward = _forward.__get__(transformer)

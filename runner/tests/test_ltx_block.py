@@ -97,6 +97,45 @@ class FusedBlockTests(unittest.TestCase):
             for mine, theirs in zip(got, expected):
                 self.assertLess(relative(mine, theirs), 1e-4)
 
+    def test_timesteps_kept_once_per_group_of_tokens_give_what_one_per_token_gives(self):
+        block = self.block()
+        video = ('temb', 'temb_ca_scale_shift', 'temb_ca_gate')
+        for groups, rows in ((2, 8192), (3, 8192), (2, 16)):
+            with self.subTest(groups=groups, rows=rows), torch.no_grad():
+                _, per_token = self.inputs(tokens=40, timesteps='per token')
+                # The tokens an image holds first, then the others; a third group in between.
+                index = torch.tensor([1] * 8 + [groups - 1] * 4 + [0] * 28, device='cuda')
+                kept = {name: per_token[name][:, :groups].clone() for name in video}
+                per_token.update({name: kept[name][:, index] for name in video})
+                original, ltx25_block.ROWS = ltx25_block.ROWS, rows
+                try:
+                    expected = ltx25_block._block_forward(block, **per_token)
+                    block._shared = SimpleNamespace(index=index, groups=groups)
+                    got = ltx25_block._block_forward(block, **dict(per_token, **kept))
+                finally:
+                    ltx25_block.ROWS = original
+                    del block._shared
+                for mine, theirs in zip(got, expected):
+                    self.assertLess(relative(mine, theirs), 1e-6)
+
+    def test_one_timestep_given_for_every_token_is_one_timestep_for_the_sequence(self):
+        block = self.block()
+        video = ('temb', 'temb_ca_scale_shift', 'temb_ca_gate')
+        with torch.no_grad():
+            _, one = self.inputs(tokens=40)
+            expected = ltx25_block._block_forward(block, **one)
+            # What _grouped leaves for a single group: one row, and the index of every token.
+            block._shared = SimpleNamespace(index=torch.zeros(40, dtype=torch.long, device='cuda'), groups=1)
+            try:
+                got = ltx25_block._block_forward(block, **one)
+                per_token = dict(one, **{name: one[name].expand(1, 40, -1) for name in video})
+                spread = ltx25_block._block_forward(block, **per_token)
+            finally:
+                del block._shared
+            for mine, theirs, wide in zip(got, expected, spread):
+                self.assertTrue(torch.equal(mine, theirs))
+                self.assertLess(relative(wide, theirs), 1e-4)
+
     def test_a_long_attention_runs_through_the_faster_kernel_with_the_same_scores(self):
         torch.manual_seed(0)
         value = lambda tokens: torch.randn(1, tokens, 4, 64, device='cuda', dtype=torch.bfloat16)  # noqa: E731
@@ -145,6 +184,16 @@ class FusedBlockTests(unittest.TestCase):
         self.assertTrue(ltx25_block.fuse(transformer))
         self.assertEqual(transformer.transformer_blocks[0].forward.__func__, ltx25_block._block_forward)
         self.assertEqual(transformer.rope.forward.__func__, ltx25_block._rotations)
+        # The blocks and the modules that embed the video's timesteps share what says the groups.
+        from diffusers.models.transformers.transformer_ltx2 import LTX2AdaLayerNormSingle
+
+        transformer.time_embed = LTX2AdaLayerNormSingle(64, num_mod_params=9)
+        transformer.transformer_blocks = torch.nn.ModuleList([self.block()])
+        self.assertTrue(ltx25_block.fuse(transformer))
+        self.assertEqual(transformer.time_embed.forward.__func__, ltx25_block._grouped)
+        self.assertTrue(transformer.time_embed._leads)
+        self.assertIs(transformer.time_embed._shared, transformer.transformer_blocks[0]._shared)
+        self.assertIs(transformer._shared, transformer.time_embed._shared)
 
 
 class NullMaskTests(unittest.TestCase):
@@ -161,6 +210,106 @@ class NullMaskTests(unittest.TestCase):
         self.assertIs(seen['audio_encoder_attention_mask'], hiding)
         # Read once: the same mask comes back at every step.
         self.assertIs(transformer._masks['encoder_attention_mask'][0], hidden)
+
+
+class GroupedTimestepTests(unittest.TestCase):
+    """The embeddings of the video's timesteps, kept once per different timestep (17/11: a
+    896 x 1600 video of 8 s from a start image ran out of the card's memory on their copies)."""
+
+    def module(self, shared, leads=True, parameters=9):
+        from diffusers.models.transformers.transformer_ltx2 import LTX2AdaLayerNormSingle
+
+        torch.manual_seed(1)
+        module = LTX2AdaLayerNormSingle(64, num_mod_params=parameters).eval()
+        module._reference_forward, module._shared, module._leads = module.forward, shared, leads
+        return module
+
+    def embed(self, module, timestep):
+        with torch.no_grad():
+            return ltx25_block._grouped(module, timestep, batch_size=1, hidden_dtype=torch.float32)
+
+    def timesteps(self, values=(300.0, 1000.0), tokens=2000, held=56):
+        """The first tokens are an image's, at their own timestep; the others share the step's."""
+        timestep = torch.full((tokens,), values[-1])
+        for place, value in enumerate(values[:-1]):
+            timestep[place * held : (place + 1) * held] = value
+        return timestep
+
+    def test_the_embedding_is_computed_once_per_different_timestep(self):
+        shared = SimpleNamespace(active=True, index=None, groups=0)
+        module, timestep = self.module(shared), self.timesteps()
+        with torch.no_grad():
+            expected, embedded = module._reference_forward(timestep, batch_size=1, hidden_dtype=torch.float32)
+        rows, per_token = self.embed(module, timestep)
+        self.assertEqual((tuple(rows.shape), tuple(per_token.shape)), ((2, 9 * 64), (2000, 64)))
+        self.assertEqual(shared.groups, 2)
+        # Each token finds its row, and the result read after the blocks is given per token.
+        self.assertTrue(torch.allclose(rows[shared.index], expected, atol=1e-6))
+        self.assertTrue(torch.allclose(per_token, embedded, atol=1e-6))
+        self.assertEqual(shared.index[:56].unique().tolist(), [0])
+        self.assertEqual(shared.index[56:].unique().tolist(), [1])
+
+    def test_it_is_left_per_token_where_groups_would_be_wrong_or_worth_nothing(self):
+        cases = dict(
+            several_sequences=(False, self.timesteps()),
+            few_tokens=(True, self.timesteps(tokens=ltx25_block.SHARED - 1)),
+            too_many_timesteps=(True, torch.arange(2000.0) % (ltx25_block.GROUPS + 1)),
+        )
+        for name, (active, timestep) in cases.items():
+            with self.subTest(name):
+                shared = SimpleNamespace(active=active, index=torch.zeros(1), groups=5)
+                module = self.module(shared)
+                rows, _ = self.embed(module, timestep)
+                self.assertEqual(rows.shape[0], timestep.numel())
+                # Nothing is left of an earlier call for the blocks to read.
+                self.assertEqual((shared.index, shared.groups), (None, 0))
+
+    def test_the_other_modules_follow_the_groups_of_the_first_or_stay_per_token(self):
+        shared = SimpleNamespace(active=True, index=None, groups=0)
+        first, timestep = self.module(shared), self.timesteps()
+        self.embed(first, timestep)
+        index = shared.index
+        other = self.module(shared, leads=False, parameters=4)
+        # The same tokens grouped, their timesteps scaled (the gate of the sound over the video).
+        rows, _ = self.embed(other, timestep * 0.02)
+        self.assertEqual(tuple(rows.shape), (2, 4 * 64))
+        self.assertIs(shared.index, index)
+        # Other groups than the blocks were told of: per token, as diffusers computes it.
+        rows, _ = self.embed(other, self.timesteps(held=80))
+        self.assertEqual(rows.shape[0], 2000)
+        self.assertIs(shared.index, index)
+        # And with nothing said by the first module (it stayed per token).
+        shared.index, shared.groups = None, 0
+        rows, _ = self.embed(other, timestep)
+        self.assertEqual(rows.shape[0], 2000)
+
+    def test_the_groups_last_the_time_of_one_call_for_one_sequence(self):
+        shared = SimpleNamespace(active=False, index=None, groups=0)
+        seen = []
+
+        def reference(**named):
+            seen.append(shared.active)
+            shared.index, shared.groups = torch.zeros(3, dtype=torch.long), 2
+            if named.get('fails'):
+                raise RuntimeError('out of memory')
+
+        transformer = SimpleNamespace(_masks={}, _shared=shared, _reference_forward=reference)
+        ltx25_block._forward(transformer, hidden_states=torch.zeros(1, 3, 4))
+        ltx25_block._forward(transformer, hidden_states=torch.zeros(2, 3, 4))
+        self.assertEqual(seen, [True, False])
+        self.assertEqual((shared.active, shared.index, shared.groups), (False, None, 0))
+        # A call that fails leaves nothing behind either.
+        with self.assertRaises(RuntimeError):
+            ltx25_block._forward(transformer, hidden_states=torch.zeros(1, 3, 4), fails=True)
+        self.assertEqual((shared.active, shared.index, shared.groups), (False, None, 0))
+
+    def test_a_value_is_spread_only_when_it_has_a_row_per_group(self):
+        index = torch.tensor([1, 1, 0, 0, 0])
+        kept, wide, one = torch.randn(1, 2, 4), torch.randn(1, 5, 4), torch.randn(1, 1, 4)
+        self.assertTrue(torch.equal(ltx25_block._spread(kept, index, 2), kept[:, index]))
+        for value, groups in ((wide, 2), (one, 2), (one, 1), (torch.ones(4), 2)):
+            self.assertIs(ltx25_block._spread(value, index, groups), value)
+        self.assertIs(ltx25_block._spread(kept, None, 0), kept)
 
 
 @unittest.skipUnless(CUDA, 'the INT8 kernel runs on the GPU')

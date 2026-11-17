@@ -55,8 +55,12 @@ Measured in November 2026 on the development RTX 4070 Super (12 GB), with INT8 C
 | LTX 2.5 distilled | Video with 48 kHz stereo sound, 384×256 | 68.14 s | 6.634 GiB |
 | LTX 2.5 distilled | 768×512, 25 frames | 108.22 s | 6.779 GiB |
 | LTX 2.5 distilled | 896×1600, 121 frames with sound, start image, two passes | 192 s | under the 12 GB of the card |
+| LTX 2.5 distilled | 896×1600, 193 frames (8 s) with sound, start image, two passes (17 Nov, 0.6.74) | 184 s | 8.76 GiB |
+| LTX 2.5 distilled | 896×1600, 121 frames with sound, from text, two passes (17 Nov, 0.6.74) | 96 s | 8.67 GiB |
 
 Startup, the state of the disk cache and the first compilation of the kernels change the total time.
+
+The two lines of 17 November were measured once the embedding of a timestep was kept once per different timestep instead of once per token (`runner/models/ltx25_block.py`): before it, the copies of these embeddings took 7.5 GiB for the 35 000 tokens of the 8-second video, whose refining pass ran out of the memory of the card.
 
 **Large LTX 2.5 videos run in two passes**, as the model's own recipe does, when the optional `upscaler` component (the ×2 latent spatial upscaler) is set and the shorter side is at least 512 px: eight steps at half the size, the latents doubled by the upscaler, then three steps at the full size with the start image held exactly. On the 12 GB card at 896×1600, 121 frames: 48 s for the first pass, 65 s for the three full-size steps, 60 s to decode. Without the upscaler the eight steps run at the full size: several times slower, and beyond what 12 GB holds at this size.
 
