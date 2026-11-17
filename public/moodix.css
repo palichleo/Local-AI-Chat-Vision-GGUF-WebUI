@@ -12018,14 +12018,15 @@ body[data-view='library'] .library-view {
   opacity: 0.38;
 }
 /* A narrow take (a 9:16 one is 110 px wide): its actions in one column down its right edge, at their
-   size, rather than in rows stretched over its picture (17/11). */
+   size, rather than in rows stretched over its picture (17/11). Not a square one (196 px), which
+   keeps them in a row. */
 #library-view .library-tile {
   container: library-tile / inline-size;
 }
 #library-view .library-tile .output-action {
   flex: none;
 }
-@container library-tile (max-width: 200px) {
+@container library-tile (max-width: 184px) {
   #library-view .library-tile .output-actions {
     flex-direction: column;
     flex-wrap: nowrap;

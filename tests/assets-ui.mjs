@@ -228,6 +228,57 @@ test('the arrow that had the focus gone (the first take, the last): the take its
   $('original-close').onclick();
 });
 
+test('› clicked up to the last take then once more at the same place: the take stays open; its margins still close it', async t => {
+  const { ui, $ } = await fixture(t),
+    record = {
+      id: 'run',
+      conversationId: 'conversation',
+      workflowName: 'Workflow',
+      prompt: 'Prompt',
+      parameters: {},
+      outputs: [{ source: { filename: 'result.png' }, analysisDataUrl: 'data:image/png;base64,AA==', take: 2 }],
+    },
+    list = [{ ...record, id: 'newer' }, record, { ...record, id: 'older' }],
+    dialog = $('original-dialog'),
+    layout = { classList: { contains: name => name === 'media-details-layout' } },
+    tick = () => new Promise(resolve => setTimeout(resolve, 0)),
+    // A press and its click at one point, on the window itself unless said otherwise.
+    press = (x, y, target = dialog) => {
+      for (const name of ['pointerdown', 'click']) dialog.listeners[name].forEach(fn => fn({ clientX: x, clientY: y, target }));
+    };
+  await ui.viewOutput(record, 0, undefined, { list: () => list, at: () => 1 });
+  // The window is 500 px wide and high here: › stands 4 px from its right edge, at mid-height.
+  $('media-next').onclick();
+  await tick();
+  assert.equal($('media-next').hidden, true);
+  // › is no longer there: the click falls on the padding of the window, where it stood.
+  press(476, 250);
+  press(458, 268);
+  assert.equal(dialog.open, true);
+  // The same for ‹, back at the first take.
+  $('media-prev').onclick();
+  await tick();
+  $('media-prev').onclick();
+  await tick();
+  assert.equal($('media-prev').hidden, true);
+  press(24, 250);
+  assert.equal(dialog.open, true);
+  // The place of an arrow that is shown is not a margin either (a click between its edge and its picture).
+  press(476, 250);
+  assert.equal(dialog.open, true);
+  // Above the arrow, the margin of the window closes the take, as the grid around the take does.
+  press(476, 120);
+  assert.equal(dialog.open, false);
+  await ui.viewOutput(record, 0, undefined, { list: () => list, at: () => 1 });
+  press(120, 250, layout);
+  assert.equal(dialog.open, false);
+  // Outside the window, at the height of the arrows: closed too.
+  await ui.viewOutput(record, 0, undefined, { list: () => list, at: () => 1 });
+  dialog.getBoundingClientRect = () => ({ left: 100, top: 0, right: 500, bottom: 500 });
+  press(60, 250);
+  assert.equal(dialog.open, false);
+});
+
 test('chat details reuse the displayed original blob and persisted original dimensions', async t => {
   const { ui, $, calls } = await fixture(t),
     original = new Blob(['Original'], { type: 'image/png' }),

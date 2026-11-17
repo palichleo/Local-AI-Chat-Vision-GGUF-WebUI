@@ -124,8 +124,19 @@ export function setupAssets({
   // Beside the take and its panel closes it, in the margins of its window too: the window keeps its
   // width (1180 px), a narrow take (9:16) leaves wide empty margins in it (17/11). Not the take, its
   // panel nor the arrows.
+  // Where ‹ and › stand, shown or not (moodix.css, « .media-step »: 40 px wide and high, 4 px from a
+  // side of the window, at the middle of its height; a few pixels more here). › clicked up to the
+  // last take is hidden under the pointer: the next click at the same place, on the window itself,
+  // closed the take.
+  const onArrow = event => {
+    const box = $('original-dialog').getBoundingClientRect(),
+      x = event?.clientX,
+      y = event?.clientY;
+    return x >= box.left && x <= box.right && Math.abs(y - (box.top + box.bottom) / 2) <= 24 && (x - box.left <= 48 || box.right - x <= 48);
+  };
   dismissSettingsOnOutsideClick($('original-dialog'), undefined, {
-    empty: target => target === $('original-dialog') || target?.classList?.contains('media-details-layout'),
+    empty: (target, event) =>
+      (target === $('original-dialog') || Boolean(target?.classList?.contains('media-details-layout'))) && !onArrow(event),
   });
   // ‹ › and the arrows of the keyboard go from one take to the next of what was shown.
   let around = null,

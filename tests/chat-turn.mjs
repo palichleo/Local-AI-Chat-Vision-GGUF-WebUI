@@ -178,7 +178,7 @@ function page({
     ...given,
   };
   // `lines`: the view the line under the tabs was drawn for, each time it was drawn.
-  const seen = { requests: [], saves: [], notices: [], takes: [], restored: [], views: [], failures: [], cancelled: [], lines: [] };
+  const seen = { requests: [], saves: [], notices: [], takes: [], restored: [], views: [], failures: [], cancelled: [], lines: [], cited: [] };
   const node = (tag, className, words) => new El(tag, className, words);
   const context = {
     ...sessionCopies,
@@ -230,8 +230,8 @@ function page({
     settingsGuard: { isDirty: () => false },
     projectUI: { render() {}, sync() {} },
     assetsUI: { flush: async () => true, refresh: async () => {}, importFiles: async () => [] },
-    // The takes a reply names, under it (cited-takes.mjs).
-    citedTakes: { show() {}, forget() {} },
+    // The takes a reply names, under it (cited-takes.mjs): what is asked of it, in its order.
+    citedTakes: { show: () => seen.cited.push('show'), forget: () => seen.cited.push('forget') },
     generationUI: {
       // A take of the message: what the page tells it is kept (`told`).
       mount(container, request, options) {
@@ -364,6 +364,9 @@ test('a video card that waits is saved with a result for its call: reopened, the
   });
   await reopened.context.loadConversation(ID);
   assert.deepEqual(reopened.notices.filter(Boolean), []);
+  // The takes its replies name are read again, before its words are drawn: one deleted since (in the
+  // Pellicule, in the Studio) was still drawn from what had been read.
+  assert.deepEqual(reopened.cited, ['forget', 'show']);
   assert.equal(reopened.state.messages.length, 3);
   assert.match(reopened.$('messages').words, /Le renard court dans la neige/);
   assert.deepEqual(

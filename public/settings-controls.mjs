@@ -159,30 +159,34 @@ export function setupComputeControls($) {
 }
 
 /**
- * A window closed by a click beside it: pressed and released outside its box. `empty`: an element
- * of the window that counts as beside it too (a part of its box with nothing in it).
+ * A window closed by a click beside it: pressed and released outside its box. `empty(element, event)`:
+ * an element of the window that counts as beside it too (a part of its box with nothing in it), at
+ * the point of the event.
  */
 export function dismissSettingsOnOutsideClick(dialog, requestClose = () => dialog.close(), { empty = () => false } = {}) {
   let startedOutside = false;
-  const outside = event => {
+  const beyond = event => {
     const bounds = dialog.getBoundingClientRect();
     return (
-      (event.target === dialog &&
-        (event.clientX < bounds.left ||
-          event.clientX > bounds.right ||
-          event.clientY < bounds.top ||
-          event.clientY > bounds.bottom)) ||
-      empty(event.target)
+      event.target === dialog &&
+      (event.clientX < bounds.left ||
+        event.clientX > bounds.right ||
+        event.clientY < bounds.top ||
+        event.clientY > bounds.bottom)
     );
   };
+  // What is under the pointer when it is released. A press in an empty part released on what the
+  // window shows (a drag, a selection of text ended on the text) sends its click to what holds both,
+  // an empty part again: the element at that point says where it really ended.
+  const releasedOn = event => globalThis.document?.elementFromPoint?.(event.clientX, event.clientY) ?? event.target;
   dialog.addEventListener('pointerdown', event => {
-    startedOutside = outside(event);
+    startedOutside = beyond(event) || empty(event.target, event);
   });
   dialog.addEventListener('pointercancel', () => {
     startedOutside = false;
   });
   dialog.addEventListener('click', event => {
-    if (startedOutside && outside(event)) requestClose();
+    if (startedOutside && (beyond(event) || (empty(event.target, event) && empty(releasedOn(event), event)))) requestClose();
     startedOutside = false;
   });
   dialog.addEventListener('close', () => {

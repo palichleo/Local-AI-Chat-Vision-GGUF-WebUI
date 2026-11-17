@@ -547,6 +547,8 @@ async function loadConversation(id) {
     $('prompt').value = draft.text;
     generationUI.clear();
     $('messages').replaceChildren();
+    // A take deleted since (in the Pellicule, in the Studio) is not drawn from what was read before.
+    citedTakes.forget();
     renderTranscript(messages, record.incomplete);
     turnActions();
     $('welcome').hidden = messages.length > 0;

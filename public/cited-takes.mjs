@@ -9,17 +9,28 @@
 /** At most this many pictures under one reply. */
 export const MOST = 8;
 const REF = /#ref(\d{1,4})(?!\d)/giy;
-// « prise 12 », « PRISE 12 », « take 12 », « prise n° 12 », « prise #12 ».
-const TAKE = /\b(?:prises?|takes?)\s*(?:n[°o]\.?\s*|#\s*)?(\d{1,4})(?!\d)/giy;
+// A number that is not that of a take, by what follows it: a figure (« 4K », « 16:9 », « 1280 × 720 »,
+// « 3,5 », « 1080p »), a length or a count (« 6 s », « 4 secondes », « 24 fps », « 5 steps »,
+// « 3 fois »), a day (« 12 mars »). (« 3 s’ouvre » and « 3 mais » are not lengths nor days.)
+const NOT_A_TAKE =
+  '(?!\\d|\\p{L}|[.,]\\d|\\s?(?::\\d|[x×]\\s?\\d|%|(?:[kp]|px|s|sec(?:s|onde?s?)?|fps|ips|fois|min(?:utes?)?|images?|frames?|steps?|étapes?|janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)(?![\\p{L}\'’])))';
+// « prise 12 », « PRISE 12 », « take 12 », « prise n° 12 », « prise #12 »; not the verb (« it takes
+// 3 seconds »).
+const TAKE = new RegExp('\\b(prises?|take)\\s*(?:n[°o]\\.?\\s*|#\\s*)?(\\d{1,4})' + NOT_A_TAKE, 'giuy');
 // What may join a number to the next one in a list: « , », « et », « ou », « & », « / », « and »;
-// a range: « à », « au », « - », « – ».
+// a range: « à », « au », « - », « – ». On the same line only (not the dash of a list under it).
 // (« \b » does not know « à »: the words are bounded by letters of any script.)
-const NEXT =
-  /\s*(,|&|\/|-|–|(?<!\p{L})(?:et|ou|and|or|à|au)(?!\p{L}))\s*(?:(?:la|les|prises?|takes?)\s+)?(?:n[°o]\.?\s*|#\s*)?(\d{1,4})(?!\d)/iuy;
+const NEXT = new RegExp(
+  '([^\\S\\r\\n]*)(,|&|\\/|-|–|(?<!\\p{L})(?:et|ou|and|or|à|au)(?!\\p{L}))([^\\S\\r\\n]*)(?:(?:la|les|prises?|take)\\s+)?(?:n[°o]\\.?\\s*|#\\s*)?(\\d{1,4})' +
+    NOT_A_TAKE,
+  'iuy',
+);
+// Code is not read: a block between fences (one still being written too), a word between backticks.
+const CODE = /```[\s\S]*?(?:```|$)|`[^`\n]*`/g;
 
 /** What a text names, in its order, each once: `{ kind: 'take' | 'ref', number }`. */
 export function citedIn(text) {
-  const source = String(text ?? ''),
+  const source = String(text ?? '').replace(CODE, '\n'),
     found = [],
     seen = new Set();
   const add = (kind, number) => {
@@ -41,16 +52,21 @@ export function citedIn(text) {
     TAKE.lastIndex = at;
     match = TAKE.exec(source);
     if (!match) continue;
-    let last = Number(match[1]),
+    let last = Number(match[2]),
       end = TAKE.lastIndex;
+    const several = /s$/i.test(match[1]);
     add('take', last);
     // « prises 12, 14 et 15 », « prises 3 à 5 ».
     for (;;) {
       NEXT.lastIndex = end;
       const next = NEXT.exec(source);
       if (!next) break;
-      const number = Number(next[2]);
-      if (/^(à|au|-|–)$/i.test(next[1]) && number > last && number - last <= MOST)
+      const number = Number(next[4]),
+        spaced = next[1].length + next[3].length;
+      // A dash joins two takes written tight (« prises 3-5 »), or with a space on each side after
+      // « prises » (« prises 3 – 5 »); else it sets what follows apart (« La prise 12 - 16:9, 6 s »).
+      if (/^[-–]$/.test(next[2]) && spaced && !(several && next[1].length <= 1 && next[3].length <= 1)) break;
+      if (/^(à|au|-|–)$/i.test(next[2]) && number > last && number - last <= MOST)
         for (let between = last + 1; between <= number; between++) add('take', between);
       else add('take', number);
       last = number;
@@ -82,18 +98,24 @@ export function setupCitedTakes({ node, icon, load, project, references, viewOut
   }
   function refresh() {
     const asked = project();
-    loading ??= Promise.resolve()
-      .then(load)
+    // One read at a time for a project. Another project asked meanwhile (a conversation of another
+    // project opened) is read for itself: the answer of the first one is not its takes.
+    if (loading?.project === asked) return loading.promise;
+    const read = { project: asked };
+    read.promise = new Promise(resolve => resolve(load()))
       .then(runs => {
-        known = { project: asked, takes: index(runs ?? []) };
+        if (loading === read && project() === asked) known = { project: asked, takes: index(runs ?? []) };
+        // The answer for a project left meanwhile is not kept: its numbers are asked again when wanted.
+        else if (project() !== asked) for (const key of [...missed.keys()]) if (key.startsWith(asked + ':')) missed.delete(key);
       })
       .catch(() => {
         // Without them, the reply shows nothing more.
       })
       .finally(() => {
-        loading = null;
+        if (loading === read) loading = null;
       });
-    return loading;
+    loading = read;
+    return read.promise;
   }
   function tile(item, records) {
     const kind = item.kind,
@@ -167,8 +189,9 @@ export function setupCitedTakes({ node, icon, load, project, references, viewOut
       );
     if (wanted.length) {
       for (const item of wanted) missed.set(here + ':' + item.number, now);
+      // (With the words the reply has by then: more of it may have come while the project was read.)
       void refresh().then(() => {
-        if (view.citedText === text && project() === here) show(view, text);
+        if (project() === here) show(view, view.citedText);
       });
     }
     draw(view, text, found);
@@ -198,6 +221,8 @@ export function setupCitedTakes({ node, icon, load, project, references, viewOut
     /** Takes made or removed since: read again at the next reply that names one. */
     forget() {
       known = { project: null, takes: new Map() };
+      // A read in flight may be from before: its answer is not kept.
+      loading = null;
       missed.clear();
     },
   };

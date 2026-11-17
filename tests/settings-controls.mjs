@@ -129,6 +129,85 @@ test('a take opened closes on a click in the empty margins of its window, not on
   press(20, 10, dialog);
   assert.equal(closed, 3);
 });
+test('pressed in a margin and released on the take or its words, the window stays: what is under the pointer decides', t => {
+  const listeners = {};
+  let closed = 0,
+    under = null;
+  const previous = globalThis.document;
+  // As Chromium does: the click of a press and a release on two elements goes to what holds both
+  // (the grid, the window), and `elementFromPoint` gives the element where it was released.
+  globalThis.document = { elementFromPoint: () => under };
+  t.after(() => {
+    globalThis.document = previous;
+  });
+  const dialog = {
+      addEventListener(name, fn) {
+        listeners[name] = fn;
+      },
+      getBoundingClientRect: () => ({ left: 115, right: 1295, top: 60, bottom: 830 }),
+      close: () => closed++,
+    },
+    layout = { classList: { contains: name => name === 'media-details-layout' } },
+    inside = { classList: { contains: () => false } },
+    seen = [];
+  dismissSettingsOnOutsideClick(dialog, undefined, {
+    empty: (target, event) => {
+      seen.push(event?.clientX);
+      return target === dialog || Boolean(target?.classList?.contains('media-details-layout'));
+    },
+  });
+  const drag = (from, to, clicked) => {
+    listeners.pointerdown({ clientX: from[0], clientY: from[1], target: from[2] });
+    under = to[2];
+    listeners.click({ clientX: to[0], clientY: to[1], target: clicked });
+  };
+  // From the gap between the take and its panel to the words of the panel (a selection of text).
+  drag([700, 400, layout], [900, 400, inside], layout);
+  assert.equal(closed, 0);
+  // From the padding of the window to the take.
+  drag([160, 400, dialog], [500, 400, inside], dialog);
+  assert.equal(closed, 0);
+  // Pressed and released in the margins: it closes, as before.
+  drag([160, 400, dialog], [260, 400, layout], dialog);
+  assert.equal(closed, 1);
+  drag([260, 400, layout], [262, 401, layout], layout);
+  assert.equal(closed, 2);
+  // `empty` is given the event too (where the pointer is: the place of an arrow not shown).
+  assert.ok(seen.length > 0 && seen.every(x => Number.isFinite(x)));
+  // Outside the box, what is under the pointer is not asked: the backdrop closes, whatever is there.
+  under = inside;
+  listeners.pointerdown({ clientX: 20, clientY: 10, target: dialog });
+  listeners.click({ clientX: 20, clientY: 10, target: dialog });
+  assert.equal(closed, 3);
+});
+test('a window without empty parts: only its backdrop closes it, whatever is under the pointer', t => {
+  const listeners = {};
+  let closed = 0;
+  const previous = globalThis.document,
+    dialog = {
+      addEventListener(name, fn) {
+        listeners[name] = fn;
+      },
+      getBoundingClientRect: () => ({ left: 100, right: 600, top: 80, bottom: 700 }),
+      close: () => closed++,
+    };
+  globalThis.document = { elementFromPoint: () => dialog };
+  t.after(() => {
+    globalThis.document = previous;
+  });
+  dismissSettingsOnOutsideClick(dialog);
+  // Pressed inside, released on the backdrop (a slider dragged out): it stays.
+  listeners.pointerdown({ clientX: 200, clientY: 100, target: {} });
+  listeners.click({ clientX: 20, clientY: 10, target: dialog });
+  assert.equal(closed, 0);
+  // Inside its box, on the window itself (its padding): it stays.
+  listeners.pointerdown({ clientX: 110, clientY: 90, target: dialog });
+  listeners.click({ clientX: 110, clientY: 90, target: dialog });
+  assert.equal(closed, 0);
+  listeners.pointerdown({ clientX: 20, clientY: 10, target: dialog });
+  listeners.click({ clientX: 20, clientY: 10, target: dialog });
+  assert.equal(closed, 1);
+});
 
 function computeControls() {
   const nodes = new Map([

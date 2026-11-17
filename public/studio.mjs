@@ -3465,13 +3465,14 @@ export function setupStudio({
     pick.onpointerup = pick.onpointercancel = pick.onpointerleave = () => clearTimeout(holding);
     // Under it (capture 22): « PRISE n » and its length (« 06.04 S »), its format for an image; a
     // continuation, « ↳ SUITE +04.00 S », glued to its take; an upscale or an interpolation,
-    // « ↳ AGRANDIE » or « ↳ INTERPOLÉE » and its whole length.
+    // « ↳ AGRANDIE » or « ↳ INTERPOLÉE » and its whole length. Made from a clip that is not in the
+    // Sortie (a file of the disk, a take deleted since), « ↳ » would point at nothing: its own number.
     const take = output.take,
       caption = node('span', 'studio-item-caption'),
       badge = node(
         'span',
         'studio-item-number',
-        from ? '↳ SUITE' : transform ? '↳ ' + transform : Number.isInteger(take) ? 'PRISE ' + take : '#' + number,
+        from ? '↳ SUITE' : transform && origin ? '↳ ' + transform : Number.isInteger(take) ? 'PRISE ' + take : '#' + number,
       ),
       length = lengthOfRecord(record, Boolean(from)),
       shape = sizeOfRecord(record);

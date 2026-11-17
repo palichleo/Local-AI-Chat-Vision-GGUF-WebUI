@@ -1481,6 +1481,22 @@ test('in the Sortie, an upscale or an interpolation of a clip is said so, with i
     },
     from = id => [{ role: 'source_video', output_id: id }],
     runs = [
+      // Made from a clip that is not in the Sortie (a file of the disk, a take deleted since): an
+      // interpolation with no number of take yet, an upscale with one.
+      {
+        id: 'c6',
+        mediaType: 'video',
+        prompt: 'un renard qui court',
+        outputs: [{ originalUrl: '/c6.mp4' }],
+        parameters: { pipeline: 'rife', mode: 'smooth', frames: 241, fps: 48, references: from('gone') },
+      },
+      {
+        id: 'c5',
+        mediaType: 'video',
+        prompt: 'un renard qui court',
+        outputs: [{ originalUrl: '/c5.mp4', take: 25 }],
+        parameters: { pipeline: 'realesrgan_video', frames: 121, fps: 24, references: from('gone') },
+      },
       // Interpolated from the upscale, then a real continuation of it, then the upscale of the first.
       {
         id: 'c4',
@@ -1518,14 +1534,20 @@ test('in the Sortie, an upscale or an interpolation of a clip is said so, with i
     const items = body.find('studio-item'),
       captions = items.map(item => item.find('studio-item-caption')[0].children.map(part => part.textContent));
     assert.deepEqual(captions, [
+      // Without the clip it was made from, « ↳ » would point at nothing: its own number, as any take.
+      ['#6', '05.02 S'],
+      ['PRISE 25', '05.04 S'],
       ['↳ SUITE', '+04.00 S'],
       ['↳ INTERPOLÉE', '05.02 S'],
       ['↳ AGRANDIE', '05.04 S'],
       ['PRISE 21', '05.04 S'],
     ]);
     assert.deepEqual(
-      items.slice(0, 3).map(item => item.find('studio-item-pick')[0].attributes['aria-label']),
+      items.slice(0, 5).map(item => item.find('studio-item-pick')[0].attributes['aria-label']),
       [
+        // What it is stays said to a screen reader, without a clip it cannot name.
+        'Clip #6 · interpolation · un renard qui court',
+        'Clip #5 · agrandissement · un renard qui court',
         'Clip #4 · suite du clip #3 · un renard qui court',
         'Clip #3 · interpolation du clip #2 · un renard qui court',
         'Clip #2 · agrandissement du clip #1 · un renard qui court',
