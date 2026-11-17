@@ -178,7 +178,12 @@ test('the events of Claude read as the chat reads llama.cpp: words, reflection, 
     { id: 'toolu_1', type: 'function', function: { name: 'create_image', arguments: '{"prompt":"boat"}' } },
   ]);
   assert.equal(chunks.at(-2).choices[0].finish_reason, 'tool_calls');
-  assert.deepEqual(chunks.at(-1).usage, { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 });
+  assert.deepEqual(chunks.at(-1).usage, {
+    prompt_tokens: 120,
+    completion_tokens: 30,
+    total_tokens: 150,
+    prompt_tokens_details: { cached_tokens: 100 },
+  });
 
   // A call without arguments reads as an empty object.
   const bare = await drain(

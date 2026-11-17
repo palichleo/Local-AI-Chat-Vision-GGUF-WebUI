@@ -613,7 +613,12 @@ test('« Continuer avec ChatGPT »: the registration of the open-source way, the
   ]);
   assert.equal(events.map(event => event.choices?.[0]?.delta?.content ?? '').join(''), 'Bonjour');
   assert.equal(events.map(event => event.choices?.[0]?.delta?.reasoning_content ?? '').join(''), 'Je salue.');
-  assert.deepEqual(events.at(-1).usage, { prompt_tokens: 30, completion_tokens: 2, total_tokens: 32 });
+  assert.deepEqual(events.at(-1).usage, {
+    prompt_tokens: 30,
+    completion_tokens: 2,
+    total_tokens: 32,
+    prompt_tokens_details: { cached_tokens: 0 },
+  });
 
   // Close to its end, the token is renewed first (one renewal), and the new one used.
   clock += 3590_000;

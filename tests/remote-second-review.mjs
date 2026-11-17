@@ -12,8 +12,8 @@ import { collectToolCalls } from '../lib/tool-runtime.mjs';
 import { nativeFields } from '../lib/native-messages.mjs';
 import { RemoteModels, nearbyHost, onThisComputer } from '../lib/remote-models.mjs';
 import { ChatModel, normalizedStream, remoteBody, remoteFailure } from '../lib/chat-model.mjs';
-import { ChatGPTAccount, responsesRequest } from '../lib/chatgpt.mjs';
-import { ClaudeAccess, claudeChunks, claudeRequest } from '../lib/claude.mjs';
+import { ChatGPTAccount, responseChunks, responsesRequest } from '../lib/chatgpt.mjs';
+import { ClaudeAccess, claudeChunks, claudeMessages, claudeRequest } from '../lib/claude.mjs';
 import { OpenRouterSignIn } from '../lib/openrouter.mjs';
 import { setupRemoteModels } from '../public/remote-llm-ui.mjs';
 import { setupModelChoice } from '../public/model-choice.mjs';
@@ -1034,4 +1034,59 @@ test('13 · « Améliorer le prompt » with a remote model that reflects within 
   assert.equal(response.status, 200, await response.clone().text());
   assert.match((await response.json()).prompt, /red fishing boat/);
   assert.equal(sent.length, 1, 'asked once');
+});
+
+// ——— 0.6.41, asked by the session that adapts the instructions to large models ———
+
+test('Claude is told a result of a tool that says a failure as an error; other results as they are', () => {
+  const { messages } = claudeMessages([
+    { role: 'user', content: 'une image' },
+    {
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ id: 'toolu_1', type: 'function', function: { name: 'create_image', arguments: '{}' } }],
+    },
+    { role: 'tool', tool_call_id: 'toolu_1', content: '{"status":"error","error":"La génération a échoué."}' },
+    {
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ id: 'toolu_2', type: 'function', function: { name: 'create_image', arguments: '{}' } }],
+    },
+    { role: 'tool', tool_call_id: 'toolu_2', content: '{"status":"done","path":"a.png"}' },
+  ]);
+  const results = messages.flatMap(turn => turn.content).filter(block => block.type === 'tool_result');
+  assert.deepEqual(
+    results.map(block => block.is_error),
+    [true, undefined],
+  );
+});
+
+test('what was read from the cache is said in the usage, as OpenAI says it (ChatGPT, Claude)', async () => {
+  const events = [
+    { type: 'response.output_text.delta', delta: 'ok' },
+    {
+      type: 'response.completed',
+      response: { usage: { input_tokens: 9000, output_tokens: 5, input_tokens_details: { cached_tokens: 8704 } } },
+    },
+  ];
+  const stream = new Response(events.map(event => `event: ${event.type}
+data: ${JSON.stringify(event)}
+
+`).join(''))
+    .body;
+  let usage;
+  for await (const chunk of responseChunks(stream)) usage = chunk.usage ?? usage;
+  assert.deepEqual([usage.prompt_tokens, usage.prompt_tokens_details], [9000, { cached_tokens: 8704 }]);
+
+  async function* claudeEvents() {
+    yield {
+      type: 'message_start',
+      message: { usage: { input_tokens: 40, cache_read_input_tokens: 9400, cache_creation_input_tokens: 60, output_tokens: 1 } },
+    };
+    yield { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 3 } };
+    yield { type: 'message_stop' };
+  }
+  let told;
+  for await (const chunk of claudeChunks(claudeEvents())) told = chunk.usage ?? told;
+  assert.deepEqual([told.prompt_tokens, told.prompt_tokens_details], [9500, { cached_tokens: 9400 }]);
 });
