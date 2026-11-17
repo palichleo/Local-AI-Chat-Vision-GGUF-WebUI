@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setupGenerationUI } from '../public/generation-ui.mjs';
+import { setupGenerationUI, takeLine } from '../public/generation-ui.mjs';
 // The parent of an element, out of what is compared (not enumerable).
 const adopt = (parent, item) =>
   item instanceof Element && Object.defineProperty(item, 'parent', { value: parent, writable: true, configurable: true });
@@ -623,4 +623,25 @@ test('a proposal declined leaves nothing; stopped, it leaves its card without «
   assert.equal(open.disabled, false, 'waiting: it leads to the Studio');
   card.fail('Génération interrompue.');
   assert.equal(open.disabled, true);
+});
+
+test('under a take made with LoRAs of the user: their number beside its format, their names to read', () => {
+  const record = {
+    mediaType: 'image',
+    parameters: {
+      width: 1024,
+      height: 1024,
+      styles: [
+        { name: 'styles\\70sSCiFiKrea2Raw.safetensors', strength: 0.8 },
+        { name: 'detail.safetensors', strength: 1 },
+      ],
+    },
+    outputs: [{ take: 12 }],
+  };
+  const line = takeLine(record, 0);
+  assert.deepEqual([line.number, line.format, line.loras], ['PRISE 12', '1:1', '2 LoRA']);
+  assert.equal(line.lorasTitle, '70sSCiFiKrea2Raw · 0,8\ndetail · 1');
+  // None: nothing is added.
+  const plain = takeLine({ ...record, parameters: { width: 1024, height: 1024 } }, 0);
+  assert.deepEqual([plain.loras, plain.lorasTitle], ['', '']);
 });

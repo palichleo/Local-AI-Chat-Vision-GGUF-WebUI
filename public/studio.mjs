@@ -1192,9 +1192,9 @@ export function setupStudio({
     disk.title = done
       ? 'Réglages enregistrés pour ' + workflow.name
       : changed
-        ? 'Enregistrer ces réglages pour ' + workflow.name + ' : ils reviendront chaque fois que vous le choisirez'
+        ? 'Enregistrer ces réglages pour ' + workflow.name + ' : ils reviendront chaque fois que vous le choisirez, et ses LoRA iront aussi avec les créations demandées dans le Chat'
         : saved
-          ? 'Réglages de ' + workflow.name + ' enregistrés · ils reviennent chaque fois que vous le choisissez'
+          ? 'Réglages de ' + workflow.name + ' enregistrés · ils reviennent chaque fois que vous le choisissez ; ses LoRA vont aussi avec les créations demandées dans le Chat'
           : 'Enregistrer ces réglages pour ' + workflow.name;
     disk.setAttribute('aria-label', disk.title);
   }

@@ -50,6 +50,11 @@ export function takeLine(record, index) {
           ? `${format} · ${width} × ${height}`
           : format,
     seconds: media === 'video' && Number.isFinite(seconds) && seconds > 0 ? figures(seconds) : '',
+    // The LoRAs of the user it was made with: their number beside its format, their names on it.
+    loras: Array.isArray(p.styles) && p.styles.length ? `${p.styles.length} LoRA` : '',
+    lorasTitle: Array.isArray(p.styles)
+      ? p.styles.map(style => `${String(style?.name ?? '').split(/[\\/]/).pop().replace(/\.safetensors$/i, '')} · ${String(style?.strength ?? 1).replace('.', ',')}`).join('\n')
+      : '',
   };
 }
 const requestMeta = request => {
@@ -379,7 +384,9 @@ export function setupGenerationUI({
     function dress(target, shown, index) {
       const line = takeLine(shown, index);
       target.takeLine ??= node('div', 'take-caption');
-      target.takeLine.replaceChildren(node('span', 'take-number', line.number), node('span', 'take-format', line.format));
+      const format = node('span', 'take-format', [line.format, line.loras].filter(Boolean).join(' · '));
+      if (line.loras) format.title = 'LoRA : ' + line.lorasTitle.replaceAll('\n', ', ');
+      target.takeLine.replaceChildren(node('span', 'take-number', line.number), format);
       target.figure.append(target.takeLine);
       target.figure.classList.add('has-take');
       target.figure.takeKind = KINDS[shown.mediaType] ?? KINDS.image;

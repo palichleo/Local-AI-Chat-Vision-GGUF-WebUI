@@ -625,6 +625,14 @@ export async function createApplication({
     // from its file by the Python of the engine, kept as a reference of the conversation's project.
     extractStill: (path, at) => generation.videoStill(path, at),
     projectOf: conversationId => projectFor(conversationId),
+    // The LoRAs kept for a model with « Enregistrer », those whose file is still listed (one gone
+    // would fail the creation): a creation asked in the Chat is made with them.
+    savedStyles: async id => {
+      const kept = (await studioPresets.all())[id]?.styles ?? [];
+      if (!kept.length) return [];
+      const listed = new Set(await generation.styles());
+      return kept.filter(style => listed.has(style.name));
+    },
     sourceMedia: async (ref, conversationId) => {
       if (ref.attachment) return { ...(await history.attachment(conversationId, ref.attachment)), name: 'Image jointe' };
       if (ref.resource_id) {
@@ -2705,6 +2713,9 @@ export async function createApplication({
                     messages: body.messages,
                     // The images the user names: one the proposal leaves out is said on it.
                     cited: citedImages(body.messages, active),
+                    // Asked in the Chat: with the LoRAs saved for the model. In the Studio those it
+                    // shows go with « Générer » (`inStudio`, said by the page).
+                    saved: body.inStudio !== true,
                   });
                   // Left out though the workflow that serves has a place for it, and the model not
                   // told yet (a continuation is not asked before its routing: the workflow that

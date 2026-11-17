@@ -40,6 +40,7 @@ function world({
   extractStill = null,
   projectOf,
   missing = [],
+  savedStyles,
 } = {}) {
   const saved = [],
     closing = { close: async () => {} };
@@ -101,6 +102,7 @@ function world({
     clientFactory: () => client,
     extractStill,
     ...(projectOf ? { projectOf } : {}),
+    ...(savedStyles ? { savedStyles } : {}),
     // (`path`: where the file is, as the application says it; `missing`: files gone from the disk.)
     sourceMedia: async (ref, conversationId) => {
       if (ref.resource_id) {
@@ -1017,4 +1019,109 @@ test('a frame named on an image is the image itself, and a picture that cannot b
     ),
     { status: 400, message: /^Impossible de lire la dernière image de la prise 25 : cette lecture n’est pas disponible ici\.$/ },
   );
+});
+
+test('a creation asked in the Chat is made with the LoRAs saved for its model, and says so; never one asked in the Studio', async () => {
+  const list = shipped(),
+    krea = of(list, 'krea2'),
+    ltx = of(list, 'ltx25'),
+    minimax = of(list, 'minimax_h3'),
+    CLIP = uid(3),
+    kept = {
+      [krea.id]: [{ name: 'styles\\70sSCiFiKrea2Raw.safetensors', strength: 0.8 }, { name: 'detail.safetensors', strength: 1 }],
+      [ltx.id]: [{ name: 'grain.safetensors', strength: 0.5 }],
+      [minimax.id]: [{ name: 'grain.safetensors', strength: 0.5 }],
+    },
+    asked = [],
+    { runtime, saved } = world({
+      workflows: list,
+      records: { [`${A}/${CLIP}`]: clip(A, CLIP, ltx) },
+      savedStyles: async id => (asked.push(id), kept[id] ?? []),
+    });
+  let turns = 3;
+  const ask = (name, args, options = {}) =>
+    runtime.request([call(name, args, 'call-' + turns)], { conversationId: A, turnId: uid(turns++), messages: [], ...options });
+  const image = { prompt: 'A lighthouse at night.', workflow: krea.id };
+  // In the Chat (`saved`): those of the model, named on the proposal.
+  const chat = await ask('create_image', image, { saved: true });
+  assert.deepEqual(chat.styles, kept[krea.id]);
+  assert.deepEqual(chat.notes, ['LoRA enregistrés pour Krea 2 : 70sSCiFiKrea2Raw · 0,8, detail · 1.']);
+  await runtime.execute({ requestId: chat.requestId, permission: 'once', approvalToken: chat.approvalToken });
+  await runtime.finished;
+  assert.deepEqual(saved.at(-1).parameters.styles, kept[krea.id], 'the take says what it was made with');
+  // From the Studio (no `saved`): none taken; those the Studio shows come with « Générer » (revise).
+  const studio = await ask('create_image', image);
+  assert.equal(studio.styles, undefined);
+  assert.equal(studio.notes, undefined);
+  // Given with the request (by hand): they are the ones, and nothing is said of the saved ones.
+  const given = await ask('create_image', image, { saved: true, styles: [{ name: 'other.safetensors', strength: 1 }] });
+  assert.deepEqual(given.styles, [{ name: 'other.safetensors', strength: 1 }]);
+  assert.equal(given.notes, undefined);
+  // Changed on the proposal, they are the user's: no longer said « enregistrés » ; another change keeps the line.
+  const again = await ask('create_image', image, { saved: true });
+  const reworded = await revise(runtime, again, { prompt: 'A lighthouse at dawn.' });
+  assert.deepEqual(reworded.notes, chat.notes);
+  const chosen = await revise(runtime, reworded, { styles: [{ name: 'detail.safetensors', strength: 0.4 }] });
+  assert.deepEqual(chosen.styles, [{ name: 'detail.safetensors', strength: 0.4 }]);
+  assert.equal(chosen.notes, undefined);
+  // One LoRA: said in the singular. The continuation of a clip takes none, nor a family whose engine takes none.
+  const video = await ask('create_video', { prompt: 'A red boat.', intention: 'x', workflow: ltx.id }, { saved: true });
+  assert.deepEqual(video.notes, ['LoRA enregistré pour LTX 2.5 : grain · 0,5.']);
+  const next = await ask(
+    'extend_video',
+    { source: { output: CLIP }, prompt: 'It sails on.', intention: 'x', workflow: ltx.id },
+    { saved: true },
+  );
+  assert.equal(next.styles, undefined);
+  const plain = await ask('create_video', { prompt: 'A red boat.', intention: 'x', workflow: minimax.id }, { saved: true });
+  assert.equal(plain.styles, undefined);
+  assert.equal(asked.includes(minimax.id), false);
+  // The saved ones cannot be read: the creation is made without, not refused.
+  const { runtime: broken } = world({
+    workflows: list,
+    savedStyles: async () => {
+      throw Error('lecture impossible');
+    },
+  });
+  const made = await broken.request([call('create_image', image)], { conversationId: A, turnId: turn, messages: [], saved: true });
+  assert.equal(made.styles, undefined);
+});
+
+test('every image of a series asked in the Chat has the LoRAs saved for its model', async () => {
+  const list = shipped(),
+    krea = of(list, 'krea2'),
+    styles = [{ name: 'detail.safetensors', strength: 1 }],
+    { runtime } = world({ workflows: list, savedStyles: async () => styles });
+  const first = await runtime.request(
+    [call('create_image', { prompt: 'A fox.', series: ['A whale.', 'An owl.'], workflow: krea.id })],
+    { conversationId: A, turnId: turn, messages: [], saved: true },
+  );
+  assert.deepEqual(first.styles, styles);
+  const second = await runtime.next({ series: first.series.id });
+  assert.deepEqual(second.styles, styles);
+  assert.deepEqual(second.notes, ['LoRA enregistré pour Krea 2 : detail · 1.']);
+});
+
+test('a draft promoted to its final keeps the LoRAs of the user it was made with', async () => {
+  const list = shipped(),
+    ltx = of(list, 'ltx25'),
+    styles = [{ name: 'grain.safetensors', strength: 0.5 }],
+    { runtime, saved } = world({ workflows: list, savedStyles: async () => [{ name: 'other.safetensors', strength: 1 }] });
+  const place = { conversationId: A, turnId: turn, messages: [] };
+  const first = await runtime.request(
+    [call('create_video', { prompt: 'A red boat crosses the bay at dawn.', intention: 'Brouillon', duration: 5, workflow: ltx.id })],
+    { ...place, styles },
+  );
+  await runtime.execute({ requestId: first.requestId, permission: 'once', approvalToken: first.approvalToken });
+  await runtime.finished;
+  const draft = saved[0];
+  assert.deepEqual(draft.parameters.styles, styles);
+  // Its final, asked in the Chat: the draft's own, not those saved for the model, and no line about them.
+  const final = await runtime.request(
+    [call('create_video', { reuse_output: draft.id, stage: 'final', intention: 'Version finale', prompt: draft.prompt, duration: null }, 'call-2')],
+    { ...place, turnId: uid(3), saved: true },
+  );
+  assert.equal(final.plan.stage, 'final');
+  assert.deepEqual(final.styles, styles);
+  assert.equal(final.notes, undefined);
 });

@@ -502,6 +502,8 @@ test('in the Studio a video the user has not seen is set there with the words of
   assert.equal(agent.saves.at(-1).incomplete, false);
   // What its screen showed as the user wrote goes with every request of the turn.
   assert.deepEqual(agent.requests.map(request => request.screen), [{ take: 4, media: 'video' }, { take: 4, media: 'video' }]);
+  // And that it is asked from the Studio: made with the LoRAs the Studio shows, not those saved.
+  assert.ok(agent.requests.every(request => request.inStudio === true));
 
   // « Refuser » instead: one result too, and the turn ends there.
   const other = studioOf(),
@@ -590,6 +592,8 @@ test('in the Chat nothing changes: the card with the words of Moodix at the firs
   assert.deepEqual(resultsOf(messages, 'call_3').map(result => result.status), ['success']);
   // From the Chat nothing is said of a screen.
   assert.ok(chat.requests.every(request => !('screen' in request)));
+  // Nor that it comes from the Studio: the server takes the LoRAs saved for the model.
+  assert.ok(chat.requests.every(request => !('inStudio' in request)));
 });
 
 // A character to put in a video, with no image of them (replace_character with a description): the

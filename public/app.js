@@ -2659,6 +2659,8 @@ async function sendMessage(event) {
           // A plan put to the user before a video is a few lines: no thinking either.
           ...(silent || briefing ? { thinking: false } : {}),
           ...(screen ? { screen } : {}),
+          // A creation asked from the Studio is made with the LoRAs the Studio shows; from the Chat, with those saved for its model.
+          ...(state.view === 'studio' ? { inStudio: true } : {}),
           conversationId: state.conversationId,
           turnId,
         },
