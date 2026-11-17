@@ -196,6 +196,118 @@ test('53 · a missing file: its card, the download as it goes, « Arrêter », a
   );
 });
 
+test('53 · the licences of the files are shown before the download; one with conditions is read and confirmed first', async () => {
+  const minimax = {
+      name: 'MiniMax H3 Community License Agreement',
+      url: 'https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE',
+      limits:
+        'Non licencié dans l’Union européenne, au Royaume-Uni, en Corée du Sud ni aux États-Unis, pour le modèle comme pour ses sorties.',
+      restricted: true,
+    },
+    apache = { name: 'Apache-2.0', url: 'https://spdx.org/licenses/Apache-2.0.html', limits: '', restricted: false };
+  const cardOf = (files, answer = async () => ({ state: 'running', workflowId: 'h3', received: 0, total: 10 })) => {
+    const host = new Element('div'),
+      asked = [];
+    const card = missingFileCard({
+      host,
+      request: {
+        requestId: 'r',
+        tool: 'create_video',
+        workflowName: 'MiniMax H3 Omni',
+        mediaType: 'video',
+        missing: { workflowId: 'h3', files, bytes: 10, left: 10 },
+      },
+      node,
+      icon,
+      api: async (route, body) => {
+        asked.push([route, body]);
+        if (route === 'downloads/start') return { json: async () => answer(body) };
+        return { json: async () => ({ job: { state: 'done', workflowId: 'h3' } }) };
+      },
+      onReady: () => true,
+      wait: () => settle(),
+    });
+    return { host, card, starts: () => asked.filter(([route]) => route === 'downloads/start').map(([, body]) => body) };
+  };
+  const lines = host =>
+    find(host, 'license-item').map(item =>
+      under(item)
+        .map(part => part.textContent)
+        .filter(Boolean),
+    );
+  const buttons = host =>
+    find(host, 'missing-foot')[0]
+      .children.filter(item => item.tag === 'button')
+      .map(item => item.children.at(-1).textContent);
+
+  // Two licences: the one with conditions first, each with its link, its files and its limits.
+  const f = cardOf([
+    { file: 'qwen25_tokenizer', size: 5, license: apache },
+    { file: 'fasth3.safetensors', size: 3, license: minimax },
+    { file: 'h3_vae.safetensors', size: 2, license: minimax },
+  ]);
+  await settle();
+  assert.equal(find(f.host, 'license-head')[0].textContent, 'Licences');
+  assert.deepEqual(lines(f.host), [
+    [
+      'MiniMax H3 Community License Agreement',
+      'à conditions',
+      'fasth3.safetensors, h3_vae.safetensors',
+      minimax.limits,
+    ],
+    ['Apache-2.0', 'qwen25_tokenizer'],
+  ]);
+  const [link] = find(f.host, 'license-name');
+  assert.deepEqual([link.tag, link.href, link.target, link.rel], ['a', minimax.url, '_blank', 'noopener noreferrer']);
+  assert.deepEqual(buttons(f.host), ['Annuler', 'Télécharger · 1 Mo']);
+  // « Télécharger »: nothing leaves; the licence with conditions alone, to read, and the question.
+  await f.card.start();
+  assert.deepEqual(f.starts(), []);
+  assert.equal(find(f.host, 'license-block')[0].attributes['data-confirm'], 'true');
+  assert.equal(find(f.host, 'license-head')[0].textContent, 'À lire avant de télécharger');
+  assert.deepEqual(
+    lines(f.host).map(line => line[0]),
+    ['MiniMax H3 Community License Agreement'],
+  );
+  assert.match(
+    find(f.host, 'license-limits')[0].textContent,
+    /Union européenne, au Royaume-Uni, en Corée du Sud ni aux États-Unis/,
+  );
+  assert.equal(
+    find(f.host, 'missing-ask')[0].textContent,
+    'Vous avez lu cette licence et vous en acceptez les conditions ?',
+  );
+  assert.deepEqual(buttons(f.host), ['Retour', 'J’ai lu, télécharger · 1 Mo']);
+  // « Retour »: as before, nothing sent. Confirmed: the request says so.
+  f.card.back();
+  assert.deepEqual(buttons(f.host), ['Annuler', 'Télécharger · 1 Mo']);
+  assert.equal(find(f.host, 'license-block')[0].attributes['data-confirm'], undefined);
+  await f.card.start();
+  await f.card.confirm();
+  assert.deepEqual(f.starts(), [{ id: 'h3', accepted: true }]);
+
+  // Free licences alone: named, one licence for all the files (no list of files), and no step more.
+  const free = cardOf([
+    { file: 'a.safetensors', size: 5, license: apache },
+    { file: 'b.safetensors', size: 5, license: apache },
+  ]);
+  await settle();
+  assert.equal(find(free.host, 'license-head')[0].textContent, 'Licence');
+  assert.deepEqual(lines(free.host), [['Apache-2.0']]);
+  await free.card.start();
+  assert.deepEqual(free.starts(), [{ id: 'h3' }]);
+
+  // A refusal of the server (no token, say) is said on the card, back to its first state.
+  const refused = cardOf([{ file: 'fasth3.safetensors', size: 3, license: minimax }], async () => {
+    throw new Error('Ces fichiers demandent un compte Hugging Face.');
+  });
+  await settle();
+  await refused.card.start();
+  await refused.card.confirm();
+  assert.equal(find(refused.host, 'missing-error')[0].textContent, 'Ces fichiers demandent un compte Hugging Face.');
+  assert.deepEqual(buttons(refused.host), ['Annuler', 'Télécharger · 1 Mo']);
+});
+
 test('53 · a verb no ready workflow makes reaches the shipped one that lacks a file; a ready one comes first', async () => {
   const video = (id, extra = {}) => ({
     schemaVersion: 1,

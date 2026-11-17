@@ -1,4 +1,5 @@
 import { setupGenerationRuntime } from './generation-runtime.mjs';
+import { licenseBlock, restrictedOf } from './model-licenses.mjs';
 
 // Interface wording for parameters; component, role and family labels come from the family manifests.
 const labels = {
@@ -114,6 +115,10 @@ export function setupNativeWorkflows(options) {
     // What the shipped workflows can download, the download in progress, whether a token is kept.
     downloads = { offers: {}, job: { state: 'idle' }, hasToken: false },
     following = false,
+    // The workflow whose licences with conditions are shown to be confirmed, before its download;
+    // its « J’ai lu, télécharger », which takes the focus when the list is drawn again.
+    licenseAsked = '',
+    confirmFocus = null,
     // Where ComfyUI, the external engine, is and whether it answers.
     comfy = { enabled: false, baseUrl: '', reachable: false, version: '' };
   // Paths being registered from a file field: Save waits for them.
@@ -380,6 +385,8 @@ export function setupNativeWorkflows(options) {
         several = offer.files.length > 1,
         them = several ? 'les' : 'le';
       const what = `Il manque ${several ? offer.files.length + ' fichiers' : 'un fichier'} : ${names}.`;
+      // A licence with conditions: said here too, it is read and confirmed before the download.
+      const restricted = offer.complete ? restrictedOf(offer.files).map(license => license.name) : [];
       return [
         'missing',
         what +
@@ -387,7 +394,10 @@ export function setupNativeWorkflows(options) {
             ? offer.needsToken
               ? ` ${several ? 'Ils demandent' : 'Il demande'} un compte Hugging Face : enregistrez votre jeton dans l’onglet Mise à jour, puis téléchargez-${them}.`
               : ` Le bouton de téléchargement ${them} place au bon endroit (${formatSize(offer.bytes)}).`
-            : ` Placez-${them} dans le dossier de ${several ? 'leur' : 'son'} type (onglet Génération, Dossier des modèles).`),
+            : ` Placez-${them} dans le dossier de ${several ? 'leur' : 'son'} type (onglet Génération, Dossier des modèles).`) +
+          (restricted.length
+            ? ` Licence à conditions (${restricted.join(', ')}) : à lire et à confirmer avant de télécharger.`
+            : ''),
       ];
     }
     const reason = record.unavailableReason || 'Indisponible.';
@@ -404,7 +414,10 @@ export function setupNativeWorkflows(options) {
         : record.builtin
           ? 'Fourni avec Atelier.'
           : 'Créé ou importé par vous.';
-  function downloadButton(record, offer) {
+  /** A licence with conditions among those of what a workflow downloads: read and confirmed first. */
+  const asksLicense = offer => restrictedOf(offer?.files).length > 0;
+  /** `asked`: its licences with conditions are shown to be confirmed; it then reads « J’ai lu, télécharger ». */
+  function downloadButton(record, offer, asked = false) {
     const job = downloads.job,
       mine = job.state === 'running' && job.workflowId === record.id;
     if (mine) {
@@ -418,6 +431,9 @@ export function setupNativeWorkflows(options) {
       stop.title = 'Arrêter le téléchargement ; il reprendra où il en était.';
       return stop;
     }
+    // Its licences with conditions, shown on its line: the first press asks to read them, the second
+    // (« J’ai lu, télécharger ») starts. Under free licences, named on the line, it starts at once.
+    const restricted = asksLicense(offer);
     const start = button('', async () => {
       if (offer.needsToken) {
         askToken(
@@ -425,12 +441,24 @@ export function setupNativeWorkflows(options) {
         );
         return;
       }
+      if (restricted && !asked) {
+        licenseAsked = record.id;
+        confirmFocus = null;
+        importStatus('');
+        renderList();
+        confirmFocus?.focus();
+        return;
+      }
       try {
         importStatus('');
-        downloads.job = await (await api('downloads/start', { id: record.id })).json();
+        licenseAsked = '';
+        downloads.job = await (
+          await api('downloads/start', { id: record.id, ...(restricted ? { accepted: true } : {}) })
+        ).json();
         renderList();
         followDownload();
       } catch (failure) {
+        renderList();
         importStatus(failure.message, true);
       }
     });
@@ -438,13 +466,19 @@ export function setupNativeWorkflows(options) {
     // A download stopped earlier starts again from where it was: what is left is shown.
     const left = offer.left ?? offer.bytes,
       resumed = left < offer.bytes;
-    start.append(icon('download'), node('span', '', formatSize(left)));
-    const label = resumed
-      ? `Reprendre le téléchargement (${formatSize(left)} restants sur ${formatSize(offer.bytes)})`
-      : `Télécharger les fichiers manquants (${formatSize(offer.bytes)})`;
+    start.append(
+      icon('download'),
+      node('span', '', asked ? 'J’ai lu, télécharger · ' + formatSize(left) : formatSize(left)),
+    );
+    const label = asked
+      ? `J’ai lu la licence : télécharger (${formatSize(left)})`
+      : resumed
+        ? `Reprendre le téléchargement (${formatSize(left)} restants sur ${formatSize(offer.bytes)})`
+        : `Télécharger les fichiers manquants (${formatSize(offer.bytes)})`;
     start.setAttribute('aria-label', label);
     start.title = label;
     start.dataset.nativeControl = 'true';
+    if (asked) confirmFocus = start;
     if (job.state === 'running') {
       start.disabled = true;
       start.dataset.unavailable = 'true';
@@ -499,7 +533,27 @@ export function setupNativeWorkflows(options) {
     main.append(head, line);
     if (engineOf(record) === 'external') main.append(comfyLine());
     const actions = node('div', 'native-card-actions');
-    if (offer?.complete) actions.append(downloadButton(record, offer));
+    if (offer?.complete) {
+      // The licences of what it downloads, before the download: named with their link and their
+      // limits; those with conditions alone once « Télécharger » is pressed, to read and confirm.
+      const waiting = stateName !== 'downloading',
+        asked = waiting && licenseAsked === record.id && asksLicense(offer),
+        licenses = waiting ? licenseBlock({ node, files: offer.files, confirm: asked }) : null;
+      if (licenses) main.append(licenses);
+      if (asked) {
+        const back = button(
+          'Annuler',
+          () => {
+            licenseAsked = '';
+            renderList();
+          },
+          'text-button workflow-license-back',
+        );
+        back.dataset.nativeControl = 'true';
+        actions.append(back);
+      }
+      actions.append(downloadButton(record, offer, asked));
+    }
     if (record.customized) {
       const reset = button(
         'Rétablir',
@@ -1560,6 +1614,8 @@ export function setupNativeWorkflows(options) {
     controller = new AbortController();
     if (draft) leaveEditor();
     importStatus('');
+    // A licence left unconfirmed is asked again from the start the next time.
+    licenseAsked = '';
   }
   $('generation-test').onclick = async () => {
     try {

@@ -97,6 +97,7 @@ const staticFiles = new Map([
   ['/take-player.mjs', ['take-player.mjs', 'text/javascript; charset=utf-8']],
   ['/first-launch.mjs', ['first-launch.mjs', 'text/javascript; charset=utf-8']],
   ['/missing-file.mjs', ['missing-file.mjs', 'text/javascript; charset=utf-8']],
+  ['/model-licenses.mjs', ['model-licenses.mjs', 'text/javascript; charset=utf-8']],
   ['/glass-menu.mjs', ['glass-menu.mjs', 'text/javascript; charset=utf-8']],
   ['/reflection.mjs', ['reflection.mjs', 'text/javascript; charset=utf-8']],
   ['/media-info.mjs', ['media-info.mjs', 'text/javascript; charset=utf-8']],
@@ -1260,7 +1261,8 @@ export async function createApplication({
         if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
         const record = (await generation.catalog.list()).find(item => item.id === body.id);
         if (!record) throw problem('Workflow introuvable.', 404);
-        return send(200, await generation.downloads.start(record));
+        // `accepted`: the licences with conditions of these files were shown, read and confirmed.
+        return send(200, await generation.downloads.start(record, { accepted: body.accepted === true }));
       }
       if (path === '/api/downloads/cancel') {
         generation.downloads.cancel();

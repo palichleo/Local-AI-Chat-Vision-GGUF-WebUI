@@ -163,3 +163,60 @@ test('every file of a shipped workflow has its source: a missing one offers its 
   // Wan 2.1 SCAIL-2 was shipped without them: no « Télécharger » on another computer.
   assert.deepEqual(missing, []);
 });
+
+test('every source names its licence, as the table of the notices gives it; one with conditions says its limits', async () => {
+  const { readFile: read } = await import('node:fs/promises');
+  const catalog = JSON.parse(await read(new URL('../runner/downloads.json', import.meta.url), 'utf8'));
+  const notices = await read(new URL('../THIRD_PARTY_NOTICES.md', import.meta.url), 'utf8');
+  const models = notices.slice(notices.indexOf('## Models'));
+  const restricted = new Set();
+  for (const [file, source] of Object.entries(catalog)) {
+    const license = source.license;
+    assert.ok(license?.name, file + ': no licence');
+    assert.match(license.url, /^https:\/\/\S+$/, file + ': no link to the text of its licence');
+    assert.deepEqual(
+      Object.keys(license).filter(key => !['name', 'url', 'limits', 'restricted'].includes(key)),
+      [],
+      file,
+    );
+    if ('limits' in license)
+      assert.ok(typeof license.limits === 'string' && license.limits.trim(), file + ': empty limits');
+    // The name is the one of the table; nothing is said here that the notices do not say.
+    assert.ok(models.includes(license.name), `${file}: « ${license.name} » is not in the table of the notices`);
+    if (license.restricted) {
+      assert.equal(license.restricted, true, file);
+      assert.ok(license.limits, file + ': a licence with conditions without its limits');
+      assert.ok(
+        models.includes(`[${license.name}](${license.url})`),
+        `${file}: its link is not the one of the notices`,
+      );
+      restricted.add(license.name);
+    } else
+      assert.match(
+        license.name,
+        /^(Apache-2\.0|MIT|BSD-3-Clause)$/,
+        file + ': neither free nor marked with conditions',
+      );
+    // A file behind a licence gate is under a licence with conditions.
+    if (source.gated) assert.equal(license.restricted, true, file + ': gated, yet not marked with conditions');
+  }
+  assert.deepEqual([...restricted].sort(), [
+    'Krea 2 Community License Agreement v.1',
+    'LTX-2.x Community License Agreement',
+    'MiniMax H3 Community License Agreement',
+    'SAM License',
+  ]);
+  // MiniMax H3: where it is not licensed is said first, in so many words.
+  for (const file of [
+    'fasth3_omniref_8step_pruned_int8_convrot.safetensors',
+    'minimax_h3_video_vae_fp16.safetensors',
+    'minimax_h3_audio_vae_fp32.safetensors',
+  ])
+    assert.match(
+      catalog[file].license.limits,
+      /^Non licencié dans l’Union européenne, au Royaume-Uni, en Corée du Sud ni aux États-Unis/,
+      file,
+    );
+  assert.match(catalog['krea2TurboOfficialComfy_krea2TurboInt8.safetensors'].license.limits, /1 million de dollars/);
+  assert.equal(catalog['sam3.1_multiplex_fp16.safetensors'].license.name, 'SAM License');
+});

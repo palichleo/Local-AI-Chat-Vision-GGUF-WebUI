@@ -14785,7 +14785,7 @@ body[data-setup='incomplete'] #resume-last {
   color: var(--text-2);
   font: 400 13.5px/1.4 var(--font-ui);
 }
-:is(.missing-cancel, .missing-stop) {
+:is(.missing-cancel, .missing-stop, .missing-back) {
   padding: 0;
   border: 0;
   background: none;
@@ -14793,8 +14793,117 @@ body[data-setup='incomplete'] #resume-last {
   font: 400 14px/1 var(--font-ui);
   cursor: pointer;
 }
-:is(.missing-cancel, .missing-stop):hover {
+:is(.missing-cancel, .missing-stop, .missing-back):hover {
   color: var(--text-1);
+}
+.missing-ask {
+  flex: 1 1 200px;
+  margin: 0 0 0 18px;
+  color: var(--text-2);
+  font: 400 13.5px/1.4 var(--font-ui);
+}
+
+/* The licences of the files to download (0.6.34), in the card of a missing file and on the line of
+   a workflow of the settings: each by its name (a link to its text), « à conditions » in the amber
+   of the alert, the files it covers in mono, its limits under it. « Télécharger » pressed, those
+   with conditions alone, under « À LIRE AVANT DE TÉLÉCHARGER », an amber line at their left. */
+.license-block {
+  margin: 14px 0 0 18px;
+}
+.license-head {
+  margin: 0 0 7px;
+  color: var(--text-3);
+  font: 600 var(--size-label) / 1 var(--font-ui);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+}
+.license-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.license-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 10px;
+  margin: 0;
+  color: var(--text-1);
+  font: 400 13px/1.4 var(--font-ui);
+}
+.license-block .license-name {
+  color: var(--text-1);
+}
+.license-block a.license-name {
+  text-decoration: underline;
+  text-decoration-color: rgba(238, 232, 222, 0.32);
+  text-underline-offset: 3px;
+}
+.license-block a.license-name:hover {
+  text-decoration-color: currentColor;
+}
+.license-tag {
+  color: var(--alert);
+  font: 400 var(--size-label) / 1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.license-files {
+  min-width: 0;
+  color: var(--text-3);
+  font: 400 11.5px/1.4 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.license-limits {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font: 400 13px/1.5 var(--font-ui);
+}
+.license-block[data-confirm] {
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--alert);
+}
+.license-block[data-confirm] .license-head {
+  color: var(--alert);
+}
+.license-block[data-confirm] .license-limits {
+  color: var(--text-1);
+}
+/* On the line of a workflow (settings): under its sentence, smaller, the line growing with it;
+   « LICENCE » beside the names, to take one row less. « Annuler » of the confirmation is neutral
+   (a text button is red by default: nothing is deleted here). */
+.workflow-main > .license-block {
+  margin: 5px 0 2px;
+}
+.workflow-main > .license-block:not([data-confirm]) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 12px;
+}
+.workflow-main > .license-block:not([data-confirm]) .license-head {
+  margin: 0;
+}
+#settings .workflow-settings .native-card-actions .workflow-license-back {
+  min-height: 34px;
+  margin: 0;
+  padding: 0 10px;
+  color: var(--text-2);
+  font: 400 14px/1 var(--font-ui);
+}
+#settings .workflow-settings .native-card-actions .workflow-license-back:hover:enabled {
+  color: var(--text-1);
+}
+.workflow-main > .license-block .license-list {
+  gap: 4px;
+}
+.workflow-main > .license-block :is(.license-line, .license-limits) {
+  font-size: 12.5px;
+}
+.workflow-main > .license-block .license-limits {
+  max-width: 76ch;
 }
 
 /* The picture of a take that failed, under its veil (52): the frame no longer hides it. */

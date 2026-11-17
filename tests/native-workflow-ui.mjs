@@ -21,6 +21,7 @@ function fixture() {
       this.checked = false;
       this.disabled = false;
       this.dataset = {};
+      this.style = {};
       this.attributes = {};
       this.classList = { toggle() {}, add() {}, remove() {} };
     }
@@ -892,6 +893,125 @@ test('one list of workflows: MOSS Image says whether ComfyUI answers, « Démarr
   assert.equal(after.dataset.state, 'starting');
   assert.equal(after.children[1].textContent, 'ComfyUI démarre…');
   assert.equal(after.children.at(-1).disabled, true);
+});
+
+test('the licences of a download are on the line of its workflow; one with conditions is read and confirmed first', async t => {
+  // A download started is followed every second: the clock of the test never runs it.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = await setup(t);
+  const krea = {
+      name: 'Krea 2 Community License Agreement v.1',
+      url: 'https://huggingface.co/Comfy-Org/Krea-2/blob/main/LICENSE.pdf',
+      limits:
+        'Usage commercial du modèle et de ses sorties seulement sous 1 million de dollars de chiffre d’affaires annuel total.',
+      restricted: true,
+    },
+    apache = { name: 'Apache-2.0', url: 'https://spdx.org/licenses/Apache-2.0.html', limits: '', restricted: false },
+    giga = 1024 ** 3;
+  const lacking = (id, name) => ({
+    ...structuredClone(f.template),
+    id,
+    name,
+    builtin: true,
+    enabled: true,
+    ready: false,
+  });
+  f.workflows.push(lacking('krea-two', 'Krea 2'), lacking('seedvr', 'Upscale SeedVR2'));
+  const offer = files => ({
+    files,
+    bytes: files.reduce((sum, file) => sum + file.size, 0),
+    left: files.reduce((sum, file) => sum + file.size, 0),
+    complete: true,
+    needsToken: false,
+    page: '',
+  });
+  const offers = {
+    'krea-two': offer([
+      { role: 'textEncoder', file: 'qwen3vl_4b.safetensors', size: giga, license: apache },
+      { role: 'model', file: 'krea2_turbo.safetensors', size: 3 * giga, license: krea },
+    ]),
+    seedvr: offer([{ role: 'model', file: 'seedvr2.safetensors', size: giga, license: apache }]),
+  };
+  const api = f.api,
+    starts = [];
+  f.api = async (route, body) => {
+    if (route === 'generation') {
+      const result = await (await api(route, body)).json();
+      return Response.json({ ...result, downloads: { offers, job: { state: 'idle' }, hasToken: false } });
+    }
+    if (route === 'downloads/start') {
+      starts.push(body);
+      return Response.json({ state: 'running', workflowId: body.id, name: body.id, received: 0, total: giga });
+    }
+    return api(route, body);
+  };
+  f.ui = setupNativeWorkflows({ api: (...args) => f.api(...args), state: {}, node: f.node, notice() {} });
+  await f.ui.refresh();
+  const cardOf = name =>
+      f.$('workflow-list').children.find(item => item.children[1]?.children[0].children[0].textContent === name),
+    under = root => [root, ...root.children.flatMap(child => under(child))],
+    find = (root, name) => under(root).filter(item => String(item.className).split(' ').includes(name)),
+    lines = card =>
+      find(card, 'license-item').map(item =>
+        under(item)
+          .map(part => part.textContent)
+          .filter(Boolean),
+      ),
+    actions = card => card.children.at(-1).children.map(item => item.children.at(-1)?.textContent || item.textContent),
+    download = card => find(card, 'workflow-download')[0];
+
+  // Before any press: each licence named with its link, the files it covers, its limits.
+  assert.deepEqual(lines(cardOf('Krea 2')), [
+    ['Krea 2 Community License Agreement v.1', 'à conditions', 'krea2_turbo.safetensors', krea.limits],
+    ['Apache-2.0', 'qwen3vl_4b.safetensors'],
+  ]);
+  assert.equal(find(cardOf('Krea 2'), 'license-name')[0].href, krea.url);
+  assert.equal(find(cardOf('Krea 2'), 'license-head')[0].textContent, 'Licences');
+  assert.match(
+    cardOf('Krea 2').children[0].dataset.help,
+    /Licence à conditions \(Krea 2 Community License Agreement v\.1\) : à lire et à confirmer/,
+  );
+  assert.deepEqual(lines(cardOf('Upscale SeedVR2')), [['Apache-2.0']]);
+  assert.doesNotMatch(cardOf('Upscale SeedVR2').children[0].dataset.help, /Licence à conditions/);
+  assert.deepEqual(actions(cardOf('Krea 2')).slice(0, 1), ['4 Go']);
+
+  // A licence with conditions: the first press starts nothing, shows it alone and asks to confirm.
+  await download(cardOf('Krea 2')).onclick();
+  assert.deepEqual(starts, []);
+  assert.equal(find(cardOf('Krea 2'), 'license-block')[0].attributes['data-confirm'], 'true');
+  assert.equal(find(cardOf('Krea 2'), 'license-head')[0].textContent, 'À lire avant de télécharger');
+  assert.deepEqual(
+    lines(cardOf('Krea 2')).map(line => line[0]),
+    ['Krea 2 Community License Agreement v.1'],
+  );
+  assert.deepEqual(actions(cardOf('Krea 2')).slice(0, 2), ['Annuler', 'J’ai lu, télécharger · 4 Go']);
+  assert.equal(download(cardOf('Krea 2')).focused, true);
+  assert.equal(download(cardOf('Krea 2')).attributes['aria-label'], 'J’ai lu la licence : télécharger (4 Go)');
+  // The other workflows are as they were.
+  assert.deepEqual(actions(cardOf('Upscale SeedVR2')).slice(0, 1), ['1 Go']);
+  // « Annuler »: back to its line, nothing sent.
+  await cardOf('Krea 2').children.at(-1).children[0].onclick();
+  assert.deepEqual(actions(cardOf('Krea 2')).slice(0, 1), ['4 Go']);
+  assert.equal(find(cardOf('Krea 2'), 'license-block')[0].attributes['data-confirm'], undefined);
+  assert.deepEqual(starts, []);
+  // Pressed, then confirmed: the request says the licence was read.
+  await download(cardOf('Krea 2')).onclick();
+  await download(cardOf('Krea 2')).onclick();
+  assert.deepEqual(starts, [{ id: 'krea-two', accepted: true }]);
+  assert.equal(cardOf('Krea 2').dataset.state, 'downloading');
+  assert.deepEqual(find(cardOf('Krea 2'), 'license-block'), [], 'the licences are no longer asked while it downloads');
+
+  // Free licences alone: one press starts it, with no word of a confirmation.
+  await f.ui.refresh();
+  await download(cardOf('Upscale SeedVR2')).onclick();
+  assert.deepEqual(starts.at(-1), { id: 'seedvr' });
+  // Closing the settings forgets a confirmation left half-way.
+  await f.ui.refresh();
+  await download(cardOf('Krea 2')).onclick();
+  assert.deepEqual(actions(cardOf('Krea 2')).slice(0, 2), ['Annuler', 'J’ai lu, télécharger · 4 Go']);
+  f.ui.cancelSettings();
+  await f.ui.refresh();
+  assert.deepEqual(actions(cardOf('Krea 2')).slice(0, 1), ['4 Go']);
 });
 
 test('an existing tokenizer is never replaced by a suggestion, and families without one show no tokenizer', async t => {

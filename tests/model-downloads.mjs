@@ -194,6 +194,81 @@ test('a gated source needs the Hugging Face token, sent to Hugging Face only', a
   assert.equal(await f.downloads.hasToken(), false);
 });
 
+test('each file to download comes with its licence; one with conditions starts only once confirmed', async t => {
+  const krea = {
+      name: 'Krea 2 Community License Agreement v.1',
+      url: 'https://huggingface.co/Comfy-Org/Krea-2/blob/main/LICENSE.pdf',
+      limits: 'Usage commercial seulement sous 1 million de dollars de chiffre d’affaires annuel.',
+      restricted: true,
+    },
+    apache = { name: 'Apache-2.0', url: 'https://spdx.org/licenses/Apache-2.0.html' };
+  const f = await fixture(t, {
+    catalog: {
+      'krea2Turbo.safetensors': {
+        repo: 'Org/Krea',
+        revision: 'abc',
+        path: 'diffusion_models/krea2_turbo.safetensors',
+        size: MODEL.length,
+        sha256: sha(MODEL),
+        license: krea,
+      },
+      tokenizer: {
+        repo: 'Org/Tokenizer',
+        revision: 'def',
+        folder: true,
+        size: VOCAB.length,
+        license: { ...apache, url: 'javascript:alert(1)' },
+        files: [{ path: 'vocab.json', size: VOCAB.length }],
+      },
+    },
+  });
+  // As the page shows it: name, link, limits, and whether it is to confirm; a link that is not https is left out.
+  assert.deepEqual(
+    (await f.downloads.missing(f.workflow)).map(item => [item.file, item.license]),
+    [
+      ['krea2Turbo.safetensors', krea],
+      ['tokenizer', { name: 'Apache-2.0', url: '', limits: '', restricted: false }],
+    ],
+  );
+  const offer = (await f.downloads.offers([f.workflow])).krea;
+  assert.equal(offer.restricted, true);
+  assert.deepEqual(
+    offer.files.map(file => [file.file, file.license.name, file.license.restricted]),
+    [
+      ['krea2Turbo.safetensors', 'Krea 2 Community License Agreement v.1', true],
+      ['tokenizer', 'Apache-2.0', false],
+    ],
+  );
+  // Not confirmed: nothing is fetched, and the licence to read is named. Confirmed: it goes.
+  await assert.rejects(
+    f.downloads.start(f.workflow),
+    /Licence à conditions \(Krea 2 Community License Agreement v\.1\) : lisez-la et confirmez/,
+  );
+  assert.deepEqual(f.requests, []);
+  assert.equal(f.downloads.status().state, 'idle');
+  await f.downloads.start(f.workflow, { accepted: true });
+  assert.equal((await f.finish()).state, 'done');
+  // Under free licences alone, no confirmation is asked.
+  const free = await fixture(t, {
+    catalog: {
+      tokenizer: {
+        repo: 'Org/Tokenizer',
+        revision: 'def',
+        folder: true,
+        size: VOCAB.length,
+        license: apache,
+        files: [{ path: 'vocab.json', size: VOCAB.length }],
+      },
+    },
+  });
+  const workflow = { ...free.workflow, components: { tokenizer: free.workflow.components.tokenizer } };
+  const open = (await free.downloads.offers([workflow])).krea;
+  assert.equal(open.restricted, false);
+  assert.deepEqual(open.files[0].license, { ...apache, limits: '', restricted: false });
+  await free.downloads.start(workflow);
+  assert.equal((await free.finish()).state, 'done');
+});
+
 test('nothing starts without room on the disk, for a workflow of the user, or twice at once', async t => {
   const small = await fixture(t, { free: 1000 });
   await assert.rejects(small.downloads.start(small.workflow), /Pas assez de place/);

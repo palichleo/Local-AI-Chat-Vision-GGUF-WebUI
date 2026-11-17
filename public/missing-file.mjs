@@ -6,7 +6,14 @@
  * file is there, `onReady()`: true when the page sent the request again (the conversation had not
  * moved); else the card says « Wan SCAIL 2 est prêt » and offers « Reprendre la demande » (`onResume`):
  * a message sent hours later on its own would come out of context.
+ *
+ * Under the files, their licences (model-licenses.mjs): each by its name, a link to its text and its
+ * limits. One with conditions (LTX 2.5, MiniMax H3, Krea 2, SAM 3.1) is confirmed first: « Télécharger »
+ * then shows those licences alone, « À LIRE AVANT DE TÉLÉCHARGER », with « Retour » and « J’ai lu,
+ * télécharger »; a free one is only named, and the download starts at once.
  */
+import { licenseBlock, restrictedOf } from './model-licenses.mjs';
+
 const KINDS = { video: 'Vidéo', audio: 'Son', image: 'Image' };
 
 /** « 28,6 Go », « 578 Mo ». */
@@ -29,7 +36,9 @@ export function missingFileCard({
 }) {
   const missing = request.missing,
     card = node('section', 'missing-card'),
-    pause = wait ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
+    pause = wait ?? (ms => new Promise(resolve => setTimeout(resolve, ms))),
+    // The licences with conditions of these files: read and confirmed before the download.
+    restricted = restrictedOf(missing.files);
   card.setAttribute('aria-label', 'Il manque un fichier');
   let state = 'idle',
     left = missing.left || missing.bytes,
@@ -89,13 +98,26 @@ export function missingFileCard({
         node('p', 'missing-done', `${request.workflowName} est prêt`),
         button('missing-go', 'Reprendre la demande', () => onResume(), 'play'),
       );
+    } else if (state === 'confirm') {
+      const several = restricted.length > 1;
+      foot.append(
+        node(
+          'p',
+          'missing-ask',
+          `Vous avez lu ${several ? 'ces licences' : 'cette licence'} et vous en acceptez les conditions ?`,
+        ),
+        button('text-button missing-back', 'Retour', () => back()),
+        button('missing-go', 'J’ai lu, télécharger · ' + sizeText(left), () => void confirm(), 'download'),
+      );
     } else {
       foot.append(
         button('text-button missing-cancel', 'Annuler', () => cancel()),
         button('missing-go', 'Télécharger · ' + sizeText(left), () => void start(), 'download'),
       );
     }
-    const parts = [head, list, note];
+    const parts = [head, list, note],
+      licenses = licenseBlock({ node, files: missing.files, confirm: state === 'confirm' });
+    if (licenses) parts.push(licenses);
     if (error) {
       const alert = node('p', 'missing-error', error);
       alert.setAttribute('role', 'alert');
@@ -103,13 +125,29 @@ export function missingFileCard({
     }
     card.replaceChildren(...parts, foot);
   }
+  /** « Télécharger »: at once under free licences; one with conditions is shown alone and confirmed first. */
   async function start() {
+    if (!restricted.length) return download(false);
+    error = '';
+    state = 'confirm';
+    render();
+  }
+  /** « J’ai lu, télécharger »: the download, with the word that the licences were read. */
+  const confirm = () => download(true);
+  function back() {
+    state = 'idle';
+    render();
+  }
+  async function download(accepted) {
     error = '';
     try {
-      const job = await (await api('downloads/start', { id: missing.workflowId })).json();
+      const job = await (
+        await api('downloads/start', { id: missing.workflowId, ...(accepted ? { accepted: true } : {}) })
+      ).json();
       ({ received = 0, total = total } = job);
       state = 'running';
     } catch (failure) {
+      state = 'idle';
       error = failure.message;
     }
     render();
@@ -179,5 +217,5 @@ export function missingFileCard({
       }
     })
     .catch(() => {});
-  return { card, start, stop, cancel };
+  return { card, start, confirm, back, stop, cancel };
 }
