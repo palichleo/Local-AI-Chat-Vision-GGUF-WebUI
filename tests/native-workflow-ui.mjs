@@ -193,8 +193,8 @@ async function setup(t) {
   return f;
 }
 
-test('only seed offers random ownership', () => {
-  assert.deepEqual(parameterPolicies('seed'), ['fixed', 'model', 'random']);
+test('only seed offers random ownership, and never the assistant (tests/workflow-options.mjs)', () => {
+  assert.deepEqual(parameterPolicies('seed'), ['fixed', 'random']);
   assert.deepEqual(parameterPolicies('steps'), ['fixed', 'model']);
 });
 
@@ -1150,4 +1150,123 @@ test('a model folder cannot be told from another: without one, the workflow is n
   assert.match(f.$('native-component-musicModel-file').placeholder, /^Choisir un dossier/);
   assert.equal(await f.ui.saveEditor(), false);
   assert.match(f.$('native-workflow-error').textContent, /Choisissez un fichier pour « Modèle de musique/);
+});
+
+// What changes nothing is greyed and said why (17/11); tests/workflow-options.mjs holds each reason
+// against what the server sends the engine.
+const shippedWorkflow = async pipeline => {
+  const { readdir, readFile } = await import('node:fs/promises');
+  const folder = new URL('../runner/workflows/', import.meta.url);
+  for (const name of (await readdir(folder)).filter(name => name.endsWith('.json'))) {
+    const workflow = JSON.parse(await readFile(new URL(name, folder), 'utf8'));
+    if (workflow.pipeline === pipeline) return workflow;
+  }
+};
+/** The note of the card a control is on: why it is greyed, or what it does unexpectedly. */
+const noteOf = control => {
+  let card = control;
+  while (card && !['native-parameter', 'native-lora'].includes(card.className)) card = card.parent;
+  return card.children.find(child => child.className.includes('native-inert'));
+};
+test('LTX 2.5: what its profiles replace, its single values and the length of its profiles are greyed, and said why', async t => {
+  const f = await setup(t);
+  await f.ui.edit(await shippedWorkflow('ltx25'));
+  const off = id => f.$(id).dataset.unavailable === 'true' && f.$(id).disabled === true;
+  // The size and the frame rate of « Réglages de génération »: the profiles set them.
+  for (const name of ['width', 'height', 'fps']) {
+    assert.ok(off('native-value-' + name), name);
+    assert.match(noteOf(f.$('native-value-' + name)).textContent, /Brouillon et vidéo finale/);
+  }
+  // Eight steps, the only value LTX takes: the whole setting, and in each profile.
+  assert.ok(off('native-value-steps') && f.$('native-policy-steps').dataset.unavailable === 'true');
+  assert.match(noteOf(f.$('native-value-steps')).textContent, /Seule valeur que LTX2.5 accepte : 8\./);
+  assert.ok(off('native-profile-draft-steps'));
+  // The length is the one asked, else « Images vidéo »: the profiles' is never used, nor said to the model.
+  assert.ok(off('native-profile-draft-frames') && off('native-profile-final-frames'));
+  assert.match(f.$('native-profile-draft-frames').parent.children.at(-1).textContent, /durée est celle demandée/);
+  assert.ok(off('native-description-frames'));
+  assert.equal(f.$('native-value-frames').dataset.unavailable, 'false');
+  // A list of choices has no bounds: they were shown, and never saved.
+  assert.equal(f.$('native-min-frames').parent, undefined);
+  assert.notEqual(f.$('native-min-start_strength').parent, undefined, 'a range keeps its bounds');
+  // What stays theirs is open.
+  assert.equal(f.$('native-profile-final-width').dataset.unavailable, 'false');
+  assert.equal(f.$('native-value-audio').dataset.unavailable, 'false');
+  // The prompt is a line, no switch.
+  assert.equal(f.$('native-policy-prompt'), null);
+  // The LoRA of the subject images: on by itself with them; its default and description do nothing.
+  assert.ok(off('native-lora-default-reference-slots') && off('native-lora-description-reference-slots'));
+  assert.match(noteOf(f.$('native-lora-default-reference-slots')).textContent, /Référence de sujet/);
+  // Fixed, the length of the profiles is used again, and its own value is replaced (live).
+  f.$('native-policy-frames').value = 'fixed';
+  f.$('native-policy-frames').onchange();
+  assert.equal(f.$('native-profile-draft-frames').dataset.unavailable, 'false');
+  assert.ok(off('native-value-frames'));
+  // Untouched, it is saved as it was.
+  f.$('native-policy-frames').value = 'model';
+  f.$('native-policy-frames').onchange();
+  assert.equal(f.ui.editorDirty(false), false);
+});
+test('an engine without LoRA offers none, and says so; one with LoRAs offers them', async t => {
+  const f = await setup(t);
+  await f.ui.edit(await shippedWorkflow('realesrgan_image'));
+  assert.equal(f.$('native-workflow-add-lora').dataset.unavailable, 'true');
+  assert.equal(f.$('native-lora-note').hidden, false);
+  assert.match(f.$('native-lora-note').textContent, /Real-ESRGAN ne prend pas de LoRA\./);
+  f.$('native-workflow-add-lora').onclick();
+  assert.equal(f.$('native-lora-count').textContent, '0', 'nothing added');
+  f.ui.setBusy(false);
+  assert.equal(f.$('native-workflow-add-lora').disabled, true, 'stays greyed after a busy spell');
+  f.$('native-workflow-back').onclick();
+  await f.ui.edit(f.template);
+  assert.equal(f.$('native-workflow-add-lora').dataset.unavailable, 'false');
+  assert.equal(f.$('native-lora-note').hidden, true);
+  f.$('native-workflow-add-lora').onclick();
+  assert.equal(f.$('native-lora-count').textContent, '1');
+});
+test('a music engine takes no reference: the button is greyed, and said why', async t => {
+  const f = await setup(t);
+  await f.ui.edit(await shippedWorkflow('acestep15'));
+  assert.equal(f.$('native-workflow-add-reference').dataset.unavailable, 'true');
+  assert.match(f.$('native-reference-note').textContent, /ACE-Step 1.5 ne prend pas d’image ni de vidéo de référence\./);
+  assert.equal(f.$('native-reference-note').hidden, false);
+});
+test('a prompt is a line, never a switch: a fixed one, refused at each creation, is saved as written each time', async t => {
+  const f = await setup(t),
+    record = structuredClone(f.template);
+  record.parameters.prompt = { policy: 'fixed', value: 'Un portrait' };
+  await f.ui.edit(record);
+  assert.equal(f.$('native-policy-prompt'), null);
+  assert.equal(f.$('native-value-prompt'), null);
+  assert.equal(await f.ui.saveEditor(), true, f.$('native-workflow-error').textContent);
+  const saved = f.calls.findLast(call => call.route === 'generation/workflows').body;
+  assert.deepEqual(saved.parameters.prompt, { policy: 'model', type: 'string' });
+});
+test('the seed is fixed or drawn; a seed left to the assistant stays shown, to be changed', async t => {
+  const f = await setup(t);
+  await f.ui.edit(f.template);
+  assert.deepEqual(
+    f.$('native-policy-seed').children.map(choice => choice.textContent),
+    ['Fixe', 'Aléatoire'],
+  );
+  const record = structuredClone(f.template);
+  record.parameters.seed = { policy: 'model', type: 'integer', default: 3 };
+  f.$('native-workflow-back').onclick();
+  await f.ui.edit(record);
+  assert.deepEqual(
+    f.$('native-policy-seed').children.map(choice => choice.textContent),
+    ['Fixe', 'Aléatoire', 'Assistant'],
+  );
+  assert.equal(f.$('native-policy-seed').value, 'model');
+});
+test('Krea 2: a denoise of 1 with an image to modify is said to ignore it, until it is lowered', async t => {
+  const f = await setup(t);
+  await f.ui.edit(await shippedWorkflow('krea2'));
+  const note = noteOf(f.$('native-value-denoise'));
+  assert.equal(note.hidden, false);
+  assert.match(note.textContent, /image à modifier est ignorée/);
+  assert.equal(f.$('native-value-denoise').dataset.unavailable, 'false', 'a warning, not greyed');
+  f.$('native-value-denoise').value = '0.7';
+  for (const listener of f.$('native-value-denoise').listeners.input) listener();
+  assert.equal(note.hidden, true);
 });

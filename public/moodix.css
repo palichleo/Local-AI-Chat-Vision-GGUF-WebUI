@@ -3697,7 +3697,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 
 /* Settings in tabs: a wide window of one size whatever the tab, the tabs in a column on the
    left, each tab's blocks side by side. Only the tab's area scrolls; the header (search) and
-   the footer (save) stay in place. The workflow editor keeps scrolling the whole window.
+   the footer (save) stay in place. The workflow editor scrolls its own body (see below).
    Kept last, as one layer over the rules above. */
 #settings {
   width: min(1120px, calc(100% - 32px));
@@ -4124,10 +4124,67 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   }
 }
 
-/* The workflow editor keeps one column: a readable width in the middle of the wide window. */
-#workflow-editor > .settings-body {
+/* The workflow editor fills the window of the settings: its head and its foot stay, its body
+   scrolls (17/11). The window itself never scrolls since « Salle obscure » (overflow: hidden), and
+   the editor, taller than it, could be neither scrolled nor saved. One column of a readable width
+   in the middle, the scroll bar at the edge of the window. */
+#settings #workflow-editor:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+#settings #workflow-editor > :is(.settings-header, .settings-footer) {
+  flex: none;
+  position: static;
+}
+#settings #workflow-editor > .settings-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#settings #workflow-editor > .settings-body > * {
   max-width: 880px;
   margin-inline: auto;
+}
+/* Clicked between two fields, the body takes the focus (tabindex -1): the keys then scroll it, as
+   in a tab of the settings. Without it the window had the focus, and it does not scroll. */
+#native-workflow-body:focus {
+  outline: none;
+}
+/* Its folding sections (Réglages, LoRAs, références, brouillon et vidéo finale) take the whole
+   column: as boxes of flex (« Salle obscure »), their content kept the width of what it held. */
+#settings #workflow-editor details.settings-block {
+  display: block;
+}
+#settings #workflow-editor details.settings-block[open] > summary {
+  margin-bottom: 12px;
+}
+/* A setting that changes nothing is greyed; the line under it says why (native-workflow-ui.mjs). */
+#settings #workflow-editor [data-unavailable='true']:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* A list of the settings (glass-menu.mjs: a button and a menu of glass) is a field as the others,
+   never the grey button of the browser (17/11, « Type de génération »). */
+#settings button.glass-select {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 12px 7px 11px;
+  border: 1px solid rgba(238, 232, 222, 0.1);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--size-1);
+}
+#settings button.glass-select:is(:hover, :focus-visible):enabled {
+  border-color: rgba(238, 232, 222, 0.24);
+}
+#settings button.glass-select:disabled {
+  color: var(--text-3);
 }
 
 @media (max-width: 760px) {

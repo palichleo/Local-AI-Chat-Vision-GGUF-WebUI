@@ -240,6 +240,30 @@ try {
     return js(`document.getElementById('prompt').value === '#'`);
   });
   await run('Configuration', () => click('#settings-open'), dialog('settings'));
+  // The editor of a workflow, at 1280 × 720 (17/11): taller than the window, its body scrolls, to
+  // the wheel as to the keys, and its foot (« Enregistrer le workflow ») stays in sight.
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
+  const editorBody = `document.getElementById('native-workflow-body')`;
+  await run('onglet Workflows', () => click('#settings-tab-workflows'), () => js(`!document.getElementById('workflow-add').hidden`));
+  await run('éditeur de workflow', () => click('#workflow-add'), () =>
+    js(`!document.getElementById('workflow-editor').hidden && ${editorBody}.scrollHeight > ${editorBody}.clientHeight + 200`));
+  await run('éditeur : molette', async () => {
+    await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 640, y: 400, deltaX: 0, deltaY: 600 });
+  }, () => js(`${editorBody}.scrollTop > 100`));
+  await run('éditeur : touche Fin', async () => {
+    await js(`${editorBody}.focus()`);
+    await key('End', 'End', 35);
+    await wait(800);
+  }, () => js(`${editorBody}.scrollTop >= ${editorBody}.scrollHeight - ${editorBody}.clientHeight - 2`));
+  await run('éditeur : touche Début', async () => {
+    await key('Home', 'Home', 36);
+    await wait(800);
+  }, () => js(`${editorBody}.scrollTop === 0`));
+  await run('éditeur : pied en vue', () => true, () =>
+    js(`(() => { const save = document.getElementById('native-workflow-save').getBoundingClientRect(), frame = document.getElementById('settings').getBoundingClientRect(); return save.height > 0 && save.bottom <= frame.bottom && save.bottom <= innerHeight; })()`));
+  await run('quitter l’éditeur', () => click('#native-workflow-back').then(() => wait(200)).then(() => click('#native-workflow-discard')), () =>
+    js(`document.getElementById('workflow-editor').hidden && !document.getElementById('settings-form').hidden`));
+  await size(1280);
   await run('Échap (Configuration)', () => key('Escape', 'Escape', 27), noDialog);
   await run('nouveau projet', () => fromMenu('#thread-project', '.thread-action'), dialog('project-dialog'));
   await run('Échap (projet)', () => key('Escape', 'Escape', 27), noDialog);

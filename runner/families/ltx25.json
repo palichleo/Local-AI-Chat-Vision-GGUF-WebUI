@@ -170,7 +170,8 @@
     "attention": {
       "type": "string",
       "choices": ["pytorch", "comfy_kitchen"],
-      "note": "Attention dense : comfy_kitchen calcule en INT8 (plus rapide, à peine différent), pytorch exactement."
+      "note": "Attention dense : comfy_kitchen calcule en INT8 (plus rapide, à peine différent), pytorch exactement.",
+      "unused": "Sans effet : le moteur de Moodix choisit lui-même son attention pour LTX (ce réglage servait à ComfyUI)."
     }
   },
   "requiredParameters": ["prompt", "seed", "width", "height", "steps", "frames", "fps", "stage", "audio"],
@@ -294,10 +295,6 @@
       "image_compression": {
         "policy": "fixed",
         "value": 18
-      },
-      "attention": {
-        "policy": "fixed",
-        "value": "pytorch"
       }
     },
     "profiles": {

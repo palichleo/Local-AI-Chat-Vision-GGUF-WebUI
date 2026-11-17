@@ -26,6 +26,22 @@ const labels = {
   max_side: 'Plus grand côté de sortie (px, 0 = libre)',
   multiplier: 'Multiplicateur d’images',
   mode: 'Mode',
+  lyrics: 'Paroles',
+  seconds: 'Durée (secondes)',
+  language: 'Langue des paroles',
+  guidance_scale: 'Guidage',
+  shift: 'Décalage (shift)',
+  attention: 'Attention',
+  sparse_attention: 'Attention creuse',
+  sparse_keep: 'Part gardée par l’attention creuse (%)',
+  sparse_start: 'Début de l’attention creuse',
+  scale: 'Agrandissement par passe',
+  passes: 'Passes',
+  color_correction: 'Correction des couleurs',
+  subject: 'Qui remplacer (en anglais)',
+  reference_subject: 'Qui est le personnage (en anglais)',
+  step_lora_strength: 'Intensité du LoRA d’étapes',
+  identity_lora_strength: 'Intensité du LoRA d’identité',
 };
 const choiceLabels = { draft: 'Brouillon', final: 'Vidéo finale', smooth: 'Fluide', slow_motion: 'Ralenti' };
 const ownership = { fixed: 'Fixe', model: 'Assistant', random: 'Aléatoire' };
@@ -44,7 +60,69 @@ const folderControls = {
 // What an optional component that is used, but left to the folders of the settings, holds in
 // place of a file: an id no file is registered under, so the server looks in the folders.
 const AUTOMATIC = 'automatic';
-export const parameterPolicies = name => (name === 'seed' ? ['fixed', 'model', 'random'] : ['fixed', 'model']);
+// The assistant never chooses a seed (tool-catalog.mjs: it passes one only when the user names it,
+// and only to a workflow that draws its own): « Assistant » would have been a fixed seed in disguise.
+export const parameterPolicies = name => (name === 'seed' ? ['fixed', 'random'] : ['fixed', 'model']);
+/** The versions (draft, final) a workflow can be made at: its profiles apply only to these. */
+function stagesOf(manifest, workflow) {
+  const stage = workflow.parameters?.stage;
+  if (!stage || !workflow.profiles) return [];
+  if (stage.policy === 'fixed') return [stage.value];
+  return stage.choices ?? manifest?.parameters?.stage?.choices ?? Object.keys(workflow.profiles);
+}
+const shownChoice = value => choiceLabels[value] ?? (value === '' ? 'vide' : String(value).replace('.', ','));
+/**
+ * Why a setting of a workflow changes nothing in what is made, or '' when it does (17/11: in the
+ * editor, half the fields of some workflows did nothing). `part`: the whole `parameter`, its
+ * `value` (a fixed value, or the default of one left to the assistant), its `description` (what
+ * the assistant is told of it), or its value in the `draft` or `final` profile. `workflow`: its
+ * parameters (policies) and profiles as they stand. tests/workflow-options.mjs holds each reason
+ * against what the server sends the engine.
+ */
+export function inertSetting(manifest, workflow, name, part) {
+  const spec = manifest?.parameters?.[name] ?? {},
+    policy = workflow.parameters?.[name];
+  // Declared by the family, read by no engine of it (`attention` from the time of ComfyUI).
+  if (spec.unused) return spec.unused;
+  // One value only: any other is refused, and that one is the model's own (LTX's 8 steps).
+  if (spec.choices?.length === 1)
+    return `Seule valeur que ${manifest.label} accepte : ${shownChoice(spec.choices[0])}.`;
+  if (part === 'draft' || part === 'final') {
+    const stages = stagesOf(manifest, workflow);
+    if (!stages.includes(part))
+      return workflow.parameters?.stage
+        ? `Jamais utilisé : « ${labels.stage} » ne prend pas cette version.`
+        : `Jamais utilisé : ce workflow n’a pas de réglage « ${labels.stage} ».`;
+    // The router always passes a length (the one asked, else the default): the profile's is never used.
+    if (name === 'frames' && policy?.policy === 'model')
+      return `La durée est celle demandée, sinon « ${labels.frames} » des réglages de génération.`;
+    return '';
+  }
+  if (part === 'value') {
+    if (name === 'frames' && policy?.policy === 'model') return '';
+    const stages = stagesOf(manifest, workflow);
+    if (stages.length && stages.every(stage => Object.hasOwn(workflow.profiles[stage]?.parameters ?? {}, name)))
+      return 'Remplacé par « Brouillon et vidéo finale », plus bas : c’est là qu’il se règle.';
+    return '';
+  }
+  // A clip length is asked of the model in seconds: what is said of the frame count never reaches it.
+  if (part === 'description' && name === 'frames' && workflow.mediaType === 'video')
+    return 'Le modèle donne une durée en secondes : cette consigne ne lui est pas transmise.';
+  return '';
+}
+/**
+ * What a setting does that the user would not expect, or '': at a denoise of 1, Krea 2 starts from
+ * pure noise and the image to modify is encoded, then ignored (runner/pipelines/krea2.py).
+ */
+export function settingWarning(manifest, workflow, name) {
+  if (name !== 'denoise') return '';
+  const policy = workflow.parameters?.denoise,
+    value = policy?.policy === 'fixed' ? policy.value : policy?.default,
+    source = (workflow.references ?? []).some(slot => manifest?.roles?.[slot.role]?.as === 'source');
+  return source && value === 1
+    ? 'À 1, l’image à modifier est ignorée : le moteur part d’un bruit pur. Baissez le débruitage (0,6 à 0,8, par exemple) pour qu’elle serve.'
+    : '';
+}
 export function setupNativeWorkflows(options) {
   const {
       api,
@@ -110,6 +188,11 @@ export function setupNativeWorkflows(options) {
     readReferences = [],
     readProfiles = [],
     readEnhance = null,
+    // The controls of the parameters by name, and the fields of the profiles: what refreshInert greys.
+    parameterControls = {},
+    profileFields = [],
+    // While the editor is drawn, refreshInert waits for the end (renderEditor calls it once).
+    rendering = false,
     // Shipped workflows the user deleted (hidden until an update changes them).
     hiddenWorkflows = 0,
     // What the shipped workflows can download, the download in progress, whether a token is kept.
@@ -1037,13 +1120,27 @@ export function setupNativeWorkflows(options) {
       },
     };
   }
-  function primitive(name, policy, prefix = 'native', allowed = parameterPolicies(name)) {
+  /**
+   * A control the editor shows but that would change nothing: greyed (`dataset.unavailable`, which
+   * setBusy keeps), with each button of a switch.
+   */
+  function unavailable(control, flag) {
+    const all = control.getAttribute?.('role') === 'group' ? [control, ...control.children] : [control];
+    for (const item of all) {
+      item.dataset.unavailable = String(flag);
+      item.disabled = flag || busy || working;
+    }
+  }
+  function primitive(name, policy, prefix = 'native', allowed = parameterPolicies(name), changed = () => {}) {
     const title = prefix === 'native-lora-strength' ? 'Intensité' : labels[name] || name;
+    // A policy a workflow holds that the editor no longer offers (a seed left to the assistant)
+    // stays shown, so it can be changed.
+    const policies = allowed.includes(policy.policy) ? allowed : [...allowed, policy.policy];
     const type = typeFor(name, policy),
       card = node('div', 'native-parameter'),
       owner = segmented(
         prefix + '-policy-' + name,
-        allowed.map(key => [key, ownership[key]]),
+        policies.map(key => [key, ownership[key]]),
         policy.policy,
       );
     const initial = policy.policy === 'fixed' ? policy.value : policy.default;
@@ -1074,7 +1171,9 @@ export function setupNativeWorkflows(options) {
       min = input(prefix + '-min-' + name, policy.min ?? boundsFor[0], 'number'),
       max = input(prefix + '-max-' + name, policy.max ?? boundsFor[1], 'number');
     min.step = max.step = type === 'integer' ? '1' : 'any';
-    if (['integer', 'number'].includes(type)) bounds.append(field('Minimum', min), field('Maximum', max));
+    // A list of choices has no bounds to narrow: they were shown, and never saved.
+    const ranged = ['integer', 'number'].includes(type) && !enumChoices;
+    if (ranged) bounds.append(field('Minimum', min), field('Maximum', max));
     const description = input(prefix + '-description-' + name, policy.description || '');
     description.maxLength = 1000;
     description.placeholder = 'Consigne pour l’assistant (facultatif)';
@@ -1087,19 +1186,42 @@ export function setupNativeWorkflows(options) {
       defaultLabel = node('label', 'history-toggle');
     defaultLabel.append(useDefault, node('span', '', 'Préférer une valeur par défaut'));
     const valueField = field(type === 'boolean' ? 'Activé' : title, value),
-      heading = field(title, owner);
+      heading = field(title, owner),
+      // Why a part of it changes nothing, or what it does unexpectedly (setInert).
+      note = node('p', 'field-help native-inert');
     heading.className += ' native-parameter-heading';
-    card.append(heading, defaultLabel, valueField, bounds, description);
+    note.hidden = true;
+    card.append(heading, defaultLabel, valueField, bounds, description, note);
     value.setAttribute('aria-label', title);
     valueField.children[0].className = 'sr-only';
+    let reasons = {};
+    function setInert(next = reasons) {
+      reasons = next;
+      const shown = owner.value,
+        valueShown = shown === 'fixed' || (shown === 'model' && useDefault.checked),
+        said = reasons.parameter
+          ? reasons.parameter
+          : [valueShown && reasons.value, shown === 'model' && reasons.description, reasons.warning]
+              .filter(Boolean)
+              .join(' ');
+      for (const control of [owner, min, max]) unavailable(control, Boolean(reasons.parameter));
+      for (const control of [value, useDefault]) unavailable(control, Boolean(reasons.parameter || reasons.value));
+      unavailable(description, Boolean(reasons.parameter || reasons.description));
+      note.textContent = said;
+      note.hidden = !said;
+      card.dataset.inert = String(Boolean(reasons.parameter || (valueShown && reasons.value)));
+    }
     owner.onchange = () => {
       defaultLabel.hidden = owner.value !== 'model';
       valueField.hidden = owner.value === 'random' || (owner.value === 'model' && !useDefault.checked);
-      bounds.hidden = owner.value !== 'model' || !['integer', 'number'].includes(type);
+      bounds.hidden = owner.value !== 'model' || !ranged;
       description.hidden = owner.value !== 'model';
+      setInert();
+      changed();
     };
     useDefault.onchange = owner.onchange;
     owner.onchange();
+    for (const event of ['input', 'change']) value.addEventListener?.(event, () => changed());
     const number = (control, label) => {
       if (control.value === '') throw Error(label + ' : ajoutez une valeur.');
       const value = Number(control.value);
@@ -1113,6 +1235,24 @@ export function setupNativeWorkflows(options) {
       value,
       min,
       max,
+      setInert,
+      /** Its policy as it stands, without the checks of `read` (what makes another field inert). */
+      peek() {
+        const selected = owner.value;
+        if (selected === 'random') return { policy: 'random' };
+        const raw =
+          type === 'boolean'
+            ? value.checked
+            : type === 'string' || (enumChoices && typeof enumChoices[0] === 'string')
+              ? value.value
+              : Number(value.value);
+        if (selected === 'fixed') return { policy: 'fixed', value: raw };
+        return {
+          policy: 'model',
+          ...(useDefault.checked ? { default: raw } : {}),
+          ...(enumChoices ? { choices: enumChoices } : {}),
+        };
+      },
       read() {
         const selected = owner.value;
         if (selected === 'random') return { policy: 'random', type: 'integer' };
@@ -1144,14 +1284,42 @@ export function setupNativeWorkflows(options) {
       },
     };
   }
+  /** How many LoRAs the family of the open workflow takes: none for most (Ajouter was offered, and refused on save). */
+  const loraLimit = () => (draft.importDraft ? 256 : (familyOf(draft.pipeline)?.loras?.max ?? 0));
+  function loraCount() {
+    const limit = loraLimit(),
+      full = readLoras.length >= limit,
+      engine = familyOf(draft.pipeline)?.label || 'Ce moteur';
+    $('native-lora-count').textContent = String(readLoras.length);
+    $('native-workflow-add-lora').dataset.unavailable = String(full);
+    $('native-workflow-add-lora').disabled = busy || working || full;
+    $('native-lora-note').textContent = !limit
+      ? `${engine} ne prend pas de LoRA.`
+      : full
+        ? `${limit} LoRA au plus pour ${engine}.`
+        : '';
+    $('native-lora-note').hidden = !$('native-lora-note').textContent;
+  }
+  /**
+   * The LoRA the subject references depend on (referenceLora, lib/native-workflows.mjs): on exactly
+   * when one of them is given, and seen by neither the user nor the assistant. Its « Actif par
+   * défaut » and its description change nothing: greyed, and said why.
+   */
+  function updateBound() {
+    const roles = familyOf(draft?.pipeline)?.roles ?? {},
+      needs = readReferences.some(item => roles[item.read().role]?.requiresLora);
+    let found = false;
+    for (const item of readLoras) {
+      const bound = needs && !found && item.activation() === 'model';
+      found ||= bound;
+      item.setBound(bound);
+    }
+  }
   function renderLoras(loras) {
     readLoras = [];
     $('native-workflow-loras').replaceChildren();
-    const count = () => {
-      $('native-lora-count').textContent = String(readLoras.length);
-    };
     for (const lora of loras) addLora(lora);
-    count();
+    loraCount();
   }
   function addLora(lora) {
     const card = node('div', 'native-lora'),
@@ -1171,17 +1339,28 @@ export function setupNativeWorkflows(options) {
       defaultEnabled = input('native-lora-default-' + lora.id, lora.enabled.default ?? true, 'checkbox');
     description.placeholder = 'Style ou effet apporté';
     description.maxLength = 1000;
-    const defaultLabel = node('label', 'history-toggle');
+    const defaultLabel = node('label', 'history-toggle'),
+      note = node('p', 'field-help native-inert');
     defaultLabel.append(defaultEnabled, node('span', '', 'Actif par défaut'));
+    note.hidden = true;
+    defaultLabel.hidden = enabled.value !== 'model';
     enabled.onchange = () => {
       defaultLabel.hidden = enabled.value !== 'model';
+      updateBound();
     };
-    enabled.onchange();
     const strength = primitive(lora.id, { ...lora.strength, type: 'number' }, 'native-lora-strength', [
       'fixed',
       'model',
     ]);
     const item = {
+      activation: () => enabled.value,
+      setBound(bound) {
+        for (const control of [defaultEnabled, description]) unavailable(control, bound);
+        note.textContent = bound
+          ? 'Activé seul quand une « Référence de sujet » est donnée, sans que l’assistant le voie : « Actif par défaut » et la description n’ont pas d’effet, et son intensité est la valeur fixée (ou par défaut).'
+          : '';
+        note.hidden = !bound;
+      },
       read: () => ({
         id: lora.id,
         asset: picker.selected(),
@@ -1200,20 +1379,23 @@ export function setupNativeWorkflows(options) {
       field('Effet / usage', description),
       field('Activation', enabled),
       defaultLabel,
+      note,
       strength.card,
       button(
         'Retirer',
         () => {
           readLoras = readLoras.filter(value => value !== item);
           card.remove();
-          $('native-lora-count').textContent = String(readLoras.length);
+          loraCount();
+          updateBound();
         },
         'text-button native-remove',
       ),
     );
     readLoras.push(item);
     $('native-workflow-loras').append(card);
-    $('native-lora-count').textContent = String(readLoras.length);
+    loraCount();
+    updateBound();
   }
   function renderReferences(references) {
     readReferences = [];
@@ -1222,15 +1404,20 @@ export function setupNativeWorkflows(options) {
     referenceCount();
   }
   function referenceCount() {
+    const limit = draft.importDraft
+      ? 256
+      : Object.values(familyOf(draft.pipeline)?.roles || {}).reduce((sum, role) => sum + (role.max ?? 1), 0);
     $('native-reference-count').textContent = String(readReferences.length);
-    $('native-workflow-add-reference').dataset.unavailable = String(
-      readReferences.length >=
-        (draft.importDraft
-          ? 256
-          : Object.values(familyOf(draft.pipeline)?.roles || {}).reduce((sum, role) => sum + (role.max ?? 1), 0)),
-    );
+    $('native-workflow-add-reference').dataset.unavailable = String(readReferences.length >= limit);
     $('native-workflow-add-reference').disabled =
       busy || working || $('native-workflow-add-reference').dataset.unavailable === 'true';
+    // Greyed, and said why: the family takes no image nor video at all.
+    $('native-reference-note').textContent = limit
+      ? ''
+      : `${familyOf(draft.pipeline)?.label || 'Ce moteur'} ne prend pas d’image ni de vidéo de référence.`;
+    $('native-reference-note').hidden = Boolean(limit);
+    updateBound();
+    refreshInert();
   }
   function addReference(reference) {
     const known = Object.keys(familyOf(draft.pipeline)?.roles || {});
@@ -1251,6 +1438,11 @@ export function setupNativeWorkflows(options) {
     description.maxLength = 1000;
     description.placeholder = 'Ce que cette référence doit apporter';
     label.append(required, node('span', '', 'Référence obligatoire'));
+    // Its role decides what else matters (the LoRA of the subject images, Krea's denoise).
+    role.onchange = () => {
+      updateBound();
+      refreshInert();
+    };
     const item = {
       read: () => ({
         id: reference.id,
@@ -1281,16 +1473,22 @@ export function setupNativeWorkflows(options) {
   }
   function renderProfiles(profiles) {
     readProfiles = [];
+    profileFields = [];
     $('native-workflow-profiles').replaceChildren();
     for (const [stage, profile] of Object.entries(profiles || {})) {
       const group = node('div', 'native-profile');
       group.append(node('h4', '', stage === 'draft' ? 'Brouillon' : 'Vidéo finale'));
       const controls = [];
       for (const [name, value] of Object.entries(profile.parameters || {})) {
-        const control = input('native-profile-' + stage + '-' + name, value, 'number');
+        const control = input('native-profile-' + stage + '-' + name, value, 'number'),
+          line = field(labels[name] || name, control),
+          note = node('p', 'field-help native-inert');
         control.step = 'any';
-        group.append(field(labels[name] || name, control));
+        note.hidden = true;
+        line.append(note);
+        group.append(line);
         controls.push([name, control]);
+        profileFields.push({ stage, name, control, note });
       }
       readProfiles.push([
         stage,
@@ -1337,6 +1535,43 @@ export function setupNativeWorkflows(options) {
         );
     };
   }
+  function promptCard() {
+    const card = node('div', 'native-parameter'),
+      heading = node('div', 'field-group native-parameter-heading');
+    heading.append(node('label', '', labels.prompt));
+    card.append(
+      heading,
+      node('p', 'field-help', 'Écrit à chaque création : par l’assistant dans le chat, par vous dans le Studio.'),
+    );
+    return card;
+  }
+  /** Greys what changes nothing in the workflow as it stands now, and says why (inertSetting). */
+  function refreshInert() {
+    const manifest = familyOf(draft?.pipeline);
+    if (!manifest || rendering) return;
+    const state = {
+      mediaType: draft.mediaType,
+      parameters: {
+        ...draft.parameters,
+        ...Object.fromEntries(Object.entries(parameterControls).map(([name, control]) => [name, control.peek()])),
+      },
+      profiles: draft.profiles,
+      references: readReferences.map(item => item.read()),
+    };
+    for (const [name, control] of Object.entries(parameterControls))
+      control.setInert({
+        parameter: inertSetting(manifest, state, name, 'parameter'),
+        value: inertSetting(manifest, state, name, 'value'),
+        description: inertSetting(manifest, state, name, 'description'),
+        warning: settingWarning(manifest, state, name),
+      });
+    for (const { stage, name, control, note } of profileFields) {
+      const reason = inertSetting(manifest, state, name, stage);
+      unavailable(control, Boolean(reason));
+      note.textContent = reason;
+      note.hidden = !reason;
+    }
+  }
   function renderEditor() {
     $('native-workflow-name').value = draft.name;
     $('native-workflow-description').value = draft.description;
@@ -1373,6 +1608,8 @@ export function setupNativeWorkflows(options) {
     }
     suggestTokenizers(componentControls);
     readParameters = [];
+    parameterControls = {};
+    rendering = true;
     $('native-workflow-parameters').replaceChildren();
     const enhanced = renderEnhance();
     for (const [name, policy] of Object.entries(draft.parameters)) {
@@ -1382,7 +1619,15 @@ export function setupNativeWorkflows(options) {
         readParameters.push([name, () => policy]);
         continue;
       }
-      const control = primitive(name, policy);
+      // Written at each creation, by the assistant or in the Studio: a fixed prompt was refused at
+      // each one (a locked parameter cannot be overridden), and what was said of it reached no one.
+      if (name === 'prompt') {
+        $('native-workflow-parameters').append(promptCard());
+        readParameters.push([name, () => (policy.policy === 'model' ? policy : { policy: 'model', type: 'string' })]);
+        continue;
+      }
+      const control = primitive(name, policy, 'native', parameterPolicies(name), refreshInert);
+      parameterControls[name] = control;
       readParameters.push([name, control.read]);
       $('native-workflow-parameters').append(control.card);
     }
@@ -1390,6 +1635,9 @@ export function setupNativeWorkflows(options) {
     renderReferences(draft.references || []);
     renderProfiles(draft.profiles);
     renderSource();
+    rendering = false;
+    refreshInert();
+    updateBound();
     error('');
     $('native-workflow-unsaved').hidden = true;
     $('native-workflow-switch').hidden = true;
@@ -1528,6 +1776,8 @@ export function setupNativeWorkflows(options) {
       $('workflow-editor').hidden = false;
       $('settings').setAttribute('aria-labelledby', 'native-workflow-title');
       $('settings').scrollTop = 0;
+      // The editor scrolls its own body (moodix.css): each workflow opens at its top.
+      $('native-workflow-body').scrollTop = 0;
       $('native-workflow-name').focus();
       return true;
     } catch (failure) {
@@ -1675,6 +1925,7 @@ export function setupNativeWorkflows(options) {
     else requestBack();
   });
   $('native-workflow-add-lora').onclick = () => {
+    if ($('native-workflow-add-lora').dataset.unavailable === 'true') return;
     addLora({
       id: crypto.randomUUID(),
       asset: '',

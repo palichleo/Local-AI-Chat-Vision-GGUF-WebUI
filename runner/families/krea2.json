@@ -104,7 +104,8 @@
     "attention": {
       "type": "string",
       "choices": ["pytorch", "comfy_kitchen"],
-      "note": "Attention dense : comfy_kitchen calcule en INT8 (plus rapide, à peine différent), pytorch exactement."
+      "note": "Attention dense : comfy_kitchen calcule en INT8 (plus rapide, à peine différent), pytorch exactement.",
+      "unused": "Sans effet : le moteur de Moodix choisit lui-même son attention pour Krea 2 (ce réglage servait à ComfyUI)."
     }
   },
   "requiredParameters": ["prompt", "seed", "width", "height", "steps"],
@@ -204,10 +205,6 @@
       "expandPrompt": {
         "policy": "fixed",
         "value": false
-      },
-      "attention": {
-        "policy": "fixed",
-        "value": "pytorch"
       }
     },
     "loras": [],
