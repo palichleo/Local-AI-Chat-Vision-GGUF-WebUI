@@ -178,7 +178,12 @@ test('the events of Claude read as the chat reads llama.cpp: words, reflection, 
     { id: 'toolu_1', type: 'function', function: { name: 'create_image', arguments: '{"prompt":"boat"}' } },
   ]);
   assert.equal(chunks.at(-2).choices[0].finish_reason, 'tool_calls');
-  assert.deepEqual(chunks.at(-1).usage, { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 });
+  assert.deepEqual(chunks.at(-1).usage, {
+    prompt_tokens: 120,
+    completion_tokens: 30,
+    total_tokens: 150,
+    prompt_tokens_details: { cached_tokens: 100 },
+  });
 
   // A call without arguments reads as an empty object.
   const bare = await drain(
@@ -225,10 +230,11 @@ test('the label of the bar of the chat: the model and its effort, or the reflect
   assert.equal(choiceLabel({ remote: null }, null, false), 'Sans réflexion');
   const status = { remote: { id: 'x', model: 'claude-opus-5-5', effort: 'high' } };
   assert.equal(choiceLabel(status, null, true), 'claude-opus-5-5 · Élevée');
+  // The name from the listing; the effort the one kept for the connection (the one sent).
   assert.equal(
     choiceLabel(
-      status,
-      { model: 'claude-opus-5-5', effort: 'xhigh', models: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }] },
+      { remote: { ...status.remote, effort: 'xhigh' } },
+      { model: 'claude-opus-5-5', effort: 'high', models: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }] },
       true,
     ),
     'Claude Opus 5.5 · Très élevée',

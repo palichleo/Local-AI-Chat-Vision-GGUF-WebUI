@@ -203,10 +203,11 @@ test('M4 · images of the conversation said in words to a remote model that does
 });
 
 test('M5 · the longest answer of the local model does not limit a remote one, which may reflect within it', () => {
+  // No length asked at all (0.6.40): a floor could pass what the model can write.
   const connection = { preset: 'openrouter', model: 'm' };
-  assert.equal(remoteBody({ messages: [], stream: true, max_tokens: 4096 }, connection).max_tokens, 16000);
-  assert.equal(remoteBody({ messages: [], stream: false, max_tokens: 700 }, connection).max_tokens, 4000);
-  assert.equal(remoteBody({ messages: [], stream: true, max_tokens: 32768 }, connection).max_tokens, 32768);
+  assert.equal(remoteBody({ messages: [], stream: true, max_tokens: 4096 }, connection).max_tokens, undefined);
+  assert.equal(remoteBody({ messages: [], stream: false, max_tokens: 700 }, connection).max_tokens, undefined);
+  assert.equal(remoteBody({ messages: [], stream: true, max_tokens: 32768 }, connection).max_tokens, undefined);
 });
 
 test('M6 · a renewal refused with an object: the user is asked to sign in again, the tokens go', async t => {
@@ -244,7 +245,7 @@ test('the OpenAI preset sends no temperature nor top_p (its models that reflect 
   );
   assert.deepEqual(
     [sent.temperature, sent.top_p, sent.max_tokens, sent.max_completion_tokens],
-    [undefined, undefined, undefined, 16000],
+    [undefined, undefined, undefined, undefined],
   );
 });
 

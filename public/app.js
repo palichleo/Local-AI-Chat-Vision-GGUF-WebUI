@@ -3674,8 +3674,9 @@ const settingsGuard = setupSettingsGuard({
   save: saveConfiguration,
   readDraft: () => ({
     llm: modelDraft(),
-    // An API being written (remote-llm-ui.mjs): closing asks before it is lost.
-    api: state.remoteUI?.draft() ?? null,
+    // An API being written, a key of Claude typed (remote-llm-ui.mjs): closing asks before they are
+    // lost. Whether something changed, not what the editor holds: opened and left as it was, nothing is.
+    api: state.remoteUI?.dirty() ?? false,
     fields: [
       'global-instructions',
       'engine-path',

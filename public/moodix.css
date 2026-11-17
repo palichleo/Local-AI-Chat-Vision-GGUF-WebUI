@@ -15608,10 +15608,19 @@ button.glass-select::after {
 #chat-form #model-choice:hover:enabled {
   background: rgba(238, 232, 222, 0.06);
 }
+/* The name of the model cut short, never its effort (0.6.40). */
 .model-choice-text {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+.model-choice-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+.model-choice-effort {
+  flex: none;
 }
 @media (max-width: 520px) {
   #chat-form #model-choice {

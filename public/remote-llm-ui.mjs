@@ -47,8 +47,11 @@ export function setupRemoteModels({
     polling = null,
     // The provider the user chose before its account was associated: chosen once it is.
     waiting = null,
-    // The field of the key of Claude, open under its line.
-    keyOpen = false;
+    // The field of the key of Claude, open under its line; made once, so that a list drawn again
+    // (a sign-in followed, another line chosen) keeps what is being typed in it, and its focus.
+    keyOpen = false,
+    keyInput = null,
+    focusKey = false;
   const links = { chatgpt: '', openrouter: '' },
     errors = {};
   const fields = {
@@ -86,7 +89,10 @@ export function setupRemoteModels({
       ...(fields.key.value ? { key: fields.key.value } : {}),
     };
   }
-  const dirty = () => Boolean(editing) && JSON.stringify(draft()) !== baseline;
+  /** A key of Claude typed and not kept yet. */
+  const typedKey = () => (keyOpen && keyInput?.value.trim()) || '';
+  /** Something written here and not saved: the editor of « Autre service » changed, or a key of Claude typed. */
+  const dirty = () => (Boolean(editing) && JSON.stringify(draft()) !== baseline) || Boolean(typedKey());
   /**
    * What the field of the key says: the kept one, only for the address it was given for. Another
    * address, and it is not sent there: a key of that server is asked for.
@@ -127,6 +133,8 @@ export function setupRemoteModels({
       service = presetOf(preset);
     editing = { id: item?.id };
     fields.preset.value = preset;
+    // The service the next change starts from (the button of glass over the list gives it no focus).
+    former = preset;
     fields.url.value = item?.baseUrl ?? service.baseUrl;
     fields.key.value = '';
     fields.model.value = item?.model ?? '';
@@ -196,7 +204,14 @@ export function setupRemoteModels({
       },
       { working: 'Essai de la connexion…' },
     );
+  /**
+   * What is written here, saved (« Enregistrer » of the settings, or the one of the editor): a key
+   * of Claude typed (checked, kept, Claude chosen), then the editor of « Autre service » (saved and
+   * chosen). False when one of them fails: the settings stay open with what stopped it.
+   */
   async function save() {
+    const key = typedKey();
+    if (key && !(await useProvider('claude', { key }))) return false;
     if (!editing) return true;
     return act(
       async () => {
@@ -237,7 +252,10 @@ export function setupRemoteModels({
       async () => {
         take(await (await api('remote/provider', { provider: id, ...extra })).json());
         waiting = null;
-        if (id === 'claude') keyOpen = false;
+        if (id === 'claude') {
+          keyOpen = false;
+          if (keyInput) keyInput.value = '';
+        }
         return true;
       },
       { where: id },
@@ -316,7 +334,7 @@ export function setupRemoteModels({
     if (id === 'chatgpt') return void signInChatGPT();
     if (id === 'openrouter') return void signInOpenRouter();
     if (view.claude?.library === 'ready') {
-      keyOpen = true;
+      keyOpen = focusKey = true;
       onChange();
       return;
     }
@@ -326,6 +344,7 @@ export function setupRemoteModels({
     clearTimeout(polling);
     polling = null;
     try {
+      const before = JSON.stringify(view);
       view = await (await api('remote')).json();
       // Associated meanwhile: the provider the user chose is chosen now.
       if (waiting === 'chatgpt' && !view.chatgpt?.pending) {
@@ -336,9 +355,11 @@ export function setupRemoteModels({
         else waiting = null;
       } else if (waiting === 'claude' && view.claude?.library !== 'installing') {
         waiting = null;
-        if (view.claude?.library === 'ready') keyOpen = true;
+        if (view.claude?.library === 'ready') keyOpen = focusKey = true;
       }
-      onChange();
+      // Drawn again only when something changed: a list drawn while the user acts on it loses the
+      // focus of the button in hand.
+      if (JSON.stringify(view) !== before) onChange();
     } catch {
       // Asked again below.
     }
@@ -400,9 +421,9 @@ export function setupRemoteModels({
       if (library === 'installing') box.append(node('span', 'provider-working', 'Installation…'));
       else if (library !== 'ready') box.append(button('Installer', () => void installClaude(), 'secondary'));
       else if (ofProvider('claude')?.hasKey) {
-        box.append(button('Changer la clé', () => ((keyOpen = true), onChange())));
+        box.append(button('Changer la clé', () => ((keyOpen = focusKey = true), onChange())));
         box.append(button('Retirer', () => void forget('claude')));
-      } else if (!keyOpen) box.append(button('Associer une clé', () => ((keyOpen = true), onChange()), 'secondary'));
+      } else if (!keyOpen) box.append(button('Associer une clé', () => ((keyOpen = focusKey = true), onChange()), 'secondary'));
     } else if (view.openrouter?.pending) {
       if (links.openrouter) {
         const link = node('a', 'text-button', 'Ouvrir la page');
@@ -418,32 +439,40 @@ export function setupRemoteModels({
   }
   /** The field of the key of Claude, under its line. */
   function keyField() {
+    // The field itself is kept from one drawing to the next: what is typed, and its focus, stay.
+    if (!keyInput) {
+      keyInput = node('input');
+      keyInput.type = 'password';
+      keyInput.autocomplete = 'off';
+      keyInput.spellcheck = false;
+      keyInput.placeholder = 'sk-ant-…  (console.anthropic.com › API Keys)';
+      keyInput.setAttribute('aria-label', 'Clé d’API de la Claude Console');
+      keyInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          if (keyInput.value.trim()) void useProvider('claude', { key: keyInput.value.trim() });
+        }
+      });
+    }
     const box = node('div', 'provider-key'),
-      input = node('input'),
       keep = button(
         'Enregistrer',
-        () => input.value.trim() && void useProvider('claude', { key: input.value.trim() }),
+        () => keyInput.value.trim() && void useProvider('claude', { key: keyInput.value.trim() }),
         'primary',
       ),
       leave = button('Annuler', () => {
         keyOpen = false;
+        keyInput.value = '';
         delete errors.claude;
         onChange();
       });
-    input.type = 'password';
-    input.autocomplete = 'off';
-    input.spellcheck = false;
-    input.placeholder = 'sk-ant-…  (console.anthropic.com › API Keys)';
-    input.setAttribute('aria-label', 'Clé d’API de la Claude Console');
-    input.disabled = off;
-    input.addEventListener('keydown', event => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        keep.click();
-      }
-    });
-    box.append(input, keep, leave);
-    queueMicrotask(() => input.focus?.());
+    keyInput.disabled = off;
+    box.append(keyInput, keep, leave);
+    // Its focus given once, when it opens (not at every drawing).
+    if (focusKey) {
+      focusKey = false;
+      queueMicrotask(() => keyInput.focus?.());
+    }
     return box;
   }
   /** The line of a provider: chosen or not, what it says, what can be done there. */
