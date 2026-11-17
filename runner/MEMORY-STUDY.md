@@ -152,3 +152,28 @@ What it shows:
 - **A counter that cannot be used as it is**: Windows' « shared usage » of the card rose by 12 to 14 GiB during every large job. It counts the page-locked RAM the engine keeps the files in, not a spill.
 
 Not covered: SCAIL-2, the sounds, Real-ESRGAN, RIFE, the subject references of LTX 2.5, any card other than this one.
+
+### After the corrections of 0.6.77 (17 November 2026)
+
+One answer to a shortage for every family (`models/ladder.py`): the same work tried in ways that hold less and less, or cut in pieces halved where one does not fit. The decoders of LTX 2.5 and of MiniMax H3 give their frames off the card a stretch at a time instead of joining the whole video there. Same cases and seeds as the sweep:
+
+| Case | Before | After |
+| --- | --- | --- |
+| LTX 2.5, 1088 × 1920, 10 s, start image | out of memory after 452 s | made in 341 s |
+| LTX 2.5, 1536 × 1536, 10 s | out of memory after 294 s | made in 387 s |
+| SeedVR2, 1536² to 3072² | out of memory after 3 s | made in 35 s |
+| MiniMax H3, 1920 × 1088, 5 s | out of memory after 87 s | refused in 4 s: 11.2 GiB asked free, 10.8 free |
+| MiniMax H3, 1344 × 768, 10 s, three references | out of memory after 31 s | refused in 4 s: 10.9 GiB asked, 10.8 free |
+| MiniMax H3, 1344 × 768, 14 s | out of memory after 27 s | refused in 6 s: 14.3 GiB asked (the card has 12) |
+| LTX 2.5, 896 × 1600, 5 s (control) | 105 s | 105 s, the same 121 frames |
+| MiniMax H3, 1344 × 768, 5 s (control) | 179 s | 175 s, the same 124 frames |
+| MiniMax H3, 768 × 448, 5 s (control) | 77 s | 76 s, the same 124 frames |
+| MiniMax H3, 768 × 448, 14 s (control) | 170 s, peak 8.5 GiB | 165 s, peak 7.5 GiB |
+| LTX 2.5, 896 × 1600, 10 s, start image (control) | 218 s | 202 s; larger tiles, hence another grain (38 dB) |
+
+What it shows:
+
+- **No creation is lost on the way any more**: it is made, or refused at once with what to reduce.
+- **The decoders by stretches of frames give the very frames of the library's** (tests: to the bit; controls: every frame identical).
+- **MiniMax H3 has a limit on this card that the fallbacks do not lift**: its steps hold 1.2 GiB plus 0.112 for each thousand tokens with none of its weights on the card (measured at 12 900, 34 800, 37 800 and 76 000 tokens), about 72 000 tokens on a 12 GiB card with 1.2 GiB taken by other programs. At 1920 × 1088 the sampling went to its end one time of two. Its blocks hold six widths of 7 168 channels of the sequence at once: lowering that is a work of its own.
+- **What a refusal costs**: it is said from what is free when the generation starts. With the other programs closed (11.6 GiB free) the two cases at the limit would be tried.
