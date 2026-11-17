@@ -1,6 +1,6 @@
 # How the engine should manage memory: a study
 
-17 November 2026. Written before changing anything, after a video that the card could hold failed for want of memory (LTX 2.5, 896 × 1600, 8 s, fixed in 0.6.74). It records what a proven engine does, what is published, where Moodix's engine stands, and the experiments that follow. Results are added below as they are measured.
+A working note, kept aside: it is no part of the documentation of the engine, and the README says nothing of it. 17 November 2026. Written before changing anything, after a video that the card could hold failed for want of memory (LTX 2.5, 896 × 1600, 8 s, fixed in 0.6.74). It records what a proven engine does, what is published, where Moodix's engine stands, and the experiments that follow. Results are added below as they are measured.
 
 Two requirements guide it:
 
