@@ -161,6 +161,45 @@ export function setupAssets({
     const text = $('media-prompt').textContent;
     if (text) void navigator.clipboard?.writeText(text).then(() => notice('Prompt copié.'), () => {});
   };
+  // The prompt of a take opened takes the room its panel leaves it (17/11): cut, it fades into a
+  // blur at its foot, where a round arrow shows it whole (the panel then scrolls, its actions
+  // staying at its foot); the arrow, turned up, folds it again. Measured again when the panel
+  // changes size: the window resized, « Plus de détails » opened.
+  let promptOpen = false,
+    promptWatch = null;
+  function fitPrompt() {
+    const row = $('media-prompt-row'),
+      prompt = $('media-prompt'),
+      more = $('media-prompt-more'),
+      full = prompt.scrollHeight || 0;
+    row.classList.toggle('is-open', promptOpen);
+    // Its whole height, for a short prompt to keep it (moodix.css: three lines at least otherwise).
+    row.style?.setProperty?.('--prompt-height', full + 'px');
+    // The panel as tall as its prompt asks, up to its limit (moodix.css: 80dvh). Its height is
+    // otherwise that of the picture beside it: next to a wide clip, room was left unused under the
+    // window while the prompt kept three lines.
+    const panel = row.parentElement;
+    if (panel?.style) {
+      panel.style.minHeight = '';
+      const natural =
+        panel.scrollHeight - row.offsetHeight + (promptOpen ? row.offsetHeight : full) + (panel.offsetHeight - panel.clientHeight);
+      if (natural > 0) panel.style.minHeight = `min(80dvh, ${Math.ceil(natural)}px)`;
+    }
+    const cut = !promptOpen && full > (row.clientHeight || 0) + 1;
+    row.classList.toggle('is-cut', cut);
+    more.hidden = !(cut || promptOpen);
+    const said = promptOpen ? 'Replier le prompt' : 'Voir tout le prompt';
+    more.title = said;
+    more.setAttribute('aria-label', said);
+    more.setAttribute('aria-expanded', String(promptOpen));
+  }
+  $('media-prompt-more').onclick = () => {
+    promptOpen = !promptOpen;
+    fitPrompt();
+    // Folded again: the panel back at its head, where the prompt is.
+    const panel = $('media-prompt-row').parentElement;
+    if (!promptOpen && panel) panel.scrollTop = 0;
+  };
   /** A line of its settings (Modèle, Format…), or of « Plus de détails » (`more`). */
   function row(label, value, { more = false } = {}) {
     const title = node('dt', '', label),
@@ -258,6 +297,8 @@ export function setupAssets({
     // The prompt whole, with Copier.
     const expanded = parameters.expanded_prompt;
     $('media-prompt').textContent = record.prompt || '';
+    // Another take: its prompt folded, at the room it has.
+    promptOpen = false;
     $('media-copy').hidden = !record.prompt;
     // Its lines (capture 33): Modèle, Format, Résolution, Durée, Seed, Date, in mono.
     const width = output.width ?? parameters.width,
@@ -291,6 +332,13 @@ export function setupAssets({
     );
     if (Object.keys(other).length) row('Paramètres', JSON.stringify(other, null, 2), { more: true });
     if (record.analysis?.text) row('Analyse du modèle', record.analysis.text, { more: true });
+    // Its lines are there: the room left to the prompt is known (and once the page is laid out).
+    fitPrompt();
+    globalThis.requestAnimationFrame?.(fitPrompt);
+    if (!promptWatch && globalThis.ResizeObserver) {
+      promptWatch = new ResizeObserver(fitPrompt);
+      promptWatch.observe($('media-metadata').parentElement ?? $('media-metadata'));
+    }
     // Télécharger, then the actions of the take, in icons.
     $('media-take-actions').replaceChildren(...(takeActions ? [takeActions(record, index)] : []));
     $('media-download').disabled = true;

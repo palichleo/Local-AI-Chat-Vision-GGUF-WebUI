@@ -405,6 +405,15 @@ export function setupGenerationUI({
         [common('takeKind'), count > 1 ? `${count} prises` : '', common('takeWorkflow')].filter(Boolean).join(' · '),
       );
     }
+    /**
+     * A clip takes its shape from its record, at once. A take put back in a conversation reopened
+     * had none until its file was read, which only happens when it is played: an upright clip was
+     * drawn as wide as a 16:9 one (560 px), several times its size.
+     */
+    function sized(shown, index, target) {
+      const output = shown.outputs?.[index] ?? {};
+      dimensions(output.width ?? shown.parameters?.width, output.height ?? shown.parameters?.height, target);
+    }
     function image({ record: outputRecord, index, blob }) {
       if (disposed || slots.has(index)) return;
       record = outputRecord;
@@ -455,6 +464,7 @@ export function setupGenerationUI({
         shown.title = 'Voir l’original et ses paramètres';
         shown.onclick = () => openOutput(record, index);
         target.figure.classList.add('is-video');
+        sized(record, index, target);
         target.figure.append(buttons(record, index));
         const slot = { index, button: shown, img: shown, isVideo: true, tile: target },
           play = node('button', 'take-play');
@@ -503,6 +513,7 @@ export function setupGenerationUI({
         video.setAttribute('aria-label', 'Vidéo originale · ' + record.workflowName);
         const poster = output.analysisDataUrl || output.thumbUrl;
         if (poster) video.poster = poster;
+        sized(record, index, target);
         video.onloadedmetadata = () => dimensions(video.videoWidth, video.videoHeight, target);
         video.onloadeddata = () => void thumbnailOf(api, record, index, video);
         wrapper.append(video, play);

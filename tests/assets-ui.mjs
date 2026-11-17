@@ -324,3 +324,45 @@ test('a take made with LoRAs of the user names them among its settings, by their
   assert.deepEqual(texts.filter((_, at) => at % 2 === 0), ['Modèle', 'Format', 'Résolution', 'LoRA', 'Seed', 'Date']);
   assert.equal(texts[texts.indexOf('LoRA') + 1], '70sSCiFiKrea2Raw · 0,8\nkrea2_detail_slider · 1');
 });
+
+test('the prompt of a take opened: cut, a round arrow shows it whole and folds it again; short, no arrow; folded again at another take', async t => {
+  const { ui, $ } = await fixture(t);
+  const take = (id, prompt) => ({
+    id,
+    conversationId: 'conversation',
+    workflowName: 'Krea 2',
+    prompt,
+    createdAt: '2026-01-02T12:00:00Z',
+    parameters: { seed: 1, width: 1024, height: 1024 },
+    outputs: [{ source: { filename: id + '.png' }, analysisDataUrl: 'data:image/png;base64,AA==', take: 19 }],
+  });
+  const more = $('media-prompt-more'),
+    row = $('media-prompt-row'),
+    prompt = $('media-prompt');
+  // A long prompt: taller than the room its panel leaves it (what the page measures).
+  Object.assign(prompt, { scrollHeight: 456 });
+  Object.assign(row, { clientHeight: 100 });
+  const long = take('long', 'The clip starts on the supplied vertical view. '.repeat(12));
+  await ui.viewOutput(long, 0, undefined, { list: () => [long], at: () => 0 });
+  assert.equal(more.hidden, false);
+  assert.deepEqual([more.attributes['aria-expanded'], more.attributes['aria-label']], ['false', 'Voir tout le prompt']);
+  // The arrow shows it whole (the panel scrolls, its actions staying at its foot: moodix.css), then folds it.
+  more.onclick();
+  assert.deepEqual([more.hidden, more.attributes['aria-expanded'], more.attributes['aria-label']], [false, 'true', 'Replier le prompt']);
+  more.onclick();
+  assert.deepEqual([more.hidden, more.attributes['aria-expanded']], [false, 'false']);
+  // Left open, another take comes folded.
+  more.onclick();
+  await ui.viewOutput(long, 0, undefined, { list: () => [long], at: () => 0 });
+  assert.equal(more.attributes['aria-expanded'], 'false');
+  // A short prompt has the room it needs: no arrow.
+  Object.assign(prompt, { scrollHeight: 24 });
+  Object.assign(row, { clientHeight: 24 });
+  const short = take('short', 'A fox.');
+  await ui.viewOutput(short, 0, undefined, { list: () => [short], at: () => 0 });
+  assert.equal(more.hidden, true);
+  // The actions are a part of the panel that stays at its foot, the prompt the part that gives way.
+  const css = await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8');
+  assert.match(css, /#original-dialog \.media-information > \.media-actions \{\r?\n  position: sticky;\r?\n  bottom: 0;/);
+  assert.match(css, /#original-dialog \.media-information > \.media-prompt-row \{\r?\n  position: relative;\r?\n  flex: 0 1 auto;/);
+});

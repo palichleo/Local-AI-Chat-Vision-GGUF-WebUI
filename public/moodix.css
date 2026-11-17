@@ -13495,6 +13495,102 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
 #original-dialog .media-information > .media-actions {
   margin-top: auto;
 }
+/* (17/11) Its actions stay at the foot of its panel, never scrolled away: what is above passes
+   under them, blurred as it nears them. The prompt takes the room that is left (three lines at
+   least, its own height when it is shorter): cut, it fades into a blur where a round arrow
+   shows it whole; the panel scrolls then, the actions still at its foot. */
+#original-dialog .media-information {
+  padding-bottom: 0;
+}
+#original-dialog .media-information > .media-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: auto -22px 0;
+  padding: 12px 22px 18px;
+  border-radius: 0 0 14px 14px;
+  background: rgba(16, 15, 20, 0.82);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+#original-dialog .media-information > .media-actions::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: 28px;
+  background: linear-gradient(to bottom, rgba(16, 15, 20, 0), rgba(16, 15, 20, 0.82));
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000);
+  mask-image: linear-gradient(to bottom, transparent, #000);
+  pointer-events: none;
+}
+/* The last line above the actions keeps clear of their blur when nothing scrolls. */
+#original-dialog .media-information > .media-more {
+  margin-bottom: 14px;
+}
+#original-dialog .media-information > .media-prompt-row {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: min(72px, var(--prompt-height, 72px));
+  overflow: hidden;
+}
+#original-dialog .media-information > .media-prompt-row.is-open {
+  flex-shrink: 0;
+  padding-bottom: 38px;
+}
+#original-dialog .media-prompt-row.is-cut::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 68px;
+  background: linear-gradient(to bottom, rgba(16, 15, 20, 0), rgba(16, 15, 20, 0.9));
+  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(5px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 75%);
+  mask-image: linear-gradient(to bottom, transparent, #000 75%);
+  pointer-events: none;
+}
+#original-dialog .media-prompt-more {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  margin: 0 0 0 -15px;
+  padding: 0;
+  border: 1px solid rgba(238, 232, 222, 0.22);
+  border-radius: 50%;
+  background: rgba(24, 23, 29, 0.86);
+  color: var(--text-1);
+}
+#original-dialog .media-prompt-more:hover {
+  border-color: rgba(238, 232, 222, 0.42);
+}
+#original-dialog .media-prompt-more[hidden] {
+  display: none;
+}
+#original-dialog .media-prompt-more svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: rotate(90deg);
+}
+#original-dialog .media-prompt-row.is-open .media-prompt-more svg {
+  transform: rotate(-90deg);
+}
 /* Its player: none of the browser's controls. The round ▶ in the middle of the picture; at its
    foot, a fine line of progress in the accent, the time in mono (« 02.00 / 06.04 »), the sound. */
 .take-player {

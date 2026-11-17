@@ -645,3 +645,29 @@ test('under a take made with LoRAs of the user: their number beside its format, 
   const plain = takeLine({ ...record, parameters: { width: 1024, height: 1024 } }, 0);
   assert.deepEqual([plain.loras, plain.lorasTitle], ['', '']);
 });
+
+test('a clip put back in a conversation takes the shape its record says, before its file is ever read', () => {
+  const container = new Element(),
+    record = {
+      id: 'run',
+      conversationId: 'conversation',
+      mediaType: 'video',
+      workflowName: 'LTX 2.5',
+      prompt: 'A staircase above the clouds',
+      parameters: { stage: 'draft', width: 288, height: 512, frames: 121, fps: 24 },
+      outputs: [{ source: { filename: 'clip.mp4' }, originalUrl: '/media/generated/signed', take: 19 }],
+    };
+  const ui = setupGenerationUI({ node: (...args) => new Element(...args), openOutput() {}, api: async () => ({}) });
+  // As a conversation reopened mounts it: nothing known of the request that made it.
+  const card = ui.mount(container, {});
+  card.image({ record, index: 0 });
+  const frame = container.children[0].children[0];
+  // (Left to the reading of the file, which waits for « play », an upright clip was drawn 560 px wide.)
+  assert.equal(frame.style.aspectRatio, '288 / 512');
+  // The size its file says, when it differs from its record (an enlargement), is the one kept.
+  const larger = new Element(),
+    big = { ...record, outputs: [{ ...record.outputs[0], width: 1152, height: 2048 }] },
+    other = ui.mount(larger, {});
+  other.image({ record: big, index: 0 });
+  assert.equal(larger.children[0].children[0].style.aspectRatio, '1152 / 2048');
+});
