@@ -177,3 +177,30 @@ What it shows:
 - **The decoders by stretches of frames give the very frames of the library's** (tests: to the bit; controls: every frame identical).
 - **MiniMax H3 has a limit on this card that the fallbacks do not lift**: its steps hold 1.2 GiB plus 0.112 for each thousand tokens with none of its weights on the card (measured at 12 900, 34 800, 37 800 and 76 000 tokens), about 72 000 tokens on a 12 GiB card with 1.2 GiB taken by other programs. At 1920 × 1088 the sampling went to its end one time of two. Its blocks hold six widths of 7 168 channels of the sequence at once: lowering that is a work of its own.
 - **What a refusal costs**: it is said from what is free when the generation starts. With the other programs closed (11.6 GiB free) the two cases at the limit would be tried.
+
+### The card under constraint (17 November 2026, engine 0.6.78)
+
+Another process holds 4 GiB of the card for the whole run and writes in them, as a game, a browser or another generation program would: 7.1 GiB are free, a card of 8 GiB.
+
+**What the first run found.** On Windows, PyTorch (`torch.cuda.mem_get_info`) says what this process may still take of its own budget, the card less a fixed share, whatever the other programs hold: 10.8 GiB free of 12 with 0.25 GiB taken elsewhere, with 1.2, and with 4. The engine sized the share of the weights on that figure. It filled the card all the same, the driver put the overflow in the shared memory, and an image of Krea 2 took **474 s instead of 30**, without an error. The driver's own count (NVML) includes every program: `hardware.free_bytes` now takes the least of the two, and every pipeline asks there. The same image: **26 s**.
+
+| Creation | Whole card (10.8 GiB free) | 7.1 GiB free |
+| --- | --- | --- |
+| Krea 2, 1024 × 1024 | 32 s | 27 s |
+| Krea 2, 1536 × 1536 | 46 s | 40 s |
+| SeedVR2, 1024² to 2048² | 15 s | 18 s |
+| LTX 2.5, 288 × 512, 5 s | not measured | 42 s |
+| LTX 2.5, 896 × 1600, 5 s | 105 s | 93 s |
+| LTX 2.5, 768 × 448, 10 s | 58 s | 58 s |
+| LTX 2.5, 896 × 1600, 10 s, start image | 202 s | 198 s |
+| MiniMax H3, 768 × 448, 5 s | 76 s | 74 s |
+| MiniMax H3, 768 × 448, 14 s | 165 s | 165 s |
+| MiniMax H3, 1344 × 768, 5 s | 175 s | 178 s |
+
+What it shows:
+
+- **With a third less memory the engine does not slow down.** It keeps fewer weights on the card (3.7 GiB of Krea 2 instead of 7.3, none of MiniMax H3) and passes the others through at each step: sending weights ahead costs almost nothing here. This is the measured ground for letting the weights give way to the computation.
+- **Two more corrections came from this run**: the attention of LTX 2.5 in pieces of its queries when it does not fit whole (the refining pass of 10 s failed there), and the refusal of MiniMax H3 from what was measured in place of an estimate that asked 7.8 GiB for a video that holds 5.1.
+- **The spill into the shared memory is slow without failing**: 57 s a step instead of 0.8. Nothing in PyTorch says it. The driver's count is what tells it before it happens.
+
+Not covered: a real card of 8 GiB (the pinned RAM and the driver may differ), less than 7 GiB free, a memory taken while a generation runs.
