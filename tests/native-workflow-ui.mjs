@@ -1342,8 +1342,8 @@ test('Krea 2: a denoise of 1 with an image to modify is said to ignore it, until
       control.value = value;
       for (const listener of control.listeners.input) listener();
     };
-  // The shipped workflow keeps a part of the image (0.75): nothing to warn of.
-  assert.equal(control.value, 0.75);
+  // The shipped workflow keeps a part of the image (0.6): nothing to warn of.
+  assert.equal(control.value, 0.6);
   assert.equal(note.hidden, true);
   // What the setting is, and that it only applies to an image given, is said whatever its value.
   const card = note.parent,

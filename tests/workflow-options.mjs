@@ -302,7 +302,7 @@ test('at a denoise of 1 the image to modify of Krea 2 is ignored: the editor say
   assert.match(sampling, /return noise \* sigma \+ source \* \(1 - sigma\)/);
   assert.match(source, /latents = start_latents\(noise, source, sigmas\[0\]\)/);
   // The shipped workflow keeps a part of the image: nothing to warn of. One of the user's at 1 is.
-  assert.deepEqual(krea.parameters.denoise, { policy: 'fixed', value: 0.75 });
+  assert.deepEqual(krea.parameters.denoise, { policy: 'fixed', value: 0.6 });
   assert.ok(krea.references.some(slot => slot.role === 'img2img'));
   assert.equal(settingWarning(manifest, krea, 'denoise'), '');
   const whole = structuredClone(krea);

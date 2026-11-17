@@ -120,7 +120,7 @@ test('copies left by older versions: unedited ones go, edited ones stay without 
   assert.deepEqual(await f.names(), [[f.original.name, true, true, false]]);
 });
 
-test('Krea 2 at a denoise of 0.75 reaches the installed copies: an untouched one follows, an edited one is kept', async t => {
+test('Krea 2 at a denoise below 1 reaches the installed copies: an untouched one follows, an edited one is kept', async t => {
   const id = 'fefb88eb-8311-4409-b636-6efbb42e952c';
   const current = JSON.parse(await readFile(new URL(`../runner/workflows/${id}.json`, import.meta.url), 'utf8'));
   // The version shipped before: the same workflow at a denoise of 1 (the image to modify was ignored).
@@ -128,7 +128,7 @@ test('Krea 2 at a denoise of 0.75 reaches the installed copies: an untouched one
   before.parameters.denoise.value = 1;
   const historyPath = new URL('../runner/workflow-history.json', import.meta.url);
   const versions = JSON.parse(await readFile(historyPath, 'utf8')).workflows[id];
-  assert.equal(current.parameters.denoise.value, 0.75);
+  assert.equal(current.parameters.denoise.value, 0.6);
   assert.ok(versions.includes(workflowFingerprint(before)), 'the version before is in the history');
   assert.equal(versions.at(-1), workflowFingerprint(current));
   const root = await mkdtemp(join(tmpdir(), 'atelier-catalog-'));
@@ -151,7 +151,7 @@ test('Krea 2 at a denoise of 0.75 reaches the installed copies: an untouched one
   await writeFile(join(user, id + '.json'), JSON.stringify(before));
   assert.deepEqual(await catalog.adoptShipped(), { removed: [id], kept: [] });
   assert.deepEqual(await readdir(user), []);
-  assert.equal(await denoise(id), 0.75);
+  assert.equal(await denoise(id), 0.6);
   // The same copy with a change of the user's: kept as it is, at their denoise.
   await writeFile(join(user, id + '.json'), JSON.stringify({ ...before, description: 'Mon Krea.' }));
   assert.deepEqual(await catalog.adoptShipped(), { removed: [], kept: [id] });
@@ -168,7 +168,7 @@ test('Krea 2 at a denoise of 0.75 reaches the installed copies: an untouched one
     listed.map(item => [item.name, item.customized ?? false, item.update ?? false, item.parameters.denoise.value]),
     [
       [current.name, true, false, 1],
-      [current.name + ' V2', false, true, 0.75],
+      [current.name + ' V2', false, true, 0.6],
     ],
   );
   // Never written to: an update replaces that folder.

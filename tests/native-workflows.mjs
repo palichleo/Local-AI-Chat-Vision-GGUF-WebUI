@@ -367,12 +367,12 @@ test('Krea 2: the denoise applies to an image to modify only, and the job says t
         overrides,
       })
     ).parameters.denoise;
-  // The shipped workflow: an image given to modify counts (0.75), and without one the picture is
+  // The shipped workflow: an image given to modify counts (0.6, measured: see the commit of 0.6.69), and without one the picture is
   // made from pure noise, which is what the engine does (runner/pipelines/sampling.py).
-  assert.deepEqual(shipped.parameters.denoise, { policy: 'fixed', value: 0.75 });
+  assert.deepEqual(shipped.parameters.denoise, { policy: 'fixed', value: 0.6 });
   assert.equal(family('krea2').parameters.denoise.onlyWith.role, 'img2img');
   assert.ok(shipped.references.some(slot => slot.id === 'source' && slot.role === 'img2img'));
-  assert.equal(await made(shipped, image), 0.75);
+  assert.equal(await made(shipped, image), 0.6);
   assert.equal(await made(shipped, null), 1);
   // A workflow of the user's fixed at 1 with an image stays at 1: their choice.
   const own = { ...fixture(), references: [{ id: 'source', role: 'img2img', required: false }] };
@@ -393,7 +393,7 @@ test('Krea 2: the denoise applies to an image to modify only, and the job says t
     allowPendingReferences: true,
   });
   const item = editableParameters(shipped, job.parameters).find(entry => entry.key === 'denoise');
-  assert.equal(item.value, 0.75);
+  assert.equal(item.value, 0.6);
   assert.match(item.note, /quand une image est donnée à modifier.*Sans image, l’image part toujours de zéro\./);
 });
 

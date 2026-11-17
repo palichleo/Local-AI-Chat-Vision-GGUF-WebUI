@@ -98,7 +98,7 @@
       "max": 1,
       "exclusiveMin": true,
       "onlyWith": { "role": "img2img", "otherwise": 1 },
-      "help": "Part de l’image refaite quand une image est donnée à modifier : 1 la remplace entièrement, plus bas il en reste davantage. Sans image, l’image part toujours de zéro."
+      "help": "Part de l’image refaite quand une image est donnée à modifier : 1 la remplace entièrement, plus bas il en reste davantage. Mesuré avec 8 pas : à 0,5 elle reste presque telle quelle, à 0,6 sa composition est gardée et le changement demandé est fait, à partir de 0,75 elle ne compte presque plus. Sans image, l’image part toujours de zéro."
     },
     "expandPrompt": {
       "type": "boolean"
@@ -202,7 +202,7 @@
       },
       "denoise": {
         "policy": "fixed",
-        "value": 0.75
+        "value": 0.6
       },
       "expandPrompt": {
         "policy": "fixed",

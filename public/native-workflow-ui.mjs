@@ -120,7 +120,7 @@ export function settingWarning(manifest, workflow, name) {
     value = policy?.policy === 'fixed' ? policy.value : policy?.default,
     source = (workflow.references ?? []).some(slot => manifest?.roles?.[slot.role]?.as === 'source');
   return source && value === 1
-    ? 'À 1, l’image à modifier est ignorée : le moteur part d’un bruit pur. Baissez le débruitage (0,6 à 0,8, par exemple) pour qu’elle serve.'
+    ? 'À 1, l’image à modifier est ignorée : le moteur part d’un bruit pur. Baissez le débruitage (0,6, par exemple : au-dessus de 0,7 elle ne compte presque plus) pour qu’elle serve.'
     : '';
 }
 export function setupNativeWorkflows(options) {
