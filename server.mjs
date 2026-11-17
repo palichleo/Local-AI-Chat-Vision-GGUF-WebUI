@@ -5,6 +5,7 @@ import { ModelLibrary, modelFolderName } from './lib/models.mjs';
 import { Resources, resourceCatalogPrompt, resourceTool, resourceReadIds } from './lib/resources.mjs';
 import { citedImages, citedMessage, citedSaid, citedUnused, citedNumbers } from './lib/cited-resources.mjs';
 import { briefMessage, briefMissing, cardBrief } from './lib/video-brief.mjs';
+import { CAPABLE, CAPABLE_CARD, capableMessages, wordingOf } from './lib/model-wording.mjs';
 import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
@@ -819,7 +820,11 @@ export async function createApplication({
   async function includeTools(payload, body, { prune = null } = {}) {
     // The references of the conversation's project; those it names stay in the list.
     const project = projectOf(body?.project),
-      cited = citedNumbers(body?.messages);
+      cited = citedNumbers(body?.messages),
+      // The words of the small local model, or those of a large remote one (lib/model-wording.mjs).
+      wording = wordingOf(chat.connection);
+    // A large model gets its own consigne and the facts of the results (the page's history unchanged).
+    if (wording === CAPABLE) payload.messages = capableMessages(payload.messages);
     // A message answered (not a count of the context): too many references for the model's
     // list, the least used are removed from the disk (copies, never the user's originals), and
     // `prune` is told which.
@@ -831,7 +836,7 @@ export async function createApplication({
       if (removed.length) prune(removed);
     }
     const active = await resources.catalog(project);
-    const context = resourceCatalogPrompt(active, { cited });
+    const context = resourceCatalogPrompt(active, { cited, wording });
     if (context) {
       if (payload.messages[0]?.role === 'system')
         payload.messages[0] = { ...payload.messages[0], content: payload.messages[0].content + context };
@@ -873,7 +878,7 @@ export async function createApplication({
               draft:
                 run.mediaType === 'video' && run.parameters?.stage === 'draft' && Boolean(run.parameters?.replay_args),
             })),
-        })),
+        }, { wording })),
       );
     }
     if (active.length && chat.vision && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8) {
@@ -2664,7 +2669,7 @@ export async function createApplication({
                   // user's answer sets the Studio (`brief`). The page knows where it is.
                   if (request && !request.missing && briefMissing(body.messages, call)) {
                     request.brief = briefMessage(await runtime.tools.lengths(call.function.name).catch(() => []));
-                    request.cardBrief = cardBrief();
+                    request.cardBrief = wordingOf(chat.connection) === CAPABLE ? CAPABLE_CARD : cardBrief();
                   }
                   // Said where the user confirms: what the prompt was written from.
                   if (replacing && request)

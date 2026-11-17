@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { createServer as netServer } from 'node:net';
 import { createApplication } from '../server.mjs';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
 import { resourceCatalogPrompt, resourceTool } from '../lib/resources.mjs';
@@ -15,6 +16,16 @@ import { THIN_NOTE } from '../lib/thin-prompt.mjs';
 import { SEEN_NOTE } from '../lib/seen-resources.mjs';
 import { citedMessage } from '../lib/cited-resources.mjs';
 import { FAILED_NOTE, FAILED_SETTLED, UNANSWERED } from '../public/transcript.mjs';
+import {
+  CAPABLE,
+  CAPABLE_CARD,
+  CAPABLE_SYSTEM,
+  LOCAL_LINE,
+  RAILS,
+  capableMessages,
+  capableResult,
+  wordingOf,
+} from '../lib/model-wording.mjs';
 
 /**
  * What the small local model is given (« rails ») does not change by a character when the remote
@@ -54,7 +65,7 @@ const CONTEXTS = {
 };
 
 /** The workflows shipped with Moodix, every one ready, as on a computer that has all their files. */
-export async function shippedCatalog() {
+async function shippedCatalog() {
   const workflows = [];
   for (const file of (await readdir(shipped)).filter(name => name.endsWith('.json')).sort())
     workflows.push({ ...JSON.parse(await readFile(join(shipped, file), 'utf8')), ready: true, builtin: true });
@@ -110,8 +121,11 @@ async function snapshot() {
   return JSON.parse(await readFile(snapshotPath, 'utf8'));
 }
 
-/** Moodix with llama.cpp replaced by the scripted engine, which gives back the request it gets. */
-async function localMoodix(t) {
+/**
+ * Moodix with llama.cpp replaced by the scripted engine, which gives back the request it gets; with
+ * `remote` (a preset), the same engine reached as that remote service instead, chosen and in use.
+ */
+async function localMoodix(t, { remote = null } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'moodix-rails-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const outputDir = join(root, 'output');
@@ -207,14 +221,45 @@ async function localMoodix(t) {
     maxOutputTokens: 4096,
     gpuLayers: 0,
   });
-  await api('start', {}, 202);
+  if (remote) {
+    // The scripted engine as a service of the Internet would be: its address and its key.
+    const port = await freePort(),
+      key = 'sk-test-' + randomUUID();
+    const service = spawn(
+      process.execPath,
+      [fixture, '--offline', '--host', '127.0.0.1', '--port', String(port), '--api-key', key],
+      { stdio: 'ignore' },
+    );
+    t.after(() => service.kill());
+    for (let i = 0; i < 400; i++) {
+      if ((await fetch(`http://127.0.0.1:${port}/health`).catch(() => null))?.status === 401) break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    const { saved } = await (
+      await api('remote/save', {
+        preset: remote,
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        model: 'test-model',
+        key,
+        vision: true,
+      })
+    ).json();
+    await api('remote/select', { id: saved.id });
+  } else await api('start', {}, 202);
   for (let i = 0; i < 400 && (await (await api('status')).json()).state !== 'ready'; i++)
     await new Promise(resolve => setTimeout(resolve, 25));
   return { api };
 }
+async function freePort() {
+  const probe = netServer();
+  await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
+  const { port } = probe.address();
+  await new Promise(resolve => probe.close(resolve));
+  return port;
+}
 
 /** A conversation as the page sends it: its line, a creation made, a video waiting on its card, a failure. */
-export function pageConversation(system) {
+function pageConversation(system) {
   const made = {
       id: 'call_image_1',
       type: 'function',
@@ -271,12 +316,10 @@ export function pageConversation(system) {
     { role: 'user', content: 'inspect tool context' },
   ];
 }
-const LOCAL_LINE =
-  'Tu es un assistant local utile. Réponds dans la langue de l’utilisateur. Décris honnêtement les images et signale tes incertitudes.';
 
-/** What llama.cpp receives for that conversation: its messages and its tools. */
-async function localRequest(t) {
-  const { api } = await localMoodix(t);
+/** What llama.cpp (or the service of `remote`) receives for that conversation: its messages and its tools. */
+async function localRequest(t, remote = null) {
+  const { api } = await localMoodix(t, { remote });
   const streamed = await (
     await api('chat', {
       messages: pageConversation(
@@ -319,4 +362,138 @@ test('a whole request of the chat reaches llama.cpp as it did in 0.6.39', { time
   assert.deepEqual(request, (await snapshot()).request);
 });
 
-export { railsWording, LOCAL_LINE, CONTEXTS, localMoodix };
+test('the line of the local model is the one the page sends, and only ChatGPT, Claude and OpenRouter get the other wording', async () => {
+  const app = await readFile(fileURLToPath(new URL('../public/app.js', import.meta.url)), 'utf8');
+  assert.ok(app.includes(`'${LOCAL_LINE}'`), 'public/app.js sends LOCAL_LINE');
+  assert.equal(wordingOf(null), RAILS);
+  for (const preset of ['chatgpt', 'claude', 'openrouter']) assert.equal(wordingOf({ preset }), CAPABLE, preset);
+  // Another service may well be a small model on this computer: the rails.
+  for (const preset of ['custom', 'ollama', 'lmstudio', 'openai', 'mistral', 'groq'])
+    assert.equal(wordingOf({ preset }), RAILS, preset);
+});
+
+test('a capable model reads the facts of a result: no order, no identifier it is never to name', () => {
+  const [, , , made, , , refused] = capableMessages(pageConversation(LOCAL_LINE + '\n\nContexte : noir et blanc.'));
+  const facts = JSON.parse(made.content);
+  assert.deepEqual(Object.keys(facts).sort(), [
+    'media_type',
+    'parameters',
+    'prompt',
+    'run_id',
+    'status',
+    'takes',
+    'workflow',
+  ]);
+  assert.deepEqual([facts.takes, facts.parameters.seed], [[4], 7]);
+  assert.deepEqual(JSON.parse(refused.content), { status: 'denied', cancelled: 'card' });
+  // What failed is a fact; what to do about it is said once in the consigne.
+  const failed = JSON.parse(
+    capableResult(JSON.stringify({ status: 'error', message: 'Mémoire insuffisante.', note: FAILED_NOTE })),
+  );
+  assert.deepEqual(failed, { status: 'error', message: 'Mémoire insuffisante.' });
+  // The application's own answers stay: a prompt too thin, images shown before a call.
+  for (const message of [THIN_NOTE, SEEN_NOTE])
+    assert.equal(JSON.parse(capableResult(JSON.stringify({ status: 'nothing_generated', message }))).message, message);
+  // The words over a card asked in the wording of the small model: in the capable one.
+  assert.equal(
+    JSON.parse(capableResult(JSON.stringify({ status: 'waiting_for_user', message: cardBrief() }))).message,
+    CAPABLE_CARD,
+  );
+  // A result that is not JSON, and a looked-at result, keep what they say.
+  assert.equal(capableResult('texte libre'), 'texte libre');
+  const looked = JSON.parse(
+    capableResult(
+      JSON.stringify({ status: 'success', analysis_outputs: [], reference_count: 1, reference_mode: 'pixels' }),
+    ),
+  );
+  assert.deepEqual([looked.reference_count, looked.reference_mode], [1, 'pixels']);
+});
+
+test('a capable model gets the consigne of Moodix in place of the local line, the user’s context after it', () => {
+  const [system, user] = capableMessages([
+    { role: 'system', content: LOCAL_LINE + '\n\nContexte fourni : noir et blanc.' },
+    { role: 'user', content: LOCAL_LINE },
+  ]);
+  assert.equal(system.content, CAPABLE_SYSTEM + '\n\nContexte fourni : noir et blanc.');
+  assert.equal(user.content, LOCAL_LINE, 'only the system line');
+  // No name of a tool, no number: the same words at every request, kept in the cache of a provider.
+  for (const name of ['create_', 'extend_video', 'replace_character', 'upscale', 'interpolate', 'local_read'])
+    assert.equal(CAPABLE_SYSTEM.includes(name), false, name);
+  assert.ok(CAPABLE_SYSTEM.length < 4000, 'a few hundred tokens');
+});
+
+test('the tools of a capable model are contracts: no plan agreed in words, every argument said, workflows by name', async () => {
+  const catalog = await shippedCatalog();
+  for (const [context, available] of Object.entries(CONTEXTS)) {
+    const tools = await catalog.definitions(available, { wording: CAPABLE }),
+      rails = await catalog.definitions(available);
+    // The same tools and arguments as the local model's, said otherwise.
+    assert.deepEqual(
+      tools.map(tool => [
+        tool.function.name,
+        Object.keys(tool.function.parameters.properties),
+        tool.function.parameters.required,
+      ]),
+      rails.map(tool => [
+        tool.function.name,
+        Object.keys(tool.function.parameters.properties),
+        tool.function.parameters.required,
+      ]),
+      context,
+    );
+    const text = JSON.stringify(tools);
+    for (const staging of [
+      /agree (on|with)/i,
+      /five lines/i,
+      /without a tool/i,
+      /no headings/i,
+      /once they answered/i,
+      /must confirm every video/i,
+      /Never write the length/i,
+    ])
+      assert.doesNotMatch(text, staging, `${context}: ${staging}`);
+    for (const tool of tools)
+      for (const [key, property] of Object.entries(tool.function.parameters.properties))
+        assert.ok(property.description, `${context}: ${tool.function.name}.${key} is described`);
+  }
+  const video = (await catalog.definitions(CONTEXTS.rich, { wording: CAPABLE })).find(
+    tool => tool.function.name === 'create_video',
+  ).function;
+  assert.deepEqual(video.parameters.properties.workflow.enum, ['MiniMax H3 Omni', 'LTX 2.5']);
+  assert.match(video.description, /\n- LTX 2\.5\. /);
+  assert.doesNotMatch(video.description, /eaec4e2f/);
+  // A workflow passed by its name is the one used.
+  const routed = await catalog.route(
+    'create_video',
+    { prompt: 'A fox runs in the snow.', duration: 5, intention: 'Un renard.', workflow: 'LTX 2.5' },
+    { mediaOf: async () => 'image' },
+  );
+  assert.equal(routed.workflow.name, 'LTX 2.5');
+  // Two workflows of a verb with the same name: their ids, as for the local model.
+  const twins = new ToolCatalog({
+    list: async () =>
+      (await catalog.workflows.list())
+        .filter(workflow => workflow.mediaType === 'audio')
+        .map(workflow => ({ ...workflow, name: 'Son' })),
+  });
+  const audio = (await twins.definitions(CONTEXTS.fresh, { wording: CAPABLE })).find(
+    tool => tool.function.name === 'create_audio',
+  ).function;
+  assert.ok(audio.parameters.properties.workflow.enum.every(value => /^[0-9a-f-]{36}$/.test(value)));
+});
+
+test(
+  'through the application: OpenRouter gets the capable wording, another service the local one',
+  { timeout: 60000 },
+  async t => {
+    const capable = await localRequest(t, 'openrouter');
+    assert.ok(capable.messages[0].content.startsWith(CAPABLE_SYSTEM));
+    assert.ok(capable.messages[0].content.endsWith('Tout en noir et blanc.'));
+    assert.equal(JSON.parse(capable.messages[3].content).note, undefined);
+    assert.doesNotMatch(capable.tools[0].function.description, /Workflows:\n- rails-image:/);
+    // Another service « compatible OpenAI » keeps the words of the local model, to the character.
+    const other = await localRequest(t, 'custom'),
+      kept = (await snapshot()).request;
+    assert.deepEqual([other.messages, other.tools], [kept.messages, kept.tools]);
+  },
+);
