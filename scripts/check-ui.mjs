@@ -216,13 +216,18 @@ try {
     click('#thread-conversation').then(() => wait(200)).then(() => js(`(() => { const f = document.querySelector('.thread-menu input'); if (!f) return false; f.value = 'renard'; f.dispatchEvent(new Event('input')); return true; })()`)),
   () => js(`!document.querySelector('.thread-empty')?.hidden`));
   await run('Échap (menu des conversations)', () => key('Escape', 'Escape', 27), menuClosed);
+  // The fil heads the Pellicule (0.6.40): « Tous les projets » alone, then a project and its
+  // conversations from its menus; « + Nouvelle conversation » opens the welcome in it.
   await run('Pellicule', () => click('#library-open'), () =>
-    js(`document.body.dataset.view === 'library' && document.querySelector('#library-projects .library-pill')?.getAttribute('aria-pressed') === 'true' && document.getElementById('library-conversations').hidden && !document.getElementById('library-empty').hidden`));
+    js(`document.body.dataset.view === 'library' && !!document.querySelector('#library-thread > #thread:not([hidden])') && document.getElementById('thread').dataset.scope === 'all' && document.getElementById('thread-project-name').textContent === 'Tous les projets' && !document.getElementById('library-empty').hidden`));
   await run('type Vidéos', () => click('#library-kinds [data-kind="video"]'), () =>
     js(`document.querySelector('#library-kinds [data-kind="video"]')?.getAttribute('aria-checked') === 'true'`));
-  await run('projet dans la Pellicule', () => click('#library-projects [data-project="inbox"]'), () =>
-    js(`document.body.dataset.view === 'library' && document.querySelector('#library-projects [data-project="inbox"]')?.getAttribute('aria-pressed') === 'true' && !document.getElementById('library-conversations').hidden`));
-  await run('nouveau chat du projet', () => click('#library-conversations .library-pill.is-new'), view('chat'));
+  await run('menu des projets dans la Pellicule', () => click('#thread-project'), () =>
+    js(`document.querySelector('.thread-menu .thread-line .thread-choice-name')?.textContent === 'Tous les projets'`));
+  await run('projet dans la Pellicule', () => click('.thread-menu .thread-lines .thread-line:last-child .thread-choice'), () =>
+    js(`document.body.dataset.view === 'library' && document.getElementById('thread').dataset.scope === 'project' && document.getElementById('thread-project-name').textContent === 'Sans projet' && document.getElementById('thread-shown').textContent === 'Toutes les conversations' && !document.querySelector('.thread-menu')`));
+  await run('nouveau chat du projet', () => fromMenu('#thread-conversation', '.thread-action'), () =>
+    js(`document.body.dataset.view === 'chat' && !!document.querySelector('.workspace > #thread:not([hidden])') && !document.getElementById('conversation-title').hidden`));
   await run('Pellicule, de nouveau', () => click('#library-open'), view('library'));
   await run('Chat depuis la Pellicule', () => click('#chat-open'), view('chat'));
   // Typed with a real key, as a person does: the page has had a gesture of its user, so that its

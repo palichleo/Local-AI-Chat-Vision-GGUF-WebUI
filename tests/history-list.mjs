@@ -441,7 +441,8 @@ test('the Pellicule keeps the current messages and draft', async () => {
   assert.equal(renders, 1);
 });
 
-test('in the Pellicule the fil is gone; the unsaved conversation is still there, not said open', t => {
+// With the Pellicule attached, the fil heads it (tests/library.mjs).
+test('in the Pellicule not attached yet the fil is hidden; the unsaved conversation is still there, not said open', t => {
   const { $, calls, open, lines } = fixture(t, {
     view: 'library',
     conversationId: null,

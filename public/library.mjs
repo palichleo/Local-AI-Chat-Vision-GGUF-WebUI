@@ -1,9 +1,10 @@
 /**
  * The Pellicule (pellicule-maquette.md; captures 30 to 34): every creation of every project, images,
- * clips and sounds, the newest at the top left. The projects are pills under the title (« Tous les
- * projets », each project and its number, « Sans projet », « + Nouveau projet »); a project chosen,
- * its conversations are a second row of pills (no more lists that unfold). Tout · Images · Vidéos ·
- * Sons at the right of the title. The takes are a contact sheet by day (« AUJOURD'HUI · 16 NOV. »),
+ * clips and sounds, the newest at the top left. Its head is one line (pellicule-fil-maquette.md,
+ * captures 35 to 39): the fil « projet / conversation » of the Chat and the Studio, which the
+ * navigation (project-navigation.mjs) puts there and whose menus choose the project and the
+ * conversation shown, through `count` and `choose`; then the number of takes; Tout · Images ·
+ * Vidéos · Sons at the right. The takes are a contact sheet by day (« AUJOURD'HUI · 16 NOV. »),
  * each in its own format at one height; a sound is a card that plays. Under the pointer, a veil
  * with its prompt and where and when it was made, and at its top right the actions of the
  * conversation. A click shows it whole with its details; on its conversation, opens it.
@@ -17,8 +18,6 @@ export const KINDS = [
   { id: 'audio', icon: 'wave', label: 'Sons' },
 ];
 const NAMES = { image: 'Image', video: 'Clip', audio: 'Son' };
-/** Kept for the callers of before (0.5.123): the conversations are all shown, as pills. */
-export const FIRST_CONVERSATIONS = 6;
 /** The height of a row of the sheet; a take is as wide as its format makes it at that height. */
 const ROW = 196;
 
@@ -84,16 +83,11 @@ export function setupLibrary({
   newConversation,
   onFilter = () => {},
   actions = null,
-  onNewProject = null,
-  onRenameProject = null,
-  onDeleteProject = null,
-  openStudio = null,
 }) {
   const filter = { project: 'all', media: 'all', conversation: 'all' };
   let runs = [],
     version = 0,
     failed = '',
-    menuOpen = false,
     playing = null; // { audio, button }: the sound that plays
   // The tiles drawn, kept from one drawing to the next (another filter, a project renamed):
   // their pictures are not loaded again.
@@ -102,91 +96,24 @@ export function setupLibrary({
   // Outside any project: « Sans projet » (0.6.0), whatever the stored name of the group.
   const projectName = id =>
     (id || 'inbox') === 'inbox' ? 'Sans projet' : (projects().find(project => project.id === id)?.name ?? 'Sans projet');
-  const conversations = () =>
-    (state.historyItems || []).filter(item => filter.project === 'all' || (item.projectId || 'inbox') === filter.project);
   const titleOf = id =>
     (state.historyItems || []).find(item => item.id === id)?.title ?? (id === state.conversationId ? 'Nouvelle conversation' : 'Conversation');
   const date = value => (value ? new Date(value).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '');
-  const count = list => String(list.length);
 
-  /** A pill: its name, its number; `chosen` lights it. */
-  function pill(className, name, number, chosen, onclick) {
-    const element = node('button', className + (chosen ? ' is-chosen' : ''));
-    element.type = 'button';
-    element.setAttribute('aria-pressed', String(Boolean(chosen)));
-    element.append(node('span', 'library-pill-name', name));
-    if (number !== null) element.append(node('span', 'library-pill-count', number));
-    element.onclick = onclick;
-    return element;
-  }
-  /** The projects, then (one chosen) its conversations: filters in pills, at the same place. */
+  /**
+   * A project gone (deleted) shows every project again; a conversation gone, or no more of the
+   * project, every conversation of it. The kinds at the right of the head.
+   */
   function paintFilters() {
     const gone = filter.project !== 'all' && !projects().some(project => project.id === filter.project);
     if (gone) filter.project = 'all';
-    // « Sans projet » after the projects, as in the fil.
-    const named = projects().filter(project => project.id !== 'inbox'),
-      ordered = [...named, ...projects().filter(project => project.id === 'inbox')],
-      row = $('library-projects');
-    row.replaceChildren(
-      pill('library-pill', 'Tous les projets', count(filtered(runs, { media: filter.media })), filter.project === 'all', () =>
-        choose({ project: 'all' }),
-      ),
-      ...ordered.map(project => {
-        const element = pill(
-          'library-pill',
-          projectName(project.id),
-          count(filtered(runs, { project: project.id, media: filter.media })),
-          filter.project === project.id,
-          () => choose({ project: project.id }),
-        );
-        element.dataset.project = project.id;
-        return element;
-      }),
-    );
-    if (onNewProject) {
-      const create = node('button', 'library-pill is-new');
-      create.type = 'button';
-      create.append(icon('plus'), node('span', '', 'Nouveau projet'));
-      create.onclick = () => onNewProject();
-      row.append(create);
-    }
-    const list = conversations();
-    if (filter.conversation !== 'all' && !list.some(item => item.id === filter.conversation)) filter.conversation = 'all';
-    const talks = $('library-conversations');
-    talks.hidden = filter.project === 'all';
-    if (filter.project === 'all') talks.replaceChildren();
-    else {
-      const inProject = filtered(runs, { project: filter.project, media: filter.media }),
-        made = list.filter(item => inProject.some(record => record.conversationId === item.id));
-      talks.replaceChildren(
-        node('span', 'library-pills-label', 'Conversations'),
-        // A project without a creation keeps « + Nouvelle conversation » only (capture 34).
-        ...(inProject.length
-          ? [
-              pill('library-pill', 'Toutes les conversations', count(inProject), filter.conversation === 'all', () =>
-                choose({ conversation: 'all' }),
-              ),
-              ...made.map(item => {
-                const element = pill(
-                  'library-pill',
-                  item.title,
-                  count(inProject.filter(record => record.conversationId === item.id)),
-                  filter.conversation === item.id,
-                  () => choose({ conversation: item.id }),
-                );
-                element.dataset.id = item.id;
-                return element;
-              }),
-            ]
-          : []),
-      );
-      const create = node('button', 'library-pill is-new');
-      create.type = 'button';
-      create.append(icon('plus'), node('span', '', 'Nouvelle conversation'));
-      create.setAttribute('aria-label', 'Nouvelle conversation dans ' + projectName(filter.project));
-      create.onclick = () => newConversation(filter.project);
-      talks.append(create);
-    }
+    if (
+      filter.conversation !== 'all' &&
+      !(state.historyItems || []).some(
+        item => item.id === filter.conversation && (filter.project === 'all' || (item.projectId || 'inbox') === filter.project),
+      )
+    )
+      filter.conversation = 'all';
     const kinds = $('library-kinds');
     kinds.replaceChildren(
       ...KINDS.map(kind => {
@@ -216,47 +143,8 @@ export function setupLibrary({
     };
     return gone;
   }
-  /** « Pellicule », or « Pellicule › test » with « ··· » (Renommer, Supprimer le projet). */
-  function paintHeading(total) {
-    const heading = $('library-heading');
-    if (filter.project === 'all') heading.replaceChildren(node('span', 'library-title', 'Pellicule'));
-    else {
-      heading.replaceChildren(node('span', 'library-crumb', 'Pellicule ›'), node('span', 'library-title', projectName(filter.project)));
-      const project = projects().find(item => item.id === filter.project);
-      if (project && project.id !== 'inbox' && (onRenameProject || onDeleteProject)) {
-        const more = node('button', 'library-project-more');
-        more.type = 'button';
-        more.setAttribute('aria-label', 'Projet ' + projectName(project.id) + ' : renommer, supprimer');
-        more.title = 'Renommer ou supprimer le projet';
-        more.setAttribute('aria-expanded', String(menuOpen));
-        more.append(node('span', '', '···'));
-        more.onclick = () => {
-          menuOpen = !menuOpen;
-          render();
-        };
-        heading.append(more);
-        if (menuOpen) {
-          const menu = node('div', 'library-project-menu');
-          menu.setAttribute('role', 'menu');
-          for (const [label, run] of [
-            ['Renommer', onRenameProject],
-            ['Supprimer le projet', onDeleteProject],
-          ]) {
-            if (!run) continue;
-            const entry = node('button', 'library-project-action', label);
-            entry.type = 'button';
-            entry.setAttribute('role', 'menuitem');
-            entry.onclick = () => {
-              menuOpen = false;
-              render();
-              run(project);
-            };
-            menu.append(entry);
-          }
-          heading.append(menu);
-        }
-      }
-    }
+  /** The number of takes shown, after the fil (« 46 PRISES », « 0 PRISE »). */
+  function paintTotal(total) {
     $('library-total').textContent = total + (total > 1 ? ' prises' : ' prise');
   }
   /** A sound plays in its card; another one stops it. */
@@ -429,28 +317,22 @@ export function setupLibrary({
         return section;
       }),
     );
-    paintHeading(shown.length);
+    paintTotal(shown.length);
     const empty = $('library-empty');
     empty.hidden = shown.length > 0;
     if (shown.length) return empty.replaceChildren();
-    // A project with nothing in it (capture 34): its sentence, and two ways to begin.
+    // A project with nothing in it (capture 39): its sentence, and one way to begin.
     if (!failed && filter.project !== 'all' && filter.media === 'all' && filter.conversation === 'all') {
       empty.replaceChildren(
         node('p', 'library-empty-title', 'Rien dans ce projet pour l’instant.'),
         node('p', 'library-empty-text', 'Les images, les vidéos et les sons faits dans ce projet arrivent ici, la dernière en haut à gauche.'),
       );
-      const doors = node('div', 'library-doors');
-      if (openStudio) {
-        const studio = node('button', 'library-door', 'Ouvrir le Studio');
-        studio.type = 'button';
-        studio.onclick = () => openStudio(filter.project);
-        doors.append(studio);
-      }
-      const chat = node('button', 'library-door', 'Nouvelle conversation');
-      chat.type = 'button';
-      chat.onclick = () => newConversation(filter.project);
-      doors.append(chat);
-      empty.append(doors);
+      const begin = node('button', 'library-door');
+      begin.type = 'button';
+      begin.append(icon('plus'), node('span', '', 'Nouvelle conversation'));
+      begin.setAttribute('aria-label', 'Nouvelle conversation dans ' + projectName(filter.project));
+      begin.onclick = () => newConversation(filter.project);
+      empty.append(begin);
       return;
     }
     empty.replaceChildren(
@@ -472,10 +354,8 @@ export function setupLibrary({
   }
   function choose(change) {
     Object.assign(filter, change);
-    if ('project' in change) {
-      filter.conversation = 'all';
-      menuOpen = false;
-    }
+    // Another project: every conversation of it.
+    if ('project' in change && !('conversation' in change)) filter.conversation = 'all';
     render();
     onFilter({ ...filter });
   }
@@ -504,13 +384,25 @@ export function setupLibrary({
     /** Shown on a project (`all`: every one), every kind, every conversation. */
     async show({ project = 'all' } = {}) {
       Object.assign(filter, { project, media: 'all', conversation: 'all' });
-      menuOpen = false;
       render();
+      // The fil at its head says it at once.
+      onFilter({ ...filter });
       await refresh();
     },
     refresh,
     render,
     filter: () => ({ ...filter }),
+    /**
+     * The fil in the Pellicule (its menus): a project or a conversation chosen there narrows the
+     * sheet (`{ project }`, `{ conversation }`); it opens nothing.
+     */
+    choose,
+    /**
+     * How many takes a line of the menus of the fil stands for: those of the kind shown, of a
+     * project (`all`: every one) or of a conversation; `media` another kind.
+     */
+    count: ({ project = 'all', conversation = 'all', media = filter.media } = {}) =>
+      filtered(runs, { project, conversation, media }).length,
     /** Leaving the Pellicule: the sound that plays stops. */
     hush,
   };
