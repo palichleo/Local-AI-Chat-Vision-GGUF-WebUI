@@ -6,6 +6,11 @@
     "roles": {
       "source": { "description": "Image to change. Omit it to make a new image." },
       "reference": { "description": "Images whose subject, character or style must be reused." }
+    },
+    "arguments": {
+      "series": {
+        "description": "When the user asks for several images in one request (« 10 images de ce style », « trois variantes »): the prompts of the images after the first, one complete English prompt per image, written like prompt (the first image). Prepare them all now, varied as the user asked; Moodix makes them one after another with the same source, references and settings. Up to 19, so 20 images in one call. Leave it out for a single image."
+      }
     }
   },
   "create_video": {

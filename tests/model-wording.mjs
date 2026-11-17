@@ -33,7 +33,8 @@ import {
  * models get their own wording: the definitions of the tools for the workflows shipped with Moodix,
  * the notes the application writes for it, and a whole request as llama.cpp receives it, compared
  * with what 0.6.39 sent (tests/fixtures/rails-wording.json). `UPDATE_RAILS=1` writes it again: only
- * when a change for the local model is meant.
+ * when a change for the local model is meant (0.6.48: the `series` of create_image, several images
+ * in one call).
  */
 const snapshotPath = fileURLToPath(new URL('./fixtures/rails-wording.json', import.meta.url));
 const fixture = fileURLToPath(new URL('./fixtures/fake-tool-engine.mjs', import.meta.url));

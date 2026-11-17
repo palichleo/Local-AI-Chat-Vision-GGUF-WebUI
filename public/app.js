@@ -31,6 +31,7 @@ import { setupTokenControls, setupComputeControls, dismissSettingsOnOutsideClick
 import { waitForModel } from './model-ready.mjs';
 import { setupRemoteModels } from './remote-llm-ui.mjs';
 import { setupModelChoice } from './model-choice.mjs';
+import { runSeries } from './image-series.mjs';
 import { setupFirstLaunch } from './first-launch.mjs';
 import { missingFileCard } from './missing-file.mjs';
 import { setupGlassSelects } from './glass-menu.mjs';
@@ -3045,16 +3046,17 @@ async function sendMessage(event) {
       // model comes back with the next message: unless it has a creation to look at.
       const kept = viaStudio && !(review && request.mediaType === 'video') && !lookAtImage;
       let result;
-      try {
-        result = await workflowsUI.requestTool(
-          request,
+      // A creation run on its card: the same for each image of a series (image-series.mjs).
+      const runOn = (proposal, card) =>
+        workflowsUI.requestTool(
+          proposal,
           signal,
           (progress, fraction, preview) => {
-            generation.progress(progress, fraction, preview);
+            card.progress(progress, fraction, preview);
             if (viaStudio) state.studio.follow(progress, fraction, preview);
             scrollToBottom();
           },
-          image => generation.image(image),
+          image => card.image(image),
           {
             review,
             reviewImages: lookAtImage,
@@ -3074,13 +3076,33 @@ async function sendMessage(event) {
               : { approve: (proposal, abort) => proposalChoice(view, proposal, abort) }),
           },
         );
-        generation.finish(result);
-        if (viaStudio) void state.studio.settled(result);
+      const settle = outcome => {
+        if (viaStudio) void state.studio.settled(outcome);
         // Made from the Chat: the Studio reads its takes again when it is shown next (its Sortie and
         // its screen did not know of the take until another conversation was opened).
-        else if (result.record) state.studio?.invalidate?.();
+        else if (outcome.record) state.studio?.invalidate?.();
+      };
+      try {
+        result = await runOn(request, generation);
+        generation.finish(result);
+        settle(result);
+        // Several images asked in one call: the others now, one after another, without the model.
+        if (request.series && result.record && !result.denied && !result.failed)
+          result = await runSeries(request, result, {
+            api,
+            signal,
+            mount: proposal => generationUI.mount(view.generations, proposal, { compact: viaStudio }),
+            run: runOn,
+            settle,
+          });
       } catch (error) {
         if (viaStudio) void state.studio.settled({ error: signal.aborted ? 'Génération arrêtée.' : error.message });
+        // Stopped or broken after the first image of a series: its card said it, and the result of
+        // the call says what was made (the first card stays as it is).
+        if (error.series) {
+          history.push({ role: 'tool', tool_call_id: request.call.id, content: error.series });
+          throw error;
+        }
         // Stopped by the user: the take goes and the message says it, once, in French (16/11: the
         // take repeated it in the browser's words); failed: the take veiled, to make again (52).
         if (signal.aborted) generation.withdraw();

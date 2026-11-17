@@ -520,3 +520,108 @@ test(
     }
   },
 );
+
+test('several images asked in one message: one call, its images made one after another without the model', { timeout: 30000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'native-series-'));
+  let app;
+  const outputDir = join(root, 'output');
+  await mkdir(outputDir);
+  const prompts = [];
+  const worker = fakeEngine(outputDir, { onGenerate: job => prompts.push(job.parameters.prompt) });
+  try {
+    app = await createApplication({
+      fullPrompts: false,
+      port: 0,
+      dataDir: root,
+      outputDir,
+      generationWorker: worker,
+      spawnProcess: (_command, args, options) => spawn(process.execPath, [fixture, ...args], options),
+    });
+    const boot = await (await fetch(app.url + '/api/bootstrap')).json();
+    const api = async (path, body, status = 200) => {
+      const response = await fetch(app.url + '/api/' + path, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { Authorization: 'Bearer ' + boot.token, 'Content-Type': 'application/json' },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+      assert.equal(response.status, status, await response.clone().text());
+      return response;
+    };
+    const assets = {
+      model: { 'first.weight': [6144, 64], 'blocks.0.attn.wq.weight': [6144, 6144] },
+      textEncoder: { 'model.embed_tokens.weight': [1, 2560] },
+      vae: { 'encoder.conv1.weight': [1, 3, 1, 1, 1], 'decoder.conv1.weight': [1, 16, 1, 1, 1] },
+    };
+    for (const [kind, tensors] of Object.entries(assets)) {
+      const path = join(root, kind + '.safetensors');
+      await checkpoint(path, tensors);
+      await api('generation/assets', { id: kind, path, kind, family: 'krea2' });
+    }
+    await api('generation/assets', { id: 'tokenizer', path: await tokenizerFolder(root), kind: 'tokenizer', family: 'krea2' });
+    await api('generation/config', { enabled: true, autoAllow: false, maxIterations: 5, pythonPath: process.execPath });
+    await api('generation/workflows', {
+      schemaVersion: 1,
+      id: 'integration-boats',
+      name: 'Native image',
+      description: 'Generate boats',
+      enabled: true,
+      pipeline: 'krea2',
+      mediaType: 'image',
+      components: Object.fromEntries(['model', 'textEncoder', 'tokenizer', 'vae'].map(k => [k, { policy: 'fixed', asset: k }])),
+      parameters: {
+        prompt: { policy: 'model', type: 'string' },
+        seed: { policy: 'fixed', value: 99 },
+        width: { policy: 'fixed', value: 512 },
+        height: { policy: 'fixed', value: 512 },
+        steps: { policy: 'fixed', value: 8 },
+        cfg: { policy: 'fixed', value: 1 },
+        denoise: { policy: 'fixed', value: 1 },
+      },
+      loras: [],
+      references: [],
+    });
+    const modelPath = join(root, 'llm.gguf');
+    await writeFile(modelPath, 'GGUF\x03\0\0\0');
+    await api('config', { enginePath: process.execPath, modelPath, projectorPath: '', contextSize: 8192, maxOutputTokens: 4096, gpuLayers: 0 });
+    await api('start', {}, 202);
+    await until(async () => (await (await api('status')).json()).state === 'ready');
+    const conversationId = randomUUID(),
+      turnId = randomUUID();
+    const streamed = await (
+      await api('chat', { messages: [{ role: 'user', content: 'generate series of boats' }], conversationId, turnId })
+    ).text();
+    const first = streamed
+      .split(/\r?\n\r?\n/)
+      .filter(s => s.startsWith('data: ') && s !== 'data: [DONE]')
+      .map(s => JSON.parse(s.slice(6)))
+      .find(e => e.local_tool_request)?.local_tool_request;
+    assert.ok(first, streamed);
+    assert.deepEqual([first.series.index, first.series.total], [1, 3]);
+    const made = async proposal => {
+      await api('tools/execute', { requestId: proposal.requestId, permission: 'once' }, 202);
+      const job = await until(async () => {
+        const j = await (await api('tools/job')).json();
+        return j && ['done', 'error'].includes(j.state) && j;
+      });
+      assert.equal(job.state, 'done', job.error);
+      return job.record;
+    };
+    const records = [await made(first)];
+    for (const index of [2, 3]) {
+      const next = await (await api('tools/series', { series: first.series.id })).json();
+      assert.deepEqual([next.series.index, next.call.id], [index, first.call.id]);
+      records.push(await made(next));
+    }
+    assert.match(
+      (await (await api('tools/series', { series: first.series.id }, 409)).json()).error,
+      /terminée/,
+    );
+    assert.deepEqual(prompts.map(prompt => prompt.match(/A \w+ boat/)?.[0]), ['A red boat', 'A blue boat', 'A green boat']);
+    // Three takes, numbered one after another in the project.
+    const takes = records.map(record => record.outputs[0].take);
+    assert.deepEqual(takes, [takes[0], takes[0] + 1, takes[0] + 2]);
+  } finally {
+    await app?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
