@@ -2677,6 +2677,9 @@ async function sendMessage(event) {
       await readSSE(response.body, chunk => {
         contextMeter.observe(chunk);
         if (chunk.local_tool_request) request = chunk.local_tool_request;
+        // The first or last image of a video, kept by the server as a reference of the project
+        // (`stills`): the list of the references is read again, so that the page knows it.
+        if (chunk.local_tool_request?.stills?.length) void assetsUI.refresh().catch(() => {});
         const choice = chunk.choices?.[0],
           delta = choice?.delta || {};
         if (!leaked) output += delta.content || '';

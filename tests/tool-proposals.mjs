@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { Resources } from '../lib/resources.mjs';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
 import { ToolRuntime, takesStyles } from '../lib/tool-runtime.mjs';
 import { resolveNativeWorkflow, validateNativeWorkflow } from '../lib/native-workflows.mjs';
@@ -24,7 +27,20 @@ const assets = { resolve: async id => ({ id, path: join(tmpdir(), `${id}.safeten
 const uid = n => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
 const call = (name, args, id = 'call-1') => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 
-function world({ workflows = shipped(), records = {}, resources = {}, client = null } = {}) {
+/**
+ * `library`: the references of the project kept for real (a Resources of lib/resources.mjs) in place
+ * of those in memory; `extractStill`: what reads the first or last picture of a video file.
+ */
+function world({
+  workflows = shipped(),
+  records = {},
+  resources = {},
+  client = null,
+  library = null,
+  extractStill = null,
+  projectOf,
+  missing = [],
+} = {}) {
   const saved = [],
     closing = { close: async () => {} };
   client ??= {
@@ -50,7 +66,7 @@ function world({ workflows = shipped(), records = {}, resources = {}, client = n
       return record;
     },
   };
-  const library = {
+  library ??= {
     activeRecord: async id => {
       if (!resources[id]) throw Object.assign(Error('Ressource introuvable.'), { status: 404 });
       return { id, ready: true, enabled: true, ...resources[id] };
@@ -83,16 +99,22 @@ function world({ workflows = shipped(), records = {}, resources = {}, client = n
     getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'native' }),
     engineConfig: () => ({}),
     clientFactory: () => client,
+    extractStill,
+    ...(projectOf ? { projectOf } : {}),
+    // (`path`: where the file is, as the application says it; `missing`: files gone from the disk.)
     sourceMedia: async (ref, conversationId) => {
       if (ref.resource_id) {
         const record = await library.activeRecord(ref.resource_id);
-        return { mime: record.mime, name: record.name, handle: closing };
+        return { mime: record.mime, name: record.name, handle: closing, path: join('references', ref.resource_id) };
       }
       const record = await gallery.get(ref.output_conversation ?? conversationId, ref.output_id);
+      const filename = record.outputs?.[ref.output_index ?? 0]?.source?.filename ?? '';
+      if (missing.includes(filename)) throw Object.assign(Error('ENOENT: no such file'), { code: 'ENOENT' });
       return {
         mime: record.mediaType === 'video' ? 'video/mp4' : 'image/png',
         name: record.workflowName,
         handle: closing,
+        path: join('output', filename),
       };
     },
   });
@@ -740,4 +762,259 @@ test('an image made from another keeps its format: a portrait is not fitted into
   assert.deepEqual(asked.resolution, { width: 1024, height: 1024 });
   const alone = await edit({}, 'call-3');
   assert.deepEqual(alone.resolution, { width: 1024, height: 1024 });
+});
+
+/**
+ * The first or last image of a video where an image is taken (`frame`: "first" or "last"): the
+ * references of the project kept for real, in a folder of their own, and the reading of the video
+ * replaced by a function that says what it was asked and gives a picture of 1280 × 720.
+ */
+const PROJECT = uid(9);
+const DOT =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6rLkAAAAASUVORK5CYII=';
+// A PNG as far as its header goes (its size is read there), each `tag` its own file.
+const pngOf = (width, height, tag = '') => {
+  const bytes = Buffer.alloc(33);
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes);
+  bytes.writeUInt32BE(13, 8);
+  bytes.write('IHDR', 12, 'latin1');
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return Buffer.concat([bytes, Buffer.from(tag)]);
+};
+async function stillsWorld(t, options = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'atelier-stills-'));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const library = new Resources(join(root, 'resources')),
+    asked = [];
+  const made = world({
+    library,
+    projectOf: async () => PROJECT,
+    extractStill: async (path, at) => {
+      asked.push([path, at]);
+      return { bytes: pngOf(1280, 720, path + at), preview: DOT, width: 1280, height: 720 };
+    },
+    ...options,
+  });
+  return { ...made, library, asked };
+}
+// A video take of the project, « PRISE n »: its record, with its number.
+const take = (conversationId, id, workflow, number) => {
+  const record = clip(conversationId, id, workflow);
+  if (number) record.outputs[0].take = number;
+  return record;
+};
+const place = { conversationId: A, turnId: turn, messages: [] };
+
+test('the last image of a video take starts a new clip: read once, kept as a reference of the project, then an ordinary image', async t => {
+  const list = shipped(),
+    ltx = of(list, 'ltx25'),
+    [CLIP, OTHER] = [uid(3), uid(4)];
+  const { runtime, library, asked, saved } = await stillsWorld(t, {
+    workflows: list,
+    records: { [`${A}/${CLIP}`]: take(A, CLIP, ltx, 25), [`${A}/${OTHER}`]: take(A, OTHER, ltx) },
+  });
+  const video = (start_image, id = 'call-1') =>
+    runtime.request([call('create_video', { prompt: 'x', intention: 'x', workflow: ltx.id, start_image }, id)], place);
+  // The profile of the draft is a portrait (288 × 512, see above): the clip takes the format of the frame.
+  const first = await video({ output: CLIP, frame: 'last' });
+  assert.deepEqual(asked, [[join('output', CLIP + '.mp4'), 'last']], 'the file of the take, its last picture');
+  const [kept] = await library.list(PROJECT);
+  assert.deepEqual(
+    [kept.name, kept.label, kept.mime, kept.width, kept.height, kept.ready, kept.enabled],
+    ['Dernière image · PRISE 25', '#ref1', 'image/png', 1280, 720, true, true],
+  );
+  assert.equal((await library.list('inbox')).length, 0, 'a reference of the project of the conversation');
+  // Before the routing: the call, the card and the format see an image reference like another.
+  assert.deepEqual(first.args.references, [{ input: 'start', resource_id: kept.id }]);
+  assert.deepEqual(rolesOf(first), ['start_image']);
+  assert.deepEqual(
+    [first.plan.references[0].resource_id, first.plan.references[0].original, first.plan.references[0].label],
+    [kept.id, true, 'Dernière image · PRISE 25'],
+  );
+  assert.equal(first.plan.references[0].frame, undefined);
+  assert.deepEqual(first.resolution, { width: 512, height: 288 });
+  assert.deepEqual(first.notes, ['Dernière image de la prise 25 gardée comme #ref1.']);
+  assert.deepEqual(first.stills, [{ id: kept.id, label: '#ref1', name: 'Dernière image · PRISE 25', existing: false }]);
+  // The same image asked again: the reference already kept, the video not read again.
+  const again = await video({ output: CLIP, frame: 'last' }, 'call-2');
+  assert.equal(asked.length, 1);
+  assert.deepEqual(again.args.references, [{ input: 'start', resource_id: kept.id }]);
+  assert.deepEqual(again.notes, ['Dernière image de la prise 25 : #ref1, déjà dans les références du projet.']);
+  assert.equal(again.stills[0].existing, true);
+  assert.equal((await library.list(PROJECT)).length, 1);
+  // Its first image is another reference; a video without a number is named by what made it.
+  const opening = await video({ output: CLIP, frame: 'first' }, 'call-3');
+  assert.deepEqual(asked[1], [join('output', CLIP + '.mp4'), 'first']);
+  assert.deepEqual(opening.notes, ['Première image de la prise 25 gardée comme #ref2.']);
+  const unnumbered = await video({ output: OTHER, frame: 'last' }, 'call-4');
+  assert.deepEqual(unnumbered.notes, ['Dernière image de cette vidéo gardée comme #ref3.']);
+  assert.deepEqual(
+    (await library.list(PROJECT)).map(item => item.name),
+    ['Dernière image · PRISE 25', 'Première image · PRISE 25', 'Dernière image · LTX 2.5'],
+  );
+  // Removed from the references since: read and kept again, under a new number.
+  await library.remove(kept.id);
+  const back = await video({ output: CLIP, frame: 'last' }, 'call-5');
+  assert.equal(asked.length, 4);
+  assert.deepEqual(back.notes, ['Dernière image de la prise 25 gardée comme #ref4.']);
+  // The take made from it keeps an image reference in its record, which the Studio gives back as any other.
+  await runtime.execute({ requestId: back.requestId, permission: 'once', approvalToken: back.approvalToken });
+  await runtime.finished;
+  assert.equal(runtime.status().state, 'done', runtime.status().error);
+  const reference = saved[0].parameters.references[0];
+  assert.deepEqual(
+    [reference.role, reference.resource_id, reference.frame, reference.output_id],
+    ['start_image', back.args.references[0].resource_id, undefined, undefined],
+  );
+  assert.deepEqual(saved[0].parameters.routing_notes, ['Dernière image de la prise 25 gardée comme #ref4.']);
+  // Switched off by the user in the references: said, never put back on behind their back.
+  await library.update(back.args.references[0].resource_id, { enabled: false });
+  await assert.rejects(video({ output: CLIP, frame: 'last' }, 'call-6'), {
+    status: 400,
+    message: 'Impossible de lire la dernière image de la prise 25 : cette image est déjà la référence #ref4, désactivée.',
+  });
+});
+
+test('a first or last image in every role that takes an image, of a take of another conversation and of a video reference', async t => {
+  const list = shipped(),
+    ltx = of(list, 'ltx25'),
+    krea = of(list, 'krea2'),
+    [CLIP, FAR] = [uid(3), uid(4)],
+    B = uid(5);
+  const { runtime, library, asked } = await stillsWorld(t, {
+    workflows: list,
+    records: { [`${A}/${CLIP}`]: take(A, CLIP, ltx, 7), [`${B}/${FAR}`]: take(B, FAR, ltx, 8) },
+  });
+  // A video among the references of the project (#ref1), as the page adds one.
+  const file = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(16)]);
+  const added = await library.add(Readable.from([file]), { name: 'plage.mp4', mime: 'video/mp4', length: file.length, project: PROJECT });
+  const clipRef = await library.update(added.id, {
+    prepared: { width: 768, height: 448, duration: 2, frames: [0.2, 1, 1.8].map(time => ({ url: DOT, time })) },
+  });
+  const video = (args, id) =>
+    runtime.request([call('create_video', { prompt: 'x', intention: 'x', workflow: ltx.id, ...args }, id)], place);
+  // The last image of a video reference, as the first frame.
+  const fromRef = await video({ start_image: { resource: clipRef.id, frame: 'last' } }, 'call-1');
+  assert.deepEqual(asked, [[join('references', clipRef.id), 'last']]);
+  const still = (await library.list(PROJECT)).find(item => item.name === 'Dernière image · #ref1');
+  assert.ok(still, 'named after the reference it comes from');
+  assert.deepEqual(fromRef.args.references, [{ input: 'start', resource_id: still.id }]);
+  assert.deepEqual(fromRef.notes, ['Dernière image de #ref1 gardée comme #ref2.']);
+  assert.deepEqual(fromRef.resolution, { width: 512, height: 288 });
+  // A sample of it (0, 1 or 2) stays the small copy made when it was added: nothing is read.
+  const sample = await video({ start_image: { resource: clipRef.id, frame: 1 } }, 'call-2');
+  assert.equal(asked.length, 1);
+  assert.deepEqual(sample.args.references, [{ input: 'start', resource_id: clipRef.id, frame: 1 }]);
+  assert.equal(sample.notes, undefined);
+  assert.equal(sample.stills, undefined);
+  // The last frame, and a subject reference, from takes: one of them of another conversation of
+  // the project. The same image in two roles is one reference.
+  const both = await video(
+    {
+      start_image: { output: CLIP, frame: 'first' },
+      end_image: { output: FAR, conversation: B, frame: 'last' },
+      reference: [{ output: CLIP, frame: 'first' }],
+    },
+    'call-3',
+  );
+  assert.deepEqual(asked.slice(1), [
+    [join('output', CLIP + '.mp4'), 'first'],
+    [join('output', FAR + '.mp4'), 'last'],
+  ]);
+  const names = Object.fromEntries((await library.list(PROJECT)).map(item => [item.name, item.id]));
+  assert.deepEqual(both.args.references, [
+    { input: 'start', resource_id: names['Première image · PRISE 7'] },
+    { input: 'end', resource_id: names['Dernière image · PRISE 8'] },
+    { input: 'subject-1', resource_id: names['Première image · PRISE 7'] },
+  ]);
+  assert.deepEqual(both.notes.slice(0, 2), [
+    'Première image de la prise 7 gardée comme #ref3.',
+    'Dernière image de la prise 8 gardée comme #ref4.',
+  ]);
+  // The image an image is made from: the last picture of a clip, whose format the image keeps.
+  const edited = await runtime.request(
+    [call('create_image', { prompt: 'The same shot at night.', workflow: krea.id, source: { output: CLIP, frame: 'last' } }, 'call-4')],
+    place,
+  );
+  const ending = (await library.list(PROJECT)).find(item => item.name === 'Dernière image · PRISE 7');
+  assert.deepEqual(edited.args.references, [{ input: 'source', resource_id: ending.id }]);
+  assert.ok(edited.resolution.width > edited.resolution.height, 'the landscape of the frame');
+  // The clip a continuation starts from is taken whole: a frame named there says nothing, as before.
+  const before = asked.length;
+  const next = await runtime.request(
+    [call('extend_video', { prompt: 'x', intention: 'x', duration: null, source: { output: CLIP, frame: 'last' } }, 'call-5')],
+    place,
+  );
+  assert.equal(asked.length, before);
+  assert.deepEqual(rolesOf(next), ['source_video']);
+  assert.deepEqual(next.plan.references[0].output_id, CLIP);
+  assert.equal(next.stills, undefined);
+});
+
+test('a frame named on an image is the image itself, and a picture that cannot be read is said before anything is made', async t => {
+  const list = shipped(),
+    ltx = of(list, 'ltx25'),
+    krea = of(list, 'krea2'),
+    [CLIP, STILL, GONE] = [uid(3), uid(4), uid(5)];
+  let failure = 'Ce fichier n’est pas une vidéo lisible.';
+  const asked = [];
+  const records = {
+    [`${A}/${CLIP}`]: take(A, CLIP, ltx, 25),
+    [`${A}/${GONE}`]: take(A, GONE, ltx, 26),
+    [`${A}/${STILL}`]: { ...take(A, STILL, krea, 12), mediaType: 'image' },
+  };
+  const { runtime, library } = await stillsWorld(t, {
+    workflows: list,
+    records,
+    missing: [GONE + '.mp4'],
+    extractStill: async (path, at) => {
+      asked.push([path, at]);
+      throw Error(failure);
+    },
+  });
+  const video = (start_image, id) =>
+    runtime.request([call('create_video', { prompt: 'x', intention: 'x', workflow: ltx.id, start_image }, id)], place);
+  // An image take, an image reference: themselves, nothing read, no reference made.
+  const image = await video({ output: STILL, frame: 'last' }, 'call-1');
+  assert.deepEqual(image.args.references, [{ input: 'start', output_id: STILL }]);
+  assert.equal(image.notes, undefined);
+  const file = pngOf(640, 360, 'plage');
+  const added = await library.add(Readable.from([file]), { name: 'plage.png', mime: 'image/png', length: file.length, project: PROJECT });
+  await library.update(added.id, { prepared: { width: 640, height: 360, frames: [{ url: DOT, time: null }] } });
+  const picture = await video({ resource: added.id, frame: 'first' }, 'call-2');
+  assert.deepEqual(picture.args.references, [{ input: 'start', resource_id: added.id }]);
+  assert.deepEqual(asked, []);
+  // The video cannot be read: said in the user's words, as a call the model can correct (400).
+  await assert.rejects(video({ output: CLIP, frame: 'last' }, 'call-3'), {
+    status: 400,
+    message: 'Impossible de lire la dernière image de la prise 25 : ce fichier n’est pas une vidéo lisible.',
+  });
+  failure = 'l’environnement de génération n’est pas installé (Paramètres › Génération)';
+  await assert.rejects(video({ output: CLIP, frame: 'first' }, 'call-4'), {
+    status: 400,
+    message:
+      'Impossible de lire la première image de la prise 25 : l’environnement de génération n’est pas installé (Paramètres › Génération).',
+  });
+  assert.equal(asked.length, 2);
+  // Its file is gone from the disk: said so, the video not even opened.
+  await assert.rejects(video({ output: GONE, frame: 'last' }, 'call-5'), {
+    status: 400,
+    message: 'Impossible de lire la dernière image de la prise 26 : le fichier de cette vidéo est introuvable.',
+  });
+  assert.equal(asked.length, 2);
+  // Nothing is kept of a picture that was not read, and nothing was proposed.
+  assert.deepEqual((await library.list(PROJECT)).map(item => item.name), ['plage.png']);
+  // Another word than first or last, a take that is none: refused too.
+  await assert.rejects(video({ output: CLIP, frame: 'middle' }, 'call-6'), { status: 400, message: /^frame : "first" ou "last"/ });
+  await assert.rejects(video({ output: uid(8), frame: 'last' }, 'call-7'), { status: 404 });
+  // Where nothing reads a video (no engine): said, not an error of the application.
+  const bare = world({ workflows: list, records });
+  await assert.rejects(
+    bare.runtime.request(
+      [call('create_video', { prompt: 'x', intention: 'x', workflow: ltx.id, start_image: { output: CLIP, frame: 'last' } })],
+      place,
+    ),
+    { status: 400, message: /^Impossible de lire la dernière image de la prise 25 : cette lecture n’est pas disponible ici\.$/ },
+  );
 });

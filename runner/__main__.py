@@ -1,12 +1,22 @@
-"""Start the offline worker: python -m runner --config PATH."""
+"""Start the offline worker: python -m runner --config PATH.
+
+One command runs apart from the worker and ends: python -m runner frame … (runner.video.still),
+the first or the last picture of a video.
+"""
 
 import argparse
 import json
 import os
 from pathlib import Path
+import sys
 
 
 def main():
+    # Nothing of the worker is loaded for it: no model, nothing of torch.
+    if sys.argv[1:2] == ['frame']:
+        from runner.video.still import main as still
+
+        sys.exit(still(sys.argv[2:]))
     os.environ['HF_HUB_OFFLINE'] = '1'
     os.environ['TRANSFORMERS_OFFLINE'] = '1'
     parser = argparse.ArgumentParser(description=__doc__)

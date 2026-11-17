@@ -60,7 +60,7 @@ import { importComfyWorkflow } from './lib/comfy-import.mjs';
 import { previewWorkflowImport } from './lib/workflow-import.mjs';
 import { STUDIO_ID, STUDIO_VERBS, enrichedPrompt, enrichMessages } from './lib/studio.mjs';
 import { LlamaBuilds } from './lib/llama-builds.mjs';
-import { Takes, numbered } from './lib/takes.mjs';
+import { Takes, numbered, takesToOutputs } from './lib/takes.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 20 * 1024 * 1024;
@@ -554,30 +554,8 @@ export async function createApplication({
   }
   /** The sources of a call named by their number, `{ take: 12 }`, made the take they stand for. */
   async function withTakes(text, conversationId, project) {
-    let args;
-    try {
-      args = JSON.parse(text);
-    } catch {
-      return text;
-    }
-    const named = value => !!value && typeof value === 'object' && !Array.isArray(value) && value.take !== undefined;
-    if (!args || typeof args !== 'object' || !Object.values(args).some(value => named(value) || (Array.isArray(value) && value.some(named))))
-      return text;
-    const takes = await projectTakes(conversationId, project);
-    const resolve = ({ take, ...rest }) => {
-      const found = takes.find(item => item.take === take);
-      if (!found) throw problem(`La prise ${take} n’existe pas dans ce projet.`, 400);
-      return {
-        ...rest,
-        output: found.id,
-        ...(found.index ? { index: found.index } : {}),
-        ...(found.conversationId !== conversationId ? { conversation: found.conversationId } : {}),
-      };
-    };
-    for (const [key, value] of Object.entries(args))
-      if (named(value)) args[key] = resolve(value);
-      else if (Array.isArray(value)) args[key] = value.map(item => (named(item) ? resolve(item) : item));
-    return JSON.stringify(args);
+    // (lib/takes.mjs: what else a source says stays, the `frame` of a video take among it.)
+    return takesToOutputs(text, () => projectTakes(conversationId, project), conversationId);
   }
   /**
    * Conversations that go to another project (moved, or their project deleted): their takes take
@@ -643,6 +621,10 @@ export async function createApplication({
     stamp: record => stampRecord(outputDir, record, { version: applicationVersion }),
     // What a shipped workflow lacks, to download from the chat (etats-maquette.md, 53).
     offerOf: async workflow => (await generation.downloads.offers([workflow]))[workflow.id] ?? null,
+    // The first or last picture of a video (`frame`: "first" or "last" where an image is taken): read
+    // from its file by the Python of the engine, kept as a reference of the conversation's project.
+    extractStill: (path, at) => generation.videoStill(path, at),
+    projectOf: conversationId => projectFor(conversationId),
     sourceMedia: async (ref, conversationId) => {
       if (ref.attachment) return { ...(await history.attachment(conversationId, ref.attachment)), name: 'Image jointe' };
       if (ref.resource_id) {
