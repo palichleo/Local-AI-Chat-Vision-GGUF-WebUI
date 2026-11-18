@@ -35,7 +35,8 @@ import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
-import { History, MAX_CONVERSATION_MESSAGES } from './lib/history.mjs';
+import { AUTOMATIC_REASONS, History, MAX_CONVERSATION_MESSAGES, TRASH_DAYS } from './lib/history.mjs';
+import { HistoryJournal } from './lib/history-journal.mjs';
 import { chooseLocalFile } from './lib/file-picker.mjs';
 import { Gallery } from './lib/gallery.mjs';
 import { Thumbnails } from './lib/thumbnails.mjs';
@@ -384,7 +385,9 @@ export async function createApplication({
   let clearingHistory = false;
   let persistingGallery = false;
   let galleryBatch = Promise.resolve();
-  const history = new History(historyDir);
+  // What becomes of each conversation, one line each (0.6.103): data/history-journal.jsonl.
+  const historyJournal = new HistoryJournal(join(dataDir, 'history-journal.jsonl'), { version: applicationVersion });
+  const history = new History(historyDir, { journal: historyJournal });
   let historySaves = Promise.resolve();
   const projects = new Projects(join(dataDir, 'projects.json'));
   // « Enregistrer » of the Studio: the settings kept per model, apart from the workflows.
@@ -613,6 +616,9 @@ export async function createApplication({
   for (const record of pendingSession?.gallery || []) await gallery.put(record, { persist: false });
   // Attachments of conversations never saved belong to a session that has ended.
   await history.pruneUnsaved(pendingSession?.conversationId ?? null).catch(error => console.error(error));
+  // What waited 30 days in the bin of the history goes for good, its thumbnails with it (0.6.103).
+  for (const id of await history.purgeTrash().catch(error => (console.error(error), [])))
+    await thumbnails.forget(id).catch(() => {});
   const generation = await new GenerationService({
     root,
     dataDir,
@@ -1410,11 +1416,20 @@ export async function createApplication({
         return;
       }
       if (req.method === 'GET' && path === '/api/projects') return send(200, { projects: await projects.list() });
+      // The bin of the history (0.6.103), Paramètres › Application: what waits there, 30 days at most.
+      // (With the history off too: what it holds is on the disk.)
+      if (req.method === 'GET' && path === '/api/history/trash')
+        return send(200, { conversations: (await history.trash()).filter(item => item.saved), days: TRASH_DAYS });
       if (req.method === 'GET' && (path === '/api/history' || path.startsWith('/api/history/'))) {
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
         if (path === '/api/history') {
           const result = await history.list();
-          return send(200, { ...result, conversations: result.conversations.map(historyView) });
+          return send(200, {
+            ...result,
+            conversations: result.conversations.map(historyView),
+            // Unreadable, their version before taken back (0.6.103): told once.
+            recovered: history.takeRecovered(),
+          });
         }
         return send(200, historyView(await history.read(path.slice('/api/history/'.length))));
       }
@@ -1579,7 +1594,10 @@ export async function createApplication({
             await historySaves;
             await history.flush();
             await gallery.pending;
-            snapshot.gallery = snapshot.conversationId ? (await gallery.list(snapshot.conversationId)).runs : [];
+            // With those of the conversation set aside without the history (0.6.103).
+            snapshot.gallery = [];
+            for (const id of [snapshot.conversationId, snapshot.aside?.conversationId].filter(Boolean))
+              snapshot.gallery.push(...(await gallery.list(id)).runs);
             snapshot = { ...compactSession(snapshot), restarted: true };
             if (Buffer.byteLength(JSON.stringify(snapshot)) <= 40 * 1024 * 1024)
               await atomicJson(join(dataDir, 'update-session.json'), snapshot);
@@ -1877,7 +1895,10 @@ export async function createApplication({
             await historySaves;
             await history.flush();
             await gallery.pending;
-            snapshot.gallery = snapshot.conversationId ? (await gallery.list(snapshot.conversationId)).runs : [];
+            // With those of the conversation set aside without the history (0.6.103).
+            snapshot.gallery = [];
+            for (const id of [snapshot.conversationId, snapshot.aside?.conversationId].filter(Boolean))
+              snapshot.gallery.push(...(await gallery.list(id)).runs);
             snapshot = compactSession(snapshot);
             if (Buffer.byteLength(JSON.stringify(snapshot)) > 40 * 1024 * 1024)
               throw new Error('La session est trop volumineuse pour une reprise automatique.');
@@ -2288,15 +2309,59 @@ export async function createApplication({
           ['loading', 'stopping'].includes(engine.state)
         )
           throw problem('Attendez la fin de l’opération en cours avant de supprimer la conversation.', 409);
+        // Why it leaves (0.6.103): the bin of a line of the fil, or the page by itself (a creation of the
+        // Studio that made nothing, `studio-empty`; the same found after a reload, `recovery-empty`).
+        // Asked by the page, it goes only when the disk says there is nothing of its own in it: never a
+        // message of the user, words of Moodix or a take (the page's memory decided alone before).
+        const reason = AUTOMATIC_REASONS.has(body.reason) ? body.reason : 'user';
         clearingHistory = true;
         try {
           await historySaves;
           await gallery.pending;
-          await history.remove(body.id);
-          await thumbnails.forget(body.id);
+          if (AUTOMATIC_REASONS.has(reason)) {
+            const held = await history.contentOf(body.id),
+              { runs, skipped } = await gallery.list(body.id, { includeImages: false });
+            if (held.exists && (!held.readable || held.own || runs.length || skipped)) {
+              await history.note('suppression refusée', {
+                id: body.id,
+                title: held.title ?? '',
+                messages: held.messages ?? 0,
+                takes: runs.length + skipped,
+                reason,
+                tab,
+              });
+              throw problem('Cette conversation a des messages ou des prises : elle reste dans l’historique.', 409);
+            }
+          }
+          // To the bin (0.6.103), 30 days: its thumbnails stay with it, until it is erased.
+          const removed = await history.remove(body.id, { reason, tab });
           gallery.forgetConversation(body.id);
           runtime.forgetConversation(body.id);
-          return send(200, { deleted: body.id });
+          return send(200, { deleted: body.id, trashed: removed.trashed === true });
+        } finally {
+          clearingHistory = false;
+        }
+      }
+      // Paramètres › Application, the bin (0.6.103): a conversation given back, or erased for good now.
+      if (path === '/api/history/restore') {
+        if (clearingHistory || disablingHistory) throw problem('Attendez la fin de l’opération en cours.', 409);
+        clearingHistory = true;
+        try {
+          await historySaves;
+          const restored = await history.restore(body?.id, { tab });
+          return send(200, { restored: body.id, conversation: restored && historyView(restored) });
+        } finally {
+          clearingHistory = false;
+        }
+      }
+      if (path === '/api/history/erase') {
+        if (body?.confirm !== true) throw problem('Confirmez l’effacement définitif de la conversation.');
+        if (clearingHistory || disablingHistory) throw problem('Attendez la fin de l’opération en cours.', 409);
+        clearingHistory = true;
+        try {
+          const erased = await history.erase(body.id, { tab });
+          await thumbnails.forget(body.id);
+          return send(200, { erased: erased.erased === true });
         } finally {
           clearingHistory = false;
         }
@@ -2317,12 +2382,12 @@ export async function createApplication({
         try {
           await historySaves;
           await gallery.pending;
-          await history.clear();
-          await thumbnails.forget();
+          // Every conversation to the bin, each for 30 days (0.6.103); their thumbnails go when they do.
+          const trashed = await history.clear({ tab });
           runtime.clear();
           // The text conditioning kept for recent prompts is derived from them: it goes too.
           await rm(join(dataDir, 'generation-cache', 'conditioning'), { recursive: true, force: true });
-          return send(200, { cleared: true });
+          return send(200, { cleared: true, trashed: trashed ?? 0 });
         } finally {
           clearingHistory = false;
         }
@@ -2341,7 +2406,8 @@ export async function createApplication({
           // Nothing is erased: the project's conversations go back to Conversations. Their takes
           // take the numbers that follow in « Sans projet », in their order of creation: first, so
           // that a deletion stopped there is made whole when asked again.
-          const leaving = (await history.list()).conversations.filter(item => item.projectId === body.id);
+          // (One whose file cannot be read stays as it is: listed in « Sans projet » all the same, 0.6.103.)
+          const leaving = (await history.list()).conversations.filter(item => item.projectId === body.id && !item.unreadable);
           await renumber(
             leaving.map(item => item.id),
             'inbox',
@@ -2349,7 +2415,8 @@ export async function createApplication({
           const moved = [];
           for (const item of leaving) {
             const conversation = await history.read(item.id);
-            moved.push(historyView(await history.save({ ...conversation, projectId: 'inbox' })));
+            // Moved, not changed: the pages that hold it go on saving on the revision they read (0.6.103).
+            moved.push(historyView(await history.save({ ...conversation, projectId: 'inbox' }, { keepRevision: true, tab })));
           }
           // Its references follow its conversations.
           await resources.moveProject(body.id, 'inbox');
@@ -2372,7 +2439,8 @@ export async function createApplication({
           // stopped there is still to be made (asked again, it is made whole; saved first, it was
           // « already there » and its takes kept numbers the project had given to others).
           if ((conversation.projectId || 'inbox') !== body.projectId) await renumber([body.id], body.projectId);
-          const moved = historyView(await history.save({ ...conversation, projectId: body.projectId }));
+          // Moved, not changed: its revision stays (0.6.103), the page that shows it saves on.
+          const moved = historyView(await history.save({ ...conversation, projectId: body.projectId }, { keepRevision: true, tab }));
           return send(200, { conversation: moved });
         } finally {
           clearingHistory = false;
@@ -2452,7 +2520,8 @@ export async function createApplication({
         if (disablingHistory) throw problem('Désactivation de l’historique en cours.', 409);
         const save = historySaves.then(async () => {
           if (body.projectId !== undefined) await projects.require(body.projectId);
-          return history.save(body);
+          // `body.revision`: the one the page read; another written since is refused (409, `stale`, 0.6.103).
+          return history.save(body, { tab });
         });
         historySaves = save.catch(() => {});
         return send(200, { conversation: historyView(await save) });
@@ -2870,6 +2939,8 @@ export async function createApplication({
       send(error.status || 500, {
         error: error.status ? error.message : 'Erreur locale inattendue. Consulte le terminal de l’application.',
         ...(error.busy ? { busy: true } : {}),
+        // A save on a copy older than the disk's (0.6.103): the page reads the conversation again.
+        ...(error.stale ? { stale: true } : {}),
       });
       if (!error.status && error.name !== 'AbortError') console.error(error);
     }

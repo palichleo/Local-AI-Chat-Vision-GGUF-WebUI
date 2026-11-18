@@ -140,6 +140,8 @@ async function page(messages, { prompt = '', busy = false, yes = true } = {}) {
     renderTranscript: shown => done.push('affiche ' + shown.length),
     // Nothing set aside beside it (0.6.90): « Régénérer » may begin.
     mayBeginBeside: () => true,
+    // The line of a message waiting in the box (0.6.103), drawn by the page.
+    unsentNote() {},
     turnActions() {},
     renderAttachments() {},
     resizePrompt() {},

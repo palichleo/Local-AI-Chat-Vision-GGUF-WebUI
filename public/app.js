@@ -18,6 +18,8 @@ import { setupGenerationUI } from './generation-ui.mjs';
 import { setupMiniature } from './work-miniature.mjs';
 import { setupTakeRecovery, takesOf } from './take-recovery.mjs';
 import { detachedTakes, leavingQuestion, reattached, takesWord } from './detached-takes.mjs';
+// When a conversation went to the bin of the history, as the fil says its dates (0.6.103).
+import { shortDate } from './project-navigation.mjs';
 import { takeContent } from './generation-runtime.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { clipPlayer } from './take-player.mjs';
@@ -254,6 +256,8 @@ async function api(route, body, options = {}) {
       status: response.status,
       // Busy for a moment: worth asking again (see installFromButton).
       busy: data.busy === true,
+      // A save on a copy older than the disk's (0.6.103): the conversation is read again.
+      stale: data.stale === true,
     });
   }
   return response;
@@ -316,6 +320,8 @@ function keepForReload() {
     thinking: state.thinking,
     title: $('conversation-title').textContent,
     view: state.view,
+    // The revision of it this page read (0.6.103): the page that comes saves on it.
+    revision: state.revisions?.get(state.conversationId),
   };
   for (const less of [kept, { ...kept, images: [] }, { ...kept, images: [], messages: [], archiveSnapshot: null }])
     try {
@@ -326,16 +332,53 @@ function keepForReload() {
     }
 }
 
+/**
+ * The conversation shown and its draft as an update or « Redémarrer » keeps them for the page that comes
+ * back (restoreUpdate): with the revision it read (0.6.103), and without the history the conversation
+ * set aside too, found nowhere else (it was lost there without a word).
+ */
+function sessionOfPage() {
+  const aside = state.aside,
+    revision = state.revisions?.get(state.conversationId);
+  return {
+    messages: state.messages,
+    archiveSnapshot: state.archiveSnapshot,
+    conversationId: state.conversationId,
+    conversationInstructions: state.conversationInstructions,
+    prompt: $('prompt').value,
+    images: state.images,
+    thinking: state.thinking,
+    title: $('conversation-title').textContent,
+    ...(Number.isInteger(revision) ? { revision } : {}),
+    ...(!state.saveHistory && aside?.conversationId && aside.messages?.length
+      ? {
+          aside: compactSession({
+            messages: aside.messages,
+            archiveSnapshot: aside.archiveSnapshot,
+            conversationId: aside.conversationId,
+            conversationInstructions: aside.conversationInstructions,
+            projectId: aside.projectId || 'inbox',
+            prompt: aside.draft?.text ?? '',
+            images: (aside.draft?.images ?? []).map(({ source, ...image }) => image),
+            thinking: state.thinking,
+            title: aside.title || '',
+          }),
+        }
+      : {}),
+  };
+}
+
 let historyWrite = Promise.resolve();
 let historyDeleteTarget = null;
 function confirmHistoryDeletion(item = null) {
   historyDeleteTarget = item;
-  $('history-delete-title').textContent = item ? 'Supprimer cette conversation ?' : 'Supprimer l’historique ?';
+  // To the bin, 30 days (0.6.103): said as it is, no longer « supprimée … définitivement ».
+  $('history-delete-title').textContent = item ? 'Mettre cette conversation à la corbeille ?' : 'Mettre tout l’historique à la corbeille ?';
   $('history-delete-description').textContent = item
     ? '« ' +
       item.title +
-      ' » sera supprimée avec ses copies compressées et ses liens de sortie. Les fichiers originaux restent à leur emplacement. Le brouillon de saisie sera conservé.'
-    : 'Les conversations, les copies compressées et les liens vers les sorties seront supprimés. Les fichiers originaux restent à leur emplacement. L’échange affiché sera fermé ; le brouillon de saisie sera conservé.';
+      ' » ira dans la corbeille de l’historique, avec ses prises. Vous pourrez la restaurer pendant 30 jours depuis Paramètres › Application ; ensuite, elle sera effacée. Les fichiers originaux restent à leur emplacement. Le brouillon de saisie sera conservé.'
+    : 'Toutes les conversations iront dans la corbeille de l’historique, avec leurs prises. Vous pourrez les restaurer pendant 30 jours depuis Paramètres › Application ; ensuite, elles seront effacées. Les fichiers originaux restent à leur emplacement. L’échange affiché sera fermé ; le brouillon de saisie sera conservé.';
   $('history-delete-error').hidden = true;
   if (!$('history-delete-dialog').open) $('history-delete-dialog').showModal();
 }
@@ -412,7 +455,16 @@ async function refreshHistory() {
   const result = await (await api('history')).json();
   state.historyItems = result.conversations;
   renderHistory();
-  if (result.skipped)
+  // By their names (0.6.103): one whose file could not be read and whose version before was taken
+  // back; one that cannot be read at all, listed as such (it was left out, a count said so).
+  const named = items => items.map(item => `« ${item.title || 'Sans titre'} »`).join(', '),
+    recovered = result.recovered ?? [],
+    damaged = (result.conversations ?? []).filter(item => item.unreadable);
+  if (recovered.length)
+    notice(`${named(recovered)} : son fichier était abîmé, sa version précédente a été reprise.`);
+  else if (damaged.length)
+    notice(`${named(damaged)} ne peut pas être lue : son fichier est gardé tel quel. Ouvrez-la dans la liste pour savoir quoi faire.`);
+  else if (result.skipped)
     notice(`${result.skipped} conversation(s) illisible(s) ignorée(s). Les fichiers restent sur disque.`);
 }
 
@@ -473,12 +525,19 @@ function persistConversation(conversationId = state.conversationId) {
   if (!state.saveHistory || state.disablingHistory || !snapshot.messages.length) return Promise.resolve(true);
   const projectId = talk.projectId || 'inbox';
   const id = (talk.conversationId ||= crypto.randomUUID());
+  // Taken up by another tab (0.6.103: a save refused, or found so after a wait): nothing more of this
+  // page's older copy is written until it is read again (readAgain, once its work is over).
+  if (state.staleIds?.has(id)) return Promise.resolve(false);
   if (talk === state) rememberConversation(id);
   const instructions = talk.conversationInstructions || '';
   talk.historyDirty = true;
   historyWrite = historyWrite.then(async () => {
     if (!state.saveHistory) return true;
     state.savingHistory = true;
+    // The revision of it this page read or wrote last (0.6.103), read as the save leaves (one queued
+    // behind another takes the revision that one gave): written by another tab since, refused.
+    const revisions = (state.revisions ??= new Map()),
+      revision = revisions.get(id);
     try {
       const { conversation } = await (
         await api('history/save', {
@@ -487,8 +546,10 @@ function persistConversation(conversationId = state.conversationId) {
           messages: withoutCopies(snapshot.messages),
           instructions,
           projectId,
+          ...(Number.isInteger(revision) ? { revision } : {}),
         })
       ).json();
+      if (Number.isInteger(conversation.revision)) revisions.set(id, conversation.revision);
       state.historyItems = [conversation, ...state.historyItems.filter(item => item.id !== id)].sort(
         (a, b) => (b.createdAt || b.updatedAt).localeCompare(a.createdAt || a.updatedAt) || a.id.localeCompare(b.id),
       );
@@ -503,6 +564,12 @@ function persistConversation(conversationId = state.conversationId) {
       renderHistory({ keep: true });
       return true;
     } catch (error) {
+      // Another tab wrote it since this one read it (0.6.103): read again, what is being written in the
+      // message box kept. It was written over before: ten images of the other tab left the conversation.
+      if (error.stale) {
+        void readAgain(id);
+        return false;
+      }
       notice(`Historique non enregistré : ${error.message} La conversation reste dans la page.`);
       return false;
     } finally {
@@ -511,6 +578,89 @@ function persistConversation(conversationId = state.conversationId) {
     }
   });
   return historyWrite;
+}
+/**
+ * Conversation `id` written meanwhile by another tab (0.6.103): its copy of the disk takes the place of
+ * this page's, said simply; what is being written in the message box stays there. Not while a work of
+ * this page goes on in it (said; read again once it is opened next), nor for one set aside (it leaves the
+ * page: the copy of the disk is the newer one).
+ */
+async function readAgain(id) {
+  // A work of this page goes on in it (the first save of a message refused): read again once it is over
+  // (endWork), what it wrote in the box kept.
+  if (state.generating || state.work?.conversationId === id) {
+    (state.staleIds ??= new Set()).add(id);
+    return;
+  }
+  if (state.aside?.conversationId === id) dropAside();
+  if (!shownHere(id)) {
+    notice('Cette conversation a changé dans un autre onglet : ce que cet onglet y a fait n’a pas été enregistré. Rouvrez-la pour voir sa dernière version.');
+    return;
+  }
+  try {
+    const known = state.revisions?.get(id),
+      record = await (await api(`history/${encodeURIComponent(id)}`)).json();
+    if (!shownHere(id) || state.generating) return;
+    // Not written there after all (a creation of another tab only went on in it): this page's copy stands.
+    if (Number.isInteger(known) && record.revision === known) return;
+    (state.revisions ??= new Map()).set(id, record.revision);
+    const messages = closedCalls(record.messages),
+      last = messages.at(-1),
+      written = Boolean($('prompt').value.trim() || state.images.length || state.videos.length);
+    // Its last message unsent, as when it is opened: in the box when the box is empty (the line of the
+    // thread says it waits there), or out of the thread when the box holds it already; else it stays in
+    // the thread, the box keeping what this tab was writing.
+    if (record.incomplete && last?.role === 'user' && !last.internal) {
+      const asked = savedUser(last);
+      if (!written) {
+        messages.pop();
+        $('prompt').value = asked.text;
+        state.images = [...asked.images];
+        state.videos = [...asked.videos];
+        renderAttachments();
+        resizePrompt();
+      } else if ($('prompt').value.trim() === asked.text.trim()) messages.pop();
+    }
+    state.messages = messages;
+    state.archiveSnapshot = { messages: record.messages, incomplete: record.incomplete };
+    state.historyDirty = false;
+    const views = rerender(id);
+    setConversationTitle(record.title);
+    notice(
+      'Cette conversation a changé dans un autre onglet : elle a été rechargée.' +
+        (written ? ' Ce que vous écriviez est resté dans la zone de saisie.' : ''),
+    );
+    // As when it is opened: what its calls made, written in it (take-recovery.mjs); the takes of this tab
+    // that the copy of the other no longer names, said with « Les remettre ».
+    void state.recovery?.complete(id, views);
+    void offerDetached(id);
+  } catch (error) {
+    notice(error.message);
+  }
+}
+/**
+ * Whether another tab took conversation `id` up while this page waited for the model (0.6.103): « job », a
+ * creation of that tab goes on in it; « written », it wrote it since (its revision on the disk is no longer
+ * the one this page wrote last, once its own saves are over); else false. Marked then: this page writes
+ * nothing more of its copy, read again once its work is over (endWork).
+ */
+async function takenElsewhere(id) {
+  if (!id) return false;
+  const job = state.status?.toolJob;
+  let taken = job?.conversationId === id && job.owner && job.owner !== TAB && !job.ownerLeft && !job.ownerAway ? 'job' : false;
+  if (!taken && state.saveHistory) {
+    await historyWrite;
+    const known = state.revisions?.get(id);
+    if (Number.isInteger(known))
+      try {
+        const record = await (await api(`history/${encodeURIComponent(id)}`)).json();
+        if (Number.isInteger(record.revision) && record.revision !== known) taken = 'written';
+      } catch {
+        // Not read: nothing is held for it, the save that follows still checks its revision.
+      }
+  }
+  if (taken) (state.staleIds ??= new Set()).add(id);
+  return taken;
 }
 /**
  * The end of the generation the server is making, if any (0.6.84): it keeps every save of the
@@ -539,7 +689,7 @@ async function generationOver(id = state.conversationId) {
  * creation starts): it leaves the history again, as it never came before. Kept when it cannot go: its
  * call reads « demande restée sans suite ».
  */
-async function forgetConversation(id) {
+async function forgetConversation(id, reason = 'studio-empty') {
   if (!state.saveHistory || !state.historyItems.some(item => item.id === id)) return;
   try {
     await historyWrite;
@@ -548,7 +698,9 @@ async function forgetConversation(id) {
     // cannot read is one too (0.6.89: `skipped`, it counted as none).
     const { runs = [], skipped = 0 } = await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json();
     if (runs.length || Number(skipped) > 0) return;
-    await api('history/delete', { confirm: true, id });
+    // Its `reason` said (0.6.103): the server looks at the disk (nothing of the user, no take) before it
+    // goes, to the bin, with a line in its journal; nothing on screen changes.
+    await api('history/delete', { confirm: true, id, reason });
     state.historyItems = state.historyItems.filter(item => item.id !== id);
     const talk = holderOf(id);
     if (talk === state || talk === state.aside) talk.archiveSnapshot = null;
@@ -599,7 +751,9 @@ async function clearHistory() {
     // Deleted from the fil of the Pellicule: its takes leave the sheet.
     if (state.view === 'library') void libraryUI.refresh();
     notice('');
-    $('live-status').textContent = target ? 'Conversation supprimée.' : 'Historique supprimé.';
+    $('live-status').textContent = target ? 'Conversation mise à la corbeille.' : 'Historique mis à la corbeille.';
+    // The bin of Paramètres › Application says it at once when it is open (0.6.103).
+    void refreshTrash();
     $('history-delete-dialog').close();
     historyDeleteTarget = null;
   } catch (error) {
@@ -662,6 +816,11 @@ async function loadConversation(id) {
   if (!state.projectWorking && !state.preparing && !state.loadingHistory && id === state.conversationId) {
     leaveLibrary();
     projectUI.render();
+    // Chosen in the fil while it is open (0.6.103): its last lines, and the line of a message that waits
+    // in the box drawn again, seen. It did nothing a user could see: « my conversation is gone ».
+    unsentNote({ called: true });
+    state.stickToBottom = true;
+    scrollToBottom();
     $('prompt').focus();
     return;
   }
@@ -684,7 +843,9 @@ async function loadConversation(id) {
     // Set aside in place of another, without the history: that one is lost, asked first (0.6.87).
     if (!returning && state.work?.conversationId === state.conversationId && !asideMayGo()) return;
     if (returning) state.aside = null;
-    setNow = setAside();
+    // Without the history, the one shown takes the place of the one coming back (0.6.103): left, it was
+    // lost without a word, found nowhere else.
+    setNow = setAside(Boolean(returning) && !state.saveHistory && state.messages.length > 0);
     // What was written in the one left, when it is not set aside with it: back when it is opened again.
     if (!setNow) keepDraft();
     if (returning) {
@@ -710,6 +871,8 @@ async function loadConversation(id) {
       draft = left ?? { text: asked?.text ?? '', images: asked?.images ?? [], videos: asked?.videos ?? [] };
     state.conversationId = id;
     rememberConversation(id);
+    // The revision read (0.6.103): its saves go on from it, refused if another tab wrote it since.
+    (state.revisions ??= new Map()).set(id, record.revision);
     state.conversationInstructions = record.instructions || '';
     state.messages = messages;
     state.projectId = record.projectId || 'inbox';
@@ -727,7 +890,9 @@ async function loadConversation(id) {
     // A call whose take the server is still making waits for its card (0.6.82).
     const views = renderTranscript(messages, record.incomplete, { waiting: state.recovery?.waiting(id, messages) });
     turnActions();
-    $('welcome').hidden = messages.length > 0;
+    // Its last message unsent, put back in the box: said where the thread ends (0.6.103), never the
+    // welcome of a new conversation.
+    unsentNote();
     setConversationTitle(record.title);
     $('settings').close();
     renderAttachments();
@@ -884,9 +1049,35 @@ async function putBack(id, groups, line) {
   await persistConversation(id);
 }
 
+/**
+ * Without the history, the conversation set aside when the application started again (an update,
+ * « Redémarrer », 0.6.103): drawn in a page of its own and set aside again beside the one shown; the fil
+ * lists it (project-navigation.mjs). It was lost there, found nowhere else.
+ */
+function restoreAside(saved) {
+  restoreSession(saved);
+  const nodes = document.createDocumentFragment();
+  nodes.append(...$('messages').childNodes);
+  state.aside = {
+    conversationId: saved.conversationId,
+    projectId: saved.projectId || 'inbox',
+    conversationInstructions: state.conversationInstructions,
+    messages: state.messages,
+    archiveSnapshot: state.archiveSnapshot,
+    historyDirty: false,
+    title: saved.title || '',
+    draft: { text: saved.prompt || '', images: saved.images || [], videos: [] },
+    nodes,
+  };
+  state.messages = [];
+  state.conversationId = null;
+  state.archiveSnapshot = null;
+}
+
 async function restoreUpdate() {
   const saved = await (await api('updates/session')).json();
   if (!saved) return;
+  if (saved.aside) restoreAside(saved.aside);
   restoreSession(saved);
   await api('updates/session/clear', {});
   if (saved.restarted) {
@@ -922,6 +1113,8 @@ function returnBand() {
 function restoreSession(saved) {
   state.messages = closedCalls(saved.messages);
   state.conversationId = saved.conversationId;
+  // The revision the page before had of it (0.6.103); one of an earlier version gives none.
+  if (saved.conversationId && Number.isInteger(saved.revision)) (state.revisions ??= new Map()).set(saved.conversationId, saved.revision);
   state.conversationInstructions = saved.conversationInstructions ?? (saved.messages.length ? '' : null);
   state.archiveSnapshot = saved.archiveSnapshot;
   state.historyDirty = false;
@@ -933,7 +1126,8 @@ function restoreSession(saved) {
   $('messages').replaceChildren();
   const views = renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
   turnActions();
-  $('welcome').hidden = state.messages.length > 0;
+  // (Its message unsent said where the thread ends, 0.6.103.)
+  unsentNote();
   setConversationTitle(saved.title || UNTITLED);
   const restored = state.historyItems.find(item => item.id === state.conversationId);
   state.projectId = restored?.projectId || 'inbox';
@@ -995,16 +1189,7 @@ async function installUpdate({ confirmed = false } = {}) {
     await installFromButton({
       api,
       token: state.token,
-      session: compactSession({
-        messages: state.messages,
-        archiveSnapshot: state.archiveSnapshot,
-        conversationId: state.conversationId,
-        conversationInstructions: state.conversationInstructions,
-        prompt: $('prompt').value,
-        images: state.images,
-        thinking: state.thinking,
-        title: $('conversation-title').textContent,
-      }),
+      session: compactSession(sessionOfPage()),
       onProgress: (text, step) => updatePanel(step, text),
       reload: () => {
         state.updateReload = true;
@@ -1133,7 +1318,8 @@ function updateControls() {
     ['loading', 'stopping'].includes(s.state);
   $('history-delete-confirm').disabled = state.clearingHistory;
   $('history-delete-cancel').disabled = state.clearingHistory;
-  $('history-delete-confirm').textContent = state.clearingHistory ? 'Suppression…' : 'Supprimer définitivement';
+  // To the bin, 30 days (0.6.103): « Supprimer définitivement » is the bin's own, for one conversation.
+  $('history-delete-confirm').textContent = state.clearingHistory ? 'Mise à la corbeille…' : 'Mettre à la corbeille';
   $('theme-toggle').disabled = state.savingPreferences || !state.connected;
   $('config-fields').disabled =
     state.settingsLoading ||
@@ -1915,6 +2101,73 @@ function requestSettingsClose(after) {
   return settingsGuard.requestClose(after);
 }
 
+/**
+ * The bin of the history, in Paramètres › Application (0.6.103): what was deleted these 30 days, by the
+ * user or by the application, with why in a few words; « Restaurer » gives it back, « Supprimer
+ * définitivement » erases it now (asked first). After 30 days it goes by itself, at the next launch.
+ */
+const TRASH_REASONS = {
+  user: 'Supprimée par vous',
+  'user-all': 'Avec tout l’historique',
+  'studio-empty': 'Création du Studio sans résultat',
+  'recovery-empty': 'Création sans résultat, retrouvée après un rechargement',
+  prune: 'Jamais enregistrée',
+};
+async function refreshTrash() {
+  const list = $('history-trash-list');
+  if (!list) return;
+  let items;
+  try {
+    items = (await (await api('history/trash')).json()).conversations ?? [];
+  } catch {
+    return;
+  }
+  list.replaceChildren(
+    ...items.map(item => {
+      const row = node('li', 'history-trash-item'),
+        what = node('span', 'history-trash-what'),
+        back = node('button', 'history-trash-restore', 'Restaurer'),
+        erase = node('button', 'history-trash-erase', 'Supprimer définitivement');
+      what.append(
+        node('span', 'history-trash-title', item.title || 'Sans titre'),
+        node('span', 'history-trash-why', `${TRASH_REASONS[item.reason] ?? 'Supprimée'} · ${shortDate(item.deletedAt)}`),
+      );
+      back.type = 'button';
+      erase.type = 'button';
+      back.onclick = () => void restoreFromTrash(item);
+      erase.onclick = () => void eraseFromTrash(item);
+      row.append(what, back, erase);
+      return row;
+    }),
+  );
+  $('history-trash-empty').hidden = items.length > 0;
+}
+async function restoreFromTrash(item) {
+  try {
+    await api('history/restore', { id: item.id });
+    $('live-status').textContent = `« ${item.title || 'Sans titre'} » restaurée.`;
+    await refreshHistory().catch(error => notice(error.message));
+  } catch (error) {
+    notice(error.message);
+  }
+  await refreshTrash();
+}
+async function eraseFromTrash(item) {
+  if (
+    !confirm(
+      `« ${item.title || 'Sans titre'} » sera effacée pour de bon, avec la liste de ses prises (leurs fichiers restent dans le dossier de sortie). Cela ne peut pas être annulé. Continuer ?`,
+    )
+  )
+    return;
+  try {
+    await api('history/erase', { id: item.id, confirm: true });
+    $('live-status').textContent = `« ${item.title || 'Sans titre'} » effacée définitivement.`;
+  } catch (error) {
+    notice(error.message);
+  }
+  await refreshTrash();
+}
+
 function openSettings() {
   if ($('settings').open) return;
   filePickerController?.abort();
@@ -1929,6 +2182,8 @@ function openSettings() {
   $('settings-body').scrollTop = 0;
   settingsTabs.opened();
   updateControls();
+  // The bin of the history, read each time (0.6.103).
+  void refreshTrash();
   Promise.all([
     api('bootstrap').then(response => response.json()),
     workflowsUI.refresh(),
@@ -2087,16 +2342,7 @@ async function restartApplication({ confirmed = false } = {}) {
     $('update-dialog').showModal();
     await api('relaunch', {
       always: true,
-      session: compactSession({
-        messages: state.messages,
-        archiveSnapshot: state.archiveSnapshot,
-        conversationId: state.conversationId,
-        conversationInstructions: state.conversationInstructions,
-        prompt: $('prompt').value,
-        images: state.images,
-        thinking: state.thinking,
-        title: $('conversation-title').textContent,
-      }),
+      session: compactSession(sessionOfPage()),
     });
     const deadline = Date.now() + 120000;
     while (Date.now() < deadline) {
@@ -2414,7 +2660,9 @@ async function takeBack(resend) {
   $('messages').replaceChildren();
   renderTranscript(state.messages);
   turnActions();
-  $('welcome').hidden = state.messages.length > 0;
+  // Its message in the box, said where the thread ends (0.6.103): « Modifier » on its only exchange
+  // left the welcome of a new conversation.
+  unsentNote();
   renderAttachments();
   resizePrompt();
   updateControls();
@@ -2866,6 +3114,32 @@ function archiveMessages(messages) {
   return closedCalls(messages.filter(message => !message.resourceId && !message.outputId));
 }
 
+/**
+ * The last message of the conversation shown that has not left: put back in the message box
+ * (« Annuler le message en attente », a send that failed before any answer, « Modifier », a conversation
+ * opened again). Said by a quiet line where its thread ends (0.6.103): one of that message alone looked
+ * like a new conversation, the welcome back, left out of « Reprendre », a click on it in the fil doing
+ * nothing. `called`: chosen again in the fil, the line shows it is that one. Whether it waits.
+ */
+function unsentNote({ called = false } = {}) {
+  const thread = dropUnsentNote(),
+    kept = state.archiveSnapshot,
+    last = kept?.incomplete ? kept.messages?.at(-1) : null,
+    waiting = Boolean(state.conversationId) && last?.role === 'user' && !last.internal && state.messages.at(-1)?.role !== 'user';
+  if (waiting)
+    thread.append(
+      node('p', 'unsent-note' + (called ? ' is-called' : ''), 'Votre dernier message attend dans la zone de saisie : il n’est pas encore parti.'),
+    );
+  $('welcome').hidden = state.messages.length > 0 || waiting;
+  return waiting;
+}
+/** That line out of the thread (the message sent at last); the thread. */
+function dropUnsentNote() {
+  const thread = $('messages');
+  for (const line of [...(thread.children ?? [])].filter(child => child.classList?.contains?.('unsent-note'))) line.remove();
+  return thread;
+}
+
 /** `talk`: who holds the conversation of the turn (state, or the conversation set aside, 0.6.81). */
 function chatRequest(messages, tools = true, resources = true, talk = state) {
   const context = talk.conversationInstructions ?? (talk.messages?.length ? '' : state.globalInstructions || '');
@@ -2993,6 +3267,12 @@ function endWork(work) {
   state.work = null;
   state.miniature?.end();
   updateControls();
+  // Written by another tab while this work went on (0.6.103): its conversation read again now, and any
+  // other whose save was refused meanwhile.
+  for (const id of [...(state.staleIds ?? [])]) {
+    state.staleIds.delete(id);
+    void readAgain(id);
+  }
 }
 /**
  * The take of the Chat being made in the conversation of the work (0.6.96), as its card tells it
@@ -3055,9 +3335,12 @@ function backHere(id, signal) {
     signal?.addEventListener?.('abort', abort, { once: true });
   });
 }
-/** The conversation on screen is left while its work goes on: set aside as it is, alive. */
-function setAside() {
-  if (!state.work || state.work.conversationId !== state.conversationId) return false;
+/**
+ * The conversation on screen is left while its work goes on: set aside as it is, alive. `force`: without
+ * a work of it (0.6.103: without the history, the one shown leaving for the one set aside).
+ */
+function setAside(force = false) {
+  if (!force && (!state.work || state.work.conversationId !== state.conversationId)) return false;
   // One at a time: one set aside before (its work over) leaves the page, saved as it was; what was
   // being written in it comes back when it is opened again (0.6.88: it went with it).
   if (state.aside) keepDraft({ id: state.aside.conversationId, projectId: state.aside.projectId, ...state.aside.draft });
@@ -3227,6 +3510,8 @@ async function sendMessage(event) {
   }
   const videos = state.videos;
   const content = userContent(withVideos(text, videos), images);
+  // (The line of a message that waited in the box goes: this one leaves, 0.6.103.)
+  dropUnsentNote();
   const history = [...state.messages, { role: 'user', content }],
     userView = userMessage(text, images, videos);
   state.conversationInstructions ??= state.messages.length ? '' : state.globalInstructions || '';
@@ -3328,6 +3613,8 @@ async function sendMessage(event) {
         if (status.state !== 'ready') waiting.show();
         updateControls();
       });
+      // (Another tab may have taken the conversation up meanwhile, 0.6.103: marked, the turn ends below.)
+      await takenElsewhere(talkId);
       return true;
     } catch (error) {
       if (signal.aborted) throw error;
@@ -3356,13 +3643,32 @@ async function sendMessage(event) {
     view.body.replaceChildren();
     markThinking(view, true);
     if (!(await persistConversation(talkId)))
-      throw Error('Impossible de sauvegarder ce message. Vérifiez le dossier history ou désactivez l’historique.');
+      throw Error(
+        // (Refused because another tab wrote it since: it is read again once this turn is over, 0.6.103.)
+        state.staleIds?.has(talkId)
+          ? 'Cette conversation a changé dans un autre onglet : votre message n’est pas parti.'
+          : 'Impossible de sauvegarder ce message. Vérifiez le dossier history ou désactivez l’historique.',
+      );
+    let waited = false;
     await waitForModel(api, signal, status => {
       state.status = status;
-      if (status.state !== 'ready') loading.show();
+      if (status.state !== 'ready') {
+        waited = true;
+        loading.show();
+      }
       updateControls();
     });
     loading.stop();
+    // Waited for (0.6.103): another tab may have taken the conversation up meanwhile (Moodix opened again
+    // during a long loading). The message is not sent by itself then: back in the box, the conversation
+    // read again once this turn is over (endWork).
+    const taken = waited && (await takenElsewhere(talkId));
+    if (taken)
+      throw Error(
+        taken === 'job'
+          ? 'Un autre onglet crée dans cette conversation : votre message n’est pas parti.'
+          : 'Cette conversation a changé dans un autre onglet : votre message n’est pas parti.',
+      );
     state.waitingForModel = false;
     updateControls();
     let allowTools = true,
@@ -3388,6 +3694,12 @@ async function sendMessage(event) {
       // local model still loading answered « Le moteur n’est pas prêt » in red under the ten images of a
       // series, and « Régénérer » took them away. Not back: the turn ends there, quietly, its takes kept.
       if (afterCreation && !(await backAfterCreation())) {
+        quietEnd();
+        break;
+      }
+      // Written by another tab during this turn (0.6.103: a save of it refused, or the conversation taken
+      // up there while the model came back): nothing more is asked of the model on this older copy.
+      if (state.staleIds?.has(talkId)) {
         quietEnd();
         break;
       }
@@ -3520,6 +3832,12 @@ async function sendMessage(event) {
         break;
       }
       await historyWrite;
+      // Nor a creation (0.6.103): a save of this answer was refused, another tab having written the
+      // conversation meanwhile. Its words stay; the conversation is read again once the turn is over.
+      if (state.staleIds?.has(talkId)) {
+        if (request.requestId) void api('tools/cancel', { requestId: request.requestId }).catch(() => {});
+        break;
+      }
       usedTool = true;
       if (!resumed) {
         // It thought and called a tool without a word: its reflection is over all the same.
@@ -4030,8 +4348,11 @@ async function sendMessage(event) {
     }
   } catch (error) {
     const canceled = signal.aborted,
+      // Its first save refused, another tab having written the conversation since (0.6.103): the message
+      // goes back to the box, the conversation is read again once the turn is over (endWork).
+      stale = Boolean(state.staleIds?.has(talkId)),
       // The model did not come (51): the message stays in the thread, the line says why.
-      unloaded = !canceled && state.waitingForModel && !(output || reasoning || usedTool);
+      unloaded = !canceled && !stale && state.waitingForModel && !(output || reasoning || usedTool);
     loading.stop();
     if (unloaded) {
       loading.fail(error.message || 'Le modèle n’a pas démarré.', () => void takeBack(true));
@@ -4049,7 +4370,9 @@ async function sendMessage(event) {
       // The videos joined come back with it (the text kept their « #ref », not their chip).
       state.videos = videos;
       renderAttachments();
-      $('welcome').hidden = state.messages.length > 0;
+      // Kept on the disk as the last message of the conversation, said where its thread ends (0.6.103):
+      // « Annuler le message en attente » on its first message brought the welcome back.
+      unsentNote();
     } else {
       // Its conversation set aside meanwhile (0.6.81): the draft goes back there, not in the one shown.
       userView.remove();
@@ -4701,7 +5024,8 @@ function rerender(id) {
   // A call whose take the server still makes keeps waiting for its card, as at the opening.
   const views = renderTranscript(state.messages, false, { waiting: state.recovery?.waiting(id, state.messages) });
   turnActions();
-  $('welcome').hidden = state.messages.length > 0;
+  // (Its message unsent said where the thread ends, 0.6.103.)
+  unsentNote();
   scrollToBottom();
   return views;
 }
@@ -4720,7 +5044,8 @@ state.recovery = setupTakeRecovery({
   beginWork,
   endWork,
   rerender,
-  forget: id => forgetConversation(id),
+  // (Found after a reload: said so to the server and its journal, 0.6.103.)
+  forget: id => forgetConversation(id, 'recovery-empty'),
   loadConversation,
   newConversation,
   showStudio,

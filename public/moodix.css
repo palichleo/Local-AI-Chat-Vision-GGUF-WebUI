@@ -1037,6 +1037,67 @@ fieldset {
 .history-clear-button:hover:enabled {
   background: var(--danger-bg);
 }
+/* The bin of the history (0.6.103), under « Conserver les conversations »: each conversation, why and
+   when it went, « Restaurer » and « Supprimer définitivement ». */
+.history-trash {
+  margin-top: 16px;
+}
+.history-settings .history-trash-label,
+.history-settings .history-trash-empty {
+  margin: 0 0 6px;
+}
+.history-trash-label {
+  color: var(--text-2);
+}
+.history-trash-list {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.history-trash-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.history-trash-what {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.history-trash-title {
+  overflow: hidden;
+  font-size: var(--size-1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.history-trash-why {
+  color: var(--muted);
+  font-size: 12px;
+}
+.history-trash-restore,
+.history-trash-erase {
+  flex-shrink: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.history-trash-erase {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.history-trash-restore:hover:enabled {
+  color: var(--text-1);
+}
+.history-trash-erase:hover:enabled {
+  background: var(--danger-bg);
+}
 #history-delete-dialog {
   position: fixed;
   inset: 0;
@@ -10257,6 +10318,20 @@ body:not([data-view='chat']) .resume {
 :is(.resume-last, .resume-item):hover:enabled {
   color: var(--text-1);
 }
+/* La dernière conversation du projet, la première de « Reprendre », bien visible (0.6.103) : à
+   l'ouverture d'un onglet ou après une relance, l'accueil est à l'écran et elle n'a pas disparu. */
+.resume-list .resume-item:first-child {
+  padding: 8px 14px;
+  border: 1px solid var(--line-strong);
+  background: var(--chip);
+  color: var(--text-1);
+}
+.resume-list .resume-item:first-child .resume-date {
+  color: var(--text-3);
+}
+.resume-list .resume-item:first-child:hover:enabled {
+  border-color: var(--text-4);
+}
 @media (max-width: 760px) {
   #welcome h1 {
     font-size: 42px;
@@ -14783,6 +14858,30 @@ body[data-setup='incomplete'] #resume-last {
 }
 #messages .takes-detached .message-retry {
   margin-left: 0;
+}
+/* The last message not sent, back in the message box (0.6.103): one quiet line where the thread ends,
+   brighter a moment when the conversation is chosen again in the fil. */
+#messages .unsent-note {
+  margin: 18px 0 0;
+  color: var(--text-3);
+  font: 400 14px/1.5 var(--font-ui);
+}
+#messages .unsent-note.is-called {
+  animation: unsent-called 1.6s ease-out;
+}
+@keyframes unsent-called {
+  from {
+    color: var(--text-1);
+  }
+  to {
+    color: var(--text-3);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #messages .unsent-note.is-called {
+    animation: none;
+    color: var(--text-2);
+  }
 }
 #chat-form .compose-state.is-waiting {
   color: var(--text-3);

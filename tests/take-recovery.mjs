@@ -174,8 +174,12 @@ function page({ id = ID, messages = asked(), job = null, runs = [], skipped = 0,
       if (route === 'tools/series') return Response.json({ ended: true });
       if (route.startsWith('history/')) {
         const which = decodeURIComponent(route.slice(8));
-        // (`unfinished`: saved with an answer stopped midway.)
-        return Response.json({ messages: given.stored?.[which] ?? [], incomplete: given.unfinished?.includes(which) === true });
+        // (`unfinished`: saved with an answer stopped midway; `storedRevision`: its revision, 0.6.103.)
+        return Response.json({
+          messages: given.stored?.[which] ?? [],
+          incomplete: given.unfinished?.includes(which) === true,
+          ...(given.storedRevision?.[which] !== undefined ? { revision: given.storedRevision[which] } : {}),
+        });
       }
       throw Error('route inattendue : ' + route);
     },
@@ -497,6 +501,29 @@ test('followed from another tab than its own, a series is not ended there, and w
   assert.deepEqual(seen.saves, [], 'what the other wrote is not written over');
   assert.equal(state.messages.at(-1).content, 'Voici les trois.', 'the page shows it');
   assert.equal(state.archiveSnapshot.incomplete, true, 'as that tab left it: its answer still said stopped (0.6.90)');
+});
+
+test('the copy another tab wrote, taken here, comes with its revision: this page saves on it, never refused for it (0.6.103)', async () => {
+  const series = call('call_s', 'create_image', { prompt: 'a', series: ['b', 'c'] }),
+    job = running({ callId: 'call_s', owner: 'onglet-2', ownerAway: true }),
+    written = [
+      { role: 'user', content: 'Trois bateaux' },
+      { role: 'assistant', content: '', tool_calls: [series] },
+      { role: 'tool', tool_call_id: 'call_s', content: JSON.stringify({ status: 'success', images: [{ run_id: 'r1' }, { run_id: 'r2' }, { run_id: 'r3' }] }) },
+      { role: 'assistant', content: 'Voici les trois.' },
+    ];
+  const { state, recovery, views } = page({
+    messages: asked(series),
+    job,
+    fresh: { ...job, proposal: { series: { id: 'S', index: 2, total: 3 } } },
+    runs: [take('r1', 'call_s'), take('r2', 'call_s', { createdAt: '2026-11-18T10:01:00.000Z' })],
+    // This page read revision 4; that tab wrote it up to 9 meanwhile.
+    state: { stored: { [ID]: written }, storedRevision: { [ID]: 9 }, revisions: new Map([[ID, 4]]) },
+  });
+  await recovery.complete(ID, views());
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(state.messages.at(-1).content, 'Voici les trois.');
+  assert.equal(state.revisions.get(ID), 9);
 });
 
 test('a creation of the Studio the page loses while it follows it frees the Studio: it says why, nothing is written', async () => {

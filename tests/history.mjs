@@ -210,7 +210,8 @@ test('historique optionnel : l’original joint est conservé, les copies du mod
     assert.equal((await call('history/save', { id, messages, incomplete: true })).status, 200);
     assert.equal((await call('history/save', { id, messages })).status, 200);
     const files = await readdir(join(historyDir, id));
-    assert.deepEqual(files.sort(), ['conversation.json', stored.file]);
+    // With the version before the last save (0.6.103), taken back if this one is ever damaged.
+    assert.deepEqual(files.sort(), ['conversation.json', 'conversation.json.prev', stored.file].sort());
     assert.ok(!(await readFile(join(historyDir, id, 'conversation.json'), 'utf8').then(s => s.includes('base64,'))));
     await app.close();
     app = await createApplication({ port: 0, dataDir: folder, historyDir });
@@ -236,7 +237,7 @@ test('historique optionnel : l’original joint est conservé, les copies du mod
   }
 });
 
-test('les images jointes d’une conversation jamais enregistrée sont retirées au démarrage suivant', async () => {
+test('les images jointes d’une conversation jamais enregistrée vont à la corbeille au démarrage suivant, et le journal le dit', async () => {
   const folder = await mkdtemp(join(tmpdir(), 'atelier-history-'));
   const historyDir = join(folder, 'history');
   const saved = randomUUID(),
@@ -258,7 +259,14 @@ test('les images jointes d’une conversation jamais enregistrée sont retirées
     });
     await app.close();
     app = await createApplication({ port: 0, dataDir: folder, historyDir });
-    assert.deepEqual((await readdir(historyDir)).sort(), [saved]);
+    // Out of the history, in its bin for 30 days (0.6.103: erased at once before).
+    assert.deepEqual((await readdir(historyDir)).sort(), ['.corbeille', saved].sort());
+    assert.deepEqual(await readdir(join(historyDir, '.corbeille')), [unsaved]);
+    const said = (await readFile(join(folder, 'history-journal.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    assert.deepEqual(
+      said.map(({ event, id, reason, messages }) => ({ event, id, reason, messages })),
+      [{ event: 'corbeille', id: unsaved, reason: 'prune', messages: 0 }],
+    );
   } finally {
     await app?.close();
     await rm(folder, { recursive: true, force: true });
@@ -309,9 +317,23 @@ test('historique : données invalides, chemins et fichiers endommagés sont cont
     const malformedData = JSON.parse(await readFile(malformedPath, 'utf8'));
     malformedData.updatedAt = 2026;
     await writeFile(malformedPath, JSON.stringify(malformedData));
+    // Listed by their names and said unreadable (0.6.103): left out of the list before, a count alone
+    // telling it.
     const list = await (await get('history')).json();
-    assert.equal(list.conversations.length, 1);
-    assert.equal(list.skipped, 2);
+    assert.equal(list.conversations.length, 3);
+    assert.equal(list.skipped, 0);
+    assert.deepEqual(
+      Object.fromEntries(list.conversations.filter(item => item.unreadable).map(item => [item.id, item.title])),
+      { [other]: 'Conversation illisible', [malformed]: 'Date incorrecte (illisible)' },
+    );
+    // Opened: what can be done, in words.
+    const opened = await get(`history/${other}`);
+    assert.equal(opened.status, 422);
+    assert.match((await opened.json()).error, /ne peut pas être lue : son fichier est abîmé .*mettre à la corbeille/);
+    // Saved again by the page that still holds it: the damaged file set aside, the save no longer refused.
+    assert.equal((await post('history/save', { id: other, messages: [{ role: 'user', content: 'Endommagé' }] })).status, 200);
+    assert.ok((await readdir(join(folder, 'history', other))).some(name => /^conversation\.illisible-.+\.json$/.test(name)));
+    assert.equal((await (await get(`history/${other}`)).json()).messages[0].content, 'Endommagé');
     assert.equal((await post('preferences', { saveHistory: 'true' })).status, 400);
   } finally {
     await app?.close();
@@ -328,6 +350,8 @@ function heldHistory(directory) {
   const held = { refusals: [], attempts: 0, kept: [] };
   held.history = new History(directory, {
     async renameFile(from, to) {
+      // (The copy of the version before, 0.6.103, is not the file held here.)
+      if (!to.endsWith('conversation.json')) return rename(from, to);
       held.attempts++;
       const code = held.refusals.shift();
       if (!code) return rename(from, to);
@@ -375,8 +399,8 @@ test('un enregistrement refusé un instant par Windows (antivirus, indexation) e
   assert.equal((await history.rename(id, 'Nom choisi')).title, 'Nom choisi');
   assert.equal(held.attempts, 2);
   assert.equal((await history.list()).conversations[0].title, 'Nom choisi');
-  // No copy left beside it.
-  assert.deepEqual(await readdir(join(directory, id)), ['conversation.json']);
+  // No copy left beside it but the version before the last save (0.6.103).
+  assert.deepEqual((await readdir(join(directory, id))).sort(), ['conversation.json', 'conversation.json.prev']);
 });
 
 test('un refus qui dure ou une autre erreur : l’enregistrement échoue, la conversation d’avant reste entière, sans copie laissée', async t => {
@@ -400,14 +424,15 @@ test('un refus qui dure ou une autre erreur : l’enregistrement échoue, la con
   assert.equal(held.attempts, 1);
   assert.deepEqual(await said(), ['Garde cette conversation']);
   assert.equal((await history.list()).conversations[0].title, 'Garde cette conversation');
-  assert.deepEqual(await readdir(join(directory, id)), ['conversation.json']);
+  // (The version before, kept as the refused save began: the same as the one in place, 0.6.103.)
+  assert.deepEqual((await readdir(join(directory, id))).sort(), ['conversation.json', 'conversation.json.prev']);
   // What failed does not stop the next save.
   held.refuse();
   await history.save(later);
   assert.deepEqual(await said(), ['Garde cette conversation', 'Plus tard']);
 });
 
-test('a folder never saved goes at launch with an old copy a refused save left in it; one being written stays (0.6.87)', async t => {
+test('a folder never saved goes to the bin at launch with an old copy a refused save left in it; one being written stays (0.6.87)', async t => {
   // A save refused by Windows whose copy could not be taken away either (atomicFile): the folder of a
   // conversation never saved was kept for good because of it.
   const root = await mkdtemp(join(tmpdir(), 'moodix-prune-'));
@@ -430,5 +455,7 @@ test('a folder never saved goes at launch with an old copy a refused save left i
   // Anything else stays as it is.
   await writeFile(join(root, other, 'notes.txt'), 'à moi');
   assert.equal(await history.pruneUnsaved(), 1);
-  assert.deepEqual((await readdir(root)).sort(), [writing, other].sort());
+  // To the bin (0.6.103): its copy did not read whole, nothing to make the conversation of again.
+  assert.deepEqual((await readdir(root)).sort(), ['.corbeille', writing, other].sort());
+  assert.deepEqual(await readdir(join(root, '.corbeille')), [old]);
 });

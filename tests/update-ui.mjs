@@ -109,6 +109,8 @@ test('download failure keeps configuration, file selection and composer controls
     source.indexOf('async function checkUpdates('),
   );
   const install = source.slice(source.indexOf('async function installUpdate('), source.indexOf('function applyTheme('));
+  // What the session of an update keeps of the page (0.6.103: with its revision, and the conversation set aside).
+  const session = source.slice(source.indexOf('function sessionOfPage('), source.indexOf('let historyWrite'));
   const nodes = new Map();
   const get = id => {
     if (!nodes.has(id))
@@ -171,7 +173,7 @@ test('download failure keeps configuration, file selection and composer controls
     refreshStatus: async () => context.updateControls(),
   };
   runInNewContext(
-    controls + '\n' + install + '\nthis.updateControls=updateControls;this.installUpdate=installUpdate;',
+    controls + '\n' + session + '\n' + install + '\nthis.updateControls=updateControls;this.installUpdate=installUpdate;',
     context,
   );
   await context.installUpdate();
@@ -192,4 +194,38 @@ test('download failure keeps configuration, file selection and composer controls
   state.connected = true;
   context.updateControls();
   assert.deepEqual([state.sendHeld, get('send').disabled], [false, false]);
+});
+
+test('what an update or « Redémarrer » keeps of the page: the revision read, and without the history the conversation set aside (0.6.103)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { runInNewContext } = await import('node:vm');
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const fields = { prompt: { value: 'un brouillon' }, 'conversation-title': { textContent: 'Un chat roux' } };
+  const aside = {
+    conversationId: 'b2222222-2222-4222-8222-222222222222',
+    projectId: 'inbox',
+    messages: [{ role: 'user', content: 'Un renard' }],
+    archiveSnapshot: null,
+    conversationInstructions: '',
+    title: 'Un renard',
+    draft: { text: 'et un loup', images: [], videos: [] },
+  };
+  const state = {
+    saveHistory: false,
+    conversationId: 'a1111111-1111-4111-8111-111111111111',
+    messages: [{ role: 'user', content: 'Un chat roux' }],
+    archiveSnapshot: null,
+    images: [],
+    thinking: true,
+    revisions: new Map([['a1111111-1111-4111-8111-111111111111', 3]]),
+    aside,
+  };
+  const context = { state, $: id => fields[id], compactSession: module.compactSession };
+  runInNewContext(source.slice(source.indexOf('function sessionOfPage('), source.indexOf('let historyWrite')) + ';this.sessionOfPage=sessionOfPage;', context);
+  const kept = context.sessionOfPage();
+  assert.equal(kept.revision, 3);
+  assert.deepEqual([kept.aside.conversationId, kept.aside.prompt, kept.aside.title], [aside.conversationId, 'et un loup', 'Un renard']);
+  // With the history, the one set aside is on the disk: not kept twice.
+  state.saveHistory = true;
+  assert.equal(context.sessionOfPage().aside, undefined);
 });

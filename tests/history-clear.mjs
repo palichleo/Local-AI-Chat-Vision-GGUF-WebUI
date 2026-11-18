@@ -58,8 +58,11 @@ test('supprimer l’historique exige confirmation et jeton, fonctionne même dé
       assert.ok((await readdir(join(historyDir, saved.id))).some(name => name.startsWith('original-')));
       const deleted = await post('history/clear', { confirm: true });
       assert.equal(deleted.status, 200);
-      assert.deepEqual(await deleted.json(), { cleared: true });
-      await assert.rejects(readdir(historyDir), { code: 'ENOENT' });
+      assert.deepEqual(await deleted.json(), { cleared: true, trashed: 1 });
+      // Out of the history, in its bin for 30 days, its image with it (0.6.103: erased at once before).
+      assert.deepEqual(await readdir(historyDir), ['.corbeille']);
+      assert.ok((await readdir(join(historyDir, '.corbeille', saved.id))).some(name => name.startsWith('original-')));
+      await rm(join(historyDir, '.corbeille'), { recursive: true, force: true });
       assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'preferences.json'), 'utf8')), before);
       assert.equal(await readFile(join(dataDir, 'outside.txt'), 'utf8'), 'À conserver');
       await assert.rejects(readdir(conditioning), { code: 'ENOENT' });
@@ -82,7 +85,9 @@ test('la suppression attend les sauvegardes déjà acceptées puis permet de nou
     const saved = history.save(record(first, file));
     const cleared = history.clear();
     await Promise.all([saved, cleared]);
-    await assert.rejects(readdir(directory), { code: 'ENOENT' });
+    // The save accepted first is in the bin with the rest (0.6.103).
+    assert.deepEqual(await readdir(directory), ['.corbeille']);
+    assert.deepEqual((await history.trash()).map(item => [item.id, item.reason, item.messages]), [[first, 'user-all', 1]]);
     assert.deepEqual(await history.list(), { conversations: [], skipped: 0 });
     const id = randomUUID();
     const fresh = record(id, (await history.addOriginal(id, [bytes])).file);

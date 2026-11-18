@@ -486,6 +486,8 @@ export function setupTakeRecovery({
             talk.messages = closedCalls(saved);
             // As that tab left it: an answer it stopped midway still said so (0.6.90: said complete).
             talk.archiveSnapshot = { messages: [...saved], incomplete: record.incomplete === true };
+            // And its revision, the one this page saves on now (0.6.103: else refused as written elsewhere).
+            if (Number.isInteger(record.revision)) state.revisions?.set?.(id, record.revision);
             if (shownHere(id)) rerender(id);
           }
           return true;

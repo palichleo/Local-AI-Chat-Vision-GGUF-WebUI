@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -159,6 +159,16 @@ async function historyStore(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   return new History(join(directory, 'history'));
 }
+/**
+ * The disk as a page opened after the application closed finds it (0.6.103): a copy, the first page going
+ * on alone in its own. Two pages alive on one disk are two tabs, and the older copy is refused there (« a
+ * tab left on an older copy… », below).
+ */
+async function diskCopy(t, store) {
+  const copy = await historyStore(t);
+  await cp(join(store.directory, ID), join(copy.directory, ID), { recursive: true });
+  return copy;
+}
 
 /**
  * The page of a conversation. `chat(body, n)`: what the n-th /api/chat answers (the events of its
@@ -233,6 +243,8 @@ function page({
     setInterval,
     clearInterval,
     crypto: { randomUUID: () => ID },
+    // This tab, for the server (0.6.103: a creation of another tab in the conversation is not this one's).
+    TAB: 'onglet-1',
     confirm: () => true,
     historyWrite: Promise.resolve(),
     moodixMark: () => [],
@@ -394,7 +406,7 @@ test('a video card that waits is saved with a result for its call: reopened, the
   // The page is closed there. Another one opens the conversation from the disk: the words, and
   // where the card was, that it was left without an answer.
   const reopened = page({
-    store,
+    store: await diskCopy(t, store),
     chat: body => {
       accepted(body.messages);
       return said('D’accord, je la propose de nouveau.');
@@ -1019,7 +1031,7 @@ test('a series of images in the Chat is kept after each image, with one result f
   );
   // The application closed there, and opened again: the images made so far are shown, the
   // conversation is taken as it is.
-  const reopened = page({ store, chat: body => (accepted(body.messages), said('Il manque la troisième.')) });
+  const reopened = page({ store: await diskCopy(t, store), chat: body => (accepted(body.messages), said('Il manque la troisième.')) });
   await reopened.context.loadConversation(ID);
   assert.deepEqual(reopened.restored.map(item => item.runId), [runOf(1), runOf(2)]);
   // Under them, in one quiet line, where it stopped (0.6.82); no failure, no take « interrompue ».
@@ -1153,7 +1165,12 @@ test('a send that fails before any answer gives the whole draft back: its text, 
     // The video comes back with its chip (only its « #ref3 » was left, in the text).
     assert.deepEqual(plain(failed.state.videos), [video]);
     assert.equal(failed.state.messages.length, 0);
-    assert.equal(failed.$('messages').children.length, 0, 'the message leaves the thread');
+    // The message leaves the thread; one quiet line says it waits in the box (0.6.103), never the welcome.
+    assert.deepEqual(
+      failed.$('messages').children.map(child => [child.className, child.textContent]),
+      [['unsent-note', 'Votre dernier message attend dans la zone de saisie : il n’est pas encore parti.']],
+    );
+    assert.equal(failed.$('welcome').hidden, true);
     assert.equal(failed.state.generating, false);
   }
 
@@ -1834,7 +1851,8 @@ test('a creation of the Studio is kept as it starts, and taken back when it make
   assert.ok(fresh.state.historyItems.some(item => item.id === ID), 'listed, in its project');
   first.finish({ content: '{}', images: [], failed: true, error: 'Génération annulée.' });
   await begun;
-  assert.deepEqual(deleted, [{ confirm: true, id: ID }]);
+  // Said why (0.6.103): the server looks at the disk, and keeps it in its bin with that reason.
+  assert.deepEqual(deleted, [{ confirm: true, id: ID, reason: 'studio-empty' }]);
   assert.equal(fresh.state.historyItems.some(item => item.id === ID), false);
   await assert.rejects(store.read(ID));
 });
@@ -2628,7 +2646,7 @@ test('« Régénérer » and « Modifier » ask before ten images leave; « Non 
   assert.equal(again.$('messages').all('takes-detached').length, 0);
 });
 
-test('a tab left on an older copy wrote over the ten images: opened again, they are offered back', async t => {
+test('a tab left on an older copy no longer writes over the ten images: refused, it reads the conversation again, its message kept (0.6.103)', async t => {
   const store = await historyStore(t);
   let arrive;
   const modelBack = new Promise(resolve => (arrive = resolve));
@@ -2636,11 +2654,35 @@ test('a tab left on an older copy wrote over the ten images: opened again, they 
   const turn = first.send('Fais 10 images de chats à l’aquarelle');
   await settled();
   // Moodix opened again while the model loads: a new tab, the conversation opened there, its message waiting.
-  const second = page({ store, chat: () => said('1. Un chat roux sur un toit') });
+  const second = page({ store, chat: () => said('Les voici : un chat roux sur un toit…') });
   await second.context.loadConversation(ID);
   arrive();
   await turn;
+  // The older copy sent from there (R5: before 0.6.103, it wrote over the ten images).
   await second.send();
+  await settled();
+  const kept = await store.read(ID);
+  assert.equal(unnamed(kept.messages, gallery).length, 0, 'the ten images stay in their conversation');
+  assert.equal(second.requests.length, 0, 'nothing asked of the model from the older copy');
+  assert.equal(second.$('prompt').value, 'Fais 10 images de chats à l’aquarelle', 'its message stays in the box');
+  assert.equal(
+    second.notices.at(-1),
+    'Cette conversation a changé dans un autre onglet : elle a été rechargée. Ce que vous écriviez est resté dans la zone de saisie.',
+  );
+  assert.deepEqual(roles(second.state.messages), roles(kept.messages), 'read again: the other tab’s copy');
+  // Sent now, it goes on from that copy: nothing lost, nothing refused.
+  await second.send();
+  const after = await store.read(ID);
+  assert.equal(unnamed(after.messages, gallery).length, 0);
+  assert.deepEqual(roles(after.messages).slice(-2), ['user', 'assistant']);
+});
+
+test('« Les remettre » after a tab of an earlier version wrote over the ten images', async t => {
+  // What a conversation already written over holds (before 0.6.103): its call and its result gone.
+  const store = await historyStore(t),
+    { friend, gallery } = tenImages({ store, after: () => said('') });
+  await friend.send('Fais 10 images de chats à l’aquarelle');
+  await store.save({ id: ID, messages: [{ role: 'user', content: 'Fais 10 images de chats à l’aquarelle' }, { role: 'assistant', content: '1. Un chat roux' }] });
   assert.equal(unnamed((await store.read(ID)).messages, gallery).length, TEN);
   const routes = { [`gallery/${ID}?images=0`]: async () => Response.json({ runs: gallery, skipped: 0 }) };
   const reopened = page({ store, routes });
@@ -2697,4 +2739,201 @@ test('the request sent again once its file is downloaded never takes the takes o
   shown.state.messages = [asked, withTake[3], withTake[4]];
   shown.context.missingFile(shown.context.assistantMessage(), request, shown.state.messages, ID);
   assert.equal(offered.onReady(), true);
+});
+
+// ------------------------------------------------------------------ guards of the history, the page (0.6.103)
+test('a first message cancelled while the model loads: the conversation stays one, its message said waiting in the box; chosen again, it shows', async t => {
+  const store = await historyStore(t),
+    shown = page({
+      store,
+      waitForModel: async (api, signal) => {
+        shown.state.controller.abort();
+        signal.throwIfAborted();
+      },
+    });
+  await shown.send('Fais 4 images d’un chat');
+  // Until 0.6.103 the welcome came back, as for a new conversation.
+  assert.equal(shown.$('welcome').hidden, true);
+  const [line] = shown.$('messages').all('unsent-note');
+  assert.equal(line?.textContent, 'Votre dernier message attend dans la zone de saisie : il n’est pas encore parti.');
+  assert.equal(shown.$('prompt').value, 'Fais 4 images d’un chat');
+  assert.equal(shown.$('conversation-title').textContent, 'Fais 4 images d’un chat');
+  // Chosen in the fil while it is open: it did nothing a user could see.
+  await shown.context.loadConversation(ID);
+  assert.deepEqual(shown.$('messages').all('unsent-note').map(item => item.className), ['unsent-note is-called']);
+  // Sent at last: the line goes.
+  shown.context.waitForModel = async () => {};
+  await shown.send();
+  assert.equal(shown.$('messages').all('unsent-note').length, 0);
+});
+
+test('« Modifier » on the only exchange, then another conversation, then this one again: its message said waiting, never the welcome', async t => {
+  const store = await historyStore(t),
+    shown = page({ store, chat: () => said('1. Un chat roux\n2. Un chat noir') });
+  await shown.send('Fais 2 images d’un chat');
+  await shown.context.takeBack(false);
+  assert.equal(shown.$('welcome').hidden, true);
+  assert.equal(shown.$('messages').all('unsent-note').length, 1);
+  shown.$('prompt').value = '';
+  await shown.context.newConversation('inbox');
+  assert.equal(shown.$('welcome').hidden, false, 'a new one: the welcome');
+  await shown.context.loadConversation(ID);
+  assert.equal(shown.$('welcome').hidden, true);
+  assert.equal(shown.$('messages').all('unsent-note').length, 1);
+  assert.equal(shown.$('prompt').value, 'Fais 2 images d’un chat');
+});
+
+test('one tab alone is never refused for its revision: a series kept image by image, « Modifier », a move, sent again', async t => {
+  const store = await historyStore(t),
+    { friend, gallery } = tenImages({ store, after: n => said(n > 3 ? 'Voici des chats noirs.' : '') });
+  await friend.send('Fais 10 images de chats à l’aquarelle');
+  // Each image of the series was kept on the revision the save before gave: never « changé dans un autre onglet ».
+  assert.ok(friend.saves.length >= TEN + 2);
+  assert.deepEqual(friend.notices.filter(text => /autre onglet|non enregistré/.test(text)), []);
+  assert.equal((await store.read(ID)).revision, friend.state.revisions.get(ID));
+  // Moved to another project meanwhile (the server keeps its revision), named by the model (the same).
+  await store.save({ ...(await store.read(ID)), projectId: 'inbox' }, { keepRevision: true });
+  await store.rename(ID, 'Chats à l’aquarelle', { auto: true });
+  friend.context.confirm = () => true;
+  await friend.context.takeBack(false);
+  await friend.send('Fais 3 images de chats noirs');
+  assert.deepEqual(friend.notices.filter(text => /autre onglet|non enregistré/.test(text)), []);
+  const read = await store.read(ID);
+  assert.deepEqual([read.title, roles(read.messages).at(-2)], ['Chats à l’aquarelle', 'user']);
+  assert.equal(unnamed(read.messages, gallery).length, TEN, '(« Modifier » said first: ten images left, as asked)');
+});
+
+test('without the history, the conversation set aside comes back with the session of an update, and opened from the fil it takes the place of the one shown, never losing it', async () => {
+  const aside = {
+      conversationId: ELSEWHERE,
+      projectId: 'inbox',
+      messages: [
+        { role: 'user', content: 'Un renard dans la neige' },
+        { role: 'assistant', content: 'Le voici.' },
+      ],
+      archiveSnapshot: null,
+      prompt: 'et un loup',
+      images: [],
+      thinking: true,
+      title: 'Un renard dans la neige',
+    },
+    main = {
+      conversationId: ID,
+      messages: [
+        { role: 'user', content: 'Un chat roux' },
+        { role: 'assistant', content: 'Voilà.' },
+      ],
+      archiveSnapshot: null,
+      prompt: '',
+      images: [],
+      thinking: true,
+      title: 'Un chat roux',
+    },
+    shown = page({ state: { saveHistory: false } });
+  // What restoreUpdate does with a session that has it (an update, « Redémarrer »).
+  shown.context.restoreAside(aside);
+  shown.context.restoreSession(main);
+  assert.equal(shown.state.conversationId, ID);
+  assert.deepEqual([shown.state.aside.conversationId, shown.state.aside.draft.text, shown.state.aside.title], [ELSEWHERE, 'et un loup', 'Un renard dans la neige']);
+  assert.equal(shown.state.aside.messages.length, 2);
+  // Opened from the fil: the one shown is set aside in its place (it was dropped without a word).
+  await shown.context.loadConversation(ELSEWHERE);
+  assert.equal(shown.state.conversationId, ELSEWHERE);
+  assert.equal(shown.$('prompt').value, 'et un loup');
+  assert.deepEqual([shown.state.aside?.conversationId, shown.state.aside?.messages.length], [ID, 2]);
+  await shown.context.loadConversation(ID);
+  assert.deepEqual([shown.state.conversationId, shown.state.aside?.conversationId], [ID, ELSEWHERE]);
+});
+
+/** The local model loading until `arrive()`, as waitForModel says it (« loading », then « ready » with `ready`). */
+function loadingModel(ready = {}) {
+  let arrive;
+  const back = new Promise(resolve => (arrive = resolve));
+  return {
+    arrive: () => arrive(),
+    waitForModel: async (api, signal, onStatus) => {
+      onStatus({ state: 'loading', busy: false });
+      await back;
+      signal.throwIfAborted();
+      onStatus({ state: 'ready', vision: true, busy: false, ...ready });
+    },
+  };
+}
+
+test('a message waiting for the model is not sent by itself once another tab took the conversation up: back in its box, the conversation read again (0.6.103)', async t => {
+  const store = await historyStore(t),
+    model = loadingModel(),
+    first = page({ store, waitForModel: model.waitForModel, chat: () => said('Un renard dans la neige.') });
+  const turn = first.send('Un renard roux dans la neige');
+  await settled();
+  // Moodix opened again while the model loads: in a new tab, the same conversation, its message sent from there.
+  const second = page({ store, chat: () => said('Voici un renard roux.') });
+  await second.context.loadConversation(ID);
+  assert.equal(second.$('prompt').value, 'Un renard roux dans la neige');
+  await second.send();
+  model.arrive();
+  await turn;
+  await settled();
+  assert.equal(first.requests.length, 0, 'nothing asked of the model by itself from the first tab');
+  assert.equal(first.$('prompt').value, 'Un renard roux dans la neige', 'its message back in its box');
+  assert.ok(first.notices.includes('Cette conversation a changé dans un autre onglet : votre message n’est pas parti.'));
+  const kept = await store.read(ID);
+  assert.deepEqual(roles(kept.messages), ['user', 'assistant'], 'one exchange, that of the second tab');
+  assert.equal(kept.messages.at(-1).content, 'Voici un renard roux.');
+  assert.deepEqual(roles(first.state.messages), ['user', 'assistant'], 'read again: the copy of the other tab');
+  assert.equal(first.state.revisions.get(ID), kept.revision);
+});
+
+test('nor while a creation of another tab goes on in it; with one tab, a message that waited for the model goes (0.6.103)', async t => {
+  const store = await historyStore(t),
+    busy = loadingModel({ toolJob: { state: 'running', conversationId: ID, owner: 'onglet-2', ownerAway: false } }),
+    first = page({ store, waitForModel: busy.waitForModel, chat: () => said('Un renard dans la neige.') });
+  const turn = first.send('Un renard roux dans la neige');
+  await settled();
+  busy.arrive();
+  await turn;
+  await settled();
+  assert.equal(first.requests.length, 0);
+  assert.equal(first.$('prompt').value, 'Un renard roux dans la neige');
+  assert.ok(first.notices.includes('Un autre onglet crée dans cette conversation : votre message n’est pas parti.'));
+  // Nothing written over the conversation that tab works in: its one save, the message waiting.
+  const kept = await store.read(ID);
+  assert.deepEqual([roles(kept.messages), kept.incomplete, kept.revision], [['user'], true, 1]);
+  assert.equal(first.notices.filter(text => /rechargée/.test(text)).length, 0, 'nothing changed there: not « rechargée »');
+  // One tab alone: the model loads, comes, the message goes, nothing refused (its own creation too).
+  const own = loadingModel({ toolJob: { state: 'done', conversationId: ID, owner: 'onglet-1' } }),
+    alone = page({ store, waitForModel: own.waitForModel, chat: () => said('Le voici.') });
+  await alone.context.loadConversation(ID);
+  const sent = alone.send();
+  await settled();
+  own.arrive();
+  await sent;
+  assert.equal(alone.requests.length, 1);
+  assert.deepEqual(alone.notices.filter(text => /autre onglet|non enregistré/.test(text)), []);
+  assert.deepEqual(roles((await store.read(ID)).messages), ['user', 'assistant']);
+});
+
+test('a turn whose save is refused asks the model nothing more on its older copy: read again once it is over (0.6.103)', async t => {
+  const store = await historyStore(t),
+    card = waitingCard(),
+    first = page({
+      store,
+      chat: (body, n) => (n === 1 ? called(videoProposal()) : n === 2 ? said(PLAN) : said('Voici votre renard.')),
+      requestTool: card.requestTool,
+    });
+  const turn = first.send('Fais une vidéo d’un renard');
+  await card.shown;
+  // Another tab opens the conversation while the card waits, and writes in it.
+  const second = page({ store, chat: () => said('D’accord, un loup.') });
+  await second.context.loadConversation(ID);
+  await second.send('Plutôt un loup');
+  // In the first tab the user presses « Générer »: the video is made, and its save refused.
+  card.answer(made());
+  await turn;
+  await settled();
+  assert.equal(first.requests.length, 2, 'nothing more asked of the model after the refused save');
+  const kept = await store.read(ID);
+  assert.equal(kept.messages.at(-1).content, 'D’accord, un loup.', 'the second tab’s words stay the last ones');
+  assert.deepEqual(roles(first.state.messages), roles(kept.messages), 'read again: the copy of the other tab');
+  assert.ok(first.notices.some(text => /elle a été rechargée/.test(text)));
 });

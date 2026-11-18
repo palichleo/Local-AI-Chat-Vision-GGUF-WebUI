@@ -432,6 +432,11 @@ export function setupProjectNavigation({
         projectId: state.projectId,
         temporary: true,
       });
+    // Without the history, the one set aside too (0.6.103): only its miniature led back to it, none
+    // after an update or « Redémarrer ».
+    const aside = state.aside;
+    if (aside?.conversationId && !result.some(item => item.id === aside.conversationId))
+      result.push({ id: aside.conversationId, title: aside.title || 'Conversation mise de côté', projectId: aside.projectId || 'inbox', temporary: true });
     return result;
   }
 
@@ -719,8 +724,9 @@ export function setupProjectNavigation({
    */
   function renderResume() {
     const project = currentProject()?.id || 'inbox',
+      // The one shown is left out, unless the welcome is what shows of it (0.6.103).
       recent = (state.saveHistory ? state.historyItems || [] : [])
-        .filter(item => (item.projectId || 'inbox') === project && item.id !== state.conversationId)
+        .filter(item => (item.projectId || 'inbox') === project && (item.id !== state.conversationId || !$('welcome').hidden))
         .sort((a, b) => (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''))
         .slice(0, 3);
     $('resume-list').replaceChildren(
