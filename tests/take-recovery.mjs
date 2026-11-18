@@ -130,7 +130,7 @@ test('a result takes the place of the one a call was left with; a creation of th
  * makes (`job`), the takes of the gallery (`runs`), what /api/tools/job answers (`fresh`), and
  * followTool (`follow`). What it did is kept in `seen`.
  */
-function page({ id = ID, messages = asked(), job = null, runs = [], fresh = undefined, follow = null, storage = null, tab = 'onglet-1', state: given = {} } = {}) {
+function page({ id = ID, messages = asked(), job = null, runs = [], skipped = 0, fresh = undefined, follow = null, storage = null, tab = 'onglet-1', state: given = {} } = {}) {
   const seen = { saves: [], forgotten: [], rendered: 0, mounted: [], works: [], loaded: [], started: [], views: [], adopted: 0, studio: [], api: [], busy: 0 };
   const state = {
     conversationId: id,
@@ -165,7 +165,7 @@ function page({ id = ID, messages = asked(), job = null, runs = [], fresh = unde
       seen.api.push(body === undefined ? route : [route, body]);
       // The server saves nothing during a generation: the page waits for its end (`busy` polls).
       if (route === 'status') return Response.json({ toolJob: seen.busy-- > 0 ? { id: 'job' } : null });
-      if (route.startsWith('gallery/')) return Response.json({ runs });
+      if (route.startsWith('gallery/')) return Response.json({ runs, skipped });
       if (route === 'tools/job') return Response.json(fresh === undefined ? job : fresh);
       if (route === 'tools/series') return Response.json({ ended: true });
       if (route.startsWith('history/')) return Response.json({ messages: given.stored?.[decodeURIComponent(route.slice(8))] ?? [] });
@@ -426,6 +426,12 @@ test('a creation of the Studio that made nothing never leaves a conversation wit
   const again = page({ messages: closedCalls(saved), runs: [take('ancienne', 'call_0')] });
   await again.recovery.complete(ID, again.views());
   assert.deepEqual([again.seen.saves.length, again.seen.forgotten.length], [0, 0]);
+  // A take whose record cannot be read is one too (0.6.89): counted as none, the conversation was
+  // left empty and forgotten with that record.
+  const unread = page({ messages: studioAsked(call('call_st')), skipped: 1 });
+  await unread.recovery.complete(ID, unread.views());
+  assert.deepEqual(unread.seen.forgotten, []);
+  assert.deepEqual(unread.seen.saves.at(-1).messages.map(message => message.role), ['user', 'assistant', 'tool']);
   // Its message put back in the message box keeps it in the history, saved with it.
   const unsent = { role: 'user', content: 'Et en bleu' };
   const box = page({ messages: studioAsked(call('call_st')) });

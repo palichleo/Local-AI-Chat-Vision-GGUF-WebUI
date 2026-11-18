@@ -2205,3 +2205,22 @@ test('the message put back in the box stays on the disk through a creation of th
     'the result of its call before it',
   );
 });
+
+test('a conversation one of whose takes cannot be read is never forgotten with it (0.6.89)', async () => {
+  // The record of a take the gallery cannot read counted as no take: the conversation begun for a
+  // creation of the Studio that made nothing went, with that record and its files.
+  const deleted = [],
+    forgotten = skipped =>
+      page({
+        state: { historyItems: [{ id: ID }] },
+        routes: {
+          'history/delete': async body => (deleted.push(plain(body)), Response.json({ removed: body.id })),
+          [`gallery/${ID}?images=0`]: async () => Response.json({ runs: [], skipped }),
+        },
+      }).context.forgetConversation(ID);
+  await forgotten(1);
+  assert.deepEqual(deleted, []);
+  // Nothing in its folder: it goes, as a conversation begun for a creation that made nothing.
+  await forgotten(0);
+  assert.deepEqual(deleted.map(body => body.id), [ID]);
+});

@@ -219,6 +219,14 @@ export function setupTakeRecovery({
       await new Promise(resolve => setTimeout(resolve, 700));
     }
   }
+  /**
+   * What the gallery has of conversation `id`: its takes, and whether some of their records cannot be
+   * read (0.6.89: they counted as none, and a conversation left with nothing else could go with them).
+   */
+  async function listed(id) {
+    const answer = await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json();
+    return { runs: answer.runs ?? [], unreadable: Number(answer.skipped) > 0 };
+  }
   /** The messages of conversation `id` as they are now, kept where it is (shown or set aside) and saved. */
   async function keep(id, messages) {
     const talk = holderOf(id);
@@ -260,9 +268,10 @@ export function setupTakeRecovery({
           !state.work && job && job.conversationId === id && following !== job.id ? open.find(item => item.call.id === job.callId) : null;
       const done = open.filter(item => item !== live);
       if (done.length) {
-        let runs = null;
+        let runs = null,
+          unreadable = false;
         try {
-          runs = (await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json()).runs ?? [];
+          ({ runs, unreadable } = await listed(id));
         } catch {
           // Unreadable now: completed when it is opened next.
         }
@@ -274,7 +283,7 @@ export function setupTakeRecovery({
             messages = withResult(messages, item.call.id, recoveredContent(item, made)) ?? messages;
             changed = true;
           } else if (!made.length && item.studio && makingJob()?.callId !== item.call.id) {
-            messages = leftWithout(messages, item.call.id, runs.length > 0) ?? messages;
+            messages = leftWithout(messages, item.call.id, runs.length > 0 || unreadable) ?? messages;
             changed = true;
           }
         }
@@ -386,7 +395,8 @@ export function setupTakeRecovery({
     try {
       let content = result.content,
         record = result.record ?? null,
-        runs = [];
+        runs = [],
+        unreadable = false;
       // A series stops at the image it was making: the others are not made (the server lets them go).
       // Not from another tab than its own: the server ends a series no page asks for after a minute,
       // and a tab woken since goes on with it (0.6.87: it was ended under it).
@@ -396,7 +406,7 @@ export function setupTakeRecovery({
       // 0.6.86, and a creation of the Studio in a new conversation took it out of the Pellicule.
       if (item.asked > 1 || !record) {
         try {
-          runs = (await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json()).runs ?? [];
+          ({ runs, unreadable } = await listed(id));
         } catch {}
         const made = takesOf(runs, item.call.id);
         if (made.length > item.made.length || (item.asked > 1 && made.length)) {
@@ -410,7 +420,7 @@ export function setupTakeRecovery({
       // (runInStudio); unless nothing else would be left of a conversation that has takes (leftWithout).
       const gone = item.studio && !record,
         before = holderOf(id).messages ?? [];
-      let messages = gone ? leftWithout(before, item.call.id, runs.length > 0) : withResult(before, item.call.id, content);
+      let messages = gone ? leftWithout(before, item.call.id, runs.length > 0 || unreadable) : withResult(before, item.call.id, content);
       if (gone && messages && placeOf(messages, item.call.id).at < 0) host?.article?.remove?.();
       // Followed from another tab than its own: that tab, woken since, may have written it already;
       // its copy is the newer, and is kept (0.6.87: it was written over).

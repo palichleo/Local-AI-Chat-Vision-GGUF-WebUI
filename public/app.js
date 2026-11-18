@@ -539,9 +539,10 @@ async function forgetConversation(id) {
   try {
     await historyWrite;
     // Never with a take (0.6.87): deleted, a conversation takes its takes with it (their records are
-    // in its folder). Kept when that cannot be read: in doubt, nothing is deleted.
-    const { runs = [] } = await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json();
-    if (runs.length) return;
+    // in its folder). Kept when that cannot be read: in doubt, nothing is deleted. A record the gallery
+    // cannot read is one too (0.6.89: `skipped`, it counted as none).
+    const { runs = [], skipped = 0 } = await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json();
+    if (runs.length || Number(skipped) > 0) return;
     await api('history/delete', { confirm: true, id });
     state.historyItems = state.historyItems.filter(item => item.id !== id);
     const talk = holderOf(id);
