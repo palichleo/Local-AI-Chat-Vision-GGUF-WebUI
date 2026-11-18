@@ -17,10 +17,11 @@ test('the top bar: « Moodix » with the Éclipse for its first « o », then Ch
   );
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'in this order');
   // The Éclipse in the word (Logo E, « Dans le nom », 17/11): fuller than the mark (radii 15.2 and
-  // 14), in currentColor; no mark apart any more.
+  // 14), in currentColor; no mark apart any more. Its ring at 70 % and 1.6 px (18/11): at 22 % it
+  // vanished at 26 px and the word read « Muodix ».
   assert.match(
     top,
-    /aria-label="Moodix">M<svg class="brand-eclipse" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15\.2" fill="none" stroke="currentColor" stroke-opacity="0\.22" stroke-width="1" vector-effect="non-scaling-stroke"\/><path d="M2\.01 10\.06A15\.2 15\.2 0 1 0 29\.99 10\.06A14 14 0 0 1 2\.01 10\.06Z" fill="currentColor"\/><\/svg>odix<\/span><\/a>/,
+    /aria-label="Moodix">M<svg class="brand-eclipse" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15\.2" fill="none" stroke="currentColor" stroke-opacity="0\.7" stroke-width="1\.6" vector-effect="non-scaling-stroke"\/><path d="M2\.01 10\.06A15\.2 15\.2 0 1 0 29\.99 10\.06A14 14 0 0 1 2\.01 10\.06Z" fill="currentColor"\/><\/svg>odix<\/span><\/a>/,
   );
   assert.doesNotMatch(top, /top-mark|eclipse-ring|eclipse\.svg/);
   assert.match(top, /<button id="library-open" type="button" class="top-place" aria-controls="library-view">Pellicule<\/button>/);

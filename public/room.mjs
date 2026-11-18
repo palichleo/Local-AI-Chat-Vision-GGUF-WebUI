@@ -7,15 +7,24 @@
  * Les dégradés sombres ne doivent pas sauter par bandes : la lumière est faite une fois par prise,
  * en deux images opaques de 128 px (un voile en multiply, une lumière en screen), agrandies sans
  * flou en direct ; un tramage de bruit bleu passe sur tout l'écran.
+ *
+ * La lumière « Irisée » (18/11, lumiere-irisee-maquette.md) : une option, jamais celle par défaut.
+ * Des bandes de spectre floues, immobiles, à la place des lumières de la dernière prise (moodix.css,
+ * .room-iris) ; les sources ne valent alors plus rien, la vignette reste celle de plusieurs sources.
  */
 
 export const ROOMS = ['salle', 'ecran', 'nuit', 'velours', 'tirage', 'lavande'];
+/** D'où vient la lumière : la dernière prise (par défaut), ou la lumière irisée. */
+export const LIGHTINGS = ['prise', 'irisee'];
+/** Les sources de la lumière de la dernière prise. */
 export const LIGHTS = ['plusieurs', 'une', 'discret'];
 export const GRAINS = ['aucun', 'poudre', 'fin', 'film', 'gros'];
 export const FILTERS = ['diffusion', 'lumiere', 'centre'];
 /** Le réglage de l'application et de toutes les maquettes. */
 export const DEFAULTS = Object.freeze({
   room: 'salle',
+  // La dernière prise éclaire la pièce : rien ne met la lumière irisée tout seul.
+  lighting: 'prise',
   light: 'plusieurs',
   grain: 'poudre',
   dose: 40,
@@ -33,6 +42,7 @@ export function roomSettings(saved = {}) {
   const dose = Number(saved.dose);
   return {
     room: pick(saved.room, ROOMS, DEFAULTS.room),
+    lighting: pick(saved.lighting, LIGHTINGS, DEFAULTS.lighting),
     light: pick(saved.light, LIGHTS, DEFAULTS.light),
     grain: pick(saved.grain, GRAINS, DEFAULTS.grain),
     dose: Number.isFinite(dose) ? Math.min(100, Math.max(0, Math.round(dose / 5) * 5)) : DEFAULTS.dose,
@@ -66,9 +76,17 @@ export function grainImage(grain, filters = DEFAULTS.filters) {
 export function roomStyle(settings) {
   const value = roomSettings(settings),
     lumiere = value.filters.includes('lumiere'),
-    [strength, vignette] = STRENGTH[value.light];
+    // Irisée : les sources ne comptent plus, la vignette est celle de plusieurs sources.
+    [strength, vignette] = STRENGTH[value.lighting === 'irisee' ? 'plusieurs' : value.light];
   return {
-    data: { room: value.room, light: value.light, grain: value.grain, motion: value.motion, filters: value.filters.join(' ') },
+    data: {
+      room: value.room,
+      lighting: value.lighting,
+      light: value.light,
+      grain: value.grain,
+      motion: value.motion,
+      filters: value.filters.join(' '),
+    },
     variables: {
       '--grain-image': value.grain === 'aucun' ? 'none' : grainImage(value.grain, value.filters),
       // Opacité = base × dose : 0,5 pour le bruit gris en overlay, 0,15 pour les points clairs.
