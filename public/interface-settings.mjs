@@ -3,10 +3,18 @@
  * light and grain, applied at once on the page (room.mjs, applyRoom); « Enregistrer » keeps them
  * with the other preferences, « Annuler » or closing goes back to what was kept, « Rétablir les
  * réglages par défaut » puts the defaults in hand. Grain « Aucun » fades Dose, Mouvement, Filtres.
+ * Éclairage (18/11, lumiere-irisee-maquette.md): « Lumière », Dernière prise (the default) or
+ * Irisée; « Sources », those of the light of the last take, faded and out of reach with Irisée.
  */
-import { DEFAULTS, FILTERS, GRAINS, LIGHTS, ROOMS, applyRoom, roomSettings } from './room.mjs';
+import { DEFAULTS, FILTERS, GRAINS, LIGHTINGS, LIGHTS, ROOMS, applyRoom, roomSettings } from './room.mjs';
 
 const ROOM_NAMES = { salle: 'Salle', ecran: 'Écran éteint', nuit: 'Nuit américaine', velours: 'Velours', tirage: 'Tirage', lavande: 'Lavande' };
+const LIGHTING_NAMES = { prise: 'Dernière prise', irisee: 'Irisée' };
+// Under the pointer (lumiere-irisee-maquette.md).
+const LIGHTING_TIPS = {
+  prise: 'La dernière prise éclaire la pièce et change avec elle',
+  irisee: 'Une lumière irisée, comme le reflet d’un disque. Elle ne change pas avec les prises',
+};
 const LIGHT_NAMES = { plusieurs: 'Plusieurs sources', une: 'Une source', discret: 'Discret' };
 const GRAIN_NAMES = { aucun: 'Aucun', poudre: 'Poudre', fin: 'Fin', film: 'Film', gros: 'Gros' };
 const MOTION_NAMES = { fige: 'Figé', 24: '24 i/s' };
@@ -17,18 +25,24 @@ export function setupInterfaceSettings({ $, node, api, root = globalThis.documen
     current = roomSettings();
   const same = (a, b) => JSON.stringify(roomSettings(a)) === JSON.stringify(roomSettings(b));
 
-  /** A row of choices, one pressed (the same small group as Image · Vidéo · Son). */
-  function segments(box, names, list, value, pick) {
+  /**
+   * A row of choices, one pressed (the same small group as Image · Vidéo · Son). `tips`: the words of
+   * each under the pointer; `off`: none can be chosen (the keyboard does not reach them either).
+   */
+  function segments(box, names, list, value, pick, { tips = null, off = false } = {}) {
     box.replaceChildren(
       ...list.map(id => {
         const choice = node('button', 'settings-segment', names[id]);
         choice.type = 'button';
         choice.setAttribute('role', 'radio');
         choice.setAttribute('aria-checked', String(String(value) === String(id)));
+        if (tips?.[id]) choice.title = tips[id];
+        choice.disabled = off;
         choice.onclick = () => pick(id);
         return choice;
       }),
     );
+    box.setAttribute('aria-disabled', String(off));
   }
   function paint() {
     // The six rooms, each its own colour, its name under it.
@@ -44,7 +58,13 @@ export function setupInterfaceSettings({ $, node, api, root = globalThis.documen
         return choice;
       }),
     );
-    segments($('room-light'), LIGHT_NAMES, LIGHTS, current.light, light => change({ light }));
+    segments($('room-lighting'), LIGHTING_NAMES, LIGHTINGS, current.lighting, lighting => change({ lighting }), {
+      tips: LIGHTING_TIPS,
+    });
+    // The sources are those of the light of the last take: with Irisée, they fade and cannot be chosen.
+    const iridescent = current.lighting === 'irisee';
+    segments($('room-light'), LIGHT_NAMES, LIGHTS, current.light, light => change({ light }), { off: iridescent });
+    $('room-sources')?.classList?.toggle('is-faded', iridescent);
     segments($('room-grain'), GRAIN_NAMES, GRAINS, current.grain, grain => change({ grain }));
     segments($('room-motion'), MOTION_NAMES, ['fige', '24'], current.motion, motion => change({ motion }));
     $('room-filters').replaceChildren(
@@ -70,7 +90,7 @@ export function setupInterfaceSettings({ $, node, api, root = globalThis.documen
    */
   function held() {
     const active = globalThis.document?.activeElement;
-    for (const id of ['room-choices', 'room-light', 'room-grain', 'room-motion', 'room-filters']) {
+    for (const id of ['room-choices', 'room-lighting', 'room-light', 'room-grain', 'room-motion', 'room-filters']) {
       const at = active ? [...($(id).children ?? [])].indexOf(active) : -1;
       if (at >= 0) return () => $(id).children[at]?.focus?.();
     }

@@ -9199,6 +9199,49 @@ html:not([data-theme='light']) {
 :root:not([data-light='plusieurs']) .room-halos {
   display: none;
 }
+/* La lumière irisée (18/11, lumiere-irisee-maquette.md ; captures 62 à 64), une option jamais
+   choisie par défaut : des bandes verticales de spectre, floues, au milieu de la pièce, éteintes en
+   haut, en bas et sur les côtés. À la place des lumières de la dernière prise (voile, lumière, halos
+   et faisceau) ; sous la vignette, le grain et le tramage, derrière le verre, jamais sur les images.
+   Immobile, la même dans toutes les salles. */
+.room-iris {
+  position: absolute;
+  inset: -40px;
+  display: none;
+  background: linear-gradient(
+    90deg,
+    transparent 4%,
+    rgba(120, 26, 22, 0.55) 15%,
+    rgba(60, 40, 22, 0.25) 22%,
+    rgba(38, 150, 40, 0.9) 31%,
+    rgba(110, 140, 30, 0.7) 39%,
+    rgba(165, 140, 34, 0.75) 45%,
+    rgba(70, 60, 70, 0.3) 51%,
+    rgba(40, 48, 200, 0.9) 57%,
+    rgba(86, 34, 196, 0.85) 64%,
+    rgba(70, 24, 110, 0.35) 70%,
+    rgba(170, 34, 170, 0.75) 77%,
+    rgba(130, 22, 48, 0.5) 86%,
+    transparent 95%
+  );
+  filter: blur(34px) saturate(1.05);
+  mix-blend-mode: screen;
+  opacity: 0.42;
+  -webkit-mask-image: radial-gradient(
+    ellipse 62% 58% at 50% 44%,
+    #000 0%,
+    rgba(0, 0, 0, 0.7) 42%,
+    rgba(0, 0, 0, 0.25) 70%,
+    transparent 92%
+  );
+  mask-image: radial-gradient(ellipse 62% 58% at 50% 44%, #000 0%, rgba(0, 0, 0, 0.7) 42%, rgba(0, 0, 0, 0.25) 70%, transparent 92%);
+}
+:root[data-lighting='irisee'] .room-iris {
+  display: block;
+}
+:root[data-lighting='irisee'] :is(.room-veil, .room-glow, .room-halos) {
+  display: none;
+}
 /* Le vignettage, en S : 0,55 avec plusieurs sources, 0,32 avec une, 0,18 discret. */
 .room-vignette {
   position: absolute;
@@ -12719,6 +12762,10 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
 .settings-row.is-faded {
   opacity: 0.35;
   pointer-events: none;
+}
+/* Les sources de la lumière de la dernière prise, avec la lumière irisée : à 38 %, hors d'atteinte. */
+.settings-row.room-sources.is-faded {
+  opacity: 0.38;
 }
 .settings-note {
   margin: 0;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { DEFAULTS, ROOMS, grainImage, refreshLight, roomSettings, roomStyle, showTakeReady } from '../public/room.mjs';
+import { DEFAULTS, LIGHTINGS, ROOMS, grainImage, refreshLight, roomSettings, roomStyle, showTakeReady } from '../public/room.mjs';
 
 // Read as the page is written, whatever the ends of line of this copy (a checkout on Windows has CRLF).
 const read = async name => (await readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replaceAll(String.fromCharCode(13, 10), String.fromCharCode(10));
@@ -10,6 +10,7 @@ const drawn = image => decodeURIComponent(image.slice('url("data:image/svg+xml,'
 test('a saved setting is completed, and kept within its choices', () => {
   assert.deepEqual(roomSettings(), {
     room: 'salle',
+    lighting: 'prise',
     light: 'plusieurs',
     grain: 'poudre',
     dose: 40,
@@ -18,7 +19,7 @@ test('a saved setting is completed, and kept within its choices', () => {
   });
   assert.deepEqual(
     roomSettings({ room: 'velours', light: 'une', grain: 'film', dose: 73, motion: 'fige', filters: ['centre', 'x', 'lumiere'] }),
-    { room: 'velours', light: 'une', grain: 'film', dose: 75, motion: 'fige', filters: ['lumiere', 'centre'] },
+    { room: 'velours', lighting: 'prise', light: 'une', grain: 'film', dose: 75, motion: 'fige', filters: ['lumiere', 'centre'] },
   );
   assert.equal(roomSettings({ room: 'cinema' }).room, 'salle');
   assert.equal(roomSettings({ dose: 'beaucoup' }).dose, 40);
@@ -28,7 +29,14 @@ test('a saved setting is completed, and kept within its choices', () => {
 
 test('what the sheet reads: the grain is its base times the dose; the light and the vignette follow the lighting', () => {
   const plain = roomStyle({});
-  assert.deepEqual(plain.data, { room: 'salle', light: 'plusieurs', grain: 'poudre', motion: '24', filters: 'diffusion lumiere' });
+  assert.deepEqual(plain.data, {
+    room: 'salle',
+    lighting: 'prise',
+    light: 'plusieurs',
+    grain: 'poudre',
+    motion: '24',
+    filters: 'diffusion lumiere',
+  });
   // Grey noise in overlay with « Lumière »: 0.5 × 40 %.
   assert.equal(plain.variables['--grain-opacity'], '0.2');
   assert.equal(plain.variables['--grain-blend'], 'overlay');
@@ -43,6 +51,33 @@ test('what the sheet reads: the grain is its base times the dose; the light and 
     ['0.7', '0.32'],
   );
   assert.equal(roomStyle({ grain: 'aucun' }).variables['--grain-image'], 'none');
+});
+
+test('the light stays that of the last take unless the user chooses « Irisée »: nothing sets it by itself', async () => {
+  // The default, and what every setting saved before 0.6.81 (without the field) becomes.
+  assert.equal(DEFAULTS.lighting, 'prise');
+  assert.deepEqual(LIGHTINGS, ['prise', 'irisee']);
+  assert.equal(roomSettings().lighting, 'prise');
+  assert.equal(roomSettings({ room: 'lavande', light: 'discret', grain: 'aucun' }).lighting, 'prise', 'a room, a grain: not it');
+  for (const odd of [undefined, null, '', 'Irisée', 'arc-en-ciel', 1, true, ['irisee'], { irisee: true }])
+    assert.equal(roomSettings({ lighting: odd }).lighting, 'prise', String(odd));
+  // Chosen: kept as it is.
+  assert.equal(roomSettings({ lighting: 'irisee' }).lighting, 'irisee');
+  // The page before any script says the default, and the sheet shows the iridescent layer only when it is asked.
+  const html = await read('index.html'),
+    css = await read('moodix.css');
+  assert.ok(html.includes(' data-lighting="prise" '));
+  assert.match(css, /\.room-iris \{[^}]*display: none;/);
+  assert.match(css, /:root\[data-lighting='irisee'\] \.room-iris \{\n {2}display: block;\n\}/);
+  assert.match(css, /:root\[data-lighting='irisee'\] :is\(\.room-veil, \.room-glow, \.room-halos\) \{\n {2}display: none;\n\}/);
+  // Its drawing as the maquette says it, behind the vignette.
+  assert.match(css, /\.room-iris \{[^}]*inset: -40px;[^}]*filter: blur\(34px\) saturate\(1\.05\);[^}]*mix-blend-mode: screen;[^}]*opacity: 0\.42;/);
+  assert.ok(html.indexOf('class="room-iris"') < html.indexOf('class="room-vignette"'));
+  assert.ok(html.indexOf('class="room-halos"') < html.indexOf('class="room-iris"'));
+  // With it, the sources no longer count: the vignette of several sources, whatever they are.
+  const iridescent = roomStyle({ lighting: 'irisee', light: 'discret' });
+  assert.equal(iridescent.data.lighting, 'irisee');
+  assert.equal(iridescent.variables['--vignette'], '0.55');
 });
 
 test('each grain its noise; the diffusion is baked into the tile, never a live blur', () => {
