@@ -249,3 +249,23 @@ What it shows:
 - **Method**: the first video of a run empties the card before its decode (a choice of 0.5.51, kept), so a new prompt only benefits from the lent share from the third video on; a cold run of ours in a new process pays the imports, which a worker pays once.
 
 Not covered: the application's own path (the chat model coming and going between two creations), SCAIL-2, sounds, upscaling; ComfyUI on the card under constraint; a second machine.
+
+### MiniMax H3 after 0.6.80 (18 November 2026)
+
+The model is left on the card between two videos, as LTX 2.5's: its file open, its layers built, its share of the card kept through the decode (which runs beside it), taken back for the same files, the same shape of video and the same attention. Measured by alternating the code of 0.6.79 and of 0.6.80 on the same machine, in use that day (a browser, 0.6 GiB of the card held elsewhere), then against ComfyUI the same day; later videos of a run, same prompt:
+
+| Video | 0.6.79 | 0.6.80 | ComfyUI |
+| --- | --- | --- | --- |
+| 768 × 448, 5 s | 53.0 s | 49.9 s | 47.0 s |
+| 1344 × 768, 5 s | 161.0 s | 155.6 s | 146.0 s |
+
+With a new prompt each time: 58.2 s against 52.5 at 768 × 448, 165.6 against 150.7 at 1344 × 768.
+
+What was tried for the rest of the gap, and what it showed:
+
+- **A model taken back must not ask for its page-locked RAM again.** Asked again, the weights to copy were named from the share as the steps had left it, a few layers more than first foreseen; at 1344 × 768, where RAM locks a part of them only, 19 GiB were read anew beside the rest and the next videos took ten minutes instead of two and a half. Found by the alternation at that size, fixed before the commit: a size not measured would have shipped it.
+- **The decoders read into RAM for the next video make everything slower on 32 GiB**: 53.4 s a draft instead of 46.2, the steps at 4.1 s instead of 3.7. With 17 to 19 GiB of the model page-locked, 5 GiB more leave the system nothing. The decoder's file read ahead through the system's cache changes nothing either (0.6.79).
+- **A larger share of the model at draft size changes nothing measurable** (5.5 GiB instead of 4.2: 47.2 to 48.9 s against 46.7 to 49.9).
+- **The decoders left on the card, ComfyUI's arrangement, would gain little here**: with 5.2 GiB of the card taken the model keeps no share, a step takes 4.0 to 4.1 s instead of 3.75 to 3.9 (2 to 3.5 s a video) for 5.7 s of loading saved, nothing at 1344 × 768 where they do not fit beside the steps, and 20 GiB of RAM locked. Not done.
+
+What separates the two engines now, at every video: the video decoder loaded again (4.6 GiB: 3.6 to 7.3 s), the audio VAE (1 s), and a new prompt (8 to 12 s for us, 5 for ComfyUI: the 15.7 GiB conditioner read from the disk). One cause under the three: the RAM held by the model's page-locked weights on a 32 GiB machine. ComfyUI locks 13 GiB at most and reads the rest through the system's cache; its steps are 6 % slower than ours and everything around them faster. On a machine of 64 GiB the question would not arise the same way: not measured.
