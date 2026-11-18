@@ -2378,10 +2378,13 @@ html[data-page-hidden='true'] .generation-frame::after,
   opacity: 0;
   transition: opacity 0.3s ease 0.4s;
 }
+/* Out of sight, the line rests: under its picture, or in it for a card of the Studio (0.6.96). */
 html[data-page-hidden='true'] .generation-progress > span,
 html[data-page-hidden='true'] .generation-progress > span::after,
 .generation-frame.is-paused + .generation-caption .generation-progress > span,
-.generation-frame.is-paused + .generation-caption .generation-progress > span::after {
+.generation-frame.is-paused + .generation-caption .generation-progress > span::after,
+.generation-frame.is-paused > .generation-progress > span,
+.generation-frame.is-paused > .generation-progress > span::after {
   animation-play-state: paused;
 }
 @keyframes generation-progress-slide {

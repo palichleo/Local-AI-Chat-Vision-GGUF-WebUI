@@ -5,7 +5,7 @@ import { generationTime, takeTime } from './generation-time.mjs';
 /**
  * The miniature of the chat (0.6.81). While a work of a conversation goes on (Moodix answers, a
  * card waits for the user, a take is made) and the user looks elsewhere (another conversation, the
- * Pellicule, the Studio when it does not show it, the Paramètres), a small window of glass at the
+ * Pellicule, the Paramètres; never its Chat nor its Studio, 0.6.96), a small window of glass at the
  * bottom right of the page shows it as the conversation does: the Éclipse of Moodix and the name of
  * the conversation, the take in progress (the Flux of the picture so far, « VIDÉO · LTX 2.5 », its
  * stage and its percentage, the line that fills). A click brings the user back to the conversation.

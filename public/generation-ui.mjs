@@ -201,7 +201,13 @@ export function setupGenerationUI({
           ? 'Génération de son'
           : 'Génération d’image en cours',
     );
-    caption.append(progress, label);
+    // A card of the Studio has its words and « Ouvrir » under its picture: its line goes in the frame,
+    // at the foot of the picture as on the other takes (0.6.96: at the foot of the card, it lay on
+    // « Ouvrir »).
+    if (compact) {
+      frame.append(progress);
+      caption.append(label);
+    } else caption.append(progress, label);
     // Over a take in progress in a conversation (capture 13): « VIDÉO · LTX 2.5 », then its stage.
     caption.setAttribute(
       'data-kind',
@@ -230,11 +236,12 @@ export function setupGenerationUI({
   }
   function mount(container, request = {}, { compact = false, live: made = false } = {}) {
     container.classList.add('generation-grid');
-    // Said to the miniature for a take being made only; never fatal to the card.
+    // Said to the miniature for a take being made only; never fatal to the card. `compact`: a creation
+    // of the Studio, which the Studio follows itself (0.6.96: it follows those of the Chat from this).
     const tell = event => {
       if (!made || !onLive) return;
       try {
-        onLive({ request, ...event });
+        onLive({ request, compact, ...event });
       } catch {
         // The card goes on without it.
       }
@@ -253,8 +260,9 @@ export function setupGenerationUI({
       controller = new AbortController();
     const slots = new Map(),
       // In a conversation, the Flux of the take in progress, drawn from the picture so far: the start
-      // image of a clip until the generator has one.
-      flux = compact ? null : takeFlux(frame, { node }),
+      // image of a clip until the generator has one. A card of the Studio too (0.6.96): without it,
+      // it showed the moving background of before, the picture so far dimmed under it.
+      flux = takeFlux(frame, { node }),
       // What the generator has so far, in the first tile.
       live = livePreview(node, frame, { onLoad: picture => flux?.source(picture) });
     // How long it has been in the making (0.6.93), at the right of its stage: the count of the server,
@@ -363,7 +371,15 @@ export function setupGenerationUI({
       // A named stage (loading, step 3/11, decoding…) is worth showing; the generic line is not,
       // unless it says which image of a series this is.
       caption(text, Boolean(series) || (named && !/^Génération (de la vidéo|de l’image|du son|en cours)…$/.test(said)));
-      tell({ type: 'progress', text, fraction: Number.isFinite(fraction) ? fraction : null, preview: preview && !record ? preview : null });
+      // (With the count of the server, until its take is there: the Studio of its conversation counts
+      // from the same go, 0.6.96.)
+      tell({
+        type: 'progress',
+        text,
+        fraction: Number.isFinite(fraction) ? fraction : null,
+        preview: preview && !record ? preview : null,
+        time: !record && time ? time : null,
+      });
     }
     function release(slot) {
       slot.controller?.abort();

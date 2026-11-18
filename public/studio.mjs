@@ -301,6 +301,9 @@ export function setupStudio({
   openAgent = () => {},
   // Brings the Studio on screen (as « Studio » of the sidebar does): a mode chosen from elsewhere.
   openStudio = () => {},
+  // The take of the Chat being made in the conversation shown (0.6.96): { request, running, label,
+  // fraction, preview, ended }, or null. Its other view, the Studio follows it (watch).
+  making = () => null,
 }) {
   const $ = id => document.getElementById(id);
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms * pace));
@@ -310,7 +313,7 @@ export function setupStudio({
     nextTake = null, // the number the next take of the project will have (the server's counter)
     legacyRuns = [],
     legacy = false, // the Sortie shows, and the Studio works in, the Studio of before Moodix
-    working = null, // { label, fraction, preview, controller | external } while a generation runs
+    working = null, // { label, fraction, preview, controller | external, chat } while a generation runs
     busyDrawn = '', // why a work of the page greys « Générer », as last drawn (busyChanged)
     // A creation just over, its takes read again: the Studio still holds its conversation (holds),
     // or a status read meanwhile let it go (letGo) and its take went on the screen of the one shown.
@@ -346,7 +349,8 @@ export function setupStudio({
     heldIn = null;
   /** Whether the Studio holds a work: a take being made, a proposal waiting, a character checked. */
   // (`settling`: a creation just over, until its take is on the screen of its own conversation, 0.6.87.)
-  const holds = () => Boolean(working || proposal || checking || ai || settling);
+  // (Not a take of the Chat it follows, `working.chat`: that one is its conversation's, 0.6.96.)
+  const holds = () => Boolean((working && !working.chat) || proposal || checking || ai || settling);
   /** The conversation the Studio works in, and its project: the page's, unless it holds a work of another. */
   const conversation = () => (heldIn ? heldIn.conversation : shownConversation());
   const project = () => (heldIn ? heldIn.project : shownProject());
@@ -1085,7 +1089,8 @@ export function setupStudio({
     const proposed = proposal?.mode === mode && proposal.values?.size === draft.size;
     // A size a take or a proposal was made at stays, outside the list too, while the model makes it
     // in the format in hand (0.6.92): replaced by the size of the list nearest to the model's own,
-    // the Studio showed 1344 × 768 beside a take of 1920 × 1080 asked in the Chat.
+    // the Studio showed 1344 × 768 beside a take of 1920 × 1080 asked in the Chat. (The same for a
+    // take of the Chat being made, its settings shown: showRequest, 0.6.96.)
     if (!proposed && !madeSize(workflow, draft) && !sizes.some(size => sizeKey(size) === draft.size))
       draft.size = nearest ? sizeKey(nearest) : null;
     return { formats, sizes, final: workflow.final && sizeKey(workflow.final) };
@@ -3322,14 +3327,186 @@ export function setupStudio({
   /**
    * A creation of the conversation shown, made by the server for a page reloaded since (0.6.82): the
    * screen follows it again (follow) until it is over (settled), as one approved here; its stop stops
-   * it (stopTurn). False when the Studio already holds a work.
+   * it (stopTurn). False when the Studio already holds a work. With its `request` (0.6.96), the
+   * Studio shows the settings it is made with, not those it had (the last take, the image of a series
+   * before it); its take, once there, gives them as any take does (settled).
    */
-  function followAgain() {
+  function followAgain(request = null) {
     if (holds()) return false;
+    // (A take of the Chat it followed: the Studio as it was first.)
+    if (working?.chat) unfollow();
     holdAt();
-    working = { label: 'Génération en cours…', fraction: null, external: true };
+    const shown = request ? showRequest(request) : null;
+    working = { label: 'Génération en cours…', fraction: null, external: true, ...(shown ? { shown } : {}) };
     render();
     return true;
+  }
+  /**
+   * The settings of `request` (a proposal, as the server makes it) in the draft of its mode, at once, as
+   * the pointer sets those of a proposal (animate): its model, its prompt, its format and size, its
+   * length, its seed, its settings, its LoRAs (those of the user it is made with too) and its inputs
+   * (0.6.96). What was shown ({ mode, seedBefore }), or null when the Studio has not its model.
+   */
+  function showRequest(request) {
+    const verb = request.tool || request.call?.function?.name,
+      target = MODE_OF_VERB[verb] ?? request.mediaType ?? 'image',
+      list = offered(verb),
+      workflow = list.find(item => item.name === request.workflowName);
+    if (!modelsOf(target).length) return null;
+    mode = target;
+    formatsOpen = false;
+    // An action on a take (Agrandir, Interpoler), a model the Studio has not: its mode alone.
+    if (!workflow) {
+      if (target !== 'video') extending = null;
+      return null;
+    }
+    const values = proposedValues(request, list),
+      draft = drafts[target],
+      seedBefore = draft.seed,
+      size = request.resolution ?? {};
+    // A continuation shows the clip it continues (a take, or a file of the disk), as proposed.
+    extending =
+      target !== 'video'
+        ? null
+        : values.source
+          ? (runs.find(item => item.id === values.source) ?? { id: values.source, prompt: '', parameters: {} })
+          : values.sourceResource
+            ? resourceRecord(assets.resource?.(values.sourceResource) ?? { id: values.sourceResource }, 'video', {
+                name: values.sourceLabel,
+                width: size.width,
+                height: size.height,
+              })
+            : null;
+    takeModel(draft, target, workflow);
+    // Its saved settings (« Enregistrer ») do not come over those it is made with.
+    presetShown[target] = true;
+    Object.assign(draft, { prompt: values.prompt, before: null, inputs: {} });
+    if (values.size && !extending) Object.assign(draft, { format: values.format ?? draft.format, size: values.size });
+    if (workflow.seeded) draft.seed = values.seed !== null ? String(values.seed) : '';
+    if (values.loras && workflow.loras?.length) {
+      const chosen = new Map(values.loras.map(item => [item.id, item.strength]));
+      for (const item of workflow.loras) {
+        const choice = loraChoice(workflow, item, draft);
+        choice.on = chosen.has(item.id) || !item.assistant;
+        if (chosen.has(item.id) && Number.isFinite(chosen.get(item.id))) choice.strength = chosen.get(item.id);
+      }
+    }
+    for (const [key, value] of Object.entries(values.settings)) {
+      (draft.settings[workflow.id] ??= {})[key] = value;
+      if (key === 'lyrics' && value) draft.lyrics = true;
+    }
+    for (const entry of referenceInputs(values.references)) (draft.inputs[entry.role] ??= [])[entry.index] = entry.item;
+    const lengths = workflow.lengths?.seconds ?? [];
+    if (lengths.length && values.seconds !== null)
+      draft[extending ? 'extension' : 'length'] = lengths.reduce((best, value) =>
+        Math.abs(value - values.seconds) < Math.abs(best - values.seconds) ? value : best,
+      );
+    if (workflow.styled && target !== 'audio' && !extending)
+      draft.styles = (Array.isArray(request.styles) ? request.styles : [])
+        .filter(style => style?.name)
+        .slice(0, MAX_STYLES)
+        .map(({ name, strength }) => ({ name, strength }));
+    return { mode: target, seedBefore };
+  }
+  /**
+   * The take of the Chat being made in the conversation shown (0.6.96), as `making()` gives it: Chat
+   * and Studio are two views of that conversation. While it is made, the screen follows it as a
+   * creation of the Studio (the Flux of the picture so far, its step, « En cours · 42 % », « Arrêter »,
+   * which stops it with its turn), with the settings it is made with; « Générer » waits for its end and
+   * says why. It does not hold the Studio: another conversation opened, the Studio is that one's
+   * (greyed there, as before), and follows the take again once back. Over, the Studio is as it was, then
+   * shows the take made with its settings (the last take of the conversation), or why it failed. Asked
+   * at each step of the take and whenever the page changes: nothing new, nothing done.
+   */
+  function watch() {
+    const take = making() ?? null;
+    if (working?.chat) {
+      if (take?.request !== working.request || !take.running) return unwatch(take?.request === working.request ? take.ended : null);
+      // How long it has been in the making, as the server counts it (0.6.93): its clock goes on alone.
+      if (take.time && take.time !== working.timeGiven) {
+        working.timeGiven = take.time;
+        timeWork(take.time);
+      }
+      const label = take.label || working.label,
+        fraction = Number.isFinite(take.fraction) ? take.fraction : working.fraction,
+        preview = take.preview || working.preview;
+      if (label === working.label && fraction === working.fraction && preview === working.preview) return;
+      Object.assign(working, { label, fraction, preview });
+      return progress();
+    }
+    // Not over a work of its own, a proposal or Moodix AI setting it, nor a prompt being improved.
+    if (!take?.running || holds() || working || enriching || !info || legacy || away()) return;
+    leaveLook();
+    const before = {
+        mode,
+        drafts: structuredClone(drafts),
+        advanced,
+        kept: { ...kept },
+        pinned,
+        extending,
+        // What a model showed first, for « Enregistrer » (paintSave): not the settings of this take.
+        presetShown: { ...presetShown },
+        baselines: { ...baselines },
+      };
+    showRequest(take.request);
+    working = {
+      label: take.label || 'Génération en cours…',
+      fraction: Number.isFinite(take.fraction) ? take.fraction : null,
+      preview: take.preview || null,
+      external: true,
+      chat: true,
+      request: take.request,
+      before,
+      timeGiven: take.time,
+    };
+    // Its time from its go, beside its step, as its card counts it (0.6.93).
+    if (take.time) timeWork(take.time);
+    failure = '';
+    render();
+  }
+  /**
+   * The take of the Chat followed here is followed no more: the Studio as it was before it (nothing
+   * drawn), but for what went wrong before: that take came since.
+   */
+  function unfollow() {
+    const { before } = working;
+    working = null;
+    // (Its count with it: the next work counts from its own go.)
+    elapsed.stop();
+    putBack(before);
+    failure = '';
+    for (const item of MODES) presetShown[item.id] = before.presetShown[item.id];
+    for (const key of Object.keys(baselines)) if (!(key in before.baselines)) delete baselines[key];
+  }
+  /**
+   * The take of the Chat followed here is over (`ended`: { type, record, message }), or not shown any
+   * more. Made: the newest take of the conversation, on the screen with its settings, now when the
+   * Studio is on screen, else when it comes (open reads its takes again). Failed under the user's eyes:
+   * why, as for a creation of its own (in the Chat, its card says it).
+   */
+  function unwatch(ended = null) {
+    unfollow();
+    const seen = globalThis.document?.body?.dataset?.view === 'studio';
+    if (ended?.record) {
+      runsStale = true;
+      if (seen) return void showMade(ended.record);
+    } else if (ended?.type === 'failed' && seen) failure = ended.message || 'La génération a échoué.';
+    render();
+  }
+  /** The take of the Chat just made, on the screen with its settings, as the last take (settle). */
+  async function showMade(made) {
+    await refresh().catch(() => {});
+    // Something else came meanwhile (a creation, a proposal, another conversation): theirs.
+    if (working || holds() || made.conversationId !== conversation()) return render();
+    pinned = null;
+    settle();
+    const record = runs.find(item => item.id === made.id);
+    if (record) {
+      kept[mediaOf(record)] = record;
+      if (modelsOf(mediaOf(record)).length) mode = mediaOf(record);
+    }
+    render();
+    scrollStrip();
   }
   /**
    * A work of the page began or ended (0.6.86): the Studio is drawn again when what greys « Générer »
@@ -3343,7 +3520,8 @@ export function setupStudio({
   }
   /** A generation approved here, run by the chat turn: its progress comes from there, with its time. */
   function follow(label, fraction, preview, time) {
-    if (!working?.external) return;
+    // (A take of the Chat followed here hears its own: watch.)
+    if (!working?.external || working.chat) return;
     Object.assign(working, {
       label: typeof label === 'string' && label ? label : working.label,
       fraction: Number.isFinite(fraction) ? fraction : working.fraction,
@@ -3354,7 +3532,10 @@ export function setupStudio({
   }
   /** The end of a generation approved here: its creation is shown on the screen. */
   async function settled(result) {
-    const external = working?.external;
+    // (Not a take of the Chat followed here: watch ends it.)
+    const external = working?.external && !working.chat,
+      // The settings of its request, shown by followAgain (0.6.96).
+      shown = external ? working.shown : null;
     if (external) working = null;
     // Held until its take is on its own screen (settling, 0.6.87).
     settling = true;
@@ -3365,7 +3546,14 @@ export function setupStudio({
       if (result?.record) {
         const record = runs.find(item => item.id === result.record.id) ?? result.record;
         kept[mediaOf(record)] = record;
+        // Shown from its request: those of its take now, its seed drawn again unless it was named.
+        if (shown) adopt(record);
       } else if (external && result?.error) failure = result.error;
+      // Nothing made: the seed and the images shown with its request were its own.
+      if (shown && !result?.record) {
+        drafts[shown.mode].seed = shown.seedBefore;
+        releaseInputs({ mode: shown.mode });
+      }
     } finally {
       settling = false;
     }
@@ -4426,6 +4614,8 @@ export function setupStudio({
       go.title = busyElsewhere;
       go.classList.add('is-unavailable');
     }
+    // A take of the Chat of this conversation, followed here (watch, 0.6.96): one creation at a time.
+    if (working?.chat) go.title = 'Génération en cours dans cette conversation : attendez sa fin.';
     if (working) {
       go.setAttribute('role', 'progressbar');
       go.setAttribute('aria-valuemin', '0');
@@ -4672,6 +4862,9 @@ export function setupStudio({
       if (!info) unreadable = error.message;
       notice('Studio indisponible : ' + error.message);
     }
+    // A take of the Chat being made, that the Studio could not follow before its tools were read
+    // (0.6.96): followed from now (settle waits for its end).
+    if (!working) watch();
     const set = settle();
     // Drawn again only if what it shows has changed, once the page has stopped moving.
     await afterMove();
@@ -4736,6 +4929,9 @@ export function setupStudio({
       return;
     }
     heldIn = null;
+    // A take of the Chat followed here (watch, 0.6.96) is the conversation left's: the Studio as it
+    // was before it, kept as such for its return (where it follows it again, below).
+    if (working?.chat) unfollow();
     // A creation was being looked at: the look ends as « Revenir » ends it, before anything is kept
     // of the conversation left. Kept as they were, its drafts were those of the take looked at (its
     // very seed with them, which followed into the conversation opened) and the user's own were lost.
@@ -4756,6 +4952,9 @@ export function setupStudio({
     draftsKey = next;
     forget();
     onConversation();
+    // Back in a conversation whose take of the Chat is being made: the Studio follows it again (settle
+    // waits for its end).
+    watch();
     if (info)
       void refresh()
         .then(settle, () => {})
@@ -4995,6 +5194,13 @@ export function setupStudio({
     if (!looked) return;
     const before = looked;
     endLook();
+    putBack(before);
+  }
+  /**
+   * The Studio as `before` kept it (a look, a take of the Chat followed, 0.6.96): its drafts, its
+   * screen, its mode, « Plus de réglages ». What was added to a draft since and was not there leaves.
+   */
+  function putBack(before) {
     for (const item of MODES) {
       const draft = drafts[item.id];
       for (const key of Object.keys(draft)) if (!(key in before.drafts[item.id])) delete draft[key];
@@ -5167,6 +5373,7 @@ export function setupStudio({
     busyChanged,
     follow,
     settled,
+    watch,
     show,
     takeOver,
     conversationChanged,

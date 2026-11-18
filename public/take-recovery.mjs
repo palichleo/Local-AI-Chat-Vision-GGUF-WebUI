@@ -389,7 +389,8 @@ export function setupTakeRecovery({
     try {
       card = host?.generations ? generationUI.mount(host.generations, request, { compact: studio }) : null;
       if (host) host.generation = true;
-      if (studio && shownHere(id)) state.studio?.followAgain?.();
+      // (With the settings it is made with, 0.6.96: not those of the last take.)
+      if (studio && shownHere(id)) state.studio?.followAgain?.(request);
       onChange();
       started();
       result = await workflowsUI.followTool(

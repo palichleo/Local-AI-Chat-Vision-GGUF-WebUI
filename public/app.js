@@ -1267,6 +1267,8 @@ function updateControls() {
     // A work the Studio held, over: left meanwhile, the Studio follows the page (it says it itself
     // at each end; asked again here, it changes nothing).
     state.studio?.letGo?.();
+    // The take of the Chat the Studio follows, over or no longer shown (0.6.96): it says it at once.
+    state.studio?.watch?.();
     // What greys « Générer » changed (a work began or ended): the Studio says it at once (0.6.86).
     state.studio?.busyChanged?.();
     syncMiniature();
@@ -1275,9 +1277,8 @@ function updateControls() {
 
 /**
  * Where the miniature of the chat shows (0.6.81): wherever the work in hand, or the one that ended
- * while the user was away, is not seen (another conversation, the Pellicule, the Studio when it does
- * not show it, the Paramètres, as a pill in their foot); nowhere once the user is back in its
- * conversation after its end.
+ * while the user was away, is not seen (another conversation, the Pellicule, the Paramètres, as a pill
+ * in their foot); nowhere once the user is back in its conversation after its end.
  */
 function syncMiniature() {
   const mini = state.miniature,
@@ -1285,13 +1286,10 @@ function syncMiniature() {
   if (!work) return;
   const settings = $('settings'),
     here = shownHere(work.conversationId) && !settings?.open,
-    // Its Chat shows it; its Studio when it holds it (a take made there, a proposal of Moodix AI on it),
-    // or when its chat is opened over it; the words of Moodix alone, its « Agent » says them.
-    seen =
-      here &&
-      (state.view === 'chat' ||
-        (state.view === 'studio' &&
-          (document.body?.dataset?.chat === 'open' || Boolean(state.studio?.holds?.()) || !mini.taking)));
+    // Its Chat and its Studio are two views of one conversation (0.6.96): either shows its work, the
+    // Studio a take of its Chat too (studio.mjs, watch). It showed in the Studio when the Studio did not
+    // hold the take (one asked in the Chat, a card waiting there), as if it were another conversation.
+    seen = here && (state.view === 'chat' || state.view === 'studio');
   // Back in its conversation once it is over: nothing more to say.
   if (here && !mini.running && state.view !== 'library') return mini.forget();
   if (seen) return mini.place(null);
@@ -2921,6 +2919,35 @@ function endWork(work) {
   state.miniature?.end();
   updateControls();
 }
+/**
+ * The take of the Chat being made in the conversation of the work (0.6.96), as its card tells it
+ * (generation-ui.mjs, onLive): its request, its step, its fraction, its picture so far, how long it has
+ * been in the making as the server counts it (`time`, 0.6.93); `running` once the generator has it,
+ * `ended` once over. The Studio of that conversation, its other view, shows it (studio.mjs, watch).
+ * Not a creation of the Studio (its card `compact`): the Studio follows those itself.
+ */
+function chatTake(event) {
+  const work = state.work;
+  if (!work || event.compact) return;
+  if (event.type === 'start')
+    work.take = { request: event.request, running: false, label: '', fraction: null, preview: null, time: null, ended: null };
+  else if (work.take?.request !== event.request) return;
+  else if (event.type === 'progress')
+    Object.assign(work.take, {
+      running: true,
+      label: event.text || work.take.label,
+      fraction: Number.isFinite(event.fraction) ? event.fraction : work.take.fraction,
+      preview: event.preview || work.take.preview,
+      time: event.time || work.take.time,
+    });
+  else if (['done', 'failed', 'stopped'].includes(event.type))
+    Object.assign(work.take, {
+      running: false,
+      ended: { type: event.type, record: event.record ?? null, message: event.message || event.error || '' },
+    });
+  else return;
+  state.studio?.watch?.();
+}
 /** The name a work gives its conversation (« named once, by its first message »), wherever it is. */
 function nameHere(id, title) {
   if (shownHere(id)) return setConversationTitle(title, { unnamed: true });
@@ -3667,8 +3694,8 @@ async function sendMessage(event) {
             // (With how long it has been in the making, as the server counts it: 0.6.93.)
             card.progress(progress, fraction, preview, time);
             // Made at once while the user was elsewhere, it is followed by its Studio once that is on
-            // screen again, as after a reload (0.6.88).
-            if (viaStudio && away && shownHere(talkId) && state.view === 'studio' && state.studio.followAgain?.())
+            // screen again, as after a reload (0.6.88), with the settings it is made with (0.6.96).
+            if (viaStudio && away && shownHere(talkId) && state.view === 'studio' && state.studio.followAgain?.(proposal))
               away = false;
             if (viaStudio && !away) state.studio.follow(progress, fraction, preview, time);
             scrollToBottom();
@@ -4457,6 +4484,8 @@ const studioUI = setupStudio({
   openAgent: () => void openChat(),
   // A mode chosen while the Studio is not on screen: the Studio opens, in that mode.
   openStudio: () => showStudio(),
+  // A take of its Chat being made (0.6.96): in the Studio of that conversation, its screen and its settings.
+  making: () => (state.work?.take && shownHere(state.work.conversationId) ? state.work.take : null),
 });
 state.studio = studioUI;
 const generationUI = setupGenerationUI({
@@ -4469,8 +4498,12 @@ const generationUI = setupGenerationUI({
   onOpen: record => showInStudio(record),
   // A take that failed: « Relancer », « Modifier la proposition » (etats-maquette.md, 52).
   onAgain: (request, options) => void againTake(request, options),
-  // Each take being made, as it goes: the miniature of the chat follows it (0.6.81).
-  onLive: event => state.miniature?.take(event),
+  // Each take being made, as it goes: the miniature of the chat follows it (0.6.81), the Studio of its
+  // conversation one of its Chat (0.6.96).
+  onLive: event => {
+    state.miniature?.take(event);
+    chatTake(event);
+  },
 });
 /**
  * The miniature of the chat (0.6.81): while a work goes on, in the corner of every page where it is

@@ -145,7 +145,11 @@ function page({ id = ID, messages = asked(), job = null, runs = [], skipped = 0,
     historyItems: [{ id: ID }, { id: OTHER }],
     status: { toolJob: job },
     studio: {
-      followAgain: () => seen.adopted++,
+      // (With the request it is made with: its settings, 0.6.96.)
+      followAgain: request => {
+        seen.adopted++;
+        seen.followedWith = request;
+      },
       follow: (...given) => seen.studio.push(['follow', ...given]),
       settled: result => seen.studio.push(['settled', result.record?.id ?? result.error]),
       invalidate: () => seen.studio.push(['invalidate']),
@@ -328,6 +332,9 @@ test('a creation of the Studio being made is followed by the Studio too; stopped
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(seen.studioWork, true, 'the miniature brings the user back to the Studio');
   assert.equal(seen.adopted, 1);
+  // Shown with the settings it is made with, not those of the last take (0.6.96).
+  assert.equal(seen.followedWith?.call?.id, 'call_st');
+  assert.equal(seen.followedWith, seen.mounted[0].request, 'the request of its card');
   assert.equal(seen.mounted[0].options.compact, true);
   assert.deepEqual(seen.studio.map(([name]) => name), ['follow', 'settled']);
   assert.deepEqual(seen.mounted[0].told.at(-1), ['withdraw']);

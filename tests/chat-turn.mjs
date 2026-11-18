@@ -1945,6 +1945,45 @@ test('what goes by itself, asked from the Studio, is made at once while the user
   assert.equal(here.proposed.length, 1);
 });
 
+test('made at once away from its Studio, it is followed there once that is on screen again, with the settings it is made with (0.6.96)', async () => {
+  // Followed again from its next step, the Studio showed the settings it had (those of the image
+  // before it, in a series).
+  const studio = studioOf(),
+    followed = [];
+  studio.followAgain = request => (followed.push(request ? plain(request) : null), true);
+  let reach, go, back, home;
+  const reached = new Promise(resolve => (reach = resolve)),
+    gate = new Promise(resolve => (go = resolve)),
+    returned = new Promise(resolve => (back = resolve));
+  const asked = { call: functionCall('create_image', 'call_img'), workflowName: 'Krea 2', requestId: 'r1', autoAllow: true, plan: { prompt: 'un renard' } };
+  const agent = page({
+    state: { view: 'studio', studio },
+    chat: (body, n) => (n === 1 ? called(asked) : said('')),
+    requestTool: async (request, signal, onProgress, onImage, options) => {
+      reach();
+      await gate;
+      // Made at once: its Studio is not on screen.
+      assert.equal(await options.approve(request, signal), 'once');
+      home();
+      await returned;
+      onProgress('Génération · 2/8', 0.25);
+      return made();
+    },
+  });
+  const left = new Promise(resolve => (home = resolve));
+  const turn = agent.send('Une image de renard');
+  await reached;
+  agent.state.conversationId = ELSEWHERE;
+  go();
+  await left;
+  assert.deepEqual(followed, [], 'not followed while its Studio is not on screen');
+  // Its Studio on screen again: followed from its next step, with its request.
+  agent.state.conversationId = ID;
+  back();
+  await turn;
+  assert.deepEqual(followed.map(request => [request?.requestId, request?.plan?.prompt]), [['r1', 'un renard']]);
+});
+
 test('made at once away from its Studio, a creation has the LoRAs of the user that Studio has for its conversation (0.6.88)', async () => {
   // Added by « Générer » in the Studio only (its edits): the images made meanwhile had none, and the
   // Studio, set from the last of them, emptied its list.

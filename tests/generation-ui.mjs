@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { cardMeta, clipSeconds, setupGenerationUI, takeLine } from '../public/generation-ui.mjs';
 // The parent of an element, out of what is compared (not enumerable).
 const adopt = (parent, item) =>
@@ -628,6 +629,75 @@ test('a proposal declined leaves nothing; stopped, it leaves its card without «
   assert.equal(open.disabled, false, 'waiting: it leads to the Studio');
   card.fail('Génération interrompue.');
   assert.equal(open.disabled, true);
+});
+
+test('a creation of the Studio being made is drawn in the conversation as the other takes: the Flux, its line at the foot of its picture (0.6.96)', async () => {
+  // Seen in the Chat after the Studio: the moving background of before, the picture so far dimmed
+  // under it, and its line at the foot of the card, on « Ouvrir » (capture 33).
+  class Canvas extends Element {
+    getContext() {
+      return new Proxy({ createRadialGradient: () => ({ addColorStop() {} }) }, { get: (pen, key) => pen[key] ?? (() => {}) });
+    }
+  }
+  const page = {
+    document: { createElement: () => Object.assign(new Canvas('canvas'), { width: 0, height: 0 }), documentElement: { dataset: {} } },
+    devicePixelRatio: 1,
+    performance: { now: () => 0 },
+    matchMedia: () => ({ matches: false }),
+    setTimeout: () => 0,
+    clearTimeout() {},
+    requestAnimationFrame: () => 0,
+    cancelAnimationFrame() {},
+  };
+  const before = globalThis.window,
+    told = [];
+  globalThis.window = page;
+  try {
+    const ui = setupGenerationUI({
+      api: async () => {
+        throw Error('No request expected');
+      },
+      node: (tag, cls = '', text = '') => (tag === 'canvas' ? new Canvas(tag, cls, text) : new Element(tag, cls, text)),
+      openOutput() {},
+      onOpen() {},
+      onLive: event => told.push(event),
+    });
+    const request = { mediaType: 'video', workflowName: 'LTX 2.5', resolution: { width: 448, height: 768 }, plan: { prompt: 'Le petit lac' } },
+      container = new Element(),
+      card = ui.mount(container, request, { compact: true }),
+      [figure] = container.children,
+      [frame] = figure.children,
+      find = cls => figure.children.find(child => child.cls === cls);
+    // In its frame the Flux of the take, as on the screen of the Studio and the takes of the Chat.
+    assert.equal(frame.classList.contains('has-flux'), true);
+    assert.equal(frame.children.filter(child => child.cls === 'take-flux').length, 1);
+    // Its line in its frame, at the foot of its picture; its words and « Ouvrir » under it, as before.
+    const bar = frame.children.find(child => child.cls === 'generation-progress');
+    assert.ok(bar, 'the line in the frame');
+    assert.equal(find('generation-caption').children.includes(bar), false, 'not at the foot of the card');
+    assert.equal(find('card-text').children[0].textContent, 'Le petit lac');
+    assert.ok(find('card-open'));
+    // Its stage over it, its time from its go at its right (0.6.93), its line filling, as the others.
+    card.progress('Génération · 3/8', 0.4, null, { ms: 5200, running: true });
+    assert.equal(bar.style['--generation-progress'], '0.4');
+    const [stage, time] = find('generation-caption').children;
+    assert.equal(stage.textContent, 'Génération · 3/8');
+    assert.deepEqual([time?.cls, time?.textContent], ['generation-elapsed', '5 s']);
+    // Its count told with its step: the Studio of its conversation counts from the same go (0.6.96).
+    const step = told.findLast(event => event.type === 'progress');
+    assert.deepEqual([step.compact, step.time?.ms], [true, 5200]);
+    // A take of the Chat keeps its line under its picture (in its caption, which comes over it).
+    const chat = new Element();
+    ui.mount(chat, request);
+    const [take] = chat.children;
+    assert.equal(take.children[1].children[0].cls, 'generation-progress');
+    assert.equal(take.children[0].classList.contains('has-flux'), true);
+  } finally {
+    globalThis.window = before;
+  }
+  // Out of sight, its line rests as under a picture.
+  const sheet = await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8');
+  assert.match(sheet, /\.generation-frame\.is-paused > \.generation-progress > span,\s*\.generation-frame\.is-paused > \.generation-progress > span::after \{\s*animation-play-state: paused;/);
 });
 
 test('under a take made with LoRAs of the user: their number beside its format, their names to read', () => {

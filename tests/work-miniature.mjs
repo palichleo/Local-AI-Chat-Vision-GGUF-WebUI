@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
 import { FOLDED_KEY, setupMiniature } from '../public/work-miniature.mjs';
 
 /**
@@ -279,4 +281,159 @@ test('a take waiting for the user in the Studio of its conversation says so, wit
   // A video waiting on its card says what it always said.
   mini.take({ type: 'start', request: video });
   assert.equal(said(), 'En attente de votre accord');
+});
+
+/**
+ * The page's side (app.js): where it puts the miniature (syncMiniature), and what it keeps of the take
+ * of the Chat for the Studio of its conversation (chatTake), cut out of app.js and run on a page of
+ * its own.
+ */
+const appSource = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+function appPart(from, to) {
+  const start = appSource.indexOf(from),
+    end = appSource.indexOf(to, start + 1);
+  assert.ok(start >= 0 && end > start, `slice not found: ${from} … ${to}`);
+  return appSource.slice(start, end);
+}
+function shownPage() {
+  const { mini, part } = miniature(),
+    foot = node('footer', 'settings-footer'),
+    settings = { open: false, querySelector: selector => (selector === '.settings-footer' ? foot : null) },
+    watched = [],
+    // A proposal of Moodix AI waiting in the Studio of the work's conversation.
+    held = { waiting: false };
+  const state = {
+    view: 'chat',
+    conversationId: WORK.conversationId,
+    miniature: mini,
+    work: null,
+    waitingForModel: false,
+    studio: {
+      proposing: () => held.waiting,
+      heldFor: () => (held.waiting ? WORK.conversationId : null),
+      holds: () => held.waiting,
+      watch: () => watched.push(structuredClone(state.work?.take ?? null)),
+    },
+  };
+  const context = {
+    state,
+    $: id => (id === 'settings' ? settings : null),
+    shownHere: id => !id || state.conversationId === id,
+    document: { body: { dataset: {} } },
+  };
+  runInNewContext(
+    appPart('function syncMiniature(', '/** Whether `version`') +
+      appPart('function chatTake(', '/** The name a work gives') +
+      '\nthis.syncMiniature = syncMiniature;\nthis.chatTake = chatTake;',
+    context,
+  );
+  return { mini, part, foot, settings, state, held, watched, sync: context.syncMiniature, chatTake: context.chatTake };
+}
+
+test('in the conversation of its work, its Chat as its Studio, the miniature never shows; elsewhere it does (0.6.96)', () => {
+  // Chat and Studio are two views of one conversation: it showed in the Studio whenever the Studio did
+  // not hold the take (one asked in the Chat, a video waiting on its card there), as for another one.
+  const { mini, part, foot, settings, state, held, sync } = shownPage();
+  state.work = { ...WORK };
+  mini.begin(WORK);
+  mini.take({ type: 'start', request: { workflowName: 'Krea 2', autoAllow: true } });
+  mini.take({ type: 'progress', text: 'Génération · 2/8', fraction: 0.25 });
+  for (const view of ['chat', 'studio']) {
+    state.view = view;
+    sync();
+    assert.equal(mini.element.hidden, true, 'in its ' + view);
+  }
+  // A proposal of Moodix AI waiting in its Studio, a video waiting on its card in its Chat: the same.
+  held.waiting = true;
+  sync();
+  assert.equal(mini.element.hidden, true);
+  held.waiting = false;
+  mini.take({ type: 'start', request: video });
+  sync();
+  assert.equal(mini.element.hidden, true);
+  // The Pellicule, another conversation in its Chat or its Studio: it shows, in its corner.
+  mini.take({ type: 'progress', request: video, text: 'Génération · 3/8', fraction: 0.4 });
+  state.view = 'library';
+  sync();
+  assert.equal(mini.element.hidden, false);
+  state.conversationId = 'b2222222-2222-4222-8222-222222222222';
+  for (const view of ['chat', 'studio']) {
+    state.view = view;
+    sync();
+    assert.equal(mini.element.hidden, false, 'in the ' + view + ' of another');
+    assert.equal(part('work-mini-said').textContent, 'Génération · 3/8');
+  }
+  // The Paramètres, over its conversation: the pill in their foot.
+  state.conversationId = WORK.conversationId;
+  settings.open = true;
+  sync();
+  assert.equal(mini.element.parentNode, foot);
+  settings.open = false;
+  sync();
+  assert.equal(mini.element.hidden, true);
+  // A proposal waiting in its Studio, seen from another conversation: said so (0.6.88), as before.
+  mini.begin(WORK);
+  mini.take({ type: 'start', request: { mediaType: 'image', workflowName: 'Krea 2', requestId: 'r3' } });
+  held.waiting = true;
+  state.conversationId = 'b2222222-2222-4222-8222-222222222222';
+  sync();
+  assert.equal(part('work-mini-said').textContent, 'Moodix AI vous attend dans le Studio de cette conversation');
+  assert.equal(mini.element.hidden, false);
+  // Back in its conversation once it is over (in its Studio too): nothing more to say.
+  held.waiting = false;
+  mini.end();
+  state.conversationId = WORK.conversationId;
+  state.view = 'studio';
+  sync();
+  assert.equal(mini.work, null);
+});
+
+test('the page keeps the take of the Chat being made for the Studio of its conversation, not one of the Studio (0.6.96)', () => {
+  const { state, watched, chatTake } = shownPage();
+  const asked = { requestId: 'r1', workflowName: 'Krea 2', plan: { prompt: 'un phare' } };
+  // No work: nothing to keep.
+  chatTake({ type: 'start', request: asked });
+  assert.deepEqual(watched, []);
+  state.work = { ...WORK };
+  chatTake({ type: 'start', request: asked });
+  assert.equal(state.work.take.request, asked);
+  assert.equal(state.work.take.running, false, 'not begun: a card may wait for the user');
+  chatTake({ type: 'progress', request: asked, text: 'Génération · 2/8', fraction: 0.25, preview: '/p/2', time: { ms: 3000, running: true } });
+  chatTake({ type: 'progress', request: asked, text: '', fraction: null, preview: null, time: null });
+  assert.deepEqual(
+    [state.work.take.running, state.work.take.label, state.work.take.fraction, state.work.take.preview, state.work.take.time?.ms],
+    [true, 'Génération · 2/8', 0.25, '/p/2', 3000],
+    'what is not said again stays as it was (its time from its go too, 0.6.93)',
+  );
+  // Its picture, its card's count each second, and the progress of another card, change nothing.
+  chatTake({ type: 'image', request: asked, record: { id: 'x' }, index: 0 });
+  chatTake({ type: 'time', request: asked, text: '4 s' });
+  chatTake({ type: 'progress', request: { requestId: 'other' }, text: 'Génération · 7/8', fraction: 0.9 });
+  assert.equal(state.work.take.label, 'Génération · 2/8');
+  const record = { id: 'run', outputs: [{ take: 4 }] };
+  chatTake({ type: 'done', request: asked, record, failed: false, error: '' });
+  // (Made in the page's realm: read field by field.)
+  const ended = () => [state.work.take.running, state.work.take.ended?.type, state.work.take.ended?.record, state.work.take.ended?.message];
+  assert.deepEqual(ended(), [false, 'done', record, '']);
+  chatTake({ type: 'start', request: { requestId: 'r2' } });
+  chatTake({ type: 'failed', request: state.work.take.request, message: 'La mémoire a manqué.' });
+  assert.deepEqual(ended(), [false, 'failed', null, 'La mémoire a manqué.']);
+  // The Studio heard each step (it follows the take from it).
+  assert.deepEqual(
+    watched.map(take => [take.running, take.label, take.ended?.type ?? null]),
+    [
+      [false, '', null],
+      [true, 'Génération · 2/8', null],
+      [true, 'Génération · 2/8', null],
+      [false, 'Génération · 2/8', 'done'],
+      [false, '', null],
+      [false, '', 'failed'],
+    ],
+  );
+  // A creation of the Studio (its card compact) is followed by the Studio itself: nothing kept.
+  const before = state.work.take;
+  chatTake({ type: 'start', compact: true, request: { requestId: 'studio' } });
+  chatTake({ type: 'progress', compact: true, request: { requestId: 'studio' }, text: 'Génération · 1/8', fraction: 0.1 });
+  assert.equal(state.work.take, before);
+  assert.equal(watched.length, 6);
 });

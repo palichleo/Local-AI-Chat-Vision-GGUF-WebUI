@@ -5614,3 +5614,177 @@ test('the Studio stays the conversation’s whose take it makes: another one sho
     page.restore();
   }
 });
+
+/** Every element under `root` (its controls too, whatever their class). */
+const under = root => [root, ...(root.children ?? []).flatMap(child => (child && typeof child === 'object' ? under(child) : []))];
+/** A take of the Chat as the page tells the Studio of it (app.js, chatTake): its request, its step. */
+const chatTakeOf = (request, step = {}) => ({ request, running: true, label: '', fraction: null, preview: null, ended: null, ...step });
+const still = { id: 'w', name: 'Image', roles: {}, limits: sizes, direct: true, size: { width: 1024, height: 1024 }, settings: [], seeded: true };
+const lighthouse = {
+  id: 'r1',
+  conversationId: 'c1',
+  mediaType: 'video',
+  workflowId: 'v',
+  workflowName: 'Clip',
+  prompt: 'Un phare dans la tempête',
+  parameters: { width: 768, height: 448, frames: 121, fps: 24, seed: 7 },
+  outputs: [{ originalUrl: '/r1.mp4', thumbUrl: '/r1.jpg', take: 3 }],
+};
+
+test('a take asked in the Chat is followed by the Studio of its conversation, with the settings it is made with (0.6.96)', async () => {
+  // Chat and Studio are two views of one conversation: during a take asked in the Chat its Studio
+  // showed it nowhere (its screen empty, the settings of before, the miniature in its corner).
+  const { clip, request } = proposalOf({ prompt: 'Un phare dans la tempête' });
+  let take = null;
+  const stopped = [];
+  const page = await studioPage({ create_image: [still], create_video: [clip] }, {}, { extra: { making: () => take, stopTurn: () => stopped.push(true) } });
+  const { body, studio } = page;
+  const ai = key => under(body).find(item => item.dataset?.ai === key);
+  try {
+    // What the user was writing in it, in Image.
+    page.prompt().value = 'mon brouillon';
+    page.prompt().oninput();
+    // Asked, not begun (a card waiting in the Chat): nothing to follow.
+    take = chatTakeOf(request, { running: false });
+    studio.watch();
+    assert.equal(studio.busy(), false);
+    // Begun: its screen follows it, in Vidéo, with what it is made with, and how long since its go.
+    Object.assign(take, { running: true, label: 'Génération · 3/8', fraction: 0.4, preview: '/media/job-preview/j/3', time: { ms: 12400, running: true } });
+    studio.watch();
+    assert.equal(studio.busy(), true);
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(page.prompt().value, 'Un phare dans la tempête');
+    assert.equal(ai('size').attributes['aria-valuetext'], '768 × 448');
+    assert.equal(ai('duration').attributes['aria-valuetext'], '05.04 S');
+    assert.equal(ai('seed').value, '7');
+    assert.equal(body.find('studio-progress')[0].textContent, 'Génération · 3/8');
+    assert.equal(body.find('studio-elapsed')[0]?.textContent, '12 s', 'its time, as its card counts it (0.6.93)');
+    // « Générer » waits for its end and says why; « Arrêter » stops it with its turn.
+    const [go] = body.find('studio-go');
+    assert.equal(go.disabled, true);
+    assert.equal(body.find('studio-go-label')[0].textContent, 'En cours…');
+    assert.equal(go.title, 'Génération en cours dans cette conversation : attendez sa fin.');
+    body.find('studio-stop')[0].onclick();
+    assert.deepEqual(stopped, [true]);
+    // It does not hold the Studio: the conversation's.
+    assert.equal(studio.holds(), false);
+    assert.equal(studio.heldFor(), null);
+    // Its next step, as it comes (nothing new: nothing drawn again).
+    Object.assign(take, { label: 'Génération · 5/8', time: { ms: 75200, running: true } });
+    studio.watch();
+    studio.render();
+    assert.equal(body.find('studio-progress')[0].textContent, 'Génération · 5/8');
+    assert.equal(body.find('studio-elapsed')[0]?.textContent, '1 min 15 s');
+    const drawn = body.find('studio-go')[0];
+    studio.watch();
+    assert.equal(body.find('studio-go')[0], drawn);
+    // Over while the Studio is not on screen: as it was, then its take with its settings once it comes.
+    page.runs.push(lighthouse);
+    Object.assign(take, { running: false, ended: { type: 'done', record: lighthouse, message: '' } });
+    studio.watch();
+    assert.equal(studio.busy(), false);
+    assert.equal(body.dataset.mode, 'image');
+    assert.equal(page.prompt().value, 'mon brouillon');
+    assert.equal(body.find('studio-elapsed').length, 0, 'no count without a take being made');
+    await studio.open();
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(page.prompt().value, 'Un phare dans la tempête');
+    assert.deepEqual(studio.screenTake(), { take: 3, media: 'video' });
+    // Its seed drawn again, as for any take (it was not named).
+    assert.equal(ai('seed').value, '');
+  } finally {
+    page.restore();
+  }
+});
+
+test('the take of the Chat followed with the Studio on screen: another conversation meanwhile, then its take there at once, or why it failed (0.6.96)', async () => {
+  const { clip, request } = proposalOf({ prompt: 'Un phare' });
+  let take = null,
+    shown = 'c1';
+  const page = await studioPage(
+    { create_image: [still], create_video: [clip] },
+    {},
+    { conversation: () => shown, extra: { making: () => (shown === 'c1' ? take : null) } },
+  );
+  const { body, studio } = page;
+  globalThis.document.body.dataset = { view: 'studio' };
+  try {
+    take = chatTakeOf(request, { label: 'Génération · 1/8', fraction: 0.1 });
+    studio.watch();
+    assert.equal(studio.busy(), true);
+    // Another conversation shown: its own Studio (not « Studio occupé »: the take holds it not).
+    shown = 'c2';
+    studio.conversationChanged();
+    await settle();
+    assert.equal(studio.busy(), false);
+    assert.equal(body.find('studio-away').length, 0);
+    assert.equal(page.prompt().value, '');
+    // Back in c1: followed again, as it is now.
+    Object.assign(take, { label: 'Génération · 5/8', fraction: 0.6 });
+    shown = 'c1';
+    studio.conversationChanged();
+    await settle();
+    assert.equal(studio.busy(), true);
+    assert.equal(body.find('studio-progress')[0].textContent, 'Génération · 5/8');
+    assert.equal(page.prompt().value, 'Un phare');
+    // Made under the user's eyes: on the screen at once.
+    page.runs.push({ ...lighthouse, prompt: 'Un phare' });
+    Object.assign(take, { running: false, ended: { type: 'done', record: lighthouse, message: '' } });
+    studio.watch();
+    for (let tries = 0; !studio.screenTake() && tries < 40; tries++) await settle();
+    assert.deepEqual(studio.screenTake(), { take: 3, media: 'video' });
+    assert.equal(studio.busy(), false);
+    // The next one fails: why, under its screen, as for a creation of the Studio.
+    take = chatTakeOf({ ...request }, { label: 'Génération · 2/8', fraction: 0.2 });
+    studio.watch();
+    Object.assign(take, { running: false, ended: { type: 'failed', record: null, message: 'La mémoire vidéo a manqué.' } });
+    studio.watch();
+    assert.equal(studio.busy(), false);
+    assert.equal(body.find('studio-error')[0]?.textContent, 'La mémoire vidéo a manqué.');
+    // Never over a proposal of Moodix AI waiting in it.
+    const answer = studio.propose({ ...request, requestId: 'q3' }, new AbortController().signal);
+    await settle();
+    take = chatTakeOf({ ...request }, { label: 'Génération · 1/8' });
+    studio.watch();
+    assert.equal(studio.proposing(), true);
+    assert.equal(studio.busy(), false);
+    studio.decline();
+    assert.equal(await answer, 'deny');
+  } finally {
+    page.restore();
+  }
+});
+
+test('followed again with its request, the Studio shows the settings it is made with; its take, its own (0.6.96)', async () => {
+  // After a reload, or an image of a series made while the Studio was not on screen: the screen
+  // followed it with the settings of the last take (or of the image before it).
+  const { clip, request } = proposalOf({ prompt: 'Un phare' });
+  const page = await studioPage({ create_video: [clip] });
+  const { body, studio } = page;
+  const ai = key => under(body).find(item => item.dataset?.ai === key);
+  try {
+    assert.equal(studio.followAgain(request), true);
+    assert.equal(studio.heldFor(), 'c1');
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(page.prompt().value, 'Un phare');
+    assert.equal(ai('seed').value, '7');
+    // Made: the settings of its take, its seed drawn again (it was not named).
+    page.runs.push({ ...lighthouse, prompt: 'Un phare' });
+    await studio.settled({ record: lighthouse });
+    assert.equal(page.prompt().value, 'Un phare');
+    assert.equal(ai('seed').value, '');
+    assert.deepEqual(studio.screenTake(), { take: 3, media: 'video' });
+    // Nothing made: the seed of before back. (Its size shown as it is made, though not one of the list.)
+    studio.followAgain({
+      ...request,
+      resolution: { width: 800, height: 448 },
+      plan: { ...request.plan, parameters: { ...request.plan.parameters, width: 800, height: 448, seed: 9 } },
+    });
+    assert.equal(ai('seed').value, '9');
+    assert.equal(ai('size').attributes['aria-valuetext'], '800 × 448');
+    await studio.settled({ error: 'La génération a échoué.' });
+    assert.equal(ai('seed').value, '');
+  } finally {
+    page.restore();
+  }
+});
