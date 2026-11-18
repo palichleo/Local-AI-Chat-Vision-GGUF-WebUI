@@ -1248,12 +1248,12 @@ test('Krea 2: the denoise the assistant passes with an image to modify stays fro
   // model), said on the proposal, never refused.
   proposal = await ask({ source: source(), denoise: 0.9 });
   assert.equal(proposal.plan.parameters.denoise, 0.7);
-  assert.deepEqual(proposal.notes, ['denoise : 0.9 → 0.7, la limite de Krea 2.']);
+  assert.deepEqual(proposal.notes, ['Débruitage : 0,9 → 0,7, la limite de Krea 2.']);
   assert.equal(proposal.plan.edited, undefined);
   assert.equal((await made(proposal)).denoise, 0.7);
   proposal = await ask({ source: source(), denoise: 0.3 });
   assert.equal(proposal.plan.parameters.denoise, 0.6);
-  assert.deepEqual(proposal.notes, ['denoise : 0.3 → 0.6, la limite de Krea 2.']);
+  assert.deepEqual(proposal.notes, ['Débruitage : 0,3 → 0,6, la limite de Krea 2.']);
   assert.equal((await made(proposal)).denoise, 0.6);
 
   // Passed without an image to modify: no error, nothing said, the picture made from nothing (1),
@@ -1315,7 +1315,7 @@ test('Krea 2: the denoise the assistant passes with an image to modify stays fro
     messages: [],
   });
   assert.equal(held.plan.parameters.denoise, 0.5);
-  assert.deepEqual(held.notes, ['denoise ignoré : fixé par le workflow Krea 2.']);
+  assert.deepEqual(held.notes, ['Débruitage : valeur ignorée, fixée par le workflow Krea 2.']);
   assert.deepEqual([setting(held).min, setting(held).max], [0, 1]);
   assert.equal((await revise(own.runtime, held, { denoise: 0.4 })).plan.parameters.denoise, 0.4);
 });

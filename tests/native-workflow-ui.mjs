@@ -494,17 +494,17 @@ test('shipped pipeline templates round-trip through the editor without corruptin
   }
 });
 
-test('newly registered native files can become model-controlled allowed choices immediately', async t => {
+test('a newly registered file is the one the workflow is made with at once; a file has no « Assistant » any more', async t => {
+  // (0.6.102) Left to the assistant, a file was offered to the model as bare identifiers, nothing
+  // to tell them apart, and the Studio had no choice of it: the editor no longer offers that choice.
   const f = await setup(t);
   await f.ui.edit(f.template);
+  assert.equal(f.$('native-component-model-policy'), null, 'no switch « Fixe / Assistant » for a file');
   await f.$('native-component-model').parent.children[1].onclick();
-  f.$('native-component-model-policy').value = 'model';
-  f.$('native-component-model-policy').onchange();
   assert.equal(f.$('native-component-model').value, 'model-new');
   assert.equal(await f.ui.saveEditor(), true);
   const component = f.calls.find(call => call.route === 'generation/workflows').body.components.model;
-  assert.equal(component.default, 'model-new');
-  assert.ok(component.choices.includes('model-new'));
+  assert.deepEqual(component, { policy: 'fixed', asset: 'model-new' });
   assert.deepEqual(f.calls.find(call => call.route === 'files/choose').body, {
     kind: 'generation',
     initialPath: 'model.safetensors',
@@ -614,8 +614,10 @@ test('closing settings cancels native refresh without surfacing an obsolete erro
   ui.cancelSettings();
   await assert.doesNotReject(pending);
 });
-test('a file or a setting left to the assistant is not saved without a default: said under its box, and why', async t => {
+test('a setting left to the assistant is not saved without a default, said under its box; a file left so is shown at the one it is made with', async t => {
   // (0.6.94) Saved so, every creation that did not name it was refused, the Studio's too.
+  // (0.6.102) « Assistant » left the files: a workflow saved so shows the file it is made with (its
+  // default, else the first allowed: lib/native-workflows.mjs, componentStandIn), and keeps it.
   const f = await setup(t),
     record = structuredClone(f.template);
   record.components.model = { policy: 'model', choices: ['model-one'], description: 'Choose the portrait checkpoint' };
@@ -628,20 +630,11 @@ test('a file or a setting left to the assistant is not saved without a default: 
       .filter(item => String(item.className).includes('native-needs-default') && !item.hidden)
       .map(item => item.textContent);
   };
-  // Said at once, under each of the two boxes.
+  assert.equal(f.$('native-component-model-file').value, 'model.safetensors', 'the file it is made with');
+  // Said at once, under the box of the setting; nothing of the file.
   assert.deepEqual(said(), [
-    'Choisissez le fichier par défaut : c’est celui qui sert quand Moodix AI n’en choisit pas. Sans lui, ce workflow ne s’enregistre pas.',
     'Choisissez une valeur par défaut : c’est elle qui sert quand Moodix AI n’en donne pas. Sans elle, ce workflow ne s’enregistre pas.',
   ]);
-  assert.equal(await f.ui.saveEditor(), false);
-  assert.equal(
-    f.$('native-workflow-error').textContent,
-    'Choisissez le fichier par défaut de « Modèle » : c’est celui qui sert quand Moodix AI n’en choisit pas.',
-  );
-  // The file of the list chosen: the setting is asked for next.
-  f.$('native-component-model-file').value = 'model.safetensors';
-  f.$('native-component-model-file').onchange();
-  assert.equal(said().length, 1);
   assert.equal(await f.ui.saveEditor(), false);
   assert.equal(
     f.$('native-workflow-error').textContent,
@@ -658,12 +651,7 @@ test('a file or a setting left to the assistant is not saved without a default: 
   assert.deepEqual(said(), []);
   assert.equal(await f.ui.saveEditor(), true);
   const saved = f.calls.find(call => call.route === 'generation/workflows').body;
-  assert.deepEqual(saved.components.model, {
-    policy: 'model',
-    choices: ['model-one'],
-    default: 'model-one',
-    description: 'Choose the portrait checkpoint',
-  });
+  assert.deepEqual(saved.components.model, { policy: 'fixed', asset: 'model-one' });
   assert.deepEqual(saved.parameters.width, { policy: 'model', type: 'integer', default: 512, min: 256, max: 1024 });
 });
 

@@ -10,6 +10,7 @@ import { forgetCitedTakes } from './cited-takes.mjs';
 import { explanation, foldPrompt } from './studio-explain.mjs';
 import { clipPlayer, stillClip } from './take-player.mjs';
 import { elapsedClock } from './generation-time.mjs';
+import { SETTING_NAMES } from './setting-names.mjs';
 
 /**
  * The Studio: the creation tools of the conversation, beside the chat. Four blocks that never
@@ -68,6 +69,51 @@ const SETTINGS = {
   reference_subject: 'Qui dessiner',
   denoise: 'Débruitage',
 };
+// (0.6.102) A setting by its name in the Studio, else by the one Paramètres › Workflows gives it
+// (« Étapes », « Audio »): never by its key (« steps »).
+const settingName = key => SETTINGS[key] ?? SETTING_NAMES[key] ?? key;
+/**
+ * (0.6.102) A value of a setting as a creation takes it: a switch is true or false; a number within
+ * the bounds of its workflow (the nearest one when it is beyond them), whole and in its steps when it
+ * must be; '' when nothing is typed (the workflow's own value then). The Studio shows what it sends.
+ */
+function settingValue(setting, value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (setting.type === 'boolean') return value === true || value === 'true' || value === 1 || value === '1';
+  if (setting.type !== 'number' && setting.type !== 'integer') return String(value);
+  if (setting.choices?.length) {
+    const number = Number(value);
+    return setting.choices.includes(number) ? number : value;
+  }
+  let number = Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(number)) return value;
+  if (Number.isFinite(setting.min)) number = Math.max(setting.min, number);
+  if (Number.isFinite(setting.max)) number = Math.min(setting.max, number);
+  if (setting.multipleOf) {
+    const base = Number.isFinite(setting.min) ? setting.min : 0;
+    number = base + Math.round((number - base) / setting.multipleOf) * setting.multipleOf;
+    if (Number.isFinite(setting.max) && number > setting.max) number -= setting.multipleOf;
+  }
+  if (setting.type === 'integer') {
+    number = Math.round(number);
+    if (Number.isFinite(setting.max) && number > setting.max) number = Math.floor(setting.max);
+    if (Number.isFinite(setting.min) && number < setting.min) number = Math.ceil(setting.min);
+  }
+  return Math.round(number * 1e6) / 1e6;
+}
+/**
+ * (0.6.102) What the Studio says when an input the model cannot do without is missing, by its role:
+ * the video to follow and the character of a replacement, the image to modify, the start and end
+ * images, a reference.
+ */
+function missingInput(workflow, role, spec) {
+  const video = spec.media?.includes('video');
+  if (workflow.follows) return role === 'source' || video ? 'Ajoutez la vidéo à suivre.' : 'Ajoutez l’image du personnage.';
+  if (role === 'source') return video ? 'Ajoutez la vidéo à prolonger.' : 'Ajoutez l’image à modifier.';
+  if (role === 'start_image') return 'Ajoutez l’image de début.';
+  if (role === 'end_image') return 'Ajoutez l’image de fin.';
+  return video ? 'Ajoutez une vidéo de référence.' : 'Ajoutez une image de référence.';
+}
 // What the values of a setting on a bar do, said under it (measured on Krea 2, 17/11).
 const BAR_HELP = { denoise: '0,6 garde la composition et change l’ambiance ; 0,7 laisse la composition changer.' };
 // Why a setting the model only reads with an input is greyed while the case of that input is empty.
@@ -159,6 +205,14 @@ const sizeKey = size => size.width + 'x' + size.height;
 const FRAME = { width: 264, height: 176 };
 // The tools of the Studio are read again in the background past this age.
 const TOOLS_TTL_MS = 60000;
+// (0.6.102) What scrolls in itself in the Studio, kept where it was from one drawing to the next:
+// the column of Entrée (the block, moodix.css) and the body of Réglages (0.6.98).
+const SCROLLED = [
+  '#studio-view .studio-block.is-input',
+  '#studio-view .studio-block.is-input > .studio-block-body',
+  '#studio-view .studio-block.is-settings',
+  '#studio-view .studio-block.is-settings > .studio-block-body',
+];
 
 /** The frame of a ratio, as large as its box allows. */
 export function frameSize(ratio, box = FRAME) {
@@ -208,7 +262,10 @@ export function proposedValues(request, offered = []) {
     width = parameters.width ?? request.resolution?.width,
     height = parameters.height ?? request.resolution?.height;
   const settings = {},
-    roles = references.map(ref => ref.role);
+    roles = references.map(ref => ref.role),
+    // (0.6.102) What its workflow fixes is no choice of Moodix AI: shown at once, as it will be made,
+    // the pointer does not set it (a size « Fixe » neither: `assistantSize`).
+    fixed = new Set((workflow?.settings ?? []).filter(setting => setting.fixed).map(setting => setting.key));
   // (Not a setting read only with an input the proposal does not have: the Studio keeps its own.)
   for (const setting of workflow?.settings ?? [])
     if (parameters[setting.key] !== undefined && settingRead(setting, roles))
@@ -221,7 +278,7 @@ export function proposedValues(request, offered = []) {
     size: width > 0 && height > 0 ? sizeKey({ width, height }) : null,
     // (Of a ratio no format is close to, the nearest one, 0.6.92: the format in hand stayed beside its size.)
     format: nearestFormat(width, height)?.id ?? null,
-    sizeFree: free('width') && free('height'),
+    sizeFree: free('width') && free('height') && (workflow?.assistantSize ?? true),
     seconds: fps && Number.isFinite(parameters.frames) ? Math.max(0, parameters.frames - overlap) / fps : null,
     frames: parameters.frames ?? null,
     fps,
@@ -232,7 +289,7 @@ export function proposedValues(request, offered = []) {
     seedFree: free('seed'),
     stage: plan.stage ?? null,
     settings,
-    settingsFree: Object.fromEntries(Object.keys(settings).map(key => [key, free(key)])),
+    settingsFree: Object.fromEntries(Object.keys(settings).map(key => [key, free(key) && !fixed.has(key)])),
     references: references.filter(ref => ref.role !== 'source_video'),
     // The LoRAs of the workflow it switches on, with their strength (the others are off).
     loras: Array.isArray(plan.loras) ? plan.loras : null,
@@ -325,6 +382,7 @@ export function setupStudio({
     extending = null, // the clip being continued
     failure = '',
     advanced = false, // « Plus de réglages » is open
+    revealRare = false, // it has just been opened: brought into sight once drawn (0.6.102)
     formatsOpen = false, // « ··· » is open
     drawn = null, // the size the frame was last drawn at, to ease from
     watching = null, // follows the size of the stage
@@ -1080,12 +1138,36 @@ export function setupStudio({
 
   // ------------------------------------------------------------------ size, length
   /** The formats and sizes a workflow offers, with the draft settled on one of each. */
+  /**
+   * (0.6.102) Whether a part of a workflow (a setting by its key, `lora:<id>`, `profiles`: changedParts
+   * in lib/native-workflows.mjs) was changed in Paramètres › Workflows after `time` (of a take, of a
+   * saving « Enregistrer »): the Studio then takes it as the workflow has it now, the rest as it was
+   * (« le plus récent des deux »).
+   */
+  const changedSince = (workflow, time) => {
+    const since = typeof time === 'number' ? time : Date.parse(time ?? '');
+    return part => Number.isFinite(since) && Number(workflow?.changed?.[part] ?? 0) > since;
+  };
+  /**
+   * (0.6.102) The size a workflow starts from, in its format: its draft's, the size it fixes, that of
+   * the version it fixes (« Vidéo finale »).
+   */
+  function startSize(workflow, draft) {
+    const base = workflow.size,
+      format = base?.width > 0 && base?.height > 0 ? nearestFormat(base.width, base.height) : null;
+    Object.assign(draft, { format: format?.id ?? null, size: format ? sizeKey(base) : null, formatChosen: false });
+  }
   function sizing(workflow) {
     const draft = drafts[mode],
       formats = FORMATS.filter(format => sizesFor(format, workflow.limits, workflow.family).length),
       base = workflow.size ?? { width: 1024, height: 1024 };
-    if (!formats.some(format => format.id === draft.format))
+    if (!formats.some(format => format.id === draft.format)) {
       draft.format = (formatOf(base.width, base.height) ?? formats[0])?.id ?? null;
+      // (0.6.102) Nothing chosen yet: the size the workflow starts from, as it is (a size « Fixe »,
+      // the size of the version it fixes), not only the nearest one of the list.
+      if (!draft.size && draft.format && nearestFormat(base.width, base.height)?.id === draft.format)
+        draft.size = sizeKey(base);
+    }
     const { sizes, nearest } = sizeChoices(workflow, draft.format, base.width * base.height);
     const proposed = proposal?.mode === mode && proposal.values?.size === draft.size;
     // A size a take or a proposal was made at stays, outside the list too, while the model makes it
@@ -1236,17 +1318,19 @@ export function setupStudio({
     const saved = info?.presets?.[workflow.id],
       draft = drafts[mode];
     if (!saved || extending) return;
+    // (0.6.102) What was changed in Paramètres › Workflows since it was saved is the workflow's now.
+    const newer = changedSince(workflow, saved.savedAt);
     const lengths = workflow.lengths?.seconds ?? [];
-    if (Number.isFinite(saved.length) && lengths.length)
+    if (Number.isFinite(saved.length) && lengths.length && !newer('frames'))
       draft.length = lengths.reduce((best, value) =>
         Math.abs(value - saved.length) < Math.abs(best - saved.length) ? value : best,
       );
-    if (saved.format && saved.size && workflow.limits && workflow.direct) {
+    if (saved.format && saved.size && workflow.limits && workflow.direct && !['width', 'height'].some(newer)) {
       const { sizes } = sizeChoices(workflow, saved.format, 0);
       if (sizes.some(size => sizeKey(size) === saved.size))
         Object.assign(draft, { format: saved.format, size: saved.size });
     }
-    if (typeof saved.seed === 'string' && workflow.seeded) draft.seed = saved.seed;
+    if (typeof saved.seed === 'string' && workflow.seeded && !newer('seed')) draft.seed = saved.seed;
     if (Array.isArray(saved.styles) && workflow.styled && mode !== 'audio')
       draft.styles = saved.styles
         .filter(style => info.styles.includes(style.name))
@@ -1254,7 +1338,7 @@ export function setupStudio({
         .map(({ name, strength }) => ({ name, strength }));
     for (const lora of workflow.loras ?? []) {
       const entry = saved.loras?.[lora.id];
-      if (!entry) continue;
+      if (!entry || newer('lora:' + lora.id)) continue;
       const choice = loraChoice(workflow, lora);
       if (lora.assistant && typeof entry.on === 'boolean') choice.on = entry.on;
       if (freeStrength(lora) && Number.isFinite(entry.strength)) choice.strength = entry.strength;
@@ -1262,14 +1346,14 @@ export function setupStudio({
       loraChoice(workflow, lora);
     }
     const sound = workflow.settings.find(setting => setting.key === 'seconds' && setting.type === 'number');
-    if (sound && Number(saved.settings?.seconds) > 0)
+    if (sound && Number(saved.settings?.seconds) > 0 && !newer('seconds'))
       (draft.settings[workflow.id] ??= {}).seconds = Math.min(
         Number(sound.max ?? Infinity),
         Math.max(Number(sound.min ?? 0), saved.settings.seconds),
       );
     // Within the bounds the workflow gives today.
     for (const setting of keptSettings(workflow))
-      if (Number.isFinite(saved.settings?.[setting.key]))
+      if (Number.isFinite(saved.settings?.[setting.key]) && !newer(setting.key))
         (draft.settings[workflow.id] ??= {})[setting.key] = fineValue(setting, saved.settings[setting.key]);
   }
   /**
@@ -1604,6 +1688,24 @@ export function setupStudio({
    * modify) is greyed while the case of that input is empty, and its tip says why in place of that
    * help: never unavailable without its reason.
    */
+  /**
+   * Why a setting the model only reads with an input changes nothing now, the case of that input
+   * empty ('' when it is read): said in its tip, the setting greyed. (0.6.102) A continuation reads
+   * it with the clip it continues; with several inputs, each is named.
+   */
+  function idleReason(workflow, setting, draft = drafts[mode]) {
+    const role = onlyRole(workflow, setting),
+      inputs = [...new Set(onlyInputs(workflow, setting))];
+    if (!role || (extending && inputs.includes('source'))) return '';
+    if (inputs.some(input => (draft.inputs[input] ?? []).some(Boolean))) return '';
+    const names = inputs.map(input => `« ${ROLES[input] ?? input} »`);
+    return (
+      ONLY_WITH[role] ??
+      (names.length > 1
+        ? `Sert seulement avec l’entrée ${names.slice(0, -1).join(', ')} ou ${names.at(-1)}.`
+        : `Sert seulement avec l’entrée ${names[0]}.`)
+    );
+  }
   function fineLine(workflow, setting) {
     const draft = drafts[mode],
       store = (draft.settings[workflow.id] ??= {}),
@@ -1611,12 +1713,10 @@ export function setupStudio({
       high = setting.max,
       list = [];
     for (let step = 0; low + step * 0.01 <= high + 1e-9; step++) list.push(Math.round((low + step * 0.01) * 100) / 100);
-    const role = onlyRole(workflow, setting),
-      idle = Boolean(role) && !onlyInputs(workflow, setting).some(input => (draft.inputs[input] ?? []).some(Boolean)),
-      label = SETTINGS[setting.key] || setting.key,
-      said = idle
-        ? (ONLY_WITH[role] ?? `Sert seulement avec l’entrée « ${ROLES[role] ?? role} ».`)
-        : (BAR_HELP[setting.key] ?? ''),
+    const reason = idleReason(workflow, setting, draft),
+      idle = Boolean(reason),
+      label = settingName(setting.key),
+      said = idle ? reason : (BAR_HELP[setting.key] ?? ''),
       line = barLine(label, {
         key: 'setting-' + setting.key,
         count: list.length,
@@ -1645,7 +1745,10 @@ export function setupStudio({
   function rareLines(workflow) {
     const draft = drafts[mode],
       lines = [];
-    if (workflow.seeded) {
+    // (0.6.102) A seed « Fixe » too: the workflow's own while the field is empty (said in its place),
+    // the one the user names otherwise, for this creation.
+    const seedFixed = Number.isSafeInteger(workflow.seedFixed) ? workflow.seedFixed : null;
+    if (workflow.seeded || seedFixed !== null) {
       const row = node('div', 'studio-set-line studio-seed'),
         seed = node('input'),
         dice = button(
@@ -1659,7 +1762,7 @@ export function setupStudio({
         );
       seed.type = 'number';
       seed.min = '0';
-      seed.placeholder = 'aléatoire';
+      seed.placeholder = seedFixed !== null ? String(seedFixed) : 'aléatoire';
       seed.value = draft.seed;
       seed.disabled = Boolean(working);
       seed.setAttribute('aria-label', 'Seed');
@@ -1687,13 +1790,20 @@ export function setupStudio({
       // Kept per workflow: a song's length is not a sound effect's.
       const store = (draft.settings[workflow.id] ??= {}),
         value = store[setting.key] ?? setting.default ?? '',
-        label = SETTINGS[setting.key] || setting.key,
+        label = settingName(setting.key),
         set = next => {
           store[setting.key] = next;
           readout();
         };
       let control;
-      if (setting.type === 'string' && !setting.choices) {
+      if (setting.type === 'boolean') {
+        // (0.6.102) On or off (« Audio » of LTX 2.5): a switch, sent as such. A number field took
+        // « false » from a take and refused the creation.
+        control = node('input', 'studio-setting-switch');
+        control.type = 'checkbox';
+        control.checked = settingValue(setting, value) === true;
+        control.onchange = () => set(control.checked);
+      } else if (setting.type === 'string' && !setting.choices) {
         control = textarea(String(value), 4, SETTING_HELP[setting.key] ?? '', set);
         if (setting.maxLength) control.maxLength = setting.maxLength;
       } else if (setting.choices)
@@ -1708,11 +1818,33 @@ export function setupStudio({
         control.value = String(value);
         if (setting.min !== undefined) control.min = String(setting.min);
         if (setting.max !== undefined) control.max = String(setting.max);
+        if (setting.type === 'integer') control.step = String(setting.multipleOf ?? 1);
+        else if (setting.multipleOf) control.step = String(setting.multipleOf);
+        else control.step = 'any';
         control.oninput = () => set(control.value);
+        // (0.6.102) Beyond its bounds, the nearest value they allow, shown at once: a whole number
+        // beyond them refused the creation, a decimal was made at its limit while 12 stayed shown.
+        control.onchange = () => {
+          const held = settingValue(setting, control.value);
+          if (held === '' || String(held) === control.value) return;
+          control.value = String(held);
+          set(held);
+        };
       }
       aiTarget(control, 'setting-' + setting.key);
-      const wrapper = field(label, control, { wide: setting.type === 'string' && !setting.choices });
-      if (setting.max !== undefined) wrapper.title = `De ${setting.min ?? 0} à ${setting.max}.`;
+      const wrapper = field(label, control, { wide: setting.type === 'string' && !setting.choices }),
+        // (0.6.102) Read only with an input not given (« Compression des références » without a start
+        // or an end image): greyed as a bar is, and why in its tip.
+        idle = idleReason(workflow, setting, draft);
+      // Its name, its switch at the right, on one line.
+      if (setting.type === 'boolean') wrapper.className += ' is-switch';
+      if (idle) {
+        control.disabled = true;
+        wrapper.className += ' is-idle';
+        wrapper.title = idle;
+        wrapper.append(node('span', 'sr-only', idle));
+      } else if (setting.max !== undefined)
+        wrapper.title = `De ${String(setting.min ?? 0).replace('.', ',')} à ${String(setting.max).replace('.', ',')}.`;
       lines.push(wrapper);
     }
     return lines;
@@ -2395,11 +2527,9 @@ export function setupStudio({
       if (extending && role === 'source') continue;
       // Never an input without a source (an image of a proposal that was joined to its message).
       const chosen = (draft.inputs[role] ?? []).filter(item => item?.source).map(item => item.source);
-      // What the model cannot do without is asked for here, in the user's words.
-      if (spec.required && spec.count && !chosen.length)
-        throw Error(
-          spec.media.includes('video') ? 'Ajoutez la vidéo à suivre.' : 'Ajoutez l’image du personnage.',
-        );
+      // What the model cannot do without is asked for here, in the user's words (0.6.102: by its
+      // role; an image to modify was asked for as « l’image du personnage »).
+      if (spec.required && spec.count && !chosen.length) throw Error(missingInput(workflow, role, spec));
       if (!chosen.length || !spec.count) continue;
       // Several references go as a list; a single one (the character of a video) alone.
       args[role] = (spec.many ?? role === 'reference') ? chosen.slice(0, spec.count) : chosen[0];
@@ -2412,18 +2542,35 @@ export function setupStudio({
       // A large picture is a final, a small one a draft: the profile only names it here.
       if (workflow.stages) args.stage = stageOf(workflow);
     }
-    if (draft.seed.trim() && workflow.seeded) {
+    const seedFixed = Number.isSafeInteger(workflow.seedFixed) ? workflow.seedFixed : null;
+    if (draft.seed.trim() && (workflow.seeded || seedFixed !== null)) {
       const seed = Number(draft.seed);
-      if (!Number.isSafeInteger(seed) || seed < 0) throw Error('Seed : un entier positif, ou vide pour un tirage.');
-      args.seed = seed;
+      if (!Number.isSafeInteger(seed) || seed < 0)
+        throw Error(
+          seedFixed !== null
+            ? 'Seed : un entier positif, ou vide pour celle du workflow.'
+            : 'Seed : un entier positif, ou vide pour un tirage.',
+        );
+      // (0.6.102) A seed « Fixe » holds Moodix AI, not the user: changed here, it is the user's own change.
+      if (workflow.seeded) args.seed = seed;
+      else edits.seed = seed;
     }
+    const store = (draft.settings[workflow.id] ??= {});
     for (const setting of workflow.settings) {
-      const value = draft.settings[workflow.id]?.[setting.key];
+      const value = store[setting.key];
       if (value === undefined || value === '') continue;
       // Read only with an input that does not go with this creation (« Débruitage » without an
       // image to modify): greyed here, and not sent.
       if (setting.onlyWith && onlyInputs(workflow, setting).every(input => args[input] === undefined)) continue;
-      args[setting.key] = setting.type === 'string' ? value : Number(value);
+      // (0.6.102) Within the bounds of the workflow, as the field then shows it: beyond them, the
+      // nearest one. A switch is on or off (« false » went as the number 0, refused).
+      const made = settingValue(setting, value);
+      store[setting.key] = made;
+      // What the workflow fixes holds Moodix AI: changed here, it is the user's own change of the
+      // proposal (as on its card in the Chat), sent with the size it fixes too. As it is, nothing goes.
+      if (setting.fixed) {
+        if (made !== setting.default) edits[setting.key] = made;
+      } else args[setting.key] = made;
     }
     // The LoRAs of the workflow left to the assistant, as chosen here.
     const loras = loraArgs(workflow, draft);
@@ -2987,7 +3134,8 @@ export function setupStudio({
       if (values.settingsFree[key] && String(shown(key)) !== String(value))
         steps.push([
           'setting-' + key,
-          'règle ' + (SETTINGS[key] || key).toLowerCase(),
+          // (0.6.102) By its name, never its key (« règle steps »).
+          'règle ' + settingName(key).toLowerCase(),
           () => {
             (draft.settings[workflow.id] ??= {})[key] = value;
             if (key === 'lyrics' && value) draft.lyrics = true;
@@ -3174,7 +3322,12 @@ export function setupStudio({
       const item = items.get(key),
         value = draft.settings[workflow?.id]?.[key];
       if (!item || item.locked || value === undefined || String(value) === String(values.settings[key])) continue;
-      changes[key] = item.type === 'string' ? String(value) : Number(value);
+      // (0.6.102) Within the bounds the proposal gives it (its workflow's, « Fixe » as « Assistant »),
+      // shown so; a switch as true or false.
+      const made = settingValue(item, value);
+      if (made === '' || String(made) === String(values.settings[key])) continue;
+      if (workflow) draft.settings[workflow.id][key] = made;
+      changes[key] = made;
     }
     // An image dragged to another slot changes role: said by the name the server gave that role
     // (the slot of the family, « msr_image » for a reference of LTX 2.5), the one it takes back.
@@ -4521,6 +4674,7 @@ export function setupStudio({
     if (rare.length) {
       const more = button('studio-more-pill' + (advanced ? ' is-open' : ''), '···', () => {
         advanced = !advanced;
+        revealRare = advanced;
         render();
       });
       more.append(node('span', 'studio-more-word', 'Plus de réglages'));
@@ -4734,6 +4888,9 @@ export function setupStudio({
     // Where the Sortie was scrolled to: drawn again, it stays there (a click on a creation, a
     // change of model), not back at its start.
     const along = document.querySelector?.('#studio-view .studio-strip')?.scrollLeft ?? 0;
+    // (0.6.102) The same for the blocks that scroll in themselves, Réglages and Entrée: a LoRA
+    // switched, « Plus de réglages » opened, a case filled sent them back to their top.
+    const tops = SCROLLED.map(selector => document.querySelector?.(selector)?.scrollTop ?? 0);
     const desk = form();
     if (sketched) desk.classList.add('is-arriving');
     sketched = false;
@@ -4756,6 +4913,19 @@ export function setupStudio({
     if (along) {
       const strip = document.querySelector?.('#studio-view .studio-strip');
       if (strip) strip.scrollLeft = along;
+    }
+    SCROLLED.forEach((selector, at) => {
+      const block = tops[at] ? document.querySelector?.(selector) : null;
+      if (block) block.scrollTop = tops[at];
+    });
+    // « Plus de réglages » just opened: brought into sight, under its pill, as far as the block allows
+    // (taller than the room it has, from its pill, which stays in sight).
+    if (revealRare) {
+      revealRare = false;
+      if (advanced) {
+        document.querySelector?.('#studio-view .studio-rare')?.scrollIntoView?.({ block: 'nearest' });
+        document.querySelector?.('#studio-view .studio-more-pill')?.scrollIntoView?.({ block: 'nearest' });
+      }
     }
     if (working) progress();
     // Nothing made any more: the Flux leaves with its frame.
@@ -4908,6 +5078,64 @@ export function setupStudio({
     runsStale = true;
     if (tools) toolsStale = true;
   }
+  /** When the user last changed each part of each workflow, as tools read so tell it: { id → { part: time } }. */
+  const changesOf = value => {
+    const map = new Map();
+    for (const list of Object.values(value?.tools ?? {}))
+      for (const item of list ?? []) if (item?.changed) map.set(item.id, item.changed);
+    return map;
+  };
+  /**
+   * (0.6.102) The parts of workflow `id` just changed in Paramètres (`parts`: a setting by its key,
+   * `lora:<id>`, `profiles`) in every draft the Studio keeps (the conversation in hand, those left):
+   * each takes the workflow's value now, the rest stays.
+   */
+  function freshen(id, parts) {
+    const sets = [drafts, ...[...leftDrafts.values()].map(left => left.drafts)];
+    for (const set of sets)
+      for (const item of MODES) {
+        const draft = set[item.id],
+          models = modelsOf(item.id),
+          workflow = models.find(model => model.id === id);
+        if (!draft || !workflow) continue;
+        for (const part of parts)
+          if (part.startsWith('lora:')) delete draft.workflowLoras?.[id]?.[part.slice(5)];
+          else delete draft.settings?.[id]?.[part];
+        // What the Studio sets for the model in hand: its size, its length, its seed.
+        if ((draft.workflow ?? models.find(model => !model.unavailable)?.id) !== id) continue;
+        if (workflow.limits && ['width', 'height', 'stage', 'profiles'].some(part => parts.has(part)))
+          startSize(workflow, draft);
+        if (parts.has('frames')) Object.assign(draft, { length: null, extension: null });
+        if (parts.has('seed')) draft.seed = '';
+      }
+  }
+  /**
+   * (0.6.102) A workflow was saved in Paramètres › Workflows (or set back, deleted, shown again) and
+   * the settings closed: the Studio reads its tools at once, where it waited to come on screen again
+   * and kept meanwhile what the workflow no longer has; and what was just changed there (a policy, a
+   * value) takes, for that setting only, the place of what the last take gave (« le plus récent des
+   * deux »): a setting turned « Fixe » shows its value, a default its new one. The rest stays, and
+   * nothing moves when nothing changed. A work holding the Studio (a take made, a proposal of Moodix
+   * AI, a character checked) keeps the settings it has: they are its own.
+   */
+  async function workflowsSaved() {
+    const before = info;
+    toolsStale = true;
+    try {
+      await load();
+    } catch {
+      return;
+    }
+    if (!before || !info || JSON.stringify(before) === JSON.stringify(info)) return;
+    const was = changesOf(before);
+    if (!(working || proposal || ai || checking || settling))
+      for (const [id, parts] of changesOf(info)) {
+        const fresh = Object.keys(parts).filter(part => was.get(id)?.[part] !== parts[part]);
+        if (fresh.length) freshen(id, new Set(fresh));
+      }
+    await afterMove();
+    render();
+  }
   function forget() {
     // A creation was being looked at: the Studio is first as it was before (leaveLook), not left
     // with the settings of that creation and no way back.
@@ -5032,9 +5260,20 @@ export function setupStudio({
     draft.workflow = workflow.id;
     // Its saved settings (« Enregistrer ») do not come over those of the take.
     presetShown[target] = true;
+    // (0.6.102) « Le plus récent des deux »: what was changed in Paramètres › Workflows since this
+    // take (a policy, a value) is shown as the workflow has it now, the rest as the take had it. Not for
+    // a take looked at to see what made it (`exactSeed`: inspect), which shows it all as it was.
+    const newer = exactSeed ? () => false : changedSince(workflow, record.createdAt);
     if (workflow.seeded)
-      draft.seed = (exactSeed || made.seed_given === true) && Number.isSafeInteger(made.seed) ? String(made.seed) : '';
-    if (workflow.limits && made.width > 0 && made.height > 0) {
+      draft.seed =
+        !newer('seed') && (exactSeed || made.seed_given === true) && Number.isSafeInteger(made.seed)
+          ? String(made.seed)
+          : '';
+    // A seed « Fixe »: the field is empty for the workflow's own; looked at, the take's when it was another.
+    else if (Number.isSafeInteger(workflow.seedFixed))
+      draft.seed = exactSeed && Number.isSafeInteger(made.seed) && made.seed !== workflow.seedFixed ? String(made.seed) : '';
+    if (workflow.limits && ['width', 'height', 'stage', 'profiles'].some(newer)) startSize(workflow, draft);
+    else if (workflow.limits && made.width > 0 && made.height > 0) {
       // Of a ratio no format is close to (1280 × 800 asked in the Chat), the nearest format (0.6.92):
       // left as they were, the format and the size shown were those of the take before.
       const format = nearestFormat(made.width, made.height);
@@ -5043,11 +5282,17 @@ export function setupStudio({
     const lengths = workflow.lengths?.seconds ?? [],
       // The whole clip; of a continuation, what it added to the clip it started from.
       length = lengthOfRecord(record, Boolean(sourceOf(record)));
-    if (lengths.length && length > 0)
+    if (lengths.length && newer('frames')) draft.length = null;
+    else if (lengths.length && length > 0)
       draft.length = lengths.reduce((best, value) => (Math.abs(value - length) < Math.abs(best - length) ? value : best));
     // The roles of its inputs, as its record names them (those of the family: « img2img »).
     const given = (Array.isArray(made.references) ? made.references : []).map(ref => ref?.role);
     for (const setting of workflow.settings ?? []) {
+      // Changed since in Paramètres: its value now (a default, a value « Fixe »).
+      if (newer(setting.key)) {
+        delete draft.settings[workflow.id]?.[setting.key];
+        continue;
+      }
       if (made[setting.key] === undefined || made[setting.key] === null) continue;
       // Read only with an input the take did not have (an image made from nothing says a denoise
       // of 1, which is no setting): the Studio keeps the one it has.
@@ -5061,6 +5306,11 @@ export function setupStudio({
     if (Array.isArray(made.loras) && workflow.loras?.length) {
       const chosen = new Map(made.loras.map(item => [item.id, item.strength]));
       for (const item of workflow.loras) {
+        // Changed since in Paramètres: as the workflow has it now.
+        if (newer('lora:' + item.id)) {
+          delete draft.workflowLoras[workflow.id]?.[item.id];
+          continue;
+        }
         const choice = loraChoice(workflow, item, draft);
         choice.on = chosen.has(item.id) || !item.assistant;
         if (chosen.has(item.id) && Number.isFinite(chosen.get(item.id))) choice.strength = chosen.get(item.id);
@@ -5384,6 +5634,7 @@ export function setupStudio({
     takeOver,
     conversationChanged,
     invalidate,
+    workflowsSaved,
     checkCharacter,
     /**
      * The size of the image of a character for a video of `size` (its format, about as many

@@ -180,7 +180,16 @@ test('the Studio is told, per verb, the ready workflows with their inputs, sizes
   assert.ok(more.lengths.seconds.some(s => Math.abs(s - 119 / 24) < 1e-9));
 
   const music = named('create_audio', 'Musique');
-  assert.deepEqual(music.settings.map(item => item.key).sort(), ['language', 'lyrics', 'seconds']);
+  assert.deepEqual(music.settings.filter(item => !item.fixed).map(item => item.key).sort(), ['language', 'lyrics', 'seconds']);
+  // (0.6.102) Those it fixes too, at their value: « Fixe » holds Moodix AI, the user may change it.
+  assert.deepEqual(
+    music.settings.filter(item => item.fixed).map(item => [item.key, item.default]),
+    [
+      ['steps', 50],
+      ['guidance_scale', 7],
+      ['shift', 3],
+    ],
+  );
   assert.match(music.for, /music/);
   assert.equal(named('create_audio', 'Bruitages').settings.find(item => item.key === 'seconds').max, 30);
 
@@ -194,7 +203,7 @@ test('the Studio is told, per verb, the ready workflows with their inputs, sizes
     reference: { count: 1, media: ['image'], many: false, required: true },
   });
   assert.deepEqual(
-    scail.settings.map(item => [item.key, item.default]),
+    scail.settings.filter(item => !item.fixed).map(item => [item.key, item.default]),
     [
       ['subject', 'person'],
       ['reference_subject', 'person'],
@@ -1025,8 +1034,11 @@ async function studioPage(tools, routes = {}, options = {}) {
   const globals = {
     document: {
       getElementById: id => page[id] ?? null,
-      // A setting the pointer goes to (options.targets): somewhere on the page.
-      querySelector: options.targets
+      // A setting the pointer goes to (options.targets): somewhere on the page. (options.querySelector:
+      // the page a test lays out itself, 0.6.102.)
+      querySelector: options.querySelector
+        ? options.querySelector
+        : options.targets
         ? () => ({
             getBoundingClientRect: () => ({ left: 100, top: 100, width: 40, height: 40 }),
             scrollIntoView() {},
@@ -5901,6 +5913,67 @@ test('followed again with its request, the Studio shows the settings it is made 
     assert.equal(ai('size').attributes['aria-valuetext'], '800 × 448');
     await studio.settled({ error: 'La génération a échoué.' });
     assert.equal(ai('seed').value, '');
+  } finally {
+    page.restore();
+  }
+});
+
+test('drawn again, Réglages and Entrée stay where they were scrolled to; « Plus de réglages » opened is brought into sight', async () => {
+  // (0.6.102) Each drawing sent them back to their top, as the Sortie was before (0.6.92): a LoRA
+  // switched, a setting changed, « Plus de réglages » opened at the foot of a long column.
+  const blocks = new Map();
+  let desk = null;
+  // The page as it is laid out: each block of the desk on the page now, its scroll its own.
+  const querySelector = selector => {
+    const now = globalThis.document.getElementById('studio-body')?.children[0] ?? null;
+    if (now !== desk) {
+      desk = now;
+      blocks.clear();
+    }
+    if (!blocks.has(selector))
+      blocks.set(selector, {
+        scrollTop: 0,
+        scrollLeft: 0,
+        into: [],
+        scrollIntoView(options) {
+          this.into.push(options);
+        },
+      });
+    return blocks.get(selector);
+  };
+  const image = {
+    id: 'w',
+    name: 'Image',
+    roles: {},
+    limits: sizes,
+    size: { width: 1024, height: 1024 },
+    seeded: true,
+    settings: [{ key: 'steps', type: 'integer', min: 1, max: 50, default: 8 }],
+  };
+  const page = await studioPage({ create_image: [image] }, {}, { querySelector });
+  const settings = '#studio-view .studio-block.is-settings > .studio-block-body',
+    input = '#studio-view .studio-block.is-input',
+    rare = '#studio-view .studio-rare';
+  try {
+    querySelector(settings).scrollTop = 140;
+    querySelector(input).scrollTop = 60;
+    page.studio.render();
+    assert.notEqual(desk, null);
+    assert.deepEqual([querySelector(settings).scrollTop, querySelector(input).scrollTop], [140, 60]);
+    // Opened: brought into sight, as little as it takes, from where the column was; its pill in sight
+    // when it is taller than the room it has.
+    page.body.find('studio-more-pill')[0].onclick();
+    assert.equal(page.body.find('studio-rare')[0].hidden, false);
+    assert.deepEqual(querySelector(rare).into, [{ block: 'nearest' }]);
+    assert.deepEqual(querySelector('#studio-view .studio-more-pill').into, [{ block: 'nearest' }]);
+    assert.equal(querySelector(settings).scrollTop, 140);
+    // Drawn again open (a setting changed): it stays where the user scrolled, nothing is brought.
+    querySelector(settings).scrollTop = 300;
+    page.studio.render();
+    assert.deepEqual([querySelector(rare).into, querySelector(settings).scrollTop], [[], 300]);
+    // Closed: nothing brought either.
+    page.body.find('studio-more-pill')[0].onclick();
+    assert.deepEqual(querySelector(rare).into, []);
   } finally {
     page.restore();
   }

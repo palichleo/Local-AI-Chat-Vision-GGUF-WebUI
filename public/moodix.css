@@ -7769,6 +7769,32 @@ html[data-switch='open']::view-transition-old(chat) {
 .studio-fine.is-idle .studio-bar-value {
   opacity: 0.45;
 }
+/* (0.6.102) A setting on or off among them (« Audio »): its name, its switch at the right, on one
+   line, the switch drawn as those of the LoRAs. */
+#studio-view .studio-field.is-switch {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+#studio-view .studio-setting-switch {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #eceef2;
+  cursor: pointer;
+}
+:root[data-theme='light'] #studio-view .studio-setting-switch {
+  accent-color: #12141a;
+}
+#studio-view .studio-setting-switch:disabled {
+  cursor: default;
+}
+/* (0.6.102) A field among them read only with an input not given: greyed as a bar is. */
+#studio-view .studio-field.is-idle > .studio-label,
+#studio-view .studio-field.is-idle > :is(input, select, textarea) {
+  opacity: 0.45;
+}
 .studio-seed {
   grid-template-columns: 52px minmax(0, 1fr) 30px;
 }

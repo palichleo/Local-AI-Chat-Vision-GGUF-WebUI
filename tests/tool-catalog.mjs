@@ -202,7 +202,8 @@ test('arguments are checked against the chosen workflow, never forwarded blindly
   const routed = await tools.route('create_video', { prompt: 'x', intention: 'y', fps: 12, stage: 'final' }, media);
   assert.equal(routed.args.stage, 'final');
   assert.equal(routed.args.fps, undefined);
-  assert.match(routed.notes[0], /fps ignoré/);
+  // (0.6.102: under the name Paramètres › Workflows gives it, as every note of the router.)
+  assert.match(routed.notes[0], /^Images par seconde : valeur ignorée, fixée par le workflow /);
   await assert.rejects(tools.route('create_image', { prompt: 'x', colour: 'red' }, media), /argument colour/);
   await assert.rejects(
     tools.route('create_image', { prompt: 'x', source: { image: 0, resource: 'r' } }, media),
@@ -227,7 +228,7 @@ test('the seed the user names is passed on, only to a workflow that draws its se
   // A workflow with its own seed keeps it, and says so.
   const fixed = await catalogOf(workflows).route('create_video', { prompt: 'x', intention: 'y', seed: 5 }, media);
   assert.equal(fixed.seed, undefined);
-  assert.match(fixed.notes.join(), /seed ignoré/);
+  assert.match(fixed.notes.join(), /Seed : valeur ignorée, fixée par le workflow/);
 });
 
 test('upscale follows the media of its source and interpolate only takes videos', async () => {
@@ -369,8 +370,8 @@ test('music and sound effects: the model names the workflow, and each keeps its 
   assert.equal(routed.workflow.id, effects.id);
   assert.equal(routed.args.seconds, 30);
   assert.equal(routed.args.lyrics, undefined);
-  assert.ok(routed.notes.some(note => /seconds : 60 → 30/.test(note)));
-  assert.ok(routed.notes.some(note => /lyrics ignoré/.test(note)));
+  assert.ok(routed.notes.some(note => /^Durée \(secondes\) : 60 → 30, la limite de /.test(note)), routed.notes.join(' | '));
+  assert.ok(routed.notes.some(note => /^Paroles : valeur ignorée, .* ne prend pas ce réglage\.$/.test(note)));
   const song = await catalog.route('create_audio', { workflow: music.id, prompt: 'synth-pop', seconds: 200 }, media);
   assert.equal(song.args.seconds, 200);
   assert.deepEqual(song.notes, []);
@@ -626,9 +627,10 @@ test('Krea 2: the denoise is the assistant’s with an image to modify, from 0.6
   routed = await route({ source, denoise: 0.65 });
   assert.deepEqual([routed.args.denoise, routed.notes], [0.65, []]);
   routed = await route({ source, denoise: 0.9 });
-  assert.deepEqual([routed.args.denoise, routed.notes], [0.7, ['denoise : 0.9 → 0.7, la limite de Krea 2.']]);
+  // (0.6.102: under the name the editor shows.)
+  assert.deepEqual([routed.args.denoise, routed.notes], [0.7, ['Débruitage : 0,9 → 0,7, la limite de Krea 2.']]);
   routed = await route({ source, denoise: 0.3 });
-  assert.deepEqual([routed.args.denoise, routed.notes], [0.6, ['denoise : 0.3 → 0.6, la limite de Krea 2.']]);
+  assert.deepEqual([routed.args.denoise, routed.notes], [0.6, ['Débruitage : 0,3 → 0,6, la limite de Krea 2.']]);
   // Without an image to modify: left aside without a word, whatever its value.
   for (const denoise of [0.7, 0.9, 0.3]) {
     routed = await route({ denoise });
@@ -638,13 +640,24 @@ test('Krea 2: the denoise is the assistant’s with an image to modify, from 0.6
   // The workflow that fixes it: ignored and said, never an error.
   routed = await route({ source, denoise: 0.7 }, held);
   assert.equal(Object.hasOwn(routed.args, 'denoise'), false);
-  assert.match(routed.notes.join(), /denoise ignoré : fixé par le workflow Krea 2\./);
+  assert.match(routed.notes.join(), /Débruitage : valeur ignorée, fixée par le workflow Krea 2\./);
 
   // The Studio: a setting of the model, with its bounds and the input it is only read with.
+  // (0.6.102) Those it fixes too (its steps), at their value: « Fixe » holds Moodix AI, the user
+  // may change it for a creation.
   const shown = (await catalog.studio()).create_image.find(item => item.id === krea.id);
   assert.deepEqual(shown.settings, [
+    { key: 'steps', type: 'integer', min: 1, max: 1000, default: 8, fixed: true },
     { key: 'denoise', type: 'number', min: 0.6, max: 0.7, default: 0.6, onlyWith: { role: 'img2img', otherwise: 1 } },
   ]);
   assert.equal(shown.inputs.img2img, 'source');
-  assert.deepEqual((await held.studio()).create_image.find(item => item.id === krea.id).settings, []);
+  assert.deepEqual(
+    (await held.studio()).create_image
+      .find(item => item.id === krea.id)
+      .settings.map(setting => [setting.key, setting.default, setting.fixed, setting.min, setting.max]),
+    [
+      ['steps', 8, true, 1, 1000],
+      ['denoise', 0.6, true, 0, 1],
+    ],
+  );
 });

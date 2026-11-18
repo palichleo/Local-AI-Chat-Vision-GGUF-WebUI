@@ -2,7 +2,8 @@
  * The name of each setting of a workflow as Paramètres › Workflows shows it (native-workflow-ui.mjs),
  * and of the values it shows by a word. (0.6.94) Read by the server too: a value it refuses, or a
  * value it needs and is not given, is said under that same name (lib/native-workflows.mjs), never by
- * its key in English (« steps is required »).
+ * its key in English (« steps is required »). (0.6.102) So is a value it leaves aside or brings within
+ * its limits (the notes of lib/tool-catalog.mjs), and a setting of the Studio that has no name of its own.
  */
 export const SETTING_NAMES = {
   prompt: 'Prompt',

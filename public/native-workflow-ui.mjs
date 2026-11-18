@@ -145,8 +145,6 @@ export function setupNativeWorkflows(options) {
     parentScroll = 0,
     afterBack,
     readComponents = [],
-    // (0.6.94) Why each file left to the assistant cannot be saved as it is (no default file), or ''.
-    componentDefaults = [],
     readParameters = [],
     readLoras = [],
     readReferences = [],
@@ -167,7 +165,10 @@ export function setupNativeWorkflows(options) {
     licenseAsked = '',
     confirmFocus = null,
     // Where ComfyUI, the external engine, is and whether it answers.
-    comfy = { enabled: false, baseUrl: '', reachable: false, version: '' };
+    comfy = { enabled: false, baseUrl: '', reachable: false, version: '' },
+    // (0.6.102) A workflow saved, set back, deleted or shown again since the settings opened: the
+    // Studio reads its tools again once they close (takeChanges, app.js).
+    changedWorkflows = false;
   // Paths being registered from a file field: Save waits for them.
   const pendingFiles = new Set();
   const element = (tag, id, text = '') => {
@@ -616,7 +617,10 @@ export function setupNativeWorkflows(options) {
             const result = await run(async signal =>
               (await api('generation/reset', { id: record.id }, { signal })).json(),
             );
-            if (result) apply(result, { settings: false });
+            if (result) {
+              changedWorkflows = true;
+              apply(result, { settings: false });
+            }
           } catch (failure) {
             importStatus(failure.message, true);
           }
@@ -663,6 +667,7 @@ export function setupNativeWorkflows(options) {
           try {
             await run(async signal => {
               await api('generation/remove', { id: record.id }, { signal });
+              changedWorkflows = true;
               workflows = workflows.filter(item => item.id !== record.id);
               renderList();
             });
@@ -738,7 +743,10 @@ export function setupNativeWorkflows(options) {
         async () => {
           try {
             const result = await run(async signal => (await api('generation/unhide', {}, { signal })).json());
-            if (result) apply(result, { settings: false });
+            if (result) {
+              changedWorkflows = true;
+              apply(result, { settings: false });
+            }
           } catch (failure) {
             importStatus(failure.message, true);
           }
@@ -1005,110 +1013,52 @@ export function setupNativeWorkflows(options) {
       void suggest();
     }
   }
+  /**
+   * A file of the workflow: the one it is made with. (0.6.102) « Assistant » left the files: Moodix
+   * AI was offered bare identifiers, nothing to tell them apart, and the Studio no choice at all. A
+   * workflow saved so shows the file it is made with (its default, else the first allowed), « Enregistrer »
+   * keeps that one.
+   */
   function componentControl(role, policy, { optional = false, present = true } = {}) {
     const card = node('div', 'native-component'),
       id = 'native-component-' + role,
-      ownershipSelect = segmented(
-        id + '-policy',
-        [
-          ['fixed', ownership.fixed],
-          ['model', ownership.model],
-        ],
-        policy.policy,
+      picker = assetPicker(
+        role,
+        id,
+        policy.policy === 'model' ? policy.default || policy.choices?.[0] || '' : policy.asset || policy.default,
       ),
-      picker = assetPicker(role, id, policy.asset || policy.default),
-      allowed = node('div', 'native-asset-choices'),
-      active = input(id + '-enabled', present, 'checkbox'),
-      // (0.6.94) Left to the assistant without a default file, every creation was refused, the
-      // Studio's too (it has no choice of files): said at once, and the workflow is not saved so.
-      needs = node(
-        'p',
-        'config-error native-needs-default',
-        'Choisissez le fichier par défaut : c’est celui qui sert quand Moodix AI n’en choisit pas. Sans lui, ce workflow ne s’enregistre pas.',
-      );
-    const lacksDefault = () =>
-        (!optional || active.checked) && ownershipSelect.value === 'model' && !picker.control.value,
-      showNeeds = () => {
-        needs.hidden = !lacksDefault();
-      };
-    needs.hidden = true;
-    let checks = [];
-    function renderChoices() {
-      const selected = new Set(
-        checks.length ? checks.filter(([, check]) => check.checked).map(([id]) => id) : policy.choices || [],
-      );
-      checks = [];
-      allowed.replaceChildren();
-      for (const asset of picker.compatible) {
-        const check = input(
-            id + '-' + asset.id,
-            selected.has(asset.id) || asset.id === picker.control.value,
-            'checkbox',
-          ),
-          label = node('label', 'history-toggle');
-        label.append(check, node('span', '', asset.name || asset.path.split(/[\\/]/).pop()));
-        allowed.append(label);
-        checks.push([asset.id, check]);
-      }
-      if (!checks.length) allowed.append(node('p', 'field-help', 'Enregistrez les fichiers locaux à autoriser.'));
-      showNeeds();
-    }
-    picker.control.onchange = renderChoices;
-    renderChoices();
-    ownershipSelect.onchange = () => {
-      allowed.hidden = ownershipSelect.value !== 'model';
-      showNeeds();
-    };
-    ownershipSelect.onchange();
-    const spec = familyOf(draft.pipeline)?.components[role] || {};
-    // A component the assistant may not choose (a tokenizer must match its encoder) shows no ownership switch.
-    if (spec.policies && !spec.policies.includes('model')) ownershipSelect.hidden = true;
-    card.append(field(componentLabel(role), ownershipSelect), picker.container, needs, allowed);
+      active = input(id + '-enabled', present, 'checkbox');
+    const spec = familyOf(draft.pipeline)?.components[role] || {},
+      // Its name on its line, as when the switch stood at its right; it goes to the field of the file.
+      heading = node('div', 'field-group'),
+      caption = node('label', '', componentLabel(role));
+    caption.setAttribute('for', id + '-file');
+    heading.append(caption);
+    card.append(heading, picker.container);
     if (spec.help) card.append(node('p', 'field-help', spec.help));
     if (optional) {
       const label = node('label', 'history-toggle');
       label.append(active, node('span', '', 'Utiliser ' + componentLabel(role)));
       card.append(label);
       const sync = () => {
-        ownershipSelect.hidden = !active.checked;
         picker.container.hidden = !active.checked;
-        allowed.hidden = !active.checked || ownershipSelect.value !== 'model';
-        showNeeds();
       };
       active.onchange = sync;
-      ownershipSelect.onchange = sync;
       sync();
     }
     return {
       card,
       picker,
-      /** Why it cannot be saved as it is (left to the assistant without a default file), or ''. */
-      missingDefault: () =>
-        lacksDefault()
-          ? `Choisissez le fichier par défaut de « ${componentLabel(role)} » : c’est celui qui sert quand Moodix AI n’en choisit pas.`
-          : '',
       read() {
         if (optional && !active.checked) return null;
         // Left without a file, where the folders of the settings can answer: a required
         // component is not sent at all, an optional one that is used says so; the server takes
         // the file from the folders. A model folder cannot be told from another: it is asked for.
-        if (ownershipSelect.value === 'fixed')
-          return picker.selected() || !picker.automatic
-            ? { policy: 'fixed', asset: picker.selected() }
-            : optional
-              ? { policy: 'fixed', asset: AUTOMATIC }
-              : null;
-        const choices = checks.filter(([, check]) => check.checked).map(([id]) => id);
-        if (picker.selected() && !choices.includes(picker.selected()))
-          throw Error(
-            'Choisissez une valeur par défaut parmi les fichiers autorisés pour ' + componentLabel(role) + '.',
-          );
-        return {
-          policy: 'model',
-          choices,
-          ...(picker.selected() ? { default: picker.selected() } : {}),
-          ...(policy.description ? { description: policy.description } : {}),
-        };
+        return picker.selected() || !picker.automatic
+          ? { policy: 'fixed', asset: picker.selected() }
+          : optional
+            ? { policy: 'fixed', asset: AUTOMATIC }
+            : null;
       },
     };
   }
@@ -1173,6 +1123,9 @@ export function setupNativeWorkflows(options) {
     min.step = max.step = type === 'integer' ? '1' : 'any';
     // A list of choices has no bounds to narrow: they were shown, and never saved.
     const ranged = ['integer', 'number'].includes(type) && !enumChoices;
+    // (0.6.102) « Fixe » has its bounds too: those the user may change it within for a creation (in
+    // the Studio, on the card of a proposal), as for « Assistant ». Not a seed's, nor a LoRA's strength.
+    const fixedBounds = ranged && name !== 'seed' && prefix === 'native';
     if (ranged) bounds.append(field('Minimum', min), field('Maximum', max));
     const description = input(prefix + '-description-' + name, policy.description || '');
     description.maxLength = 1000;
@@ -1227,7 +1180,7 @@ export function setupNativeWorkflows(options) {
     owner.onchange = () => {
       defaultLabel.hidden = owner.value !== 'model';
       valueField.hidden = owner.value === 'random' || (owner.value === 'model' && !useDefault.checked);
-      bounds.hidden = owner.value !== 'model' || !ranged;
+      bounds.hidden = !ranged || !(owner.value === 'model' || (owner.value === 'fixed' && fixedBounds));
       description.hidden = owner.value !== 'model';
       setInert();
       changed();
@@ -1282,7 +1235,24 @@ export function setupNativeWorkflows(options) {
               : type === 'string'
                 ? value.value
                 : number(value, labels[name] || name);
-        if (selected === 'fixed') return { policy: 'fixed', value: concrete };
+        if (selected === 'fixed') {
+          const result = { policy: 'fixed', value: concrete };
+          // (0.6.102) What the workflow narrows it to stays (« Assistant » turned « Fixe »): the user
+          // changes it for a creation within those limits, not wider ones. Only what narrows is written.
+          if (policy.choices) result.choices = policy.choices;
+          if (type === 'string' && !enumChoices && policy.maxLength) result.maxLength = policy.maxLength;
+          if (fixedBounds) {
+            const low = number(min, 'Minimum'),
+              high = number(max, 'Maximum'),
+              lower = policy.min !== undefined || low !== boundsFor[0],
+              upper = policy.max !== undefined || high !== boundsFor[1];
+            if (low > high || ((lower || upper) && (concrete < low || concrete > high)))
+              throw Error((labels[name] || name) + ' : la valeur doit être dans les limites choisies.');
+            if (lower) result.min = low;
+            if (upper) result.max = high;
+          }
+          return result;
+        }
         const result = { policy: 'model', type };
         if (useDefault.checked) result.default = concrete;
         if (enumChoices) result.choices = enumChoices;
@@ -1458,12 +1428,9 @@ export function setupNativeWorkflows(options) {
         reference.role,
       ),
       name = input('native-reference-name-' + reference.id, reference.name || roleLabel(reference.role)),
-      description = input('native-reference-description-' + reference.id, reference.description || ''),
       required = input('native-reference-required-' + reference.id, reference.required, 'checkbox'),
       label = node('label', 'history-toggle');
     name.maxLength = 120;
-    description.maxLength = 1000;
-    description.placeholder = 'Ce que cette référence doit apporter';
     label.append(required, node('span', '', 'Référence obligatoire'));
     // Its role decides what else matters (the LoRA of the subject images, Krea's denoise).
     role.onchange = () => {
@@ -1475,14 +1442,15 @@ export function setupNativeWorkflows(options) {
         id: reference.id,
         role: role.value,
         name: name.value.trim(),
-        description: description.value.trim(),
+        // (0.6.102) No field any more: what it said reached no one (not Moodix AI, not the Studio).
+        // What a workflow holds of it stays as it was, saved untouched it is the same workflow.
+        description: String(reference.description ?? '').trim(),
         required: required.checked,
       }),
     };
     card.append(
       field('Usage', role),
       field('Nom', name),
-      field('Description', description),
       label,
       button(
         'Retirer',
@@ -1648,7 +1616,6 @@ export function setupNativeWorkflows(options) {
       : draft.unavailableReason || '';
     $('native-workflow-enabled').dataset.unavailable = String(Boolean(draft.importDraft?.blockers.length));
     readComponents = [];
-    componentDefaults = [];
     const componentControls = {};
     $('native-workflow-components').replaceChildren();
     for (const role of [
@@ -1666,7 +1633,6 @@ export function setupNativeWorkflows(options) {
           { optional: !familyOf(draft.pipeline)?.components[role]?.required, present: Boolean(policy) },
         );
       readComponents.push([role, control.read]);
-      componentDefaults.push(control.missingDefault);
       componentControls[role] = control;
       $('native-workflow-components').append(control.card);
     }
@@ -1900,7 +1866,7 @@ export function setupNativeWorkflows(options) {
         throw Error('Ajoutez un nom et une description indiquant quand utiliser ce workflow.');
       if (!record.importDraft || record.enabled) {
         for (const [role, policy] of Object.entries(record.components))
-          if ((policy.policy === 'fixed' && !policy.asset) || (policy.policy === 'model' && !policy.choices.length))
+          if (!policy.asset)
             throw Error(
               familyOf(record.pipeline)?.components[role]?.format === 'tokenizer'
                 ? 'Choisissez le dossier du tokenizer : il est requis pour enregistrer ce workflow.'
@@ -1911,10 +1877,9 @@ export function setupNativeWorkflows(options) {
           if (section) section.open = true;
           throw Error('Choisissez le fichier de chaque LoRA, ou retirez les lignes inutilisées.');
         }
-        // (0.6.94) A setting, a LoRA's strength or a file left to the assistant without a default:
-        // not saved so (each says it under its box, too).
+        // (0.6.94) A setting or a LoRA's strength left to the assistant without a default: not saved
+        // so (each says it under its box, too). (0.6.102: a file is never left to it any more.)
         const lacking = [
-          ...componentDefaults.map(check => check()),
           ...Object.values(parameterControls).map(control => control.missingDefault()),
           ...readLoras.map(item => item.missingDefault()),
         ].find(Boolean);
@@ -1922,6 +1887,7 @@ export function setupNativeWorkflows(options) {
       }
       const result = await run(async signal => (await api('generation/workflows', record, { signal })).json());
       if (session !== version || !result) return false;
+      changedWorkflows = true;
       const saved = result.workflow || record,
         index = workflows.findIndex(item => item.id === saved.id);
       let view = saved;
@@ -2138,5 +2104,11 @@ export function setupNativeWorkflows(options) {
     requestBack,
     isEditing: () => draft !== null,
     editorDirty,
+    /** (0.6.102) Whether a workflow was saved, set back, deleted or shown again since the last call. */
+    takeChanges: () => {
+      const changed = changedWorkflows;
+      changedWorkflows = false;
+      return changed;
+    },
   };
 }

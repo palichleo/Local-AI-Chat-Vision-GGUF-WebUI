@@ -14,6 +14,7 @@ import {
   validateNativeWorkflow,
   workflowFingerprint,
 } from '../lib/native-workflows.mjs';
+import { nearestFormat } from '../public/formats.mjs';
 import { STUDIO_ID } from '../lib/studio.mjs';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
 import { ToolRuntime } from '../lib/tool-runtime.mjs';
@@ -26,8 +27,12 @@ import { renderProposal } from '../public/video-plan.mjs';
  * AI, (b) the Studio by hand, (c) the Studio set by Moodix AI? Each test follows a setting from the
  * workflow to the job the engine receives, through the real router (lib/tool-catalog.mjs), runtime
  * (lib/tool-runtime.mjs), catalog (lib/native-workflows.mjs), Studio page (public/studio.mjs) and
- * editor (public/native-workflow-ui.mjs). They state what the application does at 0.6.90, flaws
- * included: a test whose name begins with « today » describes a flaw the correction is to turn round.
+ * editor (public/native-workflow-ui.mjs). They stated what the application did at 0.6.90, flaws
+ * included: a test whose name began with « today » described a flaw the correction was to turn round.
+ * (0.6.102) Turned round, with the decisions of the user: « Fixe » is a rule for Moodix AI only (the
+ * Studio and the card of a proposal show it at its value, the user may change it, within the bounds
+ * of the workflow); the newer of a change in Paramètres and of the last take wins, setting by setting;
+ * a file has no « Assistant », a reference slot no « Description » any more.
  */
 
 const folder = fileURLToPath(new URL('../runner/workflows/', import.meta.url)),
@@ -62,10 +67,11 @@ const until = async (check, tries = 500) => {
 /**
  * The application around its workflows, everything else in memory: the gallery, the chat model,
  * the generator (which keeps each job it is given: `jobs`). `workflows` may be replaced (a workflow
- * saved in Paramètres meanwhile).
+ * saved in Paramètres meanwhile: saveIn); `changes`, when the user changed each part of each one
+ * (NativeWorkflowCatalog.changes, 0.6.102).
  */
 function world(workflows) {
-  const w = { workflows, jobs: [], saved: [] };
+  const w = { workflows, jobs: [], saved: [], changes: {} };
   const client = {
     status: async () => ({ idle: true }),
     stage: async () => ({ path: join(tmpdir(), 'staged') }),
@@ -86,6 +92,7 @@ function world(workflows) {
   const catalog = {
     kind: 'native',
     list: async () => w.workflows,
+    changes: async () => structuredClone(w.changes),
     read: async id => w.workflows.find(workflow => workflow.id === id),
     prepare: async (id, args, options) => {
       const workflow = w.workflows.find(item => item.id === id);
@@ -121,6 +128,17 @@ function world(workflows) {
   });
   w.tools = new ToolCatalog(catalog);
   return w;
+}
+/**
+ * A workflow saved in Paramètres › Workflows meanwhile, at `time`: the settings it changes are recorded
+ * as the catalog records them (changedParts in lib/native-workflows.mjs, tested below on its own).
+ */
+function saveIn(w, workflow, time = Date.now()) {
+  const before = w.workflows.find(item => item.id === workflow.id);
+  w.workflows = w.workflows.map(item => (item.id === workflow.id ? workflow : item));
+  for (const name of new Set([...Object.keys(before.parameters), ...Object.keys(workflow.parameters)]))
+    if (JSON.stringify(before.parameters[name]) !== JSON.stringify(workflow.parameters[name]))
+      (w.changes[workflow.id] ??= {})[name] = time;
 }
 /** A call of the chat model, as Moodix AI makes it. */
 const ask = (w, name, args) =>
@@ -313,12 +331,20 @@ async function studioPage(w, { runs = null } = {}) {
     prompt: () => body.find('studio-prompt-field')[0].children[0],
     /** Image, Vidéo or Son, by its place. */
     mode: index => page['studio-kinds'].children[index].onclick(),
-    /** The field of a rare setting (« Plus de réglages »), by the name it shows. */
+    /** The line of a rare setting (« Plus de réglages »), by the name it shows: its name, its control. */
+    rareLine: label =>
+      body
+        .find('studio-rare')[0]
+        ?.find('studio-field')
+        .find(item => item.children[0]?.textContent === label) ?? null,
+    /** The field of a rare setting, by the name it shows. */
     field: label =>
       body
         .find('studio-rare')[0]
         ?.find('studio-field')
         .find(item => item.children[0]?.textContent === label)?.children[1] ?? null,
+    /** The field of the seed, first of the rare settings. */
+    seed: () => body.find('studio-seed')[0]?.children[1] ?? null,
     /** « Générer », then the job the engine was given. */
     async generate() {
       const before = w.jobs.length;
@@ -362,8 +388,9 @@ test('Chat · « Fixe » takes a setting out of the tool the model is given; « 
 test('Chat · a value the model sends for a « Fixe » setting is left aside with a note; for an « Assistant » one it is the value made, up to the engine', async () => {
   const fixed = variant('krea2'),
     assistant = variant('krea2', { steps: { policy: 'model', type: 'integer', default: 8, min: 1, max: 50 } });
+  // (0.6.102: said under the name the editor shows, « steps ignoré » before.)
   for (const [workflow, made, notes] of [
-    [fixed, 8, ['steps ignoré : fixé par le workflow Krea 2.']],
+    [fixed, 8, ['Étapes : valeur ignorée, fixée par le workflow Krea 2.']],
     [assistant, 20, undefined],
   ]) {
     const w = world([workflow]),
@@ -429,13 +456,14 @@ test('an « Assistant » setting saved without a default takes the value its fam
   });
 });
 
-test('Chat · the card of a proposal lets the user change a « Fixe » setting too, within the bounds of the family: wider than those of « Assistant »', async () => {
+test('Chat · the card of a proposal lets the user change a « Fixe » setting too, within the bounds of its workflow, as for « Assistant »: not wider', async () => {
   // MOSS-SoundEffect: a sound waits for « Générer » on its card in the Chat.
   const fixed = variant('moss_sfx'),
     assistant = variant('moss_sfx', { steps: { policy: 'model', type: 'integer', default: 100, min: 50, max: 120 } });
   assert.deepEqual(fixed.parameters.steps, FIXED(100));
   const fromFixed = await ask(world([fixed]), 'create_audio', { prompt: 'Une porte qui grince', seconds: 3 });
-  // Listed as a setting to change, as the one left to the assistant, with the limits of the family.
+  // Listed as a setting to change, as the one left to the assistant: shipped « Fixe » without bounds of
+  // its own, it has those of its family.
   assert.deepEqual(editableOf(fromFixed, 'steps'), { key: 'steps', value: 100, type: 'integer', min: 1, max: 200 });
   const wf = world([fixed]),
     card = await ask(wf, 'create_audio', { prompt: 'Une porte qui grince', seconds: 3 }),
@@ -447,9 +475,32 @@ test('Chat · the card of a proposal lets the user change a « Fixe » setting t
     asked = await ask(wa, 'create_audio', { prompt: 'Une porte qui grince', seconds: 3 });
   assert.deepEqual(editableOf(asked, 'steps'), { key: 'steps', value: 100, type: 'integer', min: 50, max: 120 });
   await assert.rejects(revise(wa, asked, { steps: 180 }), /Étapes : entre 50 et 120\./);
-  // The card draws both the same way: a field to type in (public/video-plan.mjs), no padlock, no word
-  // that one is fixed in the workflow.
-  for (const proposal of [fromFixed, asked]) {
+  // (0.6.102) Turned « Fixe » in the editor, it keeps them: they were given up for those of the
+  // family (1 to 200), wider than those « Assistant » had. The editor shows them under « Fixe » too.
+  const listed = { ...assistant, builtin: true },
+    editor = await editorPage([listed]);
+  let saved;
+  try {
+    assert.equal(await editor.ui.edit(listed), true);
+    editor.$('native-policy-steps').value = 'fixed';
+    editor.$('native-policy-steps').onchange();
+    assert.equal(editor.$('native-min-steps').parent.parent.hidden, false, 'Minimum and Maximum shown for « Fixe »');
+    assert.equal(await editor.ui.saveEditor(), true);
+    [saved] = editor.saves;
+  } finally {
+    editor.restore();
+  }
+  assert.deepEqual(saved.parameters.steps, { policy: 'fixed', value: 100, min: 50, max: 120 });
+  const ws = world([{ ...validateNativeWorkflow(saved), ready: true }]),
+    held = await ask(ws, 'create_audio', { prompt: 'Une porte qui grince', seconds: 3, steps: 110 });
+  // Moodix AI is held to its value; the user, to its bounds.
+  assert.deepEqual(held.notes, ['Étapes : valeur ignorée, fixée par le workflow Bruitages (MOSS-SoundEffect v2).']);
+  assert.deepEqual(editableOf(held, 'steps'), { key: 'steps', value: 100, type: 'integer', min: 50, max: 120 });
+  await assert.rejects(revise(ws, held, { steps: 180 }), /Étapes : entre 50 et 120\./);
+  assert.equal((await make(ws, await revise(ws, held, { steps: 120 }))).parameters.steps, 120);
+  // The card draws them all the same way: a field to type in (public/video-plan.mjs), no padlock, no
+  // word that one is fixed in the workflow.
+  for (const proposal of [fromFixed, asked, held]) {
     const control = advancedControl(proposal, 'Étapes');
     assert.equal(control?.tag, 'input', 'a field to type in');
   }
@@ -494,51 +545,65 @@ test('Chat · « Aléatoire » draws the seed and takes one the user names; « F
   assert.ok((await offered([drawn], 'create_image')).properties.seed);
   const w = world([kept]),
     proposal = await ask(w, 'create_image', { prompt: 'Un renard', seed: 42 });
-  assert.deepEqual(proposal.notes, ['seed ignoré : Krea 2 fixe le sien']);
+  assert.deepEqual(proposal.notes, ['Seed : valeur ignorée, fixée par le workflow Krea 2.']);
   assert.equal((await make(w, proposal)).parameters.seed, 1234);
   const v = world([drawn]);
   assert.equal((await make(v, await ask(v, 'create_image', { prompt: 'Un renard', seed: 42 }))).parameters.seed, 42);
 });
 
-test('today · a file left to « Assistant » is offered to the model as bare identifiers, and the Studio has no choice of it', async () => {
+test('a file left to « Assistant » (a workflow saved so before) is no argument of the model any more: made with its default, one it names left aside and said', async () => {
+  // (0.6.102) It was offered as bare identifiers, nothing to tell them apart (neither the name of a
+  // file nor what it does), and the Studio had no choice of it: « Assistant » left the files.
   const krea = stored('krea2'),
     vae = krea.components.vae.asset,
     other = '0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f',
-    chosen = variant('krea2', {}, { components: { ...krea.components, vae: { policy: 'model', choices: [vae, other], default: vae } } });
+    chosen = variant('krea2', {}, { components: { ...krea.components, vae: { policy: 'model', choices: [other, vae], default: vae } } });
   for (const options of [undefined, { wording: CAPABLE }]) {
     const tool = await offered([chosen], 'create_image', options);
-    // Two identifiers and nothing to tell them apart: neither the name of a file nor what it does.
-    assert.deepEqual(tool.properties.components.properties.vae, { type: 'string', enum: [vae, other], default: vae });
+    assert.equal(tool.properties.components, undefined, options ? 'capable' : 'rails');
   }
-  const w = world([chosen]),
-    [shown] = (await w.tools.studio()).create_image;
-  assert.equal('components' in shown, false, 'nothing of it in the Studio');
+  const w = world([chosen]);
+  assert.match((await make(w, await ask(w, 'create_image', { prompt: 'Un renard' }))).components.vae, new RegExp(vae));
+  // Named all the same (a capable model, held by no grammar): the workflow's own, and said; never refused.
+  const named = await ask(w, 'create_image', { prompt: 'Un renard', components: { vae: other } });
+  assert.deepEqual(named.notes, ['« VAE » : fichier ignoré, fixé par le workflow Krea 2.']);
+  assert.match((await make(w, named)).components.vae, new RegExp(vae));
+  // The same file as the workflow's: taken, nothing to say. A file it does not take: said, not refused.
+  // The same for a file « Fixe ».
+  assert.equal((await ask(w, 'create_image', { prompt: 'Un renard', components: { vae } })).notes, undefined);
+  assert.deepEqual((await ask(w, 'create_image', { prompt: 'Un renard', components: { lumiere: other } })).notes, [
+    '« lumiere » : fichier ignoré, Krea 2 ne prend pas ce fichier.',
+  ]);
+  const v = world([variant('krea2')]);
+  assert.deepEqual((await ask(v, 'create_image', { prompt: 'Un renard', components: { vae: other } })).notes, [
+    '« VAE » : fichier ignoré, fixé par le workflow Krea 2.',
+  ]);
+  const [shown] = (await w.tools.studio()).create_image;
+  assert.equal('components' in shown, false, 'nothing of it in the Studio: the file is the workflow’s');
 });
 
-test('a file left to « Assistant » without a default: the only one allowed stands in; with several, it is asked for in French', async () => {
-  // (0.6.94) Every creation was refused, in English (« Select an allowed vae asset »).
+test('a file left to « Assistant » without a default: the first allowed stands in, the one the editor shows and keeps', async () => {
+  // (0.6.94) Every creation was refused, in English (« Select an allowed vae asset »). (0.6.102) With
+  // several allowed it was asked for in French, a choice no one can make any more.
   const krea = stored('krea2'),
     vae = krea.components.vae.asset,
-    other = '0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f',
-    only = variant('krea2', {}, { components: { ...krea.components, vae: { policy: 'model', choices: [vae] } } });
-  assert.deepEqual((await offered([only], 'create_image')).properties.components.properties.vae, {
-    type: 'string',
-    enum: [vae],
-    default: vae,
-  });
-  const w = world([only]);
-  assert.match((await make(w, await ask(w, 'create_image', { prompt: 'Un renard' }))).components.vae, new RegExp(vae));
-  const several = variant('krea2', {}, { components: { ...krea.components, vae: { policy: 'model', choices: [vae, other] } } });
-  await assert.rejects(ask(world([several]), 'create_image', { prompt: 'Un renard' }), {
-    status: 400,
-    message:
-      '« VAE » : aucun fichier par défaut dans ce workflow, et aucun n’a été choisi. Choisissez-en un dans Paramètres › Workflows.',
-  });
-  // A file it does not allow, named all the same.
-  await assert.rejects(
-    ask(world([several]), 'create_image', { prompt: 'Un renard', components: { vae: '0e0e0e0e-0e0e-4e0e-8e0e-0e0e0e0e0e0e' } }),
-    { status: 400, message: '« VAE » : ce fichier n’est pas parmi ceux que ce workflow autorise.' },
-  );
+    other = '0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f';
+  for (const choices of [[vae], [vae, other]]) {
+    const w = world([variant('krea2', {}, { components: { ...krea.components, vae: { policy: 'model', choices } } })]);
+    assert.match((await make(w, await ask(w, 'create_image', { prompt: 'Un renard' }))).components.vae, new RegExp(vae));
+  }
+  // The editor of Paramètres › Workflows: that file, « Fixe » (no switch any more), and so saved.
+  const listed = variant('krea2', {}, { components: { ...krea.components, vae: { policy: 'model', choices: [vae, other] } } }),
+    editor = await editorPage([listed]);
+  try {
+    assert.equal(await editor.ui.edit(listed), true);
+    assert.equal(editor.$('native-component-vae-policy'), null);
+    assert.equal(editor.$('native-component-vae').value, vae);
+    assert.equal(await editor.ui.saveEditor(), true);
+    assert.deepEqual(editor.saves[0].components.vae, { policy: 'fixed', asset: vae });
+  } finally {
+    editor.restore();
+  }
 });
 
 test('a LoRA the workflow fixes, named by the model all the same: the same value is taken, another is left aside and said, the call is never refused', async () => {
@@ -594,14 +659,13 @@ test('a LoRA the workflow fixes, named by the model all the same: the same value
   assert.deepEqual(await made(left, { style: { enabled: false, strength: 0.5 } }), [[], undefined]);
 });
 
-test('today · what the editor asks of a reference slot (« Description ») never reaches the model; « Référence obligatoire » is refused after the call', async () => {
+test('a reference slot has no « Description » in the editor any more, it reached no one; a required input is asked for by what it is', async () => {
   const krea = stored('krea2'),
     [source] = krea.references,
     asked = variant('krea2', {}, { references: [{ ...source, description: 'CONSIGNE-REFERENCE', required: true }] });
   for (const options of [undefined, { wording: CAPABLE }]) {
     const tool = await offered([asked], 'create_image', options);
     assert.equal(JSON.stringify(tool).includes('CONSIGNE-REFERENCE'), false, options ? 'capable' : 'rails');
-    // (It is in workflowSchema(), which the verbs do not use but for its LoRAs and files.)
     assert.equal(tool.required.includes('source'), false, 'nor is the image required in the tool');
   }
   // (Said in French since 0.6.94: « Source image is required » was read by the user too.)
@@ -609,25 +673,58 @@ test('today · what the editor asks of a reference slot (« Description ») neve
     ask(world([asked]), 'create_image', { prompt: 'Un renard' }),
     /Aucun workflow ne correspond à ces entrées pour create_image\. .*« Source image » est obligatoire dans ce workflow/,
   );
-  // The Studio requires it, in the words of a character put in a video.
+  // (0.6.102) The editor asks nothing of it any more; what a workflow holds of it stays as it was:
+  // saved untouched, it is the same workflow.
+  const editor = await editorPage([asked]);
+  try {
+    assert.equal(await editor.ui.edit(asked), true);
+    assert.ok(editor.$('native-reference-name-' + source.id), 'the slot is there');
+    assert.equal(editor.$('native-reference-description-' + source.id), null, 'without its « Description »');
+    assert.equal(await editor.ui.saveEditor(), true);
+    assert.equal(editor.saves[0].references[0].description, 'CONSIGNE-REFERENCE');
+    assert.equal(workflowFingerprint(editor.saves[0]), workflowFingerprint(asked));
+  } finally {
+    editor.restore();
+  }
+  // The Studio asks for it by what it is: the image to modify (« Ajoutez l’image du personnage » before,
+  // the words of a character put in a video), the image of the start of a video.
   const w = world([asked]),
     page = await studioPage(w);
   try {
     write(page, 'Un renard');
     assert.equal(await page.generate(), null);
-    assert.equal(page.body.find('studio-error')[0]?.textContent, 'Ajoutez l’image du personnage.');
+    assert.equal(page.body.find('studio-error')[0]?.textContent, 'Ajoutez l’image à modifier.');
   } finally {
     page.restore();
+  }
+  const ltx = stored('ltx25'),
+    starting = variant('ltx25', {}, {
+      references: ltx.references.map(slot => (slot.role === 'start_image' ? { ...slot, required: true } : slot)),
+    }),
+    v = world([starting]),
+    video = await studioPage(v);
+  try {
+    video.mode(1);
+    write(video, 'Un renard court dans la neige');
+    assert.equal(await video.generate(), null);
+    assert.equal(video.body.find('studio-error')[0]?.textContent, 'Ajoutez l’image de début.');
+  } finally {
+    video.restore();
   }
 });
 
 // ------------------------------------------------------------------ (b) the Studio by hand
 
-test('Studio · its own settings are those left to « Assistant »: a « Fixe » one is not shown, and the job keeps its value', async () => {
+test('Studio · a « Fixe » setting is shown at its value, without a mark, and is the user’s to change for a creation; « Assistant » as before', async () => {
+  // (0.6.102) « Fixe » holds Moodix AI, not the user (decision of the user): it was not shown at all.
   const assistant = variant('krea2', { steps: { policy: 'model', type: 'integer', default: 8, min: 1, max: 50 } });
   const [shownFixed] = (await world([variant('krea2')]).tools.studio()).create_image,
     [shownAssistant] = (await world([assistant]).tools.studio()).create_image;
-  assert.deepEqual(shownFixed.settings.map(setting => setting.key), ['denoise']);
+  assert.deepEqual(shownFixed.settings.map(setting => [setting.key, setting.fixed]), [
+    ['steps', true],
+    ['denoise', undefined],
+  ]);
+  assert.deepEqual(shownFixed.settings[0], { key: 'steps', type: 'integer', min: 1, max: 1000, default: 8, fixed: true });
   assert.deepEqual(
     shownAssistant.settings.find(setting => setting.key === 'steps'),
     { key: 'steps', type: 'integer', min: 1, max: 50, default: 8 },
@@ -637,7 +734,7 @@ test('Studio · its own settings are those left to « Assistant »: a « Fixe »
     page = await studioPage(w);
   try {
     write(page, 'Un renard dans la neige');
-    const steps = page.field('steps');
+    const steps = page.field('Étapes');
     assert.equal(steps.value, '8', 'the default of the workflow');
     steps.value = '20';
     steps.oninput();
@@ -650,62 +747,103 @@ test('Studio · its own settings are those left to « Assistant »: a « Fixe »
     fixedPage = await studioPage(v);
   try {
     write(fixedPage, 'Un renard dans la neige');
-    assert.equal(fixedPage.field('steps'), null, 'no field for a fixed setting');
+    const line = fixedPage.rareLine('Étapes');
+    assert.equal(line.children[1].value, '8', 'at its value');
+    assert.deepEqual(line.children.map(child => child.tag), ['span', 'input'], 'its name and its field: no padlock, no word');
+    // As it is: nothing sent, its value made.
     assert.equal((await fixedPage.generate()).parameters.steps, 8);
+    assert.equal(fixedPage.lastAction().arguments.steps, undefined);
+    assert.equal(fixedPage.lastRevise(), undefined);
+    // Changed: made so, as the user's own change of the proposal (tools/revise, as on its card in the
+    // Chat), never as an argument Moodix AI would see left aside.
+    fixedPage.field('Étapes').value = '20';
+    fixedPage.field('Étapes').oninput();
+    assert.equal((await fixedPage.generate()).parameters.steps, 20);
+    assert.equal(fixedPage.lastAction().arguments.steps, undefined);
+    assert.deepEqual(fixedPage.lastRevise().edits, { steps: 20 });
+    assert.deepEqual(v.saved[0].parameters.user_overrides, { steps: 20 });
+    assert.equal(v.saved[0].parameters.routing_notes, undefined, 'nothing left aside');
   } finally {
     fixedPage.restore();
   }
 });
 
-test('today · Studio · a value typed beyond the bounds of « Assistant »: a whole number refuses the creation, a decimal is brought back without a word', async () => {
+test('Studio · a value typed beyond the bounds of its workflow is brought to the nearest one they allow, shown so, and made: never refused', async () => {
+  // (0.6.102) A whole number beyond them refused the creation (« Étapes : entre 50 et 120. »), a
+  // decimal was made at its limit while the Studio still showed 12; « Fixe » has the same bounds.
   const sfx = variant('moss_sfx', {
       steps: { policy: 'model', type: 'integer', default: 100, min: 50, max: 120 },
       guidance_scale: { policy: 'model', type: 'number', default: 4, min: 1, max: 8 },
+      shift: { policy: 'fixed', value: 5, min: 2, max: 6 },
     }),
     w = world([sfx]),
     page = await studioPage(w);
   try {
     page.mode(2);
     write(page, 'Une porte qui grince');
-    assert.equal(page.field('guidance_scale').max, '8', 'the field says its bounds, and takes more');
-    page.field('steps').value = '500';
-    page.field('steps').oninput();
-    assert.equal(await page.generate(), null);
-    // (In French since 0.6.94, where « steps is outside the supported range » was said.)
-    assert.equal(page.body.find('studio-error')[0]?.textContent, 'Étapes : entre 50 et 120.');
-    page.field('steps').value = '100';
-    page.field('steps').oninput();
-    page.field('guidance_scale').value = '12';
-    page.field('guidance_scale').oninput();
+    const typed = (label, value, { leave = true } = {}) => {
+      const control = page.field(label);
+      control.value = value;
+      control.oninput();
+      // Left (the next field, « Générer »): the browser says it changed.
+      if (leave) control.onchange();
+      return control;
+    };
+    assert.equal(page.field('Guidage').max, '8', 'the field says its bounds');
+    assert.equal(typed('Guidage', '12').value, '8', 'brought back at once, shown as it will be made');
+    assert.equal(typed('Décalage (shift)', '9').value, '6', '« Fixe » within the bounds of its workflow');
+    assert.equal(typed('Décalage (shift)', '0,5').value, '2');
+    assert.equal(typed('Étapes', '87.6').value, '88', 'a whole number');
+    // Typed, then « Générer » at once (Ctrl + Entrée): brought back all the same, shown so after.
+    typed('Étapes', '500', { leave: false });
     const job = await page.generate();
-    assert.equal(job.parameters.guidance_scale, 8, 'made at 8, the Studio still showing 12');
-    // Said to the router's record only.
-    assert.deepEqual(w.saved[0].parameters.routing_notes, ['guidance_scale : 12 → 8, la limite de Bruitages (MOSS-SoundEffect v2).']);
+    assert.deepEqual([job.parameters.steps, job.parameters.guidance_scale, job.parameters.shift], [120, 8, 2]);
+    assert.deepEqual([page.lastAction().arguments.steps, page.lastAction().arguments.guidance_scale], [120, 8]);
+    assert.deepEqual(page.lastRevise().edits, { shift: 2 });
+    assert.equal(page.body.find('studio-error').length, 0, 'nothing refused');
+    assert.equal(page.field('Étapes').value, '120', 'the Studio shows what was made');
+    assert.equal(w.saved[0].parameters.routing_notes, undefined, 'nothing for the router to bring back');
   } finally {
     page.restore();
   }
 });
 
-test('today · Studio · a size « Fixe » (Krea 2) is the size of the Studio all the same: the bar of resolution and the formats stay, and win', async () => {
-  // The template of a new Krea 2 workflow fixes its size at 1024 × 1024 (runner/families/krea2.json).
-  const square = variant('krea2', { width: FIXED(1024), height: FIXED(1024) }),
-    w = world([square]),
+/** The value the bar « Résolution » of the Studio shows, and the format chosen above it. */
+const sizeShown = page => {
+  const line = page.body.find('studio-bar-line').find(row => row.children[0]?.textContent === 'Résolution'),
+    chip = page.body.find('studio-format').find(item => item.attributes?.['aria-checked'] === 'true');
+  return [line?.children[2]?.textContent ?? null, chip?.children[0]?.textContent ?? null];
+};
+
+test('Studio · a size « Fixe » (Krea 2) is where the bar of resolution and the formats start; the user may change it for a creation', async () => {
+  // (0.6.102) « Fixe » holds Moodix AI only (decision of the user): the bar and the formats stay, the
+  // size the workflow fixes is where they start (the nearest size of the list to it before), and the
+  // pointer of Moodix AI never sets it as its choice (assistantSize).
+  const wide = variant('krea2', { width: FIXED(1344), height: FIXED(768) }),
+    w = world([wide]),
     [shown] = (await w.tools.studio()).create_image;
-  assert.equal(shown.direct, false, 'the size is not the model’s');
-  assert.deepEqual(shown.size, { width: 1024, height: 1024 });
-  assert.ok(shown.limits.width && shown.limits.height, 'yet the Studio is given sizes to offer');
+  assert.deepEqual([shown.direct, shown.assistantSize], [false, false], 'the size is not the model’s');
+  assert.deepEqual(shown.size, { width: 1344, height: 768 });
+  assert.ok(shown.limits.width && shown.limits.height, 'the Studio is given sizes to offer');
   // In the Chat the size stays the workflow's: no format for an image, a size the model gives is left aside.
-  const chat = await ask(w, 'create_image', { prompt: 'Un renard', width: 1344, height: 768 });
-  assert.deepEqual([chat.plan.parameters.width, chat.plan.parameters.height], [1024, 1024]);
-  assert.deepEqual(chat.notes, ['width ignoré : fixé par le workflow Krea 2.', 'height ignoré : fixé par le workflow Krea 2.']);
+  const chat = await ask(w, 'create_image', { prompt: 'Un renard', width: 1024, height: 1024 });
+  assert.deepEqual([chat.plan.parameters.width, chat.plan.parameters.height], [1344, 768]);
+  assert.deepEqual(chat.notes, [
+    'Largeur : valeur ignorée, fixée par le workflow Krea 2.',
+    'Hauteur : valeur ignorée, fixée par le workflow Krea 2.',
+  ]);
   const page = await studioPage(w);
   try {
     write(page, 'Un renard dans la neige');
-    page.body.find('studio-format').find(chip => chip.children[0]?.textContent === '16:9').onclick();
-    const job = await page.generate();
+    assert.deepEqual(sizeShown(page), ['1344 × 768', nearestFormat(1344, 768).id], 'it starts at the size fixed');
+    let job = await page.generate();
+    assert.deepEqual([job.parameters.width, job.parameters.height], [1344, 768]);
+    assert.equal(page.lastRevise(), undefined, 'as it is: nothing changed');
+    page.body.find('studio-format').find(chip => chip.children[0]?.textContent === '1:1').onclick();
+    job = await page.generate();
     // Sent as the user's own edit of the proposal (tools/revise), which may change what is fixed.
     const { width, height } = page.lastRevise().edits;
-    assert.ok(width > height, `a landscape size was sent: ${width} × ${height}`);
+    assert.equal(width, height, `a square size was sent: ${width} × ${height}`);
     assert.deepEqual([job.parameters.width, job.parameters.height], [width, height], 'made at the size of the Studio');
     assert.deepEqual(w.saved[0].parameters.user_overrides, { width, height });
   } finally {
@@ -713,15 +851,17 @@ test('today · Studio · a size « Fixe » (Krea 2) is the size of the Studio al
   }
 });
 
-test('today · Studio · « Vidéo finale » fixed in LTX 2.5: by hand the final is made at the size of the draft', async () => {
+test('Studio · « Vidéo finale » fixed in LTX 2.5: the Studio starts from the size of the final, made at its own size', async () => {
+  // (0.6.102) It started from the size of the draft profile: by hand the final was made at 288 × 512.
   const final = variant('ltx25', { stage: FIXED('final') }),
     w = world([final]),
     [shown] = (await w.tools.studio()).create_video;
   assert.equal(shown.stages, false);
-  // The Studio starts from the size of the draft profile, whatever version the workflow makes.
   assert.deepEqual(final.profiles.draft.parameters, { width: 288, height: 512, steps: 8, frames: 25, fps: 24 });
-  assert.deepEqual(shown.size, { width: 288, height: 512 });
-  assert.deepEqual(shown.final, { width: 896, height: 1600 });
+  assert.deepEqual([shown.size, shown.final], [
+    { width: 896, height: 1600 },
+    { width: 896, height: 1600 },
+  ]);
   // The Chat makes its final at the size of the final profile.
   const chat = await ask(w, 'create_video', { prompt: 'Un renard court', intention: 'Essai', duration: 5 });
   assert.deepEqual([chat.plan.stage, chat.plan.parameters.width, chat.plan.parameters.height], ['final', 896, 1600]);
@@ -729,75 +869,106 @@ test('today · Studio · « Vidéo finale » fixed in LTX 2.5: by hand the final
   try {
     page.mode(1);
     write(page, 'Un renard court dans la neige');
+    assert.deepEqual(sizeShown(page), ['896 × 1600', '9:16']);
     const job = await page.generate();
     assert.equal(job.parameters.stage, 'final');
-    assert.deepEqual([job.parameters.width, job.parameters.height], [288, 512], 'a final at the size of the draft');
-    assert.deepEqual(page.lastRevise().edits, { width: 288, height: 512 });
+    assert.deepEqual([job.parameters.width, job.parameters.height], [896, 1600], 'a final at the size of the final');
+    assert.equal(page.lastRevise(), undefined, 'nothing to change: the size of its version');
   } finally {
     page.restore();
   }
+  // A draft fixed: its size, and no final to offer.
+  const draft = variant('ltx25', { stage: FIXED('draft') }),
+    [drafted] = (await world([draft]).tools.studio()).create_video;
+  assert.deepEqual([drafted.size, drafted.final], [{ width: 288, height: 512 }, null]);
 });
 
-test('today · Studio · a workflow saved in Paramètres while the Studio is on screen: the Studio keeps the settings of before until another view is opened', async () => {
+test('Studio · a workflow saved in Paramètres while the Studio is on screen: read at once as the settings close, what changed shows, the rest stays', async () => {
+  // (0.6.102) The Studio kept the settings of before until another view was opened: a setting turned
+  // « Fixe » still showed, and sent, the value set before.
   const assistant = variant('krea2', { steps: { policy: 'model', type: 'integer', default: 8, min: 1, max: 50 } }),
     w = world([assistant]),
     page = await studioPage(w);
   try {
     write(page, 'Un renard dans la neige');
-    page.field('steps').value = '20';
-    page.field('steps').oninput();
-    // « Étapes » set to « Fixe » in Paramètres › Workflows, saved; the settings closed (app.js tells the
-    // Studio its tools are stale, nothing more: the Studio is on screen under the dialog).
-    w.workflows = [variant('krea2')];
+    page.field('Étapes').value = '20';
+    page.field('Étapes').oninput();
+    page.seed().value = '42';
+    page.seed().oninput();
+    // « Étapes » set to « Fixe » 12 in Paramètres › Workflows, saved; the settings closed (app.js).
+    saveIn(w, variant('krea2', { steps: FIXED(12) }));
     page.studio.invalidate({ tools: true });
-    page.body.find('studio-more-pill')[0].onclick();
-    assert.equal(page.field('steps')?.value, '20', 'still shown, at the value set before');
-    const job = await page.generate();
-    assert.equal(page.lastAction().arguments.steps, 20, 'still sent');
-    assert.equal(job.parameters.steps, 8, 'made with the fixed value');
-    // What the router says of it is in the record of the take, not on the screen of the Studio.
-    assert.deepEqual(w.saved[0].parameters.routing_notes, ['steps ignoré : fixé par le workflow Krea 2.']);
-    assert.equal(page.body.find('studio-proposal-note').length, 0);
-    // The Studio reads its tools again when it comes on screen again (another view, then back).
-    await page.studio.open();
-    await settle();
-    assert.equal(page.field('steps'), null);
+    await page.studio.workflowsSaved();
+    assert.equal(page.field('Étapes').value, '12', 'its fixed value, at once');
+    assert.equal(page.seed().value, '42', 'the rest as it was');
+    let job = await page.generate();
+    assert.equal(page.lastAction().arguments.steps, undefined, 'nothing Moodix AI would see left aside');
+    assert.deepEqual([job.parameters.steps, job.parameters.seed], [12, 42]);
+    assert.equal(w.saved[0].parameters.routing_notes, undefined);
+    // Changed again by the user, then the settings opened and closed with nothing saved: nothing moves.
+    page.field('Étapes').value = '30';
+    page.field('Étapes').oninput();
+    await page.studio.workflowsSaved();
+    assert.equal(page.field('Étapes').value, '30');
+    job = await page.generate();
+    assert.deepEqual([page.lastRevise().edits, job.parameters.steps], [{ steps: 30 }, 30], 'the user’s own change');
   } finally {
     page.restore();
   }
 });
 
-test('today · Studio · a default changed in Paramètres does not reach the Studio of a conversation that has a take: the take’s value is sent', async () => {
-  const at = steps => variant('krea2', { steps: { policy: 'model', type: 'integer', default: steps, min: 1, max: 50 } }),
-    w = world([at(8)]);
-  // A take of the conversation, made at the default of then.
-  await make(w, await ask(w, 'create_image', { prompt: 'Un renard' }));
-  assert.equal(w.saved[0].parameters.steps, 8);
-  // The default is 12 now (Paramètres › Workflows).
-  w.workflows = [at(12)];
+test('Studio · of a change in Paramètres and the last take of a conversation, the newer wins, setting by setting', async () => {
+  // (0.6.102, decision of the user: « le plus récent des deux ».) A default changed in Paramètres did
+  // not reach the Studio of a conversation that had a take: the take's value was sent.
+  const at = (steps, guidance = 4) =>
+      variant('moss_sfx', {
+        steps: { policy: 'model', type: 'integer', default: steps, min: 50, max: 150 },
+        guidance_scale: { policy: 'model', type: 'number', default: guidance, min: 1, max: 8 },
+      }),
+    w = world([at(100)]);
+  // A take of the conversation: its steps at the default of then, its guidance chosen.
+  await make(w, await ask(w, 'create_audio', { prompt: 'Une porte qui grince', seconds: 3, guidance_scale: 6 }));
+  assert.deepEqual([w.saved[0].parameters.steps, w.saved[0].parameters.guidance_scale], [100, 6]);
+  const madeAt = Date.parse(w.saved[0].createdAt);
+  // Then the default of the steps is 120 (Paramètres › Workflows, after the take).
+  saveIn(w, at(120), madeAt + 1000);
   const page = await studioPage(w);
   try {
-    assert.equal(page.field('steps').value, '8', 'the Studio shows the settings of the last take (16/11)');
+    page.mode(2);
+    assert.equal(page.field('Étapes').value, '120', 'changed after the take: the workflow’s value now');
+    assert.equal(page.field('Guidage').value, '6', 'the rest as the take had it (16/11)');
     const job = await page.generate();
-    assert.equal(page.lastAction().arguments.steps, 8, 'sent as chosen by the user');
-    assert.equal(job.parameters.steps, 8, 'the new default of the workflow is not used');
+    assert.deepEqual([job.parameters.steps, job.parameters.guidance_scale], [120, 6]);
   } finally {
     page.restore();
   }
-  // A conversation without a take: the new default.
-  const fresh = world([at(12)]),
+  // A change older than the take: the take's value.
+  const before = world([at(100)]);
+  await make(before, await ask(before, 'create_audio', { prompt: 'Une porte qui grince', seconds: 3, steps: 90 }));
+  saveIn(before, at(110), Date.parse(before.saved[0].createdAt) - 60000);
+  const older = await studioPage(before);
+  try {
+    older.mode(2);
+    assert.equal(older.field('Étapes').value, '90');
+  } finally {
+    older.restore();
+  }
+  // A conversation without a take: the new default, nothing sent.
+  const fresh = world([at(120)]),
     blank = await studioPage(fresh);
   try {
-    write(blank, 'Un renard');
-    assert.equal(blank.field('steps').value, '12');
-    assert.equal((await blank.generate()).parameters.steps, 12);
+    blank.mode(2);
+    write(blank, 'Une porte qui grince');
+    assert.equal(blank.field('Étapes').value, '120');
+    assert.equal((await blank.generate()).parameters.steps, 120);
     assert.equal(blank.lastAction().arguments.steps, undefined, 'left as it is, nothing is sent: the default');
   } finally {
     blank.restore();
   }
 });
 
-test('today · Studio · a setting « Assistant » that is on or off (« Audio » of LTX 2.5) is a number field, and refuses the creation once a take has set it', async () => {
+test('Studio · a setting on or off (« Audio » of LTX 2.5) is a switch, sent as true or false, « Fixe » or « Assistant »', async () => {
+  // (0.6.102) It was a number field: « false » from a take was sent as the number 0, refused.
   const sound = variant('ltx25', { audio: { policy: 'model', type: 'boolean', default: true } }),
     w = world([sound]),
     [shown] = (await w.tools.studio()).create_video;
@@ -810,15 +981,31 @@ test('today · Studio · a setting « Assistant » that is on or off (« Audio �
   const page = await studioPage(w);
   try {
     page.mode(1);
-    const field = page.field('audio');
-    assert.deepEqual([field.tag, field.type, field.value], ['input', 'number', 'false'], 'a number field showing « false »');
+    const field = page.field('Audio');
+    assert.deepEqual([field.tag, field.type, field.checked], ['input', 'checkbox', false], 'a switch, off');
     write(page, 'Un renard court dans la neige');
-    assert.equal(await page.generate(), null, 'nothing made');
-    assert.equal(page.lastAction().arguments.audio, 0, 'false sent as the number 0');
-    // (In French since 0.6.94; the field itself is for the Studio's own correction.)
-    assert.equal(page.body.find('studio-error')[0]?.textContent, 'Audio : oui ou non.');
+    assert.equal((await page.generate()).parameters.audio, false);
+    assert.equal(page.lastAction().arguments.audio, false);
+    page.field('Audio').checked = true;
+    page.field('Audio').onchange();
+    assert.equal((await page.generate()).parameters.audio, true);
+    assert.equal(page.lastAction().arguments.audio, true);
   } finally {
     page.restore();
+  }
+  // Shipped, LTX 2.5 fixes it on: the same switch, on; off, the user's own change.
+  const v = world([variant('ltx25')]),
+    fixedPage = await studioPage(v);
+  try {
+    fixedPage.mode(1);
+    write(fixedPage, 'Un renard court dans la neige');
+    assert.equal(fixedPage.field('Audio').checked, true);
+    fixedPage.field('Audio').checked = false;
+    fixedPage.field('Audio').onchange();
+    assert.equal((await fixedPage.generate()).parameters.audio, false);
+    assert.deepEqual(fixedPage.lastRevise().edits, { audio: false });
+  } finally {
+    fixedPage.restore();
   }
 });
 
@@ -887,7 +1074,7 @@ test('« Disponible pour l’assistant » unticked takes the workflow out of Moo
 
 // ------------------------------------------------------------------ (c) the Studio set by Moodix AI
 
-test('Studio set by Moodix AI · an « Assistant » setting is set by the pointer and stays the user’s to change; a « Fixe » one is said left aside', async () => {
+test('Studio set by Moodix AI · an « Assistant » setting is set by the pointer and stays the user’s to change; a « Fixe » one is shown at its value, never as its choice', async () => {
   const assistant = variant('krea2', { steps: { policy: 'model', type: 'integer', default: 8, min: 1, max: 50 } });
   const w = world([assistant]),
     page = await studioPage(w);
@@ -895,10 +1082,11 @@ test('Studio set by Moodix AI · an « Assistant » setting is set by the pointe
     const proposal = await ask(w, 'create_image', { prompt: 'A red fox in the snow.', steps: 20 });
     const answer = page.studio.propose(proposal, new AbortController().signal);
     await until(() => page.said.includes('attend votre accord'));
-    assert.ok(page.said.includes('règle steps'), page.said.join(' · '));
-    assert.equal(page.field('steps').value, '20', 'the value of Moodix AI');
-    page.field('steps').value = '30';
-    page.field('steps').oninput();
+    // (0.6.102: by its name, « règle steps » before.)
+    assert.ok(page.said.includes('règle étapes'), page.said.join(' · '));
+    assert.equal(page.field('Étapes').value, '20', 'the value of Moodix AI');
+    page.field('Étapes').value = '30';
+    page.field('Étapes').oninput();
     await page.body.find('studio-go')[0].onclick();
     assert.equal(await answer, 'once');
     assert.deepEqual(page.lastRevise().edits, { steps: 30 });
@@ -907,20 +1095,33 @@ test('Studio set by Moodix AI · an « Assistant » setting is set by the pointe
   } finally {
     page.restore();
   }
-  const v = world([variant('krea2')]),
+  // (0.6.102) « Fixe »: at its value from the start, the pointer does not set it (it is no choice of
+  // Moodix AI), what Moodix AI sent for it is said left aside; the user may change it.
+  const wide = variant('krea2', { width: FIXED(1344), height: FIXED(768) }),
+    v = world([wide]),
     fixedPage = await studioPage(v);
   try {
-    const proposal = await ask(v, 'create_image', { prompt: 'A red fox in the snow.', steps: 20 });
+    const proposal = await ask(v, 'create_image', { prompt: 'A red fox in the snow.', steps: 20, width: 1024, height: 1024 });
     const answer = fixedPage.studio.propose(proposal, new AbortController().signal);
     await until(() => fixedPage.said.includes('attend votre accord'));
-    assert.equal(fixedPage.field('steps'), null);
-    assert.deepEqual(
-      fixedPage.body.find('studio-proposal-note').map(note => note.textContent),
-      ['steps ignoré : fixé par le workflow Krea 2.'],
+    assert.equal(fixedPage.field('Étapes').value, '8');
+    assert.deepEqual(sizeShown(fixedPage), ['1344 × 768', '16:9'], 'the size it fixes, shown at once');
+    assert.equal(
+      fixedPage.said.some(label => /étapes|passe en/.test(label)),
+      false,
+      'nothing of it set by the pointer: ' + fixedPage.said.join(' · '),
     );
+    assert.deepEqual(fixedPage.body.find('studio-proposal-note').map(note => note.textContent), [
+      'Étapes : valeur ignorée, fixée par le workflow Krea 2.',
+      'Largeur : valeur ignorée, fixée par le workflow Krea 2.',
+      'Hauteur : valeur ignorée, fixée par le workflow Krea 2.',
+    ]);
+    fixedPage.field('Étapes').value = '12';
+    fixedPage.field('Étapes').oninput();
     await fixedPage.body.find('studio-go')[0].onclick();
     assert.equal(await answer, 'once');
-    assert.equal((await make(v, proposal)).parameters.steps, 8);
+    assert.deepEqual(fixedPage.lastRevise().edits, { steps: 12 });
+    assert.equal((await make(v, proposal)).parameters.steps, 12);
   } finally {
     fixedPage.restore();
   }
@@ -1031,12 +1232,14 @@ test('« Fixe » on « Débruitage » of Krea 2, saved, outlives the next start 
   } finally {
     editor.restore();
   }
-  assert.deepEqual(record.parameters.denoise, FIXED(0.6), 'the value it showed, the default of before');
-  // That is, to the byte, the Krea 2 shipped with 0.6.69 (runner/workflow-history.json knows it), as
-  // « Fixe 0,75 » is that of 0.6.68 and « Fixe 1 » that of an earlier one.
+  // The value it showed, the default of before, within the bounds of before (0.6.102: « Fixe » keeps
+  // those of « Assistant », the user's to change it within for a creation).
+  assert.deepEqual(record.parameters.denoise, { policy: 'fixed', value: 0.6, min: 0.6, max: 0.7 });
+  // « Fixe 0,6 » without them is, to the byte, the Krea 2 shipped with 0.6.69 (runner/workflow-
+  // history.json knows it), as « Fixe 0,75 » is that of 0.6.68 and « Fixe 1 » that of an earlier one.
   const known = JSON.parse(readFileSync(HISTORY, 'utf8')).workflows[krea.id];
-  assert.ok(known.includes(workflowFingerprint(record)));
-  for (const value of [0.75, 1])
+  assert.equal(known.includes(workflowFingerprint(record)), false);
+  for (const value of [0.6, 0.75, 1])
     assert.ok(known.includes(workflowFingerprint({ ...record, parameters: { ...record.parameters, denoise: FIXED(value) } })), String(value));
   const user = await mkdtemp(join(tmpdir(), 'moodix-lot6-'));
   try {
@@ -1065,7 +1268,10 @@ test('« Fixe » on « Débruitage » of Krea 2, saved, outlives the next start 
     // A copy no save recorded, left by a version before 0.4.4 in the folder both shared: unedited,
     // it still goes (tests/native-catalog.mjs); with the record of the saves unreadable, nothing does.
     await mkdir(join(user, 'workflow'), { recursive: true });
-    await writeFile(join(user, 'workflow', krea.id + '.json'), JSON.stringify(record));
+    await writeFile(
+      join(user, 'workflow', krea.id + '.json'),
+      JSON.stringify({ ...record, parameters: { ...record.parameters, denoise: FIXED(0.6) } }),
+    );
     await writeFile(join(user, 'workflow-natives.json'), '{ not json');
     assert.deepEqual(await catalog().adoptShipped(), { removed: [], kept: [] });
     assert.deepEqual(await readdir(join(user, 'workflow')), [krea.id + '.json']);
@@ -1075,6 +1281,70 @@ test('« Fixe » on « Débruitage » of Krea 2, saved, outlives the next start 
   } finally {
     await rm(user, { recursive: true, force: true });
   }
+});
+
+test('the catalog keeps when the user changed each part of a workflow, for the Studio to show the newer of that change and of a take', async () => {
+  // (0.6.102) « Le plus récent des deux »: nothing said when a setting had been changed.
+  const user = await mkdtemp(join(tmpdir(), 'moodix-lot6-'));
+  try {
+    const catalog = new NativeWorkflowCatalog(join(user, 'workflow'), {
+      assets: files,
+      builtin: folder,
+      statePath: join(user, 'workflow-natives.json'),
+      historyPath: HISTORY,
+      capabilities: { krea2: true },
+    });
+    const krea = stored('krea2');
+    assert.deepEqual(await catalog.changes(), {});
+    const before = Date.now();
+    await catalog.save({ ...krea, parameters: { ...krea.parameters, steps: FIXED(12) } });
+    const first = (await catalog.changes())[krea.id];
+    assert.deepEqual(Object.keys(first), ['steps']);
+    assert.ok(first.steps >= before && first.steps <= Date.now());
+    // What is said to Moodix AI only (a description) is no part of what the Studio shows: not recorded.
+    // Nor is a save that changes nothing.
+    const saved = (await catalog.list()).find(item => item.id === krea.id);
+    await catalog.save({ ...saved, parameters: { ...saved.parameters, denoise: { ...saved.parameters.denoise, description: 'Autre consigne.' } } });
+    await catalog.save((await catalog.list()).find(item => item.id === krea.id));
+    assert.deepEqual((await catalog.changes())[krea.id], first);
+    // A LoRA added, a value changed: each by its part.
+    await settle(5);
+    const lora = { id: 'style', asset: '1e1e1e1e-1e1e-4e1e-8e1e-1e1e1e1e1e1e', description: 'Lumière', enabled: FIXED(true), strength: FIXED(0.8) };
+    await catalog.save({ ...krea, parameters: { ...krea.parameters, steps: FIXED(12), cfg: FIXED(1) }, loras: [lora] });
+    const second = (await catalog.changes())[krea.id];
+    assert.deepEqual(Object.keys(second).sort(), ['lora:style', 'steps']);
+    assert.equal(second.steps, first.steps, 'unchanged since');
+    // « Rétablir »: what it gives back is a change of the user's too.
+    await settle(5);
+    await catalog.reset(krea.id);
+    const third = (await catalog.changes())[krea.id];
+    assert.ok(third.steps > second.steps && third['lora:style'] > second['lora:style']);
+    // Kept in the record of the saves, read again after a start; the Studio is told them.
+    const again = new NativeWorkflowCatalog(join(user, 'workflow'), {
+      assets: files,
+      builtin: folder,
+      statePath: join(user, 'workflow-natives.json'),
+      historyPath: HISTORY,
+      capabilities: { krea2: true },
+    });
+    assert.deepEqual((await again.changes())[krea.id], third);
+    const shown = (await new ToolCatalog(again).studio()).create_image.find(item => item.id === krea.id);
+    assert.deepEqual(shown.changed, third);
+  } finally {
+    await rm(user, { recursive: true, force: true });
+  }
+});
+
+test('the editor says in one sentence what « Fixe » and « Assistant » do, and keeps no field that changes nothing', async () => {
+  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(
+    html,
+    /<p id="native-policy-help" class="field-help">Fixe : Moodix AI garde la valeur indiquée ; Assistant : Moodix AI la choisit entre les limites indiquées ; dans les deux cas, vous pouvez la changer pour une création, dans le Studio ou sur la carte d’une proposition\.<\/p><div id="native-workflow-parameters">/,
+  );
+  // Neither « Description » for a reference, nor « Assistant » for a file (0.6.102).
+  const ui = readFileSync(new URL('../public/native-workflow-ui.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(ui, /native-reference-description-/);
+  assert.doesNotMatch(ui, /'-policy',\s*\[\s*\['fixed'/);
 });
 
 test('Paramètres closed without « Enregistrer »: every field of Génération it saves is watched, a change of one alone is asked about', () => {

@@ -1,7 +1,9 @@
 import { formatOf, formatsFor, nearestSize, sizesFor } from './formats.mjs';
 
-// (Read by the server too, which names a setting as this form does when it refuses a value of it:
-// lib/native-workflows.mjs.)
+// The names of the settings on the card of a proposal (« Paramètres avancés »). (0.6.102) The
+// server no longer reads them: what it refuses or leaves aside, it says under the name Paramètres ›
+// Workflows gives the setting (public/setting-names.mjs, read by lib/native-workflows.mjs and
+// lib/tool-catalog.mjs).
 export const LABELS = {
   width: 'Largeur',
   height: 'Hauteur',

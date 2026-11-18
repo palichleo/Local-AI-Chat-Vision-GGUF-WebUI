@@ -4862,6 +4862,9 @@ let filePickerController = null;
 $('settings').addEventListener('close', () => {
   if ($('settings').open) return;
   state.studio?.invalidate?.({ tools: true });
+  // (0.6.102) A workflow saved meanwhile: the Studio reads its tools at once and shows what changed
+  // (its settings of the last take stay for the rest), where it waited to come on screen again.
+  if (workflowsUI.takeChanges?.()) void state.studio?.workflowsSaved?.();
   state.settingsSession = (state.settingsSession || 0) + 1;
   state.settingsLoading = false;
   state.settingsReady = false;
