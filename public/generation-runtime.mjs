@@ -314,7 +314,9 @@ export function setupGenerationRuntime({
       while (!['done', 'error', 'cancelled'].includes(job.state)) {
         if (job.record) receiveOriginals(job.record);
         signal.throwIfAborted();
-        onProgress(job.progress, job.fraction, job.previewUrl);
+        // With how long its take has been in the making (0.6.93), as the server counts it: the
+        // card, the Studio and the miniature count from the same go.
+        onProgress(job.progress, job.fraction, job.previewUrl, job.elapsed);
         await new Promise((resolve, reject) => {
           const timer = setTimeout(() => {
             signal.removeEventListener('abort', abort);

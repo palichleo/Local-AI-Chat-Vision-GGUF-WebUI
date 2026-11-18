@@ -99,6 +99,7 @@ const staticFiles = new Map([
   ['/settings-tabs.mjs', ['settings-tabs.mjs', 'text/javascript; charset=utf-8']],
   ['/help-tips.mjs', ['help-tips.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-ui.mjs', ['generation-ui.mjs', 'text/javascript; charset=utf-8']],
+  ['/generation-time.mjs', ['generation-time.mjs', 'text/javascript; charset=utf-8']],
   ['/work-miniature.mjs', ['work-miniature.mjs', 'text/javascript; charset=utf-8']],
   ['/take-recovery.mjs', ['take-recovery.mjs', 'text/javascript; charset=utf-8']],
   ['/assets-ui.mjs', ['assets-ui.mjs', 'text/javascript; charset=utf-8']],

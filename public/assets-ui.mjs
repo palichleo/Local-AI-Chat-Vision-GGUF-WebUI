@@ -3,6 +3,7 @@ import { prepareResource } from './resource-preparation.mjs';
 import { dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { formatOf } from './formats.mjs';
 import { setupTakePlayer } from './take-player.mjs';
+import { generationTime, takeTime } from './generation-time.mjs';
 
 /**
  * The references and the large view of a creation. No panel any more (0.5.106): a reference is
@@ -341,8 +342,17 @@ export function setupAssets({
       row('LoRA', parameters.styles.map(style => `${String(style?.name ?? '').split(/[\\/]/).pop().replace(/\.safetensors$/i, '')} · ${String(style?.strength ?? 1).replace('.', ',')}`).join('\n')).classList?.add('media-lines');
     row('Seed', parameters.seed);
     row('Date', record.createdAt ? new Date(record.createdAt).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null);
+    // How long it took to make (0.6.93), never « Durée » (the length of a clip): from its go to its
+    // file. A take of before kept the engine's time alone: named so, never passed off as the whole.
+    const took = takeTime(record);
+    if (took && !took.whole) row('Temps du moteur', generationTime(took.ms));
+    else row('Temps de génération', took ? generationTime(took.ms) : 'Non mesuré');
     // « Plus de détails »: the workflow, the version, the prompt made better, the file…
     if (media === 'video') row('Version', parameters.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale', { more: true });
+    // What came before the engine (the checks, its sources, the chat model leaving the card), then the
+    // engine itself (its models loaded, the computation, the file written).
+    if (took?.whole && took.prepare !== undefined) row('Temps de préparation', generationTime(took.prepare), { more: true });
+    if (took?.whole && took.engine !== undefined) row('Temps du moteur', generationTime(took.engine), { more: true });
     if (expanded) row('Prompt amélioré (utilisé pour l’image)', expanded, { more: true });
     if (parameters.expandPrompt !== undefined) row('Prompt enhance', expanded ? 'Activé' : 'Désactivé', { more: true });
     // Its file as it lies in the output folder: in its sub-folder (image/, video/, son/) when it has
@@ -352,7 +362,7 @@ export function setupAssets({
     row('Identifiant', record.id, { more: true });
     const other = Object.fromEntries(
       Object.entries(parameters).filter(
-        ([key]) => !['seed', 'prompt', 'workflow_id', 'expanded_prompt', 'expandPrompt'].includes(key),
+        ([key]) => !['seed', 'prompt', 'workflow_id', 'expanded_prompt', 'expandPrompt', 'generation_time'].includes(key),
       ),
     );
     if (Object.keys(other).length) row('Paramètres', JSON.stringify(other, null, 2), { more: true });

@@ -267,7 +267,8 @@ function page({
     generationUI: {
       // A take of the message: what the page tells it is kept (`told`).
       mount(container, request, options) {
-        const take = { container, request, options, told: [], progress() {}, image() {} };
+        // (`progressed`: what each progress handed to it, its time included.)
+        const take = { container, request, options, told: [], progressed: [], progress: (...given) => take.progressed.push(given), image() {} };
         for (const name of ['finish', 'fail', 'failed', 'withdraw']) take[name] = (...given) => take.told.push([name, ...given]);
         seen.takes.push(take);
         return take;
@@ -1332,6 +1333,27 @@ test('a creation made by a turn of the Chat tells the Studio to read its takes a
   assert.equal(agent.state.studio.read, 0);
   assert.equal(agent.state.studio.shown.length, 1);
   assert.equal(agent.state.studio.shown[0].record.id, IMAGE);
+});
+
+test('a take in the making hands its card, and the Studio that follows it, how long since its go as the server counts it (0.6.93)', async () => {
+  const time = { ms: 72000, running: true },
+    followed = [],
+    image = { call: functionCall('create_image'), workflowName: 'Krea', requestId: 'r3' },
+    requestTool = async (request, signal, onProgress) => {
+      onProgress('Génération · 5/8', 0.42, null, time);
+      return made(IMAGE, 'image');
+    },
+    studio = { accepts: () => true, propose: async () => 'once', follow: (...given) => followed.push(given), invalidate() {}, settled() {} },
+    turnOf = state => page({ state, requestTool, chat: (body, n) => (n === 1 ? called(image) : said('')) });
+  const chat = turnOf({ studio });
+  await chat.send('Une image de renard');
+  assert.deepEqual(chat.takes[0].progressed, [['Génération · 5/8', 0.42, null, time]]);
+  assert.deepEqual(followed, [], 'made in the Chat: the Studio follows nothing');
+  // Made by the agent of the Studio: its screen counts the same.
+  const agent = turnOf({ view: 'studio', studio });
+  await agent.send('Une image de renard');
+  assert.deepEqual(agent.takes[0].progressed, [['Génération · 5/8', 0.42, null, time]]);
+  assert.deepEqual(followed, [['Génération · 5/8', 0.42, null, time]]);
 });
 
 test('every call is followed by its result; a history that is sound is left as it is', () => {

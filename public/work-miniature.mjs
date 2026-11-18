@@ -1,5 +1,6 @@
 import { takeFlux } from './take-flux.mjs';
 import { livePreview } from './live-preview.mjs';
+import { generationTime, takeTime } from './generation-time.mjs';
 
 /**
  * The miniature of the chat (0.6.81). While a work of a conversation goes on (Moodix answers, a
@@ -50,6 +51,10 @@ export function setupMiniature({
     kind = node('span', 'work-mini-kind'),
     figure = node('span', 'work-mini-percent'),
     stage = node('span', 'work-mini-stage'),
+    // Its words, and at their right how long the take has been in the making, then how long it took
+    // (0.6.93): what its card says.
+    stageWords = node('span', 'work-mini-said'),
+    stageTime = node('time', 'work-mini-time'),
     bar = node('span', 'work-mini-bar'),
     fill = node('span', 'work-mini-fill'),
     fold = node('button', 'work-mini-fold'),
@@ -67,6 +72,7 @@ export function setupMiniature({
   frame.append(still);
   frame.setAttribute('aria-hidden', 'true');
   line.append(kind, figure);
+  stage.append(stageWords, stageTime);
   bar.append(fill);
   bar.setAttribute('aria-hidden', 'true');
   back.append(head, frame, line, stage, bar);
@@ -94,6 +100,9 @@ export function setupMiniature({
     waitingWords = WAITING,
     kindText = '',
     stageText = '',
+    // The count of its card while it is made; how long it took, once made (0.6.93).
+    timeText = '',
+    madeTime = '',
     fraction = null,
     picture = '',
     // The address the still shows (`src` reads back as a whole address).
@@ -146,7 +155,8 @@ export function setupMiniature({
     title.textContent = work?.title || 'Nouvelle conversation';
     kind.textContent = phase === 'answer' || phase === 'answered' ? '' : kindText;
     figure.textContent = phase === 'making' && Number.isFinite(fraction) ? percentOf(fraction) : '';
-    stage.textContent = said;
+    stageWords.textContent = said;
+    stageTime.textContent = phase === 'making' ? timeText : phase === 'done' ? madeTime : '';
     fill.style?.setProperty?.('--mini-progress', String(Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : 0));
     root.dataset.phase = phase;
     root.classList.toggle('has-take', Boolean(kindText) && phase !== 'answer' && phase !== 'answered');
@@ -166,7 +176,7 @@ export function setupMiniature({
     fold.title = folded ? 'Agrandir' : 'Réduire';
     back.setAttribute(
       'aria-label',
-      `Revenir à la conversation « ${title.textContent} » : ${[kind.textContent, said, figure.textContent].filter(Boolean).join(' · ')}`,
+      `Revenir à la conversation « ${title.textContent} » : ${[kind.textContent, said, figure.textContent, stageTime.textContent].filter(Boolean).join(' · ')}`,
     );
   }
   back.onclick = () => open(work);
@@ -193,7 +203,7 @@ export function setupMiniature({
     phase = 'answer';
     running = Boolean(work);
     words = 'Moodix répond…';
-    kindText = stageText = picture = '';
+    kindText = stageText = picture = timeText = madeTime = '';
     fraction = null;
     request = null;
     paint();
@@ -226,7 +236,7 @@ export function setupMiniature({
       waitingWords = WAITING;
       kindText = [KINDS[asked.mediaType] ?? KINDS.image, asked.workflowName].filter(Boolean).join(' · ');
       fraction = null;
-      picture = '';
+      picture = timeText = madeTime = '';
       stageText = 'Préparation…';
       // A video or a sound waits for the user on its card (or in the Studio); an image is made at once.
       phase = ['video', 'audio'].includes(asked.mediaType) && !asked.autoAllow ? 'waiting' : 'making';
@@ -241,6 +251,10 @@ export function setupMiniature({
         flux?.progress(fraction);
       }
       if (event.preview) live?.show(event.preview);
+    } else if (event.type === 'time') {
+      // Its card's count (generation-ui.mjs), each second: drawn while it is made.
+      timeText = String(event.text ?? '');
+      if (phase !== 'making') return;
     } else if (event.type === 'image') {
       const output = event.record?.outputs?.[event.index ?? 0] ?? {};
       picture = output.thumbUrl || output.analysisDataUrl || (event.record?.mediaType === 'image' ? output.originalUrl : '') || picture;
@@ -254,6 +268,9 @@ export function setupMiniature({
         phase = 'done';
         fraction = 1;
         stageText = Number.isInteger(number) ? `Prise ${number} prête` : 'Prise prête';
+        // How long it took, as its record says it (the whole of it only, from 0.6.93).
+        const took = takeTime(event.record);
+        madeTime = took?.whole ? generationTime(took.ms) : '';
       } else {
         phase = 'failed';
         stageText = 'Échec · ' + (event.error || 'la génération a échoué.');
@@ -266,6 +283,7 @@ export function setupMiniature({
       stopFlux();
       phase = 'stopped';
     } else return;
+    if (phase === 'failed' || phase === 'stopped') timeText = madeTime = '';
     paint();
   }
   /** The work is over: its last state stays while the user is away (a turn without a take: answered). */

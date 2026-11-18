@@ -2695,6 +2695,33 @@ test('Moodix AI sets its proposal in the Studio and waits: « Générer » is th
   }
 });
 
+test('while a take is made the Studio says beside its step how long since its go, as the server counts it (0.6.93)', async () => {
+  const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] };
+  const studio = await studioPage({ create_image: [image] });
+  const { body, restore } = studio;
+  try {
+    // A creation the server makes for a page reloaded since: its time is the server's, from the go.
+    studio.studio.followAgain();
+    const time = () => body.find('studio-elapsed')[0];
+    assert.equal(time().textContent, '');
+    assert.equal(time().attributes?.['aria-hidden'], 'true', 'not read aloud every second with the step');
+    studio.studio.follow('Génération · 5/8', 0.42, null, { ms: 72000, running: true });
+    assert.equal(time().textContent, '1 min 12 s');
+    // Its file written: its time, which no longer moves.
+    studio.studio.follow('Libération du moteur de génération…', 0.95, null, { ms: 73400, running: false });
+    assert.equal(time().textContent, '1 min 13 s');
+    await studio.studio.settled({ record: null, error: 'Mémoire insuffisante.' });
+    assert.equal(body.find('studio-elapsed').length, 0, 'nothing in the making, no time');
+    // The next one counts from its own go, not from the last one's.
+    studio.studio.followAgain();
+    studio.studio.follow('Génération · 1/8', 0.1, null, { ms: 3000, running: true });
+    assert.equal(time().textContent, '3 s');
+    await studio.studio.settled({ record: null, error: 'Arrêtée.' });
+  } finally {
+    restore();
+  }
+});
+
 test('a proposal left as it is goes as it is; declined, it is answered « deny »', async () => {
   const { clip, request } = proposalOf();
   const studio = await studioPage({ create_video: [clip] });

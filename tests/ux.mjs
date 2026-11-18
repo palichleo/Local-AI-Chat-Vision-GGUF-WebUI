@@ -506,3 +506,14 @@ test('the time of a turn is written at the top right of its message, on the line
   assert.match(css, /#messages \.message\.assistant > \.message-note\.is-time \{[^}]*position: absolute;[^}]*top: 4px;[^}]*right: 0;/);
   assert.match(css, /:has\(> \.generation-grid\[data-takes\]\[data-time\]\) > \.message-note\.is-time \{[^}]*display: none;/);
 });
+
+test('every progress of a take is handed on with its time: the card, the Studio and the miniature count as the server does (0.6.93)', async () => {
+  const read = async name => (await readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  for (const name of ['app.js', 'take-recovery.mjs', 'studio.mjs', 'generation-ui.mjs']) {
+    const source = await read(name);
+    // A progress handed on with its first three values only loses the count of the server (its fourth).
+    assert.doesNotMatch(source, /\((?:progress|label|value), fraction, preview\)/, name);
+  }
+  // The page that follows a job hands its count on, as /api/tools/job gives it.
+  assert.match(await read('generation-runtime.mjs'), /onProgress\(job\.progress, job\.fraction, job\.previewUrl, job\.elapsed\)/);
+});

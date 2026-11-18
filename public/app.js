@@ -2588,8 +2588,8 @@ async function againTake(failed, { edit = false, figure = null, container }) {
       result = await workflowsUI.requestTool(
         request,
         signal,
-        (progress, fraction, preview) => {
-          generation.progress(progress, fraction, preview);
+        (progress, fraction, preview, time) => {
+          generation.progress(progress, fraction, preview, time);
           scrollToBottom();
         },
         image => generation.image(image),
@@ -2707,8 +2707,8 @@ async function runOutputAction(record, index, action) {
       result = await workflowsUI.requestTool(
         request,
         signal,
-        (progress, fraction, preview) => {
-          generation.progress(progress, fraction, preview);
+        (progress, fraction, preview, time) => {
+          generation.progress(progress, fraction, preview, time);
           scrollToBottom();
         },
         image => generation.image(image),
@@ -3650,13 +3650,14 @@ async function sendMessage(event) {
         workflowsUI.requestTool(
           proposal,
           signal,
-          (progress, fraction, preview) => {
-            card.progress(progress, fraction, preview);
+          (progress, fraction, preview, time) => {
+            // (With how long it has been in the making, as the server counts it: 0.6.93.)
+            card.progress(progress, fraction, preview, time);
             // Made at once while the user was elsewhere, it is followed by its Studio once that is on
             // screen again, as after a reload (0.6.88).
             if (viaStudio && away && shownHere(talkId) && state.view === 'studio' && state.studio.followAgain?.())
               away = false;
-            if (viaStudio && !away) state.studio.follow(progress, fraction, preview);
+            if (viaStudio && !away) state.studio.follow(progress, fraction, preview, time);
             scrollToBottom();
           },
           image => card.image(image),
@@ -3990,9 +3991,9 @@ async function runForTurn(proposal, { view, signal, auto = false, talkId = state
     const result = await workflowsUI.requestTool(
       proposal,
       signal,
-      (progress, fraction, preview) => {
-        generation.progress(progress, fraction, preview);
-        state.studio.follow(progress, fraction, preview);
+      (progress, fraction, preview, time) => {
+        generation.progress(progress, fraction, preview, time);
+        state.studio.follow(progress, fraction, preview, time);
         scrollToBottom();
       },
       image => generation.image(image),
@@ -4155,9 +4156,9 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
     result = await workflowsUI.requestTool(
       proposal,
       signal,
-      (progress, fraction, preview) => {
-        generation.progress(progress, fraction, preview);
-        onProgress(progress, fraction, preview);
+      (progress, fraction, preview, time) => {
+        generation.progress(progress, fraction, preview, time);
+        onProgress(progress, fraction, preview, time);
       },
       image => generation.image(image),
       { confirmed: true, review: false, studio: true, conversationId: talkId },

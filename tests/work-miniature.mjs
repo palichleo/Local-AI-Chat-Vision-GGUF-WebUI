@@ -80,7 +80,8 @@ function miniature({ storage = null, mayClose, onClosed } = {}) {
   });
   page.append(mini.element);
   const part = name => mini.element.find(name);
-  return { mini, page, drawn, opened, part, said: () => part('work-mini-stage').textContent };
+  // (The words of its stage, beside its time since 0.6.93.)
+  return { mini, page, drawn, opened, part, said: () => part('work-mini-said').textContent };
 }
 const WORK = { conversationId: 'a1111111-1111-4111-8111-111111111111', title: 'Renard dans la neige', kind: 'turn' };
 const video = { mediaType: 'video', workflowName: 'LTX 2.5', requestId: 'r1' };
@@ -139,6 +140,39 @@ test('the miniature shows the take in progress as the conversation does, and bri
   part('work-mini-close').onclick();
   assert.equal(mini.element.hidden, true);
   assert.equal(mini.work, null);
+});
+
+test('the miniature says how long the take has been in the making, as its card does, then how long it took (0.6.93)', () => {
+  const { mini, part, said } = miniature();
+  mini.begin(WORK);
+  mini.place('corner');
+  const time = () => part('work-mini-time');
+  // Waiting for the user: nothing counted yet.
+  mini.take({ type: 'start', request: video });
+  assert.equal(time().textContent, '');
+  // Its card heard the server: the same count, at the right of its stage.
+  mini.take({ type: 'progress', request: video, text: 'Génération · 5/8', fraction: 0.42 });
+  mini.take({ type: 'time', text: '1 min 12 s' });
+  assert.deepEqual([said(), time().textContent], ['Génération · 5/8', '1 min 12 s']);
+  assert.equal(time().parentNode, part('work-mini-stage'), 'on the line of its stage');
+  assert.match(part('work-mini-back').getAttribute('aria-label'), /Génération · 5\/8 · 42 % · 1 min 12 s$/);
+  // Made: how long it took, as its record says it.
+  const record = { mediaType: 'video', parameters: { generation_time: { total_ms: 73400 } }, outputs: [{ take: 14 }] };
+  mini.take({ type: 'image', request: video, record, index: 0 });
+  mini.take({ type: 'done', request: video, record, failed: false });
+  assert.deepEqual([said(), time().textContent], ['Prise 14 prête', '1 min 13 s']);
+  // Made before 0.6.93 (the engine's time alone), or failed: no time.
+  mini.begin(WORK);
+  mini.take({ type: 'start', request: video });
+  mini.take({ type: 'time', text: '12 s' });
+  mini.take({ type: 'done', request: video, record: { ...record, parameters: { generation_duration_ms: 70000 } } });
+  assert.equal(time().textContent, '');
+  mini.begin(WORK);
+  mini.take({ type: 'start', request: video });
+  mini.take({ type: 'progress', request: video, text: 'Génération · 1/8', fraction: 0.1 });
+  mini.take({ type: 'time', text: '12 s' });
+  mini.take({ type: 'failed', message: 'La mémoire a manqué.' });
+  assert.equal(time().textContent, '');
 });
 
 test('the miniature says a failure, a cancellation, and an answer made of words alone', () => {

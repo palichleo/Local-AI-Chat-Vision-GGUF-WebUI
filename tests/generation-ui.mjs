@@ -734,6 +734,62 @@ test('a take being made tells the miniature where it is; a take put back from th
   assert.doesNotThrow(() => sturdy.mount(new Element(), request).progress('Génération · 1/8', 0.1));
 });
 
+test('a take in the making says how long since its go, at the right of its stage; made, how long it took, under it (0.6.93)', () => {
+  const told = [];
+  const ui = setupGenerationUI({
+    node: (...args) => new Element(...args),
+    api: async () => ({}),
+    openOutput() {},
+    onLive: event => told.push(event),
+  });
+  const container = new Element(),
+    request = { requestId: 'r1', mediaType: 'video', workflowName: 'LTX 2.5', resolution: { width: 768, height: 448 } },
+    card = ui.mount(container, request),
+    [figure] = container.children,
+    caption = figure.children[1],
+    time = () => caption.children.find(child => child.cls === 'generation-elapsed');
+  // Nothing counted by the server yet (a card that waits for « Confirmer »): no time.
+  card.progress('Préparation…');
+  assert.equal(time(), undefined);
+  // Its count, from the go, as the server says it; the miniature hears it.
+  card.progress('Génération · 5/8', 0.42, null, { ms: 72000, running: true });
+  assert.deepEqual([time().tag, time().textContent], ['time', '1 min 12 s']);
+  assert.deepEqual(told.filter(event => event.type === 'time').map(event => event.text), ['1 min 12 s']);
+  // Made: the count leaves its stage, and how long it took is written under it, after « PRISE 14 ».
+  const record = {
+    id: 'run',
+    conversationId: 'a',
+    mediaType: 'video',
+    workflowName: 'LTX 2.5',
+    parameters: { width: 768, height: 448, frames: 121, fps: 24, generation_time: { total_ms: 73400, prepare_ms: 2400, engine_ms: 71000 } },
+    outputs: [{ take: 14, thumbUrl: '/thumb', originalUrl: '/clip.mp4' }],
+  };
+  card.image({ record, index: 0 });
+  assert.equal(time().textContent, '');
+  const line = figure.children.find(child => child.cls === 'take-caption');
+  assert.deepEqual(
+    line.children.map(child => [child.cls, child.textContent]),
+    [
+      ['take-number', 'PRISE 14'],
+      ['take-format', '16:9 · 768 × 448'],
+      ['take-time', 'Générée en 1 min 13 s'],
+    ],
+  );
+  // What the server says once the take is there changes nothing of it.
+  card.progress('Rechargement du modèle et de la vision…', 0.98, null, { ms: 75000, running: false });
+  assert.equal(time().textContent, '');
+  card.finish({ record });
+  // Put back from the history: under it too. A take of before, the engine's time alone: nothing there.
+  assert.equal(takeLine(record, 0).time, 'Générée en 1 min 13 s');
+  assert.equal(takeLine({ ...record, parameters: { width: 768, height: 448, generation_duration_ms: 70000 } }, 0).time, '');
+  // A take that fails: no time left at its stage.
+  const failing = ui.mount(new Element(), request);
+  failing.progress('Génération · 2/8', 0.2, null, { ms: 30000, running: true });
+  failing.failed('La mémoire a manqué.');
+  assert.equal(failing.container.children[0].children[1].children.find(child => child.cls === 'generation-elapsed').textContent, '');
+  ui.clear();
+});
+
 test('the cards of a conversation set aside stay while another is shown; they go with it (0.6.81)', () => {
   const ui = setupGenerationUI({ node: (...args) => new Element(...args), api: async () => ({}), openOutput() {} });
   const shown = new Element(),

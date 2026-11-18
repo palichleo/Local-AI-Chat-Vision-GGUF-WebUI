@@ -278,7 +278,7 @@ test('a creation still being made is followed under its call: its card, the work
     job: running(),
     fresh: running({ proposal }),
     follow: async (job, request, signal, onProgress) => {
-      onProgress('Génération · 12/30', 0.4, '/preview/1');
+      onProgress('Génération · 12/30', 0.4, '/preview/1', { ms: 42000, running: true });
       await gate;
       return { content: JSON.stringify({ status: 'success', run_id: 'r1' }), record: { id: 'r1' } };
     },
@@ -296,7 +296,9 @@ test('a creation still being made is followed under its call: its card, the work
   assert.deepEqual(options, { review: false, reviewImages: false, studio: false, conversationId: ID });
   assert.deepEqual(state.work, { kind: 'follow', conversationId: ID });
   assert.equal(state.controller.signal, signal, '« Interrompre » stops it');
-  assert.deepEqual(card.told[0], ['progress', 'Génération · 12/30', 0.4, '/preview/1']);
+  // With how long it has been in the making, as the server counts it from its go (0.6.93): the page
+  // reloaded meanwhile says its true time, not the time since it came back.
+  assert.deepEqual(card.told[0], ['progress', 'Génération · 12/30', 0.4, '/preview/1', { ms: 42000, running: true }]);
   assert.equal(seen.saves.length, 0, 'nothing written while it is made');
   // Opened again meanwhile: not followed twice.
   await recovery.complete(ID, views());

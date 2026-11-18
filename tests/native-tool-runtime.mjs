@@ -276,6 +276,104 @@ test('the record of a take says when its seed was named, not drawn: the Studio g
   assert.deepEqual(stamped, [[5, 42], [5, 777]], 'each take recorded, then written in its file with its number');
 });
 
+test('the time of a take is counted by the server from the go to its file written, the same for every page, and kept with it (0.6.93)', async () => {
+  const workflow = {
+    schemaVersion: 1,
+    id: 'image',
+    name: 'Image',
+    description: '',
+    digest: 'a'.repeat(64),
+    mediaType: 'image',
+    pipeline: 'krea2',
+    enabled: true,
+    ready: true,
+    parameters: { prompt: { policy: 'model', type: 'string' } },
+    references: [],
+  };
+  // A clock moved by what each step takes.
+  let clock = 50000,
+    fails = false,
+    saved = null;
+  const during = [];
+  const engine = {
+    busy: false,
+    state: 'ready',
+    // The chat model leaves the card before the engine: part of what comes before it.
+    stop: async () => ((clock += 2100), (engine.state = 'stopped')),
+    start: async () => ((clock += 9000), (engine.state = 'ready')),
+  };
+  const runtime = new ToolRuntime({
+    engine,
+    now: () => clock,
+    catalog: {
+      list: async () => [workflow],
+      read: async () => workflow,
+      prepare: async () => ({
+        workflow,
+        job: {
+          schemaVersion: 1,
+          id,
+          pipeline: 'krea2',
+          mediaType: 'image',
+          workflowId: 'image',
+          workflowDigest: workflow.digest,
+          parameters: { prompt: 'boat', seed: 1, width: 512, height: 512 },
+          components: {},
+          loras: [],
+          references: [],
+        },
+        outputNodes: [],
+      }),
+    },
+    gallery: { put: async record => (saved = record) },
+    getConfig: () => ({ enabled: true, autoAllow: false, maxIterations: 5, baseUrl: 'native' }),
+    engineConfig: () => ({}),
+    clientFactory: () => ({
+      status: async () => ({ idle: true }),
+      preflight: async () => (clock += 400),
+      run: async () => {
+        during.push(runtime.status().elapsed);
+        // The engine: its models loaded, the computation, the file written.
+        clock += 70000;
+        during.push(runtime.status().elapsed);
+        if (fails) throw new Error('La mémoire de la carte graphique a manqué.');
+        return { outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] };
+      },
+      free: async () => (clock += 1500),
+    }),
+  });
+  const make = async () => {
+    const request = await runtime.request(
+      [{ id: 'call', type: 'function', function: { name: 'create_image', arguments: '{"prompt":"boat"}' } }],
+      { conversationId: id, turnId: id, messages: [{ role: 'user', content: 'boat' }] },
+    );
+    await runtime.execute({ requestId: request.requestId, permission: 'once' });
+    await runtime.finished;
+  };
+  await make();
+  assert.equal(runtime.status().state, 'done', runtime.status().error);
+  // While it is made, any page reads the same count: since the go, going on.
+  assert.deepEqual(during, [
+    { ms: 2500, running: true },
+    { ms: 72500, running: true },
+  ]);
+  // Its file written, that is its time: the card handed back and the chat model back add nothing to it.
+  assert.deepEqual(runtime.status().elapsed, { ms: 72500, running: false });
+  clock += 60000;
+  assert.deepEqual(runtime.status().elapsed, { ms: 72500, running: false });
+  // Kept with the take, with its detail; what the engine alone took is as it always was.
+  assert.deepEqual(saved.parameters.generation_time, { total_ms: 72500, prepare_ms: 2500, engine_ms: 70000 });
+  assert.deepEqual([saved.parameters.generation_duration_ms, saved.parameters.runner_duration_ms], [70000, 70000]);
+  // A take that fails: its count stops where it failed, nothing is kept.
+  fails = true;
+  saved = null;
+  during.length = 0;
+  await make();
+  assert.equal(runtime.status().state, 'error');
+  assert.deepEqual(runtime.status().elapsed, { ms: 72500, running: false });
+  assert.equal(saved, null);
+});
+
 test('native video approval shows the resolved fixed stage and cannot use global image authorization', async () => {
   const workflow = {
     schemaVersion: 1,

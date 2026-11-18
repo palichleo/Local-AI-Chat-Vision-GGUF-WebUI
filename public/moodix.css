@@ -10456,6 +10456,15 @@ body:not([data-view='chat']) .resume {
 #messages .take-number {
   color: var(--text-2);
 }
+/* How long it took to make (0.6.93), on a line of its own under « PRISE n » and its format: on
+   theirs, it was cut on a narrow take (an upright clip, 202 px) and read as one more length. */
+#messages .take-caption:has(> .take-time) {
+  flex-wrap: wrap;
+  row-gap: 7px;
+}
+#messages .take-time {
+  flex: 0 0 100%;
+}
 #messages .take-duration {
   position: absolute;
   bottom: 31px;
@@ -10557,6 +10566,19 @@ body:not([data-view='chat']) .resume {
   height: 5px;
   border-radius: 50%;
   background: var(--accent);
+}
+/* How long the take has been in the making (0.6.93): at the right end of the line of its stage, in
+   mono, as the server counts it from the go (generation-ui.mjs). Empty (before the go, once the take
+   is there: its time is under it), nothing. */
+#messages .generation-card:has(> .generation-frame[aria-busy='true']) .generation-caption > .generation-elapsed {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+  white-space: nowrap;
+}
+.generation-elapsed:empty {
+  display: none;
 }
 #messages .generation-card:has(> .generation-frame[aria-busy='true']) .generation-progress {
   position: absolute;
@@ -11158,6 +11180,16 @@ body:not([data-view='chat']) .resume {
   background: var(--accent);
 }
 .studio-screen-head .studio-progress[hidden] {
+  display: none;
+}
+/* How long the take under way has been in the making (0.6.93), beside its step, in mono: the count
+   of the server (studio.mjs), as on its card in the conversation. */
+.studio-screen-head .studio-progress .studio-elapsed {
+  margin-left: 6px;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+}
+.studio-screen-head .studio-progress .studio-elapsed:empty {
   display: none;
 }
 .studio-ai-line {
@@ -16145,6 +16177,22 @@ button.glass-select::after {
   height: 5px;
   border-radius: 50%;
   background: var(--accent);
+}
+/* Its words give way (an ellipsis), the time of the take stays whole at their right (0.6.93): how
+   long it has been in the making, then how long it took, as its card says it. */
+.work-mini-said {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.work-mini-time {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-3);
+  font: 400 12px/1 var(--font-mono);
+}
+.work-mini-time:empty {
+  display: none;
 }
 .work-mini[data-phase='failed'] .work-mini-stage {
   color: var(--alert, var(--danger));

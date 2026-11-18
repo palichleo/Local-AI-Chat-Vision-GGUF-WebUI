@@ -812,6 +812,39 @@ test('a job begun by a page reloaded since is followed to its end with the resul
     assert.match(content.note, /^Vidéo générée et affichée à l’utilisateur\. Tu ne l’as pas vue/);
   }));
 
+test('each progress of a take in the making goes with its time as the server counts it: a page reloaded counts from the go (0.6.93)', async () =>
+  fixture(async ({ ui, setIntercept }) => {
+    const record = {
+      id: 'run',
+      conversationId: 'conversation',
+      mediaType: 'video',
+      workflowName: 'LTX 2.5',
+      prompt: 'un bateau rouge',
+      createdAt: '2026-11-18T00:00:00Z',
+      parameters: { workflow_digest: 'd', frames: 25, fps: 24, stage: 'draft' },
+      outputs: [{ source: { filename: 'run.mp4' }, originalUrl: '/media/run', take: 4 }],
+    };
+    const polls = [
+      { id: 'job', state: 'generating', progress: 'Génération · 12/30', fraction: 0.4, elapsed: { ms: 43000, running: true } },
+      { id: 'job', state: 'done', record, elapsed: { ms: 72500, running: false } },
+    ];
+    setIntercept(route => (route === 'tools/job' ? Response.json(polls.shift()) : undefined));
+    const said = [];
+    await ui.followTool(
+      { id: 'job', state: 'generating', progress: 'Génération · 11/30', fraction: 0.37, elapsed: { ms: 42000, running: true } },
+      { call: { id: 'call_1', function: { name: 'create_video', arguments: '{}' } }, mediaType: 'video' },
+      new AbortController().signal,
+      (progress, fraction, preview, time) => said.push([progress, time]),
+      () => {},
+      { review: false, reviewImages: false, studio: true, conversationId: 'conversation' },
+    );
+    assert.deepEqual(said, [
+      ['Génération · 11/30', { ms: 42000, running: true }],
+      ['Génération · 12/30', { ms: 43000, running: true }],
+      ['Préparation des copies pour la vision…', undefined],
+    ]);
+  }));
+
 test('a followed job stopped by the user is cancelled by its identifier (0.6.82)', async () =>
   fixture(async ({ ui, calls, setIntercept }) => {
     setIntercept(route =>

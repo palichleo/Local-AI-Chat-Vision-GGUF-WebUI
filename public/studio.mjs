@@ -7,6 +7,7 @@ import { setupPointer } from './studio-pointer.mjs';
 import { closePopup, openPopup } from './glass-menu.mjs';
 import { fileInfo } from './media-info.mjs';
 import { forgetCitedTakes } from './cited-takes.mjs';
+import { elapsedClock } from './generation-time.mjs';
 
 /**
  * The Studio: the creation tools of the conversation, beside the chat. Four blocks that never
@@ -2524,13 +2525,14 @@ export function setupStudio({
         const done = await run(proposed, {
           signal: controller.signal,
           conversationId,
-          onProgress: (label, fraction, preview) => {
+          onProgress: (label, fraction, preview, time) => {
             if (!working) return;
             Object.assign(working, {
               label: typeof label === 'string' && label ? label : working.label,
               fraction: Number.isFinite(fraction) ? fraction : working.fraction,
               preview: preview ?? working.preview,
             });
+            timeWork(time);
             progress();
           },
         });
@@ -2554,6 +2556,7 @@ export function setupStudio({
             fraction: job.fraction ?? null,
             preview: job.previewUrl ?? working.preview,
           });
+          timeWork(job.elapsed);
           // The result is shown as soon as it exists.
           if (job.record && !listed) {
             listed = true;
@@ -2603,6 +2606,26 @@ export function setupStudio({
     working.controller.abort();
     if (working.requestId) api('tools/cancel', { requestId: working.requestId }).catch(() => {});
   }
+  /**
+   * How long the take under way has been in the making (0.6.93), beside its step: the count of the
+   * server (`time`, the fourth value of a progress), going on by itself between two of its answers;
+   * for the work it was given for only (`timed`): the next one counts from its own go.
+   */
+  let elapsedNode = null,
+    timed = null;
+  const elapsed = elapsedClock(text => {
+    if (!working || timed !== working) return elapsed.stop();
+    working.time = text;
+    if (elapsedNode) elapsedNode.textContent = text;
+  });
+  function timeWork(time) {
+    if (!working) return;
+    if (timed !== working) {
+      elapsed.reset();
+      timed = working;
+    }
+    elapsed.update(time);
+  }
   /** Updates the button and the screen alone: the form keeps its focus while a generation runs. */
   function progress() {
     if (!working) return;
@@ -2623,6 +2646,8 @@ export function setupStudio({
     if (line) {
       line.hidden = false;
       line.textContent = working.label || '';
+      // (Its time stays beside it: the words of the step change, not the count.)
+      if (elapsedNode) line.append(elapsedNode);
     }
     // A sound lights its bars as it goes.
     const bars = document.querySelectorAll?.('#studio-view .studio-bars span') ?? [];
@@ -3309,14 +3334,15 @@ export function setupStudio({
     const now = !working && !(gpuBlocked() && !working) && !answering() && !checking ? elsewhere() : '';
     if (now !== busyDrawn) render();
   }
-  /** A generation approved here, run by the chat turn: its progress comes from there. */
-  function follow(label, fraction, preview) {
+  /** A generation approved here, run by the chat turn: its progress comes from there, with its time. */
+  function follow(label, fraction, preview, time) {
     if (!working?.external) return;
     Object.assign(working, {
       label: typeof label === 'string' && label ? label : working.label,
       fraction: Number.isFinite(fraction) ? fraction : working.fraction,
       preview: preview ?? working.preview,
     });
+    timeWork(time);
     progress();
   }
   /** The end of a generation approved here: its creation is shown on the screen. */
@@ -4316,6 +4342,13 @@ export function setupStudio({
     step.id = 'studio-progress';
     step.setAttribute('role', 'status');
     step.hidden = !working && !heldGpu && !freed && !busyElsewhere;
+    // How long the take under way has been in the making (0.6.93), beside its step: not among what
+    // the status says aloud, which would read it every second.
+    elapsedNode = working ? node('time', 'studio-elapsed', working.time ?? '') : null;
+    if (elapsedNode) {
+      elapsedNode.setAttribute('aria-hidden', 'true');
+      step.append(elapsedNode);
+    }
     setting.hidden = !(answering() || ai);
     if (kindsBar()) head.append(kindsBar());
     head.append(step, setting);

@@ -3,6 +3,7 @@ import { thumbnailOf } from './thumbnails.mjs';
 import { livePreview } from './live-preview.mjs';
 import { takeFlux } from './take-flux.mjs';
 import { formatOf } from './formats.mjs';
+import { elapsedClock, madeIn } from './generation-time.mjs';
 
 const KINDS = { image: 'IMAGE', video: 'VIDÉO', audio: 'SON' };
 /** A length as the Studio writes it everywhere (moodix-design.md 27): « 05.04 S » in capitals. */
@@ -74,6 +75,8 @@ export function takeLine(record, index) {
     lorasTitle: Array.isArray(p.styles)
       ? p.styles.map(style => `${String(style?.name ?? '').split(/[\\/]/).pop().replace(/\.safetensors$/i, '')} · ${String(style?.strength ?? 1).replace('.', ',')}`).join('\n')
       : '',
+    // How long it took to make, from its go to its file (0.6.93): « Générée en 1 min 12 s ».
+    time: madeIn(record),
   };
 }
 const requestMeta = request => {
@@ -223,7 +226,7 @@ export function setupGenerationUI({
     }
     figure.append(caption);
     container.append(figure);
-    return { figure, frame, label, progress, title, meta, open };
+    return { figure, frame, caption, label, progress, title, meta, open };
   }
   function mount(container, request = {}, { compact = false, live: made = false } = {}) {
     container.classList.add('generation-grid');
@@ -254,6 +257,23 @@ export function setupGenerationUI({
       flux = compact ? null : takeFlux(frame, { node }),
       // What the generator has so far, in the first tile.
       live = livePreview(node, frame, { onLoad: picture => flux?.source(picture) });
+    // How long it has been in the making (0.6.93), at the right of its stage: the count of the server,
+    // going on by itself between two of its answers. Its element comes with the first count (a card
+    // that waits for « Confirmer » has none); the miniature hears it too.
+    function elapsed(target, text) {
+      if (!target.elapsed && !text) return;
+      if (!target.elapsed) target.caption.append((target.elapsed = node('time', 'generation-elapsed')));
+      target.elapsed.textContent = text;
+    }
+    const clock = elapsedClock(text => {
+      for (const target of tiles) elapsed(target, text);
+      tell({ type: 'time', text });
+    });
+    /** The count stops: the take is there (its time is written under it), or nothing will be. */
+    function untimed() {
+      clock.stop();
+      for (const target of tiles) elapsed(target, '');
+    }
     const references = request.plan?.references ?? [],
       start = references.find(ref => ref.role === 'start_image' && ref.preview) ?? references.find(ref => ref.preview);
     // A take from words alone: the Flux on the colours of the room until the first picture.
@@ -278,6 +298,7 @@ export function setupGenerationUI({
     function settle() {
       flux?.stop();
       live.clear();
+      untimed();
       for (const target of tiles) {
         unwatch(target.figure);
         target.frame.classList.add('is-finished');
@@ -305,8 +326,10 @@ export function setupGenerationUI({
       flux?.visible(visible);
     });
     tell({ type: 'start' });
-    function progress(value, fraction, preview) {
+    function progress(value, fraction, preview, time) {
       if (disposed || finished) return;
+      // (Until its take is there: from then, its own time says it.)
+      if (!record) clock.update(time);
       followSize();
       if (preview && !record) live.show(preview);
       if (Number.isFinite(fraction)) flux?.progress(fraction);
@@ -432,6 +455,8 @@ export function setupGenerationUI({
       const format = node('span', 'take-format', [line.format, line.loras].filter(Boolean).join(' · '));
       if (line.loras) format.title = 'LoRA : ' + line.lorasTitle.replaceAll('\n', ', ');
       target.takeLine.replaceChildren(node('span', 'take-number', line.number), format);
+      // How long it took to make, on a line of its own under them (0.6.93; moodix.css).
+      if (line.time) target.takeLine.append(node('span', 'take-time', line.time));
       target.figure.append(target.takeLine);
       target.figure.classList.add('has-take');
       target.figure.takeKind = KINDS[shown.mediaType] ?? KINDS.image;
@@ -465,6 +490,7 @@ export function setupGenerationUI({
       tell({ type: 'image', record, index });
       flux?.stop();
       live.clear();
+      untimed();
       const target = slots.size ? tile(container, request, compact) : first,
         { frame } = target;
       if (target !== first) tiles.push(target);
@@ -663,6 +689,8 @@ export function setupGenerationUI({
       finished = true;
       tell({ type: 'failed', message: String(message || 'La génération a échoué.').trim() });
       flux?.stop();
+      // Nothing was made: no time to say.
+      untimed();
       for (const target of tiles) {
         unwatch(target.figure);
         target.figure.classList.remove('is-warned');
@@ -747,6 +775,7 @@ export function setupGenerationUI({
     function dispose() {
       disposed = true;
       flux?.stop();
+      clock.stop();
       controller.abort();
       for (const target of tiles) unwatch(target.figure);
       for (const slot of slots.values()) {

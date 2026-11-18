@@ -18,7 +18,7 @@ class Element {
       listeners: {},
       style: {},
     });
-    this.classList = { toggle() {}, add() {}, remove() {} };
+    this.classList = { toggle() {}, add() {}, remove() {}, contains: () => false };
   }
   querySelectorAll(selector) {
     return this.children.flatMap(child => [
@@ -161,10 +161,10 @@ test('output details expose full prompts, workflow, seed and available parameter
   $('media-prev').onclick();
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal($('media-position').textContent, '2 / 3');
-  // The prompt whole, with Copier; then Modèle, Format, Résolution, Seed and Date.
+  // The prompt whole, with Copier; then Modèle, Format, Résolution, Seed, Date and how long it took.
   assert.equal($('media-prompt').textContent, record.prompt);
   const texts = $('media-metadata').children.map(item => item.textContent);
-  assert.deepEqual(texts.filter((_, at) => at % 2 === 0), ['Modèle', 'Format', 'Résolution', 'Seed', 'Date']);
+  assert.deepEqual(texts.filter((_, at) => at % 2 === 0), ['Modèle', 'Format', 'Résolution', 'Seed', 'Date', 'Temps de génération']);
   assert.ok(texts.includes(record.workflowName));
   assert.ok(texts.includes('42'));
   assert.ok(texts.includes('1024 × 768'));
@@ -415,8 +415,45 @@ test('a take made with LoRAs of the user names them among its settings, by their
   };
   await ui.viewOutput(record, 0, undefined, { list: () => [record], at: () => 0 });
   const texts = $('media-metadata').children.map(item => item.textContent);
-  assert.deepEqual(texts.filter((_, at) => at % 2 === 0), ['Modèle', 'Format', 'Résolution', 'LoRA', 'Seed', 'Date']);
+  assert.deepEqual(texts.filter((_, at) => at % 2 === 0), ['Modèle', 'Format', 'Résolution', 'LoRA', 'Seed', 'Date', 'Temps de génération']);
   assert.equal(texts[texts.indexOf('LoRA') + 1], '70sSCiFiKrea2Raw · 0,8\nkrea2_detail_slider · 1');
+});
+
+test('the window of a take says how long it took to make, apart from « Durée », the length of its clip (0.6.93)', async t => {
+  const { ui, $ } = await fixture(t);
+  const take = parameters => ({
+    id: 'run',
+    conversationId: 'conversation',
+    mediaType: 'video',
+    workflowName: 'LTX 2.5',
+    prompt: 'Un escalier au-dessus des nuages',
+    createdAt: '2026-11-18T18:12:00Z',
+    parameters: { seed: 7, width: 1088, height: 1920, frames: 593, fps: 24, ...parameters },
+    outputs: [{ source: { filename: 'clip.mp4', subfolder: 'video' }, originalUrl: '/clip.mp4', take: 44 }],
+  });
+  // Its lines as the window shows them, by their label.
+  const lines = id => {
+    const texts = $(id).children.map(item => item.textContent);
+    return Object.fromEntries(texts.flatMap((text, at) => (at % 2 ? [] : [[text, texts[at + 1]]])));
+  };
+  await ui.viewOutput(take({ generation_time: { total_ms: 125400, prepare_ms: 3100, engine_ms: 122300 }, generation_duration_ms: 122300 }), 0);
+  let shown = lines('media-metadata');
+  assert.deepEqual(Object.keys(shown), ['Modèle', 'Format', 'Résolution', 'Durée', 'Seed', 'Date', 'Temps de génération']);
+  // How long it lasts, and how long it took to make: two lines, two ways of writing them.
+  assert.deepEqual([shown['Durée'], shown['Temps de génération']], ['24.71 S', '2 min 05 s']);
+  // Its detail under « Plus de détails »: what came before the engine, and the engine itself; not
+  // again among its other parameters.
+  const more = lines('media-more-list');
+  assert.deepEqual([more['Temps de préparation'], more['Temps du moteur']], ['3 s', '2 min 02 s']);
+  assert.doesNotMatch(more['Paramètres'], /generation_time/);
+  // A take of before: the engine's time alone was kept, said as such, never as the whole of it.
+  await ui.viewOutput(take({ generation_duration_ms: 116300, runner_duration_ms: 116300 }), 0);
+  shown = lines('media-metadata');
+  assert.deepEqual([shown['Temps du moteur'], shown['Temps de génération']], ['1 min 56 s', undefined]);
+  // Nothing measured: said so.
+  await ui.viewOutput(take({}), 0);
+  assert.equal(lines('media-metadata')['Temps de génération'], 'Non mesuré');
+  $('original-close').onclick();
 });
 
 test('the prompt of a take opened: cut, a round arrow shows it whole and folds it again; short, no arrow; folded again at another take', async t => {

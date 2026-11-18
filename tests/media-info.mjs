@@ -76,6 +76,8 @@ const record = {
     workflow_digest: 'a'.repeat(64),
     generation_duration_ms: 116300,
     runner_duration_ms: 116000,
+    // How long it took here (0.6.93): this computer's, not what made the creation.
+    generation_time: { total_ms: 118800, prepare_ms: 2500, engine_ms: 116300 },
     reference_count: 1,
     reference_capacity: 3,
     reference_mode: 'pixels',
@@ -119,7 +121,7 @@ test('the sheet of a creation: what made it, never what is this computer’s own
     // Of an input, what names it: not where its file is.
     references: [{ input: 'subject-1', role: 'reference_image', label: 'Krea 2', output_id: '8d0511eb' }],
   });
-  assert.doesNotMatch(JSON.stringify(info), /D:\\\\models|F:\\\\output|workflow_digest|duration_ms/);
+  assert.doesNotMatch(JSON.stringify(info), /D:\\\\models|F:\\\\output|workflow_digest|duration_ms|generation_time|total_ms/);
   // An image without a number yet, of a record without a kind.
   const image = describe({ id: 'i', outputs: [{}], parameters: {} });
   assert.deepEqual([image.mediaType, image.take, image.app], ['image', undefined, undefined]);

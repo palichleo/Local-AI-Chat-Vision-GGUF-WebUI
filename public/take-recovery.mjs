@@ -396,9 +396,10 @@ export function setupTakeRecovery({
         fresh,
         request,
         controller.signal,
-        (progress, fraction, preview) => {
-          card?.progress(progress, fraction, preview);
-          if (studio) state.studio?.follow?.(progress, fraction, preview);
+        // With how long it has been in the making, from its go (0.6.93): reloaded, its true time.
+        (progress, fraction, preview, time) => {
+          card?.progress(progress, fraction, preview, time);
+          if (studio) state.studio?.follow?.(progress, fraction, preview, time);
           scrollToBottom();
         },
         image => card?.image(image),
