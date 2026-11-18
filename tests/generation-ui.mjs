@@ -331,6 +331,78 @@ test('video output uses the original streaming URL, plays from its round button,
   assert.equal(video.src, undefined);
 });
 
+test('a clip asked to play just as its card comes back in sight plays once it has its file again (0.6.104)', t => {
+  // Out of sight, a card gives its file back; back in sight, it takes it again a moment later. A ▶
+  // pressed in between was undone by that load (the browser pauses what it loads): it did nothing.
+  const previous = globalThis.IntersectionObserver;
+  let observed;
+  globalThis.IntersectionObserver = class {
+    constructor(callback) {
+      this.callback = callback;
+      observed = this;
+    }
+    observe() {}
+    unobserve() {}
+  };
+  t.after(() => {
+    globalThis.IntersectionObserver = previous;
+  });
+  const container = new Element(),
+    record = {
+      id: 'run',
+      conversationId: 'conversation',
+      mediaType: 'video',
+      workflowName: 'Motion',
+      prompt: 'Slow pan',
+      parameters: {},
+      outputs: [{ thumbUrl: '/thumb.jpg', originalUrl: '/clip.mp4' }],
+    },
+    ui = setupGenerationUI({
+      node: (...args) => new Element(...args),
+      openOutput() {},
+      api: async () => {
+        throw Error('No request expected');
+      },
+    }),
+    card = ui.mount(container, { mediaType: 'video' });
+  card.image({ record, index: 0 });
+  card.finish({ record });
+  const wrapper = container.children[0].children[0].children[0],
+    video = wrapper.children.find(node => node.tag === 'video'),
+    play = wrapper.children.find(node => node.cls === 'take-player').children.find(node => node.cls === 'take-play take-player-play');
+  let played = 0;
+  // As a browser does: playing un-pauses at once, a load pauses.
+  Object.assign(video, {
+    paused: true,
+    play() {
+      played++;
+      this.paused = false;
+      return Promise.resolve();
+    },
+    pause() {
+      this.paused = true;
+    },
+    load() {
+      this.paused = true;
+    },
+  });
+  const sight = visible => observed.callback([{ target: wrapper, isIntersecting: visible }]);
+  sight(true);
+  assert.deepEqual([video.src, played], ['/clip.mp4', 0], 'in sight: its file, nothing played by itself');
+  sight(false);
+  assert.equal(video.src, undefined, 'out of sight: its file given back');
+  // Scrolled back and pressed at once: the ▶ comes before the file.
+  play.onclick();
+  assert.equal(played, 1);
+  sight(true);
+  assert.equal(video.src, '/clip.mp4');
+  assert.equal(played, 2, 'played again once its file is there: the press is not lost');
+  // Back in sight without a press: nothing plays by itself.
+  sight(false);
+  sight(true);
+  assert.equal(played, 2);
+});
+
 test('a clip of the chat, a take of a reply as one of the Studio, plays with the player of a take: never the browser’s controls (0.6.97)', () => {
   // Elements that listen as those of a page do, and say whether a control of the browser was given.
   const listening = new WeakMap(),

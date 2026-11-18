@@ -456,12 +456,14 @@ try {
           // At 9:16 (202 px) the time and the buttons go over the line; at 16:9 one row, as in the window of a take.
           && wrap(0) === 'nowrap' && wrap(1) === 'wrap';
       })()`), { within: 3000 });
+    // (The clip lasts a second: played in a loop here, or a machine under load asked for its state
+    // before it began then after it ended, and the step failed now and then, 0.6.104.)
     await run('clip : Espace sur ▶', async () => {
-      await js(`${card(0)}.scrollIntoView({ block: 'center', behavior: 'instant' }); ${card(0)}.querySelector('.take-player-play').focus()`);
+      await js(`${card(0)}.scrollIntoView({ block: 'center', behavior: 'instant' }); ${card(0)}.querySelector('video').loop = true; ${card(0)}.querySelector('.take-player-play').focus()`);
       await press(' ', 'Space', 32, ' ');
-    }, () => js(`${card(0)}.querySelector('video').paused === false && document.activeElement?.getAttribute('aria-label') === 'Mettre en pause'`), { within: 2000 });
+    }, () => js(`${card(0)}.querySelector('video').paused === false && document.activeElement?.getAttribute('aria-label') === 'Mettre en pause'`), { within: 5000 });
     await run('clip : Espace de nouveau, en pause', () => press(' ', 'Space', 32, ' '), () =>
-      js(`${card(0)}.querySelector('video').paused === true && !${card(0)}.querySelector('video').controls`), { within: 1000 });
+      js(`${card(0)}.querySelector('video').paused === true && !${card(0)}.querySelector('video').controls`), { within: 5000 });
     await run('clip : Voir en grand', () => js(`${card(0)}.querySelector('.take-player-expand').click()`), () =>
       js(`document.getElementById('original-dialog').open && !document.getElementById('take-player').hidden && !document.getElementById('original-video').controls`), { within: 2000 });
     await run('Échap (fenêtre de la prise)', () => key('Escape', 'Escape', 27), noDialog);

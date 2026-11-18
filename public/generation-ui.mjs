@@ -568,8 +568,14 @@ export function setupGenerationUI({
         slots.set(index, slot);
         frame.replaceChildren(wrapper);
         watch(wrapper, visible => {
-          if (visible) video.src = output.originalUrl || '';
-          else {
+          if (visible) {
+            // Asked to play just as its card came back in sight (0.6.104): its file, given back while it
+            // was out of sight, is taken again a moment later, and the browser pauses what it loads. The
+            // ▶ pressed in between did nothing; it plays once it has its file again.
+            const asked = video.paused === false;
+            video.src = output.originalUrl || '';
+            if (asked) void video.play?.()?.catch?.(() => {});
+          } else {
             video.pause?.();
             video.removeAttribute('src');
             video.load?.();
