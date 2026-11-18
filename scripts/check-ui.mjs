@@ -5,7 +5,8 @@
  * the page: an exception, an error written to the console, a file the page cannot load, or the
  * notice of an unexpected error (app.js). Run before each commit (.githooks/pre-commit) and by
  * `npm run check:ui`. « Nouveau chat » stopped silently from 0.5.87 to 0.5.109: this would have
- * caught it at once.
+ * caught it at once. Last, the Studio is laid out with the tools of the shipped workflows, in every
+ * mode and with every model: nothing of it under the Sortie, nothing in sight out of reach (0.6.98).
  *
  * The browser: MOODIX_BROWSER, or Brave, Chrome, Edge or Chromium where they are usually
  * installed. None found: said, and the check is skipped (it never blocks for want of one).
@@ -13,11 +14,14 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Gallery } from '../lib/gallery.mjs';
+import { ToolCatalog } from '../lib/tool-catalog.mjs';
+import { validateNativeWorkflow } from '../lib/native-workflows.mjs';
+import { STUDIO_ID } from '../lib/studio.mjs';
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const local = process.env.LOCALAPPDATA || '';
@@ -44,6 +48,89 @@ if (!browser) {
   console.log('Vérification de l’interface sautée : aucun navigateur Chromium trouvé (MOODIX_BROWSER pour en indiquer un).');
   process.exit(0);
 }
+
+// The tools of the Studio on a machine that has the files of every shipped workflow (0.6.98), as
+// the application gives them (lib/tool-catalog.mjs), with three LoRAs of the user: this empty copy has
+// none (no Python, no model), and the steps that lay the Studio out are served these in their place.
+const shippedFolder = new URL('../runner/workflows/', import.meta.url);
+const shipped = await Promise.all(
+  (await readdir(shippedFolder))
+    .filter(name => name.endsWith('.json'))
+    .map(async name => JSON.parse(await readFile(new URL(name, shippedFolder), 'utf8'))),
+);
+const shippedStudio = {
+  legacyId: STUDIO_ID,
+  enabled: true,
+  tools: await new ToolCatalog({ list: async () => shipped.map(item => ({ ...validateNativeWorkflow(item), ready: true })) }).studio(),
+  styles: ['grain-argentique.safetensors', 'portrait-doux.safetensors', 'styles\\lumiere-70s.safetensors'],
+  presets: {},
+};
+/**
+ * The Studio gone through in the page (0.6.98): each mode and each of its models, as it opens and
+ * with all it may show; what goes over the Sortie, what the pointer cannot reach, a page that scrolls,
+ * in the user's words. The Studio draws each change at once (render): read as soon as it is done.
+ */
+const STUDIO_LAYOUT = `(() => {
+  const found = [],
+    desk = () => document.querySelector('#studio-view .studio-desk'),
+    click = selector => document.querySelector(selector)?.click(),
+    // What cuts what it holds: a control is in sight where all of them leave it.
+    clips = control => {
+      const rooms = [];
+      for (let node = control.parentElement; node && node !== document.body; node = node.parentElement)
+        if (getComputedStyle(node).overflowY !== 'visible') rooms.push(node.getBoundingClientRect());
+      return rooms;
+    },
+    named = element => element ? element.getAttribute('class') || element.tagName : 'rien';
+  function look(where) {
+    const out = desk()?.querySelector('.studio-block.is-output');
+    if (!out) return found.push(where + ' : pas de Sortie');
+    const top = out.getBoundingClientRect().top;
+    for (const [kind, label] of [['is-input', 'Entrée'], ['is-preview', 'Aperçu'], ['is-settings', 'Réglages']]) {
+      const block = desk().querySelector('.studio-block.' + kind),
+        over = block ? Math.round(block.getBoundingClientRect().bottom - top) : 0;
+      if (over > 0) found.push(where + ' : le bloc ' + label + ' passe ' + over + ' px sous la Sortie');
+    }
+    const page = document.documentElement;
+    if (page.scrollHeight > innerHeight + 1 || page.scrollWidth > innerWidth + 1) found.push(where + ' : la page défile');
+    for (const control of desk().querySelectorAll('.studio-block:not(.is-output) :is(button, input, select, textarea, [tabindex="0"])')) {
+      const box = control.getBoundingClientRect();
+      if (!box.width || !box.height || control.closest('[hidden]') || getComputedStyle(control).visibility === 'hidden') continue;
+      let left = Math.max(box.left, 0), right = Math.min(box.right, innerWidth), upper = Math.max(box.top, 0), lower = Math.min(box.bottom, innerHeight);
+      for (const room of clips(control)) {
+        left = Math.max(left, room.left);
+        right = Math.min(right, room.right);
+        upper = Math.max(upper, room.top);
+        lower = Math.min(lower, room.bottom);
+      }
+      // Scrolled out of sight in its block: reached by scrolling it, not here.
+      if (right - left < 2 || lower - upper < 2) continue;
+      const hit = document.elementFromPoint((left + right) / 2, (upper + lower) / 2);
+      // (A bubble of help, or the pointer of Moodix AI, passes over the page: no part of its layout.)
+      if (hit?.closest('.help-bubble, .ai-cursor')) continue;
+      if (!hit || !(hit === control || control.contains(hit) || (hit.tagName === 'LABEL' && hit.contains(control))))
+        found.push(where + ' : « ' + (control.getAttribute('aria-label') || control.textContent.trim() || named(control)) + ' » hors de portée, sous ' + named(hit));
+    }
+  }
+  for (const mode of ['Image', 'Vidéo', 'Son']) {
+    click('#studio-kinds .kind-tab[aria-label="' + mode + '"]');
+    const pick = () => document.querySelector('#studio-view .studio-model-pick'),
+      ids = [...(pick()?.options ?? [])].map(option => option.value);
+    for (const id of ids.length ? ids : [null]) {
+      if (id !== null) {
+        pick().value = id;
+        pick().onchange();
+      }
+      const name = mode + ' · ' + (pick()?.selectedOptions[0]?.textContent ?? document.querySelector('#studio-view .studio-model-name')?.textContent ?? '');
+      look(name);
+      for (let added = 0; added < 3; added++) click('#studio-view .studio-lora-plus');
+      click('#studio-view .studio-lyrics-toggle');
+      if (!document.querySelector('#studio-view .studio-more-pill')?.classList.contains('is-open')) click('#studio-view .studio-more-pill');
+      look(name + ', tout ouvert');
+    }
+  }
+  return found;
+})()`;
 
 const data = await mkdtemp(join(tmpdir(), 'moodix-check-data-')),
   profile = await mkdtemp(join(tmpdir(), 'moodix-check-browser-'));
@@ -127,7 +214,22 @@ try {
     if (message.id && pending.has(message.id)) {
       pending.get(message.id)(message);
       pending.delete(message.id);
-    } else if (message.method === 'Page.javascriptDialogOpening')
+    } else if (message.method === 'Fetch.requestPaused' && laidOut)
+      // The tools of the Studio, while the steps that lay it out are under way (shippedStudio); the
+      // steps that simulate the answers of a model have their own (paused, below).
+      socket.send(
+        JSON.stringify({
+          id: ++id,
+          method: 'Fetch.fulfillRequest',
+          params: {
+            requestId: message.params.requestId,
+            responseCode: 200,
+            responseHeaders: [{ name: 'Content-Type', value: 'application/json; charset=utf-8' }],
+            body: Buffer.from(JSON.stringify(shippedStudio)).toString('base64'),
+          },
+        }),
+      );
+    else if (message.method === 'Page.javascriptDialogOpening')
       // « Quitter la page ? » (a draft in the message box): left, as a user would.
       socket.send(JSON.stringify({ id: ++id, method: 'Page.handleJavaScriptDialog', params: { accept: true } }));
     else if (message.method === 'Runtime.exceptionThrown')
@@ -144,6 +246,8 @@ try {
    * the stream of each answer in turn, a model ready in its status. Anything else goes to the server.
    */
   let simulated = null;
+  // Whether the steps that lay the Studio out with the shipped workflows are under way.
+  let laidOut = false;
   async function paused({ requestId, request, responseStatusCode, responseHeaders }) {
     const answer = (body, type = 'application/json; charset=utf-8') =>
       send('Fetch.fulfillRequest', {
@@ -574,6 +678,39 @@ try {
   await size(1280);
   await clips();
   await run('rechargement', () => send('Page.reload').then(() => wait(2000)), view('chat'));
+  // The Studio with the tools of the shipped workflows (0.6.98): no block of it over the Sortie,
+  // every setting in sight within reach of the pointer, the page not scrolling. In each mode, with each
+  // model, as it opens and with all it may show (three LoRAs, the lyrics, « Plus de réglages »), at
+  // 1280 × 720 and 1440 × 900. At 1280 × 720 the settings of Krea 2 went 132 px under the Sortie,
+  // which took the pointer there. The message box is emptied first: nothing to leave, nothing asked.
+  laidOut = true;
+  await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/studio', requestStage: 'Request' }] });
+  await run(
+    'Studio avec les workflows fournis',
+    async () => {
+      await js(`(() => { const p = document.getElementById('prompt'); p.value = ''; p.dispatchEvent(new Event('input')); return true; })()`);
+      await send('Page.reload');
+      await wait(2000);
+      return click('#studio-open');
+    },
+    () => js(`document.querySelectorAll('#studio-view .studio-model-pick option').length > 1`),
+    { within: 6000 },
+  );
+  for (const [width, height] of [
+    [1280, 720],
+    [1440, 900],
+  ])
+    await run(
+      `Studio : rien sous la Sortie, tout à portée (${width} × ${height})`,
+      () => send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }),
+      async () => {
+        const found = await js(STUDIO_LAYOUT);
+        for (const what of found) problems.push([step, 'état', what]);
+        return found.length === 0;
+      },
+    );
+  await send('Fetch.disable');
+  laidOut = false;
   console.log(`Vérification de l’interface (${browser.split(/[\\/]/).pop()}) : ${results.filter(([, ok]) => ok).length}/${results.length} étapes.`);
   for (const [name, allowed] of allowances)
     for (let index = problems.length - 1; index >= 0; index--)

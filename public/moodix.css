@@ -15647,6 +15647,16 @@ button.glass-select::after {
     flex: 0 1 auto;
     min-height: 72px;
   }
+  /* Nor do the settings (0.6.98): as tall as their row at most; taller, what the block holds
+     scrolls in it, under a grain that stays, with the quiet bar of the page (« Scroll bars »). At
+     1280 × 720, with « Plus de réglages » open and three LoRAs, they went 132 px under the Sortie,
+     which took the pointer there: the seed and « Débruitage » could no longer be reached. */
+  #studio-view .studio-block.is-settings {
+    max-height: 100%;
+  }
+  #studio-view .studio-block.is-settings > .studio-block-body {
+    overflow: hidden auto;
+  }
 }
 
 /* ------------------------------------------------------------------ after the try of 0.6.25 (16/11) */
