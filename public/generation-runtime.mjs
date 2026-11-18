@@ -185,7 +185,9 @@ export function setupGenerationRuntime({
     onImage = () => {},
     // `review`: the storyboard of a generated video is handed to the model with the result;
     // `reviewImages`: the copy of a generated image, when the user chose it in the settings.
-    { confirmed = false, review = true, reviewImages = false, approve = null, studio = false } = {},
+    // `conversationId`: the conversation of the work (0.6.81: the user may open another meanwhile;
+    // its take is still its own), the one shown when it starts otherwise.
+    { confirmed = false, review = true, reviewImages = false, approve = null, studio = false, conversationId = state.conversationId } = {},
   ) {
     const cancel = () => api('tools/cancel', { requestId: request.requestId }).catch(() => {});
     let decision;
@@ -218,7 +220,7 @@ export function setupGenerationRuntime({
       originalsSignal = AbortSignal.any([signal, originalsController.signal]);
     function receiveOriginals(record) {
       if (originalsTask) return;
-      if (record.conversationId !== state.conversationId)
+      if (record.conversationId !== conversationId)
         throw Error('Cette sortie ne correspond pas à la conversation courante.');
       // Made in the Studio, with no model to look at it now: no copy for it, no original to
       // download; the card shows its file. The copies are made from the original when asked.
@@ -316,7 +318,7 @@ export function setupGenerationRuntime({
         };
       const record = job.record;
       receiveOriginals(record);
-      if (record.conversationId !== state.conversationId)
+      if (record.conversationId !== conversationId)
         throw Error('Cette sortie ne correspond pas à la conversation courante.');
       // A character put in a video: what to call again to change it (the video followed, not
       // the result; the same character), said with the result for the next request.

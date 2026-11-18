@@ -133,12 +133,19 @@ export function setupGenerationUI({
   onResize = () => {},
   onOpen = null,
   onAgain = null,
+  // The take of each card being made (not of those put back from the history) as it goes: started,
+  // in progress, its picture, done, failed or stopped (the miniature of the chat, 0.6.81).
+  onLive = null,
 }) {
   const cards = new Set(),
     watched = new Map(),
     // The takes that failed, worded again while the card stays held (`held`).
-    failures = new Set();
-  let gpuHeld = false;
+    failures = new Set(),
+    // Their « Relancer » and « Modifier la proposition », greyed while another creation runs (`busy`),
+    // with the words they say otherwise.
+    retries = new Map();
+  let gpuHeld = false,
+    retrying = '';
   /** « ARRÊTÉE » and the card held while it is; what failed, once it is free again. */
   function word({ kicker, said, reason }) {
     kicker.textContent = gpuHeld ? 'Arrêtée' : 'La génération a échoué';
@@ -218,13 +225,23 @@ export function setupGenerationUI({
     container.append(figure);
     return { figure, frame, label, progress, title, meta, open };
   }
-  function mount(container, request = {}, { compact = false } = {}) {
+  function mount(container, request = {}, { compact = false, live: made = false } = {}) {
     container.classList.add('generation-grid');
+    // Said to the miniature for a take being made only; never fatal to the card.
+    const tell = event => {
+      if (!made || !onLive) return;
+      try {
+        onLive({ request, ...event });
+      } catch {
+        // The card goes on without it.
+      }
+    };
     const first = tile(container, request, compact),
       { figure, frame, label } = first,
       tiles = [first];
-    // Its failures worded by `held`, forgotten with it.
-    const ownFailures = [];
+    // Its failures worded by `held`, forgotten with it; its buttons to make it again (`busy`) too.
+    const ownFailures = [],
+      ownRetries = [];
     let disposed = false,
       finished = false,
       // The last stage said: where a take that fails stopped.
@@ -287,6 +304,7 @@ export function setupGenerationUI({
       frame.classList.toggle('is-paused', !visible);
       flux?.visible(visible);
     });
+    tell({ type: 'start' });
     function progress(value, fraction, preview) {
       if (disposed || finished) return;
       followSize();
@@ -322,6 +340,7 @@ export function setupGenerationUI({
       // A named stage (loading, step 3/11, decoding…) is worth showing; the generic line is not,
       // unless it says which image of a series this is.
       caption(text, Boolean(series) || (named && !/^Génération (de la vidéo|de l’image|du son|en cours)…$/.test(said)));
+      tell({ type: 'progress', text, fraction: Number.isFinite(fraction) ? fraction : null, preview: preview && !record ? preview : null });
     }
     function release(slot) {
       slot.controller?.abort();
@@ -443,6 +462,7 @@ export function setupGenerationUI({
     function image({ record: outputRecord, index, blob }) {
       if (disposed || slots.has(index)) return;
       record = outputRecord;
+      tell({ type: 'image', record, index });
       flux?.stop();
       live.clear();
       const target = slots.size ? tile(container, request, compact) : first,
@@ -623,6 +643,8 @@ export function setupGenerationUI({
     function fail(message) {
       if (disposed) return;
       finished = true;
+      // With its take made, it is that take (only its original or its analysis is missing).
+      if (!record) tell({ type: 'failed', message: message || 'Génération interrompue.' });
       settle();
       if (!slots.size) frame.hidden = true;
       // Refused, stopped or failed: nothing was made, nothing to open in the Studio.
@@ -639,6 +661,7 @@ export function setupGenerationUI({
     function failed(message) {
       if (disposed) return;
       finished = true;
+      tell({ type: 'failed', message: String(message || 'La génération a échoué.').trim() });
       flux?.stop();
       for (const target of tiles) {
         unwatch(target.figure);
@@ -670,6 +693,15 @@ export function setupGenerationUI({
           edit.title = 'Rouvrir la proposition pour la modifier';
           again.onclick = () => onAgain(request, { edit: false, figure: target.figure, container });
           edit.onclick = () => onAgain(request, { edit: true, figure: target.figure, container });
+          // Greyed while another creation runs, its reason under the pointer (`busy`).
+          for (const button of [again, edit]) {
+            retries.set(button, button.title);
+            ownRetries.push(button);
+            if (retrying) {
+              button.disabled = true;
+              button.title = retrying;
+            }
+          }
           row.append(again, edit);
           veil.append(row);
         }
@@ -683,6 +715,7 @@ export function setupGenerationUI({
     // without a trace, no card, no line (16/11); « Annuler » alone leaves its own (proposal-card.mjs).
     function withdraw() {
       finished = true;
+      tell({ type: 'stopped' });
       settle();
       dispose();
       for (const target of tiles) target.figure.remove?.();
@@ -694,6 +727,7 @@ export function setupGenerationUI({
       if (result.denied) return withdraw();
       // Failed with nothing made: veiled, its last picture kept under the veil (52).
       if (result.failed && !result.record && !record) return failed(result.error);
+      tell({ type: 'done', record: result.record ?? record ?? null, failed: Boolean(result.failed), error: result.error || '' });
       finished = true;
       settle();
       if (result.record) record = result.record;
@@ -725,8 +759,11 @@ export function setupGenerationUI({
       slots.clear();
       cards.delete(card);
       for (const failure of ownFailures) failures.delete(failure);
+      for (const button of ownRetries) retries.delete(button);
     }
     const card = {
+      // Where it is: the page of its conversation, on screen or set aside (`clear`, `drop`).
+      container,
       progress,
       image,
       fail,
@@ -756,7 +793,7 @@ export function setupGenerationUI({
   }
   return {
     mount(container, request, options) {
-      return mount(container, request, options).card;
+      return mount(container, request, { ...options, live: true }).card;
     },
     restore(container, conversationId, runId, options) {
       const { card, figure, frame, label, progress } = mount(container, {}, options);
@@ -773,8 +810,30 @@ export function setupGenerationUI({
       });
       return card;
     },
-    clear() {
-      for (const card of [...cards]) card.dispose();
+    /**
+     * The cards of the conversation left go. `spare`: those under it stay (a conversation set aside
+     * while its work goes on, 0.6.81: its page comes back with them).
+     */
+    clear(spare = null) {
+      for (const card of [...cards]) if (!spare?.contains?.(card.container)) card.dispose();
+    },
+    /** The cards under `root` go (the conversation set aside leaves the page). */
+    drop(root) {
+      for (const card of [...cards]) if (root?.contains?.(card.container)) card.dispose();
+    },
+    /**
+     * Another creation runs (0.6.81): « Relancer » and « Modifier la proposition » of the takes that
+     * failed are greyed, the reason under the pointer; '' gives them back.
+     */
+    busy(reason = '') {
+      if (reason === retrying) return;
+      retrying = reason;
+      for (const [button, title] of retries) {
+        button.disabled = Boolean(reason);
+        // (help-tips.mjs turns a title into the tip of the bubble.)
+        if (button.dataset) button.dataset.tip = reason || title;
+        else button.title = reason || title;
+      }
     },
     /** The card stays held (54): the takes that failed say it, as the Studio does; free, what failed. */
     held(on) {

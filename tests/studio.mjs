@@ -1044,6 +1044,8 @@ async function studioPage(tools, routes = {}, options = {}) {
     ...(options.run ? { run: options.run } : {}),
     ...(options.openAgent ? { openAgent: options.openAgent } : {}),
     ...(options.openStudio ? { openStudio: options.openStudio } : {}),
+    // What else a test gives it (0.6.81: onWork, elsewhere, nameOf).
+    ...(options.extra ?? {}),
   });
   if (options.open !== false) await studio.open();
   return {
@@ -5015,4 +5017,92 @@ test('the settings kept for a model: the length of a sound and the denoise, each
     assert.throws(() => checkPreset({ settings }), { status: 400, message: 'Réglages invalides.' }, JSON.stringify(settings));
   // What was kept before stays as it was: a preset without settings has none.
   assert.deepEqual(checkPreset({ length: 5, seed: '' }), { length: 5, seed: '' });
+});
+
+test('the Studio stays the conversation’s whose take it makes: another one shown sees it held, and has it at the end (0.6.81)', async () => {
+  // Until 0.6.80 nothing could be opened while it made a take. Since 0.6.81 the page may show another
+  // conversation: the Studio keeps the one of its take (its drafts, its screen), says it is held
+  // there, and is the other one's once the take is over.
+  const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, direct: true, size: { width: 1024, height: 1024 }, settings: [], seeded: true };
+  let finish,
+    shown = 'c1',
+    elsewhere = '';
+  const works = [];
+  const page = await studioPage(
+    { create_image: [image] },
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'running', progress: 'Génération…' }),
+      'tools/job': () =>
+        new Promise(resolve => {
+          finish = () => resolve({ id: 'j', state: 'error', error: 'rien' });
+        }),
+    },
+    {
+      conversation: () => shown,
+      extra: {
+        onWork: id => works.push(id),
+        nameOf: id => (id === 'c1' ? 'Renard dans la neige' : 'Autre'),
+        elsewhere: () => elsewhere,
+      },
+    },
+  );
+  try {
+    const { body, studio } = page;
+    page.prompt().value = 'un phare';
+    page.prompt().oninput();
+    const made = body.find('studio-go')[0].onclick();
+    for (let tries = 0; !finish && tries < 120; tries++) await settle();
+    // Its work is the page's, in its conversation, from its first instant.
+    assert.deepEqual(works, ['c1']);
+    assert.equal(studio.heldFor(), 'c1');
+    // Another conversation shown: the Studio is held, said so in place of its blocks.
+    shown = 'c2';
+    studio.conversationChanged();
+    const [held] = body.find('studio-away');
+    assert.ok(held, 'held by the take of c1');
+    assert.equal(held.find('studio-away-kicker')[0].textContent, 'Studio occupé');
+    // (Non-breaking spaces inside the guillemets: a line never begins with « » ».)
+    assert.equal(held.find('studio-away-text')[0].textContent, 'La génération de « Renard dans la neige » occupe le Studio jusqu’à sa fin.');
+    assert.match(held.find('studio-away-hint')[0].textContent, /La miniature, en bas à droite, vous ramène à « Renard dans la neige »\./);
+    assert.equal(body.find('studio-go').length, 0, 'nothing of c1 is drawn in c2');
+    // Back in c1 meanwhile: as it was, the take in progress on « Générer ».
+    shown = 'c1';
+    studio.conversationChanged();
+    assert.equal(body.find('studio-away').length, 0);
+    assert.equal(body.find('studio-go')[0].disabled, true);
+    assert.equal(page.prompt().value, 'un phare');
+    // Away again, and the take ends there: the Studio is c2's (its own drafts, empty).
+    shown = 'c2';
+    studio.conversationChanged();
+    finish();
+    await made;
+    await settle();
+    assert.deepEqual(works, ['c1', null]);
+    assert.equal(studio.holds(), false);
+    assert.equal(studio.heldFor(), null);
+    assert.equal(body.find('studio-away').length, 0);
+    assert.equal(page.prompt().value, '');
+    // c1 opened again: its drafts as they were left.
+    shown = 'c1';
+    studio.conversationChanged();
+    await settle();
+    assert.equal(page.prompt().value, 'un phare');
+    // A work goes on in another conversation (the page says it): « Générer » is greyed, why on it,
+    // and on the line of the step; « Améliorer le prompt » too.
+    elsewhere = 'Génération en cours dans « Autre » : attendez sa fin.';
+    studio.render();
+    const [go] = body.find('studio-go');
+    assert.equal(go.disabled, true);
+    assert.equal(go.title, 'Génération en cours dans « Autre » : attendez sa fin.');
+    assert.equal(body.find('studio-progress')[0].textContent, 'Génération en cours dans « Autre »');
+    assert.equal(body.find('studio-progress')[0].hidden, false);
+    assert.equal(body.find('studio-enrich-go')[0].disabled, true);
+    elsewhere = '';
+    studio.render();
+    assert.equal(body.find('studio-go')[0].disabled, false);
+    assert.equal(body.find('studio-progress')[0].hidden, true);
+  } finally {
+    page.restore();
+  }
 });

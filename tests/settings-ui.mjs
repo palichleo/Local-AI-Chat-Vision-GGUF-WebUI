@@ -98,6 +98,8 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
     crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
     setupProjectNavigation: () => ({ render() {}, sync() {}, refresh: async () => {}, useLibrary() {} }),
     setupGenerationUI: () => ({ clear() {}, restore() {} }),
+    // The miniature of the chat (0.6.81): no work here, it shows nothing.
+    setupMiniature: () => ({ element: null, work: null, running: false, begin() {}, end() {}, take() {}, place() {}, forget() {} }),
     outputActions: () => () => null,
     setupAssets: () => ({ setBusy() {}, pause() {}, hasDraft: () => false }),
     setupStudio: () => ({ open: async () => {}, render() {}, busy: () => false }),

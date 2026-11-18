@@ -587,44 +587,54 @@ test('Chat and Studio are two views of one conversation: switching is immediate,
     loaded();
   }
 });
-test('a deferred library action never hides a response that started while settings confirmation was pending', async () => {
-  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
-    state = { status: {}, view: 'chat' };
-  let deferred,
-    flushes = 0;
-  const context = {
-    ...sessionCopies,
-    requestSettingsClose: action => context.settingsGuard.requestClose(action),
-    state,
-    document: { body: { dataset: {} } },
-    $: () => ({ setAttribute() {} }),
-    updateControls() {},
-    notice() {},
-    assetsUI: {
-      flush: async () => {
-        flushes++;
-        return true;
+test('a deferred library action opens the Pellicule though an answer began meanwhile; an update begun meanwhile holds it', async () => {
+  // Until 0.6.80 nothing opened while an answer was written: the page held its navigation. Since
+  // 0.6.81 any page opens during a work (it goes on in its conversation, the miniature shows it);
+  // what still holds the page (an update, a load) is looked at again when the action comes.
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  for (const [began, opens] of [
+    ['generating', true],
+    ['updating', false],
+  ]) {
+    const state = { status: {}, view: 'chat' };
+    let deferred,
+      flushes = 0,
+      shown = 0;
+    const context = {
+      ...sessionCopies,
+      requestSettingsClose: action => context.settingsGuard.requestClose(action),
+      state,
+      document: { body: { dataset: {} }, documentElement: { dataset: {} }, visibilityState: 'hidden' },
+      $: () => ({ setAttribute() {} }),
+      updateControls() {},
+      notice() {},
+      assetsUI: {
+        flush: async () => {
+          flushes++;
+          return true;
+        },
       },
-    },
-    persistConversation: async () => true,
-    settingsGuard: {
-      requestClose: action => {
-        deferred = action;
+      persistConversation: async () => true,
+      settingsGuard: {
+        requestClose: action => {
+          deferred = action;
+        },
       },
-    },
-    projectUI: { render() {} },
-    libraryUI: { show: () => assert.fail('nothing shown while an answer is written') },
-  };
-  runInNewContext(
-    source.slice(source.indexOf('function showLibrary('), source.indexOf('async function newConversation(')) +
-      ';this.home=showLibrary;',
-    context,
-  );
-  context.home();
-  state.generating = true;
-  await deferred();
-  assert.equal(state.view, 'chat');
-  assert.equal(flushes, 0);
+      projectUI: { render() {} },
+      libraryUI: { show: () => shown++ },
+    };
+    runInNewContext(
+      source.slice(source.indexOf('function showLibrary('), source.indexOf('async function newConversation(')) +
+        ';this.home=showLibrary;',
+      context,
+    );
+    context.home();
+    state[began] = true;
+    await deferred();
+    assert.equal(state.view, opens ? 'library' : 'chat', began);
+    assert.equal(flushes, opens ? 1 : 0, began);
+    assert.equal(shown, opens ? 1 : 0, began);
+  }
 });
 test('failed library preparation keeps the chat visible and releases navigation controls', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
@@ -822,4 +832,50 @@ test('a page of an older version reloads, its draft kept in its tab for the page
   assert.equal(kept.view, 'chat');
   // Not in the history: its messages go with it.
   assert.deepEqual(kept.messages, []);
+});
+
+test('any page opens while a work goes on (0.6.81): the places and the menus stay open; moving or deleting waits, and says why', t => {
+  const { ui, state, $, calls, open, lines } = fixture(t, {
+    generating: true,
+    status: { toolJob: { id: 'job', state: 'generating' } },
+    work: { kind: 'turn', conversationId: 'current' },
+  });
+  const places = ['chat-open', 'studio-open', 'library-open', 'thread-project', 'thread-conversation'].map(id => $(id));
+  globalThis.document.querySelectorAll = selector =>
+    selector === '#thread button,#chat-open,#studio-open,#library-open' ? places : [];
+  ui.sync();
+  // Until 0.6.80 they were greyed, without a word, as long as Moodix worked.
+  assert.deepEqual(places.map(place => place.disabled), [false, false, false, false, false]);
+  // The menu of the conversations opens; a line opens its conversation.
+  const menu = open('thread-conversation'),
+    past = lines(menu).find(item => item.name === 'Past');
+  assert.equal(past.choice.disabled, false);
+  past.choice.onclick();
+  assert.deepEqual(calls.at(-1), ['open', 'past']);
+  // Its bin waits for the end of the work, and says why under the pointer.
+  const bin = past.tool('Supprimer');
+  assert.equal(bin.disabled, true);
+  assert.match(bin.dataset.tip, /ne peut être ni déplacé ni supprimé : attendez sa fin\.$/);
+  // Its pencil renames it; its project stays, the line under the menu says why.
+  const pencil = past.tool('Renommer ou déplacer');
+  assert.equal(pencil.disabled, false);
+  pencil.onclick();
+  assert.equal($('conversation-dialog').open, true);
+  assert.equal($('conversation-project-button').disabled, true);
+  assert.equal($('conversation-takes').hidden, false);
+  assert.equal($('conversation-takes').textContent, 'Pendant une génération, une conversation ne change pas de projet.');
+  // While Moodix AI sets the Studio on screen (2 to 3 s, 0.6.19), the places wait for it, and say why.
+  state.studio = { settingUp: () => true };
+  ui.sync();
+  assert.deepEqual(places.map(place => place.disabled), [true, true, true, true, true]);
+  assert.equal($('studio-open').dataset.tip, 'Moodix AI règle le Studio…');
+  state.studio = { settingUp: () => false };
+  ui.sync();
+  assert.ok(places.every(place => !place.disabled));
+  assert.equal($('studio-open').dataset.tip, undefined);
+  // The work over: the bin as before.
+  Object.assign(state, { generating: false, status: {}, work: null });
+  const after = lines(open('thread-conversation')).find(item => item.name === 'Past');
+  assert.equal(after.tool('Supprimer').disabled, false);
+  assert.equal(after.tool('Supprimer').dataset.tip, 'Supprimer');
 });

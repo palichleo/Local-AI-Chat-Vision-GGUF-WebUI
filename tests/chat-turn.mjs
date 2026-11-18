@@ -57,9 +57,24 @@ class El {
   }
   append(...items) {
     for (const item of items) {
+      // A fragment gives its children, as the DOM's does (a conversation set aside comes back, 0.6.81).
+      if (item instanceof El && item.tag === 'fragment') {
+        const moved = item.children;
+        item.children = [];
+        this.append(...moved);
+        continue;
+      }
+      // Put in a fragment, a node leaves where it was (a conversation set aside).
+      if (item instanceof El && this.tag === 'fragment' && item.parent) item.parent.children = item.parent.children.filter(child => child !== item);
       if (item instanceof El) item.parent = this;
       this.children.push(item);
     }
+  }
+  get childNodes() {
+    return [...this.children];
+  }
+  get childElementCount() {
+    return this.children.length;
   }
   replaceChildren(...items) {
     this.children = [];
@@ -197,7 +212,7 @@ function page({
     node,
     seen,
     icon: () => node('svg'),
-    document: { querySelectorAll: () => [] },
+    document: { querySelectorAll: () => [], createDocumentFragment: () => new El('fragment') },
     AbortController,
     DOMException,
     performance,
@@ -277,8 +292,8 @@ function page({
   runInNewContext(
     [
       cut('const UNTITLED', 'import { setupProjectNavigation }'),
-      cut('function renderHistory()', 'async function refreshHistory()'),
-      cut('function persistConversation()', 'async function clearHistory()'),
+      cut('function renderHistory(', 'async function refreshHistory()'),
+      cut('function persistConversation(', 'async function clearHistory()'),
       cut('function savedUser(', 'async function restoreUpdate()'),
       cut('function restoreSession(', 'async function resumeAfterRestart()'),
       cut('async function addFiles(', 'function scrollToBottom()'),
@@ -289,6 +304,8 @@ function page({
       cut('function userContent(', 'async function sendMessage('),
       cut('async function sendMessage(', '\nfunction alignConversation()'),
       cut('async function runForTurn(', 'async function runInStudio('),
+      // A creation of the Studio, written in its conversation (0.6.81: wherever the user is meanwhile).
+      cut('async function runInStudio(', 'const tokenControls = setupTokenControls'),
       cut('async function newConversation(', "document.addEventListener('keydown'"),
       cut('let promptLabel = null;', '// Images need the vision projector'),
       cut("$('cancel').onclick = () => {", "$('thinking').onclick"),
@@ -1488,4 +1505,166 @@ test('stopped while Moodix writes its words over a card: its call keeps them, an
     assert.deepEqual(stopped.cancelled, [{ requestId: 'r1' }]);
     assert.equal(stopped.views[0].body.textContent, words, 'the page keeps what it showed');
   }
+});
+
+// ------------------------------------------------------------------ any page during a work (0.6.81)
+const ELSEWHERE = 'f7777777-7777-4777-8777-777777777777';
+/** Another conversation, saved: what the user opens while a take of the first is being made. */
+const otherConversation = store =>
+  store.save({
+    id: ELSEWHERE,
+    messages: [
+      { role: 'user', content: 'Bonjour' },
+      { role: 'assistant', content: 'Bonjour ! Que créons-nous ?' },
+    ],
+    incomplete: false,
+    instructions: '',
+    projectId: 'inbox',
+  });
+/** A generation the test ends: `started` (its options) once it runs, `finish(result)`. */
+function heldGeneration() {
+  let begin, end;
+  const started = new Promise(resolve => (begin = resolve));
+  return {
+    started,
+    finish: result => end(result),
+    requestTool: (request, signal, onProgress, onImage, options) =>
+      new Promise(resolve => {
+        end = resolve;
+        begin(options);
+      }),
+  };
+}
+const RUN = 'b2222222-2222-4222-8222-222222222222';
+const madeImage = (conversationId = ID) => ({
+  content: JSON.stringify({ status: 'success', run_id: RUN }),
+  images: [],
+  record: { id: RUN, conversationId, mediaType: 'image' },
+});
+
+test('another conversation opens while a turn makes its take: the one left is set aside, its take written in it, back as it was', async t => {
+  // Until 0.6.80 the page held its navigation while Moodix worked: the turn wrote in « the
+  // conversation on screen », its result would have gone to the one opened meanwhile.
+  const store = await historyStore(t),
+    generation = heldGeneration();
+  await otherConversation(store);
+  const making = page({
+    store,
+    chat: (body, n) => (n === 1 ? called({ call: functionCall('create_image'), workflowName: 'Krea 2', requestId: 'r1', approvalToken: 't1' }) : said('')),
+    requestTool: generation.requestTool,
+  });
+  const turn = making.send('Une image d’un renard dans la neige');
+  const options = await generation.started;
+  assert.equal(options.conversationId, ID, 'its take is asked for its own conversation');
+  assert.equal(making.state.work.conversationId, ID);
+
+  // The user opens the other conversation meanwhile: it opens; the one of the turn is set aside.
+  await making.context.loadConversation(ELSEWHERE);
+  assert.equal(making.state.conversationId, ELSEWHERE);
+  assert.equal(making.state.aside.conversationId, ID);
+  assert.deepEqual(roles(making.state.messages), ['user', 'assistant']);
+  assert.match(making.$('messages').words, /Que créons-nous/);
+  assert.doesNotMatch(making.$('messages').words, /renard/);
+  // Written there meanwhile: refused in words (one work at a time), kept in the box, nothing sent.
+  const asked = making.requests.length;
+  making.$('prompt').value = 'Et un lapin ?';
+  await making.send();
+  assert.match(making.notices.at(-1), /dans «\u00a0Une image d’un renard dans la neige\u00a0» : attendez/);
+  assert.equal(making.$('prompt').value, 'Et un lapin ?');
+  assert.equal(making.requests.length, asked);
+
+  // The take is made: written in its own conversation, the one shown left alone.
+  generation.finish(madeImage());
+  await turn;
+  assert.equal(making.state.work, null);
+  const kept = await store.read(ID);
+  assert.deepEqual(roles(kept.messages), ['user', 'assistant', 'tool']);
+  assert.equal(JSON.parse(kept.messages[2].content).status, 'success');
+  assert.equal(kept.incomplete, false);
+  // The model was asked again (after the take) for that conversation, in its project.
+  assert.deepEqual([making.requests.at(-1).conversationId, making.requests.at(-1).project], [ID, 'inbox']);
+  assert.equal((await store.read(ELSEWHERE)).messages.length, 2);
+  assert.deepEqual(roles(making.state.messages), ['user', 'assistant']);
+  assert.equal(making.$('prompt').value, 'Et un lapin ?');
+  assert.equal(making.state.aside.title, 'Une image d’un renard dans la neige', 'named by its first message, set aside');
+
+  // Back to it: as it was left, from the page (not read again from the disk), its take there.
+  let reads = 0;
+  const read = store.read.bind(store);
+  store.read = id => (reads++, read(id));
+  await making.context.loadConversation(ID);
+  assert.equal(reads, 0);
+  assert.equal(making.state.conversationId, ID);
+  assert.equal(making.state.aside, null);
+  assert.deepEqual(roles(making.state.messages), ['user', 'assistant', 'tool']);
+  assert.match(making.$('messages').words, /renard/);
+  assert.doesNotMatch(making.$('messages').words, /Que créons-nous/);
+  assert.equal(making.$('conversation-title').textContent, 'Une image d’un renard dans la neige');
+});
+
+test('a new conversation begun while a turn makes its take: the turn goes on in its own; a send that failed comes back there', async t => {
+  const store = await historyStore(t),
+    generation = heldGeneration();
+  const making = page({
+    store,
+    chat: (body, n) => (n === 1 ? called({ call: functionCall('create_image'), workflowName: 'Krea 2', requestId: 'r1', approvalToken: 't1' }) : said('')),
+    requestTool: generation.requestTool,
+  });
+  const turn = making.send('Une image d’un renard dans la neige');
+  await generation.started;
+  // The logo (goHome): a new conversation, here, while the take is made.
+  await making.context.newConversation('inbox');
+  assert.equal(making.state.conversationId, null);
+  assert.equal(making.state.messages.length, 0);
+  assert.equal(making.state.aside.conversationId, ID);
+  generation.finish(madeImage());
+  await turn;
+  assert.deepEqual(roles((await store.read(ID)).messages), ['user', 'assistant', 'tool']);
+  assert.equal(making.state.messages.length, 0, 'the new conversation stays empty');
+  assert.equal(making.$('welcome').hidden, false);
+
+  // A message that fails before any answer while its conversation is set aside: it goes back to the
+  // box of that conversation, not to the one shown.
+  let release;
+  const gate = new Promise(resolve => (release = resolve));
+  const failing = page({
+    store,
+    chat: async () => {
+      await gate;
+      throw Error('Le serveur ne répond pas.');
+    },
+  });
+  const sent = failing.send('Un lapin');
+  while (!failing.requests.length) await new Promise(resolve => setTimeout(resolve, 1));
+  await failing.context.newConversation('inbox');
+  release();
+  await sent;
+  assert.equal(failing.$('prompt').value, '', 'not in the box of the conversation shown');
+  assert.equal(failing.state.aside.draft.text, 'Un lapin');
+  assert.match(failing.notices.at(-1), /Le serveur ne répond pas/);
+});
+
+test('a creation of the Studio made while another conversation is open is written in its own (0.6.81)', async t => {
+  const store = await historyStore(t),
+    generation = heldGeneration();
+  await otherConversation(store);
+  const studio = page({ store, requestTool: generation.requestTool, state: { conversationId: ID, view: 'studio' } });
+  const proposal = { call: functionCall('create_image', 'action1'), workflowName: 'Krea 2', requestId: 'r1', plan: { prompt: 'un renard' } };
+  // « Générer » of the Studio: its work begins in the conversation shown (the Studio says so, onWork).
+  studio.context.beginWork('studio', ID);
+  const made = studio.context.runInStudio(proposal, { signal: new AbortController().signal, onProgress() {}, conversationId: ID });
+  const options = await generation.started;
+  assert.equal(options.conversationId, ID);
+  await studio.context.loadConversation(ELSEWHERE);
+  assert.equal(studio.state.aside.conversationId, ID);
+  generation.finish(madeImage());
+  const result = await made;
+  assert.equal(result.record.id, RUN);
+  const kept = await store.read(ID);
+  assert.deepEqual(roles(kept.messages), ['user', 'assistant', 'tool']);
+  assert.match(kept.messages[0].content, /^Studio · Image : un renard/);
+  assert.equal(JSON.parse(kept.messages[2].content).run_id, RUN);
+  assert.equal((await store.read(ELSEWHERE)).messages.length, 2, 'not in the conversation shown');
+  assert.deepEqual(roles(studio.state.messages), ['user', 'assistant']);
+  assert.deepEqual(roles(studio.state.aside.messages), ['user', 'assistant', 'tool']);
 });

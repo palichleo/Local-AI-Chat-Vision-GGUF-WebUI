@@ -248,12 +248,22 @@ export function setupStudio({
   onChange,
   // Called with the place whose creations were read again (the conversation, or the former Studio).
   onRuns = () => {},
-  // The conversation the Studio works in: its id, or null before its first message or creation.
-  conversation = () => null,
+  // The conversation the page shows: its id, or null before its first message or creation. The
+  // Studio works in it, unless it holds a work of another one (`conversation()` below, 0.6.81).
+  conversation: shownConversation = () => null,
   // The project of that conversation: its Sortie shows the creations of all its conversations.
-  project = () => 'inbox',
+  project: shownProject = () => 'inbox',
   // An id for the conversation, created when it has none yet: a creation belongs to it.
-  ensureConversation = async () => conversation(),
+  ensureConversation = async () => shownConversation(),
+  // (0.6.81) A creation made here begins (its conversation) or ends (null): the page follows it,
+  // whatever page the user opens meanwhile.
+  onWork = () => {},
+  // Why nothing can be made now, in the user's words: a work goes on in another conversation; ''.
+  elsewhere = () => '',
+  // The name of a conversation, said where the Studio is held by it.
+  nameOf = () => '',
+  // The few seconds the pointer of Moodix AI sets the Studio begin (true) or end (false).
+  onLock = () => {},
   // Runs an approved proposal in the conversation and writes it there; the result of the
   // generation. Without it, the Studio follows the job itself and nothing is written.
   run = null,
@@ -311,7 +321,29 @@ export function setupStudio({
     toolsAt = 0,
     toolsStale = false,
     shownMedia = null, // { key, element }: what the screen shows, kept from one drawing to the next
-    draftsKey = null; // the conversation whose settings are in the Studio (draftKey)
+    draftsKey = null, // the conversation whose settings are in the Studio (draftKey)
+    // 0.6.81: a work held here (a take made, a proposal of Moodix AI, a character checked) keeps the
+    // Studio in the conversation it began in, { conversation, project }, while the page shows
+    // another one, where it is said held; it is that conversation's again when the work ends (letGo).
+    heldIn = null;
+  /** Whether the Studio holds a work: a take being made, a proposal waiting, a character checked. */
+  const holds = () => Boolean(working || proposal || checking || ai);
+  /** The conversation the Studio works in, and its project: the page's, unless it holds a work of another. */
+  const conversation = () => (heldIn ? heldIn.conversation : shownConversation());
+  const project = () => (heldIn ? heldIn.project : shownProject());
+  /** The page shows another conversation than the one whose work the Studio holds. */
+  const away = () => Boolean(heldIn) && heldIn.conversation !== shownConversation();
+  /** A work begins here, in the conversation shown (`id` once it has one): always on screen then. */
+  function holdAt(id = shownConversation()) {
+    heldIn = { conversation: id, project: shownProject() };
+  }
+  /** The work held here is over: left meanwhile, the Studio goes to the conversation shown. */
+  function letGo() {
+    if (!heldIn || holds()) return;
+    const left = away();
+    heldIn = null;
+    if (left) conversationChanged();
+  }
   // The Studio as each conversation was left (its mode, its drafts) with the newest take it had
   // then: it comes back so, unless a take was made in it since (16/11).
   const leftDrafts = new Map();
@@ -564,9 +596,12 @@ export function setupStudio({
   // « GPU libéré. Le modèle peut redémarrer. » in place of the step, until then (54).
   let freedUntil = 0;
   function lockStudio(on) {
+    const changed = aiWorking !== on;
     aiWorking = on;
     const view = $('studio-view');
     if (view) view.inert = on;
+    // The page holds its places too meanwhile (0.6.81): the pointer sets the Studio on screen.
+    if (changed) onLock(on);
   }
   // The slot an image is being dragged from: dropped on another, the image changes role.
   let dragged = null,
@@ -2277,6 +2312,12 @@ export function setupStudio({
       make.setAttribute('aria-busy', 'true');
     }
     make.disabled = enriching || Boolean(working) || !improves();
+    // Moodix AI is taken by a work of another conversation (0.6.81): greyed, and why.
+    const taken = !enriching && !working && !answering() && !checking ? elsewhere() : '';
+    if (taken) {
+      make.disabled = true;
+      make.title = taken;
+    }
     if (draft.before !== null && !enriching && !working) {
       const back = button(
         'studio-link',
@@ -2426,12 +2467,16 @@ export function setupStudio({
       former = legacy;
     let made = null;
     working = { label: 'Préparation…', fraction: null, controller };
+    // Its conversation from its first instant (0.6.81): the page may show another meanwhile, the
+    // creation is still this one's, and the page follows it there.
+    const conversationId = former ? info.legacyId : await ensureConversation();
+    holdAt(conversationId);
+    if (!former) onWork(conversationId, wanted.args?.prompt ?? '');
     render();
     onChange();
     const pause = () => new Promise(resolve => setTimeout(resolve, 700));
     try {
       await releasing;
-      const conversationId = former ? info.legacyId : await ensureConversation();
       let proposed = await (
         await api('tools/action', {
           conversationId,
@@ -2458,6 +2503,7 @@ export function setupStudio({
         // In the conversation: followed and written there like a creation of the chat.
         const done = await run(proposed, {
           signal: controller.signal,
+          conversationId,
           onProgress: (label, fraction, preview) => {
             if (!working) return;
             Object.assign(working, {
@@ -2520,6 +2566,9 @@ export function setupStudio({
       onChange();
       render();
       scrollStrip();
+      // The page's work is over; left meanwhile, the Studio goes to the conversation shown.
+      if (!former) onWork(null);
+      letGo();
     }
   }
   function stop() {
@@ -2532,6 +2581,8 @@ export function setupStudio({
   function progress() {
     if (!working) return;
     if (working.preview) seenPreview = working.preview;
+    // Held by another conversation than the one shown (0.6.81): the page shows that it is, not the take.
+    if (away()) return;
     const go = document.querySelector?.('#studio-view .studio-go'),
       line = $('studio-progress');
     const known = Number.isFinite(working.fraction) && working.fraction !== null,
@@ -2700,6 +2751,7 @@ export function setupStudio({
         failure = '';
         releaseInputs(mine);
         render();
+        letGo();
         reject(signal.reason || new DOMException('Annulé', 'AbortError'));
       };
       const mine = {
@@ -2714,6 +2766,8 @@ export function setupStudio({
         },
       };
       proposal = mine;
+      // Its conversation, the one shown (0.6.81): left meanwhile, the proposal waits there.
+      holdAt();
       signal?.addEventListener('abort', abort, { once: true });
       // Locked from now until the pointer rests on « Générer », or the proposal goes (endPointer).
       lockStudio(true);
@@ -2737,6 +2791,7 @@ export function setupStudio({
           settle();
           proposal = null;
           render();
+          letGo();
           reject(
             new Error('Le Studio n’a aucun workflow prêt pour cette création : vérifiez Paramètres › Workflows.'),
           );
@@ -3148,8 +3203,11 @@ export function setupStudio({
       const abort = () => {
         checking = null;
         render();
+        letGo();
         reject(signal.reason || new DOMException('Annulé', 'AbortError'));
       };
+      // Checked in the conversation shown (0.6.81): left meanwhile, the question waits there.
+      holdAt();
       checking = {
         record,
         resolve: decision => {
@@ -3157,6 +3215,7 @@ export function setupStudio({
           const prompt = drafts.image.prompt.trim();
           checking = null;
           render();
+          letGo();
           // Read by screen readers: the question answered.
           $('live-status') &&
             ($('live-status').textContent =
@@ -3194,6 +3253,7 @@ export function setupStudio({
     releaseInputs(current);
     current.resolve('deny');
     render();
+    letGo();
     return true;
   }
   /** The seed drawn for a proposal was its own: the next creation by hand draws again, unless the user typed one. */
@@ -3224,6 +3284,8 @@ export function setupStudio({
     } else if (external && result?.error) failure = result.error;
     render();
     scrollStrip();
+    // Left meanwhile (0.6.81): the Studio goes to the conversation shown.
+    letGo();
   }
 
   // ------------------------------------------------------------------ results
@@ -4180,16 +4242,25 @@ export function setupStudio({
       head = node('div', 'studio-screen-head'),
       heldGpu = gpuBlocked() && !working,
       freed = !heldGpu && !working && Date.now() < freedUntil,
+      // A work goes on in another conversation (0.6.81): nothing is made here until its end, said
+      // on the line of the step (a proposal of Moodix AI answered here is this conversation's own).
+      busyElsewhere = !working && !heldGpu && !answering() && !checking ? elsewhere() : '',
       step = node(
         'p',
         'studio-progress' + (heldGpu ? ' is-alert' : ''),
-        heldGpu ? 'Carte graphique encore prise' : freed ? 'GPU libéré. Le modèle peut redémarrer.' : (working?.label ?? ''),
+        heldGpu
+          ? 'Carte graphique encore prise'
+          : freed
+            ? 'GPU libéré. Le modèle peut redémarrer.'
+            : busyElsewhere
+              ? busyElsewhere.replace(/ : .*$/, '')
+              : (working?.label ?? ''),
       ),
       setting = node('p', 'studio-ai-line', 'Moodix AI règle le Studio');
     // Image · Vidéo · Son at the left, the step under way in the middle, Moodix AI at the right.
     step.id = 'studio-progress';
     step.setAttribute('role', 'status');
-    step.hidden = !working && !heldGpu && !freed;
+    step.hidden = !working && !heldGpu && !freed && !busyElsewhere;
     setting.hidden = !(answering() || ai);
     if (kindsBar()) head.append(kindsBar());
     head.append(step, setting);
@@ -4209,7 +4280,8 @@ export function setupStudio({
     const onScreen = working ? (kept[mode] ?? ownRuns().find(item => mediaOf(item) === mode) ?? null) : onStage();
     if (onScreen && mode !== 'audio' && !extending && !heldGpu && !(onScreen.external && !onScreen.resource)) {
       const row = takeActions(onScreen, 0);
-      row.inert = answering() || Boolean(working);
+      // (Each makes a creation: not while another conversation makes one, 0.6.81.)
+      row.inert = answering() || Boolean(working) || Boolean(busyElsewhere);
       if (row.inert) row.classList.add('is-held');
       bar.append(row);
     } else bar.append(node('div', 'output-actions is-empty'));
@@ -4223,7 +4295,7 @@ export function setupStudio({
     go.title = (answering() ? 'Générer la proposition de Moodix AI' : 'Générer') + ` (${MODIFIER}+Entrée)`;
     // Nothing to make without a prompt (55): greyed, said in its tooltip; the half Agent stays.
     const blank = !draft.prompt.trim() && !answering() && !checking;
-    go.disabled = enriching || Boolean(working) || Boolean(workflow.unavailable) || blank;
+    go.disabled = enriching || Boolean(working) || Boolean(workflow.unavailable) || blank || Boolean(busyElsewhere);
     if (blank && !working) {
       go.title = 'Écrivez un prompt pour générer';
       go.classList.add('is-blank');
@@ -4231,6 +4303,11 @@ export function setupStudio({
     // The only model of this mode cannot run here: « Générer » is greyed and says why.
     if (workflow.unavailable) {
       go.title = workflow.unavailable;
+      go.classList.add('is-unavailable');
+    }
+    // One creation at a time (0.6.81): greyed while another conversation makes one, and why.
+    if (busyElsewhere && !workflow.unavailable) {
+      go.title = busyElsewhere;
       go.classList.add('is-unavailable');
     }
     if (working) {
@@ -4324,6 +4401,16 @@ export function setupStudio({
     // watched, it was reported once more as it went, with no mode left to read a format from.
     watching?.disconnect();
     watching = null;
+    // Held by a work of another conversation than the one shown (0.6.81): said so, nothing of that
+    // conversation drawn here (its take in progress is in the miniature).
+    if (away()) {
+      if (flux) {
+        flux.flux.stop();
+        flux = null;
+      }
+      body.replaceChildren(awayPanel());
+      return;
+    }
     if (!info) {
       if (unreadable) body.replaceChildren(message('Studio indisponible : ' + unreadable));
       else {
@@ -4350,6 +4437,35 @@ export function setupStudio({
       flux.flux.stop();
       flux = null;
     }
+  }
+  /**
+   * The Studio held by a work of another conversation (0.6.81), in place of its blocks: what holds it,
+   * and the way back (the miniature). It is this conversation's again at the end of that work.
+   */
+  function awayPanel() {
+    const panel = node('div', 'studio-away'),
+      sign = mark?.(),
+      // (Non-breaking spaces inside the guillemets: a line never begins with « » ».)
+      name = `« ${nameOf(heldIn?.conversation) || 'une autre conversation'} »`;
+    panel.setAttribute('role', 'status');
+    if (sign) {
+      sign.classList?.add('studio-away-mark');
+      panel.append(sign);
+    }
+    panel.append(
+      node('p', 'studio-away-kicker', 'Studio occupé'),
+      node(
+        'p',
+        'studio-away-text',
+        working
+          ? `La génération de ${name} occupe le Studio jusqu’à sa fin.`
+          : checking
+            ? `L’image d’un personnage attend votre avis dans le Studio de ${name}.`
+            : `Une proposition de Moodix AI attend votre accord dans le Studio de ${name}.`,
+      ),
+      node('p', 'studio-away-hint', `La miniature, en bas à droite, vous ramène à ${name}.`),
+    );
+    return panel;
   }
   async function refresh() {
     if (!info) return;
@@ -4405,6 +4521,9 @@ export function setupStudio({
     // Another conversation: what was on the screen belonged to the one before.
     if (seenConversation !== undefined && seenConversation !== conversation()) forget();
     render();
+    // A proposal of Moodix AI waits on « Générer » (the page was left meanwhile, 0.6.81): its pointer
+    // is there again.
+    if (ai?.waiting && !away()) pointer?.move(targetOf('generate'), 'attend votre accord');
     const drawn = shown();
     try {
       if (!info) await load();
@@ -4478,6 +4597,15 @@ export function setupStudio({
    * conversation has none: the Studio empty (etats-maquette.md, 55).
    */
   function conversationChanged() {
+    // A work held here goes on in its conversation (0.6.81): the Studio stays that one's, said held in
+    // the one shown (render), and comes back to it as it was; it goes to the one shown at its end (letGo).
+    if (heldIn && holds()) {
+      // The pointer resting on « Générer » goes with it; it comes back there with the Studio (open).
+      if (away()) pointer?.hide();
+      render();
+      return;
+    }
+    heldIn = null;
     // A creation was being looked at: the look ends as « Revenir » ends it, before anything is kept
     // of the conversation left. Kept as they were, its drafts were those of the take looked at (its
     // very seed with them, which followed into the conversation opened) and the user's own were lost.
@@ -4919,6 +5047,17 @@ export function setupStudio({
     },
     /** Whether a proposal of Moodix AI waits for « Générer », or a character for its check. */
     proposing: () => Boolean(proposal || checking),
+    /**
+     * Whether the Studio holds a work (0.6.81): a take being made, a proposal of Moodix AI waiting,
+     * a character checked; it stays that conversation's while the page shows another.
+     */
+    holds,
+    /** The conversation whose work the Studio holds, or null. */
+    heldFor: () => (heldIn && holds() ? heldIn.conversation : null),
+    /** The few seconds the pointer of Moodix AI sets the Studio (it is locked, the page holds its places). */
+    settingUp: () => aiWorking,
+    /** A work held here may be over (the page asks again): left meanwhile, the Studio follows the page. */
+    letGo,
     /**
      * The take on the screen (« PRISE n » at its top left), for what Moodix AI is told of it:
      * { take, media }, or null when the screen shows none (nothing made, a file of the disk, a

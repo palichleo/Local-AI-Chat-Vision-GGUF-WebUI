@@ -64,10 +64,12 @@ test('native immutable job keeps random seed through authorization and GPU hando
       events.push('generate');
       assert.equal(engine.state, 'stopped');
       assert.equal(job.parameters.seed, 123);
+      during = runtime.status();
       return { outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] };
     },
     free: async () => events.push('gpu released'),
   };
+  let during = null;
   const runtime = new ToolRuntime({
     engine,
     catalog,
@@ -98,6 +100,11 @@ test('native immutable job keeps random seed through authorization and GPU hando
   assert.equal(saved.provider, 'native');
   assert.equal(saved.parameters.seed, 123);
   assert.deepEqual(events, ['preflight', 'llm stopped', 'generate', 'gpu released', 'llm started']);
+  // While it runs, any page knows where it was asked and what it makes (0.6.81): the conversation
+  // named on the other pages, before the take exists.
+  assert.equal(during.state, 'generating');
+  assert.equal(during.record, undefined);
+  assert.deepEqual([during.conversationId, during.media, during.workflowName], [id, 'image', 'Image']);
 });
 
 test('a seed named by the user reaches the job instead of a drawn one', async () => {

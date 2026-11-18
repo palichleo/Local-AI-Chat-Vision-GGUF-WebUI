@@ -154,7 +154,8 @@ test('the server sends both notes with a proposal to put in words, in the wordin
     page = await read('../public/app.js');
   // (The small local model keeps the agreement in words its tools tell it to get: `talked`.)
   assert.match(server, /const capable = wordingOf\(chat\.connection\) === CAPABLE;\n\s+if \(request && !request\.missing && briefMissing\(body\.messages, call, \{ talked: !capable \}\)\) \{\n\s+request\.brief = true;\n\s+request\.cardBrief = capable \? CAPABLE_CARD : cardBrief\(\);\n\s+request\.studioBrief = capable \? CAPABLE_STUDIO : studioBrief\(\);/);
-  assert.match(page, /const note = setInStudio\(request\) \? request\.studioBrief : request\.cardBrief;/);
+  // (Set in the Studio of the conversation of the turn only, `talkId`: 0.6.81.)
+  assert.match(page, /const note = setInStudio\(request, talkId\) \? request\.studioBrief : request\.cardBrief;/);
   // The long plan of before (« ask for their go ») is told by nobody any more.
   for (const source of [server, page]) assert.doesNotMatch(source, /briefMessage|kind: 'brief'|kind === 'brief'/);
 });

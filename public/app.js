@@ -15,6 +15,7 @@ import { setupSettingsTabs } from './settings-tabs.mjs';
 import { setupInterfaceSettings } from './interface-settings.mjs';
 import { setupHelpTips } from './help-tips.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
+import { setupMiniature } from './work-miniature.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
 import { STUDIO_LINE, STUDIO_NOTE, callNote, closedCalls, conversationTitle, lastExchange, settledNotes, spokenText } from './transcript.mjs';
@@ -311,8 +312,9 @@ function confirmHistoryDeletion(item = null) {
   if (!$('history-delete-dialog').open) $('history-delete-dialog').showModal();
 }
 
-function renderHistory() {
-  projectUI.render();
+/** `keep`: a menu of the fil open stays open (a save during a work, while the user navigates). */
+function renderHistory(options) {
+  projectUI.render(options);
 }
 
 /** `unnamed`: only while the conversation has no name yet (it is named once, by its first message). */
@@ -355,6 +357,9 @@ async function nameConversation(messages, conversationId) {
     const named = answer.conversation;
     if (!named?.title) return;
     state.historyItems = (state.historyItems || []).map(item => (item.id === named.id ? { ...item, title: named.title } : item));
+    // Set aside meanwhile, or followed by the miniature (0.6.81): its name there too.
+    if (state.aside?.conversationId === named.id) state.aside.title = named.title;
+    if (state.miniature?.work?.conversationId === named.id) state.miniature.rename(named.title);
     // Only what its name changes is drawn again: the whole navigation drawn anew closed the menu
     // open meanwhile (a list of conversations and what was typed in its search field). A list open
     // on the former name keeps it until it is opened next.
@@ -433,14 +438,16 @@ function welcomeInLastProject() {
   projectUI.render();
 }
 
-function persistConversation() {
-  const snapshot = state.archiveSnapshot || { messages: state.messages, incomplete: false };
+function persistConversation(conversationId = state.conversationId) {
+  // A work saves its own conversation, on screen or set aside while the user looks elsewhere (0.6.81).
+  const talk = holderOf(conversationId),
+    snapshot = talk.archiveSnapshot || { messages: talk.messages ?? [], incomplete: false };
   if (!state.saveHistory || state.disablingHistory || !snapshot.messages.length) return Promise.resolve(true);
-  const projectId = state.projectId || 'inbox';
-  const id = (state.conversationId ||= crypto.randomUUID());
-  rememberConversation(id);
-  const instructions = state.conversationInstructions || '';
-  state.historyDirty = true;
+  const projectId = talk.projectId || 'inbox';
+  const id = (talk.conversationId ||= crypto.randomUUID());
+  if (talk === state) rememberConversation(id);
+  const instructions = talk.conversationInstructions || '';
+  talk.historyDirty = true;
   historyWrite = historyWrite.then(async () => {
     if (!state.saveHistory) return true;
     state.savingHistory = true;
@@ -457,12 +464,15 @@ function persistConversation() {
       state.historyItems = [conversation, ...state.historyItems.filter(item => item.id !== id)].sort(
         (a, b) => (b.createdAt || b.updatedAt).localeCompare(a.createdAt || a.updatedAt) || a.id.localeCompare(b.id),
       );
-      if (state.conversationId === id && (!state.archiveSnapshot || state.archiveSnapshot === snapshot))
-        state.historyDirty = false;
+      // Where it is now: it may have been set aside, or taken back, meanwhile.
+      const now = holderOf(id);
+      if (now.conversationId === id && (!now.archiveSnapshot || now.archiveSnapshot === snapshot)) now.historyDirty = false;
       // The bar says the name the history keeps (the one given by the user, else its first message).
       if (state.conversationId === id && typeof conversation.title === 'string' && conversation.title)
         $('conversation-title').textContent = conversation.title;
-      renderHistory();
+      else if (now === state.aside && typeof conversation.title === 'string' && conversation.title) now.title = conversation.title;
+      // A menu of the fil open meanwhile stays open (any page may be opened during a work, 0.6.81).
+      renderHistory({ keep: true });
       return true;
     } catch (error) {
       notice(`Historique non enregistré : ${error.message} La conversation reste dans la page.`);
@@ -478,6 +488,13 @@ function persistConversation() {
 async function clearHistory() {
   if (state.clearingHistory) return;
   const target = historyDeleteTarget;
+  // Never during a work (0.6.81): its take would be written in a conversation gone. (The server
+  // refuses while a generation runs or Moodix answers, not while a card waits for the user.)
+  if (state.work || state.generating) {
+    $('history-delete-error').textContent = 'Attendez la fin de la génération en cours pour supprimer.';
+    $('history-delete-error').hidden = false;
+    return;
+  }
   state.clearingHistory = true;
   state.loadingHistory = true;
   $('history-delete-error').hidden = true;
@@ -487,13 +504,18 @@ async function clearHistory() {
     await api(target ? 'history/delete' : 'history/clear', { confirm: true, ...(target ? { id: target.id } : {}) });
     forgetCopies(target?.id ?? null);
     state.historyItems = target ? state.historyItems.filter(item => item.id !== target.id) : [];
+    // The conversation set aside goes with it (its work is over: deleting one is refused during a work).
+    if (state.aside && (!target || target.id === state.aside.conversationId)) {
+      if (state.miniature?.work?.conversationId === state.aside.conversationId) state.miniature.forget();
+      dropAside();
+    }
     if (!target || target.id === state.conversationId) {
       state.messages = [];
       state.conversationId = null;
       state.conversationInstructions = null;
       state.archiveSnapshot = null;
       state.historyDirty = false;
-      generationUI.clear();
+      generationUI.clear(state.aside?.nodes);
       $('messages').replaceChildren();
       $('welcome').hidden = false;
       setConversationTitle(UNTITLED);
@@ -549,24 +571,18 @@ function leaveLibrary() {
 }
 
 async function loadConversation(id) {
-  if (
-    !state.projectWorking &&
-    !state.generating &&
-    !state.preparing &&
-    !state.loadingHistory &&
-    !state.status.toolJob &&
-    id === state.conversationId
-  ) {
+  // Any conversation opens while a work goes on (0.6.81): the one it goes on in is set aside, alive.
+  if (!state.projectWorking && !state.preparing && !state.loadingHistory && id === state.conversationId) {
     leaveLibrary();
     projectUI.render();
     $('prompt').focus();
     return;
   }
   if (settingsGuard.isDirty()) return requestSettingsClose(() => loadConversation(id));
-  if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)
-    return;
+  if (state.projectWorking || state.preparing || state.loadingHistory) return;
   state.loadingHistory = true;
   updateControls();
+  let setNow = false;
   try {
     // A conversation that cannot be saved must not trap the user in it.
     if (
@@ -574,6 +590,22 @@ async function loadConversation(id) {
       !confirm('Cette conversation n’a pas pu être enregistrée. Ouvrir l’autre conversation quand même ?')
     )
       return;
+    // The one set aside comes back as it was left; the one left while its work goes on is set aside.
+    const returning = state.aside?.conversationId === id ? state.aside : null;
+    if (returning) state.aside = null;
+    setNow = setAside();
+    if (returning) {
+      takeBackAside(returning);
+      leaveLibrary();
+      turnActions();
+      $('settings').close();
+      renderAttachments();
+      resizePrompt();
+      state.stickToBottom = true;
+      scrollToBottom();
+      state.studio?.conversationChanged?.();
+      return;
+    }
     const record = await (await api(`history/${id}`)).json();
     // One saved with a call left without its result (before 0.6.31) is read with one.
     const messages = closedCalls(record.messages);
@@ -593,7 +625,7 @@ async function loadConversation(id) {
     state.images = draft.images;
     state.videos = draft.videos;
     $('prompt').value = draft.text;
-    generationUI.clear();
+    generationUI.clear(state.aside?.nodes);
     $('messages').replaceChildren();
     // A take deleted since (in the Pellicule, in the Studio) is not drawn from what was read before.
     citedTakes.forget();
@@ -609,6 +641,8 @@ async function loadConversation(id) {
     state.studio?.conversationChanged?.();
     $('prompt').focus();
   } catch (error) {
+    // Not opened: the conversation set aside for it is the one on screen again, as it was.
+    if (setNow && state.aside?.conversationId === state.conversationId) takeBackAside();
     notice(error.message);
   } finally {
     state.loadingHistory = false;
@@ -724,7 +758,7 @@ function restoreSession(saved) {
   state.thinking = saved.thinking;
   $('prompt').value = saved.prompt;
   $('thinking').setAttribute('aria-pressed', String(state.thinking));
-  generationUI.clear();
+  generationUI.clear(state.aside?.nodes);
   $('messages').replaceChildren();
   renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
   turnActions();
@@ -998,11 +1032,16 @@ function updateControls() {
   $('engine-name').textContent =
     model?.name ||
     (state.config.modelPath ? state.config.modelPath.split(/[\\/]/).pop().replace(/\.gguf$/i, '') : 'Aucun LLM');
+  // A work goes on in another conversation than the one shown (0.6.81): this one is read and written
+  // in, its message waits for the end of that one (greyed, the reason said), and nothing of it is
+  // stopped or declined from here.
+  const away = state.work && !shownHere(state.work.conversationId) ? workHeld() : '';
   // A proposal waits (in the Studio, or in a card of the conversation): a new message declines it.
-  const proposing = Boolean(state.studio?.proposing?.() || state.proposalCard);
+  const proposing = !away && Boolean(state.studio?.proposing?.() || state.proposalCard);
   $('send').disabled =
     state.projectWorking ||
     toolBusy ||
+    Boolean(away) ||
     !state.connected ||
     s.state === 'stopping' ||
     (s.busy && !proposing) ||
@@ -1011,10 +1050,12 @@ function updateControls() {
     state.operation ||
     state.loadingHistory ||
     (!$('prompt').value.trim() && !state.images.length && !state.videos.length);
-  $('send').hidden = (state.generating && !proposing) || toolBusy;
+  $('send').hidden = !away && ((state.generating && !proposing) || toolBusy);
+  if (away && $('send').dataset) $('send').dataset.tip = away;
+  else if ($('send').dataset?.tip) delete $('send').dataset.tip;
   // Interrompre only while something runs: Moodix thinking or writing, a generation (16/11). A
   // proposal waiting for the user (a card, the Studio) runs nothing: a new message declines it.
-  $('cancel').hidden = proposing || (!state.generating && (!toolBusy || s.toolJob.blocked));
+  $('cancel').hidden = Boolean(away) || proposing || (!state.generating && (!toolBusy || s.toolJob.blocked));
   const cancelLabel = state.waitingForModel ? 'Annuler le message en attente' : 'Interrompre la réponse';
   // The model loading under a message sent: « EN ATTENTE » and « Annuler », in words (51).
   $('cancel').classList.toggle('is-word', Boolean(state.waitingForModel));
@@ -1032,10 +1073,21 @@ function updateControls() {
   // The model and its reflection, chosen in the bar of the chat (model-choice.mjs): never while it answers.
   $('model-choice').disabled = $('effort-choice').disabled = state.generating || toolBusy || !state.connected;
   state.modelChoice?.render();
-  // A card of Moodix waits: an image may go with the message that answers it.
-  $('attach').disabled = (state.generating && !state.proposalCard) || state.preparing || state.loadingHistory;
+  // A card of Moodix waits: an image may go with the message that answers it (in its conversation).
+  $('attach').disabled = Boolean(away) || (state.generating && !state.proposalCard) || state.preparing || state.loadingHistory;
+  // Its usual words come back once the work is over.
+  const attach = $('attach');
+  if (away && attach.dataset) {
+    attach.dataset.idleTip ??= attach.dataset.tip || '';
+    attach.dataset.tip = 'Joindre un fichier à la fin de la génération en cours';
+  } else if (attach.dataset?.idleTip !== undefined) {
+    attach.dataset.tip = attach.dataset.idleTip;
+    delete attach.dataset.idleTip;
+  }
   $('prompt').disabled = state.loadingHistory;
-  $('compose-state').textContent = state.proposalCard
+  $('compose-state').textContent = away
+    ? workHeld({ short: true })
+    : state.proposalCard
     ? ''
     : held
     ? ''
@@ -1089,6 +1141,50 @@ function updateControls() {
     state.llmListKey !== [$('detected-model').disabled, !!state.modelAdding, $('detected-model').value, (state.detectedModels || []).length].join('|')
   )
     renderLLMList();
+  // While a work goes on (0.6.81): the Paramètres say what they lock, the takes that failed elsewhere
+  // wait to be made again, and the miniature shows the work wherever it is not seen.
+  const working = Boolean(state.work || state.generating || toolBusy);
+  if ($('settings-held')) $('settings-held').hidden = !working || held;
+  // (The creations' UI is made after the page's first run, the miniature with it.)
+  if (state.miniature) {
+    generationUI.busy?.(workHeld() || (working ? 'Attendez la fin de la génération en cours pour relancer.' : ''));
+    // A work the Studio held, over: left meanwhile, the Studio follows the page (it says it itself
+    // at each end; asked again here, it changes nothing).
+    state.studio?.letGo?.();
+    syncMiniature();
+  }
+}
+
+/**
+ * Where the miniature of the chat shows (0.6.81): wherever the work in hand, or the one that ended
+ * while the user was away, is not seen (another conversation, the Pellicule, the Studio when it does
+ * not show it, the Paramètres, as a pill in their foot); nowhere once the user is back in its
+ * conversation after its end.
+ */
+function syncMiniature() {
+  const mini = state.miniature,
+    work = mini?.work;
+  if (!work) return;
+  const settings = $('settings'),
+    here = shownHere(work.conversationId) && !settings?.open,
+    // Its Chat shows it; its Studio when it holds it (a take made there, a proposal of Moodix AI on it),
+    // or when its chat is opened over it; the words of Moodix alone, its « Agent » says them.
+    seen =
+      here &&
+      (state.view === 'chat' ||
+        (state.view === 'studio' &&
+          (document.body?.dataset?.chat === 'open' || Boolean(state.studio?.holds?.()) || !mini.taking)));
+  // Back in its conversation once it is over: nothing more to say.
+  if (here && !mini.running && state.view !== 'library') return mini.forget();
+  if (seen) return mini.place(null);
+  mini.answer(
+    state.work?.waits
+      ? 'Moodix AI vous attend dans le Studio de cette conversation'
+      : state.waitingForModel
+        ? 'Le modèle se charge…'
+        : 'Moodix répond…',
+  );
+  mini.place(settings?.open ? (settings.querySelector?.('.settings-footer') ?? 'corner') : 'corner');
 }
 
 /** Whether `version` (x.y.z) is newer than the one installed: an update is offered only then. */
@@ -1942,6 +2038,8 @@ function unwriteReference(label) {
  */
 async function addFiles(files) {
   if (!files.length) return;
+  // A work goes on in another conversation (0.6.81): joined at its end, said so.
+  if (state.work && !shownHere(state.work.conversationId)) return notice(workHeld());
   // Dropped or pasted while a creation is made (the « + » stays within reach): said, not lost in silence.
   if (state.status.toolJob && !state.generating)
     return notice(
@@ -2106,7 +2204,7 @@ async function takeBack(resend) {
   state.images = [...draft.images, ...state.images];
   state.videos = [...draft.videos, ...state.videos];
   $('prompt').value = draft.text + (waiting ? '\n\n' + waiting : '');
-  generationUI.clear();
+  generationUI.clear(state.aside?.nodes);
   $('messages').replaceChildren();
   renderTranscript(state.messages);
   turnActions();
@@ -2123,7 +2221,8 @@ async function takeBack(resend) {
     state.resent = false;
   } else $('prompt').focus();
 }
-function assistantMessage(parent = null) {
+/** `host`: where a new message goes (the page of its conversation, on screen or set aside). */
+function assistantMessage(parent = null, host = null) {
   const article = parent?.article || node('article', 'message assistant');
   article.setAttribute('aria-label', 'Réponse du modèle');
   let header = null;
@@ -2156,7 +2255,7 @@ function assistantMessage(parent = null) {
     generations = kept || node('div', 'generation-grid');
   kept?.remove?.();
   article.append(reasoning, body, note, generations);
-  if (!parent) $('messages').append(article);
+  if (!parent) (host ?? $('messages')).append(article);
   return { article, reasoning, summary, thoughts, thought, body, note, generations };
 }
 /**
@@ -2196,9 +2295,15 @@ function proposalChoice(view, proposal, abort) {
   if (!asked) return 'once';
   return cardChoice(view.generations, proposal, abort, 0);
 }
-/** Whether a creation asked in this turn is set in the Studio (its agent's chat) rather than in the Chat. */
-const setInStudio = request =>
-  state.view === 'studio' && Boolean(state.studio?.accepts?.(request.tool || request.call?.function?.name));
+/**
+ * Whether a creation asked in this turn is set in the Studio (its agent's chat) rather than in the
+ * Chat: only in the Studio of its own conversation (`conversationId`); left meanwhile, it waits on a
+ * card in its conversation (0.6.81).
+ */
+const setInStudio = (request, conversationId = state.conversationId) =>
+  state.view === 'studio' &&
+  state.conversationId === conversationId &&
+  Boolean(state.studio?.accepts?.(request.tool || request.call?.function?.name));
 // What stands over the card when the model wrote nothing, or said the video was there.
 const PLAN_FALLBACK =
   'Voici ce que je propose : la carte ci-dessous montre la durée, le format et le prompt. Modifiez ce que vous ' +
@@ -2312,8 +2417,11 @@ function missingFile(view, request, history) {
  */
 async function againTake(failed, { edit = false, figure = null, container }) {
   if (state.generating || state.preparing || state.loadingHistory || state.status.toolJob)
-    return notice('Attendez la fin de la réponse ou de la génération en cours.');
+    return notice(workHeld() || 'Attendez la fin de la réponse ou de la génération en cours.');
   state.generating = true;
+  // Its conversation, wherever the user is when it ends (0.6.81).
+  const talkId = state.conversationId,
+    work = beginWork('again', talkId);
   let endTurn;
   state.turnEnded = new Promise(resolve => {
     endTurn = resolve;
@@ -2337,7 +2445,10 @@ async function againTake(failed, { edit = false, figure = null, container }) {
           scrollToBottom();
         },
         image => generation.image(image),
-        edit ? { approve: (proposal, abort) => cardChoice(container, proposal, abort, 0) } : { confirmed: true },
+        {
+          conversationId: talkId,
+          ...(edit ? { approve: (proposal, abort) => cardChoice(container, proposal, abort, 0) } : { confirmed: true }),
+        },
       );
       generation.finish(result);
     } catch (error) {
@@ -2353,14 +2464,16 @@ async function againTake(failed, { edit = false, figure = null, container }) {
   } catch (error) {
     if (!signal.aborted) notice(error.message);
   } finally {
-    if (history.length > state.messages.length) {
-      state.messages = archiveMessages(history);
-      state.archiveSnapshot = { messages: [...state.messages], incomplete: false };
-      await persistConversation();
+    const talk = holderOf(talkId);
+    if (history.length > (talk.messages?.length ?? 0)) {
+      talk.messages = archiveMessages(history);
+      talk.archiveSnapshot = { messages: [...talk.messages], incomplete: false };
+      await persistConversation(talkId);
     }
     state.generating = false;
     state.controller = null;
     endTurn();
+    endWork(work);
     state.studio?.invalidate?.();
     turnActions();
     updateControls();
@@ -2388,7 +2501,7 @@ async function runOutputAction(record, index, action) {
     return;
   }
   if (state.generating || state.preparing || state.loadingHistory || state.status.toolJob)
-    return notice('Attendez la fin de la réponse ou de la génération en cours.');
+    return notice(workHeld() || 'Attendez la fin de la réponse ou de la génération en cours.');
   if (record.conversationId !== state.conversationId) return notice('Ouvrez la conversation de ce résultat.');
   const video = record.mediaType === 'video',
     text =
@@ -2397,6 +2510,9 @@ async function runOutputAction(record, index, action) {
         : `Interpoler ${reference} pour une vidéo plus fluide.`,
     history = [...state.messages, { role: 'user', content: text }];
   state.generating = true;
+  // Its conversation, wherever the user is when it ends (0.6.81).
+  const talkId = state.conversationId,
+    work = beginWork('action', talkId);
   turnActions();
   state.controller = new AbortController();
   const signal = state.controller.signal;
@@ -2438,7 +2554,7 @@ async function runOutputAction(record, index, action) {
         image => generation.image(image),
         // The click on Upscale or Interpoler is the confirmation: no second question. No model
         // runs here, so the result does not say that images of the output are attached.
-        { confirmed: true, review: false },
+        { confirmed: true, review: false, conversationId: talkId },
       );
       generation.finish(result);
     } catch (error) {
@@ -2463,15 +2579,17 @@ async function runOutputAction(record, index, action) {
       notice(error.message);
     }
   } finally {
-    if (history.length > state.messages.length + 1) {
-      state.messages = archiveMessages(history);
-      state.archiveSnapshot = { messages: [...state.messages], incomplete: false };
-      await persistConversation();
+    const talk = holderOf(talkId);
+    if (history.length > (talk.messages?.length ?? 0) + 1) {
+      talk.messages = archiveMessages(history);
+      talk.archiveSnapshot = { messages: [...talk.messages], incomplete: false };
+      await persistConversation(talkId);
     }
     state.generating = false;
     // Its controller ends with it: kept, « Interrompre » aborted it again in place of cancelling
     // the next creation of the Studio.
     state.controller = null;
+    endWork(work);
     state.studio?.invalidate?.();
     turnActions();
     updateControls();
@@ -2499,8 +2617,9 @@ function archiveMessages(messages) {
   return closedCalls(messages.filter(message => !message.resourceId && !message.outputId));
 }
 
-function chatRequest(messages, tools = true, resources = true) {
-  const context = state.conversationInstructions ?? (state.messages.length ? '' : state.globalInstructions || '');
+/** `talk`: who holds the conversation of the turn (state, or the conversation set aside, 0.6.81). */
+function chatRequest(messages, tools = true, resources = true, talk = state) {
+  const context = talk.conversationInstructions ?? (talk.messages?.length ? '' : state.globalInstructions || '');
   const instructions = context
     ? '\n\nContexte fourni par l’utilisateur au démarrage de cette conversation :\n' + context
     : '';
@@ -2520,7 +2639,7 @@ function chatRequest(messages, tools = true, resources = true) {
     tools,
     resources,
     // The references the model knows are those of the conversation's project.
-    project: state.projectId || 'inbox',
+    project: talk.projectId || 'inbox',
   };
 }
 
@@ -2549,8 +2668,169 @@ async function storeAttachments(images, conversationId) {
   return stored;
 }
 
+/**
+ * A work of the page (0.6.81): a turn of Moodix, a creation of the Studio, an action on a take, a
+ * take made again. One at a time (`state.work`). The user may open any page meanwhile: its
+ * conversation, left, is set aside (`state.aside`) with its page alive, its messages and its draft;
+ * opened again, it comes back as it was, and the miniature of the chat shows the work everywhere
+ * else (work-miniature.mjs). What a work writes goes to its own conversation, on screen or set
+ * aside, never to the one the user looks at.
+ */
+/** Who holds the fields of conversation `id` now (conversationId, projectId, messages, archiveSnapshot…). */
+function holderOf(id) {
+  if (id && state.aside?.conversationId === id) return state.aside;
+  if (!id || state.conversationId === id) return state;
+  // Neither (gone meanwhile): nothing of it is written.
+  return { conversationId: id };
+}
+/** Where the messages of conversation `id` are: the page's, or those set aside with it. */
+const messagesOf = id => (id && state.aside?.conversationId === id ? state.aside.nodes : $('messages'));
+/** Whether conversation `id` is the one on screen. */
+const shownHere = id => !id || state.conversationId === id;
+/**
+ * The name of a conversation as the page knows it, a real one first (not « Nouvelle conversation »,
+ * see `untitled`); before it has one, the name its work in progress gives it (its first message, the
+ * prompt of the Studio); '' otherwise.
+ */
+function titleOf(id) {
+  const named = title => (title && title !== 'Nouvelle conversation' && title !== 'Nouveau chat' ? title : '');
+  return (
+    named(shownHere(id) ? $('conversation-title').textContent : '') ||
+    named(state.aside?.conversationId === id ? state.aside.title : '') ||
+    named((state.historyItems || []).find(item => item.id === id)?.title) ||
+    (state.work?.conversationId === id ? state.work.title : '') ||
+    (state.miniature?.work?.conversationId === id ? state.miniature.work.title : '') ||
+    ''
+  );
+}
+/**
+ * Why nothing else can be made now, in the user's words, when a work goes on in another conversation
+ * than the one shown (0.6.81): one creation at a time, and the chat model is taken; '' otherwise.
+ * A generation the page does not follow (begun before a reload) is said too.
+ */
+function workHeld({ short = false } = {}) {
+  const work = state.work,
+    job = state.status?.toolJob;
+  if (work && !shownHere(work.conversationId)) {
+    // `short`: the line of the message box, whose name of the model would give way to a long one
+    // (moodix.css, « The bar of the chat stays on one line »); the miniature names the conversation.
+    // (Non-breaking spaces inside the guillemets: a line never begins with « » ».)
+    const name = `« ${titleOf(work.conversationId) || 'Nouvelle conversation'} »`;
+    if (state.proposalCard || state.studio?.proposing?.())
+      return short ? 'Moodix attend votre accord ailleurs' : `Moodix attend votre accord dans ${name} : répondez-lui d’abord.`;
+    if (job && !job.blocked) return short ? 'Génération en cours ailleurs' : `Génération en cours dans ${name} : attendez sa fin.`;
+    return short ? 'Moodix répond ailleurs' : `Moodix répond dans ${name} : attendez la fin de sa réponse.`;
+  }
+  if (!work && job && !job.blocked && job.conversationId && !shownHere(job.conversationId)) {
+    const name = titleOf(job.conversationId);
+    return (name ? `Génération en cours dans « ${name} »` : 'Génération en cours') + (short ? '' : ' : attendez sa fin.');
+  }
+  return '';
+}
+/**
+ * A work begins in the conversation on screen (or in `conversationId`, the Studio's). `title`: the
+ * name it will have, for a conversation that has none yet (its first message).
+ */
+function beginWork(kind, conversationId = state.conversationId, title = '') {
+  const work = { kind, conversationId, title: titleOf(conversationId) || title };
+  state.work = work;
+  state.miniature?.begin(work);
+  updateControls();
+  return work;
+}
+/** It ends: the page is free for the next one; the miniature keeps its end while the user is away. */
+function endWork(work) {
+  if (!work || state.work !== work) return;
+  state.work = null;
+  state.miniature?.end();
+  updateControls();
+}
+/** The name a work gives its conversation (« named once, by its first message »), wherever it is. */
+function nameHere(id, title) {
+  if (shownHere(id)) return setConversationTitle(title, { unnamed: true });
+  if (state.aside?.conversationId === id && untitled(state.aside.title)) {
+    state.aside.title = title;
+    state.miniature?.rename(title);
+  }
+}
+/** Resolves once conversation `id` is on screen: a step that needs its Studio waits for the user. */
+function backHere(id, signal) {
+  if (shownHere(id)) return Promise.resolve();
+  if (state.work) state.work.waits = true;
+  updateControls();
+  return new Promise((resolve, reject) => {
+    const look = setInterval(() => {
+      if (!shownHere(id)) return;
+      done();
+      resolve();
+    }, 250);
+    const abort = () => {
+      done();
+      reject(signal.reason || new DOMException('Annulé', 'AbortError'));
+    };
+    function done() {
+      clearInterval(look);
+      signal?.removeEventListener?.('abort', abort);
+      if (state.work) state.work.waits = false;
+      updateControls();
+    }
+    signal?.addEventListener?.('abort', abort, { once: true });
+  });
+}
+/** The conversation on screen is left while its work goes on: set aside as it is, alive. */
+function setAside() {
+  if (!state.work || state.work.conversationId !== state.conversationId) return false;
+  // One at a time: one set aside before (its work over) leaves the page, saved as it was.
+  dropAside();
+  const nodes = document.createDocumentFragment();
+  nodes.append(...$('messages').childNodes);
+  state.aside = {
+    conversationId: state.conversationId,
+    projectId: state.projectId,
+    conversationInstructions: state.conversationInstructions,
+    messages: state.messages,
+    archiveSnapshot: state.archiveSnapshot,
+    historyDirty: state.historyDirty,
+    title: $('conversation-title').textContent,
+    // What was being written in it, and joined to it.
+    draft: { text: $('prompt').value, images: state.images, videos: state.videos },
+    nodes,
+  };
+  return true;
+}
+/** The conversation set aside leaves the page (another set aside, deleted, the history cleared). */
+function dropAside() {
+  if (!state.aside) return;
+  generationUI.drop?.(state.aside.nodes);
+  state.aside = null;
+}
+/** Back to the conversation set aside: its page, its messages and its draft, as they were left. */
+function takeBackAside(kept = state.aside) {
+  if (state.aside === kept) state.aside = null;
+  // The cards of the page left go (those of a conversation set aside meanwhile stay with it); those
+  // set aside come back with their page.
+  generationUI.drop?.($('messages'));
+  Object.assign(state, {
+    conversationId: kept.conversationId,
+    projectId: kept.projectId,
+    conversationInstructions: kept.conversationInstructions,
+    messages: kept.messages,
+    archiveSnapshot: kept.archiveSnapshot,
+    historyDirty: kept.historyDirty,
+    images: kept.draft.images,
+    videos: kept.draft.videos,
+  });
+  rememberConversation(kept.conversationId);
+  $('prompt').value = kept.draft.text;
+  $('messages').replaceChildren(kept.nodes);
+  $('welcome').hidden = $('messages').childElementCount > 0;
+  setConversationTitle((state.historyItems || []).find(item => item.id === kept.conversationId)?.title || kept.title);
+}
+
 async function sendMessage(event) {
   event.preventDefault();
+  // One work at a time (0.6.81): written in another conversation, the message waits for its end.
+  if (state.work && !shownHere(state.work.conversationId)) return notice(workHeld());
   if ($('send').disabled) return;
   if (state.generating) {
     // A proposal of Moodix waits (a card, or the Studio): this message answers it instead, and
@@ -2578,6 +2858,10 @@ async function sendMessage(event) {
   }
   const text = $('prompt').value.trim();
   state.conversationId ||= crypto.randomUUID();
+  // The conversation of this turn: the user may open another page meanwhile (0.6.81); what the turn
+  // writes goes to it, on screen or set aside (`talk()`), never to the one shown.
+  const talkId = state.conversationId,
+    talk = () => holderOf(talkId);
   let images;
   state.preparing = true;
   updateControls();
@@ -2598,8 +2882,11 @@ async function sendMessage(event) {
   const turnId = crypto.randomUUID();
   // The take on the Studio's screen as the user writes, when the Studio is the view: a model told
   // it (server.mjs, a capable one) reads « celle-ci » as that take. The same at every request of the turn.
-  const screen = state.view === 'studio' ? (state.studio?.screenTake?.() ?? null) : null;
-  state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+  const screen = state.view === 'studio' ? (state.studio?.screenTake?.() ?? null) : null,
+    // Asked from the Studio: its creations are made with the LoRAs the Studio shows, the whole turn,
+    // wherever the user goes meanwhile.
+    fromStudio = state.view === 'studio';
+  talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
   let view = assistantMessage(),
     output = '',
     reasoning = '',
@@ -2614,6 +2901,8 @@ async function sendMessage(event) {
     // The proposal of a video whose words Moodix is writing, its card to come under them.
     planFor = null;
   state.generating = true;
+  // A conversation begun with this message is named after it in the miniature, as it will be.
+  const work = beginWork('turn', talkId, state.messages.length ? '' : conversationTitle(text).slice(0, 120));
   let endTurn;
   state.turnEnded = new Promise(resolve => {
     endTurn = resolve;
@@ -2658,15 +2947,16 @@ async function sendMessage(event) {
     }
     if (output) renderText(view.body, output);
     else view.body.replaceChildren();
-    // The takes it names, small under its words, as soon as it names them.
-    citedTakes.show(view, output);
-    if (output) showLastReply(output);
+    // The takes it names, small under its words, as soon as it names them (those of its project:
+    // not while another conversation is shown, 0.6.81).
+    if (shownHere(talkId)) citedTakes.show(view, output);
+    if (output && shownHere(talkId)) showLastReply(output);
     scrollToBottom();
     lastRender = performance.now();
-    state.archiveSnapshot = snapshot();
+    talk().archiveSnapshot = snapshot();
     if ((output || reasoning) && performance.now() - lastArchive > 2000 && !state.savingHistory) {
       lastArchive = performance.now();
-      persistConversation();
+      persistConversation(talkId);
     }
   }
   const started = performance.now(),
@@ -2675,7 +2965,7 @@ async function sendMessage(event) {
     // Moodix waits: its Éclipse breathes; the model loading, its line says so (etats-maquette.md, 51).
     view.body.replaceChildren();
     markThinking(view, true);
-    if (!(await persistConversation()))
+    if (!(await persistConversation(talkId)))
       throw Error('Impossible de sauvegarder ce message. Vérifiez le dossier history ou désactivez l’historique.');
     await waitForModel(api, signal, status => {
       state.status = status;
@@ -2702,18 +2992,18 @@ async function sendMessage(event) {
       view.waiting = true;
       markThinking(view, true);
       // Attached images of a reopened conversation get their compressed copy from the original.
-      await fillCopies(history, { api, conversationId: state.conversationId, signal });
+      await fillCopies(history, { api, conversationId: talkId, signal });
       const response = await api(
         'chat',
         {
-          ...chatRequest(history, allowTools, resourceReads < 8),
+          ...chatRequest(history, allowTools, resourceReads < 8, talk()),
           // Only deciding whether to chain another tool: thinking would cost seconds for nothing shown.
           // A plan put to the user before a video is a few lines: no thinking either.
           ...(silent || briefing ? { thinking: false } : {}),
           ...(screen ? { screen } : {}),
           // A creation asked from the Studio is made with the LoRAs the Studio shows; from the Chat, with those saved for its model.
-          ...(state.view === 'studio' ? { inStudio: true } : {}),
-          conversationId: state.conversationId,
+          ...(fromStudio ? { inStudio: true } : {}),
+          conversationId: talkId,
           turnId,
         },
         { signal },
@@ -2729,7 +3019,8 @@ async function sendMessage(event) {
         void assetsUI.refresh().catch(() => {});
       }
       await readSSE(response.body, chunk => {
-        contextMeter.observe(chunk);
+        // The gauge of the message box is that of the conversation shown.
+        if (shownHere(talkId)) contextMeter.observe(chunk);
         if (chunk.local_tool_request) request = chunk.local_tool_request;
         // The first or last image of a video, kept by the server as a reference of the project
         // (`stills`): the list of the references is read again, so that the page knows it.
@@ -2795,7 +3086,7 @@ async function sendMessage(event) {
         briefing = false;
         if (history.at(-1)?.role === 'tool' && history.at(-1).tool_call_id === held.request.call.id) history.pop();
         // After what it had written with its call, if anything (`lead`, still on the page above them).
-        const words = [held.lead.trim(), planWords(output.slice(held.lead.length), setInStudio(held.request))].filter(Boolean).join('\n\n');
+        const words = [held.lead.trim(), planWords(output.slice(held.lead.length), setInStudio(held.request, talkId))].filter(Boolean).join('\n\n');
         if (words !== output) {
           output = words;
           render();
@@ -2811,8 +3102,8 @@ async function sendMessage(event) {
         // proposal comes back after the user answered it in words (lib/video-brief.mjs).
         request.autoAllow = false;
         resumed = true;
-        state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
-        await persistConversation();
+        talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+        await persistConversation(talkId);
       }
       if (!request) {
         complete = true;
@@ -2840,7 +3131,7 @@ async function sendMessage(event) {
       // (16/11) its card comes under those words; in the Studio (17/11) the pointer sets it and rests
       // on « Générer »: the plan used to come alone there, and the user had to write « go » to it.
       if (!resumed && request.brief && request.requestId && !request.missing) {
-        const note = setInStudio(request) ? request.studioBrief : request.cardBrief;
+        const note = setInStudio(request, talkId) ? request.studioBrief : request.cardBrief;
         if (note) {
           history.push({
             role: 'tool',
@@ -2866,8 +3157,8 @@ async function sendMessage(event) {
           tool_call_id: request.call.id,
           content: JSON.stringify({ status: 'nothing_generated', message: request.message }),
         });
-        state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
-        await persistConversation();
+        talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+        await persistConversation(talkId);
         finishReason = '';
         continue;
       }
@@ -2889,8 +3180,8 @@ async function sendMessage(event) {
           resourceReads = 8;
         }
         view.note.textContent = 'Appel d’outil refusé : ' + request.message;
-        state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
-        await persistConversation();
+        talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+        await persistConversation(talkId);
         view = assistantMessage(view);
         finishReason = '';
         continue;
@@ -2903,7 +3194,7 @@ async function sendMessage(event) {
         iterations++;
         let outcome;
         try {
-          outcome = await replaceWithCharacter(request, { view, signal });
+          outcome = await replaceWithCharacter(request, { view, signal, talkId });
         } catch (error) {
           // Stopped, or failed before its end: its call keeps a result, as any other creation.
           history.push({
@@ -2941,8 +3232,8 @@ async function sendMessage(event) {
             }),
           });
           resourceReads = 8;
-          state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
-          await persistConversation();
+          talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+          await persistConversation(talkId);
           view = assistantMessage(view);
           finishReason = '';
           continue;
@@ -2953,7 +3244,7 @@ async function sendMessage(event) {
             (
               await api(
                 'gallery/read',
-                { conversationId: state.conversationId, runId: request.runId, outputIndex: request.outputIndex },
+                { conversationId: talkId, runId: request.runId, outputIndex: request.outputIndex },
                 { signal },
               )
             ).json();
@@ -2964,7 +3255,7 @@ async function sendMessage(event) {
             try {
               await remakeOutputCopy({
                 api,
-                conversationId: state.conversationId,
+                conversationId: talkId,
                 runId: request.runId,
                 index: request.outputIndex ?? 0,
                 signal,
@@ -2976,7 +3267,7 @@ async function sendMessage(event) {
           }
           history.push({ role: 'tool', tool_call_id: request.call.id, content: JSON.stringify(result.metadata) });
           if (result.images.length) {
-            reviewRecord = { id: request.runId, conversationId: state.conversationId };
+            reviewRecord = { id: request.runId, conversationId: talkId };
             const outputId = request.runId + '/' + request.outputIndex;
             if (!history.some(message => message.outputId === outputId))
               history.push({
@@ -3008,8 +3299,8 @@ async function sendMessage(event) {
           if (signal.aborted) throw error;
           view.note.textContent = error.message;
         }
-        state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
-        await persistConversation();
+        talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+        await persistConversation(talkId);
         view = assistantMessage(view);
         finishReason = '';
         continue;
@@ -3074,8 +3365,8 @@ async function sendMessage(event) {
           if (signal.aborted) throw error;
           view.note.textContent = error.message;
         }
-        state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
-        await persistConversation();
+        talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+        await persistConversation(talkId);
         view = assistantMessage(view);
         finishReason = '';
         continue;
@@ -3103,7 +3394,7 @@ async function sendMessage(event) {
       // From the Studio (its agent's chat), a creation is set in the Studio: the pointer of Moodix
       // sets it there and « Générer » is the user's answer. In the Chat, a video or a sound is a card
       // of the message (an image is made at once): proposalChoice below.
-      const viaStudio = setInStudio(request);
+      const viaStudio = setInStudio(request, talkId);
       const generation = generationUI.mount(view.generations, request, { compact: viaStudio });
       // A video is commented by the model only when the user chose it in the settings: the
       // reload and the analysis take about a minute. An image too, by its own choice. Otherwise
@@ -3130,6 +3421,8 @@ async function sendMessage(event) {
           {
             review,
             reviewImages: lookAtImage,
+            // Its take is this conversation's, wherever the user is when it is made.
+            conversationId: talkId,
             ...(viaStudio
               ? {
                   approve: async (proposal, abort) => {
@@ -3175,8 +3468,8 @@ async function sendMessage(event) {
             // images made so far when the conversation is opened again (their `run_id`).
             keep: async made => {
               answer(made);
-              state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
-              await persistConversation();
+              talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+              await persistConversation(talkId);
             },
           });
         // A series that goes no further than its first image (refused, failed): the server is told,
@@ -3265,8 +3558,8 @@ async function sendMessage(event) {
       if (result.denied || result.failed) resourceReads = 8;
       // Not seen (no analysis chosen for it): its text would only repeat what the user sees.
       silent = Boolean(result.record && !looked && !result.failed);
-      state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
-      await persistConversation();
+      talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+      await persistConversation(talkId);
       view = assistantMessage(view);
       finishReason = '';
     }
@@ -3277,13 +3570,13 @@ async function sendMessage(event) {
     loading.stop();
     if (unloaded) {
       loading.fail(error.message || 'Le modèle n’a pas démarré.', () => void takeBack(true));
-      state.messages = archiveMessages(history);
-      state.archiveSnapshot = { messages: [...state.messages], incomplete: false };
+      talk().messages = archiveMessages(history);
+      talk().archiveSnapshot = { messages: [...talk().messages], incomplete: false };
     } else if (output || reasoning || usedTool) {
       render();
       view.note.textContent = canceled ? 'Opération interrompue à votre demande.' : error.message;
       if (!canceled) view.note.classList.add('error');
-    } else {
+    } else if (shownHere(talkId)) {
       userView.remove();
       view.article.remove();
       $('prompt').value = text + ($('prompt').value ? `\n\n${$('prompt').value}` : '');
@@ -3292,6 +3585,12 @@ async function sendMessage(event) {
       state.videos = videos;
       renderAttachments();
       $('welcome').hidden = state.messages.length > 0;
+    } else {
+      // Its conversation set aside meanwhile (0.6.81): the draft goes back there, not in the one shown.
+      userView.remove();
+      view.article.remove();
+      const draft = talk().draft;
+      if (draft) Object.assign(draft, { text: text + (draft.text ? `\n\n${draft.text}` : ''), images, videos });
     }
     if (!canceled && !unloaded) notice(error.message || 'La connexion a été interrompue.');
   } finally {
@@ -3329,29 +3628,31 @@ async function sendMessage(event) {
         view.body.replaceChildren(
           node('div', 'text-block', complete ? 'Aucune réponse finale reçue.' : 'Opération interrompue.'),
         );
-      state.messages = archiveMessages(history);
-      state.archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: !complete };
+      talk().messages = archiveMessages(history);
+      talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: !complete };
       // Named once, by its first message, as the history names it (persistConversation gives its
       // name back): at every turn the bar took the whole text of the last message, and lost the name
-      // the user had given.
-      setConversationTitle(conversationTitle(text).slice(0, 120) || 'Une image à explorer', { unnamed: true });
+      // the user had given. (Its own conversation, set aside or not, 0.6.81.)
+      nameHere(talkId, conversationTitle(text).slice(0, 120) || 'Une image à explorer');
     }
     // The turn is over, answered, failed or stopped: the mark is at rest, its thought timed.
     view.thought?.end();
     markThinking(view, false);
-    await persistConversation();
+    await persistConversation(talkId);
     // The conversation this turn was in: another may be opened before its name is asked.
-    const answered = state.conversationId;
+    const answered = talkId;
     state.generating = false;
     state.waitingForModel = false;
     state.controller = null;
     endTurn();
+    endWork(work);
     turnActions();
     resizePrompt();
     await refreshStatus();
     contextMeter.schedule();
     showLastReply();
-    $('prompt').focus();
+    // The message box is that of the conversation shown: the keyboard goes there only if it is this one.
+    if (shownHere(talkId)) $('prompt').focus();
     // Answered: its name in a few words, asked beside it (the pictures still in their copies here).
     if (complete) void nameConversation(history, answered);
   }
@@ -3394,10 +3695,13 @@ function syncViews() {
  * replacement): set in the Studio by the pointer and started at once, followed by a card in the
  * conversation. Returns the result, as for a creation of the chat.
  */
-async function runForTurn(proposal, { view, signal, auto = false }) {
+async function runForTurn(proposal, { view, signal, auto = false, talkId = state.conversationId }) {
   // The image of a character starts at once (the user checks it right after); the video itself
   // starts alone only as the settings of the Studio's agent say (16/11), else on « Générer ».
   if (auto) proposal.autoAllow = true;
+  // The pointer sets it in the Studio of its conversation: left meanwhile, it waits for the user to
+  // come back there (0.6.81), the miniature says so.
+  await backHere(talkId, signal);
   view.generation = true;
   const generation = generationUI.mount(view.generations, proposal, { compact: true });
   try {
@@ -3413,7 +3717,10 @@ async function runForTurn(proposal, { view, signal, auto = false }) {
       {
         review: false,
         reviewImages: false,
+        conversationId: talkId,
         approve: async (asked, abort) => {
+          // Left again before its answer: set when the user is back in its conversation.
+          await backHere(talkId, abort);
           const answer = state.studio.propose(asked, abort);
           updateControls();
           try {
@@ -3442,13 +3749,14 @@ async function runForTurn(proposal, { view, signal, auto = false }) {
  * `character`): their image made in the Studio, checked by the user (« OK », « Autre image »,
  * « Annuler »), then the replacement with it. Returns { content, record } for the model's call.
  */
-async function replaceWithCharacter(request, { view, signal }) {
+async function replaceWithCharacter(request, { view, signal, talkId = state.conversationId }) {
   const said = text => (view.note.textContent = text);
+  // Asked in the conversation of the turn and in its project, wherever the user is meanwhile.
   const action = async (name, args) =>
     (
       await api('tools/action', {
-        conversationId: state.conversationId,
-        project: state.projectId || 'inbox',
+        conversationId: talkId,
+        project: holderOf(talkId).projectId || 'inbox',
         studio: true,
         name,
         arguments: args,
@@ -3460,12 +3768,14 @@ async function replaceWithCharacter(request, { view, signal }) {
   for (let tries = 0; tries < 20 && !image; tries++) {
     said('Image du personnage…');
     const size = state.studio.imageSize?.(request.sourceSize) ?? null;
-    const made = await runForTurn(await action('create_image', { prompt, ...(size ?? {}) }), { view, signal, auto: true });
+    const made = await runForTurn(await action('create_image', { prompt, ...(size ?? {}) }), { view, signal, auto: true, talkId });
     if (!made.record) {
       said(made.error || 'L’image du personnage n’a pas pu être faite.');
       return { content: JSON.stringify({ status: 'error', message: made.error || 'Image du personnage non faite.' }) };
     }
     said('Ce personnage vous convient ? Répondez dans le Studio : OK, Autre image ou Annuler.');
+    // Checked in the Studio of its conversation: left meanwhile, when the user is back there.
+    await backHere(talkId, signal);
     const answer = await state.studio.checkCharacter(made.record, signal);
     if (answer.decision === 'cancel') {
       said('Remplacement annulé.');
@@ -3491,7 +3801,7 @@ async function replaceWithCharacter(request, { view, signal }) {
   // Its prompt is written in the Studio from the video and the image kept, with what the user
   // asked (the pointer's wand: the chat model comes back for it).
   proposal.scene = { asked: request.asked ?? '' };
-  const result = await runForTurn(proposal, { view, signal });
+  const result = await runForTurn(proposal, { view, signal, talkId });
   if (!result.record) return { content: result.content ?? JSON.stringify({ status: 'error', message: result.error }) };
   // Said to the model with its result: the image of the character it can use again.
   const content = JSON.parse(result.content);
@@ -3504,9 +3814,11 @@ async function replaceWithCharacter(request, { view, signal }) {
  * conversation: a line for the model (the user made it by hand), its call and its result. The
  * conversation shows it as a card.
  */
-async function runInStudio(proposal, { signal, onProgress }) {
-  $('welcome').hidden = true;
-  const view = assistantMessage();
+async function runInStudio(proposal, { signal, onProgress, conversationId = state.conversationId }) {
+  // The conversation the Studio asked it in: written there wherever the user is meanwhile (0.6.81).
+  const talkId = conversationId;
+  if (shownHere(talkId)) $('welcome').hidden = true;
+  const view = assistantMessage(null, messagesOf(talkId));
   view.body.replaceChildren();
   view.generation = true;
   const generation = generationUI.mount(view.generations, proposal, { compact: true });
@@ -3520,7 +3832,7 @@ async function runInStudio(proposal, { signal, onProgress }) {
         onProgress(progress, fraction, preview);
       },
       image => generation.image(image),
-      { confirmed: true, review: false, studio: true },
+      { confirmed: true, review: false, studio: true, conversationId: talkId },
     );
     generation.finish(result);
   } catch (error) {
@@ -3535,10 +3847,11 @@ async function runInStudio(proposal, { signal, onProgress }) {
   const kinds = { image: 'Image', video: 'Vidéo', audio: 'Son' },
     prompt = String(proposal.plan?.prompt || proposal.args?.prompt || result.record.prompt || ''),
     said = `Studio · ${kinds[result.record.mediaType || 'image'] ?? 'Image'} : ${prompt}`.slice(0, 4000);
+  const talk = holderOf(talkId);
   // A conversation begun in the Studio still gets the global instructions with its first message.
-  if (!state.messages.length) state.conversationInstructions ??= state.globalInstructions || '';
-  state.messages = archiveMessages([
-    ...state.messages,
+  if (!talk.messages?.length) talk.conversationInstructions ??= state.globalInstructions || '';
+  talk.messages = archiveMessages([
+    ...(talk.messages ?? []),
     {
       role: 'user',
       internal: true,
@@ -3547,12 +3860,12 @@ async function runInStudio(proposal, { signal, onProgress }) {
     { role: 'assistant', content: '', tool_calls: [proposal.call] },
     { role: 'tool', tool_call_id: proposal.call.id, content: result.content },
   ]);
-  state.archiveSnapshot = { messages: [...state.messages], incomplete: false };
+  talk.archiveSnapshot = { messages: [...talk.messages], incomplete: false };
   // Named by its prompt alone, as the server names it (the pill of the title bar says the mode).
   const named = conversationTitle(said).slice(0, 120);
-  if (named && untitled($('conversation-title').textContent)) setConversationTitle(named);
-  turnActions();
-  await persistConversation();
+  if (named) nameHere(talkId, named);
+  if (shownHere(talkId)) turnActions();
+  await persistConversation(talkId);
   contextMeter.schedule();
   return result;
 }
@@ -3594,6 +3907,8 @@ dismissSettingsOnOutsideClick($('settings'), () => requestSettingsClose());
 const interfaceUI = setupInterfaceSettings({ $, node, api });
 // Closed without « Enregistrer » (Annuler, Échap, a click beside it): the room as it was kept.
 $('settings').addEventListener('close', () => interfaceUI.revert());
+// Closed during a work (0.6.81): the miniature leaves their foot for its corner at once.
+$('settings').addEventListener('close', () => state.miniature && syncMiniature());
 const projectUI = setupProjectNavigation({
   $,
   state,
@@ -3609,6 +3924,8 @@ const projectUI = setupProjectNavigation({
     requestSettingsClose(() => newConversation(id));
   },
   removeConversation: confirmHistoryDeletion,
+  // A move or a deletion refused during a work, said (0.6.81).
+  notice: text => notice(text),
   // The conversation open, renamed from the fil: its new name at once.
   setTitle: title => setConversationTitle(title),
   // A project renamed or deleted: the library on screen says it too.
@@ -3734,11 +4051,32 @@ const studioUI = setupStudio({
   mark: () => moodixMark()[0],
   recoverGPU: () => recoverGPU(),
   blocked: () =>
-    state.generating || state.status.busy
+    workHeld() ||
+    (state.generating || state.status.busy
       ? 'Attendez la fin de la réponse en cours.'
       : state.preparing || state.loadingHistory || state.updating || state.closingApp
         ? 'Attendez la fin de l’opération en cours.'
-        : '',
+        : ''),
+  // (0.6.81) Its creations by hand are works of the page, followed wherever the user goes; a
+  // conversation not named yet is named in the miniature by the prompt, as it will be (runInStudio).
+  onWork: (id, prompt) =>
+    id
+      ? beginWork('studio', id, prompt ? conversationTitle(String(prompt)).slice(0, 120) : '')
+      : endWork(state.work?.kind === 'studio' ? state.work : null),
+  // Why « Générer » is greyed: a work in another conversation, or Moodix answering in this one
+  // (its proposals set in the Studio are answered there, they hold it).
+  elsewhere: () =>
+    workHeld() ||
+    (state.work && shownHere(state.work.conversationId) && !state.studio?.holds?.()
+      ? state.proposalCard
+        ? 'Moodix attend votre accord dans le Chat : répondez-lui d’abord.'
+        : state.status.toolJob
+          ? 'Génération en cours dans cette conversation : attendez sa fin.'
+          : 'Moodix répond : attendez la fin de sa réponse.'
+      : ''),
+  nameOf: id => titleOf(id),
+  // The pointer of Moodix AI sets the Studio: the places of the page wait for it (2 to 3 s).
+  onLock: () => updateControls(),
   onChange: () => refreshStatus(),
   onRuns: (id, legacy) => {
     state.studioId = id;
@@ -3768,7 +4106,32 @@ const generationUI = setupGenerationUI({
   onOpen: record => showInStudio(record),
   // A take that failed: « Relancer », « Modifier la proposition » (etats-maquette.md, 52).
   onAgain: (request, options) => void againTake(request, options),
+  // Each take being made, as it goes: the miniature of the chat follows it (0.6.81).
+  onLive: event => state.miniature?.take(event),
 });
+/**
+ * The miniature of the chat (0.6.81): while a work goes on, in the corner of every page where it is
+ * not seen; a click brings back to its conversation, where it is followed: its Studio when the
+ * Studio holds it (a take made there), else its Chat.
+ */
+function backToWork(work) {
+  if (!work?.conversationId) return;
+  const toStudio = Boolean(state.studio?.holds?.()) || work.kind === 'studio';
+  requestSettingsClose(async () => {
+    if (!shownHere(work.conversationId)) await loadConversation(work.conversationId);
+    if (!shownHere(work.conversationId)) return;
+    if (toStudio) showStudio();
+    else showChat();
+  });
+}
+const miniature = setupMiniature({
+  node,
+  icon,
+  mark: () => moodixMark()[0],
+  open: work => backToWork(work),
+});
+document.body?.append?.(miniature.element);
+state.miniature = miniature;
 const workflowsUI = setupNativeWorkflows({
   api,
   state,
@@ -4041,11 +4404,9 @@ state.modelChoice = setupModelChoice({
  * those of one project (`project`) or of every one. The conversation is kept first.
  */
 function showLibrary({ project = 'all' } = {}) {
+  // Not held by a work of Moodix or of the Studio (0.6.81): it goes on, the miniature shows it.
   const blocked = () =>
     state.projectWorking ||
-    state.status.toolJob ||
-    state.status.busy ||
-    state.generating ||
     state.preparing ||
     state.loadingHistory ||
     state.savingPreferences ||
@@ -4309,7 +4670,8 @@ $('library-open').onclick = () => showLibrary();
  * Pellicule).
  */
 function goHome(chosen = null) {
-  if (state.updating || state.closingApp || state.loadingHistory) return;
+  // (Not while Moodix AI sets the Studio on screen, 2 to 3 s: its places wait for it, 0.6.81.)
+  if (state.updating || state.closingApp || state.loadingHistory || state.studio?.settingUp?.()) return;
   requestSettingsClose(async () => {
     const project =
       typeof chosen === 'string'
@@ -4333,8 +4695,8 @@ $('brand-home').onclick = event => {
 };
 $('chat-open').onclick = () => showChat();
 async function newConversation(projectId = state.projectId || 'inbox') {
-  if (state.projectWorking || state.status.toolJob || state.generating || state.preparing || state.loadingHistory)
-    return;
+  // Begun while a work goes on too (0.6.81): the conversation it goes on in is set aside, alive.
+  if (state.projectWorking || state.preparing || state.loadingHistory) return;
   state.loadingHistory = true;
   updateControls();
   try {
@@ -4344,12 +4706,16 @@ async function newConversation(projectId = state.projectId || 'inbox') {
       !confirm('Cette conversation n’a pas pu être enregistrée. En commencer une nouvelle quand même ?')
     )
       return;
+    // Its work going on, it is set aside, not erased: the miniature brings it back.
+    const going = Boolean(state.work) && state.work.conversationId === state.conversationId;
     if (
       !state.saveHistory &&
       state.messages.length &&
+      !going &&
       !confirm('Recommencer effacera cette conversation de la page. Continuer ?')
     )
       return;
+    setAside();
     state.projectId = typeof projectId === 'string' ? projectId : 'inbox';
     leaveLibrary();
     state.messages = [];
@@ -4361,7 +4727,7 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     state.archiveSnapshot = null;
     state.historyDirty = false;
     $('prompt').value = '';
-    generationUI.clear();
+    generationUI.clear(state.aside?.nodes);
     $('messages').replaceChildren();
     $('welcome').hidden = false;
     setConversationTitle(UNTITLED);
@@ -4477,6 +4843,8 @@ window.addEventListener('beforeunload', event => {
     state.resourceWorking ||
     settingsGuard.isDirty() ||
     state.generating ||
+    // A creation of the Studio too (0.6.81): reloaded, the page would follow it no more.
+    state.work ||
     state.savingHistory ||
     state.historyDirty ||
     $('prompt').value.trim() ||

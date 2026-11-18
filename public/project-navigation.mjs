@@ -73,18 +73,28 @@ export function setupProjectNavigation({
   setTitle = () => {},
   onChange = () => {},
   onBusy = () => {},
+  // Why a move or a deletion is refused now, said where it is refused (0.6.81).
+  notice = () => {},
 }) {
   let editing = null,
     working = false;
-  const busy = () =>
+  /**
+   * Going from page to page, from a conversation or a project to another (0.6.81): never held by a
+   * work of Moodix or of the Studio (its conversation keeps it, the miniature shows it); only by what
+   * changes the page itself, and by the few seconds Moodix AI sets the Studio on screen.
+   */
+  const moving = () =>
     working ||
-    state.savingHistory ||
-    state.generating ||
     state.preparing ||
     state.loadingHistory ||
     state.updating ||
     state.closingApp ||
-    !!state.status.toolJob;
+    Boolean(state.studio?.settingUp?.());
+  // Moving a conversation to another project, deleting one or a project: not while a work goes on
+  // (its take would be written in a conversation gone, or numbered in the project it left; the
+  // server refuses while a generation runs or Moodix answers).
+  const busy = () => moving() || state.savingHistory || state.generating || !!state.status.toolJob || Boolean(state.work);
+  const HELD = 'Pendant une génération, une conversation ou un projet ne peut être ni déplacé ni supprimé : attendez sa fin.';
   const projects = () => (state.projects?.length ? state.projects : [{ id: 'inbox', name: 'Conversations' }]);
   const currentProject = () => projects().find(project => project.id === (state.projectId || 'inbox')) ?? projects()[0];
   // The Pellicule, once it is there (`useLibrary`): its filter and its numbers of takes. The fil is
@@ -101,21 +111,22 @@ export function setupProjectNavigation({
   };
   /** A line of a menu chosen in the Pellicule: the sheet narrowed, nothing opened. */
   function narrow(change) {
-    if (busy() || !library) return;
+    if (moving() || !library) return;
     closeMenus();
     library.choose(change);
   }
-  function button(label, cls, action, symbol) {
+  /** `locked`: what greys it (moving by default; `busy` for what moves or deletes). */
+  function button(label, cls, action, symbol, locked = moving) {
     const element = node('button', cls);
     element.type = 'button';
     element.setAttribute('aria-label', label);
     if (symbol) element.append(icon(symbol));
     element.onclick = action;
-    element.disabled = !!busy();
+    element.disabled = !!locked();
     return element;
   }
   function edit(project = null) {
-    if (busy()) return;
+    if (moving()) return;
     closeMenus();
     editing = project;
     $('project-dialog-title').textContent = project ? 'Renommer le projet' : 'Nouveau projet';
@@ -127,7 +138,9 @@ export function setupProjectNavigation({
   // Deleting a project keeps its conversations: they go to « Sans projet ».
   let deleting = null;
   function remove(project) {
-    if (busy() || project.id === 'inbox') return;
+    if (project.id === 'inbox' || moving()) return;
+    // A menu open before the work began: refused in words.
+    if (busy()) return notice(HELD);
     closeMenus();
     deleting = project;
     const count = state.historyItems?.filter(item => (item.projectId || 'inbox') === project.id).length ?? 0;
@@ -210,7 +223,7 @@ export function setupProjectNavigation({
 
   /** A project chosen in the fil: a new conversation in it, or the one not begun yet moved there. */
   function choose(project) {
-    if (busy()) return;
+    if (moving()) return;
     closeMenus();
     // In the Pellicule, the project shown.
     if (shelf()) return void narrow({ project: project.id });
@@ -234,7 +247,7 @@ export function setupProjectNavigation({
   // project a menu in the order of the fil.
   let conversationEditing = null;
   function editConversation(item) {
-    if (busy() || item.temporary) return;
+    if (moving() || item.temporary) return;
     closeMenus();
     conversationEditing = item;
     $('conversation-name').value = item.title || '';
@@ -251,6 +264,13 @@ export function setupProjectNavigation({
     paintPicker();
     openPicker(false);
     $('conversation-takes').hidden = true;
+    // Renamed during a work, not moved (0.6.81): its project stays, and the line under it says why.
+    const held = busy();
+    $('conversation-project-button').disabled = held;
+    if (held) {
+      $('conversation-takes').textContent = 'Pendant une génération, une conversation ne change pas de projet.';
+      $('conversation-takes').hidden = false;
+    }
     $('conversation-error').hidden = true;
     $('conversation-save').disabled = false;
     $('conversation-dialog').showModal();
@@ -351,6 +371,12 @@ export function setupProjectNavigation({
     const item = conversationEditing,
       title = $('conversation-name').value.trim().replace(/\s+/g, ' '),
       projectId = $('conversation-project').value || 'inbox';
+    // A work began since the window opened (0.6.81): the name is kept, not the move.
+    if (projectId !== (item.projectId || 'inbox') && busy()) {
+      $('conversation-error').textContent = HELD;
+      $('conversation-error').hidden = false;
+      return;
+    }
     working = true;
     state.projectWorking = true;
     onBusy();
@@ -481,7 +507,7 @@ export function setupProjectNavigation({
     } else pick.append(node('span', 'thread-choice-count', String(count)));
     if (current) pick.setAttribute('aria-current', 'true');
     pick.onclick = action;
-    pick.disabled = !!busy();
+    pick.disabled = !!moving();
     row.append(pick);
     const tools = node('span', 'thread-tools');
     if (rename) {
@@ -492,19 +518,21 @@ export function setupProjectNavigation({
       tools.append(pencil);
     }
     if (erase) {
-      const bin = button(`Supprimer ${kind} « ${label} »`, 'thread-tool is-danger', erase, 'trash');
-      bin.dataset.tip = 'Supprimer';
+      // Greyed during a work (0.6.81), the reason under the pointer.
+      const bin = button(`Supprimer ${kind} « ${label} »`, 'thread-tool is-danger', erase, 'trash', busy);
+      bin.dataset.tip = bin.disabled && !moving() ? HELD : 'Supprimer';
       tools.append(bin);
     }
     if (tools.children.length) row.append(tools);
     return row;
   }
-  function action(label, symbol, run) {
+  /** `locked`: what greys it (moving by default; `busy` for what deletes). */
+  function action(label, symbol, run, locked = moving) {
     const item = node('button', 'thread-action');
     item.type = 'button';
     item.append(icon(symbol), node('span', '', label));
     item.onclick = run;
-    item.disabled = !!busy();
+    item.disabled = !!locked();
     return item;
   }
   function projectMenu() {
@@ -644,14 +672,14 @@ export function setupProjectNavigation({
   }
   $('thread-project').onclick = () => {
     if (menu && opener === $('thread-project')) return closeMenus();
-    if (busy()) return;
+    if (moving()) return;
     open(projectMenu(), $('thread-project'));
     // The line chosen, even far down a list that scrolls; else the first.
     (menu.querySelector('.thread-line.is-current .thread-choice') ?? menu.querySelector('.thread-choice'))?.focus();
   };
   $('thread-conversation').onclick = () => {
     if (menu && opener === $('thread-conversation')) return closeMenus();
-    if (busy()) return;
+    if (moving()) return;
     open(conversationMenu(), $('thread-conversation'));
     // The search; in the Pellicule (no search), the line chosen.
     (
@@ -664,12 +692,14 @@ export function setupProjectNavigation({
   $('thread-project').oncontextmenu = event => {
     event.preventDefault();
     const project = shownProject();
-    if (busy() || !project || project.id === 'inbox') return;
+    if (moving() || !project || project.id === 'inbox') return;
     const list = node('div', 'thread-menu is-small');
     list.setAttribute('role', 'dialog');
     list.setAttribute('aria-label', 'Actions du projet ' + project.name);
-    list.append(action('Renommer', 'edit', () => edit(project)), action('Supprimer le projet', 'trash', () => remove(project)));
+    list.append(action('Renommer', 'edit', () => edit(project)), action('Supprimer le projet', 'trash', () => remove(project), busy));
     list.lastChild.classList.add('is-danger');
+    // Greyed during a work (0.6.81), the reason under the pointer.
+    if (list.lastChild.disabled) list.lastChild.dataset.tip = HELD;
     open(list, $('thread-project'));
     list.querySelector('button')?.focus();
   };
@@ -693,16 +723,17 @@ export function setupProjectNavigation({
         open.append(node('span', 'resume-title', item.title), node('span', 'resume-date', date));
         open.setAttribute('aria-label', `${item.title}, ${date}`);
         open.onclick = () => openConversation(item.id);
-        open.disabled = !!busy();
+        open.disabled = !!moving();
         return open;
       }),
     );
     $('resume-last').onclick = () => recent[0] && openConversation(recent[0].id);
-    $('resume-last').disabled = !!busy() || !recent.length;
+    $('resume-last').disabled = !!moving() || !recent.length;
     $('resume').hidden = !recent.length;
   }
-  function render() {
-    closeMenus();
+  /** `keep`: a menu open stays open (a save during a work, while the user goes about, 0.6.81). */
+  function render({ keep = false } = {}) {
+    if (!keep) closeMenus();
     renderResume();
     const shown = shelf(),
       project = shownProject(),
@@ -744,8 +775,20 @@ export function setupProjectNavigation({
     else if (!inLibrary && thread.parentNode !== home.parent) home.parent.insertBefore(thread, home.next);
   }
   function sync() {
-    for (const control of document.querySelectorAll('#thread button,#chat-open,#studio-open,#library-open'))
-      control.disabled = !!busy();
+    // Never held by a work (0.6.81); for the 2 to 3 s Moodix AI sets the Studio, the reason is said.
+    const held = moving(),
+      setting = Boolean(state.studio?.settingUp?.());
+    for (const control of document.querySelectorAll('#thread button,#chat-open,#studio-open,#library-open')) {
+      control.disabled = !!held;
+      if (!control.dataset) continue;
+      if (setting) control.dataset.heldTip ??= control.dataset.tip ?? '';
+      if (setting) control.dataset.tip = 'Moodix AI règle le Studio…';
+      else if (control.dataset.heldTip !== undefined) {
+        if (control.dataset.heldTip) control.dataset.tip = control.dataset.heldTip;
+        else delete control.dataset.tip;
+        delete control.dataset.heldTip;
+      }
+    }
   }
   async function refresh() {
     const result = await (await api('projects')).json();

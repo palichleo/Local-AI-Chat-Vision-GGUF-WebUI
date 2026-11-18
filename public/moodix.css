@@ -15992,3 +15992,365 @@ button.glass-select::after {
   justify-content: center;
   row-gap: 12px;
 }
+
+/* ------------------------------------------------------------------ the miniature of the chat (0.6.81) */
+/* While a work goes on and the user is elsewhere (work-miniature.mjs): at the bottom right of the
+   page, a small window of smoked glass, a message of the chat in small: the mark and « MOODIX », the
+   name of the conversation, the take in progress as the conversation shows it (its Flux, « VIDÉO ·
+   LTX 2.5 » and its percentage, an accent point and its stage, the fine line of progress). The whole
+   is one button, back to the conversation. Folded, a pill; in the foot of the Paramètres that pill,
+   without glass (no glass in glass). Nothing in it moves but the Flux and the line. */
+.work-mini {
+  --mini-width: 232px;
+  --mini-edge: 16px;
+  position: fixed;
+  right: var(--mini-edge);
+  bottom: var(--mini-edge);
+  z-index: 60;
+  box-sizing: border-box;
+  width: var(--mini-width);
+  border-radius: 14px;
+  background: var(--glass, var(--surface));
+  -webkit-backdrop-filter: blur(24px) saturate(1.15);
+  backdrop-filter: blur(24px) saturate(1.15);
+  box-shadow:
+    inset 0 0 0 1px rgba(238, 232, 222, 0.08),
+    0 18px 48px rgba(0, 0, 0, 0.45);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+}
+.work-mini[hidden] {
+  display: none;
+}
+.work-mini-back {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.work-mini-back:hover {
+  background: rgba(238, 232, 222, 0.04);
+}
+.work-mini-back:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.work-mini-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 22px;
+  /* Room for the chevron at its right, and for the × once the work is over. */
+  padding-right: 30px;
+}
+.work-mini:has(> .work-mini-close:not([hidden])) .work-mini-head {
+  padding-right: 58px;
+}
+.work-mini-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--accent);
+}
+.work-mini-mark svg {
+  width: 15px;
+  height: 15px;
+}
+.work-mini-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-1);
+  font: 400 13px/1.2 var(--font-ui);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.work-mini-frame {
+  position: relative;
+  z-index: 0;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-s);
+  background: #0e0d11;
+}
+.work-mini:not(.has-take) .work-mini-frame {
+  display: none;
+}
+.work-mini-frame.has-flux > .live-preview {
+  visibility: hidden;
+}
+.work-mini-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.work-mini-still[hidden] {
+  display: none;
+}
+.work-mini-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.work-mini:not(.has-take) .work-mini-line {
+  display: none;
+}
+.work-mini-kind {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font: 500 var(--size-label)/1.2 var(--font-ui);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.work-mini-percent {
+  flex: none;
+  color: var(--text-1);
+  font: 400 var(--size-1)/1 var(--font-mono);
+}
+.work-mini-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font: 400 13px/1.3 var(--font-ui);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.work-mini-stage::before {
+  content: '';
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.work-mini[data-phase='failed'] .work-mini-stage {
+  color: var(--alert, var(--danger));
+}
+.work-mini[data-phase='failed'] .work-mini-stage::before {
+  background: var(--alert, var(--danger));
+}
+.work-mini:is([data-phase='stopped'], [data-phase='answered']) .work-mini-stage::before {
+  background: var(--text-3);
+}
+.work-mini-bar {
+  position: relative;
+  display: block;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.work-mini-bar[hidden] {
+  display: none;
+}
+.work-mini-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform: scaleX(var(--mini-progress, 0));
+  transform-origin: left center;
+  transition: transform 0.7s linear;
+}
+/* Before a real fraction: a light that runs along it, as on the take in the conversation. */
+.work-mini-bar:not(.is-determinate) .work-mini-fill {
+  right: auto;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  transform: none;
+  animation: work-mini-wait 1.6s ease-in-out infinite;
+}
+@keyframes work-mini-wait {
+  from {
+    translate: -100% 0;
+  }
+  to {
+    translate: 340% 0;
+  }
+}
+.work-mini-fold,
+.work-mini-close {
+  position: absolute;
+  top: 8px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.work-mini-fold {
+  right: 8px;
+}
+.work-mini-close {
+  right: 36px;
+}
+.work-mini-close[hidden] {
+  display: none;
+}
+.work-mini-fold:is(:hover, :focus-visible),
+.work-mini-close:is(:hover, :focus-visible) {
+  outline: none;
+  background: rgba(238, 232, 222, 0.08);
+  color: var(--text-1);
+}
+.work-mini-fold svg,
+.work-mini-close svg {
+  width: 14px;
+  height: 14px;
+}
+/* The chevron (›) points down to fold it, up to open it again. */
+.work-mini-fold svg {
+  transform: rotate(90deg);
+}
+.work-mini.is-folded .work-mini-fold svg {
+  transform: rotate(-90deg);
+}
+/* The pill (folded, or in the foot of the Paramètres): the take small at its left, its kind, its
+   percentage and its line beside it; the words of Moodix alone when there is no take. */
+.work-mini:is(.is-folded, .is-foot) .work-mini-back {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'frame line'
+    'frame bar';
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 6px;
+  min-height: 44px;
+  padding: 8px 64px 8px 8px;
+}
+.work-mini:is(.is-folded, .is-foot) .work-mini-head {
+  display: none;
+}
+.work-mini:is(.is-folded, .is-foot) .work-mini-frame {
+  grid-area: frame;
+  width: 48px;
+}
+.work-mini:is(.is-folded, .is-foot) .work-mini-line {
+  grid-area: line;
+}
+.work-mini:is(.is-folded, .is-foot) .work-mini-bar {
+  grid-area: bar;
+}
+.work-mini:is(.is-folded, .is-foot).has-take .work-mini-stage {
+  display: none;
+}
+.work-mini:is(.is-folded, .is-foot):not(.has-take) .work-mini-stage {
+  grid-area: line;
+}
+.work-mini.is-folded :is(.work-mini-fold, .work-mini-close) {
+  top: 50%;
+  translate: 0 -50%;
+}
+.work-mini.is-foot {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  width: auto;
+  min-width: 220px;
+  max-width: 320px;
+  margin-right: auto;
+  border-radius: var(--radius-l);
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: inset 0 0 0 1px rgba(238, 232, 222, 0.08);
+}
+.work-mini.is-foot .work-mini-back {
+  padding-right: 12px;
+}
+.work-mini.is-foot :is(.work-mini-fold, .work-mini-close) {
+  display: none;
+}
+/* The Pellicule scrolls under it: its last row can come out from under it. */
+body:has(> .work-mini:not([hidden]):not(.is-foot)) .library-view {
+  padding-bottom: 280px;
+}
+/* The pointer of Moodix AI belongs to the Studio on screen: never over another page (0.6.81, a
+   proposal waiting on « Générer » while the user looks elsewhere); back there, it is there again. */
+body:not([data-view='studio']) .ai-cursor {
+  visibility: hidden;
+}
+
+/* ------------------------------------------------------------------ the Studio held elsewhere (0.6.81) */
+/* A work of another conversation holds the Studio (a take made there, a proposal of Moodix AI on
+   it): in place of its blocks, what holds it and the way back, the miniature. Nothing moves in it. */
+#studio-view .studio-away {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 32px;
+  text-align: center;
+}
+#studio-view .studio-away-mark {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 6px;
+  color: var(--text-3);
+}
+#studio-view .studio-away-kicker {
+  margin: 0;
+  color: var(--text-3);
+  font: 600 var(--size-label)/1.5 var(--font-ui);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+}
+#studio-view .studio-away-text {
+  max-width: 460px;
+  margin: 0;
+  color: var(--text-1);
+  font: 400 15px/1.55 var(--font-ui);
+  text-wrap: balance;
+}
+#studio-view .studio-away-hint {
+  max-width: 460px;
+  margin: 0;
+  color: var(--text-3);
+  font: 400 13px/1.5 var(--font-ui);
+}
+
+/* ------------------------------------------------------------------ the Paramètres during a work (0.6.81) */
+/* What they lock while a generation runs, said at their top (the engine, the models, the history). */
+.settings-held {
+  margin: 0 0 18px;
+  padding: 10px 14px;
+  border-radius: var(--radius-l);
+  background: rgba(238, 232, 222, 0.05);
+  color: var(--text-2);
+  font: 400 13px/1.5 var(--font-ui);
+}
+.settings-held[hidden] {
+  display: none;
+}

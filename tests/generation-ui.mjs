@@ -40,6 +40,11 @@ class Element {
     for (const item of items) adopt(this, item);
     this.children.push(...items);
   }
+  // The picture so far goes first in its frame (live-preview.mjs).
+  prepend(...items) {
+    for (const item of items) adopt(this, item);
+    this.children.unshift(...items);
+  }
   replaceChildren(...items) {
     for (const item of items) adopt(this, item);
     this.children = items;
@@ -690,4 +695,88 @@ test('a continuation says the length of its file under its take, and what it add
   assert.equal(clipSeconds({ frames: 121 }), null);
   // On the card of a proposal: « Suite », and the 5 s it adds.
   assert.equal(cardMeta({ media: 'video', width: 896, height: 1600, seconds: 5, added: true }), 'Suite · 9:16 · + 05.00 S');
+});
+
+test('a take being made tells the miniature where it is; a take put back from the history tells nothing (0.6.81)', async () => {
+  const told = [];
+  const ui = setupGenerationUI({
+    node: (...args) => new Element(...args),
+    api: async () => Response.json({ id: 'old', conversationId: 'a', outputs: [{ source: {} }] }),
+    openOutput() {},
+    onLive: event => told.push(event),
+  });
+  const request = { requestId: 'r1', mediaType: 'video', workflowName: 'LTX 2.5', resolution: { width: 768, height: 448 } },
+    card = ui.mount(new Element(), request);
+  card.progress('Génération · 5/8', 0.42, '/media/job-preview/j/3');
+  const record = { id: 'run', conversationId: 'a', mediaType: 'video', workflowName: 'LTX 2.5', parameters: {}, outputs: [{ take: 14, thumbUrl: '/thumb' }] };
+  card.image({ record, index: 0 });
+  card.finish({ record });
+  assert.deepEqual(
+    told.map(({ type, text, fraction, preview, index }) => [type, text, fraction, preview, index].filter(value => value !== undefined)),
+    [['start'], ['progress', 'Génération · 5/8', 0.42, '/media/job-preview/j/3'], ['image', 0], ['done']],
+  );
+  assert.ok(told.every(event => event.request === request), 'each with its request');
+  assert.equal(told.at(-1).record, record);
+  // Failed, stopped: said too.
+  const failing = ui.mount(new Element(), request);
+  failing.finish({ failed: true, error: 'La mémoire a manqué.' });
+  ui.mount(new Element(), request).withdraw();
+  assert.deepEqual(told.slice(4).map(event => [event.type, event.message].filter(Boolean)), [['start'], ['failed', 'La mémoire a manqué.'], ['start'], ['stopped']]);
+  // Put back from the history (a conversation opened): nothing to follow.
+  const before = told.length,
+    restored = new Element();
+  ui.restore(restored, 'a', 'old');
+  assert.equal(told.length, before);
+  // A miniature that breaks breaks nothing of the card.
+  const sturdy = setupGenerationUI({ node: (...args) => new Element(...args), api: async () => ({}), openOutput() {}, onLive: () => {
+    throw Error('miniature');
+  } });
+  assert.doesNotThrow(() => sturdy.mount(new Element(), request).progress('Génération · 1/8', 0.1));
+});
+
+test('the cards of a conversation set aside stay while another is shown; they go with it (0.6.81)', () => {
+  const ui = setupGenerationUI({ node: (...args) => new Element(...args), api: async () => ({}), openOutput() {} });
+  const shown = new Element(),
+    setAside = new Element();
+  const left = ui.mount(setAside, { requestId: 'r1', mediaType: 'video' }),
+    other = ui.mount(shown, { requestId: 'r2' });
+  const disposed = card => {
+    // A card disposed of hears no more of its take.
+    card.progress('Génération · 8/8', 1);
+    return !card.container.children[0].children[1].children[0].classList.contains('is-determinate');
+  };
+  // Another conversation opened: the cards on the page go, those set aside stay.
+  ui.clear({ contains: element => element === setAside });
+  assert.equal(disposed(other), true);
+  assert.equal(disposed(left), false);
+  // The conversation set aside leaves the page: its cards with it.
+  const later = new Element(),
+    again = ui.mount(later, { requestId: 'r3' });
+  ui.drop({ contains: element => element === later });
+  assert.equal(disposed(again), true);
+});
+
+test('while another creation runs, « Relancer » and « Modifier la proposition » are greyed, and say why (0.6.81)', () => {
+  const container = new Element();
+  const ui = setupGenerationUI({
+    node: (...args) => new Element(...args),
+    api: async () => ({}),
+    openOutput() {},
+    onAgain() {},
+  });
+  ui.mount(container, { requestId: 'r1', mediaType: 'video', resolution: { width: 768, height: 448 } }).finish({ failed: true, error: 'Échec.' });
+  const veil = container.children[0].children[0].children.at(-1),
+    [relaunch, edit] = veil.children[2].children;
+  ui.busy('Génération en cours dans « Renard » : attendez sa fin.');
+  assert.deepEqual([relaunch.disabled, edit.disabled], [true, true]);
+  assert.equal(relaunch.title, 'Génération en cours dans « Renard » : attendez sa fin.');
+  // One that fails meanwhile is greyed at once.
+  const next = new Element();
+  ui.mount(next, { requestId: 'r2', mediaType: 'video', resolution: { width: 768, height: 448 } }).finish({ failed: true, error: 'Échec.' });
+  assert.equal(next.children[0].children[0].children.at(-1).children[2].children[0].disabled, true);
+  // Over: as they were, their own words back.
+  ui.busy('');
+  assert.deepEqual([relaunch.disabled, edit.disabled], [false, false]);
+  assert.equal(relaunch.title, 'Relancer avec les mêmes réglages');
+  assert.equal(edit.title, 'Rouvrir la proposition pour la modifier');
 });
