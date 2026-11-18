@@ -138,3 +138,58 @@ test('a temporary file left behind by a write that never ended does not block th
   await assert.rejects(module.atomicJson(target, [], async () => { throw Object.assign(Error('no'), { code: 'EINVAL' }); }));
   assert.deepEqual(await left(), []);
 });
+
+test('every file of the data is replaced as given, text or bytes, and EACCES is tried again as EPERM and EBUSY are', async t => {
+  const { root } = await fixture(t),
+    preferences = join(root, 'data', 'preferences.json'),
+    thumbnail = join(root, 'data', 'thumbnail.jpg'),
+    jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46]);
+  // The text as written by its module (indented, a last line ended): not made into JSON again.
+  await module.atomicFile(preferences, '{\n  "theme": "dark"\n}\n');
+  assert.equal(await readFile(preferences, 'utf8'), '{\n  "theme": "dark"\n}\n');
+  await module.atomicFile(thumbnail, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+  let attempts = 0;
+  await module.atomicFile(thumbnail, jpeg, async (from, to) => {
+    attempts++;
+    assert.deepEqual(await readFile(to), Buffer.from([0xff, 0xd8, 0xff, 0xe0]), 'the previous one stays whole meanwhile');
+    if (attempts <= 3) throw Object.assign(Error('Reader lock'), { code: ['EPERM', 'EBUSY', 'EACCES'][attempts - 1] });
+    return rename(from, to);
+  });
+  assert.equal(attempts, 4);
+  assert.deepEqual(await readFile(thumbnail), jpeg);
+  assert.deepEqual((await readdir(join(root, 'data'))).filter(name => name.endsWith('.tmp')), []);
+});
+
+test('what was just downloaded waits longer than a file of the data, and no longer once its work is stopped', async t => {
+  const { root } = await fixture(t),
+    from = join(root, 'data', 'model.safetensors.part'),
+    to = join(root, 'data', 'model.safetensors');
+  await writeFile(from, 'weights');
+  let attempts = 0;
+  // Held by an antivirus for 14 attempts: more than the second a file of the data waits.
+  const held = async (source, target) => {
+    if (++attempts <= 14) throw Object.assign(Error('Held by an antivirus'), { code: 'EPERM' });
+    return rename(source, target);
+  };
+  await assert.rejects(module.renameWithRetry(from, to, { renameFile: held }), { code: 'EPERM' });
+  assert.equal(attempts, 13);
+  attempts = 0;
+  await module.renameWithRetry(from, to, { renameFile: held, retries: module.LONG_RETRIES });
+  assert.equal(attempts, 15);
+  assert.equal(await readFile(to, 'utf8'), 'weights');
+  // The download cancelled while it waits: the wait ends there.
+  const controller = new AbortController();
+  attempts = 0;
+  await assert.rejects(
+    module.renameWithRetry(from, to, {
+      renameFile: async () => {
+        if (++attempts === 2) controller.abort();
+        throw Object.assign(Error('Held by an antivirus'), { code: 'EBUSY' });
+      },
+      retries: module.LONG_RETRIES,
+      signal: controller.signal,
+    }),
+    { name: 'AbortError' },
+  );
+  assert.equal(attempts, 2);
+});

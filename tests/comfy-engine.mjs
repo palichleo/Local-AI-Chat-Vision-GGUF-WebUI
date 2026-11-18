@@ -16,6 +16,7 @@ import {
 import { comfyGraph } from '../lib/comfy-graphs.mjs';
 import { GenerationService } from '../lib/generation-service.mjs';
 import { mp4Bytes } from '../lib/video-info.mjs';
+import { held, twice } from './fixtures/held-renames.mjs';
 
 const u32 = value => {
   const bytes = Buffer.alloc(4);
@@ -705,6 +706,29 @@ test('a creation named by the application goes in the folder of its kind, never 
     );
   assert.equal(fake.seen.prompts.length, sent);
   assert.deepEqual((await readdir(dataDir)).sort(), ['comfy-engine.json', 'output', 'output-manifests']);
+});
+
+test('a creation just written that Windows holds a moment (an antivirus reading it) takes its name once let go', async t => {
+  const fake = await comfy(t),
+    dataDir = await trial(),
+    outputDir = join(dataDir, 'output'),
+    manifestDir = join(dataDir, 'output-manifests'),
+    client = fake.connect(fake.baseUrl),
+    name = '2026-11-18_10-00-00_moss-image_b4c1',
+    work = krea({ outputName: name }),
+    names = await comfyNames(client, work),
+    target = join(outputDir, 'image', name + '.png');
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  let made;
+  // Before 0.6.85: the creation failed, its file left in the folder of ComfyUI only.
+  const refused = await held([target], async () => {
+    made = (await runOnComfy(work, { client, names, outputDir, manifestDir })).outputs[0];
+  });
+  assert.deepEqual(refused, twice([target]));
+  assert.equal(made.filename, name + '.png');
+  assert.deepEqual(await readFile(target), fake.seen.film);
+  // Nothing unfinished left in the folder of the outputs.
+  assert.deepEqual(await readdir(outputDir), ['image']);
 });
 
 test('steps are counted over every pass, then the decoding is said once', async () => {

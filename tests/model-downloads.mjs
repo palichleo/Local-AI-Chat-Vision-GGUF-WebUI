@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ModelDownloads, formatBytes } from '../lib/model-downloads.mjs';
+import { held, twice } from './fixtures/held-renames.mjs';
 
 const MODEL = Buffer.from('model weights '.repeat(200)),
   VOCAB = Buffer.from('{"a":1}'),
@@ -104,6 +105,23 @@ test('a shipped workflow offers what it lacks, and the files land in their folde
   assert.equal(f.registered.get('tokenizer-asset').path, join(f.models, 'text_encoders', 'tokenizer'));
   assert.equal(f.requests[0].url, 'https://huggingface.co/Org/Krea/resolve/abc/diffusion_models/krea2_turbo.safetensors');
   assert.deepEqual(await f.downloads.offers([f.workflow]), {}, 'nothing left to offer');
+});
+
+test('a file or a folder just downloaded that Windows holds a moment (an antivirus reading it) takes its name once let go', async t => {
+  const f = await fixture(t);
+  const model = join(f.models, 'diffusion_models', 'krea2_turbo.safetensors'),
+    staged = join(f.models, 'text_encoders', 'tokenizer.download', 'vocab.json'),
+    tokenizer = join(f.models, 'text_encoders', 'tokenizer');
+  const refused = await held([model, staged, tokenizer], async () => {
+    await f.downloads.start(f.workflow);
+    const done = await f.finish();
+    // Before 0.6.85: « error » at the very end, and the whole file read again at the next try.
+    assert.equal(done.state, 'done', done.error);
+  });
+  assert.deepEqual(refused, twice([model, staged, tokenizer]));
+  assert.deepEqual(await readFile(model), MODEL);
+  assert.deepEqual(await readFile(join(tokenizer, 'vocab.json')), VOCAB);
+  await assert.rejects(stat(model + '.part'));
 });
 
 test('a download resumes from its .part file and checks the whole file', async t => {
