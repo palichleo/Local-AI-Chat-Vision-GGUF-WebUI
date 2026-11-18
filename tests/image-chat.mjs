@@ -122,6 +122,8 @@ async function exchange({
     updateControls() {},
     openSettings() {},
     persistConversation: async () => true,
+    // The end of the generation of the server before the last save (0.6.84): none here.
+    generationOver: async () => {},
     waitForModel: async () => {},
     historyWrite: Promise.resolve(),
     refreshStatus: async () => {},

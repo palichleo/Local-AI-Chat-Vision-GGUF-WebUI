@@ -217,6 +217,9 @@ function page({
     DOMException,
     performance,
     console,
+    // The page waits for the server to hand the card back after a stop (generationOver, 0.6.84).
+    setTimeout,
+    clearTimeout,
     crypto: { randomUUID: () => ID },
     confirm: () => true,
     historyWrite: Promise.resolve(),
@@ -1766,4 +1769,39 @@ test('another conversation opened while a generation runs is opened without a qu
   generation.finish(madeImage());
   await turn;
   assert.equal(JSON.parse((await store.read(ID)).messages[2].content).run_id, RUN, 'its take written in its own at its end');
+});
+
+test('a creation stopped by the user is kept once the server has handed the card back: no « Historique non enregistré » (0.6.84)', async t => {
+  // Saved at once, it was refused (/api/history/save waits for the end of a generation): the stop was
+  // never kept, and the page said « Historique non enregistré : Attendez la fin de la génération. ».
+  const store = await historyStore(t),
+    proposal = { call: functionCall('create_image', 'call_boat'), workflowName: 'Krea 2', requestId: 'r1', autoAllow: true };
+  let started;
+  const running = new Promise(resolve => (started = resolve));
+  const making = page({
+    store,
+    chat: (body, n) => (n === 1 ? called(proposal) : said('')),
+    requestTool: (request, signal) =>
+      new Promise((resolve, reject) => {
+        started();
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+  });
+  const turn = making.send('Un bateau rouge');
+  await running;
+  making.state.status = { ...making.state.status, toolJob: { id: 'job', state: 'generating', conversationId: ID, callId: 'call_boat' } };
+  const saves = making.saves.length;
+  making.$('cancel').onclick();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  // The server still hands the card back: nothing saved yet, the turn not over.
+  assert.equal(making.saves.length, saves);
+  assert.equal(making.state.generating, true);
+  making.state.status = { ...making.state.status, toolJob: null };
+  await turn;
+  const kept = await store.read(ID),
+    result = JSON.parse(kept.messages[2].content);
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.unanswered, undefined, 'stopped, not a call left without its result');
+  assert.deepEqual(making.notices.filter(Boolean), []);
+  assert.equal(making.state.generating, false);
 });

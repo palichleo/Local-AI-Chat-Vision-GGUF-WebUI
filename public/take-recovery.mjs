@@ -174,15 +174,18 @@ export function setupTakeRecovery({
   }
   /**
    * The server keeps every save for the end of a generation (/api/history/save): one stopped still
-   * hands the card back for a few seconds. Waited for, three minutes at most.
+   * hands the card back for a few seconds. Waited for, three minutes at most; not when the card is
+   * held (54), which only « Libérer le GPU » ends (app.js, generationOver).
    */
   async function idle() {
     for (const until = Date.now() + 180000; Date.now() < until; ) {
+      let job;
       try {
-        if (!(await (await api('status')).json())?.toolJob) return;
+        job = (await (await api('status')).json())?.toolJob;
       } catch {
         return;
       }
+      if (!job || job.blocked) return;
       await new Promise(resolve => setTimeout(resolve, 700));
     }
   }

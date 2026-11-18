@@ -486,6 +486,26 @@ function persistConversation(conversationId = state.conversationId) {
   return historyWrite;
 }
 /**
+ * The end of the generation the server is making, if any (0.6.84): it keeps every save of the
+ * history until then (/api/history/save), and one stopped still hands the card back for a few
+ * seconds, the chat model coming back after it (a take made to its end is waited for so already).
+ * Saved before, a stop said « Historique non enregistré : Attendez la fin de la génération. » and was
+ * not kept. Not waited for when the card is held (54): only « Libérer le GPU » ends that. Three
+ * minutes at most.
+ */
+async function generationOver() {
+  for (const until = Date.now() + 180000; Date.now() < until; ) {
+    let job;
+    try {
+      job = (await (await api('status')).json())?.toolJob;
+    } catch {
+      return;
+    }
+    if (!job || job.blocked) return;
+    await new Promise(resolve => setTimeout(resolve, 700));
+  }
+}
+/**
  * A conversation begun for a creation of the Studio that made nothing (0.6.82: it is saved as the
  * creation starts): it leaves the history again, as it never came before. Kept when it cannot go: its
  * call reads « demande restée sans suite ».
@@ -2528,6 +2548,9 @@ async function againTake(failed, { edit = false, figure = null, container }) {
   } catch (error) {
     if (!signal.aborted) notice(error.message);
   } finally {
+    // Stopped: kept once the server has handed the card back (generationOver, 0.6.84); where its
+    // conversation is then (the user may have opened another meanwhile).
+    await generationOver();
     const talk = holderOf(talkId);
     if (history.length > (talk.messages?.length ?? 0)) {
       talk.messages = archiveMessages(history);
@@ -2651,6 +2674,9 @@ async function runOutputAction(record, index, action) {
       notice(error.message);
     }
   } finally {
+    // Stopped: kept once the server has handed the card back (generationOver, 0.6.84); where its
+    // conversation is then.
+    await generationOver();
     const talk = holderOf(talkId);
     if (history.length > (talk.messages?.length ?? 0) + 1) {
       talk.messages = archiveMessages(history);
@@ -3714,6 +3740,8 @@ async function sendMessage(event) {
     // The turn is over, answered, failed or stopped: the mark is at rest, its thought timed.
     view.thought?.end();
     markThinking(view, false);
+    // A creation stopped: kept once the server has handed the card back (generationOver, 0.6.84).
+    if (usedTool) await generationOver();
     await persistConversation(talkId);
     // The conversation this turn was in: another may be opened before its name is asked.
     const answered = talkId;
@@ -3922,6 +3950,8 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
   };
   await persistConversation(talkId);
   const takeBack = async () => {
+    // Stopped: once the server has handed the card back, it allows the save (generationOver, 0.6.84).
+    await generationOver();
     const talk = holderOf(talkId);
     talk.archiveSnapshot = { messages: [...before], incomplete: false };
     if (before.length) await persistConversation(talkId);

@@ -81,6 +81,8 @@ test('grouped resource frames retain their separate labels and never enter saved
       snapshots.push(JSON.stringify(state.archiveSnapshot));
       return true;
     },
+    // The end of the generation of the server before the last save (0.6.84): none here.
+    generationOver: async () => {},
     workflowsUI: { saveReview: async () => {} },
     api: async (route, body) => {
       if (route === 'resources/read') {
