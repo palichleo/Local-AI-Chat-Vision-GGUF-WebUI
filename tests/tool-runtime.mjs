@@ -782,6 +782,11 @@ test('a failed creation made again by itself is no longer an image of its series
   // the chat model loaded again after it (it was left out, with no next image to bring it back).
   const again = await rt.again({ requestId: first.requestId });
   assert.equal(again.series, undefined);
+  // A call of its own (0.6.86): the conversation keeps both, each with its result; one identifier
+  // for both gave the take of a reload to the call that failed (take-recovery.mjs).
+  assert.notEqual(again.call.id, first.call.id);
+  assert.match(again.call.id, /^call_[0-9a-f]{24}$/);
+  assert.deepEqual([again.call.function.name, again.call.function.arguments], [first.call.function.name, first.call.function.arguments]);
   assert.equal((await make(again)).state, 'done');
   assert.deepEqual(order.slice(-4), ['stop', 'run', 'free', 'start']);
   assert.equal(rt.owed, null);

@@ -5102,6 +5102,20 @@ test('the Studio stays the conversation’s whose take it makes: another one sho
     studio.render();
     assert.equal(body.find('studio-go')[0].disabled, false);
     assert.equal(body.find('studio-progress')[0].hidden, true);
+    // The work that greys it ends with nothing else drawing the Studio (its own creation drawn last
+    // while it still counted, or a turn of Moodix ended in the Chat): the page says it changed, and
+    // « Générer » is free again (0.6.86: it said « Moodix répond » until the next drawing).
+    elsewhere = 'Moodix répond : attendez la fin de sa réponse.';
+    studio.render();
+    assert.equal(body.find('studio-go')[0].disabled, true);
+    elsewhere = '';
+    studio.busyChanged();
+    assert.equal(body.find('studio-go')[0].disabled, false);
+    assert.equal(body.find('studio-progress')[0].hidden, true);
+    // Nothing changed: not drawn again (the page asks at each of its updates).
+    const drawn = body.find('studio-go')[0];
+    studio.busyChanged();
+    assert.equal(body.find('studio-go')[0], drawn);
   } finally {
     page.restore();
   }

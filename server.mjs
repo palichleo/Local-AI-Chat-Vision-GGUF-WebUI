@@ -965,6 +965,9 @@ export async function createApplication({
       if (req.headers['sec-fetch-site'] === 'cross-site') throw problem('Requête externe refusée.', 403);
       const requestURL = new URL(req.url, url),
         path = requestURL.pathname;
+      // The tab of the page asking (0.6.86): the one that started a generation is there while it asks.
+      const tab = String(req.headers['x-moodix-tab'] || '').slice(0, 64);
+      runtime.seen(tab);
       const previewMatch = path.match(/^\/media\/previews\/([0-9a-f-]{36})$/);
       if (previewMatch) {
         if (!['GET', 'HEAD'].includes(req.method)) throw problem('Méthode non prise en charge.', 405);
@@ -2141,8 +2144,13 @@ export async function createApplication({
       if (path === '/api/tools/execute') {
         if (clearingHistory || persistingGallery || savingGeneration || savingSettings || pickingFile)
           throw problem('Une opération est en cours.', 409);
-        const job = await runtime.execute(body);
+        const job = await runtime.execute({ ...body, tab });
         return send(202, job?.record ? { ...job, record: galleryView(job.record) } : job);
+      }
+      // The tab that started the generation is closed or reloaded (pagehide): another may follow it now.
+      if (path === '/api/tools/leave') {
+        runtime.left(tab);
+        return send(200, { left: true });
       }
       if (path === '/api/gallery/persist') {
         if (!preferences.saveHistory || disablingHistory) throw problem('L’historique est désactivé.', 403);
@@ -2421,7 +2429,9 @@ export async function createApplication({
         return send(200, { conversation: historyView(await renamed) });
       }
       if (path === '/api/history/save') {
-        if (runtime.active) throw problem('Attendez la fin de la génération.', 409);
+        // The conversation whose take is being made waits for its end; any other is saved meanwhile
+        // (0.6.86: every conversation was refused during a generation, any page being open then).
+        if (runtime.writes(body.id)) throw problem('Attendez la fin de la génération.', 409);
         if (clearingHistory) throw problem('Suppression de l’historique en cours.', 409);
         if (!preferences.saveHistory) throw problem('L’historique est désactivé.', 403);
         if (disablingHistory) throw problem('Désactivation de l’historique en cours.', 409);

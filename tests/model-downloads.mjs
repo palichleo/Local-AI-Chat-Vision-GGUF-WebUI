@@ -171,6 +171,36 @@ test('a folder stopped after one of its files fetches only the others when it st
   assert.deepEqual(await readFile(join(f.models, 'text_encoders', 'tokenizer', 'vocab.json')), VOCAB);
 });
 
+test('a folder fetched whole but left without its name asks no room for what it already holds', async t => {
+  const f = await fixture(t, {
+    // Room for a few bytes above the margin kept free: not for the folder again.
+    free: 2 * 1024 ** 3 + 100,
+    catalog: {
+      tokenizer: {
+        repo: 'Org/Tokenizer',
+        revision: 'def',
+        folder: true,
+        size: MODEL.length + VOCAB.length,
+        files: [
+          { path: 'krea2_turbo.safetensors', size: MODEL.length, sha256: sha(MODEL) },
+          { path: 'vocab.json', size: VOCAB.length },
+        ],
+      },
+    },
+  });
+  // Every file fetched and named; the folder not yet (its rename refused a minute, or stopped then).
+  const staging = join(f.models, 'text_encoders', 'tokenizer.download');
+  await mkdir(staging, { recursive: true });
+  await writeFile(join(staging, 'krea2_turbo.safetensors'), MODEL);
+  await writeFile(join(staging, 'vocab.json'), VOCAB);
+  // Before 0.6.86: « Pas assez de place » (the whole folder counted again), never finished.
+  await f.downloads.start({ ...f.workflow, components: { tokenizer: f.workflow.components.tokenizer } });
+  const done = await f.finish();
+  assert.equal(done.state, 'done', done.error);
+  assert.deepEqual(f.requests, [], 'nothing fetched again');
+  assert.deepEqual(await readFile(join(f.models, 'text_encoders', 'tokenizer', 'vocab.json')), VOCAB);
+});
+
 test('a file that is not the original is deleted, and the download says so', async t => {
   const f = await fixture(t);
   f.bodies['krea2_turbo.safetensors'] = Buffer.from('x'.repeat(MODEL.length));

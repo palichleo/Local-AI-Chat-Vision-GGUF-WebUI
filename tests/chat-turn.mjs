@@ -10,6 +10,8 @@ import * as chatVideos from '../public/chat-videos.mjs';
 import * as transcript from '../public/transcript.mjs';
 import { reflection, thoughtTime } from '../public/reflection.mjs';
 import { runSeries } from '../public/image-series.mjs';
+import { takesOf } from '../public/take-recovery.mjs';
+import { takeContent } from '../public/generation-runtime.mjs';
 import { History, MAX_CONVERSATION_MESSAGES } from '../lib/history.mjs';
 import { nativeFields } from '../lib/native-messages.mjs';
 import { problem } from '../lib/engine.mjs';
@@ -207,6 +209,10 @@ function page({
     thoughtTime,
     readSSE,
     runSeries,
+    takesOf,
+    takeContent,
+    // The conversation shown, drawn again from its messages (app.js).
+    rerender: () => seen.drawn.push('rerender'),
     state,
     $,
     node,
@@ -1744,6 +1750,52 @@ test('a creation of the Studio is kept as it starts, and taken back when it make
   assert.deepEqual(deleted, [{ confirm: true, id: ID }]);
   assert.equal(fresh.state.historyItems.some(item => item.id === ID), false);
   await assert.rejects(store.read(ID));
+});
+
+test('a creation of the Studio stopped once its take was saved keeps it, in the conversation begun for it (0.6.86)', async t => {
+  // Taken back with its line before 0.6.86: the conversation begun for it left the history, and the
+  // take the Pellicule with it (its record is kept in the folder of its conversation).
+  const store = await historyStore(t),
+    deleted = [];
+  let started;
+  const running = new Promise(resolve => (started = resolve));
+  const take = {
+    id: RUN,
+    conversationId: ID,
+    callId: 'action1',
+    createdAt: '2026-11-18T10:00:00.000Z',
+    mediaType: 'image',
+    workflowName: 'Krea 2',
+    workflowId: 'krea',
+    prompt: 'un renard',
+    parameters: { seed: 7 },
+    outputs: [{ source: { filename: 'renard.png' }, take: 7 }],
+  };
+  const studio = page({
+    store,
+    state: { conversationId: ID, view: 'studio' },
+    requestTool: (request, signal) =>
+      new Promise((resolve, reject) => {
+        started();
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+    routes: {
+      [`gallery/${ID}?images=0`]: async () => Response.json({ runs: [take, { ...take, id: 'autre', callId: 'action0' }] }),
+      'history/delete': async body => (deleted.push(plain(body)), Response.json({ removed: body.id })),
+    },
+  });
+  const stop = new AbortController(),
+    proposal = { call: functionCall('create_image', 'action1'), workflowName: 'Krea 2', requestId: 'r1', plan: { prompt: 'un renard' } };
+  const made = studio.context.runInStudio(proposal, { signal: stop.signal, onProgress() {}, conversationId: ID });
+  await running;
+  stop.abort();
+  const result = await made;
+  assert.equal(result.record.id, RUN, 'the Studio shows the take made');
+  assert.deepEqual(deleted, [], 'the conversation stays, its take with it');
+  const saved = await store.read(ID);
+  assert.deepEqual(roles(saved.messages), ['user', 'assistant', 'tool']);
+  assert.deepEqual([JSON.parse(saved.messages[2].content).run_id, JSON.parse(saved.messages[2].content).takes], [RUN, [7]]);
+  assert.ok(studio.drawn.includes('rerender'), 'drawn from the conversation, its card having gone');
 });
 
 test('another conversation opened while a generation runs is opened without a question: the server keeps saves for its end (0.6.82)', async t => {

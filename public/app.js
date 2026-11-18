@@ -16,7 +16,8 @@ import { setupInterfaceSettings } from './interface-settings.mjs';
 import { setupHelpTips } from './help-tips.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupMiniature } from './work-miniature.mjs';
-import { setupTakeRecovery } from './take-recovery.mjs';
+import { setupTakeRecovery, takesOf } from './take-recovery.mjs';
+import { takeContent } from './generation-runtime.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
 import { STUDIO_LINE, STUDIO_NOTE, callNote, closedCalls, conversationTitle, lastExchange, settledNotes, spokenText } from './transcript.mjs';
@@ -196,6 +197,26 @@ let tokenKnown;
 const pageReady = new Promise(resolve => {
   tokenKnown = resolve;
 });
+/**
+ * This tab, for the server (0.6.86): the page that starts a generation is the one that follows it
+ * again once reloaded (the same tab, its storage kept); a page of another tab follows it only once
+ * that one is gone (take-recovery.mjs). Each opening but a reload is a tab of its own (a tab
+ * duplicated copies the storage of the first).
+ */
+const TAB = (() => {
+  const key = 'moodix.tab',
+    made = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+  try {
+    const reload = performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload',
+      kept = reload ? sessionStorage.getItem(key) : null;
+    if (kept) return kept;
+    const tab = made();
+    sessionStorage.setItem(key, tab);
+    return tab;
+  } catch {
+    return made();
+  }
+})();
 async function api(route, body, options = {}) {
   await pageReady;
   const { raw = false, headers: extraHeaders = {}, again = false, ...requestOptions } = options;
@@ -205,6 +226,7 @@ async function api(route, body, options = {}) {
     headers: {
       Authorization: `Bearer ${used}`,
       'Content-Type': raw ? 'application/octet-stream' : 'application/json',
+      'X-Moodix-Tab': TAB,
       ...extraHeaders,
     },
     ...(body === undefined ? {} : { body: raw ? body : JSON.stringify(body) }),
@@ -490,18 +512,20 @@ function persistConversation(conversationId = state.conversationId) {
  * history until then (/api/history/save), and one stopped still hands the card back for a few
  * seconds, the chat model coming back after it (a take made to its end is waited for so already).
  * Saved before, a stop said « Historique non enregistré : Attendez la fin de la génération. » and was
- * not kept. Not waited for when the card is held (54): only « Libérer le GPU » ends that. Three
- * minutes at most.
+ * not kept. Not waited for when the card is held (54): only « Libérer le GPU » ends that. Only for
+ * conversation `id`, the one whose take is being made (0.6.86: the server saves the others); ten
+ * minutes at most, as long as the server may take to hand the card back and bring a local chat
+ * model back (three minutes before 0.6.86: past them, the save was still refused).
  */
-async function generationOver() {
-  for (const until = Date.now() + 180000; Date.now() < until; ) {
+async function generationOver(id = state.conversationId) {
+  for (const until = Date.now() + 600000; Date.now() < until; ) {
     let job;
     try {
       job = (await (await api('status')).json())?.toolJob;
     } catch {
       return;
     }
-    if (!job || job.blocked) return;
+    if (!job || job.blocked || (job.conversationId && job.conversationId !== id)) return;
     await new Promise(resolve => setTimeout(resolve, 700));
   }
 }
@@ -760,7 +784,8 @@ function renderTranscript(messages, incomplete = false, { waiting = null } = {})
             for (const image of data.images) if (typeof image?.run_id === 'string') generationUI.restore(view.generations, state.conversationId, image.run_id, { compact: data.studio === true });
             // Fewer images than asked: where it stopped, under them (« Série interrompue avant sa fin :
             // 1 image sur 3 a été faite. », a reload, 0.6.82; stopped by the user; an image refused).
-            if (data.status === 'partial' && typeof data.message === 'string' && data.message)
+            // (Not while its next image is still being made: its card says it.)
+            if (data.status === 'partial' && typeof data.message === 'string' && data.message && !made)
               view.generations.append(node('p', 'proposal-cancelled', data.message));
           }
           // « Annuler » of a card: its line, where the card was (16/11); declined otherwise, nothing.
@@ -1222,6 +1247,8 @@ function updateControls() {
     // A work the Studio held, over: left meanwhile, the Studio follows the page (it says it itself
     // at each end; asked again here, it changes nothing).
     state.studio?.letGo?.();
+    // What greys « Générer » changed (a work began or ended): the Studio says it at once (0.6.86).
+    state.studio?.busyChanged?.();
     syncMiniature();
   }
 }
@@ -2550,7 +2577,7 @@ async function againTake(failed, { edit = false, figure = null, container }) {
   } finally {
     // Stopped: kept once the server has handed the card back (generationOver, 0.6.84); where its
     // conversation is then (the user may have opened another meanwhile).
-    await generationOver();
+    await generationOver(talkId);
     const talk = holderOf(talkId);
     if (history.length > (talk.messages?.length ?? 0)) {
       talk.messages = archiveMessages(history);
@@ -2676,7 +2703,7 @@ async function runOutputAction(record, index, action) {
   } finally {
     // Stopped: kept once the server has handed the card back (generationOver, 0.6.84); where its
     // conversation is then.
-    await generationOver();
+    await generationOver(talkId);
     const talk = holderOf(talkId);
     if (history.length > (talk.messages?.length ?? 0) + 1) {
       talk.messages = archiveMessages(history);
@@ -3741,7 +3768,7 @@ async function sendMessage(event) {
     view.thought?.end();
     markThinking(view, false);
     // A creation stopped: kept once the server has handed the card back (generationOver, 0.6.84).
-    if (usedTool) await generationOver();
+    if (usedTool) await generationOver(talkId);
     await persistConversation(talkId);
     // The conversation this turn was in: another may be opened before its name is asked.
     const answered = talkId;
@@ -3951,13 +3978,14 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
   await persistConversation(talkId);
   const takeBack = async () => {
     // Stopped: once the server has handed the card back, it allows the save (generationOver, 0.6.84).
-    await generationOver();
+    await generationOver(talkId);
     const talk = holderOf(talkId);
     talk.archiveSnapshot = { messages: [...before], incomplete: false };
     if (before.length) await persistConversation(talkId);
     else await forgetConversation(talkId);
   };
-  let result;
+  let result,
+    found = false;
   try {
     result = await workflowsUI.requestTool(
       proposal,
@@ -3972,8 +4000,20 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
     generation.finish(result);
   } catch (error) {
     view.article.remove();
-    await takeBack();
-    throw error;
+    // A stop (or a fault) that came once its take was saved, the server still handing the card back:
+    // the take is kept and shown (0.6.86). Taken back with its line before, a conversation begun for
+    // it left the history with the take, which left the Pellicule.
+    await generationOver(talkId);
+    let made = null;
+    try {
+      made = takesOf((await (await api(`gallery/${encodeURIComponent(talkId)}?images=0`)).json()).runs, proposal.call.id).at(-1) ?? null;
+    } catch {}
+    if (!made) {
+      await takeBack();
+      throw error;
+    }
+    result = { record: made, content: takeContent(made, { request: proposal, studio: true }), images: [], failed: false, error: '' };
+    found = true;
   }
   // Nothing made, nothing to tell: the Studio says why.
   if (!result.record) {
@@ -4000,6 +4040,8 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
   // Named by its prompt alone, as the server names it (the pill of the title bar says the mode).
   const named = conversationTitle(said).slice(0, 120);
   if (named) nameHere(talkId, named);
+  // A take found after its stop: drawn from the conversation, its card having gone.
+  if (found) rerender(talkId);
   if (shownHere(talkId)) turnActions();
   await persistConversation(talkId);
   contextMeter.schedule();
@@ -4252,7 +4294,8 @@ const generationUI = setupGenerationUI({
  */
 function backToWork(work) {
   if (!work?.conversationId) return;
-  const toStudio = Boolean(state.studio?.holds?.()) || work.kind === 'studio';
+  // (A creation of the Studio followed again after a reload too, 0.6.86: `studio`.)
+  const toStudio = Boolean(state.studio?.holds?.()) || work.kind === 'studio' || work.studio === true;
   requestSettingsClose(async () => {
     if (!shownHere(work.conversationId)) await loadConversation(work.conversationId);
     if (!shownHere(work.conversationId)) return;
@@ -4292,7 +4335,8 @@ function rerender(id) {
   generationUI.clear(state.aside?.nodes);
   $('messages').replaceChildren();
   citedTakes.forget();
-  const views = renderTranscript(state.messages);
+  // A call whose take the server still makes keeps waiting for its card, as at the opening.
+  const views = renderTranscript(state.messages, false, { waiting: state.recovery?.waiting(id, state.messages) });
   turnActions();
   $('welcome').hidden = state.messages.length > 0;
   scrollToBottom();
@@ -4321,12 +4365,24 @@ state.recovery = setupTakeRecovery({
   renderNavigation: () => projectUI.render(),
   scrollToBottom,
   node,
+  tab: TAB,
   onChange: () => {
     turnActions();
     void refreshStatus();
   },
 });
-window.addEventListener('pagehide', () => state.recovery.rememberTab());
+window.addEventListener('pagehide', () => {
+  state.recovery.rememberTab();
+  // The generation this tab started: another tab may follow it at once (0.6.86); reloaded, this
+  // same tab follows it again.
+  if (state.token && state.status?.toolJob?.owner === TAB)
+    void fetch('/api/tools/leave', {
+      method: 'POST',
+      keepalive: true,
+      headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json', 'X-Moodix-Tab': TAB },
+      body: '{}',
+    }).catch(() => {});
+});
 
 const settingsGuard = setupSettingsGuard({
   dialog: $('settings'),
@@ -5025,7 +5081,8 @@ window.addEventListener('beforeunload', event => {
     state.generating ||
     // Not for a creation alone (of the Studio, or followed again): reloaded, the page follows it again
     // (0.6.82). Moodix writing, a card waiting for the user, a series still to make would be lost.
-    (state.work && !['studio', 'follow'].includes(state.work.kind)) ||
+    // Without the history, nothing is found again: asked for those too.
+    (state.work && (!['studio', 'follow'].includes(state.work.kind) || !state.saveHistory)) ||
     state.savingHistory ||
     state.historyDirty ||
     $('prompt').value.trim() ||

@@ -297,6 +297,7 @@ export function setupStudio({
     legacyRuns = [],
     legacy = false, // the Sortie shows, and the Studio works in, the Studio of before Moodix
     working = null, // { label, fraction, preview, controller | external } while a generation runs
+    busyDrawn = '', // why a work of the page greys « Générer », as last drawn (busyChanged)
     releasing = null, // the chat model leaving the GPU, asked once the user sets the Studio
     released = false,
     enriching = false,
@@ -3273,6 +3274,16 @@ export function setupStudio({
     render();
     return true;
   }
+  /**
+   * A work of the page began or ended (0.6.86): the Studio is drawn again when what greys « Générer »
+   * changes. Drawn last while its own creation, or a turn of Moodix, still counted as a work of this
+   * conversation, it said « Moodix répond » and kept « Générer » greyed until it was drawn again.
+   */
+  function busyChanged() {
+    if (away() || !info || !$('studio-body')) return;
+    const now = !working && !(gpuBlocked() && !working) && !answering() && !checking ? elsewhere() : '';
+    if (now !== busyDrawn) render();
+  }
   /** A generation approved here, run by the chat turn: its progress comes from there. */
   function follow(label, fraction, preview) {
     if (!working?.external) return;
@@ -4269,6 +4280,7 @@ export function setupStudio({
               : (working?.label ?? ''),
       ),
       setting = node('p', 'studio-ai-line', 'Moodix AI règle le Studio');
+    busyDrawn = busyElsewhere;
     // Image · Vidéo · Son at the left, the step under way in the middle, Moodix AI at the right.
     step.id = 'studio-progress';
     step.setAttribute('role', 'status');
@@ -5039,6 +5051,7 @@ export function setupStudio({
     propose,
     decline,
     followAgain,
+    busyChanged,
     follow,
     settled,
     show,

@@ -130,7 +130,7 @@ test('a result takes the place of the one a call was left with; a creation of th
  * makes (`job`), the takes of the gallery (`runs`), what /api/tools/job answers (`fresh`), and
  * followTool (`follow`). What it did is kept in `seen`.
  */
-function page({ id = ID, messages = asked(), job = null, runs = [], fresh = undefined, follow = null, storage = null, state: given = {} } = {}) {
+function page({ id = ID, messages = asked(), job = null, runs = [], fresh = undefined, follow = null, storage = null, tab = 'onglet-1', state: given = {} } = {}) {
   const seen = { saves: [], forgotten: [], rendered: 0, mounted: [], works: [], loaded: [], started: [], views: [], adopted: 0, studio: [], api: [], busy: 0 };
   const state = {
     conversationId: id,
@@ -228,6 +228,7 @@ function page({ id = ID, messages = asked(), job = null, runs = [], fresh = unde
     renderNavigation: () => seen.loaded.push('fil'),
     node: (tag, className, text) => ({ tag, className, text }),
     storage,
+    tab,
   });
   return { state, seen, recovery, views };
 }
@@ -310,17 +311,126 @@ test('a creation of the Studio being made is followed by the Studio too; stopped
     fresh: running({ callId: 'call_st', studio: true }),
     follow: async (job, request, signal, onProgress) => {
       onProgress('Génération · 3/30', 0.1);
+      seen.studioWork = state.work?.studio;
       state.controller.abort();
       throw new DOMException('Arrêtée', 'AbortError');
     },
   });
   await recovery.complete(ID, views());
   await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(seen.studioWork, true, 'the miniature brings the user back to the Studio');
   assert.equal(seen.adopted, 1);
   assert.equal(seen.mounted[0].options.compact, true);
   assert.deepEqual(seen.studio.map(([name]) => name), ['follow', 'settled']);
   assert.deepEqual(seen.mounted[0].told.at(-1), ['withdraw']);
   assert.deepEqual(seen.saves.at(-1).messages.map(message => message.content), ['Bonjour', 'Bonjour !']);
+});
+
+test('a proposal of Moodix AI approved in the Studio and stopped after a reload keeps its words and says it was stopped (0.6.86)', async () => {
+  // Made with the Studio (job.studio), not by hand in it: before 0.6.86 the follow took it for a
+  // creation of the Studio and took Moodix's message and its call out of the conversation.
+  const proposed = [
+    { role: 'user', content: 'Une vidéo de bateau' },
+    { role: 'assistant', content: 'Je règle le Studio pour une vidéo.', tool_calls: [call('call_v', 'create_video')] },
+  ];
+  const { state, seen, recovery, views } = page({
+    messages: closedCalls(proposed),
+    job: running({ callId: 'call_v', studio: true, media: 'video' }),
+    fresh: running({ callId: 'call_v', studio: true, media: 'video' }),
+    follow: async () => {
+      state.controller.abort();
+      throw new DOMException('Arrêtée', 'AbortError');
+    },
+  });
+  await recovery.complete(ID, views());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const saved = seen.saves.at(-1).messages;
+  assert.deepEqual(saved.map(message => message.role), ['user', 'assistant', 'tool']);
+  assert.equal(saved[1].content, 'Je règle le Studio pour une vidéo.');
+  assert.equal(JSON.parse(saved[2].content).status, 'cancelled');
+  assert.deepEqual(seen.studio.at(-1), ['settled', 'Génération arrêtée.'], 'the Studio followed it, and lets it go');
+});
+
+test('a stop that came once its take was saved gives the call its take, and the Studio shows it (0.6.86)', async () => {
+  // The server was still handing the card back: before 0.6.86 the call said « rien n'a été produit »,
+  // and a creation of the Studio by hand was taken out of the conversation.
+  const holder = {};
+  const { state, seen, recovery, views } = page({
+    messages: [{ role: 'user', content: 'Bonjour' }, { role: 'assistant', content: 'Bonjour !' }, ...studioAsked(call('call_st'))],
+    job: running({ callId: 'call_st', studio: true }),
+    fresh: running({ callId: 'call_st', studio: true }),
+    runs: [take('r1', 'call_st', { number: 4 })],
+    follow: async (job, request, signal) => {
+      holder.state.controller.abort();
+      signal.throwIfAborted();
+    },
+  });
+  holder.state = state;
+  await recovery.complete(ID, views());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const saved = seen.saves.at(-1).messages;
+  assert.deepEqual(saved.map(message => message.role), ['user', 'assistant', 'user', 'assistant', 'tool']);
+  assert.deepEqual([JSON.parse(saved[4].content).run_id, JSON.parse(saved[4].content).takes], ['r1', [4]]);
+  assert.deepEqual(seen.studio.at(-1), ['settled', 'r1'], 'the Studio shows it');
+  assert.equal(seen.rendered, 1, 'drawn again: the take where its card was withdrawn');
+});
+
+test('a creation another tab follows is left to it: waiting under its call, nothing taken out; once that tab is gone, it is followed (0.6.86)', async () => {
+  // Followed by two tabs before 0.6.86 (the launcher opens a second one): the second ended the
+  // series of the first and saved its conversation over the other's.
+  const elsewhere = running({ callId: 'call_st', studio: true, owner: 'onglet-2', ownerAway: false });
+  const kept = page({ messages: [{ role: 'user', content: 'Bonjour' }, ...studioAsked(call('call_st'))], job: elsewhere, fresh: elsewhere });
+  assert.deepEqual([...kept.recovery.waiting(ID, kept.state.messages)], ['call_st'], 'its call waits, never « sans suite »');
+  await kept.recovery.complete(ID, kept.views());
+  assert.deepEqual([kept.seen.started.length, kept.seen.saves.length, kept.seen.forgotten.length], [0, 0, 0]);
+  assert.equal(kept.state.work, null);
+  // This tab started it (reloaded since), or the other is gone: followed here.
+  for (const job of [{ ...elsewhere, owner: 'onglet-1' }, { ...elsewhere, ownerAway: true }]) {
+    const { seen, recovery, views } = page({ messages: [{ role: 'user', content: 'Bonjour' }, ...studioAsked(call('call_st'))], job, fresh: job });
+    await recovery.complete(ID, views());
+    assert.equal(seen.started.length, 1);
+  }
+});
+
+test('a conversation left before its creation could be followed is not followed from elsewhere; its unsent message is kept (0.6.86)', async () => {
+  const { state, seen, recovery, views } = page({ job: running(), fresh: running() });
+  // Another conversation opened while the page asked the server for the job: no work held it, it was
+  // not set aside; its card would have gone in a page no longer on screen.
+  const complete = recovery.complete(ID, views());
+  state.conversationId = OTHER;
+  await complete;
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual([seen.started.length, seen.mounted.length, state.work], [0, 0, null]);
+  assert.equal(recovery.following(), null, 'followed at its next opening');
+  // A take written for a conversation opened with its last message back in the message box: that
+  // message is saved with it, still waiting (before 0.6.86 it left the history).
+  const unsent = { role: 'user', content: 'Et maintenant en bleu' };
+  const back = page({ runs: [take('r1', 'call_1')] });
+  back.state.archiveSnapshot = { messages: [...asked(), unsent], incomplete: true };
+  await back.recovery.complete(ID, back.views());
+  const saved = back.seen.saves.at(-1);
+  assert.deepEqual([saved.messages.at(-1).content, saved.incomplete], ['Et maintenant en bleu', true]);
+  assert.equal(JSON.parse(saved.messages[2].content).run_id, 'r1');
+});
+
+test('a creation of the Studio the page loses while it follows it frees the Studio: it says why, nothing is written', async () => {
+  const { state, seen, recovery, views } = page({
+    messages: [{ role: 'user', content: 'Bonjour' }, { role: 'assistant', content: 'Bonjour !' }, ...studioAsked(call('call_st'))],
+    job: running({ callId: 'call_st', studio: true }),
+    fresh: running({ callId: 'call_st', studio: true }),
+    follow: async (job, request, signal, onProgress) => {
+      onProgress('Génération · 3/30', 0.1);
+      throw Error('La génération suivie a été remplacée par une autre tâche.');
+    },
+  });
+  await recovery.complete(ID, views());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(seen.adopted, 1);
+  // Before 0.6.86 the Studio kept « Génération en cours… » and its conversation until a reload.
+  assert.deepEqual(seen.studio.at(-1), ['settled', 'La génération suivie a été remplacée par une autre tâche.']);
+  assert.deepEqual(seen.mounted[0].told.at(-1), ['failed', 'La génération suivie a été remplacée par une autre tâche.']);
+  assert.deepEqual(seen.saves, [], 'its take may be made: the next opening finds it');
+  assert.deepEqual([state.work, state.controller], [null, null]);
 });
 
 test('a series followed again stops at the image it was making: every image made is said, the server lets the others go', async () => {

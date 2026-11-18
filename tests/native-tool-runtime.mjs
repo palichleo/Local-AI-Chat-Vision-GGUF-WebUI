@@ -66,12 +66,25 @@ test('native immutable job keeps random seed through authorization and GPU hando
       assert.equal(job.parameters.seed, 123);
       during = runtime.status();
       drawn = runtime.status({ view: true });
+      // The conversation of its take waits for its end to be saved; the others do not (0.6.86).
+      writes = [runtime.writes(id), runtime.writes('autre'), runtime.writes(undefined)];
+      // The tab that started it: heard, it is there; gone, another may follow it (0.6.86).
+      runtime.seen('onglet-2');
+      owner.push([runtime.status().owner, runtime.status().ownerAway]);
+      runtime.left('onglet-2');
+      owner.push(runtime.status().ownerAway);
+      runtime.left('onglet-1');
+      owner.push(runtime.status().ownerAway);
+      runtime.seen('onglet-1');
+      owner.push(runtime.status().ownerAway);
       return { outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] };
     },
     free: async () => events.push('gpu released'),
   };
   let during = null,
-    drawn = null;
+    drawn = null,
+    writes = null;
+  const owner = [];
   const runtime = new ToolRuntime({
     engine,
     catalog,
@@ -95,9 +108,13 @@ test('native immutable job keeps random seed through authorization and GPU hando
     turnId: id,
     messages: [{ role: 'user', content: 'boat' }],
   });
-  await runtime.execute({ requestId: request.requestId, permission: 'once' });
+  await runtime.execute({ requestId: request.requestId, permission: 'once', tab: 'onglet-1' });
   await runtime.finished;
   assert.equal(runtime.status().state, 'done', runtime.status().error);
+  assert.deepEqual(writes, [true, false, false]);
+  assert.equal(runtime.writes(id), false, 'over: saved again');
+  // Another tab heard or leaving changes nothing; the one that started it, once gone, lets it go.
+  assert.deepEqual(owner, [['onglet-1', false], false, true, false]);
   assert.equal(preparation, 1);
   assert.equal(saved.provider, 'native');
   assert.equal(saved.parameters.seed, 123);

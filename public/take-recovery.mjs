@@ -21,6 +21,10 @@ import { STUDIO_LINE, closedCalls } from './transcript.mjs';
 
 // Every tool but the local readers is a generation verb, as the transcript reads them.
 const isGeneration = call => Boolean(call?.function?.name) && !call.function.name.startsWith('local_');
+// A fault of the page itself (a name or a property that is not there), not a request that failed:
+// the server not answering is said on the card, not as an error nobody expected.
+const pageFault = error =>
+  error instanceof ReferenceError || (error instanceof TypeError && !/fetch|network|load failed/i.test(String(error.message)));
 const studioLine = message =>
   message?.role === 'user' && message.internal === true && typeof message.content === 'string' && STUDIO_LINE.test(message.content);
 // What a stopped creation is told, as when the page that asked it is stopped (app.js, sendMessage).
@@ -154,38 +158,51 @@ export function setupTakeRecovery({
   // Makes an element of the page (app.js's `node`): the line of a series stopped.
   node = null,
   storage = globalThis.sessionStorage,
+  // This tab, as the server knows the one that started a generation (app.js, TAB).
+  tab = '',
 }) {
   // The job followed here (one at a time, as the server makes them), and each conversation being completed.
   let following = null;
   const completing = new Map();
-  /** The creation the server makes now, when a page may follow it: its conversation and its call known. */
-  const runningJob = () => {
+  /** The creation the server makes now: its conversation and its call known. */
+  const makingJob = () => {
     const job = state.status?.toolJob;
     return job && !job.blocked && job.callId && job.conversationId && !['done', 'error', 'cancelled'].includes(job.state)
       ? job
       : null;
   };
+  /**
+   * The one this page may follow (0.6.86): started by this tab (a reload keeps it), or by a tab gone
+   * since. One still open in another tab follows it there: a second tab that followed it too ended its
+   * series (« Cette série est terminée ») and saved its conversation over the other's.
+   */
+  const runningJob = () => {
+    const job = makingJob();
+    return job && (!job.owner || job.owner === tab || job.ownerAway === true) ? job : null;
+  };
   /** The calls of conversation `id` the job being made answers: drawn waiting for its card, not « sans suite ». */
   function waiting(id, messages) {
-    const job = runningJob();
+    const job = makingJob();
     return job && job.conversationId === id && openCalls(messages).some(item => item.call.id === job.callId)
       ? new Set([job.callId])
       : new Set();
   }
   /**
-   * The server keeps every save for the end of a generation (/api/history/save): one stopped still
-   * hands the card back for a few seconds. Waited for, three minutes at most; not when the card is
-   * held (54), which only « Libérer le GPU » ends (app.js, generationOver).
+   * The server keeps the save of a conversation for the end of the generation that makes its take
+   * (/api/history/save): one stopped still hands the card back for a while, the chat model coming
+   * back after it. Waited for, ten minutes at most, for conversation `id` alone (the server saves the
+   * others, 0.6.86); not when the card is held (54), which only « Libérer le GPU » ends (app.js,
+   * generationOver).
    */
-  async function idle() {
-    for (const until = Date.now() + 180000; Date.now() < until; ) {
+  async function idle(id) {
+    for (const until = Date.now() + 600000; Date.now() < until; ) {
       let job;
       try {
         job = (await (await api('status')).json())?.toolJob;
       } catch {
         return;
       }
-      if (!job || job.blocked) return;
+      if (!job || job.blocked || (job.conversationId && job.conversationId !== id)) return;
       await new Promise(resolve => setTimeout(resolve, 700));
     }
   }
@@ -194,9 +211,14 @@ export function setupTakeRecovery({
     const talk = holderOf(id);
     // Neither shown nor set aside any more: completed when it is opened next.
     if (talk !== state && talk !== state.aside) return;
+    // Its last message, left without an answer, was put back in the message box when it was opened
+    // (app.js, loadConversation): saved with it as before, not lost if it is not sent again.
+    const kept = talk.archiveSnapshot,
+      last = kept?.incomplete ? kept.messages?.at(-1) : null,
+      unsent = last?.role === 'user' && !last.internal && talk.messages?.at(-1)?.role !== 'user' ? last : null;
     talk.messages = messages;
-    talk.archiveSnapshot = { messages: [...messages], incomplete: false };
-    await idle();
+    talk.archiveSnapshot = unsent ? { messages: [...messages, unsent], incomplete: true } : { messages: [...messages], incomplete: false };
+    await idle(id);
     if (messages.length) await persistConversation(id);
     else await forget(id);
   }
@@ -228,16 +250,18 @@ export function setupTakeRecovery({
           if (made.length > item.made.length) {
             messages = withResult(messages, item.call.id, recoveredContent(item, made)) ?? messages;
             changed = true;
-          } else if (!made.length && item.studio && runningJob()?.callId !== item.call.id) {
+          } else if (!made.length && item.studio && makingJob()?.callId !== item.call.id) {
             messages = withoutCall(messages, item.call.id) ?? messages;
             changed = true;
           }
         }
         if (changed) {
-          // Saved once the server allows it: after the generation it makes now, followed below.
+          // Shown at once; saved once the server allows it (after the generation that makes its take,
+          // followed below). Drawn only after its save before 0.6.86: up to the end of a video made in
+          // another conversation.
           const saving = keep(id, messages);
-          if (!live) await saving;
           if (shownHere(id)) views = rerender(id) ?? views;
+          if (!live) await saving;
         }
       }
       if (!live || following === job.id) return;
@@ -265,8 +289,14 @@ export function setupTakeRecovery({
     try {
       fresh = (await (await api('tools/job')).json()) ?? null;
     } catch {}
-    // Over and gone meanwhile (another took its place): the next opening finds its take.
-    if (fresh?.id !== job.id) return;
+    // Over and gone meanwhile (another took its place): the next opening finds its take. Left before
+    // it could be followed (another conversation opened meanwhile, not set aside: no work held it):
+    // the next opening follows it.
+    if (fresh?.id !== job.id || (holderOf(id) !== state && holderOf(id) !== state.aside)) return;
+    // `studio`: shown as a creation of the Studio, which follows it too (« Générer » there, by hand
+    // or on a proposal of Moodix AI); `item.studio`: made by hand in the Studio (its line before the
+    // call), the only one that leaves nothing when it makes nothing. A proposal of Moodix AI keeps
+    // its words and says how it ended, as when the page stays (sendMessage).
     const view = fresh.proposal ?? {},
       studio = Boolean(fresh.studio || view.studio || item.studio),
       request = {
@@ -279,6 +309,8 @@ export function setupTakeRecovery({
     const work = beginWork('follow', id),
       controller = new AbortController(),
       host = views?.get?.(item.index) ?? null;
+    // Made in the Studio: the miniature brings the user back there, as for one followed from its start.
+    if (studio && work) work.studio = true;
     // « Interrompre » (and the stop of the Studio) stop it: the server cancels it by its identifier.
     state.controller = controller;
     let card = null,
@@ -315,31 +347,42 @@ export function setupTakeRecovery({
       // answer, a fault of the page). Nothing is written: its take may well be made, and the next
       // opening finds it; its card says what happened. A fault of the page goes on to the page.
       if (!stopped) {
+        // The Studio followed it too: it stops saying « Génération en cours… » and holding the
+        // conversation, and says what happened (as a creation of its own that fails).
+        if (studio) void state.studio?.settled?.({ error: error.message });
         if (state.controller === controller) state.controller = null;
         endWork(work);
         onChange();
-        if (error instanceof TypeError || error instanceof ReferenceError) throw error;
+        if (pageFault(error)) throw error;
         return;
       }
     }
     try {
-      if (studio) void state.studio?.settled?.(result.record ? result : { error: result.error });
-      else if (result.record) state.studio?.invalidate?.();
-      let content = result.content;
-      if (item.asked > 1) {
-        // A series stops at the image it was making: the others are not made (the server lets them go).
-        if (view.series?.id) void api('tools/series', { series: view.series.id, end: true }).catch(() => {});
+      let content = result.content,
+        record = result.record ?? null;
+      // A series stops at the image it was making: the others are not made (the server lets them go).
+      if (item.asked > 1 && view.series?.id) void api('tools/series', { series: view.series.id, end: true }).catch(() => {});
+      // What its call made, read again: every image of a series, and the take of a stop that came once
+      // it was saved (the server still handing the card back). Said « rien n'a été produit » before
+      // 0.6.86, and a creation of the Studio in a new conversation took it out of the Pellicule.
+      if (item.asked > 1 || !record) {
         let runs = [];
         try {
           runs = (await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json()).runs ?? [];
         } catch {}
         const made = takesOf(runs, item.call.id);
-        if (made.length) content = recoveredContent(item, made);
+        if (made.length > item.made.length || (item.asked > 1 && made.length)) {
+          content = recoveredContent(item, made);
+          record ??= made.at(-1);
+        }
       }
-      // A creation of the Studio that made nothing leaves nothing, as when the page stays (runInStudio).
-      const before = holderOf(id).messages ?? [],
-        messages = studio && !result.record ? withoutCall(before, item.call.id) : withResult(before, item.call.id, content);
-      if (studio && !result.record) host?.article?.remove?.();
+      if (studio) void state.studio?.settled?.(record ? { ...result, record } : { error: result.error });
+      else if (record) state.studio?.invalidate?.();
+      // A creation of the Studio by hand that made nothing leaves nothing, as when the page stays (runInStudio).
+      const gone = item.studio && !record,
+        before = holderOf(id).messages ?? [],
+        messages = gone ? withoutCall(before, item.call.id) : withResult(before, item.call.id, content);
+      if (gone) host?.article?.remove?.();
       // A series stopped so says where under its images, as the conversation reads it next (app.js).
       if (item.asked > 1 && node && host?.generations) {
         let said = null;
@@ -349,6 +392,8 @@ export function setupTakeRecovery({
         if (said?.status === 'partial' && said.message) host.generations.append(node('p', 'proposal-cancelled', said.message));
       }
       if (messages) await keep(id, messages);
+      // The take of a stop that came once it was saved: shown where its card was withdrawn.
+      if (record && !result.record && item.asked === 1 && shownHere(id)) rerender(id);
     } finally {
       if (state.controller === controller) state.controller = null;
       endWork(work);
