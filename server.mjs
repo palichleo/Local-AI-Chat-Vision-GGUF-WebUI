@@ -27,10 +27,10 @@ import { compactSession } from './public/update-ui.mjs';
 import { checkForUpdates } from './lib/updates.mjs';
 import { componentVersions, runVersion } from './lib/components.mjs';
 import { prepareUpdate, launchInstaller } from './lib/update-install.mjs';
-import { atomicJson } from './lib/update-files.mjs';
+import { atomicFile, atomicJson } from './lib/update-files.mjs';
 import { updateSession, readUpdateSession } from './lib/update-session.mjs';
 import { randomBytes, randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -1958,8 +1958,7 @@ export async function createApplication({
             );
           }
           if (modelChanged) {
-            await writeFile(`${configPath}.tmp`, JSON.stringify(nextConfig, null, 2), { mode: 0o600 });
-            await rename(`${configPath}.tmp`, configPath);
+            await atomicFile(configPath, JSON.stringify(nextConfig, null, 2));
             config = nextConfig;
             configWarning = '';
           }
@@ -2243,8 +2242,7 @@ export async function createApplication({
             await historySaves;
             await history.flush();
           }
-          await writeFile(`${preferencesPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 });
-          await rename(`${preferencesPath}.tmp`, preferencesPath);
+          await atomicFile(preferencesPath, JSON.stringify(next, null, 2));
           preferences = next;
         } finally {
           savingPreferences = false;
@@ -2444,8 +2442,7 @@ export async function createApplication({
         const next = normalizeConfig(body);
         saving = true;
         try {
-          await writeFile(`${configPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 });
-          await rename(`${configPath}.tmp`, configPath);
+          await atomicFile(configPath, JSON.stringify(next, null, 2));
           config = next;
           configWarning = '';
         } finally {

@@ -138,3 +138,24 @@ test('a temporary file left behind by a write that never ended does not block th
   await assert.rejects(module.atomicJson(target, [], async () => { throw Object.assign(Error('no'), { code: 'EINVAL' }); }));
   assert.deepEqual(await left(), []);
 });
+
+test('every file of the data is replaced as given, text or bytes, and EACCES is tried again as EPERM and EBUSY are', async t => {
+  const { root } = await fixture(t),
+    preferences = join(root, 'data', 'preferences.json'),
+    thumbnail = join(root, 'data', 'thumbnail.jpg'),
+    jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46]);
+  // The text as written by its module (indented, a last line ended): not made into JSON again.
+  await module.atomicFile(preferences, '{\n  "theme": "dark"\n}\n');
+  assert.equal(await readFile(preferences, 'utf8'), '{\n  "theme": "dark"\n}\n');
+  await module.atomicFile(thumbnail, Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+  let attempts = 0;
+  await module.atomicFile(thumbnail, jpeg, async (from, to) => {
+    attempts++;
+    assert.deepEqual(await readFile(to), Buffer.from([0xff, 0xd8, 0xff, 0xe0]), 'the previous one stays whole meanwhile');
+    if (attempts <= 3) throw Object.assign(Error('Reader lock'), { code: ['EPERM', 'EBUSY', 'EACCES'][attempts - 1] });
+    return rename(from, to);
+  });
+  assert.equal(attempts, 4);
+  assert.deepEqual(await readFile(thumbnail), jpeg);
+  assert.deepEqual((await readdir(join(root, 'data'))).filter(name => name.endsWith('.tmp')), []);
+});
