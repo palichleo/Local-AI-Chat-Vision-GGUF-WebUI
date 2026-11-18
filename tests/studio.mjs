@@ -4374,6 +4374,101 @@ test('when Moodix AI wrote nothing the Studio says the proposal in a sentence of
   assert.equal(plainWords('## Le plan\n\n1. **Début** : `neige`\n2. [la fin](https://x)'), 'Le plan Début : neige la fin');
 });
 
+test('the empty screen says how to begin, but not while Moodix AI sets the Studio nor while its proposal waits (0.6.101)', async () => {
+  // It said « laissez Moodix AI régler le Studio avec la moitié droite du bouton » as it did so.
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    said = [],
+    hints = [];
+  let page = null;
+  Object.defineProperty(said, 'push', {
+    value(label) {
+      hints.push(page ? page.body.find('studio-blank-text').length : null);
+      return Array.prototype.push.call(this, label);
+    },
+  });
+  page = await studioPage(tools, {}, { runs, cursor: said, targets: true });
+  const { body, studio, restore } = page;
+  try {
+    const answer = studio.propose(structuredClone(recorded.request), new AbortController().signal, { said: recorded.content });
+    await until(() => said.includes('attend votre accord'));
+    // At each step of the pointer, then while it waits: where the take comes and its size, nothing more
+    // (what is proposed is said at the top of the screen).
+    assert.deepEqual(hints, [0, 0, 0, 0, 0, 0, 0]);
+    assert.equal(body.find('studio-blank-title')[0].textContent, 'Votre première prise apparaîtra ici.');
+    // Its size breaks after « · » only, in a narrow frame: never « 768 » alone on a line.
+    assert.equal(body.find('studio-blank-size')[0].textContent, '9:16 · 448 × 768');
+    studio.decline();
+    assert.equal(await answer, 'deny');
+    // The Studio the user's again: how to begin, as before.
+    assert.deepEqual(
+      body.find('studio-blank-text').map(line => line.textContent),
+      ['Écrivez un prompt à gauche, ou laissez Moodix AI régler le Studio avec la moitié droite du bouton.'],
+    );
+  } finally {
+    restore();
+  }
+});
+
+test('the label of the pointer of Moodix AI is whole in the window wherever it rests, and its new words are put back first where it is (0.6.101)', async () => {
+  // It went to the left of the pointer at once, out of a window of 1280 px while the pointer left the
+  // column of the prompt for the settings (it glides with it now, moodix.css: check-ui follows it).
+  const { setupPointer } = await import('../public/studio-pointer.mjs');
+  let words = '';
+  const set = [],
+    transitions = [],
+    label = {
+      // As wide as its words (about the width of the page's).
+      get offsetWidth() {
+        return 70 + 6 * words.length;
+      },
+      style: {
+        set transition(value) {
+          transitions.push(value);
+        },
+      },
+    },
+    text = {
+      set textContent(value) {
+        words = value;
+      },
+      closest: () => label,
+    },
+    cursor = {
+      hidden: true,
+      style: { setProperty: (name, value) => set.push([name, parseFloat(value), label.offsetWidth]) },
+      classList: { add() {}, remove() {}, toggle() {} },
+      querySelector: () => null,
+    },
+    host = { innerWidth: 1280, matchMedia: () => ({ matches: false }), requestAnimationFrame: run => run(), setTimeout };
+  const pointer = setupPointer({ cursor, text, host }),
+    at = x => ({ getBoundingClientRect: () => ({ left: x - 20, top: 300, width: 40, height: 40 }) });
+  /** The edges of the label in the window each time its place is set: [left, right]. */
+  const edges = () => {
+    let x = null;
+    return set.flatMap(([name, value, width]) => {
+      if (name === '--ai-x') x = value;
+      return name === '--ai-label-x' ? [[x + value, x + value + width]] : [];
+    });
+  };
+  // The start of the prompt, the bar of the length at the right, the modes at the left edge, a word
+  // long at the right edge: at its right where it holds, at its left where it does not.
+  pointer.move(at(67), 'pose la prise 1 en début');
+  pointer.move(at(1122), 'règle la durée');
+  pointer.move(at(10), 'passe en Vidéo');
+  pointer.move(at(1270), 'lance la génération (autorisé dans les Paramètres)');
+  const placed = edges();
+  assert.ok(placed.every(([left, right]) => left >= 8 && right <= 1272), JSON.stringify(placed));
+  // Each new place (after the first) begins with its new words where the pointer is, at once (no
+  // glide), then goes with it: the words of « règle la durée » first at the start of the prompt.
+  assert.deepEqual(placed.slice(0, 3), [[89, 89 + 214], [89, 89 + 154], [950, 1104]]);
+  assert.deepEqual(transitions, ['none', '', 'none', '', 'none', '']);
+  // A window narrower than its words: their beginning stays in sight.
+  host.innerWidth = 300;
+  pointer.move(at(150), 'lance la génération (autorisé dans les Paramètres)');
+  assert.equal(edges().at(-1)[0], 8);
+});
+
 test('the prompt of a proposal is folded under what Moodix AI understood while it is set and waits; its arrow shows it whole (0.6.95)', async () => {
   const recorded = await recordedProposal(),
     { tools, runs } = replayStudio(),

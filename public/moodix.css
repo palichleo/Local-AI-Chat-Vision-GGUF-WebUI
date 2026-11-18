@@ -6698,9 +6698,12 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   stroke-width: 1.5;
   stroke-linejoin: round;
 }
+/* Its place beside the pointer is set by studio-pointer.mjs (--ai-label-x: at its right, or at its left,
+   always whole in the window), and it glides there with the pointer, in the same time and the same
+   curve: from one place to the next it never leaves the window (0.6.101). */
 .ai-cursor-label {
   position: absolute;
-  left: 22px;
+  left: 0;
   top: 14px;
   display: inline-flex;
   align-items: center;
@@ -6713,6 +6716,11 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   font-weight: 500;
   white-space: nowrap;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  transform: translateX(var(--ai-label-x, 22px));
+  transition: transform 0.25s cubic-bezier(0.45, 0, 0.2, 1);
+}
+.ai-cursor.is-placing .ai-cursor-label {
+  transition: none;
 }
 .ai-cursor-label strong {
   font-weight: 800;
@@ -6744,6 +6752,9 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   .ai-cursor {
     transition: opacity 0.25s ease;
   }
+  .ai-cursor-label {
+    transition: none;
+  }
 }
 
 .ai-cursor.is-placing {
@@ -6772,10 +6783,6 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
 }
 .composer:has(textarea:focus-visible) {
   outline-color: var(--focus);
-}
-.ai-cursor.is-left .ai-cursor-label {
-  left: auto;
-  right: 18px;
 }
 :root[data-theme='light'] #chat-form.composer {
   background: var(--surface);
@@ -14822,6 +14829,31 @@ body[data-setup='incomplete'] #resume-last {
   font: 400 11px/1 var(--font-mono);
   letter-spacing: 0.08em;
   opacity: 0.75;
+}
+/* Never out of its frame, nor cut in the middle of a word, whatever the format (0.6.101): a frame of
+   9:16 is 150 px wide in a window of 720 px. The title follows the width of the frame, 23 px at most and
+   12 % of it, so that its longest word holds on a line of its own; a frame too narrow or too low for how
+   to begin leaves it out, then a very low one the Éclipse: the title and the size stay. (The frame is a
+   container of its own size, « the take in its frame » below.) */
+#studio-view .studio-blank-title {
+  font-size: min(23px, 12cqw);
+  overflow-wrap: normal;
+  hyphens: manual;
+}
+@container (max-width: 239px) {
+  #studio-view .studio-blank-text {
+    display: none;
+  }
+}
+@container (max-height: 160px) {
+  #studio-view .studio-blank-text {
+    display: none;
+  }
+}
+@container (max-height: 120px) {
+  #studio-view .studio-blank-mark {
+    display: none;
+  }
 }
 #studio-view .studio-go.is-blank,
 #studio-view .studio-go-group .studio-go.is-blank :is(.studio-go-label, svg) {

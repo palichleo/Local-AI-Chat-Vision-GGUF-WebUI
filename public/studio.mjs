@@ -1777,7 +1777,9 @@ export function setupStudio({
       kept = /^\d+x\d+$/.test(draft.size ?? '') ? draft.size.split('x').map(Number) : null,
       first = workflow.limits ? sizing(workflow).sizes[0] : null,
       [width, height] = kept ?? (first ? [first.width, first.height] : []);
-    return [shapeOf().label, width && height ? `${width} × ${height}` : ''].filter(Boolean).join(' · ');
+    // (0.6.101) In a narrow frame the line breaks after « · » only: « 9:16 · » then « 448 × 768 »,
+    // never « 768 » alone on a line of its own.
+    return [shapeOf().label, width && height ? `${width} × ${height}` : ''].filter(Boolean).join(' · ');
   }
   function readoutText(workflow = current()) {
     if (!workflow) return '';
@@ -1894,15 +1896,19 @@ export function setupStudio({
         sign.classList?.add('studio-blank-mark');
         blank.append(sign);
       }
-      blank.append(
-        node('p', 'studio-blank-title', 'Votre première prise apparaîtra ici.'),
-        node(
-          'p',
-          'studio-blank-text',
-          'Écrivez un prompt à gauche, ou laissez Moodix AI régler le Studio avec la moitié droite du bouton.',
-        ),
-        node('p', 'studio-blank-size', blankSize()),
-      );
+      blank.append(node('p', 'studio-blank-title', 'Votre première prise apparaîtra ici.'));
+      // How to begin, but not while Moodix AI sets the Studio or its proposal waits (0.6.101): it said
+      // « laissez Moodix AI régler le Studio » as it did so. What it proposes is said at the top of the
+      // screen (studio-explain.mjs): nothing more here than where the take comes and its size.
+      if (!(ai || answering()))
+        blank.append(
+          node(
+            'p',
+            'studio-blank-text',
+            'Écrivez un prompt à gauche, ou laissez Moodix AI régler le Studio avec la moitié droite du bouton.',
+          ),
+        );
+      blank.append(node('p', 'studio-blank-size', blankSize()));
       frame.append(blank);
     } else frame.setAttribute('aria-hidden', 'true');
     const shown = node('span', 'studio-readout', readoutText());

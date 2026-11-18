@@ -587,6 +587,22 @@ try {
       await wait(600);
       if (!(await click('#agent-open'))) return false;
       await wait(500);
+      // (0.6.101) Where the label of the pointer is, at each drawing of the page while it shows: it
+      // must stay whole in the window, from the column of the prompt to the settings too.
+      await js(`(() => {
+        const cursor = document.getElementById('ai-cursor'), label = cursor.querySelector('.ai-cursor-label');
+        window.__label = { seen: 0, left: Infinity, right: -Infinity };
+        const look = () => {
+          if (!cursor.hidden && cursor.classList.contains('is-visible')) {
+            const box = label.getBoundingClientRect();
+            window.__label.seen++;
+            window.__label.left = Math.min(window.__label.left, box.left);
+            window.__label.right = Math.max(window.__label.right, box.right);
+          }
+          window.__labelLook = requestAnimationFrame(look);
+        };
+        look();
+      })()`);
       await js(`(() => { const p = document.getElementById('prompt'); p.value = 'Fais bouger la mer autour du phare.'; p.dispatchEvent(new Event('input', { bubbles: true })); })()`);
       return click('#send');
     },
@@ -597,10 +613,15 @@ try {
           explain.querySelector('.studio-explain-said')?.textContent.replace(/\\u00a0/g, ' ') === ${JSON.stringify(words)} &&
           !explain.querySelector('.studio-explain-more').hidden && head.getBoundingClientRect().height <= 41 &&
           !!view.querySelector('.studio-prompt-field.is-folded.is-cut') && !view.querySelector('.studio-prompt-more').hidden &&
-          view.scrollHeight <= view.clientHeight + 1;
+          view.scrollHeight <= view.clientHeight + 1 &&
+          // (0.6.101) The empty screen does not tell to « laisser Moodix AI régler le Studio » while it
+          // does so; the label of its pointer was whole in the window all along.
+          !!view.querySelector('.studio-frame.is-empty .studio-blank-title') && !view.querySelector('.studio-blank-text') &&
+          window.__label.seen > 0 && window.__label.left >= 0 && window.__label.right <= innerWidth;
       })()`),
     { within: 15000 },
   );
+  await js(`cancelAnimationFrame(window.__labelLook)`);
   await run('explication dépliée', () => click('#studio-view .studio-explain-more'), () =>
     js(`${explained}?.classList.contains('is-open') && ${explained}.querySelector('.studio-explain-more').getAttribute('aria-expanded') === 'true' && document.querySelector('#studio-view .studio-screen-head').getBoundingClientRect().height > 41`), { within: 1500 });
   await run('prompt déplié', () => click('#studio-view .studio-prompt-more'), () =>
@@ -608,6 +629,56 @@ try {
   // (Refused in the Studio, the turn ends there, without a word of the model: 16/11.)
   await run('refuser la proposition', () => click('#studio-view .studio-decline'), () =>
     js(`!document.querySelector('#studio-view .studio-explain') && !document.querySelector('#studio-view .studio-prompt-more') && !document.querySelector('#studio-view .studio-decline') && !document.getElementById('agent-open').classList.contains('is-thinking')`), { within: 3000 });
+  // (0.6.101) The empty screen in every format, in a window of 720 px (a frame of 9:16 is 150 px wide
+  // there): no part of it out of its frame, no word wider than its line. Each frame eases to its
+  // format in 0.55 s before it is measured.
+  await run(
+    'écran vide dans chaque format (1280 × 720)',
+    async () => {
+      await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
+      await wait(400);
+      return js(`(async () => {
+        const pause = ms => new Promise(resolve => setTimeout(resolve, ms)), wrong = [];
+        for (const format of ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9']) {
+          const chip = [...document.querySelectorAll('#studio-view .studio-format')].find(button => button.textContent.trim() === format);
+          if (chip) chip.click();
+          else {
+            document.querySelector('#studio-view .studio-format.is-more')?.click();
+            await pause(150);
+            const choice = [...document.querySelectorAll('#studio-view .studio-format-menu button')].find(button => button.textContent.trim() === format);
+            if (!choice) {
+              wrong.push(format + ' absent');
+              continue;
+            }
+            choice.click();
+          }
+          await pause(700);
+          const frame = document.querySelector('#studio-view .studio-frame.is-empty');
+          if (!frame) {
+            wrong.push(format + ' sans écran vide');
+            continue;
+          }
+          const edge = frame.getBoundingClientRect();
+          for (const part of frame.querySelectorAll('.studio-blank > *')) {
+            if (getComputedStyle(part).display === 'none') continue;
+            const box = part.getBoundingClientRect();
+            if (box.top < edge.top - 0.5 || box.bottom > edge.bottom + 0.5 || box.left < edge.left - 0.5 || box.right > edge.right + 0.5 || part.scrollWidth > part.clientWidth + 1)
+              wrong.push(format + ' ' + (part.className.baseVal ?? part.className));
+          }
+        }
+        window.__blankWrong = wrong;
+        return true;
+      })()`);
+    },
+    async () => {
+      const wrong = await js(`window.__blankWrong`);
+      if (wrong.length) problems.push([step, 'débord', wrong.join(', ')]);
+      return wrong.length === 0;
+    },
+  );
+  // (The window back to 800 px: its resizing closes any menu, so the next one is opened after it.)
+  await size(1280);
+  await wait(400);
   simulated = null;
   await send('Fetch.disable');
   await run('nouvelle conversation depuis le Studio', () => fromMenu('#thread-conversation', '.thread-action'), view('studio'));
