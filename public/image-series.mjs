@@ -76,9 +76,12 @@ export const seriesNote = (made, total) =>
 const stoppedAfter = (made, total) =>
   `Série arrêtée par l’utilisateur : ${made} image${made > 1 ? 's' : ''} sur ${total} ${made > 1 ? 'ont été faites' : 'a été faite'}.`;
 // What the conversation keeps while the series is made: read only if nothing came after it (the
-// application closed or the page reloaded between two images).
-const interrupted = (made, total) =>
+// application closed or the page reloaded between two images). The same once a page finds the
+// images made while none followed it (take-recovery.mjs, 0.6.82).
+export const interrupted = (made, total) =>
   `Série interrompue avant sa fin : ${made} image${made > 1 ? 's' : ''} sur ${total} ${made > 1 ? 'ont été faites' : 'a été faite'}.`;
+/** A result kept so: the series may have more images made than it says. */
+export const INTERRUPTED = /^Série interrompue avant sa fin : /;
 
 /**
  * The images after the first (`first`: its result, made and shown): each proposed by the server,

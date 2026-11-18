@@ -932,17 +932,26 @@ test('a series of images in the Chat is kept after each image, with one result f
     assert.ok(saved.messages.filter(message => message.role === 'tool').length <= 1, 'one result for the call, at most');
     assert.doesNotThrow(() => accepted(nextMessage(saved.messages)));
   }
+  // Its call is kept before its first image is made (0.6.82: the page reloaded meanwhile finds it), as
+  // a call left without a result reads (closedCalls); then after the first image, then after the second.
   assert.deepEqual(
-    first.saves.filter(saved => saved.messages[2]).map(saved => JSON.parse(saved.messages[2].content).made),
-    [1, 2],
-    'saved after the first image, then after the second',
+    first.saves
+      .filter(saved => saved.messages[2])
+      .map(saved => {
+        const result = JSON.parse(saved.messages[2].content);
+        return result.unanswered ? 'appel' : result.made;
+      }),
+    ['appel', 1, 2],
+    'kept before the first image, then after it, then after the second',
   );
   // The application closed there, and opened again: the images made so far are shown, the
   // conversation is taken as it is.
   const reopened = page({ store, chat: body => (accepted(body.messages), said('Il manque la troisième.')) });
   await reopened.context.loadConversation(ID);
   assert.deepEqual(reopened.restored.map(item => item.runId), [runOf(1), runOf(2)]);
-  assert.doesNotMatch(reopened.$('messages').words, /interrompue|non aboutie/);
+  // Under them, in one quiet line, where it stopped (0.6.82); no failure, no take « interrompue ».
+  assert.match(reopened.$('messages').words, /Série interrompue avant sa fin : 2 images sur 3 ont été faites\./);
+  assert.doesNotMatch(reopened.$('messages').words, /non aboutie|génération interrompue/);
   await reopened.send('Où en est la série ?');
   assert.deepEqual(reopened.notices.filter(Boolean), []);
 
@@ -1667,4 +1676,94 @@ test('a creation of the Studio made while another conversation is open is writte
   assert.equal((await store.read(ELSEWHERE)).messages.length, 2, 'not in the conversation shown');
   assert.deepEqual(roles(studio.state.messages), ['user', 'assistant']);
   assert.deepEqual(roles(studio.state.aside.messages), ['user', 'assistant', 'tool']);
+});
+
+test('a call of the Chat is kept before its take is made: the page reloaded meanwhile finds it (0.6.82)', async t => {
+  const store = await historyStore(t),
+    generation = heldGeneration(),
+    proposal = { call: functionCall('create_image', 'call_boat'), workflowName: 'Krea 2', requestId: 'r1', autoAllow: true };
+  const making = page({ store, requestTool: generation.requestTool, chat: (body, n) => (n === 1 ? called(proposal) : said('')) });
+  const turn = making.send('Un bateau rouge');
+  await generation.started;
+  // While its take is made, the disk holds the message and its call (read as one left without a
+  // result): reloaded now, the conversation opens on it, not on the message given back to the box.
+  const kept = await store.read(ID);
+  assert.deepEqual(roles(kept.messages), ['user', 'assistant', 'tool']);
+  assert.equal(kept.messages[1].tool_calls[0].id, 'call_boat');
+  assert.equal(JSON.parse(kept.messages[2].content).unanswered, true);
+  generation.finish(madeImage());
+  await turn;
+  const done = await store.read(ID);
+  assert.equal(JSON.parse(done.messages[2].content).run_id, RUN, 'its result in place of the one it was kept with');
+  assert.equal(done.messages.filter(message => message.role === 'tool').length, 1);
+});
+
+test('a creation of the Studio is kept as it starts, and taken back when it makes nothing (0.6.82)', async t => {
+  const store = await historyStore(t);
+  await otherConversation(store);
+  // In a conversation that had something before: its line and its call while it is made, then nothing.
+  const generation = heldGeneration(),
+    studio = page({
+      store,
+      requestTool: generation.requestTool,
+      state: { conversationId: ELSEWHERE, messages: (await store.read(ELSEWHERE)).messages, view: 'studio' },
+    });
+  const proposal = { call: functionCall('create_image', 'action1'), workflowName: 'Krea 2', requestId: 'r1', plan: { prompt: 'un renard' } };
+  const made = studio.context.runInStudio(proposal, { signal: new AbortController().signal, onProgress() {}, conversationId: ELSEWHERE });
+  await generation.started;
+  const during = await store.read(ELSEWHERE);
+  assert.deepEqual(roles(during.messages), ['user', 'assistant', 'user', 'assistant', 'tool']);
+  assert.match(during.messages[2].content, /^Studio · Image : un renard/);
+  generation.finish({ content: JSON.stringify({ status: 'error', message: 'Mémoire vidéo insuffisante.' }), images: [], failed: true, error: 'Mémoire vidéo insuffisante.' });
+  await made;
+  assert.deepEqual(roles((await store.read(ELSEWHERE)).messages), ['user', 'assistant'], 'nothing made, nothing to tell');
+  // Begun for it, in a conversation never saved: it exists while it is made, then leaves the history.
+  const first = heldGeneration(),
+    deleted = [],
+    fresh = page({
+      store,
+      requestTool: first.requestTool,
+      state: { conversationId: ID, view: 'studio' },
+      routes: {
+        'history/delete': async body => {
+          deleted.push(plain(body));
+          await store.remove(body.id);
+          return Response.json({ removed: body.id });
+        },
+      },
+    });
+  const begun = fresh.context.runInStudio(proposal, { signal: new AbortController().signal, onProgress() {}, conversationId: ID });
+  await first.started;
+  assert.deepEqual(roles((await store.read(ID)).messages), ['user', 'assistant', 'tool']);
+  assert.ok(fresh.state.historyItems.some(item => item.id === ID), 'listed, in its project');
+  first.finish({ content: '{}', images: [], failed: true, error: 'Génération annulée.' });
+  await begun;
+  assert.deepEqual(deleted, [{ confirm: true, id: ID }]);
+  assert.equal(fresh.state.historyItems.some(item => item.id === ID), false);
+  await assert.rejects(store.read(ID));
+});
+
+test('another conversation opened while a generation runs is opened without a question: the server keeps saves for its end (0.6.82)', async t => {
+  // Until 0.6.81 the page saved the conversation it left: refused during a generation
+  // (/api/history/save), each page opened then asked « n’a pas pu être enregistrée ».
+  const store = await historyStore(t),
+    generation = heldGeneration(),
+    proposal = { call: functionCall('create_image', 'call_boat'), workflowName: 'Krea 2', requestId: 'r1', autoAllow: true };
+  await otherConversation(store);
+  const asked = [];
+  const making = page({ store, requestTool: generation.requestTool, chat: (body, n) => (n === 1 ? called(proposal) : said('')) });
+  making.context.confirm = question => (asked.push(question), true);
+  const turn = making.send('Un bateau rouge');
+  await generation.started;
+  making.state.status = { ...making.state.status, toolJob: { id: 'job', state: 'generating', conversationId: ID, callId: 'call_boat' } };
+  const saves = making.saves.length;
+  await making.context.loadConversation(ELSEWHERE);
+  assert.equal(making.state.conversationId, ELSEWHERE);
+  assert.equal(making.state.aside.conversationId, ID, 'the one of the generation set aside, alive');
+  assert.equal(making.saves.length, saves, 'nothing saved while the generation runs');
+  assert.deepEqual(asked, []);
+  making.state.status = { ...making.state.status, toolJob: null };
+  generation.finish(madeImage());
+  await turn;
+  assert.equal(JSON.parse((await store.read(ID)).messages[2].content).run_id, RUN, 'its take written in its own at its end');
 });

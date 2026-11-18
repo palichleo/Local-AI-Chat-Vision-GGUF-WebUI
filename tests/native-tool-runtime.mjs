@@ -65,11 +65,13 @@ test('native immutable job keeps random seed through authorization and GPU hando
       assert.equal(engine.state, 'stopped');
       assert.equal(job.parameters.seed, 123);
       during = runtime.status();
+      drawn = runtime.status({ view: true });
       return { outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] };
     },
     free: async () => events.push('gpu released'),
   };
-  let during = null;
+  let during = null,
+    drawn = null;
   const runtime = new ToolRuntime({
     engine,
     catalog,
@@ -105,6 +107,18 @@ test('native immutable job keeps random seed through authorization and GPU hando
   assert.equal(during.state, 'generating');
   assert.equal(during.record, undefined);
   assert.deepEqual([during.conversationId, during.media, during.workflowName], [id, 'image', 'Image']);
+  // And the call it answers (0.6.82): a page reloaded meanwhile finds it in its conversation; the
+  // take keeps it too. What its card is drawn with comes only when asked (not every 1.2 s).
+  assert.equal(during.callId, 'call');
+  assert.equal(during.studio, undefined);
+  assert.equal(during.proposal, undefined);
+  assert.equal(saved.callId, 'call');
+  assert.deepEqual(
+    [drawn.proposal.call.id, drawn.proposal.tool, drawn.proposal.workflowName, drawn.proposal.requestId, drawn.proposal.mediaType],
+    ['call', 'create_image', 'Image', request.requestId, undefined],
+  );
+  assert.equal(drawn.proposal.plan.parameters.seed, 123);
+  assert.doesNotMatch(JSON.stringify(drawn.proposal), /approvalToken|[A-Z]:\\\\/);
 });
 
 test('a seed named by the user reaches the job instead of a drawn one', async () => {

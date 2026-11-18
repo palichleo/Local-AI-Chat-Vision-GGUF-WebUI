@@ -100,6 +100,14 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
     setupGenerationUI: () => ({ clear() {}, restore() {} }),
     // The miniature of the chat (0.6.81): no work here, it shows nothing.
     setupMiniature: () => ({ element: null, work: null, running: false, begin() {}, end() {}, take() {}, place() {}, forget() {} }),
+    // What the page finds of a creation made while no page followed it (0.6.82): nothing here.
+    setupTakeRecovery: () => ({
+      waiting: () => new Set(),
+      complete: async () => {},
+      rememberTab() {},
+      resumeTab: async () => false,
+      followElsewhere: async () => {},
+    }),
     outputActions: () => () => null,
     setupAssets: () => ({ setBusy() {}, pause() {}, hasDraft: () => false }),
     setupStudio: () => ({ open: async () => {}, render() {}, busy: () => false }),

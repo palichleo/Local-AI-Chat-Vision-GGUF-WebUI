@@ -100,6 +100,7 @@ const staticFiles = new Map([
   ['/help-tips.mjs', ['help-tips.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-ui.mjs', ['generation-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/work-miniature.mjs', ['work-miniature.mjs', 'text/javascript; charset=utf-8']],
+  ['/take-recovery.mjs', ['take-recovery.mjs', 'text/javascript; charset=utf-8']],
   ['/assets-ui.mjs', ['assets-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/resource-preparation.mjs', ['resource-preparation.mjs', 'text/javascript; charset=utf-8']],
   ['/copy.mjs', ['copy.mjs', 'text/javascript; charset=utf-8']],
@@ -1294,7 +1295,8 @@ export async function createApplication({
         return send(200, { legacyId: STUDIO_ID, enabled: generation.config.enabled === true, tools, styles, presets });
       }
       if (req.method === 'GET' && path === '/api/tools/job') {
-        const job = runtime.status();
+        // With what a page draws its card (`proposal`): one reloaded meanwhile follows it again (0.6.82).
+        const job = runtime.status({ view: true });
         return send(
           200,
           job && {

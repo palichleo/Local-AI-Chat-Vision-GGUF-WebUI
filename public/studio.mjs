@@ -3261,6 +3261,18 @@ export function setupStudio({
     const draft = drafts[answered.mode];
     if (answered.values && draft.seed === String(answered.values.seed)) draft.seed = answered.seedBefore ?? '';
   }
+  /**
+   * A creation of the conversation shown, made by the server for a page reloaded since (0.6.82): the
+   * screen follows it again (follow) until it is over (settled), as one approved here; its stop stops
+   * it (stopTurn). False when the Studio already holds a work.
+   */
+  function followAgain() {
+    if (holds()) return false;
+    holdAt();
+    working = { label: 'Génération en cours…', fraction: null, external: true };
+    render();
+    return true;
+  }
   /** A generation approved here, run by the chat turn: its progress comes from there. */
   function follow(label, fraction, preview) {
     if (!working?.external) return;
@@ -5026,6 +5038,7 @@ export function setupStudio({
     busy: () => Boolean(working) || enriching,
     propose,
     decline,
+    followAgain,
     follow,
     settled,
     show,

@@ -16,6 +16,7 @@ import { setupInterfaceSettings } from './interface-settings.mjs';
 import { setupHelpTips } from './help-tips.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupMiniature } from './work-miniature.mjs';
+import { setupTakeRecovery } from './take-recovery.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { setupCopy } from './copy.mjs';
 import { STUDIO_LINE, STUDIO_NOTE, callNote, closedCalls, conversationTitle, lastExchange, settledNotes, spokenText } from './transcript.mjs';
@@ -484,6 +485,24 @@ function persistConversation(conversationId = state.conversationId) {
   });
   return historyWrite;
 }
+/**
+ * A conversation begun for a creation of the Studio that made nothing (0.6.82: it is saved as the
+ * creation starts): it leaves the history again, as it never came before. Kept when it cannot go: its
+ * call reads « demande restée sans suite ».
+ */
+async function forgetConversation(id) {
+  if (!state.saveHistory || !state.historyItems.some(item => item.id === id)) return;
+  try {
+    await historyWrite;
+    await api('history/delete', { confirm: true, id });
+    state.historyItems = state.historyItems.filter(item => item.id !== id);
+    const talk = holderOf(id);
+    if (talk === state || talk === state.aside) talk.archiveSnapshot = null;
+    renderHistory({ keep: true });
+  } catch {
+    // Left in the history: deleted by hand like any other.
+  }
+}
 
 async function clearHistory() {
   if (state.clearingHistory) return;
@@ -570,6 +589,19 @@ function leaveLibrary() {
   tabLine();
 }
 
+/**
+ * Before the conversation shown is left (another opened, a new one, the Pellicule): it is saved. Not
+ * while a generation runs, when nothing new waits in it or its own work saves it at its end (0.6.82):
+ * the server keeps every save for the end of a generation (/api/history/save), and asked then, each
+ * page opened during a generation said « Cette conversation n’a pas pu être enregistrée » (0.6.81),
+ * the Pellicule did not open.
+ */
+function saveBeforeLeaving() {
+  if (state.status?.toolJob && (!state.historyDirty || state.work?.conversationId === state.conversationId))
+    return Promise.resolve(true);
+  return persistConversation();
+}
+
 async function loadConversation(id) {
   // Any conversation opens while a work goes on (0.6.81): the one it goes on in is set aside, alive.
   if (!state.projectWorking && !state.preparing && !state.loadingHistory && id === state.conversationId) {
@@ -586,7 +618,7 @@ async function loadConversation(id) {
   try {
     // A conversation that cannot be saved must not trap the user in it.
     if (
-      !(await persistConversation()) &&
+      !(await saveBeforeLeaving()) &&
       !confirm('Cette conversation n’a pas pu être enregistrée. Ouvrir l’autre conversation quand même ?')
     )
       return;
@@ -629,7 +661,8 @@ async function loadConversation(id) {
     $('messages').replaceChildren();
     // A take deleted since (in the Pellicule, in the Studio) is not drawn from what was read before.
     citedTakes.forget();
-    renderTranscript(messages, record.incomplete);
+    // A call whose take the server is still making waits for its card (0.6.82).
+    const views = renderTranscript(messages, record.incomplete, { waiting: state.recovery?.waiting(id, messages) });
     turnActions();
     $('welcome').hidden = messages.length > 0;
     setConversationTitle(record.title);
@@ -640,6 +673,8 @@ async function loadConversation(id) {
     scrollToBottom();
     state.studio?.conversationChanged?.();
     $('prompt').focus();
+    // What its calls made while no page followed them: written, shown, or followed (take-recovery.mjs).
+    void state.recovery?.complete(id, views);
   } catch (error) {
     // Not opened: the conversation set aside for it is the one on screen again, as it was.
     if (setNow && state.aside?.conversationId === state.conversationId) takeBackAside();
@@ -652,9 +687,15 @@ async function loadConversation(id) {
   }
 }
 
-function renderTranscript(messages, incomplete = false) {
+/**
+ * The messages of a conversation read back. `waiting`: the calls whose take the server is still making
+ * (take-recovery.mjs, 0.6.82): their card comes under them, nothing says « sans suite ». Gives the view
+ * of each message of Moodix by its place in `messages`.
+ */
+function renderTranscript(messages, incomplete = false, { waiting = null } = {}) {
   // Every tool other than the local readers is a generation verb, including names used by older versions.
   const isGeneration = call => Boolean(call.function?.name) && !call.function.name.startsWith('local_');
+  const views = new Map();
   let reply = null;
   for (const [index, message] of messages.entries()) {
     if (message.internal || message.role === 'tool') continue;
@@ -665,10 +706,13 @@ function renderTranscript(messages, incomplete = false) {
     } else {
       const view = assistantMessage(reply);
       reply = view;
+      views.set(index, view);
+      const made = Boolean(waiting?.has(message.tool_calls?.find(isGeneration)?.id));
       // A call the model wrote as text is not shown, as while a reply arrives; a call that left
       // no media is told in a line of its own words, not the result kept for the model.
       const text = spokenText(message.content);
       if (text) renderText(view.body, text);
+      else if (made) view.body.replaceChildren();
       else if (message.tool_calls?.length) {
         const told = callNote(message.tool_calls[0], messages[index + 1]);
         view.body.replaceChildren(...(told ? [node('div', 'message-step', told)] : []));
@@ -694,12 +738,16 @@ function renderTranscript(messages, incomplete = false) {
           else if (Array.isArray(data?.images) && data.images.some(image => typeof image?.run_id === 'string')) {
             if (!text) view.body.replaceChildren();
             for (const image of data.images) if (typeof image?.run_id === 'string') generationUI.restore(view.generations, state.conversationId, image.run_id, { compact: data.studio === true });
+            // Fewer images than asked: where it stopped, under them (« Série interrompue avant sa fin :
+            // 1 image sur 3 a été faite. », a reload, 0.6.82; stopped by the user; an image refused).
+            if (data.status === 'partial' && typeof data.message === 'string' && data.message)
+              view.generations.append(node('p', 'proposal-cancelled', data.message));
           }
           // « Annuler » of a card: its line, where the card was (16/11); declined otherwise, nothing.
           if (data?.status === 'denied' && data.cancelled === 'card')
             view.generations.append(node('p', 'proposal-cancelled', 'Proposition annulée.'));
           // A card left without an answer (the page closed while it waited): said where it was.
-          if (data?.status === 'cancelled' && data.unanswered === true && text)
+          if (data?.status === 'cancelled' && data.unanswered === true && text && !made)
             view.generations.append(node('p', 'proposal-cancelled', 'Proposition restée sans réponse.'));
         } catch {}
       }
@@ -711,6 +759,7 @@ function renderTranscript(messages, incomplete = false) {
       if (incomplete && index === messages.length - 1) view.note.textContent = 'Réponse partielle restaurée.';
     }
   }
+  return views;
 }
 
 async function restoreUpdate() {
@@ -760,7 +809,7 @@ function restoreSession(saved) {
   $('thinking').setAttribute('aria-pressed', String(state.thinking));
   generationUI.clear(state.aside?.nodes);
   $('messages').replaceChildren();
-  renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
+  const views = renderTranscript(state.messages, saved.archiveSnapshot?.incomplete);
   turnActions();
   $('welcome').hidden = state.messages.length > 0;
   setConversationTitle(saved.title || UNTITLED);
@@ -772,6 +821,8 @@ function restoreSession(saved) {
   renderHistory();
   scrollToBottom();
   contextMeter.schedule();
+  // A take made just before the server stopped: its call is given it (0.6.82).
+  void state.recovery?.complete(state.conversationId, views);
 }
 
 /**
@@ -2163,8 +2214,14 @@ function userMessage(text, images, videos = []) {
  */
 function turnActions() {
   for (const row of document.querySelectorAll('#messages .message-actions')) row.remove();
-  // Not while a reply is being written, nor for a message the application wrote itself.
-  if (state.generating || lastExchange(state.messages) < 0) return;
+  // Not while a reply is being written, nor for a message the application wrote itself; nor while a
+  // take of it is followed again after a reload (0.6.82): its message is not over.
+  if (
+    state.generating ||
+    (state.work?.kind === 'follow' && shownHere(state.work.conversationId)) ||
+    lastExchange(state.messages) < 0
+  )
+    return;
   const action = (label, glyph, title, onclick) => {
     const control = node('button', 'message-action');
     control.type = 'button';
@@ -2435,6 +2492,13 @@ async function againTake(failed, { edit = false, figure = null, container }) {
     const request = await (await api('tools/again', { requestId: failed.requestId }, { signal })).json();
     figure?.remove();
     const generation = generationUI.mount(container, request);
+    // Its call is kept before its take is made (0.6.82, take-recovery.mjs).
+    const begun = holderOf(talkId);
+    begun.archiveSnapshot = {
+      messages: archiveMessages([...history, { role: 'assistant', content: '', tool_calls: [request.call] }]),
+      incomplete: false,
+    };
+    await persistConversation(talkId);
     let result;
     try {
       result = await workflowsUI.requestTool(
@@ -2468,6 +2532,10 @@ async function againTake(failed, { edit = false, figure = null, container }) {
     if (history.length > (talk.messages?.length ?? 0)) {
       talk.messages = archiveMessages(history);
       talk.archiveSnapshot = { messages: [...talk.messages], incomplete: false };
+      await persistConversation(talkId);
+    } else if (talk.archiveSnapshot && talk.archiveSnapshot.messages.length !== (talk.messages?.length ?? 0)) {
+      // Stopped or failed: its call kept as it started goes again, as before (nothing was made of it).
+      talk.archiveSnapshot = { messages: [...(talk.messages ?? [])], incomplete: false };
       await persistConversation(talkId);
     }
     state.generating = false;
@@ -2542,6 +2610,10 @@ async function runOutputAction(record, index, action) {
     history.push({ role: 'assistant', content: '', tool_calls: [request.call] });
     view.generation = true;
     const generation = generationUI.mount(view.generations, request);
+    // Its line and its call are kept before its take is made (0.6.82, take-recovery.mjs).
+    const begun = holderOf(talkId);
+    begun.archiveSnapshot = { messages: archiveMessages(history), incomplete: false };
+    await persistConversation(talkId);
     let result;
     try {
       result = await workflowsUI.requestTool(
@@ -3452,6 +3524,10 @@ async function sendMessage(event) {
         if (last?.role === 'tool' && last.tool_call_id === request.call.id) last.content = content;
         else history.push({ role: 'tool', tool_call_id: request.call.id, content });
       };
+      // Its call is kept before its take is made (0.6.82): the page reloaded or closed meanwhile, the
+      // conversation knows of it, and the page that shows it next finds its take (take-recovery.mjs).
+      talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+      await persistConversation(talkId);
       try {
         result = await runOn(request, generation);
         generation.finish(result);
@@ -3822,6 +3898,35 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
   view.body.replaceChildren();
   view.generation = true;
   const generation = generationUI.mount(view.generations, proposal, { compact: true });
+  const kinds = { image: 'Image', video: 'Vidéo', audio: 'Son' };
+  // Its line and its call are kept as it starts (0.6.82): the page reloaded meanwhile, the conversation
+  // exists, in its project, and the page that shows it next finds its take (take-recovery.mjs). Taken
+  // back when nothing is made: a creation of the Studio that fails says nothing in the conversation.
+  const begun = holderOf(talkId),
+    before = [...(begun.messages ?? [])];
+  if (!before.length) begun.conversationInstructions ??= state.globalInstructions || '';
+  begun.archiveSnapshot = {
+    messages: archiveMessages([
+      ...before,
+      {
+        role: 'user',
+        internal: true,
+        content:
+          `Studio · ${kinds[proposal.mediaType || 'image'] ?? 'Image'} : ${String(proposal.plan?.prompt || proposal.args?.prompt || '')}`.slice(0, 4000) +
+          '\n\n' +
+          STUDIO_NOTE,
+      },
+      { role: 'assistant', content: '', tool_calls: [proposal.call] },
+    ]),
+    incomplete: false,
+  };
+  await persistConversation(talkId);
+  const takeBack = async () => {
+    const talk = holderOf(talkId);
+    talk.archiveSnapshot = { messages: [...before], incomplete: false };
+    if (before.length) await persistConversation(talkId);
+    else await forgetConversation(talkId);
+  };
   let result;
   try {
     result = await workflowsUI.requestTool(
@@ -3837,15 +3942,16 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
     generation.finish(result);
   } catch (error) {
     view.article.remove();
+    await takeBack();
     throw error;
   }
   // Nothing made, nothing to tell: the Studio says why.
   if (!result.record) {
     view.article.remove();
+    await takeBack();
     return result;
   }
-  const kinds = { image: 'Image', video: 'Vidéo', audio: 'Son' },
-    prompt = String(proposal.plan?.prompt || proposal.args?.prompt || result.record.prompt || ''),
+  const prompt = String(proposal.plan?.prompt || proposal.args?.prompt || result.record.prompt || ''),
     said = `Studio · ${kinds[result.record.mediaType || 'image'] ?? 'Image'} : ${prompt}`.slice(0, 4000);
   const talk = holderOf(talkId);
   // A conversation begun in the Studio still gets the global instructions with its first message.
@@ -4150,6 +4256,47 @@ const workflowsUI = setupNativeWorkflows({
   },
   onHelpChange: target => helpTips.refresh(target),
 });
+/** The conversation shown, drawn again from its messages (a result written meanwhile): its views by place. */
+function rerender(id) {
+  if (!shownHere(id)) return null;
+  generationUI.clear(state.aside?.nodes);
+  $('messages').replaceChildren();
+  citedTakes.forget();
+  const views = renderTranscript(state.messages);
+  turnActions();
+  $('welcome').hidden = state.messages.length > 0;
+  scrollToBottom();
+  return views;
+}
+/**
+ * A creation made while no page followed it (0.6.82): its call gets what it made when its
+ * conversation is shown, or its card follows it there; a reload comes back where the tab was.
+ */
+state.recovery = setupTakeRecovery({
+  api,
+  state,
+  holderOf,
+  shownHere,
+  persistConversation,
+  generationUI,
+  workflowsUI,
+  beginWork,
+  endWork,
+  rerender,
+  forget: id => forgetConversation(id),
+  loadConversation,
+  newConversation,
+  showStudio,
+  showLibrary,
+  renderNavigation: () => projectUI.render(),
+  scrollToBottom,
+  node,
+  onChange: () => {
+    turnActions();
+    void refreshStatus();
+  },
+});
+window.addEventListener('pagehide', () => state.recovery.rememberTab());
 
 const settingsGuard = setupSettingsGuard({
   dialog: $('settings'),
@@ -4419,7 +4566,10 @@ function showLibrary({ project = 'all' } = {}) {
     state.loadingHistory = true;
     updateControls();
     try {
-      if (!(await assetsUI.flush()) || !(await persistConversation())) return;
+      // Saved first, unless a generation runs and nothing new waits in it (saveBeforeLeaving, 0.6.82):
+      // the server keeps saves for its end, and the Pellicule did not open during one.
+      const held = state.status?.toolJob && (!state.historyDirty || state.work?.conversationId === state.conversationId);
+      if (!(await assetsUI.flush()) || !(held || (await persistConversation()))) return;
       await switchView('library', () => {
         state.view = 'library';
         state.libraryProject = project;
@@ -4702,7 +4852,7 @@ async function newConversation(projectId = state.projectId || 'inbox') {
   try {
     // A conversation that cannot be saved must not trap the user in it.
     if (
-      !(await persistConversation()) &&
+      !(await saveBeforeLeaving()) &&
       !confirm('Cette conversation n’a pas pu être enregistrée. En commencer une nouvelle quand même ?')
     )
       return;
@@ -4843,8 +4993,9 @@ window.addEventListener('beforeunload', event => {
     state.resourceWorking ||
     settingsGuard.isDirty() ||
     state.generating ||
-    // A creation of the Studio too (0.6.81): reloaded, the page would follow it no more.
-    state.work ||
+    // Not for a creation alone (of the Studio, or followed again): reloaded, the page follows it again
+    // (0.6.82). Moodix writing, a card waiting for the user, a series still to make would be lost.
+    (state.work && !['studio', 'follow'].includes(state.work.kind)) ||
     state.savingHistory ||
     state.historyDirty ||
     $('prompt').value.trim() ||
@@ -4888,8 +5039,11 @@ try {
   await restoreUpdate();
   // A page of an older version, replaced while it was open: its draft and its conversation (0.5.128).
   await resumeAfterRestart();
-  // At launch, the welcome in the project used last (0.6.5).
-  welcomeInLastProject();
+  // A tab reloaded: its conversation and its view again (0.6.82); at launch, the welcome in the
+  // project used last (0.6.5).
+  if (!(await state.recovery.resumeTab())) welcomeInLastProject();
+  // A creation being made in another conversation: followed there, the miniature shows it (0.6.82).
+  await state.recovery.followElsewhere();
   syncViews();
   showLastReply();
   if (initial.warning) notice(initial.warning);

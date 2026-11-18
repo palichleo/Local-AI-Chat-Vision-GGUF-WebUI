@@ -62,6 +62,24 @@ test('persistent metadata restores from disk; analysis copies stay in session me
   assert.deepEqual(await gallery.list(run.conversationId), { runs: [], skipped: 0 });
 });
 
+test('a take keeps the call it answers; a call it cannot keep is left out, never the take', async t => {
+  const { historyDir } = await fixture(t);
+  const gallery = new Gallery({ historyDir }),
+    run = record({ callId: 'call_red_boat' }),
+    odd = record({ callId: 'un appel avec des espaces' }),
+    long = record({ callId: 'x'.repeat(257) });
+  for (const item of [run, odd, long]) await gallery.put(item, { persist: true });
+  // Read back after a restart: the conversation finds the take of a call by it (0.6.82).
+  const restarted = new Gallery({ historyDir });
+  assert.equal((await restarted.get(run.conversationId, run.id)).callId, 'call_red_boat');
+  assert.equal((await restarted.list(run.conversationId)).runs[0].callId, 'call_red_boat');
+  for (const item of [odd, long]) {
+    const kept = await restarted.get(item.conversationId, item.id);
+    assert.equal(kept.id, item.id);
+    assert.equal(kept.callId, undefined);
+  }
+});
+
 test('nonpersistent runs stay in memory, are cloned and clearMemory never removes files', async t => {
   const { historyDir } = await fixture(t);
   const gallery = new Gallery({ historyDir });

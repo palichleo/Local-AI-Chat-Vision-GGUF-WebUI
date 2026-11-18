@@ -774,6 +774,67 @@ test('a creation of the Studio makes no copy for the model and downloads nothing
     { isShown: () => false },
   ));
 
+test('a job begun by a page reloaded since is followed to its end with the result requestTool would give (0.6.82)', async () =>
+  fixture(async ({ ui, calls, setIntercept }) => {
+    const record = {
+      id: 'run',
+      conversationId: 'conversation',
+      mediaType: 'video',
+      workflowName: 'LTX 2.5',
+      prompt: 'un bateau rouge',
+      createdAt: '2026-11-18T00:00:00Z',
+      parameters: { workflow_digest: 'd', frames: 25, fps: 24, stage: 'draft' },
+      outputs: [{ source: { filename: 'run.mp4' }, originalUrl: '/media/run', take: 4 }],
+    };
+    const polls = [{ id: 'job', state: 'generating', progress: 'Génération · 12/30', fraction: 0.4 }, { id: 'job', state: 'done', record }];
+    setIntercept(route => (route === 'tools/job' ? Response.json(polls.shift()) : undefined));
+    const said = [],
+      shown = [];
+    const result = await ui.followTool(
+      { id: 'job', state: 'generating', progress: 'Génération · 11/30', fraction: 0.37 },
+      { call: { id: 'call_1', function: { name: 'create_video', arguments: '{}' } }, mediaType: 'video' },
+      new AbortController().signal,
+      (progress, fraction) => said.push([progress, fraction]),
+      image => shown.push(image),
+      { review: false, reviewImages: false, studio: true, conversationId: 'conversation' },
+    );
+    // Followed from where it is, never started again: no execution, no cancellation.
+    assert.deepEqual(calls.map(call => call.route), ['tools/job', 'tools/job']);
+    assert.deepEqual(said, [
+      ['Génération · 11/30', 0.37],
+      ['Génération · 12/30', 0.4],
+      ['Préparation des copies pour la vision…', undefined],
+    ]);
+    assert.deepEqual(shown, [{ record, index: 0 }]);
+    const content = JSON.parse(result.content);
+    assert.deepEqual([content.status, content.run_id, content.studio, content.takes], ['success', 'run', true, [4]]);
+    // The model did not see it: it is told so, as when its page stayed.
+    assert.match(content.note, /^Vidéo générée et affichée à l’utilisateur\. Tu ne l’as pas vue/);
+  }));
+
+test('a followed job stopped by the user is cancelled by its identifier (0.6.82)', async () =>
+  fixture(async ({ ui, calls, setIntercept }) => {
+    setIntercept(route =>
+      route === 'tools/job'
+        ? Response.json({ id: 'job', state: 'generating', fraction: 0.5 })
+        : route === 'tools/cancel'
+          ? Response.json({})
+          : undefined,
+    );
+    const controller = new AbortController(),
+      followed = assert.rejects(
+        ui.followTool({ id: 'job', state: 'generating' }, { call: { id: 'call_1' } }, controller.signal, () => {}),
+        { name: 'AbortError' },
+      );
+    await new Promise(resolve => setTimeout(resolve, 20));
+    controller.abort();
+    await followed;
+    assert.deepEqual(
+      calls.filter(call => call.route === 'tools/cancel').map(call => call.body),
+      [{ jobId: 'job' }, { jobId: 'job' }],
+    );
+  }));
+
 test('a replacement tells the model what to call again to change it: the video followed and the character', async () => {
   const { replacedAgain } = await import('../public/generation-runtime.mjs');
   const request = { tool: 'replace_character' },

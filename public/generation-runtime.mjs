@@ -187,8 +187,9 @@ export function setupGenerationRuntime({
     // `reviewImages`: the copy of a generated image, when the user chose it in the settings.
     // `conversationId`: the conversation of the work (0.6.81: the user may open another meanwhile;
     // its take is still its own), the one shown when it starts otherwise.
-    { confirmed = false, review = true, reviewImages = false, approve = null, studio = false, conversationId = state.conversationId } = {},
+    options = {},
   ) {
+    const { confirmed = false, approve = null, studio = false } = options;
     const cancel = () => api('tools/cancel', { requestId: request.requestId }).catch(() => {});
     let decision;
     try {
@@ -213,6 +214,42 @@ export function setupGenerationRuntime({
       };
     }
     signal.throwIfAborted();
+    return follow(request, signal, onProgress, onImage, options, cancel, async () => {
+      const job = await (
+        await api('tools/execute', {
+          requestId: request.requestId,
+          permission: decision,
+          ...(['video', 'audio'].includes(request.mediaType) ? { approvalToken: request.approvalToken } : {}),
+          ...(studio ? { studio: true } : {}),
+        })
+      ).json();
+      if (signal.aborted) {
+        cancel();
+        signal.throwIfAborted();
+      }
+      return job;
+    });
+  }
+  /**
+   * A generation the server runs, started by a page reloaded since (0.6.82): `job` as /api/tools/job
+   * gives it, followed to its end as requestTool follows its own, with the same result. Stopped
+   * (`signal`), it is cancelled by its identifier.
+   */
+  async function followTool(job, request, signal, onProgress, onImage = () => {}, options = {}) {
+    const cancel = () => api('tools/cancel', { jobId: job.id }).catch(() => {});
+    signal.throwIfAborted();
+    return follow(request, signal, onProgress, onImage, options, cancel, async () => job);
+  }
+  /** The job `start()` gives, followed until it is over: its result for the model, its take, its copies. */
+  async function follow(
+    request,
+    signal,
+    onProgress,
+    onImage,
+    { review = true, reviewImages = false, studio = false, conversationId = state.conversationId },
+    cancel,
+    start,
+  ) {
     signal.addEventListener('abort', cancel, { once: true });
     let terminal = false,
       originalsTask;
@@ -272,18 +309,7 @@ export function setupGenerationRuntime({
       })().catch(error => ({ error }));
     }
     try {
-      let job = await (
-        await api('tools/execute', {
-          requestId: request.requestId,
-          permission: decision,
-          ...(['video', 'audio'].includes(request.mediaType) ? { approvalToken: request.approvalToken } : {}),
-          ...(studio ? { studio: true } : {}),
-        })
-      ).json();
-      if (signal.aborted) {
-        cancel();
-        signal.throwIfAborted();
-      }
+      let job = await start();
       const jobId = job.id;
       while (!['done', 'error', 'cancelled'].includes(job.state)) {
         if (job.record) receiveOriginals(job.record);
@@ -320,9 +346,6 @@ export function setupGenerationRuntime({
       receiveOriginals(record);
       if (record.conversationId !== conversationId)
         throw Error('Cette sortie ne correspond pas à la conversation courante.');
-      // A character put in a video: what to call again to change it (the video followed, not
-      // the result; the same character), said with the result for the next request.
-      const again = replacedAgain(request, record);
       if (job.warning) notice(job.warning);
       let images = [],
         dimensions = record.outputs.map(() => null),
@@ -385,81 +408,7 @@ export function setupGenerationRuntime({
         }
       }
       return {
-        content: JSON.stringify({
-          status: error ? 'generated' : 'success',
-          run_id: record.id,
-          // Their numbers in the project, as the user sees them (« PRISE 14 »): the model names them so.
-          ...(record.outputs.some(output => Number.isInteger(output.take))
-            ? {
-                takes: record.outputs.map(output => output.take ?? null),
-                takes_note:
-                  'Pour l’utilisateur, ces prises s’appellent « PRISE n » (takes, une par sortie) : nomme-les par ce numéro, jamais par run_id. Pour en reprendre une, {"take": n} suffit.',
-              }
-            : {}),
-          // Made in the Studio: the conversation shows it as a card.
-          ...(studio ? { studio: true } : {}),
-          use_as_source: { output: record.id },
-          workflow: record.workflowName,
-          prompt: record.prompt,
-          workflow_id: record.workflowId,
-          workflow_digest: record.parameters.workflow_digest,
-          media_type: record.mediaType || 'image',
-          parameters: Object.fromEntries(
-            Object.entries(record.parameters).filter(([key]) =>
-              [
-                'workflow_id',
-                'seed',
-                'width',
-                'height',
-                'frames',
-                'fps',
-                'seconds',
-                'language',
-                'negative_prompt',
-                'references',
-                'reference_image',
-                'reference_resource',
-                'reference_frame',
-                'routing_notes',
-                'user_overrides',
-              ].includes(key),
-            ),
-          ),
-          reference_default_count: record.parameters.reference_default_count ?? 0,
-          reference_defaults: record.parameters.reference_defaults || [],
-          ...(record.mediaType === 'video' ? { stage: record.parameters.stage } : {}),
-          ...(record.mediaType === 'video' && review
-            ? {
-                analysis_outputs: analysisOutputs,
-                storyboards: storyboards.map((board, index) => ({
-                  output: index,
-                  layout: board ? `${board.columns}x${board.rows}` : null,
-                  times: board?.times.map(time => Math.round(time * 100) / 100) || [],
-                })),
-                inspection_limit:
-                  'Each attached image is a storyboard of one output: frames read left to right then top to bottom, each stamped with its order and time in seconds. It shows the progression of the clip, not continuous motion; no audio.',
-              }
-            : {}),
-          ...(again ? { replace_again: again } : {}),
-          reference_count: record.parameters?.reference_count ?? null,
-          reference_capacity: record.parameters?.reference_capacity ?? null,
-          reference_mode: record.parameters?.reference_mode || 'unknown',
-          outputs: record.outputs.map(o => o.source),
-          ...(error ? { warning: error } : {}),
-          note: again
-            ? 'Personnage remplacé dans la vidéo, affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description. ' +
-              'Pour la changer ensuite (ce qui se voit, un détail, le personnage), rappelle replace_character avec replace_again et le changement dans prompt ; pour un autre personnage sans image, character à la place de reference. ' +
-              'extend_video ne fait que la prolonger dans le temps. La taille et la place du personnage sont celles de ce qu’il remplace : un prompt ne les change pas, dis-le si on te le demande.'
-            : record.mediaType === 'audio'
-              ? 'Son généré et proposé à l’écoute de l’utilisateur. Tu ne peux pas l’entendre : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque son demande la confirmation de l’utilisateur. Sinon termine sans texte.'
-              : !(record.mediaType === 'video' ? review : reviewImages)
-                ? record.mediaType === 'video'
-                  ? 'Vidéo générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque vidéo demande la confirmation de l’utilisateur. Si l’utilisateur demande une vérification, consulte sa planche d’images avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
-                  : 'Image générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil. Si l’utilisateur a demandé une vérification, consulte la copie compressée avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
-                : images.length
-                  ? 'Les images jointes sont les copies réduites des sorties identifiées par analysis_outputs (indices à partir de zéro). Les sorties sans copie ne sont pas vérifiables visuellement. Les entrées optionnelles absentes conservent leurs valeurs dans le workflow ; elles ne sont pas des références fournies par l’utilisateur. Les originaux sont dans la galerie.'
-                  : 'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.',
-        }),
+        content: takeContent(record, { request, studio, review, reviewImages, images, analysisOutputs, storyboards, error }),
         images,
         record,
         failed: !!error,
@@ -475,5 +424,96 @@ export function setupGenerationRuntime({
       onChange();
     }
   }
-  return { requestTool, saveReview };
+  return { requestTool, followTool, saveReview };
+}
+
+/**
+ * The result of a creation for the model, from its record (a take of the gallery): what requestTool
+ * gives its call once the take is made, and what a page writes for a call whose take was made while
+ * no page followed it (0.6.82, take-recovery.mjs: `request` is then its call alone, nothing attached).
+ * `review`, `reviewImages`: whether the model looks at it (its copies in `images`, `analysisOutputs`,
+ * the storyboards of a video); `error`: what went wrong after the take was made.
+ */
+export function takeContent(
+  record,
+  { request = null, studio = false, review = false, reviewImages = false, images = [], analysisOutputs = [], storyboards = [], error = '' } = {},
+) {
+  // A character put in a video: what to call again to change it (the video followed, not
+  // the result; the same character), said with the result for the next request.
+  const again = replacedAgain(request, record);
+  return JSON.stringify({
+    status: error ? 'generated' : 'success',
+    run_id: record.id,
+    // Their numbers in the project, as the user sees them (« PRISE 14 »): the model names them so.
+    ...(record.outputs.some(output => Number.isInteger(output.take))
+      ? {
+          takes: record.outputs.map(output => output.take ?? null),
+          takes_note:
+            'Pour l’utilisateur, ces prises s’appellent « PRISE n » (takes, une par sortie) : nomme-les par ce numéro, jamais par run_id. Pour en reprendre une, {"take": n} suffit.',
+        }
+      : {}),
+    // Made in the Studio: the conversation shows it as a card.
+    ...(studio ? { studio: true } : {}),
+    use_as_source: { output: record.id },
+    workflow: record.workflowName,
+    prompt: record.prompt,
+    workflow_id: record.workflowId,
+    workflow_digest: record.parameters.workflow_digest,
+    media_type: record.mediaType || 'image',
+    parameters: Object.fromEntries(
+      Object.entries(record.parameters).filter(([key]) =>
+        [
+          'workflow_id',
+          'seed',
+          'width',
+          'height',
+          'frames',
+          'fps',
+          'seconds',
+          'language',
+          'negative_prompt',
+          'references',
+          'reference_image',
+          'reference_resource',
+          'reference_frame',
+          'routing_notes',
+          'user_overrides',
+        ].includes(key),
+      ),
+    ),
+    reference_default_count: record.parameters.reference_default_count ?? 0,
+    reference_defaults: record.parameters.reference_defaults || [],
+    ...(record.mediaType === 'video' ? { stage: record.parameters.stage } : {}),
+    ...(record.mediaType === 'video' && review
+      ? {
+          analysis_outputs: analysisOutputs,
+          storyboards: storyboards.map((board, index) => ({
+            output: index,
+            layout: board ? `${board.columns}x${board.rows}` : null,
+            times: board?.times.map(time => Math.round(time * 100) / 100) || [],
+          })),
+          inspection_limit:
+            'Each attached image is a storyboard of one output: frames read left to right then top to bottom, each stamped with its order and time in seconds. It shows the progression of the clip, not continuous motion; no audio.',
+        }
+      : {}),
+    ...(again ? { replace_again: again } : {}),
+    reference_count: record.parameters?.reference_count ?? null,
+    reference_capacity: record.parameters?.reference_capacity ?? null,
+    reference_mode: record.parameters?.reference_mode || 'unknown',
+    outputs: record.outputs.map(o => o.source),
+    ...(error ? { warning: error } : {}),
+    note: again
+      ? 'Personnage remplacé dans la vidéo, affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description. ' +
+        'Pour la changer ensuite (ce qui se voit, un détail, le personnage), rappelle replace_character avec replace_again et le changement dans prompt ; pour un autre personnage sans image, character à la place de reference. ' +
+        'extend_video ne fait que la prolonger dans le temps. La taille et la place du personnage sont celles de ce qu’il remplace : un prompt ne les change pas, dis-le si on te le demande.'
+      : record.mediaType === 'audio'
+        ? 'Son généré et proposé à l’écoute de l’utilisateur. Tu ne peux pas l’entendre : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque son demande la confirmation de l’utilisateur. Sinon termine sans texte.'
+        : !(record.mediaType === 'video' ? review : reviewImages)
+          ? record.mediaType === 'video'
+            ? 'Vidéo générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil ; chaque vidéo demande la confirmation de l’utilisateur. Si l’utilisateur demande une vérification, consulte sa planche d’images avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
+            : 'Image générée et affichée à l’utilisateur. Tu ne l’as pas vue : n’écris ni commentaire ni description, ton texte ne serait pas affiché. Si la demande exige encore une génération, appelle l’outil. Si l’utilisateur a demandé une vérification, consulte la copie compressée avec local_read_output (run_id et output_index), sans demander son identifiant. Sinon termine sans texte.'
+          : images.length
+            ? 'Les images jointes sont les copies réduites des sorties identifiées par analysis_outputs (indices à partir de zéro). Les sorties sans copie ne sont pas vérifiables visuellement. Les entrées optionnelles absentes conservent leurs valeurs dans le workflow ; elles ne sont pas des références fournies par l’utilisateur. Les originaux sont dans la galerie.'
+            : 'Les originaux sont dans la galerie. Aucune copie visuelle n’est disponible pour vérifier le résultat.',
+  });
 }
