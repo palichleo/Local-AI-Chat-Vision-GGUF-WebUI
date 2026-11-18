@@ -79,6 +79,33 @@ class WeightPoolTest(unittest.TestCase):
         kept = pool.bundle(('model', 'a.weight', None))
         self.assertIs(pool.bundle(('model', 'a.weight', None)), kept)
 
+    def test_a_share_lends_its_last_layers_and_takes_only_those_back(self):
+        # What runs once beside a model left on the card (the encoder of a new prompt) is lent the
+        # room it lacks: cleared whole, the share was read again from the disk for a few layers' room.
+        sizes = {'a.weight': 40, 'b.weight': 30, 'c.weight': 20, 'd.weight': 50}
+        pool, _ = self.pool(sizes, limit=100)
+        pool.torch.cuda.empty_cache = lambda: None
+        pool.preload()
+        self.assertEqual([key for _, key, _ in pool.gpu], ['a.weight', 'b.weight', 'c.weight'])
+        first = pool.gpu[('model', 'a.weight', None)]
+        self.assertEqual(pool.lend(0), 0)
+        self.assertEqual(pool.lend(-3 / 1024**3), 0)
+        # The last ones in, until what is asked is given: 25 bytes are c and b (50).
+        self.assertEqual(pool.lend(25 / 1024**3), 50)
+        self.assertEqual([key for _, key, _ in pool.gpu], ['a.weight'])
+        self.assertEqual((pool.bytes, pool.lent, pool.limit), (40, 50, 100))
+        Tensor.copies = 0
+        pool.preload()
+        # Only what was lent is copied again; what stayed is the same tensor.
+        self.assertEqual(Tensor.copies, 3)  # b, c, and d which is tried and does not fit
+        self.assertEqual([key for _, key, _ in pool.gpu], ['a.weight', 'b.weight', 'c.weight'])
+        self.assertIs(pool.gpu[('model', 'a.weight', None)], first)
+        self.assertEqual((pool.bytes, pool.lent), (90, 0))
+        # More than it holds: all of it, and nothing more.
+        self.assertEqual(pool.lend(1), 90)
+        self.assertEqual((pool.gpu, pool.bytes), ({}, 0))
+        self.assertEqual(pool.lend(1), 0)
+
     def test_streamed_layers_are_copied_ahead_once_their_order_is_known(self):
         from runner.models import pool as module
 

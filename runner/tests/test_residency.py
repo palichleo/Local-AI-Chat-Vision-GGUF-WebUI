@@ -661,3 +661,42 @@ class PrefetchTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FillTest(unittest.TestCase):
+    """A file read into a buffer by several threads (residency._fill)."""
+
+    def _file(self, folder, size):
+        path = os.path.join(folder, 'bytes.bin')
+        content = bytes(index * 7 % 251 for index in range(size))
+        with open(path, 'wb') as handle:
+            handle.write(content)
+        return path, content
+
+    def test_stretches_land_where_asked_whatever_the_number_of_threads(self):
+        from runner.models import residency
+
+        saved = residency.CHUNK
+        residency.CHUNK = 1000  # many pieces from a small file
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                path, content = self._file(folder, 50_000)
+                # Out of order in the buffer, one of them shorter than a piece, one empty.
+                spans = [(100, 30_000, 12_345), (40_000, 0, 7_001), (20_000, 20_000, 10), (5, 29_000, 0)]
+                for readers in (1, 2, 4, 9):
+                    buffer = bytearray(50_000)
+                    residency._fill(path, memoryview(buffer), spans, readers=readers)
+                    expected = bytearray(50_000)
+                    for source, target, length in spans:
+                        expected[target : target + length] = content[source : source + length]
+                    self.assertEqual(buffer, expected, readers)
+        finally:
+            residency.CHUNK = saved
+
+    def test_a_file_shorter_than_asked_is_an_error_not_a_buffer_left_half_read(self):
+        from runner.models import residency
+
+        with tempfile.TemporaryDirectory() as folder:
+            path, _content = self._file(folder, 1_000)
+            with self.assertRaises(OSError):
+                residency._fill(path, memoryview(bytearray(4_000)), [(0, 0, 4_000)], readers=3)

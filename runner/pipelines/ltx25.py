@@ -22,6 +22,11 @@ TWO_PASS_SIDE = 512
 RAM_RESERVE_GIB = 4
 LOCK_MARGIN_GIB = 0.5
 AHEAD_GIB = 0.5
+# Video memory reading a new prompt takes beside a model left on the card, in GiB: 1.1 for the
+# encoder (its layers pass through the card one after the other), 3.0 for the connectors (one
+# weight of 1.4 GiB), measured 17/11; and the margin the engine keeps under what is free.
+TEXT_GIB = 3.3
+TEXT_MARGIN_GIB = 1.0
 # Video memory a decode in the smallest tiles takes at its peak, in GiB (measured at 896 x 1600).
 DECODE_GIB = 6
 
@@ -217,6 +222,7 @@ def _generate(job, config, progress, key, holder):
 
     if not torch.cuda.is_available():
         raise RuntimeError('Native LTX2.5 requires CUDA')
+    from runner.models.ladder import smaller
     from runner.models.pool import require, room
 
     # Asked for before anything is loaded: what the model computes with for the first pass of
@@ -266,17 +272,27 @@ def _generate(job, config, progress, key, holder):
         found = conditioning.load(config, conditioning.key('ltx25', stamps[0], job['parameters']['prompt']))
         if found:
             embeds, mask = found[0]['embeds'], found[0]['mask']
-    if text is None and holder[0] is not None and holder[0].hot is not None:
-        # A prompt to read: its encoder, then the connectors, have the card to themselves as
-        # they always had. The share of the model the last generation left there goes (its
-        # layers stay built), and is filled again when the model first runs.
-        holder[0].hot.clear()
+    left = holder[0].hot if holder[0] is not None else None
+    if text is None and left is not None and left.gpu:
+        # A prompt to read beside the share of the model the last generation left on the card:
+        # the share lends what the encoder and the connectors lack (TEXT_GIB), its last
+        # layers, and takes them back when the model first runs. Before 0.6.79 it left whole
+        # and was read again from the disk: 4.5 s of a draft for a prompt that needed 0.9 GiB.
         gc.collect()
         torch.cuda.empty_cache()
+        left.lend(TEXT_GIB - room(TEXT_MARGIN_GIB))
+
+    def alone():
+        """The encoder with the card to itself, as it always had: the share leaves whole (its
+        layers stay built), and is filled again when the model first runs."""
+        left.clear()
+        return encode(job, headers, progress)
+
     if found:
         progress(stage='video prompt encoded', conditioning='kept from an earlier generation')
     else:
-        embeds, mask = encode(job, headers, progress)
+        beside = left is not None and left.gpu
+        embeds, mask = smaller([lambda: encode(job, headers, progress), *([alone] if beside else [])], torch)
         progress(stage='video prompt encoded', weights=getattr(encode, 'weights', None))
     setup = {}
     lap = time.perf_counter()
@@ -420,7 +436,7 @@ def _generate(job, config, progress, key, holder):
             due = [] if ready else [budget]
 
             def fill(_module, _inputs):
-                if cold.recent or due:
+                if cold.recent or due or hot.lent:
                     # What those ran with leaves first: the last layers of an encoder stay on the
                     # GPU for a moment (RECENT), and PyTorch keeps the blocks it has freed.
                     cold.clear()
@@ -430,6 +446,12 @@ def _generate(job, config, progress, key, holder):
                     hot.resize(due.pop())
                     spent = setup.get('weights kept on the GPU', 0) + time.perf_counter() - began
                     setup['weights kept on the GPU'] = round(spent, 2)
+                elif hot.lent:
+                    # What the share lent to the reading of the prompt comes back, alone.
+                    began, lent = time.perf_counter(), hot.lent
+                    hot.preload()
+                    spent = round(time.perf_counter() - began, 2)
+                    setup['weights lent and taken back'] = [round(lent / 1024**3, 2), spent]
 
             hooks.append(transformer.register_forward_pre_hook(fill))
             if text is None:
@@ -439,7 +461,19 @@ def _generate(job, config, progress, key, holder):
                 # in the place of the encoder's, thirty times larger (385 MiB a prompt): another
                 # seed or size then reads 12 MiB instead of running them again.
                 connectors = load_streamed(models.pop('connectors'), names['connectors'], cold)
-                found = connectors(embeds.to('cuda'), mask.to('cuda'), padding_side='left')
+
+                def connect():
+                    return connectors(embeds.to('cuda'), mask.to('cuda'), padding_side='left')
+
+                def unshared():
+                    # Beside the share of the model they did not fit: it leaves whole, as before
+                    # 0.6.79, and is filled again when the model first runs.
+                    cold.clear()
+                    hot.resize(0)
+                    due[:] = [budget]
+                    return connect()
+
+                found = smaller([connect, *([unshared] if hot.gpu else [])], torch)
                 text = dict(zip(('video', 'audio', 'mask'), found))
                 del connectors, found
                 cold.clear()

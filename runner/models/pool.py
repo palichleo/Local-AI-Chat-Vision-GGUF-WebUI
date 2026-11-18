@@ -136,6 +136,8 @@ class WeightPool:
         self.sizes = {}
         self.locked = {}
         self.small = {}
+        # Bytes of the share given back for a moment and not yet taken again (see lend).
+        self.lent = 0
         if self.ahead_limit:
             self.stats['ahead_gib'] = 0.0
 
@@ -497,6 +499,28 @@ class WeightPool:
             self.bundle(location)
             if location not in self.gpu:
                 break
+        self.lent = 0
+
+    def lend(self, gib):
+        """Give the card back `gib` of the share for a moment: the layers that came last
+        leave, the limit stays, and `preload` brings them back. Returns the bytes given back.
+
+        For what runs once beside a model left on the card (the encoder of a new prompt, its
+        connectors). The share is on the GPU only: cleared whole for them, it was read again
+        from the disk, 4.5 s for the 7.3 GiB of an LTX 2.5 draft when they needed 0.9 (17/11)."""
+        wanted, freed = int(gib * GiB), 0
+        if wanted <= 0 or not self.gpu:
+            return 0
+        self.settle()
+        for location in reversed(list(self.gpu)):
+            if freed >= wanted:
+                break
+            del self.gpu[location]
+            freed += self.sizes[location]
+        self.bytes -= freed
+        self.lent += freed
+        self.torch.cuda.empty_cache()
+        return freed
 
     def resize(self, limit_gib):
         """Start the GPU share over at another size: everything leaves, then it is filled again
@@ -508,6 +532,7 @@ class WeightPool:
         self.ahead.clear()
         self.reach = None
         self.bytes, self.recent_bytes, self.ahead_bytes = self.merged_bytes, 0, 0
+        self.lent = 0
         self.torch.cuda.empty_cache()
         self.limit = int(limit_gib * 1024**3)
         if self.limit:
@@ -534,7 +559,7 @@ class WeightPool:
         self.locked.clear()
         self.merged.clear()
         self.reach = None
-        self.bytes = self.recent_bytes = self.merged_bytes = self.ahead_bytes = 0
+        self.bytes = self.recent_bytes = self.merged_bytes = self.ahead_bytes = self.lent = 0
 
 
 def load_streamed(model, names, pool):

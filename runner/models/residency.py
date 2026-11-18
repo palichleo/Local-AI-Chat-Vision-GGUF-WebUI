@@ -39,6 +39,8 @@ OTHERS_FLOOR = 4 * GiB
 MIN_PART = GiB
 PAGE = 4096  # where a partial arena's tensors start (see Residency.partial, _pin)
 CHUNK = 64 * 1024**2
+# Threads that read a file into an arena together (see _fill).
+READERS = 4
 
 _DTYPES = {
     'F64': 'float64',
@@ -61,6 +63,52 @@ def _header(path):
         length = struct.unpack('<Q', handle.read(8))[0]
         header = json.loads(handle.read(length))
     return header, 8 + length
+
+
+def _fill(path, view, spans, readers=None):
+    """Read stretches of a file into a buffer: `spans` are (offset in the file, offset in the
+    buffer, bytes), `view` the buffer's memoryview.
+
+    Several threads read them, a chunk each at a time, in the order of the spans. One thread
+    spent its time on the pages of the new buffer as much as on the file: 12.6 GiB already in
+    the system's cache took 4.4 s with one, 2.1 s with four and 1.8 s with eight (17/11),
+    and a disk that answers several requests at once is asked for several."""
+    pieces = [
+        (source + done, target + done, min(CHUNK, length - done))
+        for source, target, length in spans
+        for done in range(0, length, CHUNK)
+    ]
+    turn, failures = iter(pieces), []
+    lock = threading.Lock()
+
+    def read():
+        try:
+            with open(path, 'rb', buffering=0) as handle:
+                while not failures:
+                    with lock:
+                        piece = next(turn, None)
+                    if piece is None:
+                        return
+                    source, target, length = piece
+                    handle.seek(source)
+                    done = 0
+                    while done < length:
+                        count = handle.readinto(view[target + done : target + length])
+                        if not count:
+                            raise OSError('Unexpected end of ' + str(path))
+                        done += count
+        except BaseException as failure:  # noqa: BLE001 - raised again by the caller's thread
+            failures.append(failure)
+
+    count = max(1, min(READERS if readers is None else readers, len(pieces)))
+    workers = [threading.Thread(target=read, daemon=True) for _ in range(count - 1)]
+    for worker in workers:
+        worker.start()
+    read()
+    for worker in workers:
+        worker.join()
+    if failures:
+        raise failures[0]
 
 
 class Arena:
@@ -143,15 +191,7 @@ class Residency:
                 return None
             started = time.perf_counter()
             data = torch.empty(size, dtype=torch.uint8)
-            view = memoryview(data.numpy())
-            with open(path, 'rb', buffering=0) as handle:
-                handle.seek(base)
-                done = 0
-                while done < size:
-                    read = handle.readinto(view[done : done + CHUNK])
-                    if not read:
-                        raise OSError('Unexpected end of ' + path)
-                    done += read
+            _fill(path, memoryview(data.numpy()), [(base, 0, size)])
             pinned = self._pin(data) if pin else 0
             arena = Arena(path, stamp, header, base, data, pinned)
             self.arenas[path] = arena
@@ -233,18 +273,11 @@ class Residency:
                 return None
             skip = -block.data_ptr() % PAGE
             data = block[skip : skip + size]
-            view = memoryview(data.numpy())
-            with open(path, 'rb', buffering=0) as handle:
-                for key in packed:
-                    start, end = header[key]['data_offsets']
-                    to = packed[key]['data_offsets'][0]
-                    handle.seek(base + start)
-                    done = 0
-                    while done < end - start:
-                        read = handle.readinto(view[to + done : to + min(end - start, done + CHUNK)])
-                        if not read:
-                            raise OSError('Unexpected end of ' + path)
-                        done += read
+            spans = []
+            for key, entry in packed.items():
+                start, end = header[key]['data_offsets']
+                spans.append((base + start, entry['data_offsets'][0], end - start))
+            _fill(path, memoryview(data.numpy()), spans)
             arena = Arena(path, stamp, packed, base, data, self._pin(data, cuts))
             arena.keys, arena.asked, arena.whole = frozenset(packed), frozenset(wanted), whole
             self.arenas[name] = arena
