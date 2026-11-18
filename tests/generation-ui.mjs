@@ -302,14 +302,25 @@ test('video output uses the original streaming URL, plays from its round button,
     video = wrapper.children.find(node => node.tag === 'video');
   assert.ok(video);
   assert.equal(video.poster, 'compressed-preview');
-  // Its picture and a round play button (capture 14); the controls of the player once it plays.
-  const play = wrapper.children.find(node => node.cls === 'take-play');
+  // Its picture and a round play button (capture 14): the player of a take opened over it, never the
+  // browser's controls, not even once it plays (0.6.97).
+  const player = wrapper.children.find(node => node.cls === 'take-player'),
+    play = player.children.find(node => node.cls === 'take-play take-player-play');
   assert.equal(video.controls, false);
-  assert.equal(play.attributes['aria-label'], 'Lire la vidéo');
+  assert.equal(play.attributes['aria-label'], 'Lire');
+  let played = 0;
+  Object.assign(video, {
+    paused: true,
+    play: () => {
+      played++;
+      return Promise.resolve();
+    },
+  });
   play.onclick();
-  assert.equal(video.controls, true);
-  assert.equal(play.hidden, true);
-  assert.equal(video.preload, 'none');
+  assert.equal(played, 1);
+  assert.equal(video.controls, false);
+  // No picture of it when it came: its first one (its file read, its metadata only).
+  assert.equal(video.preload, 'metadata');
   assert.equal(video.src, '/media/generated/signed');
   assert.match(label.textContent, /Brouillon/);
   assert.equal(bar.classList.contains('is-complete'), true);
@@ -318,6 +329,103 @@ test('video output uses the original streaming URL, plays from its round button,
   assert.deepEqual(opened, [record, 0]);
   ui.clear();
   assert.equal(video.src, undefined);
+});
+
+test('a clip of the chat, a take of a reply as one of the Studio, plays with the player of a take: never the browser’s controls (0.6.97)', () => {
+  // Elements that listen as those of a page do, and say whether a control of the browser was given.
+  const listening = new WeakMap(),
+    given = [];
+  class Listening extends Element {
+    addEventListener(type, listener) {
+      const all = listening.get(this) ?? {};
+      (all[type] ??= []).push(listener);
+      listening.set(this, all);
+    }
+    removeEventListener(type, listener) {
+      const all = listening.get(this);
+      if (all?.[type]) all[type] = all[type].filter(item => item !== listener);
+    }
+    set controls(value) {
+      if (value) given.push(this.tag);
+    }
+    get controls() {
+      return false;
+    }
+    setAttribute(key, value) {
+      if (key === 'controls') given.push(this.tag);
+      super.setAttribute(key, value);
+    }
+  }
+  const fire = (element, type, event = {}) => {
+    for (const listener of [...(listening.get(element)?.[type] ?? [])]) listener({ type, ...event });
+  };
+  const under = item => [item, ...(item.children ?? []).flatMap(under)];
+  for (const compact of [false, true]) {
+    const container = new Listening(),
+      opened = [],
+      ui = setupGenerationUI({
+        api: async () => {
+          throw Error('No request expected');
+        },
+        node: (...args) => new Listening(...args),
+        openOutput: (...args) => opened.push(args),
+        onOpen: () => {},
+      }),
+      record = {
+        id: 'r',
+        conversationId: 'c',
+        mediaType: 'video',
+        workflowName: 'LTX 2.5',
+        prompt: 'Un portail céleste',
+        parameters: { width: 432, height: 768, frames: 593, fps: 24 },
+        outputs: [{ take: 45, thumbUrl: '/thumb.jpg', originalUrl: '/clip.mp4' }],
+      },
+      card = ui.mount(container, { mediaType: 'video' }, { compact });
+    card.image({ record, index: 0 });
+    card.finish({ record });
+    const [video, ...others] = under(container).filter(item => item.tag === 'video'),
+      [host] = under(container).filter(item => item.cls === 'take-player'),
+      [play, bar] = host.children,
+      [, time, sound, expand] = bar.children;
+    assert.deepEqual(others, [], 'one clip, in place: never another one with the controls');
+    // Its player is named for a screen reader; its length is its record's until its file is read.
+    assert.equal(host.attributes['aria-label'], 'Lecteur · PRISE 45');
+    assert.equal(time.textContent, '00.00 / 24.70');
+    // Played, paused, ended, the sound off: never a control of the browser.
+    Object.assign(video, {
+      paused: true,
+      ended: false,
+      duration: 24.7,
+      currentTime: 0,
+      play() {
+        this.paused = false;
+        fire(this, 'play');
+        return Promise.resolve();
+      },
+      pause() {
+        this.paused = true;
+        fire(this, 'pause');
+      },
+    });
+    play.onclick();
+    assert.equal(video.paused, false);
+    assert.equal(play.attributes['aria-label'], 'Mettre en pause');
+    fire(video, 'click');
+    assert.equal(video.paused, true);
+    sound.onclick();
+    assert.equal(video.muted, true);
+    fire(video, 'ended');
+    let refused = false;
+    fire(video, 'contextmenu', { preventDefault: () => (refused = true) });
+    assert.equal(refused, true, 'its menu, whose « Afficher les commandes » showed them, is refused');
+    // « Voir en grand »: the take in its window.
+    play.onclick();
+    expand.onclick();
+    assert.equal(video.paused, true);
+    assert.deepEqual(opened, [[record, 0]]);
+    assert.deepEqual(given, [], compact ? 'a card of the Studio' : 'a take of a reply');
+    ui.clear();
+  }
 });
 
 test('a proposal declined goes without a trace: no card, no line, nothing left to watch (16/11)', () => {
@@ -560,21 +668,33 @@ test('a creation of the Studio is a card: what it is, and « Ouvrir », which le
   };
   card.image({ record, index: 0 });
   card.finish({ record });
-  // Made: its first picture as it is (no grain over it) and its round play button; « Ouvrir » puts
-  // it on the screen.
-  const [shown, play] = figure.children[0].children;
-  assert.equal(shown.tag, 'img');
-  assert.equal(shown.src, '/thumb.jpg');
-  assert.equal(figure.children[0].children.length, 2);
-  assert.equal(play.cls, 'take-play');
+  // Made: its first picture as it is (no grain over it) and its round play button, the player of a
+  // take over it as on a take of a reply (0.6.97); « Ouvrir » puts it on the screen.
+  const [wrapper] = figure.children[0].children;
+  assert.equal(figure.children[0].children.length, 1);
+  assert.equal(wrapper.cls, 'video-original');
+  const [video, player] = wrapper.children,
+    [play] = player.children;
+  assert.equal(video.tag, 'video');
+  assert.equal(video.poster, '/thumb.jpg');
+  assert.equal(video.preload, 'none', 'its file read once played');
+  assert.equal(player.cls, 'take-player');
+  assert.equal(play.cls, 'take-play take-player-play');
   find('card-open').onclick();
   assert.deepEqual(opened, [null, 'r']);
-  // Played where it is: the player, with its controls, in place of the picture.
+  // Played where it is, by the player of a take: never the browser's controls.
+  let played = 0;
+  Object.assign(video, {
+    paused: true,
+    play: () => {
+      played++;
+      return Promise.resolve();
+    },
+  });
   play.onclick();
-  const [video] = figure.children[0].children;
-  assert.equal(video.tag, 'video');
+  assert.equal(played, 1);
   assert.equal(video.src, '/clip.mp4');
-  assert.equal(video.controls, true);
+  assert.equal(video.controls, false);
 });
 
 test('a card of the Studio shows its thumbnail, or its file once, and never downloads its original again', () => {

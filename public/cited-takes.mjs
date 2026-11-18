@@ -5,6 +5,7 @@
  * them), a reference among those of the project; a click on a take opens it as in the Pellicule.
  * A number the project does not have shows nothing.
  */
+import { stillClip } from './take-player.mjs';
 
 /** At most this many pictures under one reply. */
 export const MOST = 8;
@@ -176,8 +177,8 @@ export function setupCitedTakes({ node, icon, load, project, references, viewOut
       Object.assign(picture, { src: output.thumbUrl || output.originalUrl || '', alt: '', loading: 'lazy', decoding: 'async' });
       frame.append(picture);
     } else {
-      // Its first picture only.
-      const clip = node('video');
+      // Its first picture only; never a player of the browser, not even from its menu (0.6.97).
+      const clip = stillClip(node('video'));
       Object.assign(clip, { muted: true, preload: 'metadata', playsInline: true, src: (output.originalUrl || '') + '#t=0.1' });
       frame.append(clip);
     }

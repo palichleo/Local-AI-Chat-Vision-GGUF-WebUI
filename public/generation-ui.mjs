@@ -3,6 +3,7 @@ import { thumbnailOf } from './thumbnails.mjs';
 import { livePreview } from './live-preview.mjs';
 import { takeFlux } from './take-flux.mjs';
 import { formatOf } from './formats.mjs';
+import { clipPlayer } from './take-player.mjs';
 import { elapsedClock, madeIn } from './generation-time.mjs';
 
 const KINDS = { image: 'IMAGE', video: 'VIDÉO', audio: 'SON' };
@@ -538,75 +539,32 @@ export function setupGenerationUI({
         onResize();
         return;
       }
-      if (record.mediaType === 'video' && compact) {
-        // A card shows the first picture of the clip; « Ouvrir » plays it on the Studio's screen.
-        const output = record.outputs?.[index] ?? {},
-          poster = output.analysisDataUrl || output.thumbUrl,
-          shown = node(poster ? 'img' : 'video');
-        if (poster) Object.assign(shown, { src: poster, alt: record.prompt || '', decoding: 'async' });
-        else {
-          Object.assign(shown, { muted: true, preload: 'metadata', playsInline: true });
-          shown.onloadeddata = () => void thumbnailOf(api, record, index, shown);
-          shown.src = (output.originalUrl || '') + '#t=0.1';
-        }
-        shown.title = 'Voir l’original et ses paramètres';
-        shown.onclick = () => openOutput(record, index);
-        target.figure.classList.add('is-video');
-        sized(record, index, target);
-        target.figure.append(buttons(record, index));
-        const slot = { index, button: shown, img: shown, isVideo: true, tile: target },
-          play = node('button', 'take-play');
-        slots.set(index, slot);
-        // A take of the Studio in a conversation plays there too, from its round button (capture 14).
-        play.type = 'button';
-        play.setAttribute('aria-label', 'Lire la vidéo');
-        play.title = 'Lire la vidéo';
-        play.onclick = () => {
-          const video = node('video');
-          Object.assign(video, { controls: true, playsInline: true, preload: 'auto' });
-          if (poster) video.poster = poster;
-          video.setAttribute('aria-label', 'Vidéo originale · ' + record.workflowName);
-          video.src = output.originalUrl || '';
-          frame.replaceChildren(video);
-          slot.button = slot.img = video;
-          void video.play?.()?.catch?.(() => {});
-        };
-        frame.replaceChildren(shown, play);
-        frame.classList.add('has-image');
-        frame.setAttribute('aria-busy', 'false');
-        onResize();
-        return;
-      }
       if (record.mediaType === 'video') {
-        const output = record.outputs?.[index],
+        // Its picture and the round ▶ (capture 14), a take of the Studio as one of a reply: the player
+        // of a take opened plays it where it is (take-player.mjs, 0.6.97), never the browser's;
+        // « Voir en grand » shows it in its window. Without a picture of it yet, its first one.
+        const output = record.outputs?.[index] ?? {},
           wrapper = node('div', 'video-original'),
           video = node('video'),
-          play = node('button', 'take-play');
-        // Its picture and a round play button (capture 14); the controls of the player once it plays.
-        video.controls = false;
-        play.type = 'button';
-        play.setAttribute('aria-label', 'Lire la vidéo');
-        play.title = 'Lire la vidéo';
-        play.onclick = () => {
-          play.hidden = true;
-          video.controls = true;
-          void video.play?.()?.catch?.(() => {});
-        };
-        video.onplay = () => {
-          play.hidden = true;
-          video.controls = true;
-        };
-        video.preload = 'none';
+          poster = output.analysisDataUrl || output.thumbUrl,
+          take = Number.isInteger(output.take) ? 'PRISE ' + output.take : '',
+          player = clipPlayer({
+            node,
+            video,
+            onExpand: () => openOutput(record, index),
+            label: ['Lecteur', take].filter(Boolean).join(' · '),
+            length: clipSeconds(record.parameters ?? {}) ?? 0,
+          });
+        video.preload = poster ? 'none' : 'metadata';
         video.playsInline = true;
         video.setAttribute('aria-label', 'Vidéo originale · ' + record.workflowName);
-        const poster = output.analysisDataUrl || output.thumbUrl;
         if (poster) video.poster = poster;
         sized(record, index, target);
         video.onloadedmetadata = () => dimensions(video.videoWidth, video.videoHeight, target);
         video.onloadeddata = () => void thumbnailOf(api, record, index, video);
-        wrapper.append(video, play);
+        wrapper.append(video, player.element);
         target.figure.append(buttons(record, index));
-        const slot = { index, button: wrapper, img: video, isVideo: true, tile: target };
+        const slot = { index, button: wrapper, img: video, isVideo: true, tile: target, player };
         slots.set(index, slot);
         frame.replaceChildren(wrapper);
         watch(wrapper, visible => {
@@ -796,6 +754,7 @@ export function setupGenerationUI({
       for (const target of tiles) unwatch(target.figure);
       for (const slot of slots.values()) {
         unwatch(slot.button);
+        slot.player?.detach();
         release(slot);
         slot.compare?.dispose();
         slot.button.onclick = null;

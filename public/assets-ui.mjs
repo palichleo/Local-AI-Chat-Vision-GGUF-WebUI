@@ -173,6 +173,8 @@ export function setupAssets({
   $('media-prev').onclick = () => step(-1);
   $('media-next').onclick = () => step(1);
   $('original-dialog').addEventListener('keydown', event => {
+    // The space plays the clip or the sound shown, or pauses it, the window itself in hand (0.6.97).
+    if (event.key === ' ' && event.target === $('original-dialog') && player.toggle()) return void event.preventDefault();
     const typing = /^(INPUT|TEXTAREA|SELECT|VIDEO)$/.test(event.target?.tagName ?? '');
     if (typing || !around) return;
     if (event.key === 'ArrowLeft') step(-1);

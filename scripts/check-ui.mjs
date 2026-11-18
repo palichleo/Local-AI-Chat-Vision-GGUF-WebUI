@@ -11,11 +11,13 @@
  * installed. None found: said, and the check is skipped (it never blocks for want of one).
  */
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Gallery } from '../lib/gallery.mjs';
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const local = process.env.LOCALAPPDATA || '';
@@ -85,7 +87,7 @@ const app = {
   }),
   close: async () => server.kill(),
 };
-const chrome = spawn(browser, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], {
+const chrome = spawn(browser, ['--headless=new', '--mute-audio', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], {
   stdio: 'ignore',
 });
 const problems = [];
@@ -225,6 +227,9 @@ try {
     // An unexpected error said to the user (app.js) is one too.
     const said = await js(`document.getElementById('notice')?.hidden === false ? document.getElementById('notice-text').textContent : ''`);
     if (/inattendue/i.test(said)) problems.push([name, 'notice', said]);
+    // A video given the browser's controls during the step, were it for an instant.
+    for (const video of (await js(`window.__browserControls?.splice(0) ?? []`)) ?? [])
+      problems.push([name, 'lecteur', 'contrôles du navigateur sur une vidéo : ' + video]);
     results.push([name, done !== false && shown !== false]);
     if (done === false) problems.push([name, 'absent', 'l’élément de cette étape est introuvable']);
     else if (shown === false) problems.push([name, 'état', 'la page ne montre pas ce que cette étape attend']);
@@ -237,10 +242,145 @@ try {
     click(opener).then(opened => opened && wait(200).then(() => click(`.thread-menu ${line}`)));
   const menuOpen = () => js(`!!document.querySelector('.thread-menu')`);
   const menuClosed = () => js(`!document.querySelector('.thread-menu')`);
+  /** A key as a person presses it (its character too: a button takes Espace from it). */
+  const press = async (name, code, keyCode, text) => {
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code, windowsVirtualKeyCode: keyCode, ...(text ? { text, unmodifiedText: text } : {}) });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code, windowsVirtualKeyCode: keyCode });
+  };
+  /**
+   * The clips (0.6.97): a conversation with a video joined to its first message and two takes, one
+   * of a reply at 16:9, one of the Studio at 9:16, made of a second of colour the page records itself
+   * (MediaRecorder: nothing of the user's, no tool of the computer). Each plays with the player of a
+   * take, never the browser's: its ▶ with Espace, « Voir en grand » opens its window. A browser that
+   * cannot record skips them, said.
+   */
+  async function clips() {
+    // At the shape of each take (a card takes that of its file once read): 16:9 and 9:16.
+    const recorded = await js(`(async () => {
+      if (typeof MediaRecorder !== 'function' || !MediaRecorder.isTypeSupported('video/webm')) return null;
+      const record = async (width, height) => {
+        const canvas = Object.assign(document.createElement('canvas'), { width, height }),
+          context = canvas.getContext('2d'),
+          recorder = new MediaRecorder(canvas.captureStream(12), { mimeType: 'video/webm' }),
+          parts = [],
+          stopped = new Promise(resolve => (recorder.onstop = resolve));
+        recorder.ondataavailable = event => parts.push(event.data);
+        recorder.start();
+        for (let frame = 0; frame < 12; frame++) {
+          context.fillStyle = 'hsl(' + frame * 30 + ', 60%, 45%)';
+          context.fillRect(0, 0, width, height);
+          await new Promise(resolve => setTimeout(resolve, 80));
+        }
+        recorder.stop();
+        await stopped;
+        const bytes = new Uint8Array(await new Blob(parts).arrayBuffer());
+        let text = '';
+        for (const byte of bytes) text += String.fromCharCode(byte);
+        return bytes.length ? btoa(text) : null;
+      };
+      const [wide, tall] = await Promise.all([record(96, 54), record(54, 96)]);
+      return wide && tall ? { wide, tall } : null;
+    })()`).catch(() => null);
+    if (!recorded) return void console.log('Clips sautés : ce navigateur n’enregistre pas de vidéo (MediaRecorder).');
+    const clip = name => Buffer.from(recorded[name], 'base64'),
+      conversation = randomUUID(),
+      takes = { wide: randomUUID(), tall: randomUUID() },
+      gallery = new Gallery({ historyDir: join(data, 'history') });
+    await mkdir(join(data, 'output', 'video'), { recursive: true });
+    for (const name of ['wide', 'tall']) await writeFile(join(data, 'output', 'video', `verification-${name}.webm`), clip(name));
+    for (const [name, [width, height, take]] of Object.entries({ wide: [768, 432, 1], tall: [432, 768, 2] }))
+      await gallery.put(
+        {
+          id: takes[name],
+          conversationId: conversation,
+          provider: 'native',
+          mediaType: 'video',
+          workflowId: 'verification',
+          workflowName: 'Vérification',
+          prompt: 'Une seconde de couleur',
+          parameters: { width, height, frames: 12, fps: 12 },
+          createdAt: new Date().toISOString(),
+          outputs: [{ source: { filename: `verification-${name}.webm`, subfolder: 'video', type: 'output' }, take, width, height }],
+        },
+        { persist: true },
+      );
+    // The key of the page, as the launcher reads it (from memory: no work of the server).
+    const { token } = await (await fetch(app.url + '/api/bootstrap?brief=1')).json(),
+      call = async (route, body, headers = {}) => {
+        const response = await fetch(app.url + '/api/' + route, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', ...headers },
+          body: Buffer.isBuffer(body) ? body : JSON.stringify(body),
+        });
+        if (!response.ok) throw new Error(`${route} : ${response.status} ${await response.text()}`);
+        return response.json();
+      },
+      joined = await call('resources/upload', clip('tall'), { 'Content-Type': 'video/webm', 'X-Resource-Name': 'jointe.webm', 'X-Resource-Project': 'inbox' }),
+      made = (id, result) => [
+        { role: 'assistant', content: '', tool_calls: [{ id, type: 'function', function: { name: 'create_video', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: id, content: JSON.stringify({ status: 'done', ...result }) },
+      ];
+    await call('history/save', {
+      id: conversation,
+      messages: [
+        { role: 'user', content: `Deux clips à regarder\n[Vidéo jointe : ${joined.label || '#ref1'} « jointe.webm » — resource_id ${joined.id}]` },
+        ...made('call_1', { run_id: takes.wide }),
+        { role: 'user', content: 'Et une depuis le Studio' },
+        ...made('call_2', { run_id: takes.tall, studio: true }),
+      ],
+    });
+    const videos = `[...document.querySelectorAll('#messages video')]`,
+      card = index => `document.querySelectorAll('#messages .generation-card .video-original')[${index}]`;
+    await run('rechargement avec des clips', () => send('Page.reload').then(() => wait(2000)), view('chat'));
+    await run('conversation aux clips', () =>
+      click('#thread-conversation').then(() => wait(200)).then(() =>
+        js(`(() => { const line = [...document.querySelectorAll('.thread-menu .thread-choice')].find(item => item.textContent.includes('Deux clips')); line?.click(); return !!line; })()`)),
+    () => js(`${videos}.length >= 1`), { within: 3000 });
+    // Each in sight once, for its card to read its take; then the three clips with the player of a take.
+    await run('clips : lecteur de prise partout', async () => {
+      for (const index of [0, 1]) {
+        await until(() => js(`!!${card(index)} || (document.querySelectorAll('#messages .generation-card')[${index}]?.scrollIntoView({ block: 'center', behavior: 'instant' }), false)`), 3000);
+        await js(`${card(index)}?.scrollIntoView({ block: 'center', behavior: 'instant' })`);
+      }
+    }, () =>
+      js(`(() => {
+        const all = ${videos},
+          hosts = all.map(video => video.parentElement.querySelector(':scope > .take-player')),
+          wrap = index => getComputedStyle(${card('index')}.querySelector('.take-player-bar')).flexWrap;
+        return all.length === 3 && all.every(video => !video.controls) && hosts.every(host => host && !host.hidden)
+          && document.querySelectorAll('#messages .take-player-expand').length === 2
+          // At 9:16 (202 px) the time and the buttons go over the line; at 16:9 one row, as in the window of a take.
+          && wrap(0) === 'nowrap' && wrap(1) === 'wrap';
+      })()`), { within: 3000 });
+    await run('clip : Espace sur ▶', async () => {
+      await js(`${card(0)}.scrollIntoView({ block: 'center', behavior: 'instant' }); ${card(0)}.querySelector('.take-player-play').focus()`);
+      await press(' ', 'Space', 32, ' ');
+    }, () => js(`${card(0)}.querySelector('video').paused === false && document.activeElement?.getAttribute('aria-label') === 'Mettre en pause'`), { within: 2000 });
+    await run('clip : Espace de nouveau, en pause', () => press(' ', 'Space', 32, ' '), () =>
+      js(`${card(0)}.querySelector('video').paused === true && !${card(0)}.querySelector('video').controls`), { within: 1000 });
+    await run('clip : Voir en grand', () => js(`${card(0)}.querySelector('.take-player-expand').click()`), () =>
+      js(`document.getElementById('original-dialog').open && !document.getElementById('take-player').hidden && !document.getElementById('original-video').controls`), { within: 2000 });
+    await run('Échap (fenêtre de la prise)', () => key('Escape', 'Escape', 27), noDialog);
+    await run('Pellicule : clips', () => click('#library-open'), () =>
+      js(`document.querySelectorAll('#library-view .library-tile[data-media="video"]').length === 2 && ![...document.querySelectorAll('#library-view video')].some(video => video.controls)`), { within: 2000 });
+    await run('Chat depuis la Pellicule (clips)', () => click('#chat-open'), view('chat'));
+  }
 
   await send('Runtime.enable');
   await send('Log.enable');
   await send('Page.enable');
+  // Any video of the page given the browser's controls, even for an instant (0.6.97: the player of
+  // a take everywhere, take-player.mjs), from the first line of the page to the last step.
+  await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `window.__browserControls = [];
+      new MutationObserver(changes => {
+        for (const change of changes)
+          for (const item of [change.target, ...change.addedNodes])
+            for (const video of item.querySelectorAll ? [item, ...item.querySelectorAll('video')] : [])
+              if (video.localName === 'video' && video.hasAttribute('controls'))
+                window.__browserControls.push((video.getAttribute('aria-label') || video.parentElement?.className || 'vidéo') + '');
+      }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['controls'] });`,
+  });
   await size(1280);
   await send('Page.navigate', { url: app.url + '/' });
   await wait(2500);
@@ -432,6 +572,7 @@ try {
   await run('Pellicule à 900 px', () => click('#library-open'), view('library'));
   await run('Chat à 900 px', () => click('#chat-open'), view('chat'));
   await size(1280);
+  await clips();
   await run('rechargement', () => send('Page.reload').then(() => wait(2000)), view('chat'));
   console.log(`Vérification de l’interface (${browser.split(/[\\/]/).pop()}) : ${results.filter(([, ok]) => ok).length}/${results.length} étapes.`);
   for (const [name, allowed] of allowances)

@@ -1127,6 +1127,8 @@ async function studioPage(tools, routes = {}, options = {}) {
 }
 const sizes = { width: { min: 256, max: 2048, multipleOf: 32 }, height: { min: 256, max: 2048, multipleOf: 32 } };
 const settle = () => new Promise(resolve => setTimeout(resolve, 15));
+/** What the screen shows: an image, or a clip, in a box of its own with the player of a take (0.6.97). */
+const screenOf = shown => (String(shown?.className ?? '').includes('studio-frame-clip') ? shown.children[0] : shown);
 
 test('Image, Vidéo and Son at the top of the screen: icons named, there from the start, opening the Studio in their mode', async () => {
   const image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
@@ -1246,19 +1248,37 @@ test('« Ouvrir » on a card puts the creation on the screen of its mode', async
   };
   const clip = { id: 'c', mediaType: 'video', prompt: 'un renard', outputs: [{ originalUrl: '/clip.mp4' }] },
     picture = { id: 'p', prompt: 'un terrier', outputs: [{ originalUrl: '/p.png' }] };
-  const { studio, body, restore } = await studioPage({ create_video: [video] }, {}, { runs: [picture, clip] });
+  const opened = [];
+  const { studio, body, restore } = await studioPage(
+    { create_video: [video] },
+    {},
+    { runs: [picture, clip], viewOutput: record => opened.push(record.id) },
+  );
   try {
     // The Studio opens on the mode of the newest take of the conversation: an image.
     assert.equal(body.dataset.mode, 'image');
     studio.show(clip);
     assert.equal(body.dataset.mode, 'video');
-    const [shown] = body.find('studio-frame-result');
+    const [box] = body.find('studio-frame-result'),
+      shown = screenOf(box);
     assert.equal(shown.tag, 'video');
-    // Its picture and a round play button (capture 22); the controls once it plays.
+    // Its picture and a round play button (capture 22), the player of a take opened over it: never the
+    // browser's controls, not even once it plays (0.6.97).
     assert.equal(shown.controls, false);
     assert.equal(body.find('take-play').length, 1);
-    shown.playButton.onclick();
-    assert.equal(shown.controls, true, 'a clip plays on the screen');
+    assert.equal(box.find('take-player').length, 1, 'the player is with the clip, in its box');
+    let played = 0;
+    shown.play = () => {
+      played++;
+      return Promise.resolve();
+    };
+    shown.paused = true;
+    body.find('take-play')[0].onclick();
+    assert.equal(played, 1, 'a clip plays on the screen');
+    assert.equal(shown.controls, false);
+    // « Voir en grand »: the take in its window.
+    body.find('take-player-expand')[0].onclick();
+    assert.deepEqual(opened, ['c']);
     assert.match(body.find('studio-item').find(tile => tile.dataset.id === 'c').className, /is-shown/);
   } finally {
     restore();
@@ -3247,7 +3267,7 @@ test('the screen is the conversation’s, the Sortie the project’s: a new conv
   const page = await studioPage({ create_image: [image] }, {}, { runs: [], conversation: () => conversation, project: () => project });
   const { body, studio, restore, runs } = page;
   const items = () => body.find('studio-item').map(tile => tile.dataset.id),
-    onScreen = () => body.find('studio-frame-result')[0]?.src ?? null,
+    onScreen = () => screenOf(body.find('studio-frame-result')[0])?.src ?? null,
     go = async (to, into = project) => {
       conversation = to;
       project = into;
@@ -3801,7 +3821,7 @@ test('a take dropped on the screen is shown there with all that made it, its ver
   const page = await studioPage(lookModels(), lookRoutes, { runs: lookRuns(), project: () => 'p1' });
   const { body, studio, restore } = page;
   const back = () => body.find('studio-look-back')[0],
-    onScreen = () => body.find('studio-frame-result')[0]?.src ?? null,
+    onScreen = () => screenOf(body.find('studio-frame-result')[0])?.src ?? null,
     slots = () => body.find('studio-slot').map(tile => tile.children[0].children[0]?.src ?? null);
   try {
     // The conversation « c1 »: its image on the screen, its settings (not its seed: it was drawn).
@@ -3878,7 +3898,7 @@ test('a file dropped on the screen: one Moodix made says what made it, whatever 
   const page = await studioPage(lookModels(), lookRoutes, { runs: lookRuns(), project: () => 'p1' });
   const { body, notices, restore } = page;
   const back = () => body.find('studio-look-back')[0],
-    onScreen = () => body.find('studio-frame-result')[0]?.src ?? null,
+    onScreen = () => screenOf(body.find('studio-frame-result')[0])?.src ?? null,
     drop = async dropped => {
       dropOn(page, { files: [dropped], types: ['Files'] });
       await settle();
@@ -3968,14 +3988,14 @@ test('the take on the screen is a little smaller than its frame and rounded on i
       return css.slice(at, css.indexOf('\n}\n', at));
     };
   // 8 px all around, in the middle of the frame, corners of its own.
-  const take = rule('#studio-view .studio-frame > :is(img, video).studio-frame-result');
+  const take = rule('#studio-view .studio-frame > :is(img, video, .studio-frame-clip).studio-frame-result');
   assert.match(take, /width: calc\(100% - 16px\);/);
   assert.match(take, /height: calc\(100% - 16px\);/);
   assert.match(take, /border-radius: 10px;/);
   assert.match(take, /top: 50%;\n  left: 50%;/);
   assert.match(take, /transform: translate\(-50%, -50%\);/);
   // Its box has its own shape, as large as the frame allows: rounded even in a frame of another format.
-  const shaped = rule("#studio-view .studio-frame > :is(img, video).studio-frame-result[style*='--media-ratio']");
+  const shaped = rule("#studio-view .studio-frame > :is(img, video, .studio-frame-clip).studio-frame-result[style*='--media-ratio']");
   assert.match(shaped, /width: min\(100cqw - 16px, \(100cqh - 16px\) \* var\(--media-ratio\)\);/);
   assert.match(shaped, /aspect-ratio: var\(--media-ratio\);/);
   assert.match(rule('#studio-view .studio-frame'), /container-type: size;/);
@@ -3984,9 +4004,11 @@ test('the take on the screen is a little smaller than its frame and rounded on i
     clip = { id: 'c', mediaType: 'video', prompt: 'un renard', outputs: [{ originalUrl: '/clip.mp4' }], parameters: { width: 768, height: 448, frames: 121, fps: 24 } };
   const page = await studioPage({ create_video: [video] }, {}, { runs: [clip] });
   try {
-    const [shown] = page.body.find('studio-frame-result'),
+    // (A clip: its box takes the shape, read from the clip in it, 0.6.97.)
+    const [box] = page.body.find('studio-frame-result'),
+      shown = screenOf(box),
       said = [];
-    shown.style.setProperty = (name, value) => said.push([name, value]);
+    box.style.setProperty = (name, value) => said.push([name, value]);
     shown.videoWidth = 1024;
     shown.videoHeight = 1024;
     shown.onloadedmetadata();
@@ -4051,7 +4073,7 @@ test('Moodix AI continues a clip of the disk (« #ref1 »): the Studio shows tha
     assert.equal(body.dataset.mode, 'video');
     // The clip continued is named, and on the screen: it is not a take of the Sortie.
     assert.equal(body.find('studio-extending')[0].children[1].textContent, 'Suite du clip : view.mp4');
-    const [shown] = body.find('studio-frame-result');
+    const shown = screenOf(body.find('studio-frame-result')[0]);
     assert.deepEqual([shown.tag, shown.src, shown.poster], ['video', '/media/view/original', '/media/view/preview']);
     assert.equal(body.find('studio-go-label')[0].textContent, 'Générer la suite');
     // Not the cases of a new video (« Début et fin », « Références »), which have nothing to do with it.
@@ -4122,7 +4144,7 @@ test('a clip of the disk is continued with the model chosen in the Studio, which
     page.mode(1);
     body.find('studio-stage')[0].ondrop({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files: [new File([film], 'view.mp4', { type: 'video/mp4' })], types: ['Files'] } });
     await settle();
-    assert.equal(body.find('studio-frame-result')[0].src, '/preview/view.mp4');
+    assert.equal(screenOf(body.find('studio-frame-result')[0]).src, '/preview/view.mp4');
     // « Prolonger », on the bar of the screen.
     await settle();
     const extendIt = body.find('output-action-extend')[0];

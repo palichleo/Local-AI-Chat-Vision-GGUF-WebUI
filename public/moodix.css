@@ -532,12 +532,20 @@ button svg {
   margin-bottom: 9px;
   justify-content: flex-end;
 }
-.message-videos video {
-  height: 160px;
-  max-width: 300px;
+/* A video joined to a message, 160 px high at its shape: the player of a take over it (0.6.97). */
+.message-video {
+  position: relative;
+  flex: none;
   border: 1px solid var(--line);
   border-radius: 10px;
+  overflow: hidden;
   background: #000;
+}
+.message-video > video {
+  display: block;
+  height: 160px;
+  max-width: 300px;
+  cursor: pointer;
 }
 .message-video-missing {
   padding: 6px 10px;
@@ -5912,10 +5920,20 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   cursor: zoom-in;
   z-index: 0;
 }
-video.studio-frame-result {
-  object-fit: contain;
+/* A clip: in a box at its shape, the player of a take over it (take-player.mjs, 0.6.97). */
+.studio-frame-clip {
+  overflow: hidden;
   background: #000;
   cursor: default;
+}
+.studio-frame-clip > video {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  cursor: pointer;
 }
 
 /* What will be made, at the top left of the screen (moodix-design.md 25): « 16:9 - 05.17 S », in
@@ -10632,9 +10650,14 @@ body:not([data-view='chat']) .resume {
 .generation-frame.has-flux > .live-preview {
   visibility: hidden;
 }
-/* The clip finished (capture 14): its picture and a round play button; the player once it plays. */
+/* The clip finished (capture 14): its picture and a round play button; the player of a take over it
+   (0.6.97), as large as its frame from the start (its file is read once played). */
 #messages .video-original {
   position: relative;
+  height: 100%;
+}
+#messages .video-original > video {
+  cursor: pointer;
 }
 .take-play {
   position: absolute;
@@ -13860,12 +13883,25 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   transform: rotate(-90deg);
 }
 /* Its player: none of the browser's controls. The round ▶ in the middle of the picture; at its
-   foot, a fine line of progress in the accent, the time in mono (« 02.00 / 06.04 »), the sound. */
+   foot, a fine line of progress in the accent, the time in mono (« 02.00 / 06.04 »), the sound.
+   (0.6.97) The player of every clip of the page (take-player.mjs): a card of the chat, the screen
+   of the Studio, a video joined to a message, « Voir en grand » after the sound. */
 .take-player {
   position: absolute;
   inset: 0;
   z-index: 2;
   pointer-events: none;
+}
+.take-player:not(.is-audio) {
+  container: take-player / inline-size;
+}
+/* Over a picture by day too: ivory on the dark of its foot, as by night (the ink of the day was not
+   read there, nor its accent on the line). A sound keeps the colours of its window. */
+:root[data-theme='light'] .take-player:not(.is-audio) {
+  --text-1: #eee8de;
+  --text-3: #8b8891;
+  --ink: #eee8de;
+  --accent: #eee8de;
 }
 .take-player[hidden] {
   display: none;
@@ -13876,6 +13912,21 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   left: 50%;
   transform: translate(-50%, -50%);
   pointer-events: auto;
+}
+/* While a clip plays its ▶ is out of sight (a click on the picture pauses it), not out of the hand:
+   reached with the keyboard, it shows as « pause ». */
+.take-player.is-playing:not(.is-audio) > .take-player-play:not(:focus-visible) {
+  opacity: 0;
+  pointer-events: none;
+}
+.take-player.is-playing:not(.is-audio) > .take-player-play::before {
+  width: 4px;
+  height: 14px;
+  margin: 0 7px 0 0;
+  border: 0;
+  border-radius: 1px;
+  background: var(--text-1);
+  box-shadow: 7px 0 0 var(--text-1);
 }
 .take-player-bar {
   position: absolute;
@@ -13942,8 +13993,11 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
 .take-player-seek:focus-visible::-moz-range-thumb {
   opacity: 1;
 }
+/* Its line in the hand of the keyboard: ringed, as every control of the page (0.6.97). */
 .take-player-seek:focus-visible {
-  outline: none;
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .take-player-time {
   flex: none;
@@ -13951,7 +14005,7 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   font: 400 12px/1 var(--font-mono);
   letter-spacing: 0.04em;
 }
-#original-dialog .take-player-sound {
+.take-player :is(.take-player-sound, .take-player-expand) {
   position: relative;
   display: grid;
   flex: none;
@@ -13965,14 +14019,14 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   background: transparent;
   color: var(--text-1);
 }
-#original-dialog .take-player-sound svg {
+.take-player :is(.take-player-sound, .take-player-expand) svg {
   width: 16px;
   height: 16px;
 }
-#original-dialog .take-player-sound.is-muted {
+.take-player .take-player-sound.is-muted {
   color: var(--text-3);
 }
-#original-dialog .take-player-sound.is-muted::after {
+.take-player .take-player-sound.is-muted::after {
   content: '';
   position: absolute;
   width: 18px;
@@ -13980,6 +14034,76 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   border-radius: 1px;
   background: currentColor;
   transform: rotate(-45deg);
+}
+/* Narrow: the time and the buttons over the line, which keeps the whole width. One row needs some
+   300 px with « Voir en grand » (a card of the chat at 9:16 is 202 px wide), 256 px without it (a
+   video joined to a message, 16:9, is 284 px wide). The time stays at 12 px (« 00.00 / 24.70 »:
+   100 px). */
+@container take-player (max-width: 299px) {
+  :where(.take-player.has-expand) .take-player-bar {
+    flex-wrap: wrap;
+    gap: 2px 4px;
+    padding: 22px 10px 8px;
+  }
+  :where(.take-player.has-expand) .take-player-seek {
+    order: 1;
+    flex-basis: 100%;
+  }
+  :where(.take-player.has-expand) .take-player-time {
+    margin-right: auto;
+  }
+}
+@container take-player (max-width: 255px) {
+  :where(.take-player:not(.has-expand)) .take-player-bar {
+    flex-wrap: wrap;
+    gap: 2px 4px;
+    padding: 22px 10px 8px;
+  }
+  :where(.take-player:not(.has-expand)) .take-player-seek {
+    order: 1;
+    flex-basis: 100%;
+  }
+  :where(.take-player:not(.has-expand)) .take-player-time {
+    margin-right: auto;
+  }
+}
+/* Small, where the time no longer fits beside the buttons (184 px with « Voir en grand », 152
+   without; the screen of the Studio at 1280 × 720 with a clip at 9:16 is 134 px wide): no time, the
+   buttons at the right over the line. */
+@container take-player (max-width: 183px) {
+  :where(.take-player.has-expand) .take-player-time {
+    display: none;
+  }
+  :where(.take-player.has-expand) .take-player-sound {
+    margin-left: auto;
+  }
+}
+@container take-player (max-width: 151px) {
+  :where(.take-player:not(.has-expand)) .take-player-time {
+    display: none;
+  }
+  :where(.take-player:not(.has-expand)) .take-player-sound {
+    margin-left: auto;
+  }
+}
+/* Tiny (a video joined to a message, upright: 90 px): the ▶ and the line alone. */
+@container take-player (max-width: 109px) {
+  .take-player-bar {
+    padding: 16px 8px 6px;
+  }
+  .take-player :is(.take-player-sound, .take-player-expand) {
+    display: none;
+  }
+  .take-player > .take-player-play {
+    width: 36px;
+    height: 36px;
+  }
+  .take-player > .take-player-play::before {
+    margin-left: 2px;
+    border-top-width: 5px;
+    border-bottom-width: 5px;
+    border-left-width: 8px;
+  }
 }
 /* A sound: the bar alone, its ▶ at the left. */
 .take-player.is-audio {
@@ -15858,7 +15982,7 @@ button.glass-select::after {
 #studio-view .studio-frame {
   container-type: size;
 }
-#studio-view .studio-frame > :is(img, video).studio-frame-result {
+#studio-view .studio-frame > :is(img, video, .studio-frame-clip).studio-frame-result {
   inset: auto;
   top: 50%;
   left: 50%;
@@ -15868,10 +15992,13 @@ button.glass-select::after {
   object-fit: contain;
   transform: translate(-50%, -50%);
 }
-#studio-view .studio-frame > :is(img, video).studio-frame-result[style*='--media-ratio'] {
+#studio-view .studio-frame > :is(img, video, .studio-frame-clip).studio-frame-result[style*='--media-ratio'] {
   width: min(100cqw - 16px, (100cqh - 16px) * var(--media-ratio));
   height: auto;
   aspect-ratio: var(--media-ratio);
+  object-fit: cover;
+}
+#studio-view .studio-frame > .studio-frame-clip[style*='--media-ratio'] > video {
   object-fit: cover;
 }
 /* Its number, or what will be made, at the top left of the frame: clear of the corner of the take. */

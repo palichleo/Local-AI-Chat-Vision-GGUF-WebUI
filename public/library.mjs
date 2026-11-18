@@ -10,6 +10,7 @@
  * conversation. A click shows it whole with its details; on its conversation, opens it.
  */
 import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
+import { stillClip } from './take-player.mjs';
 
 export const KINDS = [
   { id: 'all', icon: 'grid', label: 'Tout' },
@@ -221,8 +222,9 @@ export function setupLibrary({
       else if (media === 'video') picture.onload = () => void healThumbnail(api, kept.record, 0, picture);
       pick.append(picture);
     } else {
-      // Its first picture only, of which a thumbnail is made for the next time.
-      const clip = node('video');
+      // Its first picture only, of which a thumbnail is made for the next time; never a player of
+      // the browser, not even from its menu (0.6.97): a click shows the take in its window.
+      const clip = stillClip(node('video'));
       Object.assign(clip, { muted: true, preload: 'metadata', playsInline: true, src: (output.originalUrl || '') + '#t=0.1' });
       clip.onloadeddata = () => void thumbnailOf(api, record, 0, clip);
       pick.append(clip);

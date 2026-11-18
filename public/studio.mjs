@@ -8,6 +8,7 @@ import { closePopup, openPopup } from './glass-menu.mjs';
 import { fileInfo } from './media-info.mjs';
 import { forgetCitedTakes } from './cited-takes.mjs';
 import { explanation, foldPrompt } from './studio-explain.mjs';
+import { clipPlayer, stillClip } from './take-player.mjs';
 import { elapsedClock } from './generation-time.mjs';
 
 /**
@@ -1883,9 +1884,7 @@ export function setupStudio({
       veil.append(node('p', 'studio-held-kicker', 'Arrêtée'), said);
       frame.append(node('span', 'studio-failed-chip', 'Échec'), veil);
     } else if (last) {
-      const shownTake = result(last);
-      frame.append(shownTake);
-      if (shownTake.playButton) frame.append(shownTake.playButton);
+      frame.append(result(last));
     } else if (!working) {
       // Nothing made in this mode yet (etats-maquette.md, 55): the Éclipse small, where the first take
       // will come, how to begin, and the format with its size, which follow the settings.
@@ -1982,7 +1981,8 @@ export function setupStudio({
       return player;
     }
     const clip = media === 'video',
-      element = node(clip ? 'video' : 'img', 'studio-frame-result');
+      // A clip in a box at its shape, with the player of a take over it (0.6.97).
+      element = node(clip ? 'div' : 'img', 'studio-frame-result' + (clip ? ' studio-frame-clip' : ''));
     // Its own shape, for the sheet (moodix.css, --media-ratio): the take is always a little smaller
     // than the frame and rounded on its own, whatever the format chosen (16/11). Known from its
     // record at once, from the picture itself once it is read.
@@ -1991,26 +1991,26 @@ export function setupStudio({
     const known = sizeOfRecord(record);
     if (known) shaped(known.width, known.height);
     if (clip) {
-      Object.assign(element, { controls: false, preload: 'metadata', playsInline: true, src: output.originalUrl || '' });
-      if (output.thumbUrl) element.poster = output.thumbUrl;
-      element.onloadedmetadata = () => {
-        shaped(element.videoWidth, element.videoHeight);
-        measuredOnScreen(record, element.videoWidth, element.videoHeight);
+      // Its picture and the round ▶ (capture 22), as in the conversation: the player of a take opened
+      // plays it there (take-player.mjs), never the browser's; « Voir en grand » opens it in its window
+      // (not a file of the computer shown here, which has none). Kept with the clip from one drawing
+      // to the next.
+      const video = node('video'),
+        take = output.take;
+      Object.assign(video, { preload: 'metadata', playsInline: true, src: output.originalUrl || '' });
+      if (output.thumbUrl) video.poster = output.thumbUrl;
+      video.setAttribute('aria-label', record.prompt || 'Dernière vidéo créée');
+      video.onloadedmetadata = () => {
+        shaped(video.videoWidth, video.videoHeight);
+        measuredOnScreen(record, video.videoWidth, video.videoHeight);
       };
-      // Its picture and a round play button (capture 22), as in the conversation; the controls of the
-      // player once it plays. Kept with the clip from one drawing to the next.
-      const play = button('take-play', '', () => {
-        play.hidden = true;
-        element.controls = true;
-        void element.play?.()?.catch?.(() => {});
+      const player = clipPlayer({
+        node,
+        video,
+        onExpand: record.external ? null : () => viewOutput(record, 0),
+        label: Number.isInteger(take) ? 'Lecteur · PRISE ' + take : 'Lecteur',
       });
-      play.setAttribute('aria-label', 'Lire la vidéo');
-      play.title = 'Lire la vidéo';
-      element.onplay = () => {
-        play.hidden = true;
-        element.controls = true;
-      };
-      element.playButton = play;
+      element.append(video, player.element);
     } else {
       Object.assign(element, {
         alt: record.prompt || 'Dernière image créée',
@@ -3896,7 +3896,7 @@ export function setupStudio({
         };
       } else {
         // Its first picture only, of which a thumbnail is made for the next time.
-        picture = node('video');
+        picture = stillClip(node('video'));
         Object.assign(picture, {
           muted: true,
           preload: 'metadata',

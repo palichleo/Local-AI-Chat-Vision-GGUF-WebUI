@@ -19,6 +19,7 @@ import { setupMiniature } from './work-miniature.mjs';
 import { setupTakeRecovery, takesOf } from './take-recovery.mjs';
 import { takeContent } from './generation-runtime.mjs';
 import { setupAssets } from './assets-ui.mjs';
+import { clipPlayer } from './take-player.mjs';
 import { setupCopy } from './copy.mjs';
 import { STUDIO_LINE, STUDIO_NOTE, callNote, closedCalls, conversationTitle, lastExchange, settledNotes, spokenText } from './transcript.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
@@ -2245,14 +2246,16 @@ function userMessage(text, images, videos = []) {
     for (const video of videos) {
       const resource = assetsUI.resource(video.id);
       if (resource?.originalUrl) {
-        const player = node('video');
-        player.controls = true;
+        // Played by the player of a take (take-player.mjs, 0.6.97), never the browser's.
+        const box = node('div', 'message-video'),
+          player = node('video');
         player.preload = 'none';
         player.playsInline = true;
         player.src = resource.originalUrl;
         if (resource.previewUrl) player.poster = resource.previewUrl;
         player.setAttribute('aria-label', `${video.label} · ${video.name}`);
-        previews.append(player);
+        box.append(player, clipPlayer({ node, video: player, label: 'Lecteur · ' + video.label, what: 'la vidéo', length: resource.duration }).element);
+        previews.append(box);
       } else previews.append(node('span', 'message-video-missing', `▶ ${video.label} · ${video.name}`));
     }
     article.append(previews);
