@@ -117,6 +117,36 @@ test('a series is only for images, of 1 to 19 prompts after the first, each a te
   );
 });
 
+test('the first image listed again at the head of the others is made once (0.6.91)', async () => {
+  // The local model, asked for five images, sent its prompt then all five in `series`: six were made,
+  // the first one twice.
+  const prompts = [
+    'A vast cosmic nebula of pink and purple clouds lit by distant blue stars, wide view.',
+    'A silver space shuttle rising through a twilight sky, its engines glowing orange.',
+    'A glowing blue planet with white clouds and rings of ice, against deep space.',
+    'An astronaut in a white suit standing at the edge of a crater, seen from behind.',
+    'A spiral galaxy of yellow and white stars among dark lanes of dust.',
+  ];
+  const ask = (runtime, args) => runtime.request([call('create_image', args)], { conversationId: A, turnId: turn, messages: [] });
+  const { runtime } = world();
+  const listed = await ask(runtime, { prompt: prompts[0], series: [` ${prompts[0]} `, ...prompts.slice(1)] });
+  assert.deepEqual([listed.series.index, listed.series.total], [1, 5], 'five images, as asked');
+  // The call the conversation keeps says the images made: the page counts them from it.
+  assert.deepEqual(JSON.parse(listed.call.function.arguments).series, prompts.slice(1));
+  const second = await runtime.next({ series: listed.series.id });
+  assert.ok(second.plan.prompt.includes(prompts[1]), 'the second image is the second prompt, not the first again');
+  // The same image asked several times over is left as it was asked: three of it.
+  const same = await ask(world().runtime, { prompt: prompts[0], series: [prompts[0], prompts[0]] });
+  assert.equal(same.series.total, 3);
+  assert.equal(JSON.parse(same.call.function.arguments).series.length, 2);
+  // And two of one image: nothing says the second is a repeat.
+  const pair = await ask(world().runtime, { prompt: prompts[0], series: [prompts[0]] });
+  assert.equal(pair.series.total, 2);
+  // A series written as it should be is untouched.
+  const right = await ask(world().runtime, { prompt: prompts[0], series: prompts.slice(1) });
+  assert.equal(right.series.total, 5);
+});
+
 test('a call of twenty prompts fits in the stream and in the history', () => {
   const prompt = 'A detailed watercolour of a lighthouse on a cliff at dawn, seen from the sea, '.repeat(30);
   const args = JSON.stringify({ prompt, series: Array(19).fill(prompt) });
