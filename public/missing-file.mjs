@@ -15,6 +15,8 @@
 import { licenseBlock, restrictedOf } from './model-licenses.mjs';
 
 const KINDS = { video: 'Vidéo', audio: 'Son', image: 'Image' };
+// What the server says of a download whose file Windows holds a moment (lib/model-downloads.mjs).
+const WAITING = /en attente que Windows libère/;
 
 /** « 28,6 Go », « 578 Mo ». */
 export function sizeText(bytes) {
@@ -45,6 +47,8 @@ export function missingFileCard({
     received = 0,
     total = missing.bytes,
     error = '',
+    // Said while Windows holds the file just downloaded (0.6.90: the line stood full, without a word).
+    waiting = '',
     following = false,
     gone = false;
 
@@ -123,7 +127,12 @@ export function missingFileCard({
       alert.setAttribute('role', 'alert');
       parts.push(alert);
     }
-    card.replaceChildren(...parts, foot);
+    // Under its line, while Windows holds the file just downloaded.
+    if (state === 'running' && waiting) {
+      const said = node('p', 'missing-note missing-wait', waiting);
+      said.setAttribute('role', 'status');
+      card.replaceChildren(...parts, foot, said);
+    } else card.replaceChildren(...parts, foot);
   }
   /** « Télécharger »: at once under free licences; one with conditions is shown alone and confirmed first. */
   async function start() {
@@ -179,6 +188,7 @@ export function missingFileCard({
         }
         received = job.received;
         total = job.total || total;
+        waiting = WAITING.test(job.current ?? '') ? job.current : '';
         render();
         await pause(poll);
       }
@@ -212,6 +222,7 @@ export function missingFileCard({
       if (job?.state === 'running' && job.workflowId === missing.workflowId) {
         state = 'running';
         ({ received = 0, total = total } = job);
+        waiting = WAITING.test(job.current ?? '') ? job.current : '';
         render();
         return follow();
       }

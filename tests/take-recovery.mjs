@@ -130,7 +130,7 @@ test('a result takes the place of the one a call was left with; a creation of th
  * makes (`job`), the takes of the gallery (`runs`), what /api/tools/job answers (`fresh`), and
  * followTool (`follow`). What it did is kept in `seen`.
  */
-function page({ id = ID, messages = asked(), job = null, runs = [], skipped = 0, fresh = undefined, follow = null, storage = null, tab = 'onglet-1', state: given = {} } = {}) {
+function page({ id = ID, messages = asked(), job = null, runs = [], skipped = 0, fresh = undefined, follow = null, storage = null, tab = 'onglet-1', status = null, state: given = {} } = {}) {
   const seen = { saves: [], forgotten: [], rendered: 0, mounted: [], works: [], loaded: [], started: [], views: [], adopted: 0, studio: [], api: [], busy: 0 };
   const state = {
     conversationId: id,
@@ -164,11 +164,15 @@ function page({ id = ID, messages = asked(), job = null, runs = [], skipped = 0,
     api: async (route, body) => {
       seen.api.push(body === undefined ? route : [route, body]);
       // The server saves nothing during a generation: the page waits for its end (`busy` polls).
-      if (route === 'status') return Response.json({ toolJob: seen.busy-- > 0 ? { id: 'job' } : null });
+      if (route === 'status') return Response.json({ toolJob: status ? status() : seen.busy-- > 0 ? { id: 'job' } : null });
       if (route.startsWith('gallery/')) return Response.json({ runs, skipped });
       if (route === 'tools/job') return Response.json(fresh === undefined ? job : fresh);
       if (route === 'tools/series') return Response.json({ ended: true });
-      if (route.startsWith('history/')) return Response.json({ messages: given.stored?.[decodeURIComponent(route.slice(8))] ?? [] });
+      if (route.startsWith('history/')) {
+        const which = decodeURIComponent(route.slice(8));
+        // (`unfinished`: saved with an answer stopped midway.)
+        return Response.json({ messages: given.stored?.[which] ?? [], incomplete: given.unfinished?.includes(which) === true });
+      }
       throw Error('route inattendue : ' + route);
     },
     state,
@@ -229,6 +233,8 @@ function page({ id = ID, messages = asked(), job = null, runs = [], skipped = 0,
     node: (tag, className, text) => ({ tag, className, text }),
     storage,
     tab,
+    // Another tab's series watched for its next image a moment only (goesOn, 0.6.90).
+    seriesWatch: 80,
   });
   return { state, seen, recovery, views };
 }
@@ -471,14 +477,17 @@ test('followed from another tab than its own, a series is not ended there, and w
     job,
     fresh: { ...job, proposal: { series: { id: 'S', index: 2, total: 3 } } },
     runs: [take('r1', 'call_s'), take('r2', 'call_s', { createdAt: '2026-11-18T10:01:00.000Z' })],
-    state: { stored: { [ID]: written } },
+    // (Its answer stopped midway there.)
+    state: { stored: { [ID]: written }, unfinished: [ID] },
   });
   await recovery.complete(ID, views());
-  await new Promise(resolve => setTimeout(resolve, 10));
+  // (An image with more to come: read again once that tab had the time to go on, 0.6.90.)
+  await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal(seen.started.length, 1, 'followed: the other tab was silent');
   assert.equal(seen.api.some(item => Array.isArray(item) && item[0] === 'tools/series'), false, 'its series not ended');
   assert.deepEqual(seen.saves, [], 'what the other wrote is not written over');
   assert.equal(state.messages.at(-1).content, 'Voici les trois.', 'the page shows it');
+  assert.equal(state.archiveSnapshot.incomplete, true, 'as that tab left it: its answer still said stopped (0.6.90)');
 });
 
 test('a creation of the Studio the page loses while it follows it frees the Studio: it says why, nothing is written', async () => {
@@ -634,4 +643,140 @@ test('a call completed while a generation of its conversation runs is saved or l
     assert.deepEqual(seen.forgotten, [], 'never forgotten for the one opened meanwhile');
     assert.deepEqual(seen.saves, [], 'neither shown nor set aside any more: completed when it is opened next');
   }
+});
+
+test('followed from a tab whose own is only silent, an image of a series with more to come is shown and kept in the page, not written: no « Série interrompue », no work held (0.6.90)', async () => {
+  // Written there, it said « Série interrompue avant sa fin » under images that tab went on making, and
+  // the page waited to save, its « Interrompre » on nothing.
+  const series = call('call_s', 'create_image', { prompt: 'a', series: ['b', 'c'] }),
+    job = running({ callId: 'call_s', owner: 'onglet-2', ownerAway: true }),
+    between = [
+      { role: 'user', content: 'Trois bateaux' },
+      { role: 'assistant', content: '', tool_calls: [series] },
+      {
+        role: 'tool',
+        tool_call_id: 'call_s',
+        content: JSON.stringify({ status: 'partial', made: 1, asked: 3, images: [{ status: 'success', run_id: 'r1' }], message: 'Série interrompue avant sa fin : 1 image sur 3 a été faite.' }),
+      },
+    ];
+  // That tab goes on: the next image of its series begins a moment after the one followed here.
+  let polls = 0;
+  const { state, seen, recovery, views } = page({
+    messages: asked(series),
+    job,
+    fresh: { ...job, proposal: { series: { id: 'S', index: 2, total: 3 } } },
+    runs: [take('r1', 'call_s'), take('r2', 'call_s', { createdAt: '2026-11-18T10:01:00.000Z' })],
+    state: { stored: { [ID]: between } },
+    // (The next image a few polls long: no other wait of this page may hang on it.)
+    status: () => (++polls >= 2 && polls <= 3 ? { id: 'job-3', conversationId: ID, callId: 'call_s', state: 'generating' } : null),
+  });
+  const drawn = views();
+  await recovery.complete(ID, drawn);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(seen.started.length, 1, 'followed: the other tab was silent');
+  assert.equal(state.work, null, 'nothing held: no « Interrompre » left on it');
+  // In the page at once, as that tab keeps it between two images: a message sent meanwhile tells the
+  // model the two images made, not the one before (0.6.89 held it so).
+  assert.equal(JSON.parse(state.messages[2].content).made, 2, 'what is made, in the page at once');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(seen.saves, [], 'not written: that tab writes the series as it goes');
+  assert.equal(seen.api.some(item => Array.isArray(item) && item[0] === 'tools/series'), false, 'its series not ended');
+  assert.equal(drawn.get(1).generations.children.some(child => child.className === 'proposal-cancelled'), false, 'no « Série interrompue »');
+  // That tab gone without a word (closed in the background): nothing begins; what it made is written
+  // here once it had the time to go on.
+  const lone = page({
+    messages: asked(series),
+    job,
+    fresh: { ...job, proposal: { series: { id: 'S', index: 2, total: 3 } } },
+    runs: [take('r1', 'call_s'), take('r2', 'call_s', { createdAt: '2026-11-18T10:01:00.000Z' })],
+    state: { stored: { [ID]: between } },
+    status: () => null,
+  });
+  const alone = lone.views();
+  await lone.recovery.complete(ID, alone);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(lone.seen.saves.length, 1, 'written, nobody else would');
+  assert.equal(JSON.parse(lone.seen.saves[0].messages.at(-1).content).status, 'partial');
+  assert.equal(alone.get(1).generations.children.some(child => child.className === 'proposal-cancelled'), true, 'its series said stopped');
+  assert.equal(lone.seen.api.some(item => Array.isArray(item) && item[0] === 'tools/series'), false, 'not ended under that tab');
+});
+
+test('« Interrompre » in a tab that follows another tab\'s series stops its series too, and says it (0.6.90)', async () => {
+  // Written as an image with more to come, the stop left the series going on in the other tab.
+  const series = call('call_s', 'create_image', { prompt: 'a', series: ['b', 'c'] }),
+    job = running({ callId: 'call_s', owner: 'onglet-2', ownerAway: true });
+  const stopping = page({
+    messages: asked(series),
+    job,
+    fresh: { ...job, proposal: { series: { id: 'S', index: 2, total: 3 } } },
+    runs: [take('r1', 'call_s')],
+    follow: async (followed, request, signal) => {
+      stopping.state.controller.abort();
+      signal.throwIfAborted();
+    },
+  });
+  await stopping.recovery.complete(ID, stopping.views());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(stopping.seen.api.some(item => Array.isArray(item) && item[0] === 'tools/series' && item[1].end === true), 'its series ended');
+  assert.equal(stopping.seen.saves.length, 1, 'what it made written');
+});
+
+test('followed from a tab whose own was closed, a series is ended there and what it made is written, as that tab reloaded would (0.6.90)', async () => {
+  // Nobody made the rest of it any more: the server let it go a minute later, and what it made stayed
+  // unwritten until the conversation was opened again.
+  const series = call('call_s', 'create_image', { prompt: 'a', series: ['b', 'c'] }),
+    job = running({ callId: 'call_s', owner: 'onglet-2', ownerAway: true, ownerLeft: true });
+  const { seen, recovery, views } = page({
+    messages: asked(series),
+    job,
+    fresh: { ...job, proposal: { series: { id: 'S', index: 2, total: 3 } } },
+    runs: [take('r1', 'call_s'), take('r2', 'call_s', { createdAt: '2026-11-18T10:01:00.000Z' })],
+  });
+  await recovery.complete(ID, views());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(seen.api.some(item => Array.isArray(item) && item[0] === 'tools/series' && item[1].end === true), 'its series ended');
+  assert.equal(seen.saves.length, 1, 'what it made written');
+  assert.equal(JSON.parse(seen.saves[0].messages.at(-1).content).status, 'partial');
+});
+
+test('another tab\'s series kept in the page while its next image is awaited: a turn then saves it, one stopped stays said stopped, its request taken back is left so (0.6.90)', async () => {
+  // Left unwritten for the wait, a message sent meanwhile read the image before, and a turn still
+  // running at its end left it so; written after a turn stopped midway, its answer was said complete.
+  const series = call('call_s', 'create_image', { prompt: 'a', series: ['b', 'c'] }),
+    job = running({ callId: 'call_s', owner: 'onglet-2', ownerAway: true }),
+    runs = [take('r1', 'call_s'), take('r2', 'call_s', { createdAt: '2026-11-18T10:01:00.000Z' })],
+    fresh = { ...job, proposal: { series: { id: 'S', index: 2, total: 3 } } };
+  // A turn of this page in its conversation at the end of the wait: that turn saves it.
+  const turn = page({ messages: asked(series), job, fresh, runs, status: () => null });
+  await turn.recovery.complete(ID, turn.views());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  turn.state.work = { kind: 'turn', conversationId: ID };
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(turn.seen.saves, [], 'left to the turn');
+  assert.equal(JSON.parse(turn.state.messages[2].content).made, 2, 'which sends and saves what is made');
+  // A turn stopped midway meanwhile: saved as it is, its answer still said partial.
+  const stopped = page({ messages: asked(series), job, fresh, runs, status: () => null });
+  await stopped.recovery.complete(ID, stopped.views());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  stopped.state.messages = [...stopped.state.messages, { role: 'user', content: 'Et la suite ?' }, { role: 'assistant', content: 'Je' }];
+  stopped.state.archiveSnapshot = { messages: [...stopped.state.messages], incomplete: true };
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(stopped.seen.saves.length, 1, 'written, that tab gone');
+  const [saved] = stopped.seen.saves;
+  assert.deepEqual([saved.incomplete, saved.messages.at(-1).content], [true, 'Je']);
+  assert.equal(JSON.parse(saved.messages[2].content).made, 2);
+  // « Modifier » on its request meanwhile: its exchange out of the page, the message back in the box,
+  // saved so by this page. Nothing written of the series, and that copy not taken for the other tab's.
+  const edited = page({ messages: asked(series), job, fresh, runs, status: () => null, state: { stored: {} } });
+  await edited.recovery.complete(ID, edited.views());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  edited.state.messages = [];
+  edited.state.archiveSnapshot = { messages: [{ role: 'user', content: 'Un bateau rouge' }], incomplete: true };
+  edited.state.stored[ID] = [{ role: 'user', content: 'Un bateau rouge' }];
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(
+    [edited.seen.saves, edited.state.messages, edited.state.archiveSnapshot.incomplete, edited.seen.rendered],
+    [[], [], true, 0],
+    'its message only in the box, as « Modifier » left it',
+  );
 });

@@ -1151,18 +1151,21 @@ function updateControls() {
   const away = state.work && !shownHere(state.work.conversationId) ? workHeld() : '';
   // A proposal waits (in the Studio, or in a card of the conversation): a new message declines it.
   const proposing = !away && Boolean(state.studio?.proposing?.() || state.proposalCard);
-  $('send').disabled =
+  // Whether a message would not leave now, whatever it says (0.6.90): « Régénérer » asks nothing then
+  // (takeBack), its question would let the conversation set aside go for a message that stays.
+  state.sendHeld = Boolean(
     state.projectWorking ||
-    toolBusy ||
-    Boolean(away) ||
-    !state.connected ||
-    s.state === 'stopping' ||
-    (s.busy && !proposing) ||
-    (state.generating && !proposing) ||
-    state.preparing ||
-    state.operation ||
-    state.loadingHistory ||
-    (!$('prompt').value.trim() && !state.images.length && !state.videos.length);
+      toolBusy ||
+      away ||
+      !state.connected ||
+      s.state === 'stopping' ||
+      (s.busy && !proposing) ||
+      (state.generating && !proposing) ||
+      state.preparing ||
+      state.operation ||
+      state.loadingHistory,
+  );
+  $('send').disabled = state.sendHeld || (!$('prompt').value.trim() && !state.images.length && !state.videos.length);
   $('send').hidden = !away && ((state.generating && !proposing) || toolBusy);
   if (away && $('send').dataset) $('send').dataset.tip = away;
   else if ($('send').dataset?.tip) delete $('send').dataset.tip;
@@ -2323,6 +2326,13 @@ async function takeBack(resend) {
     waiting = $('prompt').value.trim();
   if (resend && (waiting || state.images.length || state.videos.length))
     return notice('Envoyez ou effacez d’abord le message en cours d’écriture.');
+  // « Régénérer » begins a work (0.6.90): asked once nothing here stops it, before its last exchange
+  // leaves the page. Not when its message would not leave (« Envoyer » greyed, no model chosen): a
+  // « oui » let the conversation set aside go for nothing; the message waits in the box, as before,
+  // and asks once it is sent.
+  const leaves =
+    !state.sendHeld && Boolean(state.status?.remote || (state.config?.enginePath && state.config?.modelPath));
+  if (resend && leaves && !mayBeginBeside()) return;
   // Kept as a conversation whose last message is still being written: opened again, that
   // message comes back in the message box.
   state.archiveSnapshot = { messages: state.messages.slice(0, index + 1), incomplete: true };
@@ -2514,6 +2524,9 @@ function missingFile(view, request, history, conversationId = state.conversation
         return false;
       if (state.generating || state.preparing || state.status.toolJob) return false;
       if ($('prompt').value.trim() || state.images.length || state.videos.length) return false;
+      // Not by itself when it would cost the conversation set aside (0.6.90): the card offers it, the
+      // question comes with the user's click.
+      if (asideAtStake()) return false;
       void takeBack(true);
       return true;
     },
@@ -2545,6 +2558,7 @@ function missingFile(view, request, history, conversationId = state.conversation
 async function againTake(failed, { edit = false, figure = null, container }) {
   if (state.generating || state.preparing || state.loadingHistory || state.status.toolJob)
     return notice(workHeld() || 'Attendez la fin de la réponse ou de la génération en cours.');
+  if (!mayBeginBeside()) return;
   state.generating = true;
   // Its conversation, wherever the user is when it ends (0.6.81).
   const talkId = state.conversationId,
@@ -2644,6 +2658,7 @@ async function runOutputAction(record, index, action) {
   if (state.generating || state.preparing || state.loadingHistory || state.status.toolJob)
     return notice(workHeld() || 'Attendez la fin de la réponse ou de la génération en cours.');
   if (record.conversationId !== state.conversationId) return notice('Ouvrez la conversation de ce résultat.');
+  if (!mayBeginBeside()) return;
   const video = record.mediaType === 'video',
     text =
       action === 'upscale'
@@ -2996,6 +3011,25 @@ function asideMayGo() {
     `« ${titleOf(aside.conversationId) || UNTITLED} » n’est pas enregistrée (historique désactivé) : elle sera effacée de la page. Continuer ?`,
   );
 }
+/**
+ * A work begins in the conversation shown while the one set aside, without the history, waits there
+ * (0.6.90): the miniature that led back to it goes to the new work, and nothing else leads to it.
+ * Asked first, as when another is set aside in its place; it leaves the page once the user says so.
+ */
+function mayBeginBeside() {
+  if (!asideAtStake()) return true;
+  const aside = state.aside;
+  if (!asideMayGo()) return false;
+  dropAside();
+  // Nor the miniature that led to it (its click read a conversation the history does not keep).
+  if (state.miniature?.work?.conversationId === aside.conversationId) state.miniature.forget();
+  return true;
+}
+/** Whether a work begun in the conversation shown would leave the one set aside out of reach (0.6.90). */
+function asideAtStake() {
+  const aside = state.aside;
+  return Boolean(aside) && aside.conversationId !== state.conversationId && !state.saveHistory && aside.messages?.length > 0;
+}
 /** The conversation set aside leaves the page (another set aside, deleted, the history cleared). */
 function dropAside() {
   if (!state.aside) return;
@@ -3054,6 +3088,10 @@ async function sendMessage(event) {
     state.preparing = false;
     updateControls();
   }
+  // Without the history, the conversation set aside would be reached no more (0.6.90): asked before
+  // anything of the message is kept or shown, so that a « non » leaves nothing (its images copied, the
+  // identifier of a conversation not begun, under which its draft was kept then).
+  if (!mayBeginBeside()) return;
   const text = $('prompt').value.trim();
   state.conversationId ||= crypto.randomUUID();
   // The conversation of this turn: the user may open another page meanwhile (0.6.81); what the turn
@@ -4368,6 +4406,8 @@ const studioUI = setupStudio({
         : ''),
   // (0.6.81) Its creations by hand are works of the page, followed wherever the user goes; a
   // conversation not named yet is named in the miniature by the prompt, as it will be (runInStudio).
+  // (0.6.90) Without the history, a creation begun beside the conversation set aside asks first.
+  mayBegin: () => mayBeginBeside(),
   onWork: (id, prompt) =>
     id
       ? beginWork('studio', id, prompt ? conversationTitle(String(prompt)).slice(0, 120) : '')

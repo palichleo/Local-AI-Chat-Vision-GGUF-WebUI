@@ -183,4 +183,13 @@ test('download failure keeps configuration, file selection and composer controls
   assert.equal(get('update-dialog').open, true);
   assert.equal(get('update-failure').hidden, false);
   assert.equal(get('update-failure-text').textContent, 'Download failed');
+  // « Envoyer » greyed by its empty box only: what « Régénérer » reads first is not held (0.6.90).
+  assert.equal(state.sendHeld, false);
+  get('prompt').value = 'Un renard';
+  state.connected = false;
+  context.updateControls();
+  assert.deepEqual([state.sendHeld, get('send').disabled], [true, true], 'the server away: held, whatever the message');
+  state.connected = true;
+  context.updateControls();
+  assert.deepEqual([state.sendHeld, get('send').disabled], [false, false]);
 });

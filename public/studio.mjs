@@ -258,6 +258,8 @@ export function setupStudio({
   // (0.6.81) A creation made here begins (its conversation) or ends (null): the page follows it,
   // whatever page the user opens meanwhile.
   onWork = () => {},
+  // Whether a creation of its own may begin (0.6.90): false when the user said no to what it costs.
+  mayBegin = () => true,
   // Why nothing can be made now, in the user's words: a work goes on in another conversation; ''.
   elsewhere = () => '',
   // The name of a conversation, said where the Studio is held by it.
@@ -2469,6 +2471,9 @@ export function setupStudio({
       failure = error.message;
       return render();
     }
+    // Asked once the creation can go (0.6.90): asked before, a « yes » cost the conversation set aside
+    // for a creation that then did not go (an image missing, a seed refused).
+    if (!mayBegin()) return;
     failure = '';
     const controller = new AbortController(),
       // Where the creation will be kept once made: the mode it was asked in.

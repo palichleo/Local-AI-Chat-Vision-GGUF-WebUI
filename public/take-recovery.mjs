@@ -173,6 +173,9 @@ export function setupTakeRecovery({
   storage = globalThis.sessionStorage,
   // This tab, as the server knows the one that started a generation (app.js, TAB).
   tab = '',
+  // How long another tab's series is watched for its next image before what was made is written here
+  // (goesOn, 0.6.90): it asks for it as its image ends.
+  seriesWatch = 30000,
 }) {
   // The job followed here (one at a time, as the server makes them), and each conversation being completed.
   let following = null;
@@ -227,11 +230,37 @@ export function setupTakeRecovery({
     const answer = await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json();
     return { runs: answer.runs ?? [], unreadable: Number(answer.skipped) > 0 };
   }
+  /**
+   * Whether the tab that makes a series goes on with it (0.6.90): the next of its images (the same call)
+   * begun within `seriesWatch` of the end of the one followed here (`done`). Its tab only silent, it
+   * asks for it at once; closed without a word or asleep, it does not. Unreadable: taken as going on,
+   * the next opening completes it rather than this page writing over that tab.
+   */
+  async function goesOn(id, callId, done) {
+    for (const until = Date.now() + seriesWatch; Date.now() < until; ) {
+      await new Promise(resolve => setTimeout(resolve, Math.min(1000, seriesWatch / 8)));
+      let job = null;
+      try {
+        job = (await (await api('status')).json())?.toolJob ?? null;
+      } catch {
+        return true;
+      }
+      if (job && job.id !== done && job.conversationId === id && job.callId === callId) return true;
+    }
+    return false;
+  }
   /** The messages of conversation `id` as they are now, kept where it is (shown or set aside) and saved. */
   async function keep(id, messages) {
+    if (hold(id, messages)) await save(id);
+  }
+  /**
+   * Conversation `id` holds `messages` where it is (shown or set aside), in memory only: saved by
+   * `save`, or by a turn of this page that comes meanwhile (0.6.90). Whether it is there.
+   */
+  function hold(id, messages) {
     const talk = holderOf(id);
     // Neither shown nor set aside any more: completed when it is opened next.
-    if (talk !== state && talk !== state.aside) return;
+    if (talk !== state && talk !== state.aside) return false;
     // Its last message, left without an answer, was put back in the message box when it was opened
     // (app.js, loadConversation): saved with it as before, not lost if it is not sent again.
     const kept = talk.archiveSnapshot,
@@ -239,6 +268,10 @@ export function setupTakeRecovery({
       unsent = last?.role === 'user' && !last.internal && talk.messages?.at(-1)?.role !== 'user' ? last : null;
     talk.messages = messages;
     talk.archiveSnapshot = unsent ? { messages: [...messages, unsent], incomplete: true } : { messages: [...messages], incomplete: false };
+    return true;
+  }
+  /** Conversation `id` saved as it is in memory, once the server allows it (its generation over). */
+  async function save(id) {
     await idle(id);
     // As it is after the wait (0.6.88): another conversation opened meanwhile is the page's now, and
     // `talk` with it. Decided on that one, an empty one had this one forgotten (deleted when it had no
@@ -326,8 +359,11 @@ export function setupTakeRecovery({
     // the next opening follows it.
     if (fresh?.id !== job.id || (holderOf(id) !== state && holderOf(id) !== state.aside) || state.work) return;
     // Started by this tab (reloaded since), or by one that is gone (`ownerAway`): only the first is
-    // its page, which ends its series and writes over its conversation as it holds it (0.6.87).
-    const mine = !fresh.owner || fresh.owner === tab;
+    // its page, which ends its series and writes over its conversation as it holds it (0.6.87). And
+    // one whose tab was closed (`ownerLeft`, 0.6.90): no page makes its series any more, this one
+    // ends it and writes what it made, as that tab reloaded would. Silent only (frozen, asleep), the
+    // other may wake and go on: this one shows, and leaves the series to it.
+    const mine = !fresh.owner || fresh.owner === tab || fresh.ownerLeft === true;
     // `studio`: shown as a creation of the Studio, which follows it too (« Générer » there, by hand
     // or on a proposal of Moodix AI); `item.studio`: made by hand in the Studio (its line before the
     // call), the only one that leaves nothing when it makes nothing. A proposal of Moodix AI keeps
@@ -392,15 +428,20 @@ export function setupTakeRecovery({
         return;
       }
     }
+    // Stopped by the user from this page (« Interrompre »): its series stops with it, whatever tab
+    // started it (0.6.90).
+    const stoppedHere = controller.signal.aborted;
     try {
       let content = result.content,
         record = result.record ?? null,
         runs = [],
         unreadable = false;
       // A series stops at the image it was making: the others are not made (the server lets them go).
-      // Not from another tab than its own: the server ends a series no page asks for after a minute,
-      // and a tab woken since goes on with it (0.6.87: it was ended under it).
-      if (item.asked > 1 && view.series?.id && mine) void api('tools/series', { series: view.series.id, end: true }).catch(() => {});
+      // Not from another tab than its own: a minute after an image no page follows with the next, the
+      // server gives the card back to the chat model, and keeps the series for that tab, woken later,
+      // to go on with (6 h; 0.6.87: it was ended under it).
+      if (item.asked > 1 && view.series?.id && (mine || stoppedHere))
+        void api('tools/series', { series: view.series.id, end: true }).catch(() => {});
       // What its call made, read again: every image of a series, and the take of a stop that came once
       // it was saved (the server still handing the card back). Said « rien n'a été produit » before
       // 0.6.86, and a creation of the Studio in a new conversation took it out of the Pellicule.
@@ -418,35 +459,83 @@ export function setupTakeRecovery({
       else if (record) state.studio?.invalidate?.();
       // A creation of the Studio by hand that made nothing leaves nothing, as when the page stays
       // (runInStudio); unless nothing else would be left of a conversation that has takes (leftWithout).
-      const gone = item.studio && !record,
-        before = holderOf(id).messages ?? [];
-      let messages = gone ? leftWithout(before, item.call.id, runs.length > 0 || unreadable) : withResult(before, item.call.id, content);
-      if (gone && messages && placeOf(messages, item.call.id).at < 0) host?.article?.remove?.();
+      const gone = item.studio && !record;
+      // An image of another tab's series with more to come (0.6.90): that tab makes them and writes the
+      // series as it goes. Written here at once, it said « Série interrompue avant sa fin » under images
+      // still coming, and this page waited to save, its « Interrompre » on nothing. Saved only if that
+      // tab does not begin the next one in time (closed without a word, asleep): see goesOn.
+      const more = !mine && !stoppedHere && item.asked > 1 && Number(view.series?.index) < Number(view.series?.total);
+      // What the conversation holds of it now (null: its call is not there any more).
+      const settledMessages = () => {
+        const before = holderOf(id).messages ?? [],
+          messages = gone ? leftWithout(before, item.call.id, runs.length > 0 || unreadable) : withResult(before, item.call.id, content);
+        if (gone && messages && placeOf(messages, item.call.id).at < 0) host?.article?.remove?.();
+        return messages;
+      };
       // Followed from another tab than its own: that tab, woken since, may have written it already;
-      // its copy is the newer, and is kept (0.6.87: it was written over).
-      if (!mine && messages) {
+      // its copy is the newer, and is kept (0.6.87: it was written over). Whether it was.
+      const writtenThere = async () => {
         try {
-          const saved = (await (await api(`history/${encodeURIComponent(id)}`)).json()).messages ?? [];
-          if (saved.length && !openCalls(closedCalls(saved)).some(open => open.call.id === item.call.id)) {
-            const talk = holderOf(id);
-            if (talk === state || talk === state.aside) {
-              talk.messages = closedCalls(saved);
-              talk.archiveSnapshot = { messages: [...saved], incomplete: false };
-              if (shownHere(id)) rerender(id);
-            }
-            messages = null;
+          const record = await (await api(`history/${encodeURIComponent(id)}`)).json(),
+            saved = record?.messages ?? [];
+          if (!saved.length || openCalls(closedCalls(saved)).some(open => open.call.id === item.call.id)) return false;
+          const talk = holderOf(id);
+          if (talk === state || talk === state.aside) {
+            talk.messages = closedCalls(saved);
+            // As that tab left it: an answer it stopped midway still said so (0.6.90: said complete).
+            talk.archiveSnapshot = { messages: [...saved], incomplete: record.incomplete === true };
+            if (shownHere(id)) rerender(id);
           }
-        } catch {}
-      }
+          return true;
+        } catch {
+          return false;
+        }
+      };
       // A series stopped so says where under its images, as the conversation reads it next (app.js).
-      if (item.asked > 1 && node && host?.generations) {
+      const sayStopped = () => {
+        if (item.asked < 2 || !node || !host?.generations) return;
         let said = null;
         try {
           said = JSON.parse(content);
         } catch {}
         if (said?.status === 'partial' && said.message) host.generations.append(node('p', 'proposal-cancelled', said.message));
+      };
+      if (more) {
+        // In memory at once, as that tab keeps it between two images (runSeries: the series still open,
+        // what is made so far): a message sent meanwhile tells the model what is made, not what was
+        // before this image, and its turn saves it with its own words (0.6.89 held it so).
+        const messages = gone ? null : settledMessages();
+        if (messages) hold(id, messages);
+        // (Its work ends meanwhile: this page is free, its « Interrompre » on nothing no more. A fault
+        // of the page goes on to the page, as on the way at once: unexpected-errors.mjs.)
+        void goesOn(id, item.call.id, fresh.id)
+          .then(async on => {
+            // That tab goes on, and writes it. A work of this page in its conversation saves it with what
+            // is held; neither shown nor set aside, it is completed when it is opened next.
+            if (on || state.work?.conversationId === id) return;
+            const talk = holderOf(id);
+            if (talk !== state && talk !== state.aside) return;
+            // Its call taken out meanwhile (« Modifier » or « Régénérer » on its request): nothing to write
+            // of it, and the copy saved since is this page's own, not that tab's (writtenThere).
+            if (placeOf(talk.messages ?? [], item.call.id).at < 0 || (await writtenThere())) return;
+            if (gone) {
+              const left = settledMessages();
+              if (!left || !hold(id, left)) return;
+            }
+            sayStopped();
+            // Saved as it is in memory: a turn written meanwhile kept, its answer stopped midway too.
+            await save(id);
+          })
+          .catch(error => {
+            if (pageFault(error)) throw error;
+          });
+      } else {
+        const messages = settledMessages();
+        if (messages && (mine || !(await writtenThere()))) {
+          sayStopped();
+          await keep(id, messages);
+        }
       }
-      if (messages) await keep(id, messages);
       // The take of a stop that came once it was saved: shown where its card was withdrawn.
       if (record && !result.record && item.asked === 1 && shownHere(id)) rerender(id);
     } finally {

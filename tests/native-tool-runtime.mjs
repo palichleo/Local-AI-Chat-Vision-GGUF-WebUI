@@ -74,7 +74,7 @@ test('native immutable job keeps random seed through authorization and GPU hando
       runtime.left('onglet-2');
       owner.push(runtime.status().ownerAway);
       runtime.left('onglet-1');
-      owner.push(runtime.status().ownerAway);
+      owner.push([runtime.status().ownerAway, runtime.status().ownerLeft]);
       runtime.seen('onglet-1');
       owner.push(runtime.status().ownerAway);
       return { outputs: [{ filename: 'image.png', subfolder: '', type: 'output' }] };
@@ -114,7 +114,8 @@ test('native immutable job keeps random seed through authorization and GPU hando
   assert.deepEqual(writes, [true, false, false]);
   assert.equal(runtime.writes(id), false, 'over: saved again');
   // Another tab heard or leaving changes nothing; the one that started it, once gone, lets it go.
-  assert.deepEqual(owner, [['onglet-1', false], false, true, false]);
+  // Closed, it said so (`ownerLeft`, 0.6.90): another may take its series over.
+  assert.deepEqual(owner, [['onglet-1', false], false, [true, true], false]);
   assert.equal(preparation, 1);
   assert.equal(saved.provider, 'native');
   assert.equal(saved.parameters.seed, 123);

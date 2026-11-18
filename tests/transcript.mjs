@@ -134,6 +134,8 @@ async function page(messages, { prompt = '', busy = false } = {}) {
     notice: text => done.push('avis : ' + text),
     generationUI: { clear() {} },
     renderTranscript: shown => done.push('affiche ' + shown.length),
+    // Nothing set aside beside it (0.6.90): « Régénérer » may begin.
+    mayBeginBeside: () => true,
     turnActions() {},
     renderAttachments() {},
     resizePrompt() {},

@@ -9,6 +9,8 @@
  * `config()` is the configuration as the page has it; `onConfig(config, models)` takes the new one.
  */
 const WORKING = ['checking', 'downloading', 'unpacking', 'trying', 'switching'];
+// What the server says while Windows holds a file it just wrote (lib/llama-builds.mjs).
+const WAITING = /en attente que Windows libère/;
 const megabytes = bytes => Math.max(1, Math.round((bytes || 0) / 1048576)).toLocaleString('fr-FR') + ' Mo';
 
 export function setupFirstLaunch({ api, node, icon, host, config, onConfig, onDone = () => {} }) {
@@ -65,6 +67,7 @@ export function setupFirstLaunch({ api, node, icon, host, config, onConfig, onDo
     if (!Number.isFinite(installing.percent)) line.classList.add('is-indeterminate');
     line.append(fill);
     box.append(head, line);
+    if (installing.note) box.append(node('p', 'setup-progress-note', installing.note));
     box.setAttribute('role', 'status');
     return box;
   }
@@ -153,10 +156,12 @@ export function setupFirstLaunch({ api, node, icon, host, config, onConfig, onDo
           errors.engine = job.error;
           return;
         }
+        // Said while Windows holds a file it just wrote (0.6.90: « 100 % » for a minute, without a word).
+        const note = WAITING.test(job.step ?? '') ? job.step : '';
         installing =
           job.state === 'downloading'
-            ? { label: 'Téléchargement', percent: job.total ? Math.floor((job.received / job.total) * 100) : 0 }
-            : { label: 'Installation', percent: null };
+            ? { label: 'Téléchargement', percent: job.total ? Math.floor((job.received / job.total) * 100) : 0, note }
+            : { label: 'Installation', percent: null, note };
         render();
         await new Promise(resolve => setTimeout(resolve, 800));
       }

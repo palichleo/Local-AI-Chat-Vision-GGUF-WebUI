@@ -336,3 +336,79 @@ test('53 · a verb no ready workflow makes reaches the shipped one that lacks a 
   assert.equal(await both.lacking('create_video'), null);
   assert.equal((await both.route('create_video', { prompt: 'un phare', intention: 'x' }, { mediaOf: async () => 'image' })).workflow.id, 'ready');
 });
+
+test('53 · while Windows holds a file just downloaded, the card says it waits, under its line; then nothing more (0.6.90)', async () => {
+  // The line stood full, « 28,6 Go / 28,6 Go », for a minute without a word.
+  const host = new Element('div'),
+    said = [],
+    full = 28.6 * 1024 ** 3,
+    jobs = [
+      { job: { state: 'idle' } },
+      { job: { state: 'running', workflowId: 'wan-scail2', received: full, total: full, current: 'wan2.2_scail_14B.safetensors : en attente que Windows libère le fichier' } },
+      { job: { state: 'running', workflowId: 'wan-scail2', received: full, total: full, current: 'wan2.2_scail_14B.safetensors' } },
+      { job: { state: 'done', workflowId: 'wan-scail2', received: full, total: full } },
+    ];
+  const card = missingFileCard({
+    host,
+    request: {
+      requestId: 'r',
+      tool: 'replace_character',
+      workflowName: 'Wan SCAIL 2',
+      mediaType: 'video',
+      missing: { workflowId: 'wan-scail2', files: [{ file: 'wan2.2_scail_14B.safetensors', size: full }], bytes: full, left: full },
+    },
+    node,
+    icon,
+    api: async route => ({
+      json: async () =>
+        route === 'downloads/start'
+          ? { state: 'running', workflowId: 'wan-scail2', received: 0, total: full }
+          : route === 'downloads'
+            ? (jobs.shift() ?? { job: { state: 'done', workflowId: 'wan-scail2' } })
+            : {},
+    }),
+    onReady: () => true,
+    wait: () => (said.push(find(host, 'missing-wait').map(item => item.textContent)), settle()),
+  });
+  await settle();
+  await card.start();
+  assert.deepEqual(said, [['wan2.2_scail_14B.safetensors : en attente que Windows libère le fichier'], []]);
+});
+
+test('50 · while Windows holds a file of llama.cpp it just wrote, the first launch says it waits, under its line (0.6.90)', async () => {
+  const host = new Element('section'),
+    waiting = 'llama-b12359-bin-win-cuda-13.5-x64.zip : en attente que Windows libère le fichier…',
+    done = { state: 'done', result: { enginePath: 'C:/llama/llama-server.exe' } },
+    jobs = [
+      { state: 'idle' },
+      { state: 'downloading', received: 100, total: 100, step: waiting },
+      { state: 'downloading', received: 100, total: 100, step: 'Téléchargement de llama.cpp b12359 (CUDA 13.5)…' },
+      done,
+    ];
+  const card = setupFirstLaunch({
+    api: async route => ({
+      json: async () =>
+        route === 'llama'
+          ? (jobs.shift() ?? done)
+          : route === 'llama/check'
+            ? { tag: 'b12359', candidates: [{ label: 'CUDA 13.5', size: 578 * 1048576 }] }
+            : {},
+    }),
+    node,
+    icon,
+    host,
+    config: () => ({ enginePath: '', modelPath: '' }),
+    onConfig: () => {},
+  });
+  card.sync(true);
+  await settle();
+  await settle();
+  const installing = find(host, 'setup-install')[0].onclick();
+  await settle();
+  await settle();
+  await settle();
+  assert.deepEqual(find(host, 'setup-progress-note').map(item => item.textContent), [waiting]);
+  await new Promise(resolve => setTimeout(resolve, 900));
+  assert.deepEqual(find(host, 'setup-progress-note'), [], 'let go: its line alone again');
+  await installing;
+});

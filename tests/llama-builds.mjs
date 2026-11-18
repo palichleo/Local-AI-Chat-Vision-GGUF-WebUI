@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   LlamaBuilds,
   RELEASES,
@@ -389,19 +389,23 @@ test('a llama.cpp just downloaded or unpacked that Windows holds a moment (an an
   try {
     let kept;
     // What the installation says while it waits (0.6.87: its step stayed as it was for that minute).
-    const steps = new Set();
+    const steps = new Set(),
+      // Which file was refused, and what was said then.
+      at = [];
     const refused = await held(
       paths,
       async () => {
         kept = await builds.install();
       },
-      { onRefused: () => steps.add(builds.job.step) },
+      { onRefused: path => (steps.add(builds.job.step), at.push([path, builds.job.step])) },
     );
     assert.equal(kept.id, 'cuda-13.4');
     assert.deepEqual(refused, twice(paths));
     assert.ok([...steps].some(step => / : en attente que Windows libère (le fichier|ses fichiers)…$/.test(step)), [...steps].join(' | '));
     assert.equal(asking.length, 2, asking.join(' | '));
     assert.ok(asking.every(step => !/en attente/.test(step)), asking.join(' | '));
+    // The library let go, what came before is said again (0.6.90): not « en attente » still at the folder.
+    assert.doesNotMatch(at.find(([path]) => path === resolve(folder))[1], /en attente/);
     assert.ok((await stat(join(folder, 'cudart64_13.dll'))).isFile(), 'the library beside llama-server.exe');
     assert.deepEqual((await readdir(root)).sort(), ['b12110-cuda-13.4', 'downloads']);
   } finally {

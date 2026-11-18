@@ -2224,3 +2224,108 @@ test('a conversation one of whose takes cannot be read is never forgotten with i
   await forgotten(0);
   assert.deepEqual(deleted.map(body => body.id), [ID]);
 });
+
+test('without the history, a work begun beside the conversation set aside asks first: that one would be reached no more (0.6.90)', async () => {
+  // The miniature that led back to it went to the new work, and nothing else led to it.
+  const asked = [],
+    aside = {
+      conversationId: ELSEWHERE,
+      projectId: 'inbox',
+      messages: [{ role: 'user', content: 'Un phare' }],
+      title: 'Le phare',
+      draft: { text: '', images: [], videos: [] },
+      nodes: null,
+    };
+  let chats = 0;
+  const p = page({
+    chat: () => (chats++, said('Bonjour !')),
+    state: {
+      saveHistory: false,
+      conversationId: ID,
+      messages: [{ role: 'user', content: 'Un renard' }, { role: 'assistant', content: 'Oui ?' }],
+      aside,
+    },
+  });
+  p.context.confirm = question => (asked.push(question), false);
+  await p.send('Et en hiver ?');
+  assert.match(asked[0], /« Le phare » n’est pas enregistrée \(historique désactivé\) : elle sera effacée de la page\. Continuer \?/);
+  assert.deepEqual([chats, p.state.aside, p.$('prompt').value], [0, aside, 'Et en hiver ?'], 'nothing begun, the message kept');
+  p.context.confirm = question => (asked.push(question), true);
+  await p.send('Et en hiver ?');
+  assert.equal(chats, 1, 'begun once the user said yes');
+  assert.equal(p.state.aside, null, 'that one left the page');
+  // « Régénérer » asks before its last exchange leaves the page.
+  const exchange = [{ role: 'user', content: 'Un renard' }, { role: 'assistant', content: 'Oui ?' }],
+    regenerate = page({ chat: () => said('Bonjour !'), state: { saveHistory: false, conversationId: ID, messages: [...exchange], aside: { ...aside } } });
+  regenerate.context.confirm = () => false;
+  await regenerate.context.takeBack(true);
+  assert.equal(regenerate.state.messages.length, 2, 'its last exchange still there');
+  // With the history it is in the fil: nothing asked.
+  const kept = page({ chat: () => said('Bonjour !'), state: { conversationId: ID, messages: [], aside: { ...aside } } });
+  kept.context.confirm = () => assert.fail('nothing to ask');
+  await kept.send('Et en hiver ?');
+  assert.equal(kept.state.aside?.conversationId, ELSEWHERE);
+});
+
+test('the question comes only for a message that leaves, and a « non » leaves nothing of it (0.6.90)', async () => {
+  // Asked before « Régénérer » met its own refusal (a draft in the box), a « oui » let the conversation
+  // set aside go and nothing was made again; asked once the images of a new message were copied, a
+  // « non » left them on the server, and the conversation not begun with an identifier given for nothing.
+  const aside = () => ({
+      conversationId: ELSEWHERE,
+      projectId: 'inbox',
+      messages: [{ role: 'user', content: 'Un phare' }],
+      title: 'Le phare',
+      draft: { text: '', images: [], videos: [] },
+      nodes: null,
+    }),
+    exchange = () => [{ role: 'user', content: 'Un renard' }, { role: 'assistant', content: 'Oui ?' }];
+  const writing = page({ state: { saveHistory: false, conversationId: ID, messages: exchange(), aside: aside() } });
+  writing.context.confirm = () => assert.fail('nothing asked: « Régénérer » refuses first');
+  writing.$('prompt').value = 'Un brouillon';
+  await writing.context.takeBack(true);
+  assert.match(writing.notices.at(-1), /Envoyez ou effacez d’abord le message en cours d’écriture/);
+  assert.equal(writing.state.aside?.conversationId, ELSEWHERE, 'the one set aside still there');
+  assert.equal(writing.state.messages.length, 2);
+  // « Envoyer » greyed (the server away, the engine stopping): the message waits in the box as before,
+  // nothing asked, the one set aside kept.
+  let chats = 0;
+  const held = page({
+    chat: () => (chats++, said('Bonjour !')),
+    state: { saveHistory: false, conversationId: ID, messages: exchange(), aside: aside(), sendHeld: true },
+  });
+  held.$('send').disabled = true;
+  held.context.confirm = () => assert.fail('nothing asked: the message does not leave');
+  await held.context.takeBack(true);
+  await held.turn();
+  assert.deepEqual([chats, held.state.aside?.conversationId, held.$('prompt').value], [0, ELSEWHERE, 'Un renard']);
+  // No model chosen: the same, the Paramètres opened when it is sent.
+  const unset = page({ state: { saveHistory: false, conversationId: ID, messages: exchange(), aside: aside(), config: {} } });
+  unset.context.confirm = () => assert.fail('nothing asked: no model to answer it');
+  await unset.context.takeBack(true);
+  await unset.turn();
+  assert.deepEqual([unset.state.aside?.conversationId, unset.$('prompt').value], [ELSEWHERE, 'Un renard']);
+  assert.match(unset.notices.at(-1), /Choisissez votre LLM/);
+  // A new conversation with an image: « non » copies nothing and gives it no identifier.
+  let copies = 0;
+  const fresh = page({
+    state: {
+      saveHistory: false,
+      conversationId: null,
+      messages: [],
+      aside: aside(),
+      images: [{ url: 'blob:une', source: new Blob(['x'], { type: 'image/png' }) }],
+    },
+    routes: { attachments: () => (copies++, Response.json({ file: 'une.png', view: '/v/une.png' })) },
+  });
+  fresh.context.confirm = () => false;
+  await fresh.send('Un phare la nuit');
+  assert.deepEqual(
+    [copies, fresh.state.conversationId, fresh.state.images.length, fresh.$('prompt').value],
+    [0, null, 1, 'Un phare la nuit'],
+  );
+  // « oui »: the message leaves, its image copied once.
+  fresh.context.confirm = () => true;
+  await fresh.send('Un phare la nuit');
+  assert.deepEqual([copies, fresh.state.conversationId, fresh.state.aside], [1, ID, null]);
+});

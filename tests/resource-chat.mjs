@@ -172,6 +172,8 @@ test('a failed description save keeps the composer intact and never sends a chat
     state,
     $: id => (id === 'send' ? send : prompt),
     assetsUI: { flush: async () => false },
+    // Nothing set aside beside it (0.6.90): it may begin.
+    mayBeginBeside: () => true,
     citedTakes: { show() {}, forget() {} },
     updateControls() {},
     notice: text => {

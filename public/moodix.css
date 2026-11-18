@@ -14427,6 +14427,13 @@ body[data-setup='incomplete'] #resume-last {
   background: var(--accent);
   transition: width 0.4s ease;
 }
+/* What it says while Windows holds a file it just wrote (0.6.90). */
+.setup-progress-note {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  font: 400 12px/1.4 var(--font-ui);
+  overflow-wrap: anywhere;
+}
 .setup-progress-line.is-indeterminate .setup-progress-fill {
   width: 35% !important;
   animation: setup-sweep 1.4s ease-in-out infinite;
