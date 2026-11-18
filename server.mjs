@@ -103,6 +103,8 @@ const staticFiles = new Map([
   ['/generation-time.mjs', ['generation-time.mjs', 'text/javascript; charset=utf-8']],
   ['/work-miniature.mjs', ['work-miniature.mjs', 'text/javascript; charset=utf-8']],
   ['/take-recovery.mjs', ['take-recovery.mjs', 'text/javascript; charset=utf-8']],
+  // The takes no message of their conversation shows any more (0.6.99).
+  ['/detached-takes.mjs', ['detached-takes.mjs', 'text/javascript; charset=utf-8']],
   ['/assets-ui.mjs', ['assets-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/resource-preparation.mjs', ['resource-preparation.mjs', 'text/javascript; charset=utf-8']],
   ['/copy.mjs', ['copy.mjs', 'text/javascript; charset=utf-8']],

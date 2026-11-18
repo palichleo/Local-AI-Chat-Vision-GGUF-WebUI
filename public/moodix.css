@@ -14737,6 +14737,20 @@ body[data-setup='incomplete'] #resume-last {
   text-underline-offset: 3px;
   cursor: pointer;
 }
+/* Takes of the conversation that no message shows any more (0.6.99): a quiet line at the foot of the
+   thread, « Les remettre » beside it. */
+#messages .takes-detached {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
+  margin: 18px 0 0;
+  color: var(--text-3);
+  font: 400 14px/1.5 var(--font-ui);
+}
+#messages .takes-detached .message-retry {
+  margin-left: 0;
+}
 #chat-form .compose-state.is-waiting {
   color: var(--text-3);
   font: 400 11px/1 var(--font-mono);

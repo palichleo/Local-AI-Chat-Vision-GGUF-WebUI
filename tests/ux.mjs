@@ -496,8 +496,9 @@ test('the time of a turn is written at the top right of its message, on the line
   assert.equal(view.note.textContent, '17.3 s');
   context.turnTime(view, 58340);
   assert.equal(view.note.textContent, '1:00', 'never « 60.0 s »');
-  // Both ends of a turn go through it; nothing else writes a time under the message.
-  assert.equal(app.match(/turnTime\(view, started\)/g).length, 3);
+  // Both ends of a turn go through it, and its quiet end after a creation (0.6.99); nothing else writes
+  // a time under the message.
+  assert.equal(app.match(/turnTime\(view, started\)/g).length, 4);
   assert.doesNotMatch(app.replace(source, ''), /toFixed\(1\)\} s`/);
   const css = await read('moodix.css');
   // At the right of the line of the takes, at their right edge; else at the top right of the message.

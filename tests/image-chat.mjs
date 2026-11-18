@@ -254,7 +254,14 @@ test('a failed reload keeps the produced tool result and does not request a comp
   const result = await exchange({ ready: false, failed: true });
   assert.equal(result.requests.length, 1);
   assert.ok(result.state.messages.some(m => m.role === 'tool' && m.content.includes('generated')));
-  assert.match(result.views.at(-1).note.textContent, /restart failed/);
+  // Nothing in red under the take it made (0.6.99: « Model restart failed » was the note of the turn,
+  // and « Régénérer » under it made the take again): the turn ends, and one line says when Moodix answers.
+  const last = result.views.at(-1);
+  assert.doesNotMatch(last.note.textContent, /restart failed/);
+  assert.deepEqual(
+    last.body.children.map(child => child.textContent),
+    ['Moodix répondra à votre prochain message.'],
+  );
 });
 test('image generation finishes without automatic pixels or review, while denial retains native protocol', async () => {
   const result = await exchange();

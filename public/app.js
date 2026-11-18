@@ -17,6 +17,7 @@ import { setupHelpTips } from './help-tips.mjs';
 import { setupGenerationUI } from './generation-ui.mjs';
 import { setupMiniature } from './work-miniature.mjs';
 import { setupTakeRecovery, takesOf } from './take-recovery.mjs';
+import { detachedTakes, leavingQuestion, reattached, takesWord } from './detached-takes.mjs';
 import { takeContent } from './generation-runtime.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { clipPlayer } from './take-player.mjs';
@@ -146,9 +147,13 @@ function markThinking(view, thinking) {
 /**
  * A message sent while the model loads (etats-maquette.md, 51): beside « MOODIX », « LE MODÈLE SE
  * CHARGE · 0:42 », the time gone by; under it, what happens. Failed, the same line says why in
- * amber, with « Réessayer ».
+ * amber, with « Réessayer ». `waiting`: what the line says meanwhile (0.6.99: after a creation, its
+ * takes are there and Moodix AI comes back from the card to answer).
  */
-function modelLoading(view) {
+function modelLoading(
+  view,
+  waiting = 'Votre message partira dès que Moodix AI sera prêt. Le premier chargement peut prendre quelques minutes.',
+) {
   const label = node('span', 'message-loading'),
     line = node('p', 'message-waiting');
   let timer = null,
@@ -164,8 +169,7 @@ function modelLoading(view) {
       tick();
       timer = setInterval(tick, 1000);
       view.article.querySelector('.message-header')?.append(label);
-      line.textContent =
-        'Votre message partira dès que Moodix AI sera prêt. Le premier chargement peut prendre quelques minutes.';
+      line.textContent = waiting;
       view.body.replaceChildren(line);
     },
     stop() {
@@ -734,6 +738,8 @@ async function loadConversation(id) {
     $('prompt').focus();
     // What its calls made while no page followed them: written, shown, or followed (take-recovery.mjs).
     void state.recovery?.complete(id, views);
+    // Takes of it that no message shows any more: said, and put back on a click (0.6.99).
+    void offerDetached(id);
   } catch (error) {
     // Not opened: the conversation set aside for it is the one on screen again, as it was.
     if (setNow && state.aside?.conversationId === state.conversationId) takeBackAside();
@@ -825,6 +831,59 @@ function renderTranscript(messages, incomplete = false, { waiting = null } = {})
   return views;
 }
 
+/**
+ * Takes of the conversation shown that no message shows any more (0.6.99): an exchange taken back
+ * (« Régénérer », « Modifier »: until 0.6.99 they said nothing of the takes they took away), or a tab
+ * left on an older copy that wrote it over. Ten images of a series were in `output` and in the
+ * Pellicule, and no longer in their conversation. A quiet line at the foot of the thread says so;
+ * « Les remettre » writes their call and its result back from their records (detached-takes.mjs).
+ * Not while a creation of this conversation is being made (its take is there before its result) or a
+ * reply is written, here or in another tab; never for takes made by hand in the Studio, deleted, or
+ * of a call still open (take-recovery.mjs completes those).
+ */
+async function offerDetached(id = state.conversationId) {
+  if (!id || !state.saveHistory) return;
+  let runs;
+  try {
+    runs = (await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json()).runs ?? [];
+  } catch {
+    return;
+  }
+  const job = state.status?.toolJob;
+  if (
+    !shownHere(id) ||
+    state.generating ||
+    state.work?.conversationId === id ||
+    state.status?.busy ||
+    (job && job.conversationId === id && !['done', 'error', 'cancelled'].includes(job.state))
+  )
+    return;
+  const groups = detachedTakes(state.messages, runs);
+  if (!groups.length) return;
+  const count = groups.reduce((sum, group) => sum + group.detached, 0),
+    line = node('p', 'takes-detached'),
+    again = node('button', 'text-button message-retry', 'Les remettre');
+  again.type = 'button';
+  again.onclick = () => void putBack(id, groups, line);
+  line.append(node('span', '', `${takesWord(count)} de cette conversation ${count > 1 ? 'ne sont' : 'n’est'} plus dans le fil.`), again);
+  $('messages').append(line);
+}
+/** « Les remettre » (0.6.99): the takes of `groups` written back in their conversation, still the one shown. */
+async function putBack(id, groups, line) {
+  if (!shownHere(id) || state.generating || state.work) return;
+  // Its last message left unsent in the message box (loadConversation) stays the last one.
+  const kept = state.archiveSnapshot,
+    last = kept?.incomplete ? kept.messages?.at(-1) : null,
+    unsent = last?.role === 'user' && !last.internal && state.messages.at(-1)?.role !== 'user' ? [last] : [];
+  let messages = state.messages;
+  for (const group of groups) messages = reattached(messages, group);
+  state.messages = messages;
+  state.archiveSnapshot = { messages: [...archiveMessages(messages), ...unsent], incomplete: unsent.length > 0 };
+  line.remove();
+  rerender(id);
+  await persistConversation(id);
+}
+
 async function restoreUpdate() {
   const saved = await (await api('updates/session')).json();
   if (!saved) return;
@@ -886,6 +945,8 @@ function restoreSession(saved) {
   contextMeter.schedule();
   // A take made just before the server stopped: its call is given it (0.6.82).
   void state.recovery?.complete(state.conversationId, views);
+  // Takes of it that no message shows any more (0.6.99): said after an update too.
+  void offerDetached(state.conversationId);
 }
 
 /**
@@ -2306,13 +2367,16 @@ function turnActions() {
     return row;
   };
   const sent = [...document.querySelectorAll('#messages .message.user')].at(-1),
-    reply = $('messages').lastElementChild;
+    // The last message (0.6.99: the line said under the thread of takes no longer in it is none).
+    reply = [...document.querySelectorAll('#messages > .message')].at(-1);
   sent?.append(
     action('Modifier', 'edit', 'Reprendre ce message dans la zone de texte ; sa réponse est retirée', () =>
       takeBack(false),
     ),
   );
-  if (reply?.classList.contains('assistant') && !reply.querySelector('.message-waiting.is-failed'))
+  // Not under a reply whose takes are made and only the words of Moodix are to come (0.6.99: the chat
+  // model not back after a creation): « Régénérer » would only make them again.
+  if (reply?.classList.contains('assistant') && !reply.querySelector('.message-waiting.is-failed') && reply.dataset?.regenerate !== 'no')
     reply.append(
       action('Régénérer', 'update', 'Renvoyer le même message pour obtenir une autre réponse', () => takeBack(true)),
     );
@@ -2327,6 +2391,11 @@ async function takeBack(resend) {
     waiting = $('prompt').value.trim();
   if (resend && (waiting || state.images.length || state.videos.length))
     return notice('Envoyez ou effacez d’abord le message en cours d’écriture.');
+  // The takes of the exchange that leaves, asked first (0.6.99): « Régénérer » after « Le moteur n’est
+  // pas prêt » took the ten images of a series out of their conversation without a word (they stayed in
+  // the Pellicule and in `output`). « Non »: nothing changes.
+  const question = leavingQuestion(state.messages.slice(index + 1));
+  if (question && !confirm(question)) return;
   // « Régénérer » begins a work (0.6.90): asked once nothing here stops it, before its last exchange
   // leaves the page. Not when its message would not leave (« Envoyer » greyed, no model chosen): a
   // « oui » let the conversation set aside go for nothing; the message waits in the box, as before,
@@ -2541,6 +2610,9 @@ function missingFile(view, request, history, conversationId = state.conversation
       // Not by itself when it would cost the conversation set aside (0.6.90): the card offers it, the
       // question comes with the user's click.
       if (asideAtStake()) return false;
+      // Nor when takes would leave with its exchange (0.6.99): never taken away by itself. The card
+      // offers « Reprendre la demande », which sends it as a new message.
+      if (leavingQuestion(state.messages.slice(index + 1))) return false;
       void takeBack(true);
       return true;
     },
@@ -3238,6 +3310,45 @@ async function sendMessage(event) {
       persistConversation(talkId);
     }
   }
+  /**
+   * The chat model back on the card after a creation (0.6.99): at once when it is ready, else waited
+   * for under its step, « Le modèle se charge » beside « MOODIX », as long as the server gives it to come
+   * back (5 minutes, lib/tool-runtime.mjs). False when it is not back by then. A stop of the user stops it.
+   */
+  async function backAfterCreation() {
+    if (state.status?.state === 'ready') return true;
+    const waiting = modelLoading(view, 'Vos prises sont prêtes. Moodix AI revient sur la carte graphique pour vous répondre.'),
+      limit = new AbortController(),
+      stop = () => limit.abort(signal.reason);
+    signal.addEventListener('abort', stop, { once: true });
+    const clock = setTimeout(() => limit.abort(), 5 * 60 * 1000);
+    try {
+      await waitForModel(api, limit.signal, status => {
+        state.status = status;
+        if (status.state !== 'ready') waiting.show();
+        updateControls();
+      });
+      return true;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return false;
+    } finally {
+      clearTimeout(clock);
+      signal.removeEventListener('abort', stop);
+      waiting.stop();
+    }
+  }
+  /**
+   * The turn over after its creation, without the words of Moodix (0.6.99): its takes stay as they are,
+   * one line says when it answers, and no « Régénérer » under it (it would only make them again).
+   */
+  function quietEnd() {
+    complete = true;
+    view.silent = true;
+    view.body.replaceChildren(node('div', 'message-step', 'Moodix répondra à votre prochain message.'));
+    if (view.article?.dataset) view.article.dataset.regenerate = 'no';
+    turnTime(view, started);
+  }
   const started = performance.now(),
     loading = modelLoading(view);
   try {
@@ -3259,7 +3370,9 @@ async function sendMessage(event) {
       invalidCalls = 0,
       resourceReads = 0,
       briefing = false,
-      reviewRecord = null;
+      reviewRecord = null,
+      // A creation was made in this turn: the chat model comes back from the card before its next words (0.6.99).
+      afterCreation = false;
     while (true) {
       signal.throwIfAborted();
       let request = null,
@@ -3270,23 +3383,39 @@ async function sendMessage(event) {
       view.body.replaceChildren();
       view.waiting = true;
       markThinking(view, true);
+      // After a creation, the chat model comes back from the card (0.6.99): waited for as at the start of
+      // a message (« Le modèle se charge… »), within the 5 minutes the server gives it. Asked at once, a
+      // local model still loading answered « Le moteur n’est pas prêt » in red under the ten images of a
+      // series, and « Régénérer » took them away. Not back: the turn ends there, quietly, its takes kept.
+      if (afterCreation && !(await backAfterCreation())) {
+        quietEnd();
+        break;
+      }
       // Attached images of a reopened conversation get their compressed copy from the original.
       await fillCopies(history, { api, conversationId: talkId, signal });
-      const response = await api(
-        'chat',
-        {
-          ...chatRequest(history, allowTools, resourceReads < 8, talk()),
-          // Only deciding whether to chain another tool: thinking would cost seconds for nothing shown.
-          // A plan put to the user before a video is a few lines: no thinking either.
-          ...(silent || briefing ? { thinking: false } : {}),
-          ...(screen ? { screen } : {}),
-          // A creation asked from the Studio is made with the LoRAs the Studio shows; from the Chat, with those saved for its model.
-          ...(fromStudio ? { inStudio: true } : {}),
-          conversationId: talkId,
-          turnId,
-        },
-        { signal },
-      );
+      let response;
+      try {
+        response = await api(
+          'chat',
+          {
+            ...chatRequest(history, allowTools, resourceReads < 8, talk()),
+            // Only deciding whether to chain another tool: thinking would cost seconds for nothing shown.
+            // A plan put to the user before a video is a few lines: no thinking either.
+            ...(silent || briefing ? { thinking: false } : {}),
+            ...(screen ? { screen } : {}),
+            // A creation asked from the Studio is made with the LoRAs the Studio shows; from the Chat, with those saved for its model.
+            ...(fromStudio ? { inStudio: true } : {}),
+            conversationId: talkId,
+            turnId,
+          },
+          { signal },
+        );
+      } catch (error) {
+        // Gone again between the two (0.6.99): the same quiet end, never an error under its takes.
+        if (!afterCreation || error.status !== 503) throw error;
+        quietEnd();
+        break;
+      }
       // References too little used for the model's list were removed from the disk: said.
       const removed = response.headers?.get?.('X-References-Removed');
       if (removed) {
@@ -3871,14 +4000,20 @@ async function sendMessage(event) {
         complete = true;
         break;
       }
-      if (result.failed && state.status.state !== 'ready') {
+      // (`late`: the last image of a series made, what followed it went wrong, 0.6.99.)
+      if ((result.failed || result.late) && state.status.state !== 'ready') {
         // Nothing made and the model cannot come back now (the card held, 54): the take says what
         // failed; the turn ends there, without the same words again in red.
         if (!result.record) {
           complete = true;
           break;
         }
-        throw Error(result.error || 'L’image est disponible dans la galerie, mais le modèle n’a pas redémarré.');
+        // Made, and the chat model not back within its 5 minutes (0.6.99): the takes stay, nothing in red
+        // under them (« L’image est disponible dans la galerie, mais le modèle n’a pas redémarré. »
+        // before); Moodix answers the next message. (Kept by the end of the turn, below.)
+        view = assistantMessage(view);
+        quietEnd();
+        break;
       }
       // A take that failed says why on itself (52): no second line under the message.
       view.note.textContent = result.failed && result.record ? result.error || 'Analyse indisponible.' : '';
@@ -3891,6 +4026,7 @@ async function sendMessage(event) {
       await persistConversation(talkId);
       view = assistantMessage(view);
       finishReason = '';
+      afterCreation = true;
     }
   } catch (error) {
     const canceled = signal.aborted,

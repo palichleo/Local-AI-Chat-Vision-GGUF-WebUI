@@ -14,6 +14,7 @@ import {
   withoutStudioNote,
 } from '../public/transcript.mjs';
 import * as chatVideos from '../public/chat-videos.mjs';
+import { leavingQuestion } from '../public/detached-takes.mjs';
 
 const call = (name, id = 'c1') => ({ id, type: 'function', function: { name, arguments: '{}' } });
 const result = (content, id = 'c1') => ({ role: 'tool', tool_call_id: id, content: JSON.stringify(content) });
@@ -122,13 +123,16 @@ test('the last message the user wrote can be taken back, not one the application
   assert.equal(lastExchange([studio, { role: 'assistant', content: '' }, user('plus long'), reply]), 2);
 });
 
-async function page(messages, { prompt = '', busy = false } = {}) {
+async function page(messages, { prompt = '', busy = false, yes = true } = {}) {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const fields = { prompt: { value: prompt, focus() {} }, welcome: {}, messages: { replaceChildren() {} } };
   const done = [];
   const context = {
     ...chatVideos,
     lastExchange,
+    // The takes of the exchange taken back are said first (0.6.99); `yes`: the user's answer.
+    leavingQuestion,
+    confirm: question => (done.push('question : ' + question), yes),
     state: { messages, images: [], videos: [], status: {}, generating: busy },
     $: id => fields[id] ?? (fields[id] = { requestSubmit: () => done.push('envoi') }),
     notice: text => done.push('avis : ' + text),
@@ -179,14 +183,20 @@ test('« Modifier » puts the last message back in the message box and removes i
   assert.equal(state.archiveSnapshot.incomplete, true);
   assert.equal(state.archiveSnapshot.messages.length, 3);
   assert.equal(state.archiveSnapshot.messages.at(-1).role, 'user');
-  assert.deepEqual(done, ['affiche 2', 'enregistre']);
+  // Its reply had an image: said first, in the user's words (0.6.99).
+  assert.deepEqual(done, [
+    'question : Cette réponse a 1 image : elle quittera la conversation et restera dans la Pellicule. Continuer ?',
+    'affiche 2',
+    'enregistre',
+  ]);
 });
 
 test('« Régénérer » sends the same message again, unless another one is being written', async () => {
   const again = await page(exchange());
   await again.takeBack(true);
   assert.equal(again.fields.prompt.value, 'second');
-  assert.deepEqual(again.done, ['affiche 2', 'enregistre', 'envoi']);
+  assert.deepEqual(again.done.slice(1), ['affiche 2', 'enregistre', 'envoi']);
+  assert.match(again.done[0], /^question : Cette réponse a 1 image/);
   const writing = await page(exchange(), { prompt: 'autre chose' });
   await writing.takeBack(true);
   assert.equal(writing.state.messages.length, 5, 'nothing is removed');
@@ -199,6 +209,26 @@ test('nothing is taken back while a reply or a generation is running', async () 
   await takeBack(true);
   assert.equal(state.messages.length, 5);
   assert.match(done[0], /^avis : Attendez la fin/);
+});
+
+test('« Modifier » and « Régénérer » say first the takes that would leave with the reply; « Non » changes nothing (0.6.99)', async () => {
+  for (const resend of [false, true]) {
+    const kept = await page(exchange(), { prompt: resend ? '' : 'déjà écrit', yes: false });
+    await kept.takeBack(resend);
+    assert.equal(kept.state.messages.length, 5, 'nothing is taken back');
+    assert.equal(kept.state.archiveSnapshot, undefined, 'nothing is saved');
+    assert.equal(kept.fields.prompt.value, resend ? '' : 'déjà écrit');
+    assert.deepEqual(kept.done, [
+      'question : Cette réponse a 1 image : elle quittera la conversation et restera dans la Pellicule. Continuer ?',
+    ]);
+  }
+  // A reply of words alone leaves without a question.
+  const words = await page([
+    { role: 'user', content: 'premier' },
+    { role: 'assistant', content: 'un' },
+  ]);
+  await words.takeBack(false);
+  assert.deepEqual(words.done, ['affiche 0', 'enregistre']);
 });
 
 test('a title begun in the Studio is its line, without the words added for the model, even cut short', () => {

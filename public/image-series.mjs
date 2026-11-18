@@ -101,7 +101,9 @@ export async function runSeries(request, first, { api, signal, mount, run, settl
     images = [...(first.images ?? [])];
   let last = first,
     made = 1,
-    stopped = '';
+    stopped = '',
+    // What went wrong once the last image was made (0.6.99): the chat model not back on the card.
+    late = '';
   const end = () => api('tools/series', { series: request.series.id, end: true }).catch(() => {});
   // (What could not be kept does not stop the series: the page says so itself.)
   const kept = async () => {
@@ -141,6 +143,13 @@ export async function runSeries(request, first, { api, signal, mount, run, settl
       made++;
       last = result;
       images.push(...(result.images ?? []));
+      // The last one (0.6.99): nothing is stopped, every image is made. What followed it (the chat
+      // model that did not come back on the card within its 5 minutes) is the page's to say: « la série
+      // s'arrête là » under ten images made sent the user to make them again.
+      if (index === total) {
+        late = result.error || 'Une erreur a suivi la dernière image.';
+        break;
+      }
       stopped = `L’image ${index} est faite, mais une erreur a suivi${result.error ? ` (${String(result.error).replace(/\.$/, '')})` : ''} : la série s’arrête là.`;
       break;
     }
@@ -161,5 +170,6 @@ export async function runSeries(request, first, { api, signal, mount, run, settl
     denied: false,
     // An image refused or failed ended it: the model does not call again in this message.
     stopped: Boolean(stopped),
+    ...(late ? { late } : {}),
   };
 }

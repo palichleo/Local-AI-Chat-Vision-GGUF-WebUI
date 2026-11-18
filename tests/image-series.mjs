@@ -312,6 +312,24 @@ test('the images of a series one after another, then one result for the call: ev
   assert.equal(JSON.parse(seriesContent([made(1, 'x', 1).content], 1)).status, 'success');
 });
 
+test('its last image made, then the chat model not back on the card: every image counted, nothing « stopped » (0.6.99)', async () => {
+  const { runSeries } = await import('../public/image-series.mjs');
+  // What the page gets when the take is saved and the model does not come back within its 5 minutes.
+  const late = { ...made(14, 'An owl.', 3), failed: true, error: 'Le modèle n’a pas redémarré.' };
+  late.content = JSON.stringify({ ...JSON.parse(late.content), status: 'generated' });
+  const { asked, options } = page([() => made(13, 'A whale.', 2), () => late]);
+  const result = await runSeries(request, made(12, 'A fox.', 1), options);
+  const told = JSON.parse(result.content);
+  assert.deepEqual([told.status, told.made, told.asked], ['success', 3, 3]);
+  assert.deepEqual(told.images.map(image => image.run_id), ['run-12', 'run-13', 'run-14']);
+  // « L’image 3 est faite, mais une erreur a suivi (…) : la série s’arrête là. » under three images made
+  // sent the user to make them again.
+  assert.equal(told.message, undefined);
+  assert.deepEqual([result.stopped, result.failed, result.late], [false, false, 'Le modèle n’a pas redémarré.']);
+  assert.equal(result.record.id, 'run-14');
+  assert.equal(asked.some(([, body]) => body.end), false, 'the server ended the series with its last image');
+});
+
 test('a series stops at an image refused or failed; stopped by the user, the call says what was made', async () => {
   const { runSeries } = await import('../public/image-series.mjs');
   const failed = {

@@ -11,6 +11,7 @@ import * as transcript from '../public/transcript.mjs';
 import { reflection, thoughtTime } from '../public/reflection.mjs';
 import { runSeries } from '../public/image-series.mjs';
 import { takesOf } from '../public/take-recovery.mjs';
+import * as detached from '../public/detached-takes.mjs';
 import { takeContent } from '../public/generation-runtime.mjs';
 import { History, MAX_CONVERSATION_MESSAGES } from '../lib/history.mjs';
 import { nativeFields } from '../lib/native-messages.mjs';
@@ -199,12 +200,14 @@ function page({
     ...given,
   };
   // `lines`: the view the line under the tabs was drawn for, each time it was drawn.
-  const seen = { requests: [], saves: [], notices: [], takes: [], restored: [], views: [], failures: [], cancelled: [], lines: [], cited: [], drawn: [] };
+  // `waits`: what the line said while the page waited for the chat model after a creation (0.6.99).
+  const seen = { requests: [], saves: [], notices: [], takes: [], restored: [], views: [], failures: [], cancelled: [], lines: [], cited: [], drawn: [], waits: [] };
   const node = (tag, className, words) => new El(tag, className, words);
   const context = {
     ...sessionCopies,
     ...chatVideos,
     ...transcript,
+    ...detached,
     reflection,
     thoughtTime,
     readSSE,
@@ -234,7 +237,7 @@ function page({
     historyWrite: Promise.resolve(),
     moodixMark: () => [],
     markThinking() {},
-    modelLoading: () => ({ show() {}, stop() {}, fail: message => seen.failures.push(message) }),
+    modelLoading: (view, waiting) => ({ show: () => seen.waits.push(waiting ?? 'message'), stop() {}, fail: message => seen.failures.push(message) }),
     userMessage(words, images, videos = []) {
       const article = node('article', 'message user', words);
       Object.assign(article, { images, videos });
@@ -2446,4 +2449,252 @@ test('the question comes only for a message that leaves, and a « non » leaves 
   fresh.context.confirm = () => true;
   await fresh.send('Un phare la nuit');
   assert.deepEqual([copies, fresh.state.conversationId, fresh.state.aside], [1, ID, null]);
+});
+
+// ------------------------------------------------------------------ the takes of a turn never leave unsaid (0.6.99)
+// Ten images of a series were in `output` and in the Pellicule, and no longer in their conversation: the
+// local chat model, slow to come back, answered « Le moteur n'est pas prêt » in red under them, and
+// « Régénérer » took the call and its result away without a word (18/11).
+const TEN = 10;
+const tenRun = index => `${String(index % 10).repeat(8)}-2222-4222-8222-${String(index).padStart(12, '0')}`;
+/**
+ * A series of ten images asked in the Chat: the first call sent back by the guard of the short prompts
+ * (« nothing_generated »), then the call with its series. Each take is kept in `gallery` as the server
+ * keeps it (by its call), with what /api/gallery gives of it. `after(n, page)`: the n-th answer (n ≥ 3).
+ * `last`: what the tenth image gives back (its take made, what followed it gone wrong).
+ */
+function tenImages({ store, after = () => said(''), last = null, state = {}, waitForModel } = {}) {
+  const prompts = Array.from({ length: TEN }, (_, index) => `Un chat ${index + 1} à l’aquarelle, lumière du matin, détaillé.`),
+    call = functionCall('create_image', 'call_serie', JSON.stringify({ prompt: prompts[0], series: prompts.slice(1) })),
+    proposal = index => ({ call, workflowName: 'Krea 2', requestId: 'r' + index, autoAllow: true, series: { id: 's1', index, total: TEN } }),
+    gallery = [],
+    asked = [];
+  let friend;
+  const requestTool = async request => {
+    const index = request.series?.index ?? 1,
+      id = tenRun(index);
+    gallery.push({
+      id,
+      conversationId: ID,
+      callId: request.call.id,
+      provider: 'native',
+      workflowId: 'krea',
+      workflowName: 'Krea 2',
+      prompt: prompts[index - 1],
+      parameters: { seed: index },
+      createdAt: new Date(Date.UTC(2026, 10, 18, 18, 30, index)).toISOString(),
+      outputs: [{ source: { filename: `chat-${index}.png`, subfolder: 'image', type: 'output' }, take: index }],
+    });
+    const content = JSON.stringify({ status: 'success', run_id: id, takes: [index], workflow: 'Krea 2', media_type: 'image', parameters: { seed: index } });
+    if (index === TEN && last) return last(id, friend);
+    return { content, images: [], record: { id, conversationId: ID, mediaType: 'image' } };
+  };
+  friend = page({
+    store,
+    requestTool,
+    state,
+    ...(waitForModel ? { waitForModel: (...given) => waitForModel(friend, ...given) } : {}),
+    chat: (body, n) => {
+      if (n === 1) return called({ kind: 'retry', call: functionCall('create_image', 'call_court', '{"prompt":"chat","series":["chat noir"]}'), message: 'Prompts trop courts.' });
+      if (n === 2) return called(proposal(1));
+      return after(n, friend);
+    },
+    routes: {
+      'tools/series': body => {
+        asked.push(plain(body));
+        return Response.json(body.end ? { ended: true } : proposal(asked.filter(item => !item.end).length + 1));
+      },
+    },
+  });
+  return { friend, gallery };
+}
+// The server while the local model comes back (server.mjs: the chat refused while it loads).
+const notReady = () => {
+  throw Object.assign(new Error('Le moteur n’est pas prêt. Configure-le puis démarre-le.'), { status: 503 });
+};
+// The takes of `gallery` no message of `messages` names.
+const unnamed = (messages, gallery) => gallery.filter(item => !JSON.stringify(messages).includes(item.id));
+// The step of Moodix drawn last, as the user reads it.
+const lastStep = shown => shown.views.at(-1);
+
+test('ten images made and the chat model not back: no word in red under them, its takes kept, Moodix answers the next message', async t => {
+  const store = await historyStore(t),
+    { friend, gallery } = tenImages({ store, after: notReady });
+  await friend.send('Fais 10 images de chats à l’aquarelle');
+  assert.equal(gallery.length, TEN);
+  const kept = await store.read(ID);
+  assert.deepEqual([unnamed(kept.messages, gallery).length, kept.incomplete], [0, false], 'the ten named, the turn over');
+  // Until 0.6.99 « Le moteur n’est pas prêt. Configure-le puis démarre-le. », in red and in the notice.
+  assert.deepEqual(friend.notices.filter(text => /pas prêt|Configure/.test(text)), []);
+  const step = lastStep(friend);
+  assert.equal(step.note.classList.contains('error'), false);
+  assert.equal(step.body.words, 'Moodix répondra à votre prochain message.');
+  // And no « Régénérer » under it: it would only make the ten images again.
+  assert.equal(step.article.dataset.regenerate, 'no');
+});
+
+test('after a creation, the chat model on its way back is waited for as at the start of a message; never back, the same quiet end', async t => {
+  const comeBack = async (page, api, signal, onStatus) => {
+    if (page.state.status.state !== 'ready') {
+      onStatus(page.state.status);
+      page.state.status = { state: 'ready', vision: true, busy: false };
+    }
+    onStatus(page.state.status);
+  };
+  // The tenth image made, the model still loading (the status read after it says so).
+  const loading = (id, page) => {
+    page.state.status = { state: 'loading', vision: true, busy: false };
+    return { content: JSON.stringify({ status: 'success', run_id: id, media_type: 'image' }), images: [], record: { id, conversationId: ID, mediaType: 'image' } };
+  };
+  const back = tenImages({ store: await historyStore(t), last: loading, waitForModel: comeBack, after: () => said('Voici vos chats.') });
+  await back.friend.send('Fais 10 images de chats à l’aquarelle');
+  assert.ok(back.friend.waits.includes('Vos prises sont prêtes. Moodix AI revient sur la carte graphique pour vous répondre.'));
+  assert.equal(back.friend.requests.length, 3, 'its words asked once it is back');
+  assert.notEqual(lastStep(back.friend).body.words, 'Moodix répondra à votre prochain message.');
+  // Never back (it did not start): the turn ends there, nothing in red, its words not asked for.
+  const never = async (page, api, signal, onStatus) => {
+    if (page.state.status.state === 'ready') return onStatus(page.state.status);
+    onStatus(page.state.status);
+    throw Error('Le démarrage du modèle a été interrompu. Votre message a été conservé.');
+  };
+  const lost = tenImages({ store: await historyStore(t), last: loading, waitForModel: never });
+  await lost.friend.send('Fais 10 images de chats à l’aquarelle');
+  assert.equal(lost.friend.requests.length, 2);
+  assert.equal(lastStep(lost.friend).body.words, 'Moodix répondra à votre prochain message.');
+  assert.deepEqual(lost.friend.notices.filter(Boolean), []);
+});
+
+test('the tenth image ends on « Le modèle n’a pas redémarré »: the same quiet end, every image counted', async t => {
+  const store = await historyStore(t),
+    // The take saved, the model not back on the card within its 5 minutes (lib/tool-runtime.mjs).
+    late = (id, page) => {
+      page.state.status = { state: 'error', vision: true, busy: false };
+      return {
+        content: JSON.stringify({ status: 'generated', run_id: id, media_type: 'image' }),
+        images: [],
+        record: { id, conversationId: ID, mediaType: 'image' },
+        failed: true,
+        error: 'Le modèle n’a pas redémarré.',
+      };
+    },
+    { friend, gallery } = tenImages({ store, last: late });
+  await friend.send('Fais 10 images de chats à l’aquarelle');
+  const told = JSON.parse((await store.read(ID)).messages.at(-1).content);
+  assert.deepEqual([told.made, told.images.length, told.message], [TEN, TEN, undefined], 'no « la série s’arrête là »');
+  assert.equal(unnamed((await store.read(ID)).messages, gallery).length, 0);
+  assert.equal(friend.requests.length, 2, 'its words not asked of a model not there');
+  assert.equal(lastStep(friend).body.words, 'Moodix répondra à votre prochain message.');
+  assert.deepEqual(friend.notices.filter(text => /redémarré|pas prêt/.test(text)), []);
+});
+
+test('« Régénérer » and « Modifier » ask before ten images leave; « Non » changes nothing; reopened, they are offered back', async t => {
+  const store = await historyStore(t),
+    { friend, gallery } = tenImages({ store, after: n => (n === 3 ? notReady() : said('1. Un chat roux sur un toit\n2. Un chat noir')) });
+  await friend.send('Fais 10 images de chats à l’aquarelle');
+  const questions = [];
+  for (const resend of [true, false]) {
+    friend.context.confirm = question => (questions.push(question), false);
+    await friend.context.takeBack(resend);
+    await friend.turn();
+  }
+  assert.deepEqual(questions, Array(2).fill('Cette réponse a 10 images : elles quitteront la conversation et resteront dans la Pellicule. Continuer ?'));
+  assert.equal(unnamed((await store.read(ID)).messages, gallery).length, 0, '« Non »: nothing changes');
+  assert.equal(friend.requests.length, 3, 'nothing sent again');
+  // « Oui »: the exchange leaves as before, its message sent again.
+  friend.context.confirm = () => true;
+  await friend.context.takeBack(true);
+  await friend.turn();
+  const after = await store.read(ID);
+  assert.equal(unnamed(after.messages, gallery).length, TEN);
+  // Opened again (after an update, a restart): one quiet line says so, « Les remettre » puts them back.
+  const routes = { [`gallery/${ID}?images=0`]: async () => Response.json({ runs: gallery, skipped: 0 }) };
+  const reopened = page({ store, routes });
+  await reopened.context.loadConversation(ID);
+  await settled();
+  const line = reopened.$('messages').all('takes-detached')[0];
+  assert.ok(line, 'said at the foot of the thread');
+  assert.equal(line.words, '10 prises de cette conversation ne sont plus dans le fil. Les remettre');
+  await line.children[1].onclick();
+  await settled();
+  const back = await store.read(ID);
+  assert.equal(unnamed(back.messages, gallery).length, 0, 'written back');
+  assert.deepEqual(roles(back.messages).slice(-2), ['assistant', 'tool']);
+  assert.equal(reopened.$('messages').all('takes-detached').length, 0);
+  // And shown the next time, as the ten images they are, and nothing more to put back.
+  const again = page({ store, routes });
+  await again.context.loadConversation(ID);
+  await settled();
+  assert.deepEqual(again.restored.map(item => item.runId), gallery.map(item => item.id));
+  assert.equal(again.$('messages').all('takes-detached').length, 0);
+});
+
+test('a tab left on an older copy wrote over the ten images: opened again, they are offered back', async t => {
+  const store = await historyStore(t);
+  let arrive;
+  const modelBack = new Promise(resolve => (arrive = resolve));
+  const { friend: first, gallery } = tenImages({ store, waitForModel: () => modelBack });
+  const turn = first.send('Fais 10 images de chats à l’aquarelle');
+  await settled();
+  // Moodix opened again while the model loads: a new tab, the conversation opened there, its message waiting.
+  const second = page({ store, chat: () => said('1. Un chat roux sur un toit') });
+  await second.context.loadConversation(ID);
+  arrive();
+  await turn;
+  await second.send();
+  assert.equal(unnamed((await store.read(ID)).messages, gallery).length, TEN);
+  const routes = { [`gallery/${ID}?images=0`]: async () => Response.json({ runs: gallery, skipped: 0 }) };
+  const reopened = page({ store, routes });
+  await reopened.context.loadConversation(ID);
+  await settled();
+  await reopened.$('messages').all('takes-detached')[0].children[1].onclick();
+  assert.equal(unnamed((await store.read(ID)).messages, gallery).length, 0);
+});
+
+test('nothing is said of takes that are there, nor while one is being made or a reply is written', async t => {
+  const store = await historyStore(t),
+    { friend, gallery } = tenImages({ store, after: () => said('') });
+  await friend.send('Fais 10 images de chats à l’aquarelle');
+  const routes = { [`gallery/${ID}?images=0`]: async () => Response.json({ runs: gallery, skipped: 0 }) };
+  const opened = page({ store, routes });
+  await opened.context.loadConversation(ID);
+  await settled();
+  assert.equal(opened.$('messages').all('takes-detached').length, 0, 'every take named');
+  // Taken away, but a creation of this conversation is being made (here or in another tab), or Moodix
+  // writes: its takes may be there before their result. Said the next time it is opened.
+  friend.context.confirm = () => true;
+  await friend.context.takeBack(false);
+  for (const status of [
+    { state: 'ready', busy: false, toolJob: { id: 'job', state: 'generating', conversationId: ID, callId: 'call_autre' } },
+    { state: 'ready', busy: true },
+  ]) {
+    const busy = page({ store, routes, state: { status } });
+    await busy.context.loadConversation(ID);
+    await settled();
+    assert.equal(busy.$('messages').all('takes-detached').length, 0);
+  }
+});
+
+test('the request sent again once its file is downloaded never takes the takes of its exchange away by itself', async () => {
+  const shown = page(),
+    request = { tool: 'create_video', workflowName: 'LTX 2.5', missing: { files: [{ name: 'ltx.safetensors' }] } },
+    asked = { role: 'user', content: 'Fais une image puis une vidéo' };
+  let offered = null;
+  shown.context.missingFileCard = options => (offered = options);
+  const withTake = [
+    asked,
+    { role: 'assistant', content: '', tool_calls: [functionCall('create_image', 'call_a')] },
+    { role: 'tool', tool_call_id: 'call_a', content: JSON.stringify({ status: 'success', run_id: tenRun(1), media_type: 'image' }) },
+    { role: 'assistant', content: '', tool_calls: [functionCall('create_video', 'call_b')] },
+    { role: 'tool', tool_call_id: 'call_b', content: JSON.stringify({ status: 'missing_file' }) },
+  ];
+  Object.assign(shown.state, { conversationId: ID, messages: withTake });
+  shown.context.confirm = () => assert.fail('nothing asked: nothing sent by itself');
+  shown.context.missingFile(shown.context.assistantMessage(), request, withTake, ID);
+  assert.equal(offered.onReady(), false, 'the card offers « Reprendre la demande » instead');
+  assert.deepEqual(roles(shown.state.messages), ['user', 'assistant', 'tool', 'assistant', 'tool']);
+  assert.equal(shown.saves.length, 0);
+  // Without a take in it, sent again by itself as before.
+  shown.state.messages = [asked, withTake[3], withTake[4]];
+  shown.context.missingFile(shown.context.assistantMessage(), request, shown.state.messages, ID);
+  assert.equal(offered.onReady(), true);
 });
