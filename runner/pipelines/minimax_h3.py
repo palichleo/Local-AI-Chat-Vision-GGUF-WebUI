@@ -6,6 +6,7 @@ presentation + conditioner, VAE encoding of the conditions, 8-step joint
 denoise with the streamed DiT, then video and audio decoding.
 """
 
+from contextlib import ExitStack
 import gc
 import math
 import sys
@@ -32,6 +33,11 @@ AHEAD_GIB = 0.5
 # engine (1 GiB) and half a gigabyte. With less, a video of 1920 x 1088 failed one time of two,
 # after five minutes (17/11).
 EDGE_GIB = 1.5
+# Video memory what runs once before the steps takes beside a model left on the card, in GiB:
+# the conditioner (1.4, 2.1 with reference images), the VAE encoders of the references (1.6),
+# measured on the sweep of 17/11; and the margin the engine keeps under what is free.
+BESIDE_GIB = 3.0
+CEILING_GIB = 1.0
 # What the video VAE's pixels are normalised by (ImageNet's, as the library's pipeline says).
 PIXEL_MEAN, PIXEL_STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
 
@@ -53,6 +59,41 @@ def least_gib(tokens):
     card, and the dense attention in pieces. Measured on the sweep of 17/11 (RTX 4070 SUPER,
     INT8 model): 2.6 for 12 900 tokens, 5.1 for 34 800, 5.3 for 37 800, 9.7 for 76 000."""
     return 1.2 + 0.112 * tokens / 1000
+
+
+def decode_gib(parameters):
+    """Video memory the decode of the video holds, in GiB: its decoder (4.6) and what it
+    computes a clip with, which grows with the picture. Measured 17/11 with the audio VAE
+    beside it: 5.4 at 768 x 448, 6.0 at 1344 x 768; half a gigabyte is added to spare."""
+    return 5.2 + 0.8e-6 * parameters['width'] * parameters['height']
+
+
+class Loaded:
+    """The video model as one generation leaves it for the next (runner.models.kept): its file
+    open, its layers built, the share of its weights that stays on the GPU. As LTX 2.5's.
+
+    Built at every video, the share was read from the file each time (2 s of a draft), and its
+    pages pushed the decoders' file out of the system's cache: the decoder then took 3.6 to
+    7.3 s to load, where ComfyUI leaves both on the card (18/11)."""
+
+    def __init__(self, key):
+        self.key, self.stack = key, ExitStack()
+        self.store = self.pool = self.dit = self.sparse = None
+        self.fast = False
+        # Video memory all this holds, measured once the generation that leaves it is over.
+        self.allocated = 0
+        # Whether what its steps copy to the GPU comes from page-locked RAM, and the bytes there.
+        self.locked = True
+        self.ram = 0
+
+    def drop(self):
+        try:
+            if self.pool is not None:
+                self.pool.clear()
+        finally:
+            # Whatever the card answered, the file is closed and its RAM given back.
+            self.dit = self.pool = self.sparse = None
+            self.stack.close()
 
 
 def too_large(parameters, card_gib):
@@ -254,6 +295,38 @@ def _encode_tail(vae, audio_vae, path, tail, plan, parameters):
 
 
 def generate(job, config, progress):
+    """One video. The model the last generation left on the GPU is taken back when it is the one
+    this job asks for (same file, same attention) for a video of the same shape, and left
+    there again at the end."""
+    import torch
+    from runner.models import conditioning, kept
+
+    p = job['parameters']
+    shape = [p['width'], p['height'], p['frames'], sorted(ref['role'] for ref in job['references'])]
+    attention = [p.get('attention', 'comfy_kitchen'), p.get('sparse_attention', 'off'), p.get('sparse_keep', 10)]
+    key = [conditioning.stamp(job['components']['model']), shape, attention]
+    holder = [kept.take('minimax_h3', key)]
+    try:
+        result = _generate(job, config, progress, key, holder)
+    except BaseException:
+        # Whatever state the failure left it in, it is not one to start the next video from.
+        if holder[0] is not None:
+            holder[0].drop()
+        raise
+    loaded = holder[0]
+    if not loaded.locked or not loaded.pool.gpu:
+        # RAM was short when it was built (its steps copied from the file's mapping, whose
+        # pages stay in this process while the file is open), or its share left for the
+        # decode: the next video builds it anew.
+        loaded.drop()
+    else:
+        gc.collect()
+        loaded.allocated = torch.cuda.memory_allocated()
+        kept.put('minimax_h3', loaded)
+    return result
+
+
+def _generate(job, config, progress, key, holder):
     import numpy
     import torch
     from PIL import Image
@@ -353,6 +426,13 @@ def generate(job, config, progress):
         dict(state.values),
     )
     found = conditioning.load(config, entry)
+    left = holder[0].pool if holder[0] is not None else None
+    if left is not None and left.gpu and (not found or references or keyframe_inputs or continuation):
+        # A prompt to read, or references to encode, beside the share of the model the last
+        # video left on the card: the share lends what they lack (WeightPool.lend).
+        gc.collect()
+        torch.cuda.empty_cache()
+        left.lend(BESIDE_GIB + CEILING_GIB - hardware.free_bytes(torch) / 1024**3)
     read = None
     if found:
         for name, value in conditioning.restore(*found).items():
@@ -415,7 +495,12 @@ def generate(job, config, progress):
             dense_why = f'about {tokens} rows, faster dense below {sparse_attention.MIN_ROWS}'
         else:
             sparse = minimax_h3.Sparse(float(p.get('sparse_keep', 10)) / 100)
-    ahead = prefetch(paths, {}, use_order(minimax_h3.names(dit_header, gate=sparse is not None)))
+
+    def read_ahead():
+        return prefetch(paths, {}, use_order(minimax_h3.names(dit_header, gate=sparse is not None)))
+
+    # A model left by the last video is read no more: its share is on the card, the rest in RAM.
+    ahead = None if holder[0] is not None else read_ahead()
 
     # 2. Conditions through the VAE encoders (only when there are any).
     video_head = audio_head = None
@@ -434,33 +519,81 @@ def generate(job, config, progress):
 
     # 3. Joint denoise: DiT streamed from its file, PDD heads told each step's interval.
     progress(stage='loading video model')
-    with open_store(paths['model']) as store, torch.inference_mode():
-        # The share of the DiT kept on the GPU; the rest is copied from RAM at every step, at
-        # about 12 GiB/s. What the model computes with comes first: 5 GiB (a feed-forward
-        # chunk, the allocator's slack, the engine's margin) plus the activations, which grow
-        # with the video (1 GiB for a 5 s draft). Video memory that runs out halves the speed,
-        # a smaller share costs a second per step at most.
-        # (Sparse attention needs less at its peak: 5 widths instead of 6, measured at 1344 x 768.)
-        room = hardware.free_bytes(torch) / 1024**3 - working_gib(tokens)
-        budget = min(config.get('cacheGiB', 6), max(0, room - AHEAD_GIB))
-        pool = WeightPool({'model': store}, budget, ahead_gib=AHEAD_GIB)
+
+    def share():
+        """GiB of the DiT kept on the GPU; the rest is copied from RAM at every step, at about
+        12 GiB/s. What the model computes with comes first: 5 GiB (a feed-forward chunk, the
+        allocator's slack, the engine's margin) plus the activations, which grow with the
+        video (1 GiB for a 5 s draft). Video memory that runs out halves the speed, a smaller
+        share costs a second per step at most. Counted from what this process may hold: what
+        is free, and what it holds already (the share the last video left).
+        (Sparse attention needs less at its peak: 5 widths instead of 6, measured at 1344 x 768.)"""
+        free = (hardware.free_bytes(torch) + torch.cuda.memory_reserved()) / 1024**3
+        return min(config.get('cacheGiB', 6), max(0, free - working_gib(tokens) - AHEAD_GIB))
+
+    budget = share()
+    loaded = holder[0]
+    if loaded is not None:
+        # The share the last video left is this one's when it is about what this video leaves
+        # the model (as for LTX 2.5: a quarter of a gigabyte over, half a gigabyte under), and
+        # the model was built with the same attention. Else it is dropped and built anew: taken
+        # back at another size it could not be given its page-locked RAM (see ltx25.Refit).
+        held = loaded.pool
+        near = (budget - LOCK_MARGIN_GIB) * 1024**3 <= held.limit
+        suits = bool(held.gpu) and near and held.bytes <= (budget + 0.25) * 1024**3
+        if not suits or (sparse is None) != (loaded.sparse is None):
+            loaded.drop()
+            loaded = holder[0] = None
+            _free(scope={})
+            budget = share()
+            ahead = read_ahead()
+    # A model taken back from the last generation: this one is the next of a run (the Studio).
+    again = loaded is not None
+    if not again:
+        loaded = holder[0] = Loaded(key)
+        # The model's file stays open with it, beyond this generation.
+        loaded.store = loaded.stack.enter_context(open_store(paths['model']))
+        loaded.pool = WeightPool({'model': loaded.store}, budget, ahead_gib=AHEAD_GIB)
+    store, pool = loaded.store, loaded.pool
+    # What this generation hangs on the model, taken off again at its end.
+    hooks = []
+    with torch.inference_mode():
         if ahead:
             ahead.lead = pool.used
         try:
-            # The workflow's « attention » choice; comfy-kitchen's INT8 kernel unless it asks for PyTorch's.
-            fast_attention = (
-                p.get('attention', 'comfy_kitchen') == 'comfy_kitchen'
-                and minimax_h3.INT8_ATTENTION
-                and minimax_h3.int8_attention_ready()
-            )
-            dit, _heads = minimax_h3.load(dit_header, paths['model'], pool, fast_attention, sparse)
-            # What will not stay on the GPU goes to page-locked RAM once, for every step and
-            # the next videos; what stays is read from the file as it is loaded.
-            locked = store.keep(
-                pool.streamed().get('model', ()),
-                int(RAM_RESERVE_GIB * 1024**3),
-                spare=pool.streamed(LOCK_MARGIN_GIB, onward=True).get('model', ()),
-            )
+            if again:
+                dit, fast_attention, sparse, budget = loaded.dit, loaded.fast, loaded.sparse, pool.limit / 1024**3
+                pool.stats.update(dict.fromkeys(pool.stats, 0.0))
+                if sparse is not None:
+                    # The plans and the measures of the last video are not this one's.
+                    sparse.plan, sparse.plans, sparse.statistics, sparse.measure = None, {}, {}, False
+            else:
+                # The workflow's « attention » choice; comfy-kitchen's INT8 kernel unless it asks for PyTorch's.
+                fast_attention = (
+                    p.get('attention', 'comfy_kitchen') == 'comfy_kitchen'
+                    and minimax_h3.INT8_ATTENTION
+                    and minimax_h3.int8_attention_ready()
+                )
+                dit, _heads = minimax_h3.load(dit_header, paths['model'], pool, fast_attention, sparse)
+                loaded.dit, loaded.fast, loaded.sparse = dit, fast_attention, sparse
+            if again:
+                # Its page-locked RAM is the one its last video ran with: nothing is asked again.
+                # Asked again, the weights to copy were named from the share as the steps left
+                # it, a few layers more than first foreseen: at 1344 x 768, where RAM allows a
+                # part of them only, 19 GiB were read anew beside the rest and the steps of the
+                # next videos took five times longer (18/11).
+                locked = loaded.ram
+            else:
+                # What will not stay on the GPU goes to page-locked RAM once, for every step and
+                # the next videos; what stays is read from the file as it is loaded.
+                copied = pool.streamed().get('model', ())
+                locked = loaded.ram = store.keep(
+                    copied,
+                    int(RAM_RESERVE_GIB * 1024**3),
+                    spare=pool.streamed(LOCK_MARGIN_GIB, onward=True).get('model', ()),
+                )
+                loaded.locked = not copied or store.pinned
+            # The share is filled; one left by the last video takes back what it lent.
             pool.preload()
             scheduler, audio_scheduler = MiniMaxH3Scheduler(shift=12.0), MiniMaxH3Scheduler(shift=3.0)
             calls = {'step': 0}
@@ -493,19 +626,21 @@ def generate(job, config, progress):
                 preview.send(report, preview.MINIMAX_H3, middle_frame, values['hidden_states'], output[0], sigma, grid)
                 return output
 
-            dit.register_forward_pre_hook(before, with_kwargs=True)
-            dit.register_forward_hook(after, with_kwargs=True)
+            hooks.append(dit.register_forward_pre_hook(before, with_kwargs=True))
+            hooks.append(dit.register_forward_hook(after, with_kwargs=True))
             if continuation:
                 # Registered after the step counter: its output hook reads the finished step.
                 latent_frames = (p['frames'] - 5) // 17 * 5 + 2
-                protect_head(
-                    dit,
-                    (scheduler, audio_scheduler),
-                    calls,
-                    video_head.to('cuda'),
-                    audio_head.to('cuda'),
-                    latent_frames * (p['height'] // 32) * (p['width'] // 32),
-                    round(p['frames'] / 24 * AUDIO_LATENTS_PER_SECOND),
+                hooks.extend(
+                    protect_head(
+                        dit,
+                        (scheduler, audio_scheduler),
+                        calls,
+                        video_head.to('cuda'),
+                        audio_head.to('cuda'),
+                        latent_frames * (p['height'] // 32) * (p['width'] // 32),
+                        round(p['frames'] / 24 * AUDIO_LATENTS_PER_SECOND),
+                    )
                 )
             label = 'int8' if fast_attention else 'pytorch'
             if sparse is not None:
@@ -536,22 +671,27 @@ def generate(job, config, progress):
             progress(stage='video sampled', **cache)
             del dit
         finally:
+            for hook in hooks:
+                hook.remove()
             if ahead:
                 ahead.stop()
-            pool.clear()
             if sparse is not None:
                 sparse_attention.release()
-    del pool
+    # The share of the model stays on the GPU through the decode, for the next video: the
+    # layers copied for a moment leave, and the pages of the file read for the share go back
+    # to the system (the file stays open with the model).
+    pool.settle()
+    store.reopen()
     state.set('prompt_embeds', None)
     _free(scope={})
 
-    # 4. Decode video and sound.
+    # 4. Decode video and sound. The share lends the decode what it lacks.
     progress(stage='decoding video')
-    vae = minimax_h3_vae.video_vae(paths['vae'], 'decoder')
-    audio_vae = minimax_h3_vae.audio_vae(paths['audioVae'])
+    pool.lend(decode_gib(p) + 0.5 + CEILING_GIB - hardware.free_bytes(torch) / 1024**3)
     with torch.inference_mode():
 
         def frames_of():
+            vae = minimax_h3_vae.video_vae(paths['vae'], 'decoder')
             """The frames, uint8 [frames, height, width, 3], off the GPU as each stretch of them
             is decoded (minimax_h3_vae.decode_chunks): the block of the library joined the whole
             video on the GPU, several times as 32-bit floats."""
@@ -565,6 +705,13 @@ def generate(job, config, progress):
                 del chunk
             return numpy.concatenate(made)
 
+        def alone():
+            # Beside the share of the model the decode did not fit: the share leaves whole, as
+            # it always did before 0.6.80, and the next video builds the model anew.
+            pool.clear()
+            progress(stage='decoding video again without the share of the model')
+            return frames_of()
+
         def unbound():
             # A clip that does not fit under the engine's ceiling (1 GiB below what the card had
             # free): with all of the card, where the engine would run the whole video again.
@@ -572,9 +719,9 @@ def generate(job, config, progress):
             progress(stage='decoding video again without the video memory ceiling')
             return frames_of()
 
-        pixels = smaller([frames_of, unbound], torch)
-        del vae
+        pixels = smaller([frames_of, *([alone] if pool.gpu else []), unbound], torch)
         _free(scope={})
+        audio_vae = minimax_h3_vae.audio_vae(paths['audioVae'])
         state = _stage('decode.audio', dict(audio_vae=audio_vae), state)
     audio, rate = state.get('audio'), state.get('sampling_rate')
     del audio_vae
