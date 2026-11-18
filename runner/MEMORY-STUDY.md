@@ -204,3 +204,48 @@ What it shows:
 - **The spill into the shared memory is slow without failing**: 57 s a step instead of 0.8. Nothing in PyTorch says it. The driver's count is what tells it before it happens.
 
 Not covered: a real card of 8 GiB (the pinned RAM and the driver may differ), less than 7 GiB free, a memory taken while a generation runs.
+
+### Against ComfyUI (17 and 18 November 2026, engine 0.6.78 then 0.6.79)
+
+ComfyUI 0.45.2 with its own environment (PyTorch 2.12.1, comfy-aimdo 0.6.0, « Dynamic VRAM » enabled), started alone on the same machine; our engine through `runner.bench`, the model left on the card between two creations as the Studio does. Each engine is given the same job (same files, sizes, seeds, prompts), ComfyUI through the graph the application sends it. Four creations in a row for each case: the first after the engine gave everything back (files already read once), two with a new prompt, one with the same prompt and another seed. The other engine is stopped meanwhile. Our prompts encoded earlier are kept on the disk: every case started from an empty folder, or the comparison flattered us.
+
+How steady it is: two series of ComfyUI agree within 0.5 s, three of ours within 1 s once warm.
+
+| Creation | Cold: ours / ComfyUI | New prompt (third in a row) | Same prompt |
+| --- | --- | --- | --- |
+| Krea 2, 1024 × 1024 | 21.7 / 12.5 s | 9.8 / 8.7 s | 8.8 / 8.1 s |
+| Krea 2, 1536 × 1536 | 35.5 / 22.7 s | 23.4 / 22.2 s | 22.5 / 21.6 s |
+| LTX 2.5, 288 × 512, 5 s | 35.7 / 26.0 s | 19.1 / 18.1 s | 8.1 / 10.5 s |
+| LTX 2.5, 896 × 1600, 5 s | 95.6 / 92.4 s | 84.1 / 85.1 s | 72.2 / 78.4 s |
+| MiniMax H3, 768 × 448, 5 s | 72.3 / 52.8 s | 59.2 / 49.2 s | 49.5 / 43.8 s |
+| MiniMax H3, 1344 × 768, 5 s | 174.0 / 148.4 s | 159.1 / 146.7 s | 150.9 / 141.7 s |
+
+(Engine 0.6.79. With 0.6.78: Krea 2 cold 27.5 and 39.8 s, LTX 2.5 draft with a new prompt 23.3 to 24.1 s.)
+
+At the sizes where the sweep had found our failures, one creation each (ours: 0.6.77 and 0.6.78, a new process for each; ComfyUI: its models given back before each):
+
+| Creation | Ours | ComfyUI |
+| --- | --- | --- |
+| Krea 2, 1920 × 1088 | 39 s | 21 s |
+| LTX 2.5, 768 × 448, 10 s | 58 s | 56 s |
+| MiniMax H3, 768 × 448, 14 s | 165 s | 140 s |
+| LTX 2.5, 896 × 1600, 10 s | 203 s | 198 s |
+| LTX 2.5, 1536 × 1536, 10 s | 387 s | 389 s |
+| LTX 2.5, 1088 × 1920, 5 s, start image | 144 s | 260 s |
+| LTX 2.5, 896 × 1600, 10 s, start image | 202 s | 508 s |
+| LTX 2.5, 1088 × 1920, 10 s, start image | 341 s | 1 309 s |
+| MiniMax H3, 1344 × 768, 14 s | refused in 6 s | not finished after 25 minutes |
+
+(MiniMax H3 at 1920 × 1088 was queued behind that last one and never started: not measured on ComfyUI.)
+
+What it shows:
+
+- **The steps themselves are level.** MiniMax H3: 31.3 s of steps for a draft against 31.6, 105.7 against 105.8 at 1344 × 768. Krea 2: 0.84 s a step against 0.81, 2.43 against 2.26 at 1536². LTX 2.5: ahead. Sending the weights ahead from page-locked RAM is worth ComfyUI's weights faulted onto the card; with almost none of MiniMax H3 on the card (0.5 GiB instead of 4.2) a step takes 3.8 s instead of 3.7.
+- **What we lose is around the steps**, and it is counted:
+  - *cold*, 5 s of libraries imported at the first creation of a session (diffusers, transformers: ComfyUI imports its own when it starts), then every file read into page-locked RAM before anything runs (9.4 s for the 12.6 GiB of Krea 2, 4.2 s since 0.6.79), where ComfyUI maps the file and starts;
+  - *a new prompt on LTX 2.5* made the share of the model leave the card whole and come back from the disk (4.5 s): since 0.6.79 it lends what the encoder lacks (0.9 GiB) — see the commit;
+  - *MiniMax H3, every creation*: the video decoder (4.6 GiB) is loaded again (3.6 to 4.7 s), the audio VAE (1 s), and the share of the model (2 s), where ComfyUI leaves all three on the card (9.9 GiB held between two creations). Reading the decoder's file ahead during the last step changes nothing (tried, removed): with 17 to 19 GiB of the model page-locked on a 32 GiB machine the copy itself is slow, the processor's own memory work takes four times longer than alone. The answer is the model's share and the decoders left on the card when the video leaves them room, as LTX 2.5 does: not done.
+- **At the limits ComfyUI does not fail, it slows down beyond use**: with a start image the large LTX 2.5 videos take two to four times longer than ours (the tiles and the grouped timesteps of 0.6.74 and 0.6.77), and a MiniMax H3 video too large for the card was still running after 25 minutes where we say so in 6 s. Without a start image the two engines are within 3 %.
+- **Method**: the first video of a run empties the card before its decode (a choice of 0.5.51, kept), so a new prompt only benefits from the lent share from the third video on; a cold run of ours in a new process pays the imports, which a worker pays once.
+
+Not covered: the application's own path (the chat model coming and going between two creations), SCAIL-2, sounds, upscaling; ComfyUI on the card under constraint; a second machine.
