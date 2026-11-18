@@ -193,3 +193,24 @@ test('what was just downloaded waits longer than a file of the data, and no long
   );
   assert.equal(attempts, 2);
 });
+
+test('a rename that waits says it once, at its first refusal, and nothing when it is not held (0.6.87)', async t => {
+  // A download stayed « 100 % » for the minute it waited, without a word.
+  const { root } = await fixture(t),
+    from = join(root, 'data', 'model.safetensors.part'),
+    to = join(root, 'data', 'model.safetensors');
+  await writeFile(from, 'weights');
+  let attempts = 0,
+    waits = 0;
+  await module.renameWithRetry(from, to, {
+    renameFile: async (source, target) => {
+      if (++attempts <= 3) throw Object.assign(Error('Held by an antivirus'), { code: 'EBUSY' });
+      return rename(source, target);
+    },
+    onWait: () => waits++,
+  });
+  assert.deepEqual([attempts, waits], [4, 1]);
+  await writeFile(from, 'again');
+  await module.renameWithRetry(from, to, { onWait: () => waits++ });
+  assert.equal(waits, 1);
+});

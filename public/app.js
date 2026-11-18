@@ -538,6 +538,10 @@ async function forgetConversation(id) {
   if (!state.saveHistory || !state.historyItems.some(item => item.id === id)) return;
   try {
     await historyWrite;
+    // Never with a take (0.6.87): deleted, a conversation takes its takes with it (their records are
+    // in its folder). Kept when that cannot be read: in doubt, nothing is deleted.
+    const { runs = [] } = await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json();
+    if (runs.length) return;
     await api('history/delete', { confirm: true, id });
     state.historyItems = state.historyItems.filter(item => item.id !== id);
     const talk = holderOf(id);
@@ -568,10 +572,11 @@ async function clearHistory() {
     forgetCopies(target?.id ?? null);
     state.historyItems = target ? state.historyItems.filter(item => item.id !== target.id) : [];
     // The conversation set aside goes with it (its work is over: deleting one is refused during a work).
-    if (state.aside && (!target || target.id === state.aside.conversationId)) {
-      if (state.miniature?.work?.conversationId === state.aside.conversationId) state.miniature.forget();
-      dropAside();
-    }
+    if (state.aside && (!target || target.id === state.aside.conversationId)) dropAside();
+    // And the miniature of a work over in a conversation deleted, wherever it was (0.6.87: of the one
+    // shown, « Prise prête » stayed after « Effacer l'historique », and its click could not read it).
+    const shown = state.miniature?.work?.conversationId;
+    if (shown && !state.miniature.running && (!target || target.id === shown)) state.miniature.forget();
     if (!target || target.id === state.conversationId) {
       state.messages = [];
       state.conversationId = null;
@@ -668,8 +673,12 @@ async function loadConversation(id) {
       return;
     // The one set aside comes back as it was left; the one left while its work goes on is set aside.
     const returning = state.aside?.conversationId === id ? state.aside : null;
+    // Set aside in place of another, without the history: that one is lost, asked first (0.6.87).
+    if (!returning && state.work?.conversationId === state.conversationId && !asideMayGo()) return;
     if (returning) state.aside = null;
     setNow = setAside();
+    // What was written in the one left, when it is not set aside with it: back when it is opened again.
+    if (!setNow) keepDraft();
     if (returning) {
       takeBackAside(returning);
       leaveLibrary();
@@ -685,10 +694,15 @@ async function loadConversation(id) {
     const record = await (await api(`history/${id}`)).json();
     // One saved with a call left without its result (before 0.6.31) is read with one.
     const messages = closedCalls(record.messages);
-    const draft =
-      record.incomplete && messages.at(-1)?.role === 'user' && !messages.at(-1).internal
-        ? savedUser(messages.pop())
-        : { text: '', images: [], videos: [] };
+    const asked =
+      record.incomplete && messages.at(-1)?.role === 'user' && !messages.at(-1).internal ? savedUser(messages.pop()) : null;
+    // And what was being written in it when it was left (keepDraft, 0.6.87), after that message.
+    const left = draftLeft(id),
+      draft = {
+        text: [asked?.text, left?.text].filter(Boolean).join('\n\n'),
+        images: [...(asked?.images ?? []), ...(left?.images ?? [])],
+        videos: [...(asked?.videos ?? []), ...(left?.videos ?? [])],
+      };
     state.conversationId = id;
     rememberConversation(id);
     state.conversationInstructions = record.instructions || '';
@@ -2468,12 +2482,13 @@ const MISSING_FOR = {
  * the application, which knows the file), then the card that downloads it. The file there, the
  * same message is sent again, if it is still the last one of this conversation and nothing runs.
  */
-function missingFile(view, request, history) {
+function missingFile(view, request, history, conversationId = state.conversationId) {
+  // (`conversationId`: the one of the turn, 0.6.87; the one shown when the answer came, which the
+  // user may have left meanwhile, said « Ouvrez la conversation de cette demande » back in it.)
   const many = request.missing.files.length > 1,
     sentence =
       `${MISSING_FOR[request.tool] ?? 'Pour cette création'}, il me faut ${request.workflowName}, et il lui manque ` +
       `${many ? 'des fichiers' : 'un fichier'}. Dès qu’${many ? 'ils sont' : 'il est'} là, je reprends votre demande.`,
-    conversationId = state.conversationId,
     original = history.findLast(message => message.role === 'user' && !message.internal),
     asked = JSON.stringify(original?.content ?? '');
   view.generations.append(node('p', 'missing-say', sentence));
@@ -2922,6 +2937,38 @@ function setAside() {
     nodes,
   };
   return true;
+}
+/**
+ * What the user was writing in the conversation shown, kept when they open another (0.6.87): opened
+ * again, it comes back in the message box. Only one set aside during its work kept it before, and what
+ * was written meanwhile in the one shown was lost when the miniature brought the user back.
+ */
+function keepDraft() {
+  const id = state.conversationId,
+    text = $('prompt').value;
+  if (!id || (!text.trim() && !state.images.length && !state.videos.length)) return;
+  const drafts = (state.draftsLeft ??= new Map());
+  drafts.delete(id);
+  drafts.set(id, { text, images: state.images, videos: state.videos });
+  if (drafts.size > 20) drafts.delete(drafts.keys().next().value);
+}
+/** The draft kept for conversation `id` when it was left (taken out), or null. */
+function draftLeft(id) {
+  const kept = state.draftsLeft?.get(id) ?? null;
+  state.draftsLeft?.delete(id);
+  return kept;
+}
+/**
+ * Whether the conversation set aside may leave the page (0.6.87): another is set aside in its place,
+ * or the miniature that leads back to it is closed. Without the history it cannot be opened again:
+ * asked first, as « Recommencer » asks; it left without a word before.
+ */
+function asideMayGo() {
+  const aside = state.aside;
+  if (!aside || state.saveHistory || !aside.messages?.length) return true;
+  return confirm(
+    `« ${titleOf(aside.conversationId) || UNTITLED} » n’est pas enregistrée (historique désactivé) : elle sera effacée de la page. Continuer ?`,
+  );
 }
 /** The conversation set aside leaves the page (another set aside, deleted, the history cleared). */
 function dropAside() {
@@ -3500,7 +3547,7 @@ async function sendMessage(event) {
         // Its workflow lacks a file (etats-maquette.md, 53): Moodix says it in a sentence, the card
         // offers the download, and the message goes again once the file is there. The turn ends here.
         view.generation = true;
-        missingFile(view, request, history);
+        missingFile(view, request, history, talkId);
         history.push({
           role: 'tool',
           tool_call_id: request.call.id,
@@ -3551,6 +3598,11 @@ async function sendMessage(event) {
             ...(viaStudio
               ? {
                   approve: async (proposal, abort) => {
+                    // In the Studio of this conversation (0.6.87): the user may have opened another
+                    // meanwhile (an image of a series asked from the Studio); the proposal waits for
+                    // them there, as runForTurn's. Set in the Studio of the one shown, it took its
+                    // drafts and put this conversation's take on its screen.
+                    await backHere(talkId, abort);
                     const answer = state.studio.propose(proposal, abort);
                     updateControls();
                     try {
@@ -3958,7 +4010,13 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
   // exists, in its project, and the page that shows it next finds its take (take-recovery.mjs). Taken
   // back when nothing is made: a creation of the Studio that fails says nothing in the conversation.
   const begun = holderOf(talkId),
-    before = [...(begun.messages ?? [])];
+    before = [...(begun.messages ?? [])],
+    // As it was before (0.6.87): what it kept saved (a message taken back into the box with
+    // « Modifier » leaves no message in the page, but one in the history), and whether it existed.
+    // Only a conversation begun for this very creation leaves the history when it makes nothing:
+    // one emptied by « Modifier » was deleted with its takes.
+    previous = begun.archiveSnapshot,
+    existed = state.historyItems.some(item => item.id === talkId);
   if (!before.length) begun.conversationInstructions ??= state.globalInstructions || '';
   begun.archiveSnapshot = {
     messages: archiveMessages([
@@ -3980,9 +4038,9 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
     // Stopped: once the server has handed the card back, it allows the save (generationOver, 0.6.84).
     await generationOver(talkId);
     const talk = holderOf(talkId);
-    talk.archiveSnapshot = { messages: [...before], incomplete: false };
-    if (before.length) await persistConversation(talkId);
-    else await forgetConversation(talkId);
+    talk.archiveSnapshot = previous?.messages?.length ? previous : { messages: [...before], incomplete: false };
+    if (talk.archiveSnapshot.messages.length) await persistConversation(talkId);
+    else if (!existed) await forgetConversation(talkId);
   };
   let result,
     found = false;
@@ -4308,6 +4366,12 @@ const miniature = setupMiniature({
   icon,
   mark: () => moodixMark()[0],
   open: work => backToWork(work),
+  // Closed while it leads to the conversation set aside, without the history: that one goes with it,
+  // once the user said so (it cannot be opened again from anywhere).
+  mayClose: work => state.aside?.conversationId !== work?.conversationId || asideMayGo(),
+  onClosed: work => {
+    if (!state.saveHistory && state.aside?.conversationId === work?.conversationId) dropAside();
+  },
 });
 document.body?.append?.(miniature.element);
 state.miniature = miniature;
@@ -4951,7 +5015,10 @@ async function newConversation(projectId = state.projectId || 'inbox') {
       !confirm('Recommencer effacera cette conversation de la page. Continuer ?')
     )
       return;
-    setAside();
+    // Set aside in place of another, without the history: that one is lost, asked first (0.6.87).
+    if (going && !asideMayGo()) return;
+    // What was written in the one left, when it is not set aside with it: back when it is opened again.
+    if (!setAside()) keepDraft();
     state.projectId = typeof projectId === 'string' ? projectId : 'inbox';
     leaveLibrary();
     state.messages = [];

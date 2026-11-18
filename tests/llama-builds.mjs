@@ -382,11 +382,18 @@ test('a llama.cpp just downloaded or unpacked that Windows holds a moment (an an
     ];
   try {
     let kept;
-    const refused = await held(paths, async () => {
-      kept = await builds.install();
-    });
+    // What the installation says while it waits (0.6.87: its step stayed as it was for that minute).
+    const steps = new Set();
+    const refused = await held(
+      paths,
+      async () => {
+        kept = await builds.install();
+      },
+      { onRefused: () => steps.add(builds.job.step) },
+    );
     assert.equal(kept.id, 'cuda-13.4');
     assert.deepEqual(refused, twice(paths));
+    assert.ok([...steps].some(step => / : en attente que Windows libère (le fichier|ses fichiers)…$/.test(step)), [...steps].join(' | '));
     assert.ok((await stat(join(folder, 'cudart64_13.dll'))).isFile(), 'the library beside llama-server.exe');
     assert.deepEqual((await readdir(root)).sort(), ['b12110-cuda-13.4', 'downloads']);
   } finally {

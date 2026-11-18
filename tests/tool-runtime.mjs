@@ -786,8 +786,36 @@ test('a failed creation made again by itself is no longer an image of its series
   // for both gave the take of a reload to the call that failed (take-recovery.mjs).
   assert.notEqual(again.call.id, first.call.id);
   assert.match(again.call.id, /^call_[0-9a-f]{24}$/);
-  assert.deepEqual([again.call.function.name, again.call.function.arguments], [first.call.function.name, first.call.function.arguments]);
+  // Its call no longer names the other images either (0.6.87): reloaded during it, a page waited
+  // for as many takes as the series had.
+  assert.equal(again.call.function.name, first.call.function.name);
+  const { series: others, ...rest } = JSON.parse(first.call.function.arguments);
+  assert.ok(others?.length, 'the first image named the others');
+  assert.deepEqual(JSON.parse(again.call.function.arguments), rest);
   assert.equal((await make(again)).state, 'done');
   assert.deepEqual(order.slice(-4), ['stop', 'run', 'free', 'start']);
   assert.equal(rt.owed, null);
+});
+
+test('a call gets an identifier of its own in its conversation when a service gives each the same one (0.6.87)', async () => {
+  // « functions.create_image:0 » in each answer (made « functions_create_image_0 » by the chat): the
+  // take of a page reloaded meanwhile went to the first call of that identifier, and Claude refuses
+  // two calls of one identifier.
+  const { rt, ask, make } = seriesFixture();
+  const before = [
+    { role: 'user', content: 'Un phare' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'create_image', arguments: '{"prompt":"un phare"}' } }] },
+    { role: 'tool', tool_call_id: 'call_1', content: '{"status":"success"}' },
+    { role: 'user', content: 'Un autre' },
+  ];
+  const again = await ask(2, { messages: before });
+  assert.notEqual(again.call.id, 'call_1');
+  assert.match(again.call.id, /^call_[0-9a-f]{24}$/);
+  // Made, its take and its job say the call the conversation keeps.
+  const job = await make(again);
+  assert.equal(job.callId, again.call.id);
+  // A first call keeps the one it came with.
+  const fresh = await ask(2, { messages: [{ role: 'user', content: 'Un phare' }] });
+  assert.equal(fresh.call.id, 'call_1');
+  assert.equal(rt.job.callId, again.call.id);
 });

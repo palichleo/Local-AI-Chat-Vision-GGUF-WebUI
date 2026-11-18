@@ -2518,6 +2518,71 @@ test('while Moodix AI sets the Studio nothing in it answers the user and nothing
   }
 });
 
+test('the Studio held by a proposal of another conversation answers none of its keys there (0.6.87)', async () => {
+  // « Studio occupé » shown in the place of everything: Ctrl + Entrée still answered the proposal
+  // waiting in the other conversation, a video started without being on screen.
+  const { clip, request } = proposalOf();
+  let shown = 'c1';
+  const studio = await studioPage({ create_video: [clip] }, {}, { conversation: () => shown });
+  const { body, restore } = studio;
+  try {
+    const answer = studio.studio.propose(request, new AbortController().signal);
+    await settle();
+    assert.equal(studio.studio.proposing(), true);
+    shown = 'c2';
+    studio.studio.conversationChanged();
+    assert.equal(body.find('studio-away').length, 1);
+    let answered = false;
+    void answer.then(() => (answered = true));
+    studio.page['studio-view'].onkeydown({ key: 'Enter', ctrlKey: true, preventDefault() {} });
+    await settle();
+    assert.equal(answered, false);
+    assert.equal(studio.studio.proposing(), true);
+    // Back in its conversation: its keys answer it.
+    shown = 'c1';
+    studio.studio.conversationChanged();
+    studio.page['studio-view'].onkeydown({ key: 'Enter', ctrlKey: true, preventDefault() {} });
+    assert.equal(await answer, 'once');
+  } finally {
+    restore();
+  }
+});
+
+test('a take just made stays its conversation’s until it is on its screen: the status read meanwhile does not move it (0.6.87)', async () => {
+  // Its takes read again while the page read its status (every 1.2 s, letGo): the Studio went to the
+  // conversation shown, and the take of the other came on its screen.
+  const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] };
+  let shown = 'c1';
+  const studio = await studioPage({ create_image: [image] }, {}, { conversation: () => shown });
+  const { restore } = studio;
+  try {
+    // Followed again after a reload, held by its conversation; another one shown meanwhile.
+    studio.studio.followAgain();
+    shown = 'c2';
+    studio.studio.conversationChanged();
+    assert.equal(studio.studio.heldFor(), 'c1');
+    const record = {
+      id: 'r1',
+      conversationId: 'c1',
+      mediaType: 'image',
+      workflowId: 'w',
+      workflowName: 'Image',
+      prompt: 'un phare',
+      parameters: {},
+      outputs: [{ originalUrl: '/r1.png', thumbUrl: '/r1.jpg', take: 9 }],
+    };
+    const done = studio.studio.settled({ record });
+    studio.studio.letGo();
+    assert.equal(studio.studio.heldFor(), 'c1', 'still its own while its take comes to its screen');
+    await done;
+    await settle();
+    assert.equal(studio.studio.heldFor(), null, 'then the one shown');
+    assert.equal(studio.studio.screenTake(), null, 'without the take of the other');
+  } finally {
+    restore();
+  }
+});
+
 test('Moodix AI sets its proposal in the Studio and waits: « Générer » is the answer, with the user’s changes', async () => {
   const { clip, request } = proposalOf();
   const studio = await studioPage(

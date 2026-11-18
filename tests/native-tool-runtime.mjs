@@ -1021,3 +1021,15 @@ test('a generation the card has no memory for fails in the user’s words, the c
   );
   assert.deepEqual(events, ['gpu released', 'llm started'], 'the card is given back, the chat model comes back');
 });
+
+test('the tab of a page is heard only once its key is checked (0.6.87)', async () => {
+  // Heard before (server.mjs, at the top of each request), anything sending the header with a wrong
+  // key kept the tab that started a generation « there », and no other tab could follow it.
+  const { readFile } = await import('node:fs/promises');
+  const source = (await readFile(new URL('../server.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const key = source.indexOf("if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Rechargez la page.', 401);"),
+    heard = source.indexOf('runtime.seen(tab);');
+  assert.ok(key > 0, 'the check of the key');
+  assert.ok(heard > key, 'runtime.seen after it');
+  assert.equal(source.split('runtime.seen(').length - 1, 1, 'and only there');
+});

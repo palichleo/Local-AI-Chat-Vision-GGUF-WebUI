@@ -32,7 +32,7 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 
-async function settingsUI({ request, refresh = async () => {}, saved = () => {}, confirm = () => true } = {}) {
+async function settingsUI({ request, refresh = async () => {}, saved = () => {}, confirm = () => true, miniature = null } = {}) {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const nodes = new Map();
   const $ = id => {
@@ -98,8 +98,8 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
     crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
     setupProjectNavigation: () => ({ render() {}, sync() {}, refresh: async () => {}, useLibrary() {} }),
     setupGenerationUI: () => ({ clear() {}, restore() {} }),
-    // The miniature of the chat (0.6.81): no work here, it shows nothing.
-    setupMiniature: () => ({ element: null, work: null, running: false, begin() {}, end() {}, take() {}, place() {}, forget() {} }),
+    // The miniature of the chat (0.6.81): no work here, it shows nothing (unless a test gives its own).
+    setupMiniature: () => miniature ?? { element: null, work: null, running: false, begin() {}, end() {}, take() {}, place() {}, forget() {} },
     // What the page finds of a creation made while no page followed it (0.6.82): nothing here.
     setupTakeRecovery: () => ({
       waiting: () => new Set(),
@@ -215,7 +215,7 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
   const application = source.slice(0, source.lastIndexOf('\ntry {')).replace(/^import .*;\r?\n/gm, '');
   runInNewContext(
     application +
-      '\nthis.app = { state, tokenKnown, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, applyModelLibrary, addLLM, saveLLM, removeLLM, cancelLLM, modelDraft, modelEditorDirty, chooseDetectedModel, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };',
+      '\nthis.app = { state, tokenKnown, openSettings, saveConfiguration, changePreferences, persistConversation, refreshHistory, updateControls, refreshStatus, applyModelLibrary, addLLM, saveLLM, removeLLM, cancelLLM, modelDraft, modelEditorDirty, chooseDetectedModel, clearHistory, shutdownApplication: typeof shutdownApplication === "function" ? shutdownApplication : null };',
     context,
   );
   Object.assign(context.app.state, { token: 'test', config: { ...savedConfig }, connected: true });
@@ -841,4 +841,40 @@ test('saving an older conversation never moves it ahead of a newer creation', as
   assert.equal(await ui.persistConversation(), true);
   assert.equal(ui.state.historyItems[0].id, recent.id);
   assert.equal(ui.state.historyItems[1].id, old.id);
+});
+
+test('the miniature of a work over leaves with its conversation when the history is cleared (0.6.87)', async () => {
+  // Over in the conversation shown, the Paramètres open: « Effacer l'historique » left its « Prise
+  // prête », whose click could not read the conversation any more.
+  const shown = '22222222-2222-4222-8222-222222222222',
+    forgotten = [],
+    miniature = {
+      element: null,
+      work: { conversationId: shown, title: 'Un phare' },
+      running: false,
+      begin() {},
+      end() {},
+      take() {},
+      place() {},
+      answer() {},
+      forget() {
+        forgotten.push(this.work?.conversationId);
+        this.work = null;
+      },
+    };
+  const ui = await settingsUI({
+    miniature,
+    request: async call => (call.route === 'history/clear' ? Response.json({ removed: 1 }) : null),
+  });
+  Object.assign(ui.state, { conversationId: shown, historyItems: [{ id: shown, title: 'Un phare' }], messages: [{ role: 'user', content: 'Un phare' }] });
+  // In the Paramètres, where the history is cleared: its conversation is not seen, the miniature stays.
+  ui.$('settings').open = true;
+  await ui.clearHistory();
+  assert.deepEqual(forgotten, [shown]);
+  assert.equal(ui.calls.some(call => call.route === 'history/clear'), true);
+  // One still running is kept (deleting is refused during a work; the page never asks it then).
+  miniature.work = { conversationId: shown };
+  miniature.running = true;
+  await ui.clearHistory();
+  assert.deepEqual(forgotten, [shown]);
 });

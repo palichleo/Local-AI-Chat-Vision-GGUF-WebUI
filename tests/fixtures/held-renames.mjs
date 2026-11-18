@@ -8,8 +8,9 @@ import { resolve } from 'node:path';
  * (EPERM, then EBUSY), every other rename let through. Each module imports fs.rename itself: it is
  * replaced for the time of `work` (module.syncBuiltinESMExports). Resolves with the number of
  * refusals of each file: 2 for a file put in its place once its refusals were tried again.
+ * `onRefused(path)`: at each refusal, while the work waits (what it says meanwhile, 0.6.87).
  */
-export async function held(paths, work) {
+export async function held(paths, work, { onRefused = () => {} } = {}) {
   const rename = fs.rename,
     refused = new Map(paths.map(path => [resolve(path), 0]));
   fs.rename = async (from, to) => {
@@ -17,6 +18,7 @@ export async function held(paths, work) {
     if (count === undefined || count >= 2) return rename(from, to);
     refused.set(resolve(to), count + 1);
     const code = count ? 'EBUSY' : 'EPERM';
+    onRefused(resolve(to));
     throw Object.assign(new Error(`${code}: refused for an instant, rename '${from}' -> '${to}'`), { code });
   };
   syncBuiltinESMExports();

@@ -413,6 +413,68 @@ test('a conversation left before its creation could be followed is not followed 
   assert.equal(JSON.parse(saved.messages[2].content).run_id, 'r1');
 });
 
+test('a creation of the Studio that made nothing never leaves a conversation with takes empty: kept, its call said ended (0.6.87)', async () => {
+  // Nothing else in it, and takes in its folder (its first message taken back by « Modifier »):
+  // emptied, it was deleted with them.
+  const { seen, recovery, views } = page({ messages: studioAsked(call('call_st')), runs: [take('ancienne', 'call_0')] });
+  await recovery.complete(ID, views());
+  assert.deepEqual(seen.forgotten, []);
+  const saved = seen.saves.at(-1).messages;
+  assert.deepEqual(saved.map(message => message.role), ['user', 'assistant', 'tool']);
+  assert.deepEqual(JSON.parse(saved[2].content), { status: 'error', message: 'Rien n’a été produit.' });
+  // Opened again: nothing more to do.
+  const again = page({ messages: closedCalls(saved), runs: [take('ancienne', 'call_0')] });
+  await again.recovery.complete(ID, again.views());
+  assert.deepEqual([again.seen.saves.length, again.seen.forgotten.length], [0, 0]);
+  // Its message put back in the message box keeps it in the history, saved with it.
+  const unsent = { role: 'user', content: 'Et en bleu' };
+  const box = page({ messages: studioAsked(call('call_st')) });
+  box.state.archiveSnapshot = { messages: [...studioAsked(call('call_st')), unsent], incomplete: true };
+  await box.recovery.complete(ID, box.views());
+  assert.deepEqual(box.seen.forgotten, []);
+  assert.deepEqual(box.seen.saves.at(-1), { id: ID, messages: [unsent], incomplete: true });
+});
+
+test('a creation made while this page has a work of its own is not followed: its card waits, its « Interrompre » stays (0.6.87)', async () => {
+  // A card of Moodix waiting in another conversation: the follow took its place (state.work) and its
+  // stop (state.controller).
+  const own = { kind: 'turn', conversationId: OTHER },
+    controller = new AbortController();
+  const { state, seen, recovery, views } = page({ job: running(), fresh: running(), state: { work: own, controller } });
+  await recovery.complete(ID, views());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual([seen.started.length, seen.mounted.length], [0, 0]);
+  assert.equal(state.work, own);
+  assert.equal(state.controller, controller);
+  assert.deepEqual([...recovery.waiting(ID, state.messages)], ['call_1'], 'still drawn waiting, never « sans suite »');
+});
+
+test('followed from another tab than its own, a series is not ended there, and what that tab wrote meanwhile stays (0.6.87)', async () => {
+  // The tab that started it, frozen a while then woken: the second ended its series under it, and
+  // wrote its own copy of the conversation over the other's.
+  const series = call('call_s', 'create_image', { prompt: 'a', series: ['b', 'c'] }),
+    job = running({ callId: 'call_s', owner: 'onglet-2', ownerAway: true }),
+    written = [
+      { role: 'user', content: 'Trois bateaux' },
+      { role: 'assistant', content: '', tool_calls: [series] },
+      { role: 'tool', tool_call_id: 'call_s', content: JSON.stringify({ status: 'success', images: [{ run_id: 'r1' }, { run_id: 'r2' }, { run_id: 'r3' }] }) },
+      { role: 'assistant', content: 'Voici les trois.' },
+    ];
+  const { state, seen, recovery, views } = page({
+    messages: asked(series),
+    job,
+    fresh: { ...job, proposal: { series: { id: 'S', index: 2, total: 3 } } },
+    runs: [take('r1', 'call_s'), take('r2', 'call_s', { createdAt: '2026-11-18T10:01:00.000Z' })],
+    state: { stored: { [ID]: written } },
+  });
+  await recovery.complete(ID, views());
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(seen.started.length, 1, 'followed: the other tab was silent');
+  assert.equal(seen.api.some(item => Array.isArray(item) && item[0] === 'tools/series'), false, 'its series not ended');
+  assert.deepEqual(seen.saves, [], 'what the other wrote is not written over');
+  assert.equal(state.messages.at(-1).content, 'Voici les trois.', 'the page shows it');
+});
+
 test('a creation of the Studio the page loses while it follows it frees the Studio: it says why, nothing is written', async () => {
   const { state, seen, recovery, views } = page({
     messages: [{ role: 'user', content: 'Bonjour' }, { role: 'assistant', content: 'Bonjour !' }, ...studioAsked(call('call_st'))],

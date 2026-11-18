@@ -56,7 +56,7 @@ class Element {
 const node = (tag, className, text) => new Element(tag, className, text);
 
 /** A miniature on a page, with what its Flux and its picture so far were told. */
-function miniature({ storage = null } = {}) {
+function miniature({ storage = null, mayClose, onClosed } = {}) {
   const drawn = { fluxes: [], shown: [] },
     opened = [];
   const page = node('body');
@@ -65,6 +65,8 @@ function miniature({ storage = null } = {}) {
     icon: name => node('svg', 'icon-' + name),
     mark: () => node('svg', 'mark'),
     open: work => opened.push(work),
+    ...(mayClose ? { mayClose } : {}),
+    ...(onClosed ? { onClosed } : {}),
     storage,
     makeFlux: () => {
       const flux = { told: [], stopped: false, visible: null };
@@ -201,4 +203,25 @@ test('the miniature folds into a pill the browser keeps; in the foot of the Para
   mini.place(null);
   assert.equal(mini.element.hidden, true);
   assert.equal(drawn.fluxes.at(-1).seen, false);
+});
+
+test('« × » asks the page first: kept when it says no, and the page told what went with it (0.6.87)', () => {
+  // Without the history, the conversation it leads back to can be opened from nowhere else: the page
+  // asks before, and lets it go with it.
+  let allowed = false;
+  const closed = [];
+  const { mini, part } = miniature({ mayClose: () => allowed, onClosed: work => closed.push(work) });
+  mini.begin(WORK);
+  mini.take({ type: 'start', request: video });
+  mini.take({ type: 'done', record: { id: 'r', outputs: [{ take: 3 }] } });
+  mini.end();
+  mini.place('corner');
+  part('work-mini-close').onclick();
+  assert.equal(mini.element.hidden, false, 'kept');
+  assert.equal(mini.work?.conversationId, WORK.conversationId);
+  assert.deepEqual(closed, []);
+  allowed = true;
+  part('work-mini-close').onclick();
+  assert.equal(mini.element.hidden, true);
+  assert.deepEqual(closed.map(work => work.conversationId), [WORK.conversationId]);
 });

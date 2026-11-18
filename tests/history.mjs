@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -405,4 +405,30 @@ test('un refus qui dure ou une autre erreur : l’enregistrement échoue, la con
   held.refuse();
   await history.save(later);
   assert.deepEqual(await said(), ['Garde cette conversation', 'Plus tard']);
+});
+
+test('a folder never saved goes at launch with an old copy a refused save left in it; one being written stays (0.6.87)', async t => {
+  // A save refused by Windows whose copy could not be taken away either (atomicFile): the folder of a
+  // conversation never saved was kept for good because of it.
+  const root = await mkdtemp(join(tmpdir(), 'moodix-prune-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const history = new History(root),
+    attachment = 'original-' + 'a'.repeat(64) + '.png',
+    old = randomUUID(),
+    writing = randomUUID(),
+    other = randomUUID();
+  for (const id of [old, writing, other]) {
+    await mkdir(join(root, id), { recursive: true });
+    await writeFile(join(root, id, attachment), 'x');
+  }
+  const left = join(root, old, `conversation.json.${randomUUID()}.tmp`),
+    hour = new Date(Date.now() - 3600000);
+  await writeFile(left, '{');
+  await utimes(left, hour, hour);
+  // A save in progress: its copy is seconds old.
+  await writeFile(join(root, writing, `conversation.json.${randomUUID()}.tmp`), '{');
+  // Anything else stays as it is.
+  await writeFile(join(root, other, 'notes.txt'), 'à moi');
+  assert.equal(await history.pruneUnsaved(), 1);
+  assert.deepEqual((await readdir(root)).sort(), [writing, other].sort());
 });

@@ -27,6 +27,10 @@ export function setupMiniature({
   icon = () => null,
   mark = () => null,
   open = () => {},
+  // « × »: whether the miniature may go (false keeps it), then what goes with it (0.6.87: without the
+  // history, the conversation it leads back to can be found nowhere else).
+  mayClose = () => true,
+  onClosed = () => {},
   storage = globalThis.localStorage,
   makeFlux = takeFlux,
   makePreview = livePreview,
@@ -171,7 +175,12 @@ export function setupMiniature({
     }
     paint();
   };
-  close.onclick = () => forget();
+  close.onclick = () => {
+    const was = work;
+    if (mayClose(was) === false) return;
+    forget();
+    onClosed(was);
+  };
 
   /** The work of a conversation begins: what it says starts again. */
   function begin(given) {

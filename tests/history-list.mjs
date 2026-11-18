@@ -235,6 +235,28 @@ test('a saved conversation is renamed or moved from its pencil: one request each
   assert.equal(state.historyItems.find(item => item.id === 'past').projectId, 'inbox');
   assert.equal(state.projectId, 'project', 'the open conversation stays in its project');
 });
+test('the conversation set aside during a work, moved from the fil or left without its project, follows it (0.6.87)', async t => {
+  // Taken back, its next save put it back in the project it had left (a save names its project), or
+  // failed for good in one deleted.
+  const { open, lines, state, $ } = fixture(t);
+  state.aside = { conversationId: 'past', projectId: 'project', title: 'Past' };
+  lines(open('thread-conversation'))
+    .find(row => row.name === 'Past')
+    .tool('Renommer')
+    .onclick();
+  $('conversation-project').value = 'inbox';
+  await $('conversation-form').onsubmit({ preventDefault() {} });
+  assert.equal(state.aside.projectId, 'inbox');
+  assert.equal(state.projectId, 'project', 'the one shown stays in its project');
+  // Its project deleted (the server moves its conversations to « Sans projet »).
+  state.aside.projectId = 'project';
+  lines(open('thread-project'))
+    .find(row => row.name === 'A project')
+    .tool('Supprimer le projet')
+    .onclick();
+  await $('project-delete-confirm').onclick();
+  assert.equal(state.aside.projectId, 'inbox');
+});
 test('before a move, the window of the pencil says the numbers its takes will take, so that they do not surprise', async t => {
   const { calls, open, lines, state, $ } = fixture(t);
   lines(open('thread-conversation'))

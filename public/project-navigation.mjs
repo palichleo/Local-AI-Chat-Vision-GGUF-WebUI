@@ -167,6 +167,8 @@ export function setupProjectNavigation({
       state.projects = state.projects.filter(item => item.id !== project.id);
       state.historyItems = state.historyItems.map(item => updated.get(item.id) || item);
       if (state.projectId === project.id) state.projectId = 'inbox';
+      // The conversation set aside too (0.6.87): taken back, its next save put it in a project gone.
+      if (state.aside?.projectId === project.id) state.aside.projectId = updated.get(state.aside.conversationId)?.projectId || 'inbox';
       $('project-delete-dialog').close();
       render();
       onChange();
@@ -392,6 +394,12 @@ export function setupProjectNavigation({
       if (item.id === state.conversationId) {
         state.projectId = saved.projectId || 'inbox';
         setTitle(saved.title);
+      }
+      // The conversation set aside, moved from the fil while another is shown (0.6.87): taken back,
+      // its next save put it back in the project it had left.
+      if (item.id === state.aside?.conversationId) {
+        state.aside.projectId = saved.projectId || 'inbox';
+        state.aside.title = saved.title;
       }
       $('conversation-dialog').close();
       render();

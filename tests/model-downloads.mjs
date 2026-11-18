@@ -112,13 +112,21 @@ test('a file or a folder just downloaded that Windows holds a moment (an antivir
   const model = join(f.models, 'diffusion_models', 'krea2_turbo.safetensors'),
     staged = join(f.models, 'text_encoders', 'tokenizer.download', 'vocab.json'),
     tokenizer = join(f.models, 'text_encoders', 'tokenizer');
-  const refused = await held([model, staged, tokenizer], async () => {
-    await f.downloads.start(f.workflow);
-    const done = await f.finish();
-    // Before 0.6.85: « error » at the very end, and the whole file read again at the next try.
-    assert.equal(done.state, 'done', done.error);
-  });
+  // What the download says while it waits (0.6.87: « 100 % » for that minute, without a word).
+  const said = new Set();
+  const refused = await held(
+    [model, staged, tokenizer],
+    async () => {
+      await f.downloads.start(f.workflow);
+      const done = await f.finish();
+      // Before 0.6.85: « error » at the very end, and the whole file read again at the next try.
+      assert.equal(done.state, 'done', done.error);
+    },
+    { onRefused: () => said.add(f.downloads.job.current) },
+  );
   assert.deepEqual(refused, twice([model, staged, tokenizer]));
+  assert.ok(said.has('krea2_turbo.safetensors : en attente que Windows libère le fichier'), [...said].join(' | '));
+  assert.ok(said.has('tokenizer : en attente que Windows libère le dossier'), [...said].join(' | '));
   assert.deepEqual(await readFile(model), MODEL);
   assert.deepEqual(await readFile(join(tokenizer, 'vocab.json')), VOCAB);
   await assert.rejects(stat(model + '.part'));

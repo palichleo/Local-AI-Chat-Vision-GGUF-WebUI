@@ -130,6 +130,19 @@ export function withoutCall(messages, callId) {
   return [...messages.slice(0, studioLine(messages[at - 1]) ? at - 1 : at), ...messages.slice(end)];
 }
 
+/** What a creation of the Studio that made nothing is told when it stays (leftWithout). */
+export const ENDED = JSON.stringify({ status: 'error', message: 'Rien n’a été produit.' });
+/**
+ * What a creation of the Studio that made nothing leaves of `messages`: nothing of it, unless nothing
+ * at all would be left of a conversation that has takes (`hasTakes`, 0.6.87). Never deleted with them,
+ * it then keeps its call, said ended (opened again, it asks nothing more). Null when the call is not there.
+ */
+export function leftWithout(messages, callId, hasTakes) {
+  const without = withoutCall(messages, callId);
+  if (!without) return null;
+  return without.length || !hasTakes ? without : withResult(messages, callId, ENDED);
+}
+
 /**
  * The page's side. `holderOf`, `shownHere`, `persistConversation`, `beginWork`, `endWork`,
  * `loadConversation`, `newConversation`, `showStudio`, `showLibrary`: app.js's. `rerender(id)` draws
@@ -219,7 +232,8 @@ export function setupTakeRecovery({
     talk.messages = messages;
     talk.archiveSnapshot = unsent ? { messages: [...messages, unsent], incomplete: true } : { messages: [...messages], incomplete: false };
     await idle(id);
-    if (messages.length) await persistConversation(id);
+    // Left empty: out of the history (app.js keeps one that has takes); its unsent message keeps it.
+    if (talk.archiveSnapshot.messages.length) await persistConversation(id);
     else await forget(id);
   }
   /**
@@ -234,7 +248,11 @@ export function setupTakeRecovery({
       const open = openCalls(talk.messages ?? []);
       if (!open.length) return;
       const job = runningJob(),
-        live = job && job.conversationId === id && following !== job.id ? open.find(item => item.call.id === job.callId) : null;
+        // Not while a work of this page goes on (0.6.87: a card of Moodix waiting in another
+        // conversation), whose place and « Interrompre » a follow would take: followed at the next
+        // opening once it is over.
+        live =
+          !state.work && job && job.conversationId === id && following !== job.id ? open.find(item => item.call.id === job.callId) : null;
       const done = open.filter(item => item !== live);
       if (done.length) {
         let runs = null;
@@ -251,7 +269,7 @@ export function setupTakeRecovery({
             messages = withResult(messages, item.call.id, recoveredContent(item, made)) ?? messages;
             changed = true;
           } else if (!made.length && item.studio && makingJob()?.callId !== item.call.id) {
-            messages = withoutCall(messages, item.call.id) ?? messages;
+            messages = leftWithout(messages, item.call.id, runs.length > 0) ?? messages;
             changed = true;
           }
         }
@@ -292,7 +310,10 @@ export function setupTakeRecovery({
     // Over and gone meanwhile (another took its place): the next opening finds its take. Left before
     // it could be followed (another conversation opened meanwhile, not set aside: no work held it):
     // the next opening follows it.
-    if (fresh?.id !== job.id || (holderOf(id) !== state && holderOf(id) !== state.aside)) return;
+    if (fresh?.id !== job.id || (holderOf(id) !== state && holderOf(id) !== state.aside) || state.work) return;
+    // Started by this tab (reloaded since), or by one that is gone (`ownerAway`): only the first is
+    // its page, which ends its series and writes over its conversation as it holds it (0.6.87).
+    const mine = !fresh.owner || fresh.owner === tab;
     // `studio`: shown as a creation of the Studio, which follows it too (« Générer » there, by hand
     // or on a proposal of Moodix AI); `item.studio`: made by hand in the Studio (its line before the
     // call), the only one that leaves nothing when it makes nothing. A proposal of Moodix AI keeps
@@ -359,14 +380,16 @@ export function setupTakeRecovery({
     }
     try {
       let content = result.content,
-        record = result.record ?? null;
+        record = result.record ?? null,
+        runs = [];
       // A series stops at the image it was making: the others are not made (the server lets them go).
-      if (item.asked > 1 && view.series?.id) void api('tools/series', { series: view.series.id, end: true }).catch(() => {});
+      // Not from another tab than its own: the server ends a series no page asks for after a minute,
+      // and a tab woken since goes on with it (0.6.87: it was ended under it).
+      if (item.asked > 1 && view.series?.id && mine) void api('tools/series', { series: view.series.id, end: true }).catch(() => {});
       // What its call made, read again: every image of a series, and the take of a stop that came once
       // it was saved (the server still handing the card back). Said « rien n'a été produit » before
       // 0.6.86, and a creation of the Studio in a new conversation took it out of the Pellicule.
       if (item.asked > 1 || !record) {
-        let runs = [];
         try {
           runs = (await (await api(`gallery/${encodeURIComponent(id)}?images=0`)).json()).runs ?? [];
         } catch {}
@@ -378,11 +401,28 @@ export function setupTakeRecovery({
       }
       if (studio) void state.studio?.settled?.(record ? { ...result, record } : { error: result.error });
       else if (record) state.studio?.invalidate?.();
-      // A creation of the Studio by hand that made nothing leaves nothing, as when the page stays (runInStudio).
+      // A creation of the Studio by hand that made nothing leaves nothing, as when the page stays
+      // (runInStudio); unless nothing else would be left of a conversation that has takes (leftWithout).
       const gone = item.studio && !record,
-        before = holderOf(id).messages ?? [],
-        messages = gone ? withoutCall(before, item.call.id) : withResult(before, item.call.id, content);
-      if (gone) host?.article?.remove?.();
+        before = holderOf(id).messages ?? [];
+      let messages = gone ? leftWithout(before, item.call.id, runs.length > 0) : withResult(before, item.call.id, content);
+      if (gone && messages && placeOf(messages, item.call.id).at < 0) host?.article?.remove?.();
+      // Followed from another tab than its own: that tab, woken since, may have written it already;
+      // its copy is the newer, and is kept (0.6.87: it was written over).
+      if (!mine && messages) {
+        try {
+          const saved = (await (await api(`history/${encodeURIComponent(id)}`)).json()).messages ?? [];
+          if (saved.length && !openCalls(closedCalls(saved)).some(open => open.call.id === item.call.id)) {
+            const talk = holderOf(id);
+            if (talk === state || talk === state.aside) {
+              talk.messages = closedCalls(saved);
+              talk.archiveSnapshot = { messages: [...saved], incomplete: false };
+              if (shownHere(id)) rerender(id);
+            }
+            messages = null;
+          }
+        } catch {}
+      }
       // A series stopped so says where under its images, as the conversation reads it next (app.js).
       if (item.asked > 1 && node && host?.generations) {
         let said = null;

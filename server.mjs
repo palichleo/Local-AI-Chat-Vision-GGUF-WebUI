@@ -965,9 +965,9 @@ export async function createApplication({
       if (req.headers['sec-fetch-site'] === 'cross-site') throw problem('Requête externe refusée.', 403);
       const requestURL = new URL(req.url, url),
         path = requestURL.pathname;
-      // The tab of the page asking (0.6.86): the one that started a generation is there while it asks.
+      // The tab of the page asking (0.6.86): the one that started a generation is there while it asks
+      // (heard only once its key is checked, below: anything else could keep it there, 0.6.87).
       const tab = String(req.headers['x-moodix-tab'] || '').slice(0, 64);
-      runtime.seen(tab);
       const previewMatch = path.match(/^\/media\/previews\/([0-9a-f-]{36})$/);
       if (previewMatch) {
         if (!['GET', 'HEAD'].includes(req.method)) throw problem('Méthode non prise en charge.', 405);
@@ -1127,6 +1127,7 @@ export async function createApplication({
       }
       if (!path.startsWith('/api/')) throw problem('Page introuvable.', 404);
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Rechargez la page.', 401);
+      runtime.seen(tab);
       if (req.method === 'GET' && path === '/api/generation') return send(200, await generation.snapshot());
       // Whether ComfyUI answers (the line of MOSS Image follows it while it starts).
       if (req.method === 'GET' && path === '/api/generation/comfy') return send(200, await generation.comfyState());

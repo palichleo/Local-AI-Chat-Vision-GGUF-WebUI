@@ -226,6 +226,9 @@ function page({
     // The page waits for the server to hand the card back after a stop (generationOver, 0.6.84).
     setTimeout,
     clearTimeout,
+    // And for the user to come back to the conversation of a step that needs its Studio (backHere).
+    setInterval,
+    clearInterval,
     crypto: { randomUUID: () => ID },
     confirm: () => true,
     historyWrite: Promise.resolve(),
@@ -1739,6 +1742,8 @@ test('a creation of the Studio is kept as it starts, and taken back when it make
           await store.remove(body.id);
           return Response.json({ removed: body.id });
         },
+        // No take in its folder: it may go (0.6.87).
+        [`gallery/${ID}?images=0`]: async () => Response.json({ runs: [] }),
       },
     });
   const begun = fresh.context.runInStudio(proposal, { signal: new AbortController().signal, onProgress() {}, conversationId: ID });
@@ -1750,6 +1755,146 @@ test('a creation of the Studio is kept as it starts, and taken back when it make
   assert.deepEqual(deleted, [{ confirm: true, id: ID }]);
   assert.equal(fresh.state.historyItems.some(item => item.id === ID), false);
   await assert.rejects(store.read(ID));
+});
+
+test('a creation of the Studio that makes nothing never deletes a conversation that existed, nor one with takes (0.6.87)', async t => {
+  // « Modifier » on its first message leaves no message in the page, and one in the history: taken
+  // back, the conversation was deleted with its folder, the records of its takes in it.
+  const store = await historyStore(t),
+    deleted = [],
+    first = { role: 'user', content: 'Un renard dans la neige' },
+    failing = async () => ({ content: JSON.stringify({ status: 'error', message: 'rien' }), images: [], failed: true, error: 'rien' }),
+    proposal = { call: functionCall('create_image', 'action1'), workflowName: 'Krea 2', requestId: 'r1', plan: { prompt: 'un renard' } },
+    routes = runs => ({
+      'history/delete': async body => (deleted.push(plain(body)), Response.json({ removed: body.id })),
+      [`gallery/${ID}?images=0`]: async () => Response.json({ runs }),
+    });
+  await store.save({ id: ID, messages: [first], incomplete: true, instructions: '', projectId: 'inbox' });
+  const emptied = page({
+    store,
+    requestTool: failing,
+    routes: routes([]),
+    state: {
+      conversationId: ID,
+      view: 'studio',
+      messages: [],
+      archiveSnapshot: { messages: [first], incomplete: true },
+      historyItems: [{ id: ID, title: 'Un renard dans la neige', projectId: 'inbox' }],
+    },
+  });
+  await emptied.context.runInStudio(proposal, { signal: new AbortController().signal, onProgress() {}, conversationId: ID });
+  assert.deepEqual(deleted, []);
+  const kept = await store.read(ID);
+  assert.deepEqual([roles(kept.messages), kept.messages[0].content, kept.incomplete], [['user'], 'Un renard dans la neige', true], 'as it was');
+  // Begun for this creation, but with takes in its folder: never deleted with them.
+  await store.remove(ID);
+  const begun = page({ store, requestTool: failing, routes: routes([{ id: RUN, conversationId: ID }]), state: { conversationId: ID, view: 'studio' } });
+  await begun.context.runInStudio(proposal, { signal: new AbortController().signal, onProgress() {}, conversationId: ID });
+  assert.deepEqual(deleted, []);
+  assert.ok(await store.read(ID), 'kept in the history');
+});
+
+test('a proposal set in the Studio waits there for its own conversation: another opened meanwhile is not touched (0.6.87)', async t => {
+  // Asked from the Studio of one conversation (an image of a series), set in the Studio of the one
+  // shown meanwhile: its drafts taken, the take of the other put on its screen.
+  const studio = studioOf();
+  let reach, go;
+  const reached = new Promise(resolve => (reach = resolve)),
+    gate = new Promise(resolve => (go = resolve));
+  const agent = page({
+    state: { view: 'studio', studio },
+    chat: (body, n) =>
+      n === 1 ? called({ call: functionCall('create_image', 'call_img'), workflowName: 'Krea 2', requestId: 'r1', autoAllow: true }) : said(''),
+    requestTool: async (request, signal, onProgress, onImage, options) => {
+      reach();
+      await gate;
+      return asApproved(request, signal, onProgress, onImage, options);
+    },
+  });
+  const turn = agent.send('Une image de renard');
+  await reached;
+  agent.state.conversationId = ELSEWHERE;
+  go();
+  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(studio.proposed.length, 0, 'nothing set in the Studio of the conversation shown');
+  assert.equal(agent.state.work?.waits, true, 'the miniature says Moodix AI waits there');
+  agent.state.conversationId = ID;
+  await turn;
+  assert.equal(studio.proposed.length, 1, 'set once its conversation is shown again');
+});
+
+test('a request that lacks a file is taken up again in its own conversation, though another was shown when it came (0.6.87)', async () => {
+  let card = null;
+  const agent = page({
+    chat: (body, n) => {
+      if (n > 1) return said('');
+      // Another conversation opened while Moodix answered.
+      agent.state.conversationId = ELSEWHERE;
+      return called({
+        call: functionCall('create_image', 'call_m'),
+        tool: 'create_image',
+        workflowName: 'Krea 2',
+        requestId: 'r1',
+        missing: { workflowId: 'krea', files: [{ file: 'krea.safetensors', size: 1 }], bytes: 1, left: 1 },
+      });
+    },
+  });
+  agent.context.missingFileCard = options => ((card = options), {});
+  let sent = 0;
+  agent.$('chat-form').requestSubmit = () => sent++;
+  await agent.send('Une image de renard');
+  assert.ok(card, 'its card');
+  // Back in its conversation: « Reprendre la demande » sends it again (before: « Ouvrez la conversation
+  // de cette demande », the one shown when the answer came being kept).
+  agent.state.conversationId = ID;
+  card.onResume();
+  assert.equal(agent.notices.includes('Ouvrez la conversation de cette demande.'), false);
+  assert.equal(sent, 1);
+  agent.state.conversationId = ELSEWHERE;
+  card.onResume();
+  assert.equal(agent.notices.at(-1), 'Ouvrez la conversation de cette demande.');
+});
+
+test('what was being written in a conversation comes back when it is opened again (0.6.87)', async t => {
+  // Kept only for the one set aside during its work before: written in the one shown meanwhile, it was
+  // lost when the miniature brought the user back.
+  const store = await historyStore(t);
+  await otherConversation(store);
+  const p = page({ store, state: { conversationId: ID, messages: [{ role: 'user', content: 'Bonjour' }], historyItems: [{ id: ID }, { id: ELSEWHERE }] } });
+  p.$('prompt').value = 'Et maintenant un chat';
+  await p.context.loadConversation(ELSEWHERE);
+  assert.equal(p.$('prompt').value, '', 'the other has its own box');
+  await store.save({ id: ID, messages: [{ role: 'user', content: 'Bonjour' }, { role: 'assistant', content: 'Bonjour !' }], incomplete: false, instructions: '', projectId: 'inbox' });
+  await p.context.loadConversation(ID);
+  assert.equal(p.$('prompt').value, 'Et maintenant un chat');
+  // Taken once: opened again, the box is as it is left then.
+  p.$('prompt').value = '';
+  await p.context.loadConversation(ELSEWHERE);
+  await p.context.loadConversation(ID);
+  assert.equal(p.$('prompt').value, '');
+});
+
+test('without the history, the conversation set aside does not leave the page without a question (0.6.87)', async () => {
+  // Another set aside in its place, or the miniature closed: it can be opened from nowhere else.
+  const asked = [],
+    aside = { conversationId: ELSEWHERE, projectId: 'inbox', messages: [{ role: 'user', content: 'Bonjour' }], title: 'Le phare', draft: { text: '', images: [], videos: [] }, nodes: null };
+  const p = page({
+    state: {
+      saveHistory: false,
+      conversationId: ID,
+      messages: [{ role: 'user', content: 'Un renard' }],
+      aside,
+      work: { kind: 'turn', conversationId: ID },
+    },
+  });
+  p.context.confirm = question => (asked.push(question), false);
+  await p.context.newConversation();
+  assert.match(asked[0], /« Le phare » n’est pas enregistrée \(historique désactivé\) : elle sera effacée de la page\. Continuer \?/);
+  assert.deepEqual([p.state.conversationId, p.state.aside], [ID, aside], 'nothing left');
+  assert.equal(p.context.asideMayGo(), false);
+  p.state.saveHistory = true;
+  assert.equal(p.context.asideMayGo(), true, 'with the history it is found again in the fil');
+  assert.equal(asked.length, 2);
 });
 
 test('a creation of the Studio stopped once its take was saved keeps it, in the conversation begun for it (0.6.86)', async t => {

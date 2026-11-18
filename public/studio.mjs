@@ -298,6 +298,9 @@ export function setupStudio({
     legacy = false, // the Sortie shows, and the Studio works in, the Studio of before Moodix
     working = null, // { label, fraction, preview, controller | external } while a generation runs
     busyDrawn = '', // why a work of the page greys « Générer », as last drawn (busyChanged)
+    // A creation just over, its takes read again: the Studio still holds its conversation (holds),
+    // or a status read meanwhile let it go (letGo) and its take went on the screen of the one shown.
+    settling = false,
     releasing = null, // the chat model leaving the GPU, asked once the user sets the Studio
     released = false,
     enriching = false,
@@ -328,7 +331,8 @@ export function setupStudio({
     // another one, where it is said held; it is that conversation's again when the work ends (letGo).
     heldIn = null;
   /** Whether the Studio holds a work: a take being made, a proposal waiting, a character checked. */
-  const holds = () => Boolean(working || proposal || checking || ai);
+  // (`settling`: a creation just over, until its take is on the screen of its own conversation, 0.6.87.)
+  const holds = () => Boolean(working || proposal || checking || ai || settling);
   /** The conversation the Studio works in, and its project: the page's, unless it holds a work of another. */
   const conversation = () => (heldIn ? heldIn.conversation : shownConversation());
   const project = () => (heldIn ? heldIn.project : shownProject());
@@ -2440,7 +2444,8 @@ export function setupStudio({
     });
   }
   async function generate(given = null) {
-    if (working) return;
+    // (Nor from the Studio of another conversation than the one whose work it holds, 0.6.87.)
+    if (working || away()) return;
     // An action on a take brings what to make; « Générer » (a click, its keys) does not.
     const onTake = given?.verb ? given : null;
     // The character being checked: the key that generates keeps it, where the question is asked
@@ -2555,15 +2560,21 @@ export function setupStudio({
       failure = controller.signal.aborted ? 'Génération arrêtée.' : error.message;
     } finally {
       working = null;
-      await refresh().catch(() => {});
-      // It stays on the screen, as the gallery lists it (with the addresses it is shown from).
-      const record = made && runs.find(item => item.id === made);
-      if (record) {
-        kept[asked] = record;
-        // Made from what was looked at: those settings are the user's now, nothing to come back to.
-        endLook();
+      // Held until its take is on its own screen (settling, 0.6.87).
+      settling = true;
+      try {
+        await refresh().catch(() => {});
+        // It stays on the screen, as the gallery lists it (with the addresses it is shown from).
+        const record = made && runs.find(item => item.id === made);
+        if (record) {
+          kept[asked] = record;
+          // Made from what was looked at: those settings are the user's now, nothing to come back to.
+          endLook();
+        }
+        settledHere();
+      } finally {
+        settling = false;
       }
-      settledHere();
       onChange();
       render();
       scrollStrip();
@@ -3298,13 +3309,19 @@ export function setupStudio({
   async function settled(result) {
     const external = working?.external;
     if (external) working = null;
-    await refresh().catch(() => {});
-    // Made from the Studio as it is set: its settings are those of that take already.
-    settledHere();
-    if (result?.record) {
-      const record = runs.find(item => item.id === result.record.id) ?? result.record;
-      kept[mediaOf(record)] = record;
-    } else if (external && result?.error) failure = result.error;
+    // Held until its take is on its own screen (settling, 0.6.87).
+    settling = true;
+    try {
+      await refresh().catch(() => {});
+      // Made from the Studio as it is set: its settings are those of that take already.
+      settledHere();
+      if (result?.record) {
+        const record = runs.find(item => item.id === result.record.id) ?? result.record;
+        kept[mediaOf(record)] = record;
+      } else if (external && result?.error) failure = result.error;
+    } finally {
+      settling = false;
+    }
     render();
     scrollStrip();
     // Left meanwhile (0.6.81): the Studio goes to the conversation shown.
@@ -5001,6 +5018,9 @@ export function setupStudio({
   // Ctrl + Entrée (⌘ on a Mac) generates from anywhere in the Studio, not only from the prompt.
   const shortcut = event => {
     if (!(event.ctrlKey || event.metaKey) || event.altKey || working || enriching || aiWorking) return;
+    // Held by a work of another conversation (« Studio occupé », 0.6.87): nothing of that one is on
+    // screen, its keys answer nothing (Ctrl + Entrée started the video waiting there, or said « OK »).
+    if (away()) return;
     // The message box of the chat has its own keys: these are the Studio's.
     if (event.target?.id === 'prompt') return;
     if (event.key === 'Enter') {
