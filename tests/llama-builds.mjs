@@ -13,6 +13,7 @@ import {
   latestRelease,
   parseAsset,
 } from '../lib/llama-builds.mjs';
+import { held, twice } from './fixtures/held-renames.mjs';
 
 // The files of the nightly release b12110 (4 November 2026), as GitHub lists them.
 const NAMES = [
@@ -344,6 +345,50 @@ test('the CUDA libraries land beside the program, and a file that does not match
       detect: async () => ({ platform: 'win32', arch: 'x64', gpus: [] }),
     });
     await assert.rejects(only.install(), /empreinte différente/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a llama.cpp just downloaded or unpacked that Windows holds a moment (an antivirus reading it) takes its place once let go', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'llama-builds-'));
+  const { fetchImpl } = github({
+    'llama-b12110-bin-win-cuda-13.4-x64.zip': Buffer.from('cuda 13'),
+    'cudart-llama-bin-win-cuda-13.4-x64.zip': Buffer.from('cudart 13'),
+  });
+  const unpack = async (archive, destination) => {
+    if (archive.includes('cudart')) {
+      await mkdir(join(destination, 'bin'), { recursive: true });
+      await writeFile(join(destination, 'bin', 'cudart64_13.dll'), 'dll');
+    } else await writeFile(join(destination, 'llama-server.exe'), 'exe');
+  };
+  const builds = new LlamaBuilds({
+    root,
+    fetchImpl,
+    run: async () => ({ code: 0, output: 'Available devices:\n  CUDA0: NVIDIA GeForce RTX 4070 SUPER (12281 MiB)\n' }),
+    unpack,
+    platform: 'win32',
+    arch: 'x64',
+    env: {},
+    detect: async () => ({ platform: 'win32', arch: 'x64', gpus: [{ vendor: 'nvidia', computeCap: 8.9, cuda: [13, 3] }] }),
+  });
+  // The archives downloaded, the library put beside the program, the folder unpacked.
+  const folder = join(root, 'b12110-cuda-13.4'),
+    paths = [
+      join(root, 'downloads', 'llama-b12110-bin-win-cuda-13.4-x64.zip'),
+      join(root, 'downloads', 'cudart-llama-bin-win-cuda-13.4-x64.zip'),
+      join(folder + '.unpack', 'cudart64_13.dll'),
+      folder,
+    ];
+  try {
+    let kept;
+    const refused = await held(paths, async () => {
+      kept = await builds.install();
+    });
+    assert.equal(kept.id, 'cuda-13.4');
+    assert.deepEqual(refused, twice(paths));
+    assert.ok((await stat(join(folder, 'cudart64_13.dll'))).isFile(), 'the library beside llama-server.exe');
+    assert.deepEqual((await readdir(root)).sort(), ['b12110-cuda-13.4', 'downloads']);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

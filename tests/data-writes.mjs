@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs, { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
-import { syncBuiltinESMExports } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createApplication } from '../server.mjs';
@@ -12,34 +11,8 @@ import { Takes } from '../lib/takes.mjs';
 import { Thumbnails } from '../lib/thumbnails.mjs';
 import { StudioPresets } from '../lib/studio-presets.mjs';
 import { ProgressHistory } from '../lib/generation-progress.mjs';
+import { held, twice } from './fixtures/held-renames.mjs';
 
-/**
- * Windows refusing for an instant to put the new copy of a file in its place (an antivirus reading
- * what was just written, the indexer): the first two renames onto each file of `paths` refused
- * (EPERM, then EBUSY), every other rename let through. Each module imports fs.rename itself: it is
- * replaced for the time of `work` (module.syncBuiltinESMExports). Resolves with the number of
- * refusals of each file: 2 for a file written once its refusals were tried again.
- */
-async function held(paths, work) {
-  const rename = fs.rename,
-    refused = new Map(paths.map(path => [resolve(path), 0]));
-  fs.rename = async (from, to) => {
-    const count = refused.get(resolve(to));
-    if (count === undefined || count >= 2) return rename(from, to);
-    refused.set(resolve(to), count + 1);
-    const code = count ? 'EBUSY' : 'EPERM';
-    throw Object.assign(new Error(`${code}: refused for an instant, rename '${from}' -> '${to}'`), { code });
-  };
-  syncBuiltinESMExports();
-  try {
-    await work();
-  } finally {
-    fs.rename = rename;
-    syncBuiltinESMExports();
-  }
-  return Object.fromEntries(refused);
-}
-const twice = paths => Object.fromEntries(paths.map(path => [resolve(path), 2]));
 const leftBeside = async paths => {
   const left = [];
   for (const folder of new Set(paths.map(path => dirname(path))))

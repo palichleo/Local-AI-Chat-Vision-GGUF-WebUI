@@ -159,3 +159,37 @@ test('every file of the data is replaced as given, text or bytes, and EACCES is 
   assert.deepEqual(await readFile(thumbnail), jpeg);
   assert.deepEqual((await readdir(join(root, 'data'))).filter(name => name.endsWith('.tmp')), []);
 });
+
+test('what was just downloaded waits longer than a file of the data, and no longer once its work is stopped', async t => {
+  const { root } = await fixture(t),
+    from = join(root, 'data', 'model.safetensors.part'),
+    to = join(root, 'data', 'model.safetensors');
+  await writeFile(from, 'weights');
+  let attempts = 0;
+  // Held by an antivirus for 14 attempts: more than the second a file of the data waits.
+  const held = async (source, target) => {
+    if (++attempts <= 14) throw Object.assign(Error('Held by an antivirus'), { code: 'EPERM' });
+    return rename(source, target);
+  };
+  await assert.rejects(module.renameWithRetry(from, to, { renameFile: held }), { code: 'EPERM' });
+  assert.equal(attempts, 13);
+  attempts = 0;
+  await module.renameWithRetry(from, to, { renameFile: held, retries: module.LONG_RETRIES });
+  assert.equal(attempts, 15);
+  assert.equal(await readFile(to, 'utf8'), 'weights');
+  // The download cancelled while it waits: the wait ends there.
+  const controller = new AbortController();
+  attempts = 0;
+  await assert.rejects(
+    module.renameWithRetry(from, to, {
+      renameFile: async () => {
+        if (++attempts === 2) controller.abort();
+        throw Object.assign(Error('Held by an antivirus'), { code: 'EBUSY' });
+      },
+      retries: module.LONG_RETRIES,
+      signal: controller.signal,
+    }),
+    { name: 'AbortError' },
+  );
+  assert.equal(attempts, 2);
+});
