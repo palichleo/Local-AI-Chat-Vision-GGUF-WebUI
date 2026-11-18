@@ -134,7 +134,43 @@ try {
       problems.push([step, 'console', message.params.args.map(arg => arg.value ?? arg.description).join(' ').slice(0, 300)]);
     else if (message.method === 'Log.entryAdded' && message.params.entry.level === 'error')
       problems.push([step, 'chargement', (message.params.entry.text + ' ' + (message.params.entry.url ?? '')).slice(0, 300)]);
+    else if (message.method === 'Fetch.requestPaused') void paused(message.params);
   };
+  /**
+   * (0.6.95) While a step simulates them (`simulated`), the answers of the model and the tools of
+   * the Studio, which this copy of the server does not have (no LLM, no Python): the Studio's tools,
+   * the stream of each answer in turn, a model ready in its status. Anything else goes to the server.
+   */
+  let simulated = null;
+  async function paused({ requestId, request, responseStatusCode, responseHeaders }) {
+    const answer = (body, type = 'application/json; charset=utf-8') =>
+      send('Fetch.fulfillRequest', {
+        requestId,
+        responseCode: 200,
+        responseHeaders: [{ name: 'Content-Type', value: type }],
+        body: Buffer.from(body).toString('base64'),
+      });
+    try {
+      if (!simulated) return await send('Fetch.continueRequest', { requestId });
+      if (responseStatusCode !== undefined) {
+        const { body, base64Encoded } = await send('Fetch.getResponseBody', { requestId });
+        const status = JSON.parse(base64Encoded ? Buffer.from(body, 'base64').toString('utf8') : body);
+        return await send('Fetch.fulfillRequest', {
+          requestId,
+          responseCode: responseStatusCode,
+          responseHeaders,
+          body: Buffer.from(JSON.stringify({ ...status, state: 'ready', busy: false })).toString('base64'),
+        });
+      }
+      if (/\/api\/studio(\?|$)/.test(request.url)) return await answer(JSON.stringify(simulated.studio));
+      if (/\/api\/chat(\?|$)/.test(request.url))
+        return await answer(simulated.replies.shift() ?? simulated.silence, 'text/event-stream; charset=utf-8');
+      if (request.url.includes('/api/tools/')) return await answer('{}');
+      return await send('Fetch.continueRequest', { requestId });
+    } catch {
+      // The page has moved on (a request cancelled): nothing to answer.
+    }
+  }
   // Each exchange with the browser within 20 s: a page that stops answering is an error, said.
   const send = (method, params = {}) =>
     new Promise((resolve, reject) => {
@@ -230,6 +266,106 @@ try {
     await run('mode ' + mode, () => click(`#studio-kinds .kind-tab[aria-label="${mode}"]`), view('studio'));
   await run('Agent', () => click('#studio-view .studio-agent'), () => js(`document.body.dataset.chat === 'open'`));
   await run('Échap (Agent)', () => key('Escape', 'Escape', 27), () => js(`document.body.dataset.chat !== 'open'`));
+  // (0.6.95) A video proposed from the chat of the Agent: the pointer sets it in the Studio, and what
+  // Moodix AI understood is said at the top of the screen, its prompt folded under it, without moving
+  // the Studio; both unfold; « Refuser » takes them away. The model and the tools of the Studio are
+  // simulated (a real LLM, a real engine are not there), the page is the page.
+  const words =
+    'Un plan fixe de six secondes en 9:16 : la mer se lève doucement autour du phare, puis la lumière du phare ' +
+    'balaie la brume, sans mouvement de caméra. Je garde la lumière bleue du soir et un cadrage serré, pour que ' +
+    'le mouvement reste discret. Dites-moi si vous préférez une nuit plus noire.';
+  const asked =
+    'Plan fixe, cadrage serré sur un phare de pierre au crépuscule. La mer se lève doucement autour du rocher, ' +
+    'des vagues lentes viennent battre la base du phare et retombent en écume. Au milieu du plan, la lumière du ' +
+    'phare s’allume et balaie la brume de gauche à droite, une fois, lentement. Ciel bleu sombre, quelques étoiles, ' +
+    'brume légère au ras de l’eau. Le son : le ressac, un vent léger, une corne de brume lointaine vers la fin. ' +
+    'Pas de coupe, pas de mouvement de caméra, grain fin de pellicule.';
+  const lengths = [121 / 24, 145 / 24, 193 / 24];
+  const stream = events => events.map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('') + 'data: [DONE]\n\n';
+  const proposal = {
+    kind: 'generation',
+    requestId: 'verif-1',
+    approvalToken: 'verif-1',
+    tool: 'create_video',
+    mediaType: 'video',
+    workflowName: 'LTX 2.5',
+    autoAllow: false,
+    resolution: { width: 448, height: 768 },
+    call: { id: 'call-verif-1', type: 'function', function: { name: 'create_video', arguments: '{}' } },
+    plan: {
+      prompt: asked,
+      stage: 'draft',
+      parameters: { prompt: asked, width: 448, height: 768, frames: 145, fps: 24, seed: 7 },
+      editable: {
+        prompt: true,
+        stages: [],
+        parameters: [
+          { key: 'frames', type: 'integer', value: 145, choices: [121, 145, 193] },
+          { key: 'width', type: 'integer', value: 448 },
+          { key: 'height', type: 'integer', value: 768 },
+          { key: 'seed', type: 'integer', value: 7 },
+        ],
+        references: [],
+      },
+      references: [],
+    },
+  };
+  const sizes = { width: { min: 64, max: 4096, multipleOf: 32 }, height: { min: 64, max: 4096, multipleOf: 32 } };
+  simulated = {
+    studio: {
+      enabled: true,
+      styles: [],
+      presets: {},
+      tools: {
+        create_video: [
+          { id: 'ltx-verif', name: 'LTX 2.5', media: 'video', verb: 'create_video', family: 'ltx25', seeded: true, roles: {}, inputs: {},
+            limits: sizes, size: { width: 768, height: 448 }, lengths: { seconds: lengths, standard: lengths[0] }, loras: [], settings: [] },
+        ],
+      },
+    },
+    replies: [stream([{ choices: [{ delta: { content: words } }] }, { local_tool_request: proposal }, { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }])],
+    // Any other request of an answer (none is expected): nothing said.
+    silence: stream([{ choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+  };
+  await send('Fetch.enable', {
+    patterns: [
+      { urlPattern: '*/api/studio', requestStage: 'Request' },
+      { urlPattern: '*/api/chat', requestStage: 'Request' },
+      { urlPattern: '*/api/tools/*', requestStage: 'Request' },
+      { urlPattern: '*/api/status*', requestStage: 'Response' },
+    ],
+  });
+  const explained = `document.querySelector('#studio-view .studio-screen-head > .studio-explain')`;
+  await run(
+    'proposition de Moodix AI dans le Studio',
+    async () => {
+      // (The status of a model ready read once by the page meanwhile.)
+      await wait(600);
+      if (!(await click('#agent-open'))) return false;
+      await wait(500);
+      await js(`(() => { const p = document.getElementById('prompt'); p.value = 'Fais bouger la mer autour du phare.'; p.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      return click('#send');
+    },
+    () =>
+      js(`(() => {
+        const explain = ${explained}, view = document.getElementById('studio-view'), head = view.querySelector('.studio-screen-head');
+        return !!explain && document.getElementById('ai-cursor-text')?.textContent === 'attend votre accord' && view.inert === false &&
+          explain.querySelector('.studio-explain-said')?.textContent.replace(/\\u00a0/g, ' ') === ${JSON.stringify(words)} &&
+          !explain.querySelector('.studio-explain-more').hidden && head.getBoundingClientRect().height <= 41 &&
+          !!view.querySelector('.studio-prompt-field.is-folded.is-cut') && !view.querySelector('.studio-prompt-more').hidden &&
+          view.scrollHeight <= view.clientHeight + 1;
+      })()`),
+    { within: 15000 },
+  );
+  await run('explication dépliée', () => click('#studio-view .studio-explain-more'), () =>
+    js(`${explained}?.classList.contains('is-open') && ${explained}.querySelector('.studio-explain-more').getAttribute('aria-expanded') === 'true' && document.querySelector('#studio-view .studio-screen-head').getBoundingClientRect().height > 41`), { within: 1500 });
+  await run('prompt déplié', () => click('#studio-view .studio-prompt-more'), () =>
+    js(`!document.querySelector('#studio-view .studio-prompt-field.is-folded') && document.querySelector('#studio-view .studio-prompt-more')?.getAttribute('aria-expanded') === 'true'`), { within: 1500 });
+  // (Refused in the Studio, the turn ends there, without a word of the model: 16/11.)
+  await run('refuser la proposition', () => click('#studio-view .studio-decline'), () =>
+    js(`!document.querySelector('#studio-view .studio-explain') && !document.querySelector('#studio-view .studio-prompt-more') && !document.querySelector('#studio-view .studio-decline') && !document.getElementById('agent-open').classList.contains('is-thinking')`), { within: 3000 });
+  simulated = null;
+  await send('Fetch.disable');
   await run('nouvelle conversation depuis le Studio', () => fromMenu('#thread-conversation', '.thread-action'), view('studio'));
   await run('menu des projets', () => click('#thread-project'), menuOpen);
   await run('Échap (menu des projets)', () => key('Escape', 'Escape', 27), menuClosed);

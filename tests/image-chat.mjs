@@ -599,7 +599,8 @@ test('in the Chat an image starts at once and a video always waits on its card, 
   assert.doesNotMatch(text, /if \(signal\.aborted\) generation\.fail\(/);
   // The image of a character starts at once; the replacement itself as the settings of the Studio say.
   assert.match(text, /if \(auto\) proposal\.autoAllow = true;/);
-  // (Both in the conversation of their turn, `talkId`, wherever the user is meanwhile: 0.6.81.)
-  assert.match(text, /runForTurn\(await action\('create_image', \{ prompt, \.\.\.\(size \?\? \{\}\) \}\), \{ view, signal, auto: true, talkId \}\)/);
-  assert.match(text, /const result = await runForTurn\(proposal, \{ view, signal, talkId \}\);/);
+  // (Both in the conversation of their turn, `talkId`, wherever the user is meanwhile: 0.6.81; each
+  // said in the Studio as what it is, 0.6.95.)
+  assert.match(text, /runForTurn\(await action\('create_image', \{ prompt, \.\.\.\(size \?\? \{\}\) \}\), \{ view, signal, auto: true, talkId, purpose: 'character' \}\)/);
+  assert.match(text, /const result = await runForTurn\(proposal, \{ view, signal, talkId, said: words \}\);/);
 });

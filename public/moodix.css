@@ -11099,6 +11099,66 @@ body:not([data-view='chat']) .resume {
   resize: none;
   field-sizing: content;
 }
+/* A proposal of Moodix AI set and waiting (0.6.95): its prompt folded to four lines, what it
+   understood being read first at the top of the screen, and the images under it in sight. Cut, its
+   foot fades under a round arrow in its middle, as the prompt of a take opened (0.6.59); the arrow, or
+   a click in it, shows it whole. */
+#studio-view .studio-block.is-input .studio-prompt-field.is-folded textarea {
+  max-height: 4lh;
+  overflow: hidden;
+}
+.studio-prompt-field.is-folded.is-cut:not(.has-enrich)::after {
+  content: '';
+  position: absolute;
+  right: 9px;
+  bottom: 1px;
+  left: 1px;
+  z-index: 1;
+  height: 64px;
+  border-radius: 0 0 0 9px;
+  background: linear-gradient(to bottom, rgba(11, 12, 15, 0), #0b0c0f 88%);
+  pointer-events: none;
+}
+#studio-view .studio-prompt-field .studio-prompt-more {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  margin: 0 0 0 -15px;
+  padding: 0;
+  border: 1px solid rgba(238, 232, 222, 0.22);
+  border-radius: 50%;
+  background: rgba(24, 23, 29, 0.86);
+  color: var(--text-1);
+}
+#studio-view .studio-prompt-field .studio-prompt-more:hover {
+  border-color: rgba(238, 232, 222, 0.42);
+}
+#studio-view .studio-prompt-field .studio-prompt-more[hidden] {
+  display: none;
+}
+#studio-view .studio-prompt-more svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: rotate(90deg);
+}
+#studio-view .studio-prompt-field:not(.is-folded) .studio-prompt-more svg {
+  transform: rotate(-90deg);
+}
+/* Shown whole, its arrow (turned up) and « Améliorer » under its last line, not over it. */
+#studio-view .studio-block.is-input .studio-prompt-field:not(.is-folded):has(> .studio-prompt-more:not([hidden])) {
+  padding-bottom: 54px;
+}
 #studio-view .studio-inputs {
   gap: 14px;
 }
@@ -11192,15 +11252,96 @@ body:not([data-view='chat']) .resume {
 .studio-screen-head .studio-progress .studio-elapsed:empty {
   display: none;
 }
-.studio-ai-line {
-  margin: 0 0 0 auto;
+/* What Moodix AI understood (0.6.95, studio-explain.mjs), while its pointer sets a proposal and while
+   the proposal waits: beside Image · Vidéo · Son, in the place of « MOODIX AI RÈGLE LE STUDIO » (its
+   name keeps the capitals of that line), its words on two lines at most. Two lines keep the head at its
+   40 px: the screen does not move when a proposal comes or goes. Cut, the end of the second line fades
+   under a round arrow, as the prompt of a take opened; unfolded, the words take the room they need, the
+   screen easing smaller under them (nothing over it), and scroll past a third of the window. */
+.studio-screen-head .studio-explain {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+.studio-screen-head:has(> .studio-explain.is-open) {
+  align-items: flex-start;
+}
+.studio-explain-text {
+  display: -webkit-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font: 400 var(--size-2)/1.45 var(--font-ui);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.studio-explain.is-cut:not(.is-open) .studio-explain-text {
+  -webkit-mask-image: linear-gradient(#000, #000), linear-gradient(to left, transparent, #000 72px);
+  mask-image: linear-gradient(#000, #000), linear-gradient(to left, transparent, #000 72px);
+  -webkit-mask-size: 100% 50%;
+  mask-size: 100% 50%;
+  -webkit-mask-position: top left, bottom left;
+  mask-position: top left, bottom left;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+.studio-explain.is-open .studio-explain-text {
+  display: block;
+  max-height: 32vh;
+  overflow-y: auto;
+  -webkit-line-clamp: unset;
+  line-clamp: none;
+  scrollbar-width: thin;
+}
+.studio-explain-who {
+  margin-right: 6px;
   color: var(--accent);
   font: 500 var(--size-label)/1 var(--font-ui);
   letter-spacing: 0.24em;
   text-transform: uppercase;
 }
-.studio-ai-line[hidden] {
+/* The sentence of the application, when Moodix AI wrote nothing: headed as the card of the Chat is. */
+.studio-explain.is-sentence .studio-explain-who {
+  color: var(--text-2);
+}
+.studio-explain-more {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid rgba(238, 232, 222, 0.22);
+  border-radius: 50%;
+  background: rgba(24, 23, 29, 0.86);
+  color: var(--text-1);
+}
+.studio-explain-more:hover {
+  border-color: rgba(238, 232, 222, 0.42);
+}
+.studio-explain-more[hidden] {
   display: none;
+}
+.studio-explain-more svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: rotate(90deg);
+}
+.studio-explain.is-open .studio-explain-more svg {
+  transform: rotate(-90deg);
 }
 /* Image · Vidéo · Son: a row of three in a dark ground; the one chosen, lighter, says its name. */
 #studio-view .studio-screen-head > #studio-kinds.kind-tabs {

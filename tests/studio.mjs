@@ -4195,6 +4195,220 @@ test('what a proposal of Moodix AI says of itself is read in the Studio, at the 
   }
 });
 
+/**
+ * What the head of the screen says of a proposal (studio-explain.mjs): who, then what (its non-breaking
+ * spaces read as spaces); null without one.
+ */
+const explained = body => {
+  const [line] = body.find('studio-screen-head')[0]?.find('studio-explain') ?? [];
+  return line
+    ? [line.find('studio-explain-who')[0].textContent, line.find('studio-explain-said')[0].textContent.replace(/ /g, ' ')]
+    : null;
+};
+
+test('what Moodix AI understood is said at the top of the screen, in its words, from the first step of its pointer to the answer (0.6.95)', async () => {
+  // In the Chat its words come over the card; in the Studio the settings moved under a long prompt,
+  // and nothing said what was meant unless the chat of the Agent was opened again.
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    said = [],
+    heads = [];
+  // An image model too: the Studio opens in Image with its screen, before « passe en Vidéo ».
+  tools.create_image = [{ id: 'k', name: 'Krea 2', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] }];
+  let page = null;
+  // At each word of the pointer, what the head of the screen said then.
+  Object.defineProperty(said, 'push', {
+    value(label) {
+      heads.push(page ? explained(page.body) : null);
+      return Array.prototype.push.call(this, label);
+    },
+  });
+  page = await studioPage(tools, {}, { runs, cursor: said, targets: true });
+  const { body, studio, restore } = page;
+  try {
+    assert.equal(explained(body), null, 'nothing to say without a proposal');
+    let answer = studio.propose(structuredClone(recorded.request), new AbortController().signal, { said: recorded.content });
+    await until(() => said.includes('attend votre accord'));
+    assert.equal(said.length, 7);
+    assert.deepEqual(new Set(heads.map(head => JSON.stringify(head))), new Set([JSON.stringify(['Moodix AI', recorded.content])]), 'at every step');
+    assert.deepEqual(explained(body), ['Moodix AI', recorded.content]);
+    // As French sets them: « Dites « / Générer » » never cut at the guillemet, nor « : » alone on a line.
+    assert.match(body.find('studio-explain-said')[0].textContent, /Studio : LTX 2\.5.*« Générer »/);
+    // In the place of « Moodix AI règle le Studio »: the step of a generation is said there too.
+    assert.equal(body.find('studio-ai-line').length, 0);
+    assert.equal(body.find('studio-progress')[0].hidden, true);
+    // Refused: it goes with the proposal.
+    studio.decline();
+    assert.equal(await answer, 'deny');
+    assert.equal(explained(body), null);
+
+    // Another proposal says its own words; a word of Markdown is read as plain text.
+    answer = studio.propose(structuredClone(recorded.request), new AbortController().signal, {
+      said: '**Plan fixe** de 6 s :\n\n- la neige tombe ;\n- elle lève la tête.',
+    });
+    await until(() => said.filter(label => label === 'attend votre accord').length === 2);
+    assert.deepEqual(explained(body), ['Moodix AI', 'Plan fixe de 6 s : la neige tombe ; elle lève la tête.']);
+    // Its words cut on their two lines: the round arrow shows them whole there, and folds them again.
+    const [line] = body.find('studio-explain-text'),
+      [more] = body.find('studio-explain-more');
+    assert.equal(more.hidden, true, 'nothing cut, no arrow');
+    Object.assign(line, { scrollHeight: 120, clientHeight: 38 });
+    studio.render();
+    assert.equal(more.hidden, false);
+    assert.equal(more.attributes['aria-expanded'], 'false');
+    assert.equal(more.attributes['aria-label'], 'Lire toute l’explication');
+    more.onclick();
+    assert.equal(more.attributes['aria-expanded'], 'true');
+    assert.equal(more.attributes['aria-label'], 'Replier l’explication');
+    // Drawn again (each step of the pointer draws the Studio), it stays unfolded: the same line.
+    studio.render();
+    assert.equal(body.find('studio-explain-more')[0], more);
+    assert.equal(more.attributes['aria-expanded'], 'true');
+    // « Générer »: it goes as the creation begins; the step of the take and its time (0.6.93) are said
+    // in its place, never beside it.
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    assert.equal(explained(body), null);
+    const [step] = body.find('studio-progress');
+    assert.equal(step.hidden, false);
+    assert.equal(step.find('studio-elapsed').length, 1);
+  } finally {
+    restore();
+  }
+});
+
+test('when Moodix AI wrote nothing the Studio says the proposal in a sentence of its own, from the proposal (0.6.95)', async () => {
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    said = [];
+  const page = await studioPage(tools, {}, { runs, cursor: said, targets: true });
+  const { body, studio, restore } = page;
+  try {
+    // (The local model often calls its tool without a word: nothing is asked of it for this.)
+    const answer = studio.propose(structuredClone(recorded.request), new AbortController().signal);
+    await until(() => said.includes('attend votre accord'));
+    assert.deepEqual(explained(body), ['Proposition', 'Une vidéo de 6 secondes en 9:16 avec LTX 2.5, qui part de la prise 1.']);
+    studio.decline();
+    assert.equal(await answer, 'deny');
+  } finally {
+    restore();
+  }
+  // The sentence of each kind of proposal: its length, its format, its model, what it starts from.
+  const { proposalSentence, plainWords } = await import('../public/studio-explain.mjs');
+  const take = (n, role, more = {}) => ({ label: 'Prise ' + n, role, ...more });
+  const video = (references, parameters = { width: 768, height: 448, frames: 121, fps: 24 }) => ({
+    tool: 'create_video',
+    mediaType: 'video',
+    workflowName: 'LTX 2.5',
+    plan: { parameters, references },
+  });
+  assert.equal(
+    proposalSentence(video([take(2, 'start_image'), take(3, 'end_image'), { label: '#ref1', role: 'msr_image' }])),
+    'Une vidéo de 5 secondes en 16:9 avec LTX 2.5, qui part de la prise 2 et finit sur la prise 3, avec #ref1 en référence.',
+  );
+  assert.equal(
+    proposalSentence(video([take(4, 'end_image'), take(5, 'msr_image'), take(6, 'msr_image')])),
+    'Une vidéo de 5 secondes en 16:9 avec LTX 2.5, qui finit sur la prise 4, avec la prise 5 et la prise 6 en références.',
+  );
+  // A continuation: what it adds, its frames less those it takes again from the clip.
+  assert.equal(
+    proposalSentence({
+      tool: 'extend_video',
+      mediaType: 'video',
+      workflowName: 'LTX 2.5',
+      plan: { parameters: { width: 768, height: 448, frames: 105, fps: 24, overlap_frames: 9 }, references: [take(7, 'source_video')] },
+    }),
+    'La suite de la prise 7 : 4 secondes de plus avec LTX 2.5.',
+  );
+  assert.equal(
+    proposalSentence({
+      tool: 'replace_character',
+      mediaType: 'video',
+      workflowName: 'Wan 2.1 SCAIL-2',
+      plan: {
+        parameters: { width: 672, height: 672 },
+        references: [take(8, 'driving_video', { as: 'source' }), take(9, 'reference_image', { as: 'reference' })],
+      },
+    }),
+    'Le personnage de la prise 8 remplacé par celui de la prise 9, avec Wan 2.1 SCAIL-2.',
+  );
+  const image = { tool: 'create_image', workflowName: 'Krea 2', resolution: { width: 1024, height: 1024 } };
+  assert.equal(proposalSentence(image), 'Une image en 1:1 avec Krea 2.');
+  assert.equal(
+    proposalSentence({ ...image, plan: { references: [{ label: 'Image 1', role: 'img2img', as: 'source' }] } }),
+    'Une image en 1:1 avec Krea 2, qui modifie l’image jointe.',
+  );
+  assert.equal(proposalSentence({ ...image, series: { index: 2, total: 5 } }), 'Une image en 1:1 avec Krea 2 (image 2 sur 5).');
+  assert.equal(
+    proposalSentence({ ...image, resolution: { width: 448, height: 768 } }, { purpose: 'character' }),
+    'L’image du personnage en 9:16 avec Krea 2 : vous la verrez avant le remplacement.',
+  );
+  assert.equal(
+    proposalSentence({ tool: 'create_audio', mediaType: 'audio', workflowName: 'Bruitages', plan: { parameters: { seconds: 1 } } }),
+    'Un son de 1 seconde avec Bruitages.',
+  );
+  // What is not known is left out rather than guessed.
+  assert.equal(proposalSentence({ tool: 'create_video', mediaType: 'video' }), 'Une vidéo.');
+  assert.equal(plainWords('## Le plan\n\n1. **Début** : `neige`\n2. [la fin](https://x)'), 'Le plan Début : neige la fin');
+});
+
+test('the prompt of a proposal is folded under what Moodix AI understood while it is set and waits; its arrow shows it whole (0.6.95)', async () => {
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    said = [],
+    folds = [];
+  let page = null;
+  Object.defineProperty(said, 'push', {
+    value(label) {
+      const [field] = page?.body.find('studio-prompt-field') ?? [];
+      folds.push(Boolean(field && field.className.split(' ').includes('is-folded')));
+      return Array.prototype.push.call(this, label);
+    },
+  });
+  page = await studioPage(tools, {}, { runs, cursor: said, targets: true });
+  const { body, studio, restore } = page;
+  const field = () => body.find('studio-prompt-field')[0],
+    folded = () => Boolean(field()?.className.split(' ').includes('is-folded'));
+  try {
+    assert.equal(body.find('studio-prompt-more').length, 0);
+    let answer = studio.propose(structuredClone(recorded.request), new AbortController().signal, { said: recorded.content });
+    await until(() => said.includes('attend votre accord'));
+    // Folded from the moment the Studio shows the mode of the proposal (« passe en Vidéo » first).
+    assert.deepEqual(folds, [false, true, true, true, true, true, true]);
+    assert.equal(folded(), true);
+    assert.equal(page.prompt().value, recorded.request.plan.prompt, 'the prompt is all there, folded');
+    // Its arrow shows it whole; drawn again, it stays so; the arrow, turned up, folds it again.
+    const more = () => body.find('studio-prompt-more')[0];
+    assert.equal(more().attributes['aria-label'], 'Voir tout le prompt');
+    more().onclick();
+    assert.equal(folded(), false);
+    assert.equal(more().attributes['aria-label'], 'Replier le prompt');
+    studio.render();
+    assert.equal(folded(), false);
+    more().onclick();
+    assert.equal(folded(), true);
+    // A click in it to write shows it whole at once, without drawing it again (its focus stays).
+    const box = page.prompt();
+    box.onfocus();
+    studio.render();
+    assert.equal(folded(), false);
+    // Refused: the prompt as it always was, without its arrow.
+    studio.decline();
+    assert.equal(await answer, 'deny');
+    assert.equal(folded(), false);
+    assert.equal(body.find('studio-prompt-more').length, 0);
+    // A new proposal is folded again.
+    answer = studio.propose(structuredClone(recorded.request), new AbortController().signal);
+    await until(() => said.filter(label => label === 'attend votre accord').length === 2);
+    assert.equal(folded(), true);
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    assert.equal(folded(), false, 'its creation begun: as it always was');
+  } finally {
+    restore();
+  }
+});
+
 /** An image model, a video model and what continues a clip, with a clip and an image of the conversation. */
 function continuing({ more = true } = {}) {
   const image = { id: 'k', name: 'Krea 2', verb: 'create_image', direct: true, roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },

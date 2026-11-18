@@ -7,6 +7,7 @@ import { setupPointer } from './studio-pointer.mjs';
 import { closePopup, openPopup } from './glass-menu.mjs';
 import { fileInfo } from './media-info.mjs';
 import { forgetCitedTakes } from './cited-takes.mjs';
+import { explanation, foldPrompt } from './studio-explain.mjs';
 import { elapsedClock } from './generation-time.mjs';
 
 /**
@@ -2787,9 +2788,11 @@ export function setupStudio({
    * Shows a proposal of Moodix AI in the Studio. What its workflow leaves to the assistant is
    * set by the pointer, the rest is shown as it will be made; the pointer stops on « Générer »
    * and waits. Resolves 'once' when the user generates (their changes sent first), 'deny' when
-   * they decline; rejects when the turn is stopped.
+   * they decline; rejects when the turn is stopped. `said`: the words Moodix AI wrote for it, said at
+   * the top of the screen meanwhile ('' when it wrote none: the Studio says the proposal in a sentence
+   * of its own, 0.6.95); `purpose`: 'character', the image of a character made for a replacement.
    */
-  function propose(request, signal) {
+  function propose(request, signal, { said = '', purpose = '' } = {}) {
     const target = MODE_OF_VERB[request.tool || request.call?.function?.name] ?? request.mediaType ?? 'image';
     return new Promise((resolve, reject) => {
       const settle = () => {
@@ -2811,6 +2814,10 @@ export function setupStudio({
         values: null,
         touched: new Set(),
         signal,
+        // What Moodix AI understood, at the top of the screen, and its prompt folded under it, until
+        // the proposal is answered (0.6.95): one line made for it, moved from one drawing to the next.
+        explain: explanation({ node, icon, said, request, purpose }),
+        fold: { open: false, cut: false },
         resolve: decision => {
           settle();
           resolve(decision);
@@ -4148,11 +4155,18 @@ export function setupStudio({
     else if (proposal?.mode === 'video' && proposal.values) extending = proposal.extending ?? null;
     render();
   }
+  // (0.6.95) What measures the prompt of a proposal once drawn (folded, its arrow only when it is
+  // cut), and follows its width; the line of Moodix AI last drawn, let go once its proposal is.
+  let measurePrompt = null,
+    promptWatch = null,
+    explaining = null;
   /**
    * The four blocks: Entrée, the preview with « Générer », Réglages, Sortie. Their places
    * depend on the width only: three columns and the output under them when wide.
    */
   function form() {
+    // (A Studio drawn without its prompt, nothing ready to make: nothing of a former one to measure.)
+    measurePrompt = null;
     const draft = drafts[mode],
       list = offered(),
       workflow = current();
@@ -4223,13 +4237,21 @@ export function setupStudio({
     prompt.maxLength = 4000;
     prompt.title = MODIFIER + ' + Entrée pour générer';
     aiTarget(prompt, 'prompt');
+    // Folded to its first lines while a proposal of Moodix AI is set and waits (0.6.95): what it
+    // understood, at the top of the screen, is read first; its arrow shows it whole.
+    const folded = answering() ? proposal.fold : null;
     const promptField = node(
       'div',
-      'studio-field studio-prompt-field is-wide' + (mode !== 'audio' ? ' has-enrich' : ''),
+      'studio-field studio-prompt-field is-wide' +
+        (mode !== 'audio' ? ' has-enrich' : '') +
+        (folded && !folded.open ? ' is-folded' : ''),
     );
     promptField.append(prompt);
     if (mode !== 'audio') promptField.append(enrichRow());
     if (enriching) promptField.classList.add('is-improving');
+    measurePrompt = folded
+      ? foldPrompt({ node, icon, field: promptField, box: prompt, state: folded, onToggle: () => render() })
+      : null;
     write.append(promptField);
     // An image pasted (Ctrl+V) or dropped anywhere on the column: in the first free slot.
     write.ondragover = event => {
@@ -4336,12 +4358,18 @@ export function setupStudio({
               ? busyElsewhere.replace(/ : .*$/, '')
               : (working?.label ?? ''),
       ),
-      setting = node('p', 'studio-ai-line', 'Moodix AI règle le Studio');
+      // What Moodix AI understood, while its pointer sets the Studio and while its proposal waits
+      // (0.6.95, studio-explain.mjs): in the place of « Moodix AI règle le Studio », its words.
+      explain = (answering() || ai) && proposal?.explain ? proposal.explain : null;
     busyDrawn = busyElsewhere;
-    // Image · Vidéo · Son at the left, the step under way in the middle, Moodix AI at the right.
+    // The line of a proposal answered, or replaced, is let go (it watched its width).
+    if (explaining && explaining !== proposal?.explain) explaining.dispose();
+    explaining = proposal?.explain ?? null;
+    // Image · Vidéo · Son at the left, then the step under way in the middle, or what Moodix AI
+    // proposes. (The card held during a proposal says it on the screen itself: its veil, 54.)
     step.id = 'studio-progress';
     step.setAttribute('role', 'status');
-    step.hidden = !working && !heldGpu && !freed && !busyElsewhere;
+    step.hidden = Boolean(explain) || (!working && !heldGpu && !freed && !busyElsewhere);
     // How long the take under way has been in the making (0.6.93), beside its step: not among what
     // the status says aloud, which would read it every second.
     elapsedNode = working ? node('time', 'studio-elapsed', working.time ?? '') : null;
@@ -4349,9 +4377,9 @@ export function setupStudio({
       elapsedNode.setAttribute('aria-hidden', 'true');
       step.append(elapsedNode);
     }
-    setting.hidden = !(answering() || ai);
     if (kindsBar()) head.append(kindsBar());
-    head.append(step, setting);
+    head.append(step);
+    if (explain) head.append(explain.element);
     // A creation is on the screen to be looked at (inspect): back to the Studio as it was before.
     // Not while Moodix AI proposes or has a character checked, in whatever mode: the settings of
     // before would come under what it proposes (lookBack).
@@ -4515,6 +4543,20 @@ export function setupStudio({
     sketched = false;
     body.replaceChildren(desk);
     keepKinds(body);
+    // What Moodix AI understood and its prompt, measured once on the page: an arrow only where words
+    // are cut (0.6.95). The prompt is measured again when its column changes width.
+    if (explaining && (answering() || ai)) explaining.measure();
+    promptWatch?.disconnect();
+    promptWatch = null;
+    if (measurePrompt) {
+      measurePrompt();
+      const box = desk.querySelector?.('#studio-prompt');
+      if (box && typeof ResizeObserver === 'function') {
+        const measure = measurePrompt;
+        promptWatch = new ResizeObserver(() => measure());
+        promptWatch.observe(box);
+      }
+    }
     if (along) {
       const strip = document.querySelector?.('#studio-view .studio-strip');
       if (strip) strip.scrollLeft = along;

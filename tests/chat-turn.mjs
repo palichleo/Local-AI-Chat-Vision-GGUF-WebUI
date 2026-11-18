@@ -467,12 +467,15 @@ function studioOf({ screen = null } = {}) {
   };
   const studio = {
     proposed: [],
+    // What the page gave it to say at the top of its screen with each (0.6.95).
+    said: [],
     accepts: () => true,
     follow() {},
     settled: async () => {},
     screenTake: () => screen,
-    propose: proposal => {
+    propose: (proposal, signal, options) => {
       studio.proposed.push(plain(proposal));
+      studio.said.push(options?.said);
       return proposal.autoAllow === true ? Promise.resolve('once') : new Promise(resolve => (answer = resolve));
     },
     waiting: () => Boolean(answer),
@@ -549,6 +552,41 @@ test('in the Studio a video the user has not seen is set there with the words of
   assert.deepEqual(resultsOf(refused.state.messages, 'call_1').map(result => result.status), ['denied']);
   // A screen without a take says nothing.
   assert.ok(refused.requests.every(request => !('screen' in request)));
+});
+
+test('in the Studio the words Moodix wrote for its proposal go with it, said at the top of the screen; never the line the page writes in their place (0.6.95)', async () => {
+  // The Studio showed the settings moving and the prompt, and nothing of what Moodix meant (studio-explain.mjs).
+  const turn = async (chat, done = studio => studio.decline()) => {
+    const studio = studioOf(),
+      agent = page({ state: { view: 'studio', studio }, chat, requestTool: asApproved });
+    const sent = agent.send('Fais une vidéo d’un renard');
+    await until(() => studio.waiting());
+    const said = [...studio.said],
+      waited = agent.saves.at(-1).messages;
+    done(studio);
+    await sent;
+    return { said, waited };
+  };
+  // A video not seen yet: the words written for it, after its call.
+  assert.deepEqual((await turn((body, n) => (n === 1 ? videoAnswer(body, 'call_1') : said(PLAN)))).said, [PLAN]);
+  // With what it wrote with its call before them, as the chat shows them.
+  const led = await turn((body, n) => {
+    if (n !== 1) return said(PLAN);
+    const [, { local_tool_request }] = videoAnswer(body, 'call_1');
+    return called(local_tool_request, 'Je règle le Studio.');
+  });
+  assert.deepEqual(led.said, ['Je règle le Studio.\n\n' + PLAN]);
+  // Nothing written: the chat has the line of the page; the Studio is given nothing, it says the
+  // proposal in its own sentence.
+  const silent = await turn((body, n) => (n === 1 ? videoAnswer(body, 'call_1') : said('')));
+  assert.match(silent.waited[1].content, /^Voici ce que je propose : le Studio montre la durée/);
+  assert.deepEqual(silent.said, ['']);
+  // An image: the words with its call (no plan is asked for it).
+  const image = await turn(
+    () => called({ call: functionCall('create_image', 'call_1'), workflowName: 'Krea 2', requestId: 'r1', approvalToken: 't1' }, 'Un renard roux dans la neige, en 1:1.'),
+    studio => studio.generate(),
+  );
+  assert.deepEqual(image.said, ['Un renard roux dans la neige, en 1:1.']);
 });
 
 test('in the Studio the same proposal sent again after the user answered in words starts as the settings allow; another one waits again', async () => {
@@ -643,9 +681,9 @@ const characterRequest = {
 const IMAGE = 'c3333333-3333-4333-8333-333333333333',
   VIDEO = 'd4444444-4444-4444-8444-444444444444';
 /** The page of a replacement: `studio` is what the Studio answers, `requestTool` the generations. */
-function replacement({ requestTool, studio = {} }) {
+function replacement({ requestTool, studio = {}, chat = () => called(characterRequest) }) {
   return page({
-    chat: () => called(characterRequest),
+    chat,
     requestTool,
     state: {
       studio: {
@@ -724,6 +762,25 @@ test('a character replacement stopped by the user keeps a result for its call: t
   // The take of the image stopped goes (runForTurn), the one already made stays.
   assert.deepEqual(making.takes[0].told, [['withdraw']]);
   assert.equal(checking.takes[0].told[0][0], 'finish');
+});
+
+test('a character put in a video: its image is said in the Studio as such, the replacement with the words of Moodix for its call (0.6.95)', async () => {
+  const words = 'Je mets un chevalier en armure à la place du personnage de la prise 3.',
+    told = [];
+  const replaced = replacement({
+    chat: () => called(characterRequest, words),
+    // Each step answered where the page asks for it (generation-runtime.mjs): the image, then the replacement.
+    requestTool: async (request, signal, onProgress, onImage, options) => {
+      await options.approve(request, signal);
+      return request.call.function.name === 'create_image' ? made(IMAGE, 'image') : made(VIDEO, 'video');
+    },
+    studio: { propose: async (proposal, signal, options) => (told.push([proposal.call.function.name, plain(options)]), 'once') },
+  });
+  await replaced.send('Remplace le personnage de la prise 3 par un chevalier');
+  assert.deepEqual(told, [
+    ['create_image', { said: '', purpose: 'character' }],
+    ['replace_character', { said: words, purpose: '' }],
+  ]);
 });
 
 test('a character replacement that fails keeps what failed as the result of its call', async () => {

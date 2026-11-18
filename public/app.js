@@ -2460,6 +2460,19 @@ function planWords(text, inStudio = false) {
   if (said && !made.test(said) && !(said.length < 160 && here.test(said))) return said;
   return inStudio ? PLAN_FALLBACK_STUDIO : PLAN_FALLBACK;
 }
+/**
+ * The words Moodix AI wrote for a proposal it sets in the Studio, said there at the top of the screen
+ * while its pointer works and while it waits (0.6.95): its message with the call, as the chat shows
+ * it, without the line the page puts in place of nothing (planWords). '' when it wrote nothing of its
+ * own: the Studio then says the proposal in a sentence of the application (studio-explain.mjs).
+ */
+function saidFor(messages, call) {
+  if (!call?.id) return '';
+  const message = messages.findLast(item => item?.role === 'assistant' && item.tool_calls?.some(made => made?.id === call.id));
+  let said = spokenText(typeof message?.content === 'string' ? message.content : '');
+  for (const line of [PLAN_FALLBACK_STUDIO, PLAN_FALLBACK]) said = said.replace(line, '');
+  return said.trim();
+}
 /** The card of a proposal in `host`, until the user answers (`delay`: the count of a video). */
 function cardChoice(host, proposal, abort, delay) {
   const pending = proposalCard({
@@ -3430,7 +3443,7 @@ async function sendMessage(event) {
         iterations++;
         let outcome;
         try {
-          outcome = await replaceWithCharacter(request, { view, signal, talkId });
+          outcome = await replaceWithCharacter(request, { view, signal, talkId, words: saidFor(history, request.call) });
         } catch (error) {
           // Stopped, or failed before its end: its call keeps a result, as any other creation.
           history.push({
@@ -3703,7 +3716,8 @@ async function sendMessage(event) {
                     // them there, as runForTurn's. Set in the Studio of the one shown, it took its
                     // drafts and put this conversation's take on its screen.
                     await backHere(talkId, abort);
-                    const answer = state.studio.propose(proposal, abort);
+                    // With the words Moodix wrote for it, said at the top of the Studio (0.6.95).
+                    const answer = state.studio.propose(proposal, abort, { said: saidFor(history, request.call) });
                     updateControls();
                     try {
                       return await answer;
@@ -3976,9 +3990,10 @@ function showLastReply(streaming = '') {
 /**
  * A proposal of the application itself in a chat turn (the image of a character, then its
  * replacement): set in the Studio by the pointer and started at once, followed by a card in the
- * conversation. Returns the result, as for a creation of the chat.
+ * conversation. Returns the result, as for a creation of the chat. `said`, `purpose`: what the Studio
+ * says of it at the top of its screen meanwhile (0.6.95, studio.mjs propose).
  */
-async function runForTurn(proposal, { view, signal, auto = false, talkId = state.conversationId }) {
+async function runForTurn(proposal, { view, signal, auto = false, talkId = state.conversationId, said = '', purpose = '' }) {
   // The image of a character starts at once (the user checks it right after); the video itself
   // starts alone only as the settings of the Studio's agent say (16/11), else on « Générer ».
   if (auto) proposal.autoAllow = true;
@@ -4004,7 +4019,7 @@ async function runForTurn(proposal, { view, signal, auto = false, talkId = state
         approve: async (asked, abort) => {
           // Left again before its answer: set when the user is back in its conversation.
           await backHere(talkId, abort);
-          const answer = state.studio.propose(asked, abort);
+          const answer = state.studio.propose(asked, abort, { said, purpose });
           updateControls();
           try {
             return await answer;
@@ -4031,8 +4046,9 @@ async function runForTurn(proposal, { view, signal, auto = false, talkId = state
  * A character put in a video when there is no image of them (replace_character with
  * `character`): their image made in the Studio, checked by the user (« OK », « Autre image »,
  * « Annuler »), then the replacement with it. Returns { content, record } for the model's call.
+ * `words`: what Moodix wrote with its call, said at the top of the Studio with the replacement (0.6.95).
  */
-async function replaceWithCharacter(request, { view, signal, talkId = state.conversationId }) {
+async function replaceWithCharacter(request, { view, signal, talkId = state.conversationId, words = '' }) {
   const said = text => (view.note.textContent = text);
   // Asked in the conversation of the turn and in its project, wherever the user is meanwhile.
   const action = async (name, args) =>
@@ -4051,7 +4067,8 @@ async function replaceWithCharacter(request, { view, signal, talkId = state.conv
   for (let tries = 0; tries < 20 && !image; tries++) {
     said('Image du personnage…');
     const size = state.studio.imageSize?.(request.sourceSize) ?? null;
-    const made = await runForTurn(await action('create_image', { prompt, ...(size ?? {}) }), { view, signal, auto: true, talkId });
+    // (Said in the Studio as the image of the character, to be checked before the replacement, 0.6.95.)
+    const made = await runForTurn(await action('create_image', { prompt, ...(size ?? {}) }), { view, signal, auto: true, talkId, purpose: 'character' });
     if (!made.record) {
       said(made.error || 'L’image du personnage n’a pas pu être faite.');
       return { content: JSON.stringify({ status: 'error', message: made.error || 'Image du personnage non faite.' }) };
@@ -4084,7 +4101,7 @@ async function replaceWithCharacter(request, { view, signal, talkId = state.conv
   // Its prompt is written in the Studio from the video and the image kept, with what the user
   // asked (the pointer's wand: the chat model comes back for it).
   proposal.scene = { asked: request.asked ?? '' };
-  const result = await runForTurn(proposal, { view, signal, talkId });
+  const result = await runForTurn(proposal, { view, signal, talkId, said: words });
   if (!result.record) return { content: result.content ?? JSON.stringify({ status: 'error', message: result.error }) };
   // Said to the model with its result: the image of the character it can use again.
   const content = JSON.parse(result.content);
