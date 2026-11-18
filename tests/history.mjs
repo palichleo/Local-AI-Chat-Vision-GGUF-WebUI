@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -317,4 +317,92 @@ test('historique : données invalides, chemins et fichiers endommagés sont cont
     await app?.close();
     await rm(folder, { recursive: true, force: true });
   }
+});
+
+/**
+ * A history whose file is held a moment by another program (an antivirus reading what was just
+ * written, the indexer): Windows refuses to put the new copy in its place. `refuse(...codes)`: the
+ * codes of the next attempts refused; `kept`: what the conversation held at each of them.
+ */
+function heldHistory(directory) {
+  const held = { refusals: [], attempts: 0, kept: [] };
+  held.history = new History(directory, {
+    async renameFile(from, to) {
+      held.attempts++;
+      const code = held.refusals.shift();
+      if (!code) return rename(from, to);
+      held.kept.push(await readFile(to, 'utf8').then(text => JSON.parse(text).messages.length, () => null));
+      throw Object.assign(new Error(`${code}: operation not permitted, rename '${from}' -> '${to}'`), { code });
+    },
+  });
+  held.refuse = (...codes) => {
+    held.refusals = codes;
+    held.attempts = 0;
+    held.kept = [];
+  };
+  return held;
+}
+
+test('un enregistrement refusé un instant par Windows (antivirus, indexation) est réessayé : la conversation est enregistrée', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'atelier-history-held-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'history'),
+    id = randomUUID(),
+    held = heldHistory(directory),
+    { history } = held,
+    said = async () => (await history.read(id)).messages.map(message => message.content);
+  // Its first save (before 0.6.83: « Historique non enregistré : Erreur locale inattendue »).
+  held.refuse('EPERM', 'EPERM');
+  const first = await history.save({ id, messages: [{ role: 'user', content: 'Garde cette conversation' }] });
+  assert.equal(held.attempts, 3);
+  assert.deepEqual(held.kept, [null, null]);
+  assert.deepEqual(await said(), ['Garde cette conversation']);
+  // Saved again: the conversation saved before stays whole while its new copy waits.
+  held.refuse('EPERM', 'EBUSY', 'EACCES');
+  const again = await history.save({
+    id,
+    messages: [
+      { role: 'user', content: 'Garde cette conversation' },
+      { role: 'assistant', content: 'Elle est gardée.' },
+    ],
+  });
+  assert.equal(held.attempts, 4);
+  assert.deepEqual(held.kept, [1, 1, 1]);
+  assert.equal(again.createdAt, first.createdAt);
+  assert.deepEqual(await said(), ['Garde cette conversation', 'Elle est gardée.']);
+  // Its name (the pencil, or the one the chat model gives).
+  held.refuse('EPERM');
+  assert.equal((await history.rename(id, 'Nom choisi')).title, 'Nom choisi');
+  assert.equal(held.attempts, 2);
+  assert.equal((await history.list()).conversations[0].title, 'Nom choisi');
+  // No copy left beside it.
+  assert.deepEqual(await readdir(join(directory, id)), ['conversation.json']);
+});
+
+test('un refus qui dure ou une autre erreur : l’enregistrement échoue, la conversation d’avant reste entière, sans copie laissée', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'atelier-history-refused-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'history'),
+    id = randomUUID(),
+    held = heldHistory(directory),
+    { history } = held,
+    said = async () => (await history.read(id)).messages.map(message => message.content),
+    first = { role: 'user', content: 'Garde cette conversation' },
+    later = { id, messages: [first, { role: 'assistant', content: 'Plus tard' }] };
+  await history.save({ id, messages: [first] });
+  // Refused every time: 13 attempts (about a second), then the error the page tells.
+  held.refuse(...Array(20).fill('EPERM'));
+  await assert.rejects(history.save(later), { code: 'EPERM' });
+  assert.equal(held.attempts, 13);
+  // Another error is not one that passes: not tried again.
+  held.refuse('EINVAL');
+  await assert.rejects(history.rename(id, 'Nom choisi'), { code: 'EINVAL' });
+  assert.equal(held.attempts, 1);
+  assert.deepEqual(await said(), ['Garde cette conversation']);
+  assert.equal((await history.list()).conversations[0].title, 'Garde cette conversation');
+  assert.deepEqual(await readdir(join(directory, id)), ['conversation.json']);
+  // What failed does not stop the next save.
+  held.refuse();
+  await history.save(later);
+  assert.deepEqual(await said(), ['Garde cette conversation', 'Plus tard']);
 });
