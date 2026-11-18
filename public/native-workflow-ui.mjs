@@ -1,49 +1,11 @@
 import { setupGenerationRuntime } from './generation-runtime.mjs';
 import { licenseBlock, restrictedOf } from './model-licenses.mjs';
+import { CHOICE_NAMES, SETTING_NAMES } from './setting-names.mjs';
 
 // Interface wording for parameters; component, role and family labels come from the family manifests.
-const labels = {
-  prompt: 'Prompt',
-  negative_prompt: 'Prompt négatif',
-  seed: 'Seed',
-  width: 'Largeur',
-  height: 'Hauteur',
-  steps: 'Étapes',
-  cfg: 'Guidage',
-  denoise: 'Débruitage',
-  expandPrompt: 'Expansion du prompt',
-  frames: 'Images vidéo',
-  fps: 'Images par seconde',
-  audio: 'Audio',
-  stage: 'Brouillon / finale',
-  start_strength: 'Influence de l’image de début',
-  end_strength: 'Influence de l’image de fin',
-  image_compression: 'Compression des références (CRF)',
-  overlap_frames: 'Images de chevauchement',
-  msr_frames: 'Durée latente des références MSR',
-  msr_strength: 'Influence des références MSR',
-  tile: 'Taille des tuiles (px, 0 = entière)',
-  max_side: 'Plus grand côté de sortie (px, 0 = libre)',
-  multiplier: 'Multiplicateur d’images',
-  mode: 'Mode',
-  lyrics: 'Paroles',
-  seconds: 'Durée (secondes)',
-  language: 'Langue des paroles',
-  guidance_scale: 'Guidage',
-  shift: 'Décalage (shift)',
-  attention: 'Attention',
-  sparse_attention: 'Attention creuse',
-  sparse_keep: 'Part gardée par l’attention creuse (%)',
-  sparse_start: 'Début de l’attention creuse',
-  scale: 'Agrandissement par passe',
-  passes: 'Passes',
-  color_correction: 'Correction des couleurs',
-  subject: 'Qui remplacer (en anglais)',
-  reference_subject: 'Qui est le personnage (en anglais)',
-  step_lora_strength: 'Intensité du LoRA d’étapes',
-  identity_lora_strength: 'Intensité du LoRA d’identité',
-};
-const choiceLabels = { draft: 'Brouillon', final: 'Vidéo finale', smooth: 'Fluide', slow_motion: 'Ralenti' };
+// (0.6.94) In their own module: the server names a setting it refuses the way this editor does.
+const labels = SETTING_NAMES;
+const choiceLabels = CHOICE_NAMES;
 const ownership = { fixed: 'Fixe', model: 'Assistant', random: 'Aléatoire' };
 // Each folder setting: its field, and the folder it shows when nothing is set (`folders` of
 // the server). The first is the models directory; the others, a folder apart for one kind of file.
@@ -183,6 +145,8 @@ export function setupNativeWorkflows(options) {
     parentScroll = 0,
     afterBack,
     readComponents = [],
+    // (0.6.94) Why each file left to the assistant cannot be saved as it is (no default file), or ''.
+    componentDefaults = [],
     readParameters = [],
     readLoras = [],
     readReferences = [],
@@ -461,7 +425,14 @@ export function setupNativeWorkflows(options) {
       ];
     }
     if (record.importDraft) return ['off', 'Brouillon importé : à vérifier avant de l’activer.'];
-    if (!record.enabled) return ['off', 'Désactivé : l’assistant ne s’en sert pas.'];
+    // (0.6.94) « Disponible pour l’assistant » unticked leaves it in the Studio: said so.
+    if (!record.enabled)
+      return [
+        'off',
+        record.ready === false
+          ? 'Pas proposé à l’assistant. ' + (record.unavailableReason || 'Indisponible.')
+          : 'Pas proposé à l’assistant : il reste dans le Studio.',
+      ];
     if (record.ready !== false) return ['ready', 'Prêt : l’assistant peut s’en servir.'];
     if (offer) {
       const names = offer.files.map(file => file.file).join(', '),
@@ -1046,7 +1017,21 @@ export function setupNativeWorkflows(options) {
         policy.policy,
       ),
       picker = assetPicker(role, id, policy.asset || policy.default),
-      allowed = node('div', 'native-asset-choices');
+      allowed = node('div', 'native-asset-choices'),
+      active = input(id + '-enabled', present, 'checkbox'),
+      // (0.6.94) Left to the assistant without a default file, every creation was refused, the
+      // Studio's too (it has no choice of files): said at once, and the workflow is not saved so.
+      needs = node(
+        'p',
+        'config-error native-needs-default',
+        'Choisissez le fichier par défaut : c’est celui qui sert quand Moodix AI n’en choisit pas. Sans lui, ce workflow ne s’enregistre pas.',
+      );
+    const lacksDefault = () =>
+        (!optional || active.checked) && ownershipSelect.value === 'model' && !picker.control.value,
+      showNeeds = () => {
+        needs.hidden = !lacksDefault();
+      };
+    needs.hidden = true;
     let checks = [];
     function renderChoices() {
       const selected = new Set(
@@ -1066,19 +1051,20 @@ export function setupNativeWorkflows(options) {
         checks.push([asset.id, check]);
       }
       if (!checks.length) allowed.append(node('p', 'field-help', 'Enregistrez les fichiers locaux à autoriser.'));
+      showNeeds();
     }
     picker.control.onchange = renderChoices;
     renderChoices();
     ownershipSelect.onchange = () => {
       allowed.hidden = ownershipSelect.value !== 'model';
+      showNeeds();
     };
     ownershipSelect.onchange();
     const spec = familyOf(draft.pipeline)?.components[role] || {};
     // A component the assistant may not choose (a tokenizer must match its encoder) shows no ownership switch.
     if (spec.policies && !spec.policies.includes('model')) ownershipSelect.hidden = true;
-    card.append(field(componentLabel(role), ownershipSelect), picker.container, allowed);
+    card.append(field(componentLabel(role), ownershipSelect), picker.container, needs, allowed);
     if (spec.help) card.append(node('p', 'field-help', spec.help));
-    const active = input(id + '-enabled', present, 'checkbox');
     if (optional) {
       const label = node('label', 'history-toggle');
       label.append(active, node('span', '', 'Utiliser ' + componentLabel(role)));
@@ -1087,6 +1073,7 @@ export function setupNativeWorkflows(options) {
         ownershipSelect.hidden = !active.checked;
         picker.container.hidden = !active.checked;
         allowed.hidden = !active.checked || ownershipSelect.value !== 'model';
+        showNeeds();
       };
       active.onchange = sync;
       ownershipSelect.onchange = sync;
@@ -1095,6 +1082,11 @@ export function setupNativeWorkflows(options) {
     return {
       card,
       picker,
+      /** Why it cannot be saved as it is (left to the assistant without a default file), or ''. */
+      missingDefault: () =>
+        lacksDefault()
+          ? `Choisissez le fichier par défaut de « ${componentLabel(role)} » : c’est celui qui sert quand Moodix AI n’en choisit pas.`
+          : '',
       read() {
         if (optional && !active.checked) return null;
         // Left without a file, where the folders of the settings can answer: a required
@@ -1131,7 +1123,15 @@ export function setupNativeWorkflows(options) {
       item.disabled = flag || busy || working;
     }
   }
-  function primitive(name, policy, prefix = 'native', allowed = parameterPolicies(name), changed = () => {}) {
+  // `needed`: whether it is used at all as the rest of the workflow stands (a LoRA's strength, off).
+  function primitive(
+    name,
+    policy,
+    prefix = 'native',
+    allowed = parameterPolicies(name),
+    changed = () => {},
+    needed = () => true,
+  ) {
     const title = prefix === 'native-lora-strength' ? 'Intensité' : labels[name] || name;
     // A policy a workflow holds that the editor no longer offers (a seed left to the assistant)
     // stays shown, so it can be changed.
@@ -1188,12 +1188,20 @@ export function setupNativeWorkflows(options) {
     const valueField = field(type === 'boolean' ? 'Activé' : title, value),
       heading = field(title, owner),
       // Why a part of it changes nothing, or what it does unexpectedly (setInert).
-      note = node('p', 'field-help native-inert');
+      note = node('p', 'field-help native-inert'),
+      // (0.6.94) Left to the assistant without a default, every creation that did not name it was
+      // refused, the Studio's too: said at once, under the box, and the workflow is not saved so.
+      needs = node(
+        'p',
+        'config-error native-needs-default',
+        'Choisissez une valeur par défaut : c’est elle qui sert quand Moodix AI n’en donne pas. Sans elle, ce workflow ne s’enregistre pas.',
+      );
     heading.className += ' native-parameter-heading';
     note.hidden = true;
+    needs.hidden = true;
     // What the family says of the setting whatever its value (when the denoise of Krea 2 applies).
     const help = spec.help ? [node('p', 'field-help', spec.help)] : [];
-    card.append(heading, defaultLabel, valueField, bounds, description, ...help, note);
+    card.append(heading, defaultLabel, needs, valueField, bounds, description, ...help, note);
     value.setAttribute('aria-label', title);
     valueField.children[0].className = 'sr-only';
     let reasons = {};
@@ -1212,7 +1220,10 @@ export function setupNativeWorkflows(options) {
       note.textContent = said;
       note.hidden = !said;
       card.dataset.inert = String(Boolean(reasons.parameter || (valueShown && reasons.value)));
+      needs.hidden = !lacksDefault();
     }
+    // (A setting that changes nothing whatever it holds, greyed, or not used, is never asked for a default.)
+    const lacksDefault = () => needed() && owner.value === 'model' && !useDefault.checked && !reasons.parameter;
     owner.onchange = () => {
       defaultLabel.hidden = owner.value !== 'model';
       valueField.hidden = owner.value === 'random' || (owner.value === 'model' && !useDefault.checked);
@@ -1238,6 +1249,11 @@ export function setupNativeWorkflows(options) {
       min,
       max,
       setInert,
+      /** Why it cannot be saved as it is (left to the assistant without a default), or ''. `named`: how it is called. */
+      missingDefault: (named = title) =>
+        lacksDefault()
+          ? `${named} : choisissez une valeur par défaut (« Préférer une valeur par défaut »). C’est elle qui sert quand Moodix AI n’en donne pas.`
+          : '',
       /** Its policy as it stands, without the checks of `read` (what makes another field inert). */
       peek() {
         const selected = owner.value;
@@ -1348,14 +1364,23 @@ export function setupNativeWorkflows(options) {
     defaultLabel.hidden = enabled.value !== 'model';
     enabled.onchange = () => {
       defaultLabel.hidden = enabled.value !== 'model';
+      // (Its strength is only asked for a default while the LoRA can be on.)
+      strength.setInert();
       updateBound();
     };
-    const strength = primitive(lora.id, { ...lora.strength, type: 'number' }, 'native-lora-strength', [
-      'fixed',
-      'model',
-    ]);
+    const strength = primitive(
+      lora.id,
+      { ...lora.strength, type: 'number' },
+      'native-lora-strength',
+      ['fixed', 'model'],
+      () => {},
+      () => enabled.value !== 'off',
+    );
     const item = {
       activation: () => enabled.value,
+      // (0.6.94) Its strength left to the assistant without a default: not saved so (unless it is off).
+      missingDefault: () =>
+        strength.missingDefault(`Intensité du LoRA « ${description.value.trim() || 'sans description'} »`),
       setBound(bound) {
         for (const control of [defaultEnabled, description]) unavailable(control, bound);
         note.textContent = bound
@@ -1623,6 +1648,7 @@ export function setupNativeWorkflows(options) {
       : draft.unavailableReason || '';
     $('native-workflow-enabled').dataset.unavailable = String(Boolean(draft.importDraft?.blockers.length));
     readComponents = [];
+    componentDefaults = [];
     const componentControls = {};
     $('native-workflow-components').replaceChildren();
     for (const role of [
@@ -1640,6 +1666,7 @@ export function setupNativeWorkflows(options) {
           { optional: !familyOf(draft.pipeline)?.components[role]?.required, present: Boolean(policy) },
         );
       readComponents.push([role, control.read]);
+      componentDefaults.push(control.missingDefault);
       componentControls[role] = control;
       $('native-workflow-components').append(control.card);
     }
@@ -1884,6 +1911,14 @@ export function setupNativeWorkflows(options) {
           if (section) section.open = true;
           throw Error('Choisissez le fichier de chaque LoRA, ou retirez les lignes inutilisées.');
         }
+        // (0.6.94) A setting, a LoRA's strength or a file left to the assistant without a default:
+        // not saved so (each says it under its box, too).
+        const lacking = [
+          ...componentDefaults.map(check => check()),
+          ...Object.values(parameterControls).map(control => control.missingDefault()),
+          ...readLoras.map(item => item.missingDefault()),
+        ].find(Boolean);
+        if (lacking) throw Error(lacking);
       }
       const result = await run(async signal => (await api('generation/workflows', record, { signal })).json());
       if (session !== version || !result) return false;

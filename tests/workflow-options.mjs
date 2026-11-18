@@ -241,7 +241,11 @@ test('a prompt is never fixed: the chat and the Studio write one at each creatio
     { mediaOf: async () => 'image' },
   );
   assert.equal(routed.args.prompt, 'Un renard');
-  await assert.rejects(resolveNativeWorkflow(krea, routed.args, assets), /locked parameter cannot be overridden/);
+  // (0.6.94: said in French, with what to do.)
+  await assert.rejects(
+    resolveNativeWorkflow(krea, routed.args, assets),
+    /^Error: Le prompt de ce workflow est fixé : ouvrez-le dans Paramètres › Workflows et enregistrez-le/,
+  );
   // The editor shows it as a line, without a switch (tests/native-workflow-ui.mjs).
 });
 

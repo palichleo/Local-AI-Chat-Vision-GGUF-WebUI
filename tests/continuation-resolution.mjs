@@ -115,7 +115,7 @@ test('a continuation is generated at its source size, whatever the draft/final p
   assert.deepEqual([tall.parameters.width, tall.parameters.height], [896, 1600]);
   await assert.rejects(
     resolveNativeWorkflow(minimax, args, assets, { ...options, sourceSize: { width: 1920, height: 1080 } }),
-    /1920×1080.*multiple of 32/,
+    /1920×1080 : MiniMax H3 ne peut pas la prolonger à cette taille \(Hauteur : un multiple de 32\)\.$/,
   );
   // Plain creation ignores the source size and keeps the profile.
   const created = await resolveNativeWorkflow(minimax, { prompt: 'x', intention: 'y', stage: 'final' }, assets, {
@@ -224,7 +224,8 @@ test('the user revises a proposal in place: own values, same seed, size still lo
   assert.deepEqual(first.plan.editable.stages, ['draft', 'final']);
   const revise = edits => runtime.revise({ requestId: first.requestId, approvalToken: first.approvalToken, edits });
   await assert.rejects(revise({ width: 1344 }), /taille de sa vidéo source/);
-  await assert.rejects(revise({ frames: 130 }), /frames/);
+  // (0.6.94: under the name the editor gives the setting, in French.)
+  await assert.rejects(revise({ frames: 130 }), /^Error: Images vidéo : une des valeurs que ce workflow autorise\.$/);
   await assert.rejects(revise({ prompt: '  ' }), /vide/);
   const second = await revise({ prompt: 'the boat dives', stage: 'final', frames: 345 });
   assert.notEqual(second.requestId, first.requestId);

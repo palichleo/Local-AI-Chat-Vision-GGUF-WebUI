@@ -1,0 +1,48 @@
+/**
+ * The name of each setting of a workflow as Paramètres › Workflows shows it (native-workflow-ui.mjs),
+ * and of the values it shows by a word. (0.6.94) Read by the server too: a value it refuses, or a
+ * value it needs and is not given, is said under that same name (lib/native-workflows.mjs), never by
+ * its key in English (« steps is required »).
+ */
+export const SETTING_NAMES = {
+  prompt: 'Prompt',
+  negative_prompt: 'Prompt négatif',
+  seed: 'Seed',
+  width: 'Largeur',
+  height: 'Hauteur',
+  steps: 'Étapes',
+  cfg: 'Guidage',
+  denoise: 'Débruitage',
+  expandPrompt: 'Expansion du prompt',
+  frames: 'Images vidéo',
+  fps: 'Images par seconde',
+  audio: 'Audio',
+  stage: 'Brouillon / finale',
+  start_strength: 'Influence de l’image de début',
+  end_strength: 'Influence de l’image de fin',
+  image_compression: 'Compression des références (CRF)',
+  overlap_frames: 'Images de chevauchement',
+  msr_frames: 'Durée latente des références MSR',
+  msr_strength: 'Influence des références MSR',
+  tile: 'Taille des tuiles (px, 0 = entière)',
+  max_side: 'Plus grand côté de sortie (px, 0 = libre)',
+  multiplier: 'Multiplicateur d’images',
+  mode: 'Mode',
+  lyrics: 'Paroles',
+  seconds: 'Durée (secondes)',
+  language: 'Langue des paroles',
+  guidance_scale: 'Guidage',
+  shift: 'Décalage (shift)',
+  attention: 'Attention',
+  sparse_attention: 'Attention creuse',
+  sparse_keep: 'Part gardée par l’attention creuse (%)',
+  sparse_start: 'Début de l’attention creuse',
+  scale: 'Agrandissement par passe',
+  passes: 'Passes',
+  color_correction: 'Correction des couleurs',
+  subject: 'Qui remplacer (en anglais)',
+  reference_subject: 'Qui est le personnage (en anglais)',
+  step_lora_strength: 'Intensité du LoRA d’étapes',
+  identity_lora_strength: 'Intensité du LoRA d’identité',
+};
+export const CHOICE_NAMES = { draft: 'Brouillon', final: 'Vidéo finale', smooth: 'Fluide', slow_motion: 'Ralenti' };

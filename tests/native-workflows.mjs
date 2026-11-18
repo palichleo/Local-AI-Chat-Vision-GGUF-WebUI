@@ -80,7 +80,11 @@ test('strict policy resolver rejects locked overrides, unsupported fields and ou
     { prompt: 'test', steps: 13 },
     { prompt: 'test', module: 'os' },
   ])
-    await assert.rejects(resolveNativeWorkflow(workflow, args, assets), /fixed|random|range|unsupported|locked/i);
+    // (0.6.94: said in French, under the name the editor gives each setting.)
+    await assert.rejects(
+      resolveNativeWorkflow(workflow, args, assets),
+      /valeur fixée par ce workflow|tirée à chaque création|entre -?\d|au plus|au moins|unsupported/i,
+    );
   const job = await resolveNativeWorkflow(workflow, { prompt: 'test', steps: 10 }, assets, {
     seed: 0,
     jobId: 'job-one',
@@ -112,7 +116,7 @@ test('schema rejects executable/unknown settings and enforces family boundaries'
   assert.throws(() => validateNativeWorkflow(workflow), /multiple|width/i);
   workflow.parameters.width = { policy: 'fixed', value: 512 };
   workflow.parameters.denoise.value = 0;
-  assert.throws(() => validateNativeWorkflow(workflow), /denoise/i);
+  assert.throws(() => validateNativeWorkflow(workflow), /^Error: Débruitage : plus de 0 et 1 au plus\.$/);
 });
 
 test('enabled LoRA and component policies apply only allowlisted choices', async () => {
@@ -126,17 +130,18 @@ test('enabled LoRA and component policies apply only allowlisted choices', async
     { seed: 7 },
   );
   assert.deepEqual(job.loras, [{ id: 'style', path: assetMap.get('lora').path, strength: 0.75 }]);
+  // (0.6.94: refused in French, by what the editor shows of the LoRA and of the file.)
   await assert.rejects(
     resolveNativeWorkflow(workflow, { prompt: 'test', loras: { style: { enabled: true, strength: 1.1 } } }, assets),
-    /range/i,
+    /^Error: Intensité du LoRA « .+ » : entre 0 et 1\.$/,
   );
   await assert.rejects(
     resolveNativeWorkflow(fixture(), { prompt: 'test', loras: { style: { enabled: true } } }, assets),
-    /off|fixed|locked/i,
+    /^Error: Activation du LoRA « .+ » : valeur fixée par ce workflow, elle ne se change pas\.$/,
   );
   await assert.rejects(
     resolveNativeWorkflow(workflow, { prompt: 'test', components: { model: '/arbitrary/file' } }, assets),
-    /fixed|locked/i,
+    /^Error: « Modèle » : fichier fixé par ce workflow, il ne se change pas\.$/,
   );
 });
 
@@ -149,7 +154,7 @@ test('Krea LoRAs explicitly support signed strength within the validated bounds'
     -0.5,
   );
   workflow.loras[0].strength.value = -4.1;
-  assert.throws(() => validateNativeWorkflow(workflow), /range/i);
+  assert.throws(() => validateNativeWorkflow(workflow), /^Error: Intensité du LoRA « .+ » : entre -4 et 4\.$/);
 });
 
 test('trusted prompt expansion preserves exact settings and prompt templates resolve once', async () => {
@@ -252,7 +257,10 @@ test('references use declared roles and staged local files, never model-supplied
       () => nativeWorkflowReferences(workflow, { ...args, references: [{ input: 'source', path }] }),
       /reference|source/i,
     );
-    assert.throws(() => nativeWorkflowReferences(workflow, { prompt: 'test' }), /required/i);
+    assert.throws(
+      () => nativeWorkflowReferences(workflow, { prompt: 'test' }),
+      /^Error: « Source » : une entrée est obligatoire pour ce workflow\.$/,
+    );
     const pending = await catalog.prepare('portrait', args, { allowPendingReferences: true, seed: 5 });
     assert.equal(pending.job.references[0].path, null);
   });
@@ -266,10 +274,11 @@ test('family manifest limits are enforced when a workflow is saved, not discover
     catalog.capabilities = { ltx25: { ready: true } };
     await catalog.save(workflow);
     assert.ok((await new ToolCatalog(catalog).definitions()).some(tool => tool.function.name === 'create_video'));
+    // (0.6.94: what a setting allows is said in French, under its name in the editor.)
     for (const [patch, error] of [
-      [w => (w.parameters.steps.value = 12), /supported|allowed/i],
+      [w => (w.parameters.steps.value = 12), /^Error: Étapes : une de ces valeurs : 8\.$/],
       [w => w.references.push({ id: 'edit', role: 'img2img', required: false }), /reference slot/i],
-      [w => (w.parameters.frames.value = 24), /allowed|supported/i],
+      [w => (w.parameters.frames.value = 24), /^Error: Images vidéo : une des valeurs que ce workflow autorise\.$/],
     ]) {
       const changed = structuredClone(workflow);
       patch(changed);
@@ -412,7 +421,7 @@ test('Krea 2: the denoise applies to an image to modify only, and the job says t
   assert.equal((await asked(0.7, image)).parameters.denoise, 0.7);
   assert.equal((await asked(0.6, image)).parameters.denoise, 0.6);
   assert.equal((await asked(0.7, null)).parameters.denoise, 1);
-  await assert.rejects(asked(0.9, image), /outside the supported range/);
+  await assert.rejects(asked(0.9, image), { status: 400, message: 'Débruitage : entre 0,6 et 0,7.' });
   // Beside the setting, on the card and in the Studio: what it is, and when it applies.
   const job = await resolveNativeWorkflow(shipped, { prompt: 'a boat', references: image }, here, {
     allowPendingReferences: true,
@@ -445,7 +454,7 @@ test('Krea 2: the denoise applies to an image to modify only, and the job says t
   assert.equal(workflowSchema(own).properties.denoise.exclusiveMinimum, 0);
   assert.throws(
     () => validateNativeWorkflow({ ...own, parameters: { ...own.parameters, denoise: { policy: 'model', min: 0, default: 0 } } }),
-    /denoise/i,
+    /^Error: Débruitage : plus de 0 et 1 au plus\.$/,
   );
 });
 

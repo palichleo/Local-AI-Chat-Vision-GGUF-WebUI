@@ -135,6 +135,7 @@ const staticFiles = new Map([
   ['/session-copies.mjs', ['session-copies.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-runtime.mjs', ['generation-runtime.mjs', 'text/javascript; charset=utf-8']],
   ['/native-workflow-ui.mjs', ['native-workflow-ui.mjs', 'text/javascript; charset=utf-8']],
+  ['/setting-names.mjs', ['setting-names.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-controls.mjs', ['settings-controls.mjs', 'text/javascript; charset=utf-8']],
   ['/markdown.mjs', ['markdown.mjs', 'text/javascript; charset=utf-8']],
 ]);
@@ -2041,6 +2042,8 @@ export async function createApplication({
             turnId: randomUUID(),
             messages: [],
             ...(body.styles !== undefined ? { styles: body.styles } : {}),
+            // The user's own hand (0.6.94): a workflow not offered to Moodix AI stays theirs.
+            byHand: true,
           }),
         );
       }

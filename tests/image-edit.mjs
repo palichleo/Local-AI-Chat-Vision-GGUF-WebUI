@@ -81,9 +81,9 @@ test('an image proposal can be edited by the user too, then confirmed without a 
     runtime.revise({ requestId: second.requestId, approvalToken: second.approvalToken, edits: { width: 100 } }),
     { status: 400, message: 'Largeur : entre 256 et 2048.' },
   );
-  // (A value of another kind is still said by the check of the workflow.)
+  // (A value of another kind is still said by the check of the workflow: in French since 0.6.94.)
   await assert.rejects(
     runtime.revise({ requestId: second.requestId, approvalToken: second.approvalToken, edits: { width: 300.5 } }),
-    /width must be a finite integer/,
+    { status: 400, message: 'Largeur : un nombre entier.' },
   );
 });

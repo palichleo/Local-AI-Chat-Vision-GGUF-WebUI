@@ -614,17 +614,84 @@ test('closing settings cancels native refresh without surfacing an obsolete erro
   ui.cancelSettings();
   await assert.doesNotReject(pending);
 });
-test('model-owned components and parameters can require a model choice without inventing defaults', async t => {
+test('a file or a setting left to the assistant is not saved without a default: said under its box, and why', async t => {
+  // (0.6.94) Saved so, every creation that did not name it was refused, the Studio's too.
   const f = await setup(t),
     record = structuredClone(f.template);
   record.components.model = { policy: 'model', choices: ['model-one'], description: 'Choose the portrait checkpoint' };
   record.parameters.width = { policy: 'model', type: 'integer', min: 256, max: 1024 };
   await f.ui.edit(record);
+  const said = () => {
+    const all = node => [node, ...(node.children ?? []).flatMap(all)];
+    return ['native-workflow-components', 'native-workflow-parameters']
+      .flatMap(id => all(f.$(id)))
+      .filter(item => String(item.className).includes('native-needs-default') && !item.hidden)
+      .map(item => item.textContent);
+  };
+  // Said at once, under each of the two boxes.
+  assert.deepEqual(said(), [
+    'Choisissez le fichier par défaut : c’est celui qui sert quand Moodix AI n’en choisit pas. Sans lui, ce workflow ne s’enregistre pas.',
+    'Choisissez une valeur par défaut : c’est elle qui sert quand Moodix AI n’en donne pas. Sans elle, ce workflow ne s’enregistre pas.',
+  ]);
+  assert.equal(await f.ui.saveEditor(), false);
+  assert.equal(
+    f.$('native-workflow-error').textContent,
+    'Choisissez le fichier par défaut de « Modèle » : c’est celui qui sert quand Moodix AI n’en choisit pas.',
+  );
+  // The file of the list chosen: the setting is asked for next.
+  f.$('native-component-model-file').value = 'model.safetensors';
+  f.$('native-component-model-file').onchange();
+  assert.equal(said().length, 1);
+  assert.equal(await f.ui.saveEditor(), false);
+  assert.equal(
+    f.$('native-workflow-error').textContent,
+    'Largeur : choisissez une valeur par défaut (« Préférer une valeur par défaut »). C’est elle qui sert quand Moodix AI n’en donne pas.',
+  );
+  assert.equal(
+    f.calls.some(call => call.route === 'generation/workflows'),
+    false,
+    'nothing saved so far',
+  );
+  f.$('native-use-default-width').checked = true;
+  f.$('native-use-default-width').onchange();
+  f.$('native-value-width').value = '512';
+  assert.deepEqual(said(), []);
   assert.equal(await f.ui.saveEditor(), true);
   const saved = f.calls.find(call => call.route === 'generation/workflows').body;
-  assert.equal(Object.hasOwn(saved.components.model, 'default'), false);
-  assert.equal(Object.hasOwn(saved.parameters.width, 'default'), false);
-  assert.equal(saved.components.model.description, 'Choose the portrait checkpoint');
+  assert.deepEqual(saved.components.model, {
+    policy: 'model',
+    choices: ['model-one'],
+    default: 'model-one',
+    description: 'Choose the portrait checkpoint',
+  });
+  assert.deepEqual(saved.parameters.width, { policy: 'model', type: 'integer', default: 512, min: 256, max: 1024 });
+});
+
+test('the strength of a LoRA left to the assistant needs a default while the LoRA can be on', async t => {
+  // (0.6.94) Saved without, a creation that did not name it was refused.
+  const f = await setup(t),
+    record = structuredClone(f.template);
+  record.loras = [
+    {
+      id: 'style',
+      asset: 'lora-one',
+      description: 'Soft light',
+      enabled: { policy: 'fixed', value: true },
+      strength: { policy: 'model', type: 'number', min: 0, max: 1 },
+    },
+  ];
+  await f.ui.edit(record);
+  assert.equal(await f.ui.saveEditor(), false);
+  assert.equal(
+    f.$('native-workflow-error').textContent,
+    'Intensité du LoRA « Soft light » : choisissez une valeur par défaut (« Préférer une valeur par défaut »). C’est elle qui sert quand Moodix AI n’en donne pas.',
+  );
+  // Off, its strength is not used: nothing to ask.
+  f.$('native-lora-enabled-style').value = 'off';
+  f.$('native-lora-enabled-style').onchange();
+  assert.equal(await f.ui.saveEditor(), true);
+  const saved = f.calls.find(call => call.route === 'generation/workflows').body.loras[0];
+  assert.deepEqual([saved.enabled, saved.strength.default], [{ policy: 'off' }, undefined]);
 });
 
 test('blank creation opens, uses the checkpoint folder and leaves the files not chosen to the folders of the settings', async t => {

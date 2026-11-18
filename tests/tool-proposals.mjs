@@ -1291,7 +1291,7 @@ test('Krea 2: the denoise the assistant passes with an image to modify stays fro
   // Outside them: refused in plain words, and the proposal is still the one to confirm.
   for (const denoise of [0.75, 0.5, 1])
     await assert.rejects(revise(runtime, revised, { denoise }), { status: 400, message: 'Débruitage : entre 0,6 et 0,7.' });
-  await assert.rejects(revise(runtime, revised, { denoise: '0.65' }), /denoise must be a finite number/);
+  await assert.rejects(revise(runtime, revised, { denoise: '0.65' }), { status: 400, message: 'Débruitage : un nombre.' });
   // Both ends are values like the others.
   revised = await revise(runtime, revised, { denoise: 0.7 });
   assert.equal(revised.plan.parameters.denoise, 0.7);
