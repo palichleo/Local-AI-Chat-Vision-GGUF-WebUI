@@ -565,6 +565,7 @@ test('Chat and Studio are two views of one conversation: switching is immediate,
     document = { body: { dataset: {} } };
   let loaded,
     opened,
+    // The controls follow the view at each switch (0.6.92: no « ● Studio » of the message box to sync).
     synced = 0;
   const tools = new Promise(resolve => {
       loaded = resolve;
@@ -575,8 +576,7 @@ test('Chat and Studio are two views of one conversation: switching is immediate,
       state,
       document,
       $: () => ({ setAttribute() {}, focus() {} }),
-      updateControls() {},
-      syncViews: () => synced++,
+      updateControls: () => synced++,
       showLastReply() {},
       scrollToBottom() {},
       notice() {},

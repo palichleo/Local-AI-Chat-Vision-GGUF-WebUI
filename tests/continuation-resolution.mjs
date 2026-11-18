@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
 import { ToolRuntime } from '../lib/tool-runtime.mjs';
 import { resolveNativeWorkflow, validateNativeWorkflow } from '../lib/native-workflows.mjs';
+import { FAMILY_SIZES } from '../public/formats.mjs';
 
 // A MiniMax-H3 workflow shaped like the shipped one: draft 768×448, final 1344×768, every role.
 const minimax = validateNativeWorkflow({
@@ -596,6 +597,41 @@ test('a size the workflow sets takes the format of the image the video starts fr
     { allowPendingReferences: true, seed: 1, sourceSize: { width: 768, height: 448 }, ...portrait },
   );
   assert.deepEqual([continued.parameters.width, continued.parameters.height], [768, 448]);
+});
+
+test('an image to modify gives Krea 2 its format among the sizes of Krea 2, as the Studio offers them (0.6.92)', async () => {
+  const shipped = JSON.parse(
+    readFileSync(new URL('../runner/workflows/fefb88eb-8311-4409-b636-6efbb42e952c.json', import.meta.url), 'utf8'),
+  );
+  const krea = (side = 1024) =>
+    validateNativeWorkflow({
+      ...shipped,
+      parameters: {
+        ...shipped.parameters,
+        width: { ...shipped.parameters.width, default: side },
+        height: { ...shipped.parameters.height, default: side },
+      },
+    });
+  const sized = async (workflow, aspect) => {
+    const args = { prompt: 'x', references: [{ input: 'source', image: 0 }] },
+      job = await resolveNativeWorkflow(workflow, args, assets, { allowPendingReferences: true, seed: 1, aspect });
+    return [job.parameters.width, job.parameters.height];
+  };
+  // At the size of the shipped workflow, the same as before: the sizes near 1024 × 1024 stay.
+  assert.deepEqual(await sized(krea(), { width: 3000, height: 3000 }), [1024, 1024]);
+  assert.deepEqual(await sized(krea(), { width: 1920, height: 1080 }), [1344, 768]);
+  assert.deepEqual(await sized(krea(), { width: 1080, height: 1920 }), [768, 1344]);
+  assert.deepEqual(await sized(krea(), { width: 2100, height: 900 }), [1792, 768]);
+  // A workflow of 512 × 512: 512 is no size of Krea 2 any more, its smallest square is 768.
+  assert.deepEqual(await sized(krea(512), { width: 1000, height: 1000 }), [768, 768]);
+  // Every size the Studio offers Krea 2 is one its workflow makes as it is asked (« Générer »).
+  for (const list of Object.values(FAMILY_SIZES.krea2))
+    for (const { width, height } of list) {
+      const job = await resolveNativeWorkflow(krea(), { prompt: 'x', width, height }, assets, { seed: 1 });
+      assert.deepEqual([job.parameters.width, job.parameters.height], [width, height]);
+    }
+  // Not beyond what its family takes.
+  await assert.rejects(resolveNativeWorkflow(krea(), { prompt: 'x', width: 4104, height: 1024 }, assets, { seed: 1 }));
 });
 
 test('a proposal follows its start image, the format the model names, and keeps it across versions', async () => {

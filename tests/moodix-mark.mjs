@@ -60,8 +60,9 @@ test('every reference to the logo asks for its new version (?v=4), never the one
     assert.match(html, new RegExp(`href="/${name.replace('.', '\\.')}\\?v=4"`));
   assert.doesNotMatch(html, /\?v=[23]"/);
   const pages = [html, await read('app.js'), await read('moodix.css'), await read('studio.mjs')].join('\n');
+  // (0.6.92: the settings of the Studio no longer wear the mark of Moodix AI, the only page that
+  // asked for these files; any that asks for them again asks for this version.)
   const marks = [...pages.matchAll(/\/assets\/moodix-mark(?:-encre)?\.svg[^'")\s]*/g)].map(found => found[0]);
-  assert.ok(marks.length >= 2, 'Moodix AI in the Studio, in ivory and in ink');
   for (const mark of marks) assert.match(mark, /^\/assets\/moodix-mark(?:-encre)?\.svg\?v=4$/);
 });
 

@@ -3970,11 +3970,7 @@ function showLastReply(streaming = '') {
   agent.classList.toggle('is-working', Boolean(streaming) && state.generating === true);
   if (streaming && folded) agent.dataset.unread = 'true';
 }
-/** What depends on the view: the switch between Chat and Studio, the context of the message box. */
-function syncViews() {
-  const studio = state.view === 'studio';
-  $('composer-context').hidden = !studio;
-}
+// (0.6.92: no « ● Studio » in the message box of the Studio's chat any more, nor what showed it.)
 
 /**
  * A proposal of the application itself in a chat turn (the image of a character, then its
@@ -4963,7 +4959,6 @@ function revealStudio() {
   return switchView('studio', () => {
     state.view = 'studio';
     projectUI.render();
-    syncViews();
     updateControls();
     showLastReply();
     if (coming) void studioUI.open().catch(error => notice(error.message));
@@ -4982,7 +4977,6 @@ function showChat() {
       state.view = 'chat';
       delete document.body.dataset.chat;
       projectUI.render();
-      syncViews();
       updateControls();
       // Back on its last lines at once: the chat grows back from the last answer, not from its top.
       state.stickToBottom = true;
@@ -5096,7 +5090,6 @@ function goHome(chosen = null) {
       state.view = 'chat';
       delete document.body.dataset.chat;
       projectUI.render();
-      syncViews();
       updateControls();
     });
     await newConversation(project);
@@ -5322,7 +5315,6 @@ try {
   if (!(await state.recovery.resumeTab())) welcomeInLastProject();
   // A creation being made in another conversation: followed there, the miniature shows it (0.6.82).
   await state.recovery.followElsewhere();
-  syncViews();
   showLastReply();
   if (initial.warning) notice(initial.warning);
   contextMeter.schedule();

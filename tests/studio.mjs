@@ -290,6 +290,8 @@ test('a character replaced in a video: its model among the videos, a video and a
     assert.match(tips[0].dataset.help, /« penguin ».*\n.*« girl, handkerchief »/s);
     assert.match(tips[1].dataset.help, /décor de l’image est laissé de côté/);
     assert.equal(tips[0].attributes['aria-label'], 'Aide : ' + tips[0].dataset.help);
+    // The name and its « ? », nothing else (0.6.92: no mark « Moodix AI peut régler ce paramètre »).
+    assert.deepEqual(who().map(field => field.children[0].children.length), [1, 1]);
     assert.equal(body.find('studio-rare')[0].children.length, 1);
     // The wand writes the prompt from the video and the character: it waits for both, not for words.
     assert.equal(wand().disabled, true);
@@ -367,6 +369,64 @@ test('the page module loads and offers the sizes of a format', async () => {
   assert.ok(sizes.length > 2);
   assert.ok(sizes.every(size => size.width > size.height && size.width % 32 === 0 && size.height % 32 === 0));
   assert.ok(Math.abs(nearest.width * nearest.height - 768 * 448) < 768 * 448 * 0.4);
+});
+
+test('Krea 2 offers its own sizes in the Studio, two smaller ones less and two larger ones more; another model the common ones (0.6.92)', async () => {
+  // As lib/tool-catalog.mjs gives them: the limits of the family, its pipeline as `family`.
+  const any = { width: { min: 64, max: 4096, multipleOf: 8 }, height: { min: 64, max: 4096, multipleOf: 8 } },
+    model = (id, name, family) => ({
+      id,
+      name,
+      family,
+      direct: true,
+      seeded: true,
+      roles: {},
+      limits: any,
+      size: { width: 1024, height: 1024 },
+      settings: [],
+    }),
+    clip = { ...model('v', 'LTX 2.5', 'ltx25'), direct: false, limits: sizes, size: { width: 768, height: 448 } };
+  const page = await studioPage({
+    create_image: [model('k', 'Krea 2', 'krea2'), model('m', 'MOSS Image', 'moss')],
+    create_video: [clip],
+  });
+  const { body, restore } = page;
+  const bar = () => body.find('studio-bar').find(item => item.dataset.ai === 'size'),
+    // Each notch of the bar in turn, then the one it was on.
+    offered = () => {
+      const shown = bar(),
+        at = shown.value,
+        list = [];
+      for (let place = 0; place <= Number(shown.max); place++) {
+        shown.value = String(place);
+        shown.oninput();
+        list.push(shown.attributes['aria-valuetext']);
+      }
+      shown.value = at;
+      shown.oninput();
+      return list;
+    },
+    chip = id => body.find('studio-format').find(item => item.children.at(-1)?.textContent === id),
+    each = (...list) => list.map(([width, height]) => `${width} × ${height}`),
+    common = each([512, 288], [768, 448], [1024, 576], [1344, 768], [1600, 896], [1920, 1088]);
+  try {
+    // Krea 2 in 1:1 at its own size, 1024 × 1024 as before; from 768 × 768 to 2048 × 2048.
+    assert.equal(bar().attributes['aria-valuetext'], '1024 × 1024');
+    assert.deepEqual(offered(), each([768, 768], [1024, 1024], [1280, 1280], [1536, 1536], [1792, 1792], [2048, 2048]));
+    chip('16:9').onclick();
+    assert.equal(bar().attributes['aria-valuetext'], '1344 × 768');
+    assert.deepEqual(offered(), each([1024, 576], [1344, 768], [1600, 896], [1920, 1088], [2240, 1248], [2560, 1440]));
+    // MOSS Image: the common sizes, the same limits.
+    const pick = body.find('studio-model-pick')[0];
+    pick.value = 'm';
+    pick.onchange();
+    assert.deepEqual(offered(), common);
+    // A video model: the common sizes it accepts.
+    page.mode(1);
+    assert.deepEqual(offered(), common);
+  } finally {
+    restore();
+  }
 });
 
 test('the format frame keeps the ratio and fits its box, wide or tall', async () => {
@@ -2852,7 +2912,8 @@ test('the LoRAs of the workflow show in the Studio: those of the assistant are s
     const rows = body.find('studio-lora-row');
     assert.equal(rows.length, 2);
     assert.match(rows[0].className, /is-off/, 'off by default, as the workflow says');
-    assert.equal(rows[0].find('ai-mark').length, 1, 'the tile of Moodix AI: the assistant may switch it');
+    // (0.6.92) No mark of Moodix AI beside its name: its switch says that it may be switched.
+    assert.equal(rows[0].find('ai-mark').length, 0);
     assert.equal(rows[1].find('studio-lora-lock').length, 1);
     // A switch only for the one left to the assistant; « Activé » in Workflows is always applied,
     // its strength fixed there: its bar greyed.
@@ -3351,6 +3412,116 @@ test('a take made from the chat since the Studio was last seen sets it again; on
     await studio.open();
     assert.equal(page.prompt().value, 'un lièvre');
     assert.equal(body.find('studio-frame-result')[0].src, '/c.png');
+  } finally {
+    restore();
+  }
+});
+
+test('the size a take was made at is the one shown, outside the lists too: asked in the Chat, of no format, of a proposal answered (0.6.92)', async () => {
+  // Krea 2 makes any multiple of 8: the Chat asks sizes that no list of the Studio has (1920 × 1080).
+  const any = { width: { min: 64, max: 4096, multipleOf: 8 }, height: { min: 64, max: 4096, multipleOf: 8 } },
+    krea = {
+      id: 'k',
+      name: 'Krea 2',
+      family: 'krea2',
+      direct: true,
+      seeded: true,
+      roles: {},
+      limits: any,
+      size: { width: 1024, height: 1024 },
+      settings: [],
+    },
+    take = (id, width, height) => ({
+      id,
+      conversationId: 'c1',
+      workflowId: 'k',
+      prompt: 'un phare',
+      parameters: { width, height, seed: 3 },
+      outputs: [{ originalUrl: `/${id}.png`, thumbUrl: `/${id}.jpg` }],
+    }),
+    // Moodix AI proposes a portrait of 1080 × 1920 from the chat of the Studio.
+    proposed = {
+      requestId: 'p',
+      approvalToken: 't',
+      tool: 'create_image',
+      workflowName: 'Krea 2',
+      resolution: { width: 1080, height: 1920 },
+      call: { id: 'call-p', type: 'function', function: { name: 'create_image', arguments: '{}' } },
+      plan: {
+        prompt: 'un phare la nuit',
+        parameters: { prompt: 'un phare la nuit', width: 1080, height: 1920, seed: 7 },
+        editable: {
+          prompt: true,
+          stages: [],
+          parameters: [
+            { key: 'width', type: 'integer', value: 1080 },
+            { key: 'height', type: 'integer', value: 1920 },
+            { key: 'seed', type: 'integer', value: 7 },
+          ],
+          references: [],
+        },
+        references: [],
+      },
+    };
+  const page = await studioPage(
+    { create_image: [krea] },
+    {
+      'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }),
+      'tools/execute': () => ({ id: 'j', state: 'error', error: 'rien' }),
+    },
+    { runs: [take('a', 1920, 1080)], project: () => 'p1' },
+  );
+  const { body, studio, asked, runs, restore } = page;
+  const size = () => body.find('studio-bar').find(bar => bar.dataset.ai === 'size'),
+    // The format checked, as its chip reads.
+    format = () => {
+      const chip = body.find('studio-format').find(item => item.attributes?.['aria-checked'] === 'true');
+      return chip?.children.at(-1).textContent;
+    },
+    sent = async () => {
+      await body.find('studio-go')[0].onclick();
+      await settle();
+      const { width, height } = asked.findLast(([route]) => route === 'tools/action')[1].arguments;
+      return [width, height];
+    };
+  try {
+    // Asked in the Chat at 1920 × 1080: shown so among the sizes of 16:9, by its pixels (before
+    // 1920 × 1088), and made so again; not the size of the list nearest to 1024 × 1024 (1344 × 768).
+    assert.equal(size().attributes['aria-valuetext'], '1920 × 1080');
+    assert.deepEqual([size().value, size().max], ['3', '6']);
+    assert.equal(format(), '16:9');
+    assert.deepEqual(await sent(), [1920, 1080]);
+    // 1280 × 800 (16:10): no format is that, the nearest one (3:2) in place of « ··· », and its very
+    // size; not the format and the size of the take before.
+    runs.unshift(take('b', 1280, 800));
+    studio.invalidate();
+    await studio.open();
+    assert.equal(size().attributes['aria-valuetext'], '1280 × 800');
+    assert.equal(format(), '3:2 ···');
+    assert.deepEqual(await sent(), [1280, 800]);
+    // Another format chosen: a size of its list, and nothing else on the bar.
+    body.find('studio-format').find(chip => chip.children.at(-1)?.textContent === '1:1').onclick();
+    assert.equal(size().attributes['aria-valuetext'], '1024 × 1024');
+    assert.equal(size().max, '5');
+    // Proposed by Moodix AI at 1080 × 1920, then answered: its size stays once its take is made.
+    const answer = studio.propose(proposed, new AbortController().signal);
+    await settle();
+    assert.equal(size().attributes['aria-valuetext'], '1080 × 1920');
+    await body.find('studio-go')[0].onclick();
+    assert.equal(await answer, 'once');
+    runs.unshift(take('c', 1080, 1920));
+    await studio.settled({ record: { id: 'c' } });
+    assert.equal(body.find('studio-frame-result')[0].src, '/c.png');
+    assert.equal(size().attributes['aria-valuetext'], '1080 × 1920');
+    assert.equal(format(), '9:16');
+    assert.deepEqual(await sent(), [1080, 1920]);
+    // A proposal of no format (1280 × 800) is read with the nearest one: the format in hand stayed.
+    const { proposedValues } = await import('../public/studio.mjs'),
+      wide = { ...proposed.plan, parameters: { ...proposed.plan.parameters, width: 1280, height: 800 } };
+    assert.deepEqual(
+      ['format', 'size'].map(key => proposedValues({ ...proposed, plan: wide }, [krea])[key]),
+      ['3:2', '1280x800'],
+    );
   } finally {
     restore();
   }
@@ -4790,10 +4961,16 @@ const kreaWithDenoise = () => ({
   loras: [],
 });
 const denoiseBar = body => body.find('studio-bar').find(bar => bar.dataset.ai === 'setting-denoise');
-/** « Débruitage » as the Studio shows it: its value, whether it answers, what is said under it. */
+/**
+ * « Débruitage » as the Studio shows it: its value, whether it answers, what its tip says (under the
+ * pointer and on the focus: no line under it any more, 0.6.92), read by screen readers too.
+ */
 const denoiseShown = body => {
-  const [line] = body.find('studio-fine');
-  return [denoiseBar(body).attributes['aria-valuetext'], !denoiseBar(body).disabled, line.find('studio-fine-note')[0].textContent];
+  const [line] = body.find('studio-fine'),
+    tip = line.find('studio-bar-line')[0].title;
+  assert.deepEqual(line.find('studio-fine-note'), [], 'no line under the bar');
+  assert.equal(line.find('sr-only')[0]?.textContent, tip, 'what its tip says, for screen readers');
+  return [denoiseBar(body).attributes['aria-valuetext'], !denoiseBar(body).disabled, tip];
 };
 const DENOISE_HELP = '0,6 garde la composition et change l’ambiance ; 0,7 laisse la composition changer.',
   DENOISE_IDLE = 'Sert seulement avec une image à modifier.';
@@ -4818,12 +4995,12 @@ test('« Débruitage » of Krea 2 in « Plus de réglages »: greyed with its re
     page.prompt().value = 'un escalier la nuit';
     page.prompt().oninput();
     body.find('studio-more-pill')[0].onclick();
-    // Among the rare settings, on a bar from 0,60 to 0,70 by hundredths, with the mark of what
-    // Moodix AI may set. No image to modify: greyed, and why, never hidden.
+    // Among the rare settings, on a bar from 0,60 to 0,70 by hundredths; no mark of what Moodix AI
+    // may set any more (0.6.92). No image to modify: greyed, and why in its tip, never hidden.
     const [line] = body.find('studio-rare')[0].find('studio-fine');
     const [label] = line.find('studio-bar-label');
     assert.equal(label.textContent, 'Débruitage');
-    assert.equal(label.find('ai-mark').length, 1);
+    assert.deepEqual(body.find('ai-mark'), []);
     assert.deepEqual([denoiseBar(body).min, denoiseBar(body).max], ['0', '10']);
     assert.deepEqual(denoiseShown(body), ['0,60', false, DENOISE_IDLE]);
     assert.match(line.className, /is-idle/);
@@ -4873,9 +5050,20 @@ test('a decimal setting between two close bounds is a bar; a wider one, or one f
     assert.equal(body.find('studio-fine').length, 0);
     assert.equal(denoiseBar(body), undefined);
     assert.equal(body.find('studio-rare')[0].find('studio-field').length, 1, 'its steps, in their field as before');
+    // Its name alone, without the mark of Moodix AI (0.6.92).
+    assert.deepEqual(body.find('studio-rare')[0].find('studio-label')[0].children, []);
   } finally {
     restore();
   }
+});
+
+test('no mark « Moodix AI peut régler ce paramètre » in the Studio, nor the line under « Débruitage », nor their styles (0.6.92)', async () => {
+  const { readFile } = await import('node:fs/promises'),
+    read = name => readFile(new URL('../public/' + name, import.meta.url), 'utf8'),
+    [studio, css] = await Promise.all([read('studio.mjs'), read('moodix.css')]);
+  // There would be one on almost every setting: on none, a field, a bar or a LoRA of the workflow.
+  assert.doesNotMatch(studio, /ai-mark|peut régler ce paramètre|mark: true|studio-fine-note/);
+  assert.doesNotMatch(css, /\.ai-mark|\.studio-fine-note/);
 });
 
 /** A proposal of Moodix AI for Krea 2, as lib/tool-runtime.mjs describes it: with an image to modify, or none. */

@@ -1,4 +1,4 @@
-import { FORMATS, formatOf, nearestSize, sizesFor } from './formats.mjs';
+import { FORMATS, formatOf, nearestFormat, nearestSize, sizeFits, sizesFor } from './formats.mjs';
 import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
 import { livePreview } from './live-preview.mjs';
 import { takeFlux } from './take-flux.mjs';
@@ -164,11 +164,20 @@ export function frameSize(ratio, box = FRAME) {
     : { width: Math.round(box.height * ratio), height: box.height };
 }
 
-/** The sizes offered for a workflow in a format, and the one closest to `pixels`. */
+/** The sizes offered for a workflow in a format (those of its family: Krea 2's), and the one closest to `pixels`. */
 export function sizeChoices(workflow, formatId, pixels) {
   const format = FORMATS.find(item => item.id === formatId),
-    sizes = format ? sizesFor(format, workflow.limits) : [];
+    sizes = format ? sizesFor(format, workflow.limits, workflow.family) : [];
   return { sizes, nearest: nearestSize(sizes, pixels) };
+}
+
+/**
+ * Whether the size in a draft (« 1920x1080 ») is one the workflow makes in the format of that draft,
+ * listed or not: a size a take or a proposal was made at (0.6.92).
+ */
+function madeSize(workflow, draft) {
+  const [width, height] = /^\d+x\d+$/.test(draft.size ?? '') ? draft.size.split('x').map(Number) : [];
+  return sizeFits({ width, height }, workflow.limits) && nearestFormat(width, height)?.id === draft.format;
 }
 
 /** The formats under the preview: the three main ones, and the one chosen when it is another (it takes the place of « ··· »). */
@@ -207,7 +216,8 @@ export function proposedValues(request, offered = []) {
     prompt: String(plan.prompt ?? request.args?.prompt ?? ''),
     promptFree: Boolean(editable.prompt),
     size: width > 0 && height > 0 ? sizeKey({ width, height }) : null,
-    format: formatOf(width, height)?.id ?? null,
+    // (Of a ratio no format is close to, the nearest one, 0.6.92: the format in hand stayed beside its size.)
+    format: nearestFormat(width, height)?.id ?? null,
     sizeFree: free('width') && free('height'),
     seconds: fps && Number.isFinite(parameters.frames) ? Math.max(0, parameters.frames - overlap) / fps : null,
     frames: parameters.frames ?? null,
@@ -478,24 +488,18 @@ export function setupStudio({
   // Image · Vidéo · Son: drawn in the head of the screen, put back above it when there is none.
   let kindsEl = null;
   const kindsBar = () => (kindsEl ??= $('studio-kinds'));
-  // The settings Moodix AI may change wear its tile; the one it is changing, a ring; those it
-  // has set, a fine trace while it works. Once it has stopped, nothing is framed any more.
+  // The setting Moodix AI is changing wears a ring, those it has set a fine trace, while it works.
+  // Once it has stopped, nothing is framed any more. (0.6.92: no mark on the settings it may change
+  // any more; there would be one on almost every setting.)
   function aiTarget(element, key) {
     element.dataset.ai = key;
     if (ai?.active === key) element.setAttribute('data-ai-active', '');
     if (ai?.touched.has(key)) element.setAttribute('data-ai-touched', '');
     return element;
   }
-  function field(label, control, { help, tip, wide = false, mark = false } = {}) {
+  function field(label, control, { help, tip, wide = false } = {}) {
     const wrapper = node('label', 'studio-field' + (wide ? ' is-wide' : '')),
       title = node('span', 'studio-label', label);
-    if (mark) {
-      const dot = node('span', 'ai-mark');
-      dot.setAttribute('role', 'img');
-      dot.setAttribute('aria-label', 'Moodix AI peut régler ce paramètre');
-      dot.title = 'Moodix AI peut régler ce paramètre';
-      title.append(dot);
-    }
     // « ? » at the right of the name: its help at once under the pointer or on focus, as in the
     // settings (public/help-tips.mjs). A click on it does not go to the field.
     if (tip) {
@@ -1035,7 +1039,7 @@ export function setupStudio({
         store[setting.key] = control.value;
       };
       aiTarget(control, 'setting-' + setting.key);
-      block.append(field(SETTINGS[setting.key], control, { mark: true, tip: WHO[setting.key].help }));
+      block.append(field(SETTINGS[setting.key], control, { tip: WHO[setting.key].help }));
     }
     return block;
   }
@@ -1071,13 +1075,17 @@ export function setupStudio({
   /** The formats and sizes a workflow offers, with the draft settled on one of each. */
   function sizing(workflow) {
     const draft = drafts[mode],
-      formats = FORMATS.filter(format => sizesFor(format, workflow.limits).length),
+      formats = FORMATS.filter(format => sizesFor(format, workflow.limits, workflow.family).length),
       base = workflow.size ?? { width: 1024, height: 1024 };
     if (!formats.some(format => format.id === draft.format))
       draft.format = (formatOf(base.width, base.height) ?? formats[0])?.id ?? null;
     const { sizes, nearest } = sizeChoices(workflow, draft.format, base.width * base.height);
     const proposed = proposal?.mode === mode && proposal.values?.size === draft.size;
-    if (!proposed && !sizes.some(size => sizeKey(size) === draft.size)) draft.size = nearest ? sizeKey(nearest) : null;
+    // A size a take or a proposal was made at stays, outside the list too, while the model makes it
+    // in the format in hand (0.6.92): replaced by the size of the list nearest to the model's own,
+    // the Studio showed 1344 × 768 beside a take of 1920 × 1080 asked in the Chat.
+    if (!proposed && !madeSize(workflow, draft) && !sizes.some(size => sizeKey(size) === draft.size))
+      draft.size = nearest ? sizeKey(nearest) : null;
     return { formats, sizes, final: workflow.final && sizeKey(workflow.final) };
   }
   /** Draft or final, from the size: a large picture is a final, a small one a draft. */
@@ -1412,10 +1420,12 @@ export function setupStudio({
     if (workflow.limits && !extending) {
       const { sizes } = sizing(workflow),
         list = [...sizes];
-      // A size of a proposal outside the list (kept from a source) is shown as it is.
+      // A size outside the list, of a proposal (kept from a source) or of a take (asked in the Chat),
+      // is shown as it is, among the others by its number of pixels (0.6.92: at the end before).
       if (draft.size && !list.some(size => sizeKey(size) === draft.size)) {
-        const [width, height] = draft.size.split('x').map(Number);
-        list.push({ width, height });
+        const [width, height] = draft.size.split('x').map(Number),
+          larger = list.findIndex(size => size.width * size.height > width * height);
+        list.splice(larger < 0 ? list.length : larger, 0, { width, height });
       }
       if (list.length) {
         const line = barLine('Résolution', {
@@ -1511,8 +1521,7 @@ export function setupStudio({
         disabled: !free || !choice.on,
       }),
       lock = node('span', 'studio-lora-lock');
-    // Left to the assistant: the tile of Moodix AI, which may switch it.
-    if (lora.assistant) name.append(node('span', 'ai-mark'));
+    // (Left to the assistant, it has its switch: no mark of Moodix AI beside its name, 0.6.92.)
     name.append(node('span', 'studio-lora-label', lora.name));
     name.title = lora.description ? lora.name + ' · ' + lora.description : lora.name;
     if (!free) value.title = 'Force fixée dans Workflows';
@@ -1582,8 +1591,10 @@ export function setupStudio({
   }
   /**
    * A decimal setting on its bar, by hundredths (« Débruitage », 0,60 to 0,70), what its values do
-   * said under it. One the model only reads with an input (an image to modify) is greyed while
-   * the case of that input is empty, and says why in place of that help: never hidden.
+   * said in its tip, under the pointer and on the focus (help-tips.mjs), as the other settings say
+   * theirs: no line under it any more (0.6.92). One the model only reads with an input (an image to
+   * modify) is greyed while the case of that input is empty, and its tip says why in place of that
+   * help: never unavailable without its reason.
    */
   function fineLine(workflow, setting) {
     const draft = drafts[mode],
@@ -1609,18 +1620,13 @@ export function setupStudio({
         },
         disabled: idle,
       }),
-      wrapper = node('div', 'studio-fine' + (idle ? ' is-idle' : '')),
-      mark = node('span', 'ai-mark');
-    // Left to the assistant: its mark beside the name, as on the other settings.
-    mark.setAttribute('role', 'img');
-    mark.setAttribute('aria-label', 'Moodix AI peut régler ce paramètre');
-    mark.title = 'Moodix AI peut régler ce paramètre';
-    line.children[0].append(mark);
+      wrapper = node('div', 'studio-fine' + (idle ? ' is-idle' : ''));
     wrapper.append(line);
     if (said) {
-      const note = node('small', 'field-help studio-fine-note', said);
+      // The tip of the whole line: a greyed bar takes no focus, its label and its value the pointer.
       line.title = said;
-      wrapper.append(note);
+      // Read by screen readers after the bar, where the line under it said it, without its room.
+      wrapper.append(node('span', 'sr-only', said));
     }
     return wrapper;
   }
@@ -1697,7 +1703,7 @@ export function setupStudio({
         control.oninput = () => set(control.value);
       }
       aiTarget(control, 'setting-' + setting.key);
-      const wrapper = field(label, control, { mark: true, wide: setting.type === 'string' && !setting.choices });
+      const wrapper = field(label, control, { wide: setting.type === 'string' && !setting.choices });
       if (setting.max !== undefined) wrapper.title = `De ${setting.min ?? 0} à ${setting.max}.`;
       lines.push(wrapper);
     }
@@ -4235,7 +4241,7 @@ export function setupStudio({
         });
         if (lyrics.maxLength) box.maxLength = lyrics.maxLength;
         aiTarget(box, 'setting-lyrics');
-        write.append(field(SETTINGS.lyrics, box, { wide: true, mark: true }));
+        write.append(field(SETTINGS.lyrics, box, { wide: true }));
       } else
         write.append(
           button('studio-lyrics-toggle', '+ Paroles (facultatif)', () => {
@@ -4749,7 +4755,9 @@ export function setupStudio({
     if (workflow.seeded)
       draft.seed = (exactSeed || made.seed_given === true) && Number.isSafeInteger(made.seed) ? String(made.seed) : '';
     if (workflow.limits && made.width > 0 && made.height > 0) {
-      const format = formatOf(made.width, made.height);
+      // Of a ratio no format is close to (1280 × 800 asked in the Chat), the nearest format (0.6.92):
+      // left as they were, the format and the size shown were those of the take before.
+      const format = nearestFormat(made.width, made.height);
       if (format) Object.assign(draft, { format: format.id, size: sizeKey(made), formatChosen: true });
     }
     const lengths = workflow.lengths?.seconds ?? [],

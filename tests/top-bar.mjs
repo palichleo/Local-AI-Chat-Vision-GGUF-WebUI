@@ -239,7 +239,6 @@ test('the logo opens the accueil, a new conversation in the project in hand, fro
         apply();
       },
       projectUI: { render() {} },
-      syncViews() {},
       updateControls() {},
       newConversation: async into => done.push(['new', into]),
     };

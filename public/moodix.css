@@ -4883,15 +4883,6 @@ summary:focus-visible {
   background: transparent;
 }
 
-/* The dot of the action colour: the Studio label of the message box. */
-.mode-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--fn-action);
-  flex: none;
-}
-
 /* Image / Vidéo / Son under « Studio » in the sidebar (moodix-design.md 7 bis 19). While the Studio
    is on screen, « Studio » and its modes are one card (#1C1F26, 12 px corners); under the name, a
    dark track with three equal tabs, icons only (their names for screen readers and in their
@@ -4951,7 +4942,6 @@ body[data-view='studio'] #studio-kinds .kind-tab[aria-selected='true'] {
 }
 /* Moodix AI: the « matrice d'attention » (moodix-design.md 1, Petit logo), four rows of four cells
    in the colours of the pipes, the diagonal lit; no ground. */
-.ai-mark,
 .message-avatar {
   flex: none;
   border: 0;
@@ -4959,9 +4949,6 @@ body[data-view='studio'] #studio-kinds .kind-tab[aria-selected='true'] {
   clip-path: none;
   background: none;
   box-shadow: none;
-}
-.ai-mark {
-  background: url('/assets/moodix-mark.svg?v=4') center / contain no-repeat;
 }
 @media (max-width: 1039px) {
   :root {
@@ -5126,26 +5113,6 @@ body[data-view='studio'] .suggestions {
   min-height: 30px;
   padding: 0 10px;
   font-weight: 700;
-}
-.composer-context {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: var(--chip);
-  font-size: var(--size-1);
-  font-weight: 700;
-  color: var(--soft);
-  white-space: nowrap;
-}
-.composer-context[hidden] {
-  display: none;
-}
-.composer-context .mode-dot {
-  width: 7px;
-  height: 7px;
 }
 .composer-region {
   flex-direction: column;
@@ -5486,12 +5453,6 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
-}
-/* A setting Moodix AI may change (« Assistant » in its workflow) wears its mark, small (see
-   .message-avatar), never moving. */
-.ai-mark {
-  width: 10px;
-  height: 10px;
 }
 /* The « ? » of a field (« Qui remplacer »), at the right of its name as in the corner of a block
    of the settings, a little smaller. */
@@ -7773,18 +7734,9 @@ html[data-switch='open']::view-transition-old(chat) {
   padding-top: 10px;
   border-top: 1px solid #1a1d24;
 }
-/* A setting on a bar among them (« Débruitage »): the mark of Moodix AI beside its name, what its
-   values do under it. Greyed while the input it is only read with is missing, its reason left
-   readable. */
-.studio-fine .studio-bar-label .ai-mark {
-  display: inline-block;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-.studio-fine-note {
-  display: block;
-  line-height: 1.45;
-}
+/* A setting on a bar among them (« Débruitage »): what its values do in its tip (0.6.92: no line
+   under it, no mark of Moodix AI). Greyed while the input it is only read with is missing, its
+   reason in that tip. */
 .studio-fine.is-idle .studio-bar-label,
 .studio-fine.is-idle .studio-bar-value {
   opacity: 0.45;
@@ -9354,9 +9306,6 @@ body:has(dialog[open]) .room-grain {
 
 :root[data-theme='light'] {
   --mark: #0c0b0e;
-}
-:root[data-theme='light'] .ai-mark {
-  background-image: url('/assets/moodix-mark-encre.svg?v=4');
 }
 
 /* ------------------------------------------------------------------ the top bar (1b) */
@@ -15909,26 +15858,24 @@ button.glass-select::after {
   white-space: nowrap;
 }
 /* The bar of the chat stays on one line, whatever it says (17/11): « Joindre », the two buttons,
-   « Studio » in the Studio, then what Moodix is doing and « Envoyer ». What gives way, in this
-   order: the name of the model (whole in its tip), then the reflection, then the sentence at the
-   right, each cut short; « Joindre », « Envoyer », « Interrompre » and « Libérer le GPU » never.
+   then what Moodix is doing and « Envoyer », in the Studio too (0.6.92: no « ● Studio » there any
+   more). What gives way, in this order: the name of the model (whole in its tip), then the
+   reflection, then the sentence at the right, each cut short; « Joindre », « Envoyer »,
+   « Interrompre » and « Libérer le GPU » never.
    --bar-left is what the left side keeps at the least: « Joindre » (34 px), the model down to
-   72 px and the reflection down to 96 px, 2 px between them (206 px); with « Studio », 2 px and
-   the 80 px kept for it more (288 px). The right side never takes that: its sentence is cut
-   instead. The reflection keeps its width as long as the model has more than its 72 px.
+   72 px and the reflection down to 96 px, 2 px between them (206 px). The right side never takes
+   that: its sentence is cut instead. The reflection keeps its width as long as the model has more
+   than its 72 px.
    A window of 520 px or less: the buttons go to a second line, as before. */
 @media (min-width: 521px) {
   #chat-form .composer-tools {
     --bar-left: 206px;
   }
-  #chat-form .composer-tools:has(#composer-context:not([hidden])) {
-    --bar-left: 288px;
-  }
   #chat-form .composer-options {
     flex: 0 1 auto;
     flex-wrap: nowrap;
   }
-  #chat-form :is(#attach, .composer-context),
+  #chat-form #attach,
   #chat-form .send-tools > button {
     flex: none;
   }
