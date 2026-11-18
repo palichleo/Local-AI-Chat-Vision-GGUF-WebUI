@@ -602,3 +602,30 @@ test('a creation stopped after a reload is written once the server has handed th
   assert.equal(result.unanswered, undefined, 'stopped, not left without a result');
   assert.deepEqual(seen.mounted[0].told.at(-1), ['withdraw']);
 });
+
+test('a call completed while a generation of its conversation runs is saved or let go as its conversation is after the wait, never as the one opened meanwhile (0.6.88)', async () => {
+  // keep() decided on the conversation of the page once the wait was over: another opened meanwhile,
+  // an empty one had this one forgotten (deleted when it had no take), a new one threw.
+  for (const after of [{ archiveSnapshot: null }, { archiveSnapshot: { messages: [], incomplete: false } }]) {
+    const messages = closedCalls([
+      { role: 'user', content: 'Un bateau rouge' },
+      { role: 'assistant', content: '', tool_calls: [call('call_1')] },
+      { role: 'user', content: 'Encore' },
+      { role: 'assistant', content: '', tool_calls: [call('call_2')] },
+    ]);
+    const { state, seen, recovery, views } = page({
+      messages,
+      job: running({ callId: 'call_2' }),
+      runs: [take('r1', 'call_1')],
+      state: { work: { kind: 'turn', conversationId: OTHER } },
+    });
+    seen.busy = 2;
+    const task = recovery.complete(ID, views());
+    await new Promise(resolve => setTimeout(resolve, 100));
+    Object.assign(state, { conversationId: OTHER, messages: [], ...after });
+    await task;
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.deepEqual(seen.forgotten, [], 'never forgotten for the one opened meanwhile');
+    assert.deepEqual(seen.saves, [], 'neither shown nor set aside any more: completed when it is opened next');
+  }
+});

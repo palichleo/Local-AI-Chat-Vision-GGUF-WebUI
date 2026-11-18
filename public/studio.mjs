@@ -2457,6 +2457,9 @@ export function setupStudio({
       return notice('Ce personnage vous convient ? Répondez d’abord : OK, Autre image ou Annuler.');
     }
     if (!onTake && answering()) return approve();
+    // No creation of its own while the take just made is put on its screen (0.6.88): its end would
+    // have ended this one's work. (An answer to Moodix AI above is no such creation.)
+    if (settling) return;
     const reason = blocked() || (onTake ? '' : current()?.unavailable);
     if (reason) return notice(reason);
     let wanted;
@@ -4925,6 +4928,8 @@ export function setupStudio({
   function cannotLook(kind) {
     if (working) return 'Une création est en cours : attendez sa fin pour en regarder une autre.';
     if (proposal || ai) return 'Moodix AI est en train de proposer';
+    // Nor while a character waits for its check (0.6.88): looked at, the image to check left the screen.
+    if (checking) return 'Un personnage attend votre réponse dans le Studio : « OK », « Autre image » ou « Annuler ».';
     // A kind no model makes here has no screen: the Studio would only say so.
     if (info && !modelsOf(kind).length)
       return `Aucun modèle ${kind === 'audio' ? 'de son' : kind === 'video' ? 'de vidéo' : 'd’image'} n’est prêt : ce média ne peut pas être montré dans le Studio.`;
@@ -5090,6 +5095,16 @@ export function setupStudio({
       const pixels = (workflow.size?.width ?? 1024) * (workflow.size?.height ?? 1024);
       const { nearest } = sizeChoices(workflow, format.id, pixels);
       return nearest ? { width: nearest.width, height: nearest.height } : null;
+    },
+    /**
+     * The LoRAs of the user the Studio has for conversation `id` in mode `target` (0.6.88): those it
+     * shows when its settings are that conversation's, else those it kept when it left it; null when
+     * it has none for it. A creation made at once while that Studio is not on screen takes them.
+     */
+    stylesFor: (id, target = 'image') => {
+      const own = id && id === draftsKey ? drafts : leftDrafts.get(id)?.drafts,
+        styles = own?.[target]?.styles;
+      return Array.isArray(styles) ? styles.filter(style => style?.name).map(({ name, strength }) => ({ name, strength })) : null;
     },
     /** Whether a proposal of Moodix AI waits for « Générer », or a character for its check. */
     proposing: () => Boolean(proposal || checking),

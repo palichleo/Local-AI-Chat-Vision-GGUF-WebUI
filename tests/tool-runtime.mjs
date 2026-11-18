@@ -580,7 +580,7 @@ test('a workflow that takes no image says so of the image the user named', async
  * of the model; run, keep — its models left loaded — and free of the generator). `idle`: how long
  * the runtime waits for a next image; `run`: what the generator answers to a job.
  */
-function seriesFixture({ idle = 60000, local, run = async () => ({ outputs: [{ filename: 'x.png', subfolder: '', type: 'output' }] }) } = {}) {
+function seriesFixture({ idle = 60000, local, runs = [], run = async () => ({ outputs: [{ filename: 'x.png', subfolder: '', type: 'output' }] }) } = {}) {
   const order = [];
   const workflow = nativeWorkflow({ id: 'wf', name: 'Images', digest: 'one' });
   const engine = {
@@ -611,7 +611,7 @@ function seriesFixture({ idle = 60000, local, run = async () => ({ outputs: [{ f
   const rt = new ToolRuntime({
     engine,
     catalog: { list: async () => [workflow], read: async () => workflow, prepare: async () => nativePrepared(workflow) },
-    gallery: { put: async record => record },
+    gallery: { put: async record => record, list: async () => ({ runs }) },
     getConfig: () => ({ enabled: true, autoAllow: true, maxIterations: 50 }),
     engineConfig: () => ({}),
     clientFactory: () => client,
@@ -818,4 +818,15 @@ test('a call gets an identifier of its own in its conversation when a service gi
   const fresh = await ask(2, { messages: [{ role: 'user', content: 'Un phare' }] });
   assert.equal(fresh.call.id, 'call_1');
   assert.equal(rt.job.callId, again.call.id);
+});
+
+test('a call gets an identifier of its own against the takes of its conversation too, its call taken back meanwhile (0.6.88)', async () => {
+  // « Régénérer » or « Modifier » takes the call out of the messages, not its takes out of the
+  // Pellicule: the identifier given again went to those takes.
+  const { ask } = seriesFixture({ runs: [{ id: 'run-1', callId: 'call_1' }] });
+  const again = await ask(2, { messages: [{ role: 'user', content: 'Un phare' }] });
+  assert.match(again.call.id, /^call_[0-9a-f]{24}$/);
+  // A take of another call: it keeps its own.
+  const other = seriesFixture({ runs: [{ id: 'run-2', callId: 'call_9' }] });
+  assert.equal((await other.ask(2, { messages: [{ role: 'user', content: 'Un phare' }] })).call.id, 'call_1');
 });

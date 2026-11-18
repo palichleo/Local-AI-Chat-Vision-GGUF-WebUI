@@ -352,10 +352,16 @@ test('the CUDA libraries land beside the program, and a file that does not match
 
 test('a llama.cpp just downloaded or unpacked that Windows holds a moment (an antivirus reading it) takes its place once let go', async () => {
   const root = await mkdtemp(join(tmpdir(), 'llama-builds-'));
-  const { fetchImpl } = github({
+  const { fetchImpl: served } = github({
     'llama-b12110-bin-win-cuda-13.4-x64.zip': Buffer.from('cuda 13'),
     'cudart-llama-bin-win-cuda-13.4-x64.zip': Buffer.from('cudart 13'),
   });
+  // The step said as each archive is asked for (0.6.88: « en attente » stayed through the next one).
+  const asking = [];
+  const fetchImpl = (url, options) => {
+    if (/\.zip$/.test(url)) asking.push(builds.job.step);
+    return served(url, options);
+  };
   const unpack = async (archive, destination) => {
     if (archive.includes('cudart')) {
       await mkdir(join(destination, 'bin'), { recursive: true });
@@ -394,6 +400,8 @@ test('a llama.cpp just downloaded or unpacked that Windows holds a moment (an an
     assert.equal(kept.id, 'cuda-13.4');
     assert.deepEqual(refused, twice(paths));
     assert.ok([...steps].some(step => / : en attente que Windows libère (le fichier|ses fichiers)…$/.test(step)), [...steps].join(' | '));
+    assert.equal(asking.length, 2, asking.join(' | '));
+    assert.ok(asking.every(step => !/en attente/.test(step)), asking.join(' | '));
     assert.ok((await stat(join(folder, 'cudart64_13.dll'))).isFile(), 'the library beside llama-server.exe');
     assert.deepEqual((await readdir(root)).sort(), ['b12110-cuda-13.4', 'downloads']);
   } finally {

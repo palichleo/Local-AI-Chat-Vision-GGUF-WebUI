@@ -664,6 +664,8 @@ async function loadConversation(id) {
   state.loadingHistory = true;
   updateControls();
   let setNow = false;
+  // Where what is written in the one shown is kept, if it is left (keepDraft).
+  const from = leftKey(state.conversationId, state.projectId);
   try {
     // A conversation that cannot be saved must not trap the user in it.
     if (
@@ -696,13 +698,10 @@ async function loadConversation(id) {
     const messages = closedCalls(record.messages);
     const asked =
       record.incomplete && messages.at(-1)?.role === 'user' && !messages.at(-1).internal ? savedUser(messages.pop()) : null;
-    // And what was being written in it when it was left (keepDraft, 0.6.87), after that message.
+    // Or what was being written in it when it was left (keepDraft, 0.6.87): what the box held then,
+    // that message in it when it was there (0.6.88: both, it came back once more at each visit).
     const left = draftLeft(id),
-      draft = {
-        text: [asked?.text, left?.text].filter(Boolean).join('\n\n'),
-        images: [...(asked?.images ?? []), ...(left?.images ?? [])],
-        videos: [...(asked?.videos ?? []), ...(left?.videos ?? [])],
-      };
+      draft = left ?? { text: asked?.text ?? '', images: asked?.images ?? [], videos: asked?.videos ?? [] };
     state.conversationId = id;
     rememberConversation(id);
     state.conversationInstructions = record.instructions || '';
@@ -736,6 +735,9 @@ async function loadConversation(id) {
   } catch (error) {
     // Not opened: the conversation set aside for it is the one on screen again, as it was.
     if (setNow && state.aside?.conversationId === state.conversationId) takeBackAside();
+    // Not left either: what keepDraft kept of it is still in its box, and is not to come back once
+    // sent (0.6.88).
+    else if (!setNow && leftKey(state.conversationId, state.projectId) === from) state.draftsLeft?.delete(from);
     notice(error.message);
   } finally {
     state.loadingHistory = false;
@@ -1289,6 +1291,11 @@ function syncMiniature() {
   // Back in its conversation once it is over: nothing more to say.
   if (here && !mini.running && state.view !== 'library') return mini.forget();
   if (seen) return mini.place(null);
+  // A take in hand waiting for the user in the Studio of its conversation (0.6.88): its proposal not
+  // set there yet, or set and resting on « Générer », a character to check. Said so, not
+  // « Préparation… » over a Flux that moved for nothing.
+  const held = Boolean(state.studio?.proposing?.()) && state.studio?.heldFor?.() === work.conversationId;
+  if (state.work?.waits || held) mini.waitFor?.('Moodix AI vous attend dans le Studio de cette conversation');
   mini.answer(
     state.work?.waits
       ? 'Moodix AI vous attend dans le Studio de cette conversation'
@@ -2920,7 +2927,9 @@ function backHere(id, signal) {
 /** The conversation on screen is left while its work goes on: set aside as it is, alive. */
 function setAside() {
   if (!state.work || state.work.conversationId !== state.conversationId) return false;
-  // One at a time: one set aside before (its work over) leaves the page, saved as it was.
+  // One at a time: one set aside before (its work over) leaves the page, saved as it was; what was
+  // being written in it comes back when it is opened again (0.6.88: it went with it).
+  if (state.aside) keepDraft({ id: state.aside.conversationId, projectId: state.aside.projectId, ...state.aside.draft });
   dropAside();
   const nodes = document.createDocumentFragment();
   nodes.append(...$('messages').childNodes);
@@ -2943,14 +2952,30 @@ function setAside() {
  * again, it comes back in the message box. Only one set aside during its work kept it before, and what
  * was written meanwhile in the one shown was lost when the miniature brought the user back.
  */
-function keepDraft() {
-  const id = state.conversationId,
-    text = $('prompt').value;
-  if (!id || (!text.trim() && !state.images.length && !state.videos.length)) return;
-  const drafts = (state.draftsLeft ??= new Map());
-  drafts.delete(id);
-  drafts.set(id, { text, images: state.images, videos: state.videos });
+function keepDraft(from = shownDraft()) {
+  const key = leftKey(from.id, from.projectId),
+    drafts = (state.draftsLeft ??= new Map());
+  // Left empty: nothing comes back (0.6.88: what was kept before, then sent, came back). Not for one
+  // not begun yet: what is kept for its project is another's, not given back yet.
+  if (!String(from.text ?? '').trim() && !from.images?.length && !from.videos?.length) {
+    if (from.id) drafts.delete(key);
+    return;
+  }
+  drafts.delete(key);
+  drafts.set(key, { text: from.text, images: from.images ?? [], videos: from.videos ?? [] });
   if (drafts.size > 20) drafts.delete(drafts.keys().next().value);
+}
+/** What the message box of the conversation shown holds, as keepDraft keeps it. */
+function shownDraft() {
+  return { id: state.conversationId, projectId: state.projectId, text: $('prompt').value, images: state.images, videos: state.videos };
+}
+/**
+ * Where the draft of a conversation is kept: its identifier; one not begun yet, by its project, given
+ * to the next one begun there (0.6.88: written in a new conversation while another worked, it was
+ * lost when the miniature brought the user back).
+ */
+function leftKey(id, projectId) {
+  return id || `new:${projectId || 'inbox'}`;
 }
 /** The draft kept for conversation `id` when it was left (taken out), or null. */
 function draftLeft(id) {
@@ -3578,7 +3603,9 @@ async function sendMessage(event) {
       // Made from the Studio, the generator keeps its models for the next creation, and the chat
       // model comes back with the next message: unless it has a creation to look at.
       const kept = viaStudio && !(review && request.mediaType === 'video') && !lookAtImage;
-      let result;
+      let result,
+        // The image in hand was made at once, the Studio of its conversation not on screen (0.6.88).
+        away = false;
       // A creation run on its card: the same for each image of a series (image-series.mjs).
       const runOn = (proposal, card) =>
         workflowsUI.requestTool(
@@ -3586,7 +3613,11 @@ async function sendMessage(event) {
           signal,
           (progress, fraction, preview) => {
             card.progress(progress, fraction, preview);
-            if (viaStudio) state.studio.follow(progress, fraction, preview);
+            // Made at once while the user was elsewhere, it is followed by its Studio once that is on
+            // screen again, as after a reload (0.6.88).
+            if (viaStudio && away && shownHere(talkId) && state.view === 'studio' && state.studio.followAgain?.())
+              away = false;
+            if (viaStudio && !away) state.studio.follow(progress, fraction, preview);
             scrollToBottom();
           },
           image => card.image(image),
@@ -3598,6 +3629,35 @@ async function sendMessage(event) {
             ...(viaStudio
               ? {
                   approve: async (proposal, abort) => {
+                    // What goes by itself (an image of a series the user asked for, a creation allowed
+                    // in the settings) while the Studio of its conversation is not on screen is made at
+                    // once, as in the Chat (0.6.88). Waiting for the user to come back stopped the series
+                    // as long as they were elsewhere, and its proposal expired after 15 minutes; set in
+                    // the Studio, it took the page back there from the Pellicule at each image. Not a
+                    // video whose prompt the pointer writes from the character (`scene`).
+                    away =
+                      !(shownHere(talkId) && state.view === 'studio') &&
+                      !proposal.scene &&
+                      (Boolean(proposal.series) || proposal.autoAllow === true);
+                    if (away) {
+                      // With the LoRAs of the user its Studio has for that conversation, as « Générer »
+                      // adds them there (studio.mjs, edits): left out, the images made meanwhile had none,
+                      // and the Studio, set from the last of them, emptied its list.
+                      const verb = proposal.tool || proposal.call?.function?.name,
+                        target = verb === 'create_image' ? 'image' : verb === 'create_video' ? 'video' : null,
+                        styles = target ? state.studio?.stylesFor?.(talkId, target) : null;
+                      if (styles && JSON.stringify(styles) !== JSON.stringify(proposal.styles ?? [])) {
+                        const revised = await (
+                          await api(
+                            'tools/revise',
+                            { requestId: proposal.requestId, approvalToken: proposal.approvalToken, edits: { styles } },
+                            { signal: abort },
+                          )
+                        ).json();
+                        Object.assign(proposal, revised);
+                      }
+                      return 'once';
+                    }
                     // In the Studio of this conversation (0.6.87): the user may have opened another
                     // meanwhile (an image of a series asked from the Studio); the proposal waits for
                     // them there, as runForTurn's. Set in the Studio of the one shown, it took its
@@ -3617,7 +3677,9 @@ async function sendMessage(event) {
           },
         );
       const settle = outcome => {
-        if (viaStudio) void state.studio.settled(outcome);
+        // Made at once away from its Studio (0.6.88): put on its screen only when that is on screen;
+        // otherwise read again when it is shown next, as a take of the Chat (it is another's screen).
+        if (viaStudio && (!away || (shownHere(talkId) && state.view === 'studio'))) void state.studio.settled(outcome);
         // Made from the Chat: the Studio reads its takes again when it is shown next (its Sortie and
         // its screen did not know of the take until another conversation was opened).
         else if (outcome.record) state.studio?.invalidate?.();
@@ -3660,7 +3722,9 @@ async function sendMessage(event) {
       } catch (error) {
         // (The same when its first image is stopped or breaks: runSeries says it for the next ones.)
         if (request.series && !error.series) void api('tools/series', { series: request.series.id, end: true }).catch(() => {});
-        if (viaStudio) void state.studio.settled({ error: signal.aborted ? 'Génération arrêtée.' : error.message });
+        // (The same for its failure: one made away from its Studio leaves the Studio shown alone, 0.6.88.)
+        if (viaStudio && (!away || (shownHere(talkId) && state.view === 'studio')))
+          void state.studio.settled({ error: signal.aborted ? 'Génération arrêtée.' : error.message });
         // Stopped or broken after the first image of a series: its card said it, and the result of
         // the call says what was made (the first card stays as it is).
         if (error.series) {
@@ -4016,22 +4080,30 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
     // Only a conversation begun for this very creation leaves the history when it makes nothing:
     // one emptied by « Modifier » was deleted with its takes.
     previous = begun.archiveSnapshot,
-    existed = state.historyItems.some(item => item.id === talkId);
+    existed = state.historyItems.some(item => item.id === talkId),
+    // Its last message, put back in the message box (« Modifier », a conversation opened again): kept
+    // on the disk after the creation, as take-recovery keeps it (0.6.88). Left out, it was only in the
+    // box from the start of the creation: lost with a page reloaded meanwhile, or once it was made.
+    pending = previous?.incomplete ? previous.messages?.at(-1) : null,
+    unsent = pending?.role === 'user' && !pending.internal && before.at(-1)?.role !== 'user' ? [pending] : [];
   if (!before.length) begun.conversationInstructions ??= state.globalInstructions || '';
   begun.archiveSnapshot = {
-    messages: archiveMessages([
-      ...before,
-      {
-        role: 'user',
-        internal: true,
-        content:
-          `Studio · ${kinds[proposal.mediaType || 'image'] ?? 'Image'} : ${String(proposal.plan?.prompt || proposal.args?.prompt || '')}`.slice(0, 4000) +
-          '\n\n' +
-          STUDIO_NOTE,
-      },
-      { role: 'assistant', content: '', tool_calls: [proposal.call] },
-    ]),
-    incomplete: false,
+    messages: [
+      ...archiveMessages([
+        ...before,
+        {
+          role: 'user',
+          internal: true,
+          content:
+            `Studio · ${kinds[proposal.mediaType || 'image'] ?? 'Image'} : ${String(proposal.plan?.prompt || proposal.args?.prompt || '')}`.slice(0, 4000) +
+            '\n\n' +
+            STUDIO_NOTE,
+        },
+        { role: 'assistant', content: '', tool_calls: [proposal.call] },
+      ]),
+      ...unsent,
+    ],
+    incomplete: unsent.length > 0,
   };
   await persistConversation(talkId);
   const takeBack = async () => {
@@ -4094,7 +4166,7 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
     { role: 'assistant', content: '', tool_calls: [proposal.call] },
     { role: 'tool', tool_call_id: proposal.call.id, content: result.content },
   ]);
-  talk.archiveSnapshot = { messages: [...talk.messages], incomplete: false };
+  talk.archiveSnapshot = { messages: [...talk.messages, ...unsent], incomplete: unsent.length > 0 };
   // Named by its prompt alone, as the server names it (the pill of the title bar says the mode).
   const named = conversationTitle(said).slice(0, 120);
   if (named) nameHere(talkId, named);
@@ -5018,7 +5090,8 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     // Set aside in place of another, without the history: that one is lost, asked first (0.6.87).
     if (going && !asideMayGo()) return;
     // What was written in the one left, when it is not set aside with it: back when it is opened again.
-    if (!setAside()) keepDraft();
+    // (One not begun yet is begun again: « Nouvelle conversation » empties it, as it always did.)
+    if (!setAside() && state.conversationId) keepDraft();
     state.projectId = typeof projectId === 'string' ? projectId : 'inbox';
     leaveLibrary();
     state.messages = [];
@@ -5034,6 +5107,14 @@ async function newConversation(projectId = state.projectId || 'inbox') {
     $('messages').replaceChildren();
     $('welcome').hidden = false;
     setConversationTitle(UNTITLED);
+    // What was being written in a conversation of this project not begun yet, left for another
+    // (0.6.88): it is this one's.
+    const left = draftLeft(leftKey(null, state.projectId));
+    if (left) {
+      state.images = left.images;
+      state.videos = left.videos;
+      $('prompt').value = left.text;
+    }
     renderAttachments();
     notice('');
     resizePrompt();
@@ -5155,7 +5236,9 @@ window.addEventListener('beforeunload', event => {
     $('prompt').value.trim() ||
     state.images.length ||
     state.videos.length ||
-    (!state.saveHistory && state.messages.length)
+    (!state.saveHistory && state.messages.length) ||
+    // The one set aside too (0.6.88): it is found nowhere else either.
+    (!state.saveHistory && state.aside?.messages?.length)
   ) {
     event.preventDefault();
     event.returnValue = '';

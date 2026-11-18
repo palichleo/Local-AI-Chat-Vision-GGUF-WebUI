@@ -1794,10 +1794,43 @@ test('a creation of the Studio that makes nothing never deletes a conversation t
   assert.ok(await store.read(ID), 'kept in the history');
 });
 
-test('a proposal set in the Studio waits there for its own conversation: another opened meanwhile is not touched (0.6.87)', async t => {
-  // Asked from the Studio of one conversation (an image of a series), set in the Studio of the one
-  // shown meanwhile: its drafts taken, the take of the other put on its screen.
+test('a proposal that waits for the user, asked from the Studio, waits in the Studio of its own conversation: another opened meanwhile is not touched (0.6.87)', async () => {
+  // Set in the Studio of the one shown meanwhile: its drafts taken, the take of the other put on its screen.
   const studio = studioOf();
+  let reach, go;
+  const reached = new Promise(resolve => (reach = resolve)),
+    gate = new Promise(resolve => (go = resolve));
+  const agent = page({
+    state: { view: 'studio', studio },
+    chat: (body, n) => (n === 1 ? called({ call: functionCall('create_image', 'call_img'), workflowName: 'Krea 2', requestId: 'r1' }) : said('')),
+    requestTool: async (request, signal, onProgress, onImage, options) => {
+      reach();
+      await gate;
+      return asApproved(request, signal, onProgress, onImage, options);
+    },
+  });
+  const turn = agent.send('Une image de renard');
+  await reached;
+  agent.state.conversationId = ELSEWHERE;
+  go();
+  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(studio.proposed.length, 0, 'nothing set in the Studio of the conversation shown');
+  assert.equal(agent.state.work?.waits, true, 'the miniature says Moodix AI waits there');
+  agent.state.conversationId = ID;
+  for (let tries = 0; tries < 40 && !studio.proposed.length; tries++) await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(studio.proposed.length, 1, 'set once its conversation is shown again');
+  studio.generate();
+  await turn;
+});
+
+test('what goes by itself, asked from the Studio, is made at once while the user is elsewhere: no wait, no other Studio touched (0.6.88)', async () => {
+  // Made to wait for the user to come back (0.6.87), a series stopped as long as they were elsewhere
+  // and its proposal expired after 15 minutes; set in the Studio, it took the page back there.
+  const studio = studioOf(),
+    settled = [];
+  let invalidated = 0;
+  studio.settled = async outcome => settled.push(outcome);
+  studio.invalidate = () => invalidated++;
   let reach, go;
   const reached = new Promise(resolve => (reach = resolve)),
     gate = new Promise(resolve => (go = resolve));
@@ -1815,12 +1848,73 @@ test('a proposal set in the Studio waits there for its own conversation: another
   await reached;
   agent.state.conversationId = ELSEWHERE;
   go();
-  await new Promise(resolve => setTimeout(resolve, 600));
-  assert.equal(studio.proposed.length, 0, 'nothing set in the Studio of the conversation shown');
-  assert.equal(agent.state.work?.waits, true, 'the miniature says Moodix AI waits there');
-  agent.state.conversationId = ID;
+  const over = await Promise.race([turn.then(() => true), new Promise(resolve => setTimeout(() => resolve(false), 3000))]);
+  assert.equal(over, true, 'made without waiting for the user to come back');
+  assert.equal(studio.proposed.length, 0, 'set in no Studio');
+  assert.notEqual(agent.state.work?.waits, true, 'nothing waits for the user');
+  assert.equal(settled.length, 0, 'its take not put on the screen of the Studio shown');
+  assert.ok(invalidated > 0, 'its Studio reads its takes again when it is shown');
+  // Made in its Studio, on screen: set there, as always.
+  const here = studioOf(),
+    at = page({
+      state: { view: 'studio', studio: here },
+      chat: (body, n) =>
+        n === 1 ? called({ call: functionCall('create_image', 'call_img'), workflowName: 'Krea 2', requestId: 'r1', autoAllow: true }) : said(''),
+      requestTool: asApproved,
+    });
+  await at.send('Une image de renard');
+  assert.equal(here.proposed.length, 1);
+});
+
+test('made at once away from its Studio, a creation has the LoRAs of the user that Studio has for its conversation (0.6.88)', async () => {
+  // Added by « Générer » in the Studio only (its edits): the images made meanwhile had none, and the
+  // Studio, set from the last of them, emptied its list.
+  const studio = studioOf(),
+    revised = [],
+    ran = [],
+    grain = [{ name: 'grain.safetensors', strength: 0.8 }];
+  studio.stylesFor = (id, target) => (id === ID && target === 'image' ? grain : null);
+  let reach, go;
+  const reached = new Promise(resolve => (reach = resolve)),
+    gate = new Promise(resolve => (go = resolve));
+  const agent = page({
+    state: { view: 'studio', studio },
+    routes: {
+      'tools/revise': async body => (revised.push(plain(body)), Response.json({ requestId: 'r2', approvalToken: 't2', styles: body.edits.styles })),
+    },
+    chat: (body, n) =>
+      n === 1
+        ? called({ call: functionCall('create_image', 'call_img'), workflowName: 'Krea 2', requestId: 'r1', approvalToken: 't1', autoAllow: true, styles: [] })
+        : said(''),
+    requestTool: async (request, signal, onProgress, onImage, options) => {
+      reach();
+      await gate;
+      const decision = await options.approve(request, signal);
+      ran.push(plain([decision, request.requestId, request.styles]));
+      return made();
+    },
+  });
+  const turn = agent.send('Une image de renard');
+  await reached;
+  agent.state.conversationId = ELSEWHERE;
+  go();
   await turn;
-  assert.equal(studio.proposed.length, 1, 'set once its conversation is shown again');
+  assert.deepEqual(revised, [{ requestId: 'r1', approvalToken: 't1', edits: { styles: grain } }]);
+  assert.deepEqual(ran, [['once', 'r2', grain]]);
+  // The same LoRAs already: nothing to change.
+  studio.stylesFor = () => [];
+  const plainAgent = page({
+    state: { view: 'studio', studio },
+    routes: { 'tools/revise': async body => (revised.push(plain(body)), Response.json({})) },
+    chat: (body, n) =>
+      n === 1 ? called({ call: functionCall('create_image', 'call_img'), workflowName: 'Krea 2', requestId: 'r1', autoAllow: true, styles: [] }) : said(''),
+    requestTool: async (request, signal, onProgress, onImage, options) => {
+      plainAgent.state.conversationId = ELSEWHERE;
+      return asApproved(request, signal, onProgress, onImage, options);
+    },
+  });
+  await plainAgent.send('Une image de renard');
+  assert.equal(revised.length, 1);
 });
 
 test('a request that lacks a file is taken up again in its own conversation, though another was shown when it came (0.6.87)', async () => {
@@ -2001,4 +2095,113 @@ test('a creation stopped by the user is kept once the server has handed the card
   assert.equal(result.unanswered, undefined, 'stopped, not a call left without its result');
   assert.deepEqual(making.notices.filter(Boolean), []);
   assert.equal(making.state.generating, false);
+});
+
+test('a message left unsent comes back once in the box, however often its conversation is opened again (0.6.88)', async t => {
+  // Kept as the box held it when the conversation was left (0.6.87), it came back after that message,
+  // which was in it already: once more at each visit, its images too.
+  const store = await historyStore(t);
+  await otherConversation(store);
+  await store.save({
+    id: ID,
+    messages: [{ role: 'user', content: 'Bonjour' }, { role: 'assistant', content: 'Bonjour !' }, { role: 'user', content: 'Un phare la nuit' }],
+    incomplete: true,
+    instructions: '',
+    projectId: 'inbox',
+  });
+  const p = page({ store, state: { conversationId: ELSEWHERE, historyItems: [{ id: ID }, { id: ELSEWHERE }] } });
+  await p.context.loadConversation(ID);
+  assert.equal(p.$('prompt').value, 'Un phare la nuit');
+  await p.context.loadConversation(ELSEWHERE);
+  await p.context.loadConversation(ID);
+  assert.equal(p.$('prompt').value, 'Un phare la nuit', 'once');
+  p.$('prompt').value = 'Un phare la nuit, sous la pluie';
+  await p.context.loadConversation(ELSEWHERE);
+  await p.context.loadConversation(ID);
+  assert.equal(p.$('prompt').value, 'Un phare la nuit, sous la pluie', 'as it was changed');
+});
+
+test('what was written in a conversation not begun yet comes back with the next one begun in its project (0.6.88)', async t => {
+  // Kept only for a conversation with an identifier (0.6.87): written in a new conversation while
+  // another worked, it was lost when the miniature brought the user back.
+  const store = await historyStore(t);
+  await otherConversation(store);
+  const p = page({ store, state: { conversationId: null, projectId: 'inbox', historyItems: [{ id: ELSEWHERE }] } });
+  p.$('prompt').value = 'Un chat sur un toit';
+  await p.context.loadConversation(ELSEWHERE);
+  assert.equal(p.$('prompt').value, '');
+  // Another not begun of that project, left empty (its conversation deleted, say), takes nothing away.
+  Object.assign(p.state, { conversationId: null, messages: [] });
+  p.$('prompt').value = '';
+  await p.context.loadConversation(ELSEWHERE);
+  await p.context.newConversation();
+  assert.equal(p.$('prompt').value, 'Un chat sur un toit');
+  // Begun again from there, it is emptied, as it always was.
+  await p.context.newConversation();
+  assert.equal(p.$('prompt').value, '');
+});
+
+test('a conversation that cannot be opened leaves what is written in the one shown in its box, not kept to come back once sent (0.6.88)', async t => {
+  const store = await historyStore(t);
+  const p = page({ store, state: { conversationId: ID, messages: [{ role: 'user', content: 'Bonjour' }], historyItems: [{ id: ID }] } });
+  p.$('prompt').value = 'Un renard';
+  await p.context.loadConversation('c3333333-3333-4333-8333-333333333333');
+  assert.deepEqual([p.state.conversationId, p.$('prompt').value], [ID, 'Un renard'], 'still there');
+  assert.equal(p.state.draftsLeft?.has(ID) ?? false, false, 'nothing kept to come back');
+});
+
+test('the conversation set aside, replaced by another, keeps what was being written in it (0.6.88)', () => {
+  const p = page({
+    state: {
+      conversationId: ID,
+      projectId: 'inbox',
+      messages: [{ role: 'user', content: 'Un renard' }],
+      work: { kind: 'turn', conversationId: ID },
+      aside: {
+        conversationId: ELSEWHERE,
+        projectId: 'inbox',
+        messages: [{ role: 'user', content: 'Un phare' }],
+        title: 'Le phare',
+        draft: { text: 'Et la nuit ?', images: [], videos: [] },
+        nodes: null,
+      },
+    },
+  });
+  assert.equal(p.context.setAside(), true);
+  assert.equal(p.state.aside.conversationId, ID);
+  assert.deepEqual(plain(p.context.draftLeft(ELSEWHERE)), { text: 'Et la nuit ?', images: [], videos: [] });
+});
+
+test('the message put back in the box stays on the disk through a creation of the Studio, while it runs and once it is made (0.6.88)', async t => {
+  // Taken out of the history as the creation started, it was only in the box: lost with a page
+  // reloaded meanwhile, or once the creation was made.
+  const store = await historyStore(t),
+    hello = { role: 'user', content: 'Bonjour' },
+    reply = { role: 'assistant', content: 'Bonjour !' },
+    pending = { role: 'user', content: 'Un renard dans la neige' },
+    proposal = { call: functionCall('create_image', 'action1'), workflowName: 'Krea 2', requestId: 'r1', plan: { prompt: 'un renard' } };
+  await store.save({ id: ID, messages: [hello, reply, pending], incomplete: true, instructions: '', projectId: 'inbox' });
+  let during = null;
+  const studio = page({
+    store,
+    requestTool: async () => {
+      during = await store.read(ID);
+      return madeImage();
+    },
+    state: {
+      conversationId: ID,
+      view: 'studio',
+      messages: [hello, reply],
+      archiveSnapshot: { messages: [hello, reply, pending], incomplete: true },
+      historyItems: [{ id: ID, title: 'Bonjour', projectId: 'inbox' }],
+    },
+  });
+  await studio.context.runInStudio(proposal, { signal: new AbortController().signal, onProgress() {}, conversationId: ID });
+  assert.deepEqual([during.messages.at(-1).content, during.incomplete], ['Un renard dans la neige', true], 'kept as it runs');
+  const after = await store.read(ID);
+  assert.deepEqual([after.messages.at(-1).content, after.incomplete], ['Un renard dans la neige', true], 'kept once it is made');
+  assert.ok(
+    after.messages.some(message => message.role === 'tool' && message.tool_call_id === 'action1'),
+    'the result of its call before it',
+  );
 });

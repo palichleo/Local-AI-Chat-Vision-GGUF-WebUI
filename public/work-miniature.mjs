@@ -19,6 +19,8 @@ import { livePreview } from './live-preview.mjs';
  */
 export const FOLDED_KEY = 'moodix.miniature';
 const KINDS = { image: 'Image', video: 'Vidéo', audio: 'Son' };
+// What « waiting » says when nothing else is said (waitFor).
+const WAITING = 'En attente de votre accord';
 /** « 42 % », as the message box says it. */
 const percentOf = fraction => Math.floor(Math.min(1, Math.max(0, fraction)) * 100) + ' %';
 
@@ -88,6 +90,8 @@ export function setupMiniature({
     running = false,
     shown = false,
     words = 'Moodix répond…',
+    // What 'waiting' says (0.6.88: Moodix AI may wait for the user in the Studio, see waitFor).
+    waitingWords = WAITING,
     kindText = '',
     stageText = '',
     fraction = null,
@@ -129,7 +133,7 @@ export function setupMiniature({
         phase === 'answer'
           ? words
           : phase === 'waiting'
-            ? 'En attente de votre accord'
+            ? waitingWords
             : phase === 'making'
               ? stageText
               : phase === 'done'
@@ -194,6 +198,19 @@ export function setupMiniature({
     request = null;
     paint();
   }
+  /**
+   * The take in hand, not begun, waits for the user somewhere else (0.6.88: Moodix AI in the Studio
+   * of its conversation): `text` in place of « Préparation… », and no Flux. Its first progress makes
+   * it again.
+   */
+  function waitFor(text) {
+    if (!work || !running || !text || !['making', 'waiting'].includes(phase) || Number.isFinite(fraction)) return;
+    if (phase === 'waiting' && waitingWords === text) return;
+    stopFlux();
+    phase = 'waiting';
+    waitingWords = text;
+    paint();
+  }
   /** Moodix answers (no take in hand): what the line says (« Le modèle se charge… »). */
   function answer(text) {
     if (!work || !text) return;
@@ -206,6 +223,7 @@ export function setupMiniature({
     const asked = event.request ?? request ?? {};
     if (event.type === 'start') {
       request = asked;
+      waitingWords = WAITING;
       kindText = [KINDS[asked.mediaType] ?? KINDS.image, asked.workflowName].filter(Boolean).join(' · ');
       fraction = null;
       picture = '';
@@ -293,6 +311,7 @@ export function setupMiniature({
     element: root,
     begin,
     answer,
+    waitFor,
     take,
     end,
     forget,

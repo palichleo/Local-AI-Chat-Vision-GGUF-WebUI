@@ -232,8 +232,13 @@ export function setupTakeRecovery({
     talk.messages = messages;
     talk.archiveSnapshot = unsent ? { messages: [...messages, unsent], incomplete: true } : { messages: [...messages], incomplete: false };
     await idle(id);
+    // As it is after the wait (0.6.88): another conversation opened meanwhile is the page's now, and
+    // `talk` with it. Decided on that one, an empty one had this one forgotten (deleted when it had no
+    // take), a new one threw. Neither shown nor set aside any more: completed when it is opened next.
+    const now = holderOf(id);
+    if (now !== state && now !== state.aside) return;
     // Left empty: out of the history (app.js keeps one that has takes); its unsent message keeps it.
-    if (talk.archiveSnapshot.messages.length) await persistConversation(id);
+    if (now.archiveSnapshot?.messages?.length) await persistConversation(id);
     else await forget(id);
   }
   /**

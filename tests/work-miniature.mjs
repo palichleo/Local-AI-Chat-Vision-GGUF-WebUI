@@ -225,3 +225,24 @@ test('« × » asks the page first: kept when it says no, and the page told what
   assert.equal(mini.element.hidden, true);
   assert.deepEqual(closed.map(work => work.conversationId), [WORK.conversationId]);
 });
+
+test('a take waiting for the user in the Studio of its conversation says so, without a Flux, until it begins (0.6.88)', () => {
+  // « Préparation… » over a Flux that moved for nothing while Moodix AI waited there.
+  const { mini, drawn, said } = miniature();
+  mini.begin(WORK);
+  mini.place('corner');
+  mini.take({ type: 'start', request: { mediaType: 'image', workflowName: 'Krea 2', requestId: 'r2' } });
+  assert.equal([mini.phase, said()].join(' · '), 'making · Préparation…');
+  const flux = drawn.fluxes.at(-1);
+  mini.waitFor('Moodix AI vous attend dans le Studio de cette conversation');
+  assert.equal([mini.phase, said()].join(' · '), 'waiting · Moodix AI vous attend dans le Studio de cette conversation');
+  assert.equal(flux.stopped, true, 'no Flux for nothing');
+  // It begins: made as any take.
+  mini.take({ type: 'progress', text: 'Génération · 1/8', fraction: 0.1 });
+  assert.equal([mini.phase, said()].join(' · '), 'making · Génération · 1/8');
+  mini.waitFor('Moodix AI vous attend dans le Studio de cette conversation');
+  assert.equal(mini.phase, 'making', 'once begun, nothing to wait for');
+  // A video waiting on its card says what it always said.
+  mini.take({ type: 'start', request: video });
+  assert.equal(said(), 'En attente de votre accord');
+});
