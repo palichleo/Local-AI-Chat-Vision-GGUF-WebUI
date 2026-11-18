@@ -60,6 +60,22 @@ test('each prompt of a series is held to what a single image is: one answer name
   assert.deepEqual(thinSeries(asked, { function: { name: 'create_image', arguments: '{' } }), []);
 });
 
+test('for the local model, the first prompt of a series alone is held to it, as until 0.6.67 (0.6.100)', () => {
+  const full = words(40),
+    series = (prompt, others) => call('create_image', { prompt, series: others });
+  // The other prompts in one sentence: the call stands (sent back for them, the model wrote them in
+  // its answer and made no call).
+  assert.equal(thinNote(asked, series(full, [words(20), words(20), words(20), words(20)]), { series: false }), '');
+  // The first one short: what a single image is told, to the character.
+  assert.equal(thinNote(asked, series(words(20), [full, full]), { series: false }), THIN_NOTE);
+  assert.equal(thinNote(asked, call('create_image', { prompt: words(39) }), { series: false }), THIN_NOTE);
+  // Told once in this turn: the next call stands.
+  const told = [...asked, { role: 'tool', content: JSON.stringify({ status: 'nothing_generated', message: THIN_NOTE }) }];
+  assert.equal(thinNote(told, series(words(20), [full]), { series: false }), '');
+  // Without the option, every prompt is looked at (a large model).
+  assert.match(thinNote(asked, series(full, [words(20)])), /too thin for image 2 of this series of 2 /);
+});
+
 test('other tools, promoted drafts and calls without a prompt are left alone', () => {
   assert.equal(thinPrompt(asked, call('upscale', { prompt: 'x' })), false);
   assert.equal(thinPrompt(asked, call('create_video', { reuse_output: 'run', stage: 'final' })), false);

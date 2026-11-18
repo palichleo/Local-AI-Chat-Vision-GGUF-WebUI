@@ -13,7 +13,8 @@ import {
 import { citedImages, citedMessage, citedSaid, citedUnused, citedNumbers } from './lib/cited-resources.mjs';
 import { briefMissing, cardBrief, studioBrief } from './lib/video-brief.mjs';
 import { shortTitle, titleRequest } from './lib/conversation-title.mjs';
-import { CAPABLE, CAPABLE_CARD, CAPABLE_STUDIO, capableMessages, takesContext, wordingOf } from './lib/model-wording.mjs';
+import { CAPABLE, CAPABLE_CARD, CAPABLE_STUDIO, capableMessages, screenOf, takesContext, wordingOf } from './lib/model-wording.mjs';
+import { listedSources } from './lib/listed-takes.mjs';
 import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
@@ -900,19 +901,25 @@ export async function createApplication({
               : [...said.content, { type: 'text', text: told.trimStart() }],
         };
     }
+    // (0.6.100) The earlier creations the tools of the local model list: the latest, and those the last
+    // exchange or the user's message name (lib/listed-takes.mjs), no longer every one made since the
+    // conversation began. A large model is given no list: its tools are the same at every request.
+    const listed = (takes = []) =>
+      wording === CAPABLE ? { runs, takes } : listedSources({ runs, takes, messages: body.messages, screen: screenOf(body.screen) });
     if (
       toolConfig.enabled &&
       body.tools !== false &&
       (runtime.turns.get(body.turnId) || 0) < toolConfig.maxIterations
     ) {
+      const shown = listed(await projectTakes(conversationId, project));
       definitions.push(
         ...(await runtime.tools.definitions({
           images: chatImageUrls(body.messages).length,
           resources: active.map(({ id, type }) => ({ id, type })),
           // The takes of the project by their number (« PRISE n »), this conversation's and the others'.
-          takes: (await projectTakes(conversationId, project)).map(({ take, mediaType }) => ({ take, mediaType })),
+          takes: shown.takes.map(({ take, mediaType }) => ({ take, mediaType })),
           // Only native results can be passed to a workflow as an original file.
-          outputs: runs
+          outputs: shown.runs
             .filter(run => run.provider === 'native')
             .map(run => ({
               id: run.id,
@@ -938,7 +945,7 @@ export async function createApplication({
       definition.function.parameters.properties.resource_ids.maxItems = 8 - (resourceTurns.get(body.turnId) || 0);
       definitions.push(definition);
     }
-    const outputDefinition = wording === CAPABLE ? null : outputToolFor(runs);
+    const outputDefinition = wording === CAPABLE ? null : outputToolFor(listed().runs);
     if (chat.vision && outputDefinition && body.resources !== false && (resourceTurns.get(body.turnId) || 0) < 8)
       definitions.push(outputDefinition);
     if (definitions.length) {
@@ -2676,7 +2683,9 @@ export async function createApplication({
               chat.vision && body.resources !== false && /^[0-9a-f-]{36}$/.test(body.turnId || '')
                 ? unseenResources(body.messages, await resources.catalog(projectOf(body.project)), call)
                 : [];
-            const thin = fullPrompts ? thinNote(body.messages, call) : '';
+            // (0.6.100) The other prompts of a series are looked at for a large model only: the local
+            // one, sent back for them, wrote them in its answer and made no call (lib/thin-prompt.mjs).
+            const thin = fullPrompts ? thinNote(body.messages, call, { series: wordingOf(chat.connection) === CAPABLE }) : '';
             if (unseen.length && (resourceTurns.get(body.turnId) || 0) + unseen.length <= 8) {
               resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + unseen.length);
               if (resourceTurns.size > 256) resourceTurns.delete(resourceTurns.keys().next().value);

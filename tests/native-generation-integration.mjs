@@ -589,8 +589,10 @@ test(
  * Moodix with the scripted chat model started (the local one) and one image workflow, for a series
  * of images asked in one message. `seen`: the prompts the generator was given, the times the chat
  * model was started (`starts`), and `hold`, a promise a test sets to keep a generation running.
+ * `remote` (0.6.100): a preset (« openrouter »), the same scripted model reached as that service of
+ * the Internet, chosen for the chat: a large model, given the « capable » wording.
  */
-async function boatsApp({ fullPrompts = false } = {}) {
+async function boatsApp({ fullPrompts = false, remote = null } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'native-series-'));
   let app;
   const outputDir = join(root, 'output');
@@ -602,7 +604,9 @@ async function boatsApp({ fullPrompts = false } = {}) {
       await seen.hold;
     },
   });
+  let service = null;
   const close = async () => {
+    service?.kill();
     await app?.close();
     await rm(root, { recursive: true, force: true });
   };
@@ -666,6 +670,22 @@ async function boatsApp({ fullPrompts = false } = {}) {
     await api('config', { enginePath: process.execPath, modelPath, projectorPath: '', contextSize: 8192, maxOutputTokens: 4096, gpuLayers: 0 });
     await api('start', {}, 202);
     await until(async () => (await (await api('status')).json()).state === 'ready');
+    if (remote) {
+      // The scripted model as a service of the Internet would be: its address and its key.
+      const probe = createServer();
+      await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
+      const { port } = probe.address();
+      await new Promise(resolve => probe.close(resolve));
+      const key = 'sk-test-' + randomUUID();
+      service = spawn(process.execPath, [fixture, '--offline', '--host', '127.0.0.1', '--port', String(port), '--api-key', key], {
+        stdio: 'ignore',
+      });
+      await until(async () => (await fetch(`http://127.0.0.1:${port}/health`).catch(() => null))?.status === 401);
+      const { saved } = await (
+        await api('remote/save', { preset: remote, baseUrl: `http://127.0.0.1:${port}/v1`, model: 'test-model', key, vision: true })
+      ).json();
+      await api('remote/select', { id: saved.id });
+    }
     const state = async () => (await (await api('status')).json()).state;
     /** What the server answers to a message of the chat: its proposal, or what it sends the model back with. */
     const ask = async (said = 'generate series of boats') => {
@@ -760,18 +780,50 @@ test('several images asked in one message: one call, its images made one after a
   }
 });
 
-test('a series whose prompts are one-liners is sent back once, with the images to write again named', { timeout: 30000 }, async () => {
-  const { ask, seen, close } = await boatsApp({ fullPrompts: true });
-  try {
-    // The scripted model writes « A red boat », « A blue boat », « A green boat »: nothing is proposed.
-    const request = await ask();
-    assert.equal(request.kind, 'retry');
-    assert.equal(request.call.function.name, 'create_image');
-    assert.match(request.message, /^Nothing was generated: the prompt is too thin for every image of this series /);
-    assert.equal(seen.prompts.length, 0);
-    // A single image keeps the answer it always had.
-    assert.equal((await ask('generate a boat')).message, THIN_NOTE);
-  } finally {
-    await close();
+test('a series whose prompts are one-liners is sent back once: the images to write again named to a large model, its first prompt to the local one', { timeout: 30000 }, async () => {
+  for (const remote of [null, 'openrouter']) {
+    const { ask, seen, close } = await boatsApp({ fullPrompts: true, remote });
+    try {
+      // The scripted model writes « A red boat », « A blue boat », « A green boat »: nothing is proposed.
+      const request = await ask();
+      assert.equal(request.kind, 'retry');
+      assert.equal(request.call.function.name, 'create_image');
+      // (0.6.100) The local model is told of its first prompt alone, as until 0.6.67 (sent back for the
+      // others, it wrote them in its answer and made no call); a large model, of every one.
+      if (remote) assert.match(request.message, /^Nothing was generated: the prompt is too thin for every image of this series /);
+      else assert.equal(request.message, THIN_NOTE);
+      assert.equal(seen.prompts.length, 0);
+      // A single image keeps the answer it always had.
+      assert.equal((await ask('generate a boat')).message, THIN_NOTE);
+    } finally {
+      await close();
+    }
+  }
+});
+
+test('five images, the first prompt in full and the four others in a sentence: proposed with the local model, sent back to a large one (0.6.100)', { timeout: 30000 }, async () => {
+  for (const remote of [null, 'openrouter']) {
+    const { ask, seen, close } = await boatsApp({ fullPrompts: true, remote });
+    try {
+      // (The scripted model answers « generate five images » as a small one answered « genere 5 image
+      // de l’espace » on 18/11: tests/fixtures/fake-tool-engine.mjs.)
+      const request = await ask('generate five images');
+      const asked = JSON.parse(request.call.function.arguments);
+      assert.ok(asked.prompt.split(/\s+/).length >= 40 && asked.series.every(prompt => prompt.split(/\s+/).length < 40));
+      if (remote) {
+        // A large model writes them again when asked: the check of every prompt stays its own.
+        assert.equal(request.kind, 'retry');
+        assert.match(request.message, /too thin for images 2, 3, 4 and 5 of this series of 5 /);
+      } else {
+        // The local model: nothing sent back, the five images go, the first proposed now. Sent back for
+        // the four others (0.6.68 to 0.6.90), it wrote them in its answer as a list and called nothing.
+        assert.equal(request.kind, undefined);
+        assert.ok(request.requestId);
+        assert.deepEqual([request.series.index, request.series.total], [1, 5]);
+      }
+      assert.equal(seen.prompts.length, 0);
+    } finally {
+      await close();
+    }
   }
 });

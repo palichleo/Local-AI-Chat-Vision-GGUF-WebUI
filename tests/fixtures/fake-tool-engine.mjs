@@ -11,6 +11,18 @@ const arg = name => args[args.indexOf(name) + 1];
 if (!args.includes('--offline') || arg('--host') !== '127.0.0.1') process.exit(2);
 const key = arg('--api-key');
 const send = (res, event) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+// (0.6.100) « generate five images »: a first prompt of more than forty words, then four of about
+// twenty, under the forty words a prompt of an image is asked to have (lib/thin-prompt.mjs).
+const FULL_BOAT =
+  'A red wooden fishing boat rests in a calm stone harbour at dawn, its paint chipped along the hull, ropes ' +
+  'coiled on the deck and two gulls on the mast. Soft pink light and thin mist over the water, quiet houses ' +
+  'behind, photographed with a 35 mm lens and fine film grain.';
+const SHORT_BOATS = [
+  'A blue sailing boat crossing the open sea under a clear sky, white sails full of wind, bright midday light.',
+  'A green rowing boat tied to a wooden jetty on a misty lake at sunrise, still water, soft muted colours.',
+  'A yellow motor boat speeding past tall cliffs, white spray behind it, deep blue water and a summer sky.',
+  'A black old steamboat on a wide river at dusk, smoke from its chimney, orange sky reflected in the water.',
+];
 const server = http.createServer(async (req, res) => {
   if (req.headers.authorization !== `Bearer ${key}`) {
     res.writeHead(401);
@@ -107,7 +119,11 @@ const server = http.createServer(async (req, res) => {
                   : text.startsWith('generate series')
                     ? // Several images asked at once: every prompt prepared in the one call.
                       { prompt: 'A red boat', series: ['A blue boat', 'A green boat'] }
-                    : { prompt: 'A red boat' },
+                    : text.startsWith('generate five images')
+                      ? // (0.6.100) What a small model writes for five images: the first prompt in
+                        // full, the four others in one sentence of about twenty words each.
+                        { prompt: FULL_BOAT, series: SHORT_BOATS }
+                      : { prompt: 'A red boat' },
       );
   const middle = Math.floor(argumentsText.length / 2);
   send(res, { choices: [{ delta: { reasoning_content: 'I will use the registered workflow.' } }] });

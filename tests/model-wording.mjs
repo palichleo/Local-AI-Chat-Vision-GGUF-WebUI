@@ -755,3 +755,79 @@ test(
     assert.equal(shown.messages[0].content.startsWith(LOCAL_LINE), true);
   },
 );
+
+test(
+  'through the application: the tools of the local model list the latest creations and those the message names, however long the conversation (0.6.100)',
+  { timeout: 120000 },
+  async t => {
+    const { api, take } = await localMoodix(t);
+    // A workflow that takes an image to modify: its role lists the earlier creations (rails-image has none).
+    await api('generation/workflows', {
+      schemaVersion: 1,
+      id: 'rails-source',
+      name: 'Image à modifier',
+      description: 'Modifier une image',
+      enabled: true,
+      pipeline: 'krea2',
+      mediaType: 'image',
+      components: Object.fromEntries(['model', 'textEncoder', 'tokenizer', 'vae'].map(k => [k, { policy: 'fixed', asset: k }])),
+      parameters: {
+        prompt: { policy: 'model', type: 'string' },
+        seed: { policy: 'fixed', value: 5 },
+        width: { policy: 'fixed', value: 512 },
+        height: { policy: 'fixed', value: 512 },
+        steps: { policy: 'fixed', value: 8 },
+        cfg: { policy: 'fixed', value: 1 },
+        denoise: { policy: 'fixed', value: 0.6 },
+      },
+      loras: [],
+      references: [{ id: 'source', role: 'img2img', name: 'Source image', description: 'Optional image to edit.', required: false }],
+    });
+    const run = n => `${String(n).padStart(8, '0')}-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    /** The tools llama.cpp receives for the user's words in a conversation. */
+    const tools = async (conversationId, words) => {
+      const streamed = await (
+        await api('chat', {
+          messages: [
+            { role: 'system', content: LOCAL_LINE },
+            { role: 'user', content: 'inspect tool context · ' + words },
+          ],
+          conversationId,
+          turnId: randomUUID(),
+          thinking: false,
+          project: 'inbox',
+        })
+      ).text();
+      return streamed
+        .split(/\r?\n\r?\n/)
+        .filter(frame => frame.startsWith('data: ') && frame !== 'data: [DONE]')
+        .map(frame => JSON.parse(frame.slice(6)))
+        .find(event => event.local_test_payload).local_test_payload.tools;
+    };
+    /** What the image to modify may be: the run_ids and the take numbers offered. */
+    const sources = list => {
+      const schema = list.find(tool => tool.function.name === 'create_image').function.parameters.properties.source,
+        variants = schema.anyOf ?? [schema];
+      return {
+        outputs: variants.find(variant => variant.properties.output)?.properties.output.enum ?? [],
+        takes: variants.find(variant => variant.properties.take)?.properties.take.enum ?? [],
+      };
+    };
+    const sizes = {};
+    for (const count of [10, 50, 200]) {
+      const conversation = randomUUID();
+      for (let n = 1; n <= count; n++) await take(conversation, run(n), n, 'image');
+      const offered = await tools(conversation, 'une autre image, plus lumineuse');
+      sizes[count] = JSON.stringify(offered).length;
+      // By their run_id the eight latest, the newest first (as the gallery lists them); by their number,
+      // which costs a few characters, the 32 latest, in their order.
+      const latest = size => Array.from({ length: Math.min(count, size) }, (_, i) => count - i);
+      assert.deepEqual(sources(offered), { outputs: latest(8).map(run), takes: latest(32).reverse() });
+      // An older one the user names by its number can be passed: by its take, or by its run_id.
+      const named = sources(await tools(conversation, 'modifie la prise 3'));
+      assert.ok(named.takes.includes(3) && named.outputs.includes(run(3)), JSON.stringify(named));
+    }
+    // About the same length at 10, 50 and 200 creations (the digits of the take numbers aside).
+    assert.ok(Math.abs(sizes[200] - sizes[50]) < 200 && Math.abs(sizes[50] - sizes[10]) < 200, JSON.stringify(sizes));
+  },
+);
