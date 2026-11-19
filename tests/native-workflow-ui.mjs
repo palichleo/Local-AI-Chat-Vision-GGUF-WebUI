@@ -120,6 +120,13 @@ function fixture() {
           vae: 'C:/atelier/models/VAE',
           lora: 'C:/atelier/models/LoRa',
         },
+        // (0.6.131) Where each kind of file is when no folder is set apart for it: the same here.
+        defaultFolders: {
+          model: 'C:/atelier/models/checkpoints',
+          textEncoder: 'C:/atelier/models/LLMs',
+          vae: 'C:/atelier/models/VAE',
+          lora: 'C:/atelier/models/LoRa',
+        },
         runner: { state: 'ready', capabilities: { krea2: true } },
         families: familyCatalog(),
         workflows,
@@ -1470,4 +1477,55 @@ test('the page of a model in the shipped HTML: its head, its three groups, its f
     html,
     /native-workflow-import|id="workflow-add"|native-workflow-file|native-workflow-export|native-workflow-name|native-workflow-pipeline|native-workflow-switch|native-policy-help|native-workflow-references|native-workflow-profiles|native-source-section|Importer un workflow|Créer un workflow|Exporter pour Moodix/,
   );
+});
+test('« Dossiers à part »: a folder a line (its name, the folder, « Parcourir », « Détecter », « ? »); « Détecter » gives back the one of the models folder, kept as no folder apart (0.6.131)', async t => {
+  const f = await setup(t);
+  // The page: seven lines in sight, no folded block, no framed button.
+  const block = html.slice(html.indexOf('data-settings-section="Dossiers à part"'), html.indexOf('id="settings-panel-workflows"'));
+  assert.doesNotMatch(block, /<details|native-folders-apart|Parcourir…|class="secondary"/);
+  const lines = [
+    ...block.matchAll(
+      /<div class="set-line set-file set-folder"><label class="set-name" for="([a-z-]+)">([^<]+)<\/label><input id="\1" spellcheck="false" placeholder="[^"]+"><button id="\1-browse" type="button" class="set-act" aria-label="[^"]+">Parcourir<\/button><button id="\1-detect" type="button" class="set-act" aria-label="[^"]+">Détecter<\/button><span id="\1-help" class="help-tip set-help" tabindex="0" role="img">\?<\/span><\/div>/g,
+    ),
+  ].map(match => match[2]);
+  assert.deepEqual(lines, ['Modèles de diffusion', 'VAE', 'LoRA', 'Encodeurs de texte', 'Tokenizers', 'Modèles d’agrandissement', 'Agrandisseurs de latents']);
+  // The folder of the models folder: nothing to detect, and its « ? » says what it holds, and where.
+  const vae = f.$('generation-vae-root'),
+    detect = f.$('generation-vae-root-detect'),
+    help = f.$('generation-vae-root-help'),
+    heard = () => vae.listeners.input.forEach(listener => listener());
+  assert.equal(vae.value, 'C:/atelier/models/VAE');
+  assert.deepEqual([detect.disabled, detect.dataset.unavailable, detect.title], [true, 'true', 'C’est déjà le dossier du dossier des modèles.']);
+  assert.equal(help.dataset.help, 'Les fichiers qui transforment le calcul d’un modèle en image, en vidéo ou en son. Dans le dossier des modèles : C:/atelier/models/VAE.');
+  assert.equal(help.attributes['aria-label'], 'Aide : ' + help.dataset.help);
+  assert.equal(f.ui.values().vaeRoot, '');
+  // A folder apart, typed: « Détecter » lights up and says which folder it gives back.
+  vae.value = 'D:/my VAE';
+  heard();
+  assert.deepEqual([detect.disabled, detect.dataset.unavailable, detect.title], [false, 'false', 'Reprendre le dossier du dossier des modèles : C:/atelier/models/VAE']);
+  assert.match(help.dataset.help, / Dossier à part, choisi par vous : D:\/my VAE\.$/);
+  assert.equal(f.ui.values().vaeRoot, 'D:/my VAE');
+  detect.onclick();
+  assert.deepEqual([vae.value, detect.disabled, f.ui.values().vaeRoot], ['C:/atelier/models/VAE', true, '']);
+  // Browsed: the same.
+  await f.$('generation-vae-root-browse').onclick();
+  assert.deepEqual([vae.value, detect.disabled, f.ui.values().vaeRoot], ['C:/models/new.safetensors', false, 'C:/models/new.safetensors']);
+  // (The folders nobody touched keep theirs greyed.)
+  assert.equal(f.$('generation-lora-root-detect').disabled, true);
+
+  // A folder that was kept apart: detected, nothing is kept of it (not the default one spelled out,
+  // which would stay behind when the models folder is changed).
+  const kept = await setup(t),
+    api = kept.api;
+  kept.api = async (route, body) => {
+    if (route !== 'generation') return api(route, body);
+    const answer = await (await api('generation')).json();
+    return Response.json({ ...answer, config: { ...answer.config, vaeRoot: 'E:/vae' }, folders: { ...answer.folders, vae: 'E:/vae' } });
+  };
+  const state = {};
+  kept.ui = setupNativeWorkflows({ api: (...args) => kept.api(...args), state, node: kept.node, notice() {} });
+  await kept.ui.refresh();
+  assert.deepEqual([kept.$('generation-vae-root').value, kept.ui.values().vaeRoot, kept.$('generation-vae-root-detect').disabled], ['E:/vae', 'E:/vae', false]);
+  kept.$('generation-vae-root-detect').onclick();
+  assert.deepEqual([kept.$('generation-vae-root').value, kept.ui.values().vaeRoot], ['C:/atelier/models/VAE', '']);
 });

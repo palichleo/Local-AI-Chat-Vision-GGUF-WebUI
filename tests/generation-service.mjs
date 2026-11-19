@@ -619,3 +619,50 @@ test('no NVIDIA card: a family says so with its reason, and again when a creatio
   assert.equal(Object.hasOwn(snapshot, 'comfy'), false);
   for (const gone of ['comfyState', 'startComfy', 'saveComfy', 'refreshComfy']) assert.equal(typeof service[gone], 'undefined', gone);
 });
+test('the folder of each kind of file when none is set apart for it: what « Détecter » gives back (0.6.131)', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'folders-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const service = new GenerationService({
+    root: dataDir,
+    dataDir,
+    workflowDir: join(dataDir, 'workflows'),
+    outputDir: join(dataDir, 'output'),
+    worker: { status: () => ({ state: 'ready', busy: false, capabilities: {} }), close: async () => {}, release: async () => ({}) },
+    environment: { close: async () => {}, status: () => ({ state: 'ready' }) },
+  });
+  const models = join(dataDir, 'models'),
+    apart = {
+      modelsDir: '',
+      modelRoot: 'E:\\diffusion',
+      vaeRoot: 'E:\\vae',
+      loraRoot: 'E:\\loras',
+      textEncoderRoot: 'E:\\encoders',
+      tokenizerRoot: 'E:\\tokenizers',
+      upscaleRoot: 'E:\\upscale',
+      latentUpscaleRoot: 'E:\\latent',
+    };
+  // Every folder set apart: the ones in use are those…
+  const used = service.folders(apart);
+  assert.deepEqual(
+    [used.model, used.vae, used.lora, used.textEncoder, used.tokenizer, used.upscaler, used.latentUpscaler],
+    ['E:\\diffusion', 'E:\\vae', 'E:\\loras', 'E:\\encoders', 'E:\\tokenizers', 'E:\\upscale', 'E:\\latent'],
+  );
+  // …and each has the one of the models folder to go back to. The tokenizers go with the text
+  // encoders, wherever those are.
+  assert.deepEqual(service.defaultFolders(apart), {
+    model: join(models, 'diffusion_models'),
+    vae: join(models, 'vae'),
+    lora: join(models, 'loras'),
+    textEncoder: join(models, 'text_encoders'),
+    tokenizer: 'E:\\encoders',
+    upscaler: join(models, 'upscale_models'),
+    latentUpscaler: join(models, 'latent_upscale_models'),
+  });
+  // Another models folder: its own sub-folders. Nothing apart: the defaults are the folders in use.
+  const elsewhere = service.defaultFolders({ modelsDir: 'D:\\ComfyUI\\models' });
+  assert.deepEqual([elsewhere.vae, elsewhere.tokenizer], ['D:\\ComfyUI\\models\\vae', 'D:\\ComfyUI\\models\\text_encoders']);
+  const plain = service.folders({});
+  for (const [role, folder] of Object.entries(service.defaultFolders({}))) assert.equal(folder, plain[role], role);
+  // The page is told them with the rest.
+  assert.deepEqual((await service.snapshot()).defaultFolders, service.defaultFolders());
+});

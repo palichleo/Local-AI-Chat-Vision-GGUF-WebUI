@@ -29,6 +29,16 @@ const folderControls = {
   upscaleRoot: ['generation-upscale-root', 'upscaler'],
   latentUpscaleRoot: ['generation-latent-upscale-root', 'latentUpscaler'],
 };
+// (0.6.131) What the « ? » of each line of « Dossiers à part » says the folder holds.
+const folderHelp = {
+  modelRoot: 'Les fichiers des modèles eux-mêmes (Krea 2, LTX 2.5, MiniMax H3…).',
+  vaeRoot: 'Les fichiers qui transforment le calcul d’un modèle en image, en vidéo ou en son.',
+  loraRoot: 'Vos LoRA : ceux que le Studio propose, et ceux des réglages d’un modèle.',
+  textEncoderRoot: 'Les fichiers qui lisent le prompt pour un modèle.',
+  tokenizerRoot: 'Les dossiers qui découpent le prompt pour un encodeur de texte ; rangés avec les encodeurs de texte.',
+  upscaleRoot: 'Les modèles qui agrandissent une image ou une vidéo (Real-ESRGAN).',
+  latentUpscaleRoot: 'Les fichiers qui doublent la taille d’une vidéo pendant sa création (LTX 2.5).',
+};
 // What an optional component that is used, but left to the folders of the settings, holds in
 // place of a file: an id no file is registered under, so the server looks in the folders.
 const AUTOMATIC = 'automatic';
@@ -128,6 +138,8 @@ export function setupNativeWorkflows(options) {
   let workflows = [],
     assets = [],
     folders = {},
+    // The folder of each kind of file when none is set apart for it (« Détecter »).
+    folderDefaults = {},
     runner = {},
     busy = false,
     working = false,
@@ -239,6 +251,8 @@ export function setupNativeWorkflows(options) {
             'generation-vae-root-browse',
             'generation-lora-root',
             'generation-lora-root-browse',
+            // (« Détecter » of each folder: greyed while its folder is the one of the models folder.)
+            ...Object.values(folderControls).map(([id]) => id + '-detect'),
           ].includes(control.id) &&
           !control.dataset.nativeControl
         )
@@ -264,10 +278,48 @@ export function setupNativeWorkflows(options) {
     return Object.fromEntries(
       Object.entries(folderControls).map(([key, [id, role]]) => {
         const path = $(id).value.trim();
-        return [key, path === folders[role] && !state.generation?.[key] ? '' : path];
+        // Nothing is kept of a folder that is the one of the models folder: the one shown while
+        // none was set apart, or the one « Détecter » gave back.
+        return [
+          key,
+          (path === folders[role] && !state.generation?.[key]) || path === folderDefaults[role] ? '' : path,
+        ];
       }),
     );
   }
+  /**
+   * A line of « Dossiers à part » as its folder stands (0.6.131, maquette D1): its « ? » says what
+   * the folder holds and which one it is, « Détecter » is greyed while it is the one of the models
+   * folder, and a path longer than its field shows its end (the folder, not the drive).
+   */
+  function showFolder(key) {
+    const [id, role] = folderControls[key],
+      field = $(id),
+      detect = $(id + '-detect'),
+      help = $(id + '-help');
+    if (!detect || !help) return;
+    const path = field.value.trim(),
+      usual = folderDefaults[role] || '',
+      own = Boolean(path && usual && path !== usual);
+    detect.dataset.unavailable = String(!own);
+    detect.disabled = busy || working || !own;
+    detect.title = own
+      ? 'Reprendre le dossier du dossier des modèles : ' + usual
+      : 'C’est déjà le dossier du dossier des modèles.';
+    const said = [
+      folderHelp[key],
+      own ? 'Dossier à part, choisi par vous : ' + path + '.' : path ? 'Dans le dossier des modèles : ' + path + '.' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    help.setAttribute('aria-label', 'Aide : ' + said);
+    help.dataset.help = said;
+    onHelpChange(help);
+    field.dataset.long = String(field.scrollWidth > field.clientWidth + 1);
+  }
+  const showFolders = () => {
+    for (const key of Object.keys(folderControls)) showFolder(key);
+  };
   function componentFolder(role) {
     // « upscaler » is an image model for Real-ESRGAN and a latent one for LTX: each has its folder.
     const kind =
@@ -712,6 +764,7 @@ export function setupNativeWorkflows(options) {
     if (downloads.job?.state === 'running') followDownload();
     assets = result.assets || assets;
     folders = result.folders || folders;
+    folderDefaults = result.defaultFolders || folderDefaults;
     if (result.families) families = result.families;
     runner = result.runner || runner;
     const config = result.config;
@@ -729,6 +782,7 @@ export function setupNativeWorkflows(options) {
           $(id).value = config[key] || folders[role] || '';
       }
     }
+    showFolders();
     runnerStatus();
     renderList();
   }
@@ -1990,7 +2044,7 @@ export function setupNativeWorkflows(options) {
       $('native-import-status').focus();
     }
   }
-  for (const [id] of Object.values(folderControls))
+  for (const [key, [id, role]] of Object.entries(folderControls)) {
     $(id + '-browse').onclick = async () => {
       try {
         await run(async signal => {
@@ -2001,7 +2055,19 @@ export function setupNativeWorkflows(options) {
       } catch (failure) {
         if (!controller.signal.aborted) importStatus(failure.message, true);
       }
+      showFolder(key);
     };
+    // « Détecter »: the folder of the models folder again; kept as no folder apart at « Enregistrer ».
+    if ($(id + '-detect'))
+      $(id + '-detect').onclick = () => {
+        if (!folderDefaults[role]) return;
+        $(id).value = folderDefaults[role];
+        showFolder(key);
+      };
+    for (const event of ['input', 'change', 'blur']) $(id).addEventListener?.(event, () => showFolder(key));
+    // Measured once the line is in sight (its tab opened, the window resized).
+    if (typeof ResizeObserver === 'function' && $(id).nodeType === 1) new ResizeObserver(() => showFolder(key)).observe($(id));
+  }
   // « Remettre les valeurs de base »: every line takes the value of Moodix again; nothing is saved
   // before « Enregistrer » (saved so, a model the user changed nothing else of is Moodix's again,
   // and follows its updates: NativeWorkflowCatalog.save).

@@ -2738,17 +2738,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
   font-size: var(--size-1);
 }
 
-.native-folders-apart {
-  margin-top: 4px;
-}
-.native-folders-apart[open] > summary {
-  margin-bottom: 14px;
-}
-.native-folders-apart > summary {
-  font-size: var(--size-1);
-  color: var(--muted);
-  cursor: pointer;
-}
 .workflow-settings h3 {
   margin: 0;
   font-size: var(--size-2);
@@ -16794,7 +16783,7 @@ body:not([data-view='studio']) .ai-cursor {
   opacity: 0.5;
 }
 /* Le fichier : son nom en mono, comme une donnée ; un champ dès qu'on y vient. */
-#settings #workflow-editor .set-file > input:not([type='hidden'], [type='checkbox']),
+#settings :is(#workflow-editor, #settings-form) .set-file > input:not([type='hidden'], [type='checkbox']),
 #settings #workflow-editor .set-told > input {
   width: 100%;
   min-width: 0;
@@ -16812,22 +16801,33 @@ body:not([data-view='studio']) .ai-cursor {
 #settings #workflow-editor .set-told > input {
   font-family: var(--font-ui);
 }
-#settings #workflow-editor :is(.set-file, .set-told) > input:hover:enabled {
+#settings :is(#workflow-editor, #settings-form) :is(.set-file, .set-told) > input:hover:enabled {
   border-color: rgba(238, 232, 222, 0.1);
 }
-#settings #workflow-editor :is(.set-file, .set-told) > input:focus {
+#settings :is(#workflow-editor, #settings-form) :is(.set-file, .set-told) > input:focus {
   border-color: rgba(238, 232, 222, 0.22);
   background: rgba(0, 0, 0, 0.26);
   color: var(--text-1);
   outline: none;
 }
-#settings #workflow-editor .set-file > input::placeholder,
+#settings :is(#workflow-editor, #settings-form) .set-file > input::placeholder,
 #settings #workflow-editor .set-told > input::placeholder {
   color: var(--text-3);
 }
 /* Trouvé seul dans le dossier des modèles : son nom se lit comme celui d'un fichier choisi. */
 #settings #workflow-editor .set-file > input[data-automatic='true']::placeholder {
   color: var(--text-2);
+}
+/* 0.6.131 (maquette D1). « Dossiers à part » : un dossier par ligne, comme un fichier d'un modèle.
+   Un chemin plus long que son champ montre sa fin (le dossier lui-même, pas le disque) tant qu'on
+   n'y écrit pas : native-workflow-ui.mjs le mesure (showFolder). */
+#settings .models-folder-settings [data-settings-item] {
+  display: block;
+  flex: 1 1 100%;
+}
+#settings #settings-form .set-folder > input[data-long='true']:not(:focus) {
+  direction: rtl;
+  text-align: left;
 }
 /* « Parcourir », « Détecter », « Ajouter » : du texte, sans cadre. */
 #settings .set-act {

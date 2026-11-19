@@ -785,6 +785,10 @@ try {
   // workflows Moodix ships (this copy has none of their files: every model is to be downloaded).
   const lines = `[...document.querySelectorAll('#workflow-list .model-line')]`,
     ltx = `document.querySelector('#workflow-list .model-line[data-model="LTX 2.5"]')`;
+  // (0.6.131) « Dossiers à part » : a folder a line of 46 px (its name, the folder, « Parcourir »,
+  // « Détecter », « ? »), nothing folded, nothing that scrolls sideways.
+  await run('onglet Génération : un dossier par ligne', () => click('#settings-tab-generation'), () =>
+    js(`(() => { const rows = [...document.querySelectorAll('#settings-panel-generation .set-folder')], panel = document.getElementById('settings-panel-generation'); return rows.length === 7 && rows.every(row => Math.round(row.getBoundingClientRect().height) === 46 && row.querySelectorAll('button.set-act').length === 2 && row.querySelector('.help-tip').dataset.help) && !panel.querySelector('details') && panel.scrollWidth <= panel.clientWidth + 1; })()`), { within: 2500 });
   await run('onglet Modèles', () => click('#settings-tab-workflows'), () =>
     js(`${lines}.length === 10 && document.querySelectorAll('#workflow-list .model-group').length === 4 && document.querySelector('#settings-tab-workflows .settings-tab-label').textContent === 'Modèles' && document.querySelectorAll('#workflow-list .model-row > .model-ai input').length === 10 && document.querySelectorAll('#workflow-list .model-ai-head').length === 1`), { within: 2500 });
   // Every line is 46 px tall, « Télécharger » in the place of the version as any other (capture 65);

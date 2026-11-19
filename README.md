@@ -129,7 +129,7 @@ Git ignores weights, and the app never moves them. For a shipped workflow whose 
 | `models/diffusers/` | Model folders (ACE-Step, MOSS-SoundEffect) |
 | `models/clip_vision/`, `models/checkpoints/` | Other components some workflows need (SCAIL-2) |
 
-The generation folders carry the names ComfyUI gives its own. **Paramètres › Génération › Dossier des modèles** takes one path: leave it empty for this `models/` folder, or point it to the `models` folder of a ComfyUI, which is read the same way. A workflow that fixes no file for a component takes, in the folder of that kind, the file that fits its model, whatever its name; a file chosen in the workflow editor always comes first. Separate folders are only needed when a kind of file is kept elsewhere.
+The generation folders carry the names ComfyUI gives its own. **Paramètres › Modèles › Dossier des modèles** takes one path: leave it empty for this `models/` folder, or point it to the `models` folder of a ComfyUI, which is read the same way. A model that fixes no file for a component takes, in the folder of that kind, the file that fits it, whatever its name; a file chosen on the page of the model always comes first. Separate folders are only needed when a kind of file is kept elsewhere: **Paramètres › Génération › Dossiers à part** has a line for each kind, where **Détecter** takes the one of the models folder back.
 
 ## History and data
 
