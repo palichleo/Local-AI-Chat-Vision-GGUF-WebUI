@@ -281,6 +281,32 @@ class KeptModelTests(unittest.TestCase):
             finally:
                 kept._kept.clear()
 
+    def test_a_model_file_named_without_comfyuis_prefix_is_read_the_same(self):
+        # The INT8 files name their tensors « model.diffusion_model.… », the « fp8 scaled » ones
+        # without it (0.6.107: such a file was refused, « Unsupported LTX2.5 connectors tensor »).
+        from runner.models.ltx25 import mappings
+
+        tensors = (
+            'video_embeddings_connector.transformer_1d_blocks.0.attn1.q_norm.weight',
+            'video_embeddings_connector.learnable_registers',
+            'audio_embeddings_connector.transformer_1d_blocks.3.attn1.k_norm.weight',
+            'transformer_blocks.0.attn1.to_q.weight',
+        )
+
+        def names(prefix):
+            headers = dict(model={prefix + name: {} for name in tensors}, textEncoder={}, vae={})
+            found = mappings(headers)
+            # Each name of the model leads to the tensor of the file, whatever the file calls it.
+            for role in ('model', 'connectors'):
+                for source, original, _ in found[role].values():
+                    self.assertIn(original, headers[source] if source == 'model' else {original: 1})
+            return sorted(found['model']), sorted(found['connectors'])
+
+        self.assertEqual(names('model.diffusion_model.'), names(''))
+        self.assertIn('video_connector.transformer_blocks.0.attn1.norm_q.weight', names('')[1])
+        self.assertIn('video_connector.learnable_registers', names('')[1])
+        self.assertIn('audio_connector.transformer_blocks.3.attn1.norm_k.weight', names('')[1])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -94,9 +94,12 @@ def mappings(headers):
     model = convert_ltx2_transformer_to_diffusers(
         {key: ('model', key, None) for key in headers['model'] if key != '__metadata__'}
     )
+    # (A file names its tensors with ComfyUI's prefix or without it: the INT8 files of the model
+    # have it, the « fp8 scaled » ones do not.)
     connectors = {
-        key.replace('model.diffusion_model.video_embeddings_connector.', 'video_connector.')
-        .replace('model.diffusion_model.audio_embeddings_connector.', 'audio_connector.')
+        key.removeprefix('model.diffusion_model.')
+        .replace('video_embeddings_connector.', 'video_connector.')
+        .replace('audio_embeddings_connector.', 'audio_connector.')
         .replace('.transformer_1d_blocks.', '.transformer_blocks.')
         .replace('.q_norm.', '.norm_q.')
         .replace('.k_norm.', '.norm_k.'): ('model', key, None)

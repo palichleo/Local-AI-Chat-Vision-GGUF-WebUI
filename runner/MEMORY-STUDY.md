@@ -337,3 +337,24 @@ With the libraries imported, the first picture takes 15.2 to 16.4 s, the third o
 - **The first step of a worker takes 1.4 to 1.7 s, the first of a later picture 1.1 s (2.3 s once), the others 0.83 s; the first decode 1.0 s, the later ones 0.75 to 0.85 s.** About 0.6 s of things done once in a process, not looked into further.
 
 Not tried: the application's own path (the chat model leaving the card before a creation and coming back after it), where the arena of the model may have to leave RAM between two creations.
+
+### The 8-bit formats of a model: INT8 ConvRot, « fp8 scaled », GGUF (19 November 2026, engine 0.6.107)
+
+The question: on an RTX 40 card, was INT8 the right file to take, against an « fp8 scaled » one or a GGUF one? LTX 2.5, 121 frames, 8 steps (11 at 1344 × 768, in two passes), the published INT8 ConvRot file and an « fp8 scaled » file of a close derivative of the same model (its layers correlate at 0.99 with the published ones), alternated, two videos a process:
+
+| | INT8 ConvRot | fp8 scaled | the fp8 file converted to INT8 ConvRot |
+| --- | --- | --- | --- |
+| a step, 768 × 448 | 1.25 s | 2.74 s | 1.25 s |
+| a video, 768 × 448, model kept | 20.5 s | 32.4 s | 20.5 s |
+| the first video of a process | 43.8 and 44.5 s | 55.5 and 55.6 s | 44.6 s |
+| a step, 1344 × 768 | 0.92 s | 2.17 s | |
+| a video, 1344 × 768, model kept | 50.0 s | 71.6 s | |
+| video memory at the most | 8.6 GiB | 8.9 GiB | 8.6 GiB |
+
+- **The engine did not read the « fp8 scaled » file at all** (« Unsupported LTX2.5 connectors tensor »): it names its tensors without ComfyUI's prefix. Read since 0.6.107; nothing else in the engine assumed the prefix.
+- **It is the product that differs, not the conversion.** One layer on the card, 5376 rows: 0.80 ms from INT8 weights through comfy-kitchen's kernel (a product of 8-bit integers, the rows quantised on the way), 2.5 ms for the same layer as 16-bit floats, whatever they were stored as; turning 8-bit floats back into 16-bit ones takes 0.09 ms of it. A feed-forward of 16384 × 4096: 2.7 ms against 10 ms. No file that computes in floats can catch up on this card: « fp8 scaled », GGUF and plain weights all end in the same product.
+- **INT8 ConvRot is also the more faithful of the two.** 25 layers of the published file turned back into floats, rounded again in each format, the layer's output against the exact one: 2.7 % for « fp8 scaled » (three bits of mantissa), 1.3 % for INT8 ConvRot (weights and rows both rounded), 1.7 % for INT8 without the rotation, 0.7 % for GGUF Q8_0 (a scale every 32 weights, and a float product), 0.3 % for 16-bit floats.
+- **Any 8-bit file can be written again as INT8 ConvRot** (`python -m runner.convert`): each quantised matrix turned back into floats, rotated, rounded with one scale a row. The 20 GiB « fp8 scaled » file in 40 s; it then runs as the published INT8 file does (1.25 s a step). Its video against the source's, same seed: the same scene and the same motion, details apart (PSNR 26.7 and 28.2 dB; two runs of the source are identical to the bit). The rotation is ConvRot's regular Hadamard matrix; with another Hadamard matrix the kernel's product is noise.
+- **GGUF**: read for the conversion only (F32, F16, BF16, Q8_0, Q4_0, Q4_1, Q5_0, Q5_1, Q4_K, Q5_K, Q6_K), checked to the last bit against gguf-py on two published files (a Q8_0 one, a Q3_K_M one whose Q4_K, Q5_K and Q6_K tensors were compared). Q2_K, Q3_K and the IQ types are refused by name.
+
+Not measured: a GGUF file of LTX 2.5 itself (none on this disk, and none was downloaded); what ComfyUI makes of the same « fp8 scaled » file; another card (the ratio of the two products is the card's); fidelity on the model's own activations rather than on random rows; a non-distilled LTX 2.5 (the family runs 8 steps without guidance only).

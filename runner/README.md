@@ -66,6 +66,12 @@ The two lines of 17 November were measured once the embedding of a timestep was 
 
 The distilled LTX 2.5 pipeline takes 8 steps, CFG 1, dimensions divisible by 32 and frame counts of 8n+1. Its audio VAE is required even when no sound is exported.
 
+## Formats of a model file
+
+The engine reads safetensors files, in the precision they store: INT8 ConvRot (the note `.comfy_quant` beside each layer), 8-bit floats (« fp8 scaled » or not), 16 and 32-bit floats. On an RTX 4070 Super the INT8 files are the fast ones: a layer computes three times faster from 8-bit integers than from floats, whatever the floats were stored as (LTX 2.5: 1.25 s a step against 2.74 s from an « fp8 scaled » file), and INT8 ConvRot rounds less than 8-bit floats do. The measures are in `MEMORY-STUDY.md`.
+
+`python -s -m runner.convert SOURCE TARGET.safetensors` writes any 8-bit file again as INT8 ConvRot: an « fp8 scaled » safetensors file, or a GGUF file (Q8_0, Q4_0, Q4_1, Q5_0, Q5_1, Q4_K, Q5_K, Q6_K; `runner/models/gguf.py` reads them without llama.cpp). 20 GiB of LTX 2.5 take 40 s. GGUF files are not read in place: they are converted first.
+
 ## Checks
 
 From the root of the repository, with the interpreter of the private environment (`data/runtime/venv/Scripts/python.exe` on Windows, `data/runtime/venv/bin/python` on Linux):
