@@ -135,6 +135,9 @@ test('a workflow runs on the folders of the settings; a file it fixes overrides 
   await checkpoint(join(folders.model, 'moss_fp8.safetensors'), MOSS.model);
   await checkpoint(join(folders.textEncoder, 'qwen3.5_9b_int8.safetensors'), MOSS.textEncoder);
   const vae = await checkpoint(join(folders.vae, 'flux2-vae.safetensors'), MOSS.vae);
+  // The tokenizer of the encoder, a folder beside it (Moodix's engine reads the prompt itself).
+  await tokenizer(join(folders.textEncoder, 'qwen35_tokenizer'), 4);
+  folders.tokenizer = folders.textEncoder;
   const assets = new GenerationAssets(join(root, 'assets.json'), { folder: (family, kind) => folders[kind] ?? null }),
     catalog = new NativeWorkflowCatalog(join(root, 'workflow'), { assets, capabilities: { moss: true } }),
     workflow = { ...familyTemplate(families().moss), id: 'moss-auto', enabled: true },
@@ -142,6 +145,7 @@ test('a workflow runs on the folders of the settings; a file it fixes overrides 
     everything = {
       model: 'moss_fp8.safetensors',
       textEncoder: 'qwen3.5_9b_int8.safetensors',
+      tokenizer: 'qwen35_tokenizer',
       vae: 'flux2-vae.safetensors',
     };
 
@@ -165,7 +169,7 @@ test('a workflow runs on the folders of the settings; a file it fixes overrides 
     chosen = await assets.register({ path: own, kind: 'textEncoder', family: 'moss' });
   await catalog.save({ ...workflow, components: { textEncoder: { policy: 'fixed', asset: chosen.id } } });
   found = await listed();
-  assert.deepEqual(found.automatic, { model: everything.model, vae: everything.vae });
+  assert.deepEqual(found.automatic, { model: everything.model, tokenizer: everything.tokenizer, vae: everything.vae });
   assert.equal(
     basename(
       (await resolveNativeWorkflow(found, { prompt: 'une affiche' }, assets, { seed: 1 })).components.textEncoder,

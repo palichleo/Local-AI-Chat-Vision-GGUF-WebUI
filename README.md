@@ -103,7 +103,7 @@ Workflows shipped with Moodix:
 | Upscale vidéo (Real-ESRGAN ×2) | Video upscaling, keeping the sound |
 | Interpoler (RIFE 4.26) | In-between frames: smoother motion or slow motion |
 
-**Two engines.** Every workflow runs on Moodix's own Python engine (`runner/`), except **MOSS Image**, which is created by a ComfyUI running beside Moodix on the same computer, called through its local HTTP API. **Paramètres › Workflows** shows on its line whether that ComfyUI answers, and can start it on Windows (**Démarrer**). See [runner/README.md](runner/README.md) for the built-in engine.
+**One engine.** Every workflow runs on Moodix's own Python engine (`runner/`), **MOSS Image** included since 0.6.124: no other program has to run beside Moodix. See [runner/README.md](runner/README.md) for the engine.
 
 **Workflows** are small JSON files, created and edited in **Paramètres › Workflows**. The shipped ones live in `runner/workflows/` and come with every download and update. Your own workflows, and your edits of shipped ones, are saved in `workflow/`, which updates never touch. When an update brings a new version of a workflow you edited, or one named like yours, the new one is listed beside yours as « … V2 » (then V3…). A shipped workflow cannot be deleted, only disabled or edited; **Rétablir** brings an edited one back to its shipped version. A workflow selects its model files, LoRAs and reference slots, and decides who controls each parameter:
 
@@ -183,7 +183,7 @@ Code style: Prettier (`.prettierrc.json`) for new JavaScript and CSS files; neve
 - **The chat model does not start:** **Paramètres › Application › Diagnostic** shows the engine's last messages. An unknown option or architecture usually means an outdated llama.cpp build: install the official one from **Paramètres › Mise à jour › Composants**.
 - **Out of memory:** stop the model, reduce **Contexte total**, or lower **Calcul** to place less of the model on the graphics card.
 - **A creation is not offered:** check that generation is enabled, its environment is ready, at least one workflow is green, and the chat model supports native tool calls.
-- **MOSS Image unavailable:** its ComfyUI is not running or does not answer; start it from **Paramètres › Workflows**.
+- **MOSS Image unavailable:** one of its four files is missing (model, Qwen3.5 text encoder, its tokenizer folder, FLUX.2 VAE): **Paramètres › Modèles** offers the download, or says which file it could not read.
 - **Port in use:** another instance may be using 8787.
 - **The update fails:** run the [rescue update](#rescue-update) from the application folder.
 

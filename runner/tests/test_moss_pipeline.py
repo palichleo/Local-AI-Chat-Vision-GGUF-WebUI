@@ -192,6 +192,16 @@ class PreflightTests(unittest.TestCase):
         self.headers['small'] = {'model.language_model.embed_tokens.weight': {'shape': [248320, 2048]}}
         with self.assertRaisesRegex(ValueError, 'Qwen3.5 9B'):
             self.check(textEncoder='small')
+        # The same encoder in 4-bit weights, which ComfyUI reads and this engine does not yet.
+        self.headers['w4a8'] = {
+            'model.language_model.embed_tokens.weight': {'shape': [248320, 4096]},
+            'model.language_model.layers.0.mlp.gate_proj.weight_codebook': {'shape': [16]},
+        }
+        with self.assertRaisesRegex(ValueError, '4 bits .W4A8.*mossImage_sft_txt_int8'):
+            self.check(textEncoder='w4a8')
+        # (A codebook elsewhere in the file, the vision tower's, is not the language model's.)
+        self.headers['other'] = {**self.headers['encoder'], 'model.visual.blocks.0.attn.qkv.weight_codebook': {'shape': [16]}}
+        self.assertIsNone(self.check(textEncoder='other'))
         with self.assertRaisesRegex(ValueError, 'celui de FLUX.2'):
             self.check(vae='encoder')
         self.headers['wide'] = {'bn.running_mean': {'shape': [64]}}

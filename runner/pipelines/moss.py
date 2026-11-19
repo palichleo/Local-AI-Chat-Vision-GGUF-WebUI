@@ -62,6 +62,12 @@ def preflight(job, config):
             'L’encodeur de texte de MOSS Image est un Qwen3.5 9B (par exemple '
             'mossImage_sft_txt_int8.safetensors) : ce fichier n’en est pas un.'
         )
+    # ComfyUI also reads this encoder in files of 4-bit weights (« W4A8 »): this engine does not yet.
+    if any(key.startswith(PREFIX) and key.endswith('.weight_codebook') for key in encoder):
+        raise ValueError(
+            'Cet encodeur de texte est en 4 bits (W4A8), un format que Moodix ne lit pas encore : '
+            'choisissez l’encodeur INT8 de MOSS Image (mossImage_sft_txt_int8.safetensors).'
+        )
     vae = header(job['components']['vae'])
     if 'bn.running_mean' not in vae or vae['bn.running_mean']['shape'] != [128]:
         raise ValueError('Le VAE de MOSS Image est celui de FLUX.2 (flux2-vae.safetensors) : ce fichier n’en est pas un.')
@@ -205,14 +211,14 @@ def _generate(job, config, progress_callback, cleanup):
         settings, prefix = moss_image.config(described)
         stores = {'model': cleanup.enter_context(open_store(str(files['model']), reserve=ram_reserve))}
         # The attention the file asks for (ComfyUI's files of INT8 weights ask for INT8 attention).
-        settings['attention'] = moss_image.file_attention(described, prefix, stores['model'])
+        asked = moss_image.file_attention(described, prefix, stores['model'])
         budget = room(reserve + AHEAD_GIB)
         if config.get('cacheGiB') is not None:
             budget = min(budget, config['cacheGiB'])
         pool = WeightPool(stores, budget, ahead_gib=AHEAD_GIB)
         cleanup.callback(pool.clear)
         with init_empty_weights():
-            model = moss_image.MossImage(**settings)
+            model = moss_image.MossImage(**settings, attention=asked)
         model = load_streamed(model, moss_image.names(model, described, prefix), pool)
         progress('transformer layers prepared', budget_gib=round(budget, 2))
         # The share that stays goes to the GPU now, in layer order, before the first step.
@@ -229,6 +235,8 @@ def _generate(job, config, progress_callback, cleanup):
 
         latents = sample(model, latents, texts, sigmas, cfg, step)
         weights = dict(pool.summary(), gpu_gib=round(pool.bytes / 1024**3, 3), budget_gib=round(budget, 3))
+        # What the blocks really ran with, for the record of the picture.
+        used = model.attention
         pool.clear()
         del model, texts
         release()
@@ -256,7 +264,7 @@ def _generate(job, config, progress_callback, cleanup):
                 steps_done=total,
                 skip_layers=list(moss_image.SKIPPED) if cfg != 1 else [],
                 skip_until=SKIP_UNTIL,
-                attention=settings['attention'],
+                attention=used,
             ),
             seconds=round(time.perf_counter() - start, 2),
             peak_vram_gib=round(torch.cuda.max_memory_allocated() / 1024**3, 3),

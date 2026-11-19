@@ -310,6 +310,26 @@
       "url": "https://spdx.org/licenses/Apache-2.0.html"
     }
   },
+  "qwen35_tokenizer": {
+    "repo": "OpenMOSS-Team/MOSS-Image-SFT",
+    "revision": "f972bd4b4b9e3852133cc5da954d87bc32cd8fb9",
+    "folder": true,
+    "size": 19990448,
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://spdx.org/licenses/Apache-2.0.html"
+    },
+    "files": [
+      {
+        "path": "tokenizer/tokenizer.json",
+        "size": 19989325
+      },
+      {
+        "path": "tokenizer/tokenizer_config.json",
+        "size": 1123
+      }
+    ]
+  },
   "qwen25_tokenizer": {
     "repo": "Qwen/Qwen2.5-7B-Instruct",
     "revision": "a09a35458c702b33eeacc393d103063234e8bc28",

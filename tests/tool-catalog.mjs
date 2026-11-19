@@ -178,9 +178,9 @@ test('the Studio offers its style LoRAs where the engine that creates applies th
   const styled = Object.fromEntries(
     [...studio.create_image, ...studio.create_video].map(item => [item.id, item.styled]),
   );
-  // Atelier's engine applies them to Krea 2 and LTX 2.5, ComfyUI to MOSS Image; MiniMax H3
-  // takes none yet.
-  assert.deepEqual(styled, { krea: true, 'moss-image': true, ltx: true, minimax: false });
+  // Moodix's engine applies them to Krea 2 and LTX 2.5; MiniMax H3 takes none yet, nor MOSS
+  // Image since it left ComfyUI for that engine (0.6.124: its styles are to be carried over).
+  assert.deepEqual(styled, { krea: true, 'moss-image': false, ltx: true, minimax: false });
 });
 
 test('the LoRA of the subject references is no setting: neither the Studio nor the model sees it (16/11)', async () => {

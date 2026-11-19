@@ -17,6 +17,11 @@
       "asset": "b2d5f8c3-6e9a-4b4c-8f7d-3a8e1c9b5d62",
       "file": "mossImage_sft_txt_int8.safetensors"
     },
+    "tokenizer": {
+      "policy": "fixed",
+      "asset": "d4f7b0e5-8a1c-4d6e-ab9f-5c0a3e1d7f84",
+      "file": "qwen35_tokenizer"
+    },
     "vae": {
       "policy": "fixed",
       "asset": "c3e6a9d4-7f0b-4c5d-9a8e-4b9f2d0c6e73",

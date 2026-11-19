@@ -30,15 +30,15 @@ def ltx_job(**changes):
 
 class RegistryTests(unittest.TestCase):
     def test_every_manifest_has_a_runnable_module_and_a_capability(self):
-        # A family ComfyUI runs is known here by its manifest only: no module, no capability.
+        # A family ComfyUI runs would be known here by its manifest only (no module, no capability):
+        # there is none since MOSS Image joined this engine (0.6.124).
         own = {name for name, manifest in families().items() if manifest.get('native', True)}
         self.assertEqual(set(capabilities()), own)
-        # Krea 2, MiniMax H3 and LTX 2.5 are this engine's; MOSS Image is ComfyUI's only.
-        for name in ('krea2', 'minimax_h3', 'ltx25'):
+        # Krea 2, MiniMax H3, LTX 2.5 and MOSS Image are this engine's, as every family is.
+        for name in ('krea2', 'minimax_h3', 'ltx25', 'moss'):
             self.assertEqual(families()[name]['engine'], 'internal')
             self.assertIn(name, own)
-        self.assertEqual(families()['moss']['engine'], 'external')
-        self.assertNotIn('moss', own)
+        self.assertEqual(own, set(families()))
         for name, manifest in families().items():
             with self.subTest(family=name):
                 self.assertIn(manifest['engine'], ('internal', 'external'))

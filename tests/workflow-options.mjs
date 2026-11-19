@@ -180,7 +180,8 @@ test('every parameter a family declares is read by its engine, unless the family
     .join('\n');
   assert.ok(beside.length > 10000, 'runner/models and runner/video are read');
   for (const manifest of Object.values(families())) {
-    // MOSS Image is made by ComfyUI: its graph is built in lib/comfy-graphs.mjs.
+    // A family ComfyUI makes has its graph built in lib/comfy-graphs.mjs (none since MOSS Image
+    // joined Moodix's engine, 0.6.124).
     const path =
       manifest.engine === 'external'
         ? new URL('../lib/comfy-graphs.mjs', import.meta.url)
@@ -201,11 +202,14 @@ test('every parameter a family declares is read by its engine, unless the family
         );
     }
   }
-  // `attention` served ComfyUI: the engine of Moodix runs LTX 2.5 and Krea 2 without reading it.
-  assert.ok(family('ltx25').parameters.attention.unused && family('krea2').parameters.attention.unused);
+  // `attention` served ComfyUI: the engine of Moodix runs LTX 2.5, Krea 2 and MOSS Image without
+  // reading it (MOSS Image takes the attention its file asks for).
+  for (const name of ['ltx25', 'krea2', 'moss']) assert.ok(family(name).parameters.attention.unused, name);
+  assert.equal(family('moss').engine, 'internal');
   assert.equal(family('minimax_h3').parameters.attention.unused, undefined, 'MiniMax H3 reads its attention');
   // New workflows are made without it.
-  for (const name of ['ltx25', 'krea2']) assert.equal(family(name).template.parameters.attention, undefined, name);
+  for (const name of ['ltx25', 'krea2', 'moss'])
+    assert.equal(family(name).template.parameters.attention, undefined, name);
 });
 
 test('the router always passes a clip length: the length of a profile is never used', async () => {

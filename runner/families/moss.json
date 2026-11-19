@@ -10,8 +10,9 @@
     "version": "SFT"
   },
   "tasks": ["create_image"],
-  "engine": "external",
-  "native": false,
+  "engine": "internal",
+  "hardware": { "cuda": true },
+  "requires": ["torch", "diffusers", "transformers", "accelerate", "safetensors", "PIL", "comfy_kitchen"],
   "components": {
     "model": {
       "label": "Modèle",
@@ -36,6 +37,16 @@
           "shape": [null, 4096]
         }
       ]
+    },
+    "tokenizer": {
+      "label": "Tokenizer",
+      "folder": "text_encoders",
+      "required": true,
+      "format": "tokenizer",
+      "policies": ["fixed"],
+      "picker": "tokenizer",
+      "vocabularyOf": "textEncoder",
+      "help": "Dossier qui découpe le prompt en tokens pour l’encodeur de texte (qwen35_tokenizer : tokenizer_config.json, tokenizer.json). Proposé automatiquement d’après l’encodeur."
     },
     "vae": {
       "label": "VAE",
@@ -94,7 +105,8 @@
     "attention": {
       "type": "string",
       "choices": ["pytorch", "comfy_kitchen"],
-      "note": "Attention dense : comfy_kitchen calcule en INT8 (plus rapide, à peine différent), pytorch exactement."
+      "note": "Attention dense : comfy_kitchen calcule en INT8 (plus rapide, à peine différent), pytorch exactement.",
+      "unused": "Sans effet : le moteur de Moodix prend l’attention que le fichier du modèle demande (ce réglage servait à ComfyUI)."
     }
   },
   "requiredParameters": ["prompt", "seed", "width", "height", "steps", "cfg"],
@@ -113,6 +125,10 @@
       "textEncoder": {
         "policy": "fixed",
         "asset": "select-local-text-encoder"
+      },
+      "tokenizer": {
+        "policy": "fixed",
+        "asset": "select-local-tokenizer"
       },
       "vae": {
         "policy": "fixed",
@@ -148,10 +164,6 @@
       "cfg": {
         "policy": "fixed",
         "value": 3
-      },
-      "attention": {
-        "policy": "fixed",
-        "value": "pytorch"
       }
     },
     "loras": [],

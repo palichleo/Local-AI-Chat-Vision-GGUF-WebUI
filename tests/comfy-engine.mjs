@@ -15,6 +15,7 @@ import {
 } from '../lib/comfy-engine.mjs';
 import { comfyGraph } from '../lib/comfy-graphs.mjs';
 import { GenerationService } from '../lib/generation-service.mjs';
+import { families } from '../lib/families.mjs';
 import { mp4Bytes } from '../lib/video-info.mjs';
 import { held, twice } from './fixtures/held-renames.mjs';
 
@@ -767,9 +768,24 @@ test('the index of an MP4 gives its size, length and rate', async () => {
   assert.equal(mp4Bytes(png()), null);
 });
 
+/**
+ * No family is ComfyUI's any more: MOSS Image, the last one, joined Moodix's own engine (0.6.124).
+ * The way to ComfyUI stays in the application until it is removed: for the time of a test, MOSS
+ * Image is said to be ComfyUI's again, as its manifest said until then.
+ */
+function comfyOnly(t, name = 'moss') {
+  const all = families(),
+    own = all[name];
+  all[name] = Object.freeze({ ...own, engine: 'external', native: false });
+  t.after(() => {
+    all[name] = own;
+  });
+}
+
 test('« Démarrer »: the one ComfyUI installed starts, or the user chooses it; it is kept, MOSS Image goes to it', {
   skip: process.platform !== 'win32',
 }, async t => {
+  comfyOnly(t);
   const dataDir = await trial(null),
     app = join(dataDir, 'Comfy Desktop.exe'),
     other = join(dataDir, 'ComfyUI.exe'),
@@ -851,6 +867,7 @@ test('the ComfyUI applications installed: those of the uninstall entries of Wind
 });
 
 test('the generation service: ComfyUI for MOSS Image, the built-in engine for everything else', async t => {
+  comfyOnly(t);
   const fake = await comfy(t),
     dataDir = await trial(null),
     outputDir = join(dataDir, 'output');
