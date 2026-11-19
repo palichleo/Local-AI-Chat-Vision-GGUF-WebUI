@@ -2,6 +2,17 @@
   "family": "minimax_h3",
   "label": "MiniMax H3",
   "mediaType": "video",
+  "model": {
+    "name": "MiniMax H3",
+    "does": "Vidéos de 5 à 15 s, avec le son.",
+    "group": "video",
+    "order": 2,
+    "names": [
+      { "match": "omni", "name": "Omni" },
+      { "match": "fasth3|fastvideo", "name": "FastH3 v2" },
+      { "match": "^(?!.*ref2va).*fl2va", "name": "De base" }
+    ]
+  },
   "tasks": ["create_video", "extend_video"],
   "engine": "internal",
   "hardware": { "cuda": true },
@@ -56,7 +67,7 @@
               "absent": true
             }
           ],
-          "companion": { "role": "referenceModel", "named": "ref2va" }
+          "companion": { "role": "referenceModel", "named": "^(?!.*fl2va).*ref2va" }
         },
         {
           "id": "fast",

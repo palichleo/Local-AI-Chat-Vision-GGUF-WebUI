@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { families } from '../lib/families.mjs';
 import { versionComponent } from '../lib/model-files.mjs';
 import { GenerationService } from '../lib/generation-service.mjs';
-import { ModelVersions, isCompanion, recipeOf, withVersion } from '../lib/model-versions.mjs';
+import { ModelVersions, isCompanion, recipeOf, versionName, withVersion } from '../lib/model-versions.mjs';
 import { NativeWorkflowCatalog, validateNativeWorkflow } from '../lib/native-workflows.mjs';
 
 /**
@@ -140,7 +140,8 @@ test('the versions of a model are the files of its folder that are one of it, re
     [OWN, 'found', 'direct', false],
   ]);
   const [first, q3, , four, scaled] = listed.versions;
-  assert.deepEqual(first, { path: join(folder, PROVIDED), file: PROVIDED, format: 'INT8', how: 'direct', bytes: 40, source: 'provided', used: true });
+  assert.deepEqual(first, { path: join(folder, PROVIDED), file: PROVIDED, name: 'Distillé', format: 'INT8', how: 'direct', bytes: 40, source: 'provided', used: true });
+  assert.deepEqual(listed.versions.map(version => version.name).slice(1), ['ltx', 'ltx', 'ltx-w4a8', 'Uncensored v1.1', 'Uncensored v1.1']);
   assert.deepEqual([q3.reason, four.reason, four.format], ['Q3_K', 'W4A8', 'W4A8']);
   assert.deepEqual([scaled.path, scaled.format, scaled.bytes], [join(folder, 'video', 'ltx25_uncensored_v1.1-fp8_scaled.safetensors'), 'FP8', 20]);
   // Each file is read once, with its shapes, while it stays the same; changed, it is read again.
@@ -398,4 +399,118 @@ test('the application keeps the versions in data/model-versions.json, and its ca
   const made = await service().catalog.read(ltx.id);
   assert.deepEqual(made.components.model, { policy: 'fixed', asset: 'mon-ltx', file: OWN });
   assert.ok(service().versions instanceof ModelVersions);
+});
+
+test('a version is named without its model, its format or how it was made; a file its family knows, by the name it gives it', () => {
+  const name = (family, file) => versionName(file, families()[family]);
+  // The files of the user's folder (19/11).
+  for (const [family, file, expected] of [
+    ['ltx25', 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors', 'Distillé'],
+    ['ltx25', 'ltx25_uncensored_v1.1-int8-convrot.safetensors', 'Uncensored v1.1'],
+    ['ltx25', 'ltx25_uncensored_v1.1-fp8_scaled.safetensors', 'Uncensored v1.1'],
+    ['minimax_h3', OMNI, 'Omni'],
+    ['minimax_h3', FAST, 'FastH3 v2'],
+    ['minimax_h3', FL2VA, 'De base'],
+    ['seedvr2', 'seedvr2_7b_sharp_fp8_e4m3fn.safetensors', '7B Sharp'],
+    ['seedvr2', 'seedvr2_7b_int8_convrot.safetensors', '7B'],
+    ['seedvr2', 'seedvr2_ema_7b_sharp_fp8_e4m3fn.safetensors', '7B EMA Sharp'],
+    ['seedvr2', 'seedvr2_ema_7b_fp16.safetensors', '7B EMA'],
+    ['krea2', 'krea2TurboOfficialComfy_krea2TurboInt8.safetensors', 'Turbo'],
+    ['wan_scail2', 'wan2.1_14B_SCAIL_2_int8_convrot.safetensors', 'De base'],
+    // One nobody described: its name less the model, the format, the steps, the mark of a GGUF.
+    ['ltx25', join('D:', 'modeles', 'LTX-2.5_mon-essai_8steps_pruned.safetensors'), 'Mon essai'],
+    ['ltx25', 'mon-modele.Q8_0.gguf', 'Mon modele'],
+    ['ltx25', 'cinema-Q4_K_M.gguf', 'Cinema'],
+    ['krea2', 'krea2_portraits_v3_bf16.safetensors', 'Portraits v3'],
+    ['ltx25', 'ltx25_22b_cine_convrot.safetensors', 'Cine'],
+    // Nothing left: the whole name.
+    ['ltx25', 'ltx25-int8.safetensors', 'ltx25-int8'],
+    // A merge of the two files of MiniMax is neither the base model…
+    ['minimax_h3', 'minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors', 'Hybrid fl2va ref2va b25 49'],
+  ])
+    assert.equal(name(family, file), expected, file);
+  // … nor its second file.
+  const full = versionComponent(families().minimax_h3).spec.recipes[0];
+  assert.equal(isCompanion(full, { metadata: {} }, 'minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors'), false);
+  assert.equal(isCompanion(full, { metadata: { 'modelspec.title': 'hybrid_fl2va_ref2va' } }, 'x.safetensors'), false);
+  assert.equal(versionName('portraits_int8.safetensors', undefined), 'Portraits');
+});
+
+test('the page « Modèles » is given one line a model, in its order, and a choice made there is kept (0.6.118)', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'moodix-models-page-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const folder = join(root, 'models', 'diffusion_models'),
+    own = join(root, 'workflow');
+  await mkdir(folder, { recursive: true });
+  await mkdir(join(root, 'data'));
+  for (const name of [PROVIDED, OWN, OMNI, FL2VA, REF2VA]) await writeFile(join(folder, name), 'x');
+  const service = new GenerationService({ root, dataDir: join(root, 'data'), workflowDir: own, builtinWorkflowDir: shippedFolder, outputDir: join(root, 'output'), worker: {}, environment: {} });
+  // The files of this test are a few bytes: what reads them and the registry of the files are given.
+  const registered = new Map();
+  Object.assign(service.assets, {
+    folder: (family, kind) => (kind === 'model' ? [folder] : []),
+    register: async ({ path, kind, family }) => {
+      const id = assetId(family, kind, basename(path));
+      registered.set(id, { id, path, kind, family });
+      return registered.get(id);
+    },
+    read: async id => registered.get(id) ?? Promise.reject(new Error(`Asset ${id} not found`)),
+    resolve: async (id, { kind, family, file }) => {
+      if (registered.has(id)) return registered.get(id);
+      if (!['model', 'referenceModel'].includes(kind) || existsSync(join(folder, file))) return { id, path: join(folder, file ?? id), kind, family };
+      throw Object.assign(new Error(`Asset ${id} not found`), { status: 400 });
+    },
+  });
+  service.versions.describe = async path => SAID[basename(path)] ?? Promise.reject(new Error('unreadable'));
+  const lines = await service.models();
+  assert.deepEqual(
+    lines.map(line => [line.group, line.name, line.does]),
+    [
+      ['image', 'Krea 2', 'Photos, illustrations, retouche d’une image.'],
+      ['image', 'MOSS Image', 'Affiches, mises en page, texte dans l’image.'],
+      ['video', 'LTX 2.5', 'Vidéos et prolongations.'],
+      ['video', 'MiniMax H3', 'Vidéos de 5 à 15 s, avec le son.'],
+      ['video', 'Wan 2.1 SCAIL-2', 'Remplacer un personnage dans une vidéo.'],
+      ['audio', 'ACE-Step 1.5', 'Musique, avec ou sans paroles.'],
+      ['audio', 'MOSS-SoundEffect v2', 'Bruitages.'],
+      ['retouch', 'SeedVR2', 'Agrandir et affiner une image.'],
+      ['retouch', 'Real-ESRGAN', 'Agrandir une image ou une vidéo.'],
+      ['retouch', 'RIFE', 'Interpoler une vidéo.'],
+    ],
+  );
+  const line = name => lines.find(item => item.name === name),
+    ltx = shipped('ltx25'),
+    minimax = shipped('minimax_h3');
+  // A model whose file is one to choose comes with its versions; another with the name of the one it has.
+  assert.deepEqual(line('LTX 2.5').workflows.map(({ id, family, provided, used }) => [id, family, provided, used]), [[ltx.id, 'ltx25', PROVIDED, join(folder, PROVIDED)]]);
+  assert.deepEqual(line('LTX 2.5').workflows[0].versions.map(version => [version.name, version.format, version.used]), [['Distillé', 'INT8', true], ['Uncensored v1.1', 'INT8', false]]);
+  assert.deepEqual(line('MiniMax H3').workflows[0].versions.map(version => [version.name, version.parameters.steps]), [['Omni', 8], ['De base', 20]]);
+  assert.deepEqual(line('ACE-Step 1.5').workflows, [{ id: shipped('acestep15').id, family: 'acestep15', version: 'XL' }]);
+  assert.deepEqual(line('Krea 2').workflows[0].versions, [], 'none of its files here: to download');
+  // Real-ESRGAN is one model in two workflows: images, videos.
+  assert.deepEqual(line('Real-ESRGAN').workflows.map(({ family, version }) => [family, version]).sort(), [['realesrgan_image', '×4 Plus'], ['realesrgan_video', '×2 Plus']]);
+
+  // A version picked for a workflow as shipped: kept beside it.
+  await service.useVersion(ltx.id, join(folder, OWN));
+  assert.equal((await service.catalog.read(ltx.id)).components.model.file, OWN);
+  assert.equal((await service.models()).find(item => item.name === 'LTX 2.5').workflows[0].used, join(folder, OWN));
+  assert.equal(existsSync(join(own, ltx.id + '.json')), false, 'no copy of the workflow is written');
+  // For a workflow the user edited: written into theirs, with what they wrote.
+  const { digest, ...stored } = minimax;
+  await mkdir(own, { recursive: true });
+  await writeFile(join(own, minimax.id + '.json'), JSON.stringify({ ...stored, description: 'Le mien.' }));
+  await service.useVersion(minimax.id, join(folder, FL2VA));
+  const theirs = JSON.parse(await readFile(join(own, minimax.id + '.json'), 'utf8'));
+  assert.deepEqual([theirs.description, theirs.components.model.file, theirs.components.referenceModel.file, theirs.parameters.steps.value, theirs.profiles.draft.parameters.steps], ['Le mien.', FL2VA, REF2VA, 20, 20]);
+  assert.deepEqual([theirs.components.model.asset, theirs.components.referenceModel.asset], [assetId('minimax_h3', 'model', FL2VA), assetId('minimax_h3', 'referenceModel', REF2VA)]);
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(join(root, 'data', 'model-versions.json'), 'utf8')).used), ['ltx25']);
+  assert.equal((await service.models()).find(item => item.name === 'MiniMax H3').workflows[0].used, join(folder, FL2VA));
+  // A workflow created or imported by the user (before this page) is no line, and no model to choose a version of.
+  await writeFile(join(own, 'mon-ltx.json'), JSON.stringify({ ...stored, id: 'mon-ltx', name: 'Mon MiniMax' }));
+  assert.equal((await service.catalog.list()).some(workflow => workflow.id === 'mon-ltx'), true);
+  assert.equal((await service.models()).flatMap(item => item.workflows).some(workflow => workflow.id === 'mon-ltx'), false);
+  await assert.rejects(service.useVersion('mon-ltx', join(folder, OMNI)), { status: 404, message: 'Ce modèle n’est pas fourni avec Moodix.' });
+  for (const [id, path] of [[ltx.id, ''], [ltx.id, undefined], [undefined, join(folder, OWN)], [7, join(folder, OWN)]])
+    await assert.rejects(service.useVersion(id, path), { status: 400, message: 'Version invalide.' });
+  await assert.rejects(service.useVersion(ltx.id, join(folder, 'absent.safetensors')), { status: 404 });
 });

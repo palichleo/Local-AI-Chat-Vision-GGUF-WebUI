@@ -2,6 +2,15 @@
   "family": "ltx25",
   "label": "LTX2.5",
   "mediaType": "video",
+  "model": {
+    "name": "LTX 2.5",
+    "does": "Vidéos et prolongations.",
+    "group": "video",
+    "order": 1,
+    "names": [
+      { "match": "distill", "name": "Distillé" }
+    ]
+  },
   "tasks": ["create_video", "extend_video"],
   "engine": "internal",
   "hardware": { "cuda": true },

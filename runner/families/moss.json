@@ -2,6 +2,13 @@
   "family": "moss",
   "label": "MOSS Image",
   "mediaType": "image",
+  "model": {
+    "name": "MOSS Image",
+    "does": "Affiches, mises en page, texte dans l’image.",
+    "group": "image",
+    "order": 2,
+    "version": "SFT"
+  },
   "tasks": ["create_image"],
   "engine": "external",
   "native": false,

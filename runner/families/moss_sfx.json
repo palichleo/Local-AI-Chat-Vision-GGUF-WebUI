@@ -2,6 +2,13 @@
   "family": "moss_sfx",
   "label": "MOSS-SoundEffect v2",
   "mediaType": "audio",
+  "model": {
+    "name": "MOSS-SoundEffect v2",
+    "does": "Bruitages.",
+    "group": "audio",
+    "order": 2,
+    "version": "De base"
+  },
   "tasks": ["create_audio"],
   "engine": "internal",
   "chooseFor": "sound effects, noises and ambiences, without music or singing",

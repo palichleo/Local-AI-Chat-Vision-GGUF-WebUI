@@ -3,6 +3,13 @@
   "module": "realesrgan",
   "label": "Real-ESRGAN",
   "mediaType": "video",
+  "model": {
+    "name": "Real-ESRGAN",
+    "does": "Agrandir une image ou une vidéo.",
+    "group": "retouch",
+    "order": 2,
+    "version": "×2 Plus"
+  },
   "tasks": ["upscale"],
   "engine": "internal",
   "requires": ["torch", "PIL", "av", "imageio_ffmpeg"],

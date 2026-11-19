@@ -2,6 +2,13 @@
   "family": "rife",
   "label": "RIFE",
   "mediaType": "video",
+  "model": {
+    "name": "RIFE",
+    "does": "Interpoler une vidéo.",
+    "group": "retouch",
+    "order": 3,
+    "version": "4.26"
+  },
   "tasks": ["interpolate"],
   "engine": "internal",
   "requires": ["torch", "safetensors", "av", "imageio_ffmpeg"],

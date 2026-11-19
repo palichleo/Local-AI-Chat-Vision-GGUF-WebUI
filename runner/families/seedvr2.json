@@ -2,6 +2,18 @@
   "family": "seedvr2",
   "label": "SeedVR2",
   "mediaType": "image",
+  "model": {
+    "name": "SeedVR2",
+    "does": "Agrandir et affiner une image.",
+    "group": "retouch",
+    "order": 1,
+    "names": [
+      { "match": "ema.*7b.*sharp", "name": "7B EMA Sharp" },
+      { "match": "7b.*sharp", "name": "7B Sharp" },
+      { "match": "ema.*7b", "name": "7B EMA" },
+      { "match": "7b", "name": "7B" }
+    ]
+  },
   "tasks": ["upscale"],
   "engine": "internal",
   "hardware": { "cuda": true },

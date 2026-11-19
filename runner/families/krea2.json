@@ -2,6 +2,15 @@
   "family": "krea2",
   "label": "Krea2",
   "mediaType": "image",
+  "model": {
+    "name": "Krea 2",
+    "does": "Photos, illustrations, retouche d’une image.",
+    "group": "image",
+    "order": 1,
+    "names": [
+      { "match": "turbo", "name": "Turbo" }
+    ]
+  },
   "tasks": ["create_image"],
   "engine": "internal",
   "hardware": { "cuda": true },

@@ -1543,6 +1543,11 @@ export async function createApplication({
             await generation.catalog.remove(body.id);
             return send(200, { removed: true });
           }
+          // (0.6.118) The version of a model the user picks in the page « Modèles ».
+          if (path === '/api/generation/models/version') {
+            await generation.useVersion(body.workflowId, body.path);
+            return send(200, await generation.snapshot());
+          }
           if (path === '/api/generation/reset') {
             await generation.catalog.reset(body.id);
             return send(200, await generation.snapshot());

@@ -2,6 +2,13 @@
   "family": "acestep15",
   "label": "ACE-Step 1.5",
   "mediaType": "audio",
+  "model": {
+    "name": "ACE-Step 1.5",
+    "does": "Musique, avec ou sans paroles.",
+    "group": "audio",
+    "order": 1,
+    "version": "XL"
+  },
   "tasks": ["create_audio"],
   "engine": "internal",
   "chooseFor": "music: a song with sung lyrics, or an instrumental piece",

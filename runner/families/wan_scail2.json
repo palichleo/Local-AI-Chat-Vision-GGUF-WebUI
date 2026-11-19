@@ -2,6 +2,15 @@
   "family": "wan_scail2",
   "label": "Wan 2.1 SCAIL-2",
   "mediaType": "video",
+  "model": {
+    "name": "Wan 2.1 SCAIL-2",
+    "does": "Remplacer un personnage dans une vidéo.",
+    "group": "video",
+    "order": 3,
+    "names": [
+      { "match": "scail", "name": "De base" }
+    ]
+  },
   "tasks": ["replace_character"],
   "engine": "internal",
   "hardware": {
