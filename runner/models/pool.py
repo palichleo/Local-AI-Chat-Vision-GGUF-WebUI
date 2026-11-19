@@ -596,7 +596,9 @@ def load_streamed(model, names, pool):
 
         def forward(self, value, act=None, residual=None, gate=None):
             """`act` names an activation applied to the rows on the way in: 'swiglu' takes
-            [gate | up] rows and computes silu(gate) * up, 'gelu_tanh' the GELU of a feed-forward.
+            [gate | up] rows and computes silu(gate) * up, 'gelu_tanh' the GELU of a feed-forward,
+            'situ' takes [hidden | gate] rows and gates the hidden half, both held in bounds
+            (MOSS Image).
             With `residual` and `gate` (one value per output channel) the result is
             residual + gate * linear(rows), the end of a transformer branch.
 
@@ -622,6 +624,11 @@ def load_streamed(model, names, pool):
                     rows = F.silu(first) * up
                 elif act == 'gelu_tanh':
                     rows = F.gelu(value, approximate='tanh')
+                elif act == 'situ':
+                    hidden, opening = value.chunk(2, dim=-1)
+                    rows = (4.0 * torch.tanh(opening / 4.0) * torch.sigmoid(opening)) * (
+                        25.0 * torch.tanh(hidden / 25.0)
+                    )
                 else:
                     raise ValueError('Unknown activation ' + act)
                 if not quantized:

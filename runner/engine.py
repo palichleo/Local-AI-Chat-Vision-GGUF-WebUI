@@ -212,6 +212,12 @@ def release(keep_above=None, between=False):
         clear_blas = getattr(torch._C, '_cuda_clearCublasWorkspaces', None)
         if clear_blas is not None:
             clear_blas()
+        # comfy-kitchen keeps one of its own (4 MiB a card) once one of its products went through
+        # cuBLAS, as those of very small matrices do: asked for again, it is made again.
+        kitchen = sys.modules.get('comfy_kitchen.backends.cuda')
+        workspaces = getattr(kitchen, '_cublas_workspaces', None)
+        if workspaces:
+            workspaces.clear()
         torch.cuda.empty_cache()
         allocated = max(0, torch.cuda.memory_allocated() - held) / 1024**3
     if allocated:

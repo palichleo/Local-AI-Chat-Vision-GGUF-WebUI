@@ -27,6 +27,33 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(release(), dict(released=True, allocatedGiB=0))
         self.assertLess(calls.index('sync'), calls.index('blas'))
 
+    def test_release_gives_back_the_workspace_comfy_kitchen_keeps_for_its_products(self):
+        from runner.engine import release
+
+        # 4 MiB a card, kept by the library once a product went through cuBLAS (seen with the
+        # small matrices of a test): left there, the card was said not to be empty.
+        kitchen = SimpleNamespace(_cublas_workspaces={0: 'four mebibytes'})
+        calls = []
+        cuda = SimpleNamespace(
+            is_initialized=lambda: True,
+            synchronize=lambda: None,
+            empty_cache=lambda: calls.append(dict(kitchen._cublas_workspaces)),
+            memory_allocated=lambda: 4194304 if kitchen._cublas_workspaces else 0,
+        )
+        torch = SimpleNamespace(cuda=cuda, _C=SimpleNamespace())
+        with patch.dict(sys.modules, {'torch': torch, 'comfy_kitchen.backends.cuda': kitchen}):
+            self.assertEqual(release(), dict(released=True, allocatedGiB=0))
+        # (Before the cache is emptied: its memory goes back to the driver with the rest.)
+        self.assertEqual(calls, [{}])
+        # A library that has none, or was never imported, changes nothing.
+        for module in (SimpleNamespace(), None):
+            modules = {'torch': torch} if module is None else {'torch': torch, 'comfy_kitchen.backends.cuda': module}
+            with patch.dict(sys.modules, modules):
+                if module is None:
+                    sys.modules.pop('comfy_kitchen.backends.cuda', None)
+                kitchen._cublas_workspaces.clear()
+                self.assertEqual(release(), dict(released=True, allocatedGiB=0))
+
     def _engine_torch(self, free_gib=10):
         fractions = []
         cuda = SimpleNamespace(

@@ -232,6 +232,148 @@ class MossImageModelTests(unittest.TestCase):
         self.assertEqual(got[3].item(), 0)
 
 
+class FusedKernelTests(unittest.TestCase):
+    """What the blocks hand comfy-kitchen's kernels on a card, checked here without one."""
+
+    def test_the_rotations_as_matrices_turn_the_rows_as_cosines_and_sines_do(self):
+        cos, sin = moss_image.rotations(2, 3, 4, 16)
+        table = moss_image.matrices(cos, sin)
+        self.assertEqual((tuple(table.shape), table.dtype), ((1, 10, 1, 8, 2, 2), torch.float32))
+        torch.manual_seed(0)
+        x = torch.randn(1, 10, 3, 16)
+        # The product the kernel documents: a pair is channel i of each half of a head.
+        pairs = x.reshape(1, 10, 3, 2, 8).movedim(-2, -1).unsqueeze(-2)
+        turned = (table[..., 0] * pairs[..., 0] + table[..., 1] * pairs[..., 1]).movedim(-1, -2).reshape(x.shape)
+        self.assertTrue(torch.allclose(turned, moss_image.rotate(x, (cos, sin)), atol=1e-6))
+        # The model keeps the three for a size: cosines and sines in its precision, the matrices in float32.
+        kept = tiny(1).turn(2, 3, 4, torch.zeros(1, dtype=torch.float64))
+        self.assertEqual([part.dtype for part in kept], [torch.float64, torch.float64, torch.float32])
+        self.assertTrue(torch.equal(kept[2], moss_image.matrices(*moss_image.rotations(2, 3, 4, 16))))
+
+    def test_a_norm_and_its_modulation_go_to_the_kernel_with_the_weight_folded_in_the_scale(self):
+        torch.manual_seed(1)
+        norm = moss_image.Norm(6)
+        with torch.no_grad():
+            norm.weight.copy_(torch.rand(6) + 0.5)
+        x, scale, shift = torch.randn(1, 4, 6), torch.randn(1, 1, 6), torch.randn(1, 1, 6)
+        plain = moss_image.modulated(norm, x, scale, shift)
+        self.assertTrue(torch.allclose(plain, norm(x) * (1 + scale) + shift))
+
+        class Kitchen:
+            def rms_adaln(self, rows, folded, moved, eps):
+                # What the kernel computes: rmsnorm(rows) * (1 + folded) + moved.
+                self.eps = eps
+                return rows * torch.rsqrt(rows.square().mean(-1, keepdim=True) + eps) * (1 + folded) + moved
+
+        kitchen = Kitchen()
+        self.assertTrue(torch.allclose(moss_image.modulated(norm, x, scale, shift, kitchen), plain, atol=1e-5))
+        self.assertEqual(kitchen.eps, 1e-6)
+
+    def test_a_branch_ends_in_its_product_for_a_layer_of_the_pool_and_in_steps_for_a_plain_one(self):
+        torch.manual_seed(2)
+        layer = torch.nn.Linear(5, 3, bias=False)
+        x, gate = torch.randn(1, 4, 3), torch.randn(1, 1, 3)
+        rows = torch.randn(1, 4, 5)
+        self.assertTrue(torch.allclose(moss_image.branch(layer, rows, x, gate), x + layer(rows) * gate))
+        wide = torch.randn(1, 4, 10) * 20
+        hidden, opening = wide.chunk(2, -1)
+        expected = x + layer(moss_image.situ(hidden, opening)) * gate
+        self.assertTrue(torch.allclose(moss_image.branch(layer, wide, x, gate, act='situ'), expected))
+
+        class Pooled:
+            def __call__(self, value, act=None, residual=None, gate=None):
+                self.asked = (value, act, residual, gate)
+                return 'summed in the kernel'
+
+        pooled = Pooled()
+        self.assertEqual(moss_image.branch(pooled, wide, x, gate, act='situ'), 'summed in the kernel')
+        self.assertIs(pooled.asked[0], wide)
+        self.assertEqual((pooled.asked[1], pooled.asked[2] is x, tuple(pooled.asked[3].shape)), ('situ', True, (3,)))
+        self.assertEqual(moss_image.branch(pooled, rows, x, gate), 'summed in the kernel')
+        self.assertIsNone(pooled.asked[1])
+
+    def test_the_attention_is_the_one_the_file_asks_for_and_dense_without_a_card(self):
+        self.assertEqual(moss_image.attention(b'{"attention":"comfy_kitchen_int8"}'), 'int8')
+        self.assertEqual(moss_image.attention(bytearray(b'{"attention": "comfy_kitchen_int8"}')), 'int8')
+        for note in (b'{"attention":"pytorch"}', b'{}', b'[1]', b'not json', b''):
+            self.assertEqual(moss_image.attention(note), 'dense', note)
+
+        class Store:
+            def get_tensor(self, key):
+                self.asked = key
+                return torch.frombuffer(bytearray(b'{"attention":"comfy_kitchen_int8"}'), dtype=torch.uint8)
+
+        store = Store()
+        header = {'p.layers.0.comfy_attention.config': {'shape': [35]}}
+        self.assertEqual(moss_image.file_attention(header, 'p.', store), 'int8')
+        self.assertEqual(store.asked, 'p.layers.0.comfy_attention.config')
+        # (The published weights carry no note: nothing is read.)
+        self.assertEqual(moss_image.file_attention({}, 'p.', None), 'dense')
+        self.assertEqual(moss_image.file_attention(header, '', None), 'dense')
+        self.assertEqual((tiny(0).attention, tiny(0, attention='int8').attention), ('dense', 'int8'))
+        self.assertNotIn('attention', moss_image.config(header_of(REAL))[0])
+        with self.assertRaises(ValueError):
+            moss_image.MossImage(**{**TINY, 'attention': 'sparse'})
+        # On the processor the blocks are computed as written, whatever the file asks for.
+        self.assertIsNone(moss_image.kernels(torch.zeros(1)))
+        model, asked = tiny(3), tiny(3, attention='int8')
+        latents, context = torch.randn(1, 8, 2, 2), torch.randn(1, 3, 12)
+        with torch.no_grad():
+            self.assertTrue(torch.equal(model(latents, 0.5, context), asked(latents, 0.5, context)))
+
+    def test_on_a_card_every_block_goes_through_the_kernels_and_gives_what_the_written_blocks_give(self):
+        from unittest.mock import patch
+
+        class Kitchen:
+            """The kernels as their documentation writes them, counted."""
+
+            def __init__(self, available):
+                self.available, self.calls = available, dict(norms=0, turns=0, attentions=0)
+
+            def rms_adaln(self, rows, folded, moved, eps):
+                self.calls['norms'] += 1
+                return rows * torch.rsqrt(rows.square().mean(-1, keepdim=True) + eps) * (1 + folded) + moved
+
+            def rms_rope_split_half(self, q, k, table, q_scale, k_scale, eps):
+                self.calls['turns'] += 1
+
+                def one(rows, scale):
+                    rows = rows * torch.rsqrt(rows.square().mean(-1, keepdim=True) + eps) * scale
+                    half = rows.shape[-1] // 2
+                    pairs = rows.reshape(*rows.shape[:-1], 2, half).movedim(-2, -1).unsqueeze(-2)
+                    turned = table[..., 0] * pairs[..., 0] + table[..., 1] * pairs[..., 1]
+                    return turned.movedim(-1, -2).reshape(rows.shape)
+
+                return one(q, q_scale), one(k, k_scale)
+
+            def int8_attention_is_available(self):
+                return self.available
+
+            def int8_attention(self, q, k, v):
+                self.calls['attentions'] += 1
+                return torch.nn.functional.scaled_dot_product_attention(q, k, v)
+
+        torch.manual_seed(9)
+        latents, context = torch.randn(1, 8, 3, 2), torch.randn(1, 4, 12)
+        for asked, available, attentions in (('dense', True, 0), ('int8', True, 3), ('int8', False, 0)):
+            written = tiny(4, attention=asked)
+            kitchen = Kitchen(available)
+            with torch.no_grad():
+                expected = written(latents, 0.6, context)
+                with patch.object(moss_image, 'kernels', lambda tensor: kitchen):
+                    got = written(latents, 0.6, context)
+                    skipped = written(latents, 0.6, context, skip=(1,))
+            self.assertLess((got - expected).abs().max().item(), 2e-4, asked)
+            self.assertGreater((skipped - expected).abs().max().item(), 1e-3)
+            # Two norms a block and the one of the head; a turn a block, text blocks included; the
+            # attention of the file in the blocks of the stream only, where the card has it.
+            self.assertEqual(
+                kitchen.calls,
+                dict(norms=(2 * 3 + 1) + (2 * 2 + 1), turns=(3 + 2) + (2 + 2), attentions=attentions and attentions + 2),
+                (asked, available),
+            )
+
+
 class MossImageFileTests(unittest.TestCase):
     def test_a_file_says_its_model_by_its_shapes(self):
         full = dict(dim=3072, ffn_dim=8192, heads=24, layers=42, text_dim=4096, channels=128, fused=True, text_blocks=2)
@@ -344,18 +486,67 @@ class MossImageWeightsTests(unittest.TestCase):
                 config, prefix = moss_image.config(header(path))
                 self.assertEqual(config, REAL)
                 with open_store(path, resident=False) as store:
+                    # With the dense attention, then with the one on 8-bit integers a file may ask for.
+                    seen = {}
+                    for attention, slack in (('dense', 0), ('int8', 0.03)):
+                        pool = WeightPool({'model': store}, limit_gib=1)
+                        try:
+                            with init_empty_weights():
+                                model = moss_image.MossImage(**config, attention=attention)
+                            model = load_streamed(model, moss_image.names(model, header(path), prefix), pool)
+                            with torch.inference_mode():
+                                for sigma, skip in ((0.9, ()), (0.3, (2,))):
+                                    got = model(latents.cuda(), sigma, context.cuda(), skip=skip).float().cpu()
+                                    expected = plain(latents, sigma, context, skip=skip)
+                                    error = ((got - expected).norm() / expected.norm()).item()
+                                    self.assertLess(error, bound + slack, (int8, attention, sigma, skip))
+                                    seen.setdefault(attention, got)
+                                    self.assertEqual(got.dtype, torch.float32)
+                        finally:
+                            pool.clear()
+                            del model
+                    # (The attention asked for is the one that ran: rounded to 8 bits, it is not the dense one.)
+                    self.assertGreater((seen['dense'] - seen['int8']).abs().max().item(), 0)
+
+    def test_a_layer_of_the_pool_activates_the_halves_of_a_feed_forward_whatever_its_weights(self):
+        from accelerate import init_empty_weights
+        from safetensors.torch import save_file
+
+        from runner import convert
+        from runner.models.pool import WeightPool, load_streamed
+        from runner.models.residency import open_store
+
+        torch.manual_seed(8)
+        weight = torch.randn(4, 256) * 0.05
+        # Rows well past the bounds of the activation (25 for the hidden half, 4 for the gate).
+        rows, stream, gate = torch.randn(1, 6, 512) * 30, torch.randn(1, 6, 4), torch.rand(4) + 0.5
+        expected = stream + torch.nn.functional.linear(moss_image.situ(*rows.chunk(2, -1)), weight) * gate
+        quantised, scale = convert.quantise(convert.rotate(weight))
+        files = {
+            'plain': {'a.weight': weight.to(torch.bfloat16)},
+            'int8': {
+                'a.weight': quantised,
+                'a.weight_scale': scale,
+                'a.comfy_quant': torch.frombuffer(bytearray(convert.NOTE), dtype=torch.uint8),
+            },
+        }
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            for name, held in files.items():
+                path = str(Path(folder) / (name + '.safetensors'))
+                save_file(held, path)
+                with open_store(path, resident=False) as store:
                     pool = WeightPool({'model': store}, limit_gib=1)
                     try:
                         with init_empty_weights():
-                            model = moss_image.MossImage(**config)
-                        model = load_streamed(model, moss_image.names(model, header(path), prefix), pool)
+                            model = torch.nn.ModuleDict({'a': torch.nn.Linear(256, 4, bias=False)})
+                        model = load_streamed(model, {'a.weight': ('model', 'a.weight', None)}, pool)
                         with torch.inference_mode():
-                            for sigma, skip in ((0.9, ()), (0.3, (2,))):
-                                got = model(latents.cuda(), sigma, context.cuda(), skip=skip).float().cpu()
-                                expected = plain(latents, sigma, context, skip=skip)
-                                error = ((got - expected).norm() / expected.norm()).item()
-                                self.assertLess(error, bound, (int8, sigma, skip))
-                                self.assertEqual(got.dtype, torch.float32)
+                            got = moss_image.branch(
+                                model['a'], rows.cuda().to(torch.bfloat16), stream.cuda().to(torch.bfloat16),
+                                gate.cuda().to(torch.bfloat16), act='situ',
+                            )  # fmt: skip
+                        error = ((got.float().cpu() - expected).norm() / expected.norm()).item()
+                        self.assertLess(error, 0.05, name)
                     finally:
                         pool.clear()
                         del model

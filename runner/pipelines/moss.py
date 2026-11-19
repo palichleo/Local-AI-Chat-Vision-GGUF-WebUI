@@ -204,6 +204,8 @@ def _generate(job, config, progress_callback, cleanup):
         described = header(files['model'])
         settings, prefix = moss_image.config(described)
         stores = {'model': cleanup.enter_context(open_store(str(files['model']), reserve=ram_reserve))}
+        # The attention the file asks for (ComfyUI's files of INT8 weights ask for INT8 attention).
+        settings['attention'] = moss_image.file_attention(described, prefix, stores['model'])
         budget = room(reserve + AHEAD_GIB)
         if config.get('cacheGiB') is not None:
             budget = min(budget, config['cacheGiB'])
@@ -254,6 +256,7 @@ def _generate(job, config, progress_callback, cleanup):
                 steps_done=total,
                 skip_layers=list(moss_image.SKIPPED) if cfg != 1 else [],
                 skip_until=SKIP_UNTIL,
+                attention=settings['attention'],
             ),
             seconds=round(time.perf_counter() - start, 2),
             peak_vram_gib=round(torch.cuda.max_memory_allocated() / 1024**3, 3),
