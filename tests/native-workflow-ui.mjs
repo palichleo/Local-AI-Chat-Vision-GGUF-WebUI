@@ -487,7 +487,6 @@ test('« Proposé à Moodix AI » on the line of a model: on when all its workfl
   assert.match(f.$('native-import-status').textContent, /Composant incompatible/);
   assert.equal(f.workflows[0].enabled, true);
   f.failSave = false;
-
   // The page of the server: a model of two workflows, one to download, one this computer cannot run.
   const made = (id, name, pipeline, mediaType, more = {}) => ({ ...structuredClone(f.template), id, name, pipeline, mediaType, builtin: true, enabled: true, ready: true, ...more });
   f.workflows.push(
@@ -533,6 +532,34 @@ test('« Proposé à Moodix AI » on the line of a model: on when all its workfl
   }
   f.ui.setBusy(false);
   assert.equal(box('SeedVR2').disabled, true, 'stays greyed after a busy spell');
+});
+
+test('« Proposé à Moodix AI » turned while another save of the settings is under way: nothing runs, and the switch is as it was (0.6.133)', async t => {
+  // (It stayed turned, saying what was not so.)
+  const slow = await setup(t),
+    held = slow.api,
+    under = root => [root, ...root.children.flatMap(child => under(child))],
+    box = () => under(slow.$('workflow-list')).find(item => String(item.className).split(' ').includes('model-ai')).children[0];
+  let release;
+  slow.api = (route, body) =>
+    route === 'generation/workflows' && body ? new Promise(done => (release = () => done(held(route, body)))) : held(route, body);
+  slow.ui = setupNativeWorkflows({ api: (...args) => slow.api(...args), state: {}, node: slow.node, notice() {} });
+  await slow.ui.refresh();
+  const first = box();
+  first.checked = true;
+  const pending = first.onchange();
+  // (A second click before the first is saved: the page greys its controls meanwhile; were it to
+  // come all the same, nothing would be saved of it.)
+  first.checked = false;
+  await first.onchange();
+  assert.equal(first.checked, true, 'not left turned off: nothing was saved so');
+  release();
+  await pending;
+  assert.deepEqual(
+    slow.calls.filter(call => call.route === 'generation/workflows' && call.body).map(call => call.body.enabled),
+    [true],
+  );
+  assert.equal(box().checked, true);
 });
 
 test('a model to download says « Télécharger » and its size in the place of its version; a licence with conditions is shown at the click, to accept or to refuse', async t => {
@@ -1087,6 +1114,31 @@ test('a file is one line: its name, the file, « Parcourir », « Détecter », 
   // Only what is chosen is fixed in the workflow; the rest is left to the folders.
   assert.deepEqual(saved.components, { tokenizer: f.template.components.tokenizer, vae: { policy: 'fixed', asset: 'vae-gone' } });
   assert.equal(saved.automatic, undefined, 'what the server found is not part of the workflow');
+});
+
+test('a file that is nowhere on this computer says so in the place of its name, and is kept as written (0.6.133)', async t => {
+  // (A model not downloaded yet. It read « Fichier à retrouver », as if that were a file's name.)
+  const gone = await setup(t),
+    lacking = structuredClone(gone.template);
+  lacking.components.vae = { policy: 'fixed', asset: 'vae-gone' };
+  await gone.ui.edit(lacking);
+  const vae = gone.$('native-component-vae-file');
+  assert.deepEqual([vae.value, vae.dataset.missing, gone.$('native-component-model-file').dataset.missing], ['Introuvable', 'true', 'false']);
+  assert.equal(
+    vae.parent.children[4].dataset.help,
+    'Ce fichier n’est pas sur cet ordinateur : téléchargez le modèle, ou choisissez-le avec « Parcourir ».',
+  );
+  assert.equal(gone.ui.editorDirty(), false);
+  gone.$('native-workflow-description').value = 'Autres portraits';
+  assert.equal(await gone.ui.saveEditor(), true, gone.$('native-workflow-error').textContent);
+  assert.deepEqual(lastSave(gone).components.vae, { policy: 'fixed', asset: 'vae-gone' });
+  // Focused, the field empties for the suggestions; left as it was, it says « Introuvable » again.
+  await gone.ui.edit(structuredClone(lacking));
+  const again = gone.$('native-component-vae-file');
+  again.onfocus();
+  assert.equal(again.value, '');
+  again.onblur();
+  assert.deepEqual([again.value, again.dataset.missing], ['Introuvable', 'true']);
 });
 
 test('a model folder cannot be told from another: « Détecter » is greyed and says why; without it nothing is saved', async t => {

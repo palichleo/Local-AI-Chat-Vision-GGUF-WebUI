@@ -183,7 +183,7 @@ test('a workflow runs on the folders of the settings; a file it fixes overrides 
   assert.equal(found.ready, false);
   assert.match(
     found.unavailableReason,
-    /^Aucun fichier pour « VAE » : choisissez-le dans ce workflow, ou placez-le dans le dossier/,
+    /^Aucun fichier pour « VAE » : choisissez-le dans les réglages de ce modèle, ou placez-le dans le dossier de ce type de fichier \(Paramètres › Génération, Dossiers à part\)\.$/,
   );
   await assert.rejects(
     resolveNativeWorkflow(found, { prompt: 'une affiche' }, assets, { seed: 1 }),

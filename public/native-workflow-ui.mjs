@@ -42,6 +42,8 @@ const folderHelp = {
 // What an optional component that is used, but left to the folders of the settings, holds in
 // place of a file: an id no file is registered under, so the server looks in the folders.
 const AUTOMATIC = 'automatic';
+// What the line of a file shows in the place of its name when the file is nowhere to be found.
+const MISSING = 'Introuvable';
 /** The versions (draft, final) a workflow can be made at: its profiles apply only to these. */
 function stagesOf(manifest, workflow) {
   const stage = workflow.parameters?.stage;
@@ -517,7 +519,11 @@ export function setupNativeWorkflows(options) {
               await (await api('generation/workflows', { ...record, enabled }, { signal })).json();
           return true;
         });
-        if (!done) return;
+        // Nothing ran (another action of the settings is under way): the switch is as it was.
+        if (!done) {
+          box.checked = !enabled;
+          return;
+        }
         changedWorkflows = true;
         await refresh({ settings: false });
       } catch (failure) {
@@ -861,7 +867,8 @@ export function setupNativeWorkflows(options) {
     // Two files of the same name (in different folders) are told apart by their folder.
     function display(assetId) {
       const asset = assets.find(item => item.id === assetId);
-      if (!asset) return assetId ? 'Fichier à retrouver' : '';
+      // Named by the workflow, and nowhere on this computer: said so, not shown as a file's name.
+      if (!asset) return assetId ? MISSING : '';
       const name = asset.name || fileName(asset.path),
         twins = compatibleAssets().filter(item => item.id !== asset.id && (item.name || fileName(item.path)) === name);
       return twins.length ? `${name} (${fileName(asset.path?.replace(/[\\/][^\\/]*$/, ''))})` : name;
@@ -873,7 +880,11 @@ export function setupNativeWorkflows(options) {
     /** Where the file comes from, for the « ? » of the line. */
     function where() {
       if (stoodIn()) return `Pris dans le dossier des modèles : ${found}.`;
-      if (control.value) return assets.find(item => item.id === control.value)?.path || '';
+      if (control.value)
+        return (
+          assets.find(item => item.id === control.value)?.path ||
+          'Ce fichier n’est pas sur cet ordinateur : téléchargez le modèle, ou choisissez-le avec « Parcourir ».'
+        );
       if (!automatic) return '';
       return found
         ? `Trouvé seul dans le dossier des modèles : ${found}.`
@@ -886,6 +897,7 @@ export function setupNativeWorkflows(options) {
       // Found by itself: its name stands where a chosen file's would.
       field.placeholder = !control.value && automatic && found ? found : hint;
       field.dataset.automatic = String(automatic && !control.value);
+      field.dataset.missing = String(shown === MISSING);
       // « Détecter »: back to the file of the folders, for a component that had one chosen here.
       // Greyed, and said why, where there is nothing to detect.
       detect.dataset.unavailable = String(!automatic || !control.value);

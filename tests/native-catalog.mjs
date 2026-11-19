@@ -218,7 +218,11 @@ test('a workflow whose file is missing is listed unavailable, in words', async t
   f.catalog.assets = { resolve: async () => { throw Object.assign(new Error('Asset x not found'), {}); } };
   const [listed] = await f.catalog.list();
   assert.equal(listed.ready, false);
-  assert.match(listed.unavailableReason, /Fichier introuvable pour « .+ » \(RealESRGAN_x4plus\.pth\)/);
+  // (0.6.133: « dans les réglages de ce modèle », where it said « dans le workflow ».)
+  assert.match(
+    listed.unavailableReason,
+    /^Fichier introuvable pour « .+ » \(RealESRGAN_x4plus\.pth\) : choisissez-le dans les réglages de ce modèle\.$/,
+  );
 });
 
 test('updates deliver the shipped workflows and never touch the user folder', async () => {

@@ -16778,6 +16778,18 @@ body:not([data-view='studio']) .ai-cursor {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Un nom plus long que sa colonne passe sur deux lignes : il n'est jamais coupé. */
+#settings .set-file > .set-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}
+/* Un fichier qui n'est pas sur cet ordinateur : dit, à la couleur d'un avertissement. */
+#settings #workflow-editor .set-file > input[data-missing='true']:not(:focus) {
+  color: var(--warning);
+  font-family: var(--font-ui);
+}
 .set-line[data-held='true'] .set-name,
 .set-file[data-off='true'] .set-name {
   opacity: 0.5;
