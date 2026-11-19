@@ -1,4 +1,5 @@
-"""Native MiniMax-H3 (FastH3 Omni / FastH3 v2): prompt + references -> video with sound.
+"""Native MiniMax-H3 (FastH3 Omni / FastH3 v2, and MiniMax's own FL2VA / Ref2VA): prompt + references
+-> video with sound.
 
 The request flow is the diffusers MiniMax-H3 modular pipeline (Apache-2.0), run
 stage by stage so only one large model occupies the GPU at a time:
@@ -14,7 +15,9 @@ import time
 
 from runner import hardware, preview
 
+# The steps a checkpoint is sampled in: the distilled ones (FastH3), and MiniMax's own (0.6.108).
 STEPS = 8
+BASE_STEPS = 20
 FRAME_CHOICES = tuple(17 * n + 5 for n in range(7, 21))  # 5 to 15 seconds at 24 fps
 # A continuation overlap must cover whole VAE chunks (17n+5 frames -> 5n+2 latent frames),
 # so the source tail encodes onto exactly the latent frames that open the new window.
@@ -132,6 +135,37 @@ def check(job, family):
         raise ValueError('MiniMax-H3 continuation overlap must be 22, 39 or 56 frames')
 
 
+def steps_of(header):
+    """The steps this checkpoint is sampled in. A distilled one says so by what distillation left
+    in it: several output heads (FastH3 Omni), or the gates of the sparse attention it was taught
+    (FastH3 v2). MiniMax's own checkpoints have neither."""
+    from runner.models import minimax_h3
+
+    return STEPS if minimax_h3.pdd_heads(header) > 1 or minimax_h3.has_gates(header) else BASE_STEPS
+
+
+def model_path(job):
+    """The file of the model for this job. MiniMax's own checkpoints come in two files: one for
+    a text and start or end images (FL2VA), one for reference images (Ref2VA). A workflow that
+    names the second (`referenceModel`) is given it for a job with reference images."""
+    components = job['components']
+    referenced = any(ref['role'] == 'reference_image' for ref in job['references'])
+    return components['referenceModel'] if referenced and components.get('referenceModel') else components['model']
+
+
+def check_steps(job, header):
+    """A workflow that asks for the steps of another kind of checkpoint is told so: 8 steps of a
+    model made for 20 give a blurred video, and nothing would say why."""
+    steps, asked = steps_of(header), job['parameters'].get('steps')
+    if asked is not None and asked != steps:
+        kind = 'distillé (FastH3)' if steps == STEPS else 'de base (non distillé)'
+        raise ValueError(
+            f'Ce modèle MiniMax H3 est {kind} : il se calcule en {steps} étapes, pas en {asked}. '
+            'Réglez les étapes du workflow sur ' + str(steps) + ', ou choisissez l’autre modèle.'
+        )
+    return steps
+
+
 def model_kind(header):
     """'reference' for a Ref2VA-derived DiT (FastH3 Omni), 'base' otherwise (FastH3 v2)."""
     source = (header.get('__metadata__') or {}).get('source', '')
@@ -142,7 +176,9 @@ def preflight(job, config):
     from runner.models.headers import header
     from runner.models import minimax_h3
 
-    minimax_h3.validate(header(job['components']['model']))
+    model = header(model_path(job))
+    minimax_h3.validate(model)
+    check_steps(job, model)
     # A video the card cannot hold is said now, not after half a minute of loading.
     refused = too_large(job['parameters'], hardware.card_gib())
     if refused:
@@ -304,7 +340,7 @@ def generate(job, config, progress):
     p = job['parameters']
     shape = [p['width'], p['height'], p['frames'], sorted(ref['role'] for ref in job['references'])]
     attention = [p.get('attention', 'comfy_kitchen'), p.get('sparse_attention', 'off'), p.get('sparse_keep', 10)]
-    key = [conditioning.stamp(job['components']['model']), shape, attention]
+    key = [conditioning.stamp(model_path(job)), shape, attention]
     holder = [kept.take('minimax_h3', key)]
     try:
         result = _generate(job, config, progress, key, holder)
@@ -369,14 +405,20 @@ def _generate(job, config, progress, key, holder):
         )
         report(**data)
 
-    p, paths = job['parameters'], job['components']
+    # (The model's file is the one of this job: see model_path.)
+    p, paths = job['parameters'], dict(job['components'], model=model_path(job))
     dit_header = header(paths['model'])
+    steps = check_steps(job, dit_header)
     kind = model_kind(dit_header)
     roles = {ref['role'] for ref in job['references']}
     # FastH3 Omni also runs text-only and start/end-image requests: their packed sequences
     # only add keyframe condition rows, which the reference model reads like LongForge does.
-    if kind == 'base' and 'reference_image' in roles:
-        raise ValueError('This MiniMax-H3 model does not take reference images; use FastH3 Omni')
+    # A file the workflow names for reference images (MiniMax's Ref2VA) takes them too.
+    if kind == 'base' and 'reference_image' in roles and paths['model'] != paths.get('referenceModel'):
+        raise ValueError(
+            'Ce modèle MiniMax H3 ne prend pas d’images de référence : utilisez FastH3 Omni, '
+            'ou donnez au workflow son modèle pour les références (Ref2VA).'
+        )
     references = []
     keyframe_inputs = {}
     source = next((ref for ref in job['references'] if ref['role'] == 'source_video'), None)
@@ -608,9 +650,9 @@ def _generate(job, config, progress, key, holder):
                 )
                 if sparse is not None:
                     # The first steps lay the video out: they stay dense, as the model was trained.
-                    sparse.plan = sparse.prepare(values, grid) if i >= sparse_start * STEPS else None
+                    sparse.plan = sparse.prepare(values, grid) if i >= sparse_start * steps else None
                     # The last of them measures what the first sparse step quantizes with.
-                    sparse.measure = i < sparse_start * STEPS <= i + 1
+                    sparse.measure = i < sparse_start * steps <= i + 1
                 return args, values
 
             def after(_module, _args, values, output):
@@ -620,7 +662,7 @@ def _generate(job, config, progress, key, holder):
                 if sparse is not None:
                     mode['attention'] = 'sparse' if sparse.plan is not None else 'dense'
                 progress(
-                    stage='generating video', step=calls['step'], total=STEPS, weights=pool.summary(), **read, **mode
+                    stage='generating video', step=calls['step'], total=steps, weights=pool.summary(), **read, **mode
                 )
                 sigma = scheduler.sigmas[calls['step'] - 1]
                 preview.send(report, preview.MINIMAX_H3, middle_frame, values['hidden_states'], output[0], sigma, grid)
@@ -644,7 +686,7 @@ def _generate(job, config, progress, key, holder):
                 )
             label = 'int8' if fast_attention else 'pytorch'
             if sparse is not None:
-                first = math.ceil(sparse_start * STEPS) + 1
+                first = math.ceil(sparse_start * steps) + 1
                 gates = 'with gates' if minimax_h3.has_gates(dit_header) else 'without gates'
                 label += f', then vsa {round(sparse.keep * 100, 1)} % from step {first}, {gates}'
             elif dense_why:
@@ -656,11 +698,11 @@ def _generate(job, config, progress, key, holder):
                 'denoise',
                 {name: dit, 'scheduler': scheduler, 'audio_scheduler': audio_scheduler},
                 state,
-                num_inference_steps=STEPS + 1,
+                num_inference_steps=steps + 1,
                 generator=torch.Generator('cpu').manual_seed(p['seed']),
             )
-            if calls['step'] != STEPS:
-                raise RuntimeError(f'Expected {STEPS} denoising steps, ran {calls["step"]}')
+            if calls['step'] != steps:
+                raise RuntimeError(f'Expected {steps} denoising steps, ran {calls["step"]}')
             cache = dict(
                 gpu_cache_gib=round(pool.bytes / 1024**3, 3),
                 gpu_cache_limit_gib=round(budget, 3),

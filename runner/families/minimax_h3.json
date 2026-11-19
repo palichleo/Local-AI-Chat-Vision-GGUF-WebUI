@@ -23,7 +23,23 @@
       "label": "Modèle",
       "folder": "diffusion_models",
       "required": true,
-      "note": "Checkpoints élagués 8 étapes : FastH3 Omni (références) ou FastH3 v2 (texte, image de début/fin).",
+      "note": "Checkpoints élagués. Distillés, en 8 étapes : FastH3 Omni (références) ou FastH3 v2 (texte, image de début/fin). De base, en 20 étapes : le modèle de MiniMax (FL2VA : texte, image de début/fin).",
+      "signature": [
+        {
+          "key": "^adaln_t_table$",
+          "shape": [1025, 8]
+        },
+        {
+          "key": "^blocks\\.\\d+\\.attn\\.qkv_proj\\.weight$",
+          "shape": [21504, 5376]
+        }
+      ]
+    },
+    "referenceModel": {
+      "label": "Modèle pour les références",
+      "folder": "diffusion_models",
+      "required": false,
+      "note": "Facultatif. Les modèles de base de MiniMax sont en deux fichiers : celui-ci (Ref2VA) est lu quand la demande a des images de référence. FastH3 Omni n’en a pas besoin.",
       "signature": [
         {
           "key": "^adaln_t_table$",
@@ -115,8 +131,8 @@
     },
     "steps": {
       "type": "integer",
-      "choices": [8],
-      "note": "Modèle distillé : 8 étapes."
+      "choices": [8, 20],
+      "note": "8 étapes pour un modèle distillé (FastH3), 20 pour un modèle de base de MiniMax."
     },
     "frames": {
       "type": "integer",

@@ -8,7 +8,8 @@ each phase cost, what stayed on the GPU and what was kept in RAM.
     python -s -m runner.bench krea2 --model M.safetensors --text-encoder T.safetensors \\
         --vae V.safetensors --tokenizer TOKENIZER_FOLDER --out FOLDER [--lora FILE:STRENGTH]
     python -s -m runner.bench minimax_h3 --model M.safetensors --text-encoder T.safetensors \\
-        --vae V.safetensors --audio-vae A.safetensors --tokenizer TOKENIZER_FOLDER --out FOLDER
+        --vae V.safetensors --audio-vae A.safetensors --tokenizer TOKENIZER_FOLDER --out FOLDER \\
+        [--steps 20: MiniMax's own checkpoints] [--reference-model REF2VA --reference reference_image=FILE]
     python -s -m runner.bench ltx25 --model M.safetensors --text-encoder T.safetensors \\
         --vae V.safetensors --audio-vae A.safetensors [--upscaler U.safetensors] --out FOLDER
 
@@ -103,9 +104,13 @@ def minimax_h3_job(args, run):
             tokenizer=args.tokenizer,
             vae=args.vae,
             audioVae=args.audio_vae,
+            # MiniMax's own checkpoints: the file that reads reference images (Ref2VA).
+            **({'referenceModel': args.reference_model} if args.reference_model else {}),
         ),
         loras=[],
-        references=[],
+        references=[
+            dict(input=role, role=role, path=path) for role, _, path in (item.partition('=') for item in args.reference)
+        ],
     )
 
 
@@ -197,7 +202,8 @@ FAMILIES = {
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('family', choices=sorted(FAMILIES))
-    for name in ('model', 'text-encoder', 'vae', 'audio-vae', 'tokenizer', 'upscaler', 'clip-vision', 'segmenter'):
+    names = ('model', 'reference-model', 'text-encoder', 'vae', 'audio-vae', 'tokenizer', 'upscaler', 'clip-vision')
+    for name in (*names, 'segmenter'):
         parser.add_argument('--' + name)
     parser.add_argument('--out', required=True)
     parser.add_argument('--runs', type=int, default=3)

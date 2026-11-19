@@ -358,3 +358,21 @@ The question: on an RTX 40 card, was INT8 the right file to take, against an « 
 - **GGUF**: read for the conversion only (F32, F16, BF16, Q8_0, Q4_0, Q4_1, Q5_0, Q5_1, Q4_K, Q5_K, Q6_K), checked to the last bit against gguf-py on two published files (a Q8_0 one, a Q3_K_M one whose Q4_K, Q5_K and Q6_K tensors were compared). Q2_K, Q3_K and the IQ types are refused by name.
 
 Not measured: a GGUF file of LTX 2.5 itself (none on this disk, and none was downloaded); what ComfyUI makes of the same « fp8 scaled » file; another card (the ratio of the two products is the card's); fidelity on the model's own activations rather than on random rows; a non-distilled LTX 2.5 (the family runs 8 steps without guidance only).
+
+### MiniMax H3's own checkpoints, in 20 steps (19 November 2026, engine 0.6.108)
+
+MiniMax publishes its model in two files, FL2VA (a text, start and end images) and Ref2VA (reference images); they are guidance-distilled (one pass a step, no negative prompt) and not step-distilled: 20 steps where FastH3 takes 8. Their layers are those of FastH3 v2 without the gates of its sparse attention, one output head: the engine built them already, and sampled them in 8 steps whatever they were. A checkpoint now says its steps by what distillation left in it (several output heads, or those gates), a workflow that asks for the other count is refused with the reason, and a workflow may name a second file for the jobs that have reference images.
+
+768 × 448, 124 frames, INT8 ConvRot files, dense attention, the first video of a process:
+
+| Checkpoint | Steps | A step | The video |
+| --- | --- | --- | --- |
+| FastH3 Omni | 8 | 3.9 s | 71 s |
+| FL2VA, from a text | 20 | 3.9 s | 118 s |
+| Ref2VA, one reference image | 20 | 4.8 s | 138 s |
+
+- **A step costs the same; there are two and a half times as many.** 8.4 to 8.5 GiB of the card at the most, as FastH3.
+- **Both videos are sound** (a fox in a pine forest; the fox of a picture folding its newspaper and looking up): nothing in them points at the INT8 files. No file of these checkpoints in another precision is on this disk to compare with.
+- **The Ref2VA file on this disk ends with 73 bytes that are not its own** (a line of text added after its last tensor by whatever downloaded it). safetensors itself refuses such a file, and so does the engine; the measure above was made on a copy without them.
+
+Not measured: these checkpoints with FastH3's sparse attention (they were not trained with it), a larger size, a continuation.
