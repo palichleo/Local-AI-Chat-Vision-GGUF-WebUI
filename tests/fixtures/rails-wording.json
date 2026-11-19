@@ -2357,7 +2357,8 @@
      "additionalProperties": false
     }
    }
-  }
+  },
+  "suite": "Nothing was generated: the user did not ask for a longer clip. extend_video adds new footage after a clip: its result is that clip followed by the new part. To change a take or to make it again, call create_video with the whole new prompt and the same images, in the same roles as for that take. If the user does want this clip to go on, make this same extend_video call again."
  },
  "request": {
   "messages": [

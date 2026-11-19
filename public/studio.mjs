@@ -4553,6 +4553,15 @@ export function setupStudio({
             render();
           }),
         );
+      else {
+        // (0.6.113) A continuation Moodix AI proposes that the user did not ask for (« modifie cette
+        // prise, je veux un dézoom lent », 19/11): no way out of it but « Refuser », which said
+        // nothing of what it leaves. Refused from here, its prompt and its images stay for a new
+        // video, whose format and size are the user's to set again.
+        const fresh = button('studio-link', 'Nouvelle vidéo', () => decline());
+        fresh.title = 'Refuser cette suite et garder son prompt et ses images pour une nouvelle vidéo';
+        banner.append(fresh);
+      }
       write.append(banner);
     }
     // What a proposal of Moodix AI says of itself, as on its card in the chat: an image the user

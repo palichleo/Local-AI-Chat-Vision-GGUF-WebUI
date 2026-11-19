@@ -13,6 +13,7 @@ import { refsToIds, resourceCatalogPrompt, resourceTool } from '../lib/resources
 import { outputToolFor } from '../lib/output-tools.mjs';
 import { cardBrief, studioBrief } from '../lib/video-brief.mjs';
 import { THIN_NOTE } from '../lib/thin-prompt.mjs';
+import { SUITE_NOTE } from '../lib/unasked-suite.mjs';
 import { SEEN_NOTE } from '../lib/seen-resources.mjs';
 import { citedMessage } from '../lib/cited-resources.mjs';
 import { FAILED_NOTE, FAILED_SETTLED, UNANSWERED } from '../public/transcript.mjs';
@@ -39,7 +40,8 @@ import {
  * when a change for the local model is meant (0.6.48: the `series` of create_image, several images
  * in one call; 17/11: the `denoise` of create_image, from 0.6 to 0.7 for Krea 2, offered where an
  * image to modify can be passed; 0.6.112: `outputToolTakes`, the takes looked at by their numbers,
- * several in one call, where a result without a number keeps `outputTool` to the character).
+ * several in one call, where a result without a number keeps `outputTool` to the character;
+ * 0.6.113: `suite`, what a continuation nobody asked for is sent back with).
  * Written again, it loses `brief` and `briefExtend`, which the
  * first test leaves aside: they were put back, so that the fixture changed by that argument alone.
  */
@@ -98,6 +100,7 @@ async function railsWording(definitionsOf = (catalog, available) => catalog.defi
     resourceCatalog: resourceCatalogPrompt(catalogEntries, { cited: [1] }),
     cardBrief: cardBrief(),
     thin: THIN_NOTE,
+    suite: SUITE_NOTE,
     seen: SEEN_NOTE,
     cited: citedMessage([{ label: '#ref1', id: R1 }], ['start_image', 'reference']),
     failed: [FAILED_NOTE, FAILED_SETTLED, UNANSWERED],

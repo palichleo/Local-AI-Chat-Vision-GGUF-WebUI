@@ -11,6 +11,7 @@ import { Resources } from '../lib/resources.mjs';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
 import { ToolRuntime, takesStyles } from '../lib/tool-runtime.mjs';
 import { resolveNativeWorkflow, validateNativeWorkflow } from '../lib/native-workflows.mjs';
+import { SUITE_NOTE } from '../lib/unasked-suite.mjs';
 
 /**
  * Proposals as the application makes them, with the workflows it ships (their real slots, lengths
@@ -1318,4 +1319,36 @@ test('Krea 2: the denoise the assistant passes with an image to modify stays fro
   assert.deepEqual(held.notes, ['Débruitage : valeur ignorée, fixée par le workflow Krea 2.']);
   assert.deepEqual([setting(held).min, setting(held).max], [0, 1]);
   assert.equal((await revise(own.runtime, held, { denoise: 0.4 })).plan.parameters.denoise, 0.4);
+});
+
+test('a continuation the user did not ask for is sent back to the model before anything is proposed (0.6.113)', async () => {
+  // « Modifie cette prise, je veux un dézoom lent » (19/11): the local model called extend_video with
+  // the take as its source, and the Studio showed « Suite du clip », its size not to be changed.
+  const list = shipped().filter(workflow => workflow.pipeline !== 'minimax_h3'),
+    ltx = of(list, 'ltx25'),
+    CLIP = uid(3);
+  const { runtime } = world({ workflows: list, records: { [`${A}/${CLIP}`]: clip(A, CLIP, ltx) } });
+  const suite = () => [call('extend_video', { prompt: 'x', intention: 'Suite', duration: 5, source: { output: CLIP } })],
+    said = (...messages) => ({ conversationId: A, turnId: turn, messages }),
+    changed = { role: 'user', content: 'modifie cette prise, je veux un dézoom lent' };
+  const back = await runtime.request(suite(), said(changed));
+  assert.deepEqual([back.kind, back.message, back.call.function.name], ['retry', SUITE_NOTE, 'extend_video']);
+  assert.equal(back.requestId, undefined, 'nothing is proposed, nothing waits for the user');
+  // The model was told and asks again in the same turn: made (the user may mean it).
+  const again = await runtime.request(
+    suite(),
+    said(
+      changed,
+      { role: 'assistant', content: '', tool_calls: suite() },
+      { role: 'tool', tool_call_id: 'call-1', content: JSON.stringify({ status: 'nothing_generated', message: SUITE_NOTE }) },
+    ),
+  );
+  assert.ok(again.requestId);
+  assert.deepEqual(again.inputRoles, ['source_video']);
+  // The user's words ask for it: proposed at once.
+  assert.ok((await runtime.request(suite(), said({ role: 'user', content: 'prolonge ce clip de 5 secondes' }))).requestId);
+  // Their own hand does (« Prolonger » under a take, the Studio): never sent back, whatever was written.
+  assert.ok((await runtime.request(suite(), { ...said(changed), byHand: true })).requestId);
+  // Another verb on the same words is the model's answer to them.
+  assert.equal((await runtime.request([call('create_video', { prompt: 'x', intention: 'Vidéo', duration: null })], said(changed))).kind, undefined);
 });

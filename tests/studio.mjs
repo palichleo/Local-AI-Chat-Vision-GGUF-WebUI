@@ -4095,8 +4095,20 @@ test('Moodix AI continues a clip of the disk (« #ref1 »): the Studio shows tha
     // Nor an empty case for « the video to follow »: the clip continued is named above, it is not asked again.
     assert.deepEqual(body.find('studio-slot').map(tile => tile.dataset.slot), [], titles.join(' | '));
     assert.equal(page.prompt().value, request.plan.prompt);
-    studio.decline();
+    // (0.6.113) A continuation the user did not want (« modifie cette prise », 19/11): no format to
+    // choose in it, and no way out but « Refuser ». « Nouvelle vidéo », beside the clip named,
+    // refuses it and leaves its prompt for a new video, whose format is the user's to set.
+    assert.deepEqual(body.find('studio-formats'), [], 'a continuation has the format of its clip');
+    const way = body.find('studio-extending')[0].children[2];
+    assert.deepEqual([way.className, way.children[0].textContent], ['studio-link', 'Nouvelle vidéo']);
+    assert.match(way.title, /garder son prompt et ses images pour une nouvelle vidéo/);
+    way.onclick();
     assert.equal(await answer, 'deny');
+    assert.deepEqual(body.find('studio-extending'), []);
+    assert.equal(body.find('studio-go-label')[0].textContent, 'Générer');
+    assert.equal(page.prompt().value, request.plan.prompt, 'its prompt stays');
+    assert.equal(body.find('studio-formats').length, 1, 'the format can be chosen again');
+    assert.equal(studio.proposing(), false);
   } finally {
     restore();
   }
