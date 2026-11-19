@@ -2328,7 +2328,36 @@
    "La génération a échoué et rien n’a été produit. Aucun outil n’est disponible pour la suite de ce message : explique l’échec à l’utilisateur en une ou deux phrases, sans écrire d’appel d’outil. Il relancera s’il le souhaite.",
    "La génération a échoué et rien n’a été produit. Si l’utilisateur demande de recommencer, refais le même appel d’outil.",
    "Cette demande n’a pas abouti : rien n’a été produit. Si l’utilisateur la redemande, refais le même appel d’outil."
-  ]
+  ],
+  "outputToolTakes": {
+   "type": "function",
+   "function": {
+    "name": "local_read_output",
+    "description": "Look at takes of this conversation (« PRISE n ») by their numbers. Pass every take to look at in takes, in one call: several takes come back together on one picture, each under its number. Reads only saved compressed copies, never the originals. A video is read as a few timestamped frames, without audio or motion. After generating an image or a video, normally finish without visual analysis. Use this tool when the user requests a check or when a specific reason makes inspection relevant to their task; do not inspect every output routinely. No generation.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "takes": {
+       "type": "array",
+       "items": {
+        "type": "integer",
+        "enum": [
+         4,
+         5
+        ]
+       },
+       "minItems": 1,
+       "maxItems": 2,
+       "description": "Numbers of the takes to look at, as the user says them (« les prises 47, 49 et 50 » is [47, 49, 50])."
+      }
+     },
+     "required": [
+      "takes"
+     ],
+     "additionalProperties": false
+    }
+   }
+  }
  },
  "request": {
   "messages": [

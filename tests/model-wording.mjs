@@ -38,7 +38,9 @@ import {
  * with what 0.6.39 sent (tests/fixtures/rails-wording.json). `UPDATE_RAILS=1` writes it again: only
  * when a change for the local model is meant (0.6.48: the `series` of create_image, several images
  * in one call; 17/11: the `denoise` of create_image, from 0.6 to 0.7 for Krea 2, offered where an
- * image to modify can be passed). Written again, it loses `brief` and `briefExtend`, which the
+ * image to modify can be passed; 0.6.112: `outputToolTakes`, the takes looked at by their numbers,
+ * several in one call, where a result without a number keeps `outputTool` to the character).
+ * Written again, it loses `brief` and `briefExtend`, which the
  * first test leaves aside: they were put back, so that the fixture changed by that argument alone.
  */
 const snapshotPath = fileURLToPath(new URL('./fixtures/rails-wording.json', import.meta.url));
@@ -92,6 +94,7 @@ async function railsWording(definitionsOf = (catalog, available) => catalog.defi
     definitions,
     resourceTool,
     outputTool: outputToolFor([{ id: O1, outputs: [{}] }]),
+    outputToolTakes: outputToolFor([{ id: O2, outputs: [{ take: 4 }, { take: 5 }] }]),
     resourceCatalog: resourceCatalogPrompt(catalogEntries, { cited: [1] }),
     cardBrief: cardBrief(),
     thin: THIN_NOTE,

@@ -4,6 +4,7 @@ import { markReferences, removedNotice, setupReferencePeek, setupReferencePicker
 import { setupUnexpectedErrors } from './unexpected-errors.mjs';
 import { setupLibrary } from './library.mjs';
 import { setupCitedTakes } from './cited-takes.mjs';
+import { contactSheet } from './contact-sheet.mjs';
 
 /** The title of a conversation before its first message gives it one (« Nouveau chat » from 0.5.109 to
  * 0.5.129, the words of the fil again since 0.6.0). */
@@ -3786,7 +3787,7 @@ async function sendMessage(event) {
       render();
       if (
         reviewRecord &&
-        !['resource', 'output', 'invalid'].includes(request?.kind) &&
+        !['resource', 'output', 'outputs', 'invalid'].includes(request?.kind) &&
         output.trim() &&
         finishReason !== 'length'
       ) {
@@ -4015,6 +4016,109 @@ async function sendMessage(event) {
               });
           }
           view.note.textContent = result.images.length ? 'Sortie consultée.' : 'Copie visuelle indisponible.';
+        } catch (error) {
+          history.push({
+            role: 'tool',
+            tool_call_id: request.call.id,
+            content: JSON.stringify({ status: 'error', message: error.message }),
+          });
+          resourceReads = 8;
+          if (signal.aborted) throw error;
+          view.note.textContent = error.message;
+        }
+        talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+        await persistConversation(talkId);
+        view = assistantMessage(view);
+        finishReason = '';
+        continue;
+      }
+      if (request.kind === 'outputs') {
+        // (0.6.112) Several takes looked at in one call: what each is, and one picture of them all
+        // (contact-sheet.mjs), where each used to take a request and a picture of its own.
+        resourceReads++;
+        const numbers = request.takes.map(item => item.take),
+          outputId = 'takes/' + numbers.join(',');
+        if (history.some(message => message.outputId === outputId)) {
+          history.push({
+            role: 'tool',
+            tool_call_id: request.call.id,
+            content: JSON.stringify({
+              status: 'already_loaded',
+              takes: numbers,
+              note: 'L’image de ces prises est déjà jointe à ce tour. Réponds à l’utilisateur à partir d’elle, sans les relire.',
+            }),
+          });
+          resourceReads = 8;
+          talk().archiveSnapshot = { messages: [...archiveMessages(history)], incomplete: true };
+          await persistConversation(talkId);
+          view = assistantMessage(view);
+          finishReason = '';
+          continue;
+        }
+        view.note.textContent = 'Consultation des prises…';
+        try {
+          const read = async item =>
+            (
+              await api(
+                'gallery/read',
+                { conversationId: talkId, runId: item.runId, outputIndex: item.outputIndex },
+                { signal },
+              )
+            ).json();
+          const looked = [];
+          for (const item of request.takes) {
+            let result = await read(item);
+            // Its copy dates from an earlier session: made again from the original file.
+            if (!result.images.length && result.metadata.status === 'unavailable')
+              try {
+                await remakeOutputCopy({ api, conversationId: talkId, runId: item.runId, index: item.outputIndex ?? 0, signal });
+                result = await read(item);
+              } catch (error) {
+                if (signal.aborted) throw error;
+              }
+            looked.push({ item, result });
+          }
+          const seen = looked.filter(({ result }) => result.images.length);
+          let sheet = '';
+          if (seen.length)
+            try {
+              sheet = await contactSheet(seen.map(({ item, result }) => ({ label: 'PRISE ' + item.take, url: result.images[0] })));
+            } catch {
+              // No sheet could be drawn: their pictures follow one by one, as a single take's does.
+            }
+          history.push({
+            role: 'tool',
+            tool_call_id: request.call.id,
+            content: JSON.stringify({
+              status: seen.length ? 'loaded' : 'unavailable',
+              takes: looked.map(({ item, result }) => {
+                const { status, run_id, output_index, note, ...facts } = result.metadata;
+                return { take: item.take, ...facts, ...(result.images.length ? {} : { picture: 'unavailable' }) };
+              }),
+              note: seen.length
+                ? 'One picture follows: these takes side by side, each under its number (« PRISE n »). Compressed copies; a video is shown by its first sampled frame, without motion or audio. Do not infer what a take shows from its prompt alone.'
+                : 'No picture of these takes is available: only their settings are known.',
+            }),
+          });
+          if (seen.length)
+            history.push({
+              role: 'user',
+              internal: true,
+              outputId,
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    'Planche des prises ' +
+                    seen.map(({ item }) => item.take).join(', ') +
+                    ' : chaque image sous son numéro. Copies compressées, pixels temporaires pour ce tour uniquement.',
+                },
+                ...(sheet ? [sheet] : seen.map(({ result }) => result.images[0])).map(url => ({ type: 'image_url', image_url: { url } })),
+              ],
+            });
+          view.note.textContent = seen.length
+            ? 'Prises consultées · ' + numbers.map(number => 'PRISE ' + number).join(', ')
+            : 'Copies visuelles indisponibles.';
         } catch (error) {
           history.push({
             role: 'tool',

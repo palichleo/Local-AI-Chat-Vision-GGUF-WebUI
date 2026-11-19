@@ -23,6 +23,10 @@ async function exchange({
   readOutputAfterGeneration = false,
   readOutputAgain = false,
   readResourceDuringReview = false,
+  // (0.6.112) Two takes asked to be looked at in one call, after the generation.
+  readTakes = false,
+  readTakesAgain = false,
+  sheetFails = false,
   mediaType = 'image',
   finalText = 'Result explained',
   finalReason = 'stop',
@@ -78,6 +82,7 @@ async function exchange({
     // Each proposal put to the user, as it was then.
     proposals = [],
     reviews = [],
+    sheets = [],
     views = [],
     generationContainers = [];
   const context = {
@@ -96,6 +101,12 @@ async function exchange({
       },
     },
     assetsUI: { flush: async () => true },
+    // The picture of several takes (contact-sheet.mjs): drawn by the browser, said here.
+    contactSheet: async items => {
+      sheets.push(items);
+      if (sheetFails) throw new Error('No canvas here');
+      return 'data:image/jpeg;base64,U0hFRVQ=';
+    },
     // The takes a reply names, under it (cited-takes.mjs).
     citedTakes: { show() {}, forget() {} },
     state,
@@ -150,6 +161,7 @@ async function exchange({
             run_id: body.runId,
             output_index: body.outputIndex,
             media_type: mediaType,
+            ...(readTakes ? { workflow: 'Photo', prompt: 'Prompt of ' + body.runId, note: 'Compressed output copy.' } : {}),
           },
           images,
         });
@@ -198,6 +210,25 @@ async function exchange({
                   },
                 },
               ]
+            : readTakes && requests.length > generationCalls && requests.length <= generationCalls + (readTakesAgain ? 2 : 1)
+              ? [
+                  { choices: [{ delta: { content: 'Je regarde ces prises.' }, finish_reason: 'tool_calls' }] },
+                  {
+                    local_tool_request: {
+                      kind: 'outputs',
+                      takes: [
+                        { take: 47, runId: 'run', outputIndex: 0 },
+                        { take: 49, runId: 'other', outputIndex: 1 },
+                      ],
+                      workflowName: 'PRISE 47, PRISE 49',
+                      call: {
+                        id: 'read_takes_' + requests.length,
+                        type: 'function',
+                        function: { name: 'local_read_output', arguments: '{"takes":[47,49]}' },
+                      },
+                    },
+                  },
+                ]
             : readResourceDuringReview && requests.length === generationCalls + (readOutputAfterGeneration ? 2 : 1)
               ? [
                   { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
@@ -233,7 +264,7 @@ async function exchange({
     context,
   );
   await context.sendMessage({ preventDefault() {} });
-  return { state, requests, toolOptions, proposals, reviews, views, generationContainers, messages: $('messages') };
+  return { state, requests, toolOptions, proposals, reviews, sheets, views, generationContainers, messages: $('messages') };
 }
 
 test('without vision, generated outputs are explained without marking them visually reviewed', async () => {
@@ -610,4 +641,57 @@ test('in the Chat an image starts at once and a video always waits on its card, 
   // said in the Studio as what it is, 0.6.95.)
   assert.match(text, /runForTurn\(await action\('create_image', \{ prompt, \.\.\.\(size \?\? \{\}\) \}\), \{ view, signal, auto: true, talkId, purpose: 'character' \}\)/);
   assert.match(text, /const result = await runForTurn\(proposal, \{ view, signal, talkId, said: words \}\);/);
+});
+
+test('several takes looked at in one call come back as what each is and one picture of them all (0.6.112)', async () => {
+  const result = await exchange({ readTakes: true });
+  assert.equal(result.requests.length, 3, 'one request for the two takes, where each took its own');
+  // One sheet, each take under its number.
+  assert.deepEqual(JSON.parse(JSON.stringify(result.sheets)), [
+    [
+      { label: 'PRISE 47', url: 'data:image/png;base64,iVBORw0KGgo=' },
+      { label: 'PRISE 49', url: 'data:image/png;base64,iVBORw0KGgo=' },
+    ],
+  ]);
+  const messages = result.requests[2].messages,
+    answer = JSON.parse(messages.find(message => message.tool_call_id === 'read_takes_2').content),
+    shown = messages.find(message => message.outputId === 'takes/47,49');
+  assert.equal(answer.status, 'loaded');
+  assert.deepEqual(answer.takes, [
+    { take: 47, media_type: 'image', workflow: 'Photo', prompt: 'Prompt of run' },
+    { take: 49, media_type: 'image', workflow: 'Photo', prompt: 'Prompt of other' },
+  ]);
+  assert.match(answer.note, /One picture follows/);
+  // (Made in the sandbox: another realm, its arrays are not ours.)
+  assert.deepEqual(
+    Array.from(shown.content, part => part.type),
+    ['text', 'image_url'],
+    'one picture, whatever the number of takes',
+  );
+  assert.equal(shown.content[1].image_url.url, 'data:image/jpeg;base64,U0hFRVQ=');
+  assert.match(shown.content[0].text, /Planche des prises 47, 49/);
+  // Nothing of it is kept in the conversation, and the answer is not the review of one take.
+  assert.doesNotMatch(JSON.stringify(result.state.messages), /base64|outputId/);
+  assert.equal(result.reviews.length, 0);
+  // Each image looked at after its creation (a setting): the words it writes with this call are not
+  // the analysis of the image just made; its answer is.
+  const reviewed = await exchange({ readTakes: true, reviewImages: true });
+  assert.deepEqual(Array.from(reviewed.reviews, review => review[1]), ['Result explained']);
+  // Asked again in the same turn: the model answers from what it has.
+  const again = await exchange({ readTakes: true, readTakesAgain: true });
+  assert.equal(again.requests.length, 4);
+  assert.equal(again.sheets.length, 1);
+  assert.match(again.requests[3].messages.at(-1).content, /already_loaded/);
+  assert.equal(again.requests[3].resources, false, 'no further read is offered');
+  // No sheet could be drawn: their pictures follow one by one.
+  const plain = await exchange({ readTakes: true, sheetFails: true });
+  assert.deepEqual(
+    Array.from(plain.requests[2].messages.find(message => message.outputId === 'takes/47,49').content, part => part.type),
+    ['text', 'image_url', 'image_url'],
+  );
+  // No copy of any: said, and nothing shown.
+  const none = await exchange({ readTakes: true, images: [] });
+  assert.equal(JSON.parse(none.requests[2].messages.find(message => message.tool_call_id === 'read_takes_2').content).status, 'unavailable');
+  assert.equal(none.sheets.length, 0);
+  assert.ok(!none.requests[2].messages.some(message => message.outputId));
 });

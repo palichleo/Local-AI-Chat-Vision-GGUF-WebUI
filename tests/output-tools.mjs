@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Gallery } from '../lib/gallery.mjs';
-import { readOutput } from '../lib/output-tools.mjs';
+import { TAKES_AT_ONCE, capableOutputTool, outputTool, outputToolFor, readOutput, takesToRead } from '../lib/output-tools.mjs';
+import { SHEET_TAKES, sheetLayout, contactSheet } from '../public/contact-sheet.mjs';
 import { createApplication } from '../server.mjs';
 import { readSSE } from '../public/stream.mjs';
 import { updateSession } from '../lib/update-session.mjs';
@@ -108,8 +109,15 @@ test('in-memory inspection isolates one output and missing copies never cause an
 
 test('HTTP output tool remains available after generation is disabled, enforces conversation scope and shares the read budget', async t => {
   const { root, gallery } = await fixture(t),
-    record = run();
+    record = run(),
+    // (0.6.112) Another creation of the same conversation, two outputs.
+    other = run({
+      conversationId: record.conversationId,
+      createdAt: new Date(Date.now() + 1000).toISOString(),
+      outputs: [{ source: { filename: 'a.png', subfolder: '', type: 'output' } }, { source: { filename: 'b.png', subfolder: '', type: 'output' } }],
+    });
   await gallery.put(record, { persist: true });
+  await gallery.put(other, { persist: true });
   const modelPath = join(root, 'model.gguf'),
     projectorPath = join(root, 'mmproj.gguf');
   await writeFile(modelPath, 'GGUF\x03\0\0\0');
@@ -177,7 +185,28 @@ test('HTTP output tool remains available after generation is disabled, enforces 
     ['local_read_output'],
   );
   assert.doesNotMatch(JSON.stringify(initial), /base64/);
-  assert.deepEqual(initial.tools[0].function.parameters.properties.run_id.enum, [record.id]);
+  // (0.6.112) Its takes by their numbers, given as the application started: no run_id to copy.
+  assert.deepEqual(Object.keys(initial.tools[0].function.parameters.properties), ['takes']);
+  assert.deepEqual(initial.tools[0].function.parameters.properties.takes.items.enum, [1, 2, 3]);
+  // One take: read as a result always was. Several: handed to the page together. One read of the
+  // turn either way; a number that is none of its takes is said to the model.
+  const asked = async takes =>
+    (await chat('inspect output ' + JSON.stringify({ takes }), { turnId: randomUUID() })).find(event => event.local_tool_request)
+      .local_tool_request;
+  const one = await asked([1]);
+  assert.deepEqual([one.kind, one.runId, one.outputIndex], ['output', record.id, 0]);
+  const three = await asked([3, 1, 2, 3]);
+  assert.equal(three.kind, 'outputs');
+  assert.deepEqual(three.takes, [
+    { take: 3, runId: other.id, outputIndex: 1 },
+    { take: 1, runId: record.id, outputIndex: 0 },
+    { take: 2, runId: other.id, outputIndex: 0 },
+  ]);
+  assert.equal(three.workflowName, 'PRISE 3, PRISE 1, PRISE 2');
+  assert.doesNotMatch(JSON.stringify(three), /base64/);
+  const none = await asked([1, 9]);
+  assert.equal(none.kind, 'invalid');
+  assert.equal(none.message, 'La prise 9 n’est pas une prise de cette conversation.');
   // A wrong run_id is answered to the model as a refused call instead of ending the turn.
   const refused = (await chat('inspect output ' + JSON.stringify({ run_id: 'run_id' }))).find(
     event => event.local_tool_request,
@@ -288,4 +317,93 @@ test('HTTP output tool remains available after generation is disabled, enforces 
   ).json();
   assert.equal(status.state, 'ready');
   assert.equal(status.toolJob, null);
+});
+
+test('the takes of a conversation are looked at by their numbers, several in one call (0.6.112)', () => {
+  // Asked to plan a video from three takes, the local model wrote three calls in one message, then
+  // read them one request after the other, a run_id of thirty-six characters copied for each.
+  const A = randomUUID(),
+    B = randomUUID(),
+    C = randomUUID(),
+    runs = [
+      { id: A, mediaType: 'video', workflowName: 'LTX 2.5', outputs: [{ take: 7 }] },
+      { id: B, workflowName: 'Krea 2', outputs: [{ take: 5 }, { take: 6 }] },
+    ];
+  const tool = outputToolFor(runs),
+    parameters = tool.function.parameters;
+  assert.deepEqual(Object.keys(parameters.properties), ['takes']);
+  assert.deepEqual(parameters.properties.takes.items, { type: 'integer', enum: [5, 6, 7] });
+  assert.equal(parameters.properties.takes.maxItems, 3);
+  assert.deepEqual(parameters.required, ['takes']);
+  assert.match(tool.function.description, /in one call/);
+  assert.doesNotMatch(JSON.stringify(tool), /run_id/);
+  // As many as one sheet holds, never more.
+  const many = outputToolFor([{ id: A, outputs: Array.from({ length: 30 }, (_, at) => ({ take: at + 1 })) }]);
+  assert.equal(many.function.parameters.properties.takes.maxItems, TAKES_AT_ONCE);
+  assert.equal(TAKES_AT_ONCE, SHEET_TAKES);
+  // Found among the creations of the conversation, in the order asked, each once.
+  assert.deepEqual(takesToRead({ takes: [7, 5, 7] }, runs), [
+    { take: 7, runId: A, outputIndex: 0, mediaType: 'video', workflowName: 'LTX 2.5' },
+    { take: 5, runId: B, outputIndex: 0, mediaType: 'image', workflowName: 'Krea 2' },
+  ]);
+  assert.deepEqual(takesToRead({ takes: [6] }, runs)[0], { take: 6, runId: B, outputIndex: 1, mediaType: 'image', workflowName: 'Krea 2' });
+  assert.throws(() => takesToRead({ takes: [5, 9] }, runs), /La prise 9 n’est pas une prise de cette conversation/);
+  for (const refused of [{}, { takes: [] }, { takes: [0] }, { takes: ['5'] }, { takes: 5 }, { takes: [5], run_id: A }, { takes: Array.from({ length: 13 }, (_, at) => at + 1) }])
+    assert.throws(() => takesToRead(refused, runs), /Numéros de prise invalides/, JSON.stringify(refused));
+  // A result without a number is still read by its run_id, with the words the tool always had.
+  const earlier = outputToolFor([{ id: C, outputs: [{}, {}] }]);
+  assert.deepEqual(Object.keys(earlier.function.parameters.properties), ['run_id', 'output_index']);
+  assert.deepEqual(earlier.function.parameters.properties.run_id.enum, [C]);
+  assert.equal(earlier.function.parameters.properties.output_index.maximum, 1);
+  assert.deepEqual(earlier.function.parameters.required, ['run_id']);
+  assert.equal(earlier.function.description, outputTool.function.description);
+  const both = outputToolFor([...runs, { id: C, outputs: [{}] }]);
+  assert.deepEqual(Object.keys(both.function.parameters.properties), ['takes', 'run_id', 'output_index']);
+  assert.deepEqual(both.function.parameters.properties.run_id.enum, [C]);
+  assert.deepEqual(both.function.parameters.required, []);
+  // A large model: the same definition at every request, no list.
+  assert.deepEqual(Object.keys(capableOutputTool.function.parameters.properties), ['takes', 'run_id', 'output_index']);
+  assert.equal(capableOutputTool.function.parameters.properties.takes.items.enum, undefined);
+});
+
+test('several takes are drawn on one picture, each under its number (0.6.112)', async () => {
+  // One, two and three in a row; four as a square; then rows of three, then of four.
+  assert.deepEqual(
+    [1, 2, 3, 4, 5, 6, 7, 8, 12, 40].map(count => [sheetLayout(count).columns, sheetLayout(count).rows]),
+    [[1, 1], [2, 1], [3, 1], [2, 2], [3, 2], [3, 2], [4, 2], [4, 2], [4, 3], [4, 3]],
+  );
+  const three = sheetLayout(3);
+  assert.deepEqual([three.width, three.height], [3 * 320 + 4 * 8, 320 + 34 + 2 * 8]);
+  assert.deepEqual(three.cells, [{ x: 8, y: 8 }, { x: 336, y: 8 }, { x: 664, y: 8 }]);
+  const drawn = [],
+    canvas = {
+      getContext: () => ({
+        fillRect: (...box) => drawn.push(['box', ...box]),
+        fillText: (text, x, y) => drawn.push(['text', text, x, y]),
+        drawImage: (picture, x, y, width, height) => drawn.push(['picture', picture.name, x, y, width, height]),
+      }),
+      toDataURL: (type, quality) => `data:${type};sheet,${quality}`,
+    };
+  const sheet = await contactSheet(
+    [
+      { label: 'PRISE 47', url: 'wide' },
+      { label: 'PRISE 49', url: 'gone' },
+      { label: 'PRISE 50', url: 'tall' },
+    ],
+    {
+      document: { createElement: () => canvas },
+      load: async url => {
+        if (url === 'gone') throw new Error('unreadable');
+        return url === 'wide' ? { name: url, width: 1280, height: 640 } : { name: url, width: 500, height: 1000 };
+      },
+    },
+  );
+  assert.equal(sheet, 'data:image/jpeg;sheet,0.86');
+  assert.deepEqual([canvas.width, canvas.height], [three.width, three.height]);
+  assert.deepEqual(drawn.filter(([kind]) => kind === 'text').map(([, text, x]) => [text, x]), [['PRISE 47', 12], ['PRISE 49', 340], ['PRISE 50', 668]]);
+  // Each picture whole in its square, centred; the one that cannot be read leaves its square empty.
+  assert.deepEqual(drawn.filter(([kind]) => kind === 'picture'), [
+    ['picture', 'wide', 8, 42 + 80, 320, 160],
+    ['picture', 'tall', 664 + 80, 42, 160, 320],
+  ]);
 });

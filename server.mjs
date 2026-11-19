@@ -19,7 +19,7 @@ import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
 import { passedImages, thinNote } from './lib/thin-prompt.mjs';
-import { capableOutputTool, outputToolFor, readOutput } from './lib/output-tools.mjs';
+import { capableOutputTool, outputToolFor, readOutput, takesToRead } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
 import { generatedFile } from './lib/generated-media.mjs';
 import { countContext } from './lib/context-count.mjs';
@@ -84,6 +84,7 @@ const staticFiles = new Map([
   ['/reference-tokens.mjs', ['reference-tokens.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-picker.mjs', ['reference-picker.mjs', 'text/javascript; charset=utf-8']],
   ['/cited-takes.mjs', ['cited-takes.mjs', 'text/javascript; charset=utf-8']],
+  ['/contact-sheet.mjs', ['contact-sheet.mjs', 'text/javascript; charset=utf-8']],
   ['/unexpected-errors.mjs', ['unexpected-errors.mjs', 'text/javascript; charset=utf-8']],
   ['/moodix.css', ['moodix.css', 'text/css; charset=utf-8']],
   // « Salle obscure » (0.6.0): the room behind the page, its two fonts, the tile of its dithering.
@@ -2696,23 +2697,39 @@ export async function createApplication({
             }
             if (!body.turnId || !/^[0-9a-f-]{36}$/.test(body.turnId) || (resourceTurns.get(body.turnId) || 0) >= 8)
               throw problem('La limite de huit lectures pour ce tour est atteinte.', 502);
-            let metadata;
+            // (0.6.112) Takes named by their numbers (lib/output-tools.mjs): one is read as a result
+            // always was; several are read by the page together, and shown to the model on one
+            // picture (`outputs`). One read of the turn either way.
+            let metadata,
+              several = null;
             try {
-              ({ metadata } = await readOutput(gallery, body.conversationId, args, { includeImages: false }));
+              if (args?.takes !== undefined) {
+                const named = takesToRead(args, (await gallery.list(body.conversationId, { includeImages: false })).runs);
+                if (named.length > 1) several = named;
+                else args = { run_id: named[0].runId, output_index: named[0].outputIndex };
+              }
+              if (!several) ({ metadata } = await readOutput(gallery, body.conversationId, args, { includeImages: false }));
             } catch (error) {
               await rejectCall(call, error);
             }
-            if (metadata) {
+            if (metadata || several) {
               resourceTurns.set(body.turnId, (resourceTurns.get(body.turnId) || 0) + 1);
               if (resourceTurns.size > 256) resourceTurns.delete(resourceTurns.keys().next().value);
               await emit({
-                local_tool_request: {
-                  kind: 'output',
-                  call,
-                  runId: metadata.run_id,
-                  outputIndex: metadata.output_index,
-                  workflowName: metadata.workflow,
-                },
+                local_tool_request: several
+                  ? {
+                      kind: 'outputs',
+                      call,
+                      takes: several.map(({ take, runId, outputIndex }) => ({ take, runId, outputIndex })),
+                      workflowName: several.map(item => 'PRISE ' + item.take).join(', '),
+                    }
+                  : {
+                      kind: 'output',
+                      call,
+                      runId: metadata.run_id,
+                      outputIndex: metadata.output_index,
+                      workflowName: metadata.workflow,
+                    },
               });
             }
           } else if (calls[0].function.name === 'local_read_resource') {
