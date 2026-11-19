@@ -23,6 +23,25 @@
       "label": "Modèle",
       "folder": "diffusion_models",
       "required": true,
+      "reads": ["INT8", "FP8", "BF16", "FP16", "FP32"],
+      "fingerprint": [
+        {
+          "key": "^adaln_t_table$",
+          "shape": [1025, 8]
+        },
+        {
+          "key": "^blocks\\.49\\.attn\\.qkv_proj\\.weight$",
+          "shape": [21504, 5376]
+        },
+        {
+          "key": "^audio_patch_proj\\.weight$",
+          "shape": [5376, 32]
+        },
+        {
+          "key": "^blocks\\.50\\.",
+          "absent": true
+        }
+      ],
       "note": "Checkpoints élagués. Distillés, en 8 étapes : FastH3 Omni (références) ou FastH3 v2 (texte, image de début/fin). De base, en 20 étapes : le modèle de MiniMax (FL2VA : texte, image de début/fin).",
       "signature": [
         {

@@ -12,6 +12,7 @@
       "label": "Modèle",
       "folder": "diffusion_models",
       "required": true,
+      "reads": ["INT8", "FP8", "BF16", "FP16", "FP32"],
       "signature": [
         {
           "key": "^(?:model\\.diffusion_model\\.|diffusion_model\\.)?first\\.weight$",

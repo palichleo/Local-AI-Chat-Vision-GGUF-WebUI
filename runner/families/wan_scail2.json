@@ -25,6 +25,7 @@
       "label": "Modèle",
       "folder": "diffusion_models",
       "required": true,
+      "reads": ["INT8", "FP8", "BF16", "FP16", "FP32"],
       "note": "Wan 2.1 SCAIL-2 14B (int8 ConvRot).",
       "signature": [
         {

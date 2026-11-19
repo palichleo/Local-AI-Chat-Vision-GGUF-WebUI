@@ -11,6 +11,7 @@
       "label": "Modèle SeedVR2 (DiT 7B)",
       "folder": "diffusion_models",
       "required": true,
+      "reads": ["INT8", "FP8", "BF16", "FP16", "FP32"],
       "note": "DiT SeedVR2 7B en fp8 ou int8 ConvRot (Comfy-Org ou numz), par exemple seedvr2_7b_sharp_fp8_e4m3fn.",
       "signature": [
         {

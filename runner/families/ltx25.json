@@ -24,6 +24,25 @@
       "label": "Modèle",
       "folder": "diffusion_models",
       "required": true,
+      "reads": ["INT8", "FP8", "BF16", "FP16", "FP32"],
+      "fingerprint": [
+        {
+          "key": "^(?:model\\.diffusion_model\\.|diffusion_model\\.)?adaln_single\\.linear\\.weight$",
+          "shape": [36864, 4096]
+        },
+        {
+          "key": "^(?:model\\.diffusion_model\\.|diffusion_model\\.)?transformer_blocks\\.47\\.attn1\\.to_q\\.weight$",
+          "shape": [4096, 4096]
+        },
+        {
+          "key": "^(?:model\\.diffusion_model\\.|diffusion_model\\.)?audio_patchify_proj\\.weight$",
+          "shape": [2048, 128]
+        },
+        {
+          "key": "^(?:model\\.diffusion_model\\.|diffusion_model\\.)?transformer_blocks\\.48\\.",
+          "absent": true
+        }
+      ],
       "signature": [
         {
           "key": "(?:^|\\.)(?:transformer_blocks|diffusion_model\\.transformer_blocks)\\.\\d+\\."

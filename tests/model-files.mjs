@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GGUF_READ, GGUF_UNREAD, describeModelFile } from '../lib/model-files.mjs';
+import { families } from '../lib/families.mjs';
+import { GGUF_READ, GGUF_UNREAD, describeModelFile, fits, modelsOf, taking, versionComponent } from '../lib/model-files.mjs';
 
 /** A safetensors file: `tensors` as [name, type, shape, bytes or their number]. */
 function safetensors(tensors, { metadata, header: given } = {}) {
@@ -231,4 +232,140 @@ test('the types of GGUF blocks are those the engine names: the ones it unfolds, 
   );
   assert.ok(Object.keys(named).length >= 15);
   assert.deepEqual({ ...GGUF_UNREAD }, named);
+});
+
+// What the files of each model hold, as read on the user's disk on 19/11 (names and shapes only).
+const LTX = {
+  'adaln_single.linear.weight': [36864, 4096],
+  'audio_adaln_single.linear.weight': [18432, 2048],
+  'transformer_blocks.0.attn1.to_q.weight': [4096, 4096],
+  'transformer_blocks.47.attn1.to_q.weight': [4096, 4096],
+  'audio_patchify_proj.weight': [2048, 128],
+  'patchify_proj.weight': [4096, 128],
+};
+const MINIMAX = {
+  adaln_t_table: [1025, 8],
+  'blocks.0.attn.qkv_proj.weight': [21504, 5376],
+  'blocks.49.attn.qkv_proj.weight': [21504, 5376],
+  'audio_patch_proj.weight': [5376, 32],
+  'video_patch_proj.weight': [5376, 96],
+};
+const KREA = { 'first.weight': [6144, 64], 'last.linear.weight': [64, 6144], 'blocks.0.attn.wq.weight': [6144, 6144] };
+const SEEDVR = { 'vid_in.proj.weight': [3072, 132], 'blocks.35.attn.proj_qkv.vid.weight': [9216, 3072] };
+const SCAIL = { 'patch_embedding_pose.weight': [5120, 20, 1, 2, 2], 'patch_embedding_mask.weight': [5120, 28, 1, 2, 2] };
+const OWN = { ltx25: LTX, minimax_h3: MINIMAX, krea2: KREA, seedvr2: SEEDVR, wan_scail2: SCAIL };
+const prefixed = (shapes, prefix) => Object.fromEntries(Object.entries(shapes).map(([name, shape]) => [prefix + name, shape]));
+const which = shapes => modelsOf({ shapes });
+
+test('a file is a version of one model, told by what it holds and not by its name (0.6.116)', () => {
+  // The families whose versions are files, and the component those files are.
+  const versioned = Object.values(families()).filter(versionComponent);
+  assert.deepEqual(versioned.map(manifest => manifest.family), ['krea2', 'ltx25', 'minimax_h3', 'seedvr2', 'wan_scail2']);
+  for (const manifest of versioned) {
+    const { role, spec } = versionComponent(manifest);
+    assert.equal(role, 'model', manifest.family);
+    assert.deepEqual(spec.reads, ['INT8', 'FP8', 'BF16', 'FP16', 'FP32'], manifest.family);
+    assert.equal(spec.folder, 'diffusion_models');
+  }
+  // A folder of Hugging Face, a model ComfyUI runs, a small tool: no versions to find.
+  for (const name of ['acestep15', 'moss_sfx', 'moss', 'rife', 'realesrgan_image', 'realesrgan_video'])
+    assert.equal(versionComponent(families()[name]), null, name);
+  assert.equal(versionComponent(undefined), null);
+  // Each to its own model, and to no other.
+  for (const [family, shapes] of Object.entries(OWN)) assert.deepEqual(which(shapes), [family], family);
+  // The file Moodix ships for LTX 2.5 names its tensors under « model.diffusion_model. ».
+  assert.deepEqual(which(prefixed(LTX, 'model.diffusion_model.')), ['ltx25']);
+  assert.deepEqual(which(prefixed(LTX, 'diffusion_model.')), ['ltx25']);
+  assert.deepEqual(which(prefixed(KREA, 'model.diffusion_model.')), ['krea2']);
+  // What the looser check of the chooser took: any model with « transformer_blocks » for LTX 2.5…
+  assert.deepEqual(which({ 'transformer_blocks.0.attn1.to_q.weight': [2048, 2048] }), []);
+  // … one block more, another width, no sound: other models.
+  assert.deepEqual(which({ ...LTX, 'transformer_blocks.48.attn1.to_q.weight': [4096, 4096] }), []);
+  assert.deepEqual(which({ ...LTX, 'adaln_single.linear.weight': [18432, 2048] }), []);
+  assert.deepEqual(which({ ...LTX, 'adaln_single.linear.weight': [36864, 2048] }), [], 'each side counts');
+  assert.deepEqual(which({ ...LTX, 'adaln_single.linear.weight': [18432, 4096] }), []);
+  for (const gone of Object.keys(LTX).filter(name => /^(adaln_single|transformer_blocks\.47|audio_patchify)/.test(name))) {
+    const { [gone]: left, ...rest } = LTX;
+    assert.deepEqual(which(rest), [], gone);
+  }
+  // … and for MiniMax H3 the image model of the same name (19/11, on the user's disk): the same
+  // table and fifty blocks, no sound, and its 4-bit weights half as wide.
+  const { 'audio_patch_proj.weight': sound, ...image } = MINIMAX;
+  assert.deepEqual(which(image), []);
+  assert.deepEqual(which({ ...MINIMAX, 'blocks.49.attn.qkv_proj.weight': [21504, 2688] }), []);
+  assert.deepEqual(which({ ...MINIMAX, 'blocks.50.attn.qkv_proj.weight': [21504, 5376] }), []);
+  assert.deepEqual(which({ ...MINIMAX, adaln_t_table: [1025, 4] }), []);
+  assert.deepEqual(which(prefixed(MINIMAX, 'model.diffusion_model.')), [], 'no file of it is known with that prefix');
+  // The model of three billion of SeedVR2 (the engine is written for the seven), Wan 2.2, a Flux.
+  assert.deepEqual(which({ 'vid_in.proj.weight': [2560, 132], 'blocks.31.attn.proj_qkv.vid.weight': [7680, 2560] }), []);
+  assert.deepEqual(which({ 'patch_embedding.weight': [3072, 48, 1, 2, 2], 'blocks.29.ffn.2.weight': [3072, 14336] }), []);
+  assert.deepEqual(which({ 'double_blocks.4.img_attn.qkv.weight': [9216, 3072], 'single_blocks.19.linear1.weight': [27648, 3072] }), []);
+  // Nothing read, nothing recognised.
+  assert.deepEqual([which({}), which(undefined), modelsOf(undefined)], [[], [], []]);
+  // (Given the families to look in: the page passes those it shows.)
+  assert.deepEqual(modelsOf({ shapes: LTX }, { ltx25: families().ltx25 }), ['ltx25']);
+  assert.deepEqual(modelsOf({ shapes: LTX }, { krea2: families().krea2 }), []);
+});
+
+test('what describes a model: tensors it has, with their shape, and tensors it must not have', () => {
+  const shapes = { 'a.weight': [4, 8], 'b.0.weight': [2], 'b.1.weight': [2] };
+  assert.equal(fits(shapes, [{ key: '^a\\.weight$', shape: [4, 8] }]), true);
+  assert.equal(fits(shapes, [{ key: '^a\\.weight$' }]), true, 'no shape asked');
+  assert.equal(fits(shapes, [{ key: '^a\\.weight$', shape: [null, 8] }]), true, 'a size left open');
+  assert.equal(fits(shapes, [{ key: '^a\\.weight$', shape: [4, 9] }]), false);
+  assert.equal(fits(shapes, [{ key: '^a\\.weight$', shape: [4] }]), false, 'one side fewer');
+  assert.equal(fits(shapes, [{ key: '^a\\.weight$', shape: [4, 8, 1] }]), false);
+  assert.equal(fits(shapes, [{ key: '^c\\.' }]), false);
+  // Any tensor of that name will do; every line is to be met.
+  assert.equal(fits(shapes, [{ key: '^b\\.\\d+\\.weight$', shape: [2] }]), true);
+  assert.equal(fits(shapes, [{ key: '^a\\.' }, { key: '^c\\.' }]), false);
+  // Absent: met by no tensor, of that shape when one is given.
+  assert.equal(fits(shapes, [{ key: '^a\\.' }, { key: '^b\\.2\\.', absent: true }]), true);
+  assert.equal(fits(shapes, [{ key: '^a\\.' }, { key: '^b\\.1\\.', absent: true }]), false);
+  assert.equal(fits(shapes, [{ key: '^a\\.weight$', shape: [4, 9], absent: true }]), true);
+  // Nothing described recognises nothing, whatever the file.
+  assert.deepEqual(
+    [fits(shapes, []), fits(shapes, undefined), fits(undefined, [{ key: 'a' }]), fits({}, [{ key: 'a' }])],
+    [false, false, false, false],
+  );
+});
+
+test('how a model takes a file: as it is, through a conversion, or not, with what stops it', () => {
+  const spec = versionComponent(families().ltx25).spec,
+    file = (format, more = {}) => ({ container: 'safetensors', format, ...more });
+  for (const format of ['INT8', 'FP8', 'BF16', 'FP16', 'FP32']) assert.deepEqual(taking(spec, file(format)), { how: 'direct' }, format);
+  // 19/11, on the user's disk: weights of 4 bits, an encoder in NVFP4. Named, never tried.
+  assert.deepEqual(taking(spec, file('W4A8')), { how: 'refused', reason: 'W4A8' });
+  assert.deepEqual(taking(spec, file('NVFP4')), { how: 'refused', reason: 'NVFP4' });
+  assert.deepEqual(taking({ reads: ['INT8', 'NVFP4'] }, file('NVFP4')), { how: 'direct' }, 'a family that reads it');
+  // A GGUF is never computed with: unfolded whole and written again in INT8, when the model reads
+  // INT8 and the engine unfolds every block of the file.
+  const packed = (unread = []) => ({ container: 'gguf', format: 'GGUF Q8', unread });
+  assert.deepEqual(taking(spec, packed()), { how: 'convert' });
+  assert.deepEqual(taking(spec, packed(['Q3_K', 'IQ4_XS'])), { how: 'refused', reason: 'Q3_K, IQ4_XS' });
+  assert.deepEqual(taking({ reads: ['BF16'] }, packed()), { how: 'refused', reason: 'GGUF Q8' });
+  // A family that says nothing reads nothing.
+  assert.deepEqual(taking({}, file('INT8')), { how: 'refused', reason: 'INT8' });
+  assert.deepEqual(taking(undefined, packed()), { how: 'refused', reason: 'GGUF Q8' });
+  assert.deepEqual(taking(spec, undefined), { how: 'refused', reason: '' });
+});
+
+test('the shapes of the tensors are read on request, in the order PyTorch gives them', async t => {
+  const read = await folder(t);
+  const directory = await mkdtemp(join(tmpdir(), 'moodix-model-shapes-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const shaped = async (name, bytes) => {
+    await writeFile(join(directory, name), bytes);
+    return describeModelFile(join(directory, name), { shapes: true });
+  };
+  const plain = safetensors([['a.weight', 'BF16', [4, 8], 64], ['a.comfy_quant', 'U8', [2], note({})]], { metadata: { x: 'y' } });
+  assert.equal('shapes' in (await read(plain)), false, 'not unless asked');
+  assert.deepEqual((await shaped('a.safetensors', plain)).shapes, { 'a.weight': [4, 8], 'a.comfy_quant': [2] });
+  // A GGUF lists the sides of a tensor backwards.
+  const unfolded = await shaped('a.gguf', gguf({ tensors: [['a.weight', [8, 4], 8], ['a.bias', [4], 1]] }));
+  assert.deepEqual(unfolded.shapes, { 'a.weight': [4, 8], 'a.bias': [4] });
+  assert.equal('shapes' in (await read(gguf({ tensors: [['a.weight', [8, 4], 8]] }))), false);
+  // The whole way: a file of LTX 2.5 written as a GGUF is one of LTX 2.5, taken through a conversion.
+  const ltx = await shaped('ltx.gguf', gguf({ tensors: Object.entries(LTX).map(([name, shape]) => [name, [...shape].reverse(), 8]) }));
+  assert.deepEqual([modelsOf(ltx), taking(versionComponent(families().ltx25).spec, ltx)], [['ltx25'], { how: 'convert' }]);
 });
