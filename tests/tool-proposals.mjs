@@ -1321,13 +1321,21 @@ test('Krea 2: the denoise the assistant passes with an image to modify stays fro
   assert.equal((await revise(own.runtime, held, { denoise: 0.4 })).plan.parameters.denoise, 0.4);
 });
 
-test('a continuation the user did not ask for is sent back to the model before anything is proposed (0.6.113)', async () => {
+test('a continuation the user did not ask for, of a take that cannot be made again as a new video, is sent back to the model (0.6.113)', async () => {
   // « Modifie cette prise, je veux un dézoom lent » (19/11): the local model called extend_video with
   // the take as its source, and the Studio showed « Suite du clip », its size not to be changed.
+  // (0.6.114) Here the take continued another clip itself: no new video can be made of what it was
+  // made with, and the model is told, as every such continuation was in 0.6.113.
   const list = shipped().filter(workflow => workflow.pipeline !== 'minimax_h3'),
     ltx = of(list, 'ltx25'),
-    CLIP = uid(3);
-  const { runtime } = world({ workflows: list, records: { [`${A}/${CLIP}`]: clip(A, CLIP, ltx) } });
+    [CLIP, FIRST] = [uid(3), uid(5)];
+  const { runtime } = world({
+    workflows: list,
+    records: {
+      [`${A}/${FIRST}`]: clip(A, FIRST, ltx),
+      [`${A}/${CLIP}`]: clip(A, CLIP, ltx, { references: [{ input: 'source', output_id: FIRST, role: 'source_video' }] }),
+    },
+  });
   const suite = () => [call('extend_video', { prompt: 'x', intention: 'Suite', duration: 5, source: { output: CLIP } })],
     said = (...messages) => ({ conversationId: A, turnId: turn, messages }),
     changed = { role: 'user', content: 'modifie cette prise, je veux un dézoom lent' };
@@ -1351,4 +1359,108 @@ test('a continuation the user did not ask for is sent back to the model before a
   assert.ok((await runtime.request(suite(), { ...said(changed), byHand: true })).requestId);
   // Another verb on the same words is the model's answer to them.
   assert.equal((await runtime.request([call('create_video', { prompt: 'x', intention: 'Vidéo', duration: null })], said(changed))).kind, undefined);
+});
+
+test('a continuation nobody asked for is proposed as the new video it stands for, with what its take was made with (0.6.114)', async () => {
+  // 19/11, on the user's card: sent back with what to call instead (0.6.113), the local model made
+  // the right call three times out of eight, and three times wrote « j'ai créé… » with nothing made.
+  // The call below is the one it made most (its prompt shortened): no image named, five seconds.
+  const list = shipped(),
+    omni = of(list, 'minimax_h3'),
+    ltx = of(list, 'ltx25'),
+    krea = of(list, 'krea2'),
+    [CLIP, IMAGE, START, SENT, LOST, NEXT, OLD] = [uid(3), uid(4), uid(5), uid(6), uid(7), uid(8), uid(9)];
+  const numbered = (record, take) => ({ ...record, outputs: [{ ...record.outputs[0], take }] }),
+    galaxy = { input: 'subject-1', output_id: IMAGE, output_index: 0, original: true, label: 'Prise 50', role: 'reference_image' };
+  const records = {
+    [`${A}/${IMAGE}`]: { ...numbered(clip(A, IMAGE, krea, {}, [1024, 1024]), 50), mediaType: 'image' },
+    // Made upright by the user: the new video keeps that format, which no image of it says.
+    [`${A}/${CLIP}`]: numbered(clip(A, CLIP, omni, { frames: 141, stage: 'final', references: [galaxy] }, [448, 768]), 59),
+    [`${A}/${START}`]: numbered(clip(A, START, ltx, { frames: 97, references: [{ input: 'start', output_id: IMAGE, role: 'start_image' }] }), 60),
+    [`${A}/${SENT}`]: numbered(clip(A, SENT, omni, { frames: 124, references: [{ input: 'subject-1', image: 0, role: 'reference_image' }] }), 61),
+    [`${A}/${LOST}`]: numbered(clip(A, LOST, omni, { frames: 124, references: [{ ...galaxy, output_id: uid(0) }] }), 62),
+    [`${A}/${OLD}`]: numbered(clip(A, OLD, { id: 'removed', name: 'Ancien workflow', pipeline: 'ltx25' }, { frames: 121 }), 64),
+    [`${A}/${NEXT}`]: numbered(clip(A, NEXT, omni, { frames: 124, references: [{ input: 'source', output_id: CLIP, role: 'source_video' }] }), 63),
+  };
+  const { runtime, saved } = world({ workflows: list, records });
+  const prompt = 'A breathtaking view of a spiral galaxy. The camera slowly pulls back, revealing deep space.',
+    intention = 'Troisième plan modifié : dézoom lent de la galaxie.',
+    suite = (output = CLIP, more = {}) => [call('extend_video', { prompt, source: { output, index: 0 }, duration: 5, intention, ...more })],
+    said = (...messages) => ({ conversationId: A, turnId: randomUUID(), messages }),
+    changed = { role: 'user', content: 'modifie cette prise, je veux un dézoom lent' };
+
+  const fresh = await runtime.request(suite(), said(changed));
+  assert.ok(fresh.requestId, 'proposed at once: nothing the model has to do again');
+  assert.deepEqual([fresh.kind, fresh.tool, fresh.workflowName], [undefined, 'create_video', omni.name]);
+  // The call the conversation keeps is the one of the new video: what the take was made with.
+  assert.equal(fresh.call.function.name, 'create_video');
+  assert.equal(fresh.call.id, 'call-1');
+  assert.deepEqual(JSON.parse(fresh.call.function.arguments), {
+    prompt,
+    duration: 5.88,
+    intention,
+    workflow: omni.id,
+    stage: 'final',
+    reference: [{ output: IMAGE, index: 0 }],
+  });
+  assert.deepEqual(fresh.args.references, [{ input: 'subject-1', output_id: IMAGE, output_index: 0 }]);
+  assert.deepEqual(rolesOf(fresh), ['reference_image']);
+  assert.ok(!fresh.inputRoles.includes('source_video'), 'no clip to go on from');
+  assert.deepEqual([fresh.plan.prompt, fresh.plan.intention], [prompt, intention]);
+  // Its length (141 images, not the five seconds of the call nor the 124 of the workflow), its
+  // profile, and its upright format.
+  assert.deepEqual([fresh.plan.parameters.frames, fresh.plan.stage], [141, 'final']);
+  assert.ok(fresh.resolution.height > fresh.resolution.width, JSON.stringify(fresh.resolution));
+  assert.deepEqual(fresh.notes, [
+    'Votre message ne demande pas de suite : au lieu de prolonger la prise 59, une nouvelle vidéo est proposée, avec ses images, sa longueur et son format. Pour une suite, utilisez « Prolonger ».',
+  ]);
+  // Made, it is a take of its own.
+  await runtime.execute({ requestId: fresh.requestId, permission: 'once', approvalToken: fresh.approvalToken });
+  await runtime.finished;
+  assert.equal(runtime.status().state, 'done', runtime.status().error);
+  assert.deepEqual(saved.at(-1).parameters.references.map(ref => ref.role), ['reference_image']);
+  assert.deepEqual([saved.at(-1).parameters.continuation, saved.at(-1).callId], [undefined, 'call-1']);
+
+  // The images the call names itself are the model's choice: kept, and not said the take's.
+  const named = await runtime.request(suite(CLIP, { reference: [{ output: IMAGE }] }), said(changed));
+  assert.deepEqual(named.args.references, [{ input: 'subject-1', output_id: IMAGE }]);
+  assert.match(named.notes[0], /une nouvelle vidéo est proposée, avec sa longueur et son format\. Pour/);
+  // A length the user's message speaks of is theirs: the one of the call, not the take's.
+  const timed = await runtime.request(
+    suite(CLIP, { duration: 8 }),
+    said({ role: 'user', content: 'refais cette prise en 8 secondes avec un dézoom' }),
+  );
+  assert.equal(timed.plan.parameters.frames, 192);
+  assert.match(timed.notes[0], /avec ses images et son format\. Pour/);
+  // The number of a take is no length (inventedLength): « la prise 59 » keeps its own.
+  const byNumber = await runtime.request(suite(), said({ role: 'user', content: 'refais la prise 59 avec un dézoom' }));
+  assert.equal(byNumber.plan.parameters.frames, 141);
+  assert.match(byNumber.notes[0], /avec ses images, sa longueur et son format\. Pour/);
+  // An image the take started from goes where it was: the first image of the new video.
+  const started = await runtime.request(suite(START), said(changed));
+  assert.deepEqual([started.workflowName, started.plan.parameters.frames], [ltx.name, 97]);
+  assert.deepEqual(started.args.references, [{ input: 'start', output_id: IMAGE }]);
+  assert.deepEqual(JSON.parse(started.call.function.arguments).start_image, { output: IMAGE });
+  assert.match(started.notes[0], /au lieu de prolonger la prise 60, /);
+
+  // What cannot be made again so is sent back to the model, its call as it was: a take made from a
+  // file sent with a message, one whose image is gone, one that continued a clip, one whose workflow
+  // was removed, a clip unknown.
+  for (const output of [SENT, LOST, NEXT, OLD, uid(0)]) {
+    const back = await runtime.request(suite(output), said(changed));
+    assert.deepEqual([back.kind, back.message, back.call.function.name], ['retry', SUITE_NOTE, 'extend_video'], output);
+    assert.deepEqual(JSON.parse(back.call.function.arguments).source, { output, index: 0 });
+  }
+  // A continuation the user asks for, or asks by hand, is the continuation.
+  const wanted = await runtime.request(suite(), said({ role: 'user', content: 'prolonge la prise 59' }));
+  assert.deepEqual([wanted.tool, rolesOf(wanted)], ['extend_video', ['source_video']]);
+  assert.equal(wanted.notes, undefined);
+  assert.equal((await runtime.request(suite(), { ...said(changed), byHand: true })).tool, 'extend_video');
+  // A fault that is no refusal is not hidden behind « the model is told ».
+  const prepare = runtime.catalog.prepare;
+  runtime.catalog.prepare = async () => {
+    throw new Error('disque illisible');
+  };
+  await assert.rejects(runtime.request(suite(), said(changed)), /disque illisible/);
+  runtime.catalog.prepare = prepare;
 });

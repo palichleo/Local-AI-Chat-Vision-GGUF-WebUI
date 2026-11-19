@@ -153,11 +153,23 @@ test('the server sends both notes with a proposal to put in words, in the wordin
     server = await read('../server.mjs'),
     page = await read('../public/app.js');
   // (The small local model keeps the agreement in words its tools tell it to get: `talked`.)
-  assert.match(server, /const capable = wordingOf\(chat\.connection\) === CAPABLE;\n\s+if \(request && !request\.missing && briefMissing\(body\.messages, call, \{ talked: !capable \}\)\) \{\n\s+request\.brief = true;\n\s+request\.cardBrief = capable \? CAPABLE_CARD : cardBrief\(\);\n\s+request\.studioBrief = capable \? CAPABLE_STUDIO : studioBrief\(\);/);
+  assert.match(server, /const capable = wordingOf\(chat\.connection\) === CAPABLE;\n\s+if \(request && !request\.missing && briefMissing\(body\.messages, request\.call \?\? call, \{ talked: !capable \}\)\) \{\n\s+request\.brief = true;\n\s+request\.cardBrief = capable \? CAPABLE_CARD : cardBrief\(\);\n\s+request\.studioBrief = capable \? CAPABLE_STUDIO : studioBrief\(\);/);
   // (Set in the Studio of the conversation of the turn only, `talkId`: 0.6.81.)
   assert.match(page, /const note = setInStudio\(request, talkId\) \? request\.studioBrief : request\.cardBrief;/);
   // The long plan of before (« ask for their go ») is told by nobody any more.
   for (const source of [server, page]) assert.doesNotMatch(source, /briefMessage|kind: 'brief'|kind === 'brief'/);
+});
+
+test('a continuation made a new video is known by the call the conversation keeps, not by the one the model made (0.6.114)', () => {
+  // lib/unasked-suite.mjs: « modifie cette prise » answered by extend_video is proposed, and kept in
+  // the conversation, as create_video. The user answers its card in words and the model makes its
+  // call again: by its own call the proposal was never the one shown, and was put in words anew at
+  // every answer; by the call kept (what the server passes) it is the one they saw.
+  const remade = { prompt: 'The galaxy, a slow pull back.', duration: 5.17, workflow: 'w', reference: [{ output: 'run-1' }] },
+    suite = { prompt: remade.prompt, duration: 5, source: { output: 'run-2' } },
+    talk = [user('modifie cette prise, je veux un dézoom lent'), planned('a', 'create_video', remade), result('a', 'denied'), user('ok vas-y')];
+  assert.equal(briefMissing(talk, call('create_video', remade)), false);
+  assert.equal(briefMissing(talk, call('extend_video', suite)), true);
 });
 
 test('the small local model: a plan it wrote in words and the user answered is the agreement it is told to get', () => {

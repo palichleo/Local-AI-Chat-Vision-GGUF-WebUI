@@ -2936,8 +2936,11 @@ export async function createApplication({
                   // with what Moodix is to say of it (`brief`), and it waits for the user. Its words come
                   // over the card of the proposal in the Chat (`cardBrief`), before the Studio is set
                   // in the Studio (`studioBrief`). The page knows where it is.
+                  // (0.6.114) By the call the conversation keeps (`request.call`): a continuation
+                  // nobody asked for is kept as the new video it was made (lib/unasked-suite.mjs),
+                  // and the model's own call never matched it once the user had answered.
                   const capable = wordingOf(chat.connection) === CAPABLE;
-                  if (request && !request.missing && briefMissing(body.messages, call, { talked: !capable })) {
+                  if (request && !request.missing && briefMissing(body.messages, request.call ?? call, { talked: !capable })) {
                     request.brief = true;
                     request.cardBrief = capable ? CAPABLE_CARD : cardBrief();
                     request.studioBrief = capable ? CAPABLE_STUDIO : studioBrief();
