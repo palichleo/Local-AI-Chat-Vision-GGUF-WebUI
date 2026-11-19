@@ -164,7 +164,7 @@ const server = spawn(
     '--input-type=module',
     '-e',
     `const { createApplication } = await import(${JSON.stringify(serverFile)});
-     const app = await createApplication({ port: 0, dataDir: ${JSON.stringify(data)} });
+     const app = await createApplication({ port: 0, dataDir: ${JSON.stringify(data)}, builtinWorkflowDir: ${JSON.stringify(fileURLToPath(shippedFolder))} });
      console.log('URL ' + app.url);`,
   ],
   { stdio: ['ignore', 'pipe', 'inherit'] },
@@ -781,10 +781,22 @@ try {
   const editorBody = `document.getElementById('native-workflow-body')`;
   // These steps ask the page until it shows what they expect (`within`: the time each one waited
   // before, at most) instead of waiting that time every run: some seven seconds less.
-  await run('onglet Workflows', () => click('#settings-tab-workflows'), () => js(`!document.getElementById('workflow-add').hidden`), { within: 700 });
-  // « Ajouter » answers once the settings have read their workflows (greyed until then).
-  await run('éditeur de workflow', () => until(() => js(`!document.getElementById('workflow-add').disabled`), 700).then(() => click('#workflow-add')), () =>
-    js(`!document.getElementById('workflow-editor').hidden && ${editorBody}.scrollHeight > ${editorBody}.clientHeight + 200`), { within: 700 });
+  // (0.6.119) The page « Modèles » (maquette du 19/11): one line a model in four groups, with the
+  // workflows Moodix ships (this copy has none of their files: every model is to be downloaded).
+  const lines = `[...document.querySelectorAll('#workflow-list .model-line')]`,
+    ltx = `document.querySelector('#workflow-list .model-line[data-model="LTX 2.5"]')`;
+  await run('onglet Modèles', () => click('#settings-tab-workflows'), () =>
+    js(`${lines}.length === 10 && document.querySelectorAll('#workflow-list .model-group').length === 4 && document.querySelector('#settings-tab-workflows .settings-tab-label').textContent === 'Modèles'`), { within: 2500 });
+  // Every line is 46 px tall, « Télécharger » in the place of the version as any other (capture 65);
+  // nothing scrolls sideways, nothing of before is shown (no button to import or create, no dot).
+  await run('Modèles : lignes de 46 px', async () => {}, () =>
+    js(`(() => { const rows = [...document.querySelectorAll('#workflow-list .model-row')], panel = document.getElementById('settings-panel-workflows'), gone = id => { const box = document.getElementById(id).getBoundingClientRect(); return !box.width && !box.height; }; return rows.length === 10 && rows.every(row => Math.round(row.getBoundingClientRect().height) === 46) && panel.scrollWidth <= panel.clientWidth + 1 && gone('workflow-add') && gone('native-workflow-import') && !document.querySelector('#workflow-list .workflow-state') && document.querySelectorAll('#workflow-list .model-download').length >= 5; })()`), { within: 700 });
+  // The chevron unfolds the versions under the line, which stays as tall; « Réglages » is then in sight.
+  await run('Modèles : versions dépliées', () => click('#workflow-list .model-line[data-model="LTX 2.5"] .model-chevron'), () =>
+    js(`(() => { const line = ${ltx}; return line?.dataset.open === 'true' && Boolean(line.querySelector('.model-versions')) && Math.round(line.querySelector('.model-row').getBoundingClientRect().height) === 46 && line.querySelector('.model-chevron').getAttribute('aria-expanded') === 'true' && getComputedStyle(line.querySelector('.model-settings')).opacity === '1'; })()`), { within: 700 });
+  // The page of details of a model, behind « Réglages »: the editor of before, named after the model.
+  await run('éditeur de modèle', () => click('#workflow-list .model-line[data-model="LTX 2.5"] .model-settings'), () =>
+    js(`!document.getElementById('workflow-editor').hidden && document.getElementById('native-workflow-title').textContent === 'Réglages de LTX 2.5' && ${editorBody}.scrollHeight > ${editorBody}.clientHeight + 200`), { within: 1500 });
   await run('éditeur : molette', async () => {
     await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 640, y: 400, deltaX: 0, deltaY: 600 });
   }, () => js(`${editorBody}.scrollTop > 100`), { within: 700 });
@@ -795,9 +807,9 @@ try {
   // Back at the top, the foot is in sight (it never left: the body alone scrolls).
   await run('éditeur : touche Début, pied en vue', () => key('Home', 'Home', 36), () =>
     js(`(() => { const save = document.getElementById('native-workflow-save').getBoundingClientRect(), frame = document.getElementById('settings').getBoundingClientRect(); return ${editorBody}.scrollTop === 0 && save.height > 0 && save.bottom <= frame.bottom && save.bottom <= innerHeight; })()`), { within: 1500 });
-  // « Retour » asks whether to leave what was not saved; the answer is clicked once it is asked.
-  await run('quitter l’éditeur', () => click('#native-workflow-back').then(() => until(() => js(`!document.getElementById('native-workflow-unsaved').hidden`), 200)).then(() => click('#native-workflow-discard')), () =>
-    js(`document.getElementById('workflow-editor').hidden && !document.getElementById('settings-form').hidden`), { within: 700 });
+  // « Retour » : nothing was changed, the page « Modèles » is there again, its line still unfolded.
+  await run('quitter l’éditeur', () => click('#native-workflow-back'), () =>
+    js(`document.getElementById('workflow-editor').hidden && !document.getElementById('settings-form').hidden && ${ltx}?.dataset.open === 'true'`), { within: 700 });
   await size(1280);
   await run('Échap (Configuration)', () => key('Escape', 'Escape', 27), noDialog);
   await run('nouveau projet', () => fromMenu('#thread-project', '.thread-action'), dialog('project-dialog'));

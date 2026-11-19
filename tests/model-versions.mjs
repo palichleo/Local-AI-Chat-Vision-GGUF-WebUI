@@ -488,7 +488,7 @@ test('the page « Modèles » is given one line a model, in its order, and a cho
   assert.deepEqual(line('ACE-Step 1.5').workflows, [{ id: shipped('acestep15').id, family: 'acestep15', version: 'XL' }]);
   assert.deepEqual(line('Krea 2').workflows[0].versions, [], 'none of its files here: to download');
   // Real-ESRGAN is one model in two workflows: images, videos.
-  assert.deepEqual(line('Real-ESRGAN').workflows.map(({ family, version }) => [family, version]).sort(), [['realesrgan_image', '×4 Plus'], ['realesrgan_video', '×2 Plus']]);
+  assert.deepEqual(line('Real-ESRGAN').workflows.map(({ family, version }) => [family, version]), [['realesrgan_image', '×4 Plus'], ['realesrgan_video', '×2 Plus']], 'the one of the images first');
 
   // A version picked for a workflow as shipped: kept beside it.
   await service.useVersion(ltx.id, join(folder, OWN));

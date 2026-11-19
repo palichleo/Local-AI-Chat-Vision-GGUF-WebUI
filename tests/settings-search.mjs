@@ -87,8 +87,8 @@ test('the settings found in every tab together: each line on its own, under « 2
   const lora = element('field-group', 'LoRA'),
     vae = element('field-group', 'VAE'),
     folders = element('', '', [element('field-group', 'Dossier « models »'), vae, lora]),
-    portrait = element('workflow-card', 'Krea portrait doux Image Vous Krea 2 · LoRA « grain doux » 0,8'),
-    krea = element('workflow-card', 'Krea 2 Image Créer une image'),
+    portrait = element('model-line', 'Krea portrait doux Image Vous Krea 2 · LoRA « grain doux » 0,8'),
+    krea = element('model-line', 'Krea 2 Image Créer une image'),
     list = element('', '', [krea, portrait]),
     toggle = element('', 'Activer la génération locale');
   const generation = { dataset: {} },

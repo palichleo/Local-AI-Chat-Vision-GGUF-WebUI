@@ -899,7 +899,7 @@ test('the generation service: ComfyUI for MOSS Image, the built-in engine for ev
   // ComfyUI not set: a family it alone runs (MOSS Image) cannot, the others are the built-in
   // engine's (Krea 2 among them: this worker says nothing of it, as of MiniMax).
   assert.deepEqual(await available(), { ltx25: true, rife: true, moss: false });
-  assert.match(service.catalog.capabilities.moss.reason, /ComfyUI n’est pas réglé/);
+  assert.match(service.catalog.capabilities.moss.reason, /ComfyUI n’est pas lancé/);
   let client = service.client();
   await client.preflight(ltx());
   const progress = [];
@@ -914,7 +914,7 @@ test('the generation service: ComfyUI for MOSS Image, the built-in engine for ev
   // until 2 GiB more than that are available (measured: its model then stays, its encoder goes).
   await client.free({ reserve: 8 * 1024 ** 3 });
   assert.equal(calls.at(-1), 'release, 10 GiB available');
-  await assert.rejects(service.client().preflight(moss()), /ComfyUI n’est pas réglé/);
+  await assert.rejects(service.client().preflight(moss()), /ComfyUI n’est pas lancé/);
   assert.equal(fake.seen.prompts.length + fake.seen.freed.length, 0);
 
   // Set from the settings: an address on this machine, or nothing is saved.

@@ -7,7 +7,7 @@ const normalized = value =>
  * A line that is a setting of its own, when a block holds several (capture 49): a field, a
  * workflow, a LLM, a switch, a line. A block without them is one setting.
  */
-const UNITS = '.field-group, .workflow-card, .llm-row, .history-toggle, .settings-row, .component-row';
+const UNITS = '.field-group, .model-line, .models-file-row, .llm-row, .history-toggle, .settings-row, .component-row';
 /** The lines of a block that hold no other line. */
 function linesOf(item) {
   const all = [...(item.querySelectorAll?.(UNITS) ?? [])].filter(unit => unit?.classList);

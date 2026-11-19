@@ -829,7 +829,19 @@ test('every static control used during settings initialization exists in the shi
   const f = await setup(t);
   assert.ok(f.ui);
   assert.match(html, /data-settings-section="Génération"/);
-  assert.match(html, /class="settings-block workflow-settings"/);
+  assert.match(html, /class="settings-block workflow-settings models-page" data-settings-section="Modèles"/);
+  // (0.6.119) The page « Modèles »: its tab, no word of help, the buttons of before never shown,
+  // and at its foot « Fichiers »: the folder of the models and the token.
+  assert.match(html, /<span class="settings-tab-label">Modèles<\/span>/);
+  assert.doesNotMatch(html, /<span class="settings-tab-label">Workflows<\/span>|<h2 class="settings-panel-title">Workflows<\/h2>/);
+  const page = html.slice(html.indexOf('id="settings-panel-workflows"'), html.indexOf('id="settings-panel-interface"'));
+  assert.doesNotMatch(page, /help-tip|ComfyUI n’est pas|Enregistrer le jeton/);
+  assert.match(page, /<button id="native-workflow-import" type="button" class="secondary" hidden>/);
+  assert.match(page, /<button id="workflow-add" type="button" class="secondary" hidden>/);
+  assert.match(page, /data-settings-section="Fichiers"><h3>Fichiers<\/h3>/);
+  assert.match(page, /<label for="generation-models-dir">Dossier des modèles<\/label>.*<button id="generation-models-dir-browse"[^>]*>Changer<\/button>/);
+  assert.match(page, /<label for="hf-token">Jeton Hugging Face<\/label>.*<button id="hf-token-remove"[^>]*>Retirer<\/button>/);
+  assert.match(html, /<symbol id="i-sliders"/);
   assert.doesNotMatch(
     html,
     /Importer un JSON natif|Convertir Krea avec sauvegarde|Format d’origine|Seuls ces deux formats/,
@@ -870,9 +882,9 @@ test('four unsupported references and three named LoRAs all appear in the editor
   assert.equal(record.references.length, 4);
   assert.equal(record.loras.length, 3);
   assert.ok(Object.values(record.importDraft.files).includes('my-specific-2.safetensors'));
-  const cards = f.$('workflow-list').children.filter(item => item.className === 'workflow-card');
-  // Its pencil (the bin follows it on a workflow of the user's own).
-  await cards.at(-1).children.at(-1).children.find(item => item.className.includes('native-edit')).onclick();
+  // « Réglages », on its line.
+  const under = root => [root, ...root.children.flatMap(child => under(child))];
+  await under(f.$('workflow-list')).filter(item => item.className === 'model-settings').at(-1).onclick();
   assert.ok(f.calls.some(call => call.route === 'generation/workflows/' + record.id));
   assert.equal(f.$('native-reference-count').textContent, '4');
   assert.equal(f.$('native-value-cfg').value, 4);
@@ -893,65 +905,130 @@ test('Krea 2 is created by Atelier’s engine: its tokenizer is asked for, and p
   assert.deepEqual(f.workflows.at(-1).components.tokenizer, { policy: 'fixed', asset: 'tokenizer-one' });
 });
 
-test('one list of workflows: MOSS Image says whether ComfyUI answers, « Démarrer » while it does not', async t => {
-  // « Démarrer » asks every 2 s whether ComfyUI answers, for 2 min: left to the real clock, that
-  // wait kept this file from ending for as long (cancelled by the limit of a run).
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+test('the page « Modèles »: one line a model in its group, the version it uses, its versions under the chevron (0.6.119)', async t => {
   const f = await setup(t);
-  const list = () => f.$('workflow-list').children;
-  // No section of an external engine any more: Krea 2 alone here.
-  assert.deepEqual(list().map(item => item.className), ['workflow-card']);
+  const under = root => [root, ...root.children.flatMap(child => under(child))],
+    find = (root, name) => under(root).filter(item => String(item.className).split(' ').includes(name)),
+    list = () => f.$('workflow-list'),
+    lineOf = name => find(list(), 'model-line').find(line => line.dataset.model === name),
+    text = (root, name) => find(root, name).map(item => item.textContent);
+  // With nothing said of the models (a server of before, the editor's own tests): a line a workflow.
+  assert.deepEqual(list().children.map(item => item.className), ['model-group']);
+  assert.deepEqual([text(list(), 'model-group-title'), text(list(), 'model-name')], [['Image'], ['Portrait']]);
   assert.equal(f.nodes.get('comfy-url'), undefined);
-  // MOSS Image, which ComfyUI runs: its line says ComfyUI is not started, and offers to start it.
-  const moss = { ...structuredClone(f.template), id: 'moss-image', name: 'MOSS Image', pipeline: 'moss', builtin: true };
-  f.workflows.push(moss);
-  const answers = {
-    'generation/comfy/start': [{ choose: true }, { started: true, app: 'Comfy Desktop.exe', comfy: { enabled: true, reachable: false, reason: 'stopped' } }],
-  };
+  const made = (id, name, pipeline, mediaType, more = {}) => ({ ...structuredClone(f.template), id, name, pipeline, mediaType, builtin: true, enabled: true, ready: true, ...more });
+  f.workflows.push(
+    made('ltx', 'LTX 2.5', 'ltx25', 'video'),
+    made('moss-image', 'MOSS Image', 'moss', 'image', { ready: false, unavailableReason: 'ComfyUI n’est pas lancé.' }),
+    made('esr-video', 'Upscale vidéo', 'realesrgan_video', 'video', { customized: true }),
+    made('esr-image', 'Upscale rapide', 'realesrgan_image', 'image'),
+    made('amd', 'SeedVR2', 'seedvr2', 'image', { ready: false, unavailableReason: 'Carte NVIDIA requise.', unavailableKind: 'hardware' }),
+  );
+  const version = (name, file, more = {}) => ({ path: 'D:\\models\\' + file, file, name, format: 'INT8', how: 'direct', bytes: 1, source: 'found', used: false, ...more });
+  let used = 'ltx-distilled.safetensors';
+  const versions = () =>
+    [
+      version('Distillé', 'ltx-distilled.safetensors', { source: 'provided' }),
+      version('Uncensored v1.1', 'ltx25_uncensored.safetensors', { parameters: { steps: 8 } }),
+      version('Cinema', 'cinema-Q8_0.gguf', { format: 'GGUF Q8', how: 'convert' }),
+      version('Essai', 'essai-w4a8.safetensors', { format: 'W4A8', how: 'refused', reason: 'W4A8' }),
+    ]
+      .map(item => ({ ...item, used: item.file === used }))
+      .sort((a, b) => Number(b.used) - Number(a.used));
+  const models = () => [
+    { name: 'MOSS Image', does: 'Affiches, mises en page, texte dans l’image.', group: 'image', order: 2, workflows: [{ id: 'moss-image', family: 'moss', version: 'SFT' }] },
+    { name: 'LTX 2.5', does: 'Vidéos et prolongations.', group: 'video', order: 1, workflows: [{ id: 'ltx', family: 'ltx25', provided: 'ltx-distilled.safetensors', used: 'D:\\models\\' + used, versions: versions() }] },
+    { name: 'SeedVR2', does: 'Agrandir et affiner une image.', group: 'retouch', order: 1, workflows: [{ id: 'amd', family: 'seedvr2', versions: [] }] },
+    { name: 'Real-ESRGAN', does: 'Agrandir une image ou une vidéo.', group: 'retouch', order: 2, workflows: [{ id: 'esr-image', family: 'realesrgan_image', version: '×4 Plus' }, { id: 'esr-video', family: 'realesrgan_video', version: '×2 Plus' }] },
+  ];
   const api = f.api;
   f.api = async (route, body) => {
-    if (answers[route]) {
-      f.calls.push({ route, body: structuredClone(body) });
-      return Response.json(answers[route].shift());
-    }
-    if (route === 'files/choose') {
-      f.calls.push({ route, body: structuredClone(body) });
-      return Response.json({ path: 'D:\\Comfy\\Comfy Desktop\\Comfy Desktop.exe' });
+    if (route === 'generation' || route === 'generation/models/version' || route === 'generation/reset') {
+      if (route !== 'generation') f.calls.push({ route, body: structuredClone(body) });
+      if (route === 'generation/models/version') used = body.path.split('\\').at(-1);
+      return Response.json({ ...(await (await api('generation')).json()), models: models() });
     }
     return api(route, body);
   };
   f.ui = setupNativeWorkflows({ api: (...args) => f.api(...args), state: {}, node: f.node, notice() {} });
   await f.ui.refresh();
-  // Its line (capture 44): the dot, its name with its kind in mono and its sentence, the actions.
-  const mossCard = () => list().find(item => item.children[1].children[0].children[0].textContent === 'MOSS Image'),
-    card = mossCard(),
-    [, main] = card.children,
-    line = main.children.at(-1);
-  assert.deepEqual(main.children[0].children.map(item => item.textContent), ['MOSS Image', 'Image']);
-  assert.equal(card.find?.('help-tip'), undefined);
-  assert.equal(line.className, 'workflow-comfy');
-  assert.equal(line.dataset.state, 'stopped');
-  assert.equal(line.children[1].textContent, 'ComfyUI n’est pas lancé');
-  const start = line.children.at(-1);
-  assert.equal(start.textContent, 'Démarrer');
-  // Not known which ComfyUI: the user chooses it, then it starts; the line says it is starting.
-  await start.onclick();
-  await new Promise(resolve => setImmediate(resolve));
+  // The groups in the order of the page, a line a model; a workflow that is no model of the page is no line.
+  assert.deepEqual(text(list(), 'model-group-title'), ['Image', 'Vidéo', 'Retouches']);
+  assert.deepEqual(text(list(), 'model-name'), ['MOSS Image', 'LTX 2.5', 'SeedVR2', 'Real-ESRGAN']);
+  // No dot of state, no bubble of help, nothing of ComfyUI, no pencil nor bin.
+  for (const gone of ['workflow-state', 'help-tip', 'workflow-comfy', 'workflow-comfy-start', 'native-edit', 'native-remove', 'workflow-card'])
+    assert.deepEqual(find(list(), gone), [], gone);
+  assert.equal(under(list()).some(item => item.textContent === 'Démarrer'), false);
+  // A line: its name, what it does, the version used in mono, « Réglages », the chevron.
+  const ltx = lineOf('LTX 2.5');
+  assert.deepEqual([ltx.dataset.state, ltx.dataset.open], ['ready', undefined]);
+  assert.deepEqual(ltx.children.map(item => item.className), ['model-row']);
+  assert.deepEqual(ltx.children[0].children.map(item => item.className), ['model-name', 'model-about', 'model-side', 'model-settings', 'model-chevron']);
+  assert.deepEqual([text(ltx, 'model-does'), text(ltx, 'model-version'), text(ltx, 'model-note')], [['Vidéos et prolongations.'], ['Distillé · INT8'], []]);
+  const [settings] = find(ltx, 'model-settings'),
+    [chevron] = find(ltx, 'model-chevron');
+  assert.deepEqual([settings.attributes['aria-label'], settings.title], ['Réglages de LTX 2.5', 'Réglages de LTX 2.5']);
+  assert.deepEqual([chevron.attributes['aria-label'], chevron.attributes['aria-expanded']], ['Versions de LTX 2.5', 'false']);
+  // What is in the way of a model is said under its description, the name of its version staying.
+  const moss = lineOf('MOSS Image');
+  assert.deepEqual([moss.dataset.state, text(moss, 'model-note'), text(moss, 'model-version')], ['waiting', ['ComfyUI n’est pas lancé.'], ['SFT']]);
+  assert.equal(find(moss, 'model-note')[0].className, 'model-note');
+  assert.deepEqual([lineOf('SeedVR2').dataset.state, find(lineOf('SeedVR2'), 'model-note')[0].className], ['unavailable', 'model-note is-warning']);
+  // A model in two workflows is one line, named by the version of its first.
+  assert.deepEqual(text(lineOf('Real-ESRGAN'), 'model-version'), ['×4 Plus']);
+
+  // The chevron unfolds its versions: the one used first, the others by what the model makes of them.
+  chevron.onclick();
+  const rows = () => find(lineOf('LTX 2.5'), 'model-version-row');
+  assert.deepEqual([lineOf('LTX 2.5').dataset.open, find(lineOf('LTX 2.5'), 'model-chevron')[0].attributes['aria-expanded']], ['true', 'true']);
   assert.deepEqual(
-    f.calls.filter(call => ['generation/comfy/start', 'files/choose'].includes(call.route)).map(call => [call.route, call.body]),
+    rows().map(row => [row.tagName, ...row.children.map(item => item.textContent)]),
     [
-      ['generation/comfy/start', {}],
-      ['files/choose', { kind: 'comfy', initialPath: '' }],
-      ['generation/comfy/start', { launchPath: 'D:\\Comfy\\Comfy Desktop\\Comfy Desktop.exe' }],
+      ['DIV', 'Distillé', 'INT8', 'Utilisée'],
+      ['BUTTON', 'Uncensored v1.1', 'INT8 · 8 étapes'],
+      ['DIV', 'Cinema', 'GGUF Q8', 'À convertir'],
+      ['DIV', 'Essai', 'W4A8', 'Non lu'],
     ],
   );
-  const after = mossCard().children[1].children.at(-1);
-  assert.equal(after.dataset.state, 'starting');
-  assert.equal(after.children[1].textContent, 'ComfyUI démarre…');
-  assert.equal(after.children.at(-1).disabled, true);
+  assert.deepEqual(rows().map(row => [row.dataset.used, row.dataset.unavailable, row.dataset.source]), [['true', undefined, 'provided'], [undefined, undefined, 'found'], [undefined, 'true', 'found'], [undefined, 'true', 'found']]);
+  // The name of its file under the pointer; why it cannot serve, for one that cannot.
+  assert.deepEqual(rows().map(row => row.title), [
+    'ltx-distilled.safetensors',
+    'ltx25_uncensored.safetensors',
+    'cinema-Q8_0.gguf : un GGUF se convertit avant de servir.',
+    'essai-w4a8.safetensors : format W4A8, que ce modèle ne lit pas.',
+  ]);
+  // A click keeps another version: asked of the server, and the page is drawn with its answer, still unfolded.
+  await rows()[1].onclick();
+  assert.deepEqual(f.calls.filter(call => call.route === 'generation/models/version').map(call => call.body), [{ workflowId: 'ltx', path: 'D:\\models\\ltx25_uncensored.safetensors' }]);
+  assert.deepEqual(rows().slice(0, 2).map(row => [row.tagName, row.children[0].textContent, row.dataset.used]), [['DIV', 'Uncensored v1.1', 'true'], ['BUTTON', 'Distillé', undefined]]);
+  assert.deepEqual(text(lineOf('LTX 2.5'), 'model-version'), ['Uncensored v1.1 · INT8']);
+  assert.equal(f.ui.takeChanges?.() ?? true, true);
+  // Folded again by the chevron.
+  find(lineOf('LTX 2.5'), 'model-chevron')[0].onclick();
+  assert.deepEqual([lineOf('LTX 2.5').dataset.open, rows()], [undefined, []]);
+
+  // A model in two workflows: a row each, with what it makes and its own « Réglages »; one whose
+  // settings the user changed can be set back to those of Moodix.
+  find(lineOf('Real-ESRGAN'), 'model-chevron')[0].onclick();
+  const two = find(lineOf('Real-ESRGAN'), 'model-version-row');
+  assert.deepEqual(two.map(row => row.children.slice(0, 3).map(item => item.textContent)), [['×4 Plus', 'Images', 'Utilisée'], ['×2 Plus', 'Vidéos', 'Utilisée']]);
+  assert.deepEqual(two.map(row => find(row, 'model-settings')[0].attributes['aria-label']), ['Réglages de Upscale rapide', 'Réglages de Upscale vidéo']);
+  const [reset] = find(lineOf('Real-ESRGAN'), 'model-reset');
+  assert.equal(reset.textContent, 'Rétablir les réglages de Moodix');
+  await reset.onclick();
+  assert.deepEqual(f.calls.filter(call => call.route === 'generation/reset').map(call => call.body), [{ id: 'esr-video' }]);
+  // A model with none of its files here: the version Moodix ships is named, greyed.
+  find(lineOf('SeedVR2'), 'model-chevron')[0].onclick();
+  const [none] = find(lineOf('SeedVR2'), 'model-version-row');
+  assert.deepEqual([none.children[0].textContent, none.dataset.unavailable], ['Version fournie avec Moodix', 'true']);
+  // « Réglages » opens the page of details of the model, named after it.
+  await find(lineOf('LTX 2.5'), 'model-settings')[0].onclick();
+  assert.equal(f.$('workflow-editor').hidden, false);
+  assert.equal(f.$('native-workflow-title').textContent, 'Réglages de LTX 2.5');
 });
 
-test('the licences of a download are on the line of its workflow; one with conditions is read and confirmed first', async t => {
+test('a model to download says « Télécharger » and its size in the place of its version; a licence with conditions is shown at the click, to accept or to refuse', async t => {
   // A download started is followed every second: the clock of the test never runs it.
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = await setup(t);
@@ -964,22 +1041,16 @@ test('the licences of a download are on the line of its workflow; one with condi
     },
     apache = { name: 'Apache-2.0', url: 'https://spdx.org/licenses/Apache-2.0.html', limits: '', restricted: false },
     giga = 1024 ** 3;
-  const lacking = (id, name) => ({
-    ...structuredClone(f.template),
-    id,
-    name,
-    builtin: true,
-    enabled: true,
-    ready: false,
-  });
-  f.workflows.push(lacking('krea-two', 'Krea 2'), lacking('seedvr', 'Upscale SeedVR2'));
-  const offer = files => ({
+  const lacking = (id, name) => ({ ...structuredClone(f.template), id, name, builtin: true, enabled: true, ready: false });
+  f.workflows.push(lacking('krea-two', 'Krea 2'), lacking('seedvr', 'Upscale SeedVR2'), lacking('gated', 'LTX 2.5'));
+  const offer = (files, more = {}) => ({
     files,
     bytes: files.reduce((sum, file) => sum + file.size, 0),
     left: files.reduce((sum, file) => sum + file.size, 0),
     complete: true,
     needsToken: false,
     page: '',
+    ...more,
   });
   const offers = {
     'krea-two': offer([
@@ -987,87 +1058,91 @@ test('the licences of a download are on the line of its workflow; one with condi
       { role: 'model', file: 'krea2_turbo.safetensors', size: 3 * giga, license: krea },
     ]),
     seedvr: offer([{ role: 'model', file: 'seedvr2.safetensors', size: giga, license: apache }]),
+    gated: offer([{ role: 'model', file: 'ltx.safetensors', size: 2 * giga, license: apache }], { needsToken: true, page: 'huggingface.co/Lightricks/LTX-2.5' }),
   };
   const api = f.api,
-    starts = [];
+    starts = [],
+    asked = [];
+  let job = { state: 'idle' };
   f.api = async (route, body) => {
     if (route === 'generation') {
       const result = await (await api(route, body)).json();
-      return Response.json({ ...result, downloads: { offers, job: { state: 'idle' }, hasToken: false } });
+      return Response.json({ ...result, downloads: { offers, job, hasToken: false } });
     }
     if (route === 'downloads/start') {
       starts.push(body);
-      return Response.json({ state: 'running', workflowId: body.id, name: body.id, received: 0, total: giga });
+      return Response.json((job = { state: 'running', workflowId: body.id, name: body.id, received: giga / 4, total: giga }));
+    }
+    if (route === 'downloads/cancel') {
+      f.calls.push({ route, body });
+      return Response.json((job = { state: 'idle' }));
     }
     return api(route, body);
   };
-  f.ui = setupNativeWorkflows({ api: (...args) => f.api(...args), state: {}, node: f.node, notice() {} });
+  const again = () =>
+    (f.ui = setupNativeWorkflows({ api: (...args) => f.api(...args), state: {}, node: f.node, notice() {}, showTokenField: message => asked.push(message) }));
+  again();
   await f.ui.refresh();
-  const cardOf = name =>
-      f.$('workflow-list').children.find(item => item.children[1]?.children[0].children[0].textContent === name),
-    under = root => [root, ...root.children.flatMap(child => under(child))],
+  const under = root => [root, ...root.children.flatMap(child => under(child))],
     find = (root, name) => under(root).filter(item => String(item.className).split(' ').includes(name)),
-    lines = card =>
-      find(card, 'license-item').map(item =>
-        under(item)
-          .map(part => part.textContent)
-          .filter(Boolean),
-      ),
-    actions = card => card.children.at(-1).children.map(item => item.children.at(-1)?.textContent || item.textContent),
-    download = card => find(card, 'workflow-download')[0];
+    lineOf = name => find(f.$('workflow-list'), 'model-line').find(line => line.dataset.model === name),
+    download = name => find(lineOf(name), 'model-download')[0],
+    confirm = name => find(lineOf(name), 'model-license')[0];
 
-  // Before any press: each licence named with its link, the files it covers, its limits.
-  assert.deepEqual(lines(cardOf('Krea 2')), [
-    ['Krea 2 Community License Agreement v.1', 'à conditions', 'krea2_turbo.safetensors', krea.limits],
-    ['Apache-2.0', 'qwen3vl_4b.safetensors'],
-  ]);
-  assert.equal(find(cardOf('Krea 2'), 'license-name')[0].href, krea.url);
-  assert.equal(find(cardOf('Krea 2'), 'license-head')[0].textContent, 'Licences');
-  assert.match(
-    cardOf('Krea 2').children[0].dataset.help,
-    /Licence à conditions \(Krea 2 Community License Agreement v\.1\) : à lire et à confirmer/,
-  );
-  assert.deepEqual(lines(cardOf('Upscale SeedVR2')), [['Apache-2.0']]);
-  assert.doesNotMatch(cardOf('Upscale SeedVR2').children[0].dataset.help, /Licence à conditions/);
-  assert.deepEqual(actions(cardOf('Krea 2')).slice(0, 1), ['4 Go']);
+  // In the place of the version: « Télécharger » and what is left to fetch. No message, no list of files.
+  assert.deepEqual([lineOf('Krea 2').dataset.state, find(lineOf('Krea 2'), 'model-version')], ['download', []]);
+  assert.deepEqual(download('Krea 2').children.map(item => item.textContent).filter(Boolean), ['Télécharger · 4 Go']);
+  assert.equal(download('Krea 2').attributes['aria-label'], 'Télécharger Krea 2 (4 Go)');
+  assert.deepEqual([find(lineOf('Krea 2'), 'model-note'), find(lineOf('Krea 2'), 'license-block'), confirm('Krea 2')], [[], [], undefined]);
+  // Its licences are under the pointer.
+  assert.equal(download('Krea 2').title, 'Licences : Krea 2 Community License Agreement v.1 (à conditions) et Apache-2.0. En téléchargeant, vous les acceptez.');
+  assert.equal(download('Upscale SeedVR2').title, 'Licence : Apache-2.0. En téléchargeant, vous l’acceptez.');
 
-  // A licence with conditions: the first press starts nothing, shows it alone and asks to confirm.
-  await download(cardOf('Krea 2')).onclick();
+  // A licence with conditions: the click downloads nothing and shows it, to accept or to refuse.
+  await download('Krea 2').onclick();
   assert.deepEqual(starts, []);
-  assert.equal(find(cardOf('Krea 2'), 'license-block')[0].attributes['data-confirm'], 'true');
-  assert.equal(find(cardOf('Krea 2'), 'license-head')[0].textContent, 'À lire avant de télécharger');
-  assert.deepEqual(
-    lines(cardOf('Krea 2')).map(line => line[0]),
-    ['Krea 2 Community License Agreement v.1'],
-  );
-  assert.deepEqual(actions(cardOf('Krea 2')).slice(0, 2), ['Annuler', 'J’ai lu, télécharger · 4 Go']);
-  assert.equal(download(cardOf('Krea 2')).focused, true);
-  assert.equal(download(cardOf('Krea 2')).attributes['aria-label'], 'J’ai lu la licence : télécharger (4 Go)');
-  // The other workflows are as they were.
-  assert.deepEqual(actions(cardOf('Upscale SeedVR2')).slice(0, 1), ['1 Go']);
-  // « Annuler »: back to its line, nothing sent.
-  await cardOf('Krea 2').children.at(-1).children[0].onclick();
-  assert.deepEqual(actions(cardOf('Krea 2')).slice(0, 1), ['4 Go']);
-  assert.equal(find(cardOf('Krea 2'), 'license-block')[0].attributes['data-confirm'], undefined);
-  assert.deepEqual(starts, []);
-  // Pressed, then confirmed: the request says the licence was read.
-  await download(cardOf('Krea 2')).onclick();
-  await download(cardOf('Krea 2')).onclick();
+  const shown = confirm('Krea 2');
+  assert.equal(find(shown, 'license-block')[0].attributes['data-confirm'], 'true');
+  assert.deepEqual(find(shown, 'license-name').map(item => item.textContent), ['Krea 2 Community License Agreement v.1']);
+  assert.deepEqual(shown.children.at(-1).children.map(item => item.textContent), ['Refuser', 'Accepter et télécharger']);
+  assert.equal(shown.children.at(-1).children[1].focused, true);
+  assert.equal(confirm('Upscale SeedVR2'), undefined, 'the other models are as they were');
+  // Refused: nothing is downloaded, the line is as before.
+  await shown.children.at(-1).children[0].onclick();
+  assert.deepEqual([starts, confirm('Krea 2'), download('Krea 2').children.at(-1).textContent], [[], undefined, 'Télécharger · 4 Go']);
+  // Accepted: the request says so, and the line shows its advance in the place of nothing else.
+  await download('Krea 2').onclick();
+  await confirm('Krea 2').children.at(-1).children[1].onclick();
   assert.deepEqual(starts, [{ id: 'krea-two', accepted: true }]);
-  assert.equal(cardOf('Krea 2').dataset.state, 'downloading');
-  assert.deepEqual(find(cardOf('Krea 2'), 'license-block'), [], 'the licences are no longer asked while it downloads');
+  const running = lineOf('Krea 2');
+  assert.deepEqual([running.dataset.state, confirm('Krea 2'), find(running, 'model-download')], ['downloading', undefined, []]);
+  // The description stays; under it a trait and what came; « Arrêter » in the place of the button.
+  assert.deepEqual(find(running, 'model-does').map(item => item.textContent), ['Portraits in studio']);
+  assert.equal(find(running, 'model-progress')[0].children[0].style.width, '25%');
+  assert.deepEqual(find(running, 'model-progress-text').map(item => item.textContent), ['0,3 / 1 Go']);
+  const [stop] = find(running, 'model-stop');
+  assert.equal(stop.textContent, 'Arrêter');
+  // One download at a time: the others wait, and say why.
+  assert.deepEqual([download('Upscale SeedVR2').disabled, download('Upscale SeedVR2').title], [true, 'Un autre téléchargement est en cours.']);
+  await stop.onclick();
+  assert.deepEqual(f.calls.filter(call => call.route === 'downloads/cancel').length, 1);
 
-  // Free licences alone: one press starts it, with no word of a confirmation.
+  // Free licences alone: one click starts it, with no word of a confirmation.
   await f.ui.refresh();
-  await download(cardOf('Upscale SeedVR2')).onclick();
+  await download('Upscale SeedVR2').onclick();
   assert.deepEqual(starts.at(-1), { id: 'seedvr' });
-  // Closing the settings forgets a confirmation left half-way.
+  job = { state: 'idle' };
+  // A model that asks for an account: the token is asked for, nothing starts.
   await f.ui.refresh();
-  await download(cardOf('Krea 2')).onclick();
-  assert.deepEqual(actions(cardOf('Krea 2')).slice(0, 2), ['Annuler', 'J’ai lu, télécharger · 4 Go']);
+  await download('LTX 2.5').onclick();
+  assert.equal(starts.length, 2);
+  assert.match(asked.at(-1), /^LTX 2\.5 demande un compte Hugging Face : acceptez la licence sur huggingface\.co\/Lightricks\/LTX-2\.5 /);
+  // Closing the settings forgets a confirmation left half-way.
+  await download('Krea 2').onclick();
+  assert.ok(confirm('Krea 2'));
   f.ui.cancelSettings();
   await f.ui.refresh();
-  assert.deepEqual(actions(cardOf('Krea 2')).slice(0, 1), ['4 Go']);
+  assert.equal(confirm('Krea 2'), undefined);
 });
 
 test('an existing tokenizer is never replaced by a suggestion, and families without one show no tokenizer', async t => {

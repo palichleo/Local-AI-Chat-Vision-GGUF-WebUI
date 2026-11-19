@@ -82,7 +82,7 @@ test('50 · before the first message: the engine, then the LLM; both done, the m
     'llama-server fait tourner Moodix AI sur cet ordinateur. La version officielle pour votre carte : b12359 · CUDA 13.5 · 578 Mo.',
   );
   assert.match(llm, /^Un fichier GGUF sur cet ordinateur/);
-  assert.equal(find(host, 'setup-foot')[0].textContent, 'Les images, les vidéos et les sons se règlent ensuite, dans Paramètres › Workflows.');
+  assert.equal(find(host, 'setup-foot')[0].textContent, 'Les images, les vidéos et les sons se règlent ensuite, dans Paramètres › Modèles.');
   // « Installer »: « TÉLÉCHARGEMENT · 64 % », the step ringed, then done.
   const install = find(host, 'setup-install')[0];
   const installing = install.onclick();

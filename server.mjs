@@ -119,6 +119,7 @@ const staticFiles = new Map([
   ['/first-launch.mjs', ['first-launch.mjs', 'text/javascript; charset=utf-8']],
   ['/missing-file.mjs', ['missing-file.mjs', 'text/javascript; charset=utf-8']],
   ['/model-licenses.mjs', ['model-licenses.mjs', 'text/javascript; charset=utf-8']],
+  ['/models-page.mjs', ['models-page.mjs', 'text/javascript; charset=utf-8']],
   ['/glass-menu.mjs', ['glass-menu.mjs', 'text/javascript; charset=utf-8']],
   ['/reflection.mjs', ['reflection.mjs', 'text/javascript; charset=utf-8']],
   ['/media-info.mjs', ['media-info.mjs', 'text/javascript; charset=utf-8']],

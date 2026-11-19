@@ -1601,8 +1601,11 @@ async function checkUpdates({ refresh = false } = {}) {
 /** The Hugging Face token: kept by the server on this computer, never sent back to the page. */
 function renderToken(hasToken, message) {
   $('hf-token-remove').hidden = !hasToken;
-  $('hf-token').placeholder = hasToken ? 'Jeton enregistré · collez-en un autre pour le remplacer' : 'hf_…';
-  $('hf-token-status').textContent = message ?? (hasToken ? 'Un jeton est enregistré sur cet ordinateur.' : '');
+  // (0.6.119) Nothing written under it (maquette du 19/11): a token kept is said in its own field,
+  // where « Enregistrer » only shows once something is typed.
+  $('hf-token-save').hidden = hasToken && !$('hf-token').value.trim();
+  $('hf-token').placeholder = hasToken ? 'Jeton enregistré' : 'hf_…';
+  $('hf-token-status').textContent = message ?? '';
 }
 async function refreshToken() {
   try {
@@ -5359,6 +5362,10 @@ $('hf-token').addEventListener('keydown', event => {
   if (event.key !== 'Enter') return;
   event.preventDefault();
   $('hf-token-save').click();
+});
+// (0.6.119) « Enregistrer » shows once something is typed over a token that is kept.
+$('hf-token').addEventListener('input', () => {
+  if (!$('hf-token-remove').hidden) $('hf-token-save').hidden = !$('hf-token').value.trim();
 });
 // Nothing stops an update while it installs; failed, Échap or a click beside the panel closes it (56).
 $('update-dialog').addEventListener('cancel', event => {

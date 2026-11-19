@@ -1,5 +1,16 @@
 import { setupGenerationRuntime } from './generation-runtime.mjs';
 import { licenseBlock, restrictedOf } from './model-licenses.mjs';
+import {
+  GROUPS,
+  licenseSentence,
+  lineOf,
+  linesOf,
+  progressShare,
+  progressText,
+  sizeText,
+  speedOf,
+  versionData,
+} from './models-page.mjs';
 import { CHOICE_NAMES, SETTING_NAMES } from './setting-names.mjs';
 
 // Interface wording for parameters; component, role and family labels come from the family manifests.
@@ -350,348 +361,263 @@ export function setupNativeWorkflows(options) {
     runnerStatus();
     if (ready && $('settings').open) void refresh({ settings: false }).catch(failure => notice(failure.message));
   }
-  /** Internal: Atelier's own engine runs the family. External: ComfyUI does (MOSS Image). */
-  const engineOf = record => families.find(item => item.family === record.pipeline)?.engine || 'internal';
-  // « Démarrer » clicked: the time ComfyUI was started, followed until it answers (2 min at most).
-  let comfyStarting = 0;
-  /**
-   * The line of a workflow ComfyUI runs (MOSS Image, 16/11): whether ComfyUI answers (ready,
-   * starting, not started, silent), and « Démarrer » while it does not.
-   */
-  function comfyLine() {
-    const starting = Boolean(comfyStarting) && !comfy.reachable,
-      silent = comfy.enabled && comfy.reason === 'silent',
-      state = comfy.reachable ? 'ready' : starting ? 'starting' : silent ? 'silent' : 'stopped',
-      line = node('div', 'workflow-comfy'),
-      text = {
-        ready: 'ComfyUI prêt' + (comfy.version ? ' · ' + comfy.version : ''),
-        starting: 'ComfyUI démarre…',
-        silent: 'ComfyUI ne répond pas',
-        stopped: 'ComfyUI n’est pas lancé',
-      }[state];
-    line.dataset.state = state;
-    line.append(node('span', 'workflow-comfy-dot'), node('span', 'workflow-comfy-text', text));
-    if (!comfy.reachable) {
-      const start = button('Démarrer', () => void startComfy(), 'secondary workflow-comfy-start');
-      start.disabled = starting;
-      start.title = comfy.app ? 'Démarrer ' + comfy.app : 'Démarrer ComfyUI, qui crée les images de MOSS Image';
-      start.dataset.nativeControl = 'true';
-      line.append(start);
-    }
-    return line;
-  }
-  /** Starts ComfyUI (the application chosen once when the server does not know which one). */
-  async function startComfy() {
+  /** A licence with conditions among those of what a workflow downloads: read and confirmed first. */
+  const asksLicense = offer => restrictedOf(offer?.files).length > 0;
+  // (0.6.119) The page « Modèles » (maquette du 19/11, captures 65 à 69): the lines the server
+  // sends (`models`), those the user unfolded, and the speed of the download under way (bytes a
+  // second, with what it was last measured from). ComfyUI is no longer said on this page.
+  let models = [];
+  const openModels = new Set();
+  let speed = 0,
+    sampled = null;
+
+  /** Starts the download of what `record` lacks; `accepted`: its licences with conditions were read and accepted. */
+  async function startDownload(record, accepted) {
     try {
       importStatus('');
-      let result = await (await api('generation/comfy/start', {})).json();
-      if (result.choose) {
-        const launchPath = await browse('comfy', '', controller.signal);
-        if (!launchPath) return;
-        result = await (await api('generation/comfy/start', { launchPath })).json();
-      }
-      if (result.comfy) comfy = result.comfy;
-      comfyStarting = Date.now();
+      licenseAsked = '';
+      speed = 0;
+      sampled = null;
+      downloads.job = await (await api('downloads/start', { id: record.id, ...(accepted ? { accepted: true } : {}) })).json();
       renderList();
-      followComfy();
+      followDownload();
     } catch (failure) {
+      renderList();
       importStatus(failure.message, true);
     }
   }
-  /** Asks every 2 s whether ComfyUI answers; once it does (or after 2 min), the list is read again. */
-  function followComfy() {
-    const step = async () => {
-      if (!comfyStarting) return;
-      try {
-        comfy = await (await api('generation/comfy')).json();
-      } catch {
-        /* Asked again at the next step. */
-      }
-      if (!comfy.reachable && Date.now() - comfyStarting < 120000) return void setTimeout(step, 2000);
-      comfyStarting = 0;
-      if ($('settings').open) await refresh({ settings: false }).catch(() => renderList());
-      else renderList();
-    };
-    setTimeout(step, 2000);
-  }
-  /** What a workflow is, at a glance: a colour, and under the pointer what it means. */
-  function workflowState(record) {
-    const offer = downloads.offers[record.id],
-      job = downloads.job;
-    if (job.state === 'running' && job.workflowId === record.id) {
-      const share = job.total ? Math.floor((job.received / job.total) * 100) : 0;
-      return [
-        'downloading',
-        `Téléchargement : ${share} % (${formatSize(job.received)} sur ${formatSize(job.total)})` +
-          (job.current ? ` · ${job.current}` : '') +
-          '.',
-      ];
-    }
-    if (record.importDraft) return ['off', 'Brouillon importé : à vérifier avant de l’activer.'];
-    // (0.6.94) « Disponible pour l’assistant » unticked leaves it in the Studio: said so.
-    if (!record.enabled)
-      return [
-        'off',
-        record.ready === false
-          ? 'Pas proposé à l’assistant. ' + (record.unavailableReason || 'Indisponible.')
-          : 'Pas proposé à l’assistant : il reste dans le Studio.',
-      ];
-    if (record.ready !== false) return ['ready', 'Prêt : l’assistant peut s’en servir.'];
-    if (offer) {
-      const names = offer.files.map(file => file.file).join(', '),
-        several = offer.files.length > 1,
-        them = several ? 'les' : 'le';
-      const what = `Il manque ${several ? offer.files.length + ' fichiers' : 'un fichier'} : ${names}.`;
-      // A licence with conditions: said here too, it is read and confirmed before the download.
-      const restricted = offer.complete ? restrictedOf(offer.files).map(license => license.name) : [];
-      return [
-        'missing',
-        what +
-          (offer.complete
-            ? offer.needsToken
-              ? ` ${several ? 'Ils demandent' : 'Il demande'} un compte Hugging Face : enregistrez votre jeton dans l’onglet Mise à jour, puis téléchargez-${them}.`
-              : ` Le bouton de téléchargement ${them} place au bon endroit (${formatSize(offer.bytes)}).`
-            : ` Placez-${them} dans le dossier de ${several ? 'leur' : 'son'} type (onglet Génération, Dossier des modèles).`) +
-          (restricted.length
-            ? ` Licence à conditions (${restricted.join(', ')}) : à lire et à confirmer avant de télécharger.`
-            : ''),
-      ];
-    }
-    const reason = record.unavailableReason || 'Indisponible.';
-    // Not the workflow's fault: its engine is stopped, starting, or ComfyUI does not answer.
-    if (!/^Fichier|^Aucun fichier|Choisissez/.test(reason)) return ['waiting', reason];
-    return [/^Fichier introuvable|^Aucun fichier/.test(reason) ? 'missing' : 'problem', reason];
-  }
-  /** Shipped with Atelier, or the user's own (created or imported): the latter wear another colour. */
-  const originOf = record =>
-    record.update
-      ? 'Fourni avec Atelier · nouvelle version.'
-      : record.customized
-        ? 'Fourni avec Atelier, modifié par vous.'
-        : record.builtin
-          ? 'Fourni avec Atelier.'
-          : 'Créé ou importé par vous.';
-  /** A licence with conditions among those of what a workflow downloads: read and confirmed first. */
-  const asksLicense = offer => restrictedOf(offer?.files).length > 0;
-  /** `asked`: its licences with conditions are shown to be confirmed; it then reads « J’ai lu, télécharger ». */
-  function downloadButton(record, offer, asked = false) {
-    const job = downloads.job,
-      mine = job.state === 'running' && job.workflowId === record.id;
-    if (mine) {
-      const stop = button('Arrêter', async () => {
-        try {
-          downloads.job = await (await api('downloads/cancel', {})).json();
-        } catch (failure) {
-          importStatus(failure.message, true);
-        }
-      });
-      stop.title = 'Arrêter le téléchargement ; il reprendra où il en était.';
-      return stop;
-    }
-    // Its licences with conditions, shown on its line: the first press asks to read them, the second
-    // (« J’ai lu, télécharger ») starts. Under free licences, named on the line, it starts at once.
-    const restricted = asksLicense(offer);
-    const start = button('', async () => {
-      if (offer.needsToken) {
-        askToken(
-          `${record.name} demande un compte Hugging Face : acceptez la licence sur ${offer.page} avec ce compte, puis collez ici un jeton de lecture et relancez le téléchargement.`,
-        );
-        return;
-      }
-      if (restricted && !asked) {
-        licenseAsked = record.id;
-        confirmFocus = null;
-        importStatus('');
-        renderList();
-        confirmFocus?.focus();
-        return;
-      }
-      try {
-        importStatus('');
-        licenseAsked = '';
-        downloads.job = await (
-          await api('downloads/start', { id: record.id, ...(restricted ? { accepted: true } : {}) })
-        ).json();
-        renderList();
-        followDownload();
-      } catch (failure) {
-        renderList();
-        importStatus(failure.message, true);
-      }
-    });
-    start.className = 'secondary workflow-download';
-    // A download stopped earlier starts again from where it was: what is left is shown.
-    const left = offer.left ?? offer.bytes,
-      resumed = left < offer.bytes;
-    start.append(
-      icon('download'),
-      node('span', '', asked ? 'J’ai lu, télécharger · ' + formatSize(left) : formatSize(left)),
-    );
-    const label = asked
-      ? `J’ai lu la licence : télécharger (${formatSize(left)})`
-      : resumed
-        ? `Reprendre le téléchargement (${formatSize(left)} restants sur ${formatSize(offer.bytes)})`
-        : `Télécharger les fichiers manquants (${formatSize(offer.bytes)})`;
-    start.setAttribute('aria-label', label);
-    start.title = label;
+  /**
+   * « Télécharger · 27,3 Go », in the place of the version (capture 65): what the model lacks, the
+   * version Moodix ships it with. Its licences are under the pointer; one with conditions is shown
+   * at the click, to accept or to refuse (19/11), and nothing is downloaded before.
+   */
+  function downloadControl(model, record, offer, bytes) {
+    const size = sizeText(bytes),
+      start = button(
+        '',
+        () => {
+          if (offer.needsToken)
+            return askToken(
+              `${model.name} demande un compte Hugging Face : acceptez la licence sur ${offer.page} avec ce compte, puis collez ici un jeton de lecture et relancez le téléchargement.`,
+            );
+          if (asksLicense(offer)) {
+            licenseAsked = record.id;
+            confirmFocus = null;
+            importStatus('');
+            renderList();
+            return void confirmFocus?.focus();
+          }
+          return startDownload(record, false);
+        },
+        'secondary model-download',
+      );
+    start.append(icon('download'), node('span', '', 'Télécharger · ' + size));
+    start.setAttribute('aria-label', `Télécharger ${model.name} (${size})`);
+    start.title = licenseSentence(offer.files) || `Télécharger ${model.name} (${size})`;
     start.dataset.nativeControl = 'true';
-    if (asked) confirmFocus = start;
-    if (job.state === 'running') {
+    if (downloads.job.state === 'running') {
       start.disabled = true;
       start.dataset.unavailable = 'true';
       start.title = 'Un autre téléchargement est en cours.';
     }
     return start;
   }
-  /** The kind of a workflow, in mono beside its name (capture 44): IMAGE, VIDÉO, MUSIQUE, BRUITAGE. */
-  const kindOf = record =>
-    record.mediaType === 'audio'
-      ? /ace[-_]?step|musi/i.test(record.pipeline || '') ? 'Musique' : 'Bruitage'
-      : record.mediaType === 'video'
-        ? 'Vidéo'
-        : 'Image';
-  /** Its sentence under the name: what it lacks when it lacks a file, else what it does. */
-  function sentenceOf(record, stateName, stateText) {
-    const offer = downloads.offers[record.id];
-    if (stateName === 'missing' && offer?.files?.length)
-      return {
-        text: 'Il manque ' + offer.files.map(file => file.file).join(', ') + ' · ' + formatSize(offer.left ?? offer.bytes),
-        warn: true,
-      };
-    if (['missing', 'problem'].includes(stateName)) return { text: stateText, warn: true };
-    const first = String(record.description || '').split(/(?<=[.!?])\s/)[0].trim();
-    return { text: first || familyLabel(record.pipeline), warn: false };
+  /** « Arrêter », in the place of « Télécharger » while its download runs (capture 68). */
+  function stopControl() {
+    const stop = button(
+      'Arrêter',
+      async () => {
+        try {
+          downloads.job = await (await api('downloads/cancel', {})).json();
+        } catch (failure) {
+          importStatus(failure.message, true);
+        }
+      },
+      'text-button model-stop',
+    );
+    stop.title = 'Arrêter le téléchargement ; il reprendra où il en était.';
+    stop.dataset.nativeControl = 'true';
+    return stop;
+  }
+  /** The licences with conditions of a download, under its line: « Refuser » downloads nothing. */
+  function licenseConfirm(record, offer) {
+    const block = node('div', 'model-license'),
+      actions = node('div', 'model-license-actions'),
+      licenses = licenseBlock({ node, files: offer.files, confirm: true }),
+      refuse = button(
+        'Refuser',
+        () => {
+          licenseAsked = '';
+          renderList();
+        },
+        'text-button',
+      ),
+      accept = button('Accepter et télécharger', () => startDownload(record, true), 'secondary');
+    refuse.dataset.nativeControl = accept.dataset.nativeControl = 'true';
+    confirmFocus = accept;
+    actions.append(refuse, accept);
+    if (licenses) block.append(licenses);
+    block.append(actions);
+    return block;
+  }
+  /** Keeps the version at `path` for the model of the workflow `workflowId`; the page is drawn with it. */
+  async function pickVersion(workflowId, path) {
+    try {
+      importStatus('');
+      const result = await run(async signal =>
+        (await api('generation/models/version', { workflowId, path }, { signal })).json(),
+      );
+      if (result) {
+        changedWorkflows = true;
+        apply(result, { settings: false });
+      }
+    } catch (failure) {
+      importStatus(failure.message, true);
+    }
+  }
+  /** « Réglages » (the sliders): the page of details of a model, the one behind the pencil of before. */
+  function settingsControl(record, name) {
+    const open = button('', () => edit(record), 'model-settings');
+    open.append(icon('sliders'));
+    open.setAttribute('aria-label', 'Réglages de ' + name);
+    open.title = 'Réglages de ' + name;
+    open.dataset.nativeControl = 'true';
+    return open;
   }
   /**
-   * A workflow on its line (capture 44): its dot of state, its name and its kind in mono (« VOUS »
-   * when it is the user's own), a sentence under them; at the right Télécharger when a file is
-   * missing, Rétablir when a shipped one was changed, the pencil, and the bin for the user's own.
-   * The line of MOSS Image says, under its sentence, whether ComfyUI answers.
+   * A version in the block of its model (capture 66): its name, its format and its steps in mono,
+   * « Utilisée » on the one that serves. Another one that the model reads as it is, is kept by a
+   * click; one it does not read is greyed, with why under the pointer.
    */
-  function workflowCard(record) {
-    const card = node('article', 'workflow-card'),
-      [stateName, stateText] = workflowState(record),
-      offer = downloads.offers[record.id];
-    card.dataset.state = stateName;
-    card.dataset.origin = record.builtin ? 'atelier' : 'user';
-    const dot = node('span', 'workflow-state');
-    dot.tabIndex = 0;
-    dot.setAttribute('role', 'img');
-    dot.setAttribute('aria-label', 'État : ' + stateText);
-    dot.dataset.help = stateText;
-    const main = node('div', 'workflow-main'),
-      head = node('div', 'workflow-head'),
-      sentence = sentenceOf(record, stateName, stateText),
-      line = node('p', 'workflow-line' + (sentence.warn ? ' is-warning' : ''), sentence.text);
-    head.append(node('strong', 'workflow-name', record.name), node('span', 'workflow-kind', kindOf(record)));
-    if (!record.builtin) head.append(node('span', 'workflow-own', 'Vous'));
-    // All it does and where it comes from, under the pointer (no « ? » on each line any more).
-    line.title = [record.description, originOf(record)].filter(Boolean).join('\n');
-    main.append(head, line);
-    if (engineOf(record) === 'external') main.append(comfyLine());
-    const actions = node('div', 'native-card-actions');
-    if (offer?.complete) {
-      // The licences of what it downloads, before the download: named with their link and their
-      // limits; those with conditions alone once « Télécharger » is pressed, to read and confirm.
-      const waiting = stateName !== 'downloading',
-        asked = waiting && licenseAsked === record.id && asksLicense(offer),
-        licenses = waiting ? licenseBlock({ node, files: offer.files, confirm: asked }) : null;
-      if (licenses) main.append(licenses);
-      if (asked) {
-        const back = button(
-          'Annuler',
-          () => {
-            licenseAsked = '';
-            renderList();
-          },
-          'text-button workflow-license-back',
-        );
-        back.dataset.nativeControl = 'true';
-        actions.append(back);
+  function versionRow(entry, version, extra = '') {
+    const usable = version.how === 'direct' && !version.used,
+      row = node(usable ? 'button' : 'div', 'model-version-row'),
+      data = [...versionData(version), extra].filter(Boolean);
+    if (usable) {
+      row.type = 'button';
+      row.onclick = () => pickVersion(entry.id, version.path);
+      row.dataset.nativeControl = 'true';
+    }
+    row.dataset.source = version.source;
+    if (version.used) row.dataset.used = 'true';
+    if (version.how !== 'direct') row.dataset.unavailable = 'true';
+    row.title =
+      version.how === 'convert'
+        ? `${version.file} : un GGUF se convertit avant de servir.`
+        : version.how === 'refused'
+          ? `${version.file} : format ${version.reason}, que ce modèle ne lit pas.`
+          : version.file;
+    row.append(node('span', 'model-version-name', version.name), node('span', 'model-version-data', data.join(' · ')));
+    if (version.used) row.append(node('span', 'model-version-used', 'Utilisée'));
+    else if (version.how === 'convert') row.append(node('span', 'model-version-used', 'À convertir'));
+    else if (version.how === 'refused') row.append(node('span', 'model-version-used', 'Non lu'));
+    return row;
+  }
+  /** The versions of a model, unfolded under its line; a model in several workflows says which is which. */
+  function versionsBlock(model, shown) {
+    const block = node('div', 'model-versions'),
+      several = shown.records.length > 1,
+      kind = record => ({ video: 'Vidéos', audio: 'Sons' })[record.mediaType] ?? 'Images';
+    for (const [entry, record] of shown.records) {
+      const extra = several ? kind(record) : '';
+      if (Array.isArray(entry.versions) && entry.versions.length)
+        for (const version of entry.versions) block.append(versionRow(entry, version, extra));
+      else {
+        // One version only, or none on this computer yet: its name, and whether it serves.
+        const row = node('div', 'model-version-row'),
+          name = entry.version || (entry.versions ? 'Version fournie avec Moodix' : record.name);
+        if (record.ready !== false) row.dataset.used = 'true';
+        else row.dataset.unavailable = 'true';
+        row.append(node('span', 'model-version-name', name), node('span', 'model-version-data', extra));
+        if (record.ready !== false) row.append(node('span', 'model-version-used', 'Utilisée'));
+        if (several) row.append(settingsControl(record, record.name));
+        block.append(row);
       }
-      actions.append(downloadButton(record, offer, asked));
-    }
-    if (record.customized) {
-      const reset = button(
-        'Rétablir',
-        async () => {
-          try {
-            const result = await run(async signal =>
-              (await api('generation/reset', { id: record.id }, { signal })).json(),
-            );
-            if (result) {
-              changedWorkflows = true;
-              apply(result, { settings: false });
+      // Settings the user changed (« Réglages »): back to those Moodix ships.
+      if (record.customized) {
+        const reset = button(
+          'Rétablir les réglages de Moodix',
+          async () => {
+            try {
+              const result = await run(async signal =>
+                (await api('generation/reset', { id: record.id }, { signal })).json(),
+              );
+              if (result) {
+                changedWorkflows = true;
+                apply(result, { settings: false });
+              }
+            } catch (failure) {
+              importStatus(failure.message, true);
             }
-          } catch (failure) {
-            importStatus(failure.message, true);
-          }
-        },
-        'text-button workflow-reset',
-      );
-      reset.prepend(icon('undo'));
-      reset.title = 'Revenir à la version fournie avec Atelier';
-      reset.dataset.nativeControl = 'true';
-      actions.append(reset);
+          },
+          'text-button model-reset',
+        );
+        reset.dataset.nativeControl = 'true';
+        block.append(reset);
+      }
     }
-    const editButton = button('', () => edit(record), 'native-edit');
-    editButton.append(icon('edit'));
-    editButton.setAttribute('aria-label', 'Modifier ' + record.name);
-    editButton.title = 'Modifier';
-    editButton.dataset.nativeControl = 'true';
-    // Only the user's own workflows can be deleted (the bin, then « Confirmer »); the shipped ones stay.
-    if (!record.builtin) {
-      let confirming = false;
-      const bin = () => {
-        remove.replaceChildren(icon('trash'));
-        remove.classList.remove('is-confirming');
-        remove.setAttribute('aria-label', 'Supprimer ' + record.name);
-        remove.title = 'Supprimer';
-      };
-      const cancel = button('Annuler', () => {
-        confirming = false;
-        bin();
-        cancel.hidden = true;
-      }, 'text-button');
-      cancel.hidden = true;
-      cancel.dataset.nativeControl = 'true';
-      const remove = button(
-        '',
-        async () => {
-          if (!confirming) {
-            confirming = true;
-            remove.replaceChildren('Confirmer');
-            remove.classList.add('is-confirming');
-            remove.setAttribute('aria-label', 'Confirmer la suppression de ' + record.name);
-            cancel.hidden = false;
-            return;
-          }
-          try {
-            await run(async signal => {
-              await api('generation/remove', { id: record.id }, { signal });
-              changedWorkflows = true;
-              workflows = workflows.filter(item => item.id !== record.id);
-              renderList();
-            });
-          } catch (failure) {
-            importStatus(failure.message, true);
-          }
-        },
-        'native-remove',
-      );
-      bin();
-      remove.dataset.nativeControl = 'true';
-      actions.append(editButton, remove, cancel);
-    } else actions.append(editButton);
-    if (stateName === 'downloading') {
-      const bar = node('span', 'workflow-progress'),
+    return block;
+  }
+  /**
+   * A model on its line (capture 65): its name, what it does, and at the right the version it uses,
+   * « Télécharger » when it is to be downloaded, « Arrêter » while it is; then « Réglages » and the
+   * chevron of its versions. What is in its way is said under its description, never in its place.
+   */
+  function modelLine(model) {
+    const shown = lineOf(model, workflows, downloads),
+      line = node('article', 'model-line'),
+      row = node('div', 'model-row'),
+      about = node('div', 'model-about'),
+      side = node('div', 'model-side'),
+      open = openModels.has(model.name),
+      first = shown.records[0]?.[1];
+    line.dataset.state = shown.state;
+    line.dataset.model = model.name;
+    if (open) line.dataset.open = 'true';
+    about.append(node('span', 'model-does', model.does));
+    if (shown.state === 'downloading') {
+      const advance = node('span', 'model-progress-line'),
+        bar = node('span', 'model-progress'),
         fill = node('span');
-      fill.style.width = (downloads.job.total ? (downloads.job.received / downloads.job.total) * 100 : 0) + '%';
+      fill.style.width = progressShare(downloads.job) + '%';
       bar.append(fill);
-      main.append(bar);
+      advance.append(bar, node('span', 'model-progress-text', progressText(downloads.job, speed)));
+      about.append(advance);
+      side.append(stopControl());
+    } else if (shown.state === 'download') side.append(downloadControl(model, shown.offer[0], shown.offer[1], shown.bytes));
+    else {
+      if (shown.note) {
+        const quiet = ['waiting', 'off'].includes(shown.state),
+          note = node('span', 'model-note' + (quiet ? '' : ' is-warning'), shown.note);
+        note.title = shown.note;
+        about.append(note);
+      }
+      side.append(node('span', 'model-version', shown.label.join(' · ')));
     }
-    card.append(dot, main, actions);
-    return card;
+    row.append(node('strong', 'model-name', model.name), about, side);
+    if (first) row.append(settingsControl(first, model.name));
+    const chevron = button(
+      '',
+      () => {
+        if (openModels.has(model.name)) openModels.delete(model.name);
+        else openModels.add(model.name);
+        renderList();
+        $('workflow-list')
+          .querySelector?.(`.model-line[data-model="${model.name.replaceAll('"', '\\"')}"] .model-chevron`)
+          ?.focus();
+      },
+      'model-chevron',
+    );
+    chevron.append(icon('chevron'));
+    chevron.setAttribute('aria-expanded', String(open));
+    chevron.setAttribute('aria-label', 'Versions de ' + model.name);
+    chevron.dataset.nativeControl = 'true';
+    row.append(chevron);
+    line.append(row);
+    if (shown.state === 'download' && licenseAsked === shown.offer[0].id && asksLicense(shown.offer[1]))
+      line.append(licenseConfirm(shown.offer[0], shown.offer[1]));
+    if (open) line.append(versionsBlock(model, shown));
+    return line;
   }
   /** Follows a download while it runs; at its end, the list says again what each workflow lacks. */
   function followDownload() {
@@ -702,6 +628,10 @@ export function setupNativeWorkflows(options) {
         const next = (await (await api('downloads')).json()).job;
         const ended = downloads.job.state === 'running' && next.state !== 'running';
         downloads.job = next;
+        // How fast it comes, for the time left under its line.
+        const now = { at: Date.now(), received: next.received ?? 0 };
+        speed = ended ? 0 : speedOf(sampled, now, speed);
+        sampled = ended ? null : now;
         if (ended) {
           following = false;
           if (next.state === 'error') importStatus(next.error, true);
@@ -718,30 +648,32 @@ export function setupNativeWorkflows(options) {
     };
     setTimeout(step, 1000);
   }
-  /** The card of the download in progress, without drawing the list again (the bubble stays open). */
+  /** The line of the download in progress, without drawing the list again: its trait, its figures. */
   function updateProgress() {
     const job = downloads.job;
-    for (const card of $('workflow-list').querySelectorAll('.workflow-card[data-state="downloading"]')) {
-      const fill = card.querySelector('.workflow-progress > span');
-      if (fill) fill.style.width = (job.total ? (job.received / job.total) * 100 : 0) + '%';
-      const dot = card.querySelector('.workflow-state'),
-        record = workflows.find(item => item.id === job.workflowId);
-      if (dot && record) {
-        const [, text] = workflowState(record);
-        dot.dataset.help = text;
-        dot.setAttribute('aria-label', 'État : ' + text);
-        onHelpChange(dot);
-      }
+    for (const line of $('workflow-list').querySelectorAll('.model-line[data-state="downloading"]')) {
+      const fill = line.querySelector('.model-progress > span'),
+        text = line.querySelector('.model-progress-text');
+      if (fill) fill.style.width = progressShare(job) + '%';
+      if (text) text.textContent = progressText(job, speed);
     }
   }
   function renderList() {
-    $('workflow-list').replaceChildren();
-    // One list (parametres-maquette.md): MOSS Image among the others, ComfyUI said on its line.
-    if (!workflows.length) $('workflow-list').append(node('p', 'native-empty', 'Aucun workflow.'));
-    for (const record of workflows) $('workflow-list').append(workflowCard(record));
+    const list = $('workflow-list'),
+      lines = linesOf(models, workflows);
+    list.replaceChildren();
+    if (!lines.length) list.append(node('p', 'native-empty', 'Aucun modèle.'));
+    for (const [key, title] of GROUPS) {
+      const own = lines.filter(line => line.group === key);
+      if (!own.length) continue;
+      const group = node('section', 'model-group');
+      group.append(node('h3', 'model-group-title', title));
+      for (const model of own) group.append(modelLine(model));
+      list.append(group);
+    }
     if (hiddenWorkflows > 0) {
       const restore = button(
-        `Réafficher les workflows fournis supprimés (${hiddenWorkflows})`,
+        `Réafficher les modèles retirés (${hiddenWorkflows})`,
         async () => {
           try {
             const result = await run(async signal => (await api('generation/unhide', {}, { signal })).json());
@@ -756,12 +688,13 @@ export function setupNativeWorkflows(options) {
         'text-button native-unhide',
       );
       restore.dataset.nativeControl = 'true';
-      $('workflow-list').append(restore);
+      list.append(restore);
     }
     setBusy(busy);
   }
   function apply(result, { settings = true } = {}) {
     workflows = result.workflows || [];
+    if (result.models) models = result.models;
     comfy = result.comfy || comfy;
     hiddenWorkflows = result.hiddenWorkflows ?? hiddenWorkflows;
     downloads = result.downloads || downloads;
@@ -1611,7 +1544,7 @@ export function setupNativeWorkflows(options) {
     $('native-workflow-enabled').checked = draft.enabled;
     $('native-workflow-pipeline').value = draft.pipeline;
     $('native-workflow-video').hidden = !familyOf(draft.pipeline)?.profiles;
-    $('native-workflow-title').textContent = isNew ? 'Créer un workflow' : 'Modifier le workflow';
+    $('native-workflow-title').textContent = isNew ? 'Créer un workflow' : 'Réglages de ' + (draft?.name || 'ce modèle');
     $('native-workflow-capability').textContent = draft.importDraft
       ? draft.importDraft.blockers.length
         ? 'Brouillon prérempli · exécution non prise en charge pour ce graphe.'

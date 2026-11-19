@@ -1062,8 +1062,10 @@ test('« Disponible pour l’assistant » unticked takes the workflow out of Moo
     // The line of the workflow in Paramètres says so.
     const editor = await editorPage(await catalog.list());
     try {
-      const card = editor.$('workflow-list').children.find(item => item.children[1]?.children[0]?.children[0]?.textContent === 'Krea 2');
-      assert.equal(card.children[0].dataset.help, 'Pas proposé à l’assistant : il reste dans le Studio.');
+      // (0.6.119: under its description, on the page « Modèles ».)
+      const under = root => [root, ...root.children.flatMap(child => under(child))],
+        line = under(editor.$('workflow-list')).find(item => item.className === 'model-line' && item.dataset.model === 'Krea 2');
+      assert.deepEqual(under(line).filter(item => item.className === 'model-note').map(item => item.textContent), ['Pas proposé à l’assistant : il reste dans le Studio.']);
     } finally {
       editor.restore();
     }

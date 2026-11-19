@@ -110,7 +110,7 @@ export function setupFirstLaunch({ api, node, icon, host, config, onConfig, onDo
       head,
       engine,
       llm,
-      node('p', 'setup-foot', 'Les images, les vidéos et les sons se règlent ensuite, dans Paramètres › Workflows.'),
+      node('p', 'setup-foot', 'Les images, les vidéos et les sons se règlent ensuite, dans Paramètres › Modèles.'),
     );
   }
   async function readOffer() {
