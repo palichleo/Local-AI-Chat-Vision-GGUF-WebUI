@@ -42,6 +42,27 @@
           "absent": true
         }
       ],
+      "recipes": [
+        {
+          "id": "full",
+          "parameters": { "steps": 20 },
+          "fingerprint": [
+            {
+              "key": "^final_layer\\.video_out\\.weight$",
+              "shape": [96, 5376]
+            },
+            {
+              "key": "^blocks\\.0\\.attn\\.to_gate_compress\\.weight$",
+              "absent": true
+            }
+          ],
+          "companion": { "role": "referenceModel", "named": "ref2va" }
+        },
+        {
+          "id": "fast",
+          "parameters": { "steps": 8 }
+        }
+      ],
       "note": "Checkpoints élagués. Distillés, en 8 étapes : FastH3 Omni (références) ou FastH3 v2 (texte, image de début/fin). De base, en 20 étapes : le modèle de MiniMax (FL2VA : texte, image de début/fin).",
       "signature": [
         {

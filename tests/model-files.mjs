@@ -361,9 +361,18 @@ test('the shapes of the tensors are read on request, in the order PyTorch gives 
   const plain = safetensors([['a.weight', 'BF16', [4, 8], 64], ['a.comfy_quant', 'U8', [2], note({})]], { metadata: { x: 'y' } });
   assert.equal('shapes' in (await read(plain)), false, 'not unless asked');
   assert.deepEqual((await shaped('a.safetensors', plain)).shapes, { 'a.weight': [4, 8], 'a.comfy_quant': [2] });
+  // With them, what the file says of itself: its short texts (a title, a source), nothing else.
+  assert.deepEqual((await shaped('a.safetensors', plain)).metadata, { x: 'y' });
+  assert.equal('metadata' in (await read(plain)), false);
+  const said = { 'modelspec.title': 'MiniMax_H3_Ref2VA', source: 'transformer_ref', long: 'z'.repeat(257), edge: 'z'.repeat(256), count: 3, list: ['a'] };
+  const told = (await shaped('b.safetensors', safetensors([['a.weight', 'BF16', [4], 8]], { metadata: said }))).metadata;
+  assert.deepEqual(told, { 'modelspec.title': 'MiniMax_H3_Ref2VA', source: 'transformer_ref', edge: 'z'.repeat(256) });
+  for (const metadata of [undefined, 'texte', ['a'], 7])
+    assert.deepEqual((await shaped('c.safetensors', safetensors([['a.weight', 'BF16', [4], 8]], { header: { 'a.weight': { dtype: 'BF16', shape: [4], data_offsets: [0, 8] }, ...(metadata === undefined ? {} : { __metadata__: metadata }) } }))).metadata, {});
   // A GGUF lists the sides of a tensor backwards.
   const unfolded = await shaped('a.gguf', gguf({ tensors: [['a.weight', [8, 4], 8], ['a.bias', [4], 1]] }));
   assert.deepEqual(unfolded.shapes, { 'a.weight': [4, 8], 'a.bias': [4] });
+  assert.deepEqual(unfolded.metadata, {});
   assert.equal('shapes' in (await read(gguf({ tensors: [['a.weight', [8, 4], 8]] }))), false);
   // The whole way: a file of LTX 2.5 written as a GGUF is one of LTX 2.5, taken through a conversion.
   const ltx = await shaped('ltx.gguf', gguf({ tensors: Object.entries(LTX).map(([name, shape]) => [name, [...shape].reverse(), 8]) }));
