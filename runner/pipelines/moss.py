@@ -1,8 +1,9 @@
 """Native MOSS Image: Euler on a flow, two predictions a step, the weights as their files store them.
 
 After the model's own pipeline (OpenMOSS/MOSS-Image, Apache-2.0), with the settings it is
-published with: sigmas moved by 5 and brought to the steps of the training, the prediction of the
-negative prompt made without block 22 (runner.models.moss_image). The two predictions of a step
+published with: sigmas moved by its shift (5, a setting of the model since 0.6.129) and brought to
+the steps of the training, the prediction of the negative prompt made without block 22
+(runner.models.moss_image). The two predictions of a step
 are computed one after the other, each with its text at its own length, and joined in float32.
 
 The model is read from its file through a RAM-resident store and a `WeightPool`
@@ -154,6 +155,16 @@ def sample(model, latents, texts, sigmas, cfg, step=None):
     return latents
 
 
+def schedule(parameters):
+    """The sigmas of a job, and the shift they are moved by: the one of its settings (0.6.129: it was
+    the constant of the model, 5, whatever was asked), the model's own when a job has none (a
+    workflow written before the setting was)."""
+    from runner.models import moss_image
+
+    shift = float(parameters.get('shift', moss_image.SHIFT))
+    return moss_image.sigmas(parameters['steps'], shift), shift
+
+
 def _generate(job, config, progress_callback, cleanup):
     import torch
     from accelerate import init_empty_weights
@@ -166,7 +177,7 @@ def _generate(job, config, progress_callback, cleanup):
         raise RuntimeError('The native MOSS Image implementation requires a CUDA GPU')
     parameters = job['parameters']
     files = {name: Path(job['components'][name]) for name in ('model', 'textEncoder', 'vae')}
-    width, height, steps, cfg = (parameters[name] for name in ('width', 'height', 'steps', 'cfg'))
+    width, height, cfg = (parameters[name] for name in ('width', 'height', 'cfg'))
     megapixels = width * height / 1024**2
     reserve = RESERVE_GIB + RESERVE_PER_MEGAPIXEL_GIB * megapixels
     require('MOSS Image', reserve + AHEAD_GIB, 'la taille de l’image')
@@ -224,7 +235,7 @@ def _generate(job, config, progress_callback, cleanup):
         # The share that stays goes to the GPU now, in layer order, before the first step.
         pool.preload()
         progress('transformer weights on the GPU', gpu_gib=round(pool.bytes / 1024**3, 2))
-        sigmas = moss_image.sigmas(steps)
+        sigmas, shift = schedule(parameters)
         total = len(sigmas) - 1
         release()
         progress('denoising ready', engine=config.get('engine'))
@@ -260,7 +271,7 @@ def _generate(job, config, progress_callback, cleanup):
                 parameters,
                 sampler='euler',
                 scheduler='moss_image',
-                shift=moss_image.SHIFT,
+                shift=shift,
                 steps_done=total,
                 skip_layers=list(moss_image.SKIPPED) if cfg != 1 else [],
                 skip_until=SKIP_UNTIL,

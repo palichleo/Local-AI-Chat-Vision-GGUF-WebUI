@@ -63,6 +63,10 @@
     "cfg": {
       "policy": "fixed",
       "value": 3
+    },
+    "shift": {
+      "policy": "fixed",
+      "value": 5
     }
   },
   "loras": [],

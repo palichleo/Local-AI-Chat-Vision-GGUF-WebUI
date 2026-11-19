@@ -947,8 +947,10 @@ test('a video model: the size of its draft and of its final on a line each, what
 test('a text to write comes after the figures; a model without a setting says so', async t => {
   const f = await setup(t);
   await f.ui.edit(await shippedWorkflow('moss'), { name: 'MOSS Image' });
-  assert.deepEqual(namesOf(f, 'native-workflow-parameters').slice(-1), ['Prompt négatif']);
-  assert.deepEqual(namesOf(f, 'native-workflow-parameters').slice(0, 2), ['Étapes', 'Guidage']);
+  // (0.6.129) Its shift is a setting like the others: it was a constant of the engine.
+  assert.deepEqual(namesOf(f, 'native-workflow-parameters'), ['Étapes', 'Guidage', 'Décalage (shift)', 'Prompt négatif']);
+  assert.deepEqual([f.$('native-value-steps').value, f.$('native-value-cfg').value, f.$('native-value-shift').value], [50, 3, 5]);
+  assert.match(f.$('native-value-shift').parent.parent.children.at(-1).dataset.help, /^Répartit les étapes entre la composition/);
   const negative = f.$('native-value-negative_prompt');
   assert.deepEqual([negative.type, negative.value, negative.placeholder], ['text', '', 'aucun']);
   const none = await setup(t);

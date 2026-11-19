@@ -68,6 +68,22 @@ class SamplingTests(unittest.TestCase):
         self.assertEqual((len(model.asked), told), (3, [0, 1]))
 
 
+class ScheduleTests(unittest.TestCase):
+    def test_the_shift_of_a_job_moves_its_sigmas_and_a_job_without_one_has_the_models_own(self):
+        from runner.models import moss_image
+
+        sigmas, shift = moss.schedule({'steps': 8, 'shift': 3})
+        self.assertEqual((sigmas, shift), (moss_image.sigmas(8, 3.0), 3.0))
+        self.assertNotEqual(sigmas, moss_image.sigmas(8))
+        # A higher shift keeps every sigma nearer the noise: more of the steps go to the layout.
+        higher, _ = moss.schedule({'steps': 8, 'shift': 9})
+        self.assertEqual((len(sigmas), len(higher)), (9, 9))
+        self.assertTrue(all(above > below for above, below in zip(higher[1:-1], sigmas[1:-1])))
+        # A workflow written before the setting was (0.6.129): the shift of the model, 5.
+        self.assertEqual(moss.schedule({'steps': 8}), (moss_image.sigmas(8), 5.0))
+        self.assertEqual(moss.schedule({'steps': 8, 'shift': 5}), (moss_image.sigmas(8), 5.0))
+
+
 class DecodingTests(unittest.TestCase):
     def test_the_latents_get_their_mean_and_deviation_back_and_each_channel_its_place_in_a_block(self):
         torch.manual_seed(0)

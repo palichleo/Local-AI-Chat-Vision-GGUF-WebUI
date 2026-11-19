@@ -301,6 +301,32 @@ test('a setting is never left to Moodix AI: one a workflow of before left to it 
   });
 });
 
+test('MOSS Image: its shift is a setting of the model, 5 as shipped, the user’s to change and never Moodix AI’s (0.6.129)', async () => {
+  const shipped = JSON.parse(
+    await readFile(new URL('../runner/workflows/3d6f1a8c-2b7e-4f59-9c41-8e0a5d2b7c36.json', import.meta.url), 'utf8'),
+  );
+  const here = { resolve: async id => ({ path: join(tmpdir(), id) }), pick: async role => ({ path: join(tmpdir(), role) }) };
+  const made = async (workflow, args = {}, options = {}) =>
+    (await resolveNativeWorkflow(workflow, { prompt: 'a poster', ...args }, here, { seed: 1, ...options })).parameters.shift;
+  assert.deepEqual(shipped.parameters.shift, { policy: 'fixed', value: 5 });
+  assert.deepEqual(familyTemplate(family('moss')).parameters.shift, shipped.parameters.shift);
+  assert.deepEqual(family('moss').parameters.shift.min, 1);
+  assert.equal(await made(shipped), 5);
+  // The user's value, from the page of the model or for one creation in the Studio.
+  const mine = structuredClone(shipped);
+  mine.parameters.shift = { policy: 'fixed', value: 3 };
+  assert.equal(await made(mine), 3);
+  assert.equal(await made(shipped, {}, { overrides: { shift: 7 } }), 7);
+  await assert.rejects(made(shipped, {}, { overrides: { shift: 13 } }), /Décalage \(shift\) : entre 1 et 12\./);
+  // Never Moodix AI's: not in its tool, refused when passed all the same.
+  await assert.rejects(made(shipped, { shift: 7 }), /Décalage \(shift\) : valeur fixée par ce workflow/);
+  // A copy of the user's written before the setting was: the shift of the model.
+  const before = structuredClone(shipped);
+  delete before.parameters.shift;
+  assert.doesNotThrow(() => validateNativeWorkflow(before));
+  assert.equal(await made(before), 5);
+});
+
 test('what the list says of a workflow the user edited: the values Moodix ships, « de base » on its page; none of it is kept with the workflow', async () => {
   const root = await mkdtemp(join(tmpdir(), 'atelier-native-'));
   try {

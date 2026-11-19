@@ -102,6 +102,12 @@
       "min": 1,
       "max": 20
     },
+    "shift": {
+      "type": "number",
+      "min": 1,
+      "max": 12,
+      "note": "Répartit les étapes entre la composition d’ensemble (plus haut) et les détails (plus bas) ; 5 est la valeur du modèle."
+    },
     "attention": {
       "type": "string",
       "choices": ["pytorch", "comfy_kitchen"],
@@ -111,7 +117,8 @@
   },
   "requiredParameters": ["prompt", "seed", "width", "height", "steps", "cfg"],
   "implicitParameters": {
-    "negative_prompt": ""
+    "negative_prompt": "",
+    "shift": 5
   },
   "roles": {},
   "template": {
@@ -164,6 +171,10 @@
       "cfg": {
         "policy": "fixed",
         "value": 3
+      },
+      "shift": {
+        "policy": "fixed",
+        "value": 5
       }
     },
     "loras": [],
