@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { families, familyTemplate } from '../lib/families.mjs';
 import { GenerationService, generationConfig } from '../lib/generation-service.mjs';
 import { createApplication } from '../server.mjs';
 
@@ -58,61 +59,7 @@ test('VAE and LoRA folder overrides persist, cover audio VAEs and reject invalid
   assert.equal(reopened.folders().lora, join(root, 'models', 'loras'));
 });
 
-test('HTTP import finds VAE and LoRA files in edited folders before configuration is saved', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'native-folder-import-'));
-  const modelRoot = join(root, 'checkpoints'),
-    vaeRoot = join(root, 'external VAE'),
-    loraRoot = join(root, 'external LoRA');
-  for (const directory of [modelRoot, vaeRoot, loraRoot]) await mkdir(directory);
-  async function weights(path, shapes) {
-    let offset = 0;
-    const header = {};
-    for (const [key, shape] of Object.entries(shapes)) {
-      const length = shape.reduce((a, b) => a * b, 4);
-      header[key] = { dtype: 'F32', shape, data_offsets: [offset, offset + length] };
-      offset += length;
-    }
-    const bytes = Buffer.from(JSON.stringify(header)),
-      prefix = Buffer.alloc(8);
-    prefix.writeBigUInt64LE(BigInt(bytes.length));
-    await writeFile(path, Buffer.concat([prefix, bytes, Buffer.alloc(offset)]));
-  }
-  const vaePath = join(vaeRoot, 'decoder.safetensors'),
-    loraPath = join(loraRoot, 'style.safetensors');
-  await weights(vaePath, { 'encoder.conv1.weight': [1, 3, 1, 1, 1], 'decoder.conv1.weight': [1, 16, 1, 1, 1] });
-  await weights(loraPath, { 'layer.lora_A.weight': [1, 1], 'layer.lora_B.weight': [1, 1] });
-  const app = await createApplication({ port: 0, dataDir: join(root, 'data'), modelsDir: join(root, 'models') });
-  t.after(async () => {
-    await app.close();
-    await rm(root, { recursive: true, force: true });
-  });
-  const boot = await (await fetch(app.url + '/api/bootstrap')).json();
-  const response = await fetch(app.url + '/api/generation/import', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + boot.token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      modelRoot,
-      vaeRoot,
-      loraRoot,
-      sourceText: JSON.stringify({
-        encoder: { class_type: 'CLIPLoader', inputs: { type: 'krea2' } },
-        vae: { class_type: 'VAELoader', inputs: { vae_name: 'decoder.safetensors' } },
-        lora: { class_type: 'LoraLoaderModelOnly', inputs: { lora_name: 'style.safetensors', strength_model: 0.5 } },
-      }),
-    }),
-  });
-  assert.equal(response.status, 200);
-  const result = await response.json();
-  assert.equal(result.assets.find(asset => asset.kind === 'vae').path, await realpath(vaePath));
-  assert.equal(result.assets.find(asset => asset.kind === 'lora').path, await realpath(loraPath));
-  const saved = await (
-    await fetch(app.url + '/api/generation', { headers: { Authorization: 'Bearer ' + boot.token } })
-  ).json();
-  assert.equal(saved.config.vaeRoot, '');
-  assert.equal(saved.config.loraRoot, '');
-});
-
-test('HTTP import validation does not save a workflow and browse defaults follow the registered folders', async t => {
+test('a workflow is neither imported, converted nor created from a template any more (0.6.132); validating one saves nothing, and browse defaults follow the registered folders', async t => {
   const root = await mkdtemp(join(tmpdir(), 'native-folder-http-')),
     models = join(root, 'models'),
     calls = [];
@@ -136,24 +83,25 @@ test('HTTP import validation does not save a workflow and browse defaults follow
         headers: { Authorization: 'Bearer ' + boot.token, 'Content-Type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
-  const template = (await (await api('generation/templates?pipeline=krea2')).json()).template;
+  // (0.6.132) « Modèles seulement » (19/11): the page offers the models Moodix ships, with their
+  // settings; nothing imports a workflow of ComfyUI or of another tool, nor creates one.
+  for (const route of ['generation/import', 'generation/import-comfy', 'generation/convert-krea', 'generation/convert-longforge'])
+    assert.ok([404, 405].includes((await api(route, { sourceText: '{}', sourcePath: 'x.json' })).status), route);
+  assert.ok([404, 405].includes((await api('generation/templates?pipeline=krea2')).status));
+  assert.equal((await api('files/choose', { kind: 'workflow' })).status, 400);
+  const template = familyTemplate(families().krea2);
   assert.equal((await api('generation/validate', template)).status, 200);
   assert.equal((await api('generation/validate', { ...template, parameters: null })).status, 400);
-  assert.deepEqual((await (await api('generation/workflows')).json()).workflows, []);
-  const unsupported = await api('generation/import-comfy', { sourceText: JSON.stringify({ nodes: [] }) });
-  assert.equal(unsupported.status, 400);
-  assert.match((await unsupported.json()).error, /compatible/);
   assert.deepEqual((await (await api('generation/workflows')).json()).workflows, []);
   const generation = await (await api('generation')).json();
   assert.match(generation.folders.model, /[\\/]models[\\/]diffusion_models$/);
   const custom = join(root, 'another checkpoint folder');
   assert.equal((await api('generation/config', { ...generation.config, modelRoot: custom })).status, 200);
-  for (const kind of ['directory', 'workflow', 'model', 'projector'])
+  for (const kind of ['directory', 'model', 'projector'])
     assert.equal((await api('files/choose', { kind })).status, 200);
   assert.equal(calls[0].initialPath, custom);
-  assert.match(calls[1].initialPath, /[\\/]workflow$/);
-  assert.equal(calls[2].initialPath, join(models, 'LLMs'));
-  assert.equal(calls[3].initialPath, join(models, 'vision'));
+  assert.equal(calls[1].initialPath, join(models, 'LLMs'));
+  assert.equal(calls[2].initialPath, join(models, 'vision'));
 });
 
 test('closing during asynchronous worker setup cannot spawn an orphan after shutdown', async t => {

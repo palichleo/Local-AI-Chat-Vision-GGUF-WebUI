@@ -125,7 +125,7 @@ test('excessive native output fails even when killing emits close synchronously'
   );
 });
 
-test('Windows folder picking uses a directory dialog and workflow picking filters JSON', async () => {
+test('Windows folder picking uses a directory dialog and tokenizer picking filters JSON; a workflow is no file to pick any more', async () => {
   const calls = [];
   assert.equal(
     await chooseLocalFile('directory', {
@@ -138,9 +138,15 @@ test('Windows folder picking uses a directory dialog and workflow picking filter
   const script = Buffer.from(calls[0].args.at(-1), 'base64').toString('utf16le');
   assert.match(script, /FolderBrowserDialog/);
   assert.doesNotMatch(script, /\$dialog\.Filter|\$\(unsafe\)/);
-  await chooseLocalFile('workflow', { platform: 'win32', spawnProcess: fake('C:\\workflow.json', calls) });
+  await chooseLocalFile('tokenizer', { platform: 'win32', spawnProcess: fake('C:\\tokenizer.json', calls) });
   assert.match(Buffer.from(calls[1].args.at(-1), 'base64').toString('utf16le'), /\*\.json/);
-  await assert.rejects(chooseLocalFile('workflow', { platform: 'win32', spawnProcess: fake('C:\\wrong.txt') }), /JSON/);
+  await assert.rejects(chooseLocalFile('tokenizer', { platform: 'win32', spawnProcess: fake('C:\\wrong.txt') }), /JSON/);
+  // (0.6.132) No workflow is imported any more: its kind of file is gone with it, and no dialog opens.
+  await assert.rejects(
+    chooseLocalFile('workflow', { platform: 'win32', spawnProcess: fake('C:\\workflow.json', calls) }),
+    /Type de fichier invalide/,
+  );
+  assert.equal(calls.length, 2);
 });
 
 test('Linux folder picking requests directories in Zenity and KDialog', async () => {

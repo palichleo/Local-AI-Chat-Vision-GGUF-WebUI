@@ -51,16 +51,11 @@ import { ChatGPTAccount } from './lib/chatgpt.mjs';
 import { OpenRouterSignIn, openRouterModels } from './lib/openrouter.mjs';
 import { CLAUDE_DEFAULT, ClaudeAccess } from './lib/claude.mjs';
 import { relocate } from './lib/relocate.mjs';
-import { FOLDER_KEYS, GenerationService, generationConfig } from './lib/generation-service.mjs';
-import { convertLongForge } from './lib/longforge-conversion.mjs';
+import { GenerationService, generationConfig } from './lib/generation-service.mjs';
 import { generatedMedia } from './lib/generated-media.mjs';
 import { validateNativeWorkflow } from './lib/native-workflows.mjs';
-import { families, familyTemplate } from './lib/families.mjs';
 import { ProgressHistory } from './lib/generation-progress.mjs';
 import { StudioPresets } from './lib/studio-presets.mjs';
-import { convertKreaWorkflow } from './lib/native-workflow-conversion.mjs';
-import { importComfyWorkflow } from './lib/comfy-import.mjs';
-import { previewWorkflowImport } from './lib/workflow-import.mjs';
 import { STUDIO_ID, STUDIO_VERBS, enrichedPrompt, enrichMessages } from './lib/studio.mjs';
 import { LlamaBuilds } from './lib/llama-builds.mjs';
 import { Takes, numbered, takesToOutputs } from './lib/takes.mjs';
@@ -1157,11 +1152,6 @@ export async function createApplication({
           200,
           await generation.catalog.read(decodeURIComponent(path.slice('/api/generation/workflows/'.length))),
         );
-      if (req.method === 'GET' && path === '/api/generation/templates') {
-        const templates = Object.values(families()).map(manifest => familyTemplate(manifest));
-        const name = requestURL.searchParams.get('pipeline');
-        return send(200, name ? { template: templates.find(t => t.pipeline === name) } : { templates });
-      }
       if (path === '/api/lifecycle' && req.method === 'GET') {
         if (closing || controlResponse) throw problem('Une fenêtre contrôle déjà cette application.', 409);
         controlResponse = res;
@@ -1468,66 +1458,7 @@ export async function createApplication({
           if (path === '/api/generation/tokenizer')
             return send(200, await generation.suggestTokenizer(body.encoder, body.family));
           if (path === '/api/generation/validate') return send(200, { workflow: validateNativeWorkflow(body) });
-          if (path === '/api/generation/import') {
-            const importConfig = generationConfig({
-              ...generation.config,
-              ...Object.fromEntries(FOLDER_KEYS.map(key => [key, body[key] ?? generation.config[key]])),
-            });
-            const importFolders = generation.folders(importConfig);
-            return send(
-              200,
-              await previewWorkflowImport(body.sourceText, {
-                name: body.name,
-                assets: generation.assets,
-                modelRoot: importFolders.model,
-                additionalRoots: Object.values(importFolders).filter(path => path !== importFolders.model),
-              }),
-            );
-          }
-          if (path === '/api/generation/import-comfy')
-            return send(
-              200,
-              await importComfyWorkflow(body.sourceText, {
-                assets: generation.assets,
-                catalog: generation.catalog,
-                modelRoot: body.modelRoot || generation.folders().model,
-                additionalRoots: generation.searchFolders().filter(
-                  path => path !== generation.folders().model,
-                ),
-                backupDir: join(dataDir, 'migration'),
-              }),
-            );
           if (path === '/api/generation/workflows') return send(200, await generation.catalog.save(body));
-          if (path === '/api/generation/convert-krea')
-            return send(
-              200,
-              await convertKreaWorkflow(body.sourcePath, {
-                assets: generation.assets,
-                catalog: generation.catalog,
-                modelRoot: body.modelRoot || generation.folders().model,
-                additionalRoots: generation.searchFolders().filter(
-                  path => path !== generation.folders().model,
-                ),
-                backupDir: join(dataDir, 'migration'),
-                name: body.name,
-                description: body.description,
-              }),
-            );
-          if (path === '/api/generation/convert-longforge')
-            return send(
-              200,
-              await convertLongForge(body.sourcePath, {
-                assets: generation.assets,
-                catalog: generation.catalog,
-                modelRoot: body.modelRoot || generation.folders().model,
-                additionalRoots: generation.searchFolders().filter(
-                  path => path !== generation.folders().model,
-                ),
-                backupDir: join(dataDir, 'migration'),
-                name: body.name,
-                description: body.description,
-              }),
-            );
           if (path === '/api/generation/remove') {
             // The workflows shipped with Atelier stay: an edited one can only be restored.
             if ((await generation.catalog.list()).find(item => item.id === body.id)?.builtin)
@@ -1925,7 +1856,7 @@ export async function createApplication({
       }
       if (path === '/api/files/choose') {
         if (
-          !['engine', 'model', 'projector', 'generation', 'python', 'tokenizer', 'directory', 'workflow'].includes(body?.kind)
+          !['engine', 'model', 'projector', 'generation', 'python', 'tokenizer', 'directory'].includes(body?.kind)
         )
           throw problem('Type de fichier invalide.');
         if (saving || savingSettings || savingGeneration || pickingFile)
@@ -1948,7 +1879,6 @@ export async function createApplication({
             projector: join(modelsDir, 'vision'),
             generation: generation.folders().model,
             directory: generation.folders().model,
-            workflow: join(root, 'workflow'),
           }[body.kind] ||
           '';
         try {
