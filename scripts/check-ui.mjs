@@ -44,6 +44,14 @@ const BROWSERS = [
 ].filter(Boolean);
 
 const browser = BROWSERS.find(path => existsSync(path));
+// `--fluidity` (0.6.109, `npm run check:fluidity`): each step is also timed, and the slow ones listed
+// at the end: the tasks that hold the page's thread more than 50 ms, the longest wait between two
+// frames, the time spent in script, style and layout. `--fluidity=window` does it in a real window,
+// drawn by the graphics card (the waits a user would see); without it the browser has no window, and
+// only the page's own work is measured. Never part of the check before a commit.
+const FLUIDITY = process.argv.find(argument => argument.startsWith('--fluidity')),
+  PERF = Boolean(FLUIDITY),
+  WINDOW = FLUIDITY === '--fluidity=window';
 if (!browser) {
   console.log('Vérification de l’interface sautée : aucun navigateur Chromium trouvé (MOODIX_BROWSER pour en indiquer un).');
   process.exit(0);
@@ -174,7 +182,13 @@ const app = {
   }),
   close: async () => server.kill(),
 };
-const chrome = spawn(browser, ['--headless=new', '--mute-audio', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], {
+// (`--fluidity=window`) A real window, drawn by the graphics card and never held back for being
+// behind another, so that the waits between two frames are those a user would see.
+const shown =
+  WINDOW
+    ? ['--window-size=1440,900', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-features=CalculateNativeWinOcclusion']
+    : ['--headless=new'];
+const chrome = spawn(browser, [...shown, '--mute-audio', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], {
   stdio: 'ignore',
 });
 const problems = [];
@@ -322,8 +336,15 @@ try {
    * the step expects until it shows it, that many milliseconds at most, where the others wait
    * 700 ms and ask once.
    */
+  // (`--fluidity`) What the browser counted so far, and what each step cost.
+  const counted = async () =>
+      Object.fromEntries(((await send('Performance.getMetrics')).metrics ?? []).map(metric => [metric.name, metric.value])),
+    costs = [];
   async function run(name, action, expected, { allowed = null, within = 0 } = {}) {
     step = name;
+    const before = PERF ? await counted() : null,
+      began = Date.now();
+    if (PERF) await js('window.__perfTake?.()');
     const done = await action();
     if (!within) await wait(700);
     if (allowed) allowances.push([name, allowed]);
@@ -335,6 +356,24 @@ try {
     for (const video of (await js(`window.__browserControls?.splice(0) ?? []`)) ?? [])
       problems.push([name, 'lecteur', 'contrôles du navigateur sur une vidéo : ' + video]);
     results.push([name, done !== false && shown !== false]);
+    if (PERF) {
+      const after = await counted(),
+        seen = (await js('window.__perfTake?.()')) ?? { tasks: [], worst: 0, frames: 0 },
+        spent = key => Math.round(((after[key] ?? 0) - (before[key] ?? 0)) * 1000);
+      costs.push({
+        name,
+        ms: Date.now() - began,
+        tasks: seen.tasks,
+        frame: seen.worst,
+        frames: seen.frames,
+        work: spent('TaskDuration'),
+        script: spent('ScriptDuration'),
+        style: spent('RecalcStyleDuration'),
+        layout: spent('LayoutDuration'),
+        nodes: after.Nodes ?? 0,
+        heap: Math.round((after.JSHeapUsedSize ?? 0) / 1024 ** 2),
+      });
+    }
     if (done === false) problems.push([name, 'absent', 'l’élément de cette étape est introuvable']);
     else if (shown === false) problems.push([name, 'état', 'la page ne montre pas ce que cette étape attend']);
   }
@@ -485,8 +524,30 @@ try {
             for (const video of item.querySelectorAll ? [item, ...item.querySelectorAll('video')] : [])
               if (video.localName === 'video' && video.hasAttribute('controls'))
                 window.__browserControls.push((video.getAttribute('aria-label') || video.parentElement?.className || 'vidéo') + '');
-      }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['controls'] });`,
+      }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['controls'] });` +
+      (PERF
+        ? `
+      window.__perf = { tasks: [], worst: 0, frames: 0, last: 0 };
+      new PerformanceObserver(list => {
+        for (const entry of list.getEntries()) window.__perf.tasks.push(Math.round(entry.duration));
+      }).observe({ entryTypes: ['longtask'] });
+      requestAnimationFrame(function frame(now) {
+        const perf = window.__perf;
+        if (perf.last) perf.worst = Math.max(perf.worst, now - perf.last);
+        perf.last = now;
+        perf.frames++;
+        requestAnimationFrame(frame);
+      });
+      window.__perfTake = () => {
+        const perf = window.__perf,
+          taken = { tasks: perf.tasks.splice(0), worst: Math.round(perf.worst), frames: perf.frames };
+        perf.worst = 0;
+        perf.frames = 0;
+        return taken;
+      };`
+        : ''),
   });
+  if (PERF) await send('Performance.enable');
   await size(1280);
   await send('Page.navigate', { url: app.url + '/' });
   await wait(2500);
@@ -785,6 +846,28 @@ try {
   await send('Fetch.disable');
   laidOut = false;
   console.log(`Vérification de l’interface (${browser.split(/[\\/]/).pop()}) : ${results.filter(([, ok]) => ok).length}/${results.length} étapes.`);
+  if (PERF) {
+    // One line a step for whoever reads the numbers (a file, a chart), then the slow ones in words.
+    console.log('FLUIDITE ' + JSON.stringify(costs));
+    const slow = costs.filter(cost => cost.tasks.some(task => task >= 100) || cost.work >= 300 || cost.frame >= 100);
+    console.log(
+      `Fluidité${WINDOW ? ' (fenêtre réelle)' : ''} : ${costs.length - slow.length}/${costs.length} étapes sans tâche de 100 ms, ` +
+        'sans 300 ms de travail et sans attente de 100 ms entre deux images.',
+    );
+    for (const cost of slow.sort((a, b) => b.work - a.work))
+      console.log(
+        `  · ${cost.name} : ${cost.work} ms de travail (script ${cost.script}, style ${cost.style}, mise en page ${cost.layout})` +
+          `, attente la plus longue entre deux images ${cost.frame} ms` +
+          (cost.tasks.length ? `, tâches longues ${cost.tasks.join(' + ')} ms` : ''),
+      );
+    // (Measured on 19 November 2026: 144 ms at the first opening of the settings with a new profile,
+    // 11 and 17 ms at the next two launches with the same one.)
+    if (WINDOW && slow.some(cost => cost.frame >= 100))
+      console.log(
+        '  (Le profil du navigateur est neuf à chaque mesure : la première apparition d’un flou d’arrière-plan est ' +
+          'compilée par le pilote graphique, 100 à 250 ms une seule fois. Le navigateur d’un utilisateur la garde.)',
+      );
+  }
   for (const [name, allowed] of allowances)
     for (let index = problems.length - 1; index >= 0; index--)
       if (problems[index][0] === name && problems[index][1] === 'chargement' && allowed.test(problems[index][2]))

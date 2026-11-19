@@ -376,3 +376,20 @@ MiniMax publishes its model in two files, FL2VA (a text, start and end images) a
 - **The Ref2VA file on this disk ends with 73 bytes that are not its own** (a line of text added after its last tensor by whatever downloaded it). safetensors itself refuses such a file, and so does the engine; the measure above was made on a copy without them.
 
 Not measured: these checkpoints with FastH3's sparse attention (they were not trained with it), a larger size, a continuation.
+
+### The interface while the card works (19 November 2026, 0.6.109)
+
+Not the engine, but what its work could take from the page: the same card draws the interface. Measured in a real browser window of 1440 × 900 on the 180 Hz screen of the development machine (`npm run check:fluidity` for the steps of the interface check; a script of the same kind beside a copy of the application for the generations), the wait between two frames read from the page itself:
+
+| | Frames a second | Longest wait between two frames |
+| --- | --- | --- |
+| at rest, any page | 184 to 186 | 6 to 9 ms |
+| the 60 steps of the interface check | 184 (median) | 6 ms (median); over 100 ms in 5 steps, the first time only |
+| while a Krea 2 picture is made | 176 to 186 | 6 to 33 ms, 77 ms once as it starts |
+| while a MiniMax H3 video is made (68 s) | 181 (median), 168 at the least | 9 ms (median), 54 ms once as the video arrives |
+
+- **The page's own work is small**: one task over 50 ms in the 60 steps (87 ms, the check's own script), 212 ms of script, style and layout in 49 s.
+- **The only waits a user could feel are the first appearance of a blurred surface** (the settings: 144 to 249 ms; the Agent's panel: 121 ms): the graphics driver compiles the blur, and the browser keeps it. With the same browser profile at the next launches: 11 and 17 ms. A new profile pays it once.
+- **Changing page, opening a menu or leaving the Studio while a video is made**: 6 to 44 ms.
+
+Not measured: a card smaller or slower than this one, a 60 Hz screen (the numbers above are bound by 180 Hz), the chat while a model writes, LTX 2.5 and the upscalers.
