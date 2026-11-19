@@ -325,6 +325,8 @@ export function setupNativeWorkflows(options) {
       confirmReplacements: $('generation-confirm-replace')?.checked === true,
       reviewImages: $('generation-review-images').checked,
       reviewVideos: $('generation-review').checked,
+      // (0.6.105) On unless its box is there and unticked.
+      warmEngine: $('generation-warm')?.checked !== false,
       pythonPath: state.generation?.pythonPath || '',
       ...folderValues(),
     };
@@ -788,6 +790,7 @@ export function setupNativeWorkflows(options) {
         if ($('generation-confirm-replace')) $('generation-confirm-replace').checked = config.confirmReplacements === true;
         $('generation-review-images').checked = config.reviewImages === true;
         $('generation-review').checked = config.reviewVideos === true;
+        if ($('generation-warm')) $('generation-warm').checked = config.warmEngine !== false;
         for (const [key, [id, role]] of Object.entries(folderControls))
           $(id).value = config[key] || folders[role] || '';
       }

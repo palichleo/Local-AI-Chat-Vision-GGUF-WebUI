@@ -1357,6 +1357,7 @@ test('Paramètres closed without « Enregistrer »: every field of Génération 
     'generation-confirm-replace',
     'generation-review-images',
     'generation-review',
+    'generation-warm',
     'generation-models-dir',
     'native-convert-root',
     'generation-vae-root',

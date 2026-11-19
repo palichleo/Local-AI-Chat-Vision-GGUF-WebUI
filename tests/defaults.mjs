@@ -17,6 +17,7 @@ test('new installs save conversations by default, 100 generations a message are 
     assert.equal(initial.generation.reviewImages, false, 'An image is not analysed by the model unless asked.');
     assert.equal(initial.generation.enabled, true, 'Local generation is on from the start.');
     assert.equal(initial.generation.autoAllowVideos, true, 'A video agreed on in the chat starts by itself.');
+    assert.equal(initial.generation.warmEngine, true, 'The engine imports its libraries as it starts (0.6.105).');
     assert.equal(initial.config.gpuLayers, 999, 'A new GPU configuration must not stop offloading after 99 layers.');
     const post = (path, body) =>
       fetch(app.url + '/api/' + path, {
@@ -27,6 +28,7 @@ test('new installs save conversations by default, 100 generations a message are 
     assert.equal((await post('preferences', { saveHistory: false })).status, 200);
     assert.equal((await post('generation/config', { ...initial.generation, reviewVideos: 'yes' })).status, 400);
     assert.equal((await post('generation/config', { ...initial.generation, autoAllowVideos: 'yes' })).status, 400);
+    assert.equal((await post('generation/config', { ...initial.generation, warmEngine: 'yes' })).status, 400);
     assert.equal(
       (
         await post('generation/config', {
@@ -35,6 +37,7 @@ test('new installs save conversations by default, 100 generations a message are 
           reviewVideos: true,
           reviewImages: true,
           autoAllowVideos: false,
+          warmEngine: false,
         })
       ).status,
       200,
@@ -47,6 +50,7 @@ test('new installs save conversations by default, 100 generations a message are 
     assert.equal(initial.generation.reviewVideos, true);
     assert.equal(initial.generation.reviewImages, true);
     assert.equal(initial.generation.autoAllowVideos, false);
+    assert.equal(initial.generation.warmEngine, false, 'turned off, it stays off');
   } finally {
     await app?.close();
     await rm(dataDir, { recursive: true, force: true });

@@ -212,6 +212,7 @@ test('the former application-wide tokenizer moves into existing workflows and le
     autoAllowVideos: true,
     confirmReplacements: false,
     reviewImages: false,
+    warmEngine: true,
     modelsDir: '',
     textEncoderRoot: '',
     tokenizerRoot: '',

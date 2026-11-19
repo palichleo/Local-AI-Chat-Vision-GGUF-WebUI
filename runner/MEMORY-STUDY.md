@@ -269,3 +269,37 @@ What was tried for the rest of the gap, and what it showed:
 - **The decoders left on the card, ComfyUI's arrangement, would gain little here**: with 5.2 GiB of the card taken the model keeps no share, a step takes 4.0 to 4.1 s instead of 3.75 to 3.9 (2 to 3.5 s a video) for 5.7 s of loading saved, nothing at 1344 × 768 where they do not fit beside the steps, and 20 GiB of RAM locked. Not done.
 
 What separates the two engines now, at every video: the video decoder loaded again (4.6 GiB: 3.6 to 7.3 s), the audio VAE (1 s), and a new prompt (8 to 12 s for us, 5 for ComfyUI: the 15.7 GiB conditioner read from the disk). One cause under the three: the RAM held by the model's page-locked weights on a 32 GiB machine. ComfyUI locks 13 GiB at most and reads the rest through the system's cache; its steps are 6 % slower than ours and everything around them faster. On a machine of 64 GiB the question would not arise the same way: not measured.
+
+### The first creation of a session (19 November 2026, engine 0.6.105)
+
+What a worker that has just started pays before its first picture, Krea 2 at 1024 × 1024 in 8 steps, its files in the system's cache, driven through the worker's own protocol (one process per measure):
+
+| Stage | Seconds |
+| --- | --- |
+| libraries imported (PyTorch 1.5 s, then diffusers and transformers) | 6.9 |
+| the job checked | 0.25 |
+| text encoder read and loaded (1.8 s), prompt encoded (0.4 s), VAE loaded (0.3 s) | 2.45 |
+| the model read into page-locked RAM (12.6 GiB), its layers built | 4.1 |
+| its share copied to the card | 0.9 |
+| eight steps (the first 1.8 s, the others 0.82 s each) | 7.55 |
+| decode | 1.0 |
+| **in all** | **23.2** |
+
+The libraries alone, by family, in a process that does nothing else: 5.8 s for Krea 2, 6.6 s for LTX 2.5, 3.2 s for MiniMax H3, 6.2 s for all of them together; 0.70 GiB of RAM once imported, nothing on the card. The first time of an evening, their files not yet in the system's cache: 18.6 s (one measure).
+
+**Importing them as the worker starts** (`runner/warm.py`, a setting of the application, on unless the user turns it off). The same first picture, three rounds or more, alternated:
+
+| The picture is asked for | Seconds | |
+| --- | --- | --- |
+| no import ahead | 23.0 to 23.4 | 6 measures |
+| once the import has ended (20 s after the start) | 16.0 to 16.6 | 6 measures |
+| 3 s after the start | 19.6 to 20.3 | 10 measures, and one at 30.5 |
+| at once | 22.9 to 23.2 | 3 measures |
+
+- **6.9 s gained on the first picture of a session, nothing lost when it is asked for at once.** The idle worker holds 0.70 GiB instead of 0.03, and no memory of the card.
+- **On Windows the import stood still until a request came.** A library that opens looks at the standard handles of the process, and that look waits for a read in progress on a pipe: with the worker waiting for its request by reading its input, numpy was imported 12.06 s after the start (when the line arrived) instead of 0.12 s, and the first picture gained nothing (23.1 and 23.3 s). The worker now asks the pipe whether something is there, and reads only then, for as long as it imports.
+- **One thread imports at a time.** A request that needs the libraries takes over once the module being imported is imported (0.3 s lost at most, measured at 0 s) and imports the rest itself; the background goes on after it. Waiting for the whole list instead made a picture asked for at once wait for what the other families import.
+- **A module being imported is in `sys.modules` half made**: the worker closing during the import failed on `torch.cuda` (seen once, before the correction). What looks at PyTorch without importing it now asks whether it is entirely imported.
+- **One measure in ten at 3 s took 30.5 s**: 10 s more before the first stage, the import already late when the request came (0.41 GiB held at 3 s instead of 0.54). Not seen again in eight more with a stack recorded at 9.5 s; the machine doing something else is the likeliest, and nothing shows the contrary.
+
+Not measured: the gain the first time of an evening (the import is then the 18.6 s above, three times longer: more to gain, as much RAM); LTX 2.5 and MiniMax H3 (their imports are of the same size, their first creation much longer); a disk slower than this one.

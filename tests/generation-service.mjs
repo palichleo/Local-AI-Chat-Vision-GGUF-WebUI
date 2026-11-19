@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { GenerationService, generationConfig } from '../lib/generation-service.mjs';
@@ -435,4 +435,41 @@ test('launch reconciles an existing private environment even with generation dis
   await service.close();
   await service.prepareOnLaunch();
   assert.equal(probes, 4);
+});
+
+test('the engine is told to import its libraries as it starts, unless the user turned that off (0.6.105)', async t => {
+  // Its first creation of a session paid them: six seconds, eighteen just after the computer started.
+  const root = await mkdtemp(join(tmpdir(), 'native-warm-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const started = [],
+    worker = {
+      status: () => ({ state: 'ready', busy: false, capabilities: {} }),
+      // What the worker is given to read: its configuration file, as it is when it starts.
+      start: async config => void started.push(JSON.parse(await readFile(config.configPath, 'utf8'))),
+      close: async () => {},
+    },
+    service = await new GenerationService({
+      root,
+      dataDir: join(root, 'data'),
+      workflowDir: join(root, 'workflow'),
+      outputDir: join(root, 'output'),
+      worker,
+      environment: {
+        close: async () => {},
+        status: () => ({ state: 'ready' }),
+        exists: async () => true,
+        ensure: async () => process.execPath,
+      },
+    }).init();
+  t.after(() => service.close());
+  await service.start();
+  assert.equal(started.at(-1).warm, true, 'on from the start');
+  await service.save({ ...service.config, warmEngine: false });
+  await service.start();
+  assert.equal(started.at(-1).warm, false, 'turned off: the next start imports nothing ahead');
+  // Settings saved before it existed: on. Anything but yes or no is refused.
+  const { warmEngine, ...before } = service.config;
+  assert.equal(warmEngine, false);
+  assert.equal(generationConfig(before).warmEngine, true);
+  assert.throws(() => generationConfig({ ...before, warmEngine: 'yes' }), /invalides/);
 });

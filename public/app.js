@@ -5099,6 +5099,7 @@ const settingsGuard = setupSettingsGuard({
       'generation-confirm-replace',
       'generation-review-images',
       'generation-review',
+      'generation-warm',
       'generation-models-dir',
       'native-convert-root',
       'generation-vae-root',

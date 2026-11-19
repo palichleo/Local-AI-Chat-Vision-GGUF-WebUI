@@ -368,6 +368,7 @@ test('settings read native generation values and descriptions come from workflow
     confirmReplacements: false,
     reviewImages: false,
     reviewVideos: false,
+    warmEngine: true,
     pythonPath: '',
     modelsDir: '',
     modelRoot: '',

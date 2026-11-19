@@ -1,9 +1,10 @@
 """Version 1 serial JSON-line protocol. Only protocol data reaches stdout."""
 
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 import json
 import sys
 
+from runner import warm
 from runner.contracts import fields
 from runner.engine import capabilities, diagnostics, frames, generate, preflight, release, unload
 from runner.models.headers import unique_object
@@ -28,8 +29,13 @@ def serve(config, source=None, destination=None):
         destination.flush()
 
     emit(dict(event='ready', protocol=1, capabilities=capabilities()))
+    # Ready first, then its libraries in the background (0.6.105): the application has its answer
+    # at once, and the first creation finds them imported.
+    warm.start(config)
     try:
         while True:
+            # (No read in progress while the libraries are imported: on Windows they would wait for it.)
+            warm.await_input(source)
             line = source.readline(MAX_LINE + 1)
             if not line:
                 break
@@ -67,7 +73,10 @@ def serve(config, source=None, destination=None):
                 def progress(**data):
                     emit(dict(event='progress', id=request_id, data=data))
 
-                with redirect_stdout(sys.stderr):
+                # One thread imports at a time: what the worker imports in the background stands
+                # aside for a request that needs the libraries, and goes on after it.
+                turn = warm.aside() if method in ('preflight', 'generate', 'frames') else nullcontext()
+                with redirect_stdout(sys.stderr), turn:
                     if method == 'diagnostics':
                         result = diagnostics(config)
                     elif method == 'preflight':

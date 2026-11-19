@@ -10,7 +10,7 @@ def validate_config(config):
     # tokenizerPath is accepted from older launchers but unused: each job names its own tokenizer.
     fields(
         config,
-        ('tokenizerPath', 'cacheRoot', 'outputRoot', 'manifestRoot', 'engine', 'tuned', 'cacheGiB'),
+        ('tokenizerPath', 'cacheRoot', 'outputRoot', 'manifestRoot', 'engine', 'tuned', 'cacheGiB', 'warm'),
         ('cacheRoot', 'outputRoot'),
         'worker configuration',
     )
@@ -28,6 +28,9 @@ def validate_config(config):
         raise ValueError('Tuned kernels require INT8')
     if 'cacheGiB' in result:
         number(result['cacheGiB'], 'cacheGiB', 0, 1024)
+    # `warm`: the libraries of the creations imported as the worker starts (runner.warm).
+    if type(result.get('warm', False)) is not bool:
+        raise ValueError('Invalid warm flag')
     return result
 
 

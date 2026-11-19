@@ -8,7 +8,7 @@ import gc
 from pathlib import Path
 import sys
 
-from runner import hardware
+from runner import hardware, warm
 from runner.contracts import validate_config
 from runner.journal import Journal
 from runner.media import sweep
@@ -16,7 +16,8 @@ from runner.registry import capabilities, family, pipeline, validate_job
 
 
 def diagnostics(config):
-    torch = sys.modules.get('torch')
+    # (Being imported in the background, it is half made: not there yet.)
+    torch = warm.whole('torch')
     return dict(
         protocol=1,
         python=sys.version.split()[0],
@@ -85,6 +86,13 @@ def _kept():
 
 
 def generate(job, config, progress):
+    # What this creation imports that the process had not is kept for the next start of the
+    # worker (runner.warm, 0.6.105): paid there, in the background, not by a first creation.
+    with warm.watch(config, job):
+        return _generate(job, config, progress)
+
+
+def _generate(job, config, progress):
     preflight(job, config)
     module, config = pipeline(job['pipeline']), validate_config(config)
     # What a worker killed half-way left in the folder of the outputs, once it is old enough.
@@ -187,7 +195,8 @@ def release(keep_above=None, between=False):
         residency = sys.modules.get('runner.models.residency')
         if residency is not None:
             freed = residency.RESIDENCY.leave_room(keep_above)
-    torch = sys.modules.get('torch')
+    # (Being imported in the background, it is half made, and nothing has used the card.)
+    torch = warm.whole('torch')
     allocated = 0
     if torch is not None and torch.cuda.is_initialized():
         torch.cuda.synchronize()
