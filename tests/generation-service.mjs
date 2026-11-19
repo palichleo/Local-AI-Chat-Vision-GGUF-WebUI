@@ -551,3 +551,71 @@ test('an engine that imports its libraries as it starts is their check; one it c
   for (let turn = 0; turn < 400 && events.length < 6; turn++) await new Promise(done => setTimeout(done, 5));
   assert.deepEqual(events, ['ensure', 'start', 'distrust', 'close', 'ensure', 'start']);
 });
+
+test('no NVIDIA card: a family says so with its reason, and again when a creation is asked for', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'no-card-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const none = 'Krea2 demande une carte graphique NVIDIA : son pilote n’en voit aucune sur cet ordinateur.';
+  const lacking = { ready: false, mediaType: 'image', reason: none, hardware: true };
+  const calls = [];
+  const worker = {
+    // What the Python worker says on a computer without an NVIDIA card (runner/hardware.py).
+    status: () => ({
+      state: 'ready',
+      busy: false,
+      capabilities: { krea2: lacking, rife: { ready: true, mediaType: 'video', reason: '' } },
+    }),
+    request: async method => {
+      calls.push(method);
+      // As runner.engine.preflight does for a family that is not ready.
+      throw Object.assign(new Error(none), { status: 409 });
+    },
+    unload: async () => {},
+    release: async options => {
+      calls.push(['release', options]);
+      return { released: true };
+    },
+    close: async () => {},
+  };
+  const service = new GenerationService({
+    root: dataDir,
+    dataDir,
+    workflowDir: join(dataDir, 'workflows'),
+    outputDir: join(dataDir, 'output'),
+    worker,
+    environment: { close: async () => {}, status: () => ({ state: 'ready' }) },
+  });
+  // The family cannot run, and says that the computer is why (shown greyed); the others are as they were.
+  service.syncCapabilities();
+  assert.deepEqual(service.catalog.capabilities.krea2, lacking);
+  assert.equal(service.catalog.capabilities.rife.ready, true);
+  // The reason again when a creation is asked for, before anything is unloaded (preflight).
+  const job = {
+    schemaVersion: 1,
+    id: '5b1f6f0e-6f0c-4b65-9d3b-0c3f3a8f7a11',
+    pipeline: 'krea2',
+    mediaType: 'image',
+    parameters: { prompt: 'un renard', seed: 42, width: 1024, height: 768, steps: 8, cfg: 1, denoise: 1 },
+    components: {},
+    loras: [],
+    references: [],
+  };
+  const client = service.client();
+  assert.deepEqual(await client.status(), { idle: true });
+  await assert.rejects(client.preflight(job), /carte graphique NVIDIA/);
+  assert.deepEqual(calls, ['preflight']);
+  // What a generation leaves: kept while the Studio goes on creating, given back with the room the
+  // chat model asks for when it returns (the engine decides what leaves).
+  assert.deepEqual(await client.free({ keep: true }), { kept: true });
+  assert.deepEqual(calls, ['preflight']);
+  assert.deepEqual(await client.free({ reserve: 1024 ** 3 }), { released: true });
+  assert.deepEqual(await client.free(), { released: true });
+  assert.equal(calls[1][0], 'release');
+  assert.equal(calls[1][1].keepAbove > 1024 ** 3, true);
+  assert.deepEqual(calls[2], ['release', {}]);
+  // The style LoRAs of the Studio are the files of the loras folders, and nothing else is asked.
+  assert.deepEqual(await service.styles(), []);
+  const snapshot = await service.snapshot();
+  assert.equal(Object.hasOwn(snapshot, 'comfy'), false);
+  for (const gone of ['comfyState', 'startComfy', 'saveComfy', 'refreshComfy']) assert.equal(typeof service[gone], 'undefined', gone);
+});

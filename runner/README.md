@@ -11,6 +11,7 @@ A family (`runner/families/*.json`) describes a model: its components, its setti
 | Family | Tasks | Needs an NVIDIA card |
 | --- | --- | --- |
 | Krea 2 | images, edits of an image | yes |
+| MOSS Image | images: posters, layouts, written text | yes |
 | LTX 2.5 | videos with sound, continuations | yes |
 | MiniMax H3 | videos with sound, continuations | yes |
 | Wan 2.1 SCAIL-2 | a character replaced in a video | yes |
@@ -20,7 +21,7 @@ A family (`runner/families/*.json`) describes a model: its components, its setti
 | ACE-Step 1.5 | music | no |
 | MOSS-SoundEffect v2 | sound effects | no |
 
-**MOSS Image** is the one family with no pipeline here (`"engine": "external"`): the Node server asks a ComfyUI running on the same computer for it, over its local HTTP API (`lib/comfy-engine.mjs`, `lib/comfy-graphs.mjs`).
+Every family has its pipeline here, **MOSS Image** included since 0.6.124 (`runner/pipelines/moss.py`): no other program is asked for a creation.
 
 The workflows shipped with Moodix are the JSON files of `runner/workflows/`, replaced by updates; `runner/workflow-history.json` lists the fingerprints of their earlier versions, so that a copy the user never edited follows the new one. The user's own workflows and edits live in `workflow/` at the root (`npm run ship-workflows` publishes them into `runner/workflows/`). `runner/downloads.json` says where each file of a shipped workflow can be downloaded from, with its size, its SHA-256 and its license.
 

@@ -5,9 +5,6 @@ plus ``runner/pipelines/<name>.py`` (how it runs; several families may share one
 through the manifest's ``module`` field). The module may define ``check(job, family)``
 for rules that a manifest cannot express, and must define ``generate(job, config, progress)``.
 Adding a family therefore never requires editing this file, the protocol or the server.
-
-A manifest with ``"native": false`` has no module here: its jobs are run by ComfyUI, sent
-by the Node server. This worker knows what such a family accepts, and never runs it.
 """
 
 import importlib
@@ -40,15 +37,8 @@ def family(name):
     return families()[name]
 
 
-def native(name):
-    """Whether this worker runs the family itself."""
-    return family(name).get('native', True)
-
-
 def pipeline(name):
     """The module running a family: runner.pipelines.<module>, where module defaults to the family name."""
-    if not native(name):
-        raise ValueError(family(name)['label'] + ' is run by ComfyUI, not by this engine')
     module = family(name).get('module', name)
     if not NAME.match(module):
         raise ValueError('Invalid pipeline module for ' + name)
@@ -62,8 +52,6 @@ def capabilities():
 
     result = {}
     for name, manifest in families().items():
-        if not manifest.get('native', True):
-            continue
         missing = [module for module in manifest.get('requires', []) if importlib.util.find_spec(module) is None]
         reason = 'Missing packages: ' + ', '.join(missing) if missing else ''
         # What the computer itself lacks is told apart: the application shows the family greyed
@@ -203,8 +191,7 @@ def validate_job(job):
         if roles[item['role']].get('requiresLora') and not job['loras']:
             raise ValueError(roles[item['role']]['label'] + ' requires its learned-slot LoRA')
 
-    # A family ComfyUI runs has no module here, hence no rule beyond its manifest.
-    check = getattr(pipeline(job['pipeline']), 'check', None) if native(job['pipeline']) else None
+    check = getattr(pipeline(job['pipeline']), 'check', None)
     if check:
         check(job, manifest)
     return job

@@ -30,23 +30,16 @@ def ltx_job(**changes):
 
 class RegistryTests(unittest.TestCase):
     def test_every_manifest_has_a_runnable_module_and_a_capability(self):
-        # A family ComfyUI runs would be known here by its manifest only (no module, no capability):
-        # there is none since MOSS Image joined this engine (0.6.124).
-        own = {name for name, manifest in families().items() if manifest.get('native', True)}
+        # Every family is this engine's (0.6.127: no other program runs one any more).
+        own = set(families())
         self.assertEqual(set(capabilities()), own)
-        # Krea 2, MiniMax H3, LTX 2.5 and MOSS Image are this engine's, as every family is.
         for name in ('krea2', 'minimax_h3', 'ltx25', 'moss'):
-            self.assertEqual(families()[name]['engine'], 'internal')
             self.assertIn(name, own)
-        self.assertEqual(own, set(families()))
         for name, manifest in families().items():
             with self.subTest(family=name):
-                self.assertIn(manifest['engine'], ('internal', 'external'))
-                if name in own:
-                    self.assertTrue(callable(pipeline(name).generate))
-                else:
-                    with self.assertRaisesRegex(ValueError, 'ComfyUI'):
-                        pipeline(name)
+                self.assertEqual(manifest['engine'], 'internal')
+                self.assertNotIn('native', manifest)
+                self.assertTrue(callable(pipeline(name).generate))
                 for role, spec in manifest['roles'].items():
                     self.assertIn(spec['media'], ('image', 'video', 'audio'), role)
                     self.assertTrue(spec['as'])
@@ -55,8 +48,8 @@ class RegistryTests(unittest.TestCase):
 
     def test_family_modules_import_without_torch(self):
         code = (
-            'import sys; from runner.registry import families, native, pipeline\n'
-            '[pipeline(name) for name in families() if native(name)]\n'
+            'import sys; from runner.registry import families, pipeline\n'
+            '[pipeline(name) for name in families()]\n'
             'print(json.dumps("torch" in sys.modules))'
         )
         result = subprocess.run(

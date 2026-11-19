@@ -878,7 +878,6 @@ export async function createApplication({
     }
     const definitions = [];
     const toolConfig = generation.config;
-    await generation.refreshComfy();
     generation.syncCapabilities();
     // Tools only advertise sources this conversation really holds, so the model is never asked
     // for a run_id, attached image or resource that does not exist.
@@ -1149,8 +1148,6 @@ export async function createApplication({
       if (req.headers.authorization !== `Bearer ${token}`) throw problem('Accès refusé. Rechargez la page.', 401);
       runtime.seen(tab);
       if (req.method === 'GET' && path === '/api/generation') return send(200, await generation.snapshot());
-      // Whether ComfyUI answers (the line of MOSS Image follows it while it starts).
-      if (req.method === 'GET' && path === '/api/generation/comfy') return send(200, await generation.comfyState());
       if (req.method === 'GET' && path === '/api/generation/assets')
         return send(200, { assets: await generation.assets.list() });
       if (req.method === 'GET' && path === '/api/generation/workflows')
@@ -1306,9 +1303,9 @@ export async function createApplication({
         return send(resource.existing ? 200 : 201, resourceView(resource));
       }
       if (req.method === 'GET' && path === '/api/tools/actions') return send(200, await runtime.tools.actions());
-      // The Studio: where its results are kept, and the style LoRAs ComfyUI offers.
+      // The Studio: where its results are kept, and the style LoRAs of the loras folders.
       if (req.method === 'GET' && path === '/api/studio') {
-        // Asked together: the workflows are read from the disk, the LoRAs from ComfyUI.
+        // Asked together: the workflows and the LoRAs are both read from the disk.
         const [tools, styles, presets] = await Promise.all([
           runtime.tools.studio(),
           generation.styles(),
@@ -1450,11 +1447,6 @@ export async function createApplication({
         return send(200, generation.downloads.status());
       }
       if (path === '/api/downloads/token') return send(200, { hasToken: await generation.downloads.setToken(body.token) });
-      // « Démarrer » on the line of MOSS Image: ComfyUI started on its own (lib/comfy-launch.mjs).
-      if (path === '/api/generation/comfy/start') {
-        if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
-        return send(200, await generation.startComfy(body));
-      }
       if (path.startsWith('/api/generation/')) {
         if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
         if (runtime.active || chat.busy || clearingHistory || savingSettings || savingGeneration || pickingFile)
@@ -1464,7 +1456,6 @@ export async function createApplication({
           if (path === '/api/generation/config') {
             return send(200, await generation.save(body));
           }
-          if (path === '/api/generation/comfy') return send(200, await generation.saveComfy(body));
           if (path === '/api/generation/test') {
             if (body.config || body.pythonPath !== undefined) await generation.save(body.config || body);
             void generation.start().catch(() => {});
@@ -1934,9 +1925,7 @@ export async function createApplication({
       }
       if (path === '/api/files/choose') {
         if (
-          !['engine', 'model', 'projector', 'generation', 'python', 'tokenizer', 'directory', 'workflow', 'comfy'].includes(
-            body?.kind,
-          )
+          !['engine', 'model', 'projector', 'generation', 'python', 'tokenizer', 'directory', 'workflow'].includes(body?.kind)
         )
           throw problem('Type de fichier invalide.');
         if (saving || savingSettings || savingGeneration || pickingFile)
@@ -1960,7 +1949,6 @@ export async function createApplication({
             generation: generation.folders().model,
             directory: generation.folders().model,
             workflow: join(root, 'workflow'),
-            comfy: process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Programs') : '',
           }[body.kind] ||
           '';
         try {

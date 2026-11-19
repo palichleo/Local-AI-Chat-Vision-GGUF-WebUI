@@ -2,8 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { STUDIO_ID, STUDIO_VERBS, enrichedPrompt, enrichMessages } from '../lib/studio.mjs';
 import { ToolRuntime, checkStyles } from '../lib/tool-runtime.mjs';
-import { comfyGraph } from '../lib/comfy-graphs.mjs';
-import { comfyNames } from '../lib/comfy-engine.mjs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -74,35 +72,6 @@ const krea = styles => ({
   styles,
   parameters: { prompt: 'un renard', seed: 1, width: 1024, height: 1024, steps: 8, attention: 'comfy_kitchen' },
   components: { model: 'm/krea.safetensors', textEncoder: 'm/qwen.safetensors', vae: 'm/vae.safetensors' },
-});
-
-test('the styles of a Studio job are LoRA nodes between the model and the sampler, under ComfyUI’s names', async () => {
-  const styles = [
-    { name: '70sSCiFiKrea2Raw.safetensors', strength: 0.55 },
-    { name: 'krea2_detail_slider.safetensors', strength: 0.2 },
-  ];
-  const { graph } = comfyGraph(krea(styles));
-  assert.deepEqual(graph.style0.inputs, { lora_name: styles[0].name, strength_model: 0.55, model: ['model', 0] });
-  assert.deepEqual(graph.style1.inputs.model, ['style0', 0]);
-  assert.deepEqual(graph.attention.inputs.model, ['style1', 0]);
-  assert.deepEqual(graph.sampler.inputs.model, ['attention', 0]);
-  assert.equal(comfyGraph(krea(undefined)).graph.style0, undefined);
-
-  const lists = {
-    UNETLoader: ['unet_name', ['krea.safetensors']],
-    CLIPLoader: ['clip_name', ['qwen.safetensors']],
-    VAELoader: ['vae_name', ['vae.safetensors']],
-    LoraLoaderModelOnly: ['lora_name', ['styles\\70sSCiFiKrea2Raw.safetensors', 'krea2_detail_slider.safetensors']],
-  };
-  const client = {
-    objectInfo: async ({ node }) => ({
-      [node]: { input: { required: lists[node] ? { [lists[node][0]]: [lists[node][1], {}] } : {} } },
-    }),
-  };
-  const names = await comfyNames(client, krea(styles));
-  assert.equal(names.style0, 'styles\\70sSCiFiKrea2Raw.safetensors');
-  assert.equal(names.style1, 'krea2_detail_slider.safetensors');
-  await assert.rejects(comfyNames(client, krea([{ name: 'absent.safetensors', strength: 1 }])), /absent\.safetensors/);
 });
 
 test('a model this computer cannot run is shown greyed with its reason, others not ready stay out', async () => {

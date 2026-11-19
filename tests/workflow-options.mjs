@@ -180,12 +180,7 @@ test('every parameter a family declares is read by its engine, unless the family
     .join('\n');
   assert.ok(beside.length > 10000, 'runner/models and runner/video are read');
   for (const manifest of Object.values(families())) {
-    // A family ComfyUI makes has its graph built in lib/comfy-graphs.mjs (none since MOSS Image
-    // joined Moodix's engine, 0.6.124).
-    const path =
-      manifest.engine === 'external'
-        ? new URL('../lib/comfy-graphs.mjs', import.meta.url)
-        : new URL(`../runner/pipelines/${manifest.module ?? manifest.family}.py`, import.meta.url);
+    const path = new URL(`../runner/pipelines/${manifest.module ?? manifest.family}.py`, import.meta.url);
     const source = (sources[path] ??= readFileSync(path, 'utf8'));
     for (const [name, spec] of Object.entries(manifest.parameters)) {
       const named = new RegExp(`['"]${name}['"]|\\bp\\.${name}\\b`),
@@ -196,7 +191,7 @@ test('every parameter a family declares is read by its engine, unless the family
         assert.equal(inertSetting(manifest, { parameters: {} }, name, 'parameter'), spec.unused);
       } else if (spec.choices?.length !== 1)
         assert.equal(
-          read || (manifest.engine !== 'external' && named.test(beside)),
+          read || named.test(beside),
           true,
           `${manifest.family}.${name} is offered in the editor and read by no engine`,
         );

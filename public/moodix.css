@@ -13789,51 +13789,6 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   margin-top: 6px;
 }
 
-/* The line of MOSS Image (16/11): whether ComfyUI answers — ready, starting, not started, silent —
-   under its name, and « Démarrer » while it does not. */
-#settings .workflow-settings .workflow-card:has(> .workflow-comfy) {
-  flex-wrap: wrap;
-  row-gap: 4px;
-}
-.workflow-comfy {
-  display: flex;
-  flex: 1 0 100%;
-  align-items: center;
-  gap: 9px;
-  min-height: 30px;
-  padding-left: 19px;
-  color: var(--text-3);
-  font: 400 13px/1.3 var(--font-ui);
-}
-.workflow-comfy-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--muted);
-}
-.workflow-comfy[data-state='ready'] .workflow-comfy-dot {
-  background: var(--success);
-}
-.workflow-comfy:is([data-state='starting'], [data-state='silent']) .workflow-comfy-dot {
-  background: var(--warning);
-}
-.workflow-comfy[data-state='starting'] .workflow-comfy-dot {
-  animation: workflow-downloading 1.4s ease-in-out infinite;
-}
-#settings .workflow-comfy .workflow-comfy-start {
-  min-height: 30px;
-  margin-left: 4px;
-  padding: 4px 12px;
-  font: 400 13px/1 var(--font-ui);
-}
-@media (prefers-reduced-motion: reduce) {
-  .workflow-comfy[data-state='starting'] .workflow-comfy-dot {
-    animation: none;
-  }
-}
-
-
 /* « Projet » in the window of the pencil (16/11): a field that opens a menu as those of the fil,
    under it, the chosen project marked. */
 .project-picker {
@@ -14466,9 +14421,6 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
 #settings .workflow-settings .native-card-actions .workflow-reset svg {
   width: 14px;
   height: 14px;
-}
-#settings .workflow-settings .workflow-card .workflow-comfy {
-  padding-left: 0;
 }
 #settings .workflow-settings .workflow-card .workflow-progress {
   position: static;

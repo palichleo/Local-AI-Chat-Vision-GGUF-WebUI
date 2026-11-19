@@ -94,59 +94,6 @@ function fakeEngine(outputDir, { onGenerate = () => {}, onRelease = () => {}, fl
     },
   };
 }
-/**
- * A ComfyUI as far as Atelier asks: it knows every node, lists the fixture files and answers
- * each graph with one saved image. Set and answering, it is still not the one that creates a
- * Krea 2 image.
- */
-async function fakeComfy(onPrompt = () => {}) {
-  const names = ['model.safetensors', 'textEncoder.safetensors', 'vae.safetensors'];
-  const app = createServer(async (req, res) => {
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    const url = new URL(req.url, 'http://localhost');
-    const json = value => {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(value));
-    };
-    if (url.pathname === '/queue') return json({ queue_running: [], queue_pending: [] });
-    if (url.pathname === '/system_stats')
-      return json({
-        system: { ram_total: 32 * 1024 ** 3, ram_free: 16 * 1024 ** 3 },
-        devices: [{ type: 'cuda', vram_total: 12, vram_free: 11, torch_vram_total: 2, torch_vram_free: 1 }],
-      });
-    if (url.pathname.startsWith('/object_info/')) {
-      const node = decodeURIComponent(url.pathname.slice(13)),
-        input = { UNETLoader: 'unet_name', CLIPLoader: 'clip_name', VAELoader: 'vae_name' }[node];
-      return json({ [node]: { input: { required: input ? { [input]: [names, {}] } : {} } } });
-    }
-    if (url.pathname === '/upload/image') return json({ name: 'source.png', subfolder: 'atelier', type: 'input' });
-    if (url.pathname === '/prompt') {
-      onPrompt(JSON.parse(Buffer.concat(chunks)).prompt);
-      return json({ prompt_id: 'prompt-1' });
-    }
-    if (url.pathname === '/history/prompt-1')
-      return json({
-        'prompt-1': {
-          status: { status_str: 'success', completed: true, messages: [] },
-          outputs: { save: { images: [{ filename: 'made.png', subfolder: 'atelier', type: 'output' }] } },
-        },
-      });
-    if (url.pathname === '/view') {
-      res.writeHead(200, { 'content-type': 'image/png' });
-      return res.end(png);
-    }
-    json({});
-  });
-  await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
-  return {
-    baseUrl: `http://127.0.0.1:${app.address().port}`,
-    close() {
-      app.closeAllConnections();
-      return new Promise(resolve => app.close(resolve));
-    },
-  };
-}
 async function until(check) {
   for (let i = 0; i < 300; i++) {
     const v = await check();
@@ -162,8 +109,6 @@ test(
     const root = await mkdtemp(join(tmpdir(), 'native-http-'));
     let app, named;
     const events = [];
-    // A ComfyUI is set and answers: Atelier's engine makes the image all the same.
-    const comfy = await fakeComfy(() => assert.fail('a graph was sent to ComfyUI'));
     const outputDir = join(root, 'output');
     await mkdir(outputDir);
     const worker = fakeEngine(outputDir, {
@@ -226,8 +171,9 @@ test(
         maxIterations: 5,
         pythonPath: process.execPath,
       });
-      const settings = await (await api('generation/comfy', { enabled: true, baseUrl: comfy.baseUrl })).json();
-      assert.equal(settings.comfy.reachable, true);
+      // No other program is asked anything: the settings say nothing of one (0.6.127).
+      assert.equal(Object.hasOwn(await (await api('generation')).json(), 'comfy'), false);
+      await api('generation/comfy', { enabled: true, baseUrl: 'http://127.0.0.1:8188' }, 404);
       const workflow = {
         schemaVersion: 1,
         id: 'integration-boat',
@@ -316,7 +262,6 @@ test(
       assert.deepEqual(await readdir(join(outputDir, 'image')), [named + '.png']);
     } finally {
       await app?.close();
-      await comfy.close();
       await rm(root, { recursive: true, force: true });
     }
   },

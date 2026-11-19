@@ -175,8 +175,6 @@ export function setupNativeWorkflows(options) {
     // its « J’ai lu, télécharger », which takes the focus when the list is drawn again.
     licenseAsked = '',
     confirmFocus = null,
-    // Where ComfyUI, the external engine, is and whether it answers.
-    comfy = { enabled: false, baseUrl: '', reachable: false, version: '' },
     // (0.6.102) A workflow saved, set back, deleted or shown again since the settings opened: the
     // Studio reads its tools again once they close (takeChanges, app.js).
     changedWorkflows = false;
@@ -697,7 +695,6 @@ export function setupNativeWorkflows(options) {
   function apply(result, { settings = true } = {}) {
     workflows = result.workflows || [];
     if (result.models) models = result.models;
-    comfy = result.comfy || comfy;
     hiddenWorkflows = result.hiddenWorkflows ?? hiddenWorkflows;
     downloads = result.downloads || downloads;
     if (downloads.job?.state === 'running') followDownload();
