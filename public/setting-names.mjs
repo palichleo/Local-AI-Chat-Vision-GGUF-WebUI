@@ -47,3 +47,46 @@ export const SETTING_NAMES = {
   identity_lora_strength: 'Intensité du LoRA d’identité',
 };
 export const CHOICE_NAMES = { draft: 'Brouillon', final: 'Vidéo finale', smooth: 'Fluide', slow_motion: 'Ralenti' };
+/**
+ * (0.6.128) What is part of a request: written or chosen at each creation, by the user in the Studio
+ * or by Moodix AI in the chat (the prompt, the size, the length, the version, the words of a song,
+ * who is who, how much an upscale enlarges, how much of an image to modify is redone). Everything
+ * else a model declares is a setting of the model: Moodix gives it a value, the user alone changes
+ * it (Paramètres › Modèles for good, the Studio for one creation), and Moodix AI never does.
+ * Decisions of 19/11: « étape et guidage doivent toujours être réglables, mais jamais Moodix AI.
+ * […] C’est valable pour tous les réglages. », then « le débruitage, la résolution, le temps doivent
+ * encore être choisis par Moodix » while the model is offered to it (« Proposé à Moodix AI »).
+ */
+export const ASKED = new Set([
+  'prompt',
+  'lyrics',
+  'language',
+  'seconds',
+  'seed',
+  'width',
+  'height',
+  'frames',
+  'denoise',
+  'stage',
+  'subject',
+  'reference_subject',
+  'scale',
+  'passes',
+  'max_side',
+  'multiplier',
+  'mode',
+]);
+export const isSetting = name => !ASKED.has(name);
+/**
+ * What a setting does, in a sentence, where its family says nothing of it (`help`, `note`): the « ? »
+ * at the end of its line in the page of a model.
+ */
+export const SETTING_HELP = {
+  steps: 'Nombre de passes de calcul. Plus il y en a, plus la création est longue.',
+  cfg: 'À quel point la création suit le prompt. Trop haut, les couleurs saturent.',
+  guidance_scale: 'À quel point la création suit le prompt.',
+  shift: 'Répartit les étapes entre la composition d’ensemble (plus haut) et les détails (plus bas).',
+  negative_prompt: 'Ce que les créations de ce modèle doivent éviter.',
+  fps: 'Images par seconde des vidéos créées.',
+  audio: 'Les vidéos sont créées avec leur son.',
+};

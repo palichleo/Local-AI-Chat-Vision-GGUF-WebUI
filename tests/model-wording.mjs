@@ -41,7 +41,9 @@ import {
  * in one call; 17/11: the `denoise` of create_image, from 0.6 to 0.7 for Krea 2, offered where an
  * image to modify can be passed; 0.6.112: `outputToolTakes`, the takes looked at by their numbers,
  * several in one call, where a result without a number keeps `outputTool` to the character;
- * 0.6.113: `suite`, what a continuation nobody asked for is sent back with).
+ * 0.6.113: `suite`, what a continuation nobody asked for is sent back with; 0.6.128: the `steps` and
+ * the `color_correction` of `upscale` are gone, settings of SeedVR2: a setting of a model is the
+ * user's alone, never the model's to choose, lib/native-workflows.mjs, ownSettings).
  * Written again, it loses `brief` and `briefExtend`, which the
  * first test leaves aside: they were put back, so that the fixture changed by that argument alone.
  */

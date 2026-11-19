@@ -711,28 +711,6 @@
          "description": "Repeat the upscale; 1 unless the user wants a much larger or stronger result. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
          "default": 1
         },
-        "steps": {
-         "type": "integer",
-         "enum": [
-          1,
-          2,
-          3,
-          4
-         ],
-         "description": "Restoration steps; 1 is the natural distilled setting, more adds invented detail. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
-         "default": 1
-        },
-        "color_correction": {
-         "type": "string",
-         "enum": [
-          "lab",
-          "wavelet",
-          "adain",
-          "none"
-         ],
-         "description": "How colours are taken back from the original: lab (faithful), wavelet, adain (light), none. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
-         "default": "lab"
-        },
         "intention": {
          "type": "string",
          "minLength": 1,
@@ -2121,28 +2099,6 @@
          ],
          "description": "Repeat the upscale; 1 unless the user wants a much larger or stronger result. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
          "default": 1
-        },
-        "steps": {
-         "type": "integer",
-         "enum": [
-          1,
-          2,
-          3,
-          4
-         ],
-         "description": "Restoration steps; 1 is the natural distilled setting, more adds invented detail. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
-         "default": 1
-        },
-        "color_correction": {
-         "type": "string",
-         "enum": [
-          "lab",
-          "wavelet",
-          "adain",
-          "none"
-         ],
-         "description": "How colours are taken back from the original: lab (faithful), wavelet, adain (light), none. Only for: 6b0f2e5c-7d1a-4c8e-9a3f-5e2d1c0b9a87.",
-         "default": "lab"
         },
         "intention": {
          "type": "string",

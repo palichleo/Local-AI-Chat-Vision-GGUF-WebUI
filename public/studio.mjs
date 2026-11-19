@@ -1620,7 +1620,7 @@ export function setupStudio({
     lock.append(icon('lock'));
     lock.setAttribute('role', 'img');
     lock.setAttribute('aria-label', 'LoRA du workflow');
-    lock.title = 'LoRA du workflow : réglé dans Paramètres › Workflows';
+    lock.title = 'LoRA du modèle : réglé dans Paramètres › Modèles';
     row.append(name, track, value);
     if (lora.assistant) {
       const toggle = node('input', 'studio-lora-switch');
@@ -3009,7 +3009,7 @@ export function setupStudio({
           render();
           letGo();
           reject(
-            new Error('Le Studio n’a aucun workflow prêt pour cette création : vérifiez Paramètres › Workflows.'),
+            new Error('Le Studio n’a aucun modèle prêt pour cette création : vérifiez Paramètres › Modèles.'),
           );
           return;
         }
@@ -4522,7 +4522,7 @@ export function setupStudio({
       return message(
         mode === 'audio'
           ? 'Aucun workflow de son prêt : téléchargez les modèles de musique et de bruitages dans models\\audio.'
-          : 'Aucun workflow prêt pour cette création : vérifiez Paramètres › Workflows.',
+          : 'Aucun modèle prêt pour cette création : vérifiez Paramètres › Modèles.',
       );
     // The first time a mode shows its model, the settings saved for it come back (not over a
     // proposal of Moodix AI, which sets its own).

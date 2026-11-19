@@ -53,11 +53,11 @@ test('a line says the version its model uses; what is in its way decides the res
     assert.deepEqual([why({ unavailableReason: reason }).state, why({ unavailableReason: reason }).note], ['problem', reason]);
   const hardware = why({ unavailableReason: 'Carte NVIDIA requise.', unavailableKind: 'hardware' }, { offers: {}, job: {} });
   assert.deepEqual([hardware.state, hardware.note, hardware.label], ['unavailable', 'Carte NVIDIA requise.', ['XL']]);
-  // Not offered to the assistant (« Disponible pour l’assistant » unticked): said, the version still named.
+  // Not offered to the assistant (« Proposé à Moodix AI » off): said, the version still named.
   const off = lineOf(model({ id: 'a', version: 'XL' }), [record('a', { enabled: false })], idle);
-  assert.deepEqual([off.state, off.note, off.label], ['off', 'Pas proposé à l’assistant : il reste dans le Studio.', ['XL']]);
-  assert.equal(why({ enabled: false, unavailableReason: 'Moteur arrêté.' }).note, 'Pas proposé à l’assistant. Moteur arrêté.');
-  assert.equal(why({ enabled: false }).note, 'Pas proposé à l’assistant. Indisponible.');
+  assert.deepEqual([off.state, off.note, off.label], ['off', 'Pas proposé à Moodix AI : il reste dans le Studio.', ['XL']]);
+  assert.equal(why({ enabled: false, unavailableReason: 'Moteur arrêté.' }).note, 'Pas proposé à Moodix AI. Moteur arrêté.');
+  assert.equal(why({ enabled: false }).note, 'Pas proposé à Moodix AI. Indisponible.');
   assert.equal(lineOf(model({ id: 'a' }), [record('a', { enabled: false })], { offers: {}, job: { state: 'running', workflowId: 'a' } }).state, 'downloading');
 });
 

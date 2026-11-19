@@ -2,7 +2,7 @@ import test from 'node:test';
 import { family, familyTemplate } from '../lib/families.mjs';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -47,7 +47,8 @@ function fixture() {
       seed: { policy: 'random', type: 'integer' },
       width: { policy: 'fixed', value: 512 },
       height: { policy: 'fixed', value: 512 },
-      steps: { policy: 'model', type: 'integer', min: 1, max: 12, default: 8 },
+      // (0.6.128) A setting is never left to Moodix AI: the catalog keeps none so (ownSettings).
+      steps: { policy: 'fixed', value: 8 },
       cfg: { policy: 'fixed', value: 1 },
       denoise: { policy: 'fixed', value: 1 },
     },
@@ -74,6 +75,9 @@ async function withCatalog(fn) {
 
 test('strict policy resolver rejects locked overrides, unsupported fields and out-of-range model choices', async () => {
   const workflow = fixture();
+  // The resolver takes a workflow as it is given: one that leaves a number to the model, within bounds
+  // (what is part of a request is so; a setting never reaches it so, the catalog sees to it).
+  workflow.parameters.steps = { policy: 'model', type: 'integer', min: 1, max: 12, default: 8 };
   for (const args of [
     { prompt: 'test', width: 512 },
     { prompt: 'test', seed: 2 },
@@ -223,20 +227,115 @@ test('canonical digest changes only with saved content and saved files remain at
 
 test('tools advertise only enabled ready workflows and writable policy fields', async () => {
   await withCatalog(async catalog => {
-    await catalog.save(fixture());
+    const workflow = fixture();
+    // The height is the model's to choose, within the bounds of the workflow; the width is fixed.
+    workflow.parameters.height = { policy: 'model', type: 'integer', min: 256, max: 768, default: 512 };
+    await catalog.save(workflow);
     const tools = new ToolCatalog(catalog);
     const definition = (await tools.definitions()).find(tool => tool.function.name === 'create_image');
     const variant = definition.function.parameters;
     assert.ok(variant.properties.prompt);
     assert.equal(variant.properties.width, undefined);
+    assert.equal(variant.properties.height.maximum, 768);
     // A drawn seed is not the model's to choose, but it passes on the one the user names.
     assert.match(variant.properties.seed.description, /Only when the user gives a seed number/);
     assert.ok(!variant.required.includes('seed'));
-    assert.equal(variant.properties.steps.maximum, 12);
+    assert.equal(variant.properties.steps, undefined, 'a setting is never offered to it');
     assert.equal(variant.properties.loras, undefined);
     catalog.capabilities = {};
     assert.deepEqual(await tools.definitions(), []);
   });
+});
+
+test('a setting is never left to Moodix AI: one a workflow of before left to it is read, kept and offered « Fixe » at its default, its bounds kept (0.6.128)', async () => {
+  // Decision of 19/11: « étape et guidage doivent toujours être réglables, mais jamais Moodix AI ».
+  await withCatalog(async (catalog, directory) => {
+    const before = fixture(),
+      steps = { policy: 'model', type: 'integer', min: 1, max: 12, default: 8, description: 'More steps, more detail.' },
+      height = { policy: 'model', type: 'integer', min: 256, max: 768, default: 512 };
+    before.parameters.steps = steps;
+    before.parameters.height = height;
+    before.loras = [
+      {
+        id: 'style',
+        asset: 'lora',
+        description: 'A style',
+        enabled: { policy: 'model', default: false },
+        strength: { policy: 'model', type: 'number', min: 0, max: 1, default: 0.5 },
+      },
+    ];
+    // As a version of before wrote it in the user's folder.
+    await writeFile(join(directory, 'portrait.json'), JSON.stringify(before));
+    const read = await catalog.read('portrait');
+    // « Fixe » at the value it had by default; its bounds stay (those of the Studio for one creation).
+    assert.deepEqual(read.parameters.steps, { policy: 'fixed', value: 8, min: 1, max: 12 });
+    // What is part of a request stays Moodix AI's to choose: the prompt, the size, a drawn seed.
+    assert.deepEqual(read.parameters.height, height);
+    assert.deepEqual(read.parameters.prompt, before.parameters.prompt);
+    assert.deepEqual(read.parameters.seed, before.parameters.seed);
+    // The strength of a LoRA is a setting too; whether a LoRA is on stays a choice it may be given.
+    assert.deepEqual(read.loras[0].strength, { policy: 'fixed', value: 0.5 });
+    assert.deepEqual(read.loras[0].enabled, { policy: 'model', default: false });
+    assert.notEqual(read.digest, validateNativeWorkflow(before).digest);
+    // The file is not written to by a reading.
+    assert.deepEqual(JSON.parse(await readFile(join(directory, 'portrait.json'), 'utf8')).parameters.steps, steps);
+    assert.deepEqual((await catalog.list())[0].parameters.steps, read.parameters.steps);
+    // Moodix AI is not offered it, and a value it passes all the same is refused.
+    const tool = (await new ToolCatalog(catalog).definitions()).find(item => item.function.name === 'create_image')
+      .function.parameters;
+    assert.equal(tool.properties.steps, undefined);
+    assert.equal(tool.properties.height.maximum, 768);
+    const { workflowSchema } = await import('../lib/native-workflows.mjs');
+    assert.deepEqual(Object.keys(workflowSchema(read).properties.loras.properties.style.properties), ['enabled']);
+    await assert.rejects(catalog.prepare('portrait', { prompt: 'x', steps: 10 }), /Étapes : valeur fixée par ce workflow/);
+    // The user changes it for one creation (the Studio, the card of a proposal), within those bounds.
+    assert.equal((await catalog.prepare('portrait', { prompt: 'x' }, { seed: 1, overrides: { steps: 10 } })).job.parameters.steps, 10);
+    await assert.rejects(catalog.prepare('portrait', { prompt: 'x' }, { seed: 1, overrides: { steps: 13 } }), /Étapes : entre 1 et 12\./);
+    // Sent by a page of before, it is kept so too.
+    const saved = await catalog.save(before);
+    assert.deepEqual(saved.parameters.steps, { policy: 'fixed', value: 8, min: 1, max: 12 });
+    assert.deepEqual(JSON.parse(await readFile(join(directory, 'portrait.json'), 'utf8')).parameters.steps, saved.parameters.steps);
+    // Nothing of it left so: the workflow itself, untouched.
+    const { ownSettings } = await import('../lib/native-workflows.mjs');
+    assert.equal(ownSettings(saved), saved);
+  });
+});
+
+test('what the list says of a workflow the user edited: the values Moodix ships, « de base » on its page; none of it is kept with the workflow', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'atelier-native-'));
+  try {
+    const builtin = join(root, 'shipped'),
+      user = join(root, 'workflow');
+    await mkdir(builtin);
+    const shipped = fixture();
+    await writeFile(join(builtin, 'portrait.json'), JSON.stringify(shipped));
+    const catalog = new NativeWorkflowCatalog(user, {
+      assets,
+      capabilities: { krea2: { ready: true } },
+      builtin,
+      statePath: join(root, 'state.json'),
+    });
+    // As shipped: nothing to say, its own values are the base.
+    assert.equal(Object.hasOwn((await catalog.list())[0], 'base'), false);
+    const mine = fixture();
+    mine.parameters.steps = { policy: 'fixed', value: 12 };
+    mine.description = 'Mes portraits';
+    await catalog.save(mine);
+    const [listed] = await catalog.list();
+    assert.deepEqual([listed.customized, listed.parameters.steps.value], [true, 12]);
+    assert.deepEqual(listed.base, { description: 'For portraits', parameters: shipped.parameters });
+    // Sent back as the page holds it (with what the list said): saved as the workflow alone.
+    await catalog.save({ ...listed, unavailableKind: 'files' });
+    const kept = JSON.parse(await readFile(join(user, 'portrait.json'), 'utf8'));
+    for (const key of ['base', 'unavailableKind', 'customized', 'builtin', 'ready', 'digest'])
+      assert.equal(Object.hasOwn(kept, key), false, key);
+    // Every value of Moodix taken again and saved: Moodix's again, the copy gone.
+    await catalog.save({ ...listed, description: shipped.description, parameters: listed.base.parameters });
+    assert.deepEqual(await readdir(user), []);
+    assert.equal(Object.hasOwn((await catalog.list())[0], 'customized'), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('references use declared roles and staged local files, never model-supplied paths', async () => {

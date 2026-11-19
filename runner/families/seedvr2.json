@@ -129,20 +129,8 @@
         "default": 1,
         "description": "Repeat the upscale; 1 unless the user wants a much larger or stronger result."
       },
-      "steps": {
-        "policy": "model",
-        "type": "integer",
-        "choices": [1, 2, 3, 4],
-        "default": 1,
-        "description": "Restoration steps; 1 is the natural distilled setting, more adds invented detail."
-      },
-      "color_correction": {
-        "policy": "model",
-        "type": "string",
-        "choices": ["lab", "wavelet", "adain", "none"],
-        "default": "lab",
-        "description": "How colours are taken back from the original: lab (faithful), wavelet, adain (light), none."
-      },
+      "steps": { "policy": "fixed", "value": 1 },
+      "color_correction": { "policy": "fixed", "value": "lab" },
       "max_side": {
         "policy": "model",
         "type": "integer",

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { families, family } from '../lib/families.mjs';
 import { effective, resolveNativeWorkflow, validateNativeWorkflow, workflowSchema } from '../lib/native-workflows.mjs';
 import { ToolCatalog } from '../lib/tool-catalog.mjs';
-import { inertSetting, parameterPolicies, settingWarning } from '../public/native-workflow-ui.mjs';
+import { inertSetting, settingWarning } from '../public/native-workflow-ui.mjs';
 
 /*
  * Each setting of the workflow editor (Paramètres › Workflows, the pencil) against what the engine
@@ -251,9 +251,10 @@ test('a prompt is never fixed: the chat and the Studio write one at each creatio
   // (0.6.94: said in French, with what to do.)
   await assert.rejects(
     resolveNativeWorkflow(krea, routed.args, assets),
-    /^Error: Le prompt de ce workflow est fixé : ouvrez-le dans Paramètres › Workflows et enregistrez-le/,
+    /^Error: Le prompt de ce modèle est fixé : dans Paramètres › Modèles, changez un de ses réglages et enregistrez/,
   );
-  // The editor shows it as a line, without a switch (tests/native-workflow-ui.mjs).
+  // (0.6.128) The page of a model has no line for it; a fixed one leaves with the first change
+  // saved there (tests/native-workflow-ui.mjs).
 });
 
 test('the assistant never chooses a seed: « Assistant » was a fixed seed in disguise', async () => {
@@ -267,7 +268,7 @@ test('the assistant never chooses a seed: « Assistant » was a fixed seed in di
   assert.equal(routed.args.seed, undefined);
   assert.equal(routed.seed, undefined);
   assert.equal((await resolveNativeWorkflow(krea, routed.args, assets)).parameters.seed, 5, 'always its default');
-  assert.deepEqual(parameterPolicies('seed'), ['fixed', 'random']);
+  // (0.6.128) The page of a model has no line for the seed: it is the request's, drawn or named.
 });
 
 test('a family without LoRAs refuses one on save: the editor offers none (tests/native-workflow-ui.mjs)', () => {

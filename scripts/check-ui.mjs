@@ -790,13 +790,16 @@ try {
   // Every line is 46 px tall, « Télécharger » in the place of the version as any other (capture 65);
   // nothing scrolls sideways, nothing of before is shown (no button to import or create, no dot).
   await run('Modèles : lignes de 46 px', async () => {}, () =>
-    js(`(() => { const rows = [...document.querySelectorAll('#workflow-list .model-row')], panel = document.getElementById('settings-panel-workflows'), gone = id => { const box = document.getElementById(id).getBoundingClientRect(); return !box.width && !box.height; }; return rows.length === 10 && rows.every(row => Math.round(row.getBoundingClientRect().height) === 46) && panel.scrollWidth <= panel.clientWidth + 1 && gone('workflow-add') && gone('native-workflow-import') && !document.querySelector('#workflow-list .workflow-state') && document.querySelectorAll('#workflow-list .model-download').length >= 5; })()`), { within: 700 });
+    js(`(() => { const rows = [...document.querySelectorAll('#workflow-list .model-row')], panel = document.getElementById('settings-panel-workflows'), gone = id => !document.getElementById(id); return rows.length === 10 && rows.every(row => Math.round(row.getBoundingClientRect().height) === 46) && panel.scrollWidth <= panel.clientWidth + 1 && gone('workflow-add') && gone('native-workflow-import') && !document.querySelector('#workflow-list .workflow-state') && document.querySelectorAll('#workflow-list .model-download').length >= 5; })()`), { within: 700 });
   // The chevron unfolds the versions under the line, which stays as tall; « Réglages » is then in sight.
   await run('Modèles : versions dépliées', () => click('#workflow-list .model-line[data-model="LTX 2.5"] .model-chevron'), () =>
     js(`(() => { const line = ${ltx}; return line?.dataset.open === 'true' && Boolean(line.querySelector('.model-versions')) && Math.round(line.querySelector('.model-row').getBoundingClientRect().height) === 46 && line.querySelector('.model-chevron').getAttribute('aria-expanded') === 'true' && getComputedStyle(line.querySelector('.model-settings')).opacity === '1'; })()`), { within: 700 });
-  // The page of details of a model, behind « Réglages »: the editor of before, named after the model.
+  // The page of a model, behind « Réglages », named after it (0.6.128: « Proposé à Moodix AI » at its
+  // head, a line of 46 px a file and a setting, neither « Fixe » nor « Assistant »).
   await run('éditeur de modèle', () => click('#workflow-list .model-line[data-model="LTX 2.5"] .model-settings'), () =>
     js(`!document.getElementById('workflow-editor').hidden && document.getElementById('native-workflow-title').textContent === 'Réglages de LTX 2.5' && ${editorBody}.scrollHeight > ${editorBody}.clientHeight + 200`), { within: 1500 });
+  await run('éditeur : une ligne par fichier et par réglage', async () => {}, () =>
+    js(`(() => { const lines = [...document.querySelectorAll('#native-workflow-components .set-line, #native-workflow-parameters .set-line')], hero = document.getElementById('native-workflow-hero').getBoundingClientRect(), body = ${editorBody}; return lines.length >= 15 && lines.every(line => Math.round(line.getBoundingClientRect().height) === 46) && hero.height > 100 && document.getElementById('native-workflow-enabled').checked && body.scrollWidth <= body.clientWidth + 1 && !document.querySelector('#workflow-editor .native-policy-switch') && /choisit le format, la durée/.test(document.getElementById('native-workflow-chosen').textContent) && document.querySelector('#native-value-steps').disabled && document.querySelectorAll('#workflow-editor .set-line > .help-tip').length >= 15; })()`), { within: 700 });
   await run('éditeur : molette', async () => {
     await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 640, y: 400, deltaX: 0, deltaY: 600 });
   }, () => js(`${editorBody}.scrollTop > 100`), { within: 700 });
@@ -805,7 +808,13 @@ try {
     await key('End', 'End', 35);
   }, () => js(`${editorBody}.scrollTop >= ${editorBody}.scrollHeight - ${editorBody}.clientHeight - 2`), { within: 1500 });
   // Back at the top, the foot is in sight (it never left: the body alone scrolls).
-  await run('éditeur : touche Début, pied en vue', () => key('Home', 'Home', 36), () =>
+  // (0.6.128) The scroll « Fin » started is left to end first: the step before is answered two pixels
+  // from the bottom, while it still glides, and a « Début » pressed then was lost two runs in three
+  // (the page stayed at the bottom) once the page of a model was short enough for that to show.
+  await run('éditeur : touche Début, pied en vue', async () => {
+    await wait(400);
+    await key('Home', 'Home', 36);
+  }, () =>
     js(`(() => { const save = document.getElementById('native-workflow-save').getBoundingClientRect(), frame = document.getElementById('settings').getBoundingClientRect(); return ${editorBody}.scrollTop === 0 && save.height > 0 && save.bottom <= frame.bottom && save.bottom <= innerHeight; })()`), { within: 1500 });
   // « Retour » : nothing was changed, the page « Modèles » is there again, its line still unfolded.
   await run('quitter l’éditeur', () => click('#native-workflow-back'), () =>

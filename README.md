@@ -105,13 +105,11 @@ Workflows shipped with Moodix:
 
 **One engine.** Every workflow runs on Moodix's own Python engine (`runner/`), **MOSS Image** included since 0.6.124: no other program has to run beside Moodix. See [runner/README.md](runner/README.md) for the engine.
 
-**Workflows** are small JSON files, created and edited in **Paramètres › Workflows**. The shipped ones live in `runner/workflows/` and come with every download and update. Your own workflows, and your edits of shipped ones, are saved in `workflow/`, which updates never touch. When an update brings a new version of a workflow you edited, or one named like yours, the new one is listed beside yours as « … V2 » (then V3…). A shipped workflow cannot be deleted, only disabled or edited; **Rétablir** brings an edited one back to its shipped version. A workflow selects its model files, LoRAs and reference slots, and decides who controls each parameter:
+**Models** are set in **Paramètres › Modèles**: one line a model, the version it uses, its versions under the chevron, and **Réglages** for its page. Each model is a small JSON file (a workflow): the shipped ones live in `runner/workflows/` and come with every download and update; what you change of one is saved in `workflow/`, which updates never touch, and **Rétablir les réglages de Moodix** takes the shipped one back. The page of a model has three parts:
 
-- **Fixe**: your value, invisible to the assistant;
-- **Assistant**: the assistant chooses within your limits;
-- **Aléatoire**: a seed drawn once, before approval.
-
-The description you write is what the assistant reads to choose a workflow. **Importer un workflow** pre-fills the editor from a Moodix JSON or a ComfyUI API or editor file; importing never runs anything, and settings the engine cannot execute stay visible under **Réglages source**. Each workflow shows its state as a dot: green when ready, orange or red when something is missing, blue while its files download, hollow when disabled. Hover the dot to read why.
+- **Proposé à Moodix AI** (on by default): the assistant may choose this model, from the sentence you write there (« Il le choisit pour »). It then writes the prompt and chooses what is part of a request: the size or the format, the length, a draft or a final, the denoise of an image to modify. Off, the model is still yours in the Studio.
+- **Fichiers**: one line a file, with **Parcourir** and **Détecter** (the file found by itself in the models folder); where it comes from is under its « ? ».
+- **Réglages**: one line a setting (steps, guidance, shift, frames a second…), at the value Moodix gives it. They are yours alone: the assistant never changes them, and you may change one for a single creation in the Studio. A value you changed says « Valeur de base » beside it, and **Remettre les valeurs de base** takes them all back. A LoRA you add is always on, off, or left to the assistant's choice.
 
 ## Models
 
@@ -182,7 +180,7 @@ Code style: Prettier (`.prettierrc.json`) for new JavaScript and CSS files; neve
 
 - **The chat model does not start:** **Paramètres › Application › Diagnostic** shows the engine's last messages. An unknown option or architecture usually means an outdated llama.cpp build: install the official one from **Paramètres › Mise à jour › Composants**.
 - **Out of memory:** stop the model, reduce **Contexte total**, or lower **Calcul** to place less of the model on the graphics card.
-- **A creation is not offered:** check that generation is enabled, its environment is ready, at least one workflow is green, and the chat model supports native tool calls.
+- **A creation is not offered:** check that generation is enabled, its environment is ready, at least one model is ready in **Paramètres › Modèles**, and the chat model supports native tool calls.
 - **MOSS Image unavailable:** one of its four files is missing (model, Qwen3.5 text encoder, its tokenizer folder, FLUX.2 VAE): **Paramètres › Modèles** offers the download, or says which file it could not read.
 - **Port in use:** another instance may be using 8787.
 - **The update fails:** run the [rescue update](#rescue-update) from the application folder.

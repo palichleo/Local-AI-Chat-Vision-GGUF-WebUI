@@ -10,6 +10,7 @@ import { familyCatalog } from '../lib/families.mjs';
 import { CAPABLE } from '../lib/model-wording.mjs';
 import {
   NativeWorkflowCatalog,
+  ownSettings,
   resolveNativeWorkflow,
   validateNativeWorkflow,
   workflowFingerprint,
@@ -452,7 +453,7 @@ test('an « Assistant » setting saved without a default takes the value its fam
   await assert.rejects(ask(msr, 'create_video', { prompt: 'Un renard court', intention: 'Essai', duration: 2 }), {
     status: 400,
     message:
-      'Influence des références MSR : aucune valeur donnée, et ce workflow n’en a pas par défaut. Choisissez-en une dans Paramètres › Workflows.',
+      'Influence des références MSR : aucune valeur donnée, et ce modèle n’en a pas par défaut. Choisissez-en une dans ses réglages (Paramètres › Modèles).',
   });
 });
 
@@ -475,21 +476,11 @@ test('Chat · the card of a proposal lets the user change a « Fixe » setting t
     asked = await ask(wa, 'create_audio', { prompt: 'Une porte qui grince', seconds: 3 });
   assert.deepEqual(editableOf(asked, 'steps'), { key: 'steps', value: 100, type: 'integer', min: 50, max: 120 });
   await assert.rejects(revise(wa, asked, { steps: 180 }), /Étapes : entre 50 et 120\./);
-  // (0.6.102) Turned « Fixe » in the editor, it keeps them: they were given up for those of the
-  // family (1 to 200), wider than those « Assistant » had. The editor shows them under « Fixe » too.
-  const listed = { ...assistant, builtin: true },
-    editor = await editorPage([listed]);
-  let saved;
-  try {
-    assert.equal(await editor.ui.edit(listed), true);
-    editor.$('native-policy-steps').value = 'fixed';
-    editor.$('native-policy-steps').onchange();
-    assert.equal(editor.$('native-min-steps').parent.parent.hidden, false, 'Minimum and Maximum shown for « Fixe »');
-    assert.equal(await editor.ui.saveEditor(), true);
-    [saved] = editor.saves;
-  } finally {
-    editor.restore();
-  }
+  // (0.6.102) Turned « Fixe », it keeps them: they were given up for those of the family (1 to
+  // 200), wider than those « Assistant » had. (0.6.128) No switch turns it any more: a setting is
+  // never left to Moodix AI, and the catalog reads one a workflow of before left to it as « Fixe »
+  // at its default, within those same bounds (ownSettings; the Studio's for one creation).
+  const saved = ownSettings(assistant);
   assert.deepEqual(saved.parameters.steps, { policy: 'fixed', value: 100, min: 50, max: 120 });
   const ws = world([{ ...validateNativeWorkflow(saved), ready: true }]),
     held = await ask(ws, 'create_audio', { prompt: 'Une porte qui grince', seconds: 3, steps: 110 });
@@ -673,13 +664,14 @@ test('a reference slot has no « Description » in the editor any more, it reach
     ask(world([asked]), 'create_image', { prompt: 'Un renard' }),
     /Aucun workflow ne correspond à ces entrées pour create_image\. .*« Source image » est obligatoire dans ce workflow/,
   );
-  // (0.6.102) The editor asks nothing of it any more; what a workflow holds of it stays as it was:
+  // (0.6.102) The editor asks nothing of it any more; (0.6.128) the page of a model has no line
+  // for a slot at all: its inputs are the model's. What a workflow holds of them stays as it was:
   // saved untouched, it is the same workflow.
   const editor = await editorPage([asked]);
   try {
     assert.equal(await editor.ui.edit(asked), true);
-    assert.ok(editor.$('native-reference-name-' + source.id), 'the slot is there');
-    assert.equal(editor.$('native-reference-description-' + source.id), null, 'without its « Description »');
+    assert.equal(editor.$('native-reference-name-' + source.id), null, 'no line for the slot');
+    assert.equal(editor.$('native-reference-description-' + source.id), null, 'nor for its « Description »');
     assert.equal(await editor.ui.saveEditor(), true);
     assert.equal(editor.saves[0].references[0].description, 'CONSIGNE-REFERENCE');
     assert.equal(workflowFingerprint(editor.saves[0]), workflowFingerprint(asked));
@@ -1009,7 +1001,7 @@ test('Studio · a setting on or off (« Audio » of LTX 2.5) is a switch, sent a
   }
 });
 
-test('« Disponible pour l’assistant » unticked takes the workflow out of Moodix AI’s tools only: the Studio and the buttons of a take keep it', async () => {
+test('« Proposé à Moodix AI » off takes the workflow out of Moodix AI’s tools only: the Studio and the buttons of a take keep it', async () => {
   // (0.6.94) It was gone from the Studio too, which the box does not say.
   const user = await mkdtemp(join(tmpdir(), 'moodix-lot6-'));
   try {
@@ -1049,7 +1041,7 @@ test('« Disponible pour l’assistant » unticked takes the workflow out of Moo
     await assert.rejects(ask(w, 'create_image', { prompt: 'Un renard', workflow: krea.id }), /ne peut pas exécuter create_image/);
     await assert.rejects(resolveNativeWorkflow(listed, { prompt: 'Un renard' }, files), {
       status: 400,
-      message: 'Krea 2 n’est pas proposé à Moodix AI : cochez « Disponible pour l’assistant » dans Paramètres › Workflows.',
+      message: 'Krea 2 n’est pas proposé à Moodix AI : activez « Proposé à Moodix AI » dans ses réglages (Paramètres › Modèles).',
     });
     // The page of the Studio makes it at « Générer ».
     const page = await studioPage(w);
@@ -1065,7 +1057,7 @@ test('« Disponible pour l’assistant » unticked takes the workflow out of Moo
       // (0.6.119: under its description, on the page « Modèles ».)
       const under = root => [root, ...root.children.flatMap(child => under(child))],
         line = under(editor.$('workflow-list')).find(item => item.className === 'model-line' && item.dataset.model === 'Krea 2');
-      assert.deepEqual(under(line).filter(item => item.className === 'model-note').map(item => item.textContent), ['Pas proposé à l’assistant : il reste dans le Studio.']);
+      assert.deepEqual(under(line).filter(item => item.className === 'model-note').map(item => item.textContent), ['Pas proposé à Moodix AI : il reste dans le Studio.']);
     } finally {
       editor.restore();
     }
@@ -1221,22 +1213,13 @@ test('« Fixe » on « Débruitage » of Krea 2, saved, outlives the next start 
   // (0.6.94) It was deleted at the next start (adoptShipped), the shipped one back without a word.
   const krea = stored('krea2');
   assert.equal(krea.parameters.denoise.policy, 'model', 'shipped: left to the assistant, 0.6 to 0.7');
-  // The editor of Paramètres › Workflows: « Fixe » pressed on « Débruitage », nothing else, « Enregistrer ».
-  const listed = { ...validateNativeWorkflow(krea), ready: true, builtin: true },
-    editor = await editorPage([listed]);
-  let record;
-  try {
-    assert.equal(await editor.ui.edit(listed), true);
-    editor.$('native-policy-denoise').value = 'fixed';
-    editor.$('native-policy-denoise').onchange();
-    assert.equal(await editor.ui.saveEditor(), true);
-    [record] = editor.saves;
-  } finally {
-    editor.restore();
-  }
-  // The value it showed, the default of before, within the bounds of before (0.6.102: « Fixe » keeps
-  // those of « Assistant », the user's to change it within for a creation).
-  assert.deepEqual(record.parameters.denoise, { policy: 'fixed', value: 0.6, min: 0.6, max: 0.7 });
+  // Until 0.6.127 the editor had « Fixe » to press on « Débruitage »: saved so, it kept the value it
+  // showed, the default of before, within the bounds of before (0.6.102). (0.6.128) The page of a
+  // model has no such switch: the denoise is Moodix AI's while the model is offered to it; a copy
+  // saved so before is still the user's, as it is.
+  const { digest, ...own } = validateNativeWorkflow(krea),
+    record = { ...own, parameters: { ...own.parameters, denoise: { policy: 'fixed', value: 0.6, min: 0.6, max: 0.7 } } };
+  assert.equal(digest.length, 64);
   // « Fixe 0,6 » without them is, to the byte, the Krea 2 shipped with 0.6.69 (runner/workflow-
   // history.json knows it), as « Fixe 0,75 » is that of 0.6.68 and « Fixe 1 » that of an earlier one.
   const known = JSON.parse(readFileSync(HISTORY, 'utf8')).workflows[krea.id];
@@ -1337,16 +1320,19 @@ test('the catalog keeps when the user changed each part of a workflow, for the S
   }
 });
 
-test('the editor says in one sentence what « Fixe » and « Assistant » do, and keeps no field that changes nothing', async () => {
+test('the page of a model has no « Fixe » nor « Assistant » to press and says who chooses what in one sentence; it keeps no field that changes nothing', async () => {
+  // (0.6.102) One sentence said what « Fixe » and « Assistant » did. (0.6.128) Neither is there any
+  // more: a setting is the user's, what is part of a request is Moodix AI's while the model is
+  // offered to it, and the page says so under « Proposé à Moodix AI ».
   const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
-  assert.match(
-    html,
-    /<p id="native-policy-help" class="field-help">Fixe : Moodix AI garde la valeur indiquée ; Assistant : Moodix AI la choisit entre les limites indiquées ; dans les deux cas, vous pouvez la changer pour une création, dans le Studio ou sur la carte d’une proposition\.<\/p><div id="native-workflow-parameters">/,
-  );
-  // Neither « Description » for a reference, nor « Assistant » for a file (0.6.102).
+  assert.doesNotMatch(html, /native-policy-help|Fixe : Moodix AI garde/);
+  assert.match(html, /<p id="native-workflow-chosen" class="model-hero-text is-next" hidden><\/p>/);
   const ui = readFileSync(new URL('../public/native-workflow-ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /' ; les réglages plus bas restent les vôtres\.'/);
+  // Neither « Description » for a reference, nor « Assistant » for a file (0.6.102), nor a switch
+  // of ownership or bounds for anything (0.6.128).
   assert.doesNotMatch(ui, /native-reference-description-/);
-  assert.doesNotMatch(ui, /'-policy',\s*\[\s*\['fixed'/);
+  assert.doesNotMatch(ui, /'-policy-'|'-min-'|'-max-'|'-use-default-'/);
 });
 
 test('Paramètres closed without « Enregistrer »: every field of Génération it saves is watched, a change of one alone is asked about', () => {
@@ -1401,11 +1387,16 @@ test('a policy saved is read again after a start, and a workflow whose file is m
         capabilities: { moss_sfx: true },
       });
     const sfx = stored('moss_sfx'),
+      seconds = { policy: 'model', type: 'number', default: 5, min: 1, max: 20, description: 'Court pour un choc.' },
       steps = { policy: 'model', type: 'integer', default: 100, min: 50, max: 120, description: 'Plus pour un son net.' };
-    await catalog().save({ ...sfx, parameters: { ...sfx.parameters, steps } });
+    await catalog().save({ ...sfx, parameters: { ...sfx.parameters, seconds, steps } });
     const again = catalog();
     await again.adoptShipped();
-    assert.deepEqual((await again.list()).find(item => item.id === sfx.id).parameters.steps, steps);
+    const read = (await again.list()).find(item => item.id === sfx.id).parameters;
+    assert.deepEqual(read.seconds, seconds);
+    // (0.6.128) A setting is never left to Moodix AI: sent so by a page of before, it is kept « Fixe »
+    // at its default, within the bounds it had.
+    assert.deepEqual(read.steps, { policy: 'fixed', value: 100, min: 50, max: 120 });
     // Its sound model not downloaded yet: no setting of it can be changed (the save checks every file).
     const absent = {
       resolve: async () => {

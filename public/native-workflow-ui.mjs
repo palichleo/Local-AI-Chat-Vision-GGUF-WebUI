@@ -11,13 +11,12 @@ import {
   speedOf,
   versionData,
 } from './models-page.mjs';
-import { CHOICE_NAMES, SETTING_NAMES } from './setting-names.mjs';
+import { CHOICE_NAMES, SETTING_HELP, SETTING_NAMES, isSetting } from './setting-names.mjs';
 
 // Interface wording for parameters; component, role and family labels come from the family manifests.
 // (0.6.94) In their own module: the server names a setting it refuses the way this editor does.
 const labels = SETTING_NAMES;
 const choiceLabels = CHOICE_NAMES;
-const ownership = { fixed: 'Fixe', model: 'Assistant', random: 'Aléatoire' };
 // Each folder setting: its field, and the folder it shows when nothing is set (`folders` of
 // the server). The first is the models directory; the others, a folder apart for one kind of file.
 const folderControls = {
@@ -33,9 +32,6 @@ const folderControls = {
 // What an optional component that is used, but left to the folders of the settings, holds in
 // place of a file: an id no file is registered under, so the server looks in the folders.
 const AUTOMATIC = 'automatic';
-// The assistant never chooses a seed (tool-catalog.mjs: it passes one only when the user names it,
-// and only to a workflow that draws its own): « Assistant » would have been a fixed seed in disguise.
-export const parameterPolicies = name => (name === 'seed' ? ['fixed', 'random'] : ['fixed', 'model']);
 /** The versions (draft, final) a workflow can be made at: its profiles apply only to these. */
 function stagesOf(manifest, workflow) {
   const stage = workflow.parameters?.stage;
@@ -124,21 +120,11 @@ export function setupNativeWorkflows(options) {
       .find(Boolean) ||
     labels[role] ||
     role;
-  const roleLabel = role =>
-    ownFirst()
-      .map(item => item.roles[role]?.label)
-      .find(Boolean) || 'Usage à définir';
   const parameterSpec = name => familyOf(draft?.pipeline)?.parameters[name] || {};
   const typeFor = (name, policy) =>
     parameterSpec(name).type ||
     policy.type ||
     (typeof policy.value === 'boolean' ? 'boolean' : typeof policy.value === 'string' ? 'string' : 'number');
-  const familyLabel = name => {
-    const item = familyOf(name);
-    return item
-      ? `${{ image: 'Image', video: 'Vidéo', audio: 'Son' }[item.mediaType] || item.mediaType} · ${item.label}`
-      : 'Moteur à choisir';
-  };
   let workflows = [],
     assets = [],
     folders = {},
@@ -147,23 +133,26 @@ export function setupNativeWorkflows(options) {
     working = false,
     version = 0,
     refreshVersion = 0,
-    controller = new AbortController(),
-    pendingPipeline = '';
+    controller = new AbortController();
   let draft = null,
     baseline = '',
-    isNew = false,
+    // What Moodix ships of the open workflow when the user changed nothing of it (baseOf), and the
+    // name of its model on the page.
+    opened = null,
+    shownName = '',
     returnFocus = null,
     parentScroll = 0,
     afterBack,
     readComponents = [],
     readParameters = [],
     readLoras = [],
-    readReferences = [],
-    readProfiles = [],
     readEnhance = null,
-    // The controls of the parameters by name, and the fields of the profiles: what refreshInert greys.
+    // The lines of the settings by name (what refreshInert warns of), every line that holds a
+    // value (what « Remettre les valeurs de base » takes back), and what the lines of the draft
+    // and the final write into the profiles.
     parameterControls = {},
-    profileFields = [],
+    valueLines = [],
+    profileWriters = [],
     // While the editor is drawn, refreshInert waits for the end (renderEditor calls it once).
     rendering = false,
     // Shipped workflows the user deleted (hidden until an update changes them).
@@ -222,37 +211,6 @@ export function setupNativeWorkflows(options) {
     control.value = value ?? '';
     return control;
   };
-  const segmented = (id, items, initial) => {
-    const control = element('div', id);
-    control.className = 'native-policy-switch';
-    control.setAttribute('role', 'group');
-    let selected = initial;
-    const buttons = items.map(([key, label]) => {
-      const choice = button(label, () => {
-        control.value = key;
-        control.onchange?.();
-      });
-      choice.setAttribute('aria-pressed', String(key === selected));
-      control.append(choice);
-      return [key, choice];
-    });
-    Object.defineProperty(control, 'value', {
-      get: () => selected,
-      set: value => {
-        selected = value;
-        for (const [key, choice] of buttons) choice.setAttribute('aria-pressed', String(key === value));
-      },
-    });
-    return control;
-  };
-  const field = (label, control) => {
-    const group = node('div', 'field-group'),
-      caption = node('label', '', label);
-    if (control.getAttribute('role') === 'group') control.setAttribute('aria-label', label);
-    else if (control.id) caption.setAttribute('for', control.id);
-    group.append(caption, control);
-    return group;
-  };
   function error(message) {
     $('native-workflow-error').textContent = message;
     $('native-workflow-error').hidden = !message;
@@ -275,9 +233,6 @@ export function setupNativeWorkflows(options) {
             'generation-review-images',
             'generation-review',
             'generation-test',
-            'workflow-add',
-            'native-workflow-import',
-            'native-workflow-file',
             'native-convert-root',
             'native-convert-root-browse',
             'generation-vae-root',
@@ -473,9 +428,11 @@ export function setupNativeWorkflows(options) {
       importStatus(failure.message, true);
     }
   }
+  /** What a workflow of a model that has several makes (Real-ESRGAN: images, videos). */
+  const kindOf = record => ({ video: 'Vidéos', audio: 'Sons' })[record.mediaType] ?? 'Images';
   /** « Réglages » (the sliders): the page of details of a model, the one behind the pencil of before. */
   function settingsControl(record, name) {
-    const open = button('', () => edit(record), 'model-settings');
+    const open = button('', () => edit(record, { name }), 'model-settings');
     open.append(icon('sliders'));
     open.setAttribute('aria-label', 'Réglages de ' + name);
     open.title = 'Réglages de ' + name;
@@ -514,10 +471,9 @@ export function setupNativeWorkflows(options) {
   /** The versions of a model, unfolded under its line; a model in several workflows says which is which. */
   function versionsBlock(model, shown) {
     const block = node('div', 'model-versions'),
-      several = shown.records.length > 1,
-      kind = record => ({ video: 'Vidéos', audio: 'Sons' })[record.mediaType] ?? 'Images';
+      several = shown.records.length > 1;
     for (const [entry, record] of shown.records) {
-      const extra = several ? kind(record) : '';
+      const extra = several ? kindOf(record) : '';
       if (Array.isArray(entry.versions) && entry.versions.length)
         for (const version of entry.versions) block.append(versionRow(entry, version, extra));
       else {
@@ -530,7 +486,7 @@ export function setupNativeWorkflows(options) {
         else row.dataset.unavailable = 'true';
         row.append(node('span', 'model-version-name', name), node('span', 'model-version-data', extra));
         if (record.ready !== false) row.append(node('span', 'model-version-used', 'Utilisée'));
-        if (several) row.append(settingsControl(record, record.name));
+        if (several) row.append(settingsControl(record, `${model.name} · ${kindOf(record)}`));
         block.append(row);
       }
       // Settings the user changed (« Réglages »): back to those Moodix ships.
@@ -595,7 +551,11 @@ export function setupNativeWorkflows(options) {
       side.append(node('span', 'model-version', shown.label.join(' · ')));
     }
     row.append(node('strong', 'model-name', model.name), about, side);
-    if (first) row.append(settingsControl(first, model.name));
+    // (A model of several workflows: « Réglages » of its line are those of the first, and say so.)
+    if (first)
+      row.append(
+        settingsControl(first, shown.records.length > 1 ? `${model.name} · ${kindOf(first)}` : model.name),
+      );
     const chevron = button(
       '',
       () => {
@@ -700,17 +660,7 @@ export function setupNativeWorkflows(options) {
     if (downloads.job?.state === 'running') followDownload();
     assets = result.assets || assets;
     folders = result.folders || folders;
-    if (result.families) {
-      families = result.families;
-      const option = (value, text) => Object.assign(document.createElement('option'), { value, textContent: text });
-      $('native-workflow-pipeline').replaceChildren(
-        option('', 'Choisir un moteur…'),
-        ...families.map(item => option(item.family, familyLabel(item.family))),
-      );
-      // A list rebuilt shows its first line: read again while a workflow is edited (the engine just
-      // ready, a download ended), it said « Choisir un moteur… » for a workflow that has one.
-      if (draft) $('native-workflow-pipeline').value = draft.pipeline;
-    }
+    if (result.families) families = result.families;
     runner = result.runner || runner;
     const config = result.config;
     if (config) {
@@ -748,14 +698,43 @@ export function setupNativeWorkflows(options) {
   async function browse(kind, initialPath, signal) {
     return (await (await api('files/choose', { kind, initialPath }, { signal })).json()).path;
   }
+  // ------------------------------------------------------------------ The page of a model (0.6.128)
+  // Maquette v2 du 19/11 : « Proposé à Moodix AI » en tête, puis une ligne par fichier (son nom, le
+  // fichier, « Parcourir », « Détecter », « ? ») et une ligne par réglage (son nom, sa valeur, « ? »).
+  // Un réglage est à l'utilisateur, jamais à Moodix AI (ownSettings, lib/native-workflows.mjs) : plus
+  // de « Fixe / Assistant », plus de bornes. Ce qui fait partie d'une demande (ASKED : le prompt, la
+  // taille, la durée…) n'est pas sur cette page, et reste dans le workflow tel qu'il est écrit.
+  /** « ? » at the end of a line: its help under the pointer and on the focus (help-tips.mjs). */
+  function setHelp(mark, text) {
+    mark.setAttribute('aria-label', 'Aide : ' + text);
+    mark.dataset.help = text;
+    mark.hidden = !text;
+    onHelpChange(mark);
+  }
+  function helpMark(text = '') {
+    const mark = node('span', 'help-tip set-help', '?');
+    mark.tabIndex = 0;
+    mark.setAttribute('role', 'img');
+    setHelp(mark, text);
+    return mark;
+  }
+  /** A value as a line writes it: « 0,7 », « Brouillon », « activé », « aucun ». */
+  const shownValue = value =>
+    typeof value === 'boolean'
+      ? value
+        ? 'activé'
+        : 'désactivé'
+      : value === ''
+        ? 'aucun'
+        : (choiceLabels[value] ?? String(value).replace('.', ','));
   /**
-   * One field per file: pick a registered file from its suggestions, paste a path, or browse.
-   * The chosen asset id is kept in a hidden control (`control`, whose onchange other parts of
-   * the editor listen to); the visible field shows the file's name.
+   * The file of a line: pick a registered file from its suggestions, paste a path, or browse.
+   * The chosen asset id is kept in a hidden control (`control`, whose onchange other parts of the
+   * page listen to); the visible field shows the file's name. `detects`: whether the folders of the
+   * settings can answer for it (a file of the model; never a LoRA the user adds).
    */
-  function assetPicker(role, id, value) {
+  function assetPicker(role, id, value, { detects = true, about = '', named = componentLabel(role) } = {}) {
     const spec = familyOf(draft.pipeline)?.components[role] || {},
-      container = node('div', 'native-asset-picker'),
       folder = ['tokenizer', 'pipeline'].includes(spec.format),
       compatibleAssets = () =>
         assets.filter(
@@ -768,34 +747,49 @@ export function setupNativeWorkflows(options) {
       list = element('datalist', id + '-files'),
       // Left without a file, such a component takes the one the folders of the settings hold
       // for it (the server names it in `automatic`): it is a choice, not something missing.
-      automatic = spec.format === 'tokenizer' || Boolean(spec.signature?.length),
-      found = draft.automatic?.[role] || '',
-      replaced = node('p', 'field-help', ''),
-      hint = folder ? 'Choisir un dossier ou coller son chemin…' : 'Choisir un fichier ou coller son chemin…',
-      unset = automatic ? 'Automatique' + (found ? ' : ' + found : '') + ' · ou ' + hint.toLowerCase() : hint;
+      automatic = detects && (spec.format === 'tokenizer' || Boolean(spec.signature?.length)),
+      found = (detects && draft.automatic?.[role]) || '',
+      help = helpMark(),
+      hint = folder ? 'Choisir un dossier…' : 'Choisir un fichier…';
     const fileName = path => path?.split(/[\\/]/).pop() || '';
     // Two files of the same name (in different folders) are told apart by their folder.
     function display(assetId) {
       const asset = assets.find(item => item.id === assetId);
-      if (!asset) return assetId ? draft.importDraft?.files[assetId] || 'Fichier à retrouver' : '';
+      if (!asset) return assetId ? 'Fichier à retrouver' : '';
       const name = asset.name || fileName(asset.path),
         twins = compatibleAssets().filter(item => item.id !== asset.id && (item.name || fileName(item.path)) === name);
       return twins.length ? `${name} (${fileName(asset.path?.replace(/[\\/][^\\/]*$/, ''))})` : name;
     }
+    // The file the workflow names is not where it was: the one the folders hold stands in for it,
+    // and is the one the line names (until 0.6.127 : « Ce fichier n’est plus à sa place : X le
+    // remplace », said of a file found by itself under its own name).
+    const stoodIn = () => Boolean(control.value && found && control.value === value);
+    /** Where the file comes from, for the « ? » of the line. */
+    function where() {
+      if (stoodIn()) return `Pris dans le dossier des modèles : ${found}.`;
+      if (control.value) return assets.find(item => item.id === control.value)?.path || '';
+      if (!automatic) return '';
+      return found
+        ? `Trouvé seul dans le dossier des modèles : ${found}.`
+        : 'Aucun fichier trouvé dans le dossier des modèles : choisissez-le avec « Parcourir ».';
+    }
     let shown = '';
-    const placeholder = () => (control.value ? hint : unset);
     function show() {
-      shown = display(control.value);
+      shown = stoodIn() ? found : display(control.value);
       field.value = shown;
-      field.placeholder = placeholder();
+      // Found by itself: its name stands where a chosen file's would.
+      field.placeholder = !control.value && automatic && found ? found : hint;
       field.dataset.automatic = String(automatic && !control.value);
-      back.hidden = !automatic || !control.value;
-      // The file chosen is not here any more: the one that stands in for it is named.
-      replaced.textContent =
-        control.value && found && control.value === value
-          ? `Ce fichier n’est plus à sa place : ${found} le remplace, pris dans le dossier des réglages.`
-          : '';
-      replaced.hidden = !replaced.textContent;
+      // « Détecter »: back to the file of the folders, for a component that had one chosen here.
+      // Greyed, and said why, where there is nothing to detect.
+      detect.dataset.unavailable = String(!automatic || !control.value);
+      detect.disabled = busy || working || detect.dataset.unavailable === 'true';
+      detect.title = !automatic
+        ? 'Ce fichier ne se reconnaît pas seul : choisissez-le avec « Parcourir ».'
+        : control.value
+          ? 'Ne plus fixer ce fichier : prendre celui du dossier des modèles.'
+          : 'Déjà pris seul dans le dossier des modèles.';
+      setHelp(help, [about, spec.help, where()].filter(Boolean).join(' '));
       list.replaceChildren(
         ...compatibleAssets().map(asset => {
           const option = element('option');
@@ -808,7 +802,7 @@ export function setupNativeWorkflows(options) {
     field.spellcheck = false;
     field.autocomplete = 'off';
     field.setAttribute('list', id + '-files');
-    field.setAttribute('aria-label', 'Fichier · ' + componentLabel(role));
+    field.setAttribute('aria-label', 'Fichier · ' + named);
     async function register(chosen, signal) {
       if (!chosen) return;
       const result = await (
@@ -850,7 +844,7 @@ export function setupNativeWorkflows(options) {
       if (!final) return;
       if (/[\\/]/.test(text)) return registerTyped(text);
       error(
-        `Aucun fichier « ${text} » : choisissez-le dans la liste, collez son chemin complet ou utilisez Parcourir…`,
+        `Aucun fichier « ${text} » : choisissez-le dans la liste, collez son chemin complet ou utilisez « Parcourir ».`,
       );
     }
     // Focused, the field empties so the suggestions list every file; left empty, it shows the choice again.
@@ -861,10 +855,7 @@ export function setupNativeWorkflows(options) {
       }
     };
     field.onblur = () => {
-      if (!field.value.trim()) {
-        field.value = shown;
-        field.placeholder = placeholder();
-      }
+      if (!field.value.trim()) show();
     };
     field.oninput = () => resolveTyped({ final: false });
     field.onchange = () => resolveTyped({ final: true });
@@ -873,43 +864,49 @@ export function setupNativeWorkflows(options) {
       event.preventDefault();
       resolveTyped({ final: true });
     };
-    const browseButton = button('Parcourir…', async () => {
-      try {
-        await run(async signal =>
-          register(
-            await browse(
-              spec.picker || 'generation',
-              (field.value.trim() !== shown && field.value.trim()) ||
-                assets.find(asset => asset.id === control.value)?.path ||
-                componentFolder(role) ||
-                '',
+    const browseButton = button(
+      'Parcourir',
+      async () => {
+        try {
+          await run(async signal =>
+            register(
+              await browse(
+                spec.picker || 'generation',
+                (field.value.trim() !== shown && field.value.trim()) ||
+                  assets.find(asset => asset.id === control.value)?.path ||
+                  componentFolder(role) ||
+                  '',
+                signal,
+              ),
               signal,
             ),
-            signal,
-          ),
-        );
-      } catch (failure) {
-        if (!controller.signal.aborted) error(failure.message);
-      }
-    });
-    // Back to the file of the settings' folder, for a component that had one chosen here.
-    const back = button('Automatique', () => choose(''));
-    back.title = 'Ne plus fixer ce fichier : prendre celui qui convient dans le dossier des réglages';
-    const row = node('div', 'path-input');
-    row.append(field, browseButton, back, control, list);
-    container.append(row, replaced);
+          );
+        } catch (failure) {
+          if (!controller.signal.aborted) error(failure.message);
+        }
+      },
+      'set-act',
+    );
+    browseButton.setAttribute('aria-label', 'Parcourir · ' + named);
+    const detect = button('Détecter', () => choose(''), 'set-act');
+    detect.setAttribute('aria-label', 'Détecter · ' + named);
     show();
     return {
-      container,
+      field,
+      browse: browseButton,
+      detect,
+      help,
       control,
+      list,
       adopt,
-      // Whether the folders of the settings can answer for this component (see `unset`).
+      show,
+      // Whether the folders of the settings can answer for this component (see `found`).
       automatic,
       selected() {
         const text = field.value.trim();
         if (text && text !== shown)
           throw Error(
-            `Fichier non reconnu pour « ${componentLabel(role)} » : choisissez-le dans la liste, collez son chemin complet ou utilisez Parcourir…`,
+            `Fichier non reconnu pour « ${named} » : choisissez-le dans la liste, collez son chemin complet ou utilisez « Parcourir ».`,
           );
         return control.value;
       },
@@ -949,40 +946,47 @@ export function setupNativeWorkflows(options) {
     }
   }
   /**
-   * A file of the workflow: the one it is made with. (0.6.102) « Assistant » left the files: Moodix
-   * AI was offered bare identifiers, nothing to tell them apart, and the Studio no choice at all. A
-   * workflow saved so shows the file it is made with (its default, else the first allowed), « Enregistrer »
-   * keeps that one.
+   * A control the page shows but that would change nothing: greyed (`dataset.unavailable`, which
+   * setBusy keeps).
    */
-  function componentControl(role, policy, { optional = false, present = true } = {}) {
-    const card = node('div', 'native-component'),
-      id = 'native-component-' + role,
+  function unavailable(control, flag) {
+    control.dataset.unavailable = String(flag);
+    control.disabled = flag || busy || working;
+  }
+  /**
+   * A file of the model on its line: its name, the file it is made with, « Parcourir », « Détecter »
+   * and its « ? ». A component the family can do without has its switch before the « ? ».
+   * (0.6.102) A file is never left to Moodix AI: a workflow saved so shows the file it is made with
+   * (its default, else the first allowed), and « Enregistrer » keeps that one.
+   */
+  function fileLine(role, policy, { optional = false, present = true, name = componentLabel(role) } = {}) {
+    const id = 'native-component-' + role,
+      line = node('div', 'set-line set-file' + (optional ? ' is-optional' : '')),
       picker = assetPicker(
         role,
         id,
         policy.policy === 'model' ? policy.default || policy.choices?.[0] || '' : policy.asset || policy.default,
       ),
+      caption = node('label', 'set-name', name),
       active = input(id + '-enabled', present, 'checkbox');
-    const spec = familyOf(draft.pipeline)?.components[role] || {},
-      // Its name on its line, as when the switch stood at its right; it goes to the field of the file.
-      heading = node('div', 'field-group'),
-      caption = node('label', '', componentLabel(role));
     caption.setAttribute('for', id + '-file');
-    heading.append(caption);
-    card.append(heading, picker.container);
-    if (spec.help) card.append(node('p', 'field-help', spec.help));
+    caption.title = name;
+    line.append(caption, picker.field, picker.browse, picker.detect);
     if (optional) {
-      const label = node('label', 'history-toggle');
-      label.append(active, node('span', '', 'Utiliser ' + componentLabel(role)));
-      card.append(label);
+      const label = node('label', 'history-toggle set-switch');
+      active.setAttribute('aria-label', 'Utiliser ' + name);
+      label.append(active);
+      line.append(label);
       const sync = () => {
-        picker.container.hidden = !active.checked;
+        line.dataset.off = String(!active.checked);
+        for (const control of [picker.field, picker.browse]) unavailable(control, !active.checked);
       };
       active.onchange = sync;
       sync();
     }
+    line.append(picker.help, picker.control, picker.list);
     return {
-      card,
+      line,
       picker,
       read() {
         if (optional && !active.checked) return null;
@@ -998,519 +1002,474 @@ export function setupNativeWorkflows(options) {
     };
   }
   /**
-   * A control the editor shows but that would change nothing: greyed (`dataset.unavailable`, which
-   * setBusy keeps), with each button of a switch.
+   * The value of a setting at the right of its line: a switch, a list or a field. `base`: the value
+   * Moodix gives it; when the user's differs, « Valeur de base : 9 » stands before it, and takes it
+   * again at a click. `get` refuses what is no value, `peek` never does.
    */
-  function unavailable(control, flag) {
-    const all = control.getAttribute?.('role') === 'group' ? [control, ...control.children] : [control];
-    for (const item of all) {
-      item.dataset.unavailable = String(flag);
-      item.disabled = flag || busy || working;
-    }
-  }
-  // `needed`: whether it is used at all as the rest of the workflow stands (a LoRA's strength, off).
-  function primitive(
-    name,
-    policy,
-    prefix = 'native',
-    allowed = parameterPolicies(name),
+  function valueControl({
+    id,
+    title,
+    type,
+    choices,
+    initial,
+    base,
+    maxLength,
+    held = '',
+    lead = '',
     changed = () => {},
-    needed = () => true,
-  ) {
-    const title = prefix === 'native-lora-strength' ? 'Intensité' : labels[name] || name;
-    // A policy a workflow holds that the editor no longer offers (a seed left to the assistant)
-    // stays shown, so it can be changed.
-    const policies = allowed.includes(policy.policy) ? allowed : [...allowed, policy.policy];
-    const type = typeFor(name, policy),
-      card = node('div', 'native-parameter'),
-      owner = segmented(
-        prefix + '-policy-' + name,
-        policies.map(key => [key, ownership[key]]),
-        policy.policy,
+  }) {
+    const side = node('div', 'set-side');
+    // `control`: what holds the value; `shown`: what stands on the line (a switch is in its label).
+    let control, shown, get, set;
+    if (type === 'boolean') {
+      control = input(id, initial ?? false, 'checkbox');
+      shown = node('label', 'history-toggle set-switch');
+      shown.append(control);
+      get = () => control.checked;
+      set = value => {
+        control.checked = Boolean(value);
+      };
+    } else if (choices) {
+      const numeric = typeof choices[0] === 'number';
+      control = shown = select(
+        id,
+        choices.map(choice => [String(choice), shownValue(choice)]),
+        String(initial ?? choices[0]),
       );
-    const initial = policy.policy === 'fixed' ? policy.value : policy.default;
-    const spec =
-      prefix === 'native-lora-strength' ? familyOf(draft.pipeline)?.loras?.strength || {} : parameterSpec(name);
-    const boundsFor = [spec.min ?? spec.choices?.[0] ?? 0, spec.max ?? spec.choices?.at(-1) ?? 100];
-    const enumChoices = policy.choices || (spec.type === 'string' ? spec.choices : null) || null;
-    const value =
-      type === 'boolean'
-        ? input(prefix + '-value-' + name, initial ?? false, 'checkbox')
-        : enumChoices
-          ? select(
-              prefix + '-value-' + name,
-              enumChoices.map(choice => [String(choice), choiceLabels[choice] || String(choice)]),
-              initial ?? enumChoices[0],
-            )
-          : type === 'string'
-            ? element('textarea', prefix + '-value-' + name)
-            : input(prefix + '-value-' + name, initial ?? (name === 'seed' ? 0 : 1), 'number');
-    if (type === 'string' && !enumChoices) {
-      value.value = initial ?? '';
-      value.rows = 3;
-      value.maxLength = policy.maxLength || spec.maxLength || 8000;
+      get = () => (numeric ? Number(control.value) : control.value);
+      set = value => {
+        control.value = String(value);
+      };
+    } else if (type === 'string') {
+      control = shown = input(id, initial ?? '');
+      control.maxLength = maxLength || 8000;
+      control.placeholder = 'aucun';
+      get = () => control.value;
+      set = value => {
+        control.value = value ?? '';
+      };
+    } else {
+      control = shown = input(id, initial ?? '', 'number');
+      control.step = type === 'integer' ? '1' : 'any';
+      get = () => {
+        if (control.value === '') throw Error(title + ' : ajoutez une valeur.');
+        const value = Number(control.value);
+        if (!Number.isFinite(value) || (type === 'integer' && !Number.isInteger(value)))
+          throw Error(title + (type === 'integer' ? ' : un nombre entier.' : ' : un nombre.'));
+        return value;
+      };
+      set = value => {
+        control.value = value ?? '';
+      };
     }
-    if (type === 'integer') value.step = '1';
-    else if (type === 'number') value.step = 'any';
-    const bounds = node('div', 'native-policy-bounds'),
-      min = input(prefix + '-min-' + name, policy.min ?? boundsFor[0], 'number'),
-      max = input(prefix + '-max-' + name, policy.max ?? boundsFor[1], 'number');
-    min.step = max.step = type === 'integer' ? '1' : 'any';
-    // A list of choices has no bounds to narrow: they were shown, and never saved.
-    const ranged = ['integer', 'number'].includes(type) && !enumChoices;
-    // (0.6.102) « Fixe » has its bounds too: those the user may change it within for a creation (in
-    // the Studio, on the card of a proposal), as for « Assistant ». Not a seed's, nor a LoRA's strength.
-    const fixedBounds = ranged && name !== 'seed' && prefix === 'native';
-    if (ranged) bounds.append(field('Minimum', min), field('Maximum', max));
-    const description = input(prefix + '-description-' + name, policy.description || '');
-    description.maxLength = 1000;
-    description.placeholder = 'Consigne pour l’assistant (facultatif)';
-    description.setAttribute('aria-label', 'Indication · ' + (labels[name] || name));
-    const useDefault = input(
-        prefix + '-use-default-' + name,
-        policy.policy === 'fixed' || Object.hasOwn(policy, 'default'),
-        'checkbox',
-      ),
-      defaultLabel = node('label', 'history-toggle');
-    defaultLabel.append(useDefault, node('span', '', 'Préférer une valeur par défaut'));
-    const valueField = field(type === 'boolean' ? 'Activé' : title, value),
-      heading = field(title, owner),
-      // Why a part of it changes nothing, or what it does unexpectedly (setInert).
-      note = node('p', 'field-help native-inert'),
-      // (0.6.94) Left to the assistant without a default, every creation that did not name it was
-      // refused, the Studio's too: said at once, under the box, and the workflow is not saved so.
-      needs = node(
-        'p',
-        'config-error native-needs-default',
-        'Choisissez une valeur par défaut : c’est elle qui sert quand Moodix AI n’en donne pas. Sans elle, ce workflow ne s’enregistre pas.',
-      );
-    heading.className += ' native-parameter-heading';
-    note.hidden = true;
-    needs.hidden = true;
-    // What the family says of the setting whatever its value (when the denoise of Krea 2 applies).
-    const help = spec.help ? [node('p', 'field-help', spec.help)] : [];
-    card.append(heading, defaultLabel, needs, valueField, bounds, description, ...help, note);
-    value.setAttribute('aria-label', title);
-    valueField.children[0].className = 'sr-only';
-    let reasons = {};
-    function setInert(next = reasons) {
-      reasons = next;
-      const shown = owner.value,
-        valueShown = shown === 'fixed' || (shown === 'model' && useDefault.checked),
-        said = reasons.parameter
-          ? reasons.parameter
-          : [valueShown && reasons.value, shown === 'model' && reasons.description, reasons.warning]
-              .filter(Boolean)
-              .join(' ');
-      for (const control of [owner, min, max]) unavailable(control, Boolean(reasons.parameter));
-      for (const control of [value, useDefault]) unavailable(control, Boolean(reasons.parameter || reasons.value));
-      unavailable(description, Boolean(reasons.parameter || reasons.description));
-      note.textContent = said;
-      note.hidden = !said;
-      card.dataset.inert = String(Boolean(reasons.parameter || (valueShown && reasons.value)));
-      needs.hidden = !lacksDefault();
-    }
-    // (A setting that changes nothing whatever it holds, greyed, or not used, is never asked for a default.)
-    const lacksDefault = () => needed() && owner.value === 'model' && !useDefault.checked && !reasons.parameter;
-    owner.onchange = () => {
-      defaultLabel.hidden = owner.value !== 'model';
-      valueField.hidden = owner.value === 'random' || (owner.value === 'model' && !useDefault.checked);
-      bounds.hidden = !ranged || !(owner.value === 'model' || (owner.value === 'fixed' && fixedBounds));
-      description.hidden = owner.value !== 'model';
-      setInert();
-      changed();
+    control.setAttribute('aria-label', title);
+    const peek = () => {
+      try {
+        return get();
+      } catch {
+        return undefined;
+      }
     };
-    useDefault.onchange = owner.onchange;
-    owner.onchange();
-    for (const event of ['input', 'change']) value.addEventListener?.(event, () => changed());
-    const number = (control, label) => {
-      if (control.value === '') throw Error(label + ' : ajoutez une valeur.');
-      const value = Number(control.value);
-      if (!Number.isFinite(value) || (type === 'integer' && !Number.isInteger(value)))
-        throw Error(label + ' : valeur numérique invalide.');
-      return value;
-    };
-    return {
-      card,
-      owner,
-      value,
-      min,
-      max,
-      setInert,
-      /** Why it cannot be saved as it is (left to the assistant without a default), or ''. `named`: how it is called. */
-      missingDefault: (named = title) =>
-        lacksDefault()
-          ? `${named} : choisissez une valeur par défaut (« Préférer une valeur par défaut »). C’est elle qui sert quand Moodix AI n’en donne pas.`
-          : '',
-      /** Its policy as it stands, without the checks of `read` (what makes another field inert). */
-      peek() {
-        const selected = owner.value;
-        if (selected === 'random') return { policy: 'random' };
-        const raw =
-          type === 'boolean'
-            ? value.checked
-            : type === 'string' || (enumChoices && typeof enumChoices[0] === 'string')
-              ? value.value
-              : Number(value.value);
-        if (selected === 'fixed') return { policy: 'fixed', value: raw };
-        return {
-          policy: 'model',
-          ...(useDefault.checked ? { default: raw } : {}),
-          ...(enumChoices ? { choices: enumChoices } : {}),
-        };
+    const differs = () => !held && base !== undefined && peek() !== base;
+    const back = button(
+      '',
+      () => {
+        set(base);
+        sync();
+        changed();
       },
+      'set-base',
+    );
+    back.append(icon('undo'), node('span', '', 'Valeur de base : ' + shownValue(base ?? '')));
+    back.title = 'Reprendre la valeur de Moodix';
+    // Before the value: what it is (« Intensité »), then why it is not the user's to change (the only
+    // one the model takes) or, changed, the value of Moodix to take again.
+    if (lead) side.append(node('span', 'set-reason', lead));
+    if (held) {
+      side.append(node('span', 'set-reason', held));
+      unavailable(control, true);
+    } else if (base !== undefined) side.append(back);
+    side.append(shown);
+    function sync() {
+      back.hidden = !differs();
+      side.dataset.changed = String(differs());
+    }
+    for (const event of ['input', 'change'])
+      control.addEventListener?.(event, () => {
+        sync();
+        changed();
+      });
+    sync();
+    return {
+      side,
+      control,
+      back,
+      get,
+      peek,
+      differs,
+      toBase() {
+        if (differs()) set(base);
+        sync();
+      },
+    };
+  }
+  /** What Moodix ships of the open workflow: its own values when the user changed nothing of it. */
+  const baseOf = () => draft.base ?? (draft.builtin && !draft.customized ? opened : null);
+  const baseValue = policy => (policy?.policy === 'fixed' ? policy.value : policy?.default);
+  /**
+   * A setting of the model on its line: its name, its value, its « ? ». One value only (the 8 steps
+   * of a distilled model): greyed, with why in the place of « Valeur de base ».
+   */
+  function settingLine(name, policy) {
+    const spec = parameterSpec(name),
+      type = typeFor(name, policy),
+      title = labels[name] || name,
+      id = 'native-value-' + name,
+      choices = policy.choices || spec.choices || null,
+      single = spec.choices?.length === 1,
+      base = single ? undefined : baseValue(baseOf()?.parameters?.[name]),
+      line = node('div', 'set-line set-value'),
+      caption = node('label', 'set-name', title),
+      // What it does that the user would not expect (settingWarning), under its line.
+      note = node('p', 'set-note is-warning'),
+      value = valueControl({
+        id,
+        title,
+        type,
+        choices: choices?.length > 1 ? choices : null,
+        initial: baseValue(policy),
+        base,
+        maxLength: policy.maxLength || spec.maxLength,
+        held: single ? 'Seule valeur que ce modèle accepte' : '',
+        changed: () => {
+          refreshInert();
+          syncReset();
+        },
+      });
+    caption.setAttribute('for', id);
+    caption.title = title;
+    if (single) line.dataset.held = 'true';
+    note.hidden = true;
+    line.append(
+      caption,
+      value.side,
+      helpMark(
+        [spec.help || spec.note || SETTING_HELP[name] || '', base === undefined ? '' : `Valeur de base : ${shownValue(base)}.`]
+          .filter(Boolean)
+          .join(' '),
+      ),
+    );
+    return {
+      line,
+      note,
+      value: value.control,
+      back: value.back,
+      differs: value.differs,
+      toBase: value.toBase,
+      setWarning(text) {
+        note.textContent = text;
+        note.hidden = !text;
+      },
+      /** Its policy as it stands, without the refusals of `read` (what makes another line warn). */
+      peek: () => (single ? policy : { policy: 'fixed', value: value.peek() }),
       read() {
-        const selected = owner.value;
-        if (selected === 'random') return { policy: 'random', type: 'integer' };
-        const concrete =
-          selected === 'model' && !useDefault.checked
-            ? undefined
-            : type === 'boolean'
-              ? value.checked
-              : type === 'string'
-                ? value.value
-                : number(value, labels[name] || name);
-        if (selected === 'fixed') {
-          const result = { policy: 'fixed', value: concrete };
-          // (0.6.102) What the workflow narrows it to stays (« Assistant » turned « Fixe »): the user
-          // changes it for a creation within those limits, not wider ones. Only what narrows is written.
-          if (policy.choices) result.choices = policy.choices;
-          if (type === 'string' && !enumChoices && policy.maxLength) result.maxLength = policy.maxLength;
-          if (fixedBounds) {
-            const low = number(min, 'Minimum'),
-              high = number(max, 'Maximum'),
-              lower = policy.min !== undefined || low !== boundsFor[0],
-              upper = policy.max !== undefined || high !== boundsFor[1];
-            if (low > high || ((lower || upper) && (concrete < low || concrete > high)))
-              throw Error((labels[name] || name) + ' : la valeur doit être dans les limites choisies.');
-            if (lower) result.min = low;
-            if (upper) result.max = high;
-          }
-          return result;
+        if (single) return policy;
+        const now = value.get();
+        // Saved untouched, a workflow stays as it was stored (the same fingerprint).
+        if (policy.policy === 'fixed' && now === policy.value) return policy;
+        const result = { policy: 'fixed', value: now };
+        // What the workflow narrows it to stays. Its bounds are those of the Studio for one creation
+        // (the denoise of Krea 2 on its bar, from 0,6 to 0,7): kept while the user's value is within
+        // them, gone with a value beyond, which is then the user's whole choice.
+        if (typeof now === 'number' && (policy.min ?? now) <= now && now <= (policy.max ?? now)) {
+          if (policy.min !== undefined) result.min = policy.min;
+          if (policy.max !== undefined) result.max = policy.max;
         }
-        const result = { policy: 'model', type };
-        if (useDefault.checked) result.default = concrete;
-        if (enumChoices) result.choices = enumChoices;
-        // Only what the workflow narrows is written: the family's own limits stay the family's,
-        // so a workflow follows them when an update widens them.
-        if (type === 'string' && !enumChoices && policy.maxLength) result.maxLength = policy.maxLength;
-        if (['number', 'integer'].includes(type)) {
-          const low = number(min, 'Minimum'),
-            high = number(max, 'Maximum');
-          if (low > high || (useDefault.checked && (concrete < low || concrete > high)))
-            throw Error((labels[name] || name) + ' : la valeur par défaut doit être dans les limites choisies.');
-          if (policy.min !== undefined || (!enumChoices && low !== spec.min)) result.min = low;
-          if (policy.max !== undefined || (!enumChoices && high !== spec.max)) result.max = high;
-        }
-        if (description.value.trim()) result.description = description.value.trim();
+        if (policy.choices) result.choices = policy.choices;
+        if (type === 'string' && !choices && policy.maxLength) result.maxLength = policy.maxLength;
         return result;
       },
     };
   }
-  /** How many LoRAs the family of the open workflow takes: none for most (Ajouter was offered, and refused on save). */
-  const loraLimit = () => (draft.importDraft ? 256 : (familyOf(draft.pipeline)?.loras?.max ?? 0));
+  /**
+   * What the draft and the final of a video replace (`profiles`): the size of each on its line, and
+   * each other setting they hold on one line when both make it the same (the frames a second), on
+   * one a version when they differ. A version the workflow never makes, and what the request
+   * decides (the length), have no line: they stay as written.
+   */
+  function profileLines(name) {
+    const manifest = familyOf(draft.pipeline),
+      stages = stagesOf(manifest, draft).filter(stage =>
+        Object.hasOwn(draft.profiles?.[stage]?.parameters ?? {}, name),
+      ),
+      spec = manifest?.parameters?.[name] ?? {},
+      called = stage => (stage === 'draft' ? 'brouillon' : 'vidéo finale'),
+      of = (source, stage, key = name) => source?.[stage]?.parameters?.[key],
+      base = baseOf()?.profiles,
+      lines = [];
+    const changed = () => {
+      refreshInert();
+      syncReset();
+    };
+    if (name === 'width') {
+      // The size: a width and a height, « 896 × 1600 ».
+      for (const stage of stages) {
+        if (!Object.hasOwn(draft.profiles[stage].parameters, 'height')) continue;
+        const line = node('div', 'set-line set-value'),
+          title = stage === 'draft' ? 'Taille du brouillon' : 'Taille de la vidéo finale',
+          caption = node('label', 'set-name', title),
+          controls = ['width', 'height'].map(key =>
+            valueControl({
+              id: `native-profile-${stage}-${key}`,
+              title: `${labels[key]} · ${called(stage)}`,
+              type: manifest.parameters[key]?.type || 'integer',
+              initial: of(draft.profiles, stage, key),
+              base: of(base, stage, key),
+              changed,
+            }),
+          ),
+          side = node('div', 'set-side set-size'),
+          differs = () => controls.some(control => control.differs()),
+          back = button(
+            '',
+            () => {
+              for (const control of controls) control.toBase();
+              sync();
+              changed();
+            },
+            'set-base',
+          );
+        const sync = () => {
+          back.hidden = !differs();
+        };
+        back.append(
+          icon('undo'),
+          node('span', '', `Valeur de base : ${of(base, stage, 'width')} × ${of(base, stage, 'height')}`),
+        );
+        back.title = 'Reprendre la valeur de Moodix';
+        if (of(base, stage, 'width') !== undefined) side.append(back);
+        side.append(controls[0].control, node('span', 'set-times', '×'), controls[1].control);
+        for (const control of controls)
+          for (const event of ['input', 'change']) control.control.addEventListener?.(event, sync);
+        sync();
+        caption.setAttribute('for', `native-profile-${stage}-width`);
+        line.append(
+          caption,
+          side,
+          helpMark(
+            (stage === 'draft'
+              ? 'La taille d’un brouillon, dans le format de la demande : petit, il se fait vite.'
+              : 'La taille d’une vidéo finale, dans le format de la demande.') +
+              (of(base, stage, 'width') === undefined
+                ? ''
+                : ` Valeur de base : ${of(base, stage, 'width')} × ${of(base, stage, 'height')}.`),
+          ),
+        );
+        lines.push({
+          line,
+          differs,
+          toBase() {
+            for (const control of controls) control.toBase();
+            sync();
+          },
+          write(profiles) {
+            profiles[stage].parameters.width = controls[0].get();
+            profiles[stage].parameters.height = controls[1].get();
+          },
+        });
+      }
+      return lines;
+    }
+    // What the request decides (the length of a clip), a version never made: no line.
+    const shown = stages.filter(stage => {
+      const reason = inertSetting(manifest, draft, name, stage);
+      return !reason || spec.choices?.length === 1;
+    });
+    if (!shown.length) return lines;
+    const same = shown.every(stage => of(draft.profiles, stage) === of(draft.profiles, shown[0])),
+      single = spec.choices?.length === 1;
+    for (const group of same ? [shown] : shown.map(stage => [stage])) {
+      const stage = group[0],
+        title = (labels[name] || name) + (same ? '' : ' · ' + called(stage)),
+        id = same ? 'native-value-' + name : `native-profile-${stage}-${name}`,
+        line = node('div', 'set-line set-value'),
+        caption = node('label', 'set-name', title),
+        own = single ? undefined : of(base, stage),
+        value = valueControl({
+          id,
+          title,
+          type: spec.type || 'number',
+          choices: spec.choices?.length > 1 ? spec.choices : null,
+          initial: of(draft.profiles, stage),
+          base: own,
+          held: single ? 'Seule valeur que ce modèle accepte' : '',
+          changed,
+        });
+      caption.setAttribute('for', id);
+      caption.title = title;
+      if (single) line.dataset.held = 'true';
+      line.append(
+        caption,
+        value.side,
+        helpMark(
+          [spec.help || spec.note || SETTING_HELP[name] || '', own === undefined ? '' : `Valeur de base : ${shownValue(own)}.`]
+            .filter(Boolean)
+            .join(' '),
+        ),
+      );
+      lines.push({
+        line,
+        value: value.control,
+        differs: value.differs,
+        toBase: value.toBase,
+        write(profiles) {
+          if (single) return;
+          const now = value.get();
+          for (const each of group) profiles[each].parameters[name] = now;
+        },
+      });
+    }
+    return lines;
+  }
+  /** How many LoRAs the family of the open workflow takes: none for most. */
+  const loraLimit = () => familyOf(draft.pipeline)?.loras?.max ?? 0;
   function loraCount() {
     const limit = loraLimit(),
       full = readLoras.length >= limit,
-      engine = familyOf(draft.pipeline)?.label || 'Ce moteur';
-    $('native-lora-count').textContent = String(readLoras.length);
+      engine = shownName || 'Ce modèle',
+      shown = readLoras.filter(item => !item.bound).length;
     $('native-workflow-add-lora').dataset.unavailable = String(full);
     $('native-workflow-add-lora').disabled = busy || working || full;
+    // Greyed, and said why: the model takes none, or no more.
+    $('native-lora-section').dataset.off = String(!limit);
     $('native-lora-note').textContent = !limit
       ? `${engine} ne prend pas de LoRA.`
       : full
         ? `${limit} LoRA au plus pour ${engine}.`
-        : '';
+        : shown
+          ? ''
+          : 'Aucun LoRA ajouté.';
     $('native-lora-note').hidden = !$('native-lora-note').textContent;
   }
   /**
-   * The LoRA the subject references depend on (referenceLora, lib/native-workflows.mjs): on exactly
-   * when one of them is given, and seen by neither the user nor the assistant. Its « Actif par
-   * défaut » and its description change nothing: greyed, and said why.
+   * The LoRA the subject references of the model depend on (referenceLora, lib/native-workflows.mjs):
+   * the first one left to Moodix AI, in a model that takes such references. It is on exactly when
+   * one of them is given, seen by neither the user nor Moodix AI: a file of the model, on a line
+   * among its files.
    */
-  function updateBound() {
-    const roles = familyOf(draft?.pipeline)?.roles ?? {},
-      needs = readReferences.some(item => roles[item.read().role]?.requiresLora);
-    let found = false;
-    for (const item of readLoras) {
-      const bound = needs && !found && item.activation() === 'model';
-      found ||= bound;
-      item.setBound(bound);
-    }
+  function boundLora(loras) {
+    const roles = familyOf(draft.pipeline)?.roles ?? {};
+    if (!(draft.references ?? []).some(slot => roles[slot.role]?.requiresLora)) return null;
+    return loras.find(lora => lora.enabled.policy === 'model') ?? null;
   }
   function renderLoras(loras) {
     readLoras = [];
     $('native-workflow-loras').replaceChildren();
-    for (const lora of loras) addLora(lora);
+    const bound = boundLora(loras);
+    for (const lora of loras) addLora(lora, lora === bound);
     loraCount();
   }
-  function addLora(lora) {
-    const card = node('div', 'native-lora'),
-      picker = assetPicker('lora', 'native-lora-asset-' + lora.id, lora.asset),
-      description = input('native-lora-description-' + lora.id, lora.description || ''),
-      enabled = segmented(
-        'native-lora-enabled-' + lora.id,
-        [
-          ['off', 'Désactivé'],
-          ['fixed', 'Activé'],
-          ['model', 'Assistant'],
-        ],
+  /**
+   * A LoRA on its line: its file, its strength, when it is on, and what removes it. « Au choix de
+   * Moodix AI » : il l'active quand la demande s'y prête, d'après ce qu'on lui en dit (la ligne du
+   * dessous). Its strength is a setting: the user's alone.
+   */
+  function addLora(lora, bound = false) {
+    const id = 'native-lora-asset-' + lora.id,
+      picker = assetPicker('lora', id, lora.asset, {
+        detects: false,
+        named: bound ? 'LoRA des sujets de référence' : 'LoRA',
+        about: bound ? 'Activé seul quand un sujet de référence est donné, jamais autrement.' : '',
+      });
+    if (bound) {
+      // Its own line among the files of the model: nothing of it is a choice.
+      const line = node('div', 'set-line set-file'),
+        caption = node('label', 'set-name', 'LoRA des sujets de référence');
+      caption.setAttribute('for', id + '-file');
+      caption.title = 'LoRA des sujets de référence';
+      line.append(caption, picker.field, picker.browse, picker.detect, picker.help, picker.control, picker.list);
+      $('native-workflow-components').append(line);
+      readLoras.push({ bound: true, read: () => ({ ...lora, asset: picker.selected() }) });
+      return;
+    }
+    const was =
         lora.enabled.policy === 'off' || (lora.enabled.policy === 'fixed' && !lora.enabled.value)
           ? 'off'
           : lora.enabled.policy,
+      line = node('div', 'set-line set-file set-lora'),
+      enabled = select(
+        'native-lora-enabled-' + lora.id,
+        [
+          ['fixed', 'Toujours actif'],
+          ['model', 'Au choix de Moodix AI'],
+          ['off', 'Désactivé'],
+        ],
+        was,
       ),
-      defaultEnabled = input('native-lora-default-' + lora.id, lora.enabled.default ?? true, 'checkbox');
-    description.placeholder = 'Style ou effet apporté';
-    description.maxLength = 1000;
-    const defaultLabel = node('label', 'history-toggle'),
-      note = node('p', 'field-help native-inert');
-    defaultLabel.append(defaultEnabled, node('span', '', 'Actif par défaut'));
-    note.hidden = true;
-    defaultLabel.hidden = enabled.value !== 'model';
-    enabled.onchange = () => {
-      defaultLabel.hidden = enabled.value !== 'model';
-      // (Its strength is only asked for a default while the LoRA can be on.)
-      strength.setInert();
-      updateBound();
-    };
-    const strength = primitive(
-      lora.id,
-      { ...lora.strength, type: 'number' },
-      'native-lora-strength',
-      ['fixed', 'model'],
-      () => {},
-      () => enabled.value !== 'off',
-    );
-    const item = {
-      activation: () => enabled.value,
-      // (0.6.94) Its strength left to the assistant without a default: not saved so (unless it is off).
-      missingDefault: () =>
-        strength.missingDefault(`Intensité du LoRA « ${description.value.trim() || 'sans description'} »`),
-      setBound(bound) {
-        for (const control of [defaultEnabled, description]) unavailable(control, bound);
-        note.textContent = bound
-          ? 'Activé seul quand une « Référence de sujet » est donnée, sans que l’assistant le voie : « Actif par défaut » et la description n’ont pas d’effet, et son intensité est la valeur fixée (ou par défaut).'
-          : '';
-        note.hidden = !bound;
-      },
-      read: () => ({
-        id: lora.id,
-        asset: picker.selected(),
-        description: description.value.trim(),
-        enabled:
-          enabled.value === 'off'
-            ? { policy: 'off' }
-            : enabled.value === 'fixed'
-              ? { policy: 'fixed', value: true }
-              : { policy: 'model', default: defaultEnabled.checked },
-        strength: strength.read(),
+      strength = valueControl({
+        id: 'native-lora-strength-value-' + lora.id,
+        title: 'Intensité du LoRA',
+        type: 'number',
+        initial: baseValue(lora.strength) ?? 1,
+        lead: 'Intensité',
       }),
-    };
-    card.append(
-      field('Fichier LoRA', picker.container),
-      field('Effet / usage', description),
-      field('Activation', enabled),
-      defaultLabel,
-      note,
-      strength.card,
-      button(
-        'Retirer',
+      description = input('native-lora-description-' + lora.id, lora.description || ''),
+      told = node('div', 'set-line set-told'),
+      item = {
+        read: () => {
+          const value = strength.get();
+          return {
+            id: lora.id,
+            asset: picker.selected(),
+            description: description.value.trim(),
+            // Left as it was, it stays as it was written (saved untouched, the same workflow).
+            enabled:
+              enabled.value === was
+                ? lora.enabled
+                : enabled.value === 'off'
+                  ? { policy: 'off' }
+                  : enabled.value === 'fixed'
+                    ? { policy: 'fixed', value: true }
+                    : // Off until Moodix AI turns it on for a request it fits.
+                      { policy: 'model', default: false },
+            strength:
+              lora.strength.policy === 'fixed' && lora.strength.value === value
+                ? lora.strength
+                : { policy: 'fixed', value },
+          };
+        },
+      },
+      remove = button(
+        '',
         () => {
           readLoras = readLoras.filter(value => value !== item);
-          card.remove();
+          line.remove();
+          told.remove();
           loraCount();
-          updateBound();
         },
-        'text-button native-remove',
-      ),
-    );
-    readLoras.push(item);
-    $('native-workflow-loras').append(card);
-    loraCount();
-    updateBound();
-  }
-  function renderReferences(references) {
-    readReferences = [];
-    $('native-workflow-references').replaceChildren();
-    for (const reference of references) addReference(reference);
-    referenceCount();
-  }
-  function referenceCount() {
-    const limit = draft.importDraft
-      ? 256
-      : Object.values(familyOf(draft.pipeline)?.roles || {}).reduce((sum, role) => sum + (role.max ?? 1), 0);
-    $('native-reference-count').textContent = String(readReferences.length);
-    $('native-workflow-add-reference').dataset.unavailable = String(readReferences.length >= limit);
-    $('native-workflow-add-reference').disabled =
-      busy || working || $('native-workflow-add-reference').dataset.unavailable === 'true';
-    // Greyed, and said why: the family takes no image nor video at all.
-    $('native-reference-note').textContent = limit
-      ? ''
-      : `${familyOf(draft.pipeline)?.label || 'Ce moteur'} ne prend pas d’image ni de vidéo de référence.`;
-    $('native-reference-note').hidden = Boolean(limit);
-    updateBound();
-    refreshInert();
-  }
-  function addReference(reference) {
-    const known = Object.keys(familyOf(draft.pipeline)?.roles || {});
-    const roles = [
-      ...new Set([...(known.length ? known : families.flatMap(item => Object.keys(item.roles))), reference.role]),
-    ];
-    const card = node('div', 'native-reference'),
-      role = select(
-        'native-reference-role-' + reference.id,
-        roles.map(role => [role, roleLabel(role)]),
-        reference.role,
-      ),
-      name = input('native-reference-name-' + reference.id, reference.name || roleLabel(reference.role)),
-      required = input('native-reference-required-' + reference.id, reference.required, 'checkbox'),
-      label = node('label', 'history-toggle');
-    name.maxLength = 120;
-    label.append(required, node('span', '', 'Référence obligatoire'));
-    // Its role decides what else matters (the LoRA of the subject images, Krea's denoise).
-    role.onchange = () => {
-      updateBound();
-      refreshInert();
-    };
-    const item = {
-      read: () => ({
-        id: reference.id,
-        role: role.value,
-        name: name.value.trim(),
-        // (0.6.102) No field any more: what it said reached no one (not Moodix AI, not the Studio).
-        // What a workflow holds of it stays as it was, saved untouched it is the same workflow.
-        description: String(reference.description ?? '').trim(),
-        required: required.checked,
-      }),
-    };
-    card.append(
-      field('Usage', role),
-      field('Nom', name),
-      label,
-      button(
-        'Retirer',
-        () => {
-          readReferences = readReferences.filter(value => value !== item);
-          card.remove();
-          referenceCount();
-        },
-        'text-button native-remove',
-      ),
-    );
-    readReferences.push(item);
-    $('native-workflow-references').append(card);
-    referenceCount();
-  }
-  function renderProfiles(profiles) {
-    readProfiles = [];
-    profileFields = [];
-    $('native-workflow-profiles').replaceChildren();
-    for (const [stage, profile] of Object.entries(profiles || {})) {
-      const group = node('div', 'native-profile');
-      group.append(node('h4', '', stage === 'draft' ? 'Brouillon' : 'Vidéo finale'));
-      const controls = [];
-      for (const [name, value] of Object.entries(profile.parameters || {})) {
-        const control = input('native-profile-' + stage + '-' + name, value, 'number'),
-          line = field(labels[name] || name, control),
-          note = node('p', 'field-help native-inert');
-        control.step = 'any';
-        note.hidden = true;
-        line.append(note);
-        group.append(line);
-        controls.push([name, control]);
-        profileFields.push({ stage, name, control, note });
-      }
-      readProfiles.push([
-        stage,
-        () => ({
-          parameters: Object.fromEntries(
-            controls.map(([name, control]) => {
-              const value = Number(control.value);
-              if (control.value === '' || !Number.isFinite(value))
-                throw Error('Profil vidéo : valeur numérique invalide.');
-              return [name, value];
-            }),
-          ),
-        }),
-      ]);
-      $('native-workflow-profiles').append(group);
-    }
-  }
-  function renderSource() {
-    $('native-source-settings').replaceChildren();
-    $('native-import-notes').replaceChildren();
-    const meta = draft.importDraft,
-      section = $('native-source-section');
-    section.hidden = !meta;
-    section.open = false;
-    let rendered = false;
-    if (!meta) {
-      section.ontoggle = null;
-      return;
-    }
-    for (const warning of [...meta.blockers, ...meta.warnings]) $('native-import-notes').append(node('p', '', warning));
-    section.ontoggle = () => {
-      if (!section.open || rendered) return;
-      rendered = true;
-      for (const setting of meta.extras)
-        $('native-source-settings').append(
-          field(
-            setting.label,
-            node(
-              'pre',
-              'native-source-value',
-              typeof setting.value === 'string' ? setting.value : JSON.stringify(setting.value, null, 2),
-            ),
-          ),
-        );
-    };
-  }
-  /**
-   * The prompt of a workflow: a line, no setting. What the workflow stores of one is shown, to be
-   * read and copied: a fixed text (an imported graph, a workflow of before) and, for a prompt left
-   * to the assistant, its default and what was said of it. Nothing of it is dropped unseen.
-   */
-  function promptCard(policy) {
-    const card = node('div', 'native-parameter'),
-      heading = node('div', 'field-group native-parameter-heading');
-    heading.append(node('label', '', labels.prompt));
-    card.append(
-      heading,
-      node('p', 'field-help', 'Écrit à chaque création : par l’assistant dans le chat, par vous dans le Studio.'),
-    );
-    const stored = (id, label, value, help) => {
-      const area = element('textarea', id);
-      area.value = value;
-      area.readOnly = true;
-      area.rows = 3;
-      card.append(field(label, area), node('p', 'field-help', help));
-    };
-    if (policy.policy === 'fixed')
-      stored(
-        'native-prompt-stored',
-        'Prompt fixé dans ce workflow',
-        String(policy.value ?? ''),
-        'Un prompt fixe est refusé à chaque création : c’est désormais l’assistant qui écrit le prompt, ou vous dans le Studio. Ce texte n’est donc plus utilisé. Copiez-le si vous voulez le garder : il sera retiré du workflow dès que vous enregistrerez une modification.',
+        'icon-button set-remove',
       );
-    else {
-      if (typeof policy.default === 'string' && policy.default)
-        stored(
-          'native-prompt-default',
-          'Prompt par défaut de ce workflow',
-          policy.default,
-          'Gardé avec le workflow : utilisé seulement quand aucun prompt n’est écrit à la création.',
-        );
-      if (policy.description)
-        stored(
-          'native-prompt-description',
-          'Consigne enregistrée pour ce prompt',
-          policy.description,
-          'Gardée avec le workflow. L’assistant reçoit la consigne de Moodix pour écrire un prompt, pas celle-ci.',
-        );
-    }
-    return card;
+    enabled.setAttribute('aria-label', 'Activation du LoRA');
+    description.placeholder = 'Ce qu’il apporte (style, effet) : Moodix AI s’en sert pour savoir quand l’activer';
+    description.maxLength = 1000;
+    description.setAttribute('aria-label', 'Ce que le LoRA apporte');
+    remove.append(icon('close'));
+    remove.setAttribute('aria-label', 'Retirer ce LoRA');
+    remove.title = 'Retirer ce LoRA';
+    line.append(picker.field, picker.browse, strength.side, enabled, remove, picker.control, picker.list);
+    told.append(description);
+    const sync = () => {
+      // What it brings is said to Moodix AI only: asked for when the choice is its own.
+      told.hidden = enabled.value !== 'model';
+      unavailable(strength.control, enabled.value === 'off');
+    };
+    enabled.onchange = sync;
+    sync();
+    readLoras.push(item);
+    $('native-workflow-loras').append(line, told);
+    loraCount();
   }
-  /** Greys what changes nothing in the workflow as it stands now, and says why (inertSetting). */
+  /** What a setting does that the user would not expect, under its line (settingWarning). */
   function refreshInert() {
     const manifest = familyOf(draft?.pipeline);
     if (!manifest || rendering) return;
@@ -1521,98 +1480,185 @@ export function setupNativeWorkflows(options) {
         ...Object.fromEntries(Object.entries(parameterControls).map(([name, control]) => [name, control.peek()])),
       },
       profiles: draft.profiles,
-      references: readReferences.map(item => item.read()),
+      references: draft.references,
     };
     for (const [name, control] of Object.entries(parameterControls))
-      control.setInert({
-        parameter: inertSetting(manifest, state, name, 'parameter'),
-        value: inertSetting(manifest, state, name, 'value'),
-        description: inertSetting(manifest, state, name, 'description'),
-        warning: settingWarning(manifest, state, name),
-      });
-    for (const { stage, name, control, note } of profileFields) {
-      const reason = inertSetting(manifest, state, name, stage);
-      unavailable(control, Boolean(reason));
-      note.textContent = reason;
-      note.hidden = !reason;
-    }
+      control.setWarning(settingWarning(manifest, state, name));
+  }
+  /** « Remettre les valeurs de base »: greyed while every value is the one Moodix gives. */
+  function syncReset() {
+    const reset = $('native-workflow-reset');
+    if (!reset || rendering) return;
+    const any = valueLines.some(line => line.differs());
+    reset.hidden = !baseOf();
+    reset.dataset.unavailable = String(!any);
+    reset.disabled = busy || working || !any;
+    reset.title = any ? 'Chaque réglage reprend la valeur de Moodix ; rien n’est enregistré avant « Enregistrer ».' : 'Chaque réglage est à sa valeur de base.';
+  }
+  /** What the model is offered for, in the sentence under « Proposé à Moodix AI ». */
+  function offerText() {
+    const tasks = familyOf(draft.pipeline)?.tasks ?? [],
+      video = draft.mediaType === 'video',
+      asked = tasks.includes('replace_character')
+        ? 'de remplacer un personnage dans une vidéo'
+        : tasks.includes('interpolate')
+          ? 'de rendre une vidéo plus fluide'
+          : tasks.includes('upscale')
+            ? `d’agrandir ${video ? 'une vidéo' : 'une image'}`
+            : ({ video: 'une vidéo', audio: 'un son' }[draft.mediaType] ?? 'une image');
+    return `Moodix AI peut choisir ${shownName || 'ce modèle'} quand vous lui demandez ${asked}.`;
+  }
+  /**
+   * What Moodix AI then chooses of a request, as the workflow leaves it to it (what is part of a
+   * request, ASKED, with the policy « model »): « Il écrit le prompt et choisit la taille et le
+   * débruitage ; les réglages plus bas restent les vôtres. » (19/11: « le débruitage, la résolution,
+   * le temps doivent encore être choisis par Moodix ».) '' when it chooses nothing of it.
+   */
+  function chosenText() {
+    const left = name => draft.parameters[name]?.policy === 'model',
+      creates = (familyOf(draft.pipeline)?.tasks ?? []).includes('create_video'),
+      chosen = [
+        // The size of an image is its own; of a video, Moodix AI chooses the format.
+        left('width') && left('height') ? 'la taille' : draft.mediaType === 'video' && creates ? 'le format' : '',
+        left('frames') || left('seconds') ? 'la durée' : '',
+        left('stage') ? 'la version (brouillon ou finale)' : '',
+        left('denoise') ? 'le débruitage' : '',
+        left('lyrics') ? 'les paroles' : '',
+        left('scale') || left('passes') || left('max_side') ? 'l’agrandissement' : '',
+        left('multiplier') || left('mode') ? 'la fluidité' : '',
+        left('subject') || left('reference_subject') ? 'qui remplacer' : '',
+      ].filter(Boolean),
+      listed = chosen.length > 1 ? chosen.slice(0, -1).join(', ') + ' et ' + chosen.at(-1) : (chosen[0] ?? ''),
+      writes = Object.hasOwn(draft.parameters, 'prompt');
+    if (!writes && !listed) return '';
+    return (
+      (writes ? 'Il écrit le prompt' + (listed ? ' et choisit ' + listed : '') : 'Il choisit ' + listed) +
+      ' ; les réglages plus bas restent les vôtres.'
+    );
   }
   function renderEditor() {
-    $('native-workflow-name').value = draft.name;
+    const manifest = familyOf(draft.pipeline);
     $('native-workflow-description').value = draft.description;
     $('native-workflow-enabled').checked = draft.enabled;
-    $('native-workflow-pipeline').value = draft.pipeline;
-    $('native-workflow-video').hidden = !familyOf(draft.pipeline)?.profiles;
-    $('native-workflow-title').textContent = isNew ? 'Créer un workflow' : 'Réglages de ' + (draft?.name || 'ce modèle');
-    $('native-workflow-capability').textContent = draft.importDraft
-      ? draft.importDraft.blockers.length
-        ? 'Brouillon prérempli · exécution non prise en charge pour ce graphe.'
-        : 'Brouillon prérempli · activation après vérification des fichiers et des réglages.'
-      : draft.unavailableReason || '';
-    $('native-workflow-enabled').dataset.unavailable = String(Boolean(draft.importDraft?.blockers.length));
+    $('native-workflow-hero').dataset.off = String(!draft.enabled);
+    $('native-workflow-enabled').onchange = () => {
+      $('native-workflow-hero').dataset.off = String(!$('native-workflow-enabled').checked);
+    };
+    $('native-workflow-offer').textContent = offerText();
+    $('native-workflow-chosen').textContent = chosenText();
+    $('native-workflow-chosen').hidden = !$('native-workflow-chosen').textContent;
+    // « Réglages de Krea 2 », « Réglages d’ACE-Step 1.5 ».
+    $('native-workflow-title').textContent =
+      'Réglages ' + (/^[aeiouyàâéèêîôûh]/i.test(shownName) ? 'd’' : 'de ') + (shownName || 'ce modèle');
+    // What is in its way (a file missing, a card it cannot run on), under the sentence.
+    $('native-workflow-capability').textContent = draft.unavailableReason || '';
+    $('native-workflow-capability').hidden = !draft.unavailableReason;
     readComponents = [];
+    valueLines = [];
+    profileWriters = [];
     const componentControls = {};
     $('native-workflow-components').replaceChildren();
     for (const role of [
       ...new Set([
         ...Object.keys(draft.components),
-        ...Object.entries(familyOf(draft.pipeline)?.components || {})
+        ...Object.entries(manifest?.components || {})
           .filter(([, spec]) => spec.required)
           .map(([role]) => role),
       ]),
     ]) {
       const policy = draft.components[role],
-        control = componentControl(
-          role,
-          policy || { policy: 'fixed', asset: draft.importDraft ? 'missing-' + role : '' },
-          { optional: !familyOf(draft.pipeline)?.components[role]?.required, present: Boolean(policy) },
-        );
+        control = fileLine(role, policy || { policy: 'fixed', asset: '' }, {
+          optional: !manifest?.components[role]?.required,
+          present: Boolean(policy),
+        });
       readComponents.push([role, control.read]);
       componentControls[role] = control;
-      $('native-workflow-components').append(control.card);
+      $('native-workflow-components').append(control.line);
     }
     suggestTokenizers(componentControls);
     readParameters = [];
     parameterControls = {};
     rendering = true;
-    $('native-workflow-parameters').replaceChildren();
-    const enhanced = renderEnhance();
+    const list = $('native-workflow-parameters'),
+      stages = stagesOf(manifest, draft),
+      // What every version the workflow makes replaces: set on the lines of the versions.
+      profiled = name =>
+        stages.length > 0 && stages.every(stage => Object.hasOwn(draft.profiles[stage]?.parameters ?? {}, name));
+    list.replaceChildren();
+    const enhanced = renderEnhance(),
+      texts = [];
     for (const [name, policy] of Object.entries(draft.parameters)) {
-      // Shown as its own on/off section (renderEnhance) rather than as one more number or checkbox.
-      if (name === 'expandPrompt' && enhanced) continue;
-      if (name === 'expandPrompt' && !draft.promptExpansion && policy.policy === 'fixed' && !policy.value) {
-        readParameters.push([name, () => policy]);
-        continue;
-      }
-      // Written at each creation, by the assistant or in the Studio: a fixed prompt was refused at
-      // each one (a locked parameter cannot be overridden), and what was said of it reached no one.
-      // The card shows what is stored; a fixed text leaves with the first change saved (saveEditor).
+      const spec = manifest?.parameters?.[name] ?? {},
+        kept = () => readParameters.push([name, () => policy]);
+      // Written at each creation, by Moodix AI or in the Studio: a fixed prompt was refused at each
+      // one, and leaves with the first change saved (saveEditor).
       if (name === 'prompt') {
-        $('native-workflow-parameters').append(promptCard(policy));
         readParameters.push([name, () => (policy.policy === 'model' ? policy : { policy: 'model', type: 'string' })]);
         continue;
       }
-      const control = primitive(name, policy, 'native', parameterPolicies(name), refreshInert);
+      // The size of each version of a video, where the size of the request is not a line.
+      if ((name === 'width' || name === 'height') && profiled(name)) {
+        if (name === 'width')
+          for (const line of profileLines('width')) {
+            valueLines.push(line);
+            profileWriters.push(line.write);
+            list.append(line.line);
+          }
+        kept();
+        continue;
+      }
+      // Part of a request, or read by no engine of the family: no line, and kept as written.
+      if (!isSetting(name) || spec.unused) {
+        kept();
+        continue;
+      }
+      // On its own line, with its instruction (renderEnhance).
+      if (name === 'expandPrompt') {
+        if (enhanced) list.append(...enhanced);
+        else kept();
+        continue;
+      }
+      if (profiled(name)) {
+        for (const line of profileLines(name)) {
+          valueLines.push(line);
+          profileWriters.push(line.write);
+          list.append(line.line);
+        }
+        kept();
+        continue;
+      }
+      const control = settingLine(name, policy);
       parameterControls[name] = control;
+      valueLines.push(control);
       readParameters.push([name, control.read]);
-      $('native-workflow-parameters').append(control.card);
+      // A text to write (a negative prompt) comes after the figures and the switches.
+      if (typeFor(name, policy) === 'string' && !(policy.choices || spec.choices)) texts.push(control.line, control.note);
+      else list.append(control.line, control.note);
     }
+    // A model that had the setting added since the workflow was written (Krea 2 and its prompt).
+    if (enhanced && !Object.hasOwn(draft.parameters, 'expandPrompt')) list.append(...enhanced);
+    list.append(...texts);
+    $('native-workflow-empty').hidden = list.children.length > 0;
+    // What a workflow holds of a request that does what the user would not expect (a denoise a copy
+    // of before fixed at 1 ignores the image to modify): no line here, said at the head of the settings.
+    const warned = Object.keys(draft.parameters)
+      .filter(name => !parameterControls[name])
+      .map(name => settingWarning(manifest, draft, name))
+      .filter(Boolean);
+    $('native-workflow-warning').textContent = warned.join(' ');
+    $('native-workflow-warning').hidden = !warned.length;
     renderLoras(draft.loras || []);
-    renderReferences(draft.references || []);
-    renderProfiles(draft.profiles);
-    renderSource();
     rendering = false;
     refreshInert();
-    updateBound();
+    syncReset();
     error('');
     $('native-workflow-unsaved').hidden = true;
-    $('native-workflow-switch').hidden = true;
     setBusy(busy);
   }
   /**
-   * Prompt enhancement as one visible Off/On switch. When on, the family's text encoder rewrites the
-   * prompt before each image with an editable instruction; the prompt actually used is kept with the image.
-   * Returns whether the family offers it.
+   * « Améliorer le prompt » on its line, with its switch. On, the family's text encoder rewrites the
+   * prompt before each image with an instruction the user may edit, under the line; the prompt
+   * actually used is kept with the image. Returns its elements, or null when the family has none.
    */
   function renderEnhance() {
     const manifest = familyOf(draft.pipeline),
@@ -1621,67 +1667,61 @@ export function setupNativeWorkflows(options) {
     const supported = Boolean(
       manifest?.features?.includes('promptExpansion') && manifest.parameters?.expandPrompt && config,
     );
-    $('native-workflow-enhance').hidden = !supported;
-    $('native-workflow-enhance-body').replaceChildren();
     readEnhance = null;
-    if (!supported) return false;
-    const current = policy?.policy === 'model' ? 'model' : policy?.value === true ? 'on' : 'off';
-    const toggle = segmented(
-      'native-enhance-switch',
-      [['off', 'Off'], ['on', 'On'], ...(current === 'model' ? [['model', 'Assistant']] : [])],
-      current,
-    );
-    const template = element('textarea', 'native-enhance-template');
+    if (!supported) return null;
+    const on = policy?.policy === 'model' ? policy.default === true : policy?.value === true,
+      line = node('div', 'set-line set-value'),
+      caption = node('label', 'set-name', 'Améliorer le prompt avant chaque image'),
+      toggle = valueControl({ id: 'native-enhance-switch', title: 'Améliorer le prompt avant chaque image', type: 'boolean', initial: on }),
+      template = element('textarea', 'native-enhance-template'),
+      instruction = node('details', 'set-more');
+    caption.setAttribute('for', 'native-enhance-switch');
     template.value = config.template;
     template.rows = 6;
     template.spellcheck = false;
     template.setAttribute('aria-label', 'Consigne d’amélioration du prompt');
-    const instruction = node('details', 'native-manual-path');
     instruction.append(
       node('summary', '', 'Consigne d’amélioration'),
       template,
-      node(
-        'p',
-        'field-help',
-        'Le texte {{prompt}} est remplacé par le prompt demandé ; il doit apparaître une seule fois.',
+      node('p', 'field-help', 'Le texte {{prompt}} est remplacé par le prompt demandé ; il doit apparaître une seule fois.'),
+    );
+    line.append(
+      caption,
+      toggle.side,
+      helpMark(
+        'L’encodeur de texte réécrit le prompt en une description plus détaillée avant la génération (quelques secondes de plus). Le prompt réellement utilisé est affiché dans les détails de l’image.',
       ),
     );
     const sync = () => {
-      instruction.hidden = toggle.value === 'off';
+      instruction.hidden = !toggle.control.checked;
     };
-    toggle.onchange = sync;
+    toggle.control.onchange = sync;
     sync();
-    $('native-workflow-enhance-body').append(
-      field('Améliorer le prompt avant chaque image', toggle),
-      node(
-        'p',
-        'field-help',
-        'L’encodeur de texte réécrit le prompt en une description plus détaillée avant la génération (quelques secondes de plus). Le prompt réellement utilisé est affiché dans les détails de l’image.',
-      ),
-      instruction,
-    );
     readEnhance = () => {
-      const value = toggle.value;
       // Off in a workflow that never had the setting: nothing is added to it (saved untouched, it
       // stays as it was stored).
-      if (value === 'off')
+      if (!toggle.control.checked)
         return {
-          parameter: policy || draft.promptExpansion ? { policy: 'fixed', value: false } : undefined,
+          parameter:
+            policy?.policy === 'fixed' && policy.value === false
+              ? policy
+              : policy || draft.promptExpansion
+                ? { policy: 'fixed', value: false }
+                : undefined,
           expansion: draft.promptExpansion,
         };
       if (template.value.split('{{prompt}}').length !== 2)
         throw Error('La consigne d’amélioration doit contenir {{prompt}} exactement une fois.');
       return {
-        parameter: value === 'model' ? policy : { policy: 'fixed', value: true },
+        parameter: policy?.policy === 'fixed' && policy.value === true ? policy : { policy: 'fixed', value: true },
         expansion: { ...config, template: template.value },
       };
     };
-    return true;
+    return [line, instruction];
   }
   function readEditor() {
     const record = {
       ...draft,
-      name: $('native-workflow-name').value.trim(),
       description: $('native-workflow-description').value.trim(),
       enabled: $('native-workflow-enabled').checked,
       components: Object.fromEntries(
@@ -1689,88 +1729,76 @@ export function setupNativeWorkflows(options) {
       ),
       parameters: Object.fromEntries(readParameters.map(([name, read]) => [name, read()])),
       loras: readLoras.map(control => control.read()),
-      references: readReferences.map(control => control.read()),
     };
     // What the server found in the folders is its answer, not a part of the workflow.
     delete record.automatic;
-    if (readProfiles.length) record.profiles = Object.fromEntries(readProfiles.map(([stage, read]) => [stage, read()]));
+    if (profileWriters.length) {
+      record.profiles = structuredClone(draft.profiles);
+      for (const write of profileWriters) write(record.profiles);
+    }
     if (readEnhance) {
       const { parameter, expansion } = readEnhance();
       if (parameter) record.parameters.expandPrompt = parameter;
       if (expansion) record.promptExpansion = expansion;
       else delete record.promptExpansion;
     }
-    for (const name of ['digest', 'ready', 'unavailableReason', 'error', 'path', 'builtin', 'customized', 'update'])
+    // What the list says of a workflow beside what is written in it.
+    for (const name of [
+      'digest',
+      'ready',
+      'unavailableReason',
+      'unavailableKind',
+      'error',
+      'path',
+      'builtin',
+      'customized',
+      'update',
+      'base',
+    ])
       delete record[name];
     return record;
   }
-  function editorDirty(includeNew = true) {
+  function editorDirty() {
     if (!draft) return false;
     try {
-      return (includeNew && isNew) || JSON.stringify(readEditor()) !== baseline;
+      return JSON.stringify(readEditor()) !== baseline;
     } catch {
       return true;
     }
   }
-  async function template(pipeline, signal) {
-    return (
-      await (await api('generation/templates?pipeline=' + encodeURIComponent(pipeline), undefined, { signal })).json()
-    ).template;
-  }
-  function clearTemplateAssets(record) {
-    for (const policy of Object.values(record.components)) if (policy.policy === 'fixed') policy.asset = '';
-  }
-  async function edit(record, { fresh = false } = {}) {
-    if (busy || working) return false;
-    const session = version;
-    try {
-      if (record?.importSummary) {
-        record = await run(async signal =>
-          (await api('generation/workflows/' + encodeURIComponent(record.id), undefined, { signal })).json(),
-        );
-        if (!record || session !== version) return false;
-      }
-      if (!record) {
-        record = await run(signal => template(families[0]?.family, signal));
-        if (!record || session !== version) return false;
-        record = { ...record, id: crypto.randomUUID(), name: '', description: '' };
-        clearTemplateAssets(record);
-        fresh = true;
-      }
-      isNew = fresh;
-      draft = structuredClone(record);
-      returnFocus = document.activeElement || $('workflow-add');
-      // The settings scroll inside their tab's area; the editor scrolls the whole dialog.
-      parentScroll = $('settings-body')?.scrollTop || 0;
-      renderEditor();
-      baseline = JSON.stringify(readEditor());
-      $('settings-form').hidden = true;
-      $('workflow-editor').hidden = false;
-      $('settings').setAttribute('aria-labelledby', 'native-workflow-title');
-      $('settings').scrollTop = 0;
-      // The editor scrolls its own body (moodix.css): each workflow opens at its top.
-      $('native-workflow-body').scrollTop = 0;
-      $('native-workflow-name').focus();
-      return true;
-    } catch (failure) {
-      if (session === version) {
-        draft = null;
-        importStatus(failure.message, true);
-      }
-      return false;
-    }
+  /**
+   * Opens the page of a model: `record`, its workflow as the list has it; `name`, the model as
+   * the page « Modèles » calls it (« RIFE », where its workflow is « Interpoler (RIFE 4.26) »).
+   */
+  async function edit(record, { name = '' } = {}) {
+    if (busy || working || !record) return false;
+    draft = structuredClone(record);
+    shownName = name || record.name || '';
+    opened = { parameters: structuredClone(record.parameters), profiles: structuredClone(record.profiles ?? null) };
+    returnFocus = document.activeElement || null;
+    // The settings scroll inside their tab's area; the page of a model scrolls its own body.
+    parentScroll = $('settings-body')?.scrollTop || 0;
+    renderEditor();
+    baseline = JSON.stringify(readEditor());
+    $('settings-form').hidden = true;
+    $('workflow-editor').hidden = false;
+    $('settings').setAttribute('aria-labelledby', 'native-workflow-title');
+    $('settings').scrollTop = 0;
+    // Each model opens at its top.
+    $('native-workflow-body').scrollTop = 0;
+    $('native-workflow-back').focus();
+    return true;
   }
   function leaveEditor() {
     draft = null;
     afterBack = undefined;
-    pendingPipeline = '';
     $('workflow-editor').hidden = true;
     $('settings-form').hidden = false;
     $('settings').setAttribute('aria-labelledby', 'settings-title');
     $('native-workflow-unsaved').hidden = true;
     $('settings').scrollTop = 0;
     if ($('settings-body')) $('settings-body').scrollTop = parentScroll;
-    (returnFocus?.isConnected === false ? $('workflow-add') : returnFocus)?.focus();
+    if (returnFocus?.isConnected !== false) returnFocus?.focus();
   }
   function requestBack(after) {
     if (working || busy) return;
@@ -1793,45 +1821,28 @@ export function setupNativeWorkflows(options) {
     const session = version;
     try {
       const record = readEditor();
-      // Saved untouched, a workflow stays as it was stored (the same fingerprint): the fixed prompt
-      // the editor shows without offering it only leaves with a change of the user's.
+      // Saved untouched, a workflow stays as it was stored (the same fingerprint): a fixed prompt of
+      // before only leaves with a change of the user's.
       if (draft.parameters.prompt?.policy === 'fixed' && JSON.stringify(record) === baseline)
         record.parameters.prompt = structuredClone(draft.parameters.prompt);
-      if (!record.name || (!record.importDraft && !record.description))
-        throw Error('Ajoutez un nom et une description indiquant quand utiliser ce workflow.');
-      if (!record.importDraft || record.enabled) {
-        for (const [role, policy] of Object.entries(record.components))
-          if (!policy.asset)
-            throw Error(
-              familyOf(record.pipeline)?.components[role]?.format === 'tokenizer'
-                ? 'Choisissez le dossier du tokenizer : il est requis pour enregistrer ce workflow.'
-                : 'Choisissez un fichier pour « ' + componentLabel(role) + ' ».',
-            );
-        if (record.loras.some(lora => !lora.asset)) {
-          const section = $('native-workflow-loras').closest?.('details');
-          if (section) section.open = true;
-          throw Error('Choisissez le fichier de chaque LoRA, ou retirez les lignes inutilisées.');
-        }
-        // (0.6.94) A setting or a LoRA's strength left to the assistant without a default: not saved
-        // so (each says it under its box, too). (0.6.102: a file is never left to it any more.)
-        const lacking = [
-          ...Object.values(parameterControls).map(control => control.missingDefault()),
-          ...readLoras.map(item => item.missingDefault()),
-        ].find(Boolean);
-        if (lacking) throw Error(lacking);
-      }
+      if (!record.description)
+        throw Error('Dites en une phrase pour quoi Moodix AI choisit ce modèle (« Il le choisit pour »).');
+      for (const [role, policy] of Object.entries(record.components))
+        if (!policy.asset)
+          throw Error(
+            familyOf(record.pipeline)?.components[role]?.format === 'tokenizer'
+              ? 'Choisissez le dossier du tokenizer : il est requis pour enregistrer ces réglages.'
+              : 'Choisissez un fichier pour « ' + componentLabel(role) + ' ».',
+          );
+      if (record.loras.some(lora => !lora.asset))
+        throw Error('Choisissez le fichier de chaque LoRA, ou retirez les lignes inutilisées.');
       const result = await run(async signal => (await api('generation/workflows', record, { signal })).json());
       if (session !== version || !result) return false;
       changedWorkflows = true;
       const saved = result.workflow || record,
         index = workflows.findIndex(item => item.id === saved.id);
-      let view = saved;
-      if (saved.importDraft) {
-        const { source, extras, ...summary } = saved.importDraft;
-        view = { ...saved, importDraft: summary, importSummary: true };
-      }
-      if (index < 0) workflows.push(view);
-      else workflows[index] = view;
+      if (index < 0) workflows.push(saved);
+      else workflows[index] = saved;
       renderList();
       leaveEditor();
       // Readiness and origin (a shipped workflow becomes "modified by you") come from the server.
@@ -1862,14 +1873,13 @@ export function setupNativeWorkflows(options) {
       if (!controller.signal.aborted) $('generation-status').textContent = failure.message;
     }
   };
-  $('workflow-add').onclick = () => edit();
   $('native-workflow-back').onclick = () => requestBack();
   $('native-workflow-close').onclick = () => options.onRequestClose?.();
   $('native-workflow-save').onclick = saveEditor;
   $('native-workflow-keep').onclick = () => {
     $('native-workflow-unsaved').hidden = true;
     afterBack = undefined;
-    $('native-workflow-name').focus();
+    $('native-workflow-back').focus();
   };
   $('native-workflow-discard').onclick = () => {
     const after = afterBack;
@@ -1894,7 +1904,7 @@ export function setupNativeWorkflows(options) {
   );
   // Échap is answered at the key itself (16/11): the browser lets a page refuse a close request
   // (`cancel`, above) only once per user activation, and Échap is not one. Pressed again on « Enregistrer
-  // les modifications de ce workflow ? », it closed the settings and the workflow was lost. A key
+  // les modifications de ce modèle ? », it closed the settings and the changes were lost. A key
   // prevented is never a close request. Heard on the page: after what answers Échap itself in the
   // editor (a list of glass stops it), before the guard of the settings (on the window), and with the
   // focus lost too (the key then goes to the page, not to the settings).
@@ -1914,57 +1924,10 @@ export function setupNativeWorkflows(options) {
       id: crypto.randomUUID(),
       asset: '',
       description: '',
-      enabled: { policy: 'off' },
+      // Added to be used: on, until the user says otherwise.
+      enabled: { policy: 'fixed', value: true },
       strength: { policy: 'fixed', value: 1 },
     });
-  };
-  $('native-workflow-add-reference').onclick = () => {
-    if ($('native-workflow-add-reference').disabled) return;
-    addReference({
-      id: crypto.randomUUID(),
-      role: Object.keys(familyOf(draft.pipeline)?.roles || {})[0] || 'reference',
-      required: false,
-    });
-  };
-  async function changePipeline(pipeline) {
-    const session = version;
-    try {
-      const identity = {
-          id: draft.id,
-          name: $('native-workflow-name').value,
-          description: $('native-workflow-description').value,
-        },
-        next = await run(signal => template(pipeline, signal));
-      if (!next || session !== version) return;
-      draft = { ...next, ...identity, enabled: false };
-      clearTemplateAssets(draft);
-      renderEditor();
-    } catch (failure) {
-      if (session === version) error(failure.message);
-    }
-  }
-  $('native-workflow-pipeline').onchange = async () => {
-    const pipeline = $('native-workflow-pipeline').value;
-    $('native-workflow-pipeline').value = draft.pipeline;
-    if (pipeline === draft.pipeline) return;
-    if (!isNew || editorDirty(false)) {
-      pendingPipeline = pipeline;
-      $('native-workflow-switch').hidden = false;
-      $('native-workflow-switch-cancel').focus();
-      return;
-    }
-    await changePipeline(pipeline);
-  };
-  $('native-workflow-switch-cancel').onclick = () => {
-    pendingPipeline = '';
-    $('native-workflow-switch').hidden = true;
-    $('native-workflow-pipeline').focus();
-  };
-  $('native-workflow-switch-confirm').onclick = async () => {
-    const pipeline = pendingPipeline;
-    pendingPipeline = '';
-    $('native-workflow-switch').hidden = true;
-    if (pipeline) await changePipeline(pipeline);
   };
   function importStatus(message, failed = false) {
     $('native-import-status').hidden = !message;
@@ -1987,40 +1950,13 @@ export function setupNativeWorkflows(options) {
         if (!controller.signal.aborted) importStatus(failure.message, true);
       }
     };
-  $('native-workflow-import').onclick = () => $('native-workflow-file').click();
-  $('native-workflow-file').onchange = async event => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file || busy || working) return;
-    const paths = Object.fromEntries(Object.entries(folderControls).map(([key, [id]]) => [key, $(id).value.trim()])),
-      session = version;
-    importStatus('Lecture du workflow…');
-    try {
-      const result = await run(async signal => {
-        if (file.size > 2 * 1024 * 1024) throw Error('Workflow limité à 2 Mo.');
-        const sourceText = await file.text();
-        signal.throwIfAborted();
-        return (await api('generation/import', { sourceText, ...paths, name: file.name || '' }, { signal })).json();
-      });
-      if (!result || session !== version) return;
-      assets = result.assets || assets;
-      if (await edit(result.workflow, { fresh: true })) importStatus('');
-    } catch (failure) {
-      if (session === version) importStatus(failure.message, true);
-    }
-  };
-  $('native-workflow-export').onclick = () => {
-    try {
-      const record = readEditor(),
-        url = URL.createObjectURL(new Blob([JSON.stringify(record, null, 2) + '\n'], { type: 'application/json' })),
-        link = element('a');
-      link.href = url;
-      link.download = record.id + '.json';
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 0);
-    } catch (failure) {
-      error(failure.message);
-    }
+  // « Remettre les valeurs de base »: every line takes the value of Moodix again; nothing is saved
+  // before « Enregistrer » (saved so, a model the user changed nothing else of is Moodix's again,
+  // and follows its updates: NativeWorkflowCatalog.save).
+  $('native-workflow-reset').onclick = () => {
+    for (const line of valueLines) line.toBase();
+    refreshInert();
+    syncReset();
   };
 
   return {

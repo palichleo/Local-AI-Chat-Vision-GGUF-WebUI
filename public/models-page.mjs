@@ -72,7 +72,7 @@ export function lineOf(model, workflows, downloads) {
     line = { records, label, note: '', offer: null, bytes: 0 };
   if (job.state === 'running' && records.some(([, record]) => record.id === job.workflowId))
     return { ...line, state: 'downloading' };
-  // « Disponible pour l’assistant » unticked (0.6.94): out of the tools of Moodix AI, never out of the Studio.
+  // « Proposé à Moodix AI » off (0.6.94): out of the tools of Moodix AI, never out of the Studio.
   const off = records.find(([, record]) => record.enabled === false)?.[1];
   if (off)
     return {
@@ -80,8 +80,8 @@ export function lineOf(model, workflows, downloads) {
       state: 'off',
       note:
         off.ready === false
-          ? 'Pas proposé à l’assistant. ' + (off.unavailableReason || 'Indisponible.')
-          : 'Pas proposé à l’assistant : il reste dans le Studio.',
+          ? 'Pas proposé à Moodix AI. ' + (off.unavailableReason || 'Indisponible.')
+          : 'Pas proposé à Moodix AI : il reste dans le Studio.',
     };
   const lacking = records.filter(([, record]) => record.ready === false);
   if (!lacking.length) return { ...line, state: 'ready' };
