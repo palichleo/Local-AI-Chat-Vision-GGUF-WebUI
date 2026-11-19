@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { NativeWorkflowCatalog, workflowFingerprint } from '../lib/native-workflows.mjs';
+import { NativeWorkflowCatalog, validateNativeWorkflow, workflowFingerprint } from '../lib/native-workflows.mjs';
 
 const shippedFile = new URL('../runner/workflows/5e1b8c3a-9d2f-4a6e-b7c4-1f0d6e3a9b85.json', import.meta.url);
 const assets = { resolve: async id => ({ path: join(tmpdir(), id) }), read: async () => null };
@@ -44,25 +44,42 @@ test('a shipped workflow is listed ready, and saving it unchanged keeps it shipp
   assert.deepEqual(await f.names(), [[f.original.name, true, false, false]]);
 });
 
-test('an update never replaces an edited workflow: its new version is listed beside it as V2', async t => {
+test('an update never replaces an edited workflow, and lists nothing beside it: a model is one entry (0.6.126)', async t => {
   const f = await setup(t);
   await f.catalog.save({ ...f.original, description: 'Mon réglage à moi.' });
   assert.deepEqual(await f.names(), [[f.original.name, true, true, false]]);
-  // The update ships a new version of the same workflow.
-  await f.ship({ ...f.original, description: 'Nouvelle version fournie.' });
-  assert.deepEqual(await f.names(), [
-    [f.original.name, true, true, false],
-    [f.original.name + ' V2', true, false, true],
-  ]);
-  const listed = await f.catalog.list();
+  // The update ships a new version of the same workflow: until 0.6.126 it was listed beside the
+  // user's as « … V2 », a second model of the same name in the Studio.
+  const shipped = { ...f.original, description: 'Nouvelle version fournie.' };
+  await f.ship(shipped);
+  assert.deepEqual(await f.names(), [[f.original.name, true, true, false]]);
   assert.equal((await f.catalog.read(f.original.id)).description, 'Mon réglage à moi.');
-  const update = listed.find(item => item.update);
-  assert.notEqual(update.id, f.original.id);
-  assert.equal((await f.catalog.read(update.id)).description, 'Nouvelle version fournie.');
-  // Its identity is stable from one listing to the next (conversations keep pointing at it).
-  assert.equal((await f.catalog.list()).find(item => item.update).id, update.id);
-  const prepared = await f.catalog.prepare(update.id, { references: [{ input: 'source', image: 0 }] }, { allowPendingReferences: true });
-  assert.equal(prepared.workflow.id, update.id);
+  assert.equal((await f.catalog.list()).some(item => item.update), false);
+  // A creation made with that « V2 » named it: its workflow is the one of the model.
+  const former = f.original.id + '-' + workflowFingerprint(validateNativeWorkflow(shipped)).slice(0, 12);
+  assert.equal((await f.catalog.read(former)).description, 'Mon réglage à moi.');
+  const prepared = await f.catalog.prepare(former, { references: [{ input: 'source', image: 0 }] }, { allowPendingReferences: true });
+  assert.equal(prepared.workflow.id, f.original.id);
+  await assert.rejects(f.catalog.read(f.original.id + '-0123456789zz'), /not found/);
+  await assert.rejects(f.catalog.read('unknown-0123456789ab'), /not found/);
+  // (A workflow of the user's own never had a « V2 »: such a name is not its own.)
+  await f.catalog.save({ ...f.original, id: 'le-mien', name: 'Le mien' });
+  await assert.rejects(f.catalog.read('le-mien-0123456789ab'), /not found/);
+  await f.catalog.remove('le-mien');
+  // « Rétablir les réglages de Moodix »: the version shipped now, alone.
+  await f.catalog.reset(f.original.id);
+  assert.deepEqual(await f.names(), [[f.original.name, true, false, false]]);
+  assert.equal((await f.catalog.read(f.original.id)).description, 'Nouvelle version fournie.');
+  assert.equal((await f.catalog.read(former)).description, 'Nouvelle version fournie.');
+});
+
+test('a copy of the user that can no longer be read hides nothing: the shipped workflow is listed', async t => {
+  const f = await setup(t);
+  await f.catalog.save({ ...f.original, description: 'Mon réglage à moi.' });
+  await writeFile(join(f.user, f.original.id + '.json'), '{ "schemaVersion": 1, "id": ');
+  assert.deepEqual(await f.names(), [[f.original.name, true, false, false]]);
+  assert.match(f.catalog.warnings.join(' '), /Skipped workflow/);
+  assert.equal((await f.catalog.read(f.original.id)).description, f.original.description);
 });
 
 test('a shipped workflow named like one of the user’s becomes V2, then V3', async t => {
@@ -176,8 +193,8 @@ test('Krea 2 with its denoise left to the assistant reaches the installed copies
   await writeFile(join(user, id + '.json'), JSON.stringify(fixedAt(0.65)));
   assert.deepEqual(await catalog.adoptShipped(), { removed: [], kept: [id] });
   assert.equal(await denoise(id), 0.65);
-  // Edited from the settings while 1 was shipped: the update never replaces it, and lists the new
-  // version beside it (« Krea 2 V2 »).
+  // Edited from the settings while 1 was shipped: the update never replaces it, and lists
+  // nothing beside it (0.6.126: no « Krea 2 V2 »).
   await catalog.reset(id);
   await ship(before);
   await catalog.save({ ...before, description: 'Mon Krea.' });
@@ -185,10 +202,7 @@ test('Krea 2 with its denoise left to the assistant reaches the installed copies
   const listed = await catalog.list();
   assert.deepEqual(
     listed.map(item => [item.name, item.customized ?? false, item.update ?? false, said(item.parameters.denoise)]),
-    [
-      [current.name, true, false, 1],
-      [current.name + ' V2', false, true, 'assistant 0.6–0.7'],
-    ],
+    [[current.name, true, false, 1]],
   );
   // Opened and saved as the editor writes it (the keys in its own order): still the shipped one.
   await catalog.reset(id);
