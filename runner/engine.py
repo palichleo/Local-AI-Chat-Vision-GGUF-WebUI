@@ -40,6 +40,14 @@ def _check_reference(item, media):
 
 def preflight(job, config):
     """Everything that can fail without the GPU fails here, before the chat model is unloaded."""
+    # What it imports is kept as what a creation imports (runner.warm, 0.6.106): the application
+    # asks for this check before every creation, and most of the libraries are imported here.
+    # Kept from the creation alone, the list held 128 modules of the 3000.
+    with warm.watch(config, job):
+        return _preflight(job, config)
+
+
+def _preflight(job, config):
     validate_job(job)
     config = validate_config(config)
     manifest = family(job['pipeline'])

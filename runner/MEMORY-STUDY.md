@@ -302,4 +302,38 @@ The libraries alone, by family, in a process that does nothing else: 5.8 s for K
 - **A module being imported is in `sys.modules` half made**: the worker closing during the import failed on `torch.cuda` (seen once, before the correction). What looks at PyTorch without importing it now asks whether it is entirely imported.
 - **One measure in ten at 3 s took 30.5 s**: 10 s more before the first stage, the import already late when the request came (0.41 GiB held at 3 s instead of 0.54). Not seen again in eight more with a stack recorded at 9.5 s; the machine doing something else is the likeliest, and nothing shows the contrary.
 
-Not measured: the gain the first time of an evening (the import is then the 18.6 s above, three times longer: more to gain, as much RAM); LTX 2.5 and MiniMax H3 (their imports are of the same size, their first creation much longer); a disk slower than this one.
+Not measured: LTX 2.5 (its imports are of the same size, its first creation much longer); a disk slower than this one.
+
+#### In the application itself (19 November 2026, engine 0.6.106)
+
+A copy of the application (its own data folder and Python environment, the user's settings without the keys, no chat model), the same picture asked for from the Studio as the first creation after each start, the setting off then on, twice:
+
+| First picture of a session | In all | Before the engine | The engine |
+| --- | --- | --- | --- |
+| nothing imported ahead | 22.0 s and 21.1 s | 4.8 s and 5.1 s | 17.1 s and 16.1 s |
+| libraries imported as the worker starts | 16.1 s and 16.3 s | 0.2 s and 0.2 s | 15.9 s and 16.1 s |
+
+- **5.3 s gained (25 %), all of it before the engine**: the application asks the worker to check the job first (`preflight`), and it is that check which imports the libraries, not the creation that follows. The worker has them 12 s after the application starts (0.70 GiB held, the card untouched).
+- **The list was kept from the creation alone, and held 128 modules of the 3042** (0.6.105): importing them brought nearly everything with them, by chance. What the check imports is kept too since 0.6.106.
+- **Other families beside it**: a MiniMax H3 video made in the same session (66.8 s, its own libraries not yet known), then, after a restart with both families imported ahead (0.70 GiB again), a Krea 2 picture (17.2 s) and a MiniMax H3 video (58.4 s). Nothing failed, nothing was written to the worker's error log.
+- **The first time of an evening is not the 18.6 s above**: at every start the application checks its Python environment by importing the same libraries in a process of its own, before the worker starts. Their files are in the system's cache by then, and the worker imports them in about 5 s whatever came before. (That check and the worker's import now do the same work twice at each start, one after the other: about 5 s of one core, not looked into.)
+- **In the copy the very first creation took 25.0 s, its first step 4.4 s**: the application keeps Python's compiled code under a folder named after the path of the sources, and a copy starts without it. Not a cost of a session.
+
+#### What was tried for the rest, and why nothing of it was kept
+
+With the libraries imported, the first picture takes 15.2 to 16.4 s, the third of the same worker with a new prompt 11.1 to 11.3 s: what is left of a cold start is the model read into page-locked RAM (3.2 to 4.1 s). Each of these was tried from outside, the engine's code untouched (a file run in the worker before it starts), alternated with the engine as it is:
+
+| What | First picture | Kept |
+| --- | --- | --- |
+| the engine as it is | 14.9 to 16.4 s | |
+| the model's files out of the system's cache (read from the disk) | 15.4 and 15.5 s | nothing to do |
+| the text encoder read through its mapping, never copied into RAM | 18.0 and 18.3 s | no |
+| the model read into RAM by a thread while the text encoder works | 16.3 and 16.4 s | no |
+
+- **The disk is not what a cold start waits for, on this one.** A Samsung 980 PRO gives 3.2 GiB/s to one reader, the system's cache 7; four readers fill the 12.6 GiB arena as fast from one as from the other (2.0 to 3.2 s), bound by the pages of the new buffer. Reading the files ahead (at the start of the application, or when a creation is announced) would gain nothing here; on a slower disk it would, and that was not measured.
+- **Reading the model while the text encoder works loses 0.5 to 1 s.** Both want the same memory: the encoder's load went from 1.5 to 5.6 s beside the four readers, and it cannot keep its own copy in RAM meanwhile on 32 GiB (2.4 GiB would be left available, under the 4 kept for the system), so it is read through its mapping.
+- **The text encoder copied into RAM is worth its 0.8 s even when it cannot stay**: read through its mapping it takes 3.3 to 3.5 s instead of 1.4 to 1.7. This is also what the second picture of a session pays (text encoder 3.4 s: its copy left for the model, its file gone from the system's cache); the third finds the file in the cache again (1.7 s).
+- **Locking the pages costs nothing after the read, 1.5 s before it**: `cudaHostRegister` on 12.6 GiB takes 0.04 s once the buffer is filled, 1.5 s on an untouched one (the read is then no faster: 2.1 to 2.3 s). The order of `Residency.arena` is the right one. Eight readers instead of four: 2.1 to 2.3 s against 2.0 to 2.8, no gain.
+- **The first step of a worker takes 1.4 to 1.7 s, the first of a later picture 1.1 s (2.3 s once), the others 0.83 s; the first decode 1.0 s, the later ones 0.75 to 0.85 s.** About 0.6 s of things done once in a process, not looked into further.
+
+Not tried: the application's own path (the chat model leaving the card before a creation and coming back after it), where the arena of the model may have to leave RAM between two creations.

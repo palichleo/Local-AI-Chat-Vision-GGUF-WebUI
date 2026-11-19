@@ -8,11 +8,14 @@ application, on unless the user turns it off) imports them in the background as 
 answered. It costs 0.7 GiB of RAM from then on, and nothing of the card: no module is called, the
 driver is given no context. Measured on the first Krea 2 picture of a worker (1024 x 1024, 8 steps,
 three times or more each, alternated): 23.2 s without, 16.3 s asked for once the import has ended,
-20.0 s asked for 3 s after the start, 23.1 s asked for at once (runner/MEMORY-STUDY.md).
+20.0 s asked for 3 s after the start, 23.1 s asked for at once; in the application, from the
+Studio, 21.1 and 22.0 s without, 16.1 and 16.3 s with (runner/MEMORY-STUDY.md).
 
 What to import is not written here: each family's first creation of a process says what it imported
-(`watch`), kept beside the caches (`warm.json`) and read at the next start. A family never used on
-this computer is not prepared; a module that is gone since (an update) is passed over.
+(`watch`), kept beside the caches (`warm.json`) and read at the next start. So does the check the
+application asks for before every creation: most of the libraries are imported there (0.6.106).
+A family never used on this computer is not prepared; a module that is gone since (an update) is
+passed over.
 
 One thread imports at a time. A request that needs the libraries (`aside`) takes over once the
 module being imported is imported, and imports the rest itself as it always did: it never waits for

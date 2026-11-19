@@ -99,6 +99,26 @@ class WarmTest(unittest.TestCase):
         # Once in a process.
         self.assertFalse(warm.start(self.config | {'warm': True}))
 
+    def test_what_the_check_before_a_creation_imports_is_kept_too(self):
+        # The application asks for the check first, and the libraries are imported there.
+        def check(job, config):
+            import colorsys  # noqa: F401
+
+            return dict(ready=True)
+
+        def refuse(job, config):
+            import graphlib  # noqa: F401
+
+            raise ValueError('Invalid job')
+
+        with mock.patch.object(engine, '_preflight', check):
+            self.assertEqual(engine.preflight(dict(pipeline='krea2'), self.config), dict(ready=True))
+        self.assertEqual(self.kept(), {'krea2': ['colorsys']})
+        # A check that refuses the job keeps nothing of it.
+        with mock.patch.object(engine, '_preflight', refuse), self.assertRaises(ValueError):
+            engine.preflight(dict(pipeline='ltx25'), self.config)
+        self.assertEqual(self.kept(), {'krea2': ['colorsys']})
+
     def test_nothing_is_imported_unless_asked(self):
         with warm.watch(self.config, dict(pipeline='krea2')):
             import colorsys  # noqa: F401

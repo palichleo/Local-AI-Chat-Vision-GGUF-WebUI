@@ -30,7 +30,8 @@ export const FORMATS = [
  * whose pictures may be larger than the clips of the video models. Each of its lists leaves out the
  * two smallest sizes of the common one and goes two sizes further, by the step that list takes
  * (16:9: 1920 × 1088, then 2240 × 1248 and 2560 × 1440). On the card of 12 GB, Krea 2 was measured
- * up to 1536 × 1536 and 1920 × 1088 (runner/MEMORY-STUDY.md): the larger ones are to be tried there.
+ * up to 1536 × 1536 and 1920 × 1088 (runner/MEMORY-STUDY.md); the two larger sizes were tried by the
+ * user on 18 November 2026: 30 s then 53 s a picture.
  */
 const further = {
   '16:9': sizes([2240, 1248], [2560, 1440]),
