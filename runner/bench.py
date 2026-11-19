@@ -12,6 +12,8 @@ each phase cost, what stayed on the GPU and what was kept in RAM.
         [--steps 20: MiniMax's own checkpoints] [--reference-model REF2VA --reference reference_image=FILE]
     python -s -m runner.bench ltx25 --model M.safetensors --text-encoder T.safetensors \\
         --vae V.safetensors --audio-vae A.safetensors [--upscaler U.safetensors] --out FOLDER
+    python -s -m runner.bench moss --model M.safetensors --text-encoder T.safetensors \\
+        --vae V.safetensors --tokenizer TOKENIZER_FOLDER --out FOLDER [--cfg 3] [--negative "..."]
 
     Common: [--runs 3] [--seed 1] [--size WxH] [--steps 8] [--frames 124] [--prompt "..."]
             [--new-prompts N] [--gpu-gib N] [--ram-reserve-gib N]
@@ -71,6 +73,28 @@ def krea2_job(args, run):
         ),
         components=dict(model=args.model, textEncoder=args.text_encoder, vae=args.vae, tokenizer=args.tokenizer),
         loras=_loras(args),
+        references=[],
+    )
+
+
+def moss_job(args, run):
+    _need(args, 'model', 'text_encoder', 'vae', 'tokenizer')
+    width, height = _size(args, '1024x1024')
+    return dict(
+        id=str(uuid.uuid4()),
+        pipeline='moss',
+        mediaType='image',
+        parameters=dict(
+            prompt=_prompt(args, run),
+            negative_prompt=args.negative,
+            seed=args.seed + run - 1,
+            width=width,
+            height=height,
+            steps=args.steps or 50,
+            cfg=args.cfg,
+        ),
+        components=dict(model=args.model, textEncoder=args.text_encoder, vae=args.vae, tokenizer=args.tokenizer),
+        loras=[],
         references=[],
     )
 
@@ -195,6 +219,7 @@ FAMILIES = {
     'krea2': ('runner.pipelines.krea2', krea2_job),
     'ltx25': ('runner.pipelines.ltx25', ltx25_job),
     'minimax_h3': ('runner.pipelines.minimax_h3', minimax_h3_job),
+    'moss': ('runner.pipelines.moss', moss_job),
     'wan_scail2': ('runner.pipelines.wan_scail2', wan_scail2_job),
 }
 
@@ -209,7 +234,7 @@ def main(argv=None):
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--size')
-    parser.add_argument('--steps', type=int, help='8 unless the family has its own (SCAIL-2: 6)')
+    parser.add_argument('--steps', type=int, help='8 unless the family has its own (SCAIL-2: 6, MOSS Image: 50)')
     parser.add_argument('--frames', type=int, default=124)
     parser.add_argument('--prompt', default=PROMPT)
     parser.add_argument('--new-prompts', type=int, default=0, help='prompts that differ; later runs repeat the last')
@@ -225,6 +250,8 @@ def main(argv=None):
     parser.add_argument('--ram-reserve-gib', type=float, help='RAM the resident files must leave free')
     parser.add_argument('--sparse-keep', type=float, help='MiniMax-H3: video sparse attention, percent of cubes kept')
     parser.add_argument('--sparse-start', type=float, default=0.2, help='MiniMax-H3: share of the steps kept dense')
+    parser.add_argument('--cfg', type=float, default=3.0, help='MOSS Image: guidance (1 follows the prompt alone)')
+    parser.add_argument('--negative', default='', help='MOSS Image: negative prompt')
     args = parser.parse_args(argv)
     if args.same_prompt:
         args.new_prompts = 1
