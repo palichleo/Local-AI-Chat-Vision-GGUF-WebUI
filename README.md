@@ -105,7 +105,7 @@ Workflows shipped with Moodix:
 
 **One engine.** Every workflow runs on Moodix's own Python engine (`runner/`), **MOSS Image** included since 0.6.124: no other program has to run beside Moodix. See [runner/README.md](runner/README.md) for the engine.
 
-**Models** are set in **Paramètres › Modèles**: one line a model, the version it uses, its versions under the chevron, and **Réglages** for its page. Each model is a small JSON file (a workflow): the shipped ones live in `runner/workflows/` and come with every download and update; what you change of one is saved in `workflow/`, which updates never touch, and **Rétablir les réglages de Moodix** takes the shipped one back. The page of a model has three parts:
+**Models** are set in **Paramètres › Modèles**: one line a model, the version it uses, whether the assistant may choose it (its switch, under « Moodix AI »), its versions under the chevron, and **Réglages** for its page. Each model is a small JSON file (a workflow): the shipped ones live in `runner/workflows/` and come with every download and update; what you change of one is saved in `workflow/`, which updates never touch, and **Rétablir les réglages de Moodix** takes the shipped one back. The page of a model has three parts:
 
 - **Proposé à Moodix AI** (on by default): the assistant may choose this model, from the sentence you write there (« Il le choisit pour »). It then writes the prompt and chooses what is part of a request: the size or the format, the length, a draft or a final, the denoise of an image to modify. Off, the model is still yours in the Studio.
 - **Fichiers**: one line a file, with **Parcourir** and **Détecter** (the file found by itself in the models folder); where it comes from is under its « ? ».

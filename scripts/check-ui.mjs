@@ -786,7 +786,7 @@ try {
   const lines = `[...document.querySelectorAll('#workflow-list .model-line')]`,
     ltx = `document.querySelector('#workflow-list .model-line[data-model="LTX 2.5"]')`;
   await run('onglet Modèles', () => click('#settings-tab-workflows'), () =>
-    js(`${lines}.length === 10 && document.querySelectorAll('#workflow-list .model-group').length === 4 && document.querySelector('#settings-tab-workflows .settings-tab-label').textContent === 'Modèles'`), { within: 2500 });
+    js(`${lines}.length === 10 && document.querySelectorAll('#workflow-list .model-group').length === 4 && document.querySelector('#settings-tab-workflows .settings-tab-label').textContent === 'Modèles' && document.querySelectorAll('#workflow-list .model-row > .model-ai input').length === 10 && document.querySelectorAll('#workflow-list .model-ai-head').length === 1`), { within: 2500 });
   // Every line is 46 px tall, « Télécharger » in the place of the version as any other (capture 65);
   // nothing scrolls sideways, nothing of before is shown (no button to import or create, no dot).
   await run('Modèles : lignes de 46 px', async () => {}, () =>

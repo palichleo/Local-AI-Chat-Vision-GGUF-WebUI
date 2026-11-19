@@ -16253,6 +16253,33 @@ body:not([data-view='studio']) .ai-cursor {
   letter-spacing: 0.3em;
   text-transform: uppercase;
 }
+/* 0.6.130 (maquette M1). « Proposé à Moodix AI » sur chaque ligne : sa colonne, nommée une fois en
+   tête de la liste, entre la version et « Réglages ». */
+.model-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+#settings .model-ai-head {
+  width: 74px;
+  /* « Réglages » (32), le chevron (28), leurs deux écarts (8) et la marge de la ligne (4). */
+  margin: 0 80px 12px 0;
+  color: var(--text-2);
+  /* Écrit comme le titre d'un groupe. */
+  font: 500 var(--size-label) / 1 var(--font-ui);
+  letter-spacing: 0.3em;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+#settings .model-ai {
+  justify-content: center;
+  min-height: 0;
+  border: 0;
+}
+#settings .model-ai[data-held='true'] {
+  opacity: 0.35;
+}
 .model-line {
   border-radius: 12px;
 }
@@ -16261,7 +16288,7 @@ body:not([data-view='studio']) .ai-cursor {
 }
 .model-row {
   display: grid;
-  grid-template-columns: 194px minmax(0, 1fr) auto 32px 28px;
+  grid-template-columns: 194px minmax(0, 1fr) auto 74px 32px 28px;
   align-items: center;
   column-gap: 8px;
   height: 46px;
@@ -16543,7 +16570,7 @@ body:not([data-view='studio']) .ai-cursor {
 }
 @media (max-width: 1320px) {
   .model-row {
-    grid-template-columns: 170px minmax(0, 1fr) auto 32px 28px;
+    grid-template-columns: 170px minmax(0, 1fr) auto 74px 32px 28px;
   }
   .model-versions {
     padding-left: 170px;

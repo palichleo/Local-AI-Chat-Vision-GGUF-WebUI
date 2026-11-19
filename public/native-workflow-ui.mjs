@@ -428,6 +428,54 @@ export function setupNativeWorkflows(options) {
       importStatus(failure.message, true);
     }
   }
+  /**
+   * « Proposé à Moodix AI » on the line of a model (0.6.130, maquette M1): the switch of its page,
+   * in sight without opening anything, under « Moodix AI » at the head of the list. On when every
+   * workflow of the model is offered; a click offers them all, or none. A model that cannot be
+   * made here yet (to download, or a card it cannot run on) has it greyed, and says why.
+   */
+  function offeredControl(model, shown) {
+    const records = shown.records.map(([, record]) => record),
+      label = node('label', 'history-toggle model-ai'),
+      box = input(null, records.length > 0 && records.every(record => record.enabled !== false), 'checkbox'),
+      held = !records.length
+        ? 'Ce modèle n’est pas installé.'
+        : ['download', 'downloading'].includes(shown.state)
+          ? 'À télécharger d’abord.'
+          : shown.state === 'unavailable'
+            ? 'Indisponible sur cet ordinateur.'
+            : '';
+    box.setAttribute('aria-label', `Proposer ${model.name} à Moodix AI`);
+    box.dataset.nativeControl = 'true';
+    label.title = held || (box.checked ? 'Proposé à Moodix AI' : 'Pas proposé à Moodix AI : il reste dans le Studio');
+    if (held) {
+      box.checked = false;
+      box.dataset.unavailable = 'true';
+      box.disabled = true;
+      label.dataset.held = 'true';
+    }
+    box.onchange = async () => {
+      const enabled = box.checked;
+      try {
+        importStatus('');
+        // Each workflow of the model, as its page would save it with the switch turned.
+        const done = await run(async signal => {
+          for (const record of records)
+            if ((record.enabled !== false) !== enabled)
+              await (await api('generation/workflows', { ...record, enabled }, { signal })).json();
+          return true;
+        });
+        if (!done) return;
+        changedWorkflows = true;
+        await refresh({ settings: false });
+      } catch (failure) {
+        box.checked = !enabled;
+        if (!controller.signal.aborted) importStatus(failure.message, true);
+      }
+    };
+    label.append(box);
+    return label;
+  }
   /** What a workflow of a model that has several makes (Real-ESRGAN: images, videos). */
   const kindOf = record => ({ video: 'Vidéos', audio: 'Sons' })[record.mediaType] ?? 'Images';
   /** « Réglages » (the sliders): the page of details of a model, the one behind the pencil of before. */
@@ -550,7 +598,7 @@ export function setupNativeWorkflows(options) {
       }
       side.append(node('span', 'model-version', shown.label.join(' · ')));
     }
-    row.append(node('strong', 'model-name', model.name), about, side);
+    row.append(node('strong', 'model-name', model.name), about, side, offeredControl(model, shown));
     // (A model of several workflows: « Réglages » of its line are those of the first, and say so.)
     if (first)
       row.append(
@@ -626,8 +674,12 @@ export function setupNativeWorkflows(options) {
     for (const [key, title] of GROUPS) {
       const own = lines.filter(line => line.group === key);
       if (!own.length) continue;
-      const group = node('section', 'model-group');
-      group.append(node('h3', 'model-group-title', title));
+      const group = node('section', 'model-group'),
+        head = node('div', 'model-group-head');
+      head.append(node('h3', 'model-group-title', title));
+      // The column of the switches is named once, over the first of them.
+      if (!list.children.length) head.append(node('span', 'model-ai-head', 'Moodix AI'));
+      group.append(head);
       for (const model of own) group.append(modelLine(model));
       list.append(group);
     }

@@ -371,6 +371,8 @@ test('the page « Modèles »: one line a model in its group, the version it use
   await f.ui.refresh();
   // The groups in the order of the page, a line a model; a workflow that is no model of the page is no line.
   assert.deepEqual(text(list(), 'model-group-title'), ['Image', 'Vidéo', 'Retouches']);
+  // (0.6.130) The column of « Proposé à Moodix AI » is named once, over the first group.
+  assert.deepEqual(text(list(), 'model-ai-head'), ['Moodix AI']);
   assert.deepEqual(text(list(), 'model-name'), ['MOSS Image', 'LTX 2.5', 'SeedVR2', 'Real-ESRGAN']);
   // No dot of state, no bubble of help, nothing of ComfyUI, no pencil nor bin.
   for (const gone of ['workflow-state', 'help-tip', 'workflow-comfy', 'workflow-comfy-start', 'native-edit', 'native-remove', 'workflow-card'])
@@ -380,7 +382,8 @@ test('the page « Modèles »: one line a model in its group, the version it use
   const ltx = lineOf('LTX 2.5');
   assert.deepEqual([ltx.dataset.state, ltx.dataset.open], ['ready', undefined]);
   assert.deepEqual(ltx.children.map(item => item.className), ['model-row']);
-  assert.deepEqual(ltx.children[0].children.map(item => item.className), ['model-name', 'model-about', 'model-side', 'model-settings', 'model-chevron']);
+  // (0.6.130: « Proposé à Moodix AI » between the version and « Réglages ».)
+  assert.deepEqual(ltx.children[0].children.map(item => item.className), ['model-name', 'model-about', 'model-side', 'history-toggle model-ai', 'model-settings', 'model-chevron']);
   assert.deepEqual([text(ltx, 'model-does'), text(ltx, 'model-version'), text(ltx, 'model-note')], [['Vidéos et prolongations.'], ['Distillé · INT8'], []]);
   const [settings] = find(ltx, 'model-settings'),
     [chevron] = find(ltx, 'model-chevron');
@@ -447,6 +450,82 @@ test('the page « Modèles »: one line a model in its group, the version it use
   await find(lineOf('LTX 2.5'), 'model-settings')[0].onclick();
   assert.equal(f.$('workflow-editor').hidden, false);
   assert.equal(f.$('native-workflow-title').textContent, 'Réglages de LTX 2.5');
+});
+
+test('« Proposé à Moodix AI » on the line of a model: on when all its workflows are offered, a click saves each as its page would; greyed, with why, where the model cannot be made yet (0.6.130)', async t => {
+  const f = await setup(t);
+  const under = root => [root, ...root.children.flatMap(child => under(child))],
+    find = (root, name) => under(root).filter(item => String(item.className).split(' ').includes(name)),
+    list = () => f.$('workflow-list'),
+    lineOf = name => find(list(), 'model-line').find(line => line.dataset.model === name),
+    box = name => find(lineOf(name), 'model-ai')[0].children[0],
+    saves = () => f.calls.filter(call => call.route === 'generation/workflows' && call.body).map(call => [call.body.id, call.body.enabled]);
+  // The column is named once, at the head of the list.
+  assert.deepEqual(find(list(), 'model-ai-head').map(item => item.textContent), ['Moodix AI']);
+  // A model that is not offered: off. A click offers it, saved at once, and the list is read again.
+  assert.deepEqual([box('Portrait').type, box('Portrait').checked], ['checkbox', false]);
+  assert.deepEqual([box('Portrait').attributes['aria-label'], box('Portrait').dataset.nativeControl], ['Proposer Portrait à Moodix AI', 'true']);
+  box('Portrait').checked = true;
+  await box('Portrait').onchange();
+  assert.deepEqual(saves(), [['image-test', true]]);
+  assert.equal(f.workflows[0].enabled, true);
+  assert.equal(box('Portrait').checked, true, 'drawn again from what the server keeps');
+  assert.equal(f.ui.takeChanges(), true, 'the Studio reads its tools again');
+  // What the server refuses is said, and the switch goes back.
+  f.failSave = true;
+  const refused = box('Portrait');
+  refused.checked = false;
+  await refused.onchange();
+  assert.equal(refused.checked, true);
+  assert.match(f.$('native-import-status').textContent, /Composant incompatible/);
+  assert.equal(f.workflows[0].enabled, true);
+  f.failSave = false;
+
+  // The page of the server: a model of two workflows, one to download, one this computer cannot run.
+  const made = (id, name, pipeline, mediaType, more = {}) => ({ ...structuredClone(f.template), id, name, pipeline, mediaType, builtin: true, enabled: true, ready: true, ...more });
+  f.workflows.push(
+    made('esr-image', 'Upscale rapide', 'realesrgan_image', 'image'),
+    made('esr-video', 'Upscale vidéo', 'realesrgan_video', 'video', { enabled: false }),
+    made('music', 'Musique', 'acestep15', 'audio', { ready: false, unavailableReason: 'Fichier introuvable.', unavailableKind: 'files' }),
+    made('amd', 'SeedVR2', 'seedvr2', 'image', { ready: false, unavailableReason: 'Carte NVIDIA requise.', unavailableKind: 'hardware' }),
+  );
+  const models = [
+    { name: 'Real-ESRGAN', does: 'Agrandir une image ou une vidéo.', group: 'retouch', order: 2, workflows: [{ id: 'esr-image', family: 'realesrgan_image', version: '×4 Plus' }, { id: 'esr-video', family: 'realesrgan_video', version: '×2 Plus' }] },
+    { name: 'ACE-Step 1.5', does: 'Musique, avec ou sans paroles.', group: 'audio', order: 1, workflows: [{ id: 'music', family: 'acestep15', version: 'XL' }] },
+    { name: 'SeedVR2', does: 'Agrandir et affiner une image.', group: 'retouch', order: 1, workflows: [{ id: 'amd', family: 'seedvr2', versions: [] }] },
+  ];
+  const api = f.api;
+  f.api = async (route, body) =>
+    route === 'generation'
+      ? Response.json({
+          ...(await (await api('generation')).json()),
+          models,
+          downloads: { offers: { music: { complete: true, bytes: 10.7 * 1024 ** 3, files: [] } }, job: { state: 'idle' }, hasToken: false },
+        })
+      : api(route, body);
+  f.ui = setupNativeWorkflows({ api: (...args) => f.api(...args), state: {}, node: f.node, notice() {} });
+  await f.ui.refresh();
+  // One of its two workflows is not offered: off; a click offers that one, and only that one is saved.
+  assert.equal(box('Real-ESRGAN').checked, false);
+  f.calls.length = 0;
+  box('Real-ESRGAN').checked = true;
+  await box('Real-ESRGAN').onchange();
+  assert.deepEqual(saves(), [['esr-video', true]]);
+  assert.equal(box('Real-ESRGAN').checked, true);
+  // Off: both, each saved with what its page would send (the workflow, and what the list said of it).
+  f.calls.length = 0;
+  box('Real-ESRGAN').checked = false;
+  await box('Real-ESRGAN').onchange();
+  assert.deepEqual(saves(), [['esr-image', false], ['esr-video', false]]);
+  assert.equal(lineOf('Real-ESRGAN').dataset.state, 'off');
+  assert.deepEqual(find(lineOf('Real-ESRGAN'), 'model-note').map(item => item.textContent), ['Pas proposé à Moodix AI : il reste dans le Studio.']);
+  // To download first, or a card it cannot run on: greyed, off, and said why under the pointer.
+  for (const [name, why] of [['ACE-Step 1.5', 'À télécharger d’abord.'], ['SeedVR2', 'Indisponible sur cet ordinateur.']]) {
+    const [label] = find(lineOf(name), 'model-ai');
+    assert.deepEqual([label.title, label.dataset.held, box(name).checked, box(name).disabled, box(name).dataset.unavailable], [why, 'true', false, true, 'true'], name);
+  }
+  f.ui.setBusy(false);
+  assert.equal(box('SeedVR2').disabled, true, 'stays greyed after a busy spell');
 });
 
 test('a model to download says « Télécharger » and its size in the place of its version; a licence with conditions is shown at the click, to accept or to refuse', async t => {
