@@ -43,7 +43,9 @@ import {
  * several in one call, where a result without a number keeps `outputTool` to the character;
  * 0.6.113: `suite`, what a continuation nobody asked for is sent back with; 0.6.128: the `steps` and
  * the `color_correction` of `upscale` are gone, settings of SeedVR2: a setting of a model is the
- * user's alone, never the model's to choose, lib/native-workflows.mjs, ownSettings).
+ * user's alone, never the model's to choose, lib/native-workflows.mjs, ownSettings; 0.6.134: Wan 2.2,
+ * a third workflow of `create_video`, listed after the two others, with `stage` said « Only for »
+ * those two since it has one size).
  * Written again, it loses `brief` and `briefExtend`, which the
  * first test leaves aside: they were put back, so that the fixture changed by that argument alone.
  */
@@ -623,7 +625,7 @@ test('the tools of a capable model are contracts: no plan agreed in words, every
   const video = (await catalog.definitions(CONTEXTS.rich, { wording: CAPABLE })).find(
     tool => tool.function.name === 'create_video',
   ).function;
-  assert.deepEqual(video.parameters.properties.workflow.enum, ['MiniMax H3 Omni', 'LTX 2.5']);
+  assert.deepEqual(video.parameters.properties.workflow.enum, ['MiniMax H3 Omni', 'LTX 2.5', 'Wan 2.2']);
   assert.match(video.description, /\n- LTX 2\.5\. /);
   assert.doesNotMatch(video.description, /eaec4e2f/);
   // A workflow passed by its name is the one used.

@@ -111,7 +111,7 @@
      "type": "function",
      "function": {
       "name": "create_video",
-      "description": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images. Propose a video only when the user asks for one. To put the character of an image in place of someone in an existing video, the tool is replace_character, not this one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits. Before generating, agree on the video with the user in one short spoken message, without a tool: five lines at most, plain sentences, no headings, no lists, no bold. Say how you understand the clip, the length in seconds, what each image is for, then ask one to three questions only about what is still open or could be read two ways, and ask for their go. Do not write the full prompt there. Call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: start_image, end_image, reference)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "description": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images. Propose a video only when the user asks for one. To put the character of an image in place of someone in an existing video, the tool is replace_character, not this one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits. Before generating, agree on the video with the user in one short spoken message, without a tool: five lines at most, plain sentences, no headings, no lists, no bold. Say how you understand the clip, the length in seconds, what each image is for, then ask one to three questions only about what is still open or could be read two ways, and ask for their go. Do not write the full prompt there. Call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: start_image, end_image, reference)\n- f70c4029-0bb2-4eee-98f4-305204229fe1: Wan 2.2. Animer une image : une vidéo de 2 à 5 secondes qui commence sur cette image, sans le son. Il lui faut une image de début ; LTX 2.5 et MiniMax H3 font une vidéo depuis un texte seul, et avec le son. (accepts: start_image)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
       "parameters": {
        "type": "object",
        "properties": {
@@ -237,7 +237,8 @@
          "type": "string",
          "enum": [
           "e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f",
-          "eaec4e2f-0649-4e56-9bd9-809dc9390452"
+          "eaec4e2f-0649-4e56-9bd9-809dc9390452",
+          "f70c4029-0bb2-4eee-98f4-305204229fe1"
          ],
          "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match."
         },
@@ -276,7 +277,8 @@
           "draft",
           "final"
          ],
-         "default": "draft"
+         "default": "draft",
+         "description": "Only for: e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f, eaec4e2f-0649-4e56-9bd9-809dc9390452."
         },
         "intention": {
          "type": "string",
@@ -863,7 +865,7 @@
      "type": "function",
      "function": {
       "name": "create_video",
-      "description": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images. Propose a video only when the user asks for one. To put the character of an image in place of someone in an existing video, the tool is replace_character, not this one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits. Before generating, agree on the video with the user in one short spoken message, without a tool: five lines at most, plain sentences, no headings, no lists, no bold. Say how you understand the clip, the length in seconds, what each image is for, then ask one to three questions only about what is still open or could be read two ways, and ask for their go. Do not write the full prompt there. Call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: start_image, end_image, reference)",
+      "description": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images. Propose a video only when the user asks for one. To put the character of an image in place of someone in an existing video, the tool is replace_character, not this one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits. Before generating, agree on the video with the user in one short spoken message, without a tool: five lines at most, plain sentences, no headings, no lists, no bold. Say how you understand the clip, the length in seconds, what each image is for, then ask one to three questions only about what is still open or could be read two ways, and ask for their go. Do not write the full prompt there. Call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: start_image, end_image, reference)\n- f70c4029-0bb2-4eee-98f4-305204229fe1: Wan 2.2. Animer une image : une vidéo de 2 à 5 secondes qui commence sur cette image, sans le son. Il lui faut une image de début ; LTX 2.5 et MiniMax H3 font une vidéo depuis un texte seul, et avec le son. (accepts: start_image)",
       "parameters": {
        "type": "object",
        "properties": {
@@ -877,7 +879,8 @@
          "type": "string",
          "enum": [
           "e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f",
-          "eaec4e2f-0649-4e56-9bd9-809dc9390452"
+          "eaec4e2f-0649-4e56-9bd9-809dc9390452",
+          "f70c4029-0bb2-4eee-98f4-305204229fe1"
          ],
          "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match."
         },
@@ -916,7 +919,8 @@
           "draft",
           "final"
          ],
-         "default": "draft"
+         "default": "draft",
+         "description": "Only for: e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f, eaec4e2f-0649-4e56-9bd9-809dc9390452."
         },
         "intention": {
          "type": "string",
@@ -1161,7 +1165,7 @@
      "type": "function",
      "function": {
       "name": "create_video",
-      "description": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images. Propose a video only when the user asks for one. To put the character of an image in place of someone in an existing video, the tool is replace_character, not this one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits. Before generating, agree on the video with the user in one short spoken message, without a tool: five lines at most, plain sentences, no headings, no lists, no bold. Say how you understand the clip, the length in seconds, what each image is for, then ask one to three questions only about what is still open or could be read two ways, and ask for their go. Do not write the full prompt there. Call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: start_image, end_image, reference)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
+      "description": "Create a video clip from a description, optionally starting or ending on given images or keeping a subject from reference images. Propose a video only when the user asks for one. To put the character of an image in place of someone in an existing video, the tool is replace_character, not this one. Every video is shown to the user, who can edit it before it runs. The video model only sees the images passed in start_image, end_image and reference: an image that is only described in the prompt is not used. When the request involves several images, pass every one of them, each in the role that fits. Before generating, agree on the video with the user in one short spoken message, without a tool: five lines at most, plain sentences, no headings, no lists, no bold. Say how you understand the clip, the length in seconds, what each image is for, then ask one to three questions only about what is still open or could be read two ways, and ask for their go. Do not write the full prompt there. Call this tool once they answered.\nWorkflows:\n- e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f: MiniMax H3 Omni. Créer une vidéo de 5 à 15 secondes avec son synchronisé : depuis un texte, ou en gardant les sujets d’une à trois images de référence (personnages, objets, lieux). Pas d’image de début ni de fin : ce modèle (Omni-Ref) ne les suit pas, LTX 2.5 les prend. Peut aussi prolonger une vidéo et son son, à la résolution de cette vidéo. (accepts: reference)\n- eaec4e2f-0649-4e56-9bd9-809dc9390452: LTX 2.5. Créer une vidéo avec son : depuis un texte, entre une image de début et de fin, avec des sujets de référence, ou pour prolonger une vidéo. (accepts: start_image, end_image, reference)\n- f70c4029-0bb2-4eee-98f4-305204229fe1: Wan 2.2. Animer une image : une vidéo de 2 à 5 secondes qui commence sur cette image, sans le son. Il lui faut une image de début ; LTX 2.5 et MiniMax H3 font une vidéo depuis un texte seul, et avec le son. (accepts: start_image)\nSources: {\"image\": n} is the n-th image the user attached in this conversation (0 = first); {\"resource\": \"id\"} an active resource; {\"output\": \"run_id\"} an earlier result of this conversation; {\"take\": n} the take « PRISE n » of this project, when the user names a take by its number.",
       "parameters": {
        "type": "object",
        "properties": {
@@ -1422,7 +1426,8 @@
          "type": "string",
          "enum": [
           "e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f",
-          "eaec4e2f-0649-4e56-9bd9-809dc9390452"
+          "eaec4e2f-0649-4e56-9bd9-809dc9390452",
+          "f70c4029-0bb2-4eee-98f4-305204229fe1"
          ],
          "description": "Optional: force one of the workflows listed above, when the user names it. Omit it to let the application pick the best match."
         },
@@ -1461,7 +1466,8 @@
           "draft",
           "final"
          ],
-         "default": "draft"
+         "default": "draft",
+         "description": "Only for: e06b6ac9-0d3f-4538-b9ff-bf41cf3ef38f, eaec4e2f-0649-4e56-9bd9-809dc9390452."
         },
         "intention": {
          "type": "string",

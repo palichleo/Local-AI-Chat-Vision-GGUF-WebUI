@@ -407,6 +407,22 @@ class Residency:
             while self.arenas:
                 self._discard(self.arenas.popitem()[1])
 
+    def forget(self, path):
+        """Lets go of what is held of a file, whole or in part, unless a store still reads from
+        it. For a model that will not be read again before another takes its place (the two
+        models of Wan 2.2, one after the other): left in the table, its locked part counted
+        against the share of RAM that may be locked (_pin), and the model that follows was read
+        from unlocked memory. Returns the bytes let go."""
+        path = os.path.abspath(path)
+        freed = 0
+        with self.lock:
+            for name in (path, path + PARTIAL):
+                arena = self.arenas.get(name)
+                if arena is not None and not arena.users:
+                    freed += arena.size
+                    self.arenas.pop(name).release()
+        return freed
+
     def leave_room(self, available):
         """The chat model is about to load: arenas leave, least recently used first (never one a
         store still reads), until the machine has `available` bytes of RAM available. Returns

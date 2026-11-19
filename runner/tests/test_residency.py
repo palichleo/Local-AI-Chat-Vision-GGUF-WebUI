@@ -243,6 +243,32 @@ class EvictionTest(unittest.TestCase):
             residency.RESERVE, psutil.virtual_memory = saved_reserve, saved_memory
 
 
+class ForgottenFileTest(unittest.TestCase):
+    """A model another one takes the place of (Wan 2.2, 0.6.134) gives its locked RAM back."""
+
+    def test_what_is_held_of_a_file_leaves_whole_and_in_part_unless_it_is_being_read(self):
+        from runner.models import residency
+
+        released = []
+
+        def arena(name, users=0):
+            return SimpleNamespace(users=users, size=3, pinned=True, release=lambda: released.append(name))
+
+        table = residency.Residency()
+        high, low = os.path.abspath('high.safetensors'), os.path.abspath('low.safetensors')
+        table.arenas[high] = arena('high')
+        table.arenas[high + residency.PARTIAL] = arena('high part')
+        table.arenas[low + residency.PARTIAL] = arena('low part')
+        self.assertEqual(table.forget('high.safetensors'), 6)
+        self.assertEqual(released, ['high', 'high part'])
+        self.assertEqual(list(table.arenas), [low + residency.PARTIAL])
+        # A file a store still reads from stays; one that is not held is nothing to let go.
+        table.arenas[low + residency.PARTIAL].users = 1
+        self.assertEqual(table.forget(low), 0)
+        self.assertEqual(table.forget('other.safetensors'), 0)
+        self.assertEqual((released, len(table.arenas)), (['high', 'high part'], 1))
+
+
 class RoomForTheChatModel(unittest.TestCase):
     def test_idle_arenas_leave_oldest_first_until_the_chat_model_has_its_room(self):
         try:

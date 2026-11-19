@@ -54,6 +54,30 @@ class ProtocolTests(unittest.TestCase):
                 kitchen._cublas_workspaces.clear()
                 self.assertEqual(release(), dict(released=True, allocatedGiB=0))
 
+    def test_release_gives_back_the_rotation_matrix_comfy_kitchen_keeps_on_the_card(self):
+        from runner.engine import release
+
+        # (0.6.134) 64 x 64 values for the weights of Wan 2.2, rotated by groups of 64: 8 KiB kept
+        # by the library, and the first real video ended on « GPU cleanup incomplete ».
+        utils = SimpleNamespace(_HADAMARD_CACHE={(64, 'cuda:0', 'bfloat16'): 'eight kibibytes'})
+        calls = []
+        cuda = SimpleNamespace(
+            is_initialized=lambda: True,
+            synchronize=lambda: None,
+            empty_cache=lambda: calls.append(dict(utils._HADAMARD_CACHE)),
+            memory_allocated=lambda: 8192 if utils._HADAMARD_CACHE else 0,
+        )
+        torch = SimpleNamespace(cuda=cuda, _C=SimpleNamespace())
+        with patch.dict(sys.modules, {'torch': torch, 'comfy_kitchen.tensor.int8_utils': utils}):
+            self.assertEqual(release(), dict(released=True, allocatedGiB=0))
+        self.assertEqual(calls, [{}])
+        # A library without that cache, or never imported, changes nothing.
+        with patch.dict(sys.modules, {'torch': torch, 'comfy_kitchen.tensor.int8_utils': SimpleNamespace()}):
+            self.assertEqual(release(), dict(released=True, allocatedGiB=0))
+        with patch.dict(sys.modules, {'torch': torch}):
+            sys.modules.pop('comfy_kitchen.tensor.int8_utils', None)
+            self.assertEqual(release(), dict(released=True, allocatedGiB=0))
+
     def _engine_torch(self, free_gib=10):
         fractions = []
         cuda = SimpleNamespace(

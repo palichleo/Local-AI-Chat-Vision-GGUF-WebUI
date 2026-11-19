@@ -116,6 +116,12 @@ def embed(model, ids):
 
 def encode(path, prompt, progress=None):
     """The text conditioning of `prompt`, [1, 512, 4096], the encoder streamed from its file."""
+    return encode_all(path, [prompt], progress)[0]
+
+
+def encode_all(path, prompts, progress=None):
+    """The text conditioning of each of `prompts`, [1, 512, 4096] each: the encoder is streamed
+    from its file once for all of them (Wan 2.2 reads a prompt and what to avoid)."""
     import torch
     from runner.models.headers import header
     from runner.models.pool import WeightPool
@@ -125,15 +131,16 @@ def encode(path, prompt, progress=None):
     found = names(header(path), model)
     # Read once per prompt, this file sends nothing away from RAM to sit there.
     with open_store(path, evict=False) as source:
-        ids = token_ids(prompt, tokenizer(source))
+        pieces = tokenizer(source)
+        ids = [token_ids(prompt, pieces) for prompt in prompts]
         pool = WeightPool({'textEncoder': source}, 0)
         try:
             model = streamed(model, found, pool)
             if progress:
                 progress(stage='encoding video prompt')
-            result = embed(model, ids)
+            results = [embed(model, item) for item in ids]
             encode.weights = pool.summary()
-            return result
+            return results
         finally:
             del model
             pool.clear()

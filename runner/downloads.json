@@ -598,5 +598,29 @@
       "limits": "Licence de Meta. Redistribution sous la même licence, avec sa copie. Aucun usage militaire, nucléaire ou pour des armes.",
       "restricted": true
     }
+  },
+  "wan2.2_i2v_high_int8_convrot.safetensors": {
+    "repo": "obsxrver/ComfyUI-Native-INT8_ConvRot",
+    "revision": "4377928f97cc0efe49089f234a4bb69c310d1e77",
+    "path": "diffusion_models/wan2.2_i2v_high_int8_convrot.safetensors",
+    "size": 14538222688,
+    "sha256": "dade868b038c93e3e44d47e5730fb2e7778c3a33b932289041a7ff2802a4d5b4",
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://spdx.org/licenses/Apache-2.0.html",
+      "limits": "obsxrver/ComfyUI-Native-INT8_ConvRot ne déclare pas de licence propre ; ses fichiers sont des conversions de Wan 2.2 (Wan-AI/Wan2.2-I2V-A14B, Apache-2.0)."
+    }
+  },
+  "wan2.2_i2v_low_int8_convrot.safetensors": {
+    "repo": "obsxrver/ComfyUI-Native-INT8_ConvRot",
+    "revision": "4377928f97cc0efe49089f234a4bb69c310d1e77",
+    "path": "diffusion_models/wan2.2_i2v_low_int8_convrot.safetensors",
+    "size": 14538222688,
+    "sha256": "97df23e13eac871053249a87e4ec1fcea90c8eaa3c477e6fa1e6ffe7db0442b2",
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://spdx.org/licenses/Apache-2.0.html",
+      "limits": "obsxrver/ComfyUI-Native-INT8_ConvRot ne déclare pas de licence propre ; ses fichiers sont des conversions de Wan 2.2 (Wan-AI/Wan2.2-I2V-A14B, Apache-2.0)."
+    }
   }
 }

@@ -253,18 +253,22 @@ const MINIMAX = {
 const KREA = { 'first.weight': [6144, 64], 'last.linear.weight': [64, 6144], 'blocks.0.attn.wq.weight': [6144, 6144] };
 const SEEDVR = { 'vid_in.proj.weight': [3072, 132], 'blocks.35.attn.proj_qkv.vid.weight': [9216, 3072] };
 const SCAIL = { 'patch_embedding_pose.weight': [5120, 20, 1, 2, 2], 'patch_embedding_mask.weight': [5120, 28, 1, 2, 2] };
-const OWN = { ltx25: LTX, minimax_h3: MINIMAX, krea2: KREA, seedvr2: SEEDVR, wan_scail2: SCAIL };
+// (0.6.134) One of the two files of Wan 2.2 image to video: 36 channels in, forty blocks, no image encoder.
+const WAN22 = { 'patch_embedding.weight': [5120, 36, 1, 2, 2], 'blocks.39.self_attn.q.weight': [5120, 5120] };
+const OWN = { ltx25: LTX, minimax_h3: MINIMAX, krea2: KREA, seedvr2: SEEDVR, wan_scail2: SCAIL, wan22: WAN22 };
 const prefixed = (shapes, prefix) => Object.fromEntries(Object.entries(shapes).map(([name, shape]) => [prefix + name, shape]));
 const which = shapes => modelsOf({ shapes });
 
 test('a file is a version of one model, told by what it holds and not by its name (0.6.116)', () => {
   // The families whose versions are files, and the component those files are.
   const versioned = Object.values(families()).filter(versionComponent);
-  assert.deepEqual(versioned.map(manifest => manifest.family), ['krea2', 'ltx25', 'minimax_h3', 'seedvr2', 'wan_scail2']);
+  assert.deepEqual(versioned.map(manifest => manifest.family), ['krea2', 'ltx25', 'minimax_h3', 'seedvr2', 'wan22', 'wan_scail2']);
   for (const manifest of versioned) {
     const { role, spec } = versionComponent(manifest);
     assert.equal(role, 'model', manifest.family);
-    assert.deepEqual(spec.reads, ['INT8', 'FP8', 'BF16', 'FP16', 'FP32'], manifest.family);
+    // (0.6.134) No FP8 file of Wan 2.2 was tried: none is promised (tests/wan22.mjs).
+    const formats = ['INT8', 'FP8', 'BF16', 'FP16', 'FP32'].filter(format => format !== 'FP8' || manifest.family !== 'wan22');
+    assert.deepEqual(spec.reads, formats, manifest.family);
     assert.equal(spec.folder, 'diffusion_models');
   }
   // A folder of Hugging Face, a model ComfyUI runs, a small tool: no versions to find.

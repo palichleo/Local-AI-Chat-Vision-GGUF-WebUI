@@ -218,6 +218,12 @@ def release(keep_above=None, between=False):
         workspaces = getattr(kitchen, '_cublas_workspaces', None)
         if workspaces:
             workspaces.clear()
+        # It also keeps, for ever, the rotation matrix of a ConvRot group size it has no fused
+        # kernel for (64: the files of Wan 2.2, 0.6.134; 8 KiB on the card, and the card was said
+        # not to be empty after the first video). Asked for again, it is built again.
+        rotations = getattr(sys.modules.get('comfy_kitchen.tensor.int8_utils'), '_HADAMARD_CACHE', None)
+        if rotations:
+            rotations.clear()
         torch.cuda.empty_cache()
         allocated = max(0, torch.cuda.memory_allocated() - held) / 1024**3
     if allocated:

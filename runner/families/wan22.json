@@ -1,0 +1,264 @@
+{
+  "family": "wan22",
+  "label": "Wan 2.2",
+  "mediaType": "video",
+  "model": {
+    "name": "Wan 2.2",
+    "does": "Animer une image, sans le son.",
+    "group": "video",
+    "order": 4,
+    "names": [
+      { "match": "i2v", "name": "Image vers vidéo" }
+    ]
+  },
+  "tasks": ["create_video"],
+  "engine": "internal",
+  "hardware": {
+    "cuda": true
+  },
+  "requires": [
+    "torch",
+    "diffusers",
+    "transformers",
+    "accelerate",
+    "safetensors",
+    "sentencepiece",
+    "PIL",
+    "imageio",
+    "imageio_ffmpeg",
+    "comfy_kitchen"
+  ],
+  "components": {
+    "model": {
+      "label": "Modèle (bruit fort)",
+      "folder": "diffusion_models",
+      "required": true,
+      "reads": ["INT8", "BF16", "FP16", "FP32"],
+      "fingerprint": [
+        {
+          "key": "^patch_embedding\\.weight$",
+          "shape": [5120, 36, 1, 2, 2]
+        },
+        {
+          "key": "^blocks\\.39\\.self_attn\\.q\\.weight$",
+          "shape": [5120, 5120]
+        },
+        {
+          "key": "^blocks\\.40\\.",
+          "absent": true
+        },
+        {
+          "key": "^img_emb\\.",
+          "absent": true
+        }
+      ],
+      "recipes": [
+        {
+          "id": "pair",
+          "companion": { "role": "modelLow", "named": "(?:^|[^a-z])low(?:[^a-z]|$)" }
+        }
+      ],
+      "note": "Wan 2.2 image vers vidéo 14B, le premier de ses deux fichiers (« high noise ») : il dessine la composition et le mouvement, pendant les premières étapes.",
+      "signature": [
+        {
+          "key": "^patch_embedding\\.weight$",
+          "shape": [5120, 36, 1, 2, 2]
+        },
+        {
+          "key": "^head\\.head\\.weight$",
+          "shape": [64, 5120]
+        }
+      ]
+    },
+    "modelLow": {
+      "label": "Modèle (bruit faible)",
+      "folder": "diffusion_models",
+      "required": true,
+      "note": "Le second fichier de Wan 2.2 (« low noise ») : il finit les détails, pendant les dernières étapes. Les deux fichiers ont la même forme : seul leur nom les distingue.",
+      "signature": [
+        {
+          "key": "^patch_embedding\\.weight$",
+          "shape": [5120, 36, 1, 2, 2]
+        },
+        {
+          "key": "^head\\.head\\.weight$",
+          "shape": [64, 5120]
+        }
+      ]
+    },
+    "textEncoder": {
+      "label": "Encodeur de texte",
+      "folder": "text_encoders",
+      "required": true,
+      "note": "UMT5-XXL, avec son vocabulaire dans le fichier (umt5_xxl_fp8_e4m3fn_scaled).",
+      "signature": [
+        {
+          "key": "^shared\\.weight$",
+          "shape": [256384, 4096]
+        },
+        {
+          "key": "^spiece_model$"
+        }
+      ]
+    },
+    "vae": {
+      "label": "VAE vidéo",
+      "folder": "vae",
+      "required": true,
+      "note": "VAE de Wan 2.1 (celui de Wan 2.2, à 48 canaux, est pour le petit modèle 5B).",
+      "signature": [
+        {
+          "key": "^decoder\\.conv1\\.weight$",
+          "shape": [384, 16, 3, 3, 3]
+        },
+        {
+          "key": "^conv2\\.weight$",
+          "shape": [16, 16, 1, 1, 1]
+        }
+      ]
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "type": "string",
+      "maxLength": 8000,
+      "nonempty": true
+    },
+    "negative_prompt": {
+      "type": "string",
+      "maxLength": 4000,
+      "note": "Ce que la vidéo doit éviter. Celui de Wan, en chinois : couleurs criardes, image figée, détails flous, sous-titres, mains et visages ratés, membres en trop."
+    },
+    "seed": {
+      "type": "integer",
+      "min": 0,
+      "max": 9007199254740991
+    },
+    "width": {
+      "type": "integer",
+      "min": 256,
+      "max": 1280,
+      "multipleOf": 16
+    },
+    "height": {
+      "type": "integer",
+      "min": 256,
+      "max": 1280,
+      "multipleOf": 16
+    },
+    "steps": {
+      "type": "integer",
+      "min": 4,
+      "max": 50,
+      "note": "20 par défaut. Le code de Wan en prend 40 : deux fois plus long, un peu plus fin."
+    },
+    "cfg": {
+      "type": "number",
+      "min": 1,
+      "max": 10,
+      "note": "3,5 pour Wan 2.2. À 1, le prompt négatif n’est pas lu et chaque étape va deux fois plus vite, pour une vidéo moins fidèle au prompt."
+    },
+    "shift": {
+      "type": "number",
+      "min": 1,
+      "max": 12,
+      "note": "5 pour Wan 2.2. Plus haut, davantage d’étapes vont à la composition et au mouvement, moins aux détails."
+    },
+    "frames": {
+      "type": "integer",
+      "choices": [33, 49, 65, 81],
+      "note": "4n+1 images à 16 i/s, de 2 à 5 secondes."
+    },
+    "fps": {
+      "type": "number",
+      "choices": [16]
+    }
+  },
+  "requiredParameters": ["prompt", "seed", "width", "height", "steps", "frames", "fps"],
+  "roles": {
+    "start_image": {
+      "as": "start_image",
+      "media": "image",
+      "max": 1,
+      "label": "Image de début"
+    }
+  },
+  "template": {
+    "name": "Wan 2.2 image to video",
+    "description": "Animates an image: a clip of 2 to 5 seconds that starts on it, without sound.",
+    "components": {
+      "model": {
+        "policy": "fixed",
+        "asset": "select-local-model"
+      },
+      "modelLow": {
+        "policy": "fixed",
+        "asset": "select-local-low-noise-model"
+      },
+      "textEncoder": {
+        "policy": "fixed",
+        "asset": "select-local-text-encoder"
+      },
+      "vae": {
+        "policy": "fixed",
+        "asset": "select-local-video-vae"
+      }
+    },
+    "parameters": {
+      "prompt": {
+        "policy": "model",
+        "type": "string",
+        "maxLength": 8000
+      },
+      "negative_prompt": {
+        "policy": "fixed",
+        "value": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+      },
+      "seed": {
+        "policy": "random",
+        "type": "integer"
+      },
+      "width": {
+        "policy": "fixed",
+        "value": 768
+      },
+      "height": {
+        "policy": "fixed",
+        "value": 448
+      },
+      "steps": {
+        "policy": "fixed",
+        "value": 20
+      },
+      "cfg": {
+        "policy": "fixed",
+        "value": 3.5
+      },
+      "shift": {
+        "policy": "fixed",
+        "value": 5
+      },
+      "frames": {
+        "policy": "model",
+        "type": "integer",
+        "choices": [33, 49, 65, 81],
+        "default": 81,
+        "description": "Longueur du clip (16 i/s) : de 33 (2 s) à 81 images (5 s)."
+      },
+      "fps": {
+        "policy": "fixed",
+        "value": 16
+      }
+    },
+    "loras": [],
+    "references": [
+      {
+        "id": "start",
+        "role": "start_image",
+        "required": true,
+        "name": "Image de début"
+      }
+    ]
+  },
+  "preference": -1
+}

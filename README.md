@@ -96,6 +96,7 @@ Workflows shipped with Moodix:
 | LTX 2.5 | Videos with sound: from text, between a start and an end image, with reference subjects, or continuing a video |
 | MiniMax H3 Omni | Videos of 5 to 15 seconds with synchronized sound: from text, keeping the subjects of one to three reference images, or continuing a video |
 | Wan 2.1 SCAIL-2 | Replaces a person of a video with the character of an image, keeping the motion, framing, set and sound |
+| Wan 2.2 | Animates an image: a silent video of 2 to 5 seconds that starts on it. Made when asked for by name; LTX 2.5 stays the model of a video that starts on an image |
 | Musique (ACE-Step 1.5 XL) | Songs with sung lyrics or instrumentals, 10 seconds to 10 minutes |
 | Bruitages (MOSS-SoundEffect v2) | Sound effects and ambiences, 1 to 30 seconds |
 | Upscale SeedVR2 | Image upscaling and restoration (default upscaler) |

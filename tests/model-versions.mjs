@@ -417,6 +417,7 @@ test('a version is named without its model, its format or how it was made; a fil
     ['seedvr2', 'seedvr2_ema_7b_fp16.safetensors', '7B EMA'],
     ['krea2', 'krea2TurboOfficialComfy_krea2TurboInt8.safetensors', 'Turbo'],
     ['wan_scail2', 'wan2.1_14B_SCAIL_2_int8_convrot.safetensors', 'De base'],
+    ['wan22', 'wan2.2_i2v_high_int8_convrot.safetensors', 'Image vers vidéo'],
     // One nobody described: its name less the model, the format, the steps, the mark of a GGUF.
     ['ltx25', join('D:', 'modeles', 'LTX-2.5_mon-essai_8steps_pruned.safetensors'), 'Mon essai'],
     ['ltx25', 'mon-modele.Q8_0.gguf', 'Mon modele'],
@@ -471,6 +472,7 @@ test('the page « Modèles » is given one line a model, in its order, and a cho
       ['video', 'LTX 2.5', 'Vidéos et prolongations.'],
       ['video', 'MiniMax H3', 'Vidéos de 5 à 15 s, avec le son.'],
       ['video', 'Wan 2.1 SCAIL-2', 'Remplacer un personnage dans une vidéo.'],
+      ['video', 'Wan 2.2', 'Animer une image, sans le son.'],
       ['audio', 'ACE-Step 1.5', 'Musique, avec ou sans paroles.'],
       ['audio', 'MOSS-SoundEffect v2', 'Bruitages.'],
       ['retouch', 'SeedVR2', 'Agrandir et affiner une image.'],

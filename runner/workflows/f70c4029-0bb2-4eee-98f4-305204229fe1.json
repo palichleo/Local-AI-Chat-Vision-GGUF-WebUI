@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "id": "f70c4029-0bb2-4eee-98f4-305204229fe1",
+  "enabled": true,
+  "pipeline": "wan22",
+  "mediaType": "video",
+  "name": "Wan 2.2",
+  "description": "Animer une image : une vidéo de 2 à 5 secondes qui commence sur cette image, sans le son. Il lui faut une image de début ; LTX 2.5 et MiniMax H3 font une vidéo depuis un texte seul, et avec le son.",
+  "components": {
+    "model": {
+      "policy": "fixed",
+      "asset": "68bdeda7-1321-46f7-9c6e-6096ade43be4",
+      "file": "wan2.2_i2v_high_int8_convrot.safetensors"
+    },
+    "modelLow": {
+      "policy": "fixed",
+      "asset": "ac3294d7-09d5-441a-b297-d578cdabde8b",
+      "file": "wan2.2_i2v_low_int8_convrot.safetensors"
+    },
+    "textEncoder": {
+      "policy": "fixed",
+      "asset": "160d7c2f-1c12-485d-b586-214554096489",
+      "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+    },
+    "vae": {
+      "policy": "fixed",
+      "asset": "08c45f20-488a-4383-a3f2-8ce0a7e4c33c",
+      "file": "Wan2_1_VAE_bf16.safetensors"
+    }
+  },
+  "parameters": {
+    "prompt": {
+      "policy": "model",
+      "type": "string",
+      "maxLength": 8000
+    },
+    "negative_prompt": {
+      "policy": "fixed",
+      "value": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+    },
+    "seed": {
+      "policy": "random",
+      "type": "integer"
+    },
+    "width": {
+      "policy": "fixed",
+      "value": 768
+    },
+    "height": {
+      "policy": "fixed",
+      "value": 448
+    },
+    "steps": {
+      "policy": "fixed",
+      "value": 20
+    },
+    "cfg": {
+      "policy": "fixed",
+      "value": 3.5
+    },
+    "shift": {
+      "policy": "fixed",
+      "value": 5
+    },
+    "frames": {
+      "policy": "model",
+      "type": "integer",
+      "choices": [33, 49, 65, 81],
+      "default": 81,
+      "description": "Longueur du clip (16 i/s) : de 33 (2 s) à 81 images (5 s)."
+    },
+    "fps": {
+      "policy": "fixed",
+      "value": 16
+    }
+  },
+  "loras": [],
+  "references": [
+    {
+      "id": "start",
+      "role": "start_image",
+      "required": true,
+      "name": "Image de début"
+    }
+  ]
+}
