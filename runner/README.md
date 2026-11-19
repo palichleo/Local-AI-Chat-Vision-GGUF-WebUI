@@ -30,6 +30,8 @@ On Windows and Linux x64, Moodix prepares a private Python 3.13 environment and 
 
 The [uv-managed Python installation](https://docs.astral.sh/uv/guides/install-python/) and the versions of the libraries are pinned: `pyproject.toml` declares the supported packages, and `uv.lock` locks their transitive dependencies and wheel hashes. PyTorch comes from the official CUDA 13.0 wheel index. Python, uv, libraries, temporary files and caches stay in `data/`, which Git ignores and updates preserve.
 
+At every start `uv sync --locked` makes sure each locked package is installed. The libraries are then imported in a process of its own (7 s) to make sure they open: once per lock, and again whenever uv installed or removed something; while nothing changed and the engine imports its libraries as it starts, that import is left to the engine (0.6.110), which says when one does not open. The application then makes the whole check again.
+
 After an application update, the libraries are checked by the new version, once its sources (including `pyproject.toml` and `uv.lock`) are in place. Synchronization keeps the same `data/runtime/venv`, installs only the missing or changed locked packages and reuses the others. If it is interrupted, the chat stays available, generation stays unavailable until it succeeds, and a later launch tries again.
 
 For a release that changes the libraries, update `pyproject.toml`, regenerate `uv.lock` with `uv lock --project runner`, test and publish both files together. Startup uses `uv sync --locked`: a stale or missing lockfile produces a visible environment error instead of resolving untested versions on the user's computer.

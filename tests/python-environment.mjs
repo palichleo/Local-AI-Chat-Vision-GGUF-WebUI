@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readdir, rm, link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { PythonEnvironment, environmentVariables, runEnvironmentCommand } from '../lib/python-environment.mjs';
+import {
+  PythonEnvironment,
+  environmentVariables,
+  nothingInstalled,
+  runEnvironmentCommand,
+} from '../lib/python-environment.mjs';
 
 async function fixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'atelier-python-'));
@@ -193,4 +198,81 @@ test('a cancelled installer command is reaped and pre-cancelled commands never s
   assert.ok(Date.now() - started < 5000);
   assert.throws(() => runEnvironmentCommand(process.execPath, [], { signal: controller.signal }), /abort/i);
   assert.equal(environmentVariables('/private/runtime').PYTHONPATH, '');
+});
+
+test('the check that imports every library is made once, then skipped while nothing changed (0.6.110)', async t => {
+  // Seven seconds of every start, before the engine started and imported its libraries for itself.
+  const unchanged = 'Resolved 72 packages in 0.77ms\nChecked 52 packages in 2ms\n';
+  let said = unchanged,
+    failing = false,
+    offline = false;
+  const calls = [],
+    { root, env } = await fixture(t, {
+      run: async (_command, args) => {
+        const step = args[0] === 'sync' ? 'sync' : args[0] === '-s' ? 'check' : 'python';
+        calls.push(step);
+        if (step === 'check' && failing) throw Error('DLL load failed while importing _C');
+        if (step === 'sync' && offline) throw Error('Network interrupted');
+        return { stdout: '', stderr: step === 'sync' ? said : '' };
+      },
+    });
+  await cachedUv(env);
+  await mkdir(join(root, 'runner'));
+  await writeFile(join(root, 'runner', 'uv.lock'), 'version = 1\n');
+  await writeFile(join(root, 'runner', 'pyproject.toml'), '[project]\n');
+  const checks = async options => {
+    calls.length = 0;
+    await env.ensure(options);
+    return calls.filter(step => step === 'check').length;
+  };
+  const engine = { engineReads: true };
+  assert.equal(await checks(engine), 1, 'never checked: checked');
+  assert.equal(env.trusted, false);
+  assert.equal(await checks(engine), 0, 'passed, nothing changed, and the engine reads its libraries');
+  assert.deepEqual(calls, ['python', 'sync'], 'uv still makes sure of the libraries');
+  assert.deepEqual([env.trusted, env.status().state], [true, 'ready']);
+  assert.equal(await checks(), 1, 'an engine that imports nothing as it starts: the check is what reads them');
+  assert.equal(env.trusted, false);
+  assert.equal(await checks(engine), 0);
+  // Other libraries asked for (an update of the application).
+  await writeFile(join(root, 'runner', 'uv.lock'), 'version = 2\n');
+  assert.equal(await checks(engine), 1);
+  assert.equal(await checks(engine), 0);
+  // uv installed something, did not say it checked, or says a line this version does not know.
+  for (const words of [
+    'Resolved 72 packages in 1ms\nPrepared 1 package in 2s\nInstalled 1 package in 3s\n',
+    'Resolved 72 packages in 1ms\n',
+    unchanged + 'warning: something new\n',
+    '',
+  ]) {
+    said = words;
+    assert.equal(await checks(engine), 1, JSON.stringify(words));
+  }
+  said = unchanged;
+  assert.equal(await checks(engine), 0);
+  // The engine could not import a library: the trust of this start is withdrawn, the next one checks.
+  assert.equal(await env.distrust(), true);
+  assert.equal(await env.distrust(), false, 'nothing left to withdraw');
+  assert.equal(await checks(engine), 1);
+  assert.equal(await checks(engine), 0);
+  // A check that fails leaves no mark of the one that passed.
+  failing = true;
+  await assert.rejects(env.ensure(), /DLL load failed/);
+  assert.equal(env.status().state, 'error');
+  failing = false;
+  assert.equal(await checks(engine), 1);
+  assert.equal(await checks(engine), 0);
+  // A start that fails before uv answered skipped nothing: there is no trust of it to withdraw.
+  offline = true;
+  await assert.rejects(env.ensure(engine), /Network interrupted/);
+  assert.equal(env.trusted, false);
+});
+
+test('uv is read as having changed nothing only when it says nothing else', () => {
+  assert.equal(nothingInstalled({ stderr: 'Resolved 72 packages in 0.77ms\r\nChecked 52 packages in 2ms\r\n' }), true);
+  assert.equal(nothingInstalled({ stdout: 'Checked 1 package in 2ms\n', stderr: '' }), true);
+  assert.equal(nothingInstalled({ stderr: 'Resolved 72 packages in 1ms\nUninstalled 1 package in 4ms\n' }), false);
+  assert.equal(nothingInstalled({ stderr: 'Resolved 72 packages in 1ms\nAudited 52 packages in 2ms\n' }), false);
+  assert.equal(nothingInstalled({}), false);
+  assert.equal(nothingInstalled(), false);
 });

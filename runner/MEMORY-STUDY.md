@@ -393,3 +393,22 @@ Not the engine, but what its work could take from the page: the same card draws 
 - **Changing page, opening a menu or leaving the Studio while a video is made**: 6 to 44 ms.
 
 Not measured: a card smaller or slower than this one, a 60 Hz screen (the numbers above are bound by 180 Hz), the chat while a model writes, LTX 2.5 and the upscalers.
+
+### The check of the libraries at every start (19 November 2026, 0.6.110)
+
+Every start of the engine made sure of its environment in three steps: `uv python install` (0.04 s), `uv sync --locked` (0.03 s: « Resolved 72 packages », « Checked 52 packages »), then a process of its own importing every library the families ask for, with the classes of LTX 2.5: 6.7 s. The engine started after it, and imported its own again. Passed once, that third step is now skipped while nothing changed: the same lock and the same Python, uv saying those two lines and no other, and an engine that imports its libraries as it starts (the setting of 0.6.105, on unless turned off; off, the check stays what reads them before the first creation).
+
+Measured with the application's own classes (`PythonEnvironment`, `GenerationWorker`) on a copy of the development machine's environment, in seconds from the start, alternated, after one start left out (a copy has no compiled Python for its path):
+
+| | Environment made sure of | Engine answering | PyTorch imported in the engine |
+| --- | --- | --- | --- |
+| check made, as every start before (3 starts) | 6.7 to 7.1 | 6.8 to 7.3 | 8.6 to 9.0 |
+| check skipped (3 starts) | 0.08 | 0.22 to 0.23 | 1.9 to 2.1 |
+
+- **The check alone on the machine's own environment, only read: 6.7 and 6.9 s** (8.8 s the first time), as on the copy (6.6 to 7.0 s).
+- **A first series gave 12 s for the check, and is left out**: the terminal it was run from tells Python not to keep its compiled code (`PYTHONDONTWRITEBYTECODE`), which the application's environment inherits; every import was compiled again. The application itself is not started from such a terminal.
+- **What is left of the check.** uv still makes sure, at every start, that every locked package is installed. What it does not see, a file of a library damaged or removed where it stands, is said by the engine: a library every family computes with that it cannot import as it starts, or a request stopped by a library that would not import (a module gone, or one whose own lines fail: a DLL PyTorch cannot load). The application then withdraws the mark of the check, stops the engine and starts it again; that start makes the check, and says what it finds as a failed start always did.
+- **Tried with the application's own service on the copy, a DLL of PyTorch (`c10.dll`) taken away**: the engine answers at 0.4 s, says at 0.6 s that it cannot import PyTorch, and at 1.0 s the service says « unavailable » with the check's own words (« … loading c10_cuda.dll or one of its dependencies »). The DLL put back, the next start makes the whole check again (it passes), and the one after skips it.
+- **Each line of the change undone in turn makes a test fail**: 23 changes of one line (the check never skipped, skipped whatever uv says or whatever the lock is, a failed check leaving the mark, the engine not heard, every failure taken for the libraries, a start still on its way not waited for…).
+
+Not measured: just after the computer started (the libraries then come from the disk: the check was what read them first, the engine now does, in the background); a start of the whole application, where the chat model loads at the same time; a first creation asked within the first seconds of a start.

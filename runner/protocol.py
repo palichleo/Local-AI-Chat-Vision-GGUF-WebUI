@@ -3,6 +3,7 @@
 from contextlib import nullcontext, redirect_stdout
 import json
 import sys
+import threading
 
 from runner import warm
 from runner.contracts import fields
@@ -24,14 +25,20 @@ def serve(config, source=None, destination=None):
     source = source or sys.stdin
     destination = destination or sys.stdout
 
+    writing = threading.Lock()
+
     def emit(value):
-        destination.write(json.dumps(value, ensure_ascii=False, allow_nan=False) + '\n')
-        destination.flush()
+        # (One line at a time: the thread that imports the libraries may have one to say.)
+        with writing:
+            destination.write(json.dumps(value, ensure_ascii=False, allow_nan=False) + '\n')
+            destination.flush()
 
     emit(dict(event='ready', protocol=1, capabilities=capabilities()))
     # Ready first, then its libraries in the background (0.6.105): the application has its answer
-    # at once, and the first creation finds them imported.
-    warm.start(config)
+    # at once, and the first creation finds them imported. One every family computes with that
+    # cannot be imported is said (0.6.110): the application no longer imports them all in a
+    # process of its own before every start, and checks its environment again when told so.
+    warm.start(config, failed=lambda name, error: emit(dict(event='libraries', error=f'{name}: {error}')))
     try:
         while True:
             # (No read in progress while the libraries are imported: on Windows they would wait for it.)
@@ -95,15 +102,7 @@ def serve(config, source=None, destination=None):
             except Exception as exc:
                 _log_failure(config, method, exc)
                 # Do not retain an inference traceback (and its model tensors) during cleanup.
-                response = dict(
-                    id=request_id,
-                    error=dict(
-                        message=str(exc),
-                        code='INVALID_REQUEST'
-                        if isinstance(exc, (ValueError, TypeError, KeyError))
-                        else 'GENERATION_FAILED',
-                    ),
-                )
+                response = dict(id=request_id, error=dict(message=str(exc), code=_code(exc)))
             if method == 'generate':
                 try:
                     with redirect_stdout(sys.stderr):
@@ -119,6 +118,27 @@ def serve(config, source=None, destination=None):
     finally:
         with redirect_stdout(sys.stderr):
             release()
+
+
+def _code(exc):
+    if _import_failed(exc):
+        return 'LIBRARIES_FAILED'
+    return 'INVALID_REQUEST' if isinstance(exc, (ValueError, TypeError, KeyError)) else 'GENERATION_FAILED'
+
+
+def _import_failed(exc):
+    """Whether a request stopped on a library that would not be imported (0.6.110): a module that is
+    not there or does not open, or one whose own lines failed while it was imported (a DLL PyTorch
+    cannot load is an OSError raised in the lines of its `__init__`). The application then checks
+    the whole environment again (lib/generation-service.mjs), as every start did before."""
+    if isinstance(exc, ImportError):
+        return True
+    trace = exc.__traceback__
+    while trace is not None:
+        if trace.tb_frame.f_code.co_name == '<module>':
+            return True
+        trace = trace.tb_next
+    return False
 
 
 def _log_failure(config, method, exc):

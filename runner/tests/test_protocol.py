@@ -202,6 +202,59 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(engine._vram_ceiling(torch))
         self.assertAlmostEqual(fractions[0], 9 / 12)
 
+    def test_a_request_stopped_by_a_library_that_would_not_import_says_so(self):
+        # (0.6.110) The application no longer imports every library before each start of the worker;
+        # told that one would not import, it checks its whole environment again.
+        import importlib
+
+        def gone(job, config):
+            importlib.import_module('protocol_library_that_is_not_there')
+
+        def broken(job, config):
+            # (What a DLL PyTorch cannot load is: an OSError in the lines of the module.)
+            importlib.import_module('protocol_library_that_does_not_open')
+
+        def refused(job, config):
+            raise ValueError('Invalid job')
+
+        def failed(job, config):
+            raise OSError('No space left on device')
+
+        codes = []
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, 'protocol_library_that_does_not_open.py').write_text(
+                "raise OSError('[WinError 126] Error loading c10.dll')\n", encoding='utf-8'
+            )
+            with (
+                patch.object(sys, 'path', [folder, *sys.path]),
+                patch('runner.protocol._log_failure', lambda *args: None),
+                patch('runner.protocol.release', lambda **_: dict(released=True, allocatedGiB=0)),
+            ):
+                for preflight in (gone, broken, refused, failed):
+                    destination = io.StringIO()
+                    with patch('runner.protocol.preflight', preflight):
+                        serve({}, io.StringIO('{"id":1,"method":"preflight","params":{}}\n'), destination)
+                    codes.append(json.loads(destination.getvalue().splitlines()[1])['error']['code'])
+        self.assertEqual(codes, ['LIBRARIES_FAILED', 'LIBRARIES_FAILED', 'INVALID_REQUEST', 'GENERATION_FAILED'])
+
+    def test_a_library_the_worker_cannot_import_as_it_starts_is_said_in_a_line_of_its_own(self):
+        from runner import warm
+
+        destination = io.StringIO()
+        self.addCleanup(setattr, warm, '_thread', None)
+        warm._thread = None
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch.object(warm, 'ALWAYS', ('protocol_library_that_is_not_there',)),
+            patch('runner.protocol.release', lambda **_: dict(released=True, allocatedGiB=0)),
+        ):
+            serve(dict(cacheRoot=folder, warm=True), io.StringIO(''), destination)
+            warm._thread.join(20)
+        rows = [json.loads(line) for line in destination.getvalue().splitlines()]
+        self.assertEqual(rows[0]['event'], 'ready')
+        self.assertEqual(rows[1]['event'], 'libraries')
+        self.assertIn('protocol_library_that_is_not_there', rows[1]['error'])
+
     def test_release_is_told_the_room_the_chat_model_needs(self):
         source = io.StringIO(
             '{"id":1,"method":"release","params":{"keepAbove":1000}}\n'

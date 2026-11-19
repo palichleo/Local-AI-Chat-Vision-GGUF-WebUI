@@ -59,6 +59,26 @@ class WarmTest(unittest.TestCase):
     def kept(self):
         return json.loads((Path(self.folder.name) / warm.NAME).read_text(encoding='utf-8'))
 
+    def test_a_library_every_family_computes_with_that_cannot_be_imported_is_said(self):
+        # (0.6.110) The application no longer imports them all before every start of the worker: one
+        # that does not open is said by the worker, and the application checks its environment.
+        (Path(self.folder.name) / warm.NAME).write_text(
+            json.dumps(dict(krea2=['warm_library_noted_and_gone', LIGHT[0]])), encoding='utf-8'
+        )
+        said = []
+
+        def failed(name, error):
+            said.append((name, type(error).__name__))
+            raise RuntimeError('the application is gone')
+
+        with mock.patch.object(warm, 'ALWAYS', ('warm_library_that_is_not_there',)):
+            self.assertTrue(warm.start(dict(self.config, warm=True), failed=failed))
+            _settle()
+        # One nothing is created without: said. One noted at an earlier creation and gone since (an
+        # update of the libraries): passed over, as before. Saying it never stops the rest.
+        self.assertEqual(said, [('warm_library_that_is_not_there', 'ModuleNotFoundError')])
+        self.assertIn(LIGHT[0], sys.modules)
+
     def keep(self, **families):
         (Path(self.folder.name) / warm.NAME).write_text(json.dumps(families), encoding='utf-8')
 

@@ -78,3 +78,25 @@ test('closing during handshake cancels startup without a late worker or fallback
   assert.equal(w.child, null);
   assert.equal(w.status().state, 'stopped');
 });
+
+test('a library the worker could not import is said to the application (0.6.110)', async () => {
+  const w = worker('libraries'),
+    said = [];
+  w.onLibrariesFailed = message => said.push(message);
+  try {
+    await w.start({ pythonPath: process.execPath, configPath: 'unused' });
+    // (Said by itself once ready: read before the answer to the next request.)
+    await assert.rejects(w.request('refused'), /Invalid job/);
+    assert.deepEqual(said, ['torch: DLL load failed'], 'a request refused for another reason says nothing');
+    await assert.rejects(w.request('broken'), /No module named/);
+    assert.deepEqual(said, ['torch: DLL load failed', "No module named 'diffusers'"]);
+    // What the application makes of it never stops the worker from being read.
+    w.onLibrariesFailed = () => {
+      throw Error('the application failed');
+    };
+    await assert.rejects(w.request('broken'), /No module named/);
+    assert.deepEqual(await w.request('generate', { seed: 1 }), { method: 'generate', params: { seed: 1 } });
+  } finally {
+    await w.close();
+  }
+});

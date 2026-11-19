@@ -473,3 +473,81 @@ test('the engine is told to import its libraries as it starts, unless the user t
   assert.equal(generationConfig(before).warmEngine, true);
   assert.throws(() => generationConfig({ ...before, warmEngine: 'yes' }), /invalides/);
 });
+
+test('an engine that imports its libraries as it starts is their check; one it cannot import brings the check back (0.6.110)', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'native-trust-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const asked = [],
+    events = [];
+  let trusted = true,
+    early = false;
+  const worker = {
+      state: 'stopped',
+      status() {
+        return { state: this.state, busy: false, capabilities: {} };
+      },
+      async start() {
+        events.push('start');
+        this.state = 'ready';
+        if (!early) return;
+        // Said by the worker before the application's own start has ended.
+        early = false;
+        this.onLibrariesFailed('torch: DLL load failed');
+        await new Promise(done => setTimeout(done, 30));
+      },
+      async close() {
+        events.push('close');
+        this.state = 'stopped';
+      },
+    },
+    service = await new GenerationService({
+      root,
+      dataDir: join(root, 'data'),
+      workflowDir: join(root, 'workflow'),
+      outputDir: join(root, 'output'),
+      worker,
+      environment: {
+        close: async () => {},
+        status: () => ({ state: 'ready' }),
+        exists: async () => true,
+        ensure: async options => {
+          asked.push(options);
+          events.push('ensure');
+          return process.execPath;
+        },
+        // Whether this start had skipped the check, as lib/python-environment.mjs says it.
+        distrust: async () => {
+          events.push('distrust');
+          const was = trusted;
+          trusted = false;
+          return was;
+        },
+      },
+    }).init();
+  t.after(() => service.close());
+  await service.start();
+  assert.deepEqual(asked.at(-1), { engineReads: true }, 'it reads them as it starts: the check may be skipped');
+  // The worker says it could not import a library, in an environment taken as checked at this start:
+  // it is stopped and started again, and that start checks (what it then says is said as before).
+  events.length = 0;
+  worker.onLibrariesFailed('torch: DLL load failed');
+  for (let turn = 0; turn < 400 && events.at(-1) !== 'start'; turn++) await new Promise(done => setTimeout(done, 5));
+  assert.deepEqual(events, ['distrust', 'close', 'ensure', 'start']);
+  // Checked at this start: the failure is the creation's own, the engine is left as it is.
+  events.length = 0;
+  worker.onLibrariesFailed('diffusers: gone');
+  await new Promise(done => setTimeout(done, 30));
+  assert.deepEqual(events, ['distrust']);
+  // An engine told to import nothing ahead: the check stays what reads the libraries.
+  await service.save({ ...service.config, warmEngine: false });
+  await service.start();
+  assert.deepEqual(asked.at(-1), { engineReads: false });
+  // Said while the start that skipped the check is still on its way: that start ends first, and a
+  // new one is made, which checks (asked for at once, it would have been the one on its way).
+  await service.save({ ...service.config, warmEngine: true });
+  trusted = early = true;
+  events.length = 0;
+  await service.start();
+  for (let turn = 0; turn < 400 && events.length < 6; turn++) await new Promise(done => setTimeout(done, 5));
+  assert.deepEqual(events, ['ensure', 'start', 'distrust', 'close', 'ensure', 'start']);
+});

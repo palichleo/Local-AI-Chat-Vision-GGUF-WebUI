@@ -22,6 +22,10 @@ module being imported is imported, and imports the rest itself as it always did:
 what another family needs, and nothing is imported by two threads. The background import goes on
 after it.
 
+One of the libraries every family computes with (`ALWAYS`) that cannot be imported is said to the
+application (`failed`, 0.6.110): it no longer imports them all in a process of its own before every
+start of the worker, and checks its environment again when told so.
+
 On Windows a library that opens looks at the process's standard handles, and that look waits for
 a read in progress on a pipe: with the worker waiting for its next request the usual way, the
 import stood still until a request came (numpy imported 12 s after the start instead of 0.12 s,
@@ -84,7 +88,7 @@ def _usable(name, module):
     )
 
 
-def _run(names):
+def _run(names, failed=None):
     global _importing
     for name in names:
         with _state:
@@ -93,16 +97,22 @@ def _run(names):
             _importing = True
         try:
             importlib.import_module(name)
-        except BaseException:  # noqa: BLE001 - gone since, or refusing to be imported alone: passed over
-            pass
+        except BaseException as error:  # noqa: BLE001 - gone since, or refusing to be imported alone
+            # Passed over, except one nothing is created without: said, once.
+            if failed is not None and name in ALWAYS:
+                try:
+                    failed(name, error)
+                except Exception:  # noqa: BLE001 - saying it must not end the import of the rest
+                    pass
         finally:
             with _state:
                 _importing = False
                 _state.notify_all()
 
 
-def start(config):
-    """Imports in the background what the creations of this computer import; True when it began."""
+def start(config, failed=None):
+    """Imports in the background what the creations of this computer import; True when it began.
+    `failed(name, error)` is called for a library of `ALWAYS` that could not be imported."""
     global _thread
     if config.get('warm') is not True:
         return False
@@ -116,7 +126,7 @@ def start(config):
     with _state:
         if _thread is not None:
             return False
-        _thread = threading.Thread(target=_run, args=(names,), name='warm', daemon=True)
+        _thread = threading.Thread(target=_run, args=(names, failed), name='warm', daemon=True)
         _thread.start()
     return True
 
