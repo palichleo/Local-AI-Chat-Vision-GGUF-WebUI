@@ -524,7 +524,9 @@ export function setupNativeWorkflows(options) {
         for (const version of entry.versions) block.append(versionRow(entry, version, extra));
       else {
         // One version only, or none on this computer yet: its name, and whether it serves.
-        const row = node('div', 'model-version-row'),
+        // A model of several workflows (Real-ESRGAN: images, videos): each has its settings, at the
+        // end of its own row (a fourth column, which the row says it has).
+        const row = node('div', 'model-version-row' + (several ? ' has-settings' : '')),
           name = entry.version || (entry.versions ? 'Version fournie avec Moodix' : record.name);
         if (record.ready !== false) row.dataset.used = 'true';
         else row.dataset.unavailable = 'true';

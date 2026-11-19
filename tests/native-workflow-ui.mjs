@@ -1013,6 +1013,10 @@ test('the page « Modèles »: one line a model in its group, the version it use
   find(lineOf('Real-ESRGAN'), 'model-chevron')[0].onclick();
   const two = find(lineOf('Real-ESRGAN'), 'model-version-row');
   assert.deepEqual(two.map(row => row.children.slice(0, 3).map(item => item.textContent)), [['×4 Plus', 'Images', 'Utilisée'], ['×2 Plus', 'Vidéos', 'Utilisée']]);
+  // Each carries its own « Réglages » at its end, and says so: its row has a column for it (0.6.125:
+  // without one the button fell under the name, over the next row).
+  assert.deepEqual(two.map(row => [row.children.length, row.className, row.children[3].className]), [[4, 'model-version-row has-settings', 'model-settings'], [4, 'model-version-row has-settings', 'model-settings']]);
+  assert.equal(find(lineOf('LTX 2.5'), 'model-version-row').some(row => row.className.includes('has-settings')), false);
   assert.deepEqual(two.map(row => find(row, 'model-settings')[0].attributes['aria-label']), ['Réglages de Upscale rapide', 'Réglages de Upscale vidéo']);
   const [reset] = find(lineOf('Real-ESRGAN'), 'model-reset');
   assert.equal(reset.textContent, 'Rétablir les réglages de Moodix');
