@@ -185,6 +185,22 @@ test('HTTP output tool remains available after generation is disabled, enforces 
   assert.equal(refused.kind, 'invalid');
   assert.equal(refused.message, 'Identifiant de sortie invalide.');
   assert.equal(refused.call.function.name, 'local_read_output');
+  // (0.6.111) Several tools asked in one message, which may hold one. llama.cpp read the first,
+  // then refused the whole answer: « Failed to parse input at pos 693 » was shown as it was and
+  // the turn lost. The first call is made; the same when a service answers several calls.
+  for (const script of ['inspect unread ', 'inspect twice ']) {
+    const events = await chat(script + JSON.stringify({ run_id: record.id }), { turnId: randomUUID() }),
+      tool = events.find(event => event.local_tool_request)?.local_tool_request;
+    assert.equal(tool?.kind, 'output', script);
+    assert.equal(tool.call.id, 'first_call', script);
+    assert.equal(tool.runId, record.id, script);
+  }
+  // Nothing it could read of the answer: said in the user's words, not in the engine's.
+  await assert.rejects(chat('inspect unread nothing', { turnId: randomUUID() }), error => {
+    assert.match(error.message, /n’a pas su lire la réponse du modèle/);
+    assert.doesNotMatch(error.message, /Failed to parse/);
+    return true;
+  });
   for (let i = 0; i < 8; i++) {
     const events = await chat('inspect output ' + JSON.stringify({ run_id: record.id })),
       tool = events.find(event => event.local_tool_request).local_tool_request;

@@ -51,7 +51,29 @@ const server = http.createServer(async (req, res) => {
         },
       ],
     });
-  else if (typeof last === 'string' && last.startsWith('read-many '))
+  else if (typeof last === 'string' && (last.startsWith('inspect unread ') || last.startsWith('inspect twice '))) {
+    // Several takes asked to be looked at in one message (the local model, 19/11).
+    const unread = last.startsWith('inspect unread '),
+      given = last.slice(unread ? 15 : 14),
+      args = given === 'nothing' ? null : JSON.stringify(JSON.parse(given));
+    const call = (index, id) => ({ index, id, type: 'function', function: { name: 'local_read_output', arguments: args } });
+    emit({ choices: [{ delta: { reasoning_content: 'Let me read these images first.' } }] });
+    if (args) emit({ choices: [{ delta: { tool_calls: [call(0, 'first_call')] } }] });
+    if (unread) {
+      // What llama.cpp says once the answer is whole, when another call follows the one it may hold.
+      emit({
+        error: {
+          code: 500,
+          message:
+            'Failed to parse input at pos 693: <tool_call>\n<function=local_read_output>\n<parameter=run_id>\n' +
+            'd6b246cc-477d-48bc-9e9c-4c220ebe25cd\n</parameter>\n</function>\n</tool_call>',
+          type: 'server_error',
+        },
+      });
+      return res.end();
+    }
+    emit({ choices: [{ delta: { tool_calls: [call(1, 'second_call')] }, finish_reason: 'tool_calls' }] });
+  } else if (typeof last === 'string' && last.startsWith('read-many '))
     emit({
       choices: [
         {

@@ -40,7 +40,7 @@ import { HistoryJournal } from './lib/history-journal.mjs';
 import { chooseLocalFile } from './lib/file-picker.mjs';
 import { Gallery } from './lib/gallery.mjs';
 import { Thumbnails } from './lib/thumbnails.mjs';
-import { ToolRuntime, chatImageUrls, collectToolCalls } from './lib/tool-runtime.mjs';
+import { ToolRuntime, chatImageUrls, collectToolCalls, firstWholeCall, unreadAnswer } from './lib/tool-runtime.mjs';
 import { roomSettings } from './public/room.mjs';
 import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
@@ -2649,14 +2649,34 @@ export async function createApplication({
               res.once('close', finish);
             });
         };
-        await readSSE(upstream.body, async event => {
-          collectToolCalls(calls, event.choices?.[0]?.delta || {});
-          if (event.choices?.[0]?.finish_reason) terminalReason = event.choices[0].finish_reason;
-          await emit(event);
-        });
+        // (0.6.111) An answer llama.cpp could not read again once written (lib/tool-runtime.mjs,
+        // unreadAnswer): its words were shown as they came, « Failed to parse input at pos 693 »,
+        // and the turn was lost. The call it had read before that is made, as below.
+        let unread = null;
+        try {
+          await readSSE(upstream.body, async event => {
+            collectToolCalls(calls, event.choices?.[0]?.delta || {});
+            if (event.choices?.[0]?.finish_reason) terminalReason = event.choices[0].finish_reason;
+            await emit(event);
+          });
+        } catch (error) {
+          if (!unreadAnswer(error)) throw error;
+          unread = error;
+        }
+        if (unread) {
+          if (!firstWholeCall(calls)) {
+            console.error('Réponse du modèle que le moteur n’a pas su lire :', unread.message.slice(0, 600));
+            throw problem('Le moteur n’a pas su lire la réponse du modèle. Renvoyez votre message.', 502);
+          }
+          terminalReason = 'tool_calls';
+        }
         if (calls.length) {
           if (terminalReason !== 'tool_calls')
             throw problem('L’appel d’outil du modèle est incomplet ou tronqué. Aucune génération lancée.', 502);
+          // One tool a message (the request says so; a model may ask for several all the same): the
+          // first is made, and the model asks for the others once it has its result. Refused whole,
+          // « Le moteur a demandé un outil indisponible. » said nothing of what had happened.
+          if (calls.length > 1 && firstWholeCall(calls)) calls.length = 1;
           if (calls.length !== 1 || !definitions.some(item => item.function.name === calls[0].function?.name))
             throw problem('Le moteur a demandé un outil indisponible.', 502);
           // Arguments the model got wrong are answered as a tool error so it can correct the call
