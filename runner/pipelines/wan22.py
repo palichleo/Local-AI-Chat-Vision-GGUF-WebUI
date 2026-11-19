@@ -17,6 +17,7 @@ job's width and height are those of the video.
 
 import gc
 import time
+from pathlib import Path
 
 from runner import hardware
 
@@ -49,7 +50,15 @@ def tokens(frames, height, width):
 
 def working_gib(count):
     """Video memory a step computes with beside the weights, in GiB (the estimate of
-    runner.pipelines.wan_scail2, whose blocks these are)."""
+    runner.pipelines.wan_scail2, whose blocks these are).
+
+    It is a generous one for this model: 2.7 GiB are held beside the weights for 81 frames at
+    768 x 448 (28 200 tokens), where it sets 5.1 aside. Measured on the card of 12 GiB (19/11),
+    a larger share of the weights there gains nothing: 7.5 s a pass with 2.5, 5.0 or 6.6 GiB of
+    them on the card, the copies from locked RAM running ahead of the layers. Nor does drawing
+    for the prompt and for what to avoid together: 15.4 s the pair, 2 x 7.5 one after the other.
+    A pass is its kernels: 37 % the attention of the sequence over itself, the linear layers
+    most of the rest."""
     return 2 + 0.11 * count / 1000
 
 
@@ -117,6 +126,26 @@ def texts(config, path, prompts, progress=None, encode=None):
             values[index] = value
             conditioning.save(config, keys[index], {'value': value})
     return values, len(prompts) - len(missing)
+
+
+def start_latents(config, vae_path, image_path, shape, encode):
+    """(the latents of the start image as a video of `shape` — width, height, frames —, whether
+    they were kept from an earlier generation). Encoding takes 6.5 s for 81 frames at 768 x 448,
+    and a start image is tried again and again with other words or another seed: what it gave
+    is kept on the disk (runner.models.conditioning), told by what the file holds, not by where
+    it is (the application hands a copy of the image to each job)."""
+    import hashlib
+
+    from runner.models import conditioning
+
+    held = hashlib.sha256(Path(image_path).read_bytes()).hexdigest()
+    key = conditioning.key('wan22 start image', conditioning.stamp(vae_path), held, list(shape))
+    found = conditioning.load(config, key)
+    if found and 'value' in found[0]:
+        return found[0]['value'], True
+    value = encode().cpu()
+    conditioning.save(config, key, {'value': value})
+    return value, False
 
 
 def guided(predict, text, avoided, guidance):
@@ -273,12 +302,20 @@ def generate(job, config, progress):
 
         # 2. The start image, as the first frame of a video whose other frames are grey.
         progress(stage='encoding references')
-        picture = scail.cover(read_image(_one(job, 'start_image')), width, height)
-        vae = wan_vae.load(paths['vae'])
-        condition = wan22.given(wan_vae.encode(vae, start_video(picture, frames))).to(**bf16)
-        del picture
+        held = dict(vae=None)
+
+        def encoded():
+            held['vae'] = wan_vae.load(paths['vae'])
+            picture = scail.cover(read_image(_one(job, 'start_image')), width, height)
+            return wan_vae.encode(held['vae'], start_video(picture, frames))
+
+        found, kept_image = start_latents(
+            config, paths['vae'], _one(job, 'start_image'), (width, height, frames), encoded
+        )
+        condition = wan22.given(found.to(**bf16))
+        del found
         free_card()
-        progress(stage='references encoded', frames=frames)
+        progress(stage='references encoded', frames=frames, kept=kept_image)
 
         # 3. The steps: the « high noise » model, then the « low noise » one.
         levels = scail.sigmas(steps, shift)
@@ -352,6 +389,8 @@ def generate(job, config, progress):
         del noise, condition, text, avoided
         free_card()
         progress(stage='decoding video')
+        # (Not loaded yet when the start image was kept from an earlier generation.)
+        vae = held.pop('vae') or wan_vae.load(paths['vae'])
         decoded = wan_vae.decode(vae, latents)
         del latents, vae
         if decoded.shape[2] != frames:

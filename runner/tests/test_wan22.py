@@ -343,6 +343,37 @@ class SamplingTests(unittest.TestCase):
             pipeline.texts(config, str(encoder), ['a fox'], None, encode)
             self.assertEqual(loads[2:], [['a fox']])
 
+    def test_a_start_image_is_encoded_once_for_a_size_and_a_length_whatever_its_place(self):
+        from PIL import Image
+
+        made = []
+
+        def encode():
+            made.append(1)
+            return torch.full((1, 16, 3, 4, 4), float(len(made)), dtype=torch.bfloat16)
+
+        with tempfile.TemporaryDirectory() as folder:
+            vae = Path(folder) / 'vae.safetensors'
+            vae.write_bytes(b'vae')
+            first, copy, other = (Path(folder) / name for name in ('a.png', 'job-2-copy.png', 'b.png'))
+            Image.effect_noise((16, 16), 60).save(first)
+            copy.write_bytes(first.read_bytes())
+            Image.effect_noise((16, 16), 20).save(other)
+            config = dict(cacheRoot=folder)
+            found, kept = pipeline.start_latents(config, str(vae), str(first), (768, 448, 81), encode)
+            self.assertEqual((len(made), kept, found.dtype), (1, False, torch.bfloat16))
+            # The same picture handed over as another file (the copy of the next job): nothing is encoded.
+            again, kept = pipeline.start_latents(config, str(vae), str(copy), (768, 448, 81), encode)
+            self.assertEqual((len(made), kept), (1, True))
+            self.assertTrue((again == found).all())
+            # Another length, another size, another picture, another VAE: each is encoded.
+            for image, shape in ((first, (768, 448, 49)), (first, (512, 512, 81)), (other, (768, 448, 81))):
+                _, kept = pipeline.start_latents(config, str(vae), str(image), shape, encode)
+                self.assertFalse(kept, (image.name, shape))
+            self.assertEqual(len(made), 4)
+            vae.write_bytes(b'another vae')
+            self.assertFalse(pipeline.start_latents(config, str(vae), str(first), (768, 448, 81), encode)[1])
+
     def test_euler_steps_down_the_noise_levels_reach_the_video_the_model_points_to(self):
         torch.manual_seed(4)
         target, noise = torch.randn(1, 16, 3, 2, 2), torch.randn(1, 16, 3, 2, 2)
