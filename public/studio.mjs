@@ -596,6 +596,15 @@ export function setupStudio({
       await waitForModel(api, signal, () => {});
       return (await api('montages/describe', { ...asked, conversationId: place() }, { signal })).json();
     },
+    // (0.6.162) The plan of a request written in the Bobine (« invente la suite »), asked to the chat
+    // model in a request of its own, as its texts are: the bobine goes with it as the page has it.
+    arrange: async (asked, { signal } = {}) => {
+      await releasing;
+      await waitForModel(api, signal, () => {});
+      return (
+        await api('montages/arrange', { project: project(), conversationId: place(), montage: asked.montage, request: asked.request, previous: asked.previous }, { signal })
+      ).json();
+    },
     // (0.6.144) What a plan would be made with and in how long: the request of a creation, asked
     // only to be told (`estimate`), of which the server keeps nothing. No conversation is made for
     // it: the takes of the conversation shown are named in it, the others by their own.

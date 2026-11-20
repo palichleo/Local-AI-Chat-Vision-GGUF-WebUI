@@ -19,6 +19,7 @@ import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
 import { planPrompt } from './lib/plan-prompt.mjs';
+import { arrangePlan } from './lib/arrange.mjs';
 import { passedImages, thinNote } from './lib/thin-prompt.mjs';
 import { capableOutputTool, outputToolFor, readOutput, takesToRead } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
@@ -57,7 +58,8 @@ import { generatedMedia } from './lib/generated-media.mjs';
 import { validateNativeWorkflow } from './lib/native-workflows.mjs';
 import { ProgressHistory } from './lib/generation-progress.mjs';
 import { StudioPresets } from './lib/studio-presets.mjs';
-import { Montages } from './lib/montages.mjs';
+import { Montages, validateMontage } from './lib/montages.mjs';
+import { takeSeconds } from './public/take-length.mjs';
 import { exportMontage, exportTakes, takeFiles } from './lib/montage-export.mjs';
 import { STUDIO_ID, STUDIO_VERBS, enrichedPrompt, enrichMessages } from './lib/studio.mjs';
 import { LlamaBuilds } from './lib/llama-builds.mjs';
@@ -758,6 +760,24 @@ export async function createApplication({
         return names?.length ? { ...run, montages: names } : run;
       }),
     );
+  }
+  /**
+   * (0.6.162) The creations of a project as they are kept, the newest first: those of its conversations,
+   * and of the one open (`open`), kept or not. What Moodix AI is told of the takes it may name when it
+   * arranges a bobine (/api/montages/arrange).
+   */
+  async function projectRuns(project, open = null) {
+    const ids = new Set(open ? [open] : []);
+    if (preferences.saveHistory)
+      for (const item of (await history.list()).conversations) if ((item.projectId || 'inbox') === project) ids.add(item.id);
+    const runs = [];
+    for (const id of ids)
+      try {
+        runs.push(...(await gallery.list(id, { includeImages: false })).runs);
+      } catch {
+        // A conversation that cannot be read leaves the others.
+      }
+    return runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   function galleryView(record) {
     return {
@@ -2243,6 +2263,52 @@ export async function createApplication({
           );
           if (!written.prompt) throw problem(written.reason, 502);
           return send(200, { prompt: written.prompt });
+        } catch (error) {
+          if (error.name === 'TimeoutError')
+            throw problem(`Le modèle de chat n’a pas répondu en ${Math.round(enrichTimeoutMs / 1000)} secondes. Réessayez dans un moment.`, 504);
+          throw error;
+        } finally {
+          res.off('close', onClose);
+          if (chat.activeRequest === controller) {
+            chat.activeRequest = null;
+            chat.busy = false;
+          }
+        }
+      }
+      // (0.6.162) The plan of a request written in the Bobine (« invente la suite »), asked to the chat
+      // model in a request of its own (lib/arrange.mjs), held as the one that writes a take is. It
+      // creates nothing and lays nothing: the page lays the plan (public/montage-arrange.mjs).
+      if (path === '/api/montages/arrange') {
+        const project = projectId(body.project),
+          said = value => (typeof value === 'string' ? value.slice(0, 2000) : ''),
+          request = said(body.request),
+          previous = (Array.isArray(body.previous) ? body.previous : [])
+            .filter(item => item && typeof item === 'object' && said(item.request).trim())
+            .slice(-3)
+            .map(item => ({ request: said(item.request), say: said(item.say) }));
+        if (!request.trim()) throw problem('Écrivez ce que vous demandez à Moodix AI.');
+        // (The bobine as the page has it, kept or not: checked as one that is kept.)
+        const montage = validateMontage(body.montage, { nested: true });
+        if (runtime.active) throw problem('La génération utilise le GPU.', 409);
+        if (chat.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
+        if (chat.busy) throw problem('Une réponse est déjà en cours.', 409);
+        const takes = await projectRuns(project, typeof body.conversationId === 'string' ? body.conversationId : null),
+          lengthOf = source => {
+            const record = takes.find(run => run.id === source?.runId && run.conversationId === source?.conversationId);
+            return record ? takeSeconds(record) : null;
+          };
+        const controller = new AbortController();
+        chat.activeRequest = controller;
+        chat.busy = true;
+        const onClose = () => controller.abort();
+        res.once('close', onClose);
+        try {
+          const made = await arrangePlan(
+            { montage, takes, lengthOf, request, previous, preferences: instructions },
+            { engine: chat, signal: controller.signal, timeoutMs: enrichTimeoutMs },
+          );
+          if (!made.arrangement) throw problem(made.reason, 502);
+          return send(200, { arrangement: made.arrangement, problems: made.problems });
         } catch (error) {
           if (error.name === 'TimeoutError')
             throw problem(`Le modèle de chat n’a pas répondu en ${Math.round(enrichTimeoutMs / 1000)} secondes. Réessayez dans un moment.`, 504);

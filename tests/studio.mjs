@@ -6216,6 +6216,49 @@ test('the wand of the bobine: the chat model brought back, with what can stop th
   }
 });
 
+test('a request written in the bobine: the chat model is brought back, then asked its plan with the bobine as the page has it (0.6.162)', async () => {
+  const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
+    video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
+    image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true },
+    order = [];
+  const routes = new Proxy({}, {
+    get: (_, route) =>
+      typeof route !== 'string'
+        ? undefined
+        : route === 'montages/arrange'
+          ? () => (order.push('arrange'), { arrangement: { say: 'Une prise.', fill: [], add: [{ text: 'Le pêcheur lève les yeux.', seconds: 4, link: 'cut', start: 3, end: null }] }, problems: [] })
+          : route === 'tools/action'
+            ? () => ({ workflowName: 'LTX 2.5', seconds: 5.042 })
+            : route === 'montages/save'
+              ? body => ({ ...body.montage, createdAt: 'a', updatedAt: 'b' })
+              : /^montages\/[^/]+$/.test(route)
+                ? () => ({ montages: [] })
+                : undefined,
+  });
+  const studio = await studioPage({ create_image: [image], create_video: [video] }, routes, { runs: [photo], waitForModel: async () => void order.push('model') });
+  const { asked } = studio;
+  try {
+    const desk = studio.studio.bobine().desk();
+    await until(() => desk.find('bobine-ask-words').length === 1);
+    const field = desk.find('bobine-ask-words')[0];
+    Object.assign(field, { value: 'Une prise qui part de la prise 3.' }).oninput();
+    desk.find('bobine-ask-send')[0].onclick();
+    await until(() => desk.find('bobine-ask-facts').length === 1);
+    // The chat model first (it may have left the card for a creation), then the request, with the
+    // project, the conversation open (its takes are of the project even before it is kept) and the bobine.
+    assert.deepEqual(order, ['model', 'arrange']);
+    const [, sent] = asked.find(([route]) => route === 'montages/arrange');
+    assert.deepEqual(Object.keys(sent).sort(), ['conversationId', 'montage', 'previous', 'project', 'request']);
+    assert.deepEqual([sent.project, sent.conversationId, sent.request, sent.previous, sent.montage.plans.length, sent.montage.schemaVersion], ['inbox', 'c1', 'Une prise qui part de la prise 3.', [], 0, 1]);
+    // Its plan is laid by the page: a take to create that starts on the photo of the project; nothing is made.
+    assert.equal(desk.find('bobine-ask-facts')[0].children.at(-1).textContent, '1 prise ajoutée');
+    assert.equal(desk.find('bobine-line-words')[0].value, 'Le pêcheur lève les yeux.');
+    assert.equal(asked.filter(([route, body]) => route === 'tools/action' && !body.estimate).length, 0);
+  } finally {
+    studio.restore();
+  }
+});
+
 test('the Éclipse of the bobine: the chat model is brought back, then asked what happens in the take, in the conversation (0.6.146, 0.6.148)', async () => {
   const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
     video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },

@@ -87,7 +87,7 @@ const take = (n, mediaType, more = {}) => ({
 const INTENTION = 'Prise d’une bobine, demandée dans la Bobine.',
   FILM = { width: 1344, height: 768 };
 
-function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null, downloads = null } = {}) {
+function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null, downloads = null, arrange = null } = {}) {
   WIDTH = width;
   const calls = [],
     queue = [],
@@ -144,6 +144,7 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
     ...(modelFor ? { modelFor } : {}),
     ...(longestFor ? { longestFor } : {}),
     ...(enrich ? { enrich } : {}),
+    ...(arrange ? { arrange } : {}),
     halt: () => void halted++,
     api,
     node: (tag, className, text) => new Fake(tag, className, text),
@@ -2594,4 +2595,262 @@ test('what the download of 0.6.153 left behind is gone: the card of the chat is 
   const read = name => readFile(new URL('../public/' + name, import.meta.url), 'utf8');
   assert.doesNotMatch(await read('moodix.css'), /\.bobine-download/);
   assert.doesNotMatch(await read('missing-file.mjs'), /onCancel/);
+});
+
+// ------------------------------------------------------------------ asking Moodix AI (0.6.162)
+// (Maquette A1 à A10, claude_design/arrangeur/maquette : le champ sous l'aperçu, son choix du 20/11.)
+/** What Moodix AI is asked, held until the test answers; the page with a video laid and two photos at hand. */
+async function asking(more = {}) {
+  const asked = [];
+  const f = await setup({
+    extra: photos(),
+    create: async () => null,
+    arrange: (wanted, { signal }) =>
+      new Promise((resolve, reject) => asked.push({ request: wanted.request, previous: structuredClone(wanted.previous), plans: wanted.montage.plans.length, signal, resolve, reject })),
+    ...more,
+  }).open();
+  f.get('montage-take')[0].ondblclick();
+  await f.later();
+  const box = () => f.get('bobine-ask')[0],
+    field = () => find(box(), 'bobine-ask-words')[0],
+    send = () => find(box(), 'bobine-ask-send')[0],
+    state = () => find(box(), 'bobine-ask-field')[0].dataset.state,
+    type = words => Object.assign(field(), { value: words }).oninput(),
+    enter = (more = {}) => field().onkeydown({ key: 'Enter', preventDefault() {}, ...more }),
+    links = () => find(box(), 'bobine-ask-link'),
+    link = words => links().find(control => control.textContent === words),
+    answer = async (plan, problems = []) => {
+      asked.at(-1).resolve({ arrangement: plan, problems });
+      for (let turn = 0; turn < 4; turn++) await settle();
+    };
+  return { f, asked, box, field, send, state, type, enter, links, link, answer };
+}
+const SUITE = { say: 'Deux prises : il se lève, puis la mer.', fill: [], add: [{ text: 'Il se lève lentement.', seconds: 4, link: 'suite', start: null, end: 5 }, { text: 'La mer, au matin.', seconds: 5, link: 'cut', start: 6, end: null }] };
+
+test('under the preview, a request is asked to Moodix AI; its plan is laid in takes to create, one step of « Annuler » (0.6.162)', async () => {
+  const { f, asked, box, field, send, state, type, enter, link, answer } = await asking();
+  // At rest: its words of invitation, nothing to send; between the time and the format.
+  const transport = f.get('montage-transport')[0];
+  assert.deepEqual(transport.children.map(child => child.className.split(' ')[0]), ['montage-play', 'montage-clock', 'montage-clock-total', 'bobine-ask', 'montage-format']);
+  assert.deepEqual([field().placeholder, field().value, send().disabled, state(), box().attributes['aria-label']], ['Demandez un film, une suite…', '', true, 'rest', 'Moodix AI']);
+  // Written: the arrow lights up; spaces alone are no request. Maj+Entrée is a line, not a request.
+  type('   ');
+  assert.deepEqual([send().disabled, state()], [true, 'rest']);
+  enter();
+  await settle();
+  assert.deepEqual([asked.length, f.ui.state().arranging], [0, null]);
+  type('Invente la suite.');
+  assert.deepEqual([send().disabled, state()], [false, 'typed']);
+  enter({ shiftKey: true });
+  assert.equal(asked.length, 0);
+  const saves = f.saves().length;
+  enter();
+  await settle();
+  // Asked with the bobine as it is: « MOODIX AI ARRANGE », its request under it, « Arrêter »; the bobine is not changed meanwhile.
+  assert.deepEqual([asked.length, asked[0].request, asked[0].previous, asked[0].plans], [1, 'Invente la suite.', [], 1]);
+  assert.deepEqual([state(), find(box(), 'bobine-ask-label')[0].textContent, find(box(), 'bobine-ask-asked')[0].textContent, find(box(), 'bobine-halt')[0].textContent], ['working', 'Moodix AI arrange', 'Invente la suite.', 'Arrêter']);
+  assert.deepEqual([find(box(), 'bobine-ask-words').length, f.get('montage-format')[0].disabled, f.get('montage-pick')[0].disabled], [0, true, true]);
+  f.plans()[0].onkeydown({ key: 'Delete' });
+  assert.deepEqual([f.plans().length, f.notices.at(-1)], [1, 'Moodix AI arrange la bobine : attendez la fin, ou arrêtez.']);
+  // Its plan laid by the application: a suite that arrives on a photo, then a cut that starts on another.
+  await answer(SUITE);
+  const plans = f.ui.state().montage.plans;
+  assert.deepEqual(
+    plans.map(plan => [plan.at, plan.to - plan.from, plan.todo?.prompt ?? null, Boolean(plan.todo?.suite), plan.photos ?? null]),
+    [
+      [0, 5, null, false, null],
+      [5, 4, 'Il se lève lentement.', true, { end: { conversationId: C, runId: id(5), output: 0 } }],
+      [9, 5, 'La mer, au matin.', false, { start: { conversationId: C, runId: id(6), output: 0 } }],
+    ],
+  );
+  // Said in one line, the facts counted here; the field is empty for the next request; kept at once.
+  assert.deepEqual([find(box(), 'bobine-ask-facts')[0].textContent, find(box(), 'bobine-ask-done').length, find(box(), 'bobine-ask-said').length], ['2 prises ajoutées', 1, 0]);
+  assert.deepEqual([field().value, state(), send().disabled, f.go(), f.saves().length > saves, f.get('montage-frame')[0].dataset.asked], ['', 'rest', true, 'Créer 2 prises', true, 'true']);
+  assert.deepEqual(f.saves().at(-1).body.montage.plans.length, 3);
+  // « Annuler » takes all of it out at once; « Rétablir » puts it back, and nothing is said of it any more.
+  link('Annuler').onclick();
+  assert.deepEqual([f.ui.state().montage.plans.length, f.ui.state().laid, find(box(), 'bobine-ask-done').length, f.get('montage-frame')[0].dataset.asked], [1, null, 0, 'false']);
+  f.ui.redo();
+  assert.deepEqual([f.ui.state().montage.plans.length, find(box(), 'bobine-ask-done').length], [3, 0]);
+  f.pageKey('z', { ctrlKey: true });
+  assert.equal(f.ui.state().montage.plans.length, 1);
+  // The next request says the one before, and what was answered.
+  type('Autre chose.');
+  send().onclick();
+  await settle();
+  assert.deepEqual(asked[1].previous, [{ request: 'Invente la suite.', say: 'Deux prises : il se lève, puis la mer.' }]);
+});
+
+test('what Moodix AI laid is said while it is the last step: a change by hand, and its line is gone (0.6.162)', async () => {
+  // (Its « Annuler » undoes the last step: after another change, it would undo that one.)
+  const { f, box, type, enter, answer } = await asking();
+  type('Invente la suite.');
+  enter();
+  await settle();
+  await answer(SUITE);
+  assert.equal(find(box(), 'bobine-ask-done').length, 1);
+  f.write(0, 'Il se lève, lentement, face à la mer.');
+  assert.deepEqual([f.ui.state().laid, find(box(), 'bobine-ask-done').length, f.ui.state().montage.plans.length], [null, 0, 3]);
+});
+
+test('the detail of what was laid: what Moodix AI said, and each adjustment with the instants of its take (0.6.162)', async () => {
+  // (Maquette A5. The application repairs its plan: a suite that started on a photo is a new shot, a
+  // take that is not of the project is no photo; what could not be read of the plan is said first.)
+  const { f, box, type, enter, link, answer } = await asking();
+  type('Invente la suite.');
+  enter();
+  await settle();
+  await answer(
+    { say: 'Deux prises.', fill: [], add: [{ text: 'Il se lève.', seconds: 4, link: 'suite', start: 5, end: null }, { text: 'La mer.', seconds: 5, link: 'cut', start: null, end: 42 }] },
+    ['Le 3e ajout du plan n’a ni texte ni prise : il est laissé de côté.'],
+  );
+  // Folded: « 3 ajustements », in place of « Détail ».
+  assert.deepEqual([find(box(), 'bobine-ask-facts')[0].textContent, link('Détail'), link('3 ajustements').attributes['aria-expanded'], find(box(), 'bobine-ask-said').length], ['2 prises ajoutées', undefined, 'false', 0]);
+  link('3 ajustements').onclick();
+  assert.deepEqual([link('3 ajustements').attributes['aria-expanded'], find(box(), 'bobine-ask-say')[0].textContent], ['true', 'Deux prises.']);
+  assert.deepEqual(
+    find(box(), 'bobine-ask-notes')[0].children.map(item => item.children.map(part => part.textContent)),
+    [
+      ['Le 3e ajout du plan n’a ni texte ni prise : il est laissé de côté.'],
+      ['05.00 → 09.00', 'Elle commence sur la prise 5 : une suite ne commence pas sur une photo, c’est un nouveau plan.'],
+      ['09.00 → 14.00', 'La prise 42 n’est pas dans ce projet : pas de photo de fin.'],
+    ],
+  );
+  // « Annuler » is still there, unfolded; folded again by the same link.
+  assert.ok(link('Annuler'));
+  link('3 ajustements').onclick();
+  assert.equal(find(box(), 'bobine-ask-said').length, 0);
+  // Without adjustment: « Détail » shows what it said.
+  link('Annuler').onclick();
+  f.ask = null;
+  const again = await asking();
+  again.type('Invente la suite.');
+  again.enter();
+  await settle();
+  await again.answer(SUITE);
+  again.link('Détail').onclick();
+  assert.deepEqual([find(again.box(), 'bobine-ask-say')[0].textContent, find(again.box(), 'bobine-ask-notes').length], ['Deux prises : il se lève, puis la mer.', 0]);
+});
+
+test('nothing laid: what Moodix AI said, a cross, and the request still in its field; a refusal is said the same way (0.6.162)', async () => {
+  // (Maquette A6.)
+  const { f, asked, box, field, state, type, enter, links, link, answer } = await asking();
+  type('Termine sur la prise 42.');
+  enter();
+  await settle();
+  const saves = f.saves().length,
+    before = f.ui.state().montage;
+  await answer({ say: 'Je ne trouve pas la prise 42 dans ce projet.', fill: [], add: [] });
+  assert.deepEqual([f.ui.state().montage === before, f.saves().length, f.ui.state().past], [true, saves, 1], 'the bobine is the same, nothing kept, no step to undo');
+  assert.deepEqual([find(box(), 'bobine-ask-facts')[0].textContent, find(box(), 'bobine-ask-say')[0].textContent, link('Annuler'), field().value, state()], ['Moodix AI', 'Je ne trouve pas la prise 42 dans ce projet.', undefined, 'Termine sur la prise 42.', 'typed']);
+  // The cross closes it.
+  links().find(control => control.attributes['aria-label'] === 'Fermer').onclick();
+  assert.deepEqual([f.ui.state().laid, find(box(), 'bobine-ask-said').length], [null, 0]);
+  // Refused (the chat model is not started, its answer could not be read): said in amber, the request stays.
+  enter();
+  await settle();
+  asked.at(-1).reject(new Error('Le moteur n’est pas prêt. Configure-le puis démarre-le.'));
+  for (let turn = 0; turn < 4; turn++) await settle();
+  const said = find(box(), 'bobine-ask-say')[0];
+  assert.deepEqual([said.className, said.textContent, field().value, f.ui.state().arranging, f.ui.state().montage.plans.length], ['bobine-ask-say is-problem', 'Le moteur n’est pas prêt. Configure-le puis démarre-le.', 'Termine sur la prise 42.', null, 1]);
+});
+
+test('« Arrêter » lets the request go at once, and so does leaving the page; its words stay in the field (0.6.162)', async () => {
+  const { f, asked, box, field, type, enter, answer } = await asking();
+  type('Invente la suite.');
+  enter();
+  await settle();
+  find(box(), 'bobine-halt')[0].onclick();
+  assert.deepEqual([asked[0].signal.aborted, f.ui.state().arranging, field().value, f.get('montage-format')[0].disabled], [true, null, 'Invente la suite.', false]);
+  // Its answer, late, lays nothing.
+  await answer(SUITE);
+  assert.deepEqual([f.ui.state().montage.plans.length, f.ui.state().laid], [1, null]);
+  // The page left while it arranges: let go; back on the page, the words are still there.
+  enter();
+  await settle();
+  await f.ui.leave();
+  assert.deepEqual([asked[1].signal.aborted, f.ui.state().arranging], [true, null]);
+  await answer(SUITE);
+  f.root = f.ui.desk();
+  assert.deepEqual([f.ui.state().montage.plans.length, find(f.get('bobine-ask')[0], 'bobine-ask-words')[0].value], [1, 'Invente la suite.']);
+});
+
+test('nothing is asked while the bobine is at work, nor without Moodix AI at hand (0.6.162)', async () => {
+  // A take being created: the field is greyed, Entrée asks nothing.
+  const makes = [];
+  const { f, asked, field, send, type, enter, answer } = await asking({ create: () => new Promise(resolve => makes.push(resolve)) });
+  type('Invente la suite.');
+  enter();
+  await settle();
+  await answer(SUITE);
+  type('Encore une.');
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual([makes.length, field().disabled, send().disabled, field().value], [1, true, true, 'Encore une.']);
+  enter();
+  await settle();
+  assert.equal(asked.length, 1);
+  // Without it (a page that gives none): the row is as it was, with its empty middle.
+  const bare = await setup().open();
+  assert.deepEqual([bare.get('bobine-ask').length, bare.get('montage-transport')[0].children.map(child => child.className.split(' ')[0])], [0, ['montage-play', 'montage-clock', 'montage-clock-total', 'bobine-fil-gap', 'montage-format']]);
+});
+
+test('the styles of the request: it grows upwards from its row, what is laid is said above it, the text of the preview goes up (0.6.162)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const css = (await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const rule = selector => {
+    const at = css.lastIndexOf(selector + ' {');
+    assert.notEqual(at, -1, selector);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  assert.match(rule('.bobine-ask'), /position: relative;[\s\S]*flex: 100 1 0;[\s\S]*height: 40px;/);
+  assert.match(rule('.bobine-ask-stack'), /position: absolute;[\s\S]*bottom: 0;[\s\S]*flex-direction: column;/);
+  // (Seen in the real page: the row of the time does not break its words, and what is said above the field
+  // went out of its plate; at 1280 wide, the invitation of the field took two lines.)
+  assert.match(rule('.bobine-ask-stack'), /white-space: normal;/);
+  assert.match(rule('#bobine-view .bobine-desk textarea.bobine-ask-words::placeholder'), /white-space: nowrap;\n  text-overflow: ellipsis;/);
+  assert.match(css, /#bobine-view \.bobine-desk textarea\.bobine-ask-words \{\n  flex: 1 1 auto;\n  field-sizing: content;[\s\S]*?max-height: calc\(5lh \+ 14px\);/);
+  assert.match(rule('.bobine-ask-answer'), /width: max-content;\n  min-width: 100%;/);
+  assert.match(rule('.bobine-ask-answer[hidden]'), /display: none;/);
+  assert.match(rule("#bobine-view .montage-frame[data-asked='true'] > .montage-frame-words"), /bottom: 46px;/);
+});
+
+test('asked from its field, the keys are the field’s again once Moodix AI has answered (0.6.162)', async () => {
+  const { f, asked, field, type, enter, answer } = await asking();
+  type('Invente la suite.');
+  field().focus();
+  enter();
+  await settle();
+  assert.notEqual(f.focused(), field, 'its field is gone while Moodix AI arranges');
+  await answer(SUITE);
+  assert.equal(f.focused(), field());
+  // Refused: the same, its words are there to be said otherwise.
+  type('Termine sur la prise 42.');
+  enter();
+  await settle();
+  asked.at(-1).reject(new Error('Non.'));
+  for (let turn = 0; turn < 4; turn++) await settle();
+  assert.deepEqual([f.focused() === field(), field().value], [true, 'Termine sur la prise 42.']);
+  // Sent by its arrow from elsewhere, or the keys taken elsewhere meanwhile: they stay where they are.
+  const take = f.plans()[0];
+  take.focus();
+  find(f.get('bobine-ask')[0], 'bobine-ask-send')[0].onclick();
+  await settle();
+  await answer({ say: 'Rien.', fill: [], add: [] });
+  assert.notEqual(f.focused(), field());
+});
+
+test('another bobine: what was asked in the one before is not said again to Moodix AI (0.6.162)', async () => {
+  const { f, asked, type, enter, answer } = await asking();
+  type('Invente la suite.');
+  enter();
+  await settle();
+  await answer(SUITE);
+  f.pick('new');
+  for (let turn = 0; turn < 4; turn++) await settle();
+  assert.deepEqual([f.ui.state().laid, f.ui.state().asks], [null, []]);
+  type('Un film sur la mer.');
+  enter();
+  await settle();
+  assert.deepEqual([asked[1].request, asked[1].previous, asked[1].plans], ['Un film sur la mer.', [], 0]);
 });

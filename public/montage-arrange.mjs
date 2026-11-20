@@ -310,37 +310,37 @@ const suited = (montage, id) => ({
   plans: montage.plans.map(plan => (plan.id === id ? { ...plan, todo: { ...plan.todo, suite: true } } : plan)),
 });
 
-/** Why the take to create of block `block`, laid after the end of `montage`, cannot go on from what is before it. */
-function whyNoSuite(montage, block, lengthOf) {
-  const before = montage.plans.at(-1),
-    so = 'c’est donc un nouveau plan, pas une suite.';
-  if (!before) return `Bloc ${block} : la bobine est vide, il n’a rien à continuer ; ${so}`;
-  if (before.kind === 'image') return `Bloc ${block} : le bloc ${block - 1} est une image, une suite ne la continue pas ; ${so}`;
-  if (!(lengthOf(before.source) > 0))
-    return `Bloc ${block} : la durée de la vidéo du bloc ${block - 1} n’est pas connue, il ne peut pas la continuer ; ${so}`;
-  return `Bloc ${block} : la vidéo du bloc ${block - 1} est coupée avant sa fin, il ne peut pas la continuer ; ${so}`;
+/**
+ * Why the take to create laid after the end of `montage` cannot go on from what is before it. (Said next
+ * to the instants of that take: no number of block, which the screen does not show.)
+ */
+function whyNoSuite(montage, lengthOf) {
+  const before = montage.plans.at(-1);
+  if (!before) return 'Rien avant elle à continuer : c’est un nouveau plan, pas une suite.';
+  if (before.kind === 'image') return 'Une image est avant elle, une suite ne la continue pas : c’est un nouveau plan.';
+  if (!(lengthOf(before.source) > 0)) return 'La durée de la vidéo d’avant n’est pas connue : c’est un nouveau plan, pas une suite.';
+  return 'La vidéo d’avant est coupée avant sa fin : c’est un nouveau plan, pas une suite.';
 }
 
 /** A length brought back within `low` and `high`, as a note says it. */
-const brought = (block, wanted, kept, low, what) =>
-  `Bloc ${block} : durée ramenée de ${shownSeconds(wanted)} à ${shownSeconds(kept)}, le plus ${wanted < low ? 'court' : 'long'} pour ${what}.`;
+const brought = (wanted, kept, low, what) =>
+  `Durée ramenée de ${shownSeconds(wanted)} à ${shownSeconds(kept)}, le plus ${wanted < low ? 'court' : 'long'} pour ${what}.`;
 
 /**
  * A take to create laid after the end of `montage`: its length within what a take to create can be,
  * its photos when they are images of the project, a suite when it can go on from what is before it
  * (a start photo wins: it is a new shot that starts on it). `{ montage, id }`.
  */
-function todoLaid(montage, item, { recordOf, newId, notes, lengthOf }) {
-  const block = montage.plans.length + 1,
+function todoLaid(montage, item, { recordOf, newId, tell, lengthOf }) {
+  const id = newId(),
     text = textOf(item.text, ARRANGE_LIMITS.text),
     wanted = Number.isFinite(item.seconds) ? item.seconds : null,
     seconds = clamp(wanted ?? TODO_LIMITS.usual, TODO_LIMITS.shortest, TODO_LIMITS.longest);
   const photoOf = (number, label) => {
     if (!Number.isInteger(number)) return null;
     const record = recordOf(number);
-    if (!record) notes.push(`Bloc ${block} : la prise ${number} n’est pas dans ce projet, il n’a pas de photo de ${label}.`);
-    else if (trackOf(record) !== 'image')
-      notes.push(`Bloc ${block} : la prise ${number} n’est pas une image, elle ne peut pas être sa photo de ${label}.`);
+    if (!record) tell(id, `La prise ${number} n’est pas dans ce projet : pas de photo de ${label}.`);
+    else if (trackOf(record) !== 'image') tell(id, `La prise ${number} n’est pas une image : elle ne peut pas être sa photo de ${label}.`);
     else return record;
     return null;
   };
@@ -348,12 +348,11 @@ function todoLaid(montage, item, { recordOf, newId, notes, lengthOf }) {
     end = photoOf(item.end, 'fin');
   let suite = item.link === 'suite';
   if (suite && start) {
-    notes.push(`Bloc ${block} : il commence sur la prise ${item.start} ; une suite ne commence pas sur une photo, c’est donc un nouveau plan.`);
+    tell(id, `Elle commence sur la prise ${item.start} : une suite ne commence pas sur une photo, c’est un nouveau plan.`);
     suite = false;
   }
   // (Without a length, the usual one, unsaid: it is no repair.)
-  if (wanted !== null && wanted !== seconds) notes.push(brought(block, wanted, seconds, TODO_LIMITS.shortest, 'une prise à créer'));
-  const id = newId();
+  if (wanted !== null && wanted !== seconds) tell(id, brought(wanted, seconds, TODO_LIMITS.shortest, 'une prise à créer'));
   let next = withTodoDrawn(montage, { id, at: montageSeconds(montage), seconds }).montage;
   next = withItemChanged(next, id, { prompt: text });
   if (start) next = withPhotoIn(next, start, id, 'start').montage;
@@ -361,7 +360,7 @@ function todoLaid(montage, item, { recordOf, newId, notes, lengthOf }) {
   if (suite) {
     const tried = suited(next, id);
     if (SUITES.includes(linkOf(tried, id, lengthOf).kind)) next = tried;
-    else notes.push(whyNoSuite(montage, block, lengthOf));
+    else tell(id, whyNoSuite(montage, lengthOf));
   }
   return { montage: next, id };
 }
@@ -369,31 +368,27 @@ function todoLaid(montage, item, { recordOf, newId, notes, lengthOf }) {
 /**
  * A take of the project laid as it is after the end of `montage`: a video whole, an image for its
  * `seconds` (STILL_SECONDS by default). A sound, or a take that is not of the project, is not laid:
- * said, and undefined.
+ * said (of no take of the bobine), and undefined.
  */
-function takeLaid(montage, { take, seconds }, { recordOf, newId, notes }) {
+function takeLaid(montage, { take, seconds }, { recordOf, newId, tell }) {
   const record = recordOf(take),
     track = record ? trackOf(record) : null;
-  if (!record) return void notes.push(`La prise ${take} n’est pas dans ce projet : elle n’est pas posée.`);
-  if (track !== 'video' && track !== 'image') return void notes.push(`La prise ${take} est un son : elle n’est pas posée sur la bobine.`);
-  const block = montage.plans.length + 1,
-    id = newId();
+  if (!record) return void tell(null, `La prise ${take} n’est pas dans ce projet : elle n’est pas posée.`);
+  if (track !== 'video' && track !== 'image') return void tell(null, `La prise ${take} est un son : elle n’est pas posée sur la bobine.`);
+  const id = newId();
   let next = withTake(montage, record, { id });
   const plan = () => next.plans.at(-1);
   if (track === 'video') {
     const shown = plan().to - plan().from;
-    if (!takeSeconds(record))
-      notes.push(`Bloc ${block} : la durée de la prise ${take} n’est pas connue, elle est posée pour ${shownSeconds(shown)}.`);
-    else if (Number.isFinite(seconds) && Math.abs(seconds - shown) >= 0.05)
-      notes.push(`Bloc ${block} : la prise ${take} est une vidéo, posée entière (${shownSeconds(shown)}).`);
+    if (!takeSeconds(record)) tell(id, `La durée de la prise ${take} n’est pas connue : posée pour ${shownSeconds(shown)}.`);
+    else if (Number.isFinite(seconds) && Math.abs(seconds - shown) >= 0.05) tell(id, `La prise ${take} est une vidéo : posée entière (${shownSeconds(shown)}).`);
     return { montage: next, id };
   }
   // (Without seconds it stays as withTake lays it, STILL_SECONDS, unsaid.)
   if (Number.isFinite(seconds)) {
     // (Its length as a hand gives it: within what the bobine keeps of a plan.)
     next = withItemChanged(next, id, { to: seconds });
-    if (seconds < MONTAGE_LIMITS.shortest || seconds > MONTAGE_LIMITS.longest)
-      notes.push(brought(block, seconds, plan().to, MONTAGE_LIMITS.shortest, 'une image'));
+    if (seconds < MONTAGE_LIMITS.shortest || seconds > MONTAGE_LIMITS.longest) tell(id, brought(seconds, plan().to, MONTAGE_LIMITS.shortest, 'une image'));
   }
   return { montage: next, id };
 }
@@ -406,43 +401,49 @@ function takeLaid(montage, { take, seconds }, { recordOf, newId, notes }) {
  * - then `add`, from the end of the bobine, each against the one before it, in the order of the plan;
  * - `takes`: the records of the project, a take named by `outputs[0].take`; `newId()`: a new identifier;
  *   `lengthOf(source)`: the length of a video of the project in seconds, or null (as for linkOf).
- * `added`, `filled`: the identifiers of the plans laid and written; `notes`: each repair, a sentence.
- * The same montage when nothing could be laid nor written.
+ * `added`, `filled`: the identifiers of the plans laid and written; `notes`: each repair, `{ id, text }`
+ * (0.6.161, the page shows it next to the instants of its take): `id`, the take of the returned bobine
+ * it is about (laid, or aimed at by `fill`), null when it is about none (a block that is not there, a
+ * take not laid, a limit); `text`, a sentence read alone, without a number of block (the screen shows
+ * none). The same montage when nothing could be laid nor written.
  */
 export function withArrangement(montage, arrangement, { takes = [], newId, lengthOf = () => null } = {}) {
   const notes = [],
+    tell = (id, text) => notes.push({ id, text }),
     added = [],
     filled = [],
     records = Array.isArray(takes) ? takes : [],
     recordOf = number => records.find(record => record?.outputs?.[0]?.take === number) ?? null,
     fill = Array.isArray(arrangement?.fill) ? arrangement.fill : [],
     add = Array.isArray(arrangement?.add) ? arrangement.add : [],
-    context = { recordOf, newId, notes, lengthOf };
+    context = { recordOf, newId, tell, lengthOf };
   let next = placed(montage);
   const blocks = next.plans;
   for (const item of fill.slice(0, ARRANGE_LIMITS.fill)) {
     const block = item?.block,
       plan = Number.isInteger(block) && block > 0 ? blocks[block - 1] : null,
       text = textOf(item?.text, ARRANGE_LIMITS.text);
-    if (!plan) notes.push(`Bloc ${block} : il n’est pas sur la bobine, son texte est laissé de côté.`);
-    else if (!isTodo(plan)) notes.push(`Bloc ${block} : ce n’est pas une prise à créer, son texte est laissé de côté.`);
-    else if (filled.includes(plan.id)) notes.push(`Bloc ${block} : deux textes lui étaient donnés, seul le premier est écrit.`);
-    else if ((plan.todo.prompt ?? '').trim()) notes.push(`Bloc ${block} : il a déjà son texte, gardé tel quel.`);
-    else if (!text) notes.push(`Bloc ${block} : le texte donné est vide, rien n’est écrit.`);
+    if (!plan) tell(null, 'Un texte était écrit pour une prise qui n’est pas sur la bobine : laissé de côté.');
+    else if (!isTodo(plan)) tell(plan.id, 'Ce n’est pas une prise à créer : le texte écrit pour elle est laissé de côté.');
+    else if (filled.includes(plan.id)) tell(plan.id, 'Deux textes lui étaient donnés : seul le premier est écrit.');
+    else if ((plan.todo.prompt ?? '').trim()) tell(plan.id, 'Elle a déjà son texte : gardé tel quel.');
+    else if (!text) tell(plan.id, 'Le texte donné est vide : rien n’est écrit.');
     else {
       next = withItemChanged(next, plan.id, { prompt: text });
       filled.push(plan.id);
     }
   }
   if (fill.length > ARRANGE_LIMITS.fill)
-    notes.push(
+    tell(
+      null,
       `Le plan écrivait ${fill.length} textes : les ${fill.length - ARRANGE_LIMITS.fill} derniers sont laissés de côté (${ARRANGE_LIMITS.fill} au plus).`,
     );
   const laid = add.slice(0, ARRANGE_LIMITS.add);
   for (const [index, item] of laid.entries()) {
     if (next.plans.length >= MONTAGE_LIMITS.plans) {
       const left = laid.length - index;
-      notes.push(
+      tell(
+        null,
         `La bobine est pleine (${MONTAGE_LIMITS.plans} prises) : ` +
           (left > 1 ? `les ${left} dernières prises du plan ne sont pas posées.` : 'la dernière prise du plan n’est pas posée.'),
       );
@@ -452,13 +453,14 @@ export function withArrangement(montage, arrangement, { takes = [], newId, lengt
       ? takeLaid(next, item, context)
       : textOf(item?.text, ARRANGE_LIMITS.text)
         ? todoLaid(next, item, context)
-        : void notes.push(`Le ${nth(index + 1)} ajout du plan n’a ni texte ni prise : il n’est pas posé.`);
+        : void tell(null, `Le ${nth(index + 1)} ajout du plan n’a ni texte ni prise : il n’est pas posé.`);
     if (!step) continue;
     next = step.montage;
     added.push(step.id);
   }
   if (add.length > ARRANGE_LIMITS.add)
-    notes.push(
+    tell(
+      null,
       `Le plan ajoutait ${add.length} prises : les ${add.length - ARRANGE_LIMITS.add} dernières sont laissées de côté (${ARRANGE_LIMITS.add} au plus).`,
     );
   return { montage: added.length || filled.length ? next : montage, added, filled, notes };

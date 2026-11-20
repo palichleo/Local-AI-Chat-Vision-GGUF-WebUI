@@ -21,6 +21,7 @@
 import { FORMATS } from './formats.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
 import { sizeText } from './missing-file.mjs';
+import { withArrangement } from './montage-arrange.mjs';
 import { licenseBlock, restrictedOf } from './model-licenses.mjs';
 import { licenseSentence } from './models-page.mjs';
 import { closePopup, openPopup } from './glass-menu.mjs';
@@ -86,6 +87,8 @@ export function mono(seconds) {
   return minutes + ':' + (value - minutes * 60).toFixed(2).padStart(5, '0');
 }
 const plural = (count, one, many = one + 's') => `${count} ${count > 1 ? many : one}`;
+// (0.6.162) The earlier requests of a bobine said again to Moodix AI with a new one: the last ones.
+const ASKS = 3;
 // (0.6.154) How many steps « Annuler » goes back at most, and how long a pause between two keys typed
 // in a text makes another step, in milliseconds.
 const STEPS = 100,
@@ -162,6 +165,11 @@ export function setupMontage({
   // (0.6.146) What happens in a take to create, written by the chat model from its pictures:
   // `write({ verb, seconds, start, end, previous }, { signal })` gives { prompt }, or throws why not.
   write = null,
+  // (0.6.162, his choice of 20/11: under the preview) The plan of a request written in the Bobine
+  // (« invente la suite », « un film de 20 secondes sur… »), asked to the chat model in a request of its
+  // own (lib/arrange.mjs): `arrange({ montage, request, previous }, { signal })` gives { arrangement,
+  // problems }, or throws why not. It is laid here (public/montage-arrange.mjs): nothing is created.
+  arrange = null,
 }) {
   let root = null,
     filRoot = null,
@@ -209,6 +217,13 @@ export function setupMontage({
     // the one just enriched (it lights up a moment), what Ctrl+Z gives back ({ id, prompt, after }).
     wand = false,
     enrichingId = null,
+    // (0.6.162) What is written under the preview for Moodix AI, the request it is arranging ({ request,
+    // controller, bobine }), what it laid last ({ count, filled, say, notes, open } or { problem }), and
+    // the earlier requests of this bobine ([{ request, say }]).
+    wish = '',
+    arranging = null,
+    laid = null,
+    asks = [],
     lit = null,
     // (0.6.153, capture 78) The take whose line or piece is under the pointer: lit on both sides, drawn again so.
     hovered = null,
@@ -245,7 +260,7 @@ export function setupMontage({
   const inSeries = () => filling?.stage === 'running' || filling?.stage === 'paused';
   // (0.6.152) What the model of the takes makes at once: what a take to create is cut by.
   const limits = () => ({ create_video: longestFor('create_video'), extend_video: longestFor('extend_video') });
-  const busy = () => Boolean(making || writing || inSeries());
+  const busy = () => Boolean(making || writing || inSeries() || arranging);
   /**
    * (0.6.155) A take to create without its text that Moodix AI can write at its turn in the series, as
    * the Éclipse does: it has something to look at (a photo, the video it goes on from, the take to
@@ -468,6 +483,8 @@ export function setupMontage({
   function refusal() {
     // (0.6.146) Not while Moodix AI writes the takes: its texts are written back in this bobine.
     if (writing) return 'Moodix AI écrit les prises : attendez la fin, ou arrêtez l’écriture.';
+    // (0.6.162) Nor while it arranges the bobine: its plan is laid on the bobine it was asked for.
+    if (arranging) return 'Moodix AI arrange la bobine : attendez la fin, ou arrêtez.';
     // (0.6.144) Nor while takes are created, even between two of them or in pause.
     if (inSeries())
       return filling.stage === 'paused'
@@ -482,6 +499,8 @@ export function setupMontage({
    * two keys; a drag, the texts of Moodix AI: as long as it lasts).
    */
   function remember(previous, group = null) {
+    // (0.6.162) What Moodix AI laid is said while it is the last step only: its « Annuler » undoes it.
+    laid = null;
     const at = now(),
       same = group && step?.group === group && (typeof group !== 'string' || at - step.at < TYPED);
     if (!same) {
@@ -495,6 +514,9 @@ export function setupMontage({
   function forget() {
     past.length = future.length = 0;
     step = null;
+    // (0.6.162) Nor anything asked to Moodix AI in the bobine before.
+    laid = null;
+    asks = [];
   }
   /** (0.6.154) « Annuler » (`back`) or « Rétablir »: the bobine as it was before the last change, or after it again. */
   function travel(back) {
@@ -505,6 +527,7 @@ export function setupMontage({
     if (why) return void notice(why), false;
     to.push(montage);
     step = null;
+    laid = null;
     settle(from.pop());
     return true;
   }
@@ -1032,11 +1055,14 @@ export function setupMontage({
     }
     format.disabled = busy();
     format.onchange = () => change({ ...montage, format: format.value, ...usualSize(format.value) });
-    transport.append(playButton, time, whole, node('span', 'bobine-fil-gap'), format);
+    // (0.6.162) Between the time and the format, where nothing was: what is asked to Moodix AI.
+    transport.append(playButton, time, whole, arrange ? askBox() : node('span', 'bobine-fil-gap'), format);
     stage.append(frame);
     body.append(stage, transport);
     stop();
     media = { video, picture, blank, caption, words, end, frame, sounds: new Map() };
+    // (0.6.162) Drawn again while a line of Moodix AI is said under it: its text stays above that line.
+    frame.dataset.asked = String(Boolean(laid));
     Object.assign(live, { clock: time, whole, play: playButton });
     return section;
   }
@@ -1762,6 +1788,222 @@ export function setupMontage({
     draw();
   }
 
+  // Asking Moodix AI (0.6.162) -----------------------------------------------------------------------
+  /**
+   * (Maquette A1 à A10, claude_design/arrangeur/maquette.) The box under the preview: a field (« Demandez
+   * un film, une suite… »), which grows upwards; while Moodix AI arranges, its request and « Arrêter »;
+   * above it, what was laid last, in one line. The field stays as it is while the rest is drawn again
+   * (it is being typed in): only what is above it, and what it shows of what can be asked, change.
+   */
+  function askBox() {
+    const host = node('div', 'bobine-ask'),
+      stack = node('div', 'bobine-ask-stack'),
+      slot = node('div', 'bobine-ask-answer');
+    host.setAttribute('role', 'group');
+    host.setAttribute('aria-label', 'Moodix AI');
+    slot.setAttribute('role', 'status');
+    stack.append(slot);
+    host.append(stack);
+    live.ask = { host, stack, slot, kind: null, box: null };
+    sayAsk();
+    return host;
+  }
+  function sayAsk() {
+    const shown = live.ask;
+    if (!shown) return;
+    const kind = arranging ? 'working' : 'field';
+    if (shown.kind !== kind) {
+      // (The field gives its place to « Moodix AI arrange », and takes it back: what is said stays above.)
+      const box = kind === 'working' ? workingBox() : fieldBox();
+      shown.stack.replaceChildren(shown.slot, box);
+      Object.assign(shown, { kind, box });
+    }
+    tuneAsk();
+    shown.slot.replaceChildren(...answerOf());
+    shown.slot.hidden = !laid;
+    // (Maquette A8: the line passed over the text the preview shows of a take to create: that text goes up.)
+    if (media?.frame) media.frame.dataset.asked = String(Boolean(laid));
+  }
+  function fieldBox() {
+    const box = node('div', 'bobine-ask-field'),
+      mark = icon('eclipse'),
+      field = node('textarea', 'bobine-ask-words'),
+      send = button('bobine-ask-send', '', () => void ask(), 'arrow', 'Demander à Moodix AI');
+    mark.setAttribute('class', 'bobine-ask-mark');
+    Object.assign(field, { value: wish, rows: 1, maxLength: 2000, placeholder: 'Demandez un film, une suite…' });
+    field.setAttribute('aria-label', 'Demander à Moodix AI : un film, une suite');
+    field.oninput = () => {
+      wish = field.value;
+      tuneAsk();
+    };
+    // Entrée asks; Maj+Entrée goes to the next line.
+    field.onkeydown = event => {
+      if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+      event.preventDefault?.();
+      void ask();
+    };
+    box.append(mark, field, send);
+    Object.assign(live.ask, { field, send });
+    return box;
+  }
+  function workingBox() {
+    const box = node('div', 'bobine-ask-field'),
+      head = node('div', 'bobine-ask-working');
+    box.dataset.state = 'working';
+    head.append(node('span', 'bobine-ask-label', 'Moodix AI arrange'), button('bobine-halt', 'Arrêter', stopAsking));
+    box.append(head, node('div', 'bobine-ask-asked', arranging.request));
+    Object.assign(live.ask, { field: null, send: null });
+    return box;
+  }
+  /** What the field shows of what can be asked now: nothing while the bobine is at work, nor without words. */
+  function tuneAsk() {
+    const { field, send, box, kind } = live.ask ?? {};
+    if (kind !== 'field' || !field) return;
+    const taken = busy(),
+      words = Boolean(wish.trim());
+    field.disabled = taken;
+    send.disabled = taken || !words;
+    box.dataset.state = words && !taken ? 'typed' : 'rest';
+  }
+  /** The instants of a take of the bobine, as its line of « À créer » says them. */
+  function whenOf(id) {
+    const index = montage.plans.findIndex(plan => plan.id === id);
+    if (index < 0) return '';
+    const start = planStarts(montage)[index],
+      plan = montage.plans[index];
+    return `${mono(start)} → ${mono(start + plan.to - plan.from)}`;
+  }
+  /**
+   * What Moodix AI laid last, above the field (maquette A4 à A6): one line, the facts counted here
+   * (« 2 prises ajoutées »), « Détail » or its adjustments, « Annuler »; unfolded, what it said and each
+   * adjustment with the instants of its take. Nothing laid: what it said, and a cross.
+   */
+  function answerOf() {
+    if (!laid) return [];
+    const done = Boolean(laid.count || laid.filled),
+      line = node('div', 'bobine-ask-done'),
+      facts = node('span', 'bobine-ask-facts'),
+      notes = laid.notes ?? [],
+      said =
+        [laid.count ? plural(laid.count, 'prise ajoutée', 'prises ajoutées') : '', laid.filled ? plural(laid.filled, 'texte écrit', 'textes écrits') : '']
+          .filter(Boolean)
+          .join(' · ') || 'Moodix AI',
+      link = (className, text, onclick, glyph, after = false) => {
+        const control = node('button', 'bobine-ask-link' + (className ? ' ' + className : ''));
+        control.type = 'button';
+        if (glyph && !after) control.append(icon(glyph));
+        if (text) control.append(node('span', '', text));
+        if (glyph && after) control.append(icon(glyph));
+        control.onclick = onclick;
+        return control;
+      },
+      toggle = () => {
+        laid.open = !laid.open;
+        sayAsk();
+      };
+    if (done) facts.append(icon('check'));
+    facts.append(node('span', '', said));
+    line.append(facts);
+    if (done) {
+      const more = notes.length
+        ? link('is-quiet', plural(notes.length, 'ajustement'), toggle, 'chevron', true)
+        : link('is-faint', 'Détail', toggle, 'chevron', true);
+      more.setAttribute('aria-expanded', String(Boolean(laid.open)));
+      line.append(more);
+    }
+    line.append(node('span', 'bobine-ask-gap'));
+    if (done) line.append(link('', 'Annuler', () => void travel(true), 'undo'));
+    else {
+      const close = link('is-faint', '', () => ((laid = null), sayAsk()), 'close');
+      close.setAttribute('aria-label', 'Fermer');
+      line.append(close);
+    }
+    if (done && !laid.open) return [line];
+    const plate = node('div', 'bobine-ask-said');
+    plate.append(line);
+    if (laid.problem) plate.append(node('p', 'bobine-ask-say is-problem', laid.problem));
+    else if (laid.say) plate.append(node('p', 'bobine-ask-say', laid.say));
+    if (notes.length) {
+      const list = node('ul', 'bobine-ask-notes');
+      for (const note of notes) {
+        const item = node('li'),
+          when = note.id ? whenOf(note.id) : '';
+        if (when) item.append(node('span', 'bobine-ask-when', when));
+        item.append(node('span', '', note.text));
+        list.append(item);
+      }
+      plate.append(list);
+    }
+    return [plate];
+  }
+  /**
+   * The request written under the preview, asked to Moodix AI: its plan is laid on the bobine in takes
+   * to create, after its end (and the texts of those that had none written), in one step of « Annuler ».
+   * Nothing is created: the user reads, then « Créer ». Nothing of what they laid is changed.
+   */
+  async function ask() {
+    const request = wish.trim();
+    if (!arrange || !request || busy()) return;
+    stop();
+    // (Asked from its field, by Entrée: the keys are its own again once it is answered, for the next request.)
+    const typing = Boolean(live.ask?.field) && page?.document?.activeElement === live.ask.field,
+      back = () => {
+        const focused = page?.document?.activeElement;
+        if (typing && root && (!focused || focused === root || focused === page.document.body)) live.ask?.field?.focus?.({ preventScroll: true });
+      };
+    const controller = new AbortController(),
+      mine = (arranging = { request, controller, bobine: montage.id });
+    laid = null;
+    status = '';
+    draw();
+    await keep();
+    let answer = null,
+      problem = '';
+    try {
+      answer = await arrange({ montage, request, previous: asks.slice(-ASKS) }, { signal: controller.signal });
+    } catch (error) {
+      problem = error.message;
+    }
+    // (Let go meanwhile: stopped, the page left, another bobine come in its place.)
+    if (arranging !== mine) return;
+    arranging = null;
+    if (controller.signal.aborted || montage.id !== mine.bobine) return draw();
+    const plan = answer?.arrangement;
+    if (!plan) {
+      laid = { problem: problem || 'Moodix AI n’a rien répondu.' };
+      draw();
+      return back();
+    }
+    const before = montage,
+      result = withArrangement(before, plan, { takes: runs(), newId, lengthOf });
+    asks = [...asks, { request, say: plan.say ?? '' }].slice(-ASKS);
+    if (result.montage !== before) {
+      remember(before);
+      montage = result.montage;
+      pending = true;
+      // (Done: the field is empty for the next one. Nothing laid, its words stay to be said otherwise.)
+      wish = '';
+      await keep();
+    }
+    laid = {
+      count: result.added.length,
+      filled: result.filled.length,
+      say: plan.say ?? '',
+      // (What could not be read of its plan, then what was adjusted as it was laid.)
+      notes: [...(answer.problems ?? []).map(text => ({ id: null, text })), ...result.notes],
+      open: false,
+    };
+    draw();
+    back();
+  }
+  /** « Arrêter »: its request is let go at once; its words are in the field again. */
+  function stopAsking() {
+    if (!arranging) return;
+    arranging.controller.abort();
+    arranging = null;
+    draw();
+  }
+
   // The timeline ----------------------------------------------------------------------------------
   /** (0.6.148, captures 80 et 81) The small bar above the take or the sound chosen: icons, their words on hover. */
   function popOf(item, record, shown = null) {
@@ -2423,6 +2665,7 @@ export function setupMontage({
     }
     if (live.reel) live.reel.scrollLeft = scrolled;
     sayGo();
+    sayAsk();
     show({ sync: false });
     fitBar();
   }
@@ -2494,6 +2737,8 @@ export function setupMontage({
         // project, kept there, and its take asked there.
         writing?.controller.abort();
         writing = null;
+        arranging?.controller.abort();
+        arranging = null;
         if (filling && !making) {
           filling.controller?.abort();
           filling = null;
@@ -2520,6 +2765,10 @@ export function setupMontage({
       }
       writing?.controller.abort();
       writing = null;
+      // (0.6.162) What it is arranging too; what was written for it stays in its field.
+      arranging?.controller.abort();
+      arranging = null;
+      live.ask = null;
       // (0.6.153) The wand is put down, the enrichment asked let go.
       wand = false;
       page?.removeEventListener?.('keydown', pageKeys);
@@ -2532,7 +2781,7 @@ export function setupMontage({
       return keep();
     },
     // For the tests and the pointer of a later step: what is on the page, and the hands that change it.
-    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed), zoom, scrolled, drawing, wand, enrichingId, lit, downloading, fetchError, past: past.length, future: future.length }),
+    state: () => ({ wish, arranging, laid, asks, montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed), zoom, scrolled, drawing, wand, enrichingId, lit, downloading, fetchError, past: past.length, future: future.length }),
     undo: () => travel(true),
     redo: () => travel(false),
     lay,
