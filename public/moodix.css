@@ -19845,6 +19845,11 @@ body[data-view='bobine'] .chat-panel {
 #bobine-view .montage-frame[data-asked='true'] > .montage-frame-words {
   bottom: 46px;
 }
+/* (0.6.163, vu avec son ChatGPT le 21/11 : dépliée, la plaque de Moodix AI passait en travers de ce texte,
+   qu'on lisait des deux côtés. Tant qu'elle est dépliée, l'aperçu ne le montre pas.) */
+#bobine-view .montage-frame[data-asked='open'] > .montage-frame-words {
+  display: none;
+}
 /* (Dans sa boîte, à côté de l'Éclipse et de la flèche : pas toute la largeur comme les champs du bureau.) */
 #bobine-view .bobine-desk textarea.bobine-ask-words {
   width: auto;

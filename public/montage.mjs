@@ -1062,7 +1062,7 @@ export function setupMontage({
     stop();
     media = { video, picture, blank, caption, words, end, frame, sounds: new Map() };
     // (0.6.162) Drawn again while a line of Moodix AI is said under it: its text stays above that line.
-    frame.dataset.asked = String(Boolean(laid));
+    frame.dataset.asked = askedState();
     Object.assign(live, { clock: time, whole, play: playButton });
     return section;
   }
@@ -1808,6 +1808,13 @@ export function setupMontage({
     sayAsk();
     return host;
   }
+  /**
+   * (0.6.163) What the preview does of the text it shows of a take to create while Moodix AI says
+   * something under it: 'true', its line: the text goes up above it; 'open', its plate unfolded, or what
+   * it said with nothing laid: the text is not shown (seen with his own ChatGPT on 21/11: the plate lay
+   * across it, the text read on both sides); 'false' otherwise.
+   */
+  const askedState = () => (!laid ? 'false' : laid.open || !(laid.count || laid.filled) ? 'open' : 'true');
   function sayAsk() {
     const shown = live.ask;
     if (!shown) return;
@@ -1822,7 +1829,7 @@ export function setupMontage({
     shown.slot.replaceChildren(...answerOf());
     shown.slot.hidden = !laid;
     // (Maquette A8: the line passed over the text the preview shows of a take to create: that text goes up.)
-    if (media?.frame) media.frame.dataset.asked = String(Boolean(laid));
+    if (media?.frame) media.frame.dataset.asked = askedState();
   }
   function fieldBox() {
     const box = node('div', 'bobine-ask-field'),

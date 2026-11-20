@@ -2706,8 +2706,11 @@ test('the detail of what was laid: what Moodix AI said, and each adjustment with
   );
   // Folded: « 3 ajustements », in place of « Détail ».
   assert.deepEqual([find(box(), 'bobine-ask-facts')[0].textContent, link('Détail'), link('3 ajustements').attributes['aria-expanded'], find(box(), 'bobine-ask-said').length], ['2 prises ajoutées', undefined, 'false', 0]);
+  assert.equal(f.get('montage-frame')[0].dataset.asked, 'true');
   link('3 ajustements').onclick();
   assert.deepEqual([link('3 ajustements').attributes['aria-expanded'], find(box(), 'bobine-ask-say')[0].textContent], ['true', 'Deux prises.']);
+  // (0.6.163) Unfolded, its plate would lie across the text the preview shows of a take: that text is not shown meanwhile.
+  assert.equal(f.get('montage-frame')[0].dataset.asked, 'open');
   assert.deepEqual(
     find(box(), 'bobine-ask-notes')[0].children.map(item => item.children.map(part => part.textContent)),
     [
@@ -2719,7 +2722,7 @@ test('the detail of what was laid: what Moodix AI said, and each adjustment with
   // « Annuler » is still there, unfolded; folded again by the same link.
   assert.ok(link('Annuler'));
   link('3 ajustements').onclick();
-  assert.equal(find(box(), 'bobine-ask-said').length, 0);
+  assert.deepEqual([find(box(), 'bobine-ask-said').length, f.get('montage-frame')[0].dataset.asked], [0, 'true']);
   // Without adjustment: « Détail » shows what it said.
   link('Annuler').onclick();
   f.ask = null;
@@ -2743,6 +2746,8 @@ test('nothing laid: what Moodix AI said, a cross, and the request still in its f
   await answer({ say: 'Je ne trouve pas la prise 42 dans ce projet.', fill: [], add: [] });
   assert.deepEqual([f.ui.state().montage === before, f.saves().length, f.ui.state().past], [true, saves, 1], 'the bobine is the same, nothing kept, no step to undo');
   assert.deepEqual([find(box(), 'bobine-ask-facts')[0].textContent, find(box(), 'bobine-ask-say')[0].textContent, link('Annuler'), field().value, state()], ['Moodix AI', 'Je ne trouve pas la prise 42 dans ce projet.', undefined, 'Termine sur la prise 42.', 'typed']);
+  // (0.6.163) What it said is a plate too: the text of the preview is not shown under it.
+  assert.equal(f.get('montage-frame')[0].dataset.asked, 'open');
   // The cross closes it.
   links().find(control => control.attributes['aria-label'] === 'Fermer').onclick();
   assert.deepEqual([f.ui.state().laid, find(box(), 'bobine-ask-said').length], [null, 0]);
@@ -2813,6 +2818,7 @@ test('the styles of the request: it grows upwards from its row, what is laid is 
   assert.match(rule('.bobine-ask-answer'), /width: max-content;\n  min-width: 100%;/);
   assert.match(rule('.bobine-ask-answer[hidden]'), /display: none;/);
   assert.match(rule("#bobine-view .montage-frame[data-asked='true'] > .montage-frame-words"), /bottom: 46px;/);
+  assert.match(rule("#bobine-view .montage-frame[data-asked='open'] > .montage-frame-words"), /display: none;/);
 });
 
 test('asked from its field, the keys are the field’s again once Moodix AI has answered (0.6.162)', async () => {
