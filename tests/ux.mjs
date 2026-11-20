@@ -524,3 +524,24 @@ test('every progress of a take is handed on with its time: the card, the Studio 
   // The page that follows a job hands its count on, as /api/tools/job gives it.
   assert.match(await read('generation-runtime.mjs'), /onProgress\(job\.progress, job\.fraction, job\.previewUrl, job\.elapsed\)/);
 });
+
+test('the picture of a plan of the montage is never stretched to the width of the plan (0.6.145)', async () => {
+  // (His words of 20/11 with a capture, « c'est trop zoomé »: a portrait clip of 19,7 s, its small picture
+  // made to cover a plan 1100 px wide: a blurred band of a few pixels of it. Whole at the height of the
+  // track and repeated along the plan, as the pictures of a film, whatever the length of the plan.)
+  const sheet = (await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const rule = selector => {
+    const at = sheet.lastIndexOf('\n' + selector + ' {');
+    assert.ok(at >= 0, selector);
+    return sheet.slice(at, sheet.indexOf('}', at));
+  };
+  for (const selector of ['.montage-piece:not(.is-sound):not(.is-todo)', '.montage-piece.is-todo.is-replacing:not(.is-making)']) {
+    const made = rule(selector);
+    assert.match(made, /background-size: auto 100%;/, selector);
+    assert.match(made, /background-repeat: repeat-x;/, selector);
+    assert.match(made, /background-position: left center;/, selector);
+    assert.doesNotMatch(made, /cover/, selector);
+  }
+  // (The rule of the plans comes after the one that gave them « cover »: it is the one read.)
+  assert.ok(sheet.lastIndexOf('\n.montage-piece:not(.is-sound):not(.is-todo) {') > sheet.indexOf('\n.montage-piece {'));
+});

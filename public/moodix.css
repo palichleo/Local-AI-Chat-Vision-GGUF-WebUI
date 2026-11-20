@@ -17836,8 +17836,10 @@ body:not([data-view='studio']) .ai-cursor {
    (« griser clairement la suite de la vidéo sur laquelle il a posé l'image »). */
 .montage-piece.is-todo.is-replacing:not(.is-making) {
   background-color: #6b6a70;
-  background-size: cover;
-  background-position: center;
+  /* (0.6.145) Comme la vignette d'un plan fait : à la hauteur de la piste, répétée. */
+  background-size: auto 100%;
+  background-repeat: repeat-x;
+  background-position: left center;
   background-blend-mode: luminosity;
 }
 .montage-piece.is-todo.is-replacing:not(.is-making)::before {
@@ -18133,4 +18135,15 @@ html[data-page-hidden='true'] .montage-piece.is-making::after {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ Montage : les vignettes (0.6.145) */
+/* « C'est trop zoomé » (sa capture du 20/11 : une vidéo en portrait de 19,7 s). La vignette d'un plan
+   était étirée jusqu'à couvrir toute la largeur du plan : sur un plan long, une bande floue de quelques
+   pixels de l'image. Elle garde maintenant la hauteur de la piste, entière, et se répète le long du
+   plan, comme les images d'une pellicule : jamais agrandie, quelle que soit la durée du plan. */
+.montage-piece:not(.is-sound):not(.is-todo) {
+  background-size: auto 100%;
+  background-repeat: repeat-x;
+  background-position: left center;
 }
