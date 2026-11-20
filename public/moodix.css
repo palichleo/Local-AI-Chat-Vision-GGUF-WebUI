@@ -18011,3 +18011,33 @@ html[data-page-hidden='true'] .montage-piece.is-making::after {
     min-height: 32px;
   }
 }
+
+/* ------------------------------------------------------------------ Montage, étape 2, lot 2 (0.6.143) */
+/* Maquette M6. La suite à créer d'une vidéo la touche : les quatre pixels qui séparent deux plans sont
+   pris, et leurs bords se font face sans arrondi. Elle se lit comme le prolongement de la vidéo. */
+.montage-piece.is-todo.is-suite:not(.is-making) {
+  border-left: 0;
+}
+.montage-piece.is-todo.is-suite {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.montage-piece:has(+ .montage-piece.is-suite) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* Pendant qu'on tire le bord d'une vidéo au-delà de sa prise : ce que cela fait, dit au-dessus de la main. */
+.montage-tip {
+  position: absolute;
+  z-index: 2;
+  top: -6px;
+  transform: translate(-50%, -100%);
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(26, 24, 31, 0.97);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  color: var(--ink);
+  font: 500 11.5px/1.2 var(--font-ui);
+  white-space: nowrap;
+}

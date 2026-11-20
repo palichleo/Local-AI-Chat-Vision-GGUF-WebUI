@@ -177,7 +177,22 @@ export function withItemChanged(montage, id, changes, { longest = null } = {}) {
     if (changes.at !== undefined && item.track) next.at = round(Math.max(0, changes.at));
     return next;
   };
-  return { ...montage, plans: montage.plans.map(edit), sounds: montage.sounds.map(edit) };
+  return { ...montage, plans: replacing(montage.plans.map(edit)), sounds: montage.sounds.map(edit) };
+}
+
+/**
+ * (0.6.143) A plan to make no longer says it replaces the end of the video before it once that video is
+ * given its end back by hand (its edge pulled to the end of its take): nothing of it is replaced then.
+ * (Cut otherwise since, the video stays as the hand left it: see withoutItem.)
+ */
+function replacing(plans) {
+  return plans.map((plan, at) => {
+    const before = plans[at - 1];
+    if (!plan.replaces || !before || isTodo(before) || !sameSource(before.source, plan.replaces.source)) return plan;
+    if (before.to < plan.replaces.to - 0.002) return plan;
+    const { replaces: _nothing, ...rest } = plan;
+    return rest;
+  });
 }
 
 /** What the head of the timeline says of a montage: « 4 plans · 14 s · 16:9 · 24 i/s ». */
@@ -236,6 +251,31 @@ const todoPlan = (id, seconds, more = {}) => ({
   volume: 1,
   ...more,
 });
+
+/** (0.6.143) How far beyond the end of its take the end of a video is pulled before its continuation is asked. */
+export const SUITE_BEYOND = 0.5;
+
+/**
+ * (0.6.143) The end of the plan `id` pulled to `to` seconds of its take, which is `longest` long (« s'il
+ * déroule la vidéo plus loin que sa durée d'origine, on lui montre […] que ça va continuer sa vidéo »).
+ * Within the take: what is kept of it, as withItemChanged. Beyond it (by SUITE_BEYOND at least): the
+ * plan keeps its take to its end, and what exceeds is its continuation, a plan to make laid right
+ * after it under `suiteId`; what follows comes later in the film. Read on the montage as it was when
+ * the edge was pressed: pulled back, the continuation is gone. A video that has its continuation to
+ * make already stops at the end of its take: that one is pulled by its own edge.
+ */
+export function withEndPulled(montage, id, to, { longest = null, suiteId } = {}) {
+  const within = withItemChanged(montage, id, { to }, { longest }),
+    index = montage.plans.findIndex(plan => plan.id === id),
+    plan = montage.plans[index],
+    next = montage.plans[index + 1];
+  if (!plan || isTodo(plan) || plan.kind !== 'video' || !(longest > 0) || !suiteId) return within;
+  if (to - longest < SUITE_BEYOND || (isTodo(next) && !next.photos?.start)) return within;
+  if (montage.plans.length >= MONTAGE_LIMITS.plans) return within;
+  const plans = [...within.plans];
+  plans.splice(index + 1, 0, todoPlan(suiteId, to - longest));
+  return { ...within, plans };
+}
 
 /**
  * A photo of the project laid on the track of the photos at `seconds` of the film. What it becomes is
@@ -319,6 +359,30 @@ export function withTodoMade(montage, id, record, { from = 0 } = {}) {
 }
 
 /**
+ * (0.6.143) What a plan to make goes on from, read on the montage: `{ kind, before, whole }`.
+ * - 'photo': its start photo;
+ * - 'suite': the video before it, shown to the end of its take, which it continues (`whole`: the
+ *   length of that take);
+ * - 'last': the last image of that video, towards its own end photo (a new clip: see creationOf);
+ * - 'wait': the plan before it is still to make; 'cut': the video before it stops before the end of
+ *   its take;
+ * - 'own': nothing to go on from; 'made': not a plan to make.
+ * `before`: the number of the plan before it, as the page says it.
+ */
+export function linkOf(montage, id, lengthOf = () => null) {
+  const index = montage.plans.findIndex(plan => plan.id === id),
+    plan = montage.plans[index];
+  if (!isTodo(plan)) return { kind: 'made' };
+  if (plan.photos?.start) return { kind: 'photo' };
+  const before = montage.plans[index - 1];
+  if (isTodo(before)) return { kind: 'wait', before: index };
+  if (before?.kind !== 'video') return { kind: 'own' };
+  const whole = lengthOf(before.source);
+  if (!(whole > 0) || Math.abs(before.to - whole) > 0.06) return { kind: 'cut', before: index };
+  return { kind: plan.photos?.end ? 'last' : 'suite', before: index, whole };
+}
+
+/**
  * What must be asked for a plan to make to be created, read on the montage: `{ verb, prompt, duration,
  * format, start, end, continues, from }`, or `{ reason }` in the user's words when it cannot be yet.
  * `lengthOf(source)`: the length of a take of the project, or null.
@@ -342,14 +406,14 @@ export function creationOf(montage, id, lengthOf = () => null) {
     ...(plan.photos?.end ? { end: { source: plan.photos.end } } : {}),
     from: 0,
   };
-  if (plan.photos?.start) return { ...wanted, start: { source: plan.photos.start } };
-  const before = montage.plans[index - 1];
-  if (isTodo(before)) return { reason: `Créez d’abord le plan ${index} : celui-ci le continue.` };
-  if (before?.kind !== 'video') return wanted;
-  const whole = lengthOf(before.source);
-  if (!(whole > 0) || Math.abs(before.to - whole) > 0.06)
+  const link = linkOf(montage, id, lengthOf),
+    before = montage.plans[index - 1];
+  if (link.kind === 'photo') return { ...wanted, start: { source: plan.photos.start } };
+  if (link.kind === 'wait') return { reason: `Créez d’abord le plan ${index} : celui-ci le continue.` };
+  if (link.kind === 'own') return wanted;
+  if (link.kind === 'cut')
     return { reason: `Le plan ${index} est coupé avant la fin de sa prise : rendez-lui sa fin, ou posez une photo de début sur ce plan.` };
-  if (plan.photos?.end) return { ...wanted, start: { source: before.source, frame: 'last' } };
+  if (link.kind === 'last') return { ...wanted, start: { source: before.source, frame: 'last' } };
   const { format: _format, ...rest } = wanted;
-  return { ...rest, verb: 'extend_video', continues: before.source, from: whole };
+  return { ...rest, verb: 'extend_video', continues: before.source, from: link.whole };
 }

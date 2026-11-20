@@ -14,6 +14,10 @@
  * Photos of the project are laid on a track above the plans: the photo a plan starts on, the photo
  * it arrives on; a photo laid above a video cuts it there. A plan to make is then created by the
  * Studio, as one of its takes (`create`), and becomes the plan of that take.
+ *
+ * (0.6.143) Maquette M6: the end of a video pulled beyond its take shows its continuation to make,
+ * joined to it; what follows comes later in the film. Let go, the continuation is chosen: its text,
+ * its length, « Prolonger ».
  */
 import { FORMATS } from './formats.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
@@ -24,6 +28,7 @@ import {
   clock,
   creationOf,
   isTodo,
+  linkOf,
   montageSeconds,
   montageSizes,
   montageSummary,
@@ -36,6 +41,7 @@ import {
   todoPlans,
   trackOf,
   usualSize,
+  withEndPulled,
   withItemChanged,
   withPhoto,
   withPlanAt,
@@ -119,6 +125,8 @@ export function setupMontage({
     held = null,
     ghost = null,
     slid = false,
+    // (0.6.143) While the end of a video is pulled beyond its take: its continuation, { id, at } (where it ends).
+    pulling = null,
     // (0.6.142) The plan being created: { id, label, fraction }.
     making = null;
 
@@ -623,22 +631,37 @@ export function setupMontage({
     const index = montage.plans.indexOf(item),
       busy = making?.id === item.id,
       title = node('div', 'montage-title is-tight'),
-      current = () => itemOf(item.id) ?? item;
+      current = () => itemOf(item.id) ?? item,
+      // (0.6.143) What it goes on from: after a video shown to its end, it is its continuation.
+      link = linkOf(montage, item.id, lengthOf),
+      suite = link.kind === 'suite' || link.kind === 'last';
     section.setAttribute('aria-label', 'Plan à faire');
     // (Its lines take what they need, its text the room that is left: never cut by the foot.)
     rows.className += ' is-tight';
     foot.className += ' is-tight';
-    const about = node('span', 'montage-title-meta', item.replaces ? `Remplace la fin du plan ${index}` : 'Vidéo · ce plan n’existe pas encore');
+    const about = node(
+      'span',
+      'montage-title-meta',
+      item.replaces
+        ? `Remplace la fin du plan ${index}`
+        : link.kind === 'suite'
+          ? `Continue le plan ${link.before}, là où il s’arrête`
+          : link.kind === 'last'
+            ? `Part de la dernière image du plan ${link.before}`
+            : 'Vidéo · ce plan n’existe pas encore',
+    );
     // (His choice of 20/11, « coupe sur la photo », said where the plan is read.)
     if (item.replaces) about.title = 'Le film coupe sur la photo : la vidéo est gardée jusqu’à elle, et ce plan part d’elle.';
-    title.append(node('span', 'montage-title-name', `Plan ${index + 1} · à faire`), about);
+    title.append(node('span', 'montage-title-name', `Plan ${index + 1} · ${suite ? 'suite à créer' : 'à faire'}`), about);
     for (const [side, name] of [
       ['start', 'Photo de début'],
       ['end', 'Photo de fin'],
     ]) {
       const photo = item.photos?.[side];
       if (!photo) {
-        rows.append(row(name, node('span', 'montage-none-yet', 'Glissez une image sur « Repères »')));
+        // (A continuation starts where the video before it ends: said in the place of its start photo.)
+        if (side === 'start' && suite) rows.append(row('Départ', node('span', 'montage-figures', `Fin du plan ${link.before}`)));
+        else rows.append(row(name, node('span', 'montage-none-yet', 'Glissez une image sur « Repères »')));
         continue;
       }
       const record = recordOf(photo),
@@ -656,9 +679,10 @@ export function setupMontage({
     const words = node('label', 'montage-words'),
       field = node('textarea', 'montage-words-field'),
       why = node('p', 'montage-reason'),
-      go = button('montage-action is-go', busy ? 'Création…' : 'Créer ce plan', () => void makePlan(item.id));
-    Object.assign(field, { value: item.todo.prompt, rows: 3, maxLength: TODO_LIMITS.prompt, placeholder: 'Par exemple : il lève les yeux.', disabled: Boolean(making) });
-    field.setAttribute('aria-label', 'Ce qui se passe dans ce plan');
+      // (« Prolonger », the word of the Studio for it: the continuation itself. Towards an end photo it is a new clip.)
+      go = button('montage-action is-go', busy ? 'Création…' : link.kind === 'suite' ? 'Prolonger' : 'Créer ce plan', () => void makePlan(item.id));
+    Object.assign(field, { value: item.todo.prompt, rows: 3, maxLength: TODO_LIMITS.prompt, placeholder: suite ? 'Par exemple : il se lève et s’éloigne.' : 'Par exemple : il lève les yeux.', disabled: Boolean(making) });
+    field.setAttribute('aria-label', suite ? 'Ce qui se passe ensuite' : 'Ce qui se passe dans ce plan');
     // What stops it is said as it changes: the button is never drawn again under the hand that goes to it.
     const judge = () => {
       const wanted = creationOf(montage, item.id, lengthOf),
@@ -672,9 +696,9 @@ export function setupMontage({
       change(withItemChanged(montage, item.id, { prompt: field.value }), { sliding: true });
       judge();
     };
-    words.append(node('span', 'montage-row-name', 'Ce qui se passe'), field);
+    words.append(node('span', 'montage-row-name', suite ? 'Ce qui se passe ensuite' : 'Ce qui se passe'), field);
     judge();
-    const out = button('montage-action is-quiet', item.replaces ? 'Retirer la photo' : 'Retirer', () => change(withoutItem(montage, item.id)));
+    const out = button('montage-action is-quiet', item.replaces ? 'Retirer la photo' : suite ? 'Retirer la suite' : 'Retirer', () => change(withoutItem(montage, item.id)));
     out.disabled = Boolean(making);
     foot.append(go, out);
     body.append(title, rows, words, why, foot);
@@ -872,13 +896,16 @@ export function setupMontage({
           record = recordOf(todo ? item.replaces?.source : item.source),
           picture = id === 'plans' ? pictureOf(record) : '',
           number = montage.plans.indexOf(item) + 1,
+          // (0.6.143) A plan to make that goes on from the video before it: its continuation, drawn joined to it.
+          link = todo && id === 'plans' ? linkOf(montage, item.id, lengthOf) : null,
+          suite = link?.kind === 'suite' || link?.kind === 'last',
           label =
             id !== 'plans'
               ? (takeLabel(item.source) || KINDS[id]) + (record?.prompt ? ' · ' + String(record.prompt).split('\n')[0].slice(0, 60) : '')
               : todo
-                ? `${number} · ${busy ? 'EN COURS' : item.replaces ? 'SERA REMPLACÉ' : 'À FAIRE'}`
+                ? `${number} · ${busy ? 'EN COURS' : item.replaces ? 'SERA REMPLACÉ' : suite ? 'SUITE À CRÉER' : 'À FAIRE'}`
                 : `${number}${takeLabel(item.source, ' · ').toUpperCase()}`,
-          look = id !== 'plans' ? ' is-sound' : todo ? ' is-todo' + (item.replaces ? ' is-replacing' : '') + (busy ? ' is-making' : '') : '',
+          look = id !== 'plans' ? ' is-sound' : todo ? ' is-todo' + (item.replaces ? ' is-replacing' : '') + (suite ? ' is-suite' : '') + (busy ? ' is-making' : '') : '',
           piece = button('montage-piece' + look, '', () => {
             // (The click that ends a drag chooses nothing.)
             if (slid) return void (slid = false);
@@ -889,9 +916,10 @@ export function setupMontage({
         piece.dataset.id = item.id;
         piece.dataset.missing = String(!record && !todo);
         piece.setAttribute('aria-pressed', String(chosen === item.id));
-        piece.style.left = percent(at);
-        // (Four pixels between two neighbours: the surface shows between them.)
-        piece.style.width = `calc(${percent(item.to - item.from)} - 4px)`;
+        // (Four pixels between two neighbours: the surface shows between them. A continuation takes
+        // those of the video it continues: the two touch.)
+        piece.style.left = suite ? `calc(${percent(at)} - 4px)` : percent(at);
+        piece.style.width = suite ? percent(item.to - item.from) : `calc(${percent(item.to - item.from)} - 4px)`;
         if (picture) piece.style.backgroundImage = `url("${picture}")`;
         piece.append(node('span', 'montage-piece-name', record || todo ? label : 'Prise introuvable'));
         if (id === 'plans') {
@@ -900,9 +928,17 @@ export function setupMontage({
               ? KINDS[item.kind]
               : busy
                 ? making.label
-                : item.todo.prompt.trim().split('\n')[0].slice(0, 60) || (item.replaces ? 'Nouveau clip qui part de la photo' : 'Plan à faire'),
+                : item.todo.prompt.trim().split('\n')[0].slice(0, 60) ||
+                  (item.replaces
+                    ? 'Nouveau clip qui part de la photo'
+                    : link.kind === 'suite'
+                      ? `Suite du plan ${link.before}`
+                      : link.kind === 'last'
+                        ? 'Jusqu’à la photo de fin'
+                        : 'Plan à faire'),
             kind = node('span', 'montage-piece-kind', about);
-          piece.append(kind, node('span', 'montage-piece-length', shownSeconds(item.to - item.from)));
+          // (What a continuation adds to the film: « + 4 s ».)
+          piece.append(kind, node('span', 'montage-piece-length', (suite ? '+ ' : '') + shownSeconds(item.to - item.from)));
           if (busy) {
             const bar = node('span', 'montage-piece-bar'),
               done = node('span', 'montage-piece-bar-done');
@@ -948,16 +984,31 @@ export function setupMontage({
               event.stopPropagation?.();
               const first = { from: item.from, to: item.to },
                 longest = record ? takeSeconds(record) : null,
-                before = new Map(montage.plans.map((plan, index) => [plan.id, starts[index]]));
+                before = new Map(montage.plans.map((plan, index) => [plan.id, starts[index]])),
+                // (0.6.143) The end of a video pulled beyond its take: what exceeds is its continuation
+                // to make, right after it. Read on the montage as it was pressed: pulled back, it is gone.
+                pressed = montage,
+                beyond = edge === 'end' && !todo && item.kind === 'video' ? newId() : null;
               follow(event, lane, {
                 slack: 2,
                 kind: 'trim',
                 move: far => {
-                  const next = withItemChanged(montage, item.id, edge === 'start' ? { from: first.from + far } : { to: first.to + far }, { longest });
+                  const next = beyond
+                    ? withEndPulled(pressed, item.id, first.to + far, { longest, suiteId: beyond })
+                    : withItemChanged(montage, item.id, edge === 'start' ? { from: first.from + far } : { to: first.to + far }, { longest });
                   if (edge === 'start') ghost = { starts: before, id: item.id, shift: next.plans.find(plan => plan.id === item.id).from - first.from };
                   chosen = item.id;
-                  if (next === montage) update();
+                  const added = beyond ? next.plans.find(plan => plan.id === beyond) : null,
+                    kept = next.plans.find(plan => plan.id === item.id);
+                  // (Where the continuation ends, at the scale of the timeline: what is said of it is said there.)
+                  pulling = added ? { id: beyond, at: before.get(item.id) + (kept.to - kept.from) + (added.to - added.from), seconds: added.to - added.from } : null;
+                  if (next === montage || (beyond && JSON.stringify(next.plans) === JSON.stringify(montage.plans))) update();
                   else change(next);
+                },
+                // Let go with its continuation: that one is chosen, what happens next is written there.
+                done: () => {
+                  if (pulling && itemOf(pulling.id)) chosen = pulling.id;
+                  pulling = null;
                 },
               });
             };
@@ -991,6 +1042,13 @@ export function setupMontage({
     // The head is laid over the lanes, at their scale.
     const over = node('div', 'montage-over');
     over.append(headLine);
+    // (0.6.143) While the end of a video is pulled beyond its take: what that does, said where the hand is.
+    if (pulling && itemOf(pulling.id)) {
+      const later = montage.plans.findIndex(plan => plan.id === pulling.id) < montage.plans.length - 1,
+        tip = node('span', 'montage-tip', `Au-delà de la prise : + ${shownSeconds(pulling.seconds)} à créer` + (later ? ' · ce qui suit se décale' : ''));
+      tip.style.left = `clamp(180px, ${percent(pulling.at)}, calc(100% - 180px))`;
+      over.append(tip);
+    }
     lanes.append(over);
     body.append(headRow, ruler, lanes);
     Object.assign(live, { head: headLine, status: state });

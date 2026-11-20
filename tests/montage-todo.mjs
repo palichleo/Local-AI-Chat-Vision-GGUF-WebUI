@@ -5,10 +5,12 @@ import {
   TODO_LIMITS,
   creationOf,
   isTodo,
+  linkOf,
   montageSeconds,
   montageSummary,
   planStarts,
   todoPlans,
+  withEndPulled,
   withItemChanged,
   withPhoto,
   withTake,
@@ -198,4 +200,81 @@ test('the server keeps a plan to make as it is, and refuses what is none (0.6.14
   const mixed = withTake(montage, clip(5, 5), { id: id(15), index: 0 });
   await assert.rejects(assemblyOf(validateMontage(mixed), async () => 'D:/x.mp4'), /Le plan 2 est encore à faire : créez-le ou retirez-le avant d’exporter le film\./);
   assert.equal((await assemblyOf(validateMontage(made), async () => 'D:/x.mp4')).plans.length, 1);
+});
+
+test('the end of a video pulled beyond its take asks for its continuation, right after it (0.6.143)', () => {
+  // His words of 20/11: « s'il déroule la vidéo plus loin que sa durée d'origine, on lui montre
+  // implicitement que ça va continuer sa vidéo (et ça déplace les images ou vidéos vers la droite) ».
+  const film = withTake(withTake(empty(), clip(5, 5), { id: id(15) }), photo(7), { id: id(17) }),
+    still = shape(film)[1],
+    pull = (to, from = film) => withEndPulled(from, id(15), to, { longest: 5, suiteId: id(40) });
+  // Within its take: what is kept of it, as before.
+  assert.deepEqual(shape(pull(3)), [['video', 0, 3, null, null], still]);
+  // At its end and a little beyond: the whole take, nothing more (the hand can stop there).
+  assert.deepEqual(shape(pull(5.4)), shape(film));
+  // Beyond: the take whole, then what exceeds, to make; the image comes later in the film.
+  const longer = pull(9);
+  assert.deepEqual(shape(longer), [['video', 0, 5, null, null], ['à faire', 0, 4, null, null], still]);
+  assert.deepEqual([longer.plans[1].id, longer.plans[1].todo, planStarts(longer)], [id(40), { prompt: '' }, [0, 5, 9]]);
+  assert.deepEqual(validateMontage(longer).plans, longer.plans);
+  // Read on the montage as it was pressed: further, as short as a clip can be, as long, back within the take.
+  assert.deepEqual([pull(11.52).plans[1].to, pull(5.5).plans[1].to, pull(60).plans[1].to], [6.5, TODO_LIMITS.shortest, TODO_LIMITS.longest]);
+  assert.deepEqual(shape(pull(4.2)), [['video', 0, 4.2, null, null], still]);
+  // A video cut before its end: its end comes back first, then its continuation.
+  const cut = withItemChanged(film, id(15), { to: 2 }, { longest: 5 });
+  assert.deepEqual(shape(pull(7, cut)), [['video', 0, 5, null, null], ['à faire', 0, 2, null, null], still]);
+  // It has its continuation to make already: its edge stops at the end of its take, that one has its own edge.
+  assert.deepEqual(shape(withEndPulled(longer, id(15), 12, { longest: 5, suiteId: id(41) })), shape(longer));
+  assert.equal(withItemChanged(longer, id(40), { to: 6 }).plans[1].to, 6);
+  // Not for an image (its edge is its length), a plan to make, or a take nobody knows the length of.
+  assert.deepEqual(withEndPulled(film, id(17), 9, { longest: 3, suiteId: id(42) }).plans.map(plan => plan.id), [id(15), id(17)]);
+  assert.deepEqual(withEndPulled(longer, id(40), 9, { longest: 4, suiteId: id(42) }).plans.map(plan => plan.to), [5, 9, still[2]]);
+  assert.equal(withEndPulled(film, id(15), 9, { longest: null, suiteId: id(42) }).plans.length, 2);
+  assert.equal(withEndPulled(film, id(15), 9, { longest: 5 }).plans.length, 2, 'no name for the continuation: none');
+  // A montage that is full takes no plan more.
+  const full = { ...film, plans: [film.plans[0], ...Array.from({ length: MONTAGE_LIMITS.plans - 1 }, (_, at) => ({ ...film.plans[1], id: id(100 + at) }))] };
+  assert.equal(withEndPulled(full, id(15), 9, { longest: 5, suiteId: id(42) }).plans.length, MONTAGE_LIMITS.plans);
+});
+
+test('what a plan to make goes on from is read on the montage, once for what is asked and what is shown (0.6.143)', () => {
+  const lengthOf = wanted => (wanted.runId === id(5) ? 5 : null),
+    film = withTake(empty(), clip(5, 5), { id: id(15) }),
+    suite = withEndPulled(film, id(15), 8, { longest: 5, suiteId: id(40) });
+  // After a video shown to the end of its take: its continuation.
+  assert.deepEqual(linkOf(suite, id(40), lengthOf), { kind: 'suite', before: 1, whole: 5 });
+  assert.equal(creationOf(withItemChanged(suite, id(40), { prompt: 'Il se lève.' }), id(40), lengthOf).verb, 'extend_video');
+  // With an end photo: a clip from the last image of that video. With a start photo: from that photo.
+  const toPhoto = withPhoto(suite, photo(2), 7.5, { id: id(41) }).montage,
+    fromPhoto = withPhoto(suite, photo(2), 5.5, { id: id(41) }).montage;
+  assert.deepEqual([toPhoto.plans[1].photos, fromPhoto.plans[1].photos], [{ end: source(2) }, { start: source(2) }]);
+  assert.deepEqual(linkOf(toPhoto, id(40), lengthOf), { kind: 'last', before: 1, whole: 5 });
+  assert.deepEqual(linkOf(fromPhoto, id(40), lengthOf), { kind: 'photo' });
+  // The video cut before its end, or of a length nobody knows; the plan before still to make.
+  assert.deepEqual(linkOf(withItemChanged(suite, id(15), { to: 3 }, { longest: 5 }), id(40), lengthOf), { kind: 'cut', before: 1 });
+  assert.deepEqual(linkOf(suite, id(40)), { kind: 'cut', before: 1 });
+  const then = { ...suite, plans: [...suite.plans, { id: id(43), kind: 'video', todo: { prompt: '' }, from: 0, to: 2, frame: 'fit', volume: 1 }] };
+  assert.deepEqual(linkOf(then, id(43), lengthOf), { kind: 'wait', before: 2 });
+  // Nothing before it, or an image: a clip of its own. A plan that is made, or none: not one to make.
+  assert.deepEqual(linkOf({ ...suite, plans: [suite.plans[1]] }, id(40), lengthOf), { kind: 'own' });
+  assert.deepEqual(linkOf({ ...suite, plans: [withTake(empty(), photo(7), { id: id(17) }).plans[0], suite.plans[1]] }, id(40), lengthOf), { kind: 'own' });
+  assert.deepEqual([linkOf(suite, id(15), lengthOf), linkOf(suite, id(99), lengthOf)], [{ kind: 'made' }, { kind: 'made' }]);
+});
+
+test('a video given its end back by hand is no longer said replaced (0.6.143)', () => {
+  const cut = withPhoto(withTake(empty(), clip(5, 10), { id: id(15) }), photo(2), 6, { id: id(16) }).montage;
+  assert.deepEqual(cut.plans[1].replaces, { source: source(5), from: 6, to: 10 });
+  // Its edge pulled a little: more of it is kept, its end is still what the plan after it replaces.
+  assert.deepEqual(withItemChanged(cut, id(15), { to: 8 }, { longest: 10 }).plans[1].replaces, cut.plans[1].replaces);
+  // Pulled to the end of its take: whole again; the plan after it is a clip of its own, on its photo.
+  const whole = withItemChanged(cut, id(15), { to: 10 }, { longest: 10 });
+  assert.deepEqual([whole.plans[0].to, whole.plans[1].replaces, whole.plans[1].photos], [10, undefined, { start: source(2) }]);
+  assert.deepEqual(validateMontage(whole).plans, whole.plans);
+  assert.deepEqual(shape(withoutItem(whole, id(16))), [['video', 0, 10, null, null]]);
+  // And beyond: its continuation comes between the two.
+  const beyond = withEndPulled(cut, id(15), 12, { longest: 10, suiteId: id(40) });
+  assert.deepEqual(shape(beyond), [['video', 0, 10, null, null], ['à faire', 0, 2, null, null], ['à faire', 0, 4, id(2), null]]);
+  assert.equal(beyond.plans[2].replaces, undefined);
+  // (Another video before it, or a plan to make: what it says is left as it is.)
+  const other = { ...cut, plans: [withTake(empty(), clip(6, 20), { id: id(18) }).plans[0], cut.plans[1]] };
+  assert.deepEqual(withItemChanged(other, id(18), { to: 12 }, { longest: 20 }).plans[1].replaces, cut.plans[1].replaces);
 });

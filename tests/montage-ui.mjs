@@ -731,11 +731,13 @@ test('« Créer ce plan » asks the Studio for the clip, shows it being made, an
   // Refused by the engine: said where the state is, the plan is still to make and can be tried again.
   answer.reject(new Error('Mémoire vidéo insuffisante.'));
   await settle();
-  assert.deepEqual([f.said('montage-status'), f.plans()[1].className, f.ui.state().making], [['Création impossible : Mémoire vidéo insuffisante.'], 'montage-piece is-todo', null]);
+  assert.deepEqual([f.said('montage-status'), f.plans()[1].className, f.ui.state().making], [['Création impossible : Mémoire vidéo insuffisante.'], 'montage-piece is-todo is-suite', null]);
   assert.equal(f.button('Créer ce plan').disabled, false);
   // Without its end photo it is the continuation itself, whose file holds the first clip: the plan shows what was added.
   find(f.root, 'montage-off')[0].onclick();
-  f.button('Créer ce plan').onclick();
+  // (0.6.143) « Prolonger », the word of the Studio for it.
+  assert.equal(f.button('Créer ce plan'), undefined);
+  f.button('Prolonger').onclick();
   await settle();
   assert.deepEqual(asked[2].wanted, { verb: 'extend_video', args: { prompt: 'Il regarde la mer.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 2, source: { output: id(50) } } });
   f.runs.push(made(51, 49, { continuation: { overlapFrames: 9, sourceFrames: 121, newFrames: 40 } }));
@@ -809,4 +811,78 @@ test('a take whose small picture has just been made shows it on the timeline at 
   g.get('montage-take').find(item => item.dataset.id === id(10)).querySelectorAll('VIDEO')[0].onloadeddata();
   await settle();
   assert.equal(g.lanes()[0], lane);
+});
+
+test('the end of a video pulled beyond its take shows its continuation to make, joined to it (0.6.143)', async () => {
+  // (Maquette M6, his words of 20/11: « s'il déroule la vidéo plus loin que sa durée d'origine, on lui
+  // montre implicitement que ça va continuer sa vidéo (et ça déplace les images ou vidéos vers la droite) ».)
+  const f = await setup({ extra: photos(), create: async () => null }).open();
+  for (const at of [0, 2]) f.get('montage-take')[at].ondblclick();
+  const grips = () => find(f.root, 'montage-grip'),
+    plans = () => f.ui.state().montage.plans,
+    shown = () => f.plans().map(piece => [piece.className, piece.textContent, piece.style.left, piece.style.width]);
+  assert.deepEqual(grips().map(grip => grip.className), ['montage-grip is-start', 'montage-grip is-end', 'montage-grip is-end']);
+  // The end of the video (5 s of 10 on a lane of 1000: a second is 100). A little beyond the end of its
+  // take: the whole take, nothing more, the hand can stop there.
+  f.press(grips()[1], 500);
+  f.pointer.move(540);
+  assert.deepEqual([plans().length, plans()[0].to, f.get('montage-tip').length], [2, 5, 0]);
+  // Four seconds beyond: its continuation to make, touching it; the image comes later in the film.
+  f.pointer.move(900);
+  assert.deepEqual(shown(), [
+    ['montage-piece', '1 · PRISE 1Vidéo5 s', '0%', 'calc(50% - 4px)'],
+    ['montage-piece is-todo is-suite', '2 · SUITE À CRÉERSuite du plan 1+ 4 s', 'calc(50% - 4px)', '40%'],
+    ['montage-piece', '3 · PRISE 3Image3 s', '90%', 'calc(30% - 4px)'],
+  ]);
+  // What that does is said where the hand is; the video stays the one in hand.
+  assert.deepEqual([f.said('montage-tip'), f.get('montage-tip')[0].style.left], [['Au-delà de la prise : + 4 s à créer · ce qui suit se décale'], 'clamp(180px, 90%, calc(100% - 180px))']);
+  assert.deepEqual(f.said('montage-title-name'), ['Plan 1 · Prise 1']);
+  // Pulled back within the take: gone, as if nothing had been asked.
+  f.pointer.move(450);
+  assert.deepEqual([plans().length, plans()[0].to, f.get('montage-tip').length], [2, 4.5, 0]);
+  // Beyond again, and let go: the continuation is chosen, what happens next is written there.
+  f.pointer.move(700);
+  f.pointer.up();
+  assert.deepEqual([plans().length, plans()[0].to, plans()[1].to, f.ui.state().chosen === plans()[1].id, f.get('montage-tip').length], [3, 5, 2, true, 0]);
+  assert.deepEqual(f.said('montage-title-name').concat(f.said('montage-title-meta')), ['Plan 2 · suite à créer', 'Continue le plan 1, là où il s’arrête']);
+  assert.deepEqual(f.said('montage-row').slice(0, 2), ['DépartFin du plan 1', 'Photo de finGlissez une image sur « Repères »']);
+  assert.deepEqual(find(f.root, 'montage-action').map(control => control.textContent), ['Prolonger', 'Retirer la suite']);
+  assert.deepEqual(f.said('montage-words').map(words => words.slice(0, 23)), ['Ce qui se passe ensuite']);
+  await f.later();
+  assert.deepEqual(f.saves().at(-1).body.montage.plans.map(plan => [Boolean(plan.todo), plan.to]), [[false, 5], [true, 2], [false, 3]]);
+  // It has its continuation: the edge of the video stops at the end of its take, that one has its own edge.
+  f.press(grips()[1], 500);
+  f.pointer.move(800);
+  f.pointer.up();
+  assert.deepEqual(plans().map(plan => plan.to), [5, 2, 3]);
+  f.press(grips()[2], 700);
+  f.pointer.move(850);
+  f.pointer.up();
+  assert.deepEqual([plans().map(plan => plan.to), f.plans()[1].textContent], [[5, 3.5, 3], '2 · SUITE À CRÉERSuite du plan 1+ 3,5 s']);
+  // Towards an end photo it is a new clip, from the last image of the video: said as it is, and asked as such.
+  f.get('montage-take')[4].ondragstart({ dataTransfer: { setData() {} } });
+  // (The film is 11,5 s long now: 652 of 1000 is 7,5 s, on the second half of the continuation.)
+  f.photos().ondrop(event(652));
+  assert.deepEqual(f.said('montage-title-meta'), ['Part de la dernière image du plan 1']);
+  assert.deepEqual([f.plans()[1].className, f.plans()[1].textContent], ['montage-piece is-todo is-suite', '2 · SUITE À CRÉERJusqu’à la photo de fin+ 3,5 s']);
+  assert.deepEqual(find(f.root, 'montage-action').map(control => control.textContent), ['Créer ce plan', 'Retirer la suite']);
+  // « Retirer la suite »: the film as it was.
+  f.button('Retirer la suite').onclick();
+  assert.deepEqual(shown(), [
+    ['montage-piece', '1 · PRISE 1Vidéo5 s', '0%', 'calc(50% - 4px)'],
+    ['montage-piece', '2 · PRISE 3Image3 s', '50%', 'calc(30% - 4px)'],
+  ]);
+  // Neither an image nor a plan to make is continued by its edge: the edge of an image is its length.
+  f.press(grips()[2], 800);
+  f.pointer.move(1000);
+  f.pointer.up();
+  assert.deepEqual(plans().map(plan => [plan.kind, plan.to]), [['video', 5], ['image', 5]]);
+  // (Nothing after the video: nothing is said to move.)
+  const alone = await setup().open();
+  alone.get('montage-take')[0].ondblclick();
+  alone.press(find(alone.root, 'montage-grip')[1], 500);
+  alone.pointer.move(900);
+  assert.deepEqual(alone.said('montage-tip'), ['Au-delà de la prise : + 4 s à créer']);
+  alone.pointer.up();
+  assert.deepEqual(alone.said('montage-title-name'), ['Plan 2 · suite à créer']);
 });
