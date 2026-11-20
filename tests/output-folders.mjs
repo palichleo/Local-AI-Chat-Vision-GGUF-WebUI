@@ -204,6 +204,11 @@ test('the file of a creation is found in both forms; any other folder is refused
   for (const filename of ['../secret.png', '..\\secret.png', 'image/' + NEW.filename, join(root, 'secret.png'), '..'])
     for (const subfolder of ['', 'image'])
       await assert.rejects(generatedFile(output, { filename, subfolder, type: 'output' }), /Sortie générée invalide/, filename);
+  // (0.6.157) A file gone from the disk: said in the user's words (it was « Erreur locale inattendue »).
+  await assert.rejects(generatedFile(output, { filename: 'partie.png', subfolder: 'image', type: 'output' }), {
+    status: 404,
+    message: 'Le fichier de cette prise n’est plus sur le disque.',
+  });
 });
 
 test('the gallery keeps, lists, renumbers and forgets a take of either form; its file is never touched', async t => {

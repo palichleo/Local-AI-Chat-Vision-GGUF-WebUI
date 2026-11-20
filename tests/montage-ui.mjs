@@ -2221,3 +2221,47 @@ test('the bar of a take to create never lies over its photos nor their places: c
   f.ui.fitBar();
   assert.equal(f.pop().dataset.inside, 'true');
 });
+
+test('an empty bobine: its ghost has its two places of photo, at rest; a photo there makes it a take to create (0.6.157)', async () => {
+  // (Capture 71: « sur la piste Prises, une prise fantôme de 5 s en pointillés, avec un « + » qui respire,
+  // et ses deux emplacements de photo vides ».)
+  const f = await setup().open();
+  const slots = () => find(f.photos(), 'is-ghost');
+  assert.deepEqual(slots().map(slot => [slot.className, slot.attributes['aria-label'], slot.style.left ?? null, slot.style.right ?? null]), [
+    ['montage-photo is-start is-slot is-ghost', 'Photo de début d’une nouvelle prise : glissez une image ici', '0%', null],
+    ['montage-photo is-end is-slot is-ghost', 'Photo de fin d’une nouvelle prise : glissez une image ici', null, 'calc(50% + 4px)'],
+  ]);
+  // A photo dropped on the end: a take to create of 5 s at 0 that arrives on it, chosen; the ghost's places are gone.
+  f.get('montage-take')[2].ondragstart({ dataTransfer: { setData() {} } });
+  slots()[1].ondrop(event(0));
+  const [plan] = f.ui.state().montage.plans;
+  assert.deepEqual([plan.at, plan.to, plan.todo.prompt, plan.photos, f.ui.state().chosen, slots().length], [0, 5, '', { end: { conversationId: C, runId: id(3), output: 0 } }, plan.id, 0]);
+  // On the start, from an empty bobine again: it starts on it.
+  const g = await setup().open();
+  g.get('montage-take')[2].ondragstart({ dataTransfer: { setData() {} } });
+  find(g.photos(), 'is-ghost')[0].ondrop(event(0));
+  assert.deepEqual(g.ui.state().montage.plans[0].photos, { start: { conversationId: C, runId: id(3), output: 0 } });
+});
+
+test('the end of a video under the pointer shows, in light dots, the suite pulling it would give (0.6.157)', async () => {
+  // (Capture 72: « une poignée, le curseur ↔, et en pointillés légers la suite qu'on obtiendrait en tirant ».)
+  const f = await setup().open();
+  f.get('montage-take')[0].ondblclick();
+  f.get('montage-take')[2].ondblclick();
+  const hint = () => find(f.root, 'bobine-edge-hint')[0],
+    grips = () => find(f.root, 'montage-grip');
+  assert.equal(hint().hidden, true);
+  // The end of the video (5 s, then the image: a timeline of 20 s): two seconds after it.
+  const [, end, image] = grips();
+  end.onpointerenter();
+  assert.deepEqual([hint().hidden, hint().style.left, hint().style.width], [false, '25%', 'calc(10% - 4px)']);
+  end.onpointerleave();
+  assert.equal(hint().hidden, true);
+  // Pressed: gone, the real suite comes under the hand.
+  end.onpointerenter();
+  f.press(end, 500);
+  assert.equal(hint().hidden, true);
+  f.pointer.up();
+  // Not the start of a video, nor an image, nor a take to create.
+  assert.deepEqual([grips()[0].onpointerenter, image.onpointerenter], [undefined, undefined]);
+});

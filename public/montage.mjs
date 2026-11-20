@@ -93,6 +93,8 @@ const STEPS = 100,
 // (0.6.155) How long the end of an export is said in the fil, and how often a download is asked about, in ms.
 const SAID = 4000,
   POLL = 1000;
+// (0.6.157) How long the suite shown under the end of a video is, in seconds (capture 72).
+const HINT = 2;
 /** (0.6.154) Every key in its order, at every depth: two bobines alike say the same. */
 const sorted = value =>
   Array.isArray(value)
@@ -1860,7 +1862,22 @@ export function setupMontage({
           lane.append(pin);
         }
       });
-      if (carrying) {
+      // (0.6.157, capture 71) An empty bobine: its ghost of 5 s has its two empty places of photo, there at
+      // rest; a photo dropped there makes it a take to create that starts, or arrives, on it.
+      if (!montage.plans.length)
+        for (const side of ['start', 'end']) {
+          const slot = button(`montage-photo is-${side} is-slot is-ghost`, '', null);
+          slot.setAttribute('aria-label', `${side === 'start' ? 'Photo de début' : 'Photo de fin'} d’une nouvelle prise : glissez une image ici`);
+          if (side === 'start') slot.style.left = percent(0);
+          else slot.style.right = `calc(${100 - (100 * TODO_LIMITS.usual) / whole}% + 4px)`;
+          slot.append(icon('image'), node('span', 'montage-photo-side', side === 'start' ? 'Début' : 'Fin'));
+          into(slot, dropped => {
+            const laid = withTodoDrawn(montage, { id: newId(), at: 0, seconds: TODO_LIMITS.usual });
+            return laid.reason ? laid : withPhotoIn(laid.montage, dropped, laid.chosen, side);
+          });
+          lane.append(slot);
+        }
+      else if (carrying) {
         const fresh = button('montage-photo is-start is-slot is-new', '', null);
         fresh.setAttribute('aria-label', 'Une nouvelle prise, qui part de cette photo, à la fin de la bobine');
         fresh.style.left = `calc(${percent(total())} + 4px)`;
@@ -2007,7 +2024,14 @@ export function setupMontage({
         if (id === 'plans')
           for (const edge of item.kind === 'image' || todo ? ['end'] : ['start', 'end']) {
             const grip = node('span', 'montage-grip is-' + edge);
+            // (0.6.157, capture 72) The end of a video under the pointer: in light dots, the suite pulling it
+            // would give. Nothing is drawn again: the grip stays under the hand.
+            if (edge === 'end' && !todo && item.kind === 'video') {
+              grip.onpointerenter = () => hint(at + (item.to - item.from));
+              grip.onpointerleave = () => hint(null);
+            }
             grip.onpointerdown = event => {
+              hint(null);
               event.stopPropagation?.();
               const first = { from: item.from, to: item.to },
                 longest = record ? takeSeconds(record) : null,
@@ -2054,7 +2078,12 @@ export function setupMontage({
       // (0.6.149) In the void of the takes, after the bobine or in a hole (captures 71, 75, 76): a take to
       // create of 5 s, a ghost, follows the pointer with a « + »; a double click lays it there; pressed
       // and pulled, a take to create is drawn there, as long as it is pulled, within its hole.
-      if (id === 'plans') drawable(lane, timeAt);
+      if (id === 'plans') {
+        drawable(lane, timeAt);
+        live.hint = node('span', 'bobine-edge-hint');
+        live.hint.hidden = true;
+        lane.append(live.hint);
+      }
       // A press on the lane itself, beside what it holds: the head goes there, what was chosen is let go.
       lane.onclick = event => {
         if (event.target !== lane && !live.shade?.contains?.(event.target)) return;
@@ -2297,6 +2326,15 @@ export function setupMontage({
    * preview goes on with the clip it shows and the grid of the takes keeps its place. `panel: false`:
    * a text being written in « À créer », a bar being slid: they are not drawn again under the hand.
    */
+  /** (0.6.157, capture 72) The suite pulling the end of a video at `end` seconds would give, in light dots: two seconds of it. */
+  function hint(end) {
+    const shown = live.hint;
+    if (!shown) return;
+    shown.hidden = end === null || Boolean(held);
+    if (shown.hidden) return;
+    shown.style.left = percent(end);
+    shown.style.width = `calc(${percent(Math.min(HINT, Math.max(0, span() - end)))} - 4px)`;
+  }
   /**
    * (0.6.155) The bar of the take chosen never lies over its photos nor their empty places (capture 78:
    * its trash covered the place of the start): centred, it does when the take is narrow; it then goes
