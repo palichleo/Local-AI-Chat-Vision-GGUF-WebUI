@@ -240,3 +240,97 @@ test('the film of a montage is assembled from the files of its takes and kept as
   await assert.rejects(exportMontage({ montage: validateMontage(film()), conversationId: C, fileOf, assemble: async () => ({ outputs: [] }), gallery }), /n’a pas rendu de film/);
   assert.equal(kept.length, 1);
 });
+
+// ---- 0.6.154, lot 5 de la Bobine -----------------------------------------------------------------------
+
+test('« Enregistrer » puts the bobine in the Archives as it is then; what changes after it leaves that version as it was (0.6.154)', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'moodix-montages-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const montages = new Montages({ dir }),
+    project = '22222222-2222-4222-8222-222222222222';
+  // Kept on its own: not in the Archives.
+  await montages.save(project, film());
+  assert.equal('archived' in (await montages.read(project, id(900))), false);
+  assert.equal('archived' in (await montages.list(project))[0], false);
+  // « Enregistrer »: the bobine as it is now, and when.
+  const put = await montages.save(project, film(), { archive: true });
+  const { name, format, width, height, fps, plans, sounds } = put;
+  assert.deepEqual(put.archived, { at: put.updatedAt, name, format, width, height, fps, plans, sounds });
+  // Changed after it, kept on its own: what is in the Archives stays as it was, whatever the page sends of it.
+  const changed = await montages.save(project, { ...film({ name: 'Autre nom', plans: [] }), archived: { at: '2001-01-01T00:00:00.000Z', name: 'Faux', plans: [] } });
+  assert.deepEqual([changed.name, changed.plans.length, changed.archived], ['Autre nom', 0, put.archived]);
+  assert.deepEqual((await montages.read(project, id(900))).archived, put.archived);
+  // Nor for a bobine never put there: what the page sends of a version is never taken.
+  const { name: _, ...content } = put.archived;
+  await montages.save(project, { ...newMontage({ id: id(901) }), archived: { ...content, name: 'Faux', at: '2001-01-01T00:00:00.000Z' } });
+  assert.equal('archived' in (await montages.read(project, id(901))), false);
+  // Listed with what the Archives show of it: when, how long, how many takes, the first two made.
+  const listed = (await montages.list(project)).find(item => item.id === id(900));
+  assert.deepEqual(listed.archived, { at: put.archived.at, seconds: 10, plans: 3, pictures: [take(12), take(14)] });
+  assert.equal(listed.name, 'Autre nom');
+  // A version that cannot be read any more is left out; the bobine itself stays.
+  const kept = JSON.parse(await readFile(join(dir, project, id(900) + '.json'), 'utf8'));
+  await writeFile(join(dir, project, id(900) + '.json'), JSON.stringify({ ...kept, archived: { ...kept.archived, fps: 7 } }));
+  const read = await montages.read(project, id(900));
+  assert.deepEqual([read.name, 'archived' in read], ['Autre nom', false]);
+});
+
+test('« Un seul fichier »: the film is named after its bobine (0.6.154)', async () => {
+  const { exportMontage } = await import('../lib/montage-export.mjs');
+  const asked = [];
+  await exportMontage({
+    montage: validateMontage(film()),
+    conversationId: C,
+    fileOf: async source => `D:/sorties/video/${source.runId}.mp4`,
+    assemble: async request => (asked.push(request), { outputs: [{ filename: request.outputName + '.mp4', subfolder: 'video', type: 'output' }] }),
+    gallery: { put: async record => record },
+  });
+  assert.match(asked[0].outputName, /^\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d_le-pecheur-a-l-aube_[0-9a-f]{4}$/);
+});
+
+test('« Un fichier par prise »: the takes made, each alone, numbered in a folder of their own under BOBINES; none written over (0.6.154)', async t => {
+  const { exportTakes } = await import('../lib/montage-export.mjs');
+  const { folderName } = await import('../public/montage-model.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'moodix-bobines-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const asked = [],
+    labels = [];
+  const assemble = async (request, options) => {
+    asked.push({ request, options });
+    return { outputs: [{ filename: request.exportTo.split('/').pop(), subfolder: request.exportTo.split('/').slice(0, 2).join('/'), type: 'export' }] };
+  };
+  const fileOf = async (source, label) => (labels.push(label), `D:/sorties/video/${source.runId}.mp4`);
+  // A take to create between two made, a hole before the last: they are left out, and each is alone in its file.
+  const montage = validateMontage(
+    film({
+      plans: [
+        { id: id(1), source: take(12), kind: 'video', from: 1, to: 4, frame: 'fill', volume: 0.5 },
+        { id: id(2), kind: 'video', todo: { prompt: 'Il lève les yeux.' }, from: 0, to: 2 },
+        { id: id(3), at: 8, source: take(9), kind: 'image', to: 2 },
+      ],
+    }),
+  );
+  let count = 0;
+  const done = await exportTakes({ montage, fileOf, assemble, outputDir: dir, id: () => id(600 + count), name: () => `2026-11-20_03-00-0${count++}_bobine_ab12` });
+  assert.deepEqual(done, { folder: 'bobines/Le pêcheur à l’aube', files: ['01.mp4', '02.mp4'] });
+  assert.deepEqual(labels, ['Prise 1', 'Prise 3']);
+  assert.deepEqual(asked.map(({ request }) => [request.id, request.outputName, request.exportTo, request.width, request.fps, request.sounds, request.plans.map(plan => [plan.at, plan.kind, plan.from, plan.to, plan.frame, plan.volume])]), [
+    [id(600), '2026-11-20_03-00-00_bobine_ab12', 'bobines/Le pêcheur à l’aube/01.mp4', 1344, 24, [], [[0, 'video', 1, 4, 'fill', 0.5]]],
+    [id(601), '2026-11-20_03-00-01_bobine_ab12', 'bobines/Le pêcheur à l’aube/02.mp4', 1344, 24, [], [[0, 'image', 0, 2, 'fit', 1]]],
+  ]);
+  // Its folder there already: the next free one.
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(join(dir, 'bobines', 'Le pêcheur à l’aube'), { recursive: true });
+  await mkdir(join(dir, 'bobines', 'Le pêcheur à l’aube 2'));
+  assert.equal((await exportTakes({ montage, fileOf, assemble, outputDir: dir })).folder, 'bobines/Le pêcheur à l’aube 3');
+  assert.match(asked.at(-1).request.outputName, /^\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d_bobine_[0-9a-f]{4}$/);
+  // Ten takes and more: two figures; a hundred: three.
+  const many = validateMontage(film({ plans: Array.from({ length: 100 }, (_, at) => ({ id: id(1000 + at), source: take(12), kind: 'video', from: 0, to: 1 })), sounds: [] }));
+  const hundred = await exportTakes({ montage: many, fileOf, assemble, outputDir: dir });
+  assert.deepEqual([hundred.files[0], hundred.files.at(-1)], ['001.mp4', '100.mp4']);
+  // Nothing made yet: refused in the user's words.
+  const none = validateMontage(film({ plans: [{ id: id(2), kind: 'video', todo: { prompt: '' }, from: 0, to: 2 }], sounds: [] }));
+  await assert.rejects(exportTakes({ montage: none, fileOf, assemble, outputDir: dir }), /Aucune prise de cette bobine n’est encore créée/);
+  // The folder, as Windows takes it.
+  assert.deepEqual(['Le renard / l’hiver ?', 'CON', '  ', 'Fin…  .'].map(folderName), ['Le renard l’hiver', 'Bobine CON', 'Bobine', 'Fin…']);
+});

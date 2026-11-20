@@ -19287,3 +19287,171 @@ body[data-view='bobine'] .chat-panel {
   padding-top: 10px;
   background: linear-gradient(to bottom, transparent, #141318 12px);
 }
+
+/* ------------------------------------------------------------------ La Bobine, lot 5 (0.6.154) */
+/* Le fil (capture 90) : Annuler et Rétablir, icônes seules ; « Enregistrer » et « Exporter ⌄ », boutons de
+   verre au contour fin. Un point sur « Enregistrer » : la bobine a changé depuis qu'elle est dans les Archives. */
+#bobine-view .bobine-step {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+#bobine-view .bobine-step svg {
+  width: 17px;
+  height: 17px;
+}
+#bobine-view .bobine-step.is-again svg {
+  transform: scaleX(-1);
+}
+#bobine-view .bobine-step:hover:enabled {
+  background: rgba(238, 232, 222, 0.07);
+  color: var(--ink);
+}
+#bobine-view .bobine-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+#bobine-view .bobine-save {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin-left: 6px;
+  padding: 0 14px;
+  border: 1px solid rgba(238, 232, 222, 0.14);
+  border-radius: 10px;
+  background: rgba(20, 19, 24, 0.6);
+  color: var(--ink);
+  font: 500 13.5px/1 var(--font-ui);
+  cursor: pointer;
+}
+#bobine-view .bobine-save svg {
+  width: 15px;
+  height: 15px;
+}
+#bobine-view .bobine-save:hover:enabled {
+  border-color: rgba(238, 232, 222, 0.3);
+}
+#bobine-view .bobine-save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+#bobine-view .bobine-save[data-unsaved='true']::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(208, 202, 221);
+  box-shadow: 0 0 0 2px rgba(12, 11, 14, 0.95), 0 0 10px rgba(208, 202, 221, 0.5);
+}
+#bobine-view .montage-export > svg:last-child {
+  width: 12px;
+  height: 12px;
+  margin-left: 2px;
+  opacity: 0.7;
+  transform: rotate(90deg);
+}
+#bobine-view .montage-export[aria-expanded='true'] {
+  border-color: rgba(238, 232, 222, 0.4);
+}
+/* Le menu d'« Exporter » (captures 90 et 91) : verre sombre ; chaque choix, son nom et où il va, en mono. */
+.bobine-export-menu {
+  min-width: 310px;
+}
+.glass-menu-item.bobine-export-item {
+  display: grid;
+  gap: 7px;
+  padding: 11px 14px;
+  white-space: normal;
+}
+.bobine-export-name {
+  color: var(--text-1);
+  font: 500 14px/1.2 var(--font-ui);
+}
+.bobine-export-where {
+  color: var(--text-3);
+  font: 400 10.5px/1.3 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.glass-menu-item.bobine-export-item.is-off {
+  opacity: 0.6;
+}
+.glass-menu-item.bobine-export-item.is-off .bobine-export-name {
+  color: var(--text-3);
+}
+
+/* Une bobine dans les Archives (capture 92) : une bande de film perforée, les images de ses premières
+   prises, « BOBINE » en haut à gauche, son nom en bas à gauche, sa durée et ses prises en bas à droite. */
+#library-view .library-tile.is-bobine .library-pick {
+  padding: 16px 0;
+  background-color: rgb(14, 13, 16);
+  background-image: repeating-linear-gradient(90deg, rgba(238, 232, 222, 0.2) 0 10px, transparent 10px 22px),
+    repeating-linear-gradient(90deg, rgba(238, 232, 222, 0.2) 0 10px, transparent 10px 22px);
+  background-position: 8px 6px, 8px calc(100% - 6px);
+  background-size: calc(100% - 16px) 4px, calc(100% - 16px) 4px;
+  background-repeat: no-repeat;
+}
+.library-reel {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.library-reel > :is(img, .library-reel-blank) {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  object-fit: cover;
+  background: rgba(238, 232, 222, 0.04);
+  transition: transform 0.3s ease;
+}
+.library-reel-said {
+  position: absolute;
+  inset: 16px 0;
+  pointer-events: none;
+}
+.library-reel-label,
+.library-reel-meta {
+  position: absolute;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: rgba(12, 11, 14, 0.72);
+  color: var(--text-1);
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.library-reel-label {
+  top: 10px;
+  left: 10px;
+}
+.library-reel-meta {
+  right: 10px;
+  bottom: 10px;
+}
+.library-reel-name {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  max-width: 52%;
+  overflow: hidden;
+  color: #f4f1ec;
+  font: 500 15px/1.2 var(--font-ui);
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+}

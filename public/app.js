@@ -4944,6 +4944,8 @@ const libraryUI = setupLibrary({
   remove: record => studioUI.remove(record),
   busy: () => (state.work || state.generating ? 'Attendez la fin de la génération en cours pour supprimer.' : ''),
   notice,
+  // (0.6.154) A bobine of the Archives: opened again in the Bobine.
+  openBobine: ({ project, id }) => void openBobine(project, id),
 });
 // The fil heads the Pellicule (pellicule-fil-maquette.md): its menus choose the project and the
 // conversation shown, with their numbers of takes; projects are made, renamed and deleted there.
@@ -5510,6 +5512,17 @@ function showBobine() {
       void studioUI.open().catch(error => notice(error.message));
     });
   });
+}
+/**
+ * (0.6.154) A bobine of the Archives opened again in the Bobine, in its project: a new conversation there
+ * first when the page is in another one, as the fil does when another project is chosen.
+ */
+async function openBobine(project, id) {
+  if (state.updating || state.closingApp || state.loadingHistory) return;
+  if ((state.projectId || 'inbox') !== project) await newConversation(project);
+  if ((state.projectId || 'inbox') !== project) return;
+  studioUI.bobine().wanted(id);
+  showBobine();
 }
 // The line under the tab of the view, which glides to the tab chosen (moodix.css, top-line).
 const TABS = { chat: 'chat-open', studio: 'studio-open', bobine: 'bobine-open', library: 'library-open' };

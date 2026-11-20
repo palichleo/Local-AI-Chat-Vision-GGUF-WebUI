@@ -7,7 +7,9 @@
  * Three fixed columns, then the timeline over the whole width: at the left the takes of the project
  * (« Prises »), in the middle the preview, at the right « À créer », always there. The middle never
  * moves. No panel of settings: a small bar opens above the take or the sound chosen, on its track.
- * The fil at the top: « projet / bobine », then « Exporter ». The words of the page are those of the
+ * The fil at the top: « projet / bobine », then (0.6.154) Annuler, Rétablir, « Enregistrer » (the
+ * bobine put in the Archives, a point while it changed since) and « Exporter » (« Un seul fichier », « Un
+ * fichier par prise »). The words of the page are those of the
  * maquette: prises, prises à créer, suites; the tracks are Photos, Prises, Piste audio 1 and 2. The
  * code keeps its own names (montage, plans, sounds).
  *
@@ -19,11 +21,13 @@
 import { FORMATS } from './formats.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
 import { missingFileCard, sizeText } from './missing-file.mjs';
+import { closePopup, openPopup } from './glass-menu.mjs';
 import {
   MONTAGE_LIMITS,
   MONTAGE_RATES,
   TODO_LIMITS,
   creationOf,
+  folderName,
   holeAt,
   isTodo,
   linkOf,
@@ -80,6 +84,25 @@ export function mono(seconds) {
   return minutes + ':' + (value - minutes * 60).toFixed(2).padStart(5, '0');
 }
 const plural = (count, one, many = one + 's') => `${count} ${count > 1 ? many : one}`;
+// (0.6.154) How many steps « Annuler » goes back at most, and how long a pause between two keys typed
+// in a text makes another step, in milliseconds.
+const STEPS = 100,
+  TYPED = 1500;
+/** (0.6.154) Every key in its order, at every depth: two bobines alike say the same. */
+const sorted = value =>
+  Array.isArray(value)
+    ? value.map(sorted)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sorted(value[key])]))
+      : value;
+/** (0.6.154) What a bobine is made of, as one text: its version in the Archives is compared by it. */
+const contentKey = ({ name, format, width, height, fps, plans, sounds }) => JSON.stringify(sorted({ name, format, width, height, fps, plans, sounds }));
+/** (0.6.154) « 01 À 05 »: the numbers of the files of the takes exported one by one. */
+const numbered = count => {
+  const width = Math.max(2, String(count).length),
+    first = '1'.padStart(width, '0');
+  return count > 1 ? `${first} à ${String(count).padStart(width, '0')}` : first;
+};
 
 export function setupMontage({
   api,
@@ -180,8 +203,25 @@ export function setupMontage({
     // (0.6.153) What lets the enrichment being asked go.
     enriched = null,
     // (0.6.153) The model being downloaded from « À créer »: { name, offer, host }.
-    downloading = null;
-  const back = [];
+    downloading = null,
+    // (0.6.154) A drag of the timeline being made: all its moves are one step of « Annuler ».
+    dragging = null,
+    // (0.6.154) The bobine as « Enregistrer » put it in the Archives (contentKey), or null; « Enregistrer »
+    // being done; the menu of « Exporter » open; the bobine to open when those of the project are read.
+    archivedKey = null,
+    archiving = false,
+    exportMenu = null,
+    wantedId = null,
+    reading = null;
+  // (What contentKey said of the bobine shown, kept while it is the same.)
+  let keyed = { of: null, key: '' };
+  // (0.6.154) Annuler, Rétablir (Ctrl+Z, Ctrl+Maj+Z): the bobine as it was before each change, and as it
+  // was after each one undone. A text typed in a row, a drag, a volume slid, the texts Moodix AI writes
+  // at once: one step each. A take created is one too: undone, it is a take to create again (the take
+  // made stays in « Prises »), and « Rétablir » puts it back.
+  const past = [],
+    future = [];
+  let step = null;
   // (0.6.148) Why a take to create could not be made, by its id: said in its line, in amber.
   const failed = new Map();
   // (0.6.148) The model of each kind of take to create, as the server would choose it: { name, missing }.
@@ -250,22 +290,37 @@ export function setupMontage({
   async function read() {
     const place = project();
     readFor = place;
+    // (0.6.154) Read now: the bobine asked from the Archives waits for it (opened).
+    const mine = (reading = {});
     list = [];
     montage = fresh();
+    archivedKey = null;
     stored = false;
     chosen = null;
     head = 0;
     status = '';
     failed.clear();
+    forget();
     try {
       const found = (await (await api('montages/' + encodeURIComponent(place))).json()).montages ?? [];
-      if (project() !== place) return;
+      if (project() !== place) return void (reading === mine && (reading = null));
       list = found;
-      if (found.length) await open(found[0].id);
+      // (0.6.154) The one opened from the Archives, else the last changed.
+      const wanted = found.some(item => item.id === wantedId) ? wantedId : found[0]?.id;
+      wantedId = null;
+      if (wanted) await open(wanted);
     } catch (error) {
       status = 'Bobines illisibles : ' + error.message;
     }
+    if (reading === mine) reading = null;
     draw();
+  }
+  /** (0.6.154) The bobine asked from the Archives, opened once those of its project are read. */
+  function opened() {
+    if (!wantedId || reading || readFor !== project()) return;
+    const id = wantedId;
+    wantedId = null;
+    if (montage?.id !== id) void choose(id);
   }
   async function open(id) {
     const place = project();
@@ -273,8 +328,12 @@ export function setupMontage({
     if (project() !== place) return;
     stop();
     // (0.6.149) Each take at its instant (the server says them; a bobine of before, end to end).
-    montage = placed(found);
+    // (0.6.154) Its version in the Archives is said by its key only: never sent back.
+    const { archived = null, ...opened } = found;
+    montage = placed(opened);
+    archivedKey = archived ? contentKey(placed(archived)) : null;
     stored = true;
+    forget();
     chosen = null;
     head = 0;
     status = '';
@@ -288,20 +347,58 @@ export function setupMontage({
     pending = false;
     const sent = montage,
       place = project();
-    status = 'Enregistrement…';
-    say();
     try {
       const kept = await (await api('montages/save', { project: place, montage: sent })).json();
       stored = true;
       if (montage === sent) montage = { ...sent, createdAt: kept.createdAt, updatedAt: kept.updatedAt };
-      const known = list.some(item => item.id === kept.id && item.name === kept.name);
-      list = [{ id: kept.id, name: kept.name, updatedAt: kept.updatedAt }, ...list.filter(item => item.id !== kept.id)];
-      if (!pending) status = 'Enregistré';
-      // (A new bobine, or a new name: the menu of the fil says it.)
-      if (!known) fil();
+      listed(kept);
+      // (0.6.154) Kept on its own, as before, but said only when it could not be: « Enregistrer » puts
+      // the bobine in the Archives now, its point says what changed since.
+      if (status.startsWith('Non gardée')) status = '';
     } catch (error) {
-      status = 'Non enregistré : ' + error.message;
+      status = 'Non gardée : ' + error.message;
     }
+    say();
+  }
+  /** The bobine kept is the first of the menu of the fil; a new one, or a new name, is said there. */
+  function listed(kept) {
+    const known = list.some(item => item.id === kept.id && item.name === kept.name);
+    list = [{ id: kept.id, name: kept.name, updatedAt: kept.updatedAt }, ...list.filter(item => item.id !== kept.id)];
+    if (!known) fil();
+  }
+  /** (0.6.154) Whether the bobine changed since « Enregistrer » put it in the Archives (its point says it). */
+  function unsaved() {
+    if (keyed.of !== montage) keyed = { of: montage, key: contentKey(montage) };
+    return archivedKey ? keyed.key !== archivedKey : Boolean(montage.plans.length || montage.sounds.length);
+  }
+  /**
+   * (0.6.154, capture 90) « Enregistrer »: the bobine put in the Archives as it is now, « comme une bobine
+   * qu'on rouvre, pas comme un film »; its card there opens it again. What changes after it is kept as
+   * before, and its point says so.
+   */
+  async function archive() {
+    if (archiving || exporting || (!montage.plans.length && !montage.sounds.length)) return;
+    archiving = true;
+    if (saving) timers.clear(saving);
+    saving = null;
+    const sent = montage,
+      place = project();
+    pending = false;
+    sayFil();
+    try {
+      const kept = await (await api('montages/save', { project: place, montage: sent, archive: true })).json();
+      stored = true;
+      archivedKey = contentKey(sent);
+      if (montage === sent) montage = { ...sent, createdAt: kept.createdAt, updatedAt: kept.updatedAt };
+      listed(kept);
+      status = 'Enregistrée dans les Archives';
+    } catch (error) {
+      // (Not kept either: kept on its own a moment later.)
+      pending = true;
+      saving = timers.set(() => void keep(), saveDelay);
+      status = 'Non enregistrée : ' + error.message;
+    }
+    archiving = false;
     say();
   }
   /**
@@ -309,20 +406,63 @@ export function setupMontage({
    * créer », not drawn again under the hand; `still`: a bar being slid on the timeline, nothing is drawn
    * again (what it shows is said by the bar itself), until it is let go.
    */
-  function change(next, { select, sliding = false, still = false } = {}) {
+  function change(next, { select, sliding = false, still = false, group = dragging } = {}) {
     if (next === montage) return;
+    const why = refusal();
+    if (why) return void notice(why);
+    remember(montage, group);
+    settle(next, { select, sliding, still });
+  }
+  /** Why the bobine cannot be changed now ('' when it can). */
+  function refusal() {
     // (0.6.146) Not while Moodix AI writes the takes: its texts are written back in this bobine.
-    if (writing) return void notice('Moodix AI écrit les prises : attendez la fin, ou arrêtez l’écriture.');
+    if (writing) return 'Moodix AI écrit les prises : attendez la fin, ou arrêtez l’écriture.';
     // (0.6.144) Nor while takes are created, even between two of them or in pause.
     if (inSeries())
-      return void notice(
-        filling.stage === 'paused'
-          ? 'La création est en pause : reprenez-la ou arrêtez-la avant de modifier la bobine.'
-          : 'Des prises sont en cours de création : attendez la fin, ou arrêtez.',
-      );
-    if (making) return void notice('Une prise est en cours de création : attendez sa fin, ou arrêtez-la.');
+      return filling.stage === 'paused'
+        ? 'La création est en pause : reprenez-la ou arrêtez-la avant de modifier la bobine.'
+        : 'Des prises sont en cours de création : attendez la fin, ou arrêtez.';
+    if (making) return 'Une prise est en cours de création : attendez sa fin, ou arrêtez-la.';
+    return '';
+  }
+  /**
+   * (0.6.154) The bobine as it was, kept for « Annuler »; what was undone cannot come back any more.
+   * `group`: the changes of one gesture make one step (a text typed in a row: a moment at most between
+   * two keys; a drag, the texts of Moodix AI: as long as it lasts).
+   */
+  function remember(previous, group = null) {
+    const at = now(),
+      same = group && step?.group === group && (typeof group !== 'string' || at - step.at < TYPED);
+    if (!same) {
+      past.push(previous);
+      if (past.length > STEPS) past.shift();
+    }
+    future.length = 0;
+    step = { group, at };
+  }
+  /** (0.6.154) No step to undo nor to do again: another bobine is open. */
+  function forget() {
+    past.length = future.length = 0;
+    step = null;
+  }
+  /** (0.6.154) « Annuler » (`back`) or « Rétablir »: the bobine as it was before the last change, or after it again. */
+  function travel(back) {
+    const from = back ? past : future,
+      to = back ? future : past;
+    if (!from.length) return false;
+    const why = refusal();
+    if (why) return void notice(why), false;
+    to.push(montage);
+    step = null;
+    settle(from.pop());
+    return true;
+  }
+  /** A change shown at once, kept a moment later. */
+  function settle(next, { select, sliding = false, still = false } = {}) {
     // Another shape of film: the preview takes it. Anything else leaves the preview and the takes as they are.
-    const reshaped = next.format !== montage.format || next.width !== montage.width || next.height !== montage.height;
+    const reshaped = next.format !== montage.format || next.width !== montage.width || next.height !== montage.height,
+      // (0.6.154) Another name (« Annuler » after « Renommer »): the fil says it.
+      renamed = next.name !== montage.name;
     montage = next;
     if (select !== undefined) chosen = select;
     if (chosen && !itemOf(chosen)) chosen = null;
@@ -331,6 +471,7 @@ export function setupMontage({
     if (saving) timers.clear(saving);
     saving = timers.set(() => void keep(), saveDelay);
     status = '';
+    if (renamed && !reshaped) fil();
     if (reshaped) draw();
     else if (still) sayGo();
     else update({ panel: !sliding });
@@ -349,14 +490,36 @@ export function setupMontage({
     try {
       pending = pending || !stored;
       await keep();
-      if (status.startsWith('Non enregistré')) throw new Error(status);
+      if (status.startsWith('Non gardée')) throw new Error(status);
       const conversation = await ensureConversation();
       const film = await (await api('montages/export', { project: project(), id: montage.id, conversation })).json();
       const take = film.outputs?.[0]?.take;
       status = Number.isInteger(take) ? `Film exporté · Prise ${take}` : 'Film exporté';
       await refresh();
     } catch (error) {
-      status = 'Export impossible : ' + error.message.replace(/^Non enregistré : /, '');
+      status = 'Export impossible : ' + error.message.replace(/^Non gardée : /, '');
+    }
+    exporting = false;
+    draw();
+  }
+  /**
+   * (0.6.154) « Un fichier par prise »: the takes already made, cut as the bobine shows them, numbered in
+   * its order, in a folder of their own under BOBINES (« BOBINES / LE RENARD EN HIVER / 01 À 05 »), beside
+   * VIDEO; without the audio tracks. They are not takes of the project.
+   */
+  async function exportTakes() {
+    if (exporting || busy() || !montage.plans.some(plan => !isTodo(plan))) return;
+    exporting = true;
+    stop();
+    fil();
+    try {
+      pending = pending || !stored;
+      await keep();
+      if (status.startsWith('Non gardée')) throw new Error(status);
+      const done = await (await api('montages/export-takes', { project: project(), id: montage.id })).json();
+      status = `${plural(done.files.length, 'prise exportée', 'prises exportées')} · ${done.folder.replace('/', ' / ')}`;
+    } catch (error) {
+      status = 'Export impossible : ' + error.message.replace(/^Non gardée : /, '');
     }
     exporting = false;
     draw();
@@ -382,6 +545,8 @@ export function setupMontage({
     asking = null;
     if (wanted === 'new') {
       montage = fresh();
+      archivedKey = null;
+      forget();
       stored = false;
       chosen = null;
       head = 0;
@@ -521,16 +686,18 @@ export function setupMontage({
     }
     if (live.status) {
       live.status.textContent = status;
-      live.status.dataset.problem = String(/impossible|Non enregistré|illisible/.test(status));
+      live.status.dataset.problem = String(/impossible|Non gardée|Non enregistrée|illisible/.test(status));
     }
-    sayExport();
+    sayFil();
     sayGo();
   }
 
   // The fil ------------------------------------------------------------------------------------------
-  /** « / bobine ⌄ », what it asks (rename, take out), then what is said and « Exporter ». */
+  /** « / bobine ⌄ », what it asks (rename, take out), then what is said, Annuler, Rétablir, « Enregistrer », « Exporter ». */
   function fil() {
     if (!filRoot) return;
+    // (Its menu goes with the button it opens from.)
+    closeExport();
     const parts = [node('span', 'thread-slash bobine-slash', '/')];
     if (asking?.kind === 'rename') {
       const name = node('input', 'bobine-name');
@@ -580,27 +747,111 @@ export function setupMontage({
           fil();
         }),
       );
+    // (0.6.154) Annuler, Rétablir (the arrow of « Annuler » turned round), « Enregistrer », « Exporter ⌄ ».
     const state = node('span', 'montage-status'),
-      go = button('montage-export', exporting ? 'Export…' : 'Exporter', () => void exportFilm(), 'download');
-    parts.push(node('span', 'bobine-fil-gap'), state, go);
+      undo = button('bobine-step', '', () => travel(true), 'undo', 'Annuler (Ctrl+Z)'),
+      redo = button('bobine-step is-again', '', () => travel(false), 'undo', 'Rétablir (Ctrl+Maj+Z)'),
+      save = button('bobine-save', archiving ? 'Enregistrement…' : 'Enregistrer', () => void archive(), 'save'),
+      go = button('montage-export', exporting ? 'Export…' : 'Exporter', toggleExport, 'download');
+    go.append(icon('chevron'));
+    go.setAttribute('aria-haspopup', 'menu');
+    go.setAttribute('aria-expanded', 'false');
+    parts.push(node('span', 'bobine-fil-gap'), state, undo, redo, save, go);
     filRoot.replaceChildren(...parts);
-    Object.assign(live, { status: state, export: go });
+    Object.assign(live, { status: state, export: go, undo, redo, save });
     say();
   }
   /**
-   * What « Exporter » says of the bobine as it is now: it follows every change without the fil being
-   * drawn again (a name being written there would be lost).
+   * What the buttons of the fil say of the bobine as it is now: they follow every change without the
+   * fil being drawn again (a name being written there would be lost).
    */
-  function sayExport() {
-    const go = live.export;
-    if (!go || !montage) return;
-    const waiting = todoPlans(montage).length;
-    go.disabled = exporting || !montage.plans.length || waiting > 0 || busy();
-    go.title = waiting
-      ? `${plural(waiting, 'prise est encore', 'prises sont encore')} à créer`
-      : montage.plans.length
-        ? 'Un seul fichier : le film dans VIDEO, et une prise du projet'
-        : 'Posez au moins une prise pour exporter un film';
+  function sayFil() {
+    if (!montage) return;
+    const { export: go, undo, redo, save } = live;
+    if (undo) undo.disabled = !past.length || busy();
+    if (redo) redo.disabled = !future.length || busy();
+    if (save) {
+      const empty = !montage.plans.length && !montage.sounds.length,
+        changed = !empty && unsaved();
+      save.disabled = archiving || exporting || empty;
+      // (Its point: what is in the Archives is not what is open here.)
+      save.dataset.unsaved = String(changed);
+      save.title = empty
+        ? 'Posez au moins une prise pour enregistrer la bobine'
+        : changed
+          ? 'Enregistrer la bobine dans les Archives : elle a changé depuis'
+          : 'Enregistrer la bobine dans les Archives';
+    }
+    // (0.6.154, capture 91) « Exporter » is greyed only for an empty bobine (and while takes are made):
+    // its menu says what cannot be done yet.
+    if (go) {
+      go.disabled = exporting || !montage.plans.length || busy();
+      go.title = montage.plans.length ? 'Exporter la bobine' : 'Posez au moins une prise pour exporter';
+    }
+  }
+  /**
+   * (0.6.154, captures 90 et 91) The menu of « Exporter », of dark glass: « Un seul fichier » (the film in
+   * VIDEO, a take of the project; greyed while takes are to create, why under the pointer) and « Un fichier
+   * par prise » (the takes made, in BOBINES). Échap or a click beside closes it.
+   */
+  function toggleExport() {
+    if (exportMenu) return closeExport({ refocus: true });
+    if (!live.export || live.export.disabled) return;
+    const menu = node('div', 'glass-menu bobine-export-menu'),
+      waiting = todoPlans(montage).length,
+      made = montage.plans.filter(plan => !isTodo(plan)).length,
+      item = (name, where, why, act) => {
+        const choice = node('button', 'glass-menu-item bobine-export-item' + (why ? ' is-off' : ''));
+        choice.type = 'button';
+        choice.setAttribute('role', 'menuitem');
+        choice.append(node('span', 'bobine-export-name', name), node('span', 'bobine-export-where', where));
+        if (why) {
+          choice.setAttribute('aria-disabled', 'true');
+          choice.dataset.tip = why;
+        }
+        choice.onclick = () => {
+          if (why) return;
+          closeExport();
+          void act();
+        };
+        return choice;
+      };
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Exporter la bobine');
+    const all = [
+      item('Un seul fichier', `video / ${montage.name}`, waiting ? `${plural(waiting, 'prise est encore', 'prises sont encore')} à créer` : '', exportFilm),
+      item('Un fichier par prise', `bobines / ${folderName(montage.name)} / ${numbered(made)}`, made ? '' : 'Aucune prise n’est encore créée', exportTakes),
+    ];
+    menu.append(...all);
+    const choices = () => all.filter(choice => choice.getAttribute('aria-disabled') !== 'true');
+    menu.onkeydown = event => {
+      const list = choices(),
+        at = list.indexOf(page?.document?.activeElement);
+      if (event.key === 'Escape') {
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        closeExport({ refocus: true });
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault?.();
+        list[(at + (event.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length]?.focus?.();
+      } else if (event.key === 'Tab') closeExport();
+    };
+    exportMenu = { menu, beside: event => !menu.contains?.(event.target) && !live.export?.contains?.(event.target) && closeExport() };
+    filRoot.append(menu);
+    openPopup(menu, live.export, { align: 'end' });
+    live.export.setAttribute('aria-expanded', 'true');
+    page?.addEventListener?.('pointerdown', exportMenu.beside, true);
+    choices()[0]?.focus?.();
+  }
+  function closeExport({ refocus = false } = {}) {
+    if (!exportMenu) return;
+    const { menu, beside } = exportMenu;
+    exportMenu = null;
+    page?.removeEventListener?.('pointerdown', beside, true);
+    closePopup(menu);
+    menu.remove?.();
+    live.export?.setAttribute('aria-expanded', 'false');
+    if (refocus) live.export?.focus?.();
   }
 
   // The blocks -------------------------------------------------------------------------------------
@@ -861,7 +1112,7 @@ export function setupMontage({
       Object.assign(field, { value: plan.todo.prompt, rows: 2, maxLength: 4000, disabled: busy() || enrichingId === item.id });
       field.dataset.id = item.id;
       field.setAttribute('aria-label', `Ce qui se passe, de ${mono(starts[index])} à ${mono(starts[index] + plan.to - plan.from)}`);
-      field.oninput = () => change(withItemChanged(montage, item.id, { prompt: field.value }), { sliding: true });
+      field.oninput = () => change(withItemChanged(montage, item.id, { prompt: field.value }), { sliding: true, group: 'text:' + item.id });
       // (With the wand, the field is not written in: the click enriches it.)
       field.onpointerdown = event => {
         if (wand) event.preventDefault?.();
@@ -1052,6 +1303,7 @@ export function setupMontage({
     making = null;
     if (record) {
       // (0.6.152) A take made in parts: its first part made, what is left of it stays to create.
+      remember(montage);
       montage = withTodoMade(montage, id, record, { from: wanted.from, limits: limits(), partId: newId() });
       pending = true;
       // Kept at once: the take exists, the bobine must say so.
@@ -1107,18 +1359,31 @@ export function setupMontage({
     if (on && (busy() || !enrich)) return;
     wand = on;
     if (root) root.dataset.wand = String(wand);
-    // (Échap puts it down wherever the keys are: a click with the wand takes no focus.)
-    if (wand) page?.addEventListener?.('keydown', wandKey);
-    else page?.removeEventListener?.('keydown', wandKey);
     update();
   }
-  function wandKey(event) {
-    if (wand && event.key === 'Escape') toggleWand(false);
+  /**
+   * The keys heard by the page itself, wherever the focus is (a click with the wand takes none): Échap
+   * puts the wand down; (0.6.154) Ctrl+Z « Annuler », Ctrl+Maj+Z and Ctrl+Y « Rétablir », but in a field
+   * being typed in (its own text comes back there).
+   */
+  function pageKeys(event) {
+    if (!root) return;
+    if (wand && event.key === 'Escape') return toggleWand(false);
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const { tagName, isContentEditable } = event.target ?? {};
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName) || isContentEditable) return;
+    const view = globalThis.document?.body?.dataset?.view;
+    if (view && view !== 'bobine') return;
+    const key = String(event.key).toLowerCase(),
+      back = key === 'z' && !event.shiftKey;
+    if (!back && !(key === 'z' && event.shiftKey) && key !== 'y') return;
+    event.preventDefault?.();
+    travel(back);
   }
   /**
    * A take to create enriched by Moodix AI: its text detailed, nothing changed of what happens in it.
-   * An empty text is not enriched. Written meanwhile by the user, theirs stays. Ctrl+Z gives back the
-   * text of before.
+   * An empty text is not enriched. Written meanwhile by the user, theirs stays. « Annuler » (Ctrl+Z)
+   * gives back the text of before.
    */
   async function enrichOne(id) {
     if (!enrich || enrichingId || busy()) return;
@@ -1145,7 +1410,6 @@ export function setupMontage({
     enrichingId = null;
     const now = itemOf(id);
     if (!isTodo(now) || now.todo.prompt !== before) return update();
-    back.push({ id, prompt: before, after: written });
     change(withItemChanged(montage, id, { prompt: written }));
     lit = id;
     update();
@@ -1154,15 +1418,6 @@ export function setupMontage({
       lit = null;
       update({ panel: !inPanel() });
     }, 1200);
-  }
-  /** Ctrl+Z: the text of before the last enrichment, while the take still has what was written. */
-  function enrichedBack() {
-    const last = back.at(-1),
-      plan = last ? itemOf(last.id) : null;
-    if (!last || !isTodo(plan) || plan.todo.prompt !== last.after || busy()) return false;
-    back.pop();
-    change(withItemChanged(montage, last.id, { prompt: last.prompt }));
-    return true;
   }
 
   // The list and the track (0.6.153, capture 78) -------------------------------------------------------
@@ -1271,6 +1526,7 @@ export function setupMontage({
         const written = String((await write(asked, { signal: controller.signal }))?.prompt ?? '').trim();
         if (writing !== mine) return;
         if (!written) throw new Error('Moodix AI n’a rien écrit.');
+        remember(montage, mine);
         montage = withItemChanged(montage, id, { prompt: written });
         pending = true;
         done++;
@@ -1313,7 +1569,7 @@ export function setupMontage({
         volume.style.setProperty?.('--fill', String(Number(volume.value) / 200));
         figure.textContent = volume.value + ' %';
         if (shown) shown.textContent = volume.value + ' %';
-        change(withItemChanged(montage, item.id, { volume: Number(volume.value) / 100 }), { still: true });
+        change(withItemChanged(montage, item.id, { volume: Number(volume.value) / 100 }), { still: true, group: 'volume:' + item.id });
       };
       volume.onchange = () => update();
       bar.append(volume, figure, part());
@@ -1831,6 +2087,8 @@ export function setupMontage({
       if (!moved && Math.abs(far) < slack) return;
       if (!moved) {
         held = span();
+        // (0.6.154) Its moves: one step of « Annuler ».
+        dragging = {};
         // (Said to the desk: one cursor everywhere while it lasts, moodix.css.)
         if (kind) root.dataset.held = kind;
       }
@@ -1845,7 +2103,7 @@ export function setupMontage({
     function onUp() {
       for (const [type, listener] of heard) page.removeEventListener(type, listener);
       if (!moved) return;
-      held = ghost = null;
+      held = ghost = dragging = null;
       delete root.dataset.held;
       // The click the browser sends after a drag chooses nothing; without one (let go elsewhere), forgotten at once.
       slid = true;
@@ -1912,6 +2170,8 @@ export function setupMontage({
       filRoot = given ?? node('div', 'bobine-fil');
       root = node('div', 'studio-desk bobine-desk');
       root.dataset.wand = String(wand);
+      page?.removeEventListener?.('keydown', pageKeys);
+      page?.addEventListener?.('keydown', pageKeys);
       // (A press anywhere on the desk gives it the keys.)
       root.tabIndex = -1;
       parts = null;
@@ -1920,9 +2180,8 @@ export function setupMontage({
         // (A take, a sound or a tile is a button too: Enter chooses it, the space bar reads the film.)
         const { tagName, className } = event.target ?? {},
           typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName) || (tagName === 'BUTTON' && !/\bmontage-(piece|take)\b/.test(className));
-        // (0.6.153) Échap puts the wand down; Ctrl+Z gives back the text of before the last enrichment.
+        // (0.6.153) Échap puts the wand down (heard by the page too, pageKeys).
         if (event.key === 'Escape' && wand) return toggleWand(false);
-        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && String(event.key).toLowerCase() === 'z' && tagName !== 'INPUT' && enrichedBack()) return void event.preventDefault?.();
         if (event.key === ' ' && !typing) {
           event.preventDefault?.();
           play();
@@ -1938,9 +2197,17 @@ export function setupMontage({
         montage = fresh();
         stored = false;
         void read();
-      }
+      } else opened();
       draw();
       return root;
+    },
+    /**
+     * (0.6.154) The bobine a card of the Archives opens: at once when those of its project are read,
+     * else once they are (it is the project of the page then).
+     */
+    wanted(id) {
+      wantedId = id;
+      if (root && montage && readFor === project()) opened();
     },
     /** The creations of the project were read again (one made, one removed): shown as they are now. Another project: its bobines. */
     refreshed() {
@@ -1961,7 +2228,8 @@ export function setupMontage({
       writing = null;
       // (0.6.153) The wand is put down, the enrichment asked let go.
       wand = false;
-      page?.removeEventListener?.('keydown', wandKey);
+      page?.removeEventListener?.('keydown', pageKeys);
+      closeExport();
       enriched?.abort();
       enrichingId = null;
       asking = null;
@@ -1970,7 +2238,9 @@ export function setupMontage({
       return keep();
     },
     // For the tests and the pointer of a later step: what is on the page, and the hands that change it.
-    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed), zoom, scrolled, drawing, wand, enrichingId, lit, downloading }),
+    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed), zoom, scrolled, drawing, wand, enrichingId, lit, downloading, past: past.length, future: future.length }),
+    undo: () => travel(true),
+    redo: () => travel(false),
     lay,
     zoomTo,
     createAll,
@@ -1983,5 +2253,7 @@ export function setupMontage({
     seek,
     keep,
     exportFilm,
+    exportTakes,
+    archive,
   };
 }

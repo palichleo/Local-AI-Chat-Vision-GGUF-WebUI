@@ -417,9 +417,10 @@ test('the kind and the conversation narrow the creations; ← → move between t
       ['image', 'radio', 'false', -1],
       ['video', 'radio', 'false', -1],
       ['audio', 'radio', 'false', -1],
+      ['bobine', 'radio', 'false', -1],
     ],
   );
-  assert.deepEqual(kinds.children.map(item => item.children[1].textContent), ['Tout', 'Images', 'Vidéos', 'Sons']);
+  assert.deepEqual(kinds.children.map(item => item.children[1].textContent), ['Tout', 'Images', 'Vidéos', 'Sons', 'Bobines']);
   kind('video').onclick();
   assert.deepEqual(tiles(f.$('library-grid')), ['r2']);
   assert.equal(kind('video').attributes['aria-checked'], 'true');
@@ -429,8 +430,12 @@ test('the kind and the conversation narrow the creations; ← → move between t
   assert.equal(f.library.count({ project: 'p1', media: 'all' }), 2, 'or the kind asked');
   kinds.onkeydown({ key: 'ArrowRight', preventDefault() {} });
   assert.deepEqual(tiles(f.$('library-grid')), ['r3']);
+  // (0.6.154) Then the bobines (none put in the Archives here), and after them the first.
+  kinds.onkeydown({ key: 'ArrowRight', preventDefault() {} });
+  assert.deepEqual([tiles(f.$('library-grid')), f.$('library-total').textContent], [[], '0 bobine']);
   kinds.onkeydown({ key: 'ArrowRight', preventDefault() {} });
   assert.equal(tiles(f.$('library-grid')).length, 4, 'after the last, the first');
+  kinds.onkeydown({ key: 'ArrowLeft', preventDefault() {} });
   kinds.onkeydown({ key: 'ArrowLeft', preventDefault() {} });
   assert.deepEqual(tiles(f.$('library-grid')), ['r3']);
   kind('image').onclick();
@@ -852,6 +857,19 @@ test('(0.6.147) GET /api/library and the Sortie: each take with the montages of 
     const expected = { free: null, sound: ['Le pêcheur'], photo: ['Le pêcheur'], plan: ['Bis', 'Le pêcheur'] };
     assert.deepEqual(uses((await (await call('library?images=0')).json()).runs), expected);
     assert.deepEqual(uses((await (await call('project-gallery/inbox?images=0')).json()).runs), expected);
+    // (0.6.154) « Enregistrer »: the bobine in the Archives, with what its card shows; the other is not there.
+    assert.deepEqual((await (await call('library?images=0')).json()).bobines, []);
+    assert.equal((await call('montages/save', { project: 'inbox', montage: first, archive: true })).status, 200);
+    const [shelved, ...others] = (await (await call('library?images=0')).json()).bobines;
+    assert.deepEqual(
+      [others, shelved.id, shelved.name, shelved.project, shelved.archived.seconds, shelved.archived.plans, shelved.archived.pictures],
+      [[], first.id, 'Le pêcheur', 'inbox', 2, 1, [take('plan')]],
+    );
+    // « Un fichier par prise » of a bobine with nothing made: refused in the user's words, nothing asked of the engine.
+    const waiting = { ...newMontage({ name: 'À faire' }), plans: [{ id: randomUUID(), kind: 'video', todo: { prompt: '' }, from: 0, to: 2 }], sounds: [] };
+    assert.equal((await call('montages/save', { project: 'inbox', montage: waiting })).status, 200);
+    const refused = await call('montages/export-takes', { project: 'inbox', id: waiting.id });
+    assert.deepEqual([refused.status, (await refused.json()).error], [400, 'Aucune prise de cette bobine n’est encore créée.']);
     // The take goes (the route of the Studio, that of the Pellicule): listed nowhere, its file still there.
     assert.equal((await call('studio/delete', { id: made.plan, conversationId: talk })).status, 200);
     assert.equal((await (await call('library?images=0')).json()).runs.some(run => run.id === made.plan), false);
@@ -863,4 +881,61 @@ test('(0.6.147) GET /api/library and the Sortie: each take with the montages of 
     await app?.close();
     await rm(folder, { recursive: true, force: true });
   }
+});
+
+test('(0.6.154) the bobines put in the Archives: among the takes at their date, a card of their own; « Bobines » shows them alone; a click opens one', async () => {
+  // (Capture 92.)
+  const bobines = [
+      {
+        id: 'b1',
+        name: 'Le renard en hiver',
+        format: '16:9',
+        project: 'p1',
+        archived: { at: '2026-11-14T12:00:00.000Z', seconds: 22.04, plans: 7, pictures: [{ conversationId: 'c1', runId: 'r1', output: 0 }, { conversationId: 'c9', runId: 'gone', output: 0 }] },
+      },
+      { id: 'b2', name: 'Le phare', format: '9:16', project: 'inbox', archived: { at: '2026-11-15T09:00:00.000Z', seconds: 4, plans: 1, pictures: [] } },
+    ],
+    wanted = [];
+  const f = fixture({ api: async () => Response.json({ runs: RUNS, bobines }), openBobine: asked => wanted.push(asked) });
+  await f.library.show();
+  const grid = f.$('library-grid');
+  // At the date they were put there, the newest first; not counted as takes.
+  assert.deepEqual([tiles(grid), f.$('library-total').textContent], [['b2', 'b1', 'r1', 'r2', 'r3', 'r4'], '4 prises']);
+  const reel = card(f, 'b1');
+  assert.deepEqual([reel.className, reel.dataset.media], ['library-tile is-bobine', 'bobine']);
+  // A strip with the pictures of its first takes (a take gone: an empty place), « BOBINE », its name, its length and takes.
+  const strip = find(reel, 'library-reel');
+  assert.deepEqual(strip.children.map(cell => [cell.tag, cell.className, cell.src ?? null]), [
+    ['img', '', '/media/thumbnail/r1'],
+    ['span', 'library-reel-blank', null],
+  ]);
+  assert.deepEqual(find(reel, 'library-reel-said').children.map(part => [part.className, part.textContent]), [
+    ['library-reel-label', 'Bobine'],
+    ['library-reel-name', 'Le renard en hiver'],
+    ['library-reel-meta', '22.04 S · 7 prises'],
+  ]);
+  const pick = find(reel, 'library-pick');
+  assert.match(pick.attributes['aria-label'], /^Bobine Le renard en hiver · 22\.04 S · 7 prises · enregistrée le 14 nov\. · l’ouvrir dans la Bobine$/);
+  assert.deepEqual(find(card(f, 'b2'), 'library-reel').children.map(cell => cell.className), ['library-reel-blank']);
+  // A click opens it again in the Bobine, in its project.
+  pick.onclick();
+  assert.deepEqual(wanted, [{ project: 'p1', id: 'b1' }]);
+  // « Bobines »: they alone, counted as bobines; of a project, of none in a conversation.
+  const kind = id => f.$('library-kinds').children.find(item => item.dataset.kind === id);
+  kind('bobine').onclick();
+  assert.deepEqual([tiles(grid), f.$('library-total').textContent], [['b2', 'b1'], '2 bobines']);
+  assert.deepEqual([f.library.count(), f.library.count({ project: 'p1' }), f.library.count({ conversation: 'c1' })], [2, 1, 0]);
+  project(f, 'p1').onclick();
+  assert.deepEqual([tiles(grid), f.$('library-total').textContent], [['b1'], '1 bobine']);
+  f.library.choose({ conversation: 'c1' });
+  assert.deepEqual([tiles(grid), f.$('library-empty').hidden], [[], false]);
+  // Another kind: none of them.
+  f.library.choose({ conversation: 'all' });
+  kind('image').onclick();
+  assert.deepEqual(tiles(grid), ['r1']);
+  // None in the Archives: said.
+  const bare = fixture();
+  await bare.library.show();
+  bare.library.choose({ media: 'bobine' });
+  assert.equal(bare.$('library-empty').children[0].textContent, 'Aucune bobine ici : « Enregistrer », dans la Bobine, en range une dans les Archives.');
 });

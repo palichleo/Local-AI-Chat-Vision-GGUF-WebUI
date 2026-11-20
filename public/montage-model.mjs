@@ -695,3 +695,20 @@ export function creationOf(montage, id, lengthOf = () => null, { limits = {} } =
   const { format: _format, ...rest } = wanted;
   return { ...rest, verb: 'extend_video', continues: before.source, from: link.whole };
 }
+
+/**
+ * (0.6.154) The folder « Un fichier par prise » puts the takes of a bobine in, under BOBINES in the folder
+ * of the outputs (« BOBINES / LE RENARD EN HIVER / 01 À 05 »): its name as it is written, without what a
+ * folder of Windows refuses (\ / : * ? " < > |, a dot or a space at its end, CON, NUL…), « Bobine » when
+ * nothing is left.
+ */
+export function folderName(name) {
+  let plain = String(name ?? '')
+    .replace(/[\x00-\x1f<>:"/\\|?*]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60)
+    .replace(/[. ]+$/, '');
+  if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i.test(plain)) plain = 'Bobine ' + plain;
+  return plain || 'Bobine';
+}

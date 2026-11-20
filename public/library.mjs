@@ -10,6 +10,9 @@
  * conversation. A click shows it whole with its details; on its conversation, opens it.
  * (0.6.147) At its top left, the bin of the Sortie of the Studio: any take goes, after the Studio's
  * question asked on it (take-delete.mjs), by the Studio's own deletion.
+ * (0.6.154, capture 92) The bobines « Enregistrer » put there take their place in the days too, at the
+ * date they were put there, each a card of its own (a strip of film); « Bobines » among the kinds. A
+ * click opens one again in the Bobine. They are not takes: « 32 PRISES » does not count them.
  */
 import { DELETE_TIP, deleteQuestion } from './take-delete.mjs';
 import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
@@ -21,6 +24,7 @@ export const KINDS = [
   { id: 'image', icon: 'image', label: 'Images' },
   { id: 'video', icon: 'video', label: 'Vidéos' },
   { id: 'audio', icon: 'wave', label: 'Sons' },
+  { id: 'bobine', icon: 'reel', label: 'Bobines' },
 ];
 const NAMES = { image: 'Image', video: 'Clip', audio: 'Son' };
 /** The height of a row of the sheet; a take is as wide as its format makes it at that height. */
@@ -89,9 +93,13 @@ export function setupLibrary({
   remove = null,
   busy = () => '',
   notice = () => {},
+  // (0.6.154) `openBobine({ project, id })`: a bobine of the Archives opened again in the Bobine.
+  openBobine = null,
 }) {
   const filter = { project: 'all', media: 'all', conversation: 'all' };
   let runs = [],
+    // (0.6.154) The bobines put in the Archives, of every project: { id, name, format, project, archived }.
+    bobines = [],
     version = 0,
     failed = '',
     playing = null, // { audio, button }: the sound that plays
@@ -150,9 +158,10 @@ export function setupLibrary({
     };
     return gone;
   }
-  /** The number of takes shown, after the fil (« 46 PRISES », « 0 PRISE »). */
+  /** The number of takes shown, after the fil (« 46 PRISES », « 0 PRISE »); of bobines, when they alone are shown. */
   function paintTotal(total) {
-    $('library-total').textContent = total + (total > 1 ? ' prises' : ' prise');
+    const [one, many] = filter.media === 'bobine' ? [' bobine', ' bobines'] : [' prise', ' prises'];
+    $('library-total').textContent = total + (total > 1 ? many : one);
   }
   /** A sound plays in its card; another one stops it. */
   function play(record, button) {
@@ -329,6 +338,64 @@ export function setupLibrary({
     if (next) cards.get(keyOf(next))?.pick.focus?.();
   }
   const keyOf = record => record.id + '|' + (record.outputs?.[0]?.originalUrl || '');
+  // (0.6.154) A bobine: drawn again when it is put in the Archives again.
+  const reelKey = bobine => ['bobine', bobine.project, bobine.id, bobine.archived.at, bobine.name].join('|');
+  /** (0.6.154) The bobines the filter keeps: of the project shown, every conversation, the kind « Tout » or « Bobines ». */
+  const reelsShown = () =>
+    filter.conversation !== 'all' || (filter.media !== 'all' && filter.media !== 'bobine')
+      ? []
+      : bobines.filter(bobine => filter.project === 'all' || bobine.project === filter.project);
+  /** The picture of a take a bobine names, if it is still among the creations. */
+  const pictureOf = source => {
+    const output = runs.find(run => run.id === source.runId && run.conversationId === source.conversationId)?.outputs?.[source.output];
+    return output?.thumbUrl || (output && !/^video|^audio/.test(String(output.mime ?? '')) ? output.originalUrl : '') || '';
+  };
+  /**
+   * (0.6.154, capture 92) A bobine put in the Archives: a strip of film, its holes along it, the pictures
+   * of its first takes, « BOBINE », its name, its length and its number of takes. A click opens it again
+   * in the Bobine.
+   */
+  function reel(bobine) {
+    const key = reelKey(bobine);
+    if (cards.has(key)) return cards.get(key).card;
+    const { archived } = bobine,
+      [wide, high] = String(bobine.format || '16:9').split(':').map(Number),
+      cells = Math.max(1, Math.min(2, archived.pictures.length)),
+      card = node('article', 'library-tile is-bobine'),
+      pick = node('button', 'library-pick'),
+      strip = node('span', 'library-reel'),
+      count = archived.plans + (archived.plans > 1 ? ' prises' : ' prise'),
+      length = lengthText(archived.seconds);
+    card.dataset.media = 'bobine';
+    card.dataset.id = bobine.id;
+    // As wide as its pictures at the height of the row, inside the holes of the strip.
+    card.style?.setProperty?.('--ratio', Math.min(3.2, Math.max(0.8, (cells * (wide > 0 && high > 0 ? wide / high : 16 / 9) * (ROW - 32)) / ROW)).toFixed(4));
+    strip.setAttribute('aria-hidden', 'true');
+    for (let at = 0; at < cells; at++) {
+      const url = archived.pictures[at] ? pictureOf(archived.pictures[at]) : '';
+      if (!url) {
+        strip.append(node('span', 'library-reel-blank'));
+        continue;
+      }
+      const picture = node('img');
+      Object.assign(picture, { alt: '', loading: 'lazy', decoding: 'async', src: url });
+      strip.append(picture);
+    }
+    const said = node('span', 'library-reel-said');
+    said.setAttribute('aria-hidden', 'true');
+    said.append(
+      node('span', 'library-reel-label', 'Bobine'),
+      node('span', 'library-reel-name', bobine.name),
+      node('span', 'library-reel-meta', [length, count].filter(Boolean).join(' · ')),
+    );
+    pick.type = 'button';
+    pick.setAttribute('aria-label', [`Bobine ${bobine.name}`, length, count, 'enregistrée le ' + date(archived.at), 'l’ouvrir dans la Bobine'].filter(Boolean).join(' · '));
+    pick.onclick = () => openBobine?.({ project: bobine.project, id: bobine.id });
+    pick.append(strip, said);
+    card.append(pick);
+    cards.set(key, { card, pick });
+    return card;
+  }
   function tile(record) {
     const key = keyOf(record);
     let kept = cards.get(key);
@@ -360,11 +427,15 @@ export function setupLibrary({
     // The card of the sound that plays leaves the sheet (another kind chosen, another project): it
     // stops. It went on with nothing on screen to stop it.
     if (playing && !shown.some(record => record.id === playing.id)) hush();
+    // (0.6.154) The bobines among the takes, at the date they were put in the Archives.
+    const reels = reelsShown(),
+      dated = [...shown.map(record => ({ at: record.createdAt ?? '', record })), ...reels.map(bobine => ({ at: bobine.archived.at, bobine }))];
+    if (reels.length) dated.sort((a, b) => String(b.at).localeCompare(String(a.at)));
     const days = [];
-    for (const record of shown) {
-      const day = dayOf(record.createdAt);
+    for (const item of dated) {
+      const day = dayOf(item.at);
       if (days.at(-1)?.key !== day.key) days.push({ ...day, records: [] });
-      days.at(-1).records.push(record);
+      days.at(-1).records.push(item);
     }
     $('library-grid').replaceChildren(
       ...days.map(day => {
@@ -378,15 +449,15 @@ export function setupLibrary({
         );
         head.setAttribute('aria-hidden', 'true');
         section.setAttribute('aria-label', day.label);
-        row.append(...day.records.map(tile));
+        row.append(...day.records.map(item => (item.bobine ? reel(item.bobine) : tile(item.record))));
         section.append(head, row);
         return section;
       }),
     );
-    paintTotal(shown.length);
+    paintTotal(filter.media === 'bobine' ? reels.length : shown.length);
     const empty = $('library-empty');
-    empty.hidden = shown.length > 0;
-    if (shown.length) return empty.replaceChildren();
+    empty.hidden = dated.length > 0;
+    if (dated.length) return empty.replaceChildren();
     // A project with nothing in it (capture 39): its sentence, and one way to begin.
     if (!failed && filter.project !== 'all' && filter.media === 'all' && filter.conversation === 'all') {
       empty.replaceChildren(
@@ -407,7 +478,9 @@ export function setupLibrary({
         'library-note',
         failed
           ? 'Archives illisibles : ' + failed
-          : filter.media !== 'all' || filter.conversation !== 'all'
+          : filter.media === 'bobine'
+            ? 'Aucune bobine ici : « Enregistrer », dans la Bobine, en range une dans les Archives.'
+            : filter.media !== 'all' || filter.conversation !== 'all'
             ? 'Aucune création de ce type ici.'
             : 'Aucune création pour l’instant. Les images, vidéos et sons faits dans le Studio ou dans un chat arrivent ici.',
       ),
@@ -437,14 +510,16 @@ export function setupLibrary({
       const result = await (await api('library?images=0' + open)).json();
       if (asked !== version) return;
       runs = result.runs ?? [];
+      bobines = (result.bobines ?? []).filter(bobine => bobine?.archived);
       failed = '';
     } catch (error) {
       if (asked !== version) return;
       runs = [];
+      bobines = [];
       failed = error.message;
     }
     // Only the tiles of these creations are kept; a question on one gone goes with it.
-    const keys = new Set(runs.map(keyOf));
+    const keys = new Set([...runs.map(keyOf), ...bobines.map(reelKey)]);
     for (const key of [...cards.keys()]) if (!keys.has(key)) cards.delete(key);
     if (asking && !keys.has(keyOf(asking.kept.record))) unask();
     render();
@@ -472,7 +547,12 @@ export function setupLibrary({
      * project (`all`: every one) or of a conversation; `media` another kind.
      */
     count: ({ project = 'all', conversation = 'all', media = filter.media } = {}) =>
-      filtered(runs, { project, conversation, media }).length,
+      // (0.6.154) « Bobines » shown: the bobines of a project (none in a conversation).
+      media === 'bobine'
+        ? conversation === 'all'
+          ? bobines.filter(bobine => project === 'all' || bobine.project === project).length
+          : 0
+        : filtered(runs, { project, conversation, media }).length,
     /** Leaving the Pellicule: the sound that plays stops. */
     hush,
   };

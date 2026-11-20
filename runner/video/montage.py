@@ -17,6 +17,7 @@ as it is. Without instants, the plans follow one another.
 """
 
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -32,6 +33,9 @@ STILL = ('.png', '.jpg', '.jpeg', '.webp')
 HEARD = ('.wav', '.mp4', '.webm')
 # What Windows takes on one command line; the graph itself is read from a file.
 LONGEST_COMMAND = 30000
+# (0.6.154) A take of a bobine exported alone: `bobines/<the folder of its bobine>/<its number>.mp4`.
+FOLDER = re.compile(r'[^\x00-\x1f<>:"/\\|?*]{1,64}')
+NUMBERED = re.compile(r'\d{2,3}\.mp4')
 
 
 def _n(value):
@@ -64,11 +68,33 @@ def _volume(value, label):
     return round(float(value), 2)
 
 
+def export_place(value, root):
+    """(0.6.154) Where a take of a bobine exported alone goes (« Un fichier par prise »): a file of the
+    folder `bobines` of the outputs, in the folder of its bobine, that is not there yet: nothing is
+    written over."""
+    parts = value.split('/') if isinstance(value, str) else []
+    if (
+        len(parts) != 3
+        or parts[0] != 'bobines'
+        or not FOLDER.fullmatch(parts[1])
+        or parts[1] != parts[1].strip()
+        or parts[1][-1] == '.'
+        or not NUMBERED.fullmatch(parts[2])
+    ):
+        raise ValueError('Invalid export place')
+    target = (root / parts[0] / parts[1] / parts[2]).resolve()
+    if root / 'bobines' not in target.parents:
+        raise ValueError('Invalid export place')
+    if target.exists():
+        raise ValueError('Ce fichier existe déjà : rien n’est écrit par-dessus.')
+    return target
+
+
 def validated(params, root):
     """The assembly asked, every value checked, every file one of the folder of the outputs."""
     from runner.registry import fields, output_name, text
 
-    known = ('id', 'outputName', 'width', 'height', 'fps', 'plans', 'sounds')
+    known = ('id', 'outputName', 'exportTo', 'width', 'height', 'fps', 'plans', 'sounds')
     fields(params, known, ('id', 'width', 'height', 'fps', 'plans'), 'film')
     text(params['id'], 'id')
     for side in ('width', 'height'):
@@ -84,6 +110,11 @@ def validated(params, root):
     result = {key: params[key] for key in ('id', 'width', 'height', 'fps')} | dict(plans=[], sounds=[])
     if 'outputName' in params:
         result['outputName'] = output_name(params['outputName'])
+    if 'exportTo' in params:
+        # (Its temporary file is named as those of a creation: one a stopped engine leaves is swept.)
+        if 'outputName' not in result:
+            raise ValueError('An export names its temporary file')
+        result['exportTo'] = export_place(params['exportTo'], root)
     for index, item in enumerate(plans):
         label = f'Plan {index + 1}'
         known = ('path', 'at', 'kind', 'from', 'to', 'frame', 'volume')
@@ -225,8 +256,13 @@ def assemble(params, config, progress):
             raise ValueError(f'Son {index + 1} : ce fichier n’a pas de son.')
     inputs, filters, sound, total = graph(plan, audible)
     job = {key: plan[key] for key in ('id', 'outputName') if key in plan}
-    destination, output = output_place(config, job, 'video', '.mp4')
-    temporary = destination / (output.stem + '.tmp.mp4')
+    exported = plan.get('exportTo')
+    if exported:
+        destination, output = root, exported
+        temporary = root / (plan['outputName'] + '.tmp.mp4')
+    else:
+        destination, output = output_place(config, job, 'video', '.mp4')
+        temporary = destination / (output.stem + '.tmp.mp4')
     started = time.perf_counter()
     script = errors = None
     try:
@@ -270,7 +306,15 @@ def assemble(params, config, progress):
             audio=True,
         )
         result = dict(jobId=plan['id'], outputs=[descriptor], metadata=metadata)
-        publish(temporary, output, manifest_path(config, output.stem), result)
+        if exported:
+            # (0.6.154) A file of the folder of its bobine, not a creation: no manifest.
+            descriptor.update(subfolder=output.parent.relative_to(root).as_posix(), type='export')
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if output.exists():
+                raise ValueError('Ce fichier existe déjà : rien n’est écrit par-dessus.')
+            os.replace(temporary, output)
+        else:
+            publish(temporary, output, manifest_path(config, output.stem), result)
         progress(stage='film assembled', seconds=total, total=total)
         return result
     finally:

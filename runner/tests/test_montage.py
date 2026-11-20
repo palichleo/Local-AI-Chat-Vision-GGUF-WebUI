@@ -6,6 +6,9 @@ from pathlib import Path
 
 from runner.video import montage
 
+# (0.6.154) The name of the temporary file of a take exported alone.
+NAMED = dict(outputName='2026-11-20_03-00-00_bobine_ab12')
+
 
 def lavfi(target, *sources, extra=()):
     """A small real file made by ffmpeg for the test: a moving picture, a tone."""
@@ -84,9 +87,23 @@ class RuleTests(Folder):
             (dict(sounds=[dict(self.asked()['sounds'][0], path=self.image)]), 'not a file of that kind'),
             (dict(sounds=[dict(self.asked()['sounds'][0], at=-1)]), 'invalid time'),
             (dict(outputName='../x'), 'Invalid output name'),
+            # (0.6.154) A take exported alone: a numbered file of the folder of its bobine, under `bobines`.
+            (dict(exportTo='bobines/Le renard/01.mp4'), 'An export names its temporary file'),
+            (dict(**NAMED, exportTo='video/01.mp4'), 'Invalid export place'),
+            (dict(**NAMED, exportTo='Bobines/Fin/01.mp4'), 'Invalid export place'),
+            (dict(**NAMED, exportTo='bobines/../01.mp4'), 'Invalid export place'),
+            (dict(**NAMED, exportTo='bobines/a?b/01.mp4'), 'Invalid export place'),
+            (dict(**NAMED, exportTo='bobines/Fin./01.mp4'), 'Invalid export place'),
+            (dict(**NAMED, exportTo='bobines/ Fin/01.mp4'), 'Invalid export place'),
+            (dict(**NAMED, exportTo='bobines/Fin/1.mp4'), 'Invalid export place'),
+            (dict(**NAMED, exportTo='bobines/Fin/01.mov'), 'Invalid export place'),
+            (dict(**NAMED, exportTo='bobines/Le/renard/01.mp4'), 'Invalid export place'),
+            (dict(**NAMED, exportTo=1), 'Invalid export place'),
         ):
             with self.assertRaisesRegex(ValueError, said, msg=said):
                 montage.validated(self.asked(**wrong), self.root)
+        place = montage.validated(self.asked(**NAMED, exportTo='bobines/Le renard/01.mp4'), self.root)
+        self.assertEqual(place['exportTo'], self.root / 'bobines' / 'Le renard' / '01.mp4')
 
     def test_each_plan_is_cut_sized_and_given_exactly_its_length_then_joined_and_mixed(self):
         plan = montage.validated(self.asked(), self.root)
@@ -238,6 +255,35 @@ class FilmTests(Folder):
             with self.assertRaisesRegex(OSError, 'disk full'):
                 montage.assemble(self.asked(sounds=[]), self.config, lambda **data: None)
         self.assertFalse([path.name for path in self.root.rglob('*.tmp.mp4')])
+
+    def test_a_take_exported_alone_is_a_file_of_the_folder_of_its_bobine_never_written_over(self):
+        import imageio.v3 as iio
+
+        # (0.6.154) « Un fichier par prise »: the clip filling the picture, a second of it, in BOBINES.
+        heard = dict(path=self.heard, kind='video', **{'from': 0.5, 'to': 1.5}, frame='fill', volume=1)
+        asked = self.asked(plans=[dict(heard, at=0)], sounds=[], outputName='2026-11-20_03-00-00_bobine_cd34')
+        asked['exportTo'] = 'bobines/Le renard en hiver/01.mp4'
+        made = sorted(path.name for path in (self.root / 'video').iterdir())
+        manifests = self.root.parent / 'manifests'
+        before = sorted(path.name for path in manifests.iterdir()) if manifests.exists() else []
+        result = montage.assemble(asked, self.config, lambda **data: None)
+        (descriptor,) = result['outputs']
+        wanted = dict(filename='01.mp4', subfolder='bobines/Le renard en hiver', type='export', width=320, height=180)
+        self.assertEqual(descriptor, wanted)
+        file = self.root / 'bobines' / 'Le renard en hiver' / '01.mp4'
+        self.assertEqual(len(iio.imread(file)), 24, 'a second at 24 frames a second')
+        # Not a creation: nothing in VIDEO, no manifest, nothing left in the outputs.
+        self.assertEqual(sorted(path.name for path in (self.root / 'video').iterdir()), made)
+        after = sorted(path.name for path in manifests.iterdir()) if manifests.exists() else []
+        self.assertEqual(after, before)
+        self.assertFalse([path.name for path in self.root.glob('*.tmp.mp4')])
+        # Never written over: asked again, refused before anything is made, the file as it was.
+        size = file.stat().st_size
+        with self.assertRaisesRegex(ValueError, 'Ce fichier existe déjà'):
+            montage.validated(asked, self.root)
+        with self.assertRaisesRegex(ValueError, 'Ce fichier existe déjà'):
+            montage.assemble(asked, self.config, lambda **data: None)
+        self.assertEqual(file.stat().st_size, size)
 
     def test_the_worker_assembles_a_film_asked_over_its_protocol(self):
         import sys

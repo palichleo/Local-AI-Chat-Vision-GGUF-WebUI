@@ -58,7 +58,7 @@ import { validateNativeWorkflow } from './lib/native-workflows.mjs';
 import { ProgressHistory } from './lib/generation-progress.mjs';
 import { StudioPresets } from './lib/studio-presets.mjs';
 import { Montages } from './lib/montages.mjs';
-import { exportMontage, takeFiles } from './lib/montage-export.mjs';
+import { exportMontage, exportTakes, takeFiles } from './lib/montage-export.mjs';
 import { STUDIO_ID, STUDIO_VERBS, enrichedPrompt, enrichMessages } from './lib/studio.mjs';
 import { LlamaBuilds } from './lib/llama-builds.mjs';
 import { Takes, numbered, takesToOutputs } from './lib/takes.mjs';
@@ -1430,7 +1430,13 @@ export async function createApplication({
             // A conversation that cannot be read leaves the others.
           }
         runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        return send(200, { runs: (await withMontages(runs, run => run.projectId)).map(galleryView) });
+        // (0.6.154) The bobines « Enregistrer » put in the Archives, of every project, the last put first.
+        const bobines = [];
+        for (const project of new Set(['inbox', ...(await projects.list()).map(item => item.id)]))
+          for (const item of await montages.list(project).catch(() => []))
+            if (item.archived) bobines.push({ ...item, project });
+        bobines.sort((a, b) => b.archived.at.localeCompare(a.archived.at));
+        return send(200, { runs: (await withMontages(runs, run => run.projectId)).map(galleryView), bobines });
       }
       if (req.method === 'GET' && path.startsWith('/api/gallery/')) {
         const [, , , conversationId, runId, index] = path.split('/');
@@ -1473,7 +1479,8 @@ export async function createApplication({
       const body = await jsonBody(req, path === '/api/updates/install' ? 40 * 1024 * 1024 : maxBody);
       // (0.6.136) A montage kept, set aside, or made into its film: a take of the conversation it is
       // asked from, assembled by the engine from the takes of its project.
-      if (path === '/api/montages/save') return send(200, await montages.save(body.project, body.montage));
+      // (0.6.154) `archive`: « Enregistrer » puts the bobine in the Archives as it is now.
+      if (path === '/api/montages/save') return send(200, await montages.save(body.project, body.montage, { archive: body.archive === true }));
       if (path === '/api/montages/remove') return send(200, await montages.remove(body.project, body.id));
       if (path === '/api/montages/export') {
         if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
@@ -1500,6 +1507,27 @@ export async function createApplication({
           persist: preferences.saveHistory,
         });
         return send(200, galleryView(record));
+      }
+      // (0.6.154) « Un fichier par prise »: the takes of the bobine already made, one file each, in a
+      // folder of its own under `bobines` in the folder of the outputs; no take of the project is made.
+      if (path === '/api/montages/export-takes') {
+        if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
+        const project = projectId(body.project),
+          montage = await montages.read(project, body.id);
+        return send(
+          200,
+          await exportTakes({
+            montage,
+            outputDir,
+            fileOf: takeFiles({
+              project,
+              gallery,
+              pathOf: async source => (await generatedFile(outputDir, source)).path,
+              projectOf: projectFor,
+            }),
+            assemble: (request, options) => generation.assembleFilm(request, options),
+          }),
+        );
       }
       // The files of a shipped workflow: downloaded in the background, followed with GET /api/downloads.
       if (path === '/api/downloads/start') {
