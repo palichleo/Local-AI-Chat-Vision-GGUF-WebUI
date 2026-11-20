@@ -107,6 +107,36 @@ export function withPlanMoved(montage, id, step) {
   return { ...montage, plans };
 }
 
+/** `montage` with a plan put at `index` among the others (0: the first); the same when it is there already. */
+export function withPlanAt(montage, id, index) {
+  const from = montage.plans.findIndex(plan => plan.id === id);
+  if (from < 0) return montage;
+  const others = montage.plans.filter(plan => plan.id !== id),
+    to = clamp(index, 0, others.length);
+  if (to === from) return montage;
+  others.splice(to, 0, montage.plans[from]);
+  return { ...montage, plans: others };
+}
+/**
+ * The place a plan dragged to `seconds` of the film takes among the others: after those whose
+ * middle is before that time, in the montage as it was when the plan was pressed (`montage`, the
+ * plan still in its place). Read on the film as it is being changed, the others closing the gap it
+ * leaves, a long plan pressed near its end went after its neighbour at the first move.
+ */
+export function placeAt(montage, id, seconds) {
+  const starts = planStarts(montage);
+  return montage.plans.filter((plan, index) => plan.id !== id && starts[index] + (plan.to - plan.from) / 2 < seconds).length;
+}
+/**
+ * Where a sound dragged to `seconds` starts: on a cut between two plans, at the start or the end of
+ * the film when it is within `near` seconds of one; else where it is, to the tenth of a second.
+ */
+export function snapped(montage, seconds, near = 0.2) {
+  const cuts = [0, ...planStarts(montage).slice(1), montageSeconds(montage)],
+    close = cuts.find(cut => Math.abs(cut - seconds) <= near);
+  return close ?? Math.max(0, Math.round(seconds * 10) / 10);
+}
+
 /**
  * `montage` with what is kept of an element changed: { from, to, frame, volume, at }. A value out of
  * bounds is brought back to them: never under 0 nor beyond the length of the take (`longest`, when it

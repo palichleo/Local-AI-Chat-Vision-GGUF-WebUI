@@ -19,13 +19,16 @@ import {
   montageSeconds,
   montageSizes,
   montageSummary,
+  placeAt,
   planAt,
   planStarts,
   shownSeconds,
+  snapped,
   takeSeconds,
   trackOf,
   usualSize,
   withItemChanged,
+  withPlanAt,
   withPlanMoved,
   withTake,
   withoutItem,
@@ -45,6 +48,8 @@ const TRACKS = [
 const KINDS = { video: 'Vidéo', image: 'Image', music: 'Musique', effects: 'Bruitage' };
 // The timeline shows ten seconds at least: a first plan does not fill it from side to side.
 const SHORTEST_SPAN = 10;
+// How near a cut of the film a sound dragged stops on it, in pixels of the timeline.
+const NEAR_PIXELS = 8;
 const figures = seconds => seconds.toFixed(1).padStart(4, '0') + ' S';
 
 export function setupMontage({
@@ -68,6 +73,8 @@ export function setupMontage({
   now = () => performance.now(),
   // Makes the small picture of a clip that has none yet, from its first picture (as the Sortie does).
   thumbnail = thumbnailOf,
+  // What hears the pointer while something of the timeline is dragged (0.6.138): the window.
+  page = globalThis.window,
 }) {
   let root = null,
     kindsBar = null,
@@ -85,7 +92,15 @@ export function setupMontage({
     exporting = false,
     confirming = false,
     carried = null,
-    media = null;
+    media = null,
+    // The four blocks as last drawn: a change draws two of them again, not the screen nor the takes.
+    parts = null,
+    // While something is dragged on the timeline: its scale held as it was (it would change under
+    // the pointer with the length of the film), where the plans were (a start that is cut follows
+    // the pointer, the others wait), and the click that ends a drag, which chooses nothing.
+    held = null,
+    ghost = null,
+    slid = false;
 
   const fresh = (format = '16:9') => ({
     schemaVersion: 1,
@@ -103,7 +118,7 @@ export function setupMontage({
   const itemOf = id => montage.plans.find(plan => plan.id === id) ?? montage.sounds.find(sound => sound.id === id) ?? null;
   const total = () => montageSeconds(montage);
   const span = () =>
-    Math.max(SHORTEST_SPAN, total(), ...montage.sounds.map(sound => sound.at + (sound.to - sound.from)));
+    held ?? Math.max(SHORTEST_SPAN, total(), ...montage.sounds.map(sound => sound.at + (sound.to - sound.from)));
   const percent = seconds => (100 * seconds) / span() + '%';
 
   // What is kept ---------------------------------------------------------------------------------
@@ -160,8 +175,10 @@ export function setupMontage({
     say();
   }
   /** A change made by hand: shown at once, kept a moment later. */
-  function change(next, { select } = {}) {
+  function change(next, { select, sliding = false } = {}) {
     if (next === montage) return;
+    // Another shape of film: the screen takes it. Anything else leaves the screen and the takes as they are.
+    const reshaped = next.format !== montage.format || next.width !== montage.width || next.height !== montage.height;
     montage = next;
     if (select !== undefined) chosen = select;
     if (chosen && !itemOf(chosen)) chosen = null;
@@ -170,7 +187,8 @@ export function setupMontage({
     if (saving) timers.clear(saving);
     saving = timers.set(() => void keep(), saveDelay);
     status = '';
-    draw();
+    if (reshaped) draw();
+    else update({ inspector: !sliding });
   }
   function lay(record, where = {}) {
     const id = newId(),
@@ -229,6 +247,11 @@ export function setupMontage({
       at = montage.plans.length ? planAt(montage, Math.min(head, Math.max(0, total() - 0.001))) : null,
       url = at ? outputOf(at.plan.source)?.originalUrl : null;
     blank.hidden = Boolean(url);
+    if (!url) {
+      const [title, text] = blank.children;
+      title.textContent = at ? 'Prise introuvable.' : 'Votre montage se lira ici.';
+      text.textContent = at ? 'Ce plan nomme une prise qui n’est plus dans le projet.' : 'Posez une première prise dans la timeline.';
+    }
     picture.hidden = !(url && at.plan.kind === 'image');
     video.hidden = !(url && at.plan.kind === 'video');
     media.caption.textContent = at ? `Plan ${at.index + 1}` + takeLabel(at.plan.source, ' · ') : '';
@@ -292,9 +315,11 @@ export function setupMontage({
   const live = {};
   function say() {
     if (live.clock) live.clock.textContent = clock(head);
+    if (live.whole) live.whole.textContent = ' / ' + clock(total());
     if (live.done) live.done.style.width = total() ? (100 * head) / total() + '%' : '0%';
     if (live.head) live.head.style.left = percent(head);
     if (live.play) {
+      live.play.disabled = !montage.plans.length;
       live.play.setAttribute('aria-label', playing ? 'Mettre en pause' : 'Lire le montage');
       if (live.play.dataset.playing !== String(Boolean(playing))) live.play.replaceChildren(icon(playing ? 'stop' : 'play'));
       live.play.dataset.playing = String(Boolean(playing));
@@ -409,10 +434,8 @@ export function setupMontage({
     // The frame has the shape of the film, as large as its block lets it be (moodix.css).
     frame.style.aspectRatio = `${montage.width} / ${montage.height}`;
     frame.style.setProperty?.('--ratio', String(montage.width / montage.height));
-    blank.append(
-      node('span', 'montage-blank-title', montage.plans.length ? 'Prise introuvable.' : 'Votre montage se lira ici.'),
-      node('span', 'montage-blank-text', montage.plans.length ? 'Ce plan nomme une prise qui n’est plus dans le projet.' : 'Posez une première prise dans la timeline.'),
-    );
+    // (What they say is written as the screen is shown: show.)
+    blank.append(node('span', 'montage-blank-title', ''), node('span', 'montage-blank-text', ''));
     Object.assign(video, { playsInline: true, preload: 'auto', hidden: true });
     Object.assign(picture, { alt: '', hidden: true });
     frame.append(blank, picture, video, caption);
@@ -421,13 +444,12 @@ export function setupMontage({
       const box = bar.getBoundingClientRect?.();
       if (box?.width) seek(((event.clientX - box.left) / box.width) * total());
     };
-    playButton.disabled = !montage.plans.length;
     transport.append(playButton, time, whole, bar);
     stage.append(frame);
     body.append(headRow, stage, transport);
     stop();
     media = { video, picture, blank, caption, sounds: new Map() };
-    Object.assign(live, { clock: time, done, play: playButton });
+    Object.assign(live, { clock: time, whole, done, play: playButton });
     return section;
   }
 
@@ -451,17 +473,25 @@ export function setupMontage({
       fill(Number(input.value));
       onset(Number(input.value));
     };
+    // Let go: the block is drawn again with what was kept (a bar pushed beyond what the take allows goes back).
+    input.onchange = () => update();
     box.append(input);
     return box;
   };
-  const readout = text => node('span', 'montage-figures', text);
 
   function inspector() {
     const { section, body } = block('is-settings', 'montage-inspector'),
       item = chosen ? itemOf(chosen) : null,
       // What is set scrolls in the block when the window is short; what is done stays in sight under it.
       rows = node('div', 'montage-rows'),
-      foot = node('div', 'montage-foot');
+      foot = node('div', 'montage-foot'),
+      // A figure of the block, said again while a bar is slid: the block itself stays under the hand.
+      readout = say => {
+        const out = node('span', 'montage-figures', say());
+        live.figures.push(() => (out.textContent = say()));
+        return out;
+      };
+    live.figures = [];
     section.setAttribute('aria-label', item ? 'Élément choisi' : 'Réglages du montage');
     if (!item) {
       const name = node('input', 'montage-name');
@@ -484,7 +514,7 @@ export function setupMontage({
       };
       const title = node('div', 'montage-title');
       title.append(node('span', 'montage-title-name', stored ? 'Montage' : 'Nouveau montage'), node('span', 'montage-title-meta', 'Enregistré avec le projet'));
-      rows.append(row('Nom', name), row('Format', format), row('Taille', size), row('Cadence', readout(montage.fps + ' i/s')));
+      rows.append(row('Nom', name), row('Format', format), row('Taille', size), row('Cadence', readout(() => montage.fps + ' i/s')));
       if (stored) foot.append(button('montage-action is-quiet', confirming ? 'Confirmer la suppression' : 'Supprimer ce montage', () => void remove()));
       body.append(title, rows, foot);
       return section;
@@ -494,19 +524,23 @@ export function setupMontage({
       sound = Boolean(item.track),
       index = sound ? -1 : montage.plans.indexOf(item),
       title = node('div', 'montage-title'),
-      set = changes => change(withItemChanged(montage, item.id, changes, { longest }));
+      set = (changes, how) => change(withItemChanged(montage, item.id, changes, { longest }), how),
+      // (0.6.138) A bar being slid: drawn again at each of its steps, as it was, the block took it
+      // out of the hand at the first one.
+      slide = changes => set(changes, { sliding: true }),
+      current = () => itemOf(item.id) ?? item;
     title.append(
       node('span', 'montage-title-name', (sound ? KINDS[item.track] : `Plan ${index + 1}`) + takeLabel(item.source, ' · ')),
       node('span', 'montage-title-meta', record ? [KINDS[sound ? item.track : item.kind], record.workflowName, longest ? shownSeconds(longest) + ' à l’origine' : ''].filter(Boolean).join(' · ') : 'Cette prise n’est plus dans le projet.'),
     );
     const top = Math.max(longest ?? 0, item.to, 0.2);
-    if (sound) rows.append(row('Début', slider('Début dans le film', item.at, 0, Math.max(total(), item.at, 1), 0.1, at => set({ at })), readout(figures(item.at))));
-    if (item.kind === 'image') rows.append(row('Durée', slider('Durée de l’image', item.to, 0.5, 20, 0.5, to => set({ to })), readout(figures(item.to))));
+    if (sound) rows.append(row('Début', slider('Début dans le film', item.at, 0, Math.max(total(), item.at, 1), 0.1, at => slide({ at })), readout(() => figures(current().at))));
+    if (item.kind === 'image') rows.append(row('Durée', slider('Durée de l’image', item.to, 0.5, 20, 0.5, to => slide({ to })), readout(() => figures(current().to))));
     else {
       rows.append(
-        row('Début gardé', slider('Début gardé', item.from, 0, top, 0.1, from => set({ from })), readout(figures(item.from))),
-        row('Fin gardée', slider('Fin gardée', item.to, 0, top, 0.1, to => set({ to })), readout(figures(item.to))),
-        row('Durée', readout(figures(item.to - item.from))),
+        row('Début gardé', slider('Début gardé', item.from, 0, top, 0.1, from => slide({ from })), readout(() => figures(current().from))),
+        row('Fin gardée', slider('Fin gardée', item.to, 0, top, 0.1, to => slide({ to })), readout(() => figures(current().to))),
+        row('Durée', readout(() => figures(current().to - current().from))),
       );
     }
     if (!sound) {
@@ -524,7 +558,7 @@ export function setupMontage({
     }
     if (item.kind !== 'image') {
       const volume = item.volume ?? 1;
-      rows.append(row(sound ? 'Volume' : 'Son du clip', slider(sound ? 'Volume' : 'Son du clip', Math.round(volume * 100), 0, 200, 5, value => set({ volume: value / 100 })), readout(Math.round(volume * 100) + ' %')));
+      rows.append(row(sound ? 'Volume' : 'Son du clip', slider(sound ? 'Volume' : 'Son du clip', Math.round(volume * 100), 0, 200, 5, value => slide({ volume: value / 100 })), readout(() => Math.round((current().volume ?? 1) * 100) + ' %')));
     }
     if (!sound) {
       const earlier = button('montage-step', '← Avant', () => change(withPlanMoved(montage, item.id, -1))),
@@ -551,6 +585,8 @@ export function setupMontage({
       starts = planStarts(montage),
       whole = span();
     section.setAttribute('aria-label', 'Timeline du montage');
+    // (It takes the keys when it is pressed: the space bar reads the film.)
+    section.tabIndex = -1;
     pick.setAttribute('aria-label', 'Montage ouvert');
     const named = [{ id: montage.id, name: montage.name }, ...list.filter(item => item.id !== montage.id)];
     for (const item of named) pick.append(Object.assign(node('option', '', item.name), { value: item.id, selected: item.id === montage.id }));
@@ -588,7 +624,11 @@ export function setupMontage({
       const box = lane.getBoundingClientRect?.();
       return box?.width ? Math.max(0, ((event.clientX - box.left) / box.width) * whole) : 0;
     };
-    ruler.onclick = event => seek(timeAt(event, ruler));
+    // The head goes where the ruler is pressed, and follows the pointer while it is held.
+    ruler.onpointerdown = event => {
+      seek(timeAt(event, ruler));
+      follow(event, ruler, { slack: 0, kind: '', move: (far, time) => seek(time) });
+    };
     for (const [id, name, invitation] of TRACKS) {
       const track = node('div', 'montage-track'),
         lane = node('div', 'montage-lane');
@@ -596,14 +636,17 @@ export function setupMontage({
       const items = id === 'plans' ? montage.plans : montage.sounds.filter(sound => sound.track === id);
       if (!items.length) lane.append(node('span', 'montage-invite', invitation));
       items.forEach(item => {
-        const at = id === 'plans' ? starts[montage.plans.indexOf(item)] : item.at,
+        // (While the start of a plan is cut, the plans stay where they were: only that edge moves.)
+        const at = id !== 'plans' ? item.at : ghost?.starts.has(item.id) ? ghost.starts.get(item.id) + (ghost.id === item.id ? ghost.shift : 0) : starts[montage.plans.indexOf(item)],
           record = recordOf(item.source),
           picture = id === 'plans' ? pictureOf(record) : '',
           label = id === 'plans' ? `${montage.plans.indexOf(item) + 1}${takeLabel(item.source, ' · ').toUpperCase()}` : (takeLabel(item.source) || KINDS[id]) + (record?.prompt ? ' · ' + String(record.prompt).split('\n')[0].slice(0, 60) : ''),
           piece = button('montage-piece' + (id === 'plans' ? '' : ' is-sound'), '', () => {
+            // (The click that ends a drag chooses nothing.)
+            if (slid) return void (slid = false);
             chosen = chosen === item.id ? null : item.id;
             confirming = false;
-            draw();
+            update();
           });
         piece.dataset.id = item.id;
         piece.dataset.missing = String(!record);
@@ -620,9 +663,61 @@ export function setupMontage({
           );
         piece.onkeydown = event => {
           if (event.key === 'Delete' || event.key === 'Backspace') change(withoutItem(montage, item.id));
+          // Alt and an arrow: the plan one place earlier or later, as its buttons do.
+          const step = event.altKey && id === 'plans' ? { ArrowLeft: -1, ArrowRight: 1 }[event.key] : 0;
+          if (step) change(withPlanMoved(montage, item.id, step), { select: item.id });
         };
+        // Dragged along its track: a plan takes its place among the others, a sound its moment.
+        piece.onpointerdown = event => {
+          const pressed = montage,
+            first = item.at,
+            // (What is dragged is chosen, even when it ends where it was.)
+            put = next => {
+              if (next === montage && chosen === item.id) return;
+              chosen = item.id;
+              confirming = false;
+              if (next === montage) update();
+              else change(next);
+            };
+          follow(event, lane, {
+            // A sound stops on a cut of the film when it is within a few pixels of one.
+            move: (far, time, perPixel) =>
+              put(
+                id === 'plans'
+                  ? withPlanAt(montage, item.id, placeAt(pressed, item.id, time))
+                  : withItemChanged(montage, item.id, { at: snapped(montage, first + far, Math.max(0.1, NEAR_PIXELS * perPixel)) }),
+              ),
+          });
+        };
+        // Its two edges: what is kept of the take, from its start (a clip) and to its end.
+        if (id === 'plans')
+          for (const edge of item.kind === 'image' ? ['end'] : ['start', 'end']) {
+            const grip = node('span', 'montage-grip is-' + edge);
+            grip.onpointerdown = event => {
+              event.stopPropagation?.();
+              const first = { from: item.from, to: item.to },
+                longest = record ? takeSeconds(record) : null,
+                before = new Map(montage.plans.map((plan, index) => [plan.id, starts[index]]));
+              follow(event, lane, {
+                slack: 2,
+                kind: 'trim',
+                move: far => {
+                  const next = withItemChanged(montage, item.id, edge === 'start' ? { from: first.from + far } : { to: first.to + far }, { longest });
+                  if (edge === 'start') ghost = { starts: before, id: item.id, shift: next.plans.find(plan => plan.id === item.id).from - first.from };
+                  chosen = item.id;
+                  if (next === montage) update();
+                  else change(next);
+                },
+              });
+            };
+            piece.append(grip);
+          }
         lane.append(piece);
       });
+      // A press on the lane itself, beside what it holds: the head goes there.
+      lane.onclick = event => {
+        if (event.target === lane) seek(timeAt(event, lane));
+      };
       lane.ondragover = event => {
         if (!carried) return;
         const fits = id === 'plans' ? ['video', 'image'].includes(trackOf(carried)) : trackOf(carried) === id;
@@ -651,10 +746,92 @@ export function setupMontage({
     return section;
   }
 
+  /**
+   * Follows the pointer pressed on `lane` (0.6.138): `move(far, time, perPixel)` as it goes, `far` how
+   * far it went and `time` where it is, both in seconds of the film at the scale the timeline had when
+   * it was pressed (`perPixel` seconds a pixel); `done()` once it is let go. `kind`: what is being done
+   * (« move », « trim »), said to the desk while it lasts. A press that does not move (`slack` pixels) is a click:
+   * nothing is called.
+   */
+  function follow(event, lane, { move, done = () => {}, slack = 4, kind = 'move' }) {
+    if (event.button > 0 || !page?.addEventListener) return;
+    const box = lane.getBoundingClientRect?.() ?? { left: 0, width: 0 },
+      scale = box.width ? span() / box.width : 0,
+      from = event.clientX;
+    let moved = false;
+    const onMove = now => {
+      const far = now.clientX - from;
+      if (!moved && Math.abs(far) < slack) return;
+      if (!moved) {
+        held = span();
+        // (Said to the desk: one cursor everywhere while it lasts, moodix.css.)
+        if (kind) root.dataset.held = kind;
+      }
+      moved = true;
+      move(far * scale, Math.max(0, (now.clientX - box.left) * scale), scale);
+    };
+    const heard = [
+      ['pointermove', onMove],
+      ['pointerup', onUp],
+      ['pointercancel', onUp],
+    ];
+    function onUp() {
+      for (const [type, listener] of heard) page.removeEventListener(type, listener);
+      if (!moved) return;
+      held = ghost = null;
+      delete root.dataset.held;
+      // The click the browser sends after a drag chooses nothing; without one (let go elsewhere), forgotten at once.
+      slid = true;
+      timers.set(() => (slid = false), 0);
+      done();
+      update();
+    }
+    for (const [type, listener] of heard) page.addEventListener(type, listener);
+  }
+
   function draw() {
     if (!root || !montage) return;
-    root.replaceChildren(takes(), screen(), inspector(), timeline());
+    const focused = page?.document?.activeElement,
+      inside = focused && focused !== root && root.contains?.(focused);
+    parts = { takes: takes(), screen: screen(), inspector: inspector(), timeline: timeline() };
+    root.replaceChildren(parts.takes, parts.screen, parts.inspector, parts.timeline);
+    if (inside) refocus(focused, root);
     show();
+  }
+  /**
+   * What a change of the montage alters (0.6.138): its timeline and what is chosen. The screen goes on
+   * with the clip it shows and the grid of the takes keeps its place: drawn again at every move of a
+   * hand, the clip started over and the grid went back to its top.
+   */
+  function update({ inspector: whole = true } = {}) {
+    if (!root || !montage) return;
+    if (!parts || !root.replaceChild) return draw();
+    const focused = page?.document?.activeElement;
+    for (const [name, make] of [
+      ['inspector', inspector],
+      ['timeline', timeline],
+    ]) {
+      if (name === 'inspector' && !whole) {
+        // (One of its bars is being slid: replaced under the hand, it would be let go.)
+        for (const say of live.figures ?? []) say();
+        continue;
+      }
+      const old = parts[name],
+        next = make();
+      root.replaceChild(next, old);
+      parts[name] = next;
+      if (focused && old.contains?.(focused)) refocus(focused, next);
+    }
+    show({ sync: false });
+  }
+  /**
+   * The focus put back on what replaces `was` in `part` (the same plan, the same control), else on the
+   * desk: what had it has just left the page, and the keys of the montage would no longer be heard.
+   */
+  function refocus(was, part) {
+    const key = item => item.dataset?.id || item.getAttribute?.('aria-label') || item.className + '|' + item.textContent,
+      again = [...(part.querySelectorAll?.(was.tagName) ?? [])].find(item => key(item) === key(was) && !item.disabled);
+    (again ?? root).focus?.({ preventScroll: true });
   }
 
   return {
@@ -662,6 +839,20 @@ export function setupMontage({
     desk(kinds = null) {
       kindsBar = kinds;
       root = node('div', 'studio-desk is-montage');
+      // (A press anywhere on the desk gives it the keys.)
+      root.tabIndex = -1;
+      parts = null;
+      // The space bar reads the film or pauses it, wherever nothing is being typed or pressed.
+      root.onkeydown = event => {
+        // (A plan, a sound or a take is a button too: Enter chooses it, the space bar reads the film.)
+        const { tagName, className } = event.target ?? {},
+          typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName) || (tagName === 'BUTTON' && !/\bmontage-(piece|take)\b/.test(className));
+        if (event.key === ' ' && !typing) {
+          event.preventDefault?.();
+          play();
+        } else if (event.key === 'Home' && !typing) seek(0);
+        else if (event.key === 'End' && !typing) seek(total());
+      };
       if (readFor !== project() || !montage) {
         montage = fresh();
         stored = false;
@@ -675,7 +866,8 @@ export function setupMontage({
     /** Leaving the mode or the page: nothing goes on playing, what is not kept yet is. */
     leave() {
       stop();
-      root = null;
+      root = parts = null;
+      held = ghost = null;
       return keep();
     },
     // For the tests and the pointer of a later step: what is on the page, and the hands that change it.

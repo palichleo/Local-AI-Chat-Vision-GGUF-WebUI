@@ -16,6 +16,11 @@ class Fake {
     this.children = [];
     this.append(...items);
   }
+  replaceChild(next, old) {
+    const at = this.children.indexOf(old);
+    assert.notEqual(at, -1, 'only a child is replaced');
+    this.children[at] = next;
+  }
   setAttribute(name, value) {
     this.attributes[name] = String(value);
   }
@@ -32,6 +37,15 @@ class Fake {
   getBoundingClientRect() {
     return { left: 0, width: 1000 };
   }
+  contains(other) {
+    return under(this).includes(other);
+  }
+  querySelectorAll(tag) {
+    return under(this).slice(1).filter(item => item.tagName === tag);
+  }
+  focus() {
+    shown.activeElement = this;
+  }
   pause() {
     this.paused = true;
   }
@@ -40,6 +54,8 @@ class Fake {
     return Promise.resolve();
   }
 }
+// The document of the page: what has the keys.
+const shown = { activeElement: null };
 const under = root => [root, ...root.children.flatMap(child => under(child))];
 const find = (root, name) => under(root).filter(item => String(item.className).split(' ').includes(name));
 const settle = () => new Promise(done => setImmediate(done));
@@ -85,8 +101,12 @@ function setup({ stored = [], fail = {} } = {}) {
     if (found) return { json: async () => found };
     throw new Error('Ce montage n’existe plus.');
   };
-  const notices = [];
+  const notices = [],
+    heard = new Map(),
+    page = { document: shown, addEventListener: (type, listener) => heard.set(type, listener), removeEventListener: type => heard.delete(type) };
+  shown.activeElement = null;
   const ui = setupMontage({
+    page,
     api,
     node: (tag, className, text) => new Fake(tag, className, text),
     icon: name => new Fake('svg', 'icon-' + name),
@@ -109,6 +129,10 @@ function setup({ stored = [], fail = {} } = {}) {
     kept,
     saves: () => calls.filter(call => call.route === 'montages/save'),
     refreshed: () => refreshed,
+    // The pointer once pressed on the timeline: moved to `clientX`, let go; how many listeners are left.
+    pointer: { move: clientX => heard.get('pointermove')?.({ clientX }), up: () => heard.get('pointerup')?.({}), held: () => heard.size },
+    press: (target, clientX) => target.onpointerdown({ clientX, button: 0, stopPropagation() {} }),
+    focused: () => shown.activeElement,
     /** Runs what waits (a save a moment after a change, the next tick of the film) and lets it finish. */
     async later({ ms = 0 } = {}) {
       clock += ms;
@@ -120,7 +144,7 @@ function setup({ stored = [], fail = {} } = {}) {
     said: name => find(f.root, name).map(item => item.textContent),
     plans: () => find(f.root, 'montage-piece').filter(piece => !piece.className.includes('is-sound')),
     slider: label => find(f.root, 'montage-range').find(input => input.attributes['aria-label'] === label),
-    press: label => find(f.root, 'montage-action').concat(find(f.root, 'montage-step'), find(f.root, 'montage-choice')).find(control => control.textContent === label),
+    button: label => find(f.root, 'montage-action').concat(find(f.root, 'montage-step'), find(f.root, 'montage-choice')).find(control => control.textContent === label),
   };
   f.open = async () => {
     f.root = ui.desk(new Fake('div', 'kind-tabs'));
@@ -192,22 +216,22 @@ test('a plan chosen is cut, framed, moved and taken out from its settings (0.6.1
   // Never beyond the take itself.
   Object.assign(f.slider('Fin gardée'), { value: '99' }).oninput();
   assert.equal(f.ui.state().montage.plans[0].to, 5);
-  f.press('Remplir').onclick();
-  assert.deepEqual([f.ui.state().montage.plans[0].frame, f.press('Remplir').attributes['aria-pressed'], f.press('Ajuster').attributes['aria-pressed']], ['fill', 'true', 'false']);
+  f.button('Remplir').onclick();
+  assert.deepEqual([f.ui.state().montage.plans[0].frame, f.button('Remplir').attributes['aria-pressed'], f.button('Ajuster').attributes['aria-pressed']], ['fill', 'true', 'false']);
   Object.assign(f.slider('Son du clip'), { value: '40' }).oninput();
   assert.equal(f.ui.state().montage.plans[0].volume, 0.4);
   // First of the film: nothing before it; moved after the next, it stays the one chosen.
-  assert.deepEqual([f.press('← Avant').disabled, f.press('Après →').disabled], [true, false]);
-  f.press('Après →').onclick();
+  assert.deepEqual([f.button('← Avant').disabled, f.button('Après →').disabled], [true, false]);
+  f.button('Après →').onclick();
   assert.deepEqual(f.plans().map(piece => piece.textContent.slice(0, 11)), ['1 · PRISE 2', '2 · PRISE 1', '3 · PRISE 3']);
   assert.deepEqual(f.said('montage-title-name'), ['Plan 2 · Prise 1']);
-  f.press('Ouvrir la prise').onclick();
+  f.button('Ouvrir la prise').onclick();
   assert.deepEqual(f.calls.at(-1), { route: 'open', body: id(1) });
   // An image has a length and a frame only.
   f.plans()[2].onclick();
   assert.deepEqual(f.said('montage-row-name'), ['Durée', 'Cadre', 'Place']);
   // Taken out by its button, or by the key on the plan itself: the others close the gap, nothing is chosen.
-  f.press('Retirer').onclick();
+  f.button('Retirer').onclick();
   f.plans()[0].onkeydown({ key: 'Delete' });
   assert.deepEqual([f.plans().map(piece => piece.textContent.slice(0, 11)), f.ui.state().chosen, f.said('montage-title-name')], [['1 · PRISE 1'], null, ['Nouveau montage']]);
   // All of it kept once, a moment after the last change.
@@ -246,6 +270,186 @@ test('a take dragged to the timeline is laid where it is dropped (0.6.137)', asy
   assert.equal(f.plans().length, 4);
 });
 
+test('a plan is stretched by its edges and moved by dragging it; a change leaves the screen as it is (0.6.138)', async () => {
+  // (His request of 20/11, « studio montage : améliore »: the length was set at the right only, the
+  // order by two buttons, and every change drew the screen and the takes again.)
+  const f = await setup().open();
+  for (const at of [0, 1]) f.get('montage-take')[at].ondblclick();
+  const grips = () => find(f.root, 'montage-grip'),
+    plan = at => f.ui.state().montage.plans[at],
+    places = () => f.plans().map(piece => [piece.style.left, piece.style.width]),
+    [screen] = f.get('montage-screen'),
+    [takes] = f.get('montage-takes');
+  assert.deepEqual(grips().map(grip => grip.className), ['montage-grip is-start', 'montage-grip is-end', 'montage-grip is-start', 'montage-grip is-end']);
+  // The end of the first plan (5 s of 10 on a lane of 1000: a second is 100): a pixel is no drag;
+  // a hundred to the left take a second off, and the plan after it follows.
+  // (The other buttons of the mouse pull nothing.)
+  grips()[1].onpointerdown({ clientX: 500, button: 2, stopPropagation() {} });
+  assert.equal(f.pointer.held(), 0);
+  f.press(grips()[1], 500);
+  f.pointer.move(499);
+  assert.equal(plan(0).to, 5);
+  assert.equal(f.root.dataset.held, undefined);
+  f.pointer.move(400);
+  assert.deepEqual([plan(0).to, places()], [4, [['0%', 'calc(40% - 4px)'], ['40%', 'calc(30% - 4px)']]]);
+  assert.equal(f.root.dataset.held, 'trim', 'said to the desk while it lasts: one cursor everywhere');
+  assert.deepEqual(f.said('montage-title-name'), ['Plan 1 · Prise 1']);
+  // Never beyond the take itself, whatever the pointer does; let go, nothing listens any more.
+  f.pointer.move(900);
+  assert.equal(plan(0).to, 5);
+  f.pointer.move(380);
+  f.pointer.up();
+  assert.deepEqual([plan(0).to, f.pointer.held(), f.root.dataset.held], [3.8, 0, undefined]);
+  // The start of the second plan: its edge follows the pointer while it is cut, the plan before it
+  // stays; let go, the film closes the gap.
+  f.press(grips()[2], 380);
+  f.pointer.move(480);
+  assert.deepEqual([plan(1).from, plan(1).to, places()], [1, 3, [['0%', 'calc(38% - 4px)'], ['48%', 'calc(20% - 4px)']]]);
+  f.pointer.up();
+  assert.deepEqual(places(), [['0%', 'calc(38% - 4px)'], ['38%', 'calc(20% - 4px)']]);
+  // The click the browser sends after a drag chooses nothing: the plan cut is still the one chosen.
+  f.plans()[1].onclick();
+  assert.equal(f.ui.state().chosen, plan(1).id);
+  await f.later();
+  assert.equal(f.saves().length, 1, 'kept once, a moment after the last of them');
+  // Dragged past the middle of the other, a plan takes its place; a few pixels are a click, not a move.
+  const [first, second] = [plan(0).id, plan(1).id];
+  f.press(f.plans()[0], 100);
+  f.pointer.move(103);
+  f.pointer.up();
+  assert.deepEqual([plan(0).id, plan(1).id, f.ui.state().chosen], [first, second, second]);
+  // Pressed near its end and moved a little, it stays where it is, and is the one chosen: its place
+  // is read on the film as it was when it was pressed (3,8 s then 2 s: the middle to pass is at 4,8 s).
+  f.press(f.plans()[0], 370);
+  f.pointer.move(378);
+  assert.deepEqual([plan(0).id, plan(1).id, f.ui.state().chosen, f.plans()[0].attributes['aria-pressed']], [first, second, first, 'true']);
+  f.pointer.move(470);
+  assert.deepEqual([plan(0).id, plan(1).id], [first, second]);
+  f.pointer.move(490);
+  assert.deepEqual([plan(0).id, plan(1).id], [second, first]);
+  f.pointer.move(470);
+  f.pointer.up();
+  assert.deepEqual([plan(0).id, plan(1).id], [first, second]);
+  f.press(f.plans()[0], 100);
+  f.pointer.move(520);
+  assert.deepEqual([plan(0).id, plan(1).id, f.ui.state().chosen, f.root.dataset.held], [second, first, first, 'move']);
+  f.pointer.move(60);
+  assert.deepEqual([plan(0).id, plan(1).id], [first, second]);
+  f.pointer.up();
+  // Alt and an arrow move it too, from the keyboard.
+  f.plans()[0].onkeydown({ key: 'ArrowRight', altKey: true });
+  assert.deepEqual([plan(0).id, plan(1).id], [second, first]);
+  f.plans()[1].onkeydown({ key: 'ArrowRight', altKey: false });
+  assert.deepEqual([plan(0).id, plan(1).id], [second, first]);
+  // Through all of it the screen and the grid of the takes are the ones first drawn: the clip on the
+  // screen did not start over, the grid did not go back to its top. Another shape of film draws them again.
+  assert.equal(f.get('montage-screen')[0], screen);
+  assert.equal(f.get('montage-takes')[0], takes);
+  f.plans()[1].onclick();
+  f.plans()[1].onclick();
+  Object.assign(f.get('montage-select')[0], { value: '1:1' }).onchange();
+  assert.notEqual(f.get('montage-screen')[0], screen);
+  assert.equal(f.get('montage-frame')[0].style.aspectRatio, '1024 / 1024');
+});
+
+test('a bar of the settings stays in the hand while it is slid; let go, the block says what was kept (0.6.138)', async () => {
+  // (Found on 20/11 while reading 0.6.137 again: the block was drawn again at each step of a bar,
+  // and the bar taken out of the hand that was sliding it.)
+  const f = await setup().open();
+  f.get('montage-take')[0].ondblclick();
+  const [block] = f.get('montage-inspector'),
+    end = f.slider('Fin gardée'),
+    start = f.slider('Début gardé'),
+    plan = () => f.ui.state().montage.plans[0];
+  Object.assign(end, { value: '2' }).oninput();
+  Object.assign(end, { value: '1.5' }).oninput();
+  assert.deepEqual([f.get('montage-inspector')[0], f.slider('Fin gardée')], [block, end]);
+  // What it says follows, and the timeline with it.
+  assert.deepEqual([plan().to, f.said('montage-figures').slice(0, 3)], [1.5, ['00.0 S', '01.5 S', '01.5 S']]);
+  assert.deepEqual([f.plans().map(piece => piece.style.width), f.said('montage-piece-length'), f.said('montage-summary')], [['calc(15% - 4px)'], ['1,5 s'], ['1 plan · 1,5 s · 16:9 · 24 i/s']]);
+  // The start pushed past the end: a tenth of a second is kept; the bar is where the hand has it
+  // until it is let go, then where what was kept is.
+  Object.assign(start, { value: '4' }).oninput();
+  assert.deepEqual([plan().from, start.value, f.said('montage-figures').slice(0, 3)], [1.4, '4', ['01.4 S', '01.5 S', '00.1 S']]);
+  start.focus();
+  start.onchange();
+  assert.notEqual(f.get('montage-inspector')[0], block);
+  assert.deepEqual([f.slider('Début gardé').value, f.focused()], ['1.4', f.slider('Début gardé')]);
+  Object.assign(f.slider('Son du clip'), { value: '40' }).oninput();
+  assert.deepEqual([plan().volume, f.said('montage-figures').at(-1)], [0.4, '40 %']);
+  await f.later();
+  assert.equal(f.saves().length, 1);
+});
+
+test('the keys stay with the montage: what is drawn again under the focus gets it back (0.6.138)', async () => {
+  // (A plan clicked was drawn again and left the page with the focus: the next key went nowhere.)
+  const f = await setup().open();
+  for (const at of [0, 1, 2]) f.get('montage-take')[at].ondblclick();
+  const plan = at => f.ui.state().montage.plans[at],
+    first = plan(0).id,
+    pressed = f.plans()[0];
+  pressed.focus();
+  pressed.onclick();
+  assert.notEqual(f.plans()[0], pressed);
+  assert.equal(f.focused(), f.plans()[0]);
+  // Alt and an arrow, twice: the plan goes on with the focus as it moves.
+  for (const place of [1, 2]) {
+    f.focused().onkeydown({ key: 'ArrowRight', altKey: true });
+    assert.deepEqual([plan(place).id, f.focused()], [first, f.plans()[place]]);
+  }
+  // A button of its settings is drawn again with them: the same button has the focus; one that
+  // can no longer be pressed leaves it to the desk, which hears the keys of the montage.
+  const earlier = f.button('← Avant');
+  earlier.focus();
+  earlier.onclick();
+  assert.notEqual(f.button('← Avant'), earlier);
+  assert.deepEqual([plan(1).id, f.focused()], [first, f.button('← Avant')]);
+  f.focused().onclick();
+  assert.deepEqual([plan(0).id, f.button('← Avant').disabled, f.focused()], [first, true, f.root]);
+  // Taken out with its key, a plan leaves the focus to the desk too.
+  f.plans()[0].focus();
+  f.plans()[0].onkeydown({ key: 'Delete' });
+  assert.deepEqual([f.plans().length, f.focused()], [2, f.root]);
+  // What is not drawn again keeps it: a take of the grid, while the timeline changes.
+  const [tile] = f.get('montage-take');
+  tile.focus();
+  f.plans()[0].onclick();
+  assert.equal(f.focused(), tile);
+  // Everything drawn again (another kind of takes shown): the same filter has it.
+  const filter = f.get('montage-filter')[1];
+  filter.focus();
+  filter.onclick();
+  assert.notEqual(f.get('montage-filter')[1], filter);
+  assert.equal(f.focused(), f.get('montage-filter')[1]);
+});
+
+test('a sound slides along its track, and stops on a cut of the film when it is near one (0.6.138)', async () => {
+  const f = await setup().open();
+  f.get('montage-take')[0].ondblclick();
+  f.get('montage-take')[3].ondblclick();
+  const sound = () => f.ui.state().montage.sounds[0],
+    piece = () => find(f.root, 'is-sound')[0];
+  // Thirty seconds of music on a lane of 1000: a hundred pixels are three seconds.
+  f.press(piece(), 10);
+  f.pointer.move(110);
+  assert.deepEqual([sound().at, piece().style.left], [3, '10%']);
+  // Near the end of the only plan (5 s): on it. Near is eight pixels of the timeline, here a quarter
+  // of a second; further, it is where the pointer is.
+  f.pointer.move(175);
+  assert.equal(sound().at, 5);
+  f.pointer.move(169);
+  assert.equal(sound().at, 5);
+  f.pointer.move(160);
+  assert.equal(sound().at, 4.5);
+  f.pointer.move(-400);
+  assert.equal(sound().at, 0);
+  f.pointer.up();
+  assert.deepEqual([f.ui.state().chosen, f.said('montage-title-name')], [sound().id, ['Musique · Prise 4']]);
+  // An image has one edge to pull: its length.
+  f.get('montage-take')[2].ondblclick();
+  assert.deepEqual(find(f.plans()[1], 'montage-grip').map(grip => grip.className), ['montage-grip is-end']);
+});
+
 test('the film is read on the screen: the head moves, each plan is shown in its turn, it stops at the end (0.6.137)', async () => {
   const f = await setup().open();
   for (const at of [1, 2]) f.get('montage-take')[at].ondblclick();
@@ -271,9 +475,46 @@ test('the film is read on the screen: the head moves, each plan is shown in its 
   // A click on the bar or on the ruler puts the head there.
   f.get('montage-bar')[0].onclick({ clientX: 500 });
   assert.equal(f.ui.state().head, 3);
-  f.get('montage-ruler')[0].onclick({ clientX: 100 });
+  f.press(f.get('montage-ruler')[0], 100);
   assert.equal(f.ui.state().head, 1);
   assert.deepEqual([video.hidden, video.currentTime], [false, 1]);
+  // (0.6.138) Held, the head follows the pointer along the ruler, until it is let go.
+  f.pointer.move(250);
+  assert.deepEqual([f.ui.state().head, video.currentTime, find(f.root, 'montage-playhead')[0].style.left], [2.5, 2.5, '25%']);
+  f.pointer.move(450);
+  assert.deepEqual([f.ui.state().head, picture.hidden], [4.5, false]);
+  f.pointer.up();
+  assert.equal(f.pointer.held(), 0);
+  // A press on a lane beside what it holds puts the head there too; the space bar reads the film
+  // from anywhere in the montage, except where a key is typed or a button pressed.
+  const [lane] = f.get('montage-lane');
+  lane.onclick({ clientX: 800, target: lane });
+  assert.equal(f.ui.state().head, 6);
+  lane.onclick({ clientX: 100, target: f.plans()[0] });
+  assert.equal(f.ui.state().head, 6);
+  const key = (name, tagName, className) => f.root.onkeydown({ key: name, target: { tagName, className }, preventDefault() {} });
+  key('Home', 'DIV');
+  assert.equal(f.ui.state().head, 0);
+  key(' ', 'INPUT');
+  key(' ', 'BUTTON');
+  key(' ', 'BUTTON', 'montage-action is-quiet');
+  assert.equal(f.ui.state().playing, false);
+  key(' ', 'SECTION');
+  assert.equal(f.ui.state().playing, true);
+  key(' ', 'DIV');
+  assert.equal(f.ui.state().playing, false);
+  // A plan, a sound, a take: buttons too, but the space bar reads the film there (Enter chooses).
+  key(' ', 'BUTTON', 'montage-piece');
+  assert.equal(f.ui.state().playing, true);
+  key(' ', 'BUTTON', 'montage-piece is-sound');
+  assert.equal(f.ui.state().playing, false);
+  key(' ', 'BUTTON', 'montage-take');
+  assert.equal(f.ui.state().playing, true);
+  key(' ', 'BUTTON', 'montage-take');
+  assert.equal(f.ui.state().playing, false);
+  assert.equal(f.root.tabIndex, -1, 'a press anywhere on the desk gives it the keys');
+  key('End', 'DIV');
+  assert.equal(f.ui.state().head, 6);
 });
 
 test('« Exporter le film » keeps the montage, asks for its film and says the take it became (0.6.137)', async () => {
@@ -332,9 +573,9 @@ test('the montage of the project is found again; its name, its format, another o
   Object.assign(f.get('montage-pick')[0], { value: id(900) });
   await f.get('montage-pick')[0].onchange();
   assert.equal(f.ui.state().montage.name, 'Aube');
-  f.press('Supprimer ce montage').onclick();
+  f.button('Supprimer ce montage').onclick();
   assert.equal(f.calls.some(call => call.route === 'montages/remove'), false);
-  f.press('Confirmer la suppression').onclick();
+  f.button('Confirmer la suppression').onclick();
   await settle();
   await settle();
   assert.deepEqual(f.calls.find(call => call.route === 'montages/remove').body, { project: 'inbox', id: id(900) });

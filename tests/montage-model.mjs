@@ -6,13 +6,16 @@ import {
   clock,
   montageSeconds,
   montageSummary,
+  placeAt,
   planAt,
   planStarts,
   shownSeconds,
+  snapped,
   takeSeconds,
   trackOf,
   usualSize,
   withItemChanged,
+  withPlanAt,
   withPlanMoved,
   withTake,
   withoutItem,
@@ -68,6 +71,24 @@ test('plans follow one another: their starts, the one under the head, the length
   assert.deepEqual(withPlanMoved(montage, id(13), -1).plans.map(plan => plan.id), [id(11), id(13), id(12)]);
   assert.deepEqual(withPlanMoved(montage, id(11), 1).plans.map(plan => plan.id), [id(12), id(11), id(13)]);
   for (const [which, step] of [[id(11), -1], [id(13), 1], [id(99), 1]]) assert.equal(withPlanMoved(montage, which, step), montage);
+  // (0.6.138) Dragged along the timeline: the place it takes among the others is after those whose
+  // middle (2,5 s, 6,5 s, 10 s) the pointer has passed, on the film as it was when it was pressed. A
+  // long plan pressed near its end stays where it is until then: read with the others closing the
+  // gap it leaves, it went after its neighbour at the first move (1,6 s was past « its middle »).
+  assert.deepEqual([0, 1.6, 4.9, 6.4, 6.6, 9.9, 10.1, 99].map(at => placeAt(montage, id(11), at)), [0, 0, 0, 0, 1, 1, 2, 2]);
+  assert.deepEqual([0, 2.4, 2.6, 7.9, 9.9, 10.1].map(at => placeAt(montage, id(12), at)), [0, 0, 1, 1, 1, 2]);
+  assert.deepEqual([0, 2.4, 2.6, 6.4, 6.6, 11].map(at => placeAt(montage, id(13), at)), [0, 0, 1, 1, 2, 2]);
+  // (Where it is pressed, it is at its own place: nothing moves before the pointer does.)
+  for (const [which, at, place] of [[id(11), 4.99, 0], [id(12), 5, 1], [id(12), 7.99, 1], [id(13), 8, 2]]) assert.equal(placeAt(montage, which, at), place);
+  assert.deepEqual(withPlanAt(montage, id(11), 2).plans.map(plan => plan.id), [id(12), id(13), id(11)]);
+  assert.deepEqual(withPlanAt(montage, id(13), 0).plans.map(plan => plan.id), [id(13), id(11), id(12)]);
+  assert.deepEqual(withPlanAt(montage, id(12), 99).plans.map(plan => plan.id), [id(11), id(13), id(12)]);
+  for (const [which, index] of [[id(11), 0], [id(12), 1], [id(13), 2], [id(99), 0]]) assert.equal(withPlanAt(montage, which, index), montage);
+  // A sound dragged near a cut of the film (5 s, 8 s), near its start (0) or its end (12), starts on
+  // it; else where it is, to the tenth of a second, never before the film. How near: the timeline says.
+  assert.deepEqual([0.15, 4.85, 5.15, 5.26, 7.9, 11.85, 12.1, 3.14, -2].map(at => snapped(montage, at)), [0, 5, 5, 5.3, 8, 12, 12, 3.1, 0]);
+  assert.deepEqual([4.6, 5.45, 5.57].map(at => snapped(montage, at, 0.5)), [5, 5, 5.6]);
+  assert.deepEqual([4.96, 4.94].map(at => snapped(montage, at, 0.05)), [5, 4.9]);
   // Taken out: the others close the gap.
   const without = withoutItem(montage, id(12));
   assert.deepEqual([without.plans.map(plan => plan.id), planStarts(without), montageSeconds(without)], [[id(11), id(13)], [0, 5], 9]);

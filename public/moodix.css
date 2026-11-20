@@ -17490,6 +17490,7 @@ body:not([data-view='studio']) .ai-cursor {
   height: 24px;
   margin: 0 22px 0 104px;
   cursor: pointer;
+  touch-action: none;
 }
 .montage-ruler::before {
   content: '';
@@ -17543,6 +17544,8 @@ body:not([data-view='studio']) .ai-cursor {
   position: relative;
   height: 26px;
   border-radius: 9px;
+  /* (Un son tiré au-delà de la fin de la timeline ne sort pas de son bloc.) */
+  overflow: hidden;
 }
 .montage-track[data-track='plans'] > .montage-lane {
   height: 100%;
@@ -17587,9 +17590,84 @@ body:not([data-view='studio']) .ai-cursor {
 }
 .montage-piece[aria-pressed='true'] {
   border-color: var(--ink);
-  box-shadow:
-    inset 5px 0 0 var(--ink),
-    inset -5px 0 0 var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+/* (0.6.138) Ce qui se saisit sur la timeline : un plan ou un son par son milieu, pour le déplacer ;
+   un plan par ses bords, pour garder plus ou moins de sa prise. Les bords d'un plan choisi sont
+   pleins : ce sont eux qu'on tire (une image n'en a qu'un, sa durée). */
+.montage-piece {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  /* Un plan raccourci jusqu'à ne plus tenir ses mots n'en garde que ce qui tient : sa durée, puis rien. */
+  container-type: inline-size;
+}
+@container (max-width: 104px) {
+  .montage-piece-kind {
+    display: none;
+  }
+}
+@container (max-width: 50px) {
+  .montage-piece-length {
+    display: none;
+  }
+}
+.montage-piece:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -4px;
+}
+.montage-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: min(10px, 30%);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.montage-grip.is-start {
+  left: 0;
+}
+.montage-grip.is-end {
+  right: 0;
+}
+.montage-grip::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 14px;
+  margin: -7px 0 0 -1px;
+  border-radius: 1px;
+  background: var(--ink);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.montage-piece:hover > .montage-grip::before {
+  opacity: 0.8;
+}
+.montage-piece[aria-pressed='true'] > .montage-grip {
+  width: min(7px, 30%);
+  background: var(--ink);
+}
+.montage-piece[aria-pressed='true'] > .montage-grip::before {
+  background: #0c0b0f;
+  opacity: 0.75;
+}
+/* Pendant qu'on tire : le même curseur partout, et aucun texte sélectionné au passage. */
+.studio-desk.is-montage[data-held] {
+  user-select: none;
+}
+.studio-desk.is-montage[data-held='move'] * {
+  cursor: grabbing !important;
+}
+.studio-desk.is-montage[data-held='trim'] * {
+  cursor: ew-resize !important;
+}
+/* Le bureau et la timeline prennent les touches (Espace : lire) sans se cerner d'un trait. */
+.studio-desk.is-montage:focus,
+.montage-timeline:focus {
+  outline: none;
 }
 .montage-piece[data-missing='true'] {
   border-style: dashed;
