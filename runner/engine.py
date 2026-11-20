@@ -170,6 +170,14 @@ def frames(params, config):
     return dict(frames=sample(target, count, side))
 
 
+def assemble(params, config, progress):
+    """A film made of takes of the outputs, plans end to end with their sounds (runner.video.montage,
+    0.6.136): no model, no video memory. Returns what a generation returns."""
+    from runner.video import montage
+
+    return montage.assemble(params, validate_config(config), progress)
+
+
 def unload():
     """Everything the worker keeps between generations leaves RAM and VRAM: the model files
     held in RAM (and pinned for fast transfers), then the GPU allocator's cache."""

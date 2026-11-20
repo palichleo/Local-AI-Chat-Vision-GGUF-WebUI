@@ -7,7 +7,7 @@ import threading
 
 from runner import warm
 from runner.contracts import fields
-from runner.engine import capabilities, diagnostics, frames, generate, preflight, release, unload
+from runner.engine import assemble, capabilities, diagnostics, frames, generate, preflight, release, unload
 from runner.models.headers import unique_object
 
 MAX_LINE = 1024 * 1024
@@ -70,11 +70,12 @@ def serve(config, source=None, destination=None):
                 ):
                     request_id = None
                     raise ValueError('Invalid request id')
-                if method not in ('diagnostics', 'preflight', 'generate', 'frames', 'release', 'unload', 'shutdown'):
+                known = ('diagnostics', 'preflight', 'generate', 'frames', 'assemble', 'release', 'unload', 'shutdown')
+                if method not in known:
                     raise ValueError('Unsupported worker method')
                 if not isinstance(params, dict):
                     raise ValueError('Worker params must be an object')
-                if method not in ('preflight', 'generate', 'frames', 'release') and params:
+                if method not in ('preflight', 'generate', 'frames', 'assemble', 'release') and params:
                     raise ValueError('This method accepts no parameters')
 
                 def progress(**data):
@@ -92,6 +93,8 @@ def serve(config, source=None, destination=None):
                         result = generate(params, config, progress)
                     elif method == 'frames':
                         result = frames(params, config)
+                    elif method == 'assemble':
+                        result = assemble(params, config, progress)
                     elif method == 'unload':
                         result = unload()
                     elif params:

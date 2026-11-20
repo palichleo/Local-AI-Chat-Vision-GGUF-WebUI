@@ -56,6 +56,8 @@ import { generatedMedia } from './lib/generated-media.mjs';
 import { validateNativeWorkflow } from './lib/native-workflows.mjs';
 import { ProgressHistory } from './lib/generation-progress.mjs';
 import { StudioPresets } from './lib/studio-presets.mjs';
+import { Montages } from './lib/montages.mjs';
+import { exportMontage, takeFiles } from './lib/montage-export.mjs';
 import { STUDIO_ID, STUDIO_VERBS, enrichedPrompt, enrichMessages } from './lib/studio.mjs';
 import { LlamaBuilds } from './lib/llama-builds.mjs';
 import { Takes, numbered, takesToOutputs } from './lib/takes.mjs';
@@ -389,6 +391,8 @@ export async function createApplication({
   const projects = new Projects(join(dataDir, 'projects.json'));
   // « Enregistrer » of the Studio: the settings kept per model, apart from the workflows.
   const studioPresets = new StudioPresets(join(dataDir, 'studio-presets.json'));
+  // (0.6.136) The montages of the projects: films laid by hand from their takes (lib/montages.mjs).
+  const montages = new Montages({ dir: join(dataDir, 'montages') });
   const attachmentUrl = (conversationId, file) =>
     `/media/attachments/${conversationId}/${file}?key=${mediaKey(conversationId + '/' + file, 'attachment')}`;
   /** A session taken back: each attached image links to its stored file, as in a conversation read from the history. */
@@ -1322,6 +1326,13 @@ export async function createApplication({
       }
       // The Sortie of the Studio: the creations of every conversation of a project, the newest
       // first, the open one too (even before it is saved). Without the history, the open one alone.
+      // (0.6.136) The montages of a project, then one of them by its identifier.
+      if (req.method === 'GET' && path.startsWith('/api/montages/')) {
+        const [project, id, more] = path.slice('/api/montages/'.length).split('/').map(decodeURIComponent);
+        if (more !== undefined) throw problem('Montage introuvable.', 404);
+        if (id === undefined) return send(200, { montages: await montages.list(project) });
+        return send(200, await montages.read(project, id));
+      }
       if (req.method === 'GET' && path.startsWith('/api/project-gallery/')) {
         const project = projectId(decodeURIComponent(path.slice('/api/project-gallery/'.length))),
           open = requestURL.searchParams.get('conversation'),
@@ -1424,6 +1435,36 @@ export async function createApplication({
       }
       if (req.method !== 'POST') throw problem('Méthode non prise en charge.', 405);
       const body = await jsonBody(req, path === '/api/updates/install' ? 40 * 1024 * 1024 : maxBody);
+      // (0.6.136) A montage kept, set aside, or made into its film: a take of the conversation it is
+      // asked from, assembled by the engine from the takes of its project.
+      if (path === '/api/montages/save') return send(200, await montages.save(body.project, body.montage));
+      if (path === '/api/montages/remove') return send(200, await montages.remove(body.project, body.id));
+      if (path === '/api/montages/export') {
+        if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
+        const project = projectId(body.project),
+          montage = await montages.read(project, body.id),
+          conversationId = body.conversation;
+        if (typeof conversationId !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(conversationId))
+          throw problem('Conversation du film invalide.');
+        // The film is a take of its project: kept in a conversation of that project, numbered there.
+        const known = await history.projectOf(conversationId).catch(() => null);
+        if (known && known !== project) throw problem('Cette conversation est d’un autre projet que ce montage.', 409);
+        if (!known && conversationId !== STUDIO_ID) namedProjects.set(conversationId, project);
+        const record = await exportMontage({
+          montage,
+          conversationId,
+          fileOf: takeFiles({
+            project,
+            gallery,
+            pathOf: async source => (await generatedFile(outputDir, source)).path,
+            projectOf: projectFor,
+          }),
+          assemble: (request, options) => generation.assembleFilm(request, options),
+          gallery,
+          persist: preferences.saveHistory,
+        });
+        return send(200, galleryView(record));
+      }
       // The files of a shipped workflow: downloaded in the background, followed with GET /api/downloads.
       if (path === '/api/downloads/start') {
         if (closing || relaunching) throw problem('L’application est en cours de fermeture.', 409);
