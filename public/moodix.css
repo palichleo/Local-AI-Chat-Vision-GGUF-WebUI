@@ -19490,3 +19490,26 @@ body[data-view='bobine'] .chat-panel {
   overflow-y: auto;
   scrollbar-width: thin;
 }
+/* (Un son court : son nom s’arrête avant son volume, à droite ; il ne passe plus dessous.) */
+#bobine-view .montage-piece.is-sound > .montage-piece-name {
+  max-width: calc(100% - 74px);
+}
+/* (Le texte d’une prise à créer, entier jusqu’à quatre lignes : il grandit avec lui, jamais une ligne coupée en deux.) */
+#bobine-view .bobine-desk textarea.bobine-line-words {
+  field-sizing: content;
+  height: auto;
+  min-height: calc(2lh + 18px);
+  max-height: calc(4lh + 18px);
+}
+/* (Ce que montre l’aperçu, « PRISE 4 », « À CRÉER · SUITE DE LA PRISE 5 » : sur la plaque sombre des étiquettes, captures 70 et 83.) */
+#bobine-view .montage-caption {
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(10, 10, 12, 0.72);
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-shadow: none;
+}
+#bobine-view .montage-caption:empty {
+  display: none;
+}
