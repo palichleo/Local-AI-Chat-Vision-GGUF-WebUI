@@ -19530,10 +19530,13 @@ body[data-view='bobine'] .chat-panel {
 #bobine-view .bobine-line[data-linked='true'] {
   box-shadow: inset 0 0 0 1px rgba(238, 232, 222, 0.32);
 }
-/* La barre d’une prise trop étroite pour ses emplacements de photo : dans la prise, en bas, sous son texte. */
+/* La barre d’une prise trop étroite pour ses emplacements de photo : dans la prise, en bas à gauche, sous
+   son texte et loin de sa durée (en bas à droite). */
 #bobine-view .montage-pop[data-inside='true'] {
   top: auto;
   bottom: 6px;
+  left: calc(var(--take) + 6px) !important;
+  transform: none;
 }
 /* (Capture 72) Sous le bord de fin d’une vidéo, en pointillés légers, la suite qu’on obtiendrait en tirant. */
 .bobine-edge-hint {

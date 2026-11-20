@@ -2213,6 +2213,8 @@ test('the bar of a take to create never lies over its photos nor their places: c
   f.ui.select(f.ui.state().montage.plans[1].id);
   // (6 s of a timeline of 20; its trash and « Retirer la photo de fin », a rule between them.)
   assert.deepEqual([f.pop().style.left, f.pop().style['--half']], ['clamp(var(--half), 30%, calc(100% - var(--half)))', '42px']);
+  // (0.6.158) Where it goes in the take when it is narrow: at its start, under its text, far from its length.
+  assert.equal(f.pop().style['--take'], '25%');
   // Wide: between its photos, as it is. Narrow: over a place of photo, it goes into the take.
   place([box(500, 64), box(636, 64)], box(580, 40));
   f.ui.fitBar();

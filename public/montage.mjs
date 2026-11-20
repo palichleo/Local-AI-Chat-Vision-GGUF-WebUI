@@ -2071,6 +2071,8 @@ export function setupMontage({
           const bar = popOf(item, recordOf(item.source), loudness);
           // (0.6.155) Centred above it, kept inside the track; over its photos, it goes into the take (fitBar).
           bar.style.left = `clamp(var(--half), ${percent(at + (item.to - item.from) / 2)}, calc(100% - var(--half)))`;
+          // (0.6.158) Where it goes in a take too narrow for it between its places of photo: at its start.
+          bar.style.setProperty?.('--take', percent(at));
           live.pop = { bar, id: item.id };
           layer.append(bar);
         }
