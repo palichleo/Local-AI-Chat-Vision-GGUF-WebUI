@@ -5,7 +5,8 @@
  * after 150 ms (16/11: half of what it was), at once on the keyboard's focus. The bubble is fixed to
  * the window, so a scrolling area never cuts it; it goes into an open dialog when the control is in
  * one (a dialog lies above the page). Every bubble is centred on its control, 8 px above it, under
- * it when there is no room above, and stays inside the window.
+ * it when there is no room above, and stays inside the window. (0.6.155) `data-tip-side="left"`: at its
+ * left, at its height, when there is room there (a choice of a menu: above it, it hid what is above).
  */
 export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 150 } = {}) {
   const page = root.ownerDocument ?? root,
@@ -59,9 +60,14 @@ export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 1
       margin = 8,
       width = view.innerWidth ?? 1280,
       height = view.innerHeight ?? 800;
-    let top = box.top - size.height - 8;
+    let top = box.top - size.height - 8,
+      left = box.left + box.width / 2 - size.width / 2;
     if (top < margin) top = box.bottom + 8;
-    const left = Math.round(Math.max(margin, Math.min(box.left + box.width / 2 - size.width / 2, width - size.width - margin)));
+    if (target.dataset.tipSide === 'left' && box.left - size.width - 8 >= margin) {
+      left = box.left - size.width - 8;
+      top = box.top + box.height / 2 - size.height / 2;
+    }
+    left = Math.round(Math.max(margin, Math.min(left, width - size.width - margin)));
     top = Math.round(Math.max(margin, Math.min(top, height - size.height - margin)));
     set(left, top);
     // In a window of glass (the settings), « fixed » is counted from that window, not from the

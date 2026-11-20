@@ -158,3 +158,18 @@ test('in an open dialog, the bubble goes into it (a dialog is above the page)', 
   assert.equal(bubble.parentNode, dialog);
   assert.equal(bubble.textContent, 'Le dossier des modèles.');
 });
+
+test('(0.6.155) data-tip-side="left": the bubble at the left of its control, at its height, when there is room there', () => {
+  // (A choice of the menu of « Exporter », greyed: above it, its reason hid « Enregistrer ».)
+  const { body } = page();
+  const choice = new Element('button', { attributes: { 'data-tip': '2 prises sont encore à créer', 'data-tip-side': 'left' }, box: { left: 900, top: 140, right: 1210, bottom: 180 } });
+  const edge = new Element('button', { attributes: { 'data-tip': 'Trop près du bord', 'data-tip-side': 'left' }, box: { left: 60, top: 140, right: 300, bottom: 180 } });
+  body.append(choice, edge);
+  setupHelpTips(body);
+  const bubble = body.children.find(child => child.className === 'help-bubble');
+  body.fire('focusin', { target: choice });
+  assert.deepEqual([bubble.textContent, bubble.style.left, bubble.style.top], ['2 prises sont encore à créer', '772px', '147px']);
+  // No room at its left: above it, as every bubble.
+  body.fire('focusin', { target: edge });
+  assert.deepEqual([bubble.style.left, bubble.style.top], ['120px', '106px']);
+});

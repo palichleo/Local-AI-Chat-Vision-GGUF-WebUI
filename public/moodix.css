@@ -19455,3 +19455,38 @@ body[data-view='bobine'] .chat-panel {
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.8);
   white-space: nowrap;
 }
+
+/* ------------------------------------------------------------------ La Bobine, ses retours du 20/11 (0.6.155) */
+/* Une prise à créer : le contour pointillé et le verre à peine éclairé de la maquette, sans hachures (les
+   hachures étaient l'ancien « plan à faire »). */
+#bobine-view .montage-piece.is-todo:not(.is-making):not(.is-replacing) {
+  background: rgba(238, 232, 222, 0.035);
+}
+#bobine-view .montage-piece.is-todo.is-replacing:not(.is-making)::before {
+  background: rgba(12, 11, 15, 0.62);
+}
+/* La barre d'une prise, centrée au-dessus d'elle ; sur une prise trop étroite pour la poser entre ses
+   emplacements de photo, elle va dans la prise, en haut : jamais sur une photo ni sur un emplacement. */
+#bobine-view .montage-pop {
+  transform: translateX(-50%);
+}
+#bobine-view .montage-pop[data-inside='true'] {
+  top: 6px;
+  bottom: auto;
+}
+/* « À créer » qui défile : un fondu au bas de la liste, la phrase ambre jamais sur une carte. */
+.bobine-lines[data-more='true'] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+}
+#bobine-view .bobine-create .bobine-missing {
+  margin: 10px 0 0;
+}
+/* Une licence à conditions, à lire avant le téléchargement : au-dessus du bouton, à la place de la phrase. */
+#bobine-view .bobine-create .license-block {
+  flex: none;
+  max-height: 42%;
+  margin-top: 10px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}

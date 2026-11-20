@@ -20,7 +20,9 @@
  */
 import { FORMATS } from './formats.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
-import { missingFileCard, sizeText } from './missing-file.mjs';
+import { sizeText } from './missing-file.mjs';
+import { licenseBlock, restrictedOf } from './model-licenses.mjs';
+import { licenseSentence } from './models-page.mjs';
 import { closePopup, openPopup } from './glass-menu.mjs';
 import {
   MONTAGE_LIMITS,
@@ -88,6 +90,9 @@ const plural = (count, one, many = one + 's') => `${count} ${count > 1 ? many : 
 // in a text makes another step, in milliseconds.
 const STEPS = 100,
   TYPED = 1500;
+// (0.6.155) How long the end of an export is said in the fil, and how often a download is asked about, in ms.
+const SAID = 4000,
+  POLL = 1000;
 /** (0.6.154) Every key in its order, at every depth: two bobines alike say the same. */
 const sorted = value =>
   Array.isArray(value)
@@ -202,8 +207,10 @@ export function setupMontage({
     hovered = null,
     // (0.6.153) What lets the enrichment being asked go.
     enriched = null,
-    // (0.6.153) The model being downloaded from « À créer »: { name, offer, host }.
+    // (0.6.155) The model being downloaded from « À créer »: { name, offer, stage: 'confirm' | 'running',
+    // received, total }; why it could not be (said above the button).
     downloading = null,
+    fetchError = '',
     // (0.6.154) A drag of the timeline being made: all its moves are one step of « Annuler ».
     dragging = null,
     // (0.6.154) The bobine as « Enregistrer » put it in the Archives (contentKey), or null; « Enregistrer »
@@ -226,10 +233,19 @@ export function setupMontage({
   const failed = new Map();
   // (0.6.148) The model of each kind of take to create, as the server would choose it: { name, missing }.
   const models = new Map();
+  // (0.6.155) The models whose download under way elsewhere (Paramètres › Modèles) was looked for.
+  const watched = new Set();
   const inSeries = () => filling?.stage === 'running' || filling?.stage === 'paused';
   // (0.6.152) What the model of the takes makes at once: what a take to create is cut by.
   const limits = () => ({ create_video: longestFor('create_video'), extend_video: longestFor('extend_video') });
   const busy = () => Boolean(making || writing || inSeries());
+  /**
+   * (0.6.155) A take to create without its text that Moodix AI can write at its turn in the series, as
+   * the Éclipse does: it has something to look at (a photo, the video it goes on from, the take to
+   * create it goes on from).
+   */
+  const writable = plan =>
+    Boolean(write) && Boolean(plan.photos?.start || plan.photos?.end || ['suite', 'last', 'wait'].includes(linkOf(montage, plan.id, lengthOf).kind));
 
   const fresh = (format = '16:9') => ({
     schemaVersion: 1,
@@ -360,6 +376,15 @@ export function setupMontage({
     }
     say();
   }
+  /** (0.6.155) The end of an export, said a few seconds in the fil, then nothing: only errors stay there. */
+  function fades() {
+    const said = status;
+    timers.set(() => {
+      if (status !== said) return;
+      status = '';
+      say();
+    }, SAID);
+  }
   /** The bobine kept is the first of the menu of the fil; a new one, or a new name, is said there. */
   function listed(kept) {
     const known = list.some(item => item.id === kept.id && item.name === kept.name);
@@ -391,7 +416,8 @@ export function setupMontage({
       archivedKey = contentKey(sent);
       if (montage === sent) montage = { ...sent, createdAt: kept.createdAt, updatedAt: kept.updatedAt };
       listed(kept);
-      status = 'Enregistrée dans les Archives';
+      // (0.6.155) Nothing said: its point is gone.
+      status = '';
     } catch (error) {
       // (Not kept either: kept on its own a moment later.)
       pending = true;
@@ -495,6 +521,7 @@ export function setupMontage({
       const film = await (await api('montages/export', { project: project(), id: montage.id, conversation })).json();
       const take = film.outputs?.[0]?.take;
       status = Number.isInteger(take) ? `Film exporté · Prise ${take}` : 'Film exporté';
+      fades();
       await refresh();
     } catch (error) {
       status = 'Export impossible : ' + error.message.replace(/^Non gardée : /, '');
@@ -518,6 +545,7 @@ export function setupMontage({
       if (status.startsWith('Non gardée')) throw new Error(status);
       const done = await (await api('montages/export-takes', { project: project(), id: montage.id })).json();
       status = `${plural(done.files.length, 'prise exportée', 'prises exportées')} · ${done.folder.replace('/', ' / ')}`;
+      fades();
     } catch (error) {
       status = 'Export impossible : ' + error.message.replace(/^Non gardée : /, '');
     }
@@ -808,6 +836,8 @@ export function setupMontage({
         if (why) {
           choice.setAttribute('aria-disabled', 'true');
           choice.dataset.tip = why;
+          // (0.6.155) At its left: above, it hid « Enregistrer ».
+          choice.dataset.tipSide = 'left';
         }
         choice.onclick = () => {
           if (why) return;
@@ -819,7 +849,7 @@ export function setupMontage({
     menu.setAttribute('role', 'menu');
     menu.setAttribute('aria-label', 'Exporter la bobine');
     const all = [
-      item('Un seul fichier', `video / ${montage.name}`, waiting ? `${plural(waiting, 'prise est encore', 'prises sont encore')} à créer` : '', exportFilm),
+      item('Un seul fichier', `video / ${montage.name}.mp4`, waiting ? `${plural(waiting, 'prise est encore', 'prises sont encore')} à créer` : '', exportFilm),
       item('Un fichier par prise', `bobines / ${folderName(montage.name)} / ${numbered(made)}`, made ? '' : 'Aucune prise n’est encore créée', exportTakes),
     ];
     menu.append(...all);
@@ -1071,7 +1101,7 @@ export function setupMontage({
     const { section, body } = block('is-settings', 'bobine-create'),
       lines = node('div', 'bobine-lines'),
       starts = planStarts(montage),
-      series = seriesOf(montage, lengthOf, { limits: limits() }),
+      series = seriesOf(montage, lengthOf, { limits: limits(), writable }),
       ready = creatable(),
       can = new Set(ready.map(item => item.id));
     section.setAttribute('aria-label', 'À créer');
@@ -1145,21 +1175,45 @@ export function setupMontage({
       live.lines.set(item.id, line);
       lines.append(line);
     }
-    // (0.6.153) Its model downloaded, in « À créer » in the place of its lines: the card of the chat
-    // (missing-file.mjs), its files, their licences read first, the download and its line.
-    if (downloading) {
-      lines.replaceChildren(downloading.host);
-      lines.dataset.downloading = 'true';
-    }
     const row = node('div', 'bobine-foot');
-    // (Capture 86: « Arrêter » at the left of the button while Moodix AI writes.)
-    if (writing) row.append(button('bobine-halt', 'Arrêter', () => writing?.controller.abort()));
+    // (Capture 86: « Arrêter » at the left of the button while Moodix AI writes; in a series, its own stop.)
+    if (writing && !writing.series) row.append(button('bobine-halt', 'Arrêter', () => writing?.controller.abort()));
     const foot = node('div', 'bobine-go');
-    if (absent?.offer && !ready.length && !inSeries()) {
+    // What is said above the button, in amber: the model this computer lacks, or why it cannot be downloaded.
+    let said = absent ? `${absent.name} n’est pas sur cet ordinateur.` : '',
+      licences = null;
+    live.download = null;
+    if (downloading || (absent?.offer && !ready.length && !inSeries())) {
       // (Capture 89: nothing can be created without it: « Télécharger · 20,0 Go » takes the place of « Créer ».)
-      const fetch = button('bobine-go-main bobine-go-download', '', () => download(absent), 'download');
-      fetch.append(node('span', 'bobine-go-label', 'Télécharger · ' + sizeText(absent.offer.left || absent.offer.bytes)));
-      fetch.disabled = Boolean(downloading);
+      const { name, offer } = downloading ?? absent,
+        fetch = button('bobine-go-main bobine-go-download', '', () => void download({ name, offer }, { accepted: downloading?.stage === 'confirm' })),
+        label = node('span', 'bobine-go-label', ''),
+        fill = node('span', 'bobine-go-fill'),
+        size = sizeText(offer.left || offer.bytes);
+      fetch.append(fill, icon('download'), label);
+      fetch.dataset.state = downloading?.stage ?? '';
+      if (downloading?.stage === 'running') {
+        // Its line, its figures, « Arrêter » at its left.
+        row.append(button('bobine-halt', 'Arrêter', () => void api('downloads/cancel', {}).catch(error => notice(error.message))));
+        fetch.disabled = true;
+        live.download = { fill, label };
+      } else if (downloading?.stage === 'confirm') {
+        // A licence with conditions: read here, accepted or refused, before anything is downloaded.
+        row.append(button('bobine-halt', 'Refuser', () => ((downloading = null), update())));
+        label.textContent = 'J’ai lu, télécharger · ' + size;
+        licences = licenseBlock({ node, files: offer.files, confirm: true });
+        said = '';
+      } else {
+        label.textContent = 'Télécharger · ' + size;
+        // Its licences under the pointer.
+        fetch.title = licenseSentence(offer.files) || `Télécharger ${name} (${size})`;
+        if (offer.needsToken) {
+          fetch.disabled = true;
+          said = `${name} demande un compte Hugging Face : acceptez sa licence${offer.page ? ' sur ' + offer.page : ''}, puis enregistrez votre jeton dans Paramètres › Mise à jour.`;
+        }
+        watch({ name, offer });
+      }
+      if (fetchError) said = fetchError;
       foot.append(fetch);
       Object.assign(live, { goMain: null, goLabel: null, goFill: null, pause: null });
     } else {
@@ -1196,16 +1250,24 @@ export function setupMontage({
       Object.assign(live, { goMain: main, goLabel: label, goFill: fill });
     }
     row.append(foot);
-    // (Its card open, it has the column: its own « Télécharger » and « Annuler » are the buttons then.)
+    // (0.6.155) The list that scrolls fades at its bottom, never under what is said above the button.
+    lines.onscroll = () => fade(lines);
     body.append(
       node('h2', 'bobine-create-title', 'À créer'),
       lines,
-      ...(absent && !downloading ? [node('p', 'bobine-missing', `${absent.name} n’est pas sur cet ordinateur.`)] : []),
-      ...(downloading ? [] : [row]),
+      ...(said ? [node('p', 'bobine-missing', said)] : []),
+      ...(licences ? [licences] : []),
+      row,
     );
-    if (downloading) Object.assign(live, { goMain: null, goLabel: null, goFill: null, pause: null, wand: null, agent: null });
+    live.list = lines;
     sayGo();
+    sayDownload();
     return section;
+  }
+  /** (0.6.155) Whether there is more of « À créer » under its bottom: it fades there (moodix.css). */
+  function fade(lines = live.list) {
+    if (!lines || !(lines.clientHeight > 0)) return;
+    lines.dataset.more = String(lines.scrollTop + lines.clientHeight < lines.scrollHeight - 2);
   }
   /** What the button says: how many takes « Créer » makes, or where the creation is. */
   function sayGo() {
@@ -1241,7 +1303,7 @@ export function setupMontage({
    */
   function creatable() {
     const ready = [];
-    for (const item of seriesOf(montage, lengthOf, { limits: limits() }))
+    for (const item of seriesOf(montage, lengthOf, { limits: limits(), writable }))
       if (item.ready && !modelMissing(item.id) && (!item.after || ready.some(other => other.id === item.after))) ready.push({ id: item.id, parts: item.parts });
     return ready;
   }
@@ -1334,7 +1396,12 @@ export function setupMontage({
         Object.assign(series, { stage: 'paused', pausing: false });
         return draw();
       }
-      const record = await makePlan(series.ids[series.done]);
+      // (0.6.155) Without its text: Moodix AI writes it first, then it is made.
+      const id = series.ids[series.done];
+      if (isTodo(itemOf(id)) && !itemOf(id).todo.prompt.trim() && !(await writeFor(id, series))) break;
+      if (filling !== series) return;
+      if (series.stopping) break;
+      const record = await makePlan(id);
       if (filling !== series) return;
       // (Refused or stopped: the series ends there, what is made stays.)
       if (!record) break;
@@ -1345,12 +1412,50 @@ export function setupMontage({
   }
   function stopSeries() {
     if (!filling) return;
+    // (0.6.155) Moodix AI writing a take of the series: let go, at once.
+    filling.controller?.abort();
+    if (writing?.series) writing = null;
     if (filling.stage === 'paused' || !making) {
       filling = null;
       return draw();
     }
     filling.stopping = true;
     halt();
+  }
+
+  /**
+   * (0.6.155) A take of the series without its text: Moodix AI writes it from its pictures, as the Éclipse
+   * does, « MOODIX AI ÉCRIT » in its line; then it is made. What it could not write is said in its line,
+   * and the series ends there. Whether it was written.
+   */
+  async function writeFor(id, series) {
+    const plan = itemOf(id),
+      asked = plan ? picturesFor(plan) : null;
+    if (!write || !asked) {
+      failed.set(id, 'Moodix AI n’a rien à regarder : posez une photo de début ou de fin, ou écrivez ce qui se passe.');
+      return false;
+    }
+    const controller = (series.controller = new AbortController());
+    writing = { id, at: 1, of: 1, controller, series: true };
+    chosen = id;
+    draw();
+    try {
+      const written = String((await write(asked, { signal: controller.signal }))?.prompt ?? '').trim();
+      if (controller.signal.aborted || filling !== series) return false;
+      if (!written) throw new Error('Moodix AI n’a rien écrit.');
+      writing = null;
+      remember(montage);
+      montage = withItemChanged(montage, id, { prompt: written });
+      pending = true;
+      await keep();
+      return true;
+    } catch (error) {
+      if (!controller.signal.aborted) failed.set(id, 'Texte non écrit : ' + error.message);
+      return false;
+    } finally {
+      if (writing?.controller === controller) writing = null;
+      if (series.controller === controller) series.controller = null;
+    }
   }
 
   // Enrichir (0.6.153) -------------------------------------------------------------------------------
@@ -1433,29 +1538,86 @@ export function setupMontage({
   }
 
   // A model this computer lacks (0.6.153, capture 89) -------------------------------------------------
-  /** « Télécharger · 20,0 Go »: the card of the chat in « À créer », its licences read first; once there, the models asked again. */
-  function download(absent) {
-    if (downloading || !absent?.offer) return;
-    const host = node('div', 'bobine-download');
-    downloading = { name: absent.name, offer: absent.offer, host };
-    missingFileCard({
-      host,
-      request: { missing: absent.offer, workflowName: absent.name, mediaType: 'video' },
-      node,
-      icon,
-      api,
-      onReady: () => {
-        downloading = null;
-        models.clear();
-        update();
-        return true;
-      },
-      onCancel: () => {
-        downloading = null;
-        update();
-      },
-    });
+  /**
+   * (0.6.155) « Télécharger · 20,0 Go », as in Paramètres › Modèles (19/11): the click downloads at once,
+   * its licences under the pointer; one with conditions is shown at the click, to accept or to refuse,
+   * and nothing is downloaded before (the server asks for it). The button keeps its place meanwhile: its
+   * line, « 3,4 / 20,0 Go », « Arrêter » at its left; « À créer » keeps its lines. Once the model is
+   * there, the models of the takes are asked again.
+   */
+  async function download({ name, offer }, { accepted = false } = {}) {
+    if (!offer || offer.needsToken || downloading?.stage === 'running') return;
+    fetchError = '';
+    if (!accepted && restrictedOf(offer.files).length) {
+      downloading = { name, offer, stage: 'confirm' };
+      return update();
+    }
+    downloading = { name, offer, stage: 'running', received: 0, total: offer.bytes };
     update();
+    try {
+      const job = await (await api('downloads/start', { id: offer.workflowId, ...(accepted ? { accepted: true } : {}) })).json();
+      if (!downloading) return;
+      Object.assign(downloading, { received: job.received ?? 0, total: job.total || offer.bytes });
+    } catch (error) {
+      downloading = null;
+      fetchError = 'Téléchargement impossible : ' + error.message;
+      return update();
+    }
+    sayDownload();
+    timers.set(followDownload, POLL);
+  }
+  /** (0.6.155) The download as it goes (GET /api/downloads), until the model is there, stopped or failed. */
+  async function followDownload() {
+    if (downloading?.stage !== 'running') return;
+    const { workflowId } = downloading.offer;
+    let job;
+    try {
+      ({ job } = await (await api('downloads')).json());
+    } catch {
+      return void timers.set(followDownload, POLL);
+    }
+    if (downloading?.offer.workflowId !== workflowId) return;
+    if (job.state === 'running' && job.workflowId !== workflowId) {
+      downloading = null;
+      fetchError = `Un autre téléchargement est en cours (${job.name}) : attendez sa fin.`;
+      return update();
+    }
+    if (job.state !== 'running') {
+      downloading = null;
+      if (job.state === 'error') fetchError = 'Téléchargement impossible : ' + job.error;
+      // (There, or stopped: what is left of it, asked again with the models.)
+      models.clear();
+      return update();
+    }
+    Object.assign(downloading, { received: job.received ?? 0, total: job.total || downloading.total });
+    sayDownload();
+    timers.set(followDownload, POLL);
+  }
+  /** Its line and its figures, the panel not drawn again (a text being written there stays in the hand). */
+  function sayDownload() {
+    const said = live.download;
+    if (!said || downloading?.stage !== 'running') return;
+    const { received = 0, total = 0 } = downloading;
+    said.fill.style.width = (total ? Math.min(100, Math.round((received / total) * 1000) / 10) : 0) + '%';
+    // (« 3,4 / 20,0 Go »: what has come, in the unit of the whole.)
+    const giga = total >= 1024 ** 3,
+      come = received > 0 ? (giga ? (received / 1024 ** 3).toFixed(1).replace('.', ',') : Math.round(received / 1024 ** 2).toLocaleString('fr-FR')) : '0';
+    said.label.textContent = `${come} / ${sizeText(total)}`;
+  }
+  /** (0.6.155) A download of this model already under way (from Paramètres › Modèles): followed here. */
+  function watch(absent) {
+    const id = absent?.offer?.workflowId;
+    if (!id || downloading || watched.has(id)) return;
+    watched.add(id);
+    void api('downloads')
+      .then(response => response.json())
+      .then(({ job }) => {
+        if (job?.state !== 'running' || job.workflowId !== id || downloading) return;
+        downloading = { name: absent.name, offer: absent.offer, stage: 'running', received: job.received ?? 0, total: job.total || absent.offer.bytes };
+        update();
+        timers.set(followDownload, POLL);
+      })
+      .catch(() => {});
   }
 
   // Moodix AI writes ------------------------------------------------------------------------------
@@ -1541,9 +1703,8 @@ export function setupMontage({
     const stopped = controller.signal.aborted;
     writing = null;
     await keep();
-    status = stopped
-      ? `Écriture arrêtée · ${plural(done, 'prise écrite', 'prises écrites')}`
-      : problem || (unseen && !done ? 'Moodix AI n’a rien à regarder : posez une photo de début ou de fin, ou écrivez vous-même.' : '');
+    // (0.6.155) Stopped by the user: nothing to say.
+    status = stopped ? '' : problem || (unseen && !done ? 'Moodix AI n’a rien à regarder : posez une photo de début ou de fin, ou écrivez vous-même.' : '');
     draw();
   }
 
@@ -1555,6 +1716,14 @@ export function setupMontage({
       out = () => change(withoutItem(montage, item.id));
     bar.setAttribute('role', 'toolbar');
     bar.setAttribute('aria-label', item.track ? 'Réglages du son' : 'Réglages de la prise');
+    // (0.6.155) Half its width, what keeps it inside the track once centred: a sound has its volume, a
+    // take its buttons (thirty-two pixels each, and the rules between them).
+    const half = () => {
+      const kids = [...bar.children],
+        buttons = kids.filter(child => String(child.className).includes('montage-pop-button')).length,
+        rules = kids.filter(child => String(child.className).includes('montage-pop-rule')).length;
+      return item.track ? 96 : Math.ceil((10 + buttons * 32 + rules * 9) / 2);
+    };
     const part = () => node('span', 'montage-pop-rule');
     if (item.track) {
       // A sound: its volume, a bar and its figure; open it; take it out.
@@ -1595,6 +1764,7 @@ export function setupMontage({
     }
     if (record && !isTodo(item)) bar.append(button('montage-pop-button', '', () => showTake(record), 'open', 'Ouvrir la prise'));
     bar.append(button('montage-pop-button', '', out, 'trash', item.replaces ? 'Retirer, et rendre sa fin à la vidéo' : 'Retirer de la bobine (Suppr)'));
+    bar.style.setProperty?.('--half', half() + 'px');
     bar.onpointerdown = event => event.stopPropagation?.();
     return bar;
   }
@@ -1609,7 +1779,7 @@ export function setupMontage({
     section.setAttribute('aria-label', 'Timeline de la bobine');
     // (It takes the keys when it is pressed: the space bar reads the film.)
     section.tabIndex = -1;
-    live.bar = live.making = null;
+    live.bar = live.making = live.pop = null;
     live.pieces = new Map();
     // A mark a second up to a minute shown, then every five or ten: the ruler never turns into a comb.
     const seen = whole / zoom,
@@ -1875,8 +2045,9 @@ export function setupMontage({
         // (Not over a take being made: nothing can be changed in it.)
         if (chosen === item.id && !held && making?.id !== item.id) {
           const bar = popOf(item, recordOf(item.source), loudness);
-          // (Kept inside the track at its right edge.)
-          bar.style.left = `clamp(0px, ${percent(at)}, calc(100% - 240px))`;
+          // (0.6.155) Centred above it, kept inside the track; over its photos, it goes into the take (fitBar).
+          bar.style.left = `clamp(var(--half), ${percent(at + (item.to - item.from) / 2)}, calc(100% - var(--half)))`;
+          live.pop = { bar, id: item.id };
           layer.append(bar);
         }
       });
@@ -1920,13 +2091,7 @@ export function setupMontage({
     // The head is laid over the lanes, at their scale.
     const over = node('div', 'montage-over');
     over.append(headLine);
-    // (0.6.143) While the end of a video is pulled beyond its take: what that does, said where the hand is.
-    if (pulling && itemOf(pulling.id)) {
-      const later = montage.plans.findIndex(plan => plan.id === pulling.id) < montage.plans.length - 1,
-        tip = node('span', 'montage-tip', `+ ${mono(pulling.seconds)} s à créer` + (later ? ' · ce qui suit se décale' : ''));
-      tip.style.left = `clamp(120px, ${percent(pulling.at)}, calc(100% - 120px))`;
-      over.append(tip);
-    }
+    // (0.6.155) While the end of a video is pulled, nothing is said over the ruler: « +12.10 S » on the take says it.
     lanes.append(over);
     // (0.6.149) Zoomed, the bobine scrolls under the names of its tracks: −, + and « Voir toute la
     // bobine » at the top left, and Ctrl + molette, around the pointer.
@@ -2123,6 +2288,7 @@ export function setupMontage({
     // (0.6.149) The timeline zoomed stays where it was scrolled: set once it is on the page.
     if (live.reel) live.reel.scrollLeft = scrolled;
     fil();
+    fitBar();
     if (inside) refocus(focused, root);
     show();
   }
@@ -2131,6 +2297,23 @@ export function setupMontage({
    * preview goes on with the clip it shows and the grid of the takes keeps its place. `panel: false`:
    * a text being written in « À créer », a bar being slid: they are not drawn again under the hand.
    */
+  /**
+   * (0.6.155) The bar of the take chosen never lies over its photos nor their empty places (capture 78:
+   * its trash covered the place of the start): centred, it does when the take is narrow; it then goes
+   * into the take, at its top. Measured once on the page; the list of « À créer » says if it goes on.
+   */
+  function fitBar() {
+    fade();
+    const { bar, id } = live.pop ?? {};
+    if (!bar?.isConnected || !bar.getBoundingClientRect) return;
+    const box = bar.getBoundingClientRect();
+    if (!box.width) return;
+    const over = (live.pieces?.get(id) ?? []).slice(1).some(pin => {
+      const at = pin.getBoundingClientRect();
+      return at.width > 0 && at.left < box.right - 1 && at.right > box.left + 1;
+    });
+    bar.dataset.inside = String(over);
+  }
   function update({ panel = true } = {}) {
     if (!root || !montage) return;
     if (!parts || !root.replaceChild) return draw();
@@ -2149,6 +2332,7 @@ export function setupMontage({
     if (live.reel) live.reel.scrollLeft = scrolled;
     sayGo();
     show({ sync: false });
+    fitBar();
   }
   /**
    * The focus put back on what replaces `was` in `part` (the same take, the same control), else on the
@@ -2238,7 +2422,7 @@ export function setupMontage({
       return keep();
     },
     // For the tests and the pointer of a later step: what is on the page, and the hands that change it.
-    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed), zoom, scrolled, drawing, wand, enrichingId, lit, downloading, past: past.length, future: future.length }),
+    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed), zoom, scrolled, drawing, wand, enrichingId, lit, downloading, fetchError, past: past.length, future: future.length }),
     undo: () => travel(true),
     redo: () => travel(false),
     lay,
@@ -2255,5 +2439,6 @@ export function setupMontage({
     exportFilm,
     exportTakes,
     archive,
+    fitBar,
   };
 }

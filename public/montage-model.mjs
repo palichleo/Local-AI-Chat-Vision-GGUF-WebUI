@@ -627,15 +627,19 @@ export function linkOf(montage, id, lengthOf = () => null) {
  *   be either.
  * `kind`: what it goes on from (linkOf).
  */
-export function seriesOf(montage, lengthOf = () => null, { limits = {} } = {}) {
+export function seriesOf(montage, lengthOf = () => null, { limits = {}, writable = () => false } = {}) {
   const items = [];
   montage.plans.forEach((plan, index) => {
     if (!isTodo(plan)) return;
     const prompt = (plan.todo.prompt ?? '').trim(),
       link = linkOf(montage, plan.id, lengthOf),
+      // (0.6.155) Without its text, Moodix AI writes it first when it can (`writable(plan)`): nothing
+      // else stops it, it is read as written.
+      written = Boolean(prompt) || writable(plan),
+      probe = prompt || !written ? montage : withItemChanged(montage, plan.id, { prompt: 'Prise.' }),
       // (The plan before it is to make too: the last one read. Without its text it waits for nothing.)
-      before = link.kind === 'wait' && prompt ? items.at(-1) : null,
-      reason = before ? (before.ready ? '' : 'Elle continue la prise d’avant, qui ne peut pas être créée.') : (creationOf(montage, plan.id, lengthOf, { limits }).reason ?? ''),
+      before = link.kind === 'wait' && written ? items.at(-1) : null,
+      reason = before ? (before.ready ? '' : 'Elle continue la prise d’avant, qui ne peut pas être créée.') : (creationOf(probe, plan.id, lengthOf, { limits }).reason ?? ''),
       // (0.6.152) How many parts it is made in, and how long each is.
       parts = partsOf(plan, limits);
     items.push({

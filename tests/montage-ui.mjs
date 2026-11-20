@@ -87,7 +87,7 @@ const take = (n, mediaType, more = {}) => ({
 const INTENTION = 'Prise d’une bobine, demandée dans la Bobine.',
   FILM = { width: 1344, height: 768 };
 
-function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null } = {}) {
+function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null, downloads = null } = {}) {
   WIDTH = width;
   const calls = [],
     queue = [],
@@ -107,6 +107,11 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
   const api = async (route, body) => {
     calls.push({ route, body: body && structuredClone(body) });
     if (fail[route]) throw new Error(fail[route]);
+    // (0.6.155) The downloads of the server (lib/model-downloads.mjs), as the test says them.
+    if (downloads && /^downloads(\/|$)/.test(route)) {
+      const answer = downloads(route, body);
+      return { json: async () => answer };
+    }
     if (route === 'montages/' + project) return { json: async () => ({ montages: [...kept.values()].map(({ id, name }) => ({ id, name, updatedAt: '2026-11-20T03:00:00.000Z' })) }) };
     if (route === 'montages/save') {
       const saved = { ...body.montage, createdAt: '2026-11-20T03:00:00.000Z', updatedAt: '2026-11-20T03:00:01.000Z' };
@@ -286,7 +291,8 @@ test('takes laid by a double click or Enter go on their tracks, kept a moment la
   // The last laid is the one chosen: its small bar above it, on its track.
   assert.equal(f.ui.state().chosen, f.ui.state().montage.sounds[0].id);
   assert.deepEqual([find(f.track('music'), 'montage-pop').length, f.pop().attributes['aria-label'], f.popLabels(), f.said('montage-pop-figure')], [1, 'Réglages du son', ['Volume', 'Ouvrir la prise', 'Retirer de la bobine (Suppr)'], ['60 %']]);
-  assert.equal(f.pop().style.left, 'clamp(0px, 0%, calc(100% - 240px))');
+  // (0.6.155) Centred above it, kept inside the track by half its width.
+  assert.deepEqual([f.pop().style.left, f.pop().style['--half']], ['clamp(var(--half), 50%, calc(100% - var(--half)))', '96px']);
   assert.equal(f.saves().length, 0, 'not kept at every change');
   await f.later();
   assert.equal(f.saves().length, 1);
@@ -328,7 +334,7 @@ test('the small bar of a take chosen: its sound, its frame, opened, taken out; a
   assert.deepEqual(f.calls.at(-1), { route: 'open', body: id(1) });
   // Alt and an arrow move it, it stays the one chosen; its bar follows it.
   f.plans()[0].onkeydown({ key: 'ArrowRight', altKey: true });
-  assert.deepEqual([f.names(), f.ui.state().chosen, f.pop().style.left], [['Prise 2', 'Prise 1', 'Prise 3'], plan(1).id, 'clamp(0px, 15%, calc(100% - 240px))']);
+  assert.deepEqual([f.names(), f.ui.state().chosen, f.pop().style.left], [['Prise 2', 'Prise 1', 'Prise 3'], plan(1).id, 'clamp(var(--half), 27.5%, calc(100% - var(--half)))']);
   // An image has a frame, no sound.
   f.plans()[2].onclick();
   assert.deepEqual(f.popLabels().map(label => label.split(' :')[0]), ['Ajuster', 'Remplir', 'Ouvrir la prise', 'Retirer de la bobine (Suppr)']);
@@ -523,7 +529,7 @@ test('a sound slides along its track, and stops on a cut of the bobine when it i
   f.pointer.move(-400);
   assert.equal(sound().at, 0);
   f.pointer.up();
-  assert.deepEqual([f.ui.state().chosen, f.pop().style.left], [sound().id, 'clamp(0px, 0%, calc(100% - 240px))']);
+  assert.deepEqual([f.ui.state().chosen, f.pop().style.left], [sound().id, 'clamp(var(--half), 50%, calc(100% - var(--half)))']);
   // An image has one edge to pull: its length.
   f.get('montage-take')[2].ondblclick();
   assert.deepEqual(find(f.plans()[1], 'montage-grip').map(grip => grip.className), ['montage-grip is-end']);
@@ -1130,8 +1136,8 @@ test('the end of a video pulled beyond its take shows its suite to create, joine
     ['montage-piece is-todo is-suite', '↳ Suite', '+04.00 s', 'calc(25% - 4px)', '20%'],
     ['montage-piece', 'Prise 3', '03.00 s', '45%', 'calc(15% - 4px)'],
   ]);
-  // What that does is said where the hand is; the video stays the one in hand.
-  assert.deepEqual([f.said('montage-tip'), f.get('montage-tip')[0].style.left], [['+ 04.00 s à créer · ce qui suit se décale'], 'clamp(120px, 45%, calc(100% - 120px))']);
+  // (0.6.155) Nothing said over the ruler: « +04.00 s » on the take says it. The video stays the one in hand.
+  assert.equal(f.get('montage-tip').length, 0);
   assert.equal(f.ui.state().chosen, plans()[0].id);
   // Pulled back within the take: gone, as if nothing had been asked.
   f.pointer.move(450);
@@ -1168,12 +1174,12 @@ test('the end of a video pulled beyond its take shows its suite to create, joine
   f.pointer.move(1000);
   f.pointer.up();
   assert.deepEqual(plans().map(plan => [plan.kind, plan.to]), [['video', 5], ['image', 5]]);
-  // (Nothing after the video: nothing is said to move.)
+  // (Nothing after the video: its suite, and still nothing said over the ruler.)
   const alone = await setup().open();
   alone.get('montage-take')[0].ondblclick();
   alone.press(find(alone.root, 'montage-grip')[1], 500);
   alone.pointer.move(900);
-  assert.deepEqual(alone.said('montage-tip'), ['+ 04.00 s à créer']);
+  assert.deepEqual([alone.said('montage-tip'), alone.ui.state().montage.plans.length], [[], 2]);
   alone.pointer.up();
   assert.equal(alone.ui.state().chosen, alone.ui.state().montage.plans[1].id);
 });
@@ -1322,7 +1328,7 @@ test('a photo carried lights up the places where it can go; it goes in the one i
 // (0.6.144, 0.6.149) « Créer n prises »: his three photos, laid in 0.6.146 and kept without instants: a take
 // to create between two photos, then one that goes on from it towards a third. Read again in 0.6.149, it is
 // a suite (public/montage-model.mjs `placed`): it still waits for the first, and starts on its last image.
-async function series({ times = { workflowName: 'LTX 2.5' }, texts = ['Il lève les yeux.', 'Il regarde la mer.'], estimate = null, write = null } = {}) {
+async function series({ times = { workflowName: 'LTX 2.5' }, texts = ['Il lève les yeux.', 'Il regarde la mer.'], estimate = null, write = null, downloads = null } = {}) {
   const asked = [],
     foreseen = [],
     answers = [],
@@ -1338,6 +1344,7 @@ async function series({ times = { workflowName: 'LTX 2.5' }, texts = ['Il lève 
     stored: [old],
     extra: photos(),
     ...(write ? { write } : {}),
+    ...(downloads ? { downloads } : {}),
     create: (wanted, hooks) => {
       asked.push({ wanted: structuredClone(wanted), hooks });
       return new Promise((resolve, reject) => answers.push({ resolve, reject }));
@@ -1574,7 +1581,8 @@ test('what Moodix AI cannot write is said; its writing is stopped at once, and e
   assert.deepEqual([pens[1].signal.aborted, f.halted()], [true, 0]);
   pens[1].reject(Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' }));
   for (let turn = 0; turn < 3; turn++) await settle();
-  assert.deepEqual([f.said('montage-status'), f.ui.state().montage.plans.map(plan => plan.todo.prompt)], [['Écriture arrêtée · 1 prise écrite'], ['An old fisherman lifts his eyes.', '']]);
+  // (0.6.155) Stopped by the hand: nothing said in the fil.
+  assert.deepEqual([f.said('montage-status'), f.ui.state().montage.plans.map(plan => plan.todo.prompt)], [[''], ['An old fisherman lifts his eyes.', '']]);
   // Leaving the page lets its request go; its answer, late, writes nothing.
   ({ pens, write } = pen());
   ({ f } = await series({ texts: ['', ''], write }));
@@ -1726,28 +1734,112 @@ test('while Moodix AI writes, its field says it and « Arrêter » is at the lef
   assert.deepEqual([f.said('bobine-line-writing'), f.lines()[0][1]], [['Moodix AI écrit'], 'LTX 2.5']);
 });
 
-test('the model nothing can be created without is downloaded from « À créer », its licences read first (0.6.153)', async () => {
-  // (Capture 89: « son nom passe en ambre dans la ligne, une phrase au-dessus du bouton […] et
-  // « Télécharger · 20,0 Go » prend la place de « Créer ». »)
-  const offer = { workflowId: 'ltx', files: [{ name: 'ltx-2.5-int8.safetensors', bytes: 21474836480 }], bytes: 21474836480, left: 21474836480, needsToken: false, page: '' };
-  const { f } = await series({ times: { workflowName: 'LTX 2.5', missing: offer } });
+test('a model missing is downloaded from « À créer » at once, as in Paramètres › Modèles: its line, its figures, « Arrêter »; « À créer » keeps its lines (0.6.155)', async () => {
+  // (Capture 89 and his relecture of 20/11: « Le clic doit lancer le téléchargement tout de suite, sans
+  // ouvrir la carte du chat. […] le bouton garde sa place : un trait d'avancée, « 3,4 / 20,0 GO » en mono
+  // et « Arrêter ». Les licences sont au survol du bouton. »)
+  const GB = 1024 ** 3,
+    free = [{ file: 'ltx-2.5-int8.safetensors', size: 20 * GB, license: { name: 'Apache 2.0' } }],
+    offer = { workflowId: 'ltx', files: free, bytes: 20 * GB, left: 20 * GB, needsToken: false, page: '' };
+  let answer = { workflowName: 'LTX 2.5', missing: offer };
+  const job = { state: 'idle' },
+    asked = [],
+    downloads = (route, body) => {
+      asked.push(body === undefined ? [route] : [route, body]);
+      if (route === 'downloads/start') Object.assign(job, { state: 'running', workflowId: 'ltx', name: 'LTX 2.5', received: 0, total: 20 * GB });
+      if (route === 'downloads/cancel') job.state = 'cancelled';
+      return structuredClone(route === 'downloads' ? { job } : job);
+    };
+  const { f } = await series({ estimate: () => structuredClone(answer), downloads });
+  // Said once above the button; « Télécharger · 20,0 Go » in the place of « Créer », its licences under the pointer.
   assert.deepEqual([f.said('bobine-missing'), f.get('bobine-line-right')[0].dataset.missing], [['LTX 2.5 n’est pas sur cet ordinateur.'], 'true']);
-  const [fetch] = f.get('bobine-go-download');
-  assert.deepEqual([fetch.textContent, f.get('bobine-go')[0].children.length, f.get('bobine-go-wand').length], ['Télécharger · 20,0 Go', 1, 0]);
-  // Its card, in the place of the lines: the one of the chat, with its files and its licences.
-  // (It has the column then: its own buttons, not ours.)
-  fetch.onclick();
-  assert.deepEqual([f.ui.state().downloading.name, f.get('missing-card').length, f.get('bobine-line').length, f.get('bobine-go').length, f.get('bobine-missing').length], ['LTX 2.5', 1, 0, 0, 0]);
-  // The same card while « À créer » is drawn again (the download goes on).
-  const [card] = f.get('missing-card');
-  f.plans()[0].onclick();
-  assert.equal(f.get('missing-card')[0], card);
-  // « Annuler »: the lines are back, nothing is said in the chat's words.
-  find(card, 'missing-cancel')[0].onclick();
-  assert.deepEqual([f.ui.state().downloading, f.get('missing-card').length, f.get('bobine-line').length, f.get('proposal-cancelled').length], [null, 0, 2, 0]);
+  const fetch = () => f.get('bobine-go-download')[0];
+  assert.deepEqual([fetch().textContent, fetch().title, f.get('bobine-go')[0].children.length, f.get('bobine-go-wand').length], ['Télécharger · 20,0 Go', 'Licence : Apache 2.0. En téléchargeant, vous l’acceptez.', 1, 0]);
+  // (A download of it under way elsewhere was looked for, once.)
+  assert.deepEqual(asked, [['downloads']]);
+  // The click: downloaded at once, nothing opened; the lines stay, the button keeps its place.
+  fetch().onclick();
+  await settle();
+  assert.deepEqual(asked.at(-1), ['downloads/start', { id: 'ltx' }]);
+  assert.deepEqual([f.get('missing-card').length, f.get('bobine-line').length, fetch().disabled, fetch().dataset.state, fetch().textContent], [0, 2, true, 'running', '0 / 20,0 Go']);
+  assert.deepEqual([f.said('bobine-halt'), f.said('bobine-missing')], [['Arrêter'], ['LTX 2.5 n’est pas sur cet ordinateur.']]);
+  // As it comes: its line and its figures, the panel not drawn again (a text being written stays in the hand).
+  const field = f.get('bobine-line-words')[0];
+  job.received = 3.4 * GB;
+  await f.later({ ms: 1000 });
+  assert.deepEqual([fetch().textContent, find(fetch(), 'bobine-go-fill')[0].style.width, f.get('bobine-line-words')[0]], ['3,4 / 20,0 Go', '17%', field]);
+  // « Arrêter »: stopped, what is left of it asked again with the models.
+  f.get('bobine-halt')[0].onclick();
+  await settle();
+  assert.deepEqual(asked.at(-1), ['downloads/cancel', {}]);
+  offer.left = 16.6 * GB;
+  await f.later({ ms: 1000 });
+  await settle();
+  await settle();
+  assert.deepEqual([f.ui.state().downloading, fetch().textContent, f.said('bobine-halt')], [null, 'Télécharger · 16,6 Go', []]);
+  // Downloaded to its end: the models asked again, « Créer » is back.
+  fetch().onclick();
+  await settle();
+  job.state = 'done';
+  answer = { workflowName: 'LTX 2.5' };
+  await f.later({ ms: 1000 });
+  await settle();
+  await settle();
+  assert.deepEqual([f.ui.state().downloading, f.get('bobine-go-download').length, f.go(), f.said('bobine-missing')], [null, 0, 'Créer 2 prises', []]);
+});
+
+test('a licence with conditions is read in « À créer » before the download, accepted or refused; refusals and other downloads are said (0.6.155)', async () => {
+  const GB = 1024 ** 3,
+    files = [{ file: 'ltx-2.5-int8.safetensors', size: 20 * GB, license: { name: 'LTX-2 Community License', url: 'https://example.test/ltx', limits: 'Pas pour un concurrent.', restricted: true } }],
+    offer = { workflowId: 'ltx', files, bytes: 20 * GB, left: 20 * GB, needsToken: false, page: '' };
+  const job = { state: 'idle' },
+    asked = [];
+  let refuse = '';
+  const downloads = (route, body) => {
+    asked.push([route, body]);
+    if (route === 'downloads/start') {
+      if (refuse) throw new Error(refuse);
+      Object.assign(job, { state: 'running', workflowId: 'ltx', name: 'LTX 2.5', received: 0, total: 20 * GB });
+    }
+    return structuredClone(route === 'downloads' ? { job } : job);
+  };
+  const { f } = await series({ times: { workflowName: 'LTX 2.5', missing: offer }, downloads });
+  const fetch = () => f.get('bobine-go-download')[0];
+  assert.equal(fetch().title, 'Licence : LTX-2 Community License (à conditions). En téléchargeant, vous l’acceptez.');
+  // The click shows it, in the place of the sentence; the lines stay; nothing is asked yet.
+  fetch().onclick();
+  await settle();
+  assert.deepEqual([asked.filter(([route]) => route === 'downloads/start').length, f.get('license-block').length, f.said('license-head'), f.said('bobine-missing'), f.get('bobine-line').length], [0, 1, ['À lire avant de télécharger'], [], 2]);
+  assert.deepEqual([fetch().textContent, f.said('bobine-halt')], ['J’ai lu, télécharger · 20,0 Go', ['Refuser']]);
+  // « Refuser »: as it was, nothing downloaded.
+  f.get('bobine-halt')[0].onclick();
+  assert.deepEqual([f.ui.state().downloading, f.get('license-block').length, fetch().textContent], [null, 0, 'Télécharger · 20,0 Go']);
+  // Accepted: the download, with the word that it was read.
+  fetch().onclick();
+  fetch().onclick();
+  await settle();
+  assert.deepEqual([asked.at(-1), f.ui.state().downloading.stage], [['downloads/start', { id: 'ltx', accepted: true }], 'running']);
+  // Another download under way: said, the button back.
+  Object.assign(job, { workflowId: 'wan', name: 'Wan 2.2' });
+  await f.later({ ms: 1000 });
+  assert.deepEqual([f.ui.state().downloading, f.said('bobine-missing'), fetch().textContent], [null, ['Un autre téléchargement est en cours (Wan 2.2) : attendez sa fin.'], 'Télécharger · 20,0 Go']);
+  // Refused by the server: said.
+  refuse = 'Disque plein.';
+  fetch().onclick();
+  fetch().onclick();
+  await settle();
+  assert.deepEqual(f.said('bobine-missing'), ['Téléchargement impossible : Disque plein.']);
+  // A model behind a Hugging Face account: said, the button greyed.
+  const { f: g } = await series({ times: { workflowName: 'LTX 2.5', missing: { ...offer, needsToken: true, page: 'huggingface.co/Lightricks' } }, downloads });
+  assert.deepEqual([g.get('bobine-go-download')[0].disabled, g.said('bobine-missing')], [true, ['LTX 2.5 demande un compte Hugging Face : acceptez sa licence sur huggingface.co/Lightricks, puis enregistrez votre jeton dans Paramètres › Mise à jour.']]);
+  // Its download already under way (from Paramètres › Modèles): followed here.
+  Object.assign(job, { state: 'running', workflowId: 'ltx', name: 'LTX 2.5', received: 10 * GB, total: 20 * GB });
+  const { f: h } = await series({ times: { workflowName: 'LTX 2.5', missing: offer }, downloads });
+  await settle();
+  assert.deepEqual([h.ui.state().downloading?.stage, h.get('bobine-go-download')[0].textContent], ['running', '10,0 / 20,0 Go']);
   // A model whose download nobody can say (no offer): the sentence, « Créer » greyed.
-  const { f: g } = await series({ times: { workflowName: 'LTX 2.5', missing: true } });
-  assert.deepEqual([g.said('bobine-missing'), g.get('bobine-go-download').length, g.go(), g.goMain().disabled], [['LTX 2.5 n’est pas sur cet ordinateur.'], 0, 'Créer', true]);
+  const { f: k } = await series({ times: { workflowName: 'LTX 2.5', missing: true } });
+  assert.deepEqual([k.said('bobine-missing'), k.get('bobine-go-download').length, k.go(), k.goMain().disabled], [['LTX 2.5 n’est pas sur cet ordinateur.'], 0, 'Créer', true]);
 });
 
 test('a line of « À créer » and its take on the track light up together; a click on one brings the other in view (0.6.153)', async () => {
@@ -1899,7 +1991,8 @@ test('« Enregistrer » puts the bobine in the Archives; its point says it chang
   assert.deepEqual([save().disabled, save().dataset.unsaved, save().title], [false, 'true', 'Enregistrer la bobine dans les Archives : elle a changé depuis']);
   await f.ui.archive();
   assert.deepEqual([f.saves().length, f.saves().at(-1).body.archive, f.saves().at(-1).body.montage.plans.length], [1, true, 1]);
-  assert.deepEqual([save().dataset.unsaved, save().title, f.said('montage-status')], ['false', 'Enregistrer la bobine dans les Archives', ['Enregistrée dans les Archives']]);
+  // (0.6.155) Nothing said in the fil: the point is gone.
+  assert.deepEqual([save().dataset.unsaved, save().title, f.said('montage-status')], ['false', 'Enregistrer la bobine dans les Archives', ['']]);
   // Nothing waits to be kept on its own any more.
   await f.later();
   assert.equal(f.saves().length, 1);
@@ -1967,7 +2060,7 @@ test('« Exporter » opens its menu: « Un seul fichier » or « Un fichier par 
   const [menu] = f.get('bobine-export-menu');
   assert.deepEqual([menu.attributes.role, go.attributes['aria-expanded'], f.heard('pointerdown')], ['menu', 'true', true]);
   assert.deepEqual(f.get('bobine-export-item').map(item => [find(item, 'bobine-export-name')[0].textContent, find(item, 'bobine-export-where')[0].textContent, item.attributes['aria-disabled'] ?? null]), [
-    ['Un seul fichier', 'video / Sans titre', null],
+    ['Un seul fichier', 'video / Sans titre.mp4', null],
     ['Un fichier par prise', 'bobines / Sans titre / 01 à 02', null],
   ]);
   assert.equal(f.focused(), f.get('bobine-export-item')[0], 'its first choice in hand');
@@ -1983,6 +2076,9 @@ test('« Exporter » opens its menu: « Un seul fichier » or « Un fichier par 
   assert.deepEqual(f.calls.slice(-2).map(call => call.route), ['montages/save', 'montages/export-takes']);
   assert.deepEqual(f.calls.at(-1).body, { project: 'inbox', id: f.ui.state().montage.id });
   assert.deepEqual([f.said('montage-status'), f.get('bobine-export-menu').length], [['2 prises exportées · bobines / Sans titre'], 0]);
+  // (0.6.155) Said a few seconds, then nothing.
+  await f.later({ ms: 4000 });
+  assert.deepEqual(f.said('montage-status'), ['']);
   // « Un seul fichier »: the film, as before.
   f.get('montage-export')[0].onclick();
   f.get('bobine-export-item')[0].onclick();
@@ -2006,6 +2102,8 @@ test('while takes are to create, « Un seul fichier » is greyed with its reason
   go.onclick();
   const [single, each] = f.get('bobine-export-item');
   assert.deepEqual([single.className, single.attributes['aria-disabled'], single.dataset.tip, each.attributes['aria-disabled'] ?? null], ['glass-menu-item bobine-export-item is-off', 'true', '2 prises sont encore à créer', null]);
+  // (0.6.155) Its reason at the left of the menu: above it, it hid « Enregistrer ».
+  assert.equal(single.dataset.tipSide, 'left');
   assert.equal(find(each, 'bobine-export-where')[0].textContent, 'bobines / Sans titre / 01');
   single.onclick();
   assert.equal(f.get('bobine-export-menu').length, 1, 'a choice greyed does nothing');
@@ -2042,4 +2140,84 @@ test('« Annuler » after « Renommer »: the fil says the name of before (0.6.1
   assert.deepEqual([f.ui.state().montage.name, named()], ['Sans titre', 'Sans titre']);
   f.pageKey('z', { ctrlKey: true, shiftKey: true });
   assert.equal(named(), 'Le renard en hiver');
+});
+
+test('« Créer » counts every take to create: Moodix AI writes those without text first, then makes them in the series (0.6.155)', async () => {
+  // (Captures 70, 73, 74: « Créer 3 prises » with a suite still without its text. His words of 20/11:
+  // « Une prise sans texte n'empêche rien : Moodix AI l'écrit d'abord, comme l'Éclipse, puis la crée dans
+  // la série. « Créer » n'est grisé que s'il n'y a rien à créer. »)
+  const { pens, write } = pen();
+  const { f, asked, answers } = await series({ texts: ['Il lève les yeux.', ''], write });
+  assert.deepEqual([f.go(), f.goMain().disabled, f.lines().map(line => line[3])], ['Créer 2 prises', false, ['', '']]);
+  f.goMain().onclick();
+  await settle();
+  assert.equal(asked.length, 1);
+  f.runs.push(made(50, 121));
+  answers[0].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  // Its turn: Moodix AI writes it from what it starts and arrives on, « MOODIX AI ÉCRIT » in its line; nothing is made meanwhile.
+  assert.deepEqual([pens.length, pens[0].wanted, f.said('bobine-line-writing'), asked.length, f.go()], [1, { verb: 'create_video', seconds: 2, start: { output: id(50), frame: 'last' }, end: { output: id(6) }, previous: 'Prise 50' }, ['Moodix AI écrit'], 1, '2 sur 2']);
+  assert.deepEqual([f.get('bobine-halt').length, Boolean(f.button('Arrêter'))], [0, true], 'the stop of the series stops it');
+  pens[0].resolve({ prompt: 'He looks at the sea.' });
+  await settle();
+  await settle();
+  assert.deepEqual([asked.length, asked[1].wanted.args.prompt, f.ui.state().montage.plans[1].todo.prompt], [2, 'He looks at the sea.', 'He looks at the sea.']);
+  f.runs.push(made(51, 49));
+  answers[1].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  assert.deepEqual([f.ui.state().filling, f.names()], [null, ['Prise 50', 'Prise 51']]);
+  // What Moodix AI could not write: in its line, in amber; the series ends there.
+  const { pens: tips, write: writes } = pen();
+  const { f: g } = await series({ texts: ['', ''], write: writes });
+  assert.equal(g.go(), 'Créer 2 prises');
+  g.goMain().onclick();
+  await settle();
+  tips[0].reject(new Error('Le modèle de chat ne répond pas.'));
+  await settle();
+  await settle();
+  assert.deepEqual([g.ui.state().filling, g.lines()[0][3], g.get('bobine-line')[0].dataset.state, g.ui.state().writing], [null, 'Texte non écrit : Le modèle de chat ne répond pas.', 'failed', null]);
+  // Stopped while it writes: let go at once, nothing made.
+  const { pens: held, write: holds } = pen();
+  const { f: h, asked: made2 } = await series({ texts: ['', ''], write: holds });
+  h.goMain().onclick();
+  await settle();
+  h.button('Arrêter').onclick();
+  await settle();
+  await settle();
+  assert.deepEqual([held[0].signal.aborted, h.ui.state().filling, h.ui.state().writing, made2.length, h.lines()[0][3]], [true, null, null, 0, '']);
+  // Nothing to look at (a take drawn, without photo): not counted; without Moodix AI at hand, those without text neither.
+  const { pens: none, write: blind } = pen();
+  const k = await setup({ write: blind, create: async () => null }).open();
+  k.lanes()[0].ondblclick({ clientX: 300, target: k.lanes()[0] });
+  assert.deepEqual([k.go(), k.goMain().disabled, none.length], ['Créer', true, 0]);
+  const { f: m } = await series({ texts: ['Il lève les yeux.', ''] });
+  assert.equal(m.go(), 'Créer 1 prise');
+});
+
+test('the bar of a take to create never lies over its photos nor their places: centred, or in the take when it is narrow (0.6.155)', async () => {
+  // (Captures 78, 84, 89, 91: the trash lay on the place of the start photo.) Measured on the page.
+  const f = await setup({ extra: photos(), create: async () => null }).open();
+  lay(f);
+  const box = (left, width) => ({ left, right: left + width, width, top: 0, bottom: 30, height: 30 }),
+    place = (pins, bar) => {
+      const pop = f.pop();
+      Object.assign(pop, { isConnected: true, getBoundingClientRect: () => bar });
+      laid(f)
+        .concat(find(f.root, 'is-slot'))
+        .filter(pin => pin.dataset.plan === f.ui.state().chosen)
+        .forEach((pin, at) => (pin.getBoundingClientRect = () => pins[at]));
+    };
+  // The second take chosen (5 s to 7 s): its bar centred over it, half its width kept inside the track.
+  f.ui.select(f.ui.state().montage.plans[1].id);
+  // (6 s of a timeline of 20; its trash and « Retirer la photo de fin », a rule between them.)
+  assert.deepEqual([f.pop().style.left, f.pop().style['--half']], ['clamp(var(--half), 30%, calc(100% - var(--half)))', '42px']);
+  // Wide: between its photos, as it is. Narrow: over a place of photo, it goes into the take.
+  place([box(500, 64), box(636, 64)], box(580, 40));
+  f.ui.fitBar();
+  assert.equal(f.pop().dataset.inside, 'false');
+  place([box(500, 64), box(560, 64)], box(580, 40));
+  f.ui.fitBar();
+  assert.equal(f.pop().dataset.inside, 'true');
 });
