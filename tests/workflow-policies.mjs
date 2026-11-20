@@ -1447,7 +1447,8 @@ test('what a creation would be made with, and in how long, is said without keepi
   const short = proposal.plan.parameters.frames;
   assert.deepEqual((await w.runtime.foreseen(proposal)).expected, { seconds: Math.round(((108.4 * short) / frames) * 10) / 10, exact: false });
   // A request that is no proposal (the files of its model are not there): its name, said as missing.
-  assert.deepEqual(await w.runtime.foreseen({ requestId: randomUUID(), workflowName: 'LTX 2.5', missing: { files: [] } }), { workflowName: 'LTX 2.5', missing: true });
+  // (0.6.153) What its download is, for « Télécharger · 20,0 Go » of the Bobine.
+  assert.deepEqual(await w.runtime.foreseen({ requestId: randomUUID(), workflowName: 'LTX 2.5', missing: { files: [], bytes: 7 } }), { workflowName: 'LTX 2.5', missing: { files: [], bytes: 7 } });
   // A proposal that is made stays one: asked for real, it is created as before.
   proposal = await byHand('create_video', wanted);
   assert.equal((await make(w, proposal, { studio: true })).parameters.frames, frames);

@@ -47,6 +47,9 @@ class Fake {
   focus() {
     shown.activeElement = this;
   }
+  remove() {
+    this.removed = true;
+  }
   pause() {
     this.paused = true;
   }
@@ -78,7 +81,7 @@ const take = (n, mediaType, more = {}) => ({
 const INTENTION = 'Prise d’une bobine, demandée dans la Bobine.',
   FILM = { width: 1344, height: 768 };
 
-function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null } = {}) {
+function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null } = {}) {
   WIDTH = width;
   const calls = [],
     queue = [],
@@ -124,6 +127,7 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
     ...(write ? { write } : {}),
     ...(modelFor ? { modelFor } : {}),
     ...(longestFor ? { longestFor } : {}),
+    ...(enrich ? { enrich } : {}),
     halt: () => void halted++,
     api,
     node: (tag, className, text) => new Fake(tag, className, text),
@@ -158,6 +162,8 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
     // (0.6.149) A press in the void of the takes, beside what they hold.
     pressVoid: clientX => f.lanes()[0].onpointerdown({ clientX, button: 0, target: f.lanes()[0], stopPropagation() {} }),
     focused: () => shown.activeElement,
+    // (0.6.153) A key heard by the page itself, wherever the focus is.
+    pageKey: key => heard.get('keydown')?.({ key }),
     /** Runs what waits (a save a moment after a change, the next tick of the film) and lets it finish. */
     async later({ ms = 0 } = {}) {
       clock += ms;
@@ -1438,10 +1444,11 @@ test('what cannot be created is said in its line and left aside, and what goes o
   let { f } = await series({ texts: ['', 'Il regarde la mer.'] });
   assert.deepEqual([f.go(), f.goMain().disabled], ['Créer', true]);
   assert.deepEqual(f.lines().map(line => line[3]), ['', 'Elle continue la prise d’avant, qui ne peut pas être créée.']);
-  // The model of the first is not on this computer: said in its line; the second, which goes on from it,
-  // is left aside with it (it would be asked first, and refused).
+  // The model of the first is not on this computer: its name in amber in its line, said once above the
+  // button (capture 89); the second, which goes on from it, is left aside with it.
   ({ f } = await series({ times: { workflowName: 'LTX 2.5', missing: true } }));
-  assert.deepEqual(f.lines().map(line => [line[1], line[3]]), [['LTX 2.5', 'LTX 2.5 n’est pas sur cet ordinateur.'], ['', 'Elle continue la prise d’avant, qui ne peut pas être créée.']]);
+  assert.deepEqual(f.lines().map(line => [line[1], line[3]]), [['LTX 2.5', ''], ['', 'Elle continue la prise d’avant, qui ne peut pas être créée.']]);
+  assert.deepEqual(f.said('bobine-missing'), ['LTX 2.5 n’est pas sur cet ordinateur.']);
   assert.equal(f.get('bobine-line-right')[0].dataset.missing, 'true');
   assert.deepEqual([f.go(), f.goMain().disabled], ['Créer', true]);
   await f.ui.createAll();
@@ -1474,7 +1481,8 @@ test('the Éclipse has Moodix AI write the takes to create that have no text, fr
   await settle();
   // The first: from its photo to its photo, for its length.
   assert.deepEqual(pens[0].wanted, { verb: 'create_video', seconds: 5, start: { output: id(3) }, end: { output: id(5) } });
-  assert.deepEqual([f.names(), f.plans()[0].className, f.lines()[0][1]], [['Moodix AI écrit', '↳ Suite'], 'montage-piece is-todo is-writing', 'Moodix AI écrit']);
+  // (0.6.153, capture 86: in its field, its model still at the right of its line.)
+  assert.deepEqual([f.names(), f.plans()[0].className, f.lines()[0][1], f.said('bobine-line-writing')], [['Moodix AI écrit', '↳ Suite'], 'montage-piece is-todo is-writing', 'LTX 2.5', ['Moodix AI écrit']]);
   // At work: it says so; it can be stopped; nothing else is offered meanwhile.
   assert.deepEqual([agent().className, agent().disabled, f.said('bobine-halt'), f.goMain().disabled, f.get('montage-pick')[0].disabled], ['bobine-go-part bobine-go-agent is-thinking', true, ['Arrêter'], true, true]);
   f.plans()[1].onkeydown({ key: 'Delete' });
@@ -1577,3 +1585,170 @@ test('what Moodix AI cannot write is said; its writing is stopped at once, and e
   for (let turn = 0; turn < 4; turn++) await settle();
   assert.deepEqual([pens.length, f.said('montage-status'), f.ui.state().writing], [0, ['Moodix AI n’a rien à regarder : posez une photo de début ou de fin, ou écrivez vous-même.'], null]);
 });
+
+test('the wand: what has a text is enriched by Moodix AI, one take after another, until Échap; Ctrl+Z gives the text back (0.6.153)', async () => {
+  // (Captures 84 et 85: « tout ce qui peut être enrichi s'entoure […] ; ce qui est sous la baguette se
+  // remplit, des deux côtés à la fois. Un clic l'enrichit […]. Le mode reste ouvert […] jusqu'à Échap ou
+  // un nouveau clic sur la baguette. Ctrl+Z revient au texte d'avant. Un texte vide n'est pas enrichissable. »)
+  const asked = [],
+    signals = [];
+  let answer = null;
+  const f = await setup({
+    extra: photos(),
+    create: async () => null,
+    write: () => new Promise(() => {}),
+    enrich: (wanted, { signal }) => (asked.push(structuredClone(wanted)), signals.push(signal), new Promise((resolve, reject) => (answer = { resolve, reject }))),
+  }).open();
+  lay(f);
+  const wand = () => f.get('bobine-go-wand')[0],
+    agent = () => f.get('bobine-go-agent')[0],
+    lines = () => f.get('bobine-line'),
+    key = (name, more = {}) => f.root.onkeydown({ key: name, target: { tagName: 'DIV' }, preventDefault() {}, ...more });
+  // Between « Créer » and the Éclipse; nothing to enrich without a text: greyed, until a text is written.
+  assert.deepEqual(f.get('bobine-go')[0].children.map(part => part.className), ['bobine-go-main', 'bobine-go-part bobine-go-wand', 'bobine-go-part bobine-go-agent']);
+  assert.deepEqual([wand().attributes['aria-label'].split(' :')[0], wand().attributes['aria-pressed'], wand().disabled], ['Enrichir', 'false', true]);
+  f.write(0, 'Il lève les yeux.');
+  assert.equal(wand().disabled, false);
+  wand().onclick();
+  assert.deepEqual([f.ui.state().wand, f.root.dataset.wand, wand().attributes['aria-pressed'], agent().disabled], [true, 'true', 'true', true]);
+  // What can be enriched is said so, in « À créer » and on the track; under the pointer, both together.
+  assert.deepEqual([lines().map(line => line.dataset.enrichable), f.plans().map(piece => piece.dataset.enrichable)], [['true', 'false'], ['true', 'false']]);
+  lines()[0].onpointerenter();
+  assert.deepEqual([lines()[0].dataset.linked, f.plans()[0].dataset.linked, f.plans()[1].dataset.linked], ['true', 'true', undefined]);
+  lines()[0].onpointerleave();
+  assert.equal(f.plans()[0].dataset.linked, 'false');
+  // A click: Moodix AI details it, as the wand of the Studio does (its verb: a new take); meanwhile it
+  // says so, and nothing else is enriched or created.
+  lines()[0].onclick({ target: lines()[0] });
+  assert.deepEqual(asked, [{ prompt: 'Il lève les yeux.', verb: 'create_video' }]);
+  assert.deepEqual([lines()[0].dataset.state, f.said('bobine-line-writing'), f.get('bobine-line-words')[0].disabled, f.goMain().disabled, f.plans()[0].dataset.enriching], ['enriching', ['Moodix AI enrichit'], true, true, 'true']);
+  f.plans()[0].onclick();
+  assert.equal(asked.length, 1);
+  answer.resolve({ prompt: '  Gros plan : il lève lentement les yeux vers la mer, lumière d’aube.  ' });
+  await settle();
+  assert.equal(f.ui.state().montage.plans[0].todo.prompt, 'Gros plan : il lève lentement les yeux vers la mer, lumière d’aube.');
+  // It lights up a moment, on both sides; the wand is still in the hand.
+  assert.deepEqual([lines()[0].dataset.lit, f.plans()[0].dataset.lit, f.ui.state().wand], ['true', 'true', true]);
+  await f.later();
+  assert.deepEqual([lines()[0].dataset.lit, f.plans()[0].dataset.lit], [undefined, undefined]);
+  // An empty text is not enriched: said; a take on the track is enriched by a click too.
+  lines()[1].onclick({ target: lines()[1] });
+  assert.deepEqual([asked.length, f.notices.at(-1)], [1, 'Un texte vide ne s’enrichit pas : écrivez d’abord ce qui se passe.']);
+  f.plans()[0].onclick();
+  assert.equal(asked.length, 2);
+  answer.reject(new Error('Le moteur n’est pas prêt.'));
+  await settle();
+  assert.deepEqual([f.notices.at(-1), f.ui.state().montage.plans[0].todo.prompt, f.ui.state().enrichingId], ['Texte non enrichi : Le moteur n’est pas prêt.', 'Gros plan : il lève lentement les yeux vers la mer, lumière d’aube.', null]);
+  // Échap puts the wand down, heard by the page wherever the keys are (a click with the wand takes
+  // no focus): a click on a line chooses it again.
+  f.pageKey('Escape');
+  assert.deepEqual([f.ui.state().wand, f.root.dataset.wand], [false, 'false']);
+  f.pageKey('Escape');
+  assert.equal(f.ui.state().wand, false);
+  lines()[1].onclick({ target: lines()[1] });
+  assert.deepEqual([asked.length, f.ui.state().chosen], [2, f.ui.state().montage.plans[1].id]);
+  // Ctrl+Z: the text of before; once, and not when the text was written since.
+  key('z', { ctrlKey: true });
+  assert.equal(f.ui.state().montage.plans[0].todo.prompt, 'Il lève les yeux.');
+  key('z', { ctrlKey: true });
+  assert.equal(f.ui.state().montage.plans[0].todo.prompt, 'Il lève les yeux.');
+  wand().onclick();
+  lines()[0].onclick({ target: lines()[0] });
+  answer.resolve({ prompt: 'Plan large : il lève les yeux.' });
+  await settle();
+  f.write(0, 'Plan large : il lève les yeux, puis sourit.');
+  key('z', { ctrlKey: true });
+  assert.equal(f.ui.state().montage.plans[0].todo.prompt, 'Plan large : il lève les yeux, puis sourit.');
+  // Written meanwhile (its field is greyed, the text changed all the same): the user's text stays.
+  assert.equal(f.ui.state().wand, true);
+  lines()[0].onclick({ target: lines()[0] });
+  assert.equal(f.ui.state().enrichingId, f.ui.state().montage.plans[0].id);
+  f.write(0, 'Il sourit.');
+  answer.resolve({ prompt: 'Gros plan : il sourit.' });
+  await settle();
+  assert.equal(f.ui.state().montage.plans[0].todo.prompt, 'Il sourit.');
+  f.write(0, 'Plan large : il lève les yeux, puis sourit.');
+  // A click on the wand puts it down too. Leaving the page puts it down and lets go of the enrichment asked.
+  wand().onclick();
+  assert.equal(f.ui.state().wand, false);
+  wand().onclick();
+  lines()[0].onclick({ target: lines()[0] });
+  await f.ui.leave();
+  assert.deepEqual([f.ui.state().wand, f.ui.state().enrichingId, signals.at(-1).aborted], [false, null, true]);
+  answer.resolve({ prompt: 'Trop tard.' });
+  await settle();
+  assert.equal(f.ui.state().montage.plans[0].todo.prompt, 'Plan large : il lève les yeux, puis sourit.');
+  // Without Moodix AI at hand: no wand.
+  const bare = await setup({ create: async () => null }).open();
+  assert.equal(bare.get('bobine-go-wand').length, 0);
+});
+
+test('while Moodix AI writes, its field says it and « Arrêter » is at the left of the button (0.6.153)', async () => {
+  // (Capture 86.)
+  const { write } = pen();
+  const { f } = await series({ texts: ['', ''], write });
+  f.get('bobine-go-agent')[0].onclick();
+  await settle();
+  assert.deepEqual(f.get('bobine-foot')[0].children.map(part => part.className), ['bobine-halt', 'bobine-go']);
+  assert.deepEqual([f.said('bobine-line-writing'), f.lines()[0][1]], [['Moodix AI écrit'], 'LTX 2.5']);
+});
+
+test('the model nothing can be created without is downloaded from « À créer », its licences read first (0.6.153)', async () => {
+  // (Capture 89: « son nom passe en ambre dans la ligne, une phrase au-dessus du bouton […] et
+  // « Télécharger · 20,0 Go » prend la place de « Créer ». »)
+  const offer = { workflowId: 'ltx', files: [{ name: 'ltx-2.5-int8.safetensors', bytes: 21474836480 }], bytes: 21474836480, left: 21474836480, needsToken: false, page: '' };
+  const { f } = await series({ times: { workflowName: 'LTX 2.5', missing: offer } });
+  assert.deepEqual([f.said('bobine-missing'), f.get('bobine-line-right')[0].dataset.missing], [['LTX 2.5 n’est pas sur cet ordinateur.'], 'true']);
+  const [fetch] = f.get('bobine-go-download');
+  assert.deepEqual([fetch.textContent, f.get('bobine-go')[0].children.length, f.get('bobine-go-wand').length], ['Télécharger · 20,0 Go', 1, 0]);
+  // Its card, in the place of the lines: the one of the chat, with its files and its licences.
+  // (It has the column then: its own buttons, not ours.)
+  fetch.onclick();
+  assert.deepEqual([f.ui.state().downloading.name, f.get('missing-card').length, f.get('bobine-line').length, f.get('bobine-go').length, f.get('bobine-missing').length], ['LTX 2.5', 1, 0, 0, 0]);
+  // The same card while « À créer » is drawn again (the download goes on).
+  const [card] = f.get('missing-card');
+  f.plans()[0].onclick();
+  assert.equal(f.get('missing-card')[0], card);
+  // « Annuler »: the lines are back, nothing is said in the chat's words.
+  find(card, 'missing-cancel')[0].onclick();
+  assert.deepEqual([f.ui.state().downloading, f.get('missing-card').length, f.get('bobine-line').length, f.get('proposal-cancelled').length], [null, 0, 2, 0]);
+  // A model whose download nobody can say (no offer): the sentence, « Créer » greyed.
+  const { f: g } = await series({ times: { workflowName: 'LTX 2.5', missing: true } });
+  assert.deepEqual([g.said('bobine-missing'), g.get('bobine-go-download').length, g.go(), g.goMain().disabled], [['LTX 2.5 n’est pas sur cet ordinateur.'], 0, 'Créer', true]);
+});
+
+test('a line of « À créer » and its take on the track light up together; a click on one brings the other in view (0.6.153)', async () => {
+  // (Capture 78.)
+  const f = await setup({ extra: photos(), create: async () => null }).open();
+  lay(f);
+  const lines = () => f.get('bobine-line'),
+    seen = [];
+  // Its line under the pointer: the take and its photos lit.
+  lines()[0].onpointerenter();
+  assert.deepEqual([f.plans()[0].dataset.linked, laid(f).filter(pin => pin.dataset.plan === f.ui.state().montage.plans[0].id).map(pin => pin.dataset.linked)], ['true', ['true', 'true']]);
+  lines()[0].onpointerleave();
+  // Lit still when the timeline is drawn again under the pointer (a change of the bobine).
+  lines()[0].onpointerenter();
+  f.root.onkeydown({ key: 'Home', target: { tagName: 'DIV' }, preventDefault() {} });
+  f.get('montage-filter')[1].onclick();
+  assert.deepEqual([lines()[0].dataset.linked, f.plans()[0].dataset.linked], ['true', 'true']);
+  lines()[0].onpointerleave();
+  // The take under the pointer: its line lit.
+  f.plans()[1].onpointerenter();
+  assert.deepEqual(lines().map(line => line.dataset.linked), ['false', 'true']);
+  f.plans()[1].onpointerleave();
+  // A click on a line chooses its take and brings it into the timeline; one on a take brings its line into the list.
+  // (What is brought into view is the element drawn again after the choice.)
+  Fake.prototype.scrollIntoView = function (options) {
+    seen.push([String(this.className).split(' ')[0], this.dataset.id, options]);
+  };
+  try {
+    lines()[0].onclick({ target: lines()[0] });
+    assert.deepEqual([f.ui.state().chosen, seen], [f.ui.state().montage.plans[0].id, [['montage-piece', f.ui.state().montage.plans[0].id, { block: 'nearest', inline: 'nearest' }]]]);
+    f.plans()[1].onclick();
+    assert.deepEqual([f.ui.state().chosen, seen.at(-1)], [f.ui.state().montage.plans[1].id, ['bobine-line', f.ui.state().montage.plans[1].id, { block: 'nearest', inline: 'nearest' }]]);
+  } finally {
+    delete Fake.prototype.scrollIntoView;
+  }
+});
+

@@ -6164,6 +6164,51 @@ test('the bobine asks its takes to LTX 2.5 by its name when the Studio has it re
   }
 });
 
+test('the wand of the bobine: the chat model brought back, with what can stop the wait, then asked as the wand of the Studio (0.6.153)', async () => {
+  // (Seen in the real page, 20/11: the wait for the chat model was given no signal, and the wand said
+  // « Cannot read properties of undefined (reading 'throwIfAborted') ».)
+  const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
+    video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
+    image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true },
+    stored = {
+      schemaVersion: 1, id: 'm1', name: 'Film', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
+      plans: [{ id: 'a', at: 0, kind: 'video', todo: { prompt: 'Il lève les yeux.' }, from: 0, to: 5, frame: 'fit', volume: 1, photos: { start: { conversationId: 'c0', runId: 'p1', output: 0 } } }],
+    },
+    seen = [];
+  const routes = new Proxy({}, {
+    get: (_, route) =>
+      typeof route !== 'string'
+        ? undefined
+        : route === 'studio/enrich'
+          ? () => ({ prompt: 'Gros plan : il lève lentement les yeux.' })
+          : route === 'tools/action'
+            ? () => ({ workflowName: 'LTX 2.5' })
+            : route === 'montages/save'
+              ? body => ({ ...body.montage, createdAt: 'a', updatedAt: 'b' })
+              : /^montages\/[^/]+\/m1$/.test(route)
+                ? () => stored
+                : /^montages\/[^/]+$/.test(route)
+                  ? () => ({ montages: [{ id: 'm1', name: 'Film' }] })
+                  : undefined,
+  });
+  const studio = await studioPage({ create_image: [image], create_video: [video] }, routes, {
+    runs: [photo],
+    waitForModel: async (api, signal) => void seen.push(typeof signal?.throwIfAborted),
+  });
+  try {
+    const desk = studio.studio.bobine().desk();
+    await until(() => desk.find('bobine-go-wand').length === 1 && !desk.find('bobine-go-wand')[0].disabled);
+    desk.find('bobine-go-wand')[0].onclick();
+    desk.find('bobine-line')[0].onclick({ target: desk.find('bobine-line')[0] });
+    await until(() => desk.find('bobine-line-words')[0]?.value === 'Gros plan : il lève lentement les yeux.');
+    assert.deepEqual(seen, ['function']);
+    const [, sent] = studio.asked.find(([route]) => route === 'studio/enrich');
+    assert.deepEqual(sent, { prompt: 'Il lève les yeux.', verb: 'create_video' });
+  } finally {
+    studio.restore();
+  }
+});
+
 test('the Éclipse of the bobine: the chat model is brought back, then asked what happens in the take, in the conversation (0.6.146, 0.6.148)', async () => {
   const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
     video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },

@@ -33,6 +33,8 @@ export function missingFileCard({
   api,
   onReady = () => false,
   onResume = () => {},
+  // (0.6.153) « Annuler » elsewhere than in the chat (the Bobine): the card goes, `onCancel()` says the rest.
+  onCancel = null,
   poll = 1000,
   wait = null,
 }) {
@@ -211,6 +213,7 @@ export function missingFileCard({
   function cancel() {
     gone = true;
     card.remove();
+    if (onCancel) return onCancel();
     host.append(node('p', 'proposal-cancelled', 'Proposition annulée.'));
   }
   render();

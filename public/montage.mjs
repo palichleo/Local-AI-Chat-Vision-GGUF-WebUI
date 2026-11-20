@@ -18,6 +18,7 @@
  */
 import { FORMATS } from './formats.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
+import { missingFileCard, sizeText } from './missing-file.mjs';
 import {
   MONTAGE_LIMITS,
   MONTAGE_RATES,
@@ -120,6 +121,10 @@ export function setupMontage({
   // (0.6.152) The longest that model makes at once, by verb (seconds), or null: a take to create
   // longer than it is made in equal parts (montage-model.mjs `partsOf`).
   longestFor = () => null,
+  // (0.6.153, captures 84 et 85) The text of a take to create detailed by the chat model (framing,
+  // light, movement) without changing what happens in it, as the wand of the Studio does:
+  // `enrich({ prompt, verb }, { signal })` gives { prompt }, or throws why not.
+  enrich = null,
   // (0.6.146) What happens in a take to create, written by the chat model from its pictures:
   // `write({ verb, seconds, start, end, previous }, { signal })` gives { prompt }, or throws why not.
   write = null,
@@ -164,7 +169,19 @@ export function setupMontage({
     zoom = 1,
     scrolled = 0,
     // (0.6.149) The take to create being drawn in a hole: { from, to } in seconds of the bobine.
-    drawing = null;
+    drawing = null,
+    // (0.6.153) Enrichir: the wand is in the hand (« Le mode reste ouvert »), the take being enriched,
+    // the one just enriched (it lights up a moment), what Ctrl+Z gives back ({ id, prompt, after }).
+    wand = false,
+    enrichingId = null,
+    lit = null,
+    // (0.6.153, capture 78) The take whose line or piece is under the pointer: lit on both sides, drawn again so.
+    hovered = null,
+    // (0.6.153) What lets the enrichment being asked go.
+    enriched = null,
+    // (0.6.153) The model being downloaded from « À créer »: { name, offer, host }.
+    downloading = null;
+  const back = [];
   // (0.6.148) Why a take to create could not be made, by its id: said in its line, in amber.
   const failed = new Map();
   // (0.6.148) The model of each kind of take to create, as the server would choose it: { name, missing }.
@@ -754,7 +771,8 @@ export function setupMontage({
     models.set(key, 'asking');
     void Promise.resolve(estimate({ verb: wanted.verb, args: { ...args, prompt: 'Prise.' }, size: filmSize() }))
       .then(seen => {
-        models.set(key, { name: seen?.workflowName ?? '', missing: Boolean(seen?.missing) });
+        // (0.6.153) A model this computer lacks: what its download is (files, size), from the server.
+        models.set(key, { name: seen?.workflowName ?? '', missing: Boolean(seen?.missing), offer: seen?.missing && typeof seen.missing === 'object' ? seen.missing : null });
         if (parts?.create && !inPanel()) update();
         else sayModels();
       })
@@ -803,10 +821,15 @@ export function setupMontage({
       lines = node('div', 'bobine-lines'),
       starts = planStarts(montage),
       series = seriesOf(montage, lengthOf, { limits: limits() }),
-      can = new Set(creatable().map(item => item.id));
+      ready = creatable(),
+      can = new Set(ready.map(item => item.id));
     section.setAttribute('aria-label', 'À créer');
     live.models = new Map();
     live.states = new Map();
+    live.lines = new Map();
+    live.wand = live.agent = null;
+    // (0.6.153, capture 89) The model a take needs and this computer lacks: said once, above the button.
+    let absent = null;
     for (const item of series) {
       const plan = itemOf(item.id),
         index = montage.plans.indexOf(plan),
@@ -814,82 +837,133 @@ export function setupMontage({
         top = node('div', 'bobine-line-top'),
         state = stateOf(item.id),
         model = modelOf(item.id),
-        right = node('span', 'bobine-line-right', state || model?.name || ''),
+        // (Capture 86: while Moodix AI writes it, its model stays at the right, its field says it.)
+        written = writing?.id === item.id,
+        right = node('span', 'bobine-line-right', (written ? '' : state) || model?.name || ''),
         field = node('textarea', 'bobine-line-words'),
         reason =
           failed.get(item.id) ||
-          (model?.missing
-            ? `${model.name} n’est pas sur cet ordinateur.`
-            : item.reason && item.prompt
-              ? item.reason
-              : item.ready && !can.has(item.id)
-                ? 'Elle continue la prise d’avant, qui ne peut pas être créée.'
-                : '');
+          (item.reason && item.prompt
+            ? item.reason
+            : item.ready && !can.has(item.id) && !model?.missing
+              ? 'Elle continue la prise d’avant, qui ne peut pas être créée.'
+              : '');
+      if (model?.missing) absent ??= model;
       line.dataset.id = item.id;
-      line.dataset.state = failed.has(item.id) && !state.startsWith('En') ? 'failed' : making?.id === item.id ? 'making' : '';
+      line.dataset.state = failed.has(item.id) && !state.startsWith('En') ? 'failed' : making?.id === item.id ? 'making' : enrichingId === item.id ? 'enriching' : '';
       if (model?.missing) right.dataset.missing = 'true';
-      if (state) right.dataset.state = 'true';
+      if (state && !written) right.dataset.state = 'true';
       line.setAttribute('aria-pressed', String(chosen === item.id));
+      // (0.6.153, captures 84 et 85) What has a text can be enriched; just enriched, it lights up a moment.
+      line.dataset.enrichable = String(Boolean(enrich) && Boolean(item.prompt));
+      if (lit === item.id) line.dataset.lit = 'true';
       top.append(node('span', 'bobine-line-when', `${mono(starts[index])} → ${mono(starts[index] + plan.to - plan.from)}`), right);
-      Object.assign(field, { value: plan.todo.prompt, rows: 2, maxLength: 4000, disabled: busy() });
+      Object.assign(field, { value: plan.todo.prompt, rows: 2, maxLength: 4000, disabled: busy() || enrichingId === item.id });
       field.dataset.id = item.id;
       field.setAttribute('aria-label', `Ce qui se passe, de ${mono(starts[index])} à ${mono(starts[index] + plan.to - plan.from)}`);
       field.oninput = () => change(withItemChanged(montage, item.id, { prompt: field.value }), { sliding: true });
-      // A line chosen chooses its take, and brings the head to it.
+      // (With the wand, the field is not written in: the click enriches it.)
+      field.onpointerdown = event => {
+        if (wand) event.preventDefault?.();
+      };
+      // A line chosen chooses its take, and brings the head and the timeline to it (capture 78); with
+      // the wand, a click enriches it.
       line.onclick = event => {
+        if (wand) return void enrichOne(item.id);
         if (event.target === field) return;
         chosen = item.id;
         head = starts[index];
         update();
+        reveal(item.id);
       };
+      line.onpointerenter = () => linked(item.id, true);
+      line.onpointerleave = () => linked(item.id, false);
+      if (hovered === item.id) line.dataset.linked = 'true';
       // (0.6.152, capture 74) Made in parts: how many, of how long each, at the right of what it is.
-      const middle = node('div', 'bobine-line-middle');
+      const middle = node('div', 'bobine-line-middle'),
+        box = node('div', 'bobine-line-field');
       middle.append(node('span', 'bobine-line-what', whatOf(plan)));
       if (item.parts > 1) middle.append(node('span', 'bobine-line-parts', `${item.parts} × ${mono(item.part)} s`));
-      line.append(top, middle, field);
+      box.append(field);
+      if (written) box.append(node('span', 'bobine-line-writing', 'Moodix AI écrit'));
+      if (enrichingId === item.id) box.append(node('span', 'bobine-line-writing', 'Moodix AI enrichit'));
+      line.append(top, middle, box);
       if (reason) line.append(node('p', 'bobine-line-reason', reason));
       live.models.set(item.id, right);
       live.states.set(item.id, right);
+      live.lines.set(item.id, line);
       lines.append(line);
     }
-    // The button: « ▶ Créer 2 prises » | the Éclipse (Moodix AI); being made, it fills.
-    const foot = node('div', 'bobine-go'),
-      main = button('bobine-go-main', '', () => (filling?.stage === 'paused' ? void run(filling) : void createAll())),
-      label = node('span', 'bobine-go-label', ''),
-      fill = node('span', 'bobine-go-fill');
-    // (The fill under the rest: it grows from the left as the takes are made.)
-    main.append(fill, icon('play'), label);
-    foot.append(main);
-    if (inSeries()) {
-      const pause = button('bobine-go-part', '', () => {
-          if (filling.stage !== 'running') return;
-          filling.pausing = true;
-          sayGo();
-        }, 'pause', 'Mettre en pause après cette prise'),
-        stopAll = button('bobine-go-part', '', () => stopSeries(), 'stop', 'Arrêter');
-      pause.hidden = filling.stage !== 'running';
-      foot.append(pause, stopAll);
-      live.pause = pause;
-    } else live.pause = null;
-    // (Capture 87: while takes are created, the pause and the stop take the place of the Éclipse.)
-    if (write && !inSeries()) {
-      const agent = button('bobine-go-part bobine-go-agent' + (writing ? ' is-thinking' : ''), '', () => void askAgent(), 'eclipse', 'Moodix AI écrit ce qui se passe dans les prises sans texte');
-      agent.disabled = busy() || !series.some(item => !item.prompt);
-      foot.append(agent);
+    // (0.6.153) Its model downloaded, in « À créer » in the place of its lines: the card of the chat
+    // (missing-file.mjs), its files, their licences read first, the download and its line.
+    if (downloading) {
+      lines.replaceChildren(downloading.host);
+      lines.dataset.downloading = 'true';
     }
-    const halting = writing ? button('bobine-halt', 'Arrêter', () => writing?.controller.abort()) : null;
-    body.append(node('h2', 'bobine-create-title', 'À créer'), lines, ...(halting ? [halting] : []), foot);
-    Object.assign(live, { goMain: main, goLabel: label, goFill: fill });
+    const row = node('div', 'bobine-foot');
+    // (Capture 86: « Arrêter » at the left of the button while Moodix AI writes.)
+    if (writing) row.append(button('bobine-halt', 'Arrêter', () => writing?.controller.abort()));
+    const foot = node('div', 'bobine-go');
+    if (absent?.offer && !ready.length && !inSeries()) {
+      // (Capture 89: nothing can be created without it: « Télécharger · 20,0 Go » takes the place of « Créer ».)
+      const fetch = button('bobine-go-main bobine-go-download', '', () => download(absent), 'download');
+      fetch.append(node('span', 'bobine-go-label', 'Télécharger · ' + sizeText(absent.offer.left || absent.offer.bytes)));
+      fetch.disabled = Boolean(downloading);
+      foot.append(fetch);
+      Object.assign(live, { goMain: null, goLabel: null, goFill: null, pause: null });
+    } else {
+      // The button: « ▶ Créer 2 prises » | the wand (Enrichir) | the Éclipse (Moodix AI); being made, it fills.
+      const main = button('bobine-go-main', '', () => (filling?.stage === 'paused' ? void run(filling) : void createAll())),
+        label = node('span', 'bobine-go-label', ''),
+        fill = node('span', 'bobine-go-fill');
+      // (The fill under the rest: it grows from the left as the takes are made.)
+      main.append(fill, icon('play'), label);
+      foot.append(main);
+      if (inSeries()) {
+        const pause = button('bobine-go-part', '', () => {
+            if (filling.stage !== 'running') return;
+            filling.pausing = true;
+            sayGo();
+          }, 'pause', 'Mettre en pause après cette prise'),
+          stopAll = button('bobine-go-part', '', () => stopSeries(), 'stop', 'Arrêter');
+        pause.hidden = filling.stage !== 'running';
+        foot.append(pause, stopAll);
+        live.pause = pause;
+      } else live.pause = null;
+      // (Capture 87: while takes are created, the pause and the stop take the place of the wand and the Éclipse.)
+      if (enrich && !inSeries()) {
+        const magic = button('bobine-go-part bobine-go-wand', '', () => toggleWand(), 'wand', 'Enrichir : Moodix AI détaille le texte d’une prise (cadre, lumière, mouvement) ; Échap pour finir');
+        magic.setAttribute('aria-pressed', String(wand));
+        foot.append(magic);
+        live.wand = magic;
+      }
+      if (write && !inSeries()) {
+        const agent = button('bobine-go-part bobine-go-agent' + (writing ? ' is-thinking' : ''), '', () => void askAgent(), 'eclipse', 'Moodix AI écrit ce qui se passe dans les prises sans texte');
+        foot.append(agent);
+        live.agent = agent;
+      }
+      Object.assign(live, { goMain: main, goLabel: label, goFill: fill });
+    }
+    row.append(foot);
+    // (Its card open, it has the column: its own « Télécharger » and « Annuler » are the buttons then.)
+    body.append(
+      node('h2', 'bobine-create-title', 'À créer'),
+      lines,
+      ...(absent && !downloading ? [node('p', 'bobine-missing', `${absent.name} n’est pas sur cet ordinateur.`)] : []),
+      ...(downloading ? [] : [row]),
+    );
+    if (downloading) Object.assign(live, { goMain: null, goLabel: null, goFill: null, pause: null, wand: null, agent: null });
     sayGo();
     return section;
   }
   /** What the button says: how many takes « Créer » makes, or where the creation is. */
   function sayGo() {
-    if (!live.goMain || !montage) return;
+    if (!montage) return;
+    if (!live.goMain) return;
     const ready = creatable().reduce((sum, item) => sum + item.parts, 0),
       running = inSeries(),
       count = running ? filling.ids.length : ready;
-    live.goMain.disabled = writing ? true : running ? filling.stage === 'running' : !create || !ready || Boolean(making);
+    live.goMain.disabled = writing || enrichingId ? true : running ? filling.stage === 'running' : !create || !ready || Boolean(making);
     live.goMain.dataset.state = running ? filling.stage : '';
     live.goLabel.textContent = running
       ? filling.stage === 'paused'
@@ -904,6 +978,10 @@ export function setupMontage({
       live.pause.hidden = !running || filling.stage !== 'running';
       live.pause.disabled = Boolean(filling?.pausing);
     }
+    // (0.6.153) The wand and the Éclipse follow the texts as they are written, the panel not drawn again.
+    const texts = seriesOf(montage, lengthOf).map(item => Boolean(item.prompt));
+    if (live.wand) live.wand.disabled = !wand && (busy() || Boolean(enrichingId) || !texts.some(Boolean));
+    if (live.agent) live.agent.disabled = busy() || wand || !texts.some(has => !has);
   }
   const modelMissing = id => Boolean(modelOf(id)?.missing);
   /**
@@ -1021,6 +1099,108 @@ export function setupMontage({
     }
     filling.stopping = true;
     halt();
+  }
+
+  // Enrichir (0.6.153) -------------------------------------------------------------------------------
+  /** The wand taken or put down (« jusqu'à Échap ou un nouveau clic sur la baguette »). */
+  function toggleWand(on = !wand) {
+    if (on && (busy() || !enrich)) return;
+    wand = on;
+    if (root) root.dataset.wand = String(wand);
+    // (Échap puts it down wherever the keys are: a click with the wand takes no focus.)
+    if (wand) page?.addEventListener?.('keydown', wandKey);
+    else page?.removeEventListener?.('keydown', wandKey);
+    update();
+  }
+  function wandKey(event) {
+    if (wand && event.key === 'Escape') toggleWand(false);
+  }
+  /**
+   * A take to create enriched by Moodix AI: its text detailed, nothing changed of what happens in it.
+   * An empty text is not enriched. Written meanwhile by the user, theirs stays. Ctrl+Z gives back the
+   * text of before.
+   */
+  async function enrichOne(id) {
+    if (!enrich || enrichingId || busy()) return;
+    const plan = itemOf(id);
+    if (!isTodo(plan)) return;
+    const before = plan.todo.prompt,
+      asked = before.trim();
+    if (!asked) return void notice('Un texte vide ne s’enrichit pas : écrivez d’abord ce qui se passe.');
+    enrichingId = id;
+    update();
+    let written = '';
+    // (Let go with the page: its answer, late, writes nothing.)
+    const controller = (enriched = new AbortController());
+    try {
+      written = String((await enrich({ prompt: asked, verb: plan.todo.suite ? 'extend_video' : 'create_video' }, { signal: controller.signal }))?.prompt ?? '').trim();
+      if (controller.signal.aborted) return;
+      if (!written) throw new Error('Moodix AI n’a rien écrit.');
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      enrichingId = null;
+      notice('Texte non enrichi : ' + error.message);
+      return update();
+    }
+    enrichingId = null;
+    const now = itemOf(id);
+    if (!isTodo(now) || now.todo.prompt !== before) return update();
+    back.push({ id, prompt: before, after: written });
+    change(withItemChanged(montage, id, { prompt: written }));
+    lit = id;
+    update();
+    timers.set(() => {
+      if (lit !== id) return;
+      lit = null;
+      update({ panel: !inPanel() });
+    }, 1200);
+  }
+  /** Ctrl+Z: the text of before the last enrichment, while the take still has what was written. */
+  function enrichedBack() {
+    const last = back.at(-1),
+      plan = last ? itemOf(last.id) : null;
+    if (!last || !isTodo(plan) || plan.todo.prompt !== last.after || busy()) return false;
+    back.pop();
+    change(withItemChanged(montage, last.id, { prompt: last.prompt }));
+    return true;
+  }
+
+  // The list and the track (0.6.153, capture 78) -------------------------------------------------------
+  /** The line of a take to create and the take on the track, with its photos: lit together under the pointer. */
+  function linked(id, on) {
+    hovered = on ? id : hovered === id ? null : hovered;
+    for (const element of [live.lines?.get(id), ...(live.pieces?.get(id) ?? [])]) if (element?.dataset) element.dataset.linked = String(on);
+  }
+  /** The take chosen from its line, brought into the timeline when it is zoomed; its line brought into the list. */
+  function reveal(id, { line = false } = {}) {
+    const target = line ? live.lines?.get(id) : live.pieces?.get(id)?.[0];
+    target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }
+
+  // A model this computer lacks (0.6.153, capture 89) -------------------------------------------------
+  /** « Télécharger · 20,0 Go »: the card of the chat in « À créer », its licences read first; once there, the models asked again. */
+  function download(absent) {
+    if (downloading || !absent?.offer) return;
+    const host = node('div', 'bobine-download');
+    downloading = { name: absent.name, offer: absent.offer, host };
+    missingFileCard({
+      host,
+      request: { missing: absent.offer, workflowName: absent.name, mediaType: 'video' },
+      node,
+      icon,
+      api,
+      onReady: () => {
+        downloading = null;
+        models.clear();
+        update();
+        return true;
+      },
+      onCancel: () => {
+        downloading = null;
+        update();
+      },
+    });
+    update();
   }
 
   // Moodix AI writes ------------------------------------------------------------------------------
@@ -1174,6 +1354,7 @@ export function setupMontage({
     // (It takes the keys when it is pressed: the space bar reads the film.)
     section.tabIndex = -1;
     live.bar = live.making = null;
+    live.pieces = new Map();
     // A mark a second up to a minute shown, then every five or ten: the ruler never turns into a comb.
     const seen = whole / zoom,
       step = seen <= 60 ? 1 : seen <= 300 ? 5 : 10;
@@ -1246,6 +1427,10 @@ export function setupMontage({
           if (empty) pin.append(icon('image'));
           pin.append(node('span', 'montage-photo-side', side === 'start' ? 'Début' : 'Fin'));
           if (todo) into(pin, dropped => withPhotoIn(montage, dropped, plan.id, side));
+          // (Lit with its take and its line.)
+          if (hovered === plan.id) pin.dataset.linked = 'true';
+          if (!live.pieces.has(plan.id)) live.pieces.set(plan.id, []);
+          live.pieces.get(plan.id).push(pin);
           lane.append(pin);
         }
       });
@@ -1308,11 +1493,25 @@ export function setupMontage({
           piece = button('montage-piece' + look, '', () => {
             // (The click that ends a drag chooses nothing.)
             if (slid) return void (slid = false);
+            // (0.6.153) With the wand, a take to create with a text is enriched.
+            if (wand && todo) return void enrichOne(item.id);
             chosen = chosen === item.id ? null : item.id;
             update();
+            if (todo && chosen) reveal(item.id, { line: true });
           });
         piece.dataset.id = item.id;
         piece.dataset.missing = String(!record && !todo);
+        if (id === 'plans') {
+          // (0.6.153) Lit with its line and its photos; enrichable with the wand when it has a text.
+          // (Its photos are drawn before it, on the track above: the take first, then them.)
+          live.pieces.set(item.id, [piece, ...(live.pieces.get(item.id) ?? [])]);
+          piece.onpointerenter = () => linked(item.id, true);
+          piece.onpointerleave = () => linked(item.id, false);
+          if (hovered === item.id) piece.dataset.linked = 'true';
+          if (todo) piece.dataset.enrichable = String(Boolean(enrich) && Boolean(item.todo.prompt.trim()));
+          if (lit === item.id) piece.dataset.lit = 'true';
+          if (enrichingId === item.id) piece.dataset.enriching = 'true';
+        }
         piece.setAttribute('aria-pressed', String(chosen === item.id));
         // (Four pixels between two neighbours: the surface shows between them. A continuation takes
         // those of the video it continues: the two touch.)
@@ -1712,6 +1911,7 @@ export function setupMontage({
       ownFil = !given;
       filRoot = given ?? node('div', 'bobine-fil');
       root = node('div', 'studio-desk bobine-desk');
+      root.dataset.wand = String(wand);
       // (A press anywhere on the desk gives it the keys.)
       root.tabIndex = -1;
       parts = null;
@@ -1720,6 +1920,9 @@ export function setupMontage({
         // (A take, a sound or a tile is a button too: Enter chooses it, the space bar reads the film.)
         const { tagName, className } = event.target ?? {},
           typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName) || (tagName === 'BUTTON' && !/\bmontage-(piece|take)\b/.test(className));
+        // (0.6.153) Échap puts the wand down; Ctrl+Z gives back the text of before the last enrichment.
+        if (event.key === 'Escape' && wand) return toggleWand(false);
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && String(event.key).toLowerCase() === 'z' && tagName !== 'INPUT' && enrichedBack()) return void event.preventDefault?.();
         if (event.key === ' ' && !typing) {
           event.preventDefault?.();
           play();
@@ -1756,13 +1959,18 @@ export function setupMontage({
       // (0.6.146) What Moodix AI is writing is let go.
       writing?.controller.abort();
       writing = null;
+      // (0.6.153) The wand is put down, the enrichment asked let go.
+      wand = false;
+      page?.removeEventListener?.('keydown', wandKey);
+      enriched?.abort();
+      enrichingId = null;
       asking = null;
       root = parts = null;
       held = ghost = null;
       return keep();
     },
     // For the tests and the pointer of a later step: what is on the page, and the hands that change it.
-    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed), zoom, scrolled, drawing }),
+    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed), zoom, scrolled, drawing, wand, enrichingId, lit, downloading }),
     lay,
     zoomTo,
     createAll,

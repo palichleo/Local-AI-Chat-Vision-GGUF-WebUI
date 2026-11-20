@@ -585,6 +585,12 @@ export function setupStudio({
     // (0.6.146) What happens in a plan, written by Moodix AI from its photos: the chat model comes
     // back first when it has left the card, as for « Améliorer »; the takes of the conversation shown
     // are named in the request, the others by their own conversation.
+    // (0.6.153) Enrichir: the text of a take detailed by the chat model, as the wand of the Studio does.
+    enrich: async (asked, { signal = new AbortController().signal } = {}) => {
+      await releasing;
+      await waitForModel(api, signal, () => {});
+      return (await api('studio/enrich', { prompt: asked.prompt, verb: asked.verb }, { signal })).json();
+    },
     write: async (asked, { signal } = {}) => {
       await releasing;
       await waitForModel(api, signal, () => {});
