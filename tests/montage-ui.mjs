@@ -1186,8 +1186,11 @@ test('« Créer 2 prises » makes them at once, one after the other, in the orde
   // The first is asked as a hand asks it; the second waits its turn.
   assert.deepEqual(asked.map(item => item.wanted), [{ ...foreseen[0], args: { ...foreseen[0].args, prompt: 'Il lève les yeux.' } }]);
   assert.deepEqual([f.names(), f.lines().map(line => line[1]), f.go(), f.get('bobine-go-fill')[0].style.width], [['En cours', 'En attente'], ['En cours', 'En attente'], '1 sur 2', '0%']);
-  // Pause and stop beside it; nothing else is offered meanwhile.
+  // Pause and stop beside it (capture 87: two bars, a square); nothing else is offered meanwhile, not
+  // even the small bar of the take being made.
   assert.deepEqual([f.button('Mettre en pause après cette prise').hidden, Boolean(f.button('Arrêter'))], [false, true]);
+  assert.deepEqual([f.button('Mettre en pause après cette prise').children[0].className, f.button('Arrêter').children[0].className], ['icon-pause', 'icon-stop']);
+  assert.deepEqual([f.ui.state().chosen, f.get('montage-pop').length], [f.ui.state().montage.plans[0].id, 0]);
   assert.deepEqual([f.get('montage-export')[0].disabled, f.get('montage-pick')[0].disabled, f.get('montage-format')[0].disabled], [true, true, true]);
   // Its progress: on the take, in its line, in the button, which fills (half of the first of two: a quarter).
   asked[0].hooks.onProgress('Étape 4 sur 8', 0.5);
@@ -1332,6 +1335,10 @@ test('the Éclipse has Moodix AI write the takes to create that have no text, fr
   // Both written in their lines and kept; nothing is made: « Créer 2 prises » does it.
   assert.deepEqual([f.get('bobine-line-words').map(field => field.value), f.saves().at(-1).body.montage.plans[1].todo.prompt], [['An old fisherman lifts his eyes.', 'He looks at the sea.'], 'He looks at the sea.']);
   assert.deepEqual([f.ui.state().writing, asked.length, f.go(), f.goMain().disabled, agent().className, agent().disabled], [null, 0, 'Créer 2 prises', false, 'bobine-go-part bobine-go-agent', true]);
+  // While they are created, the pause and the stop take the place of the Éclipse (capture 87).
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual([f.get('bobine-go-agent').length, f.get('bobine-go-part').map(part => part.attributes['aria-label'])], [0, ['Mettre en pause après cette prise', 'Arrêter']]);
   // What the user wrote is left as it is: only the take without text is written, the other is its story before.
   ({ pens, write } = pen());
   ({ f } = await series({ texts: ['Il lève les yeux.', ''], write }));

@@ -835,13 +835,14 @@ export function setupMontage({
           if (filling.stage !== 'running') return;
           filling.pausing = true;
           sayGo();
-        }, 'stop', 'Mettre en pause après cette prise'),
-        stopAll = button('bobine-go-part', '', () => stopSeries(), 'close', 'Arrêter');
+        }, 'pause', 'Mettre en pause après cette prise'),
+        stopAll = button('bobine-go-part', '', () => stopSeries(), 'stop', 'Arrêter');
       pause.hidden = filling.stage !== 'running';
       foot.append(pause, stopAll);
       live.pause = pause;
     } else live.pause = null;
-    if (write) {
+    // (Capture 87: while takes are created, the pause and the stop take the place of the Éclipse.)
+    if (write && !inSeries()) {
       const agent = button('bobine-go-part bobine-go-agent' + (writing ? ' is-thinking' : ''), '', () => void askAgent(), 'eclipse', 'Moodix AI écrit ce qui se passe dans les prises sans texte');
       agent.disabled = busy() || !series.some(item => !item.prompt);
       foot.append(agent);
@@ -1335,7 +1336,8 @@ export function setupMontage({
             piece.append(grip);
           }
         lane.append(piece);
-        if (chosen === item.id && !held) {
+        // (Not over a take being made: nothing can be changed in it.)
+        if (chosen === item.id && !held && making?.id !== item.id) {
           const bar = popOf(item, recordOf(item.source), loudness);
           // (Kept inside the track at its right edge.)
           bar.style.left = `clamp(0px, ${percent(at)}, calc(100% - 240px))`;

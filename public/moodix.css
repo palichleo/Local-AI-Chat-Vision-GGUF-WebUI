@@ -18710,10 +18710,18 @@ body[data-view='bobine'] .chat-panel {
   cursor: default;
 }
 .bobine-go-main[data-state='running'] {
+  justify-content: flex-start;
   color: var(--ink);
-  font: 500 14px/1 var(--font-mono);
+  font: 500 13px/1 var(--font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+/* (Capture 87 : « 1 SUR 2 · 46 % » sur une ligne, jamais coupé en deux.) */
+.bobine-go-main[data-state] > .bobine-go-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .bobine-go-main[data-state='running'] svg {
   display: none;
