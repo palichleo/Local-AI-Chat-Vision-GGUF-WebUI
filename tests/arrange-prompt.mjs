@@ -108,7 +108,16 @@ test('the instructions are the same for every bobine and every request, short, a
   assert.match(system, /seconds: from 1 to 60, 5 when nothing says otherwise\./);
   assert.match(system, /A suite never follows an image, never opens an empty bobine and never has a start image\./);
   assert.match(system, /Only an image can be a start or an end, never a video\./);
-  assert.match(system, /say and every text are in the language the request itself is written in\./);
+  // (0.6.164, his choice of 21/11, « Oui, en anglais »: with his own ChatGPT the texts of the takes were in
+  // French for one request and in English for the next two, all three asked in French. The text of a take
+  // is the prompt of its video, always in English as Enrichir and the Éclipse write; what is said to him
+  // stays in his language.)
+  assert.match(system, /say is in the language the request itself is written in; every text is in English\./);
+  assert.match(system, /text: the prompt of the video, always in English: two or three sentences/);
+  assert.doesNotMatch(system, /every text are in the language/);
+  const [simply] = arrangeMessages({ montage: empty(), takes: [], request: 'x', simple: true });
+  assert.match(simply.content, /text: always in English: one or two sentences/);
+  assert.match(simply.content, /say is in the language the request itself is written in; every text is in English\.$/);
   // (Measured on 20/11 with a small ChatGPT, 12 requests: offered as an item like the others, an image laid
   // still was taken in 8 of them, a film of fixed pictures; a video of 5 s stood for a shot asked of 6 s;
   // « Le vaisseau argenté de la prise 2 monte… » was written as the text of a take.)
@@ -277,14 +286,14 @@ test('the earlier requests and the standing instructions are in the message, the
       '- « ajoute une image de la Terre » You answered: « J’ai ajouté la prise 3 comme photo de fin. »\n' +
       '- « une prise à créer après la vidéo de la capsule »',
     "The user's standing instructions, which come first where they differ: Des plans courts, en noir et blanc.",
-    `The request (write say and every text in its language):\n« ${REQUEST} »\nAnswer with the JSON plan only.`,
+    `The request (say in its language, every text in English):\n« ${REQUEST} »\nAnswer with the JSON plan only.`,
   ]);
   assert.equal(user.includes('fais un essai'), false, 'the three last only');
   assert.equal(system.includes('noir et blanc'), false);
   // Neither said when there is none.
   const plain = userOf(arrangeMessages({ montage: FILM(), takes: TAKES, request: 'invente la suite', previous: [{ request: '  ', say: 'x' }, null] }));
   assert.equal(/Earlier requests|standing instructions/.test(plain), false);
-  assert.ok(plain.endsWith('The request (write say and every text in its language):\n« invente la suite »\nAnswer with the JSON plan only.'));
+  assert.ok(plain.endsWith('The request (say in its language, every text in English):\n« invente la suite »\nAnswer with the JSON plan only.'));
 });
 
 test('an empty bobine and a project without takes read plainly (0.6.161)', () => {
@@ -292,7 +301,7 @@ test('an empty bobine and a project without takes read plainly (0.6.161)', () =>
     userOf(arrangeMessages({ montage: empty(), takes: [], request: 'crée une vidéo sur le thème de l’espace' })),
     'The bobine is empty: what you add opens the film, and its first take is a cut.\n\n' +
       'The project has no image or video yet: start and end stay null, and add holds only takes to create.\n\n' +
-      'The request (write say and every text in its language):\n« crée une vidéo sur le thème de l’espace »\nAnswer with the JSON plan only.',
+      'The request (say in its language, every text in English):\n« crée une vidéo sur le thème de l’espace »\nAnswer with the JSON plan only.',
   );
   // Nothing given at all: still a message, without « undefined » or « NaN ».
   for (const messages of [arrangeMessages({}), arrangeMessages({ montage: null, takes: null, previous: 'x', most: Number.NaN })]) {
