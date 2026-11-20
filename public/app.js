@@ -4936,6 +4936,11 @@ const libraryUI = setupLibrary({
   },
   // On a take, the actions of the conversation (Ouvrir, Prolonger…), done in its conversation.
   actions: (record, index) => libraryActions(record, index),
+  // (0.6.147) « Supprimer » on any take: the deletion of the Studio itself (its Sortie and its montage
+  // read again), never during a generation (the server refuses it then): the bin says why.
+  remove: record => studioUI.remove(record),
+  busy: () => (state.work || state.generating ? 'Attendez la fin de la génération en cours pour supprimer.' : ''),
+  notice,
 });
 // The fil heads the Pellicule (pellicule-fil-maquette.md): its menus choose the project and the
 // conversation shown, with their numbers of takes; projects are made, renamed and deleted there.

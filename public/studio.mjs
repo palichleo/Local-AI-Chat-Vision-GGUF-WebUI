@@ -7,6 +7,7 @@ import { setupPointer } from './studio-pointer.mjs';
 import { closePopup, openPopup } from './glass-menu.mjs';
 import { fileInfo } from './media-info.mjs';
 import { forgetCitedTakes } from './cited-takes.mjs';
+import { DELETE_TIP, deleteQuestion } from './take-delete.mjs';
 import { explanation, foldPrompt } from './studio-explain.mjs';
 import { clipPlayer, stillClip } from './take-player.mjs';
 import { elapsedClock } from './generation-time.mjs';
@@ -3819,14 +3820,28 @@ export function setupStudio({
   /** The clip an upscale or an interpolation was made from. */
   const transformedFrom = record =>
     transformOf(record) ? record.parameters?.references?.find(ref => ref.role === 'source_video')?.output_id : undefined;
+  /**
+   * A take leaves its conversation (its file stays in output): the one deletion of the page, that of
+   * the Sortie and of the Pellicule (0.6.147, take-delete.mjs). Whether it went: refused, it says why.
+   */
   async function remove(record) {
+    let gone = false;
     try {
+      const where = record.conversationId ?? place();
       // A creation of another conversation of the project leaves that conversation.
-      await api('studio/delete', { id: record.id, conversationId: record.conversationId ?? place() });
+      await api('studio/delete', { id: record.id, conversationId: where });
+      gone = true;
       // A later reply of the chat that names it no longer draws it from what was read before.
       forgetCitedTakes();
       if (extending?.id === record.id) extending = null;
       for (const key of Object.keys(kept)) if (kept[key].id === record.id) delete kept[key];
+      // (0.6.147) The newest take of a conversation left, whose Studio is kept as it was left: it comes
+      // back so, not with the settings of the take before it (as settledHere does for the one in hand).
+      const left = leftDrafts.get(where);
+      if (left?.newest === record.id) {
+        const { runs: remaining = [] } = await (await api(`gallery/${encodeURIComponent(where)}?images=0`)).json();
+        left.newest = remaining.find(run => run.conversationId === where && run.id !== record.id)?.id ?? null;
+      }
       await refresh();
       // A take deleted here leaves the settings in hand as they are (not those of the take before it).
       settledHere();
@@ -3834,6 +3849,7 @@ export function setupStudio({
       notice(error.message);
     }
     render();
+    return gone;
   }
   // ------------------------------------------------------------------ the Sortie
   // (moodix-design.md 15, 15 bis, 22-24; 7 bis 7, 8, 11): pictures only, the newest at the left
@@ -4011,7 +4027,7 @@ export function setupStudio({
       id: 'delete',
       label: 'Supprimer',
       glyph: 'trash',
-      title: 'Supprimer de cette conversation (le fichier reste dans le dossier output)',
+      title: DELETE_TIP,
       danger: true,
       run: () => askDelete(record),
     });
@@ -4223,35 +4239,26 @@ export function setupStudio({
       };
       tile.append(menu);
     }
-    if (confirmFor === record.id) {
-      const ask = node('div', 'studio-item-confirm'),
-        row = node('div', 'studio-confirm-row'),
-        no = button('studio-confirm-no', '', () => backTo(record), 'close'),
-        yes = button(
-          'studio-confirm-yes',
-          '',
-          () => {
+    // « Supprimer #12 ? » (0.6.147: the number of the take, as the Pellicule asks it; the montages that
+    // use it said under it), written once for both (take-delete.mjs).
+    if (confirmFor === record.id)
+      tile.append(
+        deleteQuestion({
+          node,
+          icon,
+          record,
+          media,
+          shown: number,
+          name,
+          // A take of the Sortie is too small for the names of the montages: « Dans un montage ».
+          short: true,
+          onKeep: () => backTo(record),
+          onDelete: () => {
             confirmFor = null;
             void remove(record);
           },
-          'trash',
-        );
-      ask.setAttribute('role', 'alertdialog');
-      ask.setAttribute('aria-label', 'Supprimer #' + number + ' ?');
-      no.setAttribute('aria-label', 'Annuler');
-      no.title = 'Annuler';
-      yes.setAttribute('aria-label', 'Supprimer ' + name);
-      yes.title = 'Supprimer de cette conversation (le fichier reste dans le dossier output)';
-      ask.onkeydown = event => {
-        if (event.key !== 'Escape') return;
-        event.preventDefault();
-        event.stopPropagation?.();
-        backTo(record);
-      };
-      row.append(no, yes);
-      ask.append(node('span', 'studio-confirm-text', 'Supprimer #' + number + ' ?'), row);
-      tile.append(ask);
-    }
+        }),
+      );
     return tile;
   }
   /** The length of a creation (`added`: what a continuation adds to its clip). */
@@ -5799,5 +5806,10 @@ export function setupStudio({
     },
     /** The verbs the Studio answers for Moodix AI. */
     accepts: name => name in MODE_OF_VERB,
+    /**
+     * (0.6.147) A take of any conversation leaves it, as from the Sortie (the Pellicule asks it): the
+     * Studio forgets it too, its Sortie and its montage read again. Whether it went.
+     */
+    remove,
   };
 }

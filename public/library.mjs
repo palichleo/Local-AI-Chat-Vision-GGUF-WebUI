@@ -8,7 +8,10 @@
  * each in its own format at one height; a sound is a card that plays. Under the pointer, a veil
  * with its prompt and where and when it was made, and at its top right the actions of the
  * conversation. A click shows it whole with its details; on its conversation, opens it.
+ * (0.6.147) At its top left, the bin of the Sortie of the Studio: any take goes, after the Studio's
+ * question asked on it (take-delete.mjs), by the Studio's own deletion.
  */
+import { DELETE_TIP, deleteQuestion } from './take-delete.mjs';
 import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
 import { stillClip } from './take-player.mjs';
 import { takeSeconds } from './take-length.mjs';
@@ -81,12 +84,18 @@ export function setupLibrary({
   newConversation,
   onFilter = () => {},
   actions = null,
+  // (0.6.147) `remove(record)`: the take leaves its conversation (the Studio's deletion); whether it
+  // went. Without it, no bin. `busy()`: why nothing can be deleted now ('' when it can), said by `notice`.
+  remove = null,
+  busy = () => '',
+  notice = () => {},
 }) {
   const filter = { project: 'all', media: 'all', conversation: 'all' };
   let runs = [],
     version = 0,
     failed = '',
-    playing = null; // { audio, button }: the sound that plays
+    playing = null, // { audio, button }: the sound that plays
+    asking = null; // { kept, question }: the take whose deletion waits for its answer
   // The tiles drawn, kept from one drawing to the next (another filter, a project renamed):
   // their pictures are not loaded again.
   const cards = new Map();
@@ -260,10 +269,68 @@ export function setupLibrary({
     if (kept.foot) card.append(kept.foot);
     // The actions of a take, as in the conversation (output-actions.mjs).
     if (actions && !record.legacy && !record.unsaved) card.append(actions(record, 0));
+    // (0.6.147) The bin at its top left, under the pointer, as in the Sortie of the Studio: on every
+    // take, those of the Studio of before and of a conversation never saved too.
+    if (remove) {
+      const bin = node('button', 'library-del'),
+        take = output.take;
+      bin.type = 'button';
+      bin.append(icon('trash'));
+      kept.name = (NAMES[media] ?? 'Création') + (Number.isInteger(take) ? ' #' + take : '');
+      bin.setAttribute('aria-label', 'Supprimer · ' + kept.name);
+      bin.onclick = () => ask(kept);
+      kept.bin = bin;
+      held(kept);
+      // Greyed during a generation, why under the pointer: said again when the pointer comes.
+      card.addEventListener?.('pointerenter', () => held(kept));
+      card.append(bin);
+    }
     return kept;
   }
+  /** Why the bin of a take is greyed now ('' when it is not), said on it. */
+  function held(kept) {
+    const why = busy() || '';
+    kept.bin.setAttribute('aria-disabled', why ? 'true' : 'false');
+    kept.bin.title = why ? DELETE_TIP + '\n' + why : DELETE_TIP;
+    return why;
+  }
+  /** The question of the Studio, on the take: one at a time; ✕ (or Échap) keeps it. */
+  function ask(kept) {
+    const why = held(kept);
+    if (why) return void notice(why);
+    unask();
+    const question = deleteQuestion({
+      node,
+      icon,
+      record: kept.record,
+      media: kept.media,
+      name: kept.name,
+      onKeep: () => {
+        unask();
+        kept.bin.focus?.();
+      },
+      onDelete: () => void erase(kept),
+    });
+    asking = { kept, question };
+    kept.card.append(question);
+    question.querySelector?.('.studio-confirm-no')?.focus?.();
+  }
+  function unask() {
+    asking?.question.remove();
+    asking = null;
+  }
+  /** The light bin: the take goes; the one after it has the focus, or the one before it at the end. */
+  async function erase(kept) {
+    unask();
+    const at = shown.indexOf(kept.record);
+    if (!(await remove(kept.record))) return;
+    await refresh();
+    const next = shown[at] ?? shown[at - 1];
+    if (next) cards.get(keyOf(next))?.pick.focus?.();
+  }
+  const keyOf = record => record.id + '|' + (record.outputs?.[0]?.originalUrl || '');
   function tile(record) {
-    const key = record.id + '|' + (record.outputs?.[0]?.originalUrl || '');
+    const key = keyOf(record);
     let kept = cards.get(key);
     if (!kept) cards.set(key, (kept = build(record)));
     kept.record = record;
@@ -352,6 +419,8 @@ export function setupLibrary({
     if (gone) onFilter({ ...filter });
   }
   function choose(change) {
+    // Another filter: a question left open is not found again later on a take that comes back.
+    unask();
     Object.assign(filter, change);
     // Another project: every conversation of it.
     if ('project' in change && !('conversation' in change)) filter.conversation = 'all';
@@ -374,14 +443,16 @@ export function setupLibrary({
       runs = [];
       failed = error.message;
     }
-    // Only the tiles of these creations are kept.
-    const keys = new Set(runs.map(record => record.id + '|' + (record.outputs?.[0]?.originalUrl || '')));
+    // Only the tiles of these creations are kept; a question on one gone goes with it.
+    const keys = new Set(runs.map(keyOf));
     for (const key of [...cards.keys()]) if (!keys.has(key)) cards.delete(key);
+    if (asking && !keys.has(keyOf(asking.kept.record))) unask();
     render();
   }
   return {
     /** Shown on a project (`all`: every one), every kind, every conversation. */
     async show({ project = 'all' } = {}) {
+      unask();
       Object.assign(filter, { project, media: 'all', conversation: 'all' });
       render();
       // The fil at its head says it at once.

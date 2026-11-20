@@ -4,10 +4,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import { filtered, mediaOf, setupLibrary } from '../public/library.mjs';
+import { deleteWords, montageWords } from '../public/take-delete.mjs';
 import { setupProjectNavigation } from '../public/project-navigation.mjs';
 import { createApplication } from '../server.mjs';
 import { Gallery } from '../lib/gallery.mjs';
+import { newMontage } from '../lib/montages.mjs';
 import { STUDIO_ID } from '../lib/studio.mjs';
 
 class Element {
@@ -18,9 +21,11 @@ class Element {
     this.classList = { add: name => marks.add(name), remove: name => marks.delete(name) };
   }
   append(...items) {
+    for (const item of items) if (item instanceof Element) item.parent = this;
     this.children.push(...items);
   }
   replaceChildren(...items) {
+    for (const item of items) if (item instanceof Element) item.parent = this;
     this.children = items;
   }
   setAttribute(name, value) {
@@ -40,10 +45,15 @@ class Element {
   getBoundingClientRect() {
     return { left: 36, top: 90, right: 180, bottom: 123, width: 144, height: 33 };
   }
+  // Out of the element it was in (the question of a take, answered).
   remove() {
     this.removed = true;
+    if (this.parent) this.parent.children = this.parent.children.filter(item => item !== this);
   }
-  focus() {}
+  // The element that has the focus last (after a take deleted, the one after it).
+  focus() {
+    Element.focused = this;
+  }
   showModal() {
     this.open = true;
   }
@@ -626,6 +636,229 @@ test('GET /api/library: the creations of every project, each with its own, the o
       ],
     );
     assert.equal((await fetch(`${app.url}/api/library`)).status, 401, 'not without the key of the page');
+  } finally {
+    await app?.close();
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
+test('(0.6.147) the question of a take: its number, else what it is; the montages that use it', () => {
+  assert.equal(deleteWords({ outputs: [{ take: 12 }] }, 'image'), 'Supprimer #12\u00a0?');
+  // Without a number of take: the one it is shown with (the Studio), else what it is.
+  assert.equal(deleteWords({ outputs: [{}] }, 'video', 3), 'Supprimer #3\u00a0?');
+  assert.deepEqual(
+    ['image', 'video', 'audio', undefined].map(media => deleteWords({ outputs: [{}] }, media)),
+    ['Supprimer cette image\u00a0?', 'Supprimer ce clip\u00a0?', 'Supprimer ce son\u00a0?', 'Supprimer cette création\u00a0?'],
+  );
+  assert.equal(montageWords(undefined), '');
+  assert.equal(montageWords([]), '');
+  assert.equal(montageWords(['Le pêcheur']), 'Elle sert dans le montage « Le pêcheur »');
+  assert.equal(montageWords(['Bis', 'Le pêcheur']), 'Elle sert dans 2 montages : « Bis », « Le pêcheur »');
+  // On a take too small for their names (the Sortie of the Studio).
+  assert.deepEqual([montageWords(['Le pêcheur'], true), montageWords(['Bis', 'Le pêcheur'], true), montageWords([], true)], [
+    'Dans un montage',
+    'Dans 2 montages',
+    '',
+  ]);
+});
+
+test('(0.6.147) every take has the bin of the Studio: asked on the take, ✕ and Échap keep it, the light bin deletes it by the Studio’s deletion', async () => {
+  // Takes of every kind, of a conversation never saved and of the Studio of before too.
+  const list = [
+      { ...RUNS[0], outputs: [output('c1', 'r1', { take: 12 })], montages: ['Le pêcheur'] },
+      { ...RUNS[1], outputs: [output('c2', 'r2', { take: 3 })] },
+      { ...RUNS[2], outputs: [output('open', 'r3', { take: 4 })] },
+      RUNS[3],
+      { id: 'u1', conversationId: 'gone', projectId: 'inbox', unsaved: true, prompt: 'Un renard', outputs: [output('gone', 'u1')] },
+    ],
+    removed = [],
+    notices = [];
+  let answer = true,
+    why = '';
+  const f = fixture({
+    runs: list,
+    remove: async record => {
+      removed.push([record.id, record.conversationId]);
+      // Gone from the server: no longer listed.
+      if (answer) list.splice(list.findIndex(run => run.id === record.id), 1);
+      return answer;
+    },
+    busy: () => why,
+    notice: text => notices.push(text),
+  });
+  await f.library.show();
+  const bin = id => find(card(f, id), 'library-del'),
+    asked = id => find(card(f, id), 'studio-item-confirm'),
+    open = () => walk(f.$('library-grid')).filter(item => item.className === 'studio-item-confirm'),
+    answered = () => new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(
+    ['r1', 'r2', 'r3', 'r4', 'u1'].map(id => [bin(id).attributes['aria-label'], bin(id).attributes['aria-disabled']]),
+    [
+      ['Supprimer · Image #12', 'false'],
+      ['Supprimer · Clip #3', 'false'],
+      ['Supprimer · Son #4', 'false'],
+      ['Supprimer · Image', 'false'],
+      ['Supprimer · Image', 'false'],
+    ],
+  );
+  assert.equal(bin('r1').title, 'Supprimer de sa conversation (le fichier reste dans le dossier output)');
+  assert.equal(bin('r1').children[0].className, 'icon-trash');
+  // The question of the Studio, on the take: its number, the montage that uses it, ✕ and the light bin.
+  bin('r1').onclick();
+  const ask = asked('r1');
+  assert.equal(ask.attributes.role, 'alertdialog');
+  assert.deepEqual(
+    ask.children.map(item => [item.className, item.textContent]),
+    [
+      ['studio-confirm-text', 'Supprimer #12\u00a0?'],
+      ['studio-confirm-note', 'Elle sert dans le montage « Le pêcheur »'],
+      ['studio-confirm-row', ''],
+    ],
+  );
+  assert.deepEqual(
+    find(ask, 'studio-confirm-row').children.map(item => [item.className, item.children[0].className]),
+    [
+      ['studio-confirm-no', 'icon-close'],
+      ['studio-confirm-yes', 'icon-trash'],
+    ],
+  );
+  // One at a time: another bin closes it.
+  bin('r2').onclick();
+  assert.deepEqual(open().map(item => item.parent.dataset.id), ['r2']);
+  assert.equal(find(asked('r2'), 'studio-confirm-text').textContent, 'Supprimer #3\u00a0?');
+  assert.equal(find(asked('r2'), 'studio-confirm-note'), undefined, 'in no montage: no line');
+  // ✕ keeps it; Échap too. Without a number: what it is.
+  find(asked('r2'), 'studio-confirm-no').onclick();
+  assert.deepEqual(open(), []);
+  assert.equal(Element.focused, bin('r2'), 'the focus back on its bin');
+  bin('r4').onclick();
+  assert.equal(find(asked('r4'), 'studio-confirm-text').textContent, 'Supprimer cette image\u00a0?');
+  let stopped = 0;
+  asked('r4').onkeydown({ key: 'Escape', preventDefault() {}, stopPropagation: () => stopped++ });
+  assert.deepEqual([open(), stopped], [[], 1]);
+  assert.deepEqual(removed, []);
+  // The light bin: the Studio's deletion, then the sheet read again without it.
+  const reads = f.asked.length;
+  bin('r2').onclick();
+  find(asked('r2'), 'studio-confirm-yes').onclick();
+  await answered();
+  assert.deepEqual(removed, [['r2', 'c2']]);
+  assert.deepEqual(open(), []);
+  assert.equal(f.asked.length, reads + 1);
+  assert.deepEqual(tiles(f.$('library-grid')), ['r1', 'r3', 'r4', 'u1']);
+  assert.equal(Element.focused, find(card(f, 'r3'), 'library-pick'), 'the focus on the take after it');
+  // One of a conversation never saved goes the same way; the last one: the focus on the one before it.
+  bin('u1').onclick();
+  find(asked('u1'), 'studio-confirm-yes').onclick();
+  await answered();
+  assert.deepEqual(removed.at(-1), ['u1', 'gone']);
+  assert.deepEqual(tiles(f.$('library-grid')), ['r1', 'r3', 'r4']);
+  assert.equal(Element.focused, find(card(f, 'r4'), 'library-pick'));
+  // Refused (the Studio says why): the take stays, the sheet is not read again.
+  answer = false;
+  bin('r4').onclick();
+  find(asked('r4'), 'studio-confirm-yes').onclick();
+  await answered();
+  assert.deepEqual(removed.at(-1), ['r4', STUDIO_ID]);
+  assert.equal(f.asked.length, reads + 2);
+  assert.deepEqual(tiles(f.$('library-grid')), ['r1', 'r3', 'r4']);
+  assert.deepEqual(open(), []);
+  // During a generation: greyed, why under the pointer and said when it is pressed; nothing asked.
+  why = 'Attendez la fin de la génération en cours pour supprimer.';
+  const count = removed.length;
+  bin('r1').onclick();
+  assert.deepEqual(open(), []);
+  assert.deepEqual(notices, [why]);
+  assert.equal(bin('r1').attributes['aria-disabled'], 'true');
+  assert.equal(bin('r1').title, 'Supprimer de sa conversation (le fichier reste dans le dossier output)\n' + why);
+  assert.equal(removed.length, count);
+  // Another filter closes a question left open.
+  why = '';
+  bin('r1').onclick();
+  assert.equal(open().length, 1);
+  f.library.choose({ media: 'image' });
+  assert.deepEqual(open(), []);
+});
+
+test('(0.6.147) without the Studio’s deletion given, no bin', async () => {
+  const f = fixture();
+  await f.library.show();
+  assert.equal(walk(f.$('library-grid')).some(item => item.className === 'library-del'), false);
+});
+
+test('(0.6.147) GET /api/library and the Sortie: each take with the montages of its project that use it; deleted, it leaves them, its file stays', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'atelier-library-montages-')),
+    historyDir = join(folder, 'history');
+  let app;
+  try {
+    app = await createApplication({ port: 0, dataDir: folder, historyDir });
+    const token = (await (await fetch(`${app.url}/api/bootstrap`)).json()).token;
+    const call = (route, body) =>
+      fetch(`${app.url}/api/${route}`, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    assert.equal((await call('preferences', { saveHistory: true })).status, 200);
+    const talk = randomUUID();
+    assert.equal((await call('history/save', { id: talk, messages: [{ role: 'user', content: 'Le pêcheur' }] })).status, 200);
+    const gallery = new Gallery({ historyDir }),
+      made = {};
+    await mkdir(join(folder, 'output'), { recursive: true });
+    let minute = 10;
+    for (const [name, mediaType] of [
+      ['plan', 'image'],
+      ['photo', 'image'],
+      ['sound', 'audio'],
+      ['free', 'image'],
+    ]) {
+      made[name] = randomUUID();
+      await writeFile(join(folder, 'output', name + '.png'), 'fichier');
+      await gallery.put(
+        {
+          id: made[name],
+          conversationId: talk,
+          provider: 'native',
+          mediaType,
+          workflowId: 'basic',
+          workflowName: 'Basic',
+          prompt: 'Prompt ' + name,
+          parameters: {},
+          createdAt: `2026-11-20T10:${minute++}:00.000Z`,
+          outputs: [{ source: { filename: name + '.png', subfolder: '', type: 'output' } }],
+        },
+        { persist: true },
+      );
+    }
+    const take = name => ({ conversationId: talk, runId: made[name], output: 0 });
+    // A plan, the photo it starts on, a sound under it; another montage of the plan twice (said once), changed last.
+    const first = {
+      ...newMontage({ name: 'Le pêcheur' }),
+      plans: [{ id: randomUUID(), kind: 'image', source: take('plan'), from: 0, to: 2, frame: 'fit', photos: { start: take('photo') } }],
+      sounds: [{ id: randomUUID(), source: take('sound'), track: 'music', at: 0, from: 0, to: 2, volume: 1 }],
+    };
+    assert.equal((await call('montages/save', { project: 'inbox', montage: first })).status, 200);
+    await new Promise(resolve => setTimeout(resolve, 15));
+    const second = {
+      ...newMontage({ name: 'Bis' }),
+      plans: [
+        { id: randomUUID(), kind: 'image', source: take('plan'), from: 0, to: 2, frame: 'fit' },
+        { id: randomUUID(), kind: 'image', source: take('plan'), from: 0, to: 2, frame: 'fit' },
+      ],
+      sounds: [],
+    };
+    assert.equal((await call('montages/save', { project: 'inbox', montage: second })).status, 200);
+    const uses = runs => Object.fromEntries(runs.map(run => [Object.keys(made).find(name => made[name] === run.id), run.montages ?? null]));
+    const expected = { free: null, sound: ['Le pêcheur'], photo: ['Le pêcheur'], plan: ['Bis', 'Le pêcheur'] };
+    assert.deepEqual(uses((await (await call('library?images=0')).json()).runs), expected);
+    assert.deepEqual(uses((await (await call('project-gallery/inbox?images=0')).json()).runs), expected);
+    // The take goes (the route of the Studio, that of the Pellicule): listed nowhere, its file still there.
+    assert.equal((await call('studio/delete', { id: made.plan, conversationId: talk })).status, 200);
+    assert.equal((await (await call('library?images=0')).json()).runs.some(run => run.id === made.plan), false);
+    assert.equal((await (await call('project-gallery/inbox?images=0')).json()).runs.some(run => run.id === made.plan), false);
+    await access(join(folder, 'output', 'plan.png'));
+    // The montages are untouched: their plan says « Prise introuvable » (public/montage.mjs).
+    assert.equal((await (await call(`montages/inbox/${first.id}`)).json()).plans[0].source.runId, made.plan);
   } finally {
     await app?.close();
     await rm(folder, { recursive: true, force: true });

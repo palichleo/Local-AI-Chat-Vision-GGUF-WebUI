@@ -1522,7 +1522,7 @@ test('the Sortie: pictures only, the newest at the left with the largest number,
     assert.deepEqual(body.find('studio-item-menu'), []);
     const [ask] = body.find('studio-item-confirm');
     assert.equal(ask.attributes.role, 'alertdialog');
-    assert.equal(ask.find('studio-confirm-text')[0].textContent, 'Supprimer #3 ?');
+    assert.equal(ask.find('studio-confirm-text')[0].textContent, 'Supprimer #3\u00a0?');
     // ✕ keeps it.
     ask.find('studio-confirm-no')[0].onclick();
     assert.deepEqual(body.find('studio-item-confirm'), []);
@@ -1663,6 +1663,68 @@ test('in the Sortie, an upscale or an interpolation of a clip is said so, with i
         'Clip #2 · agrandissement du clip #1 · un renard qui court',
       ],
     );
+  } finally {
+    restore();
+  }
+});
+
+test('(0.6.147) the bin asks with the number of the take and the montages that use it; a take of a conversation left goes, its Studio as left', async () => {
+  const krea = { id: 'k', name: 'Krea 2', seeded: true, roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    made = (id, conversationId, prompt, take, more = {}) => ({
+      id,
+      conversationId,
+      workflowId: 'k',
+      mediaType: 'image',
+      prompt,
+      parameters: { width: 1024, height: 1024 },
+      outputs: [{ originalUrl: `/${id}.png`, thumbUrl: `/${id}.jpg`, take }],
+      ...more,
+    }),
+    // The newest first; take 6 was deleted: the take 7 is the second of the Sortie.
+    all = [
+      made('b2', 'c2', 'une barque', 9),
+      made('a3', 'c1', 'un phare la nuit', 7, { montages: ['Le pêcheur'] }),
+      made('a2', 'c1', 'un phare au matin', 5),
+    ];
+  let conversation = 'c1';
+  const page = await studioPage({ create_image: [krea] }, {}, { runs: all, conversation: () => conversation, project: () => 'p1' });
+  const { body, studio, asked, restore } = page;
+  const item = id => body.find('studio-item').find(tile => tile.dataset.id === id);
+  try {
+    item('a3').find('studio-item-del')[0].onclick();
+    let [ask] = body.find('studio-item-confirm');
+    // Its number, as the Pellicule asks it (« #2 » before: its place in the Sortie); the montage under it.
+    assert.equal(ask.find('studio-confirm-text')[0].textContent, 'Supprimer #7\u00a0?');
+    // Too small for the name of the montage: in short, whole under the pointer and to a screen reader.
+    assert.equal(ask.find('studio-confirm-note')[0].textContent, 'Dans un montage');
+    assert.equal(ask.find('studio-confirm-note')[0].title, 'Elle sert dans le montage « Le pêcheur »');
+    assert.equal(ask.attributes['aria-label'], 'Supprimer #7\u00a0? Elle sert dans le montage « Le pêcheur ».');
+    assert.equal(ask.find('studio-confirm-yes')[0].title, 'Supprimer de sa conversation (le fichier reste dans le dossier output)');
+    ask.find('studio-confirm-no')[0].onclick();
+    assert.deepEqual(body.find('studio-item-confirm'), []);
+    // In no montage: no line.
+    item('a2').find('studio-item-del')[0].onclick();
+    [ask] = body.find('studio-item-confirm');
+    assert.equal(ask.find('studio-confirm-text')[0].textContent, 'Supprimer #5\u00a0?');
+    assert.deepEqual(ask.find('studio-confirm-note'), []);
+    ask.find('studio-confirm-no')[0].onclick();
+    assert.equal(asked.filter(([route]) => route === 'studio/delete').length, 0);
+    // What the user writes in « c1 » stays there while « c2 » is shown.
+    page.prompt().value = 'un phare sous la pluie';
+    page.prompt().oninput();
+    conversation = 'c2';
+    studio.conversationChanged();
+    await settle();
+    assert.equal(page.prompt().value, 'une barque');
+    // The newest take of « c1 » goes from the Pellicule, by the Studio's own deletion.
+    all.splice(1, 1);
+    assert.equal(await studio.remove(made('a3', 'c1', 'un phare la nuit', 7)), true);
+    assert.deepEqual(asked.find(([route]) => route === 'studio/delete')[1], { id: 'a3', conversationId: 'c1' });
+    // Back in « c1 »: as it was left, not with the settings of the take before the one deleted.
+    conversation = 'c1';
+    studio.conversationChanged();
+    await settle();
+    assert.equal(page.prompt().value, 'un phare sous la pluie');
   } finally {
     restore();
   }

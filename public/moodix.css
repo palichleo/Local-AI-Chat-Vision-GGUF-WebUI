@@ -7615,7 +7615,9 @@ html[data-switch='open']::view-transition-old(chat) {
   gap: 8px;
 }
 #studio-view .studio-confirm-no,
-#studio-view .studio-confirm-yes {
+#studio-view .studio-confirm-yes,
+#library-view .studio-confirm-no,
+#library-view .studio-confirm-yes {
   display: grid;
   place-items: center;
   width: 34px;
@@ -7625,21 +7627,55 @@ html[data-switch='open']::view-transition-old(chat) {
   border: 0;
   border-radius: 999px;
 }
-#studio-view .studio-confirm-no {
+#studio-view .studio-confirm-no,
+#library-view .studio-confirm-no {
   background: #1c1f26;
   color: var(--text-1);
 }
-#studio-view .studio-confirm-no svg {
+#studio-view .studio-confirm-no svg,
+#library-view .studio-confirm-no svg {
   width: 12px;
   height: 12px;
 }
-#studio-view .studio-confirm-yes {
+#studio-view .studio-confirm-yes,
+#library-view .studio-confirm-yes {
   background: #eceef2;
   color: #0b0c0f;
 }
-#studio-view .studio-confirm-yes svg {
+#studio-view .studio-confirm-yes svg,
+#library-view .studio-confirm-yes svg {
   width: 13px;
   height: 13px;
+}
+/* (0.6.147) The question in the middle of the take, its words centred when they wrap (« Supprimer #5 »
+   then « ? » at the left on a small one); under them, the montages that use it, two lines at most. */
+.studio-item-confirm {
+  padding: 6px;
+  text-align: center;
+}
+.studio-confirm-note {
+  display: -webkit-box;
+  /* Never squeezed by the column of the question: its two lines, or its short form, whole. */
+  flex: none;
+  max-width: 100%;
+  margin-top: -4px;
+  overflow: hidden;
+  color: var(--text-2);
+  font: 400 12px/1.35 var(--font-ui);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+/* A take of the Sortie of the Studio is 96 px wide: « Dans un montage » on one line, the question a little
+   closer, all of it within the take (two lines of words, the line, the two buttons). */
+#studio-view .studio-item-confirm:has(.studio-confirm-note) {
+  gap: 6px;
+  padding: 4px;
+}
+#studio-view .studio-confirm-note {
+  display: block;
+  margin-top: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* The creations, and the button that shows the whole project (on the line « SORTIE », at the
    right: captures 20 to 23). */
@@ -11951,6 +11987,57 @@ body[data-view='library'] .library-view {
   #library-view .library-veil {
     padding-right: 54px;
   }
+}
+/* (0.6.147) The bin of a take, at its top left under the pointer or the keyboard, as in the Sortie of
+   the Studio (pellicule-suppression-maquette.md, B): the square of the bar of its actions. */
+#library-view .library-del {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid rgba(238, 232, 222, 0.14);
+  border-radius: 8px;
+  background: rgba(18, 17, 22, 0.86);
+  color: var(--text-1);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+#library-view .library-del svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+#library-view .library-tile:is(:hover, :focus-within) .library-del {
+  opacity: 1;
+}
+@media (hover: none) {
+  #library-view .library-del {
+    opacity: 1;
+  }
+}
+#library-view .library-del:hover,
+#library-view .library-del:focus-visible {
+  background: rgba(11, 12, 15, 0.95);
+  color: #ffffff;
+}
+/* During a generation: greyed, why under the pointer. */
+#library-view .library-del[aria-disabled='true'] {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+/* On a sound, the bin and the actions cover « PRISE 4 » and « BRUITAGE »: they fade under the pointer,
+   as the length of a clip does. */
+#library-view .library-sound-head {
+  transition: opacity 0.15s ease;
+}
+#library-view .library-tile.is-sound:is(:hover, :focus-within) .library-sound-head {
+  opacity: 0;
 }
 /* A project with nothing in it (capture 39): in the middle of the page, its sentence in Gloock, a
    line, one way to begin (« + Nouvelle conversation », in glass). */

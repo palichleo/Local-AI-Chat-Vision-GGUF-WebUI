@@ -79,6 +79,7 @@ const staticFiles = new Map([
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/project-navigation.mjs', ['project-navigation.mjs', 'text/javascript; charset=utf-8']],
   ['/library.mjs', ['library.mjs', 'text/javascript; charset=utf-8']],
+  ['/take-delete.mjs', ['take-delete.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-tokens.mjs', ['reference-tokens.mjs', 'text/javascript; charset=utf-8']],
   ['/reference-picker.mjs', ['reference-picker.mjs', 'text/javascript; charset=utf-8']],
   ['/cited-takes.mjs', ['cited-takes.mjs', 'text/javascript; charset=utf-8']],
@@ -741,6 +742,22 @@ export async function createApplication({
     }
     return null;
   }
+  /**
+   * (0.6.147) The runs of a list, each with the names of the montages of its project that use it
+   * (`montages`): the question « Supprimer #12 ? » says them before a take goes (public/take-delete.mjs).
+   * A project whose montages cannot be read says none; the takes are listed all the same.
+   */
+  async function withMontages(runs, projectOf) {
+    const uses = new Map();
+    return Promise.all(
+      runs.map(async run => {
+        const project = projectOf(run);
+        if (!uses.has(project)) uses.set(project, montages.uses(project).catch(() => new Map()));
+        const names = (await uses.get(project)).get(run.conversationId + '/' + run.id);
+        return names?.length ? { ...run, montages: names } : run;
+      }),
+    );
+  }
   function galleryView(record) {
     return {
       ...record,
@@ -1366,7 +1383,10 @@ export async function createApplication({
           }
         runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         // The number of the take to come (« PRISE 32 » on the screen of the Studio while it is made).
-        return send(200, { runs: runs.map(galleryView), nextTake: (await takes.last(project)) + 1 });
+        return send(200, {
+          runs: (await withMontages(runs, () => project)).map(galleryView),
+          nextTake: (await takes.last(project)) + 1,
+        });
       }
       // The Bibliothèque: the creations of every conversation of every project, the newest first,
       // each with its project; the open one too (even before it is saved, `project` its own), those
@@ -1410,7 +1430,7 @@ export async function createApplication({
             // A conversation that cannot be read leaves the others.
           }
         runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        return send(200, { runs: runs.map(galleryView) });
+        return send(200, { runs: (await withMontages(runs, run => run.projectId)).map(galleryView) });
       }
       if (req.method === 'GET' && path.startsWith('/api/gallery/')) {
         const [, , , conversationId, runId, index] = path.split('/');
