@@ -110,6 +110,11 @@ export function setupMontage({
   // (0.6.144) The model a creation would be made with, nothing being made nor kept: `estimate({ verb,
   // args, size })` gives { workflowName, missing }. (0.6.148) No time is said any more.
   estimate = null,
+  // (0.6.151) The model a take of the Bobine is asked to, by its name (`workflow`), when it is on this
+  // computer: `modelFor(verb)` gives its id, or null (the server chooses, as for any creation). His
+  // answer of 20/11 « Oui, LTX 2.5 »: a take drawn of 1,90 s had gone to MiniMax H3 Omni, which
+  // made 5,17 s of it in 201 s.
+  modelFor = () => null,
   // (0.6.146) What happens in a take to create, written by the chat model from its pictures:
   // `write({ verb, seconds, start, end, previous }, { signal })` gives { prompt }, or throws why not.
   write = null,
@@ -696,7 +701,9 @@ export function setupMontage({
       if (!record) throw new Error(`${what} n’est plus dans le projet.`);
       return { ...inputOf(record), ...(item.frame ? { frame: item.frame } : {}) };
     };
-    const args = { prompt: wanted.prompt, intention: 'Prise d’une bobine, demandée dans la Bobine.', duration: wanted.duration };
+    const args = { prompt: wanted.prompt, intention: 'Prise d’une bobine, demandée dans la Bobine.', duration: wanted.duration },
+      model = modelFor(wanted.verb);
+    if (model) args.workflow = model;
     if (wanted.format) args.format = wanted.format;
     if (wanted.start) args.start_image = named(wanted.start, wanted.start.frame ? 'La vidéo d’avant' : 'La photo de début');
     if (wanted.end) args.end_image = named(wanted.end, 'La photo de fin');

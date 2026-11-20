@@ -78,7 +78,7 @@ const take = (n, mediaType, more = {}) => ({
 const INTENTION = 'Prise d’une bobine, demandée dans la Bobine.',
   FILM = { width: 1344, height: 768 };
 
-function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000 } = {}) {
+function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null } = {}) {
   WIDTH = width;
   const calls = [],
     queue = [],
@@ -122,6 +122,7 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
     ...(create ? { create } : {}),
     ...(estimate ? { estimate } : {}),
     ...(write ? { write } : {}),
+    ...(modelFor ? { modelFor } : {}),
     halt: () => void halted++,
     api,
     node: (tag, className, text) => new Fake(tag, className, text),
@@ -1133,6 +1134,42 @@ test('the end of a video pulled beyond its take shows its suite to create, joine
   assert.deepEqual(alone.said('montage-tip'), ['+ 04.00 s à créer']);
   alone.pointer.up();
   assert.equal(alone.ui.state().chosen, alone.ui.state().montage.plans[1].id);
+});
+
+test('when LTX 2.5 is here, every take of the bobine is asked to it by its name, its model said in its line (0.6.151)', async () => {
+  // (His answer of 20/11, « Oui, LTX 2.5 »: on the card, a take drawn of 1,90 s had gone to MiniMax
+  // H3 Omni, the model the server prefers, which made 5,17 s of it in 201 s.)
+  const asked = [],
+    foreseen = [];
+  const f = await setup({
+    modelFor: verb => (['create_video', 'extend_video'].includes(verb) ? 'ltx-25' : null),
+    create: wanted => (asked.push(structuredClone(wanted)), new Promise(() => {})),
+    estimate: async wanted => (foreseen.push(structuredClone(wanted)), { workflowName: 'LTX 2.5' }),
+  }).open();
+  f.get('montage-take')[0].ondblclick();
+  // A suite pulled from the video (ten seconds shown on 1000 pixels), then a take laid in the void
+  // after it by a double click (twenty seconds shown now).
+  f.press(find(f.root, 'montage-grip')[1], 500);
+  f.pointer.move(700);
+  f.pointer.up();
+  await f.later();
+  f.lanes()[0].ondblclick({ clientX: 600, target: f.lanes()[0] });
+  f.write(0, 'Il se retourne.');
+  f.write(1, 'La brume se lève.');
+  await settle();
+  // Both asked by its name, the suite and the new take, to know their model as to make them.
+  assert.deepEqual(foreseen.map(wanted => [wanted.verb, wanted.args.workflow]), [['extend_video', 'ltx-25'], ['create_video', 'ltx-25']]);
+  assert.deepEqual(f.lines().map(line => [line[1], line[2]]), [['LTX 2.5', 'Suite de la prise 1'], ['LTX 2.5', 'Nouvelle prise']]);
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual(asked[0], { verb: 'extend_video', args: { prompt: 'Il se retourne.', intention: INTENTION, duration: 2, workflow: 'ltx-25', source: { output: id(1) } }, size: FILM });
+  // Without it, nothing is named: the server chooses, as for any creation.
+  const g = await setup({ create: wanted => (asked.push(structuredClone(wanted)), new Promise(() => {})) }).open();
+  g.lanes()[0].ondblclick({ clientX: 300, target: g.lanes()[0] });
+  g.write(0, 'La brume se lève.');
+  g.goMain().onclick();
+  await settle();
+  assert.equal('workflow' in asked.at(-1).args, false);
 });
 
 // (0.6.144, 0.6.149) « Créer n prises »: his three photos, laid in 0.6.146 and kept without instants: a take

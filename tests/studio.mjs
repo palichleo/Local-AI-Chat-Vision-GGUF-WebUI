@@ -6122,6 +6122,45 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
   }
 });
 
+test('the bobine asks its takes to LTX 2.5 by its name when the Studio has it ready, and names nothing else (0.6.151)', async () => {
+  // (« Oui, LTX 2.5 », 20/11: a take drawn had gone to the model the server prefers.)
+  const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
+    image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true },
+    clip = { id: 'v', name: 'MiniMax H3 Omni', family: 'minimax', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
+    ltx = { id: 'l', name: 'LTX 2.5', family: 'ltx25', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
+    stored = {
+      schemaVersion: 1, id: 'm1', name: 'Film', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
+      plans: [{ id: 'a', at: 0, kind: 'video', todo: { prompt: 'Il lève les yeux.' }, from: 0, to: 2, frame: 'fit', volume: 1, photos: { start: { conversationId: 'c0', runId: 'p1', output: 0 } } }],
+    };
+  const routes = new Proxy({}, {
+    get: (_, route) =>
+      typeof route !== 'string'
+        ? undefined
+        : route === 'tools/action'
+          ? () => ({ workflowName: 'LTX 2.5' })
+          : /^montages\/[^/]+\/m1$/.test(route)
+            ? () => stored
+            : /^montages\/[^/]+$/.test(route)
+              ? () => ({ montages: [{ id: 'm1', name: 'Film' }] })
+              : undefined,
+  });
+  for (const [videos, named] of [
+    [[clip, ltx], 'l'],
+    [[clip, { ...ltx, unavailable: 'Un fichier de LTX 2.5 manque.' }], undefined],
+    [[clip], undefined],
+  ]) {
+    const studio = await studioPage({ create_image: [image], create_video: videos }, routes, { runs: [photo] });
+    try {
+      studio.studio.bobine().desk();
+      await until(() => studio.asked.some(([route]) => route === 'tools/action'));
+      const [, sent] = studio.asked.find(([route]) => route === 'tools/action');
+      assert.equal(sent.arguments.workflow, named, videos.map(video => video.name + (video.unavailable ? ' (absent)' : '')).join(', '));
+    } finally {
+      studio.restore();
+    }
+  }
+});
+
 test('the Éclipse of the bobine: the chat model is brought back, then asked what happens in the take, in the conversation (0.6.146, 0.6.148)', async () => {
   const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
     video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },

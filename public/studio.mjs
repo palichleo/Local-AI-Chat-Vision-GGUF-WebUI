@@ -572,6 +572,9 @@ export function setupStudio({
     create: (wanted, hooks) => generate({ ...wanted, styles: [], edits: {}, montage: hooks ?? {} }),
     halt: () => stop(),
     inputOf: record => outputSource(record),
+    // (0.6.151) Every take of the Bobine, new or suite, is asked to LTX 2.5 by its name when it is
+    // ready here (« Oui, LTX 2.5 », 20/11): it makes the length drawn, from a fraction of a second.
+    modelFor: verb => (info?.tools?.[verb] ?? []).find(tool => tool.family === 'ltx25' && !tool.unavailable)?.id ?? null,
     // (0.6.146) What happens in a plan, written by Moodix AI from its photos: the chat model comes
     // back first when it has left the card, as for « Améliorer »; the takes of the conversation shown
     // are named in the request, the others by their own conversation.
