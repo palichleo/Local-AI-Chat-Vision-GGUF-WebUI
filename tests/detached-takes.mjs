@@ -135,17 +135,17 @@ test('before an exchange leaves, its takes are said in the user’s words; words
   const image = id => result(id, { status: 'success', run_id: runOf(id.length), media_type: 'image' });
   assert.equal(
     leavingQuestion([image('c')]),
-    'Cette réponse a 1 image : elle quittera la conversation et restera dans la Pellicule. Continuer ?',
+    'Cette réponse a 1 image : elle quittera la conversation et restera dans les Archives. Continuer ?',
   );
   const ten = result('call_serie', { status: 'success', images: series(10).map(record => ({ status: 'success', run_id: record.id })) });
   assert.equal(
     leavingQuestion([{ role: 'assistant', content: '', tool_calls: [call('call_serie')] }, ten]),
-    'Cette réponse a 10 images : elles quitteront la conversation et resteront dans la Pellicule. Continuer ?',
+    'Cette réponse a 10 images : elles quitteront la conversation et resteront dans les Archives. Continuer ?',
   );
   assert.match(leavingQuestion([result('v', { run_id: runOf(1), media_type: 'video' })]), /^Cette réponse a 1 vidéo : elle quittera/);
   assert.match(
     leavingQuestion([result('a', { run_id: runOf(1), media_type: 'audio' }), result('b', { run_id: runOf(2), media_type: 'audio' })]),
-    /^Cette réponse a 2 sons : ils quitteront la conversation et resteront dans la Pellicule/,
+    /^Cette réponse a 2 sons : ils quitteront la conversation et resteront dans les Archives/,
   );
   assert.match(leavingQuestion([ten, result('v', { run_id: runOf(11), media_type: 'video' })]), /^Cette réponse a 11 prises : elles quitteront/);
   // The same take named twice counts once (a series result written again after each image).

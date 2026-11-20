@@ -771,28 +771,36 @@ export function setupProjectNavigation({
     );
     $('chat-open')?.setAttribute('aria-current', state.view === 'chat' ? 'page' : 'false');
     $('studio-open').setAttribute('aria-current', state.view === 'studio' ? 'page' : 'false');
+    $('bobine-open')?.setAttribute('aria-current', state.view === 'bobine' ? 'page' : 'false');
     $('library-open')?.setAttribute('aria-current', state.view === 'library' ? 'page' : 'false');
     $('studio-view').hidden = state.view !== 'studio';
+    if ($('bobine-view')) $('bobine-view').hidden = state.view !== 'bobine';
     // The fil, the same in the Chat, the Studio and the Pellicule: there, it heads the sheet.
-    $('thread').hidden = !['chat', 'studio'].includes(state.view || 'chat') && !shown;
-    settle(!!shown);
+    // (0.6.148) In the Bobine, the project heads its page: « test / Le renard en hiver ».
+    const bobine = state.view === 'bobine';
+    if (bobine) $('thread').dataset.scope = 'bobine';
+    $('thread').hidden = !['chat', 'studio', 'bobine'].includes(state.view || 'chat') && !shown;
+    settle(shown ? 'library-thread' : bobine ? 'bobine-thread' : null);
     document.body.dataset.view = state.view || 'chat';
     sync();
   }
-  /** The fil in the head of the Pellicule (`#library-thread`), or back above the Chat and the Studio. */
-  function settle(inLibrary) {
+  /**
+   * The fil in the head of the Archives (`#library-thread`) or of the Bobine (`#bobine-thread`), or back
+   * above the Chat and the Studio (`where`: null).
+   */
+  function settle(where) {
     const thread = $('thread'),
-      slot = $('library-thread');
-    if (!thread.parentNode || !slot) return;
+      slot = where ? $(where) : null;
+    if (!thread.parentNode || (where && !slot)) return;
     home ??= { parent: thread.parentNode, next: thread.nextSibling };
-    if (inLibrary && thread.parentNode !== slot) slot.append(thread);
-    else if (!inLibrary && thread.parentNode !== home.parent) home.parent.insertBefore(thread, home.next);
+    if (slot && thread.parentNode !== slot) slot.append(thread);
+    else if (!slot && thread.parentNode !== home.parent) home.parent.insertBefore(thread, home.next);
   }
   function sync() {
     // Never held by a work (0.6.81); for the 2 to 3 s Moodix AI sets the Studio, the reason is said.
     const held = moving(),
       setting = Boolean(state.studio?.settingUp?.());
-    for (const control of document.querySelectorAll('#thread button,#chat-open,#studio-open,#library-open')) {
+    for (const control of document.querySelectorAll('#thread button,#chat-open,#studio-open,#bobine-open,#library-open')) {
       control.disabled = !!held;
       if (!control.dataset) continue;
       if (setting) control.dataset.heldTip ??= control.dataset.tip ?? '';

@@ -2615,7 +2615,7 @@ test('« Régénérer » and « Modifier » ask before ten images leave; « Non 
     await friend.context.takeBack(resend);
     await friend.turn();
   }
-  assert.deepEqual(questions, Array(2).fill('Cette réponse a 10 images : elles quitteront la conversation et resteront dans la Pellicule. Continuer ?'));
+  assert.deepEqual(questions, Array(2).fill('Cette réponse a 10 images : elles quitteront la conversation et resteront dans les Archives. Continuer ?'));
   assert.equal(unnamed((await store.read(ID)).messages, gallery).length, 0, '« Non »: nothing changes');
   assert.equal(friend.requests.length, 3, 'nothing sent again');
   // « Oui »: the exchange leaves as before, its message sent again.

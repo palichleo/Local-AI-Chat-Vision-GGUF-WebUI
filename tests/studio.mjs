@@ -712,7 +712,7 @@ test('another mode stops following the size of the frame it leaves', async () =>
     assert.equal(page['studio-body'].dataset.mode, 'image');
     assert.deepEqual(
       page['studio-kinds'].children.map(tab => tab.dataset.mode),
-      ['image', 'video', 'audio', 'montage'],
+      ['image', 'video', 'audio'],
     );
     const following = observers.at(-1);
     assert.ok(following.watched, 'the frame follows its stage');
@@ -1129,7 +1129,6 @@ test('Image, Vidéo and Son at the top of the screen: icons named, there from th
         ['tab', 'Image', 'Image', 'Image'],
         ['tab', 'Vidéo', 'Vidéo', 'Vidéo'],
         ['tab', 'Son', 'Son', 'Son'],
-        ['tab', 'Montage', 'Montage', 'Montage'],
       ],
       'an icon each and its name (shown beside it for the one chosen), for screen readers and in its tooltip',
     );
@@ -1148,21 +1147,15 @@ test('Image, Vidéo and Son at the top of the screen: icons named, there from th
     assert.equal(body.dataset.mode, 'video');
     page['studio-kinds'].onkeydown({ key: 'ArrowLeft', preventDefault() {} });
     assert.equal(body.dataset.mode, 'image');
-    // (0.6.137) « Montage », the fourth: the timeline of the project in the place of the form of a mode
-    // (public/montage.mjs, tests/montage-ui.mjs); the mode left is behind it as it was.
-    tabs[3].onclick();
-    assert.equal(body.dataset.mode, 'montage');
-    assert.deepEqual(tabs.map(tab => tab.attributes['aria-selected']), ['false', 'false', 'false', 'true']);
-    assert.match(String(body.children[0].className), /studio-desk is-montage/);
-    tabs[0].onclick();
-    assert.equal(body.dataset.mode, 'image');
-    assert.deepEqual(tabs.map(tab => tab.attributes['aria-selected']), ['true', 'false', 'false', 'false']);
-    assert.doesNotMatch(String(body.children[0].className), /is-montage/);
-    // The arrows reach it too: before Image one way, after Son the other.
+    // (0.6.148) No fourth mode any more: the Bobine (ex-Montage) is a page of its own. The arrows go
+    // round the three: before Image is Son, after Son is Image.
+    assert.equal(tabs.length, 3);
     page['studio-kinds'].onkeydown({ key: 'ArrowLeft', preventDefault() {} });
-    assert.equal(body.dataset.mode, 'montage');
+    assert.equal(body.dataset.mode, 'audio');
+    assert.deepEqual(tabs.map(tab => tab.attributes['aria-selected']), ['false', 'false', 'true']);
     page['studio-kinds'].onkeydown({ key: 'ArrowRight', preventDefault() {} });
     assert.equal(body.dataset.mode, 'image');
+    assert.doesNotMatch(String(body.children[0].className), /is-montage/);
   } finally {
     restore();
   }
@@ -1696,9 +1689,9 @@ test('(0.6.147) the bin asks with the number of the take and the montages that u
     // Its number, as the Pellicule asks it (« #2 » before: its place in the Sortie); the montage under it.
     assert.equal(ask.find('studio-confirm-text')[0].textContent, 'Supprimer #7\u00a0?');
     // Too small for the name of the montage: in short, whole under the pointer and to a screen reader.
-    assert.equal(ask.find('studio-confirm-note')[0].textContent, 'Dans un montage');
-    assert.equal(ask.find('studio-confirm-note')[0].title, 'Elle sert dans le montage « Le pêcheur »');
-    assert.equal(ask.attributes['aria-label'], 'Supprimer #7\u00a0? Elle sert dans le montage « Le pêcheur ».');
+    assert.equal(ask.find('studio-confirm-note')[0].textContent, 'Dans une bobine');
+    assert.equal(ask.find('studio-confirm-note')[0].title, 'Elle sert dans la bobine « Le pêcheur »');
+    assert.equal(ask.attributes['aria-label'], 'Supprimer #7\u00a0? Elle sert dans la bobine « Le pêcheur ».');
     assert.equal(ask.find('studio-confirm-yes')[0].title, 'Supprimer de sa conversation (le fichier reste dans le dossier output)');
     ask.find('studio-confirm-no')[0].onclick();
     assert.deepEqual(body.find('studio-item-confirm'), []);
@@ -2595,33 +2588,6 @@ test('a recorded proposal replayed: the pointer does what Moodix AI proposes, in
     assert.equal(body.find('studio-decline').length, 1);
     assert.equal(body.find('studio-shelf').length, 0);
     assert.equal(asked.filter(([route]) => route.startsWith('tools/')).length, 0);
-    studio.studio.decline();
-    assert.equal(await answer, 'deny');
-  } finally {
-    restore();
-  }
-});
-
-test('a proposal of Moodix AI that arrives while the Studio shows a montage takes it back to its mode (0.6.137)', async () => {
-  // (The montage hid the form: the pointer would have set a Studio nobody saw, « Générer » out of sight.)
-  const recorded = await recordedProposal(),
-    { tools, runs } = replayStudio(),
-    said = [];
-  const studio = await studioPage(tools, {}, { runs, cursor: said, targets: true });
-  const { body, page, restore } = studio;
-  try {
-    page['studio-kinds'].children[3].onclick();
-    assert.equal(body.dataset.mode, 'montage');
-    assert.equal(body.find('montage-timeline').length, 1);
-    const answer = studio.studio.propose(structuredClone(recorded.request), new AbortController().signal);
-    await until(() => said.includes('attend votre accord'));
-    assert.equal(body.dataset.mode, 'video');
-    assert.equal(body.find('montage-timeline').length, 0);
-    assert.equal(studio.prompt().value, recorded.request.plan.prompt);
-    assert.deepEqual(
-      page['studio-kinds'].children.map(tab => tab.attributes['aria-selected']),
-      ['false', 'true', 'false', 'false'],
-    );
     studio.studio.decline();
     assert.equal(await answer, 'deny');
   } finally {
@@ -6065,14 +6031,14 @@ test('drawn again, Réglages and Entrée stay where they were scrolled to; « Pl
   }
 });
 
-test('a plan to make of the montage is created as a take of the Studio is, the montage staying on screen (0.6.142)', async () => {
-  // (Étape 2 du Montage, 20/11. A creation that began took the Studio back to its mode: the plan being
-  // made would have left the screen with its timeline.)
+test('a take to create of the bobine is made as a take of the Studio is, the bobine its own page (0.6.142, 0.6.148)', async () => {
+  // (0.6.148) The Bobine (ex-Montage) is a page of its own beside the Studio, no fourth mode of it; the
+  // Studio holds it all the same, because it creates its takes as its own. « Créer 1 prise » makes it at
+  // once, the Studio staying in the mode it was left in.
   // (The photo is a take of another conversation of the project: named as the Studio names such a take.)
   const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
     clip = { id: 'v9', conversationId: 'c1', mediaType: 'video', workflowName: 'LTX 2.5', prompt: 'Il lève les yeux.', parameters: { frames: 121, fps: 24 }, outputs: [{ take: 9, originalUrl: '/media/v9' }] },
     video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
-    // (Image, the mode the montage is opened from, has a form and a screen of its own to come back to.)
     image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true };
   const page = async outcome => {
     const runs = [photo],
@@ -6086,7 +6052,7 @@ test('a plan to make of the montage is created as a take of the Studio is, the m
         typeof route !== 'string'
           ? undefined
           : route === 'tools/action'
-            ? () => ({ requestId: 'q', plan: { parameters: {} } })
+            ? body => (body.estimate ? { workflowName: 'LTX 2.5', seconds: 5.042 } : { requestId: 'q', plan: { parameters: {} } })
             : route === 'montages/save'
               ? body => (kept.push(body.montage), { ...body.montage, createdAt: 'a', updatedAt: 'b' })
               : /^montages\/[^/]+\/m1$/.test(route)
@@ -6096,136 +6062,67 @@ test('a plan to make of the montage is created as a take of the Studio is, the m
                   : undefined,
     });
     const seen = [];
+    let desk = null;
     const studio = await studioPage({ create_image: [image], create_video: [video] }, routes, {
       runs,
       run: async (proposed, { onProgress }) => {
         onProgress('Étape 2 sur 8', 0.25);
         seen.push({
           mode: studio.body.dataset.mode,
-          pieces: studio.body.find('montage-piece').map(piece => piece.children[0].textContent),
-          status: studio.body.find('montage-status')[0].textContent,
+          pieces: desk.find('montage-piece').map(piece => piece.children[0].textContent),
+          button: desk.find('bobine-go-label')[0].textContent,
         });
         if (outcome.record) runs.push(outcome.record);
         return outcome;
       },
     });
-    const action = label => studio.body.find('montage-action').find(control => control.children[0]?.textContent === label);
-    // The mode the montage is opened from, and the way back to it.
-    const home = studio.body.dataset.mode,
-      back = async () => {
-        studio.page['studio-kinds'].children.find(tab => tab.dataset.mode === home).onclick();
-        await until(() => studio.body.dataset.mode === home);
-      };
-    studio.page['studio-kinds'].children[3].onclick();
-    await until(() => studio.body.find('montage-piece').length === 1);
-    // (Chosen on the timeline: its settings, and « Créer ce plan », are at the right.)
-    studio.body.find('montage-piece')[0].onclick();
-    return { ...studio, kept, seen, action, home, back };
+    desk = studio.studio.bobine().desk();
+    await until(() => desk.find('montage-piece').length === 1 && desk.find('bobine-line-right')[0]?.textContent === 'LTX 2.5');
+    const actions = () => studio.asked.filter(([route]) => route === 'tools/action').map(([, sent]) => sent);
+    return { ...studio, desk, kept, seen, actions };
   };
   let studio = await page({ record: clip });
   try {
-    const { body, asked, kept, seen, action, home, back } = studio;
-    assert.equal(home, 'image');
-    assert.equal(body.find('montage-piece')[0].children[0].textContent, '1 · À FAIRE');
-    action('Créer ce plan').onclick();
-    await until(() => kept.length === 1);
-    // Asked as the Studio asks a clip: in the conversation, for the project, by the user's own hand.
-    const [, sent] = asked.find(([route]) => route === 'tools/action');
-    assert.deepEqual([sent.conversationId, sent.studio, sent.name], ['c1', true, 'create_video']);
-    // (0.6.144) At the size of its film, which the server sets for the model it chooses.
-    assert.deepEqual(sent.size, { width: 1344, height: 768 });
-    assert.deepEqual(sent.arguments, { prompt: 'Il lève les yeux.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } });
-    // While it is made the montage is still the one on screen, and says it on its timeline.
-    assert.deepEqual(seen, [{ mode: 'montage', pieces: ['1 · EN COURS'], status: 'Création du plan 1 · Étape 2 sur 8 · 25 %' }]);
-    // Made: still the montage, whose plan is the plan of that take, kept as such.
-    assert.equal(body.dataset.mode, 'montage');
-    assert.equal(body.find('montage-piece')[0].children[0].textContent, '1 · PRISE 9');
-    assert.equal(body.find('montage-status')[0].textContent, 'Plan 1 créé');
-    assert.deepEqual([kept[0].plans[0].source, kept[0].plans[0].todo], [{ conversationId: 'c1', runId: 'v9', output: 0 }, undefined]);
-    // Back in the mode it was opened from: its screen is as it was (a clip is not put on the screen of Image).
-    await back();
-    assert.deepEqual(body.find('studio-frame-result'), []);
+    const { body, page: view, desk, kept, seen, actions } = studio;
+    // The Studio: Image · Vidéo · Son again, in its mode.
+    assert.deepEqual(view['studio-kinds'].children.map(tab => tab.dataset.mode), ['image', 'video', 'audio']);
+    assert.equal(body.dataset.mode, 'image');
+    // The model of the take, asked once to the server without making anything: in the conversation, as
+    // its creation will be, its text left out (it does not choose the model).
+    assert.deepEqual(actions(), [
+      { conversationId: 'c1', project: actions()[0].project, studio: true, name: 'create_video', estimate: true, size: { width: 1344, height: 768 }, arguments: { prompt: 'Prise.', intention: 'Prise d’une bobine, demandée dans la Bobine.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } } },
+    ]);
+    assert.deepEqual([desk.find('montage-piece')[0].children[0].textContent, desk.find('bobine-go-label')[0].textContent], ['', 'Créer 1 prise']);
+    desk.find('bobine-go-main')[0].onclick();
+    await until(() => kept.some(montage => !montage.plans[0].todo));
+    // Asked as the Studio asks a clip: in the conversation, for the project, by the user's own hand, at the size of the film.
+    const sent = actions().at(-1);
+    assert.deepEqual([sent.conversationId, sent.studio, sent.name, sent.estimate, sent.size], ['c1', true, 'create_video', undefined, { width: 1344, height: 768 }]);
+    assert.deepEqual(sent.arguments, { prompt: 'Il lève les yeux.', intention: 'Prise d’une bobine, demandée dans la Bobine.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } });
+    // While it is made the bobine says it on the take and in its button; the Studio stays in its mode.
+    assert.deepEqual(seen, [{ mode: 'image', pieces: ['En cours · 25 %'], button: '1 sur 1 · 25 %' }]);
+    // Made: the take to create is the take made, kept as such; « À créer » is empty, the Studio's screen as it was.
+    await until(() => desk.find('montage-piece')[0].children[0].textContent === 'Prise 9');
+    assert.deepEqual([kept.at(-1).plans[0].source, kept.at(-1).plans[0].todo, desk.find('bobine-line').length], [{ conversationId: 'c1', runId: 'v9', output: 0 }, undefined, 0]);
+    assert.deepEqual([body.dataset.mode, body.find('studio-frame-result')], ['image', []]);
   } finally {
     studio.restore();
   }
-  // Refused by the engine: said on the montage, where it was asked; the plan is still to make.
+  // Refused by the engine: said in its line of « À créer », in amber; it can be tried again; the form of the Studio says nothing.
   studio = await page({ record: null, error: 'Mémoire vidéo insuffisante.' });
   try {
-    const { body, action } = studio;
-    action('Créer ce plan').onclick();
-    await until(() => /impossible/.test(body.find('montage-status')[0]?.textContent ?? ''));
-    assert.equal(body.find('montage-status')[0].textContent, 'Création impossible : Mémoire vidéo insuffisante.');
-    assert.equal(body.dataset.mode, 'montage');
-    assert.equal(body.find('montage-piece')[0].children[0].textContent, '1 · À FAIRE');
-    assert.equal(action('Créer ce plan').disabled, false, 'it can be tried again');
-    // Said on the montage only: the form of the mode has nothing to say of it.
-    await studio.back();
-    assert.deepEqual(body.find('studio-error'), []);
+    const { body, desk } = studio;
+    desk.find('bobine-go-main')[0].onclick();
+    await until(() => desk.find('bobine-line-reason').length === 1);
+    assert.deepEqual([desk.find('bobine-line-reason')[0].textContent, desk.find('bobine-line')[0].dataset.state, desk.find('bobine-line-right')[0].textContent], ['Mémoire vidéo insuffisante.', 'failed', 'Échec']);
+    assert.deepEqual([desk.find('bobine-go-label')[0].textContent, desk.find('bobine-go-main')[0].disabled], ['Créer 1 prise', false]);
+    assert.deepEqual([body.dataset.mode, body.find('studio-error')], ['image', []]);
   } finally {
     studio.restore();
   }
 });
 
-test('« Combler les trous » asks the server what a plan would be made with, as it will be asked, nothing being made (0.6.144)', async () => {
-  // (Étape 2 du Montage, lot 3. The same request as a creation of the Studio, in its conversation, with
-  // `estimate`: the server answers the model and the time, and keeps nothing of it.)
-  const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
-    clip = { id: 'v9', conversationId: 'c1', mediaType: 'video', workflowName: 'LTX 2.5', prompt: 'Il lève les yeux.', parameters: { frames: 121, fps: 24 }, outputs: [{ take: 9, originalUrl: '/media/v9' }] },
-    video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
-    image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true },
-    runs = [photo],
-    stored = {
-      schemaVersion: 1, id: 'm1', name: 'Film', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
-      plans: [{ id: 'a', kind: 'video', todo: { prompt: 'Il lève les yeux.' }, from: 0, to: 5, frame: 'fit', volume: 1, photos: { start: { conversationId: 'c0', runId: 'p1', output: 0 } } }],
-    };
-  const routes = new Proxy({}, {
-    get: (_, route) =>
-      typeof route !== 'string'
-        ? undefined
-        : route === 'tools/action'
-          ? body => (body.estimate ? { workflowName: 'LTX 2.5', seconds: 5.042, expected: { seconds: 61, exact: true } } : { requestId: 'q', plan: { parameters: {} } })
-          : route === 'montages/save'
-            ? body => ({ ...body.montage, createdAt: 'a', updatedAt: 'b' })
-            : /^montages\/[^/]+\/m1$/.test(route)
-              ? () => stored
-              : /^montages\/[^/]+$/.test(route)
-                ? () => ({ montages: [{ id: 'm1', name: 'Film' }] })
-                : undefined,
-  });
-  let made = 0;
-  const studio = await studioPage({ create_image: [image], create_video: [video] }, routes, {
-    runs,
-    run: async () => {
-      made++;
-      runs.push(clip);
-      return { record: clip };
-    },
-  });
-  const { body, asked } = studio,
-    said = name => body.find(name).map(item => item.textContent || item.children.map(child => child.textContent).join('')),
-    actions = () => asked.filter(([route]) => route === 'tools/action').map(([, sent]) => sent);
-  try {
-    studio.page['studio-kinds'].children[3].onclick();
-    await until(() => body.find('montage-piece').length === 1);
-    body.find('montage-fill')[0].onclick();
-    await until(() => body.find('montage-series-model').some(model => model.textContent === 'LTX 2.5'));
-    // Asked once, as the creation will be: in the conversation, for the project, by the user's own hand.
-    assert.deepEqual(actions(), [
-      { conversationId: 'c1', project: actions()[0].project, studio: true, name: 'create_video', estimate: true, size: { width: 1344, height: 768 }, arguments: { prompt: 'Il lève les yeux.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } } },
-    ]);
-    assert.deepEqual([said('montage-title-name'), said('montage-title-meta'), made, body.dataset.mode], [['À créer · 1'], ['≈ 1 min sur votre carte'], 0, 'montage']);
-    // « Lancer »: the same request, for real this time.
-    body.find('montage-action').find(control => (control.children[0]?.textContent ?? control.textContent) === 'Lancer (1)').onclick();
-    await until(() => made === 1 && body.find('montage-status')[0]?.textContent === '1 plan créé');
-    const [, real] = actions();
-    assert.deepEqual([real.estimate, real.arguments, real.size], [undefined, actions()[0].arguments, { width: 1344, height: 768 }]);
-    assert.equal(body.find('montage-piece')[0].children[0].textContent, '1 · PRISE 9');
-  } finally {
-    studio.restore();
-  }
-});
-
-test('« Agent » in the montage: the chat model is brought back, then asked what happens in the plan, in the conversation (0.6.146)', async () => {
+test('the Éclipse of the bobine: the chat model is brought back, then asked what happens in the take, in the conversation (0.6.146, 0.6.148)', async () => {
   const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
     video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
     image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true },
@@ -6251,19 +6148,28 @@ test('« Agent » in the montage: the chat model is brought back, then asked wha
                   : undefined,
   });
   const studio = await studioPage({ create_image: [image], create_video: [video] }, routes, { runs: [photo], waitForModel: async () => void order.push('model') });
-  const { body, asked } = studio;
+  const { asked } = studio;
   try {
-    studio.page['studio-kinds'].children[3].onclick();
-    await until(() => body.find('montage-piece').length === 1);
-    body.find('montage-agent')[0].onclick();
-    await until(() => body.find('montage-series-item').length === 1);
+    const desk = studio.studio.bobine().desk();
+    await until(() => desk.find('bobine-go-agent').length === 1 && !desk.find('bobine-go-agent')[0].disabled);
+    desk.find('bobine-go-agent')[0].onclick();
+    await until(() => desk.find('bobine-line-words')[0]?.value === 'An old fisherman lifts his eyes towards the sea.');
     // The chat model first (it may have left the card for a creation), then the request, in the
     // conversation: the take of another conversation of the project is named with its own.
     assert.deepEqual(order, ['model', 'describe']);
     const [, sent] = asked.find(([route]) => route === 'montages/describe');
     assert.deepEqual(sent, { verb: 'create_video', seconds: 5, start: { output: 'p1', conversation: 'c0' }, conversationId: 'c1' });
-    // Its text is the text of the plan, shown before anything is made; the montage is still on screen.
-    assert.deepEqual([body.find('montage-series-words')[0].textContent, body.dataset.mode], ['« An old fisherman lifts his eyes towards the sea. »', 'montage']);
+    // Its text is the text of the take, in its line; nothing is made.
+    assert.equal(asked.filter(([route, body]) => route === 'tools/action' && !body.estimate).length, 0);
+    // (0.6.148) A take made or removed elsewhere while the Bobine is shown: the Studio reads the takes
+    // of the project again, and the Bobine shows them as they are now.
+    assert.equal(desk.find('montage-take-number').length, 1);
+    globalThis.document.body.dataset = { view: 'bobine' };
+    studio.runs.push({ id: 'p2', conversationId: 'c0', mediaType: 'image', prompt: 'La mer', parameters: {}, outputs: [{ take: 4, originalUrl: '/media/p2', thumbUrl: '/thumb/p2' }] });
+    studio.studio.invalidate();
+    await studio.studio.open();
+    await until(() => desk.find('montage-take-number').length === 2);
+    assert.deepEqual(desk.find('montage-take-number').map(tile => tile.textContent), ['Prise 3', 'Prise 4']);
   } finally {
     studio.restore();
   }

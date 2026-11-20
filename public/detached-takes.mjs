@@ -124,6 +124,6 @@ export function leavingQuestion(messages) {
     pronoun = masculine ? (one ? 'il' : 'ils') : one ? 'elle' : 'elles';
   return (
     `Cette réponse a ${count} ${noun}${one ? '' : 's'} : ${pronoun} ${one ? 'quittera' : 'quitteront'} la conversation ` +
-    `et ${one ? 'restera' : 'resteront'} dans la Pellicule. Continuer ?`
+    `et ${one ? 'restera' : 'resteront'} dans les Archives. Continuer ?`
   );
 }

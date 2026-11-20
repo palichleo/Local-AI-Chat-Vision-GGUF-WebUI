@@ -134,11 +134,11 @@ test('what is kept of a take stays within the take, and never shorter than a ten
 
 test('a montage is said in a line, its times as a clock and as seconds (0.6.137)', () => {
   let montage = empty();
-  assert.equal(montageSummary(montage), 'Aucun plan · 16:9 · 24 i/s');
+  assert.equal(montageSummary(montage), 'Aucune prise · 16:9 · 24 i/s');
   montage = withTake(montage, clip(1, 5), { id: id(11) });
-  assert.equal(montageSummary(montage), '1 plan · 5 s · 16:9 · 24 i/s');
+  assert.equal(montageSummary(montage), '1 prise · 5 s · 16:9 · 24 i/s');
   montage = withTake(montage, clip(2, 9), { id: id(12) });
-  assert.equal(montageSummary(montage), '2 plans · 14 s · 16:9 · 24 i/s');
+  assert.equal(montageSummary(montage), '2 prises · 14 s · 16:9 · 24 i/s');
   assert.deepEqual([0.5, 2.06, 14, 59.96, 65, 600].map(shownSeconds), ['0,5 s', '2,1 s', '14 s', '1 min 00 s', '1 min 05 s', '10 min 00 s']);
   assert.deepEqual([0, 6.9, 59.99, 61, 754].map(clock), ['00:00', '00:06', '00:59', '01:01', '12:34']);
   assert.deepEqual([usualSize('16:9'), usualSize('9:16'), usualSize('1:1'), usualSize('7:5')], [{ width: 1344, height: 768 }, { width: 768, height: 1344 }, { width: 1024, height: 1024 }, null]);

@@ -1,51 +1,34 @@
 /**
- * (0.6.137) The « Montage » mode of the Studio, its first step (maquettes M2 à M4 du 20/11, the user's
- * « Oui, code-le »): the takes of the project laid by hand one after the other, with sounds under
- * them, read on the screen and exported as one film.
+ * La Bobine (ex-Montage), 0.6.148: a page of its own, at the level of the project, beside the Studio
+ * (maquette « La Bobine », claude_design/maquettes/bobine-maquette.md, captures 70 à 92). Before it,
+ * the fourth mode of the Studio (0.6.137 to 0.6.146, montage-fonctionnement.md): what is kept, what
+ * is asked of the models and the gestures of the timeline are those; the page is new.
  *
- * The four blocks of the Studio keep their places and their look: at the left the takes of the project
- * (dragged to the timeline, or laid at its end by a double click), in the middle the screen that
- * reads the montage, at the right what is chosen (a plan, a sound, else the montage itself), at the
- * foot the timeline. A montage is a file of the project (lib/montages.mjs): every change is kept
- * a moment after it is made. The film is assembled by the engine from the takes as they are
- * (runner/video/montage.py) and comes back as a take of the project.
+ * Three fixed columns, then the timeline over the whole width: at the left the takes of the project
+ * (« Prises »), in the middle the preview, at the right « À créer », always there. The middle never
+ * moves. No panel of settings: a small bar opens above the take or the sound chosen, on its track.
+ * The fil at the top: « projet / bobine », then « Exporter ». The words of the page are those of the
+ * maquette: prises, prises à créer, suites; the tracks are Photos, Prises, Piste audio 1 and 2. The
+ * code keeps its own names (montage, plans, sounds).
  *
- * (0.6.142) Its second step (maquettes M5 et M9 du 20/11, « Oui, code-le »): a plan may be one to make.
- * Photos of the project are laid on a track above the plans: the photo a plan starts on, the photo
- * it arrives on; a photo laid above a video cuts it there. A plan to make is then created by the
- * Studio, as one of its takes (`create`), and becomes the plan of that take.
- *
- * (0.6.143) Maquette M6: the end of a video pulled beyond its take shows its continuation to make,
- * joined to it; what follows comes later in the film. Let go, the continuation is chosen: its text,
- * its length, « Prolonger ».
- *
- * (0.6.144) Maquettes M7 et M8: « Combler les trous » creates every plan to make that can be, one
- * after the other. What will be made is said first, each plan with its model and the whole with its
- * time (`estimate`: asked to the server, nothing kept); nothing is made before « Lancer ». The series
- * can be paused after the plan being made, or stopped at once.
- *
- * (0.6.146) « Agent », as in the other modes of the Studio (maquette M7): here Moodix AI writes what
- * happens in the plans to make that have no text, from their photos, one plan at a time (`write`);
- * then what will be created is shown, to be agreed on.
+ * What is kept (lib/montages.mjs) is unchanged: every change is kept a moment after it is made. A take
+ * to create is made by the Studio as one of its takes (`create`), « Créer n prises » making them one
+ * after the other at once, in the order of the bobine (no agreement apart any more: « À créer » is
+ * the list). The Éclipse has Moodix AI write what happens in those that have no text (`write`).
  */
 import { FORMATS } from './formats.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
 import {
   MONTAGE_LIMITS,
   MONTAGE_RATES,
-  TODO_LIMITS,
-  clock,
   creationOf,
   isTodo,
   linkOf,
   montageSeconds,
-  montageSizes,
-  montageSummary,
   placeAt,
   planAt,
   planStarts,
   seriesOf,
-  shownSeconds,
   snapped,
   takeSeconds,
   todoPlans,
@@ -68,31 +51,38 @@ const FILTERS = [
   ['image', 'Images'],
   ['audio', 'Sons'],
 ];
+// (0.6.148) The tracks under their names of the maquette; a sound goes on the one it is dropped on.
 const TRACKS = [
-  ['plans', 'Plans', 'Les vidéos et les images, dans l’ordre du film'],
-  ['music', 'Musique', 'Une musique sous tout le film'],
-  ['effects', 'Bruitages', 'Des sons, où vous les posez'],
+  ['plans', 'Prises'],
+  ['music', 'Piste audio 1'],
+  ['effects', 'Piste audio 2'],
 ];
-const KINDS = { video: 'Vidéo', image: 'Image', music: 'Musique', effects: 'Bruitage' };
-// The timeline shows ten seconds at least: a first plan does not fill it from side to side.
+// The timeline shows ten seconds at least: a first take does not fill it from side to side.
 const SHORTEST_SPAN = 10;
 // How near a cut of the film a sound dragged stops on it, in pixels of the timeline.
 const NEAR_PIXELS = 8;
-const figures = seconds => seconds.toFixed(1).padStart(4, '0') + ' S';
+/** « 06.04 », « 1:02.50 »: the instants and lengths of the page, in mono (maquette 70). */
+export function mono(seconds) {
+  const value = Math.max(0, Math.round(seconds * 100) / 100);
+  if (value < 60) return value.toFixed(2).padStart(5, '0');
+  const minutes = Math.floor(value / 60);
+  return minutes + ':' + (value - minutes * 60).toFixed(2).padStart(5, '0');
+}
+const plural = (count, one, many = one + 's') => `${count} ${count > 1 ? many : one}`;
 
 export function setupMontage({
   api,
   node,
   icon,
   notice = () => {},
-  // The project the Studio works in, and its creations (the same the Sortie shows).
+  // The project the Bobine works in, and its creations (those the Studio reads for it).
   project,
   runs,
   // Reads the creations of the project again: a film exported is one of them.
   refresh = async () => {},
   // The conversation a film is kept in, made when it has none yet.
   ensureConversation,
-  // Opens a take with its details, as a click in the Sortie does.
+  // Opens a take with its details, as a click in the Sortie of the Studio does.
   showTake = () => {},
   newId = () => globalThis.crypto.randomUUID(),
   // How long a change waits before it is kept (several made in a row are kept once).
@@ -103,21 +93,22 @@ export function setupMontage({
   thumbnail = thumbnailOf,
   // What hears the pointer while something of the timeline is dragged (0.6.138): the window.
   page = globalThis.window,
-  // (0.6.142) What makes a plan to make: the Studio's own creation, asked as one of its takes is
-  // (`create({ verb, args }, { onProgress })` gives the record made, or throws why not), what stops
-  // it, and how the Studio names a take as an input of a creation.
+  // (0.6.142) What makes a take to create: the Studio's own creation, asked as one of its takes is
+  // (`create({ verb, args, size }, { onProgress })` gives the record made, or throws why not), what
+  // stops it, and how the Studio names a take as an input of a creation.
   create = null,
   halt = () => {},
   inputOf = record => ({ output: record.id }),
-  // (0.6.144) What a creation would be made with, and in how long, nothing being made nor kept:
-  // `estimate({ verb, args })` gives { workflowName, seconds, expected: { seconds, exact }, missing }.
+  // (0.6.144) The model a creation would be made with, nothing being made nor kept: `estimate({ verb,
+  // args, size })` gives { workflowName, missing }. (0.6.148) No time is said any more.
   estimate = null,
-  // (0.6.146) What happens in a plan, written by the chat model from its pictures: `write({ verb,
-  // seconds, start, end, previous }, { signal })` gives { prompt }, or throws why not.
+  // (0.6.146) What happens in a take to create, written by the chat model from its pictures:
+  // `write({ verb, seconds, start, end, previous }, { signal })` gives { prompt }, or throws why not.
   write = null,
 }) {
   let root = null,
-    kindsBar = null,
+    filRoot = null,
+    ownFil = false,
     readFor = null,
     list = [],
     montage = null,
@@ -130,29 +121,33 @@ export function setupMontage({
     saving = null,
     pending = false,
     exporting = false,
-    confirming = false,
+    // (0.6.148) What the fil asks before it is done: « Renommer », « Supprimer ».
+    asking = null,
     carried = null,
     media = null,
-    // The four blocks as last drawn: a change draws two of them again, not the screen nor the takes.
+    // The four blocks as last drawn: a change draws two of them again, not the preview nor the takes.
     parts = null,
     // While something is dragged on the timeline: its scale held as it was (it would change under
-    // the pointer with the length of the film), where the plans were (a start that is cut follows
+    // the pointer with the length of the film), where the takes were (a start that is cut follows
     // the pointer, the others wait), and the click that ends a drag, which chooses nothing.
     held = null,
     ghost = null,
     slid = false,
-    // (0.6.143) While the end of a video is pulled beyond its take: its continuation, { id, at } (where it ends).
+    // (0.6.143) While the end of a video is pulled beyond its take: its continuation, { id, at, seconds }.
     pulling = null,
-    // (0.6.142) The plan being created: { id, label, fraction }.
+    // (0.6.142) The take to create being made: { id, label, fraction, preview }.
     making = null,
-    // (0.6.144) The series of plans being agreed on or created: { stage: 'asking' | 'ready' | 'running' |
-    // 'paused', items, at, pausing, stopping }. An item: what seriesOf says of a plan, with its model
-    // (`model`), the length that model makes (`makes`), its time (`expected`), where it is (`state`:
-    // 'wait', 'making', 'made', 'failed') and its take once made.
+    // (0.6.148) The takes to create being made one after the other: { stage: 'running' | 'paused',
+    // ids (in their order), done (how many are made), pausing, stopping }.
     filling = null,
-    // (0.6.146) Moodix AI is writing the plans: { id (the one it writes), at, of, controller }.
+    // (0.6.146) Moodix AI is writing the takes: { id (the one it writes), at, of, controller }.
     writing = null;
+  // (0.6.148) Why a take to create could not be made, by its id: said in its line, in amber.
+  const failed = new Map();
+  // (0.6.148) The model of each kind of take to create, as the server would choose it: { name, missing }.
+  const models = new Map();
   const inSeries = () => filling?.stage === 'running' || filling?.stage === 'paused';
+  const busy = () => Boolean(making || writing || inSeries());
 
   const fresh = (format = '16:9') => ({
     schemaVersion: 1,
@@ -164,7 +159,7 @@ export function setupMontage({
     plans: [],
     sounds: [],
   });
-  // (A plan to make has no take yet: nothing is found for it.)
+  // (A take to create has no take yet: nothing is found for it.)
   const recordOf = source =>
     (source && (runs() ?? []).find(run => run.id === source.runId && run.conversationId === source.conversationId)) || null;
   const outputOf = source => recordOf(source)?.outputs?.[source.output] ?? null;
@@ -177,6 +172,32 @@ export function setupMontage({
   const span = () =>
     held ?? Math.max(SHORTEST_SPAN, total(), ...montage.sounds.map(sound => sound.at + (sound.to - sound.from)));
   const percent = seconds => (100 * seconds) / span() + '%';
+  const takeLabel = (source, before = '') => {
+    const take = outputOf(source)?.take;
+    return Number.isInteger(take) ? before + 'Prise ' + take : '';
+  };
+  const pictureOf = record => {
+    const output = record?.outputs?.[0] ?? {};
+    return output.thumbUrl || (record?.mediaType === 'video' || record?.mediaType === 'audio' ? '' : output.originalUrl) || '';
+  };
+  const button = (className, text, onclick, glyph, tip = '') => {
+    const control = node('button', className);
+    control.type = 'button';
+    if (glyph) control.append(icon(glyph));
+    if (text) control.append(node('span', '', text));
+    control.onclick = onclick;
+    if (tip) {
+      control.title = tip;
+      control.setAttribute('aria-label', tip);
+    }
+    return control;
+  };
+  const block = (kind, name) => {
+    const section = node('section', `studio-block ${kind} ${name}`),
+      body = node('div', 'studio-block-body');
+    section.append(body);
+    return { section, body };
+  };
 
   // What is kept ---------------------------------------------------------------------------------
   async function read() {
@@ -188,13 +209,14 @@ export function setupMontage({
     chosen = null;
     head = 0;
     status = '';
+    failed.clear();
     try {
       const found = (await (await api('montages/' + encodeURIComponent(place))).json()).montages ?? [];
       if (project() !== place) return;
       list = found;
       if (found.length) await open(found[0].id);
     } catch (error) {
-      status = 'Montages illisibles : ' + error.message;
+      status = 'Bobines illisibles : ' + error.message;
     }
     draw();
   }
@@ -208,8 +230,9 @@ export function setupMontage({
     chosen = null;
     head = 0;
     status = '';
+    failed.clear();
   }
-  /** Keeps the montage now; resolves once it is kept (or could not be: said in the head). */
+  /** Keeps the bobine now; resolves once it is kept (or could not be: said in the fil). */
   async function keep() {
     if (saving) timers.clear(saving);
     saving = null;
@@ -223,31 +246,34 @@ export function setupMontage({
       const kept = await (await api('montages/save', { project: place, montage: sent })).json();
       stored = true;
       if (montage === sent) montage = { ...sent, createdAt: kept.createdAt, updatedAt: kept.updatedAt };
-      const summary = { id: kept.id, name: kept.name, updatedAt: kept.updatedAt };
-      list = [summary, ...list.filter(item => item.id !== kept.id)];
+      const known = list.some(item => item.id === kept.id && item.name === kept.name);
+      list = [{ id: kept.id, name: kept.name, updatedAt: kept.updatedAt }, ...list.filter(item => item.id !== kept.id)];
       if (!pending) status = 'Enregistré';
+      // (A new bobine, or a new name: the menu of the fil says it.)
+      if (!known) fil();
     } catch (error) {
       status = 'Non enregistré : ' + error.message;
     }
     say();
   }
-  /** A change made by hand: shown at once, kept a moment later. */
-  function change(next, { select, sliding = false } = {}) {
+  /**
+   * A change made by hand: shown at once, kept a moment later. `sliding`: a text being written in « À
+   * créer », not drawn again under the hand; `still`: a bar being slid on the timeline, nothing is drawn
+   * again (what it shows is said by the bar itself), until it is let go.
+   */
+  function change(next, { select, sliding = false, still = false } = {}) {
     if (next === montage) return;
-    // (0.6.146) Nor while Moodix AI writes the plans: its texts are written back in this montage.
-    if (writing) return void notice('Moodix AI écrit les plans : attendez la fin, ou arrêtez l’écriture.');
-    // (0.6.144) Nor while a series of plans is created, even between two of them or in pause.
+    // (0.6.146) Not while Moodix AI writes the takes: its texts are written back in this bobine.
+    if (writing) return void notice('Moodix AI écrit les prises : attendez la fin, ou arrêtez l’écriture.');
+    // (0.6.144) Nor while takes are created, even between two of them or in pause.
     if (inSeries())
       return void notice(
         filling.stage === 'paused'
-          ? 'La série est en pause : reprenez-la ou arrêtez-la avant de modifier le montage.'
-          : 'Des plans sont en cours de création : attendez leur fin, ou arrêtez la série.',
+          ? 'La création est en pause : reprenez-la ou arrêtez-la avant de modifier la bobine.'
+          : 'Des prises sont en cours de création : attendez la fin, ou arrêtez.',
       );
-    // (0.6.142) The plan being created is written back in this montage when it is made.
-    if (making) return void notice('Un plan est en cours de création : attendez sa fin, ou arrêtez-la.');
-    // (What was only shown to be agreed on described the montage as it was: closed.)
-    filling = null;
-    // Another shape of film: the screen takes it. Anything else leaves the screen and the takes as they are.
+    if (making) return void notice('Une prise est en cours de création : attendez sa fin, ou arrêtez-la.');
+    // Another shape of film: the preview takes it. Anything else leaves the preview and the takes as they are.
     const reshaped = next.format !== montage.format || next.width !== montage.width || next.height !== montage.height;
     montage = next;
     if (select !== undefined) chosen = select;
@@ -258,19 +284,20 @@ export function setupMontage({
     saving = timers.set(() => void keep(), saveDelay);
     status = '';
     if (reshaped) draw();
-    else update({ inspector: !sliding });
+    else if (still) sayGo();
+    else update({ panel: !sliding });
   }
   function lay(record, where = {}) {
     const id = newId(),
       next = withTake(montage, record, { id, ...where });
-    if (next === montage) return notice('Ce montage est plein.');
+    if (next === montage) return notice('Cette bobine est pleine.');
     change(next, { select: id });
   }
   async function exportFilm() {
-    if (exporting || !montage.plans.length) return;
+    if (exporting || !montage.plans.length || todoPlans(montage).length || busy()) return;
     exporting = true;
     stop();
-    draw();
+    fil();
     try {
       pending = pending || !stored;
       await keep();
@@ -278,7 +305,7 @@ export function setupMontage({
       const conversation = await ensureConversation();
       const film = await (await api('montages/export', { project: project(), id: montage.id, conversation })).json();
       const take = film.outputs?.[0]?.take;
-      status = Number.isInteger(take) ? `Film exporté · PRISE ${take}` : 'Film exporté';
+      status = Number.isInteger(take) ? `Film exporté · Prise ${take}` : 'Film exporté';
       await refresh();
     } catch (error) {
       status = 'Export impossible : ' + error.message.replace(/^Non enregistré : /, '');
@@ -287,65 +314,103 @@ export function setupMontage({
     draw();
   }
   async function remove() {
-    // (0.6.144) Not under a plan being created: its take would have no montage to go to.
-    if (writing) return void notice('Moodix AI écrit les plans : attendez la fin, ou arrêtez l’écriture.');
-    if (making || inSeries()) return void notice('Un plan est en cours de création : attendez sa fin, ou arrêtez-la.');
-    if (!confirming) {
-      confirming = true;
-      return draw();
-    }
-    confirming = false;
+    // (0.6.144) Not under a take being created: it would have no bobine to go to.
+    if (writing) return void notice('Moodix AI écrit les prises : attendez la fin, ou arrêtez l’écriture.');
+    if (making || inSeries()) return void notice('Une prise est en cours de création : attendez sa fin, ou arrêtez-la.');
+    asking = null;
     stop();
     try {
       if (stored) await api('montages/remove', { project: project(), id: montage.id });
-      notice('Montage mis de côté.');
+      notice('Bobine mise de côté.');
     } catch (error) {
       status = 'Suppression impossible : ' + error.message;
       return draw();
     }
     await read();
   }
+  async function choose(wanted) {
+    await keep();
+    stop();
+    asking = null;
+    if (wanted === 'new') {
+      montage = fresh();
+      stored = false;
+      chosen = null;
+      head = 0;
+      status = '';
+      failed.clear();
+    } else
+      try {
+        await open(wanted);
+      } catch (error) {
+        status = 'Bobine illisible : ' + error.message;
+      }
+    draw();
+  }
 
-  // Reading the film on the screen ---------------------------------------------------------------
+  // Reading the film in the preview --------------------------------------------------------------
   function stop() {
     if (playing) timers.clear(playing.timer);
     playing = null;
     media?.video.pause?.();
     for (const sound of media?.sounds.values() ?? []) sound.pause?.();
   }
-  /** Puts on the screen what the film shows at `head`, the clip and the sounds at their place. */
+  /** Puts in the preview what the film shows at `head`, the clip and the sounds at their place. */
   function show({ sync = true } = {}) {
     if (!media) return;
-    const { video, picture, blank } = media,
+    const { video, picture, blank, frame } = media,
       at = montage.plans.length ? planAt(montage, Math.min(head, Math.max(0, total() - 0.001))) : null,
       todo = Boolean(at) && isTodo(at.plan),
-      // (0.6.142) A plan to make has nothing to play yet: the photo it starts on stands for it.
-      seen = !at ? null : todo ? (at.plan.photos?.start ? { source: at.plan.photos.start, kind: 'image' } : null) : at.plan,
-      url = seen ? outputOf(seen.source)?.originalUrl : null;
+      link = todo ? linkOf(montage, at.plan.id, lengthOf) : null,
+      before = todo ? montage.plans[at.index - 1] : null,
+      busy = todo && making?.id === at.plan.id,
+      // (0.6.148, capture 83) A take to create shows where it starts from, veiled: its start photo, or
+      // the last picture of the video it continues; being made, what the engine shows of it, blurred.
+      seen = !at
+        ? null
+        : !todo
+          ? at.plan
+          : busy && making.preview
+            ? { kind: 'image', url: making.preview }
+            : at.plan.photos?.start
+              ? { source: at.plan.photos.start, kind: 'image' }
+              : (link.kind === 'suite' || link.kind === 'last') && before?.source
+                ? { source: before.source, kind: 'video', last: true }
+                : null,
+      url = seen ? (seen.url ?? outputOf(seen.source)?.originalUrl) : null;
+    frame.dataset.todo = String(todo);
+    frame.dataset.busy = String(busy);
     blank.hidden = Boolean(url);
-    if (!url) {
-      const [title, text] = blank.children;
-      title.textContent = todo ? 'Plan à faire.' : at ? 'Prise introuvable.' : 'Votre montage se lira ici.';
-      text.textContent = todo
-        ? 'Il n’existe pas encore : créez-le pour le voir ici.'
-        : at
-          ? 'Ce plan nomme une prise qui n’est plus dans le projet.'
-          : 'Posez une première prise dans la timeline.';
-    }
     picture.hidden = !(url && seen.kind === 'image');
     video.hidden = !(url && seen.kind === 'video');
-    media.caption.textContent = at ? `Plan ${at.index + 1}` + (todo ? ' · à faire' : takeLabel(at.plan.source, ' · ')) : '';
+    media.caption.textContent = !at
+      ? ''
+      : busy
+        ? 'En cours' + (Number.isFinite(making.fraction) ? ` · ${Math.round(making.fraction * 100)} %` : '')
+        : todo
+          ? 'À créer' + (link.kind === 'suite' || link.kind === 'last' ? ' · suite de la ' + (takeLabel(before?.source) || 'prise à créer').toLowerCase() : '')
+          : takeLabel(at.plan.source) || 'Prise introuvable';
+    // What happens in it, and the photo it arrives on.
+    media.words.textContent = todo ? at.plan.todo.prompt.trim() : '';
+    media.words.hidden = !media.words.textContent;
+    const end = todo && at.plan.photos?.end ? recordOf(at.plan.photos.end) : null;
+    media.end.hidden = !end;
+    if (end) {
+      media.end.style.backgroundImage = `url("${pictureOf(end)}")`;
+      media.end.children[0].textContent = 'Fin · ' + mono(at.start + (at.plan.to - at.plan.from));
+    }
     if (url && seen.kind === 'image') {
       if (picture.dataset.url !== url) Object.assign(picture, { src: url }).dataset.url = url;
       video.pause?.();
     } else if (url) {
-      const wanted = at.plan.from + (head - at.start);
+      const wanted = seen.last ? Math.max(0, before.to - 0.05) : at.plan.from + (head - at.start);
       if (video.dataset.url !== url) Object.assign(video, { src: url }).dataset.url = url;
-      video.volume = Math.min(1, at.plan.volume ?? 1);
-      video.muted = !(at.plan.volume > 0);
+      const volume = todo ? 0 : (at.plan.volume ?? 1);
+      video.volume = Math.min(1, volume);
+      video.muted = !(volume > 0);
       // Put back where the film is when it drifted, or when the head was moved by hand.
-      if (sync || Math.abs((video.currentTime ?? 0) - wanted) > 0.35) video.currentTime = wanted;
-      if (playing) void video.play?.()?.catch?.(() => {});
+      if (sync || seen.last || Math.abs((video.currentTime ?? 0) - wanted) > 0.35) video.currentTime = wanted;
+      if (playing && !todo) void video.play?.()?.catch?.(() => {});
       else video.pause?.();
     } else video.pause?.();
     for (const sound of montage.sounds) {
@@ -372,7 +437,7 @@ export function setupMontage({
     const tick = () => {
       // Another page of the application is shown: the film does not go on playing behind it.
       const view = globalThis.document?.body?.dataset?.view;
-      if (view && view !== 'studio') return stop();
+      if (view && view !== 'bobine') return stop();
       const moment = now();
       head = Math.min(total(), head + (moment - playing.at) / 1000);
       playing.at = moment;
@@ -391,49 +456,103 @@ export function setupMontage({
     show();
   }
 
-  // What is said without drawing everything again: the clock, the head, the state.
+  // What is said without drawing everything again: the clock, the head, the state, the button.
   const live = {};
   function say() {
-    if (live.clock) live.clock.textContent = clock(head);
-    if (live.whole) live.whole.textContent = ' / ' + clock(total());
-    if (live.done) live.done.style.width = total() ? (100 * head) / total() + '%' : '0%';
+    if (live.clock) live.clock.textContent = mono(head);
+    if (live.whole) live.whole.textContent = ' / ' + mono(total());
     if (live.head) live.head.style.left = percent(head);
     if (live.play) {
       live.play.disabled = !montage.plans.length;
-      live.play.setAttribute('aria-label', playing ? 'Mettre en pause' : 'Lire le montage');
+      live.play.setAttribute('aria-label', playing ? 'Mettre en pause' : 'Lire la bobine');
       if (live.play.dataset.playing !== String(Boolean(playing))) live.play.replaceChildren(icon(playing ? 'stop' : 'play'));
       live.play.dataset.playing = String(Boolean(playing));
     }
     if (live.status) {
       live.status.textContent = status;
-      live.status.dataset.problem = String(/impossible|Non enregistré|illisibles/.test(status));
+      live.status.dataset.problem = String(/impossible|Non enregistré|illisible/.test(status));
     }
+    sayExport();
+    sayGo();
   }
 
-  // The blocks -----------------------------------------------------------------------------------
-  const button = (className, text, onclick, glyph) => {
-    const control = node('button', className);
-    control.type = 'button';
-    if (glyph) control.append(icon(glyph));
-    if (text) control.append(node('span', '', text));
-    control.onclick = onclick;
-    return control;
-  };
-  const block = (kind, name) => {
-    const section = node('section', `studio-block ${kind} ${name}`),
-      body = node('div', 'studio-block-body');
-    section.append(body);
-    return { section, body };
-  };
-  const takeLabel = (source, before = '') => {
-    const take = outputOf(source)?.take;
-    return Number.isInteger(take) ? before + 'Prise ' + take : '';
-  };
-  const pictureOf = record => {
-    const output = record?.outputs?.[0] ?? {};
-    return output.thumbUrl || (record?.mediaType === 'video' || record?.mediaType === 'audio' ? '' : output.originalUrl) || '';
-  };
+  // The fil ------------------------------------------------------------------------------------------
+  /** « / bobine ⌄ », what it asks (rename, take out), then what is said and « Exporter ». */
+  function fil() {
+    if (!filRoot) return;
+    const parts = [node('span', 'thread-slash bobine-slash', '/')];
+    if (asking?.kind === 'rename') {
+      const name = node('input', 'bobine-name');
+      Object.assign(name, { type: 'text', value: montage.name, maxLength: MONTAGE_LIMITS.name });
+      name.setAttribute('aria-label', 'Nom de la bobine');
+      const done = keepIt => {
+        if (asking?.kind !== 'rename') return;
+        asking = null;
+        const wanted = name.value.trim();
+        if (keepIt && wanted && wanted !== montage.name) change({ ...montage, name: wanted });
+        fil();
+      };
+      name.onkeydown = event => {
+        if (event.key === 'Enter') done(true);
+        if (event.key === 'Escape') done(false);
+      };
+      name.onblur = () => done(true);
+      parts.push(name);
+      timers.set(() => name.focus?.(), 0);
+    } else {
+      const pick = node('select', 'montage-pick');
+      pick.setAttribute('aria-label', 'Bobine ouverte');
+      const named = [{ id: montage.id, name: montage.name }, ...list.filter(item => item.id !== montage.id)];
+      for (const item of named) pick.append(Object.assign(node('option', '', item.name), { value: item.id, selected: item.id === montage.id }));
+      pick.append(
+        Object.assign(node('option', '', '+ Nouvelle bobine'), { value: 'new' }),
+        Object.assign(node('option', '', 'Renommer la bobine'), { value: 'rename' }),
+        ...(stored ? [Object.assign(node('option', '', 'Supprimer la bobine'), { value: 'remove' })] : []),
+      );
+      pick.disabled = busy() || exporting;
+      pick.onchange = () => {
+        const wanted = pick.value;
+        if (wanted === 'rename' || wanted === 'remove') {
+          asking = { kind: wanted };
+          return fil();
+        }
+        if (wanted !== montage.id) void choose(wanted);
+      };
+      parts.push(pick);
+    }
+    if (asking?.kind === 'remove')
+      parts.push(
+        node('span', 'bobine-ask', `Supprimer « ${montage.name} » ?`),
+        button('bobine-ask-go', 'Supprimer', () => void remove()),
+        button('bobine-ask-no', 'Garder', () => {
+          asking = null;
+          fil();
+        }),
+      );
+    const state = node('span', 'montage-status'),
+      go = button('montage-export', exporting ? 'Export…' : 'Exporter', () => void exportFilm(), 'download');
+    parts.push(node('span', 'bobine-fil-gap'), state, go);
+    filRoot.replaceChildren(...parts);
+    Object.assign(live, { status: state, export: go });
+    say();
+  }
+  /**
+   * What « Exporter » says of the bobine as it is now: it follows every change without the fil being
+   * drawn again (a name being written there would be lost).
+   */
+  function sayExport() {
+    const go = live.export;
+    if (!go || !montage) return;
+    const waiting = todoPlans(montage).length;
+    go.disabled = exporting || !montage.plans.length || waiting > 0 || busy();
+    go.title = waiting
+      ? `${plural(waiting, 'prise est encore', 'prises sont encore')} à créer`
+      : montage.plans.length
+        ? 'Un seul fichier : le film dans VIDEO, et une prise du projet'
+        : 'Posez au moins une prise pour exporter un film';
+  }
 
+  // The blocks -------------------------------------------------------------------------------------
   function takes() {
     const { section, body } = block('is-settings', 'montage-takes'),
       all = runs() ?? [],
@@ -442,7 +561,7 @@ export function setupMontage({
       filters = node('div', 'montage-filters'),
       grid = node('div', 'montage-grid');
     section.setAttribute('aria-label', 'Prises du projet');
-    headRow.append(node('span', 'montage-label', 'Prises du projet'), node('span', 'montage-count', String(all.length)));
+    headRow.append(node('span', 'montage-label', 'Prises'), node('span', 'montage-count', String(all.length)));
     for (const [id, label] of FILTERS) {
       const pill = button('montage-filter', label, () => {
         filter = id;
@@ -455,11 +574,11 @@ export function setupMontage({
       const output = record.outputs?.[0] ?? {},
         track = trackOf(record),
         seconds = takeSeconds(record),
-        name = (Number.isInteger(output.take) ? 'Prise ' + output.take : 'Création') + ' · ' + KINDS[track],
+        name = Number.isInteger(output.take) ? 'Prise ' + output.take : 'Création',
         tile = button('montage-take', '', null);
       tile.dataset.kind = track;
       tile.dataset.id = record.id;
-      tile.title = name + ' : double-cliquez pour la poser à la fin du montage';
+      tile.title = name + ' : glissez-la sur la bobine, ou double-cliquez pour la poser à la fin';
       tile.setAttribute('aria-label', name);
       const picture = pictureOf(record);
       if (picture) tile.append(Object.assign(node('img'), { src: picture, alt: '', loading: 'lazy', draggable: false }));
@@ -467,20 +586,19 @@ export function setupMontage({
         // Its first picture, of which a small one is made for the next time (and for the timeline).
         const first = Object.assign(node('video'), { muted: true, preload: 'metadata', playsInline: true, draggable: false });
         first.src = output.originalUrl + '#t=0.1';
-        // (0.6.142) Once made it is shown on the timeline too: a plan just created stayed black there
-        // until the next change, its take showing its picture beside.
+        // (0.6.142) Once made it is shown on the timeline too.
         first.onloadeddata = () =>
           void Promise.resolve(thumbnail(api, record, 0, first))
             .then(() => {
-              if (pictureOf(record) && montage?.plans.some(plan => plan.source?.runId === record.id)) update({ inspector: false });
+              if (pictureOf(record) && montage?.plans.some(plan => plan.source?.runId === record.id)) update({ panel: false });
             })
             .catch(() => {});
         tile.append(first);
       } else tile.append(node('span', track === 'video' ? 'montage-take-blank' : 'montage-wave'));
+      // (Capture 70: « PRISE n » at the left, its length, or « IMAGE », at the right, on dark grounds.)
       tile.append(
-        node('span', 'montage-take-number', Number.isInteger(output.take) ? 'PRISE ' + output.take : ''),
-        node('span', 'montage-take-kind', KINDS[track]),
-        node('span', 'montage-take-length', seconds ? shownSeconds(seconds) : ''),
+        node('span', 'montage-take-number', Number.isInteger(output.take) ? 'Prise ' + output.take : ''),
+        node('span', 'montage-take-length', track === 'image' ? 'Image' : seconds ? mono(seconds) + ' s' : ''),
       );
       tile.ondblclick = () => lay(record);
       tile.onkeydown = event => {
@@ -495,297 +613,279 @@ export function setupMontage({
       tile.ondragend = () => (carried = null);
       grid.append(tile);
     }
-    if (!shown.length)
-      grid.append(node('p', 'montage-none', all.length ? 'Aucune prise de ce type dans ce projet.' : 'Ce projet n’a pas encore de prise : créez-en dans Image, Vidéo ou Son.'));
-    body.append(headRow, filters, grid, node('p', 'montage-hint', 'Glissez une prise dans la timeline, ou double-cliquez pour la poser à la fin.'));
+    if (!shown.length) grid.append(node('p', 'montage-none', all.length ? 'Aucune prise de ce type.' : 'Aucune prise dans ce projet.'));
+    body.append(headRow, filters, grid);
     return section;
   }
 
   function screen() {
     const { section, body } = block('is-preview', 'montage-screen'),
-      headRow = node('div', 'studio-screen-head montage-screen-head'),
       stage = node('div', 'montage-stage'),
       frame = node('div', 'montage-frame'),
       blank = node('div', 'montage-blank'),
       video = node('video'),
       picture = node('img'),
       caption = node('span', 'montage-caption'),
+      words = node('p', 'montage-frame-words'),
+      end = node('span', 'montage-frame-end'),
       transport = node('div', 'montage-transport'),
       playButton = button('montage-play', '', play, 'play'),
       time = node('span', 'montage-clock'),
-      whole = node('span', 'montage-clock-total', ' / ' + clock(total())),
-      bar = node('div', 'montage-bar'),
-      done = node('span', 'montage-bar-done');
-    section.setAttribute('aria-label', 'Écran du montage');
-    if (kindsBar) headRow.append(kindsBar);
+      whole = node('span', 'montage-clock-total', ' / ' + mono(total())),
+      format = node('select', 'montage-format');
+    section.setAttribute('aria-label', 'Aperçu de la bobine');
     // The frame has the shape of the film, as large as its block lets it be (moodix.css).
     frame.style.aspectRatio = `${montage.width} / ${montage.height}`;
     frame.style.setProperty?.('--ratio', String(montage.width / montage.height));
-    // (What they say is written as the screen is shown: show.)
-    blank.append(node('span', 'montage-blank-title', ''), node('span', 'montage-blank-text', ''));
+    // (An empty bobine: its frame and the Éclipse, no words; capture 71.)
+    blank.append(icon('eclipse'));
     Object.assign(video, { playsInline: true, preload: 'auto', hidden: true });
     Object.assign(picture, { alt: '', hidden: true });
-    frame.append(blank, picture, video, caption);
-    bar.append(done);
-    bar.onclick = event => {
-      const box = bar.getBoundingClientRect?.();
-      if (box?.width) seek(((event.clientX - box.left) / box.width) * total());
-    };
-    transport.append(playButton, time, whole, bar);
+    end.append(node('span', 'montage-frame-end-label', ''));
+    end.hidden = true;
+    words.hidden = true;
+    frame.append(blank, picture, video, caption, words, end);
+    // (0.6.148, capture 82) The format of the bobine, under the preview at the right of the time: it
+    // decides the size of all that will be created; the takes laid follow their own frame setting.
+    format.setAttribute('aria-label', 'Format de la bobine');
+    for (const item of FORMATS) {
+      const size = item.id === montage.format ? { width: montage.width, height: montage.height } : usualSize(item.id);
+      const option = Object.assign(node('option', '', item.label), { value: item.id, selected: item.id === montage.format });
+      // (What the list shows of the one chosen: « 16:9  1344 × 768 », glass-menu.mjs.)
+      if (size) option.dataset.face = `${item.id}  ${size.width} × ${size.height}`;
+      format.append(option);
+    }
+    format.disabled = busy();
+    format.onchange = () => change({ ...montage, format: format.value, ...usualSize(format.value) });
+    transport.append(playButton, time, whole, node('span', 'bobine-fil-gap'), format);
     stage.append(frame);
-    body.append(headRow, stage, transport);
+    body.append(stage, transport);
     stop();
-    media = { video, picture, blank, caption, sounds: new Map() };
-    Object.assign(live, { clock: time, whole, done, play: playButton });
+    media = { video, picture, blank, caption, words, end, frame, sounds: new Map() };
+    Object.assign(live, { clock: time, whole, play: playButton });
     return section;
   }
 
-  const row = (name, ...controls) => {
-    const line = node('div', 'montage-row'),
-      side = node('span', 'montage-row-side');
-    side.append(...controls);
-    line.append(node('span', 'montage-row-name', name), side);
-    return line;
-  };
-  /** A bar from `low` to `high`; `onset(value)` as it moves. */
-  const slider = (label, value, low, high, step, onset) => {
-    // A bar of the Studio (moodix.css, .studio-bar): filled up to where it is.
-    const input = node('input', 'studio-bar montage-range'),
-      box = node('span', 'montage-range-box'),
-      fill = at => input.style.setProperty?.('--fill', String(high > low ? (at - low) / (high - low) : 0));
-    Object.assign(input, { type: 'range', min: String(low), max: String(high), step: String(step), value: String(value) });
-    input.setAttribute('aria-label', label);
-    fill(Math.min(high, Math.max(low, value)));
-    input.oninput = () => {
-      fill(Number(input.value));
-      onset(Number(input.value));
-    };
-    // Let go: the block is drawn again with what was kept (a bar pushed beyond what the take allows goes back).
-    input.onchange = () => update();
-    box.append(input);
-    return box;
-  };
-
-  function inspector() {
-    const { section, body } = block('is-settings', 'montage-inspector'),
-      item = chosen ? itemOf(chosen) : null,
-      // What is set scrolls in the block when the window is short; what is done stays in sight under it.
-      rows = node('div', 'montage-rows'),
-      foot = node('div', 'montage-foot'),
-      // A figure of the block, said again while a bar is slid: the block itself stays under the hand.
-      readout = say => {
-        const out = node('span', 'montage-figures', say());
-        live.figures.push(() => (out.textContent = say()));
-        return out;
-      };
-    live.figures = [];
-    live.seriesState = live.seriesMeta = null;
-    if (filling) return seriesPanel(section, body);
-    section.setAttribute('aria-label', item ? 'Élément choisi' : 'Réglages du montage');
-    if (!item) {
-      const name = node('input', 'montage-name');
-      Object.assign(name, { type: 'text', value: montage.name, maxLength: MONTAGE_LIMITS.name });
-      name.setAttribute('aria-label', 'Nom du montage');
-      name.onchange = () => change({ ...montage, name: name.value.trim() || 'Sans titre' });
-      const format = node('select', 'montage-select');
-      format.setAttribute('aria-label', 'Format du film');
-      for (const item of FORMATS) format.append(Object.assign(node('option', '', item.label), { value: item.id, selected: item.id === montage.format }));
-      format.onchange = () => change({ ...montage, format: format.value, ...usualSize(format.value) });
-      const size = node('select', 'montage-select');
-      size.setAttribute('aria-label', 'Taille du film');
-      for (const item of montageSizes(montage.format)) {
-        const value = item.width + 'x' + item.height;
-        size.append(Object.assign(node('option', '', `${item.width} × ${item.height}`), { value, selected: item.width === montage.width && item.height === montage.height }));
-      }
-      size.onchange = () => {
-        const [width, height] = size.value.split('x').map(Number);
-        change({ ...montage, width, height });
-      };
-      const title = node('div', 'montage-title');
-      title.append(node('span', 'montage-title-name', stored ? 'Montage' : 'Nouveau montage'), node('span', 'montage-title-meta', 'Enregistré avec le projet'));
-      rows.append(row('Nom', name), row('Format', format), row('Taille', size), row('Cadence', readout(() => montage.fps + ' i/s')));
-      if (stored) foot.append(button('montage-action is-quiet', confirming ? 'Confirmer la suppression' : 'Supprimer ce montage', () => void remove()));
-      body.append(title, rows, foot);
-      return section;
-    }
-    if (isTodo(item)) return todoSettings(section, body, rows, foot, item, readout);
-    const record = recordOf(item.source),
-      longest = record ? takeSeconds(record) : null,
-      sound = Boolean(item.track),
-      index = sound ? -1 : montage.plans.indexOf(item),
-      title = node('div', 'montage-title'),
-      set = (changes, how) => change(withItemChanged(montage, item.id, changes, { longest }), how),
-      // (0.6.138) A bar being slid: drawn again at each of its steps, as it was, the block took it
-      // out of the hand at the first one.
-      slide = changes => set(changes, { sliding: true }),
-      current = () => itemOf(item.id) ?? item;
-    title.append(
-      node('span', 'montage-title-name', (sound ? KINDS[item.track] : `Plan ${index + 1}`) + takeLabel(item.source, ' · ')),
-      node('span', 'montage-title-meta', record ? [KINDS[sound ? item.track : item.kind], record.workflowName, longest ? shownSeconds(longest) + ' à l’origine' : ''].filter(Boolean).join(' · ') : 'Cette prise n’est plus dans le projet.'),
-    );
-    const top = Math.max(longest ?? 0, item.to, 0.2);
-    if (sound) rows.append(row('Début', slider('Début dans le film', item.at, 0, Math.max(total(), item.at, 1), 0.1, at => slide({ at })), readout(() => figures(current().at))));
-    if (item.kind === 'image') rows.append(row('Durée', slider('Durée de l’image', item.to, 0.5, 20, 0.5, to => slide({ to })), readout(() => figures(current().to))));
-    else {
-      rows.append(
-        row('Début gardé', slider('Début gardé', item.from, 0, top, 0.1, from => slide({ from })), readout(() => figures(current().from))),
-        row('Fin gardée', slider('Fin gardée', item.to, 0, top, 0.1, to => slide({ to })), readout(() => figures(current().to))),
-        row('Durée', readout(() => figures(current().to - current().from))),
-      );
-    }
-    if (!sound) {
-      const frames = node('span', 'montage-two');
-      for (const [id, label] of [
-        ['fit', 'Ajuster'],
-        ['fill', 'Remplir'],
-      ]) {
-        const choice = button('montage-choice', label, () => set({ frame: id }));
-        choice.setAttribute('aria-pressed', String(item.frame === id));
-        choice.title = id === 'fit' ? 'La prise entière, avec du noir sur deux côtés si son format diffère' : 'L’image remplie, ce qui dépasse coupé des deux côtés';
-        frames.append(choice);
-      }
-      rows.append(row('Cadre', frames));
-    }
-    if (item.kind !== 'image') {
-      const volume = item.volume ?? 1;
-      rows.append(row(sound ? 'Volume' : 'Son du clip', slider(sound ? 'Volume' : 'Son du clip', Math.round(volume * 100), 0, 200, 5, value => slide({ volume: value / 100 })), readout(() => Math.round((current().volume ?? 1) * 100) + ' %')));
-    }
-    if (!sound) {
-      const earlier = button('montage-step', '← Avant', () => change(withPlanMoved(montage, item.id, -1))),
-        later = button('montage-step', 'Après →', () => change(withPlanMoved(montage, item.id, 1)));
-      earlier.disabled = index <= 0;
-      later.disabled = index >= montage.plans.length - 1;
-      rows.append(row('Place', earlier, later));
-    }
-    if (record) foot.append(button('montage-action', 'Ouvrir la prise', () => showTake(record)));
-    foot.append(button('montage-action is-quiet', 'Retirer', () => change(withoutItem(montage, item.id))));
-    body.append(title, rows, foot);
-    return section;
-  }
-
-  /**
-   * (0.6.142) The settings of a plan to make: the photos it goes by, its length, what happens in it,
-   * and « Créer ce plan ». Why it cannot be created yet is said under its text, in the user's words.
-   */
-  function todoSettings(section, body, rows, foot, item, readout) {
-    const index = montage.plans.indexOf(item),
-      busy = making?.id === item.id,
-      title = node('div', 'montage-title is-tight'),
-      current = () => itemOf(item.id) ?? item,
-      // (0.6.143) What it goes on from: after a video shown to its end, it is its continuation.
-      link = linkOf(montage, item.id, lengthOf),
-      suite = link.kind === 'suite' || link.kind === 'last';
-    section.setAttribute('aria-label', 'Plan à faire');
-    // (Its lines take what they need, its text the room that is left: never cut by the foot.)
-    rows.className += ' is-tight';
-    foot.className += ' is-tight';
-    const about = node(
-      'span',
-      'montage-title-meta',
-      item.replaces
-        ? `Remplace la fin du plan ${index}`
-        : link.kind === 'suite'
-          ? `Continue le plan ${link.before}, là où il s’arrête`
-          : link.kind === 'last'
-            ? `Part de la dernière image du plan ${link.before}`
-            : 'Vidéo · ce plan n’existe pas encore',
-    );
-    // (His choice of 20/11, « coupe sur la photo », said where the plan is read.)
-    if (item.replaces) about.title = 'Le film coupe sur la photo : la vidéo est gardée jusqu’à elle, et ce plan part d’elle.';
-    title.append(node('span', 'montage-title-name', `Plan ${index + 1} · ${suite ? 'suite à créer' : 'à faire'}`), about);
-    for (const [side, name] of [
-      ['start', 'Photo de début'],
-      ['end', 'Photo de fin'],
-    ]) {
-      const photo = item.photos?.[side];
-      if (!photo) {
-        // (A continuation starts where the video before it ends: said in the place of its start photo.)
-        if (side === 'start' && suite) rows.append(row('Départ', node('span', 'montage-figures', `Fin du plan ${link.before}`)));
-        else rows.append(row(name, node('span', 'montage-none-yet', 'Glissez une image sur « Repères »')));
-        continue;
-      }
-      const record = recordOf(photo),
-        picture = pictureOf(record),
-        chip = node('span', 'montage-chip'),
-        off = button('montage-off', '×', () => change(withoutPhoto(montage, item.id, side)));
-      if (picture) chip.style.backgroundImage = `url("${picture}")`;
-      off.setAttribute('aria-label', `Retirer la ${name.toLowerCase()}`);
-      off.title = `Retirer la ${name.toLowerCase()}`;
-      off.disabled = Boolean(making);
-      rows.append(row(name, chip, node('span', 'montage-figures', record ? takeLabel(photo) : 'Introuvable'), off));
-    }
-    const length = slider('Durée du plan', item.to, TODO_LIMITS.shortest, TODO_LIMITS.longest, 0.5, to => change(withItemChanged(montage, item.id, { to }), { sliding: true }));
-    rows.append(row('Durée', length, readout(() => figures(current().to))));
-    const words = node('label', 'montage-words'),
-      field = node('textarea', 'montage-words-field'),
-      why = node('p', 'montage-reason'),
-      // (« Prolonger », the word of the Studio for it: the continuation itself. Towards an end photo it is a new clip.)
-      go = button('montage-action is-go', busy ? 'Création…' : link.kind === 'suite' ? 'Prolonger' : 'Créer ce plan', () => void makePlan(item.id));
-    Object.assign(field, { value: item.todo.prompt, rows: 3, maxLength: TODO_LIMITS.prompt, placeholder: suite ? 'Par exemple : il se lève et s’éloigne.' : 'Par exemple : il lève les yeux.', disabled: Boolean(making) || Boolean(writing) });
-    field.setAttribute('aria-label', suite ? 'Ce qui se passe ensuite' : 'Ce qui se passe dans ce plan');
-    // What stops it is said as it changes: the button is never drawn again under the hand that goes to it.
-    const judge = () => {
-      const wanted = creationOf(montage, item.id, lengthOf),
-        reason = !create ? 'La création n’est pas disponible ici.' : (wanted.reason ?? '');
-      go.disabled = Boolean(reason) || Boolean(making) || Boolean(writing);
-      go.title = reason;
-      why.textContent = busy ? '' : reason;
-      why.hidden = busy || !reason;
-    };
-    field.oninput = () => {
-      change(withItemChanged(montage, item.id, { prompt: field.value }), { sliding: true });
-      judge();
-    };
-    words.append(node('span', 'montage-row-name', suite ? 'Ce qui se passe ensuite' : 'Ce qui se passe'), field);
-    judge();
-    const out = button('montage-action is-quiet', item.replaces ? 'Retirer la photo' : suite ? 'Retirer la suite' : 'Retirer', () => change(withoutItem(montage, item.id)));
-    out.disabled = Boolean(making);
-    foot.append(go, out);
-    body.append(title, rows, words, why, foot);
-    return section;
-  }
-
-  /**
-   * (0.6.142) Creates a plan to make: what is asked is read on the montage (creationOf), made by the
-   * Studio as one of its takes (`create`), and the plan becomes the plan of that take. One at a time;
-   * the montage is not changed meanwhile.
-   */
-  /** (0.6.144) The size a plan is made at: the one of its film (a continuation keeps the size of its video, the server sees to it). */
-  const filmSize = () => ({ width: montage.width, height: montage.height });
-  /** The arguments a plan to make is asked with (creationOf): thrown, in the user's words, when a take it needs is gone. */
+  // « À créer » -------------------------------------------------------------------------------------
+  /** (0.6.144) The arguments a take to create is asked with (creationOf): thrown, in the user's words, when a take it needs is gone. */
   function argsOf(wanted) {
     const named = (item, what) => {
       const record = recordOf(item.source);
       if (!record) throw new Error(`${what} n’est plus dans le projet.`);
       return { ...inputOf(record), ...(item.frame ? { frame: item.frame } : {}) };
     };
-    const args = { prompt: wanted.prompt, intention: 'Plan d’un montage, demandé dans le Studio.', duration: wanted.duration };
+    const args = { prompt: wanted.prompt, intention: 'Prise d’une bobine, demandée dans la Bobine.', duration: wanted.duration };
     if (wanted.format) args.format = wanted.format;
-    if (wanted.start) args.start_image = named(wanted.start, wanted.start.frame ? 'La vidéo du plan précédent' : 'La photo de début');
+    if (wanted.start) args.start_image = named(wanted.start, wanted.start.frame ? 'La vidéo d’avant' : 'La photo de début');
     if (wanted.end) args.end_image = named(wanted.end, 'La photo de fin');
-    if (wanted.continues) args.source = named({ source: wanted.continues }, 'La vidéo du plan précédent');
+    if (wanted.continues) args.source = named({ source: wanted.continues }, 'La vidéo continuée');
     return args;
   }
+  /** (0.6.144) The size a take is made at: the one of its film (a continuation keeps the size of its video, the server sees to it). */
+  const filmSize = () => ({ width: montage.width, height: montage.height });
+  /**
+   * (0.6.148) The model a take to create would be made with: asked to the server once for each kind of
+   * take (its verb and its inputs, never its text), kept, and said in its line. Null while it is asked.
+   */
+  function modelOf(id) {
+    const plan = itemOf(id);
+    if (!plan || !estimate) return null;
+    const probe = plan.todo.prompt.trim() ? montage : withItemChanged(montage, id, { prompt: 'Prise.' }),
+      wanted = creationOf(probe, id, lengthOf);
+    if (wanted.reason) return null;
+    let args;
+    try {
+      args = argsOf(wanted);
+    } catch {
+      return null;
+    }
+    const { prompt: _prompt, intention: _intention, duration: _duration, ...inputs } = args,
+      key = JSON.stringify([wanted.verb, inputs, filmSize()]),
+      known = models.get(key);
+    if (known) return known === 'asking' ? null : known;
+    models.set(key, 'asking');
+    void Promise.resolve(estimate({ verb: wanted.verb, args: { ...args, prompt: 'Prise.' }, size: filmSize() }))
+      .then(seen => {
+        models.set(key, { name: seen?.workflowName ?? '', missing: Boolean(seen?.missing) });
+        if (parts?.create && !inPanel()) update();
+        else sayModels();
+      })
+      // (Not known now, the chat model answering say: asked again the next time.)
+      .catch(() => models.delete(key));
+    return null;
+  }
+  const inPanel = () => Boolean(page?.document?.activeElement && parts?.create?.contains?.(page.document.activeElement));
+  function sayModels() {
+    for (const [id, span] of live.models ?? []) {
+      const model = itemOf(id) ? modelOf(id) : null;
+      if (model && !span.dataset.state) span.textContent = model.name;
+    }
+  }
+  /** What a line of « À créer » says of what it is: « Suite de la prise 24 · photo de fin », « Nouvelle prise ». */
+  function whatOf(plan) {
+    const link = linkOf(montage, plan.id, lengthOf),
+      before = montage.plans[montage.plans.indexOf(plan) - 1],
+      // (After a take to create, it goes on from it once that one is made: « Suite de la prise à créer ».)
+      suite = ['suite', 'last', 'wait'].includes(link.kind) || (link.kind === 'cut' && !plan.photos?.start),
+      photos = [plan.photos?.start && !suite ? 'photo de début' : '', plan.photos?.end ? 'photo de fin' : ''].filter(Boolean);
+    const first = suite ? 'Suite de la ' + (takeLabel(before?.source) || 'prise à créer').toLowerCase() : 'Nouvelle prise';
+    return [first, photos.length === 2 ? 'photos de début et de fin' : photos[0]].filter(Boolean).join(' · ');
+  }
+  const stateOf = id =>
+    making?.id === id
+      ? 'En cours' + (Number.isFinite(making.fraction) ? ` · ${Math.round(making.fraction * 100)} %` : '')
+      : writing?.id === id
+        ? 'Moodix AI écrit'
+        : inSeries() && filling.ids.slice(filling.done).includes(id)
+          ? 'En attente'
+          : failed.has(id)
+            ? 'Échec'
+            : '';
+  /**
+   * (0.6.148) « À créer », always there (capture 70): one line by take to create, in the order of the
+   * bobine, its instants, what it is, its model, and its text, written in place. Then the button.
+   */
+  function createPanel() {
+    const { section, body } = block('is-settings', 'bobine-create'),
+      lines = node('div', 'bobine-lines'),
+      starts = planStarts(montage),
+      series = seriesOf(montage, lengthOf),
+      can = new Set(creatable());
+    section.setAttribute('aria-label', 'À créer');
+    live.models = new Map();
+    live.states = new Map();
+    for (const item of series) {
+      const plan = itemOf(item.id),
+        index = montage.plans.indexOf(plan),
+        line = node('div', 'bobine-line'),
+        top = node('div', 'bobine-line-top'),
+        state = stateOf(item.id),
+        model = modelOf(item.id),
+        right = node('span', 'bobine-line-right', state || model?.name || ''),
+        field = node('textarea', 'bobine-line-words'),
+        reason =
+          failed.get(item.id) ||
+          (model?.missing
+            ? `${model.name} n’est pas sur cet ordinateur.`
+            : item.reason && item.prompt
+              ? item.reason
+              : item.ready && !can.has(item.id)
+                ? 'Elle continue la prise d’avant, qui ne peut pas être créée.'
+                : '');
+      line.dataset.id = item.id;
+      line.dataset.state = failed.has(item.id) && !state.startsWith('En') ? 'failed' : making?.id === item.id ? 'making' : '';
+      if (model?.missing) right.dataset.missing = 'true';
+      if (state) right.dataset.state = 'true';
+      line.setAttribute('aria-pressed', String(chosen === item.id));
+      top.append(node('span', 'bobine-line-when', `${mono(starts[index])} → ${mono(starts[index] + plan.to - plan.from)}`), right);
+      Object.assign(field, { value: plan.todo.prompt, rows: 2, maxLength: 4000, disabled: busy() });
+      field.dataset.id = item.id;
+      field.setAttribute('aria-label', `Ce qui se passe, de ${mono(starts[index])} à ${mono(starts[index] + plan.to - plan.from)}`);
+      field.oninput = () => change(withItemChanged(montage, item.id, { prompt: field.value }), { sliding: true });
+      // A line chosen chooses its take, and brings the head to it.
+      line.onclick = event => {
+        if (event.target === field) return;
+        chosen = item.id;
+        head = starts[index];
+        update();
+      };
+      line.append(top, node('span', 'bobine-line-what', whatOf(plan)), field);
+      if (reason) line.append(node('p', 'bobine-line-reason', reason));
+      live.models.set(item.id, right);
+      live.states.set(item.id, right);
+      lines.append(line);
+    }
+    // The button: « ▶ Créer 2 prises » | the Éclipse (Moodix AI); being made, it fills.
+    const foot = node('div', 'bobine-go'),
+      main = button('bobine-go-main', '', () => (filling?.stage === 'paused' ? void run(filling) : void createAll())),
+      label = node('span', 'bobine-go-label', ''),
+      fill = node('span', 'bobine-go-fill');
+    // (The fill under the rest: it grows from the left as the takes are made.)
+    main.append(fill, icon('play'), label);
+    foot.append(main);
+    if (inSeries()) {
+      const pause = button('bobine-go-part', '', () => {
+          if (filling.stage !== 'running') return;
+          filling.pausing = true;
+          sayGo();
+        }, 'stop', 'Mettre en pause après cette prise'),
+        stopAll = button('bobine-go-part', '', () => stopSeries(), 'close', 'Arrêter');
+      pause.hidden = filling.stage !== 'running';
+      foot.append(pause, stopAll);
+      live.pause = pause;
+    } else live.pause = null;
+    if (write) {
+      const agent = button('bobine-go-part bobine-go-agent' + (writing ? ' is-thinking' : ''), '', () => void askAgent(), 'eclipse', 'Moodix AI écrit ce qui se passe dans les prises sans texte');
+      agent.disabled = busy() || !series.some(item => !item.prompt);
+      foot.append(agent);
+    }
+    const halting = writing ? button('bobine-halt', 'Arrêter', () => writing?.controller.abort()) : null;
+    body.append(node('h2', 'bobine-create-title', 'À créer'), lines, ...(halting ? [halting] : []), foot);
+    Object.assign(live, { goMain: main, goLabel: label, goFill: fill });
+    sayGo();
+    return section;
+  }
+  /** What the button says: how many takes « Créer » makes, or where the creation is. */
+  function sayGo() {
+    if (!live.goMain || !montage) return;
+    const ready = creatable().length,
+      running = inSeries(),
+      count = running ? filling.ids.length : ready;
+    live.goMain.disabled = writing ? true : running ? filling.stage === 'running' : !create || !ready || Boolean(making);
+    live.goMain.dataset.state = running ? filling.stage : '';
+    live.goLabel.textContent = running
+      ? filling.stage === 'paused'
+        ? `Reprendre · ${filling.done} sur ${count}`
+        : `${Math.min(filling.done + 1, count)} sur ${count}` + (Number.isFinite(making?.fraction) ? ` · ${Math.round(making.fraction * 100)} %` : '') + (filling.pausing ? ' · pause demandée' : '')
+      : ready
+        ? `Créer ${plural(ready, 'prise')}`
+        : 'Créer';
+    // (Being made, the button fills from the left as the take is made.)
+    live.goFill.style.width = running && filling.stage === 'running' ? Math.round((((filling.done + (making?.fraction ?? 0)) / Math.max(1, count)) * 100)) + '%' : '0%';
+    if (live.pause) {
+      live.pause.hidden = !running || filling.stage !== 'running';
+      live.pause.disabled = Boolean(filling?.pausing);
+    }
+  }
+  const modelMissing = id => Boolean(modelOf(id)?.missing);
+  /**
+   * The takes « Créer » makes, in the order of the bobine: those ready whose model is on this computer,
+   * and those that go on from one of them (a take whose model is missing leaves its suite aside too).
+   */
+  function creatable() {
+    const ids = [];
+    for (const item of seriesOf(montage, lengthOf))
+      if (item.ready && !modelMissing(item.id) && (!item.after || ids.includes(item.after))) ids.push(item.id);
+    return ids;
+  }
+
+  // Creating ----------------------------------------------------------------------------------------
+  /**
+   * (0.6.142) Creates a take to create: what is asked is read on the bobine (creationOf), made by the
+   * Studio as one of its takes (`create`), and the take to create becomes the take made. One at a time;
+   * the bobine is not changed meanwhile. Its failure is said in its line.
+   */
   async function makePlan(id) {
-    if (making || writing || !create) return;
+    if (making || writing || !create) return null;
     const wanted = creationOf(montage, id, lengthOf);
-    if (wanted.reason) return notice(wanted.reason);
-    const index = montage.plans.findIndex(plan => plan.id === id);
+    if (wanted.reason) {
+      failed.set(id, wanted.reason);
+      return null;
+    }
     let args;
     try {
       args = argsOf(wanted);
     } catch (error) {
-      return notice(error.message);
+      failed.set(id, error.message);
+      return null;
     }
     stop();
     await keep();
-    // (In a series: which one of how many, the plan itself saying on the timeline where it is.)
-    const series = filling?.stage === 'running' ? filling.items.filter(item => item.ready) : null,
-      name = series ? `Création ${series.findIndex(item => item.id === id) + 1} sur ${series.length}` : `Création du plan ${index + 1}`,
-      said = (label, fraction) => name + (label ? ' · ' + label : '') + (Number.isFinite(fraction) ? ` · ${Math.round(fraction * 100)} %` : '');
-    making = { id, label: 'Préparation…', fraction: null };
+    failed.delete(id);
+    making = { id, label: 'Préparation…', fraction: null, preview: null };
     chosen = id;
-    status = said(making.label, null);
+    head = planStarts(montage)[montage.plans.findIndex(plan => plan.id === id)] ?? head;
+    status = '';
     draw();
     let record = null,
       problem = '';
@@ -793,16 +893,18 @@ export function setupMontage({
       record = await create(
         { verb: wanted.verb, args, size: filmSize() },
         {
-          onProgress: (label, fraction) => {
+          onProgress: (label, fraction, preview) => {
             if (!making) return;
-            Object.assign(making, { label: label || making.label, fraction: Number.isFinite(fraction) ? fraction : making.fraction });
-            status = said(making.label, making.fraction);
+            Object.assign(making, {
+              label: label || making.label,
+              fraction: Number.isFinite(fraction) ? fraction : making.fraction,
+              preview: preview ?? making.preview,
+            });
             if (live.bar) live.bar.style.width = Math.round((making.fraction ?? 0) * 100) + '%';
-            if (live.making) live.making.textContent = making.label;
-            // (Its line of the series, and the time that is left.)
-            if (live.seriesState) live.seriesState.textContent = stateOf({ state: 'making' });
-            if (live.seriesMeta && filling) live.seriesMeta.textContent = seriesTime(filling);
-            say();
+            if (live.making) live.making.textContent = stateOf(id);
+            const line = live.states?.get(id);
+            if (line) line.textContent = stateOf(id);
+            show({ sync: false });
           },
         },
       );
@@ -810,115 +912,63 @@ export function setupMontage({
     } catch (error) {
       problem = error.message;
     }
+    const stopped = Boolean(filling?.stopping);
     making = null;
     if (record) {
       montage = withTodoMade(montage, id, record, { from: wanted.from });
       pending = true;
-      // Kept at once: the take exists, the montage must say so. Then said as made (not only « Enregistré »).
+      // Kept at once: the take exists, the bobine must say so.
       await keep();
-      if (!status.startsWith('Non enregistré')) status = `Plan ${index + 1} créé`;
-    } else status = 'Création impossible : ' + problem;
+    } else if (!stopped) failed.set(id, problem.charAt(0).toUpperCase() + problem.slice(1));
     draw();
     return record;
   }
-
-  /** « ≈ 45 s », « ≈ 4 min 30 »: a time that is foreseen, never to the second. */
-  const about = seconds => {
-    if (seconds < 60) return `≈ ${Math.max(5, Math.round(seconds / 5) * 5)} s`;
-    const rounded = Math.round(seconds / 10) * 10,
-      rest = rounded % 60;
-    return `≈ ${Math.floor(rounded / 60)} min` + (rest ? ' ' + String(rest).padStart(2, '0') : '');
-  };
-  const stateOf = item =>
-    item.state === 'made'
-      ? 'FAIT' + (item.take ? takeLabel({ conversationId: item.take.conversationId, runId: item.take.id, output: 0 }, ' · ').toUpperCase() : '')
-      : item.state === 'making'
-        ? 'EN COURS' + (Number.isFinite(making?.fraction) ? ` · ${Math.round(making.fraction * 100)} %` : '')
-        : item.state === 'failed'
-          ? 'NON CRÉÉ'
-          : 'EN ATTENTE';
-  /** What is said under the title of the series: its time before it starts, what is left of it once it runs. */
-  function seriesTime(series) {
-    const ready = series.items.filter(item => item.ready),
-      out = series.items.length - ready.length,
-      aside = out ? ` · ${out} plan${out > 1 ? 's' : ''} laissé${out > 1 ? 's' : ''} de côté` : '';
-    if (series.stage === 'asking') return 'Préparation…';
-    if (series.stage === 'paused') return `${ready.filter(item => item.state === 'made').length} sur ${ready.length} créés`;
-    if (series.stage === 'running') {
-      const left = ready.filter(item => item.state !== 'made');
-      if (left.some(item => !item.expected)) return 'Un plan après l’autre';
-      const seconds = left.reduce((sum, item) => sum + item.expected.seconds * (item.state === 'making' ? 1 - (making?.fraction ?? 0) : 1), 0);
-      return 'Un plan après l’autre · reste ' + about(seconds);
-    }
-    if (!ready.length) return 'Rien ne peut être créé pour l’instant';
-    const known = ready.filter(item => item.expected),
-      seconds = known.reduce((sum, item) => sum + item.expected.seconds, 0);
-    if (!known.length) return 'Durée inconnue : jamais créé ici à cette taille' + aside;
-    if (known.length < ready.length) return `${about(seconds)} pour ${known.length} plan${known.length > 1 ? 's' : ''}, inconnu pour ${ready.length - known.length}` + aside;
-    return `${about(seconds)} sur votre carte` + aside;
+  /** (0.6.148) « Créer n prises »: at once, in the order of the bobine, one after the other. */
+  async function createAll() {
+    if (busy() || !create) return;
+    const ids = creatable();
+    if (!ids.length) return;
+    for (const id of ids) failed.delete(id);
+    filling = { stage: 'running', ids, done: 0, pausing: false, stopping: false };
+    return run(filling);
   }
-  /**
-   * (0.6.144) The series in the place of the settings: what will be created, each plan with its model and
-   * its text, and what cannot be yet with its reason; then, once launched, where each one is.
-   */
-  function seriesPanel(section, body) {
-    const series = filling,
-      ready = series.items.filter(item => item.ready),
-      running = inSeries(),
-      title = node('div', 'montage-title is-tight'),
-      list = node('div', 'montage-rows montage-series'),
-      foot = node('div', 'montage-foot is-tight'),
-      meta = node('span', 'montage-title-meta', seriesTime(series));
-    section.setAttribute('aria-label', running ? 'Création en cours' : 'Plans à créer');
-    title.append(node('span', 'montage-title-name', series.stage === 'paused' ? 'En pause' : running ? 'Création en cours' : `À créer · ${ready.length}`), meta);
-    live.seriesMeta = meta;
-    for (const item of series.items) {
-      const entry = node('div', 'montage-series-item' + (item.ready ? '' : ' is-out')),
-        top = node('div', 'montage-series-top');
-      top.append(
-        node('span', 'montage-series-name', `Plan ${item.number} · ${shownSeconds(item.seconds)}`),
-        node('span', 'montage-series-model', item.ready ? item.model || (series.stage === 'asking' ? '…' : '') : ''),
-      );
-      entry.append(top, node('p', 'montage-series-words', item.ready ? `« ${item.prompt} »` : item.reason));
-      // (The model makes clips of its own lengths: said when it is not the one asked.)
-      if (item.ready && item.makes && Math.abs(item.makes - item.seconds) > 0.3) entry.append(node('p', 'montage-series-note', `Ce modèle en fera ${shownSeconds(item.makes)}.`));
-      if (running && item.ready) {
-        const state = node('span', 'montage-series-state', stateOf(item));
-        if (item.state === 'making') live.seriesState = state;
-        entry.append(state);
+  /** The takes of the series not made yet, each in its turn; a pause waits for the end of the one being made. */
+  async function run(series) {
+    if (filling !== series || making) return;
+    Object.assign(series, { stage: 'running', pausing: false });
+    draw();
+    while (series.done < series.ids.length) {
+      if (filling !== series) return;
+      if (series.stopping) break;
+      if (series.pausing) {
+        Object.assign(series, { stage: 'paused', pausing: false });
+        return draw();
       }
-      list.append(entry);
+      const record = await makePlan(series.ids[series.done]);
+      if (filling !== series) return;
+      // (Refused or stopped: the series ends there, what is made stays.)
+      if (!record) break;
+      series.done++;
     }
-    if (running) {
-      const last = ready.findLast(item => item.state === 'made' && item.take);
-      if (last) foot.append(button('montage-action is-quiet', 'Ouvrir la' + takeLabel({ conversationId: last.take.conversationId, runId: last.take.id, output: 0 }, ' ').toLowerCase(), () => showTake(last.take)));
-    } else {
-      const go = button('montage-action is-go', `Lancer (${ready.length})`, () => void launch());
-      go.disabled = series.stage !== 'ready' || !ready.length;
-      foot.append(
-        go,
-        button('montage-action is-quiet', 'Annuler', () => {
-          filling = null;
-          update();
-        }),
-      );
+    if (filling === series) filling = null;
+    draw();
+  }
+  function stopSeries() {
+    if (!filling) return;
+    if (filling.stage === 'paused' || !making) {
+      filling = null;
+      return draw();
     }
-    body.append(title, list, foot);
-    return section;
+    filling.stopping = true;
+    halt();
   }
 
-  /** (0.6.146) « Agent », as in the other modes of the Studio; while Moodix AI writes, its mark turns. */
-  function agentButton() {
-    const agent = button('montage-agent' + (writing ? ' is-thinking' : ''), 'Agent', () => void askAgent(), 'eclipse');
-    agent.disabled = Boolean(filling) || Boolean(writing);
-    agent.title = 'Moodix AI écrit ce qui se passe dans les plans à faire, d’après leurs photos, puis vous montre ce qui sera créé';
-    return agent;
-  }
+  // Moodix AI writes ------------------------------------------------------------------------------
   /**
-   * (0.6.146) What Moodix AI is shown of a plan to make to write what happens in it: the picture it
-   * starts on (its start photo, else the end of the video it goes on from, else the photo the plan
+   * (0.6.146) What Moodix AI is shown of a take to create to write what happens in it: the picture it
+   * starts on (its start photo, else the end of the video it goes on from, else the photo the take
    * before it arrives on), the picture it ends on (its end photo), its length, and what happens in the
-   * plan before it. Null when it has nothing to look at.
+   * take before it. Null when it has nothing to look at.
    */
   function picturesFor(plan) {
     const before = montage.plans[montage.plans.indexOf(plan) - 1],
@@ -946,34 +996,36 @@ export function setupMontage({
     };
   }
   /**
-   * (0.6.146) « Agent »: Moodix AI writes what happens in each plan to make that has no text yet, from
-   * its pictures, one plan at a time and in the order of the film (the story of a plan goes on from the
-   * one before it); what the user wrote is left as it is. Then what will be created is shown, as
-   * « Combler les trous » shows it: nothing is made before « Lancer ».
+   * (0.6.146) The Éclipse: Moodix AI writes what happens in each take to create that has no text yet,
+   * from its pictures, one at a time and in the order of the bobine; what the user wrote is left as it
+   * is. Nothing is made: « Créer » does.
    */
   async function askAgent() {
-    if (making || filling || writing || !write) return;
+    if (busy() || !write) return;
     const blank = montage.plans.filter(plan => isTodo(plan) && !plan.todo.prompt.trim()).map(plan => plan.id);
-    if (!blank.length) return fill();
+    if (!blank.length) return;
     stop();
     const controller = new AbortController(),
       mine = (writing = { id: null, at: 0, of: blank.length, controller });
     let problem = '',
-      done = 0;
-    status = 'Moodix AI regarde vos plans…';
-    update();
+      done = 0,
+      unseen = 0;
+    status = '';
+    draw();
     await keep();
     for (const id of blank) {
       if (writing !== mine) return;
       if (controller.signal.aborted) break;
       const plan = itemOf(id),
-        number = montage.plans.indexOf(plan) + 1,
+        start = planStarts(montage)[montage.plans.indexOf(plan)],
         asked = plan ? picturesFor(plan) : null;
       mine.at++;
-      // (Nothing to look at: left to the user, who is told so where what will be created is shown.)
-      if (!asked) continue;
+      // (Nothing to look at: left to the user.)
+      if (!asked) {
+        unseen++;
+        continue;
+      }
       mine.id = id;
-      status = `Moodix AI écrit le plan ${number} · ${mine.at} sur ${mine.of}`;
       update();
       try {
         const written = String((await write(asked, { signal: controller.signal }))?.prompt ?? '').trim();
@@ -984,7 +1036,8 @@ export function setupMontage({
         done++;
       } catch (error) {
         if (writing !== mine) return;
-        if (!controller.signal.aborted) problem = `Plan ${number} non écrit : ${error.message}`;
+        // (Named by its instants: « Prise 24 » is the name of a take made.)
+        if (!controller.signal.aborted) problem = `Prise de ${mono(start)} à ${mono(start + plan.to - plan.from)} non écrite : ${error.message}`;
         break;
       }
     }
@@ -992,176 +1045,74 @@ export function setupMontage({
     const stopped = controller.signal.aborted;
     writing = null;
     await keep();
-    if (stopped || problem) {
-      status = stopped ? `Écriture arrêtée · ${done} plan${done > 1 ? 's' : ''} écrit${done > 1 ? 's' : ''}` : problem;
-      return draw();
-    }
-    // What is written is read before anything is made: the agreement of « Combler les trous ».
+    status = stopped
+      ? `Écriture arrêtée · ${plural(done, 'prise écrite', 'prises écrites')}`
+      : problem || (unseen && !done ? 'Moodix AI n’a rien à regarder : posez une photo de début ou de fin, ou écrivez vous-même.' : '');
     draw();
-    return fill();
   }
 
-  /**
-   * (0.6.144) « Combler les trous »: what would be created is read on the montage (seriesOf) and said,
-   * each plan with the model that would make it and its time, asked to the server for those that need
-   * nothing more (`estimate`); a plan that goes on from the one before it has its model, and its time
-   * brought to its own length. Nothing is made here: « Lancer » does.
-   */
-  async function fill() {
-    if (making || filling || writing || !create) return;
-    const items = seriesOf(montage, lengthOf).map(item => ({ ...item, model: '', makes: null, expected: null, state: 'wait', take: null }));
-    if (!items.length) return;
-    stop();
-    const series = (filling = { stage: 'asking', items, pausing: false, stopping: false });
-    status = '';
-    update();
-    await keep();
-    for (const item of items) {
-      if (filling !== series) return;
-      if (!item.ready) continue;
-      const before = item.after ? items.find(other => other.id === item.after) : null;
-      if (before) {
-        if (!before.ready) Object.assign(item, { ready: false, reason: `Il continue le plan ${before.number}, qui ne peut pas être créé.` });
-        else
-          Object.assign(item, {
-            model: before.model,
-            expected: before.expected ? { seconds: Math.round(((before.expected.seconds * item.seconds) / (before.makes ?? before.seconds)) * 10) / 10, exact: false } : null,
-          });
-        continue;
+  // The timeline ----------------------------------------------------------------------------------
+  /** (0.6.148, captures 80 et 81) The small bar above the take or the sound chosen: icons, their words on hover. */
+  function popOf(item, record, shown = null) {
+    const bar = node('div', 'montage-pop'),
+      set = changes => change(withItemChanged(montage, item.id, changes, { longest: record ? takeSeconds(record) : null }), { select: item.id }),
+      out = () => change(withoutItem(montage, item.id));
+    bar.setAttribute('role', 'toolbar');
+    bar.setAttribute('aria-label', item.track ? 'Réglages du son' : 'Réglages de la prise');
+    const part = () => node('span', 'montage-pop-rule');
+    if (item.track) {
+      // A sound: its volume, a bar and its figure; open it; take it out.
+      const volume = node('input', 'studio-bar montage-range montage-pop-volume'),
+        figure = node('span', 'montage-pop-figure', Math.round((item.volume ?? 1) * 100) + ' %');
+      Object.assign(volume, { type: 'range', min: '0', max: '200', step: '5', value: String(Math.round((item.volume ?? 1) * 100)) });
+      volume.setAttribute('aria-label', 'Volume');
+      volume.style.setProperty?.('--fill', String((item.volume ?? 1) / 2));
+      // (The bar stays in the hand while it is slid: nothing is drawn again, it says the volume itself,
+      // and the sound on its track with it; let go, the timeline is drawn as it now is.)
+      volume.oninput = () => {
+        volume.style.setProperty?.('--fill', String(Number(volume.value) / 200));
+        figure.textContent = volume.value + ' %';
+        if (shown) shown.textContent = volume.value + ' %';
+        change(withItemChanged(montage, item.id, { volume: Number(volume.value) / 100 }), { still: true });
+      };
+      volume.onchange = () => update();
+      bar.append(volume, figure, part());
+    } else if (isTodo(item)) {
+      if (item.photos?.start) bar.append(button('montage-pop-button', '', () => change(withoutPhoto(montage, item.id, 'start')), 'start', 'Retirer la photo de début'));
+      if (item.photos?.end) bar.append(button('montage-pop-button', '', () => change(withoutPhoto(montage, item.id, 'end')), 'end', 'Retirer la photo de fin'));
+      if (item.photos?.start || item.photos?.end) bar.append(part());
+    } else {
+      if (item.kind === 'video') {
+        const sound = button('montage-pop-button', '', () => set({ volume: item.volume > 0 ? 0 : 1 }), 'sound', item.volume > 0 ? 'Couper le son de la prise' : 'Remettre le son de la prise');
+        sound.setAttribute('aria-pressed', String(item.volume > 0));
+        bar.append(sound, part());
       }
-      if (!estimate) continue;
-      try {
-        const wanted = creationOf(montage, item.id, lengthOf),
-          seen = await estimate({ verb: wanted.verb, args: argsOf(wanted), size: filmSize() });
-        if (filling !== series) return;
-        if (seen?.missing) Object.assign(item, { ready: false, reason: `${seen.workflowName || 'Son modèle'} n’est pas prêt : un de ses fichiers manque.` });
-        else Object.assign(item, { model: seen?.workflowName ?? '', makes: seen?.seconds ?? null, expected: seen?.expected ?? null });
-      } catch (error) {
-        if (filling !== series) return;
-        Object.assign(item, { ready: false, reason: error.message });
+      for (const [frame, glyph, tip] of [
+        ['fit', 'fit', 'Ajuster : la prise entière, avec des bandes si son format diffère'],
+        ['fill', 'fill', 'Remplir : plein cadre, ce qui dépasse est coupé'],
+      ]) {
+        const choice = button('montage-pop-button', '', () => set({ frame }), glyph, tip);
+        choice.setAttribute('aria-pressed', String(item.frame === frame));
+        bar.append(choice);
       }
+      bar.append(part());
     }
-    if (filling !== series) return;
-    series.stage = 'ready';
-    update();
-  }
-  /** The series is over (all made, one refused, stopped): said once, and the settings come back. */
-  function endSeries(series, { stopped = false, refused = '' } = {}) {
-    if (filling !== series) return;
-    const ready = series.items.filter(item => item.ready),
-      made = ready.filter(item => item.state === 'made').length,
-      count = `${made} plan${made > 1 ? 's' : ''} créé${made > 1 ? 's' : ''}`;
-    filling = null;
-    status = stopped ? `Série arrêtée · ${count} sur ${ready.length}` : refused ? `${refused} · ${count} sur ${ready.length}` : count;
-    draw();
-  }
-  /** « Lancer », or « Reprendre » after a pause: the plans that are ready, one after the other, each in its turn. */
-  async function launch() {
-    const series = filling;
-    if (!series || !['ready', 'paused'].includes(series.stage) || making) return;
-    Object.assign(series, { stage: 'running', pausing: false });
-    for (const item of series.items) {
-      if (!item.ready || item.state === 'made') continue;
-      if (filling !== series) return;
-      if (series.stopping) break;
-      if (series.pausing) {
-        Object.assign(series, { stage: 'paused', pausing: false });
-        status = 'En pause';
-        return draw();
-      }
-      item.state = 'making';
-      const record = await makePlan(item.id);
-      if (filling !== series) return;
-      if (!record) {
-        item.state = 'failed';
-        // (What makePlan said of it, « Création impossible : … »; a plan it did not even ask for said nothing.)
-        return endSeries(series, series.stopping ? { stopped: true } : { refused: status.startsWith('Création impossible') ? status : `Plan ${item.number} non créé` });
-      }
-      Object.assign(item, { state: 'made', take: record });
-    }
-    endSeries(series, { stopped: series.stopping });
+    if (record && !isTodo(item)) bar.append(button('montage-pop-button', '', () => showTake(record), 'open', 'Ouvrir la prise'));
+    bar.append(button('montage-pop-button', '', out, 'trash', item.replaces ? 'Retirer, et rendre sa fin à la vidéo' : 'Retirer de la bobine (Suppr)'));
+    bar.onpointerdown = event => event.stopPropagation?.();
+    return bar;
   }
 
   function timeline() {
     const { section, body } = block('is-output', 'montage-timeline'),
-      headRow = node('div', 'montage-timeline-head'),
-      pick = node('select', 'montage-pick'),
-      state = node('span', 'montage-status'),
-      go = button('montage-export', exporting ? 'Export…' : 'Exporter le film', () => void exportFilm()),
       ruler = node('div', 'montage-ruler'),
       lanes = node('div', 'montage-lanes'),
       headLine = node('span', 'montage-playhead'),
       starts = planStarts(montage),
       whole = span();
-    section.setAttribute('aria-label', 'Timeline du montage');
+    section.setAttribute('aria-label', 'Timeline de la bobine');
     // (It takes the keys when it is pressed: the space bar reads the film.)
     section.tabIndex = -1;
-    pick.setAttribute('aria-label', 'Montage ouvert');
-    const named = [{ id: montage.id, name: montage.name }, ...list.filter(item => item.id !== montage.id)];
-    for (const item of named) pick.append(Object.assign(node('option', '', item.name), { value: item.id, selected: item.id === montage.id }));
-    pick.append(Object.assign(node('option', '', '+ Nouveau montage'), { value: 'new' }));
-    pick.onchange = async () => {
-      const wanted = pick.value;
-      await keep();
-      stop();
-      if (wanted === 'new') {
-        montage = fresh();
-        stored = false;
-        chosen = null;
-        head = 0;
-        status = '';
-      } else
-        try {
-          await open(wanted);
-        } catch (error) {
-          status = 'Montage illisible : ' + error.message;
-        }
-      draw();
-    };
-    // (0.6.142) A film is made of takes: none is exported while a plan is to make, or being made.
-    const waiting = todoPlans(montage).length;
-    go.disabled = exporting || !montage.plans.length || waiting > 0 || Boolean(making);
-    go.title = waiting
-      ? 'Créez ou retirez les plans à faire pour exporter le film'
-      : montage.plans.length
-        ? 'Assemble le film et l’ajoute aux prises du projet'
-        : 'Posez au moins une prise pour exporter un film';
-    headRow.append(node('span', 'montage-label', 'Montage'), pick, node('span', 'montage-summary', montageSummary(montage)), state);
-    if (writing)
-      // (0.6.146) Moodix AI writes: its button says so, and the writing can be stopped.
-      headRow.append(agentButton(), button('montage-halt', 'Arrêter', () => writing?.controller.abort()));
-    else if (filling?.stage === 'running') {
-      // (The plan being made is finished first: a pause never loses what the card is doing.)
-      const pause = button('montage-halt', filling.pausing ? 'Pause demandée…' : 'Mettre en pause', () => {
-        filling.pausing = true;
-        update();
-      });
-      pause.disabled = filling.pausing;
-      pause.title = 'La série s’arrête après le plan en cours, et reprend quand vous voulez';
-      headRow.append(
-        pause,
-        button('montage-halt', 'Arrêter', () => {
-          filling.stopping = true;
-          halt();
-        }),
-      );
-    } else if (filling?.stage === 'paused')
-      headRow.append(
-        button('montage-halt is-go', 'Reprendre', () => void launch()),
-        button('montage-halt', 'Arrêter', () => endSeries(filling, { stopped: true })),
-      );
-    else if (making) headRow.append(button('montage-halt', 'Arrêter', () => halt()));
-    else if (waiting > 0 && create) {
-      if (write) headRow.append(agentButton());
-      const all = button('montage-fill', 'Combler les trous', () => void fill());
-      // (Greyed while what it would make is shown at the right, waiting for « Lancer ».)
-      all.disabled = Boolean(filling);
-      all.title = 'Crée les plans à faire, l’un après l’autre, après votre accord';
-      headRow.append(all);
-    }
-    // (The montage shown is the one of the plans being created.)
-    pick.disabled = Boolean(making) || inSeries() || Boolean(writing);
-    headRow.append(go);
     live.bar = live.making = null;
     // A mark a second up to a minute, then every five or ten: the ruler never turns into a comb.
     const step = whole <= 60 ? 1 : whole <= 300 ? 5 : 10;
@@ -1180,29 +1131,26 @@ export function setupMontage({
       seek(timeAt(event, ruler));
       follow(event, ruler, { slack: 0, kind: '', move: (far, time) => seek(time) });
     };
-    // (0.6.142) The photos the plans go by, above them. A start photo sits against the left edge of
-    // its plan and an end photo against its right edge, never beyond (his rule of 20/11). A photo of
-    // the project is laid here by dragging it: where it lands says what it becomes (withPhoto).
+    // (0.6.142) The photos the takes go by, above them. A start photo sits against the left edge of its
+    // take and an end photo against its right edge, never beyond. A photo of the project is laid here
+    // by dragging it: where it lands says what it becomes (withPhoto).
     {
       const track = node('div', 'montage-track'),
         lane = node('div', 'montage-lane montage-photos');
       track.dataset.track = 'photos';
-      let count = 0;
       montage.plans.forEach((plan, index) => {
         for (const side of ['start', 'end']) {
           const photo = plan.photos?.[side];
           if (!photo) continue;
-          count++;
           const record = recordOf(photo),
             picture = pictureOf(record),
             pin = button('montage-photo is-' + side, '', () => {
               chosen = plan.id;
-              confirming = false;
               update();
             });
           pin.dataset.plan = plan.id;
           pin.dataset.missing = String(!record);
-          pin.setAttribute('aria-label', `${side === 'start' ? 'Photo de début' : 'Photo de fin'} du plan ${index + 1}`);
+          pin.setAttribute('aria-label', `${side === 'start' ? 'Photo de début' : 'Photo de fin'}, prise de ${mono(starts[index])} à ${mono(starts[index] + plan.to - plan.from)}`);
           pin.setAttribute('aria-pressed', String(chosen === plan.id));
           if (picture) pin.style.backgroundImage = `url("${picture}")`;
           if (side === 'start') pin.style.left = percent(starts[index]);
@@ -1211,7 +1159,6 @@ export function setupMontage({
           lane.append(pin);
         }
       });
-      if (!count) lane.append(node('span', 'montage-invite', 'Une photo posée ici : un plan part d’elle, ou arrive sur elle'));
       lane.ondragover = event => {
         if (carried && trackOf(carried) === 'image') event.preventDefault();
       };
@@ -1224,45 +1171,41 @@ export function setupMontage({
         if (laid.reason) return notice(laid.reason);
         change(laid.montage, { select: laid.chosen });
       };
-      track.append(node('span', 'montage-track-name', 'Repères'), lane);
+      track.append(node('span', 'montage-track-name', 'Photos'), lane);
       lanes.append(track);
     }
-    for (const [id, name, invitation] of TRACKS) {
+    for (const [id, name] of TRACKS) {
       const track = node('div', 'montage-track'),
-        lane = node('div', 'montage-lane');
+        lane = node('div', 'montage-lane'),
+        // (The small bar of what is chosen, at the scale of the lane but above it: the lane cuts what overflows.)
+        layer = node('div', 'montage-pop-layer');
       track.dataset.track = id;
       const items = id === 'plans' ? montage.plans : montage.sounds.filter(sound => sound.track === id);
-      if (!items.length) lane.append(node('span', 'montage-invite', invitation));
       items.forEach(item => {
-        // (While the start of a plan is cut, the plans stay where they were: only that edge moves.)
+        // (What a sound says of its volume on its track: its bar, once chosen, says it there too.)
+        let loudness = null;
+        // (While the start of a take is cut, the takes stay where they were: only that edge moves.)
         const at = id !== 'plans' ? item.at : ghost?.starts.has(item.id) ? ghost.starts.get(item.id) + (ghost.id === item.id ? ghost.shift : 0) : starts[montage.plans.indexOf(item)],
           todo = isTodo(item),
-          busy = todo && making?.id === item.id,
-          // (A plan to make that takes the place of the end of a video shows it, greyed, until it is made.)
+          made = todo && making?.id === item.id,
+          // (A take to create that takes the place of the end of a video shows it, greyed, until it is made.)
           record = recordOf(todo ? item.replaces?.source : item.source),
           picture = id === 'plans' ? pictureOf(record) : '',
-          number = montage.plans.indexOf(item) + 1,
-          // (0.6.143) A plan to make that goes on from the video before it: its continuation, drawn joined to it.
+          // (0.6.143) A take to create that goes on from the video before it: its continuation, drawn joined to it.
           link = todo && id === 'plans' ? linkOf(montage, item.id, lengthOf) : null,
           suite = link?.kind === 'suite' || link?.kind === 'last',
-          // (0.6.144) Its turn has not come yet in the series being created.
-          queued = todo && inSeries() && filling.items.some(entry => entry.id === item.id && entry.ready && entry.state === 'wait'),
-          // (0.6.146) Moodix AI is writing what happens in it.
-          penned = todo && writing?.id === item.id,
+          state = todo ? stateOf(item.id) : '',
           label =
             id !== 'plans'
-              ? (takeLabel(item.source) || KINDS[id]) + (record?.prompt ? ' · ' + String(record.prompt).split('\n')[0].slice(0, 60) : '')
+              ? (takeLabel(item.source) || 'Son') + (record?.prompt ? ' · ' + String(record.prompt).split('\n')[0].slice(0, 60) : '')
               : todo
-                ? `${number} · ${busy ? 'EN COURS' : penned ? 'MOODIX AI ÉCRIT' : queued ? 'EN ATTENTE' : item.replaces ? 'SERA REMPLACÉ' : suite ? 'SUITE À CRÉER' : 'À FAIRE'}`
-                : `${number}${takeLabel(item.source, ' · ').toUpperCase()}`,
-          look = id !== 'plans' ? ' is-sound' : todo ? ' is-todo' + (item.replaces ? ' is-replacing' : '') + (suite ? ' is-suite' : '') + (penned ? ' is-writing' : '') + (busy ? ' is-making' : '') : '',
+                ? state || (item.replaces ? 'Sera remplacé' : suite ? '↳ Suite' : '')
+                : takeLabel(item.source) || 'Prise introuvable',
+          look = id !== 'plans' ? ' is-sound' : todo ? ' is-todo' + (item.replaces ? ' is-replacing' : '') + (suite ? ' is-suite' : '') + (writing?.id === item.id ? ' is-writing' : '') + (made ? ' is-making' : '') + (failed.has(item.id) && !state.startsWith('En') ? ' is-failed' : '') : '',
           piece = button('montage-piece' + look, '', () => {
             // (The click that ends a drag chooses nothing.)
             if (slid) return void (slid = false);
-            // (0.6.144) What was shown to be agreed on gives its place back to what is chosen.
-            if (filling && !inSeries()) filling = null;
             chosen = chosen === item.id ? null : item.id;
-            confirming = false;
             update();
           });
         piece.dataset.id = item.id;
@@ -1273,40 +1216,34 @@ export function setupMontage({
         piece.style.left = suite ? `calc(${percent(at)} - 4px)` : percent(at);
         piece.style.width = suite ? percent(item.to - item.from) : `calc(${percent(item.to - item.from)} - 4px)`;
         if (picture) piece.style.backgroundImage = `url("${picture}")`;
-        piece.append(node('span', 'montage-piece-name', record || todo ? label : 'Prise introuvable'));
+        piece.append(node('span', 'montage-piece-name', label));
         if (id === 'plans') {
-          // What a plan to make waits for: its text, else what it is.
-          const about = !todo
-              ? KINDS[item.kind]
-              : busy
-                ? making.label
-                : item.todo.prompt.trim().split('\n')[0].slice(0, 60) ||
-                  (item.replaces
-                    ? 'Nouveau clip qui part de la photo'
-                    : link.kind === 'suite'
-                      ? `Suite du plan ${link.before}`
-                      : link.kind === 'last'
-                        ? 'Jusqu’à la photo de fin'
-                        : 'Plan à faire'),
-            kind = node('span', 'montage-piece-kind', about);
-          // (What a continuation adds to the film: « + 4 s ».)
-          piece.append(kind, node('span', 'montage-piece-length', (suite ? '+ ' : '') + shownSeconds(item.to - item.from)));
-          if (busy) {
+          // What a take to create says: its text, on two lines.
+          const words = node('span', 'montage-piece-kind', todo ? item.todo.prompt.trim().split('\n')[0].slice(0, 160) : '');
+          piece.append(words, node('span', 'montage-piece-length', (suite ? '+' : '') + mono(item.to - item.from) + ' s'));
+          if (made) {
             const bar = node('span', 'montage-piece-bar'),
               done = node('span', 'montage-piece-bar-done');
             done.style.width = Math.round((making.fraction ?? 0) * 100) + '%';
             bar.append(done);
             piece.append(bar);
-            Object.assign(live, { bar: done, making: kind });
+            Object.assign(live, { bar: done, making: piece.children[0] });
           }
+        } else {
+          loudness = node('span', 'montage-piece-length', Math.round((item.volume ?? 1) * 100) + ' %');
+          piece.append(loudness);
         }
         piece.onkeydown = event => {
           if (event.key === 'Delete' || event.key === 'Backspace') change(withoutItem(montage, item.id));
-          // Alt and an arrow: the plan one place earlier or later, as its buttons do.
+          if (event.key === 'Escape' && chosen === item.id) {
+            chosen = null;
+            update();
+          }
+          // Alt and an arrow: the take one place earlier or later.
           const step = event.altKey && id === 'plans' ? { ArrowLeft: -1, ArrowRight: 1 }[event.key] : 0;
           if (step) change(withPlanMoved(montage, item.id, step), { select: item.id });
         };
-        // Dragged along its track: a plan takes its place among the others, a sound its moment.
+        // Dragged along its track: a take takes its place among the others, a sound its moment.
         piece.onpointerdown = event => {
           const pressed = montage,
             first = item.at,
@@ -1314,7 +1251,6 @@ export function setupMontage({
             put = next => {
               if (next === montage && chosen === item.id) return;
               chosen = item.id;
-              confirming = false;
               if (next === montage) update();
               else change(next);
             };
@@ -1338,7 +1274,7 @@ export function setupMontage({
                 longest = record ? takeSeconds(record) : null,
                 before = new Map(montage.plans.map((plan, index) => [plan.id, starts[index]])),
                 // (0.6.143) The end of a video pulled beyond its take: what exceeds is its continuation
-                // to make, right after it. Read on the montage as it was pressed: pulled back, it is gone.
+                // to create, right after it. Read on the bobine as it was pressed: pulled back, it is gone.
                 pressed = montage,
                 beyond = edge === 'end' && !todo && item.kind === 'video' ? newId() : null;
               follow(event, lane, {
@@ -1357,7 +1293,7 @@ export function setupMontage({
                   if (next === montage || (beyond && JSON.stringify(next.plans) === JSON.stringify(montage.plans))) update();
                   else change(next);
                 },
-                // Let go with its continuation: that one is chosen, what happens next is written there.
+                // Let go with its continuation: that one is chosen, what happens next is written in its line.
                 done: () => {
                   if (pulling && itemOf(pulling.id)) chosen = pulling.id;
                   pulling = null;
@@ -1367,14 +1303,26 @@ export function setupMontage({
             piece.append(grip);
           }
         lane.append(piece);
+        if (chosen === item.id && !held) {
+          const bar = popOf(item, recordOf(item.source), loudness);
+          // (Kept inside the track at its right edge.)
+          bar.style.left = `clamp(0px, ${percent(at)}, calc(100% - 240px))`;
+          layer.append(bar);
+        }
       });
-      // A press on the lane itself, beside what it holds: the head goes there.
+      // A press on the lane itself, beside what it holds: the head goes there, what was chosen is let go.
       lane.onclick = event => {
-        if (event.target === lane) seek(timeAt(event, lane));
+        if (event.target !== lane) return;
+        if (chosen) {
+          chosen = null;
+          update();
+        }
+        seek(timeAt(event, lane));
       };
       lane.ondragover = event => {
         if (!carried) return;
-        const fits = id === 'plans' ? ['video', 'image'].includes(trackOf(carried)) : trackOf(carried) === id;
+        const kind = trackOf(carried),
+          fits = id === 'plans' ? ['video', 'image'].includes(kind) : kind === 'music' || kind === 'effects';
         if (fits) event.preventDefault();
       };
       lane.ondrop = event => {
@@ -1383,12 +1331,13 @@ export function setupMontage({
         const dropped = carried,
           time = timeAt(event, lane);
         carried = null;
-        if (id !== 'plans') return lay(dropped, { at: Math.round(time * 10) / 10 });
-        // Before the first plan whose middle is after where it is dropped.
+        // (0.6.148) A sound goes on the track it is dropped on.
+        if (id !== 'plans') return lay(dropped, { at: Math.round(time * 10) / 10, track: id });
+        // Before the first take whose middle is after where it is dropped.
         const index = montage.plans.findIndex((plan, at) => starts[at] + (plan.to - plan.from) / 2 > time);
         lay(dropped, { index: index < 0 ? montage.plans.length : index });
       };
-      track.append(node('span', 'montage-track-name', name), lane);
+      track.append(node('span', 'montage-track-name', name), lane, layer);
       lanes.append(track);
     }
     // The head is laid over the lanes, at their scale.
@@ -1397,13 +1346,13 @@ export function setupMontage({
     // (0.6.143) While the end of a video is pulled beyond its take: what that does, said where the hand is.
     if (pulling && itemOf(pulling.id)) {
       const later = montage.plans.findIndex(plan => plan.id === pulling.id) < montage.plans.length - 1,
-        tip = node('span', 'montage-tip', `Au-delà de la prise : + ${shownSeconds(pulling.seconds)} à créer` + (later ? ' · ce qui suit se décale' : ''));
-      tip.style.left = `clamp(190px, ${percent(pulling.at)}, calc(100% - 190px))`;
+        tip = node('span', 'montage-tip', `+ ${mono(pulling.seconds)} s à créer` + (later ? ' · ce qui suit se décale' : ''));
+      tip.style.left = `clamp(120px, ${percent(pulling.at)}, calc(100% - 120px))`;
       over.append(tip);
     }
     lanes.append(over);
-    body.append(headRow, ruler, lanes);
-    Object.assign(live, { head: headLine, status: state });
+    body.append(ruler, lanes);
+    live.head = headLine;
     return section;
   }
 
@@ -1454,40 +1403,38 @@ export function setupMontage({
     if (!root || !montage) return;
     const focused = page?.document?.activeElement,
       inside = focused && focused !== root && root.contains?.(focused);
-    parts = { takes: takes(), screen: screen(), inspector: inspector(), timeline: timeline() };
-    root.replaceChildren(parts.takes, parts.screen, parts.inspector, parts.timeline);
+    parts = { takes: takes(), screen: screen(), create: createPanel(), timeline: timeline() };
+    root.replaceChildren(...(ownFil ? [filRoot] : []), parts.takes, parts.screen, parts.create, parts.timeline);
+    fil();
     if (inside) refocus(focused, root);
     show();
   }
   /**
-   * What a change of the montage alters (0.6.138): its timeline and what is chosen. The screen goes on
-   * with the clip it shows and the grid of the takes keeps its place: drawn again at every move of a
-   * hand, the clip started over and the grid went back to its top.
+   * What a change of the bobine alters (0.6.138): its timeline, « À créer » and what is chosen. The
+   * preview goes on with the clip it shows and the grid of the takes keeps its place. `panel: false`:
+   * a text being written in « À créer », a bar being slid: they are not drawn again under the hand.
    */
-  function update({ inspector: whole = true } = {}) {
+  function update({ panel = true } = {}) {
     if (!root || !montage) return;
     if (!parts || !root.replaceChild) return draw();
     const focused = page?.document?.activeElement;
     for (const [name, make] of [
-      ['inspector', inspector],
+      ['create', createPanel],
       ['timeline', timeline],
     ]) {
-      if (name === 'inspector' && !whole) {
-        // (One of its bars is being slid: replaced under the hand, it would be let go.)
-        for (const say of live.figures ?? []) say();
-        continue;
-      }
+      if (name === 'create' && !panel) continue;
       const old = parts[name],
         next = make();
       root.replaceChild(next, old);
       parts[name] = next;
       if (focused && old.contains?.(focused)) refocus(focused, next);
     }
+    sayGo();
     show({ sync: false });
   }
   /**
-   * The focus put back on what replaces `was` in `part` (the same plan, the same control), else on the
-   * desk: what had it has just left the page, and the keys of the montage would no longer be heard.
+   * The focus put back on what replaces `was` in `part` (the same take, the same control), else on the
+   * desk: what had it has just left the page, and the keys of the bobine would no longer be heard.
    */
   function refocus(was, part) {
     const key = item => item.dataset?.id || item.getAttribute?.('aria-label') || item.className + '|' + item.textContent,
@@ -1496,16 +1443,20 @@ export function setupMontage({
   }
 
   return {
-    /** The desk of the mode, drawn for the project of the Studio; `kinds`: Image · Vidéo · Son · Montage. */
-    desk(kinds = null) {
-      kindsBar = kinds;
-      root = node('div', 'studio-desk is-montage');
+    /**
+     * The page of the bobine, drawn for the project; `fil`: where « / bobine ⌄ … Exporter » goes (the
+     * head of the page, beside the project). Without one it is drawn at the top of the desk.
+     */
+    desk({ fil: given = null } = {}) {
+      ownFil = !given;
+      filRoot = given ?? node('div', 'bobine-fil');
+      root = node('div', 'studio-desk bobine-desk');
       // (A press anywhere on the desk gives it the keys.)
       root.tabIndex = -1;
       parts = null;
       // The space bar reads the film or pauses it, wherever nothing is being typed or pressed.
       root.onkeydown = event => {
-        // (A plan, a sound or a take is a button too: Enter chooses it, the space bar reads the film.)
+        // (A take, a sound or a tile is a button too: Enter chooses it, the space bar reads the film.)
         const { tagName, className } = event.target ?? {},
           typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(tagName) || (tagName === 'BUTTON' && !/\bmontage-(piece|take)\b/.test(className));
         if (event.key === ' ' && !typing) {
@@ -1513,6 +1464,11 @@ export function setupMontage({
           play();
         } else if (event.key === 'Home' && !typing) seek(0);
         else if (event.key === 'End' && !typing) seek(total());
+        // Échap lets go of what is chosen, and closes its bar.
+        else if (event.key === 'Escape' && chosen && !typing) {
+          chosen = null;
+          update();
+        }
       };
       if (readFor !== project() || !montage) {
         montage = fresh();
@@ -1522,26 +1478,32 @@ export function setupMontage({
       draw();
       return root;
     },
-    /** The creations of the project were read again (one made, one removed): shown as they are now. */
-    refreshed: () => draw(),
-    /** Leaving the mode or the page: nothing goes on playing, what is not kept yet is. */
+    /** The creations of the project were read again (one made, one removed): shown as they are now. Another project: its bobines. */
+    refreshed() {
+      if (root && readFor !== project()) {
+        montage = fresh();
+        stored = false;
+        void read();
+      }
+      draw();
+    },
+    /** Leaving the page: nothing goes on playing, what is not kept yet is. */
     leave() {
       stop();
-      // (0.6.144) A series in pause, or only shown, ends with the mode.
-      filling = null;
-      // (0.6.146) So does what Moodix AI is writing: its request is let go.
+      // (A creation in pause ends with the page; one running goes on, its take kept when made.)
+      if (filling?.stage === 'paused') filling = null;
+      // (0.6.146) What Moodix AI is writing is let go.
       writing?.controller.abort();
       writing = null;
+      asking = null;
       root = parts = null;
       held = ghost = null;
       return keep();
     },
     // For the tests and the pointer of a later step: what is on the page, and the hands that change it.
-    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing }),
+    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed) }),
     lay,
-    makePlan,
-    fill,
-    launch,
+    createAll,
     askAgent,
     select: id => {
       chosen = id;

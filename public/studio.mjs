@@ -555,10 +555,8 @@ export function setupStudio({
   // Image · Vidéo · Son: drawn in the head of the screen, put back above it when there is none.
   let kindsEl = null;
   const kindsBar = () => (kindsEl ??= $('studio-kinds'));
-  // (0.6.137) « Montage », a fourth mode beside Image · Vidéo · Son: the takes of the project laid on
-  // a timeline, read and exported as one film (public/montage.mjs). It makes nothing itself; the
-  // three others stay as they were left behind it.
-  let editing = false;
+  // (0.6.148) The Bobine (ex-Montage, public/montage.mjs): a page of its own beside the Studio, which
+  // holds it here because it creates its takes as takes of the Studio. The page shows it (`bobine()`).
   const montage = setupMontage({
     api,
     node,
@@ -569,8 +567,8 @@ export function setupStudio({
     refresh: () => refresh(),
     ensureConversation: () => ensureConversation(),
     showTake: record => viewOutput(record, 0),
-    // (0.6.142) A plan to make is created as a take of the Studio is: the same request, in the
-    // conversation, one creation at a time. The montage stays on screen meanwhile (`montage`).
+    // (0.6.142) A take to create is created as a take of the Studio is: the same request, in the
+    // conversation, one creation at a time. The bobine stays on screen meanwhile (`montage`).
     create: (wanted, hooks) => generate({ ...wanted, styles: [], edits: {}, montage: hooks ?? {} }),
     halt: () => stop(),
     inputOf: record => outputSource(record),
@@ -2691,7 +2689,9 @@ export function setupStudio({
       asked = mode,
       former = legacy;
     let made = null,
-      result = null;
+      result = null,
+      // (0.6.148) Why a take of the bobine was not made: said there, never on the form of a mode.
+      refused = '';
     // (`montage`: asked by the montage, which shows it being made on its own timeline.)
     working = { label: 'Préparation…', fraction: null, controller, montage: Boolean(onTake?.montage) };
     // Its conversation from its first instant (0.6.81): the page may show another meanwhile, the
@@ -2742,7 +2742,7 @@ export function setupStudio({
             });
             timeWork(time);
             progress();
-            onTake?.montage?.onProgress?.(working.label, working.fraction);
+            onTake?.montage?.onProgress?.(working.label, working.fraction, working.preview);
           },
         });
         if (!done.record)
@@ -2773,7 +2773,7 @@ export function setupStudio({
             render();
           }
           progress();
-          onTake?.montage?.onProgress?.(working.label, working.fraction);
+          onTake?.montage?.onProgress?.(working.label, working.fraction, working.preview);
           await pause();
           job = await (await api('tools/job')).json();
           if (job?.id !== jobId) throw Error('La génération suivie a été remplacée par une autre tâche.');
@@ -2784,7 +2784,9 @@ export function setupStudio({
       }
       if (extending) extending = null;
     } catch (error) {
-      failure = controller.signal.aborted ? 'Génération arrêtée.' : error.message;
+      const said = controller.signal.aborted ? 'Génération arrêtée.' : error.message;
+      if (onTake?.montage) refused = said;
+      else failure = said;
     } finally {
       working = null;
       // Held until its take is on its own screen (settling, 0.6.87).
@@ -2813,9 +2815,7 @@ export function setupStudio({
     }
     // (0.6.142) Asked by the montage: the take made, or why there is none, said there and not on the form.
     if (onTake?.montage) {
-      const said = failure;
-      failure = '';
-      if (!result) throw new Error(said || 'La génération a échoué.');
+      if (!result) throw new Error(refused || 'La génération a échoué.');
       return result;
     }
   }
@@ -4499,15 +4499,15 @@ export function setupStudio({
     const pill = $('studio-pill-text'),
       about = modeOf(mode);
     if (pill) {
-      pill.textContent = 'Studio · ' + (editing ? 'Montage' : about.label);
-      pill.parentElement?.querySelector?.('use')?.setAttribute('href', '#i-' + (editing ? 'frames' : about.icon));
+      pill.textContent = 'Studio · ' + about.label;
+      pill.parentElement?.querySelector?.('use')?.setAttribute('href', '#i-' + about.icon);
     }
     const bar = kindsBar();
     if (!bar) return;
     bar.removeAttribute('data-ai-active');
     bar.removeAttribute('data-ai-touched');
     aiTarget(bar, 'kind');
-    if (bar.children.length !== MODES.length + 1) {
+    if (bar.children.length !== MODES.length) {
       bar.replaceChildren(
         ...MODES.map(item => {
           const tab = node('button', 'kind-tab');
@@ -4527,34 +4527,19 @@ export function setupStudio({
           return tab;
         }),
       );
-      // (0.6.137) « Montage », after them.
-      const film = node('button', 'kind-tab');
-      film.type = 'button';
-      film.setAttribute('role', 'tab');
-      film.setAttribute('aria-label', 'Montage');
-      film.title = 'Montage';
-      film.dataset.tip = 'Montage';
-      film.dataset.mode = 'montage';
-      film.append(icon('frames'), node('span', 'kind-tab-name', 'Montage'));
-      film.onclick = () => {
-        chooseMontage();
-        if (globalThis.document?.body?.dataset?.view !== 'studio') openStudio();
-      };
-      bar.append(film);
       // The arrows go from one mode to the next, as in any row (or column) of tabs.
       bar.onkeydown = event => {
         const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
         if (!step || working) return;
         event.preventDefault();
-        const ring = [...MODES.map(item => item.id), 'montage'],
-          next = ring[(ring.indexOf(editing ? 'montage' : mode) + step + ring.length) % ring.length];
-        if (next === 'montage') chooseMontage();
-        else chooseMode(next);
+        const ring = MODES.map(item => item.id),
+          next = ring[(ring.indexOf(mode) + step + ring.length) % ring.length];
+        chooseMode(next);
         for (const tab of bar.children) if (tab.dataset.mode === next) tab.focus?.();
       };
     }
     for (const tab of bar.children) {
-      const chosen = tab.dataset.mode === (editing ? 'montage' : mode);
+      const chosen = tab.dataset.mode === mode;
       tab.setAttribute('aria-selected', String(chosen));
       tab.tabIndex = chosen ? 0 : -1;
       tab.disabled = Boolean(working);
@@ -4568,21 +4553,9 @@ export function setupStudio({
     const bar = kindsBar();
     if (bar && !body.contains?.(bar)) body.parentElement?.insertBefore?.(bar, body);
   }
-  /** (0.6.137) « Montage »: the timeline of the project in the place of the form of a mode. */
-  function chooseMontage() {
-    if (working || aiWorking || editing) return;
-    if (ai) takeOver();
-    editing = true;
-    render();
-  }
   function chooseMode(id) {
     if (working || aiWorking) return;
-    // (0.6.137) Back from « Montage »: the mode it was left in is as it was, another is chosen.
-    if (editing) {
-      editing = false;
-      void montage.leave();
-      if (mode === id) return render();
-    } else if (mode === id) return;
+    if (mode === id) return;
     if (ai) takeOver();
     setMode(id);
     release();
@@ -4963,12 +4936,6 @@ export function setupStudio({
     kinds();
     const body = $('studio-body');
     if (!body) return;
-    // (0.6.137) A creation begins or a proposal of Moodix AI arrives: the Studio is its mode again.
-    // (0.6.142) Not for a plan the montage itself is having made: it shows it on its timeline.
-    if (editing && ((working && !working.montage) || proposal)) {
-      editing = false;
-      void montage.leave();
-    }
     // The drafts are named after their conversation: at the first drawing, and when a new one gets
     // its identifier (its first take) while they are on the page.
     if (draftsKey === null || (draftsKey.startsWith('new|') && conversation())) draftsKey = draftKey();
@@ -4985,19 +4952,6 @@ export function setupStudio({
         flux = null;
       }
       body.replaceChildren(awayPanel());
-      return;
-    }
-    // (0.6.137) « Montage »: its own desk, the same four blocks (public/montage.mjs). It needs none of the
-    // tools of the Studio: shown while they are read, its takes come with them.
-    if (editing) {
-      if (flux) {
-        flux.flux.stop();
-        flux = null;
-      }
-      promptWatch?.disconnect();
-      promptWatch = null;
-      body.dataset.mode = 'montage';
-      body.replaceChildren(montage.desk(kindsBar()));
       return;
     }
     if (!info) {
@@ -5111,6 +5065,8 @@ export function setupStudio({
       legacyRuns = Object.assign([...runs], { loaded: true });
     }
     onRuns(id, legacy);
+    // (0.6.148) The bobine shows the takes of the project too: one made or removed is shown there.
+    if (globalThis.document?.body?.dataset?.view === 'bobine') montage.refreshed();
   }
   /**
    * Reads the tools of the Studio (the server checks the files of every workflow: most of a
@@ -5811,5 +5767,9 @@ export function setupStudio({
      * Studio forgets it too, its Sortie and its montage read again. Whether it went.
      */
     remove,
+    /** (0.6.148) The Bobine, a page of its own (public/montage.mjs): its takes are made by the Studio. */
+    bobine: () => montage,
+    /** (0.6.148) A take of the bobine is being made: the bobine shows it, no miniature is needed. */
+    bobineWorking: () => Boolean(working?.montage),
   };
 }

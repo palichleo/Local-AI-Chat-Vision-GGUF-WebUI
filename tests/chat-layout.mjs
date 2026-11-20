@@ -181,13 +181,16 @@ test('under a message, only the last exchange can be taken back: nothing copies 
   assert.doesNotMatch(actions, /clipboard|Copier/);
 });
 
-test('the interface names its places in French: Chat, Studio, Pellicule, Jour and Nuit; no « Créations », no « Fichiers »', async () => {
+test('the interface names its places in French: Chat, Studio, Bobine, Archives, Jour and Nuit; no « Créations », no « Fichiers »', async () => {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   // « Pellicule » in the texts only (0.6.0): the routes, the modules and the data keep « library ».
   assert.match(html, /id="chat-open"[^>]*>Chat<\/button>/);
   assert.match(html, /id="studio-open"[^>]*>Studio<\/button>/);
-  assert.match(html, /id="library-open"[^>]*>Pellicule<\/button>/);
+  // (0.6.148) « Bobine » (ex-Montage) beside the Studio, « Archives » (ex-Pellicule).
+  assert.match(html, /id="bobine-open"[^>]*>Bobine<\/button>/);
+  assert.match(html, /id="library-open"[^>]*>Archives<\/button>/);
+  assert.doesNotMatch(html, />(Pellicule|Montage)</);
   assert.doesNotMatch(html, />Bibliothèque</);
   // No home page any more (0.5.123): a project opens in the library.
   assert.doesNotMatch(html, /id="home-open"|id="home-view"|>Accueil</);

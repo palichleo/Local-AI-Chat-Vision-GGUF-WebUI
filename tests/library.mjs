@@ -550,7 +550,7 @@ test('a project gone shows every project again; an empty project offers one way 
   const broken = fixture({ fail: 'Disque illisible.' });
   await broken.library.show();
   assert.equal(broken.$('library-empty').hidden, false);
-  assert.equal(broken.$('library-empty').children[0].textContent, 'Pellicule illisible : Disque illisible.');
+  assert.equal(broken.$('library-empty').children[0].textContent, 'Archives illisibles : Disque illisible.');
 });
 
 test('GET /api/library: the creations of every project, each with its own, the open one, those never saved and those of before', async () => {
@@ -652,12 +652,12 @@ test('(0.6.147) the question of a take: its number, else what it is; the montage
   );
   assert.equal(montageWords(undefined), '');
   assert.equal(montageWords([]), '');
-  assert.equal(montageWords(['Le pêcheur']), 'Elle sert dans le montage « Le pêcheur »');
-  assert.equal(montageWords(['Bis', 'Le pêcheur']), 'Elle sert dans 2 montages : « Bis », « Le pêcheur »');
+  assert.equal(montageWords(['Le pêcheur']), 'Elle sert dans la bobine « Le pêcheur »');
+  assert.equal(montageWords(['Bis', 'Le pêcheur']), 'Elle sert dans 2 bobines : « Bis », « Le pêcheur »');
   // On a take too small for their names (the Sortie of the Studio).
   assert.deepEqual([montageWords(['Le pêcheur'], true), montageWords(['Bis', 'Le pêcheur'], true), montageWords([], true)], [
-    'Dans un montage',
-    'Dans 2 montages',
+    'Dans une bobine',
+    'Dans 2 bobines',
     '',
   ]);
 });
@@ -711,7 +711,7 @@ test('(0.6.147) every take has the bin of the Studio: asked on the take, ✕ and
     ask.children.map(item => [item.className, item.textContent]),
     [
       ['studio-confirm-text', 'Supprimer #12\u00a0?'],
-      ['studio-confirm-note', 'Elle sert dans le montage « Le pêcheur »'],
+      ['studio-confirm-note', 'Elle sert dans la bobine « Le pêcheur »'],
       ['studio-confirm-row', ''],
     ],
   );

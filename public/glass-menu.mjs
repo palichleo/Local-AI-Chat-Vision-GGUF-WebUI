@@ -90,7 +90,8 @@ function enhance(select, view) {
 
   const sync = () => {
     const chosen = select.selectedOptions?.[0] ?? select.options[select.selectedIndex];
-    text.textContent = chosen?.textContent ?? '';
+    // (0.6.148) What the face shows of the one chosen, when it says it shorter (« 16:9  1344 × 768 »).
+    text.textContent = chosen?.dataset?.face ?? chosen?.textContent ?? '';
     face.disabled = select.disabled;
     // Its classes are the list's, as they change (a value changed in a proposal turns to the accent).
     dress();

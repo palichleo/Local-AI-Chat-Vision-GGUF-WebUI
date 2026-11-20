@@ -8,11 +8,11 @@ import * as sessionCopies from '../public/session-copies.mjs';
 // before): what those tests checked of the places, the library and the model, now on the top bar.
 const read = async name => (await readFile(new URL('../public/' + name, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
-test('the top bar: « Moodix » with the Éclipse for its first « o », then Chat · Studio · Pellicule, then the model and the gear; no sidebar', async () => {
+test('the top bar: « Moodix » with the Éclipse for its first « o », then Chat · Studio · Bobine · Archives, then the model and the gear; no sidebar', async () => {
   const html = await read('index.html'),
     top = html.slice(html.indexOf('<header id="top"'), html.indexOf('</header>', html.indexOf('<header id="top"')));
   assert.ok(top.length > 100);
-  const order = ['id="brand-home"', 'class="top-name brand-word" aria-label="Moodix">M<svg', 'id="chat-open"', 'id="studio-open"', 'id="library-open"', 'id="toggle-engine"', 'id="engine-name"', 'id="settings-open"'].map(
+  const order = ['id="brand-home"', 'class="top-name brand-word" aria-label="Moodix">M<svg', 'id="chat-open"', 'id="studio-open"', 'id="bobine-open"', 'id="library-open"', 'id="toggle-engine"', 'id="engine-name"', 'id="settings-open"'].map(
     mark => top.indexOf(mark),
   );
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'in this order');
@@ -24,7 +24,9 @@ test('the top bar: « Moodix » with the Éclipse for its first « o », then Ch
     /aria-label="Moodix">M<svg class="brand-eclipse" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15\.2" fill="none" stroke="currentColor" stroke-opacity="0\.7" stroke-width="1\.6" vector-effect="non-scaling-stroke"\/><path d="M2\.01 10\.06A15\.2 15\.2 0 1 0 29\.99 10\.06A14 14 0 0 1 2\.01 10\.06Z" fill="currentColor"\/><\/svg>odix<\/span><\/a>/,
   );
   assert.doesNotMatch(top, /top-mark|eclipse-ring|eclipse\.svg/);
-  assert.match(top, /<button id="library-open" type="button" class="top-place" aria-controls="library-view">Pellicule<\/button>/);
+  // (0.6.148) The Bobine (ex-Montage) beside the Studio, the Archives (ex-Pellicule) after it.
+  assert.match(top, /<button id="bobine-open" type="button" class="top-place" aria-controls="bobine-view">Bobine<\/button>/);
+  assert.match(top, /<button id="library-open" type="button" class="top-place" aria-controls="library-view">Archives<\/button>/);
   // No sidebar, no drawer, no button « Nouveau chat » any more: the fil holds the conversations.
   assert.doesNotMatch(html, /id="sidebar"|id="navigation-open"|id="new-chat"|id="sidebar-toggle"|class="mdx-filet"|sidebar-state\.js/);
   // No home page (0.5.123), nothing left of « Fichiers ».
@@ -48,14 +50,14 @@ test('the top bar: « Moodix » with the Éclipse for its first « o », then Ch
   assert.match(html, /<span id="top-line" class="top-line" aria-hidden="true" hidden><\/span>/);
 });
 
-test('the Pellicule: a page of its own, headed by the fil of the Chat and the Studio, its number of takes, the kinds', async () => {
+test('the Archives: a page of its own, headed by the fil of the Chat and the Studio, its number of takes, the kinds', async () => {
   const html = await read('index.html'),
     app = await read('app.js'),
     navigation = await read('project-navigation.mjs'),
     css = await read('moodix.css');
   const page = html.match(/<section id="library-view"[^]*?<\/section><\/section>/)?.[0] ?? '';
   // Its name for a screen reader only: no title, no pills any more (pellicule-fil-maquette.md).
-  assert.match(page, /^<section id="library-view" class="library-view" aria-labelledby="library-heading"><h1 id="library-heading" class="sr-only">Pellicule<\/h1><header class="library-head">/);
+  assert.match(page, /^<section id="library-view" class="library-view" aria-labelledby="library-heading"><h1 id="library-heading" class="sr-only">Archives<\/h1><header class="library-head">/);
   // One line: the place of the fil, the number of takes, the kinds; then the sheet.
   const order = ['id="library-thread"', 'id="library-total"', 'id="library-kinds"', 'id="library-grid"', 'id="library-empty"'].map(mark =>
     page.indexOf(mark),
@@ -67,7 +69,9 @@ test('the Pellicule: a page of its own, headed by the fil of the Chat and the St
   // The fil is one element, put there by its module; in it, what the Pellicule shows of the conversations.
   assert.equal(html.split('<nav id="thread"').length, 2, 'the same fil, not a copy');
   assert.match(html, /<span id="conversation-title">Nouvelle conversation<\/span><span id="thread-shown" hidden><\/span>/);
-  assert.match(navigation, /slot = \$\('library-thread'\);/);
+  // (0.6.148) Put in the head of the Archives, or of the Bobine.
+  assert.match(navigation, /settle\(shown \? 'library-thread' : bobine \? 'bobine-thread' : null\);/);
+  assert.match(navigation, /slot = where \? \$\(where\) : null;/);
   assert.match(app, /\nprojectUI\.useLibrary\(libraryUI\);\r?\n/);
   assert.match(app, /\$\('library-open'\)\.onclick = \(\) => showLibrary\(\);/);
   // The logo opens the accueil (16/11: a new conversation of the project, from any view).
@@ -75,7 +79,7 @@ test('the Pellicule: a page of its own, headed by the fil of the Chat and the St
   assert.match(html, /<body data-view="chat">/);
   assert.match(app, /\n {2}view: 'chat',\n/);
   assert.match(navigation, /\$\('library-open'\)\?\.setAttribute\('aria-current', state\.view === 'library' \? 'page' : 'false'\);/);
-  assert.match(navigation, /'#thread button,#chat-open,#studio-open,#library-open'/);
+  assert.match(navigation, /'#thread button,#chat-open,#studio-open,#bobine-open,#library-open'/);
   assert.match(css, /body\[data-view='library'\] \.library-view \{\n {2}display: flex;/);
   assert.match(css, /\.library-note \{\n {2}margin: 0;\n {2}color: var\(--text-2\);/);
   assert.match(css, /body\[data-view='library'\] \.chat-area,\nbody\[data-view='library'\] \.composer-region \{/);

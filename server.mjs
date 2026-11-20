@@ -1362,7 +1362,7 @@ export async function createApplication({
       // (0.6.136) The montages of a project, then one of them by its identifier.
       if (req.method === 'GET' && path.startsWith('/api/montages/')) {
         const [project, id, more] = path.slice('/api/montages/'.length).split('/').map(decodeURIComponent);
-        if (more !== undefined) throw problem('Montage introuvable.', 404);
+        if (more !== undefined) throw problem('Bobine introuvable.', 404);
         if (id === undefined) return send(200, { montages: await montages.list(project) });
         return send(200, await montages.read(project, id));
       }
@@ -1484,7 +1484,7 @@ export async function createApplication({
           throw problem('Conversation du film invalide.');
         // The film is a take of its project: kept in a conversation of that project, numbered there.
         const known = await history.projectOf(conversationId).catch(() => null);
-        if (known && known !== project) throw problem('Cette conversation est d’un autre projet que ce montage.', 409);
+        if (known && known !== project) throw problem('Cette conversation est d’un autre projet que cette bobine.', 409);
         if (!known && conversationId !== STUDIO_ID) namedProjects.set(conversationId, project);
         const record = await exportMontage({
           montage,

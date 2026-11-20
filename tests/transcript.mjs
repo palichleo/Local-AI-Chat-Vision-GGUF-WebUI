@@ -187,7 +187,7 @@ test('« Modifier » puts the last message back in the message box and removes i
   assert.equal(state.archiveSnapshot.messages.at(-1).role, 'user');
   // Its reply had an image: said first, in the user's words (0.6.99).
   assert.deepEqual(done, [
-    'question : Cette réponse a 1 image : elle quittera la conversation et restera dans la Pellicule. Continuer ?',
+    'question : Cette réponse a 1 image : elle quittera la conversation et restera dans les Archives. Continuer ?',
     'affiche 2',
     'enregistre',
   ]);
@@ -221,7 +221,7 @@ test('« Modifier » and « Régénérer » say first the takes that would leave
     assert.equal(kept.state.archiveSnapshot, undefined, 'nothing is saved');
     assert.equal(kept.fields.prompt.value, resend ? '' : 'déjà écrit');
     assert.deepEqual(kept.done, [
-      'question : Cette réponse a 1 image : elle quittera la conversation et restera dans la Pellicule. Continuer ?',
+      'question : Cette réponse a 1 image : elle quittera la conversation et restera dans les Archives. Continuer ?',
     ]);
   }
   // A reply of words alone leaves without a question.

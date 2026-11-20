@@ -187,7 +187,11 @@ const app = {
 const shown =
   WINDOW
     ? ['--window-size=1440,900', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-features=CalculateNativeWinOcclusion']
-    : ['--headless=new'];
+    : // (0.6.148) Without a window. `MOODIX_CHECK_NO_GPU=1`: without the graphics card too, when it is
+      // busy elsewhere (his game, 20/11: « laisse le GPU pendant que je joue »). The page is slower then:
+      // the card of a clip of the chat is drawn again just after « Espace sur ▶ », about one time in
+      // two, and those two steps fail (its video loaded again, still on « Lire »).
+      ['--headless=new', ...(process.env.MOODIX_CHECK_NO_GPU === '1' ? ['--disable-gpu'] : [])];
 const chrome = spawn(browser, [...shown, '--mute-audio', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], {
   stdio: 'ignore',
 });
@@ -537,9 +541,9 @@ try {
     await run('clip : Voir en grand', () => js(`${card(0)}.querySelector('.take-player-expand').click()`), () =>
       js(`document.getElementById('original-dialog').open && !document.getElementById('take-player').hidden && !document.getElementById('original-video').controls`), { within: 2000 });
     await run('Échap (fenêtre de la prise)', () => key('Escape', 'Escape', 27), noDialog);
-    await run('Pellicule : clips', () => click('#library-open'), () =>
+    await run('Archives : clips', () => click('#library-open'), () =>
       js(`document.querySelectorAll('#library-view .library-tile[data-media="video"]').length === 2 && ![...document.querySelectorAll('#library-view video')].some(video => video.controls)`), { within: 2000 });
-    await run('Chat depuis la Pellicule (clips)', () => click('#chat-open'), view('chat'));
+    await run('Chat depuis les Archives (clips)', () => click('#chat-open'), view('chat'));
   }
 
   await send('Runtime.enable');
@@ -602,13 +606,14 @@ try {
   await run('studio', () => click('#studio-open'), view('studio'));
   for (const mode of ['Vidéo', 'Son', 'Image'])
     await run('mode ' + mode, () => click(`#studio-kinds .kind-tab[aria-label="${mode}"]`), view('studio'));
-  // (0.6.137) « Montage », the fourth mode: the timeline in the place of the Sortie, the four blocks whole
-  // in the window, nothing to export yet, the page not scrolling; then back to Image. (0.6.142) Four
-  // tracks, the photos the plans go by first (« Repères »), each whole in the timeline.
-  await run('mode Montage', () => click('#studio-kinds .kind-tab[aria-label="Montage"]'), () =>
-    js(`(() => { const desk = document.querySelector('#studio-view .studio-desk.is-montage'); if (!desk) return false; const blocks = [...desk.querySelectorAll('.studio-block')]; return blocks.length === 4 && blocks.every(block => { const box = block.getBoundingClientRect(); return box.width > 100 && box.height > 100 && box.bottom <= innerHeight + 1 && box.right <= innerWidth + 1; }) && document.querySelector('#studio-kinds .kind-tab[aria-selected="true"]')?.dataset.mode === 'montage' && desk.querySelectorAll('.montage-track').length === 4 && desk.querySelector('.montage-track').dataset.track === 'photos' && Boolean(desk.querySelector('.montage-photos > .montage-invite')) && [...desk.querySelectorAll('.montage-track')].every(track => track.getBoundingClientRect().bottom <= desk.querySelector('.montage-timeline').getBoundingClientRect().bottom + 1) && desk.querySelector('.montage-export').disabled && desk.querySelector('.montage-frame').getBoundingClientRect().height > 80 && document.documentElement.scrollHeight <= innerHeight + 1; })()`), { within: 2500 });
-  await run('retour au mode Image', () => click('#studio-kinds .kind-tab[aria-label="Image"]'), () =>
-    js(`!document.querySelector('#studio-view .studio-desk.is-montage') && document.querySelector('#studio-kinds .kind-tab[aria-selected="true"]')?.dataset.mode === 'image'`), { within: 1500 });
+  // (0.6.148) « Bobine », a page of its own beside the Studio (ex-Montage, its fourth mode from 0.6.137 to
+  // 0.6.146): three fixed columns over the timeline, all whole in the window, the page not scrolling; four
+  // tracks, the photos first, each whole in the timeline; « À créer » always there; nothing to export yet,
+  // in the fil beside the project. Then the Studio again, in its three modes.
+  await run('Bobine', () => click('#bobine-open'), () =>
+    js(`(() => { const desk = document.querySelector('#bobine-view .bobine-desk'); if (document.body.dataset.view !== 'bobine' || !desk) return false; const blocks = [...desk.querySelectorAll(':scope > .studio-block')], line = desk.querySelector('.montage-timeline')?.getBoundingClientRect(); return blocks.length === 4 && blocks.every(block => { const box = block.getBoundingClientRect(); return box.width > 100 && box.height > 100 && box.bottom <= innerHeight + 1 && box.right <= innerWidth + 1; }) && desk.querySelectorAll('.montage-track').length === 4 && desk.querySelector('.montage-track').dataset.track === 'photos' && [...desk.querySelectorAll('.montage-track')].every(track => track.getBoundingClientRect().bottom <= line.bottom + 1) && Boolean(desk.querySelector('.bobine-create .bobine-go-main')) && document.querySelector('#bobine-fil .montage-export')?.disabled === true && Boolean(document.querySelector('#bobine-thread > #thread:not([hidden])')) && document.getElementById('bobine-open').getAttribute('aria-current') === 'page' && desk.querySelector('.montage-frame').getBoundingClientRect().height > 80 && document.documentElement.scrollHeight <= innerHeight + 1; })()`), { within: 2500 });
+  await run('Studio : Image, Vidéo, Son', () => click('#studio-open'), () =>
+    js(`document.body.dataset.view === 'studio' && [...document.querySelectorAll('#studio-kinds .kind-tab')].map(tab => tab.dataset.mode).join() === 'image,video,audio' && document.querySelector('#studio-kinds .kind-tab[aria-selected="true"]')?.dataset.mode === 'image' && !document.querySelector('#studio-view .bobine-desk')`), { within: 1500 });
   await run('Agent', () => click('#studio-view .studio-agent'), () => js(`document.body.dataset.chat === 'open'`));
   await run('Échap (Agent)', () => key('Escape', 'Escape', 27), () => js(`document.body.dataset.chat !== 'open'`));
   // (0.6.95) A video proposed from the chat of the Agent: the pointer sets it in the Studio, and what
@@ -789,20 +794,20 @@ try {
     click('#thread-conversation').then(() => wait(200)).then(() => js(`(() => { const f = document.querySelector('.thread-menu input'); if (!f) return false; f.value = 'renard'; f.dispatchEvent(new Event('input')); return true; })()`)),
   () => js(`!document.querySelector('.thread-empty')?.hidden`));
   await run('Échap (menu des conversations)', () => key('Escape', 'Escape', 27), menuClosed);
-  // The fil heads the Pellicule (0.6.40): « Tous les projets » alone, then a project and its
+  // The fil heads the Archives (0.6.40): « Tous les projets » alone, then a project and its
   // conversations from its menus; « + Nouvelle conversation » opens the welcome in it.
-  await run('Pellicule', () => click('#library-open'), () =>
+  await run('Archives', () => click('#library-open'), () =>
     js(`document.body.dataset.view === 'library' && !!document.querySelector('#library-thread > #thread:not([hidden])') && document.getElementById('thread').dataset.scope === 'all' && document.getElementById('thread-project-name').textContent === 'Tous les projets' && !document.getElementById('library-empty').hidden`));
   await run('type Vidéos', () => click('#library-kinds [data-kind="video"]'), () =>
     js(`document.querySelector('#library-kinds [data-kind="video"]')?.getAttribute('aria-checked') === 'true'`));
-  await run('menu des projets dans la Pellicule', () => click('#thread-project'), () =>
+  await run('menu des projets dans les Archives', () => click('#thread-project'), () =>
     js(`document.querySelector('.thread-menu .thread-line .thread-choice-name')?.textContent === 'Tous les projets'`));
-  await run('projet dans la Pellicule', () => click('.thread-menu .thread-lines .thread-line:last-child .thread-choice'), () =>
+  await run('projet dans les Archives', () => click('.thread-menu .thread-lines .thread-line:last-child .thread-choice'), () =>
     js(`document.body.dataset.view === 'library' && document.getElementById('thread').dataset.scope === 'project' && document.getElementById('thread-project-name').textContent === 'Sans projet' && document.getElementById('thread-shown').textContent === 'Toutes les conversations' && !document.querySelector('.thread-menu')`));
   await run('nouveau chat du projet', () => fromMenu('#thread-conversation', '.thread-action'), () =>
     js(`document.body.dataset.view === 'chat' && !!document.querySelector('.workspace > #thread:not([hidden])') && !document.getElementById('conversation-title').hidden`));
-  await run('Pellicule, de nouveau', () => click('#library-open'), view('library'));
-  await run('Chat depuis la Pellicule', () => click('#chat-open'), view('chat'));
+  await run('Archives, de nouveau', () => click('#library-open'), view('library'));
+  await run('Chat depuis les Archives', () => click('#chat-open'), view('chat'));
   // Typed with a real key, as a person does: the page has had a gesture of its user, so that its
   // « Quitter la page ? » (a draft in the box) may show at the reload below (Ctrl+B gave it that
   // gesture until 0.6.1; Escape never does).
@@ -870,7 +875,7 @@ try {
   await run('Échap', () => key('Escape', 'Escape', 27), noDialog);
   await size(900);
   await wait(400);
-  await run('Pellicule à 900 px', () => click('#library-open'), view('library'));
+  await run('Archives à 900 px', () => click('#library-open'), view('library'));
   await run('Chat à 900 px', () => click('#chat-open'), view('chat'));
   await size(1280);
   await clips();

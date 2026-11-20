@@ -30,9 +30,9 @@ export function deleteWords(record, media, shown = null) {
 export function montageWords(names, short = false) {
   const list = (Array.isArray(names) ? names : []).filter(name => typeof name === 'string' && name);
   if (!list.length) return '';
-  if (short) return list.length === 1 ? 'Dans un montage' : `Dans ${list.length} montages`;
-  if (list.length === 1) return `Elle sert dans le montage « ${list[0]} »`;
-  return `Elle sert dans ${list.length} montages : ${list.map(name => `« ${name} »`).join(', ')}`;
+  if (short) return list.length === 1 ? 'Dans une bobine' : `Dans ${list.length} bobines`;
+  if (list.length === 1) return `Elle sert dans la bobine « ${list[0]} »`;
+  return `Elle sert dans ${list.length} bobines : ${list.map(name => `« ${name} »`).join(', ')}`;
 }
 
 /**

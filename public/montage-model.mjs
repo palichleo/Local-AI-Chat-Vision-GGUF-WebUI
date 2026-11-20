@@ -75,7 +75,7 @@ const sourceOf = (record, output = 0) => ({ conversationId: record.conversationI
  * end by default), a sound on its track from `at` seconds (the start by default). `id`: the identifier
  * of the new element. A take already there may be laid again: a film may show it twice.
  */
-export function withTake(montage, record, { id, index, at = 0 } = {}) {
+export function withTake(montage, record, { id, index, at = 0, track: lane } = {}) {
   const track = trackOf(record),
     length = takeSeconds(record);
   if (track === 'video' || track === 'image') {
@@ -90,7 +90,8 @@ export function withTake(montage, record, { id, index, at = 0 } = {}) {
     return { ...montage, plans };
   }
   if (montage.sounds.length >= MONTAGE_LIMITS.sounds) return montage;
-  const sound = { id, source: sourceOf(record), track, at: round(Math.max(0, at)), from: 0, to: Math.max(MONTAGE_LIMITS.shortest, length ?? STILL_SECONDS), volume: track === 'music' ? 0.6 : 1 };
+  // (0.6.148) A sound goes on the track it is dropped on (« Piste audio 1 » or « 2 »), else on its own.
+  const sound = { id, source: sourceOf(record), track: lane === 'music' || lane === 'effects' ? lane : track, at: round(Math.max(0, at)), from: 0, to: Math.max(MONTAGE_LIMITS.shortest, length ?? STILL_SECONDS), volume: track === 'music' ? 0.6 : 1 };
   return { ...montage, sounds: [...montage.sounds, sound] };
 }
 
@@ -203,7 +204,7 @@ export function montageSummary(montage) {
     plural = count > 1 ? 's' : '';
   return [
     // (0.6.142) « 2 plans à faire », « 3 plans dont 1 à faire ».
-    !count ? 'Aucun plan' : todo === count ? `${count} plan${plural} à faire` : `${count} plan${plural}` + (todo ? ` dont ${todo} à faire` : ''),
+    !count ? 'Aucune prise' : todo === count ? `${count} prise${plural} à créer` : `${count} prise${plural}` + (todo ? ` dont ${todo} à créer` : ''),
     ...(count ? [shownSeconds(seconds)] : []),
     montage.format,
     montage.fps + ' i/s',
@@ -306,7 +307,7 @@ export function withPhoto(montage, record, seconds, { id } = {}) {
       plans[plans.length - 1] = { ...last, to: tenth(clamp(at - start, TODO_LIMITS.shortest, TODO_LIMITS.longest)), photos: { ...last.photos, end: photo } };
       return { montage: { ...montage, plans }, chosen: last.id };
     }
-    if (plans.length >= MONTAGE_LIMITS.plans) return refused('Ce montage est plein.');
+    if (plans.length >= MONTAGE_LIMITS.plans) return refused('Cette bobine est pleine.');
     plans.push(todoPlan(id, at - total < TODO_LIMITS.shortest ? TODO_LIMITS.usual : at - total, { photos: { end: photo } }));
     return { montage: { ...montage, plans }, chosen: id };
   }
@@ -317,10 +318,10 @@ export function withPhoto(montage, record, seconds, { id } = {}) {
     plans[index] = { ...plan, photos: { ...plan.photos, [local < length / 2 ? 'start' : 'end']: photo } };
     return { montage: { ...montage, plans }, chosen: plan.id };
   }
-  if (plan.kind !== 'video') return refused('Une photo se pose au-dessus d’une vidéo ou d’un plan à faire, pas d’une image.');
-  if (local < 0.5) return refused('Posez la photo plus loin dans la vidéo : avant elle, il ne resterait rien de ce plan.');
-  if (length - local < TODO_LIMITS.shortest) return refused('Posez la photo plus tôt dans la vidéo, ou après la fin du film pour un nouveau plan.');
-  if (plans.length >= MONTAGE_LIMITS.plans) return refused('Ce montage est plein.');
+  if (plan.kind !== 'video') return refused('Une photo se pose au-dessus d’une vidéo ou d’une prise à créer, pas d’une image.');
+  if (local < 0.5) return refused('Posez la photo plus loin dans la vidéo : avant elle, il ne resterait rien de cette prise.');
+  if (length - local < TODO_LIMITS.shortest) return refused('Posez la photo plus tôt dans la vidéo, ou après la fin pour une nouvelle prise.');
+  if (plans.length >= MONTAGE_LIMITS.plans) return refused('Cette bobine est pleine.');
   const cut = round(plan.from + local);
   plans[index] = { ...plan, to: cut };
   plans.splice(index + 1, 0, todoPlan(id, length - local, { photos: { start: photo }, replaces: { source: plan.source, from: cut, to: plan.to } }));
@@ -400,7 +401,7 @@ export function seriesOf(montage, lengthOf = () => null) {
       link = linkOf(montage, plan.id, lengthOf),
       // (The plan before it is to make too: the last one read. Without its text it waits for nothing.)
       before = link.kind === 'wait' && prompt ? items.at(-1) : null,
-      reason = before ? (before.ready ? '' : `Il continue le plan ${index}, qui ne peut pas être créé.`) : (creationOf(montage, plan.id, lengthOf).reason ?? '');
+      reason = before ? (before.ready ? '' : 'Elle continue la prise d’avant, qui ne peut pas être créée.') : (creationOf(montage, plan.id, lengthOf).reason ?? '');
     items.push({
       id: plan.id,
       number: index + 1,
@@ -428,9 +429,9 @@ export function seriesOf(montage, lengthOf = () => null) {
 export function creationOf(montage, id, lengthOf = () => null) {
   const index = montage.plans.findIndex(plan => plan.id === id),
     plan = montage.plans[index];
-  if (!isTodo(plan)) return { reason: 'Ce plan est déjà fait.' };
+  if (!isTodo(plan)) return { reason: 'Cette prise est déjà créée.' };
   const prompt = (plan.todo.prompt ?? '').trim();
-  if (!prompt) return { reason: 'Écrivez ce qui se passe dans ce plan.' };
+  if (!prompt) return { reason: 'Écrivez ce qui se passe dans cette prise.' };
   const wanted = {
     verb: 'create_video',
     prompt,
@@ -442,10 +443,10 @@ export function creationOf(montage, id, lengthOf = () => null) {
   const link = linkOf(montage, id, lengthOf),
     before = montage.plans[index - 1];
   if (link.kind === 'photo') return { ...wanted, start: { source: plan.photos.start } };
-  if (link.kind === 'wait') return { reason: `Créez d’abord le plan ${index} : celui-ci le continue.` };
+  if (link.kind === 'wait') return { reason: 'Créez d’abord la prise d’avant : celle-ci la continue.' };
   if (link.kind === 'own') return wanted;
   if (link.kind === 'cut')
-    return { reason: `Le plan ${index} est coupé avant la fin de sa prise : rendez-lui sa fin, ou posez une photo de début sur ce plan.` };
+    return { reason: 'La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une photo de début.' };
   if (link.kind === 'last') return { ...wanted, start: { source: before.source, frame: 'last' } };
   const { format: _format, ...rest } = wanted;
   return { ...rest, verb: 'extend_video', continues: before.source, from: link.whole };

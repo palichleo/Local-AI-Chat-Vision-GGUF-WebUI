@@ -862,12 +862,12 @@ test('any page opens while a work goes on (0.6.81): the places and the menus sta
     status: { toolJob: { id: 'job', state: 'generating' } },
     work: { kind: 'turn', conversationId: 'current' },
   });
-  const places = ['chat-open', 'studio-open', 'library-open', 'thread-project', 'thread-conversation'].map(id => $(id));
+  const places = ['chat-open', 'studio-open', 'bobine-open', 'library-open', 'thread-project', 'thread-conversation'].map(id => $(id));
   globalThis.document.querySelectorAll = selector =>
-    selector === '#thread button,#chat-open,#studio-open,#library-open' ? places : [];
+    selector === '#thread button,#chat-open,#studio-open,#bobine-open,#library-open' ? places : [];
   ui.sync();
   // Until 0.6.80 they were greyed, without a word, as long as Moodix worked.
-  assert.deepEqual(places.map(place => place.disabled), [false, false, false, false, false]);
+  assert.deepEqual(places.map(place => place.disabled), [false, false, false, false, false, false]);
   // The menu of the conversations opens; a line opens its conversation.
   const menu = open('thread-conversation'),
     past = lines(menu).find(item => item.name === 'Past');
@@ -889,7 +889,7 @@ test('any page opens while a work goes on (0.6.81): the places and the menus sta
   // While Moodix AI sets the Studio on screen (2 to 3 s, 0.6.19), the places wait for it, and say why.
   state.studio = { settingUp: () => true };
   ui.sync();
-  assert.deepEqual(places.map(place => place.disabled), [true, true, true, true, true]);
+  assert.deepEqual(places.map(place => place.disabled), [true, true, true, true, true, true]);
   assert.equal($('studio-open').dataset.tip, 'Moodix AI règle le Studio…');
   state.studio = { settingUp: () => false };
   ui.sync();

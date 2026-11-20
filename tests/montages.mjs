@@ -47,7 +47,7 @@ test('a new montage is empty, at the usual size of its format, 24 frames a secon
   // The sizes offered are those of the format the other pages know, without the smallest drafts.
   assert.deepEqual(montageSizes('16:9').map(size => size.width), [512, 768, 1024, 1344, 1600, 1920]);
   assert.deepEqual(montageSizes('7:5'), []);
-  assert.throws(() => newMontage({ format: '7:5' }), /Format de montage inconnu/);
+  assert.throws(() => newMontage({ format: '7:5' }), /Format de bobine inconnu/);
 });
 
 test('a montage is kept as it is said, plans end to end: nothing else is carried over (0.6.136)', () => {
@@ -68,27 +68,27 @@ test('what cannot be a montage is refused in the user’s words (0.6.136)', () =
   const plan = film().plans[0],
     sound = film().sounds[0];
   for (const [changes, said] of [
-    [{ name: '  ' }, /nom du montage/],
-    [{ name: 'x'.repeat(81) }, /nom du montage/],
-    [{ format: '7:5' }, /Format de montage inconnu/],
+    [{ name: '  ' }, /nom de la bobine/],
+    [{ name: 'x'.repeat(81) }, /nom de la bobine/],
+    [{ format: '7:5' }, /Format de bobine inconnu/],
     [{ width: 1000 }, /n’est pas une taille du format 16:9/],
     [{ fps: 16 }, /Cadence/],
-    [{ schemaVersion: 2 }, /Version de montage inconnue/],
-    [{ plans: [{ ...plan, to: 0.05 }] }, /Plan 1 : sa durée va de 0.1 à 600 secondes/],
-    [{ plans: [{ ...plan, from: 3, to: 2 }] }, /Plan 1 : sa durée/],
-    [{ plans: [{ ...plan, kind: 'audio' }] }, /Plan 1 : ni vidéo ni image/],
+    [{ schemaVersion: 2 }, /Version de bobine inconnue/],
+    [{ plans: [{ ...plan, to: 0.05 }] }, /Prise 1 : sa durée va de 0.1 à 600 secondes/],
+    [{ plans: [{ ...plan, from: 3, to: 2 }] }, /Prise 1 : sa durée/],
+    [{ plans: [{ ...plan, kind: 'audio' }] }, /Prise 1 : ni vidéo ni image/],
     [{ plans: [{ ...plan, kind: 'image', from: 1, to: 3 }] }, /une image commence à 0/],
     [{ plans: [{ ...plan, frame: 'stretch' }] }, /cadre invalide/],
     [{ plans: [{ ...plan, volume: 3 }] }, /volume invalide/],
-    [{ plans: [{ ...plan, source: { conversationId: C, runId: '../x' } }] }, /Plan 1 : prise invalide/],
+    [{ plans: [{ ...plan, source: { conversationId: C, runId: '../x' } }] }, /Prise 1 : prise invalide/],
     [{ plans: [plan, { ...film().plans[1], id: plan.id }] }, /même identifiant/],
-    [{ plans: Array.from({ length: MONTAGE_LIMITS.plans + 1 }, (_, n) => ({ ...plan, id: id(n + 1) })) }, /au plus 200 plans/],
+    [{ plans: Array.from({ length: MONTAGE_LIMITS.plans + 1 }, (_, n) => ({ ...plan, id: id(n + 1) })) }, /au plus 200 prises/],
     [{ sounds: [{ ...sound, track: 'voice' }] }, /Son 1 : piste inconnue/],
     [{ sounds: [{ ...sound, at: -1 }] }, /Son 1 : durée invalide/],
     [{ sounds: [{ ...sound, to: 0 }] }, /Son 1 : trop court/],
   ])
     assert.throws(() => validateMontage(film(changes)), said, JSON.stringify(changes).slice(0, 80));
-  for (const wrong of [null, [], 'x']) assert.throws(() => validateMontage(wrong), /Montage invalide/);
+  for (const wrong of [null, [], 'x']) assert.throws(() => validateMontage(wrong), /Bobine invalide/);
 });
 
 test('the montages of a project are files of it: kept, listed, read, and set aside rather than destroyed (0.6.136)', async t => {
@@ -151,13 +151,13 @@ test('what the engine assembles is the montage with the file of each take (0.6.1
     // (A sound that starts after the end of the film, 10 s, is not part of it.)
     sounds: [{ path: 'D:\\sorties\\00000016.mp4', at: 0, from: 0, to: 30, volume: 0.4 }],
   });
-  assert.deepEqual(asked, ['Plan 1', 'Plan 2', 'Plan 3', 'Son 1']);
-  await assert.rejects(assemblyOf(newMontage(), fileOf), /aucun plan/);
+  assert.deepEqual(asked, ['Prise 1', 'Prise 2', 'Prise 3', 'Son 1']);
+  await assert.rejects(assemblyOf(newMontage(), fileOf), /aucune prise/);
   // A take that is gone stops the export with the plan that names it.
   const gone = async (source, label) => {
     throw new Error(`${label} : cette prise n’existe plus.`);
   };
-  await assert.rejects(assemblyOf(validateMontage(film()), gone), /Plan 1 : cette prise n’existe plus/);
+  await assert.rejects(assemblyOf(validateMontage(film()), gone), /Prise 1 : cette prise n’existe plus/);
 });
 
 test('the film of a montage is assembled from the files of its takes and kept as a take of the conversation (0.6.136)', async () => {
@@ -187,12 +187,12 @@ test('the film of a montage is assembled from the files of its takes and kept as
     persist: true,
     onProgress: value => told.push(value.stage),
     id: id(500),
-    name: '2026-11-20_03-00-00_montage_ab12',
+    name: '2026-11-20_03-00-00_bobine_ab12',
     now: () => times.shift(),
   });
   // The engine is asked for the film of the montage, each plan by its file.
   assert.deepEqual(asked[0].plans.map(plan => plan.path), ['D:/sorties/video/prise-12.mp4', 'D:/sorties/video/prise-14.mp4', 'D:/sorties/video/prise-9.mp4']);
-  assert.deepEqual([asked[0].id, asked[0].outputName, asked[0].width, asked[0].fps, asked[0].sounds.length], [id(500), '2026-11-20_03-00-00_montage_ab12', 1344, 24, 1]);
+  assert.deepEqual([asked[0].id, asked[0].outputName, asked[0].width, asked[0].fps, asked[0].sounds.length], [id(500), '2026-11-20_03-00-00_bobine_ab12', 1344, 24, 1]);
   assert.deepEqual(told, ['assembling film']);
   // The film is a video of the conversation, named by its montage, with what tells its length.
   const [[record, options]] = kept;
@@ -205,22 +205,22 @@ test('the film of a montage is assembled from the files of its takes and kept as
       id: id(500),
       conversationId: C,
       workflowId: 'montage',
-      workflowName: 'Montage',
+      workflowName: 'Bobine',
       prompt: 'Le pêcheur à l’aube',
       parameters: undefined,
       createdAt: '2026-11-20T03:00:02.500Z',
-      outputs: [{ source: { filename: '2026-11-20_03-00-00_montage_ab12.mp4', subfolder: 'video', type: 'output', width: 1344, height: 768 }, width: 1344, height: 768 }],
+      outputs: [{ source: { filename: '2026-11-20_03-00-00_bobine_ab12.mp4', subfolder: 'video', type: 'output', width: 1344, height: 768 }, width: 1344, height: 768 }],
     },
   );
   assert.deepEqual(record.parameters, { montage: id(900), plans: 3, sounds: 1, seconds: 10, width: 1344, height: 768, fps: 24, frames: 240, generation_duration_ms: 2500 });
   assert.equal(saved.outputs[0].take, 18);
   // A take that is gone, or of another project, stops the export by the plan that names it; nothing is kept.
   const lacking = validateMontage(film({ plans: [{ id: id(1), source: take(77), kind: 'video', from: 0, to: 2 }], sounds: [] }));
-  await assert.rejects(exportMontage({ montage: lacking, conversationId: C, fileOf, assemble, gallery }), /Plan 1 : cette prise n’existe plus/);
+  await assert.rejects(exportMontage({ montage: lacking, conversationId: C, fileOf, assemble, gallery }), /Prise 1 : cette prise n’existe plus/);
   const elsewhere = takeFiles({ project, gallery, pathOf: async () => 'x', projectOf: async () => 'inbox' });
-  await assert.rejects(exportMontage({ montage: validateMontage(film()), conversationId: C, fileOf: elsewhere, assemble, gallery }), /Plan 1 : cette prise est d’un autre projet/);
+  await assert.rejects(exportMontage({ montage: validateMontage(film()), conversationId: C, fileOf: elsewhere, assemble, gallery }), /Prise 1 : cette prise est d’un autre projet/);
   const unreadable = takeFiles({ project, gallery, pathOf: async () => Promise.reject(new Error('no file')), projectOf: async () => project });
-  await assert.rejects(exportMontage({ montage: validateMontage(film()), conversationId: C, fileOf: unreadable, assemble, gallery }), /Plan 1 : cette prise n’existe plus/);
+  await assert.rejects(exportMontage({ montage: validateMontage(film()), conversationId: C, fileOf: unreadable, assemble, gallery }), /Prise 1 : cette prise n’existe plus/);
   await assert.rejects(exportMontage({ montage: validateMontage(film()), conversationId: C, fileOf, assemble: async () => ({ outputs: [] }), gallery }), /n’a pas rendu de film/);
   assert.equal(kept.length, 1);
 });

@@ -226,7 +226,7 @@ test('a file left zeros by a computer cut off: its version before is taken back 
   assert.deepEqual(history.takeRecovered(), []);
   assert.equal((await history.read(mended)).messages.length, 2);
   assert.ok((await readdir(join(directory, mended))).some(name => /^conversation\.illisible-.+\.json$/.test(name)), 'the damaged file kept beside it');
-  await assert.rejects(history.read(lost), error => error.status === 422 && /son fichier est abîmé .*corbeille/.test(error.message));
+  await assert.rejects(history.read(lost), error => error.status === 422 && /son fichier est abîmé .*ses prises restent dans les Archives\. .*corbeille/.test(error.message));
   // Saved again by the page that holds it: not refused for ever any more.
   await history.save(conversation(lost, 6, 'Perdue'));
   assert.equal((await history.read(lost)).messages.length, 6);

@@ -18277,3 +18277,643 @@ html[data-page-hidden='true'] .montage-piece.is-making::after {
   border-style: solid;
   border-color: rgba(238, 232, 222, 0.55);
 }
+
+/* ================================================================== La Bobine (0.6.148) */
+/* La Bobine (ex-Montage) : une page à elle, au niveau du projet (bobine-maquette.md, captures 70 à 92).
+   Trois colonnes fixes (Prises · aperçu · À créer), puis la timeline sur toute la largeur. Le centre ne
+   bouge jamais. Le fil en haut : « projet / bobine », puis « Exporter ». Gris et ivoire seulement ;
+   l'ambre dit un échec ou un modèle absent. */
+.bobine-view {
+  display: none;
+}
+body[data-view='bobine'] .bobine-view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 0 var(--pad) 18px;
+}
+body[data-view='bobine'] .chat-area,
+body[data-view='bobine'] .composer-region {
+  display: none !important;
+}
+body[data-view='bobine'] .chat-panel {
+  display: none;
+}
+/* Le fil : le projet (le même bouton que dans le Chat, déplacé ici), puis « / bobine ⌄ ». */
+.bobine-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+}
+.bobine-thread {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.bobine-thread > .thread {
+  min-width: 0;
+  margin: 0 0 0 -9px;
+}
+.thread[data-scope='bobine'] :is(.thread-slash, .thread-conversation) {
+  display: none;
+}
+.bobine-fil {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bobine-fil-gap {
+  flex: 1 1 auto;
+}
+#bobine-view .bobine-fil button.montage-pick.glass-select {
+  width: auto;
+  max-width: 360px;
+  height: 33px;
+  min-height: 0;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-1);
+  font: 500 15px/1 var(--font-ui);
+}
+#bobine-view .bobine-fil button.montage-pick.glass-select:hover:enabled {
+  background: rgba(238, 232, 222, 0.07);
+}
+#bobine-view .bobine-fil input.bobine-name {
+  width: 260px;
+  height: 33px;
+  min-height: 0;
+  padding: 0 10px;
+  border-radius: var(--radius-s);
+  font: 500 15px/1 var(--font-ui);
+}
+.bobine-ask {
+  font: 400 13px/1.2 var(--font-ui);
+  color: var(--text-1);
+  white-space: nowrap;
+}
+.bobine-ask-go,
+.bobine-ask-no {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  font: 500 12.5px/1 var(--font-ui);
+  cursor: pointer;
+}
+.bobine-ask-go {
+  border-color: rgba(var(--warning-rgb, 214, 160, 90), 0.5);
+  color: var(--warning);
+}
+#bobine-view .bobine-fil .montage-status {
+  max-width: 340px;
+  font: 400 12.5px/1 var(--font-ui);
+  color: var(--muted);
+}
+/* « Exporter », comme les boutons de verre du fil (capture 70) : contour fin, son icône. */
+#bobine-view .montage-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(238, 232, 222, 0.14);
+  border-radius: 10px;
+  background: rgba(20, 19, 24, 0.6);
+  color: var(--ink);
+  font: 500 13.5px/1 var(--font-ui);
+}
+#bobine-view .montage-export svg {
+  width: 15px;
+  height: 15px;
+}
+#bobine-view .montage-export:hover:enabled {
+  border-color: rgba(238, 232, 222, 0.3);
+}
+#bobine-view .montage-export:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* La page : trois colonnes fixes, la timeline en dessous. */
+.bobine-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+#bobine-view .bobine-desk {
+  --line-h: 262px;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  display: grid;
+  gap: 14px;
+  align-content: stretch;
+  grid-template-columns: 300px minmax(0, 1fr) 300px;
+  grid-template-rows: minmax(0, 1fr) var(--line-h);
+  grid-template-areas: 'takes prev create' 'line line line';
+}
+@media (max-height: 760px) {
+  #bobine-view .bobine-desk {
+    --line-h: 240px;
+  }
+}
+#bobine-view .bobine-desk:focus,
+#bobine-view .montage-timeline:focus {
+  outline: none;
+}
+#bobine-view .bobine-desk > .montage-takes {
+  grid-area: takes;
+}
+#bobine-view .bobine-desk > .montage-screen {
+  grid-area: prev;
+}
+#bobine-view .bobine-desk > .bobine-create {
+  grid-area: create;
+}
+#bobine-view .bobine-desk > .montage-timeline {
+  grid-area: line;
+}
+#bobine-view .studio-block {
+  min-height: 0;
+  border: 1px solid rgba(238, 232, 222, 0.08);
+  border-radius: 12px;
+  background: rgba(var(--room-glass), 0.46);
+  box-shadow: none;
+}
+#bobine-view .studio-block.montage-takes {
+  --block-pad: 14px 16px 12px;
+}
+#bobine-view .montage-takes > .studio-block-body {
+  gap: 10px;
+  overflow: hidden;
+}
+/* Les prises du projet (capture 70) : « PRISE n » et sa durée, ou « IMAGE », sur fond sombre. */
+#bobine-view .montage-take {
+  height: 70px;
+}
+#bobine-view .montage-take:is([data-kind='video'], [data-kind='image'])::after {
+  content: none;
+}
+#bobine-view .montage-take-number,
+#bobine-view .montage-take-length {
+  top: 6px;
+  bottom: auto;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: rgba(10, 10, 12, 0.78);
+  text-shadow: none;
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+#bobine-view .montage-take-number {
+  left: 6px;
+}
+#bobine-view .montage-take-length {
+  right: 6px;
+}
+#bobine-view .montage-none {
+  font: 400 12px/1.4 var(--font-ui);
+}
+/* L'aperçu, sans bloc autour : le cadre au format de la bobine, puis la lecture et le format. */
+#bobine-view .studio-block.montage-screen {
+  border: 0;
+  background: none;
+  --block-pad: 0;
+}
+#bobine-view .montage-screen > .studio-block-body {
+  gap: 12px;
+}
+#bobine-view .montage-transport {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+#bobine-view .montage-play {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(238, 232, 222, 0.18);
+  border-radius: 50%;
+  background: rgba(20, 19, 24, 0.6);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#bobine-view .montage-clock,
+#bobine-view .montage-clock-total {
+  font: 400 14px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+#bobine-view .montage-clock-total {
+  color: var(--muted);
+}
+#bobine-view .montage-transport button.montage-format.glass-select {
+  width: auto;
+  min-width: 0;
+  height: 34px;
+  min-height: 0;
+  padding: 0 12px;
+  border-radius: 8px;
+  font: 400 12px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+}
+#bobine-view .montage-blank {
+  border: 1px solid rgba(238, 232, 222, 0.08);
+  background: rgba(12, 11, 15, 0.9);
+  color: rgba(238, 232, 222, 0.3);
+}
+#bobine-view .montage-blank svg {
+  width: 44px;
+  height: 44px;
+}
+/* (Capture 83) Une prise à créer, sous la tête : d'où elle part, voilé, en pointillés ; son texte, et sa photo de fin. */
+.montage-frame[data-todo='true'] {
+  outline: 1px dashed rgba(238, 232, 222, 0.4);
+  outline-offset: -1px;
+}
+.montage-frame[data-todo='true'] > :is(img, video) {
+  opacity: 0.42;
+  filter: saturate(0.7);
+}
+.montage-frame[data-busy='true'] > :is(img, video) {
+  opacity: 0.8;
+  filter: blur(14px) saturate(0.8);
+}
+.montage-frame-words {
+  position: absolute;
+  left: 14px;
+  right: 130px;
+  bottom: 12px;
+  margin: 0;
+  font: 400 14px/1.45 var(--font-ui);
+  color: var(--ink);
+  text-shadow: 0 1px 6px #000;
+}
+.montage-frame-end {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 104px;
+  height: 58px;
+  border: 1px solid rgba(238, 232, 222, 0.4);
+  border-radius: 6px;
+  background: #000 center / cover no-repeat;
+}
+.montage-frame-end-label {
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: rgba(10, 10, 12, 0.78);
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.montage-frame > [hidden] {
+  display: none;
+}
+/* « À créer », toujours là (capture 70). */
+#bobine-view .studio-block.bobine-create {
+  --block-pad: 18px 18px 16px;
+}
+#bobine-view .bobine-create > .studio-block-body {
+  gap: 0;
+}
+.bobine-create-title {
+  flex: none;
+  margin: 0 0 8px;
+  font: 400 26px/1.1 var(--font-display);
+  color: var(--ink);
+}
+.bobine-lines {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.bobine-line {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(238, 232, 222, 0.06);
+  cursor: pointer;
+}
+.bobine-line:first-child {
+  border-top: 0;
+}
+.bobine-line-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.bobine-line-when,
+.bobine-line-right {
+  font: 400 12px/1.2 var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.bobine-line[aria-pressed='true'] .bobine-line-when {
+  color: var(--ink);
+}
+.bobine-line-right[data-state='true'] {
+  color: var(--ink);
+  text-transform: uppercase;
+}
+.bobine-line-right[data-missing='true'],
+.bobine-line[data-state='failed'] .bobine-line-right {
+  color: var(--warning);
+}
+.bobine-line-what {
+  font: 400 12.5px/1.3 var(--font-ui);
+  color: var(--muted);
+}
+#bobine-view .bobine-desk textarea.bobine-line-words {
+  height: 58px;
+  min-height: 0;
+  padding: 9px 11px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: none;
+}
+.bobine-line[data-state='failed'] textarea.bobine-line-words {
+  border-color: rgba(214, 160, 90, 0.55);
+}
+.bobine-line-reason {
+  margin: 0;
+  font: 400 12px/1.35 var(--font-ui);
+  color: var(--warning);
+}
+.bobine-halt {
+  flex: none;
+  align-self: flex-start;
+  height: 30px;
+  margin: 8px 0 0;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  font: 500 12.5px/1 var(--font-ui);
+  cursor: pointer;
+}
+/* Le bouton, en verre, en parts (capture 70) : « ▶ Créer 2 prises » | l'Éclipse ; en création, il se remplit (capture 87). */
+.bobine-go {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 46px;
+  margin-top: 12px;
+  border: 1px solid rgba(238, 232, 222, 0.16);
+  border-radius: 12px;
+  background: rgba(238, 232, 222, 0.05);
+  overflow: hidden;
+}
+.bobine-go-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 500 15px/1 var(--font-ui);
+  cursor: pointer;
+}
+.bobine-go-main svg {
+  width: 13px;
+  height: 13px;
+}
+.bobine-go-main:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.bobine-go-main[data-state='running'] {
+  color: var(--ink);
+  font: 500 14px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.bobine-go-main[data-state='running'] svg {
+  display: none;
+}
+.bobine-go-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: rgba(238, 232, 222, 0.1);
+  transition: width 0.5s linear;
+}
+.bobine-go-label {
+  position: relative;
+}
+.bobine-go-part {
+  flex: none;
+  width: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-left: 1px solid rgba(238, 232, 222, 0.12);
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.bobine-go-part svg {
+  width: 17px;
+  height: 17px;
+}
+.bobine-go-part:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.bobine-go-part:enabled:hover,
+.bobine-go-main:enabled:hover {
+  background: rgba(238, 232, 222, 0.06);
+}
+.bobine-go-part[hidden] {
+  display: none;
+}
+/* La timeline, sur toute la largeur. */
+#bobine-view .studio-block.montage-timeline {
+  height: auto;
+  padding: 0;
+}
+#bobine-view .montage-timeline > .studio-block-body {
+  gap: 0;
+  padding: 8px 0 0;
+}
+.bobine-desk[data-held] {
+  user-select: none;
+}
+.bobine-desk[data-held='move'] * {
+  cursor: grabbing !important;
+}
+.bobine-desk[data-held='trim'] * {
+  cursor: ew-resize !important;
+}
+/* Ce qui est sur la piste Prises (captures 70, 74, 87) : « PRISE n » en haut à gauche, la durée en bas à
+   droite ; une prise à créer en pointillés, avec son texte sur deux lignes ; une suite « ↳ SUITE ». */
+#bobine-view .montage-piece-name {
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: rgba(10, 10, 12, 0.72);
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#bobine-view .montage-piece-name:empty {
+  display: none;
+}
+#bobine-view .montage-piece-length {
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: rgba(10, 10, 12, 0.72);
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* (Sous ce qu'elle dit d'elle quand elle dit quelque chose ; jamais sur sa durée, en bas à droite.) */
+#bobine-view .montage-piece.is-todo > .montage-piece-kind {
+  top: 9px;
+  right: 10px;
+  bottom: auto;
+  max-width: none;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  font: 400 12px/1.35 var(--font-ui);
+  color: rgba(238, 232, 222, 0.82);
+}
+#bobine-view .montage-piece:not(.is-todo) > .montage-piece-kind {
+  display: none;
+}
+#bobine-view .montage-piece.is-failed {
+  border-color: rgba(214, 160, 90, 0.75);
+}
+#bobine-view .montage-piece.is-failed > .montage-piece-name {
+  color: var(--warning);
+}
+#bobine-view .montage-piece.is-sound > .montage-piece-name {
+  background: #141318;
+  font: 400 12px/1.1 var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+}
+#bobine-view .montage-piece.is-sound > .montage-piece-length {
+  top: 5px;
+  bottom: auto;
+}
+/* La petite barre au-dessus de ce qui est choisi (captures 80 et 81) : opaque, des icônes seules. */
+.montage-pop-layer {
+  grid-area: 1 / 2;
+  position: relative;
+  align-self: stretch;
+  pointer-events: none;
+}
+.montage-lane {
+  grid-area: 1 / 2;
+}
+.montage-pop {
+  position: absolute;
+  z-index: 6;
+  bottom: calc(100% + 6px);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid rgba(238, 232, 222, 0.22);
+  border-radius: 10px;
+  background: #16151a;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+.montage-pop-button {
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.montage-pop-button svg {
+  width: 16px;
+  height: 16px;
+}
+.montage-pop-button:hover,
+.montage-pop-button:focus-visible {
+  background: rgba(238, 232, 222, 0.08);
+  color: var(--ink);
+}
+.montage-pop-button[aria-pressed='true'] {
+  background: rgba(238, 232, 222, 0.12);
+  color: var(--ink);
+}
+.montage-pop-rule {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: rgba(238, 232, 222, 0.14);
+}
+.montage-pop-volume {
+  width: 110px;
+}
+.montage-pop-figure {
+  min-width: 46px;
+  font: 400 12px/1 var(--font-mono);
+  text-align: right;
+  color: var(--ink);
+}
+#bobine-view .montage-piece.is-todo > .montage-piece-name:not(:empty) + .montage-piece-kind {
+  top: 31px;
+  -webkit-line-clamp: 1;
+}
+#bobine-view .montage-piece.is-todo > .montage-piece-length {
+  bottom: 7px;
+}
+#bobine-view .montage-track[data-track='plans'] {
+  flex: 1 1 84px;
+  max-height: 92px;
+}
+/* (« PISTE AUDIO 1 » entière : la colonne des noms est plus large ici ; la règle et la tête suivent.) */
+#bobine-view .montage-track {
+  grid-template-columns: 108px minmax(0, 1fr);
+}
+#bobine-view .montage-ruler {
+  margin-left: 126px;
+}
+#bobine-view .montage-ruler::before {
+  left: -126px;
+}
+#bobine-view .montage-over {
+  left: 126px;
+}

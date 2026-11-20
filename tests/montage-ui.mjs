@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setupMontage } from '../public/montage.mjs';
+import { mono, setupMontage } from '../public/montage.mjs';
 
-// (0.6.137) The « Montage » mode of the Studio (maquettes M2 à M4, « Oui, code-le » du 20/11): takes of
-// the project laid by hand on a timeline, read on the screen, exported as one film.
+// (0.6.148) La Bobine (ex-Montage, the fourth mode of the Studio from 0.6.137 to 0.6.146): a page of its
+// own, three fixed columns (« Prises », the preview, « À créer ») over a timeline of four tracks, a small
+// bar above what is chosen, the fil at the top (maquette « La Bobine », captures 70 à 92).
 class Fake {
   constructor(tag, className = '', text = '') {
     Object.assign(this, { tagName: tag.toUpperCase(), className, own: text, children: [], dataset: {}, attributes: {}, hidden: false, paused: true, currentTime: 0 });
@@ -71,6 +72,8 @@ const take = (n, mediaType, more = {}) => ({
   outputs: [{ take: n, originalUrl: `/media/${n}`, ...(mediaType === 'audio' ? {} : { thumbUrl: `/thumb/${n}` }) }],
   ...more,
 });
+const INTENTION = 'Prise d’une bobine, demandée dans la Bobine.',
+  FILM = { width: 1344, height: 768 };
 
 function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {} } = {}) {
   const calls = [],
@@ -98,10 +101,13 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
       return { json: async () => saved };
     }
     if (route === 'montages/export') return { json: async () => ({ id: id(500), outputs: [{ take: 18 }] }) };
-    if (route === 'montages/remove') return void kept.delete(body.id) ?? { json: async () => ({ removed: body.id }) };
+    if (route === 'montages/remove') {
+      kept.delete(body.id);
+      return { json: async () => ({ removed: body.id }) };
+    }
     const found = kept.get(route.split('/').pop());
     if (found) return { json: async () => found };
-    throw new Error('Ce montage n’existe plus.');
+    throw new Error('Cette bobine n’existe plus.');
   };
   const notices = [],
     heard = new Map(),
@@ -136,9 +142,10 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
     saves: () => calls.filter(call => call.route === 'montages/save'),
     refreshed: () => refreshed,
     halted: () => halted,
-    // (0.6.142) The lanes of the plans and of the sounds, in their order; the one of the photos, above them.
+    // The lanes of the takes and of the two audio tracks, in their order; the one of the photos, above them.
     lanes: () => find(f.root, 'montage-lane').filter(lane => !String(lane.className).includes('montage-photos')),
     photos: () => find(f.root, 'montage-photos')[0],
+    track: name => find(f.root, 'montage-track').find(track => track.dataset.track === name),
     // The pointer once pressed on the timeline: moved to `clientX`, let go; how many listeners are left.
     pointer: { move: clientX => heard.get('pointermove')?.({ clientX }), up: () => heard.get('pointerup')?.({}), held: () => heard.size },
     press: (target, clientX) => target.onpointerdown({ clientX, button: 0, stopPropagation() {} }),
@@ -153,134 +160,164 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
     get: name => find(f.root, name),
     said: name => find(f.root, name).map(item => item.textContent),
     plans: () => find(f.root, 'montage-piece').filter(piece => !piece.className.includes('is-sound')),
+    // What each take of the timeline says: its name (or its state), its length.
+    names: () => f.plans().map(piece => piece.children[0].textContent),
+    lengths: () => f.plans().map(piece => find(piece, 'montage-piece-length')[0].textContent),
     slider: label => find(f.root, 'montage-range').find(input => input.attributes['aria-label'] === label),
-    button: label => find(f.root, 'montage-action').concat(find(f.root, 'montage-step'), find(f.root, 'montage-choice')).find(control => control.textContent === label),
+    // A button by its words, or by the words of its icon (« Remplir » for « Remplir : plein cadre… »).
+    button: label =>
+      under(f.root).find(item => {
+        const tip = item.attributes?.['aria-label'] ?? '';
+        return item.tagName === 'BUTTON' && (tip === label || tip.startsWith(label + ' :') || item.textContent === label);
+      }),
+    // The small bar of what is chosen: the words of its controls.
+    pop: () => f.get('montage-pop')[0],
+    popLabels: () => under(f.pop()).slice(1).map(item => item.attributes['aria-label']).filter(Boolean),
+    // « À créer »: each line, [its instants, its model or state, what it is, why it cannot be created].
+    lines: () =>
+      f.get('bobine-line').map(line => [
+        find(line, 'bobine-line-when')[0].textContent,
+        find(line, 'bobine-line-right')[0].textContent,
+        find(line, 'bobine-line-what')[0].textContent,
+        find(line, 'bobine-line-reason').map(reason => reason.textContent).join(''),
+      ]),
+    write: (at, words) => Object.assign(f.get('bobine-line-words')[at], { value: words }).oninput(),
+    go: () => f.said('bobine-go-label')[0],
+    goMain: () => f.get('bobine-go-main')[0],
+    pick: value => Object.assign(f.get('montage-pick')[0], { value }).onchange(),
   };
   f.open = async () => {
-    f.root = ui.desk(new Fake('div', 'kind-tabs'));
+    f.root = ui.desk();
     await settle();
     await settle();
-    // (Drawn again once its montages are read: the same root.)
+    // (Drawn again once its bobines are read: the same root.)
     return f;
   };
   return f;
 }
 
-test('a new montage shows the takes of the project and invites to lay them; nothing is kept yet (0.6.137)', async () => {
+test('the instants of the page are said in mono: seconds and hundredths, then minutes (0.6.148)', () => {
+  assert.deepEqual([0, 5, 6.04, 5.0417, 59.999, 62.5, 125].map(mono), ['00.00', '05.00', '06.04', '05.04', '1:00.00', '1:02.50', '2:05.00']);
+});
+
+test('a new bobine shows the takes of the project, its four tracks and « À créer »; nothing is kept yet (0.6.137, 0.6.148)', async () => {
   const f = await setup().open();
-  assert.deepEqual(f.said('montage-take-number'), ['PRISE 1', 'PRISE 2', 'PRISE 3', 'PRISE 4']);
-  assert.deepEqual(f.said('montage-take-kind'), ['Vidéo', 'Vidéo', 'Image', 'Musique']);
-  assert.deepEqual(f.said('montage-take-length'), ['5 s', '3 s', '', '30 s']);
-  assert.deepEqual(f.said('montage-summary'), ['Aucun plan · 16:9 · 24 i/s']);
-  assert.deepEqual(f.said('montage-invite'), ['Une photo posée ici : un plan part d’elle, ou arrive sur elle', 'Les vidéos et les images, dans l’ordre du film', 'Une musique sous tout le film', 'Des sons, où vous les posez']);
-  assert.deepEqual(f.said('montage-blank-title'), ['Votre montage se lira ici.']);
-  assert.deepEqual(f.said('montage-title-name'), ['Nouveau montage']);
+  // Its fil at the top of the page when the page gives none.
+  assert.deepEqual([f.root.className, f.root.children[0].className], ['studio-desk bobine-desk', 'bobine-fil']);
+  assert.deepEqual(f.root.children.slice(1).map(part => part.className), [
+    'studio-block is-settings montage-takes',
+    'studio-block is-preview montage-screen',
+    'studio-block is-settings bobine-create',
+    'studio-block is-output montage-timeline',
+  ]);
+  assert.deepEqual(f.said('montage-take-number'), ['Prise 1', 'Prise 2', 'Prise 3', 'Prise 4']);
+  assert.deepEqual(f.said('montage-take-length'), ['05.00 s', '03.00 s', 'Image', '30.00 s']);
+  assert.deepEqual(f.said('montage-track-name'), ['Photos', 'Prises', 'Piste audio 1', 'Piste audio 2']);
+  // The preview of an empty bobine: its frame and the Éclipse, no words.
+  const [blank] = f.get('montage-blank');
+  assert.deepEqual([blank.hidden, blank.children.map(child => child.className), blank.textContent], [false, ['icon-eclipse'], '']);
+  // The format under the preview, said with its size.
+  const [format] = f.get('montage-format');
+  assert.equal(format.children.find(option => option.selected).dataset.face, '16:9  1344 × 768');
+  // The fil: the bobine, what it can do (no « Supprimer » for one not kept), « Exporter ».
+  assert.deepEqual(f.get('montage-pick')[0].children.map(option => [option.textContent, option.value, Boolean(option.selected)]), [
+    ['Sans titre', f.ui.state().montage.id, true],
+    ['+ Nouvelle bobine', 'new', false],
+    ['Renommer la bobine', 'rename', false],
+  ]);
   const [go] = f.get('montage-export');
-  assert.deepEqual([go.disabled, go.textContent, f.get('montage-play')[0].disabled], [true, 'Exporter le film', true]);
-  // The tabs of the Studio are in the head of the screen, as in its other modes.
-  assert.equal(f.get('montage-screen-head')[0].children[0].className, 'kind-tabs');
+  assert.deepEqual([go.disabled, go.textContent, go.title, go.children[0].className], [true, 'Exporter', 'Posez au moins une prise pour exporter un film', 'icon-download']);
+  assert.equal(f.get('montage-play')[0].disabled, true);
+  // « À créer », always there: nothing in it, its button says « Créer » and waits.
+  assert.deepEqual([f.said('bobine-create-title'), f.get('bobine-line').length, f.go(), f.goMain().disabled], [['À créer'], 0, 'Créer', true]);
   assert.deepEqual(f.calls.map(call => call.route), ['montages/inbox']);
   // A kind alone: the others leave the grid, the count stays that of the project.
   f.get('montage-filter')[3].onclick();
-  assert.deepEqual([f.said('montage-take-number'), f.said('montage-count')], [['PRISE 4'], ['4']]);
+  assert.deepEqual([f.said('montage-take-number'), f.said('montage-count')], [['Prise 4'], ['4']]);
   f.get('montage-filter')[2].onclick();
-  assert.deepEqual(f.said('montage-take-number'), ['PRISE 3']);
+  assert.deepEqual(f.said('montage-take-number'), ['Prise 3']);
 });
 
-test('takes laid by a double click or Enter become plans and sounds, kept a moment later, once (0.6.137)', async () => {
+test('takes laid by a double click or Enter go on their tracks, kept a moment later, once (0.6.137, 0.6.148)', async () => {
   const f = await setup().open();
   f.get('montage-take')[0].ondblclick();
   f.get('montage-take')[2].onkeydown({ key: 'Enter' });
   f.get('montage-take')[3].ondblclick();
   f.get('montage-take')[1].onkeydown({ key: 'Tab' });
-  assert.deepEqual(f.plans().map(piece => piece.textContent), ['1 · PRISE 1Vidéo5 s', '2 · PRISE 3Image3 s']);
-  assert.deepEqual(find(f.root, 'is-sound').map(piece => piece.textContent), ['Prise 4 · Prise 4']);
-  assert.deepEqual(f.said('montage-summary'), ['2 plans · 8 s · 16:9 · 24 i/s']);
+  assert.deepEqual([f.names(), f.lengths()], [['Prise 1', 'Prise 3'], ['05.00 s', '03.00 s']]);
+  // The music on « Piste audio 1 », at 60 %.
+  const sounds = find(f.root, 'is-sound');
+  assert.deepEqual(sounds.map(piece => piece.children.map(part => part.textContent)), [['Prise 4 · Prise 4', '60 %']]);
+  assert.deepEqual([f.lanes()[1].children, f.lanes()[2].children], [sounds, []]);
   // Placed at the scale of the timeline: ten seconds at least, here the thirty of the music.
   assert.deepEqual(f.plans().map(piece => [piece.style.left, piece.style.width]), [['0%', 'calc(16.666666666666668% - 4px)'], ['16.666666666666668%', 'calc(10% - 4px)']]);
-  // The last laid is the one chosen: its settings at the right.
-  assert.deepEqual(f.said('montage-title-name'), ['Musique · Prise 4']);
+  // The last laid is the one chosen: its small bar above it, on its track.
+  assert.equal(f.ui.state().chosen, f.ui.state().montage.sounds[0].id);
+  assert.deepEqual([find(f.track('music'), 'montage-pop').length, f.pop().attributes['aria-label'], f.popLabels(), f.said('montage-pop-figure')], [1, 'Réglages du son', ['Volume', 'Ouvrir la prise', 'Retirer de la bobine (Suppr)'], ['60 %']]);
+  assert.equal(f.pop().style.left, 'clamp(0px, 0%, calc(100% - 240px))');
   assert.equal(f.saves().length, 0, 'not kept at every change');
   await f.later();
   assert.equal(f.saves().length, 1);
   const { project, montage } = f.saves()[0].body;
   assert.deepEqual([project, montage.plans.length, montage.sounds.length, montage.name, montage.width, montage.fps], ['inbox', 2, 1, 'Sans titre', 1344, 24]);
   assert.deepEqual(f.said('montage-status'), ['Enregistré']);
-  assert.equal(f.get('montage-export')[0].disabled, false);
+  // Kept: the fil can take it out now, and « Exporter » makes its film.
+  assert.deepEqual(f.get('montage-pick')[0].children.map(option => option.textContent), ['Sans titre', '+ Nouvelle bobine', 'Renommer la bobine', 'Supprimer la bobine']);
+  assert.deepEqual([f.get('montage-export')[0].disabled, f.get('montage-export')[0].title], [false, 'Un seul fichier : le film dans VIDEO, et une prise du projet']);
+  // It follows the bobine at once, the fil not drawn again: no take, no film.
+  const fil = f.get('montage-pick')[0];
+  for (const piece of f.plans()) piece.onkeydown({ key: 'Delete' });
+  assert.deepEqual([f.get('montage-export')[0].disabled, f.get('montage-export')[0].title, f.get('montage-pick')[0]], [true, 'Posez au moins une prise pour exporter un film', fil]);
 });
 
-test('a plan chosen is cut, framed, moved and taken out from its settings (0.6.137)', async () => {
+test('the small bar of a take chosen: its sound, its frame, opened, taken out; a second click or Échap closes it (0.6.148)', async () => {
+  // (Captures 80 et 81: no panel of settings any more, a small bar above the take, icons, their words on hover.)
   const f = await setup().open();
   for (const at of [0, 1, 2]) f.get('montage-take')[at].ondblclick();
+  const plan = at => f.ui.state().montage.plans[at];
   f.plans()[0].onclick();
   assert.deepEqual(f.plans().map(piece => piece.attributes['aria-pressed']), ['true', 'false', 'false']);
-  assert.deepEqual(f.said('montage-title-name'), ['Plan 1 · Prise 1']);
-  assert.deepEqual(f.said('montage-title-meta'), ['Vidéo · Wan 2.2 · 5 s à l’origine']);
-  assert.deepEqual(f.said('montage-row-name'), ['Début gardé', 'Fin gardée', 'Durée', 'Cadre', 'Son du clip', 'Place']);
-  // Its end brought to two seconds, its start to half a second: a second and a half of it is kept.
-  Object.assign(f.slider('Fin gardée'), { value: '2' }).oninput();
-  Object.assign(f.slider('Début gardé'), { value: '0.5' }).oninput();
-  assert.deepEqual([f.ui.state().montage.plans[0].from, f.ui.state().montage.plans[0].to], [0.5, 2]);
-  assert.deepEqual(f.said('montage-figures').slice(0, 3), ['00.5 S', '02.0 S', '01.5 S']);
-  assert.deepEqual(f.said('montage-summary'), ['3 plans · 7,5 s · 16:9 · 24 i/s']);
-  // Never beyond the take itself.
-  Object.assign(f.slider('Fin gardée'), { value: '99' }).oninput();
-  assert.equal(f.ui.state().montage.plans[0].to, 5);
+  assert.deepEqual([find(f.track('plans'), 'montage-pop').length, f.pop().attributes['aria-label']], [1, 'Réglages de la prise']);
+  assert.deepEqual(f.popLabels(), [
+    'Couper le son de la prise',
+    'Ajuster : la prise entière, avec des bandes si son format diffère',
+    'Remplir : plein cadre, ce qui dépasse est coupé',
+    'Ouvrir la prise',
+    'Retirer de la bobine (Suppr)',
+  ]);
   f.button('Remplir').onclick();
-  assert.deepEqual([f.ui.state().montage.plans[0].frame, f.button('Remplir').attributes['aria-pressed'], f.button('Ajuster').attributes['aria-pressed']], ['fill', 'true', 'false']);
-  Object.assign(f.slider('Son du clip'), { value: '40' }).oninput();
-  assert.equal(f.ui.state().montage.plans[0].volume, 0.4);
-  // First of the film: nothing before it; moved after the next, it stays the one chosen.
-  assert.deepEqual([f.button('← Avant').disabled, f.button('Après →').disabled], [true, false]);
-  f.button('Après →').onclick();
-  assert.deepEqual(f.plans().map(piece => piece.textContent.slice(0, 11)), ['1 · PRISE 2', '2 · PRISE 1', '3 · PRISE 3']);
-  assert.deepEqual(f.said('montage-title-name'), ['Plan 2 · Prise 1']);
+  assert.deepEqual([plan(0).frame, f.button('Remplir').attributes['aria-pressed'], f.button('Ajuster').attributes['aria-pressed']], ['fill', 'true', 'false']);
+  f.button('Couper le son de la prise').onclick();
+  assert.deepEqual([plan(0).volume, f.button('Remettre le son de la prise').attributes['aria-pressed']], [0, 'false']);
+  f.button('Remettre le son de la prise').onclick();
+  assert.equal(plan(0).volume, 1);
   f.button('Ouvrir la prise').onclick();
   assert.deepEqual(f.calls.at(-1), { route: 'open', body: id(1) });
-  // An image has a length and a frame only.
+  // Alt and an arrow move it, it stays the one chosen; its bar follows it.
+  f.plans()[0].onkeydown({ key: 'ArrowRight', altKey: true });
+  assert.deepEqual([f.names(), f.ui.state().chosen, f.pop().style.left], [['Prise 2', 'Prise 1', 'Prise 3'], plan(1).id, 'clamp(0px, 27.272727272727273%, calc(100% - 240px))']);
+  // An image has a frame, no sound.
   f.plans()[2].onclick();
-  assert.deepEqual(f.said('montage-row-name'), ['Durée', 'Cadre', 'Place']);
-  // Taken out by its button, or by the key on the plan itself: the others close the gap, nothing is chosen.
-  f.button('Retirer').onclick();
+  assert.deepEqual(f.popLabels().map(label => label.split(' :')[0]), ['Ajuster', 'Remplir', 'Ouvrir la prise', 'Retirer de la bobine (Suppr)']);
+  // Clicked again, or Échap: let go, no bar.
+  f.plans()[2].onclick();
+  assert.deepEqual([f.ui.state().chosen, f.get('montage-pop').length], [null, 0]);
+  f.plans()[2].onclick();
+  f.root.onkeydown({ key: 'Escape', target: { tagName: 'DIV' } });
+  assert.deepEqual([f.ui.state().chosen, f.get('montage-pop').length], [null, 0]);
+  // Taken out by its bar, or by the key on the take itself: the others close the gap, nothing is chosen.
+  f.plans()[2].onclick();
+  f.button('Retirer de la bobine (Suppr)').onclick();
+  assert.deepEqual([f.names(), f.ui.state().chosen, f.get('montage-pop').length], [['Prise 2', 'Prise 1'], null, 0]);
   f.plans()[0].onkeydown({ key: 'Delete' });
-  assert.deepEqual([f.plans().map(piece => piece.textContent.slice(0, 11)), f.ui.state().chosen, f.said('montage-title-name')], [['1 · PRISE 1'], null, ['Nouveau montage']]);
+  assert.deepEqual(f.names(), ['Prise 1']);
   // All of it kept once, a moment after the last change.
   await f.later();
   assert.equal(f.saves().length, 1);
-  assert.deepEqual(f.saves()[0].body.montage.plans.map(plan => [plan.from, plan.to, plan.frame, plan.volume]), [[0.5, 5, 'fill', 0.4]]);
+  assert.deepEqual(f.saves()[0].body.montage.plans.map(item => [item.from, item.to, item.frame, item.volume]), [[0, 5, 'fill', 1]]);
 });
 
-test('a take dragged to the timeline is laid where it is dropped (0.6.137)', async () => {
-  const f = await setup().open();
-  for (const at of [0, 1]) f.get('montage-take')[at].ondblclick();
-  const lanes = f.lanes(),
-    carry = at => f.get('montage-take')[at].ondragstart({ dataTransfer: { setData() {} } });
-  const event = clientX => ({ clientX, prevented: false, preventDefault() { this.prevented = true; } });
-  // A clip over the plans: accepted there, not over a track of sounds.
-  carry(2);
-  const over = event(100);
-  lanes[0].ondragover(over);
-  const refused = event(100);
-  lanes[1].ondragover(refused);
-  assert.deepEqual([over.prevented, refused.prevented], [true, false]);
-  // Dropped at one second of ten: before the first plan, whose middle is later.
-  lanes[0].ondrop(event(100));
-  assert.deepEqual(f.plans().map(piece => piece.textContent.slice(0, 11)), ['1 · PRISE 3', '2 · PRISE 1', '3 · PRISE 2']);
-  // Dropped after everything: at the end.
-  carry(1);
-  f.lanes()[0].ondrop(event(990));
-  assert.equal(f.plans().length, 4);
-  assert.equal(f.plans()[3].textContent.slice(0, 11), '4 · PRISE 2');
-  // A music dropped on its track starts where it is dropped (14 s of film: a tenth of the lane is 1,4 s).
-  carry(3);
-  f.lanes()[1].ondrop(event(100));
-  assert.deepEqual(f.ui.state().montage.sounds.map(sound => [sound.track, sound.at]), [['music', 1.4]]);
-  // Nothing carried: a drop of anything else (a file of the computer) changes nothing.
-  f.lanes()[0].ondrop(event(10));
-  assert.equal(f.plans().length, 4);
-});
-
-test('a plan is stretched by its edges and moved by dragging it; a change leaves the screen as it is (0.6.138)', async () => {
+test('a take is stretched by its edges and moved by dragging it; a change leaves the preview as it is (0.6.138)', async () => {
   // (His request of 20/11, « studio montage : améliore »: the length was set at the right only, the
   // order by two buttons, and every change drew the screen and the takes again.)
   const f = await setup().open();
@@ -291,8 +328,8 @@ test('a plan is stretched by its edges and moved by dragging it; a change leaves
     [screen] = f.get('montage-screen'),
     [takes] = f.get('montage-takes');
   assert.deepEqual(grips().map(grip => grip.className), ['montage-grip is-start', 'montage-grip is-end', 'montage-grip is-start', 'montage-grip is-end']);
-  // The end of the first plan (5 s of 10 on a lane of 1000: a second is 100): a pixel is no drag;
-  // a hundred to the left take a second off, and the plan after it follows.
+  // The end of the first take (5 s of 10 on a lane of 1000: a second is 100): a pixel is no drag;
+  // a hundred to the left take a second off, and the take after it follows.
   // (The other buttons of the mouse pull nothing.)
   grips()[1].onpointerdown({ clientX: 500, button: 2, stopPropagation() {} });
   assert.equal(f.pointer.held(), 0);
@@ -303,33 +340,34 @@ test('a plan is stretched by its edges and moved by dragging it; a change leaves
   f.pointer.move(400);
   assert.deepEqual([plan(0).to, places()], [4, [['0%', 'calc(40% - 4px)'], ['40%', 'calc(30% - 4px)']]]);
   assert.equal(f.root.dataset.held, 'trim', 'said to the desk while it lasts: one cursor everywhere');
-  assert.deepEqual(f.said('montage-title-name'), ['Plan 1 · Prise 1']);
+  // The take in hand is the one chosen; its bar waits for the hand to let go.
+  assert.deepEqual([f.ui.state().chosen, f.get('montage-pop').length], [plan(0).id, 0]);
   // Never beyond the take itself, whatever the pointer does; let go, nothing listens any more.
   f.pointer.move(900);
   assert.equal(plan(0).to, 5);
   f.pointer.move(380);
   f.pointer.up();
-  assert.deepEqual([plan(0).to, f.pointer.held(), f.root.dataset.held], [3.8, 0, undefined]);
-  // The start of the second plan: its edge follows the pointer while it is cut, the plan before it
-  // stays; let go, the film closes the gap.
+  assert.deepEqual([plan(0).to, f.pointer.held(), f.root.dataset.held, f.get('montage-pop').length], [3.8, 0, undefined, 1]);
+  // The start of the second take: its edge follows the pointer while it is cut, the take before it
+  // stays; let go, the bobine closes the gap.
   f.press(grips()[2], 380);
   f.pointer.move(480);
   assert.deepEqual([plan(1).from, plan(1).to, places()], [1, 3, [['0%', 'calc(38% - 4px)'], ['48%', 'calc(20% - 4px)']]]);
   f.pointer.up();
   assert.deepEqual(places(), [['0%', 'calc(38% - 4px)'], ['38%', 'calc(20% - 4px)']]);
-  // The click the browser sends after a drag chooses nothing: the plan cut is still the one chosen.
+  // The click the browser sends after a drag chooses nothing: the take cut is still the one chosen.
   f.plans()[1].onclick();
   assert.equal(f.ui.state().chosen, plan(1).id);
   await f.later();
   assert.equal(f.saves().length, 1, 'kept once, a moment after the last of them');
-  // Dragged past the middle of the other, a plan takes its place; a few pixels are a click, not a move.
+  // Dragged past the middle of the other, a take takes its place; a few pixels are a click, not a move.
   const [first, second] = [plan(0).id, plan(1).id];
   f.press(f.plans()[0], 100);
   f.pointer.move(103);
   f.pointer.up();
   assert.deepEqual([plan(0).id, plan(1).id, f.ui.state().chosen], [first, second, second]);
   // Pressed near its end and moved a little, it stays where it is, and is the one chosen: its place
-  // is read on the film as it was when it was pressed (3,8 s then 2 s: the middle to pass is at 4,8 s).
+  // is read on the bobine as it was when it was pressed (3,8 s then 2 s: the middle to pass is at 4,8 s).
   f.press(f.plans()[0], 370);
   f.pointer.move(378);
   assert.deepEqual([plan(0).id, plan(1).id, f.ui.state().chosen, f.plans()[0].attributes['aria-pressed']], [first, second, first, 'true']);
@@ -351,48 +389,42 @@ test('a plan is stretched by its edges and moved by dragging it; a change leaves
   assert.deepEqual([plan(0).id, plan(1).id], [second, first]);
   f.plans()[1].onkeydown({ key: 'ArrowRight', altKey: false });
   assert.deepEqual([plan(0).id, plan(1).id], [second, first]);
-  // Through all of it the screen and the grid of the takes are the ones first drawn: the clip on the
-  // screen did not start over, the grid did not go back to its top. Another shape of film draws them again.
+  // Through all of it the preview and the grid of the takes are the ones first drawn: the clip in the
+  // preview did not start over, the grid did not go back to its top. Another format draws them again.
   assert.equal(f.get('montage-screen')[0], screen);
   assert.equal(f.get('montage-takes')[0], takes);
-  f.plans()[1].onclick();
-  f.plans()[1].onclick();
-  Object.assign(f.get('montage-select')[0], { value: '1:1' }).onchange();
+  Object.assign(f.get('montage-format')[0], { value: '1:1' }).onchange();
   assert.notEqual(f.get('montage-screen')[0], screen);
-  assert.equal(f.get('montage-frame')[0].style.aspectRatio, '1024 / 1024');
+  assert.deepEqual([f.get('montage-frame')[0].style.aspectRatio, f.ui.state().montage.width], ['1024 / 1024', 1024]);
 });
 
-test('a bar of the settings stays in the hand while it is slid; let go, the block says what was kept (0.6.138)', async () => {
-  // (Found on 20/11 while reading 0.6.137 again: the block was drawn again at each step of a bar,
-  // and the bar taken out of the hand that was sliding it.)
+test('the volume of a sound stays in the hand while it is slid; let go, the timeline says it (0.6.138, 0.6.148)', async () => {
+  // (Found on 20/11 while reading 0.6.137 again: a bar drawn again at each step was taken out of the hand
+  // sliding it. In the Bobine the bar is above the sound, on the timeline: nothing is drawn while it slides.)
   const f = await setup().open();
   f.get('montage-take')[0].ondblclick();
-  const [block] = f.get('montage-inspector'),
-    end = f.slider('Fin gardée'),
-    start = f.slider('Début gardé'),
-    plan = () => f.ui.state().montage.plans[0];
-  Object.assign(end, { value: '2' }).oninput();
-  Object.assign(end, { value: '1.5' }).oninput();
-  assert.deepEqual([f.get('montage-inspector')[0], f.slider('Fin gardée')], [block, end]);
-  // What it says follows, and the timeline with it.
-  assert.deepEqual([plan().to, f.said('montage-figures').slice(0, 3)], [1.5, ['00.0 S', '01.5 S', '01.5 S']]);
-  assert.deepEqual([f.plans().map(piece => piece.style.width), f.said('montage-piece-length'), f.said('montage-summary')], [['calc(15% - 4px)'], ['1,5 s'], ['1 plan · 1,5 s · 16:9 · 24 i/s']]);
-  // The start pushed past the end: a tenth of a second is kept; the bar is where the hand has it
-  // until it is let go, then where what was kept is.
-  Object.assign(start, { value: '4' }).oninput();
-  assert.deepEqual([plan().from, start.value, f.said('montage-figures').slice(0, 3)], [1.4, '4', ['01.4 S', '01.5 S', '00.1 S']]);
-  start.focus();
-  start.onchange();
-  assert.notEqual(f.get('montage-inspector')[0], block);
-  assert.deepEqual([f.slider('Début gardé').value, f.focused()], ['1.4', f.slider('Début gardé')]);
-  Object.assign(f.slider('Son du clip'), { value: '40' }).oninput();
-  assert.deepEqual([plan().volume, f.said('montage-figures').at(-1)], [0.4, '40 %']);
+  f.get('montage-take')[3].ondblclick();
+  const [timeline] = f.get('montage-timeline'),
+    bar = f.pop(),
+    volume = f.slider('Volume'),
+    sound = () => f.ui.state().montage.sounds[0];
+  assert.deepEqual([volume.value, volume.min, volume.max], ['60', '0', '200']);
+  Object.assign(volume, { value: '80' }).oninput();
+  Object.assign(volume, { value: '40' }).oninput();
+  assert.deepEqual([f.get('montage-timeline')[0], f.pop(), f.slider('Volume')], [timeline, bar, volume]);
+  // What it says follows: its figure, and the sound on its track.
+  assert.deepEqual([sound().volume, f.said('montage-pop-figure'), find(f.root, 'is-sound')[0].children[1].textContent, volume.style['--fill']], [0.4, ['40 %'], '40 %', '0.2']);
+  // Let go: drawn as it now is, the same bar keeps the keys.
+  volume.focus();
+  volume.onchange();
+  assert.notEqual(f.get('montage-timeline')[0], timeline);
+  assert.deepEqual([f.slider('Volume').value, f.focused()], ['40', f.slider('Volume')]);
   await f.later();
-  assert.equal(f.saves().length, 1);
+  assert.deepEqual([f.saves().length, f.saves()[0].body.montage.sounds[0].volume], [1, 0.4]);
 });
 
-test('the keys stay with the montage: what is drawn again under the focus gets it back (0.6.138)', async () => {
-  // (A plan clicked was drawn again and left the page with the focus: the next key went nowhere.)
+test('the keys stay with the bobine: what is drawn again under the focus gets it back (0.6.138)', async () => {
+  // (A take clicked was drawn again and left the page with the focus: the next key went nowhere.)
   const f = await setup().open();
   for (const at of [0, 1, 2]) f.get('montage-take')[at].ondblclick();
   const plan = at => f.ui.state().montage.plans[at],
@@ -402,24 +434,25 @@ test('the keys stay with the montage: what is drawn again under the focus gets i
   pressed.onclick();
   assert.notEqual(f.plans()[0], pressed);
   assert.equal(f.focused(), f.plans()[0]);
-  // Alt and an arrow, twice: the plan goes on with the focus as it moves.
+  // Alt and an arrow, twice: the take goes on with the focus as it moves.
   for (const place of [1, 2]) {
     f.focused().onkeydown({ key: 'ArrowRight', altKey: true });
     assert.deepEqual([plan(place).id, f.focused()], [first, f.plans()[place]]);
   }
-  // A button of its settings is drawn again with them: the same button has the focus; one that
-  // can no longer be pressed leaves it to the desk, which hears the keys of the montage.
-  const earlier = f.button('← Avant');
-  earlier.focus();
-  earlier.onclick();
-  assert.notEqual(f.button('← Avant'), earlier);
-  assert.deepEqual([plan(1).id, f.focused()], [first, f.button('← Avant')]);
+  // A button of its bar is drawn again with it: the same button has the focus; one that is no longer
+  // there leaves it to the desk, which hears the keys of the bobine.
+  const fill = f.button('Remplir');
+  fill.focus();
+  fill.onclick();
+  assert.notEqual(f.button('Remplir'), fill);
+  assert.deepEqual([plan(2).frame, f.focused()], ['fill', f.button('Remplir')]);
+  f.button('Retirer de la bobine (Suppr)').focus();
   f.focused().onclick();
-  assert.deepEqual([plan(0).id, f.button('← Avant').disabled, f.focused()], [first, true, f.root]);
-  // Taken out with its key, a plan leaves the focus to the desk too.
+  assert.deepEqual([f.plans().length, f.focused()], [2, f.root]);
+  // Taken out with its key, a take leaves the focus to the desk too.
   f.plans()[0].focus();
   f.plans()[0].onkeydown({ key: 'Delete' });
-  assert.deepEqual([f.plans().length, f.focused()], [2, f.root]);
+  assert.deepEqual([f.plans().length, f.focused()], [1, f.root]);
   // What is not drawn again keeps it: a take of the grid, while the timeline changes.
   const [tile] = f.get('montage-take');
   tile.focus();
@@ -433,7 +466,7 @@ test('the keys stay with the montage: what is drawn again under the focus gets i
   assert.equal(f.focused(), f.get('montage-filter')[1]);
 });
 
-test('a sound slides along its track, and stops on a cut of the film when it is near one (0.6.138)', async () => {
+test('a sound slides along its track, and stops on a cut of the bobine when it is near one (0.6.138)', async () => {
   const f = await setup().open();
   f.get('montage-take')[0].ondblclick();
   f.get('montage-take')[3].ondblclick();
@@ -443,7 +476,7 @@ test('a sound slides along its track, and stops on a cut of the film when it is 
   f.press(piece(), 10);
   f.pointer.move(110);
   assert.deepEqual([sound().at, piece().style.left], [3, '10%']);
-  // Near the end of the only plan (5 s): on it. Near is eight pixels of the timeline, here a quarter
+  // Near the end of the only take (5 s): on it. Near is eight pixels of the timeline, here a quarter
   // of a second; further, it is where the pointer is.
   f.pointer.move(175);
   assert.equal(sound().at, 5);
@@ -454,66 +487,65 @@ test('a sound slides along its track, and stops on a cut of the film when it is 
   f.pointer.move(-400);
   assert.equal(sound().at, 0);
   f.pointer.up();
-  assert.deepEqual([f.ui.state().chosen, f.said('montage-title-name')], [sound().id, ['Musique · Prise 4']]);
+  assert.deepEqual([f.ui.state().chosen, f.pop().style.left], [sound().id, 'clamp(0px, 0%, calc(100% - 240px))']);
   // An image has one edge to pull: its length.
   f.get('montage-take')[2].ondblclick();
   assert.deepEqual(find(f.plans()[1], 'montage-grip').map(grip => grip.className), ['montage-grip is-end']);
 });
 
-test('the film is read on the screen: the head moves, each plan is shown in its turn, it stops at the end (0.6.137)', async () => {
+test('the bobine is read in the preview: the head moves, each take is shown in its turn, it stops at the end (0.6.137)', async () => {
   const f = await setup().open();
   for (const at of [1, 2]) f.get('montage-take')[at].ondblclick();
   const [frame] = f.get('montage-frame'),
     [blank, picture, video, caption] = frame.children;
-  assert.deepEqual([video.src, video.hidden, picture.hidden, blank.hidden, caption.textContent], ['/media/2', false, true, true, 'Plan 1 · Prise 2']);
-  assert.deepEqual(f.said('montage-clock').concat(f.said('montage-clock-total')), ['00:00', ' / 00:06']);
+  assert.deepEqual([video.src, video.hidden, picture.hidden, blank.hidden, caption.textContent], ['/media/2', false, true, true, 'Prise 2']);
+  assert.deepEqual(f.said('montage-clock').concat(f.said('montage-clock-total')), ['00.00', ' / 06.00']);
   f.get('montage-play')[0].onclick();
   assert.deepEqual([f.ui.state().playing, video.paused, f.get('montage-play')[0].attributes['aria-label']], [true, false, 'Mettre en pause']);
   await f.later({ ms: 1500 });
   assert.equal(f.ui.state().head, 1.5);
-  assert.deepEqual([f.said('montage-clock'), find(f.root, 'montage-playhead')[0].style.left], [['00:01'], '15%']);
+  assert.deepEqual([f.said('montage-clock'), find(f.root, 'montage-playhead')[0].style.left], [['01.50'], '15%']);
   // Past the clip of three seconds: the image, the clip paused.
   await f.later({ ms: 2000 });
-  assert.deepEqual([picture.src, picture.hidden, video.hidden, video.paused, caption.textContent], ['/media/3', false, true, true, 'Plan 2 · Prise 3']);
-  // At the end of the film it stops there; played again, it starts over.
+  assert.deepEqual([picture.src, picture.hidden, video.hidden, video.paused, caption.textContent], ['/media/3', false, true, true, 'Prise 3']);
+  // At the end of the bobine it stops there; played again, it starts over.
   await f.later({ ms: 5000 });
-  assert.deepEqual([f.ui.state().playing, f.ui.state().head, f.get('montage-play')[0].attributes['aria-label']], [false, 6, 'Lire le montage']);
+  assert.deepEqual([f.ui.state().playing, f.ui.state().head, f.get('montage-play')[0].attributes['aria-label']], [false, 6, 'Lire la bobine']);
   f.ui.play();
   assert.deepEqual([f.ui.state().playing, f.ui.state().head], [true, 0]);
   f.ui.play();
   assert.equal(f.ui.state().playing, false);
-  // A click on the bar or on the ruler puts the head there.
-  f.get('montage-bar')[0].onclick({ clientX: 500 });
-  assert.equal(f.ui.state().head, 3);
+  // A press on the ruler puts the head there; held, the head follows the pointer, until it is let go.
   f.press(f.get('montage-ruler')[0], 100);
   assert.equal(f.ui.state().head, 1);
   assert.deepEqual([video.hidden, video.currentTime], [false, 1]);
-  // (0.6.138) Held, the head follows the pointer along the ruler, until it is let go.
   f.pointer.move(250);
   assert.deepEqual([f.ui.state().head, video.currentTime, find(f.root, 'montage-playhead')[0].style.left], [2.5, 2.5, '25%']);
   f.pointer.move(450);
   assert.deepEqual([f.ui.state().head, picture.hidden], [4.5, false]);
   f.pointer.up();
   assert.equal(f.pointer.held(), 0);
-  // A press on a lane beside what it holds puts the head there too; the space bar reads the film
-  // from anywhere in the montage, except where a key is typed or a button pressed.
+  // A press on a lane beside what it holds puts the head there too, and lets go of what was chosen;
+  // the space bar reads the bobine from anywhere, except where a key is typed or a button pressed.
   const [lane] = f.lanes();
+  assert.notEqual(f.ui.state().chosen, null);
   lane.onclick({ clientX: 800, target: lane });
-  assert.equal(f.ui.state().head, 6);
+  assert.deepEqual([f.ui.state().head, f.ui.state().chosen], [6, null]);
   lane.onclick({ clientX: 100, target: f.plans()[0] });
   assert.equal(f.ui.state().head, 6);
   const key = (name, tagName, className) => f.root.onkeydown({ key: name, target: { tagName, className }, preventDefault() {} });
   key('Home', 'DIV');
   assert.equal(f.ui.state().head, 0);
   key(' ', 'INPUT');
+  key(' ', 'TEXTAREA');
   key(' ', 'BUTTON');
-  key(' ', 'BUTTON', 'montage-action is-quiet');
+  key(' ', 'BUTTON', 'montage-pop-button');
   assert.equal(f.ui.state().playing, false);
   key(' ', 'SECTION');
   assert.equal(f.ui.state().playing, true);
   key(' ', 'DIV');
   assert.equal(f.ui.state().playing, false);
-  // A plan, a sound, a take: buttons too, but the space bar reads the film there (Enter chooses).
+  // A take, a sound, a tile: buttons too, but the space bar reads the bobine there (Enter chooses).
   key(' ', 'BUTTON', 'montage-piece');
   assert.equal(f.ui.state().playing, true);
   key(' ', 'BUTTON', 'montage-piece is-sound');
@@ -525,20 +557,34 @@ test('the film is read on the screen: the head moves, each plan is shown in its 
   assert.equal(f.root.tabIndex, -1, 'a press anywhere on the desk gives it the keys');
   key('End', 'DIV');
   assert.equal(f.ui.state().head, 6);
+  // (0.6.148) The Bobine is a page of its own: another page of the application shown, it does not go
+  // on playing behind it; on its page it does.
+  for (const [view, playing] of [['bobine', true], ['studio', false]]) {
+    globalThis.document = { body: { dataset: { view } } };
+    try {
+      f.ui.seek(0);
+      if (f.ui.state().playing) f.ui.play();
+      f.ui.play();
+      await f.later({ ms: 100 });
+      assert.equal(f.ui.state().playing, playing, view);
+    } finally {
+      delete globalThis.document;
+    }
+  }
 });
 
-test('« Exporter le film » keeps the montage, asks for its film and says the take it became (0.6.137)', async () => {
+test('« Exporter » keeps the bobine, asks for its film and says the take it became (0.6.137, 0.6.148)', async () => {
   const f = await setup().open();
   f.get('montage-take')[0].ondblclick();
   await f.ui.exportFilm();
   assert.deepEqual(f.calls.slice(-2).map(call => call.route), ['montages/save', 'montages/export']);
   assert.deepEqual(f.calls.at(-1).body, { project: 'inbox', id: f.ui.state().montage.id, conversation: C });
-  assert.deepEqual([f.said('montage-status'), f.refreshed(), f.get('montage-status')[0].dataset.problem], [['Film exporté · PRISE 18'], 1, 'false']);
-  // Refused by the server (a take that is gone): said where the state is, in its words, as a problem.
-  const failing = await setup({ fail: { 'montages/export': 'Plan 1 : cette prise n’existe plus.' } }).open();
+  assert.deepEqual([f.said('montage-status'), f.refreshed(), f.get('montage-status')[0].dataset.problem], [['Film exporté · Prise 18'], 1, 'false']);
+  // Refused by the server (a take that is gone): said in the fil, in its words, as a problem.
+  const failing = await setup({ fail: { 'montages/export': 'Prise 1 : cette prise n’existe plus.' } }).open();
   failing.get('montage-take')[0].ondblclick();
   await failing.ui.exportFilm();
-  assert.deepEqual([failing.said('montage-status'), failing.get('montage-status')[0].dataset.problem, failing.refreshed()], [['Export impossible : Plan 1 : cette prise n’existe plus.'], 'true', 0]);
+  assert.deepEqual([failing.said('montage-status'), failing.get('montage-status')[0].dataset.problem, failing.refreshed()], [['Export impossible : Prise 1 : cette prise n’existe plus.'], 'true', 0]);
   assert.equal(failing.get('montage-export')[0].disabled, false, 'it can be tried again');
   // Not kept: no film is asked for.
   const unsaved = await setup({ fail: { 'montages/save': 'Disque plein.' } }).open();
@@ -548,7 +594,7 @@ test('« Exporter le film » keeps the montage, asks for its film and says the t
   assert.equal(unsaved.calls.some(call => call.route === 'montages/export'), false);
 });
 
-test('the montage of the project is found again; its name, its format, another one, and set aside in two clicks (0.6.137)', async () => {
+test('the bobine of the project is found again; renamed and taken out from the fil, another one, its format (0.6.137, 0.6.148)', async () => {
   const kept = {
     schemaVersion: 1, id: id(900), name: 'Le pêcheur à l’aube', format: '16:9', width: 1344, height: 768, fps: 24,
     plans: [
@@ -559,63 +605,111 @@ test('the montage of the project is found again; its name, its format, another o
   };
   const f = await setup({ stored: [kept] }).open();
   assert.deepEqual(f.calls.map(call => call.route), ['montages/inbox', 'montages/inbox/' + id(900)]);
-  assert.deepEqual(f.said('montage-summary'), ['2 plans · 7 s · 16:9 · 24 i/s']);
-  // A plan whose take is no longer in the project says so, on the timeline and on the screen.
-  assert.deepEqual(f.plans().map(piece => [piece.dataset.missing, piece.textContent.slice(0, 16)]), [['false', '1 · PRISE 1Vidéo'], ['true', 'Prise introuvabl']]);
+  // A take that is no longer in the project says so, on the timeline and in the preview.
+  assert.deepEqual(f.plans().map(piece => [piece.dataset.missing, piece.children[0].textContent]), [['false', 'Prise 1'], ['true', 'Prise introuvable']]);
   f.ui.seek(6);
-  assert.deepEqual([f.get('montage-blank')[0].hidden, f.said('montage-blank-title')], [false, ['Prise introuvable.']]);
-  const [pick] = f.get('montage-pick');
-  assert.deepEqual(pick.children.map(option => [option.textContent, option.value, Boolean(option.selected)]), [['Le pêcheur à l’aube', id(900), true], ['+ Nouveau montage', 'new', false]]);
-  // Its name and its format are its own settings, shown when nothing is chosen.
-  assert.deepEqual(f.said('montage-row-name'), ['Nom', 'Format', 'Taille', 'Cadence']);
-  Object.assign(f.get('montage-name')[0], { value: '  Aube  ' }).onchange();
-  const [format] = f.get('montage-select');
-  Object.assign(format, { value: '9:16' }).onchange();
-  assert.deepEqual([f.ui.state().montage.name, f.ui.state().montage.width, f.ui.state().montage.height], ['Aube', 768, 1344]);
+  const [frame] = f.get('montage-frame');
+  assert.deepEqual([f.get('montage-blank')[0].hidden, frame.children[3].textContent], [false, 'Prise introuvable']);
+  assert.deepEqual(f.get('montage-pick')[0].children.map(option => [option.textContent, option.value, Boolean(option.selected)]), [
+    ['Le pêcheur à l’aube', id(900), true],
+    ['+ Nouvelle bobine', 'new', false],
+    ['Renommer la bobine', 'rename', false],
+    ['Supprimer la bobine', 'remove', false],
+  ]);
+  // « Renommer la bobine »: its name in place of the list; Échap leaves it as it was, Entrée keeps it.
+  f.pick('rename');
+  assert.deepEqual([f.get('bobine-name')[0].value, f.get('bobine-name')[0].attributes['aria-label'], f.get('montage-pick').length], ['Le pêcheur à l’aube', 'Nom de la bobine', 0]);
+  Object.assign(f.get('bobine-name')[0], { value: 'Autre' }).onkeydown({ key: 'Escape' });
+  assert.deepEqual([f.ui.state().montage.name, f.get('bobine-name').length, f.get('montage-pick').length], ['Le pêcheur à l’aube', 0, 1]);
+  f.pick('rename');
+  Object.assign(f.get('bobine-name')[0], { value: '  Aube  ' }).onkeydown({ key: 'Enter' });
+  assert.deepEqual([f.ui.state().montage.name, f.get('montage-pick')[0].children[0].textContent], ['Aube', 'Aube']);
+  // Its format, under the preview: every take to create will be made at its size.
+  Object.assign(f.get('montage-format')[0], { value: '9:16' }).onchange();
+  assert.deepEqual([f.ui.state().montage.width, f.ui.state().montage.height], [768, 1344]);
   await f.later();
   assert.equal(f.saves().length, 1);
-  // Another montage: what is not kept yet is first, then an empty one, not kept until something is laid.
-  Object.assign(f.get('montage-pick')[0], { value: 'new' });
-  await f.get('montage-pick')[0].onchange();
-  assert.deepEqual([f.said('montage-summary'), f.ui.state().stored, f.said('montage-title-name')], [['Aucun plan · 16:9 · 24 i/s'], false, ['Nouveau montage']]);
-  assert.deepEqual(f.get('montage-pick')[0].children.map(option => option.textContent), ['Sans titre', 'Aube', '+ Nouveau montage']);
-  // Back to the first, then set aside: asked twice, said, and the project has an empty one again.
-  Object.assign(f.get('montage-pick')[0], { value: id(900) });
-  await f.get('montage-pick')[0].onchange();
+  // Another bobine: what is not kept yet is first, then an empty one, not kept until something is laid.
+  f.pick('new');
+  await settle();
+  assert.deepEqual([f.ui.state().stored, f.ui.state().montage.plans.length], [false, 0]);
+  assert.deepEqual(f.get('montage-pick')[0].children.map(option => option.textContent), ['Sans titre', 'Aube', '+ Nouvelle bobine', 'Renommer la bobine']);
+  // Back to the first, then taken out: asked in the fil, « Garder » leaves it, « Supprimer » does it.
+  f.pick(id(900));
+  await settle();
   assert.equal(f.ui.state().montage.name, 'Aube');
-  f.button('Supprimer ce montage').onclick();
-  assert.equal(f.calls.some(call => call.route === 'montages/remove'), false);
-  f.button('Confirmer la suppression').onclick();
+  f.pick('remove');
+  assert.deepEqual(f.said('bobine-ask'), ['Supprimer « Aube » ?']);
+  f.button('Garder').onclick();
+  assert.deepEqual([f.get('bobine-ask').length, f.get('montage-pick').length, f.calls.some(call => call.route === 'montages/remove')], [0, 1, false]);
+  f.pick('remove');
+  f.button('Supprimer').onclick();
   await settle();
   await settle();
   assert.deepEqual(f.calls.find(call => call.route === 'montages/remove').body, { project: 'inbox', id: id(900) });
-  assert.deepEqual([f.notices, f.ui.state().stored, f.ui.state().montage.plans.length], [['Montage mis de côté.'], false, 0]);
+  assert.deepEqual([f.notices, f.ui.state().stored, f.ui.state().montage.plans.length], [['Bobine mise de côté.'], false, 0]);
 });
 
-test('leaving the mode stops the film and keeps what was not kept yet (0.6.137)', async () => {
+test('leaving the page stops the film and keeps what was not kept yet (0.6.137)', async () => {
   const f = await setup().open();
   f.get('montage-take')[0].ondblclick();
   f.ui.play();
   await f.ui.leave();
   assert.deepEqual([f.ui.state().playing, f.saves().length], [false, 1]);
-  // Back in the mode: the same montage, as it was left.
-  f.root = f.ui.desk(new Fake('div', 'kind-tabs'));
+  // Back on the page: the same bobine, as it was left.
+  f.root = f.ui.desk();
   assert.equal(f.plans().length, 1);
   assert.equal(f.calls.filter(call => call.route === 'montages/inbox').length, 1, 'not read again for the same project');
 });
 
-// ------------------------------------------------------------------ plans to make (0.6.142)
-// The second step of the montage (maquettes M5 et M9 du 20/11, « Oui, code-le »): photos laid on a track
-// above the plans, plans to make, and « Créer ce plan ».
+// ------------------------------------------------------------------ takes to create (0.6.142)
+// Photos laid on their track above the takes, takes to create, and « À créer ».
 const event = clientX => ({ clientX, prevented: false, preventDefault() { this.prevented = true; } });
 const photos = () => [take(5, 'image'), take(6, 'image')];
 const made = (n, frames, more = {}) => take(n, 'video', { parameters: { frames, fps: 24, ...more } });
+// His three photos at 0, 5 and 7 seconds (ten seconds on a lane of 1000): two takes to create, the
+// first from a photo to a photo, the second from where the first arrives to its own photo.
+const lay = f => {
+  for (const [at, x] of [[2, 0], [4, 500], [5, 700]]) {
+    f.get('montage-take')[at].ondragstart({ dataTransfer: { setData() {} } });
+    f.photos().ondrop(event(x));
+  }
+};
 
-test('photos dragged to their track become plans to make, each against the edge of its plan (0.6.142)', async () => {
+test('a take dragged to the timeline is laid where it is dropped; a sound on the track it is dropped on (0.6.137, 0.6.148)', async () => {
+  const f = await setup().open();
+  for (const at of [0, 1]) f.get('montage-take')[at].ondblclick();
+  const carry = at => f.get('montage-take')[at].ondragstart({ dataTransfer: { setData() {} } });
+  // A clip over the takes: accepted there, not over a track of sounds.
+  carry(2);
+  const over = event(100),
+    refused = event(100);
+  f.lanes()[0].ondragover(over);
+  f.lanes()[1].ondragover(refused);
+  assert.deepEqual([over.prevented, refused.prevented], [true, false]);
+  // Dropped at one second of ten: before the first take, whose middle is later.
+  f.lanes()[0].ondrop(event(100));
+  assert.deepEqual(f.names(), ['Prise 3', 'Prise 1', 'Prise 2']);
+  // Dropped after everything: at the end.
+  carry(1);
+  f.lanes()[0].ondrop(event(990));
+  assert.deepEqual(f.names(), ['Prise 3', 'Prise 1', 'Prise 2', 'Prise 2']);
+  // A music dropped on « Piste audio 2 » goes there, where it is dropped (14 s of bobine: a tenth of the lane is 1,4 s).
+  carry(3);
+  const sound = event(100);
+  f.lanes()[2].ondragover(sound);
+  f.lanes()[2].ondrop(event(100));
+  assert.deepEqual([sound.prevented, f.ui.state().montage.sounds.map(item => [item.track, item.at])], [true, [['effects', 1.4]]]);
+  assert.deepEqual([f.lanes()[1].children.length, f.lanes()[2].children.length], [0, 1]);
+  // Nothing carried: a drop of anything else (a file of the computer) changes nothing.
+  f.lanes()[0].ondrop(event(10));
+  assert.equal(f.plans().length, 4);
+});
+
+test('photos dragged to their track become takes to create, each against the edge of its take, listed in « À créer » (0.6.142, 0.6.148)', async () => {
   const f = await setup({ extra: photos(), create: async () => null }).open();
   const carry = at => f.get('montage-take')[at].ondragstart({ dataTransfer: { setData() {} } }),
     pins = () => find(f.root, 'montage-photo').map(pin => [pin.className, pin.style.left ?? null, pin.style.right ?? null, pin.attributes['aria-label']]);
-  assert.deepEqual(f.said('montage-track-name'), ['Repères', 'Plans', 'Musique', 'Bruitages']);
   // An image is taken there; a clip or a sound is not.
   carry(2);
   const over = event(0);
@@ -624,59 +718,60 @@ test('photos dragged to their track become plans to make, each against the edge 
   const refused = event(0);
   f.photos().ondragover(refused);
   assert.deepEqual([over.prevented, refused.prevented], [true, false]);
-  // His three photos, at 0, 5 and 7 seconds (ten seconds on a lane of 1000).
-  for (const [at, x] of [[2, 0], [4, 500], [5, 700]]) {
-    carry(at);
-    f.photos().ondrop(event(x));
-  }
-  assert.deepEqual(f.plans().map(piece => [piece.className, piece.textContent]), [
-    ['montage-piece is-todo', '1 · À FAIREPlan à faire5 s'],
-    ['montage-piece is-todo', '2 · À FAIREPlan à faire2 s'],
-  ]);
-  // The start photo against the left edge of its plan, an end photo against the right edge of its own.
+  lay(f);
+  assert.deepEqual(f.plans().map(piece => [piece.className, piece.children[0].textContent]), [['montage-piece is-todo', ''], ['montage-piece is-todo', '']]);
+  assert.deepEqual(f.lengths(), ['05.00 s', '02.00 s']);
+  // The start photo against the left edge of its take, an end photo against the right edge of its own.
   assert.deepEqual(pins(), [
-    ['montage-photo is-start', '0%', null, 'Photo de début du plan 1'],
-    ['montage-photo is-end', null, 'calc(50% + 4px)', 'Photo de fin du plan 1'],
-    ['montage-photo is-end', null, 'calc(30% + 4px)', 'Photo de fin du plan 2'],
+    ['montage-photo is-start', '0%', null, 'Photo de début, prise de 00.00 à 05.00'],
+    ['montage-photo is-end', null, 'calc(50% + 4px)', 'Photo de fin, prise de 00.00 à 05.00'],
+    ['montage-photo is-end', null, 'calc(30% + 4px)', 'Photo de fin, prise de 05.00 à 07.00'],
   ]);
   assert.deepEqual(find(f.root, 'montage-photo').map(pin => [pin.style.backgroundImage, pin.textContent]), [['url("/thumb/3")', 'Début'], ['url("/thumb/5")', 'Fin'], ['url("/thumb/6")', 'Fin']]);
-  assert.deepEqual(f.said('montage-summary'), ['2 plans à faire · 7 s · 16:9 · 24 i/s']);
-  // No film while a plan is to make: said on its button.
+  // No film while a take is to create: said on « Exporter ».
   const [go] = f.get('montage-export');
-  assert.deepEqual([go.disabled, go.title], [true, 'Créez ou retirez les plans à faire pour exporter le film']);
-  // The last laid is the one chosen: its settings at the right, and why it cannot be created yet.
-  assert.deepEqual(f.said('montage-title-name').concat(f.said('montage-title-meta')), ['Plan 2 · à faire', 'Vidéo · ce plan n’existe pas encore']);
-  assert.deepEqual(f.said('montage-row-name'), ['Photo de début', 'Photo de fin', 'Durée', 'Ce qui se passe']);
-  assert.deepEqual(f.said('montage-none-yet'), ['Glissez une image sur « Repères »']);
-  const [block] = f.get('montage-inspector'),
-    [field] = f.get('montage-words-field'),
-    create = () => f.button('Créer ce plan');
-  assert.deepEqual([create().disabled, f.said('montage-reason')], [true, ['Écrivez ce qui se passe dans ce plan.']]);
-  // Written: the block stays under the hand (the button too), and the reason follows.
-  Object.assign(field, { value: 'Il regarde la mer.' }).oninput();
-  assert.equal(f.get('montage-inspector')[0], block);
-  assert.deepEqual([f.ui.state().montage.plans[1].todo.prompt, f.said('montage-reason')], ['Il regarde la mer.', ['Créez d’abord le plan 1 : celui-ci le continue.']]);
-  assert.deepEqual(f.plans()[1].textContent, '2 · À FAIREIl regarde la mer.2 s');
-  // Its length by its bar or its right edge, within what a clip can be; it has no left edge to pull.
+  assert.deepEqual([go.disabled, go.title], [true, '2 prises sont encore à créer']);
+  // « À créer »: a line for each, in the order of the bobine; the second goes on from the first.
+  assert.deepEqual(f.lines(), [
+    ['00.00 → 05.00', '', 'Nouvelle prise · photos de début et de fin', ''],
+    ['05.00 → 07.00', '', 'Suite de la prise à créer · photo de fin', ''],
+  ]);
+  // The last laid is the one chosen: its line says it, its bar is above it.
+  assert.deepEqual([f.get('bobine-line').map(line => line.attributes['aria-pressed']), f.popLabels()], [['false', 'true'], ['Retirer la photo de fin', 'Retirer de la bobine (Suppr)']]);
+  assert.deepEqual([f.go(), f.goMain().disabled], ['Créer', true]);
+  // Written in its line: « À créer » stays under the hand, the take shows its text, the button counts.
+  const [panel] = f.get('bobine-create'),
+    field = f.get('bobine-line-words')[1];
+  f.write(1, 'Il regarde la mer.');
+  assert.deepEqual([f.get('bobine-create')[0], f.get('bobine-line-words')[1], f.ui.state().montage.plans[1].todo.prompt], [panel, field, 'Il regarde la mer.']);
+  assert.deepEqual([find(f.plans()[1], 'montage-piece-kind')[0].textContent, f.go()], ['Il regarde la mer.', 'Créer']);
+  // A line chosen chooses its take and brings the head to it; why the second cannot be created is said.
+  f.get('bobine-line')[0].onclick({ target: f.get('bobine-line')[0] });
+  assert.deepEqual([f.ui.state().chosen, f.ui.state().head], [f.ui.state().montage.plans[0].id, 0]);
+  assert.deepEqual(f.lines().map(line => line[3]), ['', 'Elle continue la prise d’avant, qui ne peut pas être créée.']);
+  f.write(0, 'Il lève les yeux.');
+  assert.deepEqual([f.go(), f.goMain().disabled], ['Créer 2 prises', false]);
+  // Its length by its right edge, within what a clip can be; it has no left edge to pull.
   assert.deepEqual(find(f.plans()[1], 'montage-grip').map(grip => grip.className), ['montage-grip is-end']);
-  Object.assign(f.slider('Durée du plan'), { value: '3.5' }).oninput();
-  assert.equal(f.ui.state().montage.plans[1].to, 3.5);
-  // A photo clicked chooses its plan; one taken off with its cross leaves the other.
+  f.press(find(f.plans()[1], 'montage-grip')[0], 700);
+  f.pointer.move(850);
+  f.pointer.up();
+  assert.deepEqual([f.ui.state().montage.plans[1].to, f.lines()[1][0]], [3.5, '05.00 → 08.50']);
+  // A photo clicked chooses its take; one taken off from its bar leaves the other.
   find(f.root, 'montage-photo')[0].onclick();
-  assert.deepEqual(f.said('montage-title-name'), ['Plan 1 · à faire']);
-  assert.deepEqual(f.said('montage-figures').slice(0, 2), ['Prise 3', 'Prise 5']);
-  find(f.root, 'montage-off')[1].onclick();
-  assert.deepEqual(pins().map(pin => pin[3]), ['Photo de début du plan 1', 'Photo de fin du plan 2']);
+  assert.deepEqual([f.ui.state().chosen, f.popLabels()], [f.ui.state().montage.plans[0].id, ['Retirer la photo de début', 'Retirer la photo de fin', 'Retirer de la bobine (Suppr)']]);
+  f.button('Retirer la photo de fin').onclick();
+  assert.deepEqual(pins().map(pin => pin[3]), ['Photo de début, prise de 00.00 à 05.00', 'Photo de fin, prise de 05.00 à 08.50']);
   // A clip dropped there is no photo: said, nothing changed. All of it is kept, as any change.
   carry(0);
   f.photos().ondrop(event(100));
-  assert.match(f.notices.at(-1), /^Seule une image/);
+  assert.equal(f.notices.at(-1), 'Seule une image se pose comme photo de début ou de fin.');
   assert.equal(f.plans().length, 2);
   await f.later();
   assert.equal(f.saves().at(-1).body.montage.plans[1].todo.prompt, 'Il regarde la mer.');
 });
 
-test('« Créer ce plan » asks the Studio for the clip, shows it being made, and the plan becomes its take (0.6.142)', async () => {
+test('« Créer 1 prise » asks the Studio for the clip, shows it being made, and the take to create becomes its take (0.6.142, 0.6.148)', async () => {
   const asked = [];
   let answer = null;
   const f = await setup({
@@ -686,107 +781,101 @@ test('« Créer ce plan » asks the Studio for the clip, shows it being made, an
       return new Promise((resolve, reject) => (answer = { resolve, reject }));
     },
   }).open();
-  const carry = at => f.get('montage-take')[at].ondragstart({ dataTransfer: { setData() {} } });
-  for (const [at, x] of [[2, 0], [4, 500], [5, 700]]) {
-    carry(at);
-    f.photos().ondrop(event(x));
-  }
-  const write = (plan, words) => {
-    f.plans()[plan].onclick();
-    if (f.ui.state().chosen !== f.ui.state().montage.plans[plan].id) f.plans()[plan].onclick();
-    Object.assign(f.get('montage-words-field')[0], { value: words }).oninput();
-  };
-  write(0, 'Il lève les yeux.');
-  assert.deepEqual([f.button('Créer ce plan').disabled, f.said('montage-reason')], [false, ['']]);
-  f.button('Créer ce plan').onclick();
+  lay(f);
+  f.write(0, 'Il lève les yeux.');
+  assert.deepEqual([f.go(), f.goMain().disabled], ['Créer 1 prise', false]);
+  f.goMain().onclick();
   await settle();
-  // Kept first, then asked as the Studio asks a clip: its text, its length, the format of the film, its two photos.
+  // Kept first, then asked as the Studio asks a clip: its text, its length, the format of the bobine, its two photos, at its size.
   assert.equal(f.saves().length, 1);
   assert.deepEqual(asked[0].wanted, {
     verb: 'create_video',
-    args: { prompt: 'Il lève les yeux.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5, format: '16:9', start_image: { output: id(3) }, end_image: { output: id(5) } },
-    // (0.6.144) At the size of the film: a plan was made as a small draft of its model.
-    size: { width: 1344, height: 768 },
+    args: { prompt: 'Il lève les yeux.', intention: INTENTION, duration: 5, format: '16:9', start_image: { output: id(3) }, end_image: { output: id(5) } },
+    size: FILM,
   });
-  // Being made: said on the plan and in the head, with what stops it; nothing else is changed meanwhile.
-  asked[0].hooks.onProgress('Étape 3 sur 8', 0.4);
-  assert.deepEqual([f.plans()[0].className, f.plans()[0].textContent], ['montage-piece is-todo is-making', '1 · EN COURSÉtape 3 sur 85 s']);
-  assert.deepEqual([find(f.root, 'montage-piece-bar-done')[0].style.width, f.said('montage-status')], ['40%', ['Création du plan 1 · Étape 3 sur 8 · 40 %']]);
-  assert.deepEqual([f.get('montage-export')[0].disabled, f.button('Création…').disabled, f.ui.state().making.id], [true, true, f.ui.state().montage.plans[0].id]);
+  // Being made: said on the take, in its line, in the button that fills, in the preview (what the engine shows, blurred).
+  asked[0].hooks.onProgress('Étape 3 sur 8', 0.4, '/preview/a.jpg');
+  const [frame] = f.get('montage-frame'),
+    [, picture, , caption] = frame.children;
+  assert.deepEqual([f.plans()[0].className, f.names()[0], find(f.root, 'montage-piece-bar-done')[0].style.width], ['montage-piece is-todo is-making', 'En cours · 40 %', '40%']);
+  assert.deepEqual([f.lines()[0][1], f.get('bobine-line')[0].dataset.state], ['En cours · 40 %', 'making']);
+  assert.deepEqual([f.go(), f.goMain().disabled, f.get('bobine-go-fill')[0].style.width], ['1 sur 1 · 40 %', true, '40%']);
+  assert.deepEqual([picture.src, picture.hidden, caption.textContent, frame.dataset.busy], ['/preview/a.jpg', false, 'En cours · 40 %', 'true']);
+  // Nothing else is changed meanwhile: not exported, not another bobine, not another format, no text.
+  assert.deepEqual([f.get('montage-export')[0].disabled, f.get('montage-pick')[0].disabled, f.get('montage-format')[0].disabled, f.get('bobine-line-words')[0].disabled], [true, true, true, true]);
   f.plans()[1].onkeydown({ key: 'Delete' });
-  assert.equal(f.plans().length, 2);
-  assert.match(f.notices.at(-1), /^Un plan est en cours de création/);
-  f.get('montage-halt')[0].onclick();
-  assert.equal(f.halted(), 1);
-  // Made (the Studio has read the takes of the project again): the plan is the plan of that take.
+  assert.deepEqual([f.plans().length, f.notices.at(-1)], [2, 'Des prises sont en cours de création : attendez la fin, ou arrêtez.']);
+  // Made (the Studio has read the takes of the project again): the take to create is the take made.
   f.runs.push(made(50, 121));
   answer.resolve(f.runs.at(-1));
   await settle();
-  assert.deepEqual([f.plans()[0].className, f.plans()[0].textContent], ['montage-piece', '1 · PRISE 50Vidéo5 s']);
-  assert.deepEqual([f.said('montage-status'), f.ui.state().making, f.get('montage-halt').length], [['Plan 1 créé'], null, 0]);
+  assert.deepEqual([f.plans()[0].className, f.names()[0], f.lengths()[0]], ['montage-piece', 'Prise 50', '05.04 s']);
+  assert.deepEqual([f.ui.state().making, f.ui.state().filling, f.get('bobine-line').length], [null, null, 1]);
   assert.deepEqual(f.ui.state().montage.plans[0], { id: f.ui.state().montage.plans[0].id, kind: 'video', from: 0, to: 5.042, frame: 'fit', volume: 1, photos: { start: { conversationId: C, runId: id(3), output: 0 }, end: { conversationId: C, runId: id(5), output: 0 } }, source: { conversationId: C, runId: id(50), output: 0 } });
-  await f.later();
   assert.equal(f.saves().at(-1).body.montage.plans[0].source.runId, id(50));
   // The second goes on from it, to its own photo: a clip that starts on the last image of the first.
-  write(1, 'Il regarde la mer.');
-  f.button('Créer ce plan').onclick();
+  assert.deepEqual([f.plans()[1].className, f.names()[1], f.lines()[0][2]], ['montage-piece is-todo is-suite', '↳ Suite', 'Suite de la prise 50 · photo de fin']);
+  f.write(0, 'Il regarde la mer.');
+  f.goMain().onclick();
   await settle();
-  assert.deepEqual(asked[1].wanted.args, { prompt: 'Il regarde la mer.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 2, format: '16:9', start_image: { output: id(50), frame: 'last' }, end_image: { output: id(6) } });
-  // Refused by the engine: said where the state is, the plan is still to make and can be tried again.
+  assert.deepEqual(asked[1].wanted.args, { prompt: 'Il regarde la mer.', intention: INTENTION, duration: 2, format: '16:9', start_image: { output: id(50), frame: 'last' }, end_image: { output: id(6) } });
+  // Refused by the engine: said in its line, in amber; the take is still to create and can be tried again.
   answer.reject(new Error('Mémoire vidéo insuffisante.'));
   await settle();
-  assert.deepEqual([f.said('montage-status'), f.plans()[1].className, f.ui.state().making], [['Création impossible : Mémoire vidéo insuffisante.'], 'montage-piece is-todo is-suite', null]);
-  assert.equal(f.button('Créer ce plan').disabled, false);
-  // Without its end photo it is the continuation itself, whose file holds the first clip: the plan shows what was added.
-  find(f.root, 'montage-off')[0].onclick();
-  // (0.6.143) « Prolonger », the word of the Studio for it.
-  assert.equal(f.button('Créer ce plan'), undefined);
-  f.button('Prolonger').onclick();
+  assert.deepEqual([f.lines(), f.get('bobine-line')[0].dataset.state], [[['05.04 → 07.04', 'Échec', 'Suite de la prise 50 · photo de fin', 'Mémoire vidéo insuffisante.']], 'failed']);
+  assert.deepEqual([f.plans()[1].className, f.names()[1], f.ui.state().making, f.go(), f.goMain().disabled], ['montage-piece is-todo is-suite is-failed', 'Échec', null, 'Créer 1 prise', false]);
+  // Without its end photo it is the continuation itself, whose file holds the first clip: the take shows what was added.
+  f.button('Retirer la photo de fin').onclick();
+  assert.equal(f.lines()[0][2], 'Suite de la prise 50');
+  f.goMain().onclick();
   await settle();
-  assert.deepEqual(asked[2].wanted, { verb: 'extend_video', args: { prompt: 'Il regarde la mer.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 2, source: { output: id(50) } }, size: { width: 1344, height: 768 } });
+  assert.deepEqual(asked[2].wanted, { verb: 'extend_video', args: { prompt: 'Il regarde la mer.', intention: INTENTION, duration: 2, source: { output: id(50) } }, size: FILM });
   f.runs.push(made(51, 49, { continuation: { overlapFrames: 9, sourceFrames: 121, newFrames: 40 } }));
   answer.resolve(f.runs.at(-1));
   await settle();
-  assert.deepEqual([f.ui.state().montage.plans[1].from, f.ui.state().montage.plans[1].to, f.plans()[1].textContent], [5.042, 6.708, '2 · PRISE 51Vidéo1,7 s']);
-  assert.equal(f.get('montage-export')[0].disabled, false, 'every plan is made: the film can be exported');
+  assert.deepEqual([f.ui.state().montage.plans[1].from, f.ui.state().montage.plans[1].to, f.names()[1], f.lengths()[1]], [5.042, 6.708, 'Prise 51', '01.67 s']);
+  assert.equal(f.get('montage-export')[0].disabled, false, 'every take is made: the film can be exported');
   // A creation that could not begin (the Studio busy elsewhere) is said too.
-  carry(4);
+  f.get('montage-take')[4].ondragstart({ dataTransfer: { setData() {} } });
   f.photos().ondrop(event(900));
-  write(2, 'Le soleil perce.');
-  f.button('Créer ce plan').onclick();
+  f.write(0, 'Le soleil perce.');
+  f.goMain().onclick();
   await settle();
   answer.resolve(null);
   await settle();
-  assert.deepEqual(f.said('montage-status'), ['Création impossible : la création n’a pas pu commencer.']);
+  assert.deepEqual(f.lines()[0].slice(1), ['Échec', 'Suite de la prise 51 · photo de fin', 'La création n’a pas pu commencer.']);
 });
 
-test('a photo laid above a video cuts it there: its end is greyed until the new clip is made (0.6.142)', async () => {
+test('a photo laid above a video cuts it there: its end is greyed until the new clip is made (0.6.142, 0.6.148)', async () => {
   const f = await setup({ extra: photos() }).open();
   const carry = at => f.get('montage-take')[at].ondragstart({ dataTransfer: { setData() {} } });
   f.get('montage-take')[0].ondblclick();
   // Three seconds into a clip of five: kept up to there, the two that follow will be replaced.
   carry(2);
   f.photos().ondrop(event(300));
-  assert.deepEqual(f.plans().map(piece => [piece.className, piece.textContent, piece.style.backgroundImage]), [
-    ['montage-piece', '1 · PRISE 1Vidéo3 s', 'url("/thumb/1")'],
-    ['montage-piece is-todo is-replacing', '2 · SERA REMPLACÉNouveau clip qui part de la photo2 s', 'url("/thumb/1")'],
+  assert.deepEqual(f.plans().map(piece => [piece.className, piece.children[0].textContent, piece.style.backgroundImage]), [
+    ['montage-piece', 'Prise 1', 'url("/thumb/1")'],
+    ['montage-piece is-todo is-replacing', 'Sera remplacé', 'url("/thumb/1")'],
   ]);
-  assert.deepEqual(find(f.root, 'montage-photo').map(pin => [pin.className, pin.style.left]), [['montage-photo is-start', '30%']]);
-  assert.deepEqual(f.said('montage-title-meta'), ['Remplace la fin du plan 1']);
-  assert.match(f.get('montage-title-meta')[0].title, /coupe sur la photo/);
-  assert.deepEqual(f.said('montage-summary'), ['2 plans dont 1 à faire · 5 s · 16:9 · 24 i/s']);
-  // On the screen, a plan to make is the photo it starts on; without one, said.
+  assert.deepEqual([f.lengths(), find(f.root, 'montage-photo').map(pin => [pin.className, pin.style.left])], [['03.00 s', '02.00 s'], [['montage-photo is-start', '30%']]]);
+  assert.deepEqual(f.lines(), [['03.00 → 05.00', '', 'Nouvelle prise · photo de début', '']]);
+  // In the preview, a take to create is the photo it starts on, veiled; without one, the empty frame.
   const [frame] = f.get('montage-frame'),
     [blank, picture, video, caption] = frame.children;
   f.ui.seek(4);
-  assert.deepEqual([picture.src, picture.hidden, video.hidden, caption.textContent], ['/media/3', false, true, 'Plan 2 · à faire']);
-  find(f.root, 'montage-off')[0].onclick();
+  assert.deepEqual([picture.src, picture.hidden, video.hidden, caption.textContent, frame.dataset.todo], ['/media/3', false, true, 'À créer', 'true']);
+  assert.deepEqual(f.popLabels(), ['Retirer la photo de début', 'Retirer, et rendre sa fin à la vidéo']);
+  f.button('Retirer la photo de début').onclick();
   f.ui.seek(4);
-  assert.deepEqual([blank.hidden, blank.children[0].textContent, picture.hidden], [false, 'Plan à faire.', true]);
-  // Without a creation here, the button says so; « Retirer la photo » gives the video its end back.
-  assert.deepEqual([f.button('Créer ce plan').disabled, f.button('Créer ce plan').title], [true, 'La création n’est pas disponible ici.']);
-  f.button('Retirer la photo').onclick();
-  assert.deepEqual(f.plans().map(piece => piece.textContent), ['1 · PRISE 1Vidéo5 s']);
+  assert.deepEqual([blank.hidden, picture.hidden, caption.textContent], [false, true, 'À créer']);
+  // Without its photo it would continue a video cut before its end: said once it has its text.
+  f.write(0, 'Il plonge.');
+  f.get('bobine-line')[0].onclick({ target: f.get('bobine-line')[0] });
+  assert.deepEqual(f.lines(), [['03.00 → 05.00', '', 'Suite de la prise 1', 'La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une photo de début.']]);
+  // Without a creation here, nothing can be created; taken out, the video has its end back.
+  assert.deepEqual([f.go(), f.goMain().disabled], ['Créer', true]);
+  f.button('Retirer, et rendre sa fin à la vidéo').onclick();
+  assert.deepEqual([f.names(), f.lengths(), f.get('bobine-line').length], [['Prise 1'], ['05.00 s'], 0]);
   // Too near the end of the video, nothing would be replaced: said, nothing changed.
   carry(2);
   f.photos().ondrop(event(450));
@@ -795,20 +884,20 @@ test('a photo laid above a video cuts it there: its end is greyed until the new 
 });
 
 test('a take whose small picture has just been made shows it on the timeline at once (0.6.142)', async () => {
-  // (Seen on the card, 20/11: the plan just created was black on the timeline until the next change,
-  // its take showing its picture beside. The picture is made from the tile of the take, once its clip is read.)
+  // (Seen on the card, 20/11: the take just created was black on the timeline until the next change,
+  // its tile showing its picture beside. The picture is made from the tile of the take, once its clip is read.)
   const fresh = take(9, 'video', { parameters: { frames: 48, fps: 24 }, outputs: [{ take: 9, originalUrl: '/media/9' }] });
   const f = await setup({ extra: [fresh], thumbnail: async (api, record) => void (record.outputs[0].thumbUrl = '/thumb/9') }).open();
   const tile = () => f.get('montage-take').find(item => item.dataset.id === id(9));
   tile().ondblclick();
   assert.deepEqual([f.plans().length, f.plans()[0].style.backgroundImage], [1, undefined]);
-  const words = f.get('montage-title-name')[0];
+  const [panel] = f.get('bobine-create');
   tile().querySelectorAll('VIDEO')[0].onloadeddata();
   await settle();
   assert.equal(f.plans()[0].style.backgroundImage, 'url("/thumb/9")');
-  // (Only the timeline is drawn again: what is being set at the right stays under the hand.)
-  assert.equal(f.get('montage-title-name')[0], words);
-  // A take that is on no plan draws nothing again.
+  // (Only the timeline is drawn again: what is being written in « À créer » stays under the hand.)
+  assert.equal(f.get('bobine-create')[0], panel);
+  // A take that is on no take of the bobine draws nothing again.
   const other = take(10, 'video', { parameters: { frames: 48, fps: 24 }, outputs: [{ take: 10, originalUrl: '/media/10' }] });
   const g = await setup({ extra: [other], thumbnail: async (api, record) => void (record.outputs[0].thumbUrl = '/thumb/10') }).open();
   const lane = g.lanes()[0];
@@ -817,44 +906,41 @@ test('a take whose small picture has just been made shows it on the timeline at 
   assert.equal(g.lanes()[0], lane);
 });
 
-test('the end of a video pulled beyond its take shows its continuation to make, joined to it (0.6.143)', async () => {
+test('the end of a video pulled beyond its take shows its suite to create, joined to it (0.6.143, 0.6.148)', async () => {
   // (Maquette M6, his words of 20/11: « s'il déroule la vidéo plus loin que sa durée d'origine, on lui
   // montre implicitement que ça va continuer sa vidéo (et ça déplace les images ou vidéos vers la droite) ».)
   const f = await setup({ extra: photos(), create: async () => null }).open();
   for (const at of [0, 2]) f.get('montage-take')[at].ondblclick();
   const grips = () => find(f.root, 'montage-grip'),
     plans = () => f.ui.state().montage.plans,
-    shown = () => f.plans().map(piece => [piece.className, piece.textContent, piece.style.left, piece.style.width]);
+    look = () => f.plans().map(piece => [piece.className, piece.children[0].textContent, find(piece, 'montage-piece-length')[0].textContent, piece.style.left, piece.style.width]);
   assert.deepEqual(grips().map(grip => grip.className), ['montage-grip is-start', 'montage-grip is-end', 'montage-grip is-end']);
   // The end of the video (5 s of 10 on a lane of 1000: a second is 100). A little beyond the end of its
   // take: the whole take, nothing more, the hand can stop there.
   f.press(grips()[1], 500);
   f.pointer.move(540);
   assert.deepEqual([plans().length, plans()[0].to, f.get('montage-tip').length], [2, 5, 0]);
-  // Four seconds beyond: its continuation to make, touching it; the image comes later in the film.
+  // Four seconds beyond: its suite to create, touching it; the image comes later in the bobine.
   f.pointer.move(900);
-  assert.deepEqual(shown(), [
-    ['montage-piece', '1 · PRISE 1Vidéo5 s', '0%', 'calc(50% - 4px)'],
-    ['montage-piece is-todo is-suite', '2 · SUITE À CRÉERSuite du plan 1+ 4 s', 'calc(50% - 4px)', '40%'],
-    ['montage-piece', '3 · PRISE 3Image3 s', '90%', 'calc(30% - 4px)'],
+  assert.deepEqual(look(), [
+    ['montage-piece', 'Prise 1', '05.00 s', '0%', 'calc(50% - 4px)'],
+    ['montage-piece is-todo is-suite', '↳ Suite', '+04.00 s', 'calc(50% - 4px)', '40%'],
+    ['montage-piece', 'Prise 3', '03.00 s', '90%', 'calc(30% - 4px)'],
   ]);
   // What that does is said where the hand is; the video stays the one in hand.
-  assert.deepEqual([f.said('montage-tip'), f.get('montage-tip')[0].style.left], [['Au-delà de la prise : + 4 s à créer · ce qui suit se décale'], 'clamp(190px, 90%, calc(100% - 190px))']);
-  assert.deepEqual(f.said('montage-title-name'), ['Plan 1 · Prise 1']);
+  assert.deepEqual([f.said('montage-tip'), f.get('montage-tip')[0].style.left], [['+ 04.00 s à créer · ce qui suit se décale'], 'clamp(120px, 90%, calc(100% - 120px))']);
+  assert.equal(f.ui.state().chosen, plans()[0].id);
   // Pulled back within the take: gone, as if nothing had been asked.
   f.pointer.move(450);
   assert.deepEqual([plans().length, plans()[0].to, f.get('montage-tip').length], [2, 4.5, 0]);
-  // Beyond again, and let go: the continuation is chosen, what happens next is written there.
+  // Beyond again, and let go: the suite is chosen, what happens next is written in its line.
   f.pointer.move(700);
   f.pointer.up();
   assert.deepEqual([plans().length, plans()[0].to, plans()[1].to, f.ui.state().chosen === plans()[1].id, f.get('montage-tip').length], [3, 5, 2, true, 0]);
-  assert.deepEqual(f.said('montage-title-name').concat(f.said('montage-title-meta')), ['Plan 2 · suite à créer', 'Continue le plan 1, là où il s’arrête']);
-  assert.deepEqual(f.said('montage-row').slice(0, 2), ['DépartFin du plan 1', 'Photo de finGlissez une image sur « Repères »']);
-  assert.deepEqual(find(f.root, 'montage-action').map(control => control.textContent), ['Prolonger', 'Retirer la suite']);
-  assert.deepEqual(f.said('montage-words').map(words => words.slice(0, 23)), ['Ce qui se passe ensuite']);
+  assert.deepEqual([f.lines(), f.popLabels()], [[['05.00 → 07.00', '', 'Suite de la prise 1', '']], ['Retirer de la bobine (Suppr)']]);
   await f.later();
   assert.deepEqual(f.saves().at(-1).body.montage.plans.map(plan => [Boolean(plan.todo), plan.to]), [[false, 5], [true, 2], [false, 3]]);
-  // It has its continuation: the edge of the video stops at the end of its take, that one has its own edge.
+  // It has its suite: the edge of the video stops at the end of its take, the suite has its own edge.
   f.press(grips()[1], 500);
   f.pointer.move(800);
   f.pointer.up();
@@ -862,21 +948,19 @@ test('the end of a video pulled beyond its take shows its continuation to make, 
   f.press(grips()[2], 700);
   f.pointer.move(850);
   f.pointer.up();
-  assert.deepEqual([plans().map(plan => plan.to), f.plans()[1].textContent], [[5, 3.5, 3], '2 · SUITE À CRÉERSuite du plan 1+ 3,5 s']);
-  // Towards an end photo it is a new clip, from the last image of the video: said as it is, and asked as such.
+  assert.deepEqual([plans().map(plan => plan.to), f.lengths()[1]], [[5, 3.5, 3], '+03.50 s']);
+  // Towards an end photo it is a new clip, from the last image of the video: said as it is.
   f.get('montage-take')[4].ondragstart({ dataTransfer: { setData() {} } });
-  // (The film is 11,5 s long now: 652 of 1000 is 7,5 s, on the second half of the continuation.)
+  // (The bobine is 11,5 s long now: 652 of 1000 is 7,5 s, on the second half of the suite.)
   f.photos().ondrop(event(652));
-  assert.deepEqual(f.said('montage-title-meta'), ['Part de la dernière image du plan 1']);
-  assert.deepEqual([f.plans()[1].className, f.plans()[1].textContent], ['montage-piece is-todo is-suite', '2 · SUITE À CRÉERJusqu’à la photo de fin+ 3,5 s']);
-  assert.deepEqual(find(f.root, 'montage-action').map(control => control.textContent), ['Créer ce plan', 'Retirer la suite']);
-  // « Retirer la suite »: the film as it was.
-  f.button('Retirer la suite').onclick();
-  assert.deepEqual(shown(), [
-    ['montage-piece', '1 · PRISE 1Vidéo5 s', '0%', 'calc(50% - 4px)'],
-    ['montage-piece', '2 · PRISE 3Image3 s', '50%', 'calc(30% - 4px)'],
+  assert.deepEqual([f.plans()[1].className, f.lines()[0][2]], ['montage-piece is-todo is-suite', 'Suite de la prise 1 · photo de fin']);
+  // Taken out: the bobine as it was.
+  f.button('Retirer de la bobine (Suppr)').onclick();
+  assert.deepEqual(look(), [
+    ['montage-piece', 'Prise 1', '05.00 s', '0%', 'calc(50% - 4px)'],
+    ['montage-piece', 'Prise 3', '03.00 s', '50%', 'calc(30% - 4px)'],
   ]);
-  // Neither an image nor a plan to make is continued by its edge: the edge of an image is its length.
+  // Neither an image nor a take to create is continued by its edge: the edge of an image is its length.
   f.press(grips()[2], 800);
   f.pointer.move(1000);
   f.pointer.up();
@@ -886,13 +970,13 @@ test('the end of a video pulled beyond its take shows its continuation to make, 
   alone.get('montage-take')[0].ondblclick();
   alone.press(find(alone.root, 'montage-grip')[1], 500);
   alone.pointer.move(900);
-  assert.deepEqual(alone.said('montage-tip'), ['Au-delà de la prise : + 4 s à créer']);
+  assert.deepEqual(alone.said('montage-tip'), ['+ 04.00 s à créer']);
   alone.pointer.up();
-  assert.deepEqual(alone.said('montage-title-name'), ['Plan 2 · suite à créer']);
+  assert.equal(alone.ui.state().chosen, alone.ui.state().montage.plans[1].id);
 });
 
-// (0.6.144) « Combler les trous »: his three photos laid, two plans to make, the second going on from the first.
-async function series({ times = { workflowName: 'LTX 2.5', seconds: 5.042, expected: { seconds: 108.4, exact: true } }, texts = ['Il lève les yeux.', 'Il regarde la mer.'], estimate = null, write = null } = {}) {
+// (0.6.144, 0.6.148) « Créer n prises »: his three photos laid, two takes to create, the second going on from the first.
+async function series({ times = { workflowName: 'LTX 2.5' }, texts = ['Il lève les yeux.', 'Il regarde la mer.'], estimate = null, write = null } = {}) {
   const asked = [],
     foreseen = [],
     answers = [];
@@ -910,144 +994,114 @@ async function series({ times = { workflowName: 'LTX 2.5', seconds: 5.042, expec
       return structuredClone(times);
     },
   }).open();
-  for (const [at, x] of [[2, 0], [4, 500], [5, 700]]) {
-    f.get('montage-take')[at].ondragstart({ dataTransfer: { setData() {} } });
-    f.photos().ondrop(event(x));
-  }
-  texts.forEach((words, plan) => {
-    if (!words) return;
-    if (f.ui.state().chosen !== f.ui.state().montage.plans[plan].id) f.plans()[plan].onclick();
-    Object.assign(f.get('montage-words-field')[0], { value: words }).oninput();
-  });
-  const head = label => f.get('montage-agent').concat(f.get('montage-fill'), f.get('montage-halt')).find(control => control.textContent === label),
-    lines = () => f.get('montage-series-item').map(entry => entry.children.map(part => part.textContent)),
-    panel = () => f.said('montage-title-name').concat(f.said('montage-title-meta')),
-    // « Combler les trous », then what it asks the server: all settled.
-    open = async () => {
-      head('Combler les trous').onclick();
-      await settle();
-      await settle();
-    };
-  return { f, asked, foreseen, answers, head, lines, panel, open };
+  lay(f);
+  texts.forEach((words, at) => words && f.write(at, words));
+  // (What the server says of the models: « À créer » is drawn again with it.)
+  await settle();
+  await settle();
+  return { f, asked, foreseen, answers };
 }
 
-test('« Combler les trous » says what will be created, with its model and its time, and makes nothing before « Lancer » (0.6.144)', async () => {
-  // (Maquette M7. On the card, 20/11, a continuation went to a model nobody had named: five minutes
-  // instead of one. Here the model and the time are said first, and agreed on.)
-  const { f, asked, foreseen, answers, head, lines, panel, open } = await series();
-  assert.equal(head('Combler les trous').disabled, false);
-  await open();
-  // Asked to the server for the plan that needs nothing more, as it will be asked for real; the second
-  // goes on from the first: its model, and its time brought to its length (108,4 s for 5,04 s: 43 s for 2 s).
-  assert.deepEqual(foreseen, [{ verb: 'create_video', args: { prompt: 'Il lève les yeux.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5, format: '16:9', start_image: { output: id(3) }, end_image: { output: id(5) } }, size: { width: 1344, height: 768 } }]);
-  assert.deepEqual(panel(), ['À créer · 2', '≈ 2 min 30 sur votre carte']);
-  assert.deepEqual(lines(), [
-    ['Plan 1 · 5 sLTX 2.5', '« Il lève les yeux. »'],
-    ['Plan 2 · 2 sLTX 2.5', '« Il regarde la mer. »'],
+test('« Créer 2 prises » makes them at once, one after the other, in the order of the bobine; the model of each is said in its line (0.6.144, 0.6.148)', async () => {
+  // (On the card, 20/11, a suite went to a model nobody had named. The model is said in its line before
+  // anything is made; no agreement apart any more, no time: « À créer » is the list, the button does it.)
+  const { f, asked, foreseen, answers } = await series();
+  // Its model asked to the server once for each kind of take, never for its text: here the first, from a
+  // photo then from a photo to a photo (the second goes on from it: asked once the first is made).
+  const shape = { prompt: 'Prise.', intention: INTENTION, duration: 5, format: '16:9', start_image: { output: id(3) } };
+  assert.deepEqual(foreseen, [
+    { verb: 'create_video', args: shape, size: FILM },
+    { verb: 'create_video', args: { ...shape, end_image: { output: id(5) } }, size: FILM },
   ]);
-  assert.deepEqual(find(f.root, 'montage-action').map(control => [control.textContent, control.disabled]), [['Lancer (2)', false], ['Annuler', undefined]]);
-  // Nothing is made, the montage is kept as it is, and the button waits for the answer.
-  assert.deepEqual([asked.length, f.saves().length, head('Combler les trous').disabled, f.ui.state().filling.stage], [0, 1, true, 'ready']);
-  // « Annuler »: the settings come back. Shown again, a plan chosen on the timeline closes it too.
-  f.button('Annuler').onclick();
-  assert.deepEqual([f.ui.state().filling, f.get('montage-series-item').length, head('Combler les trous').disabled], [null, 0, false]);
-  await open();
-  f.plans()[0].onclick();
-  assert.deepEqual([f.ui.state().filling, f.said('montage-title-name')], [null, ['Plan 1 · à faire']]);
-  // « Lancer »: the first plan is asked as a hand asks it; the second waits its turn.
-  await open();
-  assert.equal(foreseen.length, 3);
-  f.button('Lancer (2)').onclick();
+  assert.deepEqual(f.lines().map(line => line[1]), ['LTX 2.5', '']);
+  assert.deepEqual([f.go(), f.goMain().disabled, asked.length], ['Créer 2 prises', false, 0]);
+  f.goMain().onclick();
   await settle();
-  assert.deepEqual(asked.map(item => item.wanted), [foreseen[0]]);
-  assert.deepEqual(f.plans().map(piece => piece.children[0].textContent), ['1 · EN COURS', '2 · EN ATTENTE']);
-  assert.deepEqual([f.said('montage-status'), panel()], [['Création 1 sur 2 · Préparation…'], ['Création en cours', 'Un plan après l’autre · reste ≈ 2 min 30']]);
-  assert.deepEqual(f.get('montage-halt').map(control => [control.textContent, control.disabled]), [['Mettre en pause', false], ['Arrêter', undefined]]);
-  assert.deepEqual([f.get('montage-fill').length, f.get('montage-export')[0].disabled, f.get('montage-pick')[0].disabled], [0, true, true]);
-  assert.deepEqual(lines().map(line => line.at(-1)), ['EN COURS', 'EN ATTENTE']);
-  // Its progress: on the plan, in the head, on its line, and in the time that is left (half of 108 s, and 43 s).
+  // The first is asked as a hand asks it; the second waits its turn.
+  assert.deepEqual(asked.map(item => item.wanted), [{ ...foreseen[1], args: { ...foreseen[1].args, prompt: 'Il lève les yeux.' } }]);
+  assert.deepEqual([f.names(), f.lines().map(line => line[1]), f.go(), f.get('bobine-go-fill')[0].style.width], [['En cours', 'En attente'], ['En cours', 'En attente'], '1 sur 2', '0%']);
+  // Pause and stop beside it; nothing else is offered meanwhile.
+  assert.deepEqual([f.button('Mettre en pause après cette prise').hidden, Boolean(f.button('Arrêter'))], [false, true]);
+  assert.deepEqual([f.get('montage-export')[0].disabled, f.get('montage-pick')[0].disabled, f.get('montage-format')[0].disabled], [true, true, true]);
+  // Its progress: on the take, in its line, in the button, which fills (half of the first of two: a quarter).
   asked[0].hooks.onProgress('Étape 4 sur 8', 0.5);
-  assert.deepEqual([f.said('montage-status'), panel(), lines()[0].at(-1)], [['Création 1 sur 2 · Étape 4 sur 8 · 50 %'], ['Création en cours', 'Un plan après l’autre · reste ≈ 1 min 40'], 'EN COURS · 50 %']);
-  // The montage is not changed meanwhile, nor set aside.
+  assert.deepEqual([f.names()[0], f.lines()[0][1], f.go(), f.get('bobine-go-fill')[0].style.width], ['En cours · 50 %', 'En cours · 50 %', '1 sur 2 · 50 %', '25%']);
   f.plans()[1].onkeydown({ key: 'Delete' });
-  assert.equal(f.plans().length, 2);
-  assert.match(f.notices.at(-1), /^Des plans sont en cours de création/);
+  assert.deepEqual([f.plans().length, f.notices.at(-1)], [2, 'Des prises sont en cours de création : attendez la fin, ou arrêtez.']);
   // The first made: the second is asked in its turn, from the last image of the first.
   f.runs.push(made(50, 121));
   answers[0].resolve(f.runs.at(-1));
   await settle();
   await settle();
-  assert.deepEqual(asked[1].wanted.args, { prompt: 'Il regarde la mer.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 2, format: '16:9', start_image: { output: id(50), frame: 'last' }, end_image: { output: id(6) } });
-  assert.deepEqual(f.plans().map(piece => piece.children[0].textContent), ['1 · PRISE 50', '2 · EN COURS']);
-  assert.deepEqual([f.said('montage-status'), lines().map(line => line.at(-1))], [['Création 2 sur 2 · Préparation…'], ['FAIT · PRISE 50', 'EN COURS']]);
-  f.button('Ouvrir la prise 50').onclick();
-  assert.deepEqual(f.calls.at(-1), { route: 'open', body: id(50) });
-  // The second made: the series is over, said once; the settings and « Exporter le film » are back.
+  assert.deepEqual(asked[1].wanted.args, { prompt: 'Il regarde la mer.', intention: INTENTION, duration: 2, format: '16:9', start_image: { output: id(50), frame: 'last' }, end_image: { output: id(6) } });
+  assert.deepEqual([f.names(), f.lines().map(line => line[1]), f.go(), f.get('bobine-go-fill')[0].style.width], [['Prise 50', 'En cours'], ['En cours'], '2 sur 2', '50%']);
+  // The second made: all of it is made; « Exporter » and the fil are back.
   f.runs.push(made(51, 49));
   answers[1].resolve(f.runs.at(-1));
   await settle();
   await settle();
-  assert.deepEqual([f.said('montage-status'), f.ui.state().filling, f.get('montage-series-item').length, f.get('montage-halt').length], [['2 plans créés'], null, 0, 0]);
-  assert.deepEqual([f.get('montage-export')[0].disabled, f.get('montage-fill').length, f.get('montage-pick')[0].disabled], [false, 0, false]);
-  assert.deepEqual(f.plans().map(piece => piece.children[0].textContent), ['1 · PRISE 50', '2 · PRISE 51']);
+  assert.deepEqual([f.ui.state().filling, f.get('bobine-line').length, f.go(), f.goMain().disabled], [null, 0, 'Créer', true]);
+  assert.deepEqual([f.get('montage-export')[0].disabled, f.get('montage-pick')[0].disabled, f.names()], [false, false, ['Prise 50', 'Prise 51']]);
 });
 
-test('a series is paused after the plan being made, stopped at once, and ends on a refusal (0.6.144)', async () => {
-  // (Maquette M8: « Mettre en pause », « Arrêter ».)
-  let { f, asked, answers, head, lines, panel, open } = await series();
-  await open();
-  f.button('Lancer (2)').onclick();
+test('the creation is paused after the take being made, stopped at once, and ends on a refusal (0.6.144, 0.6.148)', async () => {
+  let { f, asked, answers } = await series();
+  f.goMain().onclick();
   await settle();
-  // « Mettre en pause »: asked, the plan being made goes to its end.
-  head('Mettre en pause').onclick();
-  assert.deepEqual(f.get('montage-halt').map(control => [control.textContent, control.disabled]), [['Pause demandée…', true], ['Arrêter', undefined]]);
+  // Pause asked: the take being made goes to its end.
+  f.button('Mettre en pause après cette prise').onclick();
+  assert.deepEqual([f.go(), f.button('Mettre en pause après cette prise').disabled], ['1 sur 2 · pause demandée', true]);
   f.runs.push(made(50, 121));
   answers[0].resolve(f.runs.at(-1));
   await settle();
   await settle();
-  assert.deepEqual([asked.length, f.ui.state().filling.stage, f.said('montage-status'), panel()], [1, 'paused', ['En pause'], ['En pause', '1 sur 2 créés']]);
-  assert.deepEqual([f.get('montage-halt').map(control => control.textContent), lines().map(line => line.at(-1))], [['Reprendre', 'Arrêter'], ['FAIT · PRISE 50', 'EN ATTENTE']]);
-  // In pause the montage is still the one of the series.
+  assert.deepEqual([asked.length, f.ui.state().filling.stage, f.go(), f.goMain().disabled, f.button('Mettre en pause après cette prise').hidden], [1, 'paused', 'Reprendre · 1 sur 2', false, true]);
+  assert.deepEqual(f.lines().map(line => line[1]), ['En attente']);
+  // In pause the bobine is still the one being created.
   f.plans()[1].onkeydown({ key: 'Delete' });
-  assert.match(f.notices.at(-1), /^La série est en pause/);
-  // « Reprendre »: the second plan, in its turn. « Arrêter »: the creation is stopped, and the series with it.
-  head('Reprendre').onclick();
+  assert.equal(f.notices.at(-1), 'La création est en pause : reprenez-la ou arrêtez-la avant de modifier la bobine.');
+  // « Reprendre »: the second, in its turn. Stopped: the creation is stopped on the card, nothing is said to have failed.
+  f.goMain().onclick();
   await settle();
-  assert.deepEqual([asked.length, f.said('montage-status')], [2, ['Création 2 sur 2 · Préparation…']]);
-  head('Arrêter').onclick();
+  assert.deepEqual([asked.length, f.go()], [2, '2 sur 2']);
+  f.button('Arrêter').onclick();
   assert.equal(f.halted(), 1);
   answers[1].reject(new Error('Génération arrêtée.'));
   await settle();
   await settle();
-  assert.deepEqual([f.said('montage-status'), f.ui.state().filling, f.plans().map(piece => piece.children[0].textContent)], [['Série arrêtée · 1 plan créé sur 2'], null, ['1 · PRISE 50', '2 · SUITE À CRÉER']]);
-  // Stopped while in pause: nothing to stop on the card, the series ends there.
-  ({ f, asked, answers, head, open } = await series());
-  await open();
-  f.button('Lancer (2)').onclick();
+  assert.deepEqual([f.ui.state().filling, f.ui.state().failed.size, f.names(), f.lines().map(line => line[3]), f.go()], [null, 0, ['Prise 50', '↳ Suite'], [''], 'Créer 1 prise']);
+  // Stopped while in pause: nothing to stop on the card, the creation ends there.
+  ({ f, asked, answers } = await series());
+  f.goMain().onclick();
   await settle();
-  head('Mettre en pause').onclick();
+  f.button('Mettre en pause après cette prise').onclick();
   f.runs.push(made(50, 121));
   answers[0].resolve(f.runs.at(-1));
   await settle();
   await settle();
-  head('Arrêter').onclick();
-  assert.deepEqual([f.halted(), asked.length, f.said('montage-status'), f.ui.state().filling], [0, 1, ['Série arrêtée · 1 plan créé sur 2'], null]);
-  // Refused by the engine: said with what was made, and the plans after it are not asked.
-  ({ f, asked, answers, open } = await series());
-  await open();
-  f.button('Lancer (2)').onclick();
+  f.button('Arrêter').onclick();
+  assert.deepEqual([f.halted(), asked.length, f.ui.state().filling, f.go()], [0, 1, null, 'Créer 1 prise']);
+  // Refused by the engine: said in its line, and the take after it is not asked.
+  ({ f, asked, answers } = await series());
+  f.goMain().onclick();
   await settle();
   answers[0].reject(new Error('Mémoire vidéo insuffisante.'));
   await settle();
   await settle();
-  assert.deepEqual([asked.length, f.said('montage-status'), f.ui.state().filling], [1, ['Création impossible : Mémoire vidéo insuffisante. · 0 plan créé sur 2'], null]);
-  assert.deepEqual(f.plans().map(piece => piece.children[0].textContent), ['1 · À FAIRE', '2 · À FAIRE']);
-  // Leaving the mode ends a series in pause.
-  ({ f, answers, head, open } = await series());
-  await open();
-  f.button('Lancer (2)').onclick();
+  assert.deepEqual([asked.length, f.ui.state().filling, f.names(), f.go()], [1, null, ['Échec', ''], 'Créer 2 prises']);
+  assert.deepEqual(f.lines().map(line => [line[1], line[3]]), [['Échec', 'Mémoire vidéo insuffisante.'], ['', '']]);
+  // A bobine is not taken out under a take being created: its take would have no bobine to go to.
+  f.goMain().onclick();
   await settle();
-  head('Mettre en pause').onclick();
+  f.pick('remove');
+  f.button('Supprimer').onclick();
+  await settle();
+  assert.deepEqual([f.notices.at(-1), f.calls.some(call => call.route === 'montages/remove')], ['Une prise est en cours de création : attendez sa fin, ou arrêtez-la.', false]);
+  // Leaving the page ends a creation in pause.
+  ({ f, answers } = await series());
+  f.goMain().onclick();
+  await settle();
+  f.button('Mettre en pause après cette prise').onclick();
   f.runs.push(made(50, 121));
   answers[0].resolve(f.runs.at(-1));
   await settle();
@@ -1056,78 +1110,25 @@ test('a series is paused after the plan being made, stopped at once, and ends on
   assert.equal(f.ui.state().filling, null);
 });
 
-test('what cannot be created is said with its reason and left aside; a time nobody knows is said unknown (0.6.144)', async () => {
-  // A plan without its text, and the one that goes on from it: nothing to launch, nothing asked to the server.
-  let { f, foreseen, lines, panel, open } = await series({ texts: ['', 'Il regarde la mer.'] });
-  await open();
-  assert.deepEqual([foreseen.length, panel()], [0, ['À créer · 0', 'Rien ne peut être créé pour l’instant']]);
-  assert.deepEqual(lines(), [
-    ['Plan 1 · 5 s', 'Écrivez ce qui se passe dans ce plan.'],
-    ['Plan 2 · 2 s', 'Il continue le plan 1, qui ne peut pas être créé.'],
-  ]);
-  assert.deepEqual(f.get('montage-series-item').map(entry => entry.className), ['montage-series-item is-out', 'montage-series-item is-out']);
-  assert.equal(f.button('Lancer (0)').disabled, true);
-  // The model of the first lacks a file: it cannot be created, nor the one that goes on from it.
-  ({ f, lines, panel, open } = await series({ times: { workflowName: 'LTX 2.5', missing: true } }));
-  await open();
-  assert.deepEqual([panel(), lines().map(line => line[1])], [['À créer · 0', 'Rien ne peut être créé pour l’instant'], ['LTX 2.5 n’est pas prêt : un de ses fichiers manque.', 'Il continue le plan 1, qui ne peut pas être créé.']]);
-  // The server refuses the request (no model for these inputs): its words.
-  ({ lines, open } = await series({ times: new Error('Aucun workflow ne correspond à ces entrées pour create_video.') }));
-  await open();
-  assert.deepEqual(lines().map(line => line[1]), ['Aucun workflow ne correspond à ces entrées pour create_video.', 'Il continue le plan 1, qui ne peut pas être créé.']);
-  // Never made here at that size: the model is said, the time is said unknown; it can be launched.
-  ({ f, lines, panel, open } = await series({ times: { workflowName: 'LTX 2.5', seconds: 5.042 } }));
-  await open();
-  assert.deepEqual([panel(), f.button('Lancer (2)').disabled], [['À créer · 2', 'Durée inconnue : jamais créé ici à cette taille'], false]);
-  // A model that makes clips of its own lengths: said under the plan (4,3 s for the 5 s asked).
-  ({ lines, panel, open } = await series({ times: { workflowName: 'MiniMax H3 Omni', seconds: 4.29, expected: { seconds: 300, exact: false } } }));
-  await open();
-  assert.deepEqual(lines()[0], ['Plan 1 · 5 sMiniMax H3 Omni', '« Il lève les yeux. »', 'Ce modèle en fera 4,3 s.']);
-  // (The second, 2 s after a clip of 4,29 s made in 300 s: 140 s. 440 s in all.)
-  assert.deepEqual(panel(), ['À créer · 2', '≈ 7 min 20 sur votre carte']);
-  // One plan ready, one left aside: said, and counted apart.
-  ({ f, lines, panel, open } = await series({ texts: ['Il lève les yeux.', ''] }));
-  await open();
-  assert.deepEqual([panel(), f.button('Lancer (1)').disabled], [['À créer · 1', '≈ 1 min 50 sur votre carte · 1 plan laissé de côté'], false]);
-  // No plan to make: no « Combler les trous ». No way to create (outside the Studio): none either.
-  const bare = await setup().open();
-  bare.get('montage-take')[0].ondblclick();
-  assert.equal(bare.get('montage-fill').length, 0);
-});
-
-test('the agreement follows the montage: closed by a change, empty while the server is asked, held while the series runs (0.6.144)', async () => {
-  // A change of the montage closes what was shown: it described the montage as it was.
-  let { f, panel, open } = await series();
-  await open();
-  f.plans()[1].onkeydown({ key: 'Delete' });
-  assert.deepEqual([f.ui.state().filling, f.plans().length], [null, 1]);
-  // While the series runs, a plan chosen on the timeline leaves it where it is.
-  ({ f, panel, open } = await series());
-  await open();
-  f.button('Lancer (2)').onclick();
-  await settle();
-  f.plans()[1].onclick();
-  assert.deepEqual([f.ui.state().filling.stage, panel()[0]], ['running', 'Création en cours']);
-  // While the server is asked: « Préparation… », nothing to launch yet. « Annuler » then: its answer, late, opens nothing.
-  let tell = null;
-  const late = await series({ estimate: () => new Promise(resolve => (tell = resolve)) });
-  late.head('Combler les trous').onclick();
-  await settle();
-  assert.deepEqual([late.panel(), late.f.button('Lancer (2)').disabled, late.lines()[0][0]], [['À créer · 2', 'Préparation…'], true, 'Plan 1 · 5 s…']);
-  late.f.button('Annuler').onclick();
-  tell({ workflowName: 'LTX 2.5' });
-  await settle();
-  assert.deepEqual([late.f.ui.state().filling, late.f.get('montage-series-item').length], [null, 0]);
-  // A montage is not set aside under a plan being created: its take would have no montage to go to.
-  const one = await series();
-  one.f.plans()[0].onclick();
-  one.f.button('Créer ce plan').onclick();
-  await settle();
-  one.f.plans()[0].onclick();
-  assert.deepEqual(one.f.said('montage-title-name'), ['Montage']);
-  one.f.button('Supprimer ce montage').onclick();
-  assert.match(one.f.notices.at(-1), /^Un plan est en cours de création/);
-  assert.deepEqual([one.f.calls.some(call => call.route === 'montages/remove'), one.f.button('Confirmer la suppression')], [false, undefined]);
+test('what cannot be created is said in its line and left aside, and what goes on from it with it (0.6.144, 0.6.148)', async () => {
+  // The first without its text, the second going on from it: nothing to create.
+  let { f } = await series({ texts: ['', 'Il regarde la mer.'] });
+  assert.deepEqual([f.go(), f.goMain().disabled], ['Créer', true]);
+  assert.deepEqual(f.lines().map(line => line[3]), ['', 'Elle continue la prise d’avant, qui ne peut pas être créée.']);
+  // The model of the first is not on this computer: said in its line; the second, which goes on from it,
+  // is left aside with it (it would be asked first, and refused).
+  ({ f } = await series({ times: { workflowName: 'LTX 2.5', missing: true } }));
+  assert.deepEqual(f.lines().map(line => [line[1], line[3]]), [['LTX 2.5', 'LTX 2.5 n’est pas sur cet ordinateur.'], ['', 'Elle continue la prise d’avant, qui ne peut pas être créée.']]);
+  assert.equal(f.get('bobine-line-right')[0].dataset.missing, 'true');
+  assert.deepEqual([f.go(), f.goMain().disabled], ['Créer', true]);
+  await f.ui.createAll();
+  assert.equal(f.ui.state().filling, null);
+  // The server cannot say (its engine busy): no model said, the takes can be created all the same.
+  ({ f } = await series({ times: new Error('Le serveur ne répond pas.') }));
+  assert.deepEqual([f.lines().map(line => line[1]), f.go()], [['', ''], 'Créer 2 prises']);
+  // One take ready, one left aside without its text.
+  ({ f } = await series({ texts: ['Il lève les yeux.', ''] }));
+  assert.deepEqual([f.go(), f.lines().map(line => line[3])], ['Créer 1 prise', ['', '']]);
 });
 
 // (0.6.146) What Moodix AI is asked to write, each request answered by hand: [{ wanted, signal, resolve, reject }].
@@ -1139,119 +1140,113 @@ function pen() {
   };
 }
 
-test('« Agent » has Moodix AI write the plans that have no text, from their photos, then shows what will be created (0.6.146)', async () => {
-  // (Maquette M7, his words of 20/11: he lays photos, « et le modèle s'occupe de combler les trous ».
-  // His first words on trying 0.6.144: « j'ai pas le bouton agent ».)
+test('the Éclipse has Moodix AI write the takes to create that have no text, from their photos; nothing is made (0.6.146, 0.6.148)', async () => {
+  // (His words of 20/11: he lays photos, « et le modèle s'occupe de combler les trous ». In the Bobine
+  // the Éclipse is the third part of the button of « À créer ».)
   let { pens, write } = pen();
-  let { f, asked, head, lines, panel } = await series({ texts: ['', ''], write });
-  // The button of the other modes, at the left of « Combler les trous ».
-  assert.deepEqual(f.get('montage-agent').concat(f.get('montage-fill')).map(control => [control.textContent, control.disabled]), [['Agent', false], ['Combler les trous', false]]);
-  head('Agent').onclick();
+  let { f, asked } = await series({ texts: ['', ''], write });
+  const agent = () => f.get('bobine-go-agent')[0];
+  assert.deepEqual([agent().disabled, agent().attributes['aria-label'], agent().children[0].className], [false, 'Moodix AI écrit ce qui se passe dans les prises sans texte', 'icon-eclipse']);
+  agent().onclick();
   await settle();
-  // The first plan: from its photo to its photo, for its length.
+  // The first: from its photo to its photo, for its length.
   assert.deepEqual(pens[0].wanted, { verb: 'create_video', seconds: 5, start: { output: id(3) }, end: { output: id(5) } });
-  assert.deepEqual([f.said('montage-status'), f.plans().map(piece => [piece.children[0].textContent, piece.className])], [
-    ['Moodix AI écrit le plan 1 · 1 sur 2'],
-    [['1 · MOODIX AI ÉCRIT', 'montage-piece is-todo is-writing'], ['2 · À FAIRE', 'montage-piece is-todo']],
-  ]);
-  // Its button says it is at work; the writing can be stopped; nothing else is offered meanwhile.
-  assert.deepEqual(f.get('montage-agent').concat(f.get('montage-halt')).map(control => [control.textContent, control.className, control.disabled]), [['Agent', 'montage-agent is-thinking', true], ['Arrêter', 'montage-halt', undefined]]);
-  assert.deepEqual([f.get('montage-fill').length, f.get('montage-pick')[0].disabled, f.ui.state().writing.id], [0, true, f.ui.state().montage.plans[0].id]);
-  // The montage is not changed under its hand, nor a plan created.
+  assert.deepEqual([f.names(), f.plans()[0].className, f.lines()[0][1]], [['Moodix AI écrit', ''], 'montage-piece is-todo is-writing', 'Moodix AI écrit']);
+  // At work: it says so; it can be stopped; nothing else is offered meanwhile.
+  assert.deepEqual([agent().className, agent().disabled, f.said('bobine-halt'), f.goMain().disabled, f.get('montage-pick')[0].disabled], ['bobine-go-part bobine-go-agent is-thinking', true, ['Arrêter'], true, true]);
   f.plans()[1].onkeydown({ key: 'Delete' });
-  assert.equal(f.plans().length, 2);
-  assert.match(f.notices.at(-1), /^Moodix AI écrit les plans/);
+  assert.deepEqual([f.plans().length, f.notices.at(-1)], [2, 'Moodix AI écrit les prises : attendez la fin, ou arrêtez l’écriture.']);
   // Written: the second goes on from the photo the first arrives on, with what happens before it.
   pens[0].resolve({ prompt: '  An old fisherman lifts his eyes.  ' });
   await settle();
   assert.deepEqual(pens[1].wanted, { verb: 'create_video', seconds: 2, start: { output: id(5) }, end: { output: id(6) }, previous: 'An old fisherman lifts his eyes.' });
-  assert.deepEqual([f.said('montage-status'), f.plans().map(piece => piece.children[0].textContent)], [['Moodix AI écrit le plan 2 · 2 sur 2'], ['1 · À FAIRE', '2 · MOODIX AI ÉCRIT']]);
+  assert.deepEqual(f.names(), ['', 'Moodix AI écrit']);
   pens[1].resolve({ prompt: 'He looks at the sea.' });
   for (let turn = 0; turn < 4; turn++) await settle();
-  // Both are written and kept; what will be created is shown to be agreed on, and nothing is made.
-  assert.deepEqual(f.ui.state().montage.plans.map(plan => plan.todo.prompt), ['An old fisherman lifts his eyes.', 'He looks at the sea.']);
-  assert.equal(f.saves().at(-1).body.montage.plans[1].todo.prompt, 'He looks at the sea.');
-  assert.deepEqual([f.ui.state().writing, panel(), lines().map(line => line[1]), asked.length], [null, ['À créer · 2', '≈ 2 min 30 sur votre carte'], ['« An old fisherman lifts his eyes. »', '« He looks at the sea. »'], 0]);
-  assert.deepEqual(f.get('montage-agent').map(control => [control.className, control.disabled]), [['montage-agent', true]]);
-  // What the user wrote is left as it is: only the plan without text is written, the other is its story before.
+  // Both written in their lines and kept; nothing is made: « Créer 2 prises » does it.
+  assert.deepEqual([f.get('bobine-line-words').map(field => field.value), f.saves().at(-1).body.montage.plans[1].todo.prompt], [['An old fisherman lifts his eyes.', 'He looks at the sea.'], 'He looks at the sea.']);
+  assert.deepEqual([f.ui.state().writing, asked.length, f.go(), f.goMain().disabled, agent().className, agent().disabled], [null, 0, 'Créer 2 prises', false, 'bobine-go-part bobine-go-agent', true]);
+  // What the user wrote is left as it is: only the take without text is written, the other is its story before.
   ({ pens, write } = pen());
-  ({ f, head, panel } = await series({ texts: ['Il lève les yeux.', ''], write }));
-  head('Agent').onclick();
+  ({ f } = await series({ texts: ['Il lève les yeux.', ''], write }));
+  agent().onclick();
   await settle();
-  assert.deepEqual([pens.length, pens[0].wanted.previous, f.said('montage-status')], [1, 'Il lève les yeux.', ['Moodix AI écrit le plan 2 · 1 sur 1']]);
+  assert.deepEqual([pens.length, pens[0].wanted.previous], [1, 'Il lève les yeux.']);
   pens[0].resolve({ prompt: 'He looks at the sea.' });
   for (let turn = 0; turn < 4; turn++) await settle();
-  assert.deepEqual([f.ui.state().montage.plans.map(plan => plan.todo.prompt), panel()[0]], [['Il lève les yeux.', 'He looks at the sea.'], 'À créer · 2']);
-  // Every plan written already: what will be created is shown at once, Moodix AI is asked nothing.
+  assert.deepEqual(f.ui.state().montage.plans.map(plan => plan.todo.prompt), ['Il lève les yeux.', 'He looks at the sea.']);
+  // Every take written already: nothing for it to do.
   ({ pens, write } = pen());
-  ({ f, head, panel } = await series({ write }));
-  head('Agent').onclick();
-  for (let turn = 0; turn < 3; turn++) await settle();
-  assert.deepEqual([pens.length, panel()[0]], [0, 'À créer · 2']);
-  // Without Moodix AI at hand (no `write`): no « Agent », « Combler les trous » alone.
+  ({ f } = await series({ write }));
+  assert.equal(agent().disabled, true);
+  await f.ui.askAgent();
+  assert.equal(pens.length, 0);
+  // Without Moodix AI at hand (no `write`): no Éclipse.
   ({ f } = await series());
-  assert.deepEqual([f.get('montage-agent').length, f.get('montage-fill').length], [0, 1]);
+  assert.equal(f.get('bobine-go-agent').length, 0);
 });
 
-test('what Moodix AI cannot write is said; its writing is stopped at once, and ends with the mode (0.6.146)', async () => {
-  // Refused (a chat model that does not see images): said with the plan, which is left to the user; nothing is shown to launch.
+test('what Moodix AI cannot write is said; its writing is stopped at once, and ends with the page (0.6.146, 0.6.148)', async () => {
+  // Refused (a chat model that does not see images): said with the take, which is left to the user.
   let { pens, write } = pen();
-  let { f, head, lines, panel } = await series({ texts: ['', ''], write });
-  head('Agent').onclick();
+  let { f } = await series({ texts: ['', ''], write });
+  const agent = () => f.get('bobine-go-agent')[0];
+  agent().onclick();
   await settle();
-  pens[0].reject(new Error('Ce modèle de chat ne voit pas les images : écrivez vous-même ce qui se passe dans ce plan.'));
+  pens[0].reject(new Error('Ce modèle de chat ne voit pas les images : écrivez vous-même ce qui se passe dans cette prise.'));
   for (let turn = 0; turn < 3; turn++) await settle();
-  assert.deepEqual([f.said('montage-status'), pens.length, f.ui.state().writing, f.ui.state().filling], [['Plan 1 non écrit : Ce modèle de chat ne voit pas les images : écrivez vous-même ce qui se passe dans ce plan.'], 1, null, null]);
-  assert.deepEqual([f.ui.state().montage.plans.map(plan => plan.todo.prompt), head('Agent').disabled], [['', ''], false]);
+  assert.deepEqual([f.said('montage-status'), pens.length, f.ui.state().writing], [['Prise de 00.00 à 05.00 non écrite : Ce modèle de chat ne voit pas les images : écrivez vous-même ce qui se passe dans cette prise.'], 1, null]);
+  assert.deepEqual([f.ui.state().montage.plans.map(plan => plan.todo.prompt), agent().disabled], [['', ''], false]);
   // An answer with nothing in it is no text.
-  head('Agent').onclick();
+  agent().onclick();
   await settle();
   pens[1].resolve({ prompt: '   ' });
   for (let turn = 0; turn < 3; turn++) await settle();
-  assert.deepEqual(f.said('montage-status'), ['Plan 1 non écrit : Moodix AI n’a rien écrit.']);
-  // « Arrêter » while the second is written: its request is let go; what is written stays, nothing more is shown.
+  assert.deepEqual(f.said('montage-status'), ['Prise de 00.00 à 05.00 non écrite : Moodix AI n’a rien écrit.']);
+  // « Arrêter » while the second is written: its request is let go; what is written stays.
   ({ pens, write } = pen());
-  ({ f, head, panel } = await series({ texts: ['', ''], write }));
-  head('Agent').onclick();
+  ({ f } = await series({ texts: ['', ''], write }));
+  agent().onclick();
   await settle();
   pens[0].resolve({ prompt: 'An old fisherman lifts his eyes.' });
   await settle();
-  head('Arrêter').onclick();
+  f.button('Arrêter').onclick();
   assert.deepEqual([pens[1].signal.aborted, f.halted()], [true, 0]);
   pens[1].reject(Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' }));
   for (let turn = 0; turn < 3; turn++) await settle();
-  assert.deepEqual([f.said('montage-status'), f.ui.state().montage.plans.map(plan => plan.todo.prompt), f.ui.state().filling], [['Écriture arrêtée · 1 plan écrit'], ['An old fisherman lifts his eyes.', ''], null]);
-  // Leaving the mode lets its request go; its answer, late, writes nothing.
+  assert.deepEqual([f.said('montage-status'), f.ui.state().montage.plans.map(plan => plan.todo.prompt)], [['Écriture arrêtée · 1 prise écrite'], ['An old fisherman lifts his eyes.', '']]);
+  // Leaving the page lets its request go; its answer, late, writes nothing.
   ({ pens, write } = pen());
-  ({ f, head } = await series({ texts: ['', ''], write }));
-  head('Agent').onclick();
+  ({ f } = await series({ texts: ['', ''], write }));
+  agent().onclick();
   await settle();
   await f.ui.leave();
   assert.deepEqual([pens[0].signal.aborted, f.ui.state().writing], [true, null]);
   pens[0].resolve({ prompt: 'Too late.' });
   await settle();
   assert.deepEqual(f.ui.state().montage.plans.map(plan => plan.todo.prompt), ['', '']);
-  // The continuation of a video: the end of that video, the words of a continuation, what its take shows before.
+  // The suite of a video: the end of that video, the words of a suite, what its take shows before.
   ({ pens, write } = pen());
   const g = await setup({ create: async () => null, write }).open();
   g.get('montage-take')[0].ondblclick();
   g.press(find(g.root, 'montage-grip')[1], 500);
   g.pointer.move(700);
   g.pointer.up();
-  find(g.root, 'montage-agent')[0].onclick();
+  g.get('bobine-go-agent')[0].onclick();
   await settle();
   assert.deepEqual(pens[0].wanted, { verb: 'extend_video', seconds: 2, start: { output: id(1), frame: 'last' }, previous: 'Prise 1' });
   pens[0].reject(new Error('non'));
   await settle();
-  // A plan with nothing to look at (no photo, nothing before it) is left to the user: said where what will be created is shown.
+  // A take with nothing to look at (no photo, nothing before it) is left to the user, and that is said.
   ({ pens, write } = pen());
-  ({ f, head, lines, panel } = await series({ texts: ['', ''], write }));
+  ({ f } = await series({ texts: ['', ''], write }));
   f.plans()[1].onkeydown({ key: 'Delete' });
+  f.plans()[0].onclick();
   if (f.ui.state().chosen !== f.ui.state().montage.plans[0].id) f.plans()[0].onclick();
-  for (const off of find(f.root, 'montage-off')) off.onclick();
-  for (const off of find(f.root, 'montage-off')) off.onclick();
+  f.button('Retirer la photo de début').onclick();
+  f.button('Retirer la photo de fin').onclick();
   assert.equal(f.ui.state().montage.plans[0].photos, undefined);
-  head('Agent').onclick();
+  agent().onclick();
   for (let turn = 0; turn < 4; turn++) await settle();
-  assert.deepEqual([pens.length, panel(), lines()], [0, ['À créer · 0', 'Rien ne peut être créé pour l’instant'], [['Plan 1 · 5 s', 'Écrivez ce qui se passe dans ce plan.']]]);
+  assert.deepEqual([pens.length, f.said('montage-status'), f.ui.state().writing], [0, ['Moodix AI n’a rien à regarder : posez une photo de début ou de fin, ou écrivez vous-même.'], null]);
 });

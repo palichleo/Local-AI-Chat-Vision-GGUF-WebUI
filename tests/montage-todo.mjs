@@ -74,7 +74,7 @@ test('where a photo is laid says what it becomes (0.6.142)', () => {
   assert.equal(withPhoto(still, photo(8), 1, { id: id(18) }).montage, still);
   // A full montage takes no plan more.
   const full = { ...empty(), plans: Array.from({ length: MONTAGE_LIMITS.plans }, (_, n) => ({ id: id(n + 100), source: source(5), kind: 'video', from: 0, to: 1, frame: 'fit', volume: 1 })) };
-  assert.equal(withPhoto(full, photo(9), 999, { id: id(19) }).reason, 'Ce montage est plein.');
+  assert.equal(withPhoto(full, photo(9), 999, { id: id(19) }).reason, 'Cette bobine est pleine.');
 });
 
 test('a photo laid above a video cuts it there: the film will cut on the photo (0.6.142)', () => {
@@ -118,10 +118,10 @@ test('a plan to make has a length a clip can have, a text, and photos that can b
   assert.deepEqual(withoutPhoto(one, id(11), 'end').plans, one.plans);
   assert.deepEqual(validateMontage(withoutPhoto(one, id(11), 'start')).plans, withoutPhoto(one, id(11), 'start').plans);
   // What the head of the timeline says.
-  assert.equal(montageSummary(montage), '1 plan à faire · 5 s · 16:9 · 24 i/s');
+  assert.equal(montageSummary(montage), '1 prise à créer · 5 s · 16:9 · 24 i/s');
   const mixed = withTake(montage, clip(5, 5), { id: id(15) });
-  assert.equal(montageSummary(mixed), '2 plans dont 1 à faire · 10 s · 16:9 · 24 i/s');
-  assert.equal(montageSummary(withTake(empty(), clip(5, 5), { id: id(15) })), '1 plan · 5 s · 16:9 · 24 i/s');
+  assert.equal(montageSummary(mixed), '2 prises dont 1 à créer · 10 s · 16:9 · 24 i/s');
+  assert.equal(montageSummary(withTake(empty(), clip(5, 5), { id: id(15) })), '1 prise · 5 s · 16:9 · 24 i/s');
 });
 
 test('what is asked for a plan to make is read on the montage (0.6.142)', () => {
@@ -129,7 +129,7 @@ test('what is asked for a plan to make is read on the montage (0.6.142)', () => 
   montage = withPhoto(montage, photo(2), 5, { id: id(12) }).montage;
   montage = withPhoto(montage, photo(3), 7, { id: id(13) }).montage;
   // Nothing to ask without what happens in it.
-  assert.deepEqual(creationOf(montage, id(11)), { reason: 'Écrivez ce qui se passe dans ce plan.' });
+  assert.deepEqual(creationOf(montage, id(11)), { reason: 'Écrivez ce qui se passe dans cette prise.' });
   montage = withItemChanged(montage, id(11), { prompt: '  Il lève les yeux.  ' });
   montage = withItemChanged(montage, id(13), { prompt: 'Il regarde la mer.' });
   // Between its two photos: a new clip of its length, at the format of the film.
@@ -137,7 +137,7 @@ test('what is asked for a plan to make is read on the montage (0.6.142)', () => 
     verb: 'create_video', prompt: 'Il lève les yeux.', duration: 5, format: '16:9', end: { source: source(2) }, from: 0, start: { source: source(1) },
   });
   // The second goes on from the first, which is not made yet.
-  assert.deepEqual(creationOf(montage, id(13)), { reason: 'Créez d’abord le plan 1 : celui-ci le continue.' });
+  assert.deepEqual(creationOf(montage, id(13)), { reason: 'Créez d’abord la prise d’avant : celle-ci la continue.' });
   // The first made (a clip of 5,04 s): the second starts on its last image and arrives on its own photo.
   const first = record(21, 'video', { parameters: { frames: 121, fps: 24 } });
   const made = withTodoMade(montage, id(11), first);
@@ -157,8 +157,8 @@ test('what is asked for a plan to make is read on the montage (0.6.142)', () => 
   assert.deepEqual(validateMontage(continued).plans, continued.plans);
   // A video cut before the end of its take cannot be continued: said, with what to do.
   const shortened = withItemChanged(plain, id(11), { to: 3 }, { longest: 5.042 });
-  assert.match(creationOf(shortened, id(13), lengthOf).reason, /^Le plan 1 est coupé avant la fin de sa prise/);
-  assert.match(creationOf(plain, id(13), () => null).reason, /^Le plan 1 est coupé/, 'a take nobody knows the length of');
+  assert.match(creationOf(shortened, id(13), lengthOf).reason, /^La vidéo d’avant est coupée avant sa fin/);
+  assert.match(creationOf(plain, id(13), () => null).reason, /^La vidéo d’avant est coupée/, 'a take nobody knows the length of');
   // With a start photo it needs nothing of what is before it (the film cuts on the photo).
   const cut = withPhoto(withTake(empty(), clip(5, 10), { id: id(15) }), photo(2), 6, { id: id(16) }).montage;
   assert.deepEqual(creationOf(withItemChanged(cut, id(16), { prompt: 'Le soleil perce.' }), id(16)), {
@@ -169,8 +169,8 @@ test('what is asked for a plan to make is read on the montage (0.6.142)', () => 
   assert.deepEqual(creationOf(alone, id(31)), { verb: 'create_video', prompt: 'La mer.', duration: 3, format: '16:9', from: 0 });
   const afterStill = { ...alone, plans: [withTake(empty(), photo(7), { id: id(17) }).plans[0], ...alone.plans] };
   assert.equal(creationOf(afterStill, id(31)).verb, 'create_video');
-  assert.deepEqual(creationOf(made, id(11)), { reason: 'Ce plan est déjà fait.' });
-  assert.deepEqual(creationOf(made, id(99)), { reason: 'Ce plan est déjà fait.' });
+  assert.deepEqual(creationOf(made, id(11)), { reason: 'Cette prise est déjà créée.' });
+  assert.deepEqual(creationOf(made, id(99)), { reason: 'Cette prise est déjà créée.' });
 });
 
 test('the server keeps a plan to make as it is, and refuses what is none (0.6.142)', async () => {
@@ -180,13 +180,13 @@ test('the server keeps a plan to make as it is, and refuses what is none (0.6.14
   const plan = montage.plans[0];
   const tried = changes => () => validateMontage({ ...montage, plans: [{ ...plan, ...changes }] });
   for (const [changes, said] of [
-    [{ source: source(5) }, /un plan à faire est une vidéo sans prise/],
-    [{ kind: 'image' }, /un plan à faire est une vidéo sans prise/],
-    [{ from: 1 }, /un plan à faire est une vidéo sans prise/],
+    [{ source: source(5) }, /une prise à créer est une vidéo sans fichier/],
+    [{ kind: 'image' }, /une prise à créer est une vidéo sans fichier/],
+    [{ from: 1 }, /une prise à créer est une vidéo sans fichier/],
     [{ to: 0.5 }, /durée invalide/],
     [{ to: 21 }, /durée invalide/],
-    [{ todo: {} }, /texte du plan à faire invalide/],
-    [{ todo: { prompt: 'x'.repeat(4001) } }, /texte du plan à faire invalide/],
+    [{ todo: {} }, /texte de la prise à créer invalide/],
+    [{ todo: { prompt: 'x'.repeat(4001) } }, /texte de la prise à créer invalide/],
     [{ photos: { middle: source(1) } }, /photos invalides/],
     [{ photos: { start: { runId: 'x' } } }, /photo : prise invalide/],
     [{ replaces: { source: source(5), from: 6, to: 6 } }, /ce qu’il remplace est invalide/],
@@ -199,7 +199,7 @@ test('the server keeps a plan to make as it is, and refuses what is none (0.6.14
   assert.deepEqual(validateMontage(made).plans[0].photos, { start: source(1), end: source(2) });
   // A film is made of takes: nothing is assembled while a plan is to make.
   const mixed = withTake(montage, clip(5, 5), { id: id(15), index: 0 });
-  await assert.rejects(assemblyOf(validateMontage(mixed), async () => 'D:/x.mp4'), /Le plan 2 est encore à faire : créez-le ou retirez-le avant d’exporter le film\./);
+  await assert.rejects(assemblyOf(validateMontage(mixed), async () => 'D:/x.mp4'), /1 prise est encore à créer : créez-la ou retirez-la avant d’exporter le film\./);
   assert.equal((await assemblyOf(validateMontage(made), async () => 'D:/x.mp4')).plans.length, 1);
 });
 
@@ -288,12 +288,12 @@ test('what is left to create is read in the order of the film, each plan ready o
   const brief = items => items.map(item => [item.number, item.seconds, item.kind, item.ready, item.reason, item.after]);
   // No text yet: neither can be created, each is asked its own text first.
   assert.deepEqual(brief(seriesOf(montage)), [
-    [1, 5, 'photo', false, 'Écrivez ce qui se passe dans ce plan.', null],
-    [2, 2, 'wait', false, 'Écrivez ce qui se passe dans ce plan.', null],
+    [1, 5, 'photo', false, 'Écrivez ce qui se passe dans cette prise.', null],
+    [2, 2, 'wait', false, 'Écrivez ce qui se passe dans cette prise.', null],
   ]);
   // The second written, not the first: it goes on from a plan that cannot be created.
   const second = withItemChanged(montage, id(13), { prompt: 'Il regarde la mer.' });
-  assert.deepEqual(brief(seriesOf(second))[1], [2, 2, 'wait', false, 'Il continue le plan 1, qui ne peut pas être créé.', null]);
+  assert.deepEqual(brief(seriesOf(second))[1], [2, 2, 'wait', false, 'Elle continue la prise d’avant, qui ne peut pas être créée.', null]);
   // Both written: the first now, the second in its turn, once the first is made.
   const both = withItemChanged(second, id(11), { prompt: '  Il lève les yeux.  ' });
   assert.deepEqual(brief(seriesOf(both)), [
@@ -305,9 +305,9 @@ test('what is left to create is read in the order of the film, each plan ready o
   const third = { ...both, plans: [...both.plans, { id: id(14), kind: 'video', todo: { prompt: 'Le soleil perce.' }, from: 0, to: 3, frame: 'fit', volume: 1 }] };
   assert.deepEqual(brief(seriesOf(third))[2], [3, 3, 'wait', true, '', id(13)]);
   assert.deepEqual(seriesOf(withItemChanged(third, id(11), { prompt: '' })).map(item => [item.ready, item.reason]), [
-    [false, 'Écrivez ce qui se passe dans ce plan.'],
-    [false, 'Il continue le plan 1, qui ne peut pas être créé.'],
-    [false, 'Il continue le plan 2, qui ne peut pas être créé.'],
+    [false, 'Écrivez ce qui se passe dans cette prise.'],
+    [false, 'Elle continue la prise d’avant, qui ne peut pas être créée.'],
+    [false, 'Elle continue la prise d’avant, qui ne peut pas être créée.'],
   ]);
   // The first made: it is no longer of the series; the second goes on from its video and needs nothing more.
   const lengthOf = wanted => (wanted.runId === id(21) ? 5.042 : null),

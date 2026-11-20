@@ -1171,6 +1171,7 @@ async function resumeAfterRestart() {
   resizePrompt();
   returnBand();
   if (kept.view === 'studio') showStudio();
+  else if (kept.view === 'bobine') showBobine();
   else if (kept.view === 'library') showLibrary();
 }
 
@@ -1538,7 +1539,9 @@ function syncMiniature() {
     // Its Chat and its Studio are two views of one conversation (0.6.96): either shows its work, the
     // Studio a take of its Chat too (studio.mjs, watch). It showed in the Studio when the Studio did not
     // hold the take (one asked in the Chat, a card waiting there), as if it were another conversation.
-    seen = here && (state.view === 'chat' || state.view === 'studio');
+    seen =
+      here &&
+      (state.view === 'chat' || state.view === 'studio' || (state.view === 'bobine' && Boolean(state.studio?.bobineWorking?.())));
   // Back in its conversation once it is over: nothing more to say.
   if (here && !mini.running && state.view !== 'library') return mini.forget();
   if (seen) return mini.place(null);
@@ -5487,8 +5490,29 @@ function showLibrary({ project = 'all' } = {}) {
     }
   });
 }
+/**
+ * (0.6.148) The Bobine (ex-Montage), a page of its own at the level of the project (public/montage.mjs,
+ * held by the Studio, which creates its takes): the takes of the project read for it, its desk drawn
+ * in the page, its fil beside the project.
+ */
+function showBobine() {
+  if (state.updating || state.closingApp || state.loadingHistory) return;
+  requestSettingsClose(() => {
+    const coming = state.view !== 'bobine';
+    void switchView('bobine', () => {
+      state.view = 'bobine';
+      delete document.body.dataset.chat;
+      projectUI.render();
+      updateControls();
+      if (!coming) return;
+      $('bobine-body').replaceChildren(studioUI.bobine().desk({ fil: $('bobine-fil') }));
+      // (Its takes are those the Studio reads: read now, the bobine is drawn again with them.)
+      void studioUI.open().catch(error => notice(error.message));
+    });
+  });
+}
 // The line under the tab of the view, which glides to the tab chosen (moodix.css, top-line).
-const TABS = { chat: 'chat-open', studio: 'studio-open', library: 'library-open' };
+const TABS = { chat: 'chat-open', studio: 'studio-open', bobine: 'bobine-open', library: 'library-open' };
 function tabLine(kind = state.view) {
   const tab = $(TABS[kind]),
     line = $('top-line');
@@ -5512,6 +5536,8 @@ const VIEW_OUT = 120,
 function switchView(kind, apply) {
   // A sound playing in the Pellicule stops as the page changes.
   if (kind !== 'library') state.hushLibrary?.();
+  // (0.6.148) Leaving the Bobine: nothing goes on playing there, what is not kept yet is.
+  if (kind !== 'bobine' && kind !== 'open' && kind !== 'close' && state.view === 'bobine') void state.studio?.bobine?.().leave();
   const folding = kind === 'open' || kind === 'close';
   if (!folding) {
     // Asked while another moves: that one is shown at once.
@@ -5713,6 +5739,7 @@ function unsendChat() {
 state.onChatSent = chatSent;
 $('chat-scrim').onclick = () => void closeChat({ refocus: true });
 $('studio-open').onclick = () => showStudio();
+$('bobine-open').onclick = () => showBobine();
 $('library-open').onclick = () => showLibrary();
 /**
  * The logo, from any view (16/11): the accueil, a new conversation in the project in hand (the one
@@ -5948,7 +5975,7 @@ try {
   state.saveHistory = initial.preferences?.saveHistory === true;
   await projectUI.refresh().catch(error => notice('Projets indisponibles : ' + error.message));
   await refreshHistory();
-  await assetsUI.refresh().catch(error => notice('Pellicule indisponible : ' + error.message));
+  await assetsUI.refresh().catch(error => notice('Archives indisponibles : ' + error.message));
   await workflowsUI.refresh();
   await restoreUpdate();
   // A page of an older version, replaced while it was open: its draft and its conversation (0.5.128).

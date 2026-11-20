@@ -406,7 +406,7 @@ export function setupLibrary({
         'p',
         'library-note',
         failed
-          ? 'Pellicule illisible : ' + failed
+          ? 'Archives illisibles : ' + failed
           : filter.media !== 'all' || filter.conversation !== 'all'
             ? 'Aucune création de ce type ici.'
             : 'Aucune création pour l’instant. Les images, vidéos et sons faits dans le Studio ou dans un chat arrivent ici.',
