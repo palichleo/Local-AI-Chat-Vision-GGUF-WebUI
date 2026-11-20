@@ -100,6 +100,7 @@ const staticFiles = new Map([
   ['/studio-explain.mjs', ['studio-explain.mjs', 'text/javascript; charset=utf-8']],
   ['/montage.mjs', ['montage.mjs', 'text/javascript; charset=utf-8']],
   ['/montage-model.mjs', ['montage-model.mjs', 'text/javascript; charset=utf-8']],
+  ['/montage-arrange.mjs', ['montage-arrange.mjs', 'text/javascript; charset=utf-8']],
   ['/take-length.mjs', ['take-length.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-search.mjs', ['settings-search.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-tabs.mjs', ['settings-tabs.mjs', 'text/javascript; charset=utf-8']],
