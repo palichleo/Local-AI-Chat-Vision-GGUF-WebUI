@@ -7,6 +7,7 @@ import {
   isTodo,
   linkOf,
   montageSeconds,
+  partsOf,
   montageSummary,
   planStarts,
   seriesOf,
@@ -14,7 +15,9 @@ import {
   withEndPulled,
   withItemChanged,
   withPhoto,
+  withPhotoIn,
   withTake,
+  withTodoDrawn,
   withTodoMade,
   withoutItem,
   withoutPhoto,
@@ -58,7 +61,7 @@ test('where a photo is laid says what it becomes (0.6.142)', () => {
   // After the end, a plan to make that has no end photo yet takes it, and ends where it is laid;
   // never longer than a clip can be.
   assert.deepEqual(shape(withPhoto(first, photo(2), 7.04, { id: id(12) }).montage), [['à faire', 0, 7, id(1), id(2)]]);
-  assert.deepEqual(shape(withPhoto(first, photo(2), 40, { id: id(12) }).montage), [['à faire', 0, TODO_LIMITS.longest, id(1), id(2)]]);
+  assert.deepEqual(shape(withPhoto(first, photo(2), 90, { id: id(12) }).montage), [['à faire', 0, TODO_LIMITS.longest, id(1), id(2)]]);
   // Laid just at the end of a film whose last plan is made, or has its end photo: a new plan of the usual length.
   const ended = withPhoto(first, photo(2), 5, { id: id(12) }).montage;
   assert.deepEqual(shape(withPhoto(ended, photo(3), 5.3, { id: id(13) }).montage).at(-1), ['à faire', 0, TODO_LIMITS.usual, null, id(3)]);
@@ -152,8 +155,10 @@ test('what is asked for a plan to make is read on the montage (0.6.142)', () => 
   assert.deepEqual(planStarts(made), [0, 5.042]);
   assert.deepEqual(validateMontage(made).plans, made.plans);
   const lengthOf = wanted => (wanted.runId === id(21) ? 5.042 : null);
+  // (0.6.152) A continuation that arrives on that photo (end_image on extend_video): no format, the
+  // size of its video; its file holds the video first.
   assert.deepEqual(creationOf(made, id(13), lengthOf), {
-    verb: 'create_video', prompt: 'Il regarde la mer.', duration: 2, format: '16:9', end: { source: source(3) }, from: 0, start: { source: source(21), frame: 'last' },
+    verb: 'extend_video', prompt: 'Il regarde la mer.', duration: 2, end: { source: source(3) }, from: 5.042, continues: source(21),
   });
   assert.deepEqual(creationOf(withTodoMade(montage, id(11), first), id(13), lengthOf), own);
   // Without an end photo it is the continuation itself: no format (it keeps the size of its video),
@@ -193,7 +198,7 @@ test('the server keeps a plan to make as it is, and refuses what is none (0.6.14
     [{ kind: 'image' }, /une prise à créer est une vidéo sans fichier/],
     [{ from: 1 }, /une prise à créer est une vidéo sans fichier/],
     [{ to: 0.5 }, /durée invalide/],
-    [{ to: 21 }, /durée invalide/],
+    [{ to: 61 }, /durée invalide/],
     [{ todo: {} }, /texte de la prise à créer invalide/],
     [{ todo: { prompt: 'x'.repeat(4001) } }, /texte de la prise à créer invalide/],
     [{ photos: { middle: source(1) } }, /photos invalides/],
@@ -229,7 +234,7 @@ test('the end of a video pulled beyond its take asks for its continuation, right
   assert.deepEqual([longer.plans[1].id, longer.plans[1].todo, planStarts(longer)], [id(40), { prompt: '', suite: true }, [0, 5, 9]]);
   assert.deepEqual(validateMontage(longer).plans, longer.plans);
   // Read on the montage as it was pressed: further, as short as a clip can be, as long, back within the take.
-  assert.deepEqual([pull(11.52).plans[1].to, pull(5.5).plans[1].to, pull(60).plans[1].to], [6.5, TODO_LIMITS.shortest, TODO_LIMITS.longest]);
+  assert.deepEqual([pull(11.52).plans[1].to, pull(5.5).plans[1].to, pull(70).plans[1].to], [6.5, TODO_LIMITS.shortest, TODO_LIMITS.longest]);
   assert.deepEqual(shape(pull(4.2)), [['video', 0, 4.2, null, null], still]);
   // A video cut before its end: its end comes back first, then its continuation.
   const cut = withItemChanged(film, id(15), { to: 2 }, { longest: 5 });
@@ -257,9 +262,12 @@ test('what a plan to make goes on from is read on the montage, once for what is 
   // With an end photo: a clip from the last image of that video. With a start photo: from that photo.
   const toPhoto = withPhoto(suite, photo(2), 7.5, { id: id(41) }).montage,
     fromPhoto = withPhoto(suite, photo(2), 5.5, { id: id(41) }).montage;
-  assert.deepEqual([toPhoto.plans[1].photos, fromPhoto.plans[1].photos], [{ end: source(2) }, { start: source(2) }]);
+  // (0.6.152) A suite starts from the end of its video: a photo laid on its first half is its end photo too.
+  assert.deepEqual([toPhoto.plans[1].photos, fromPhoto.plans[1].photos], [{ end: source(2) }, { end: source(2) }]);
   assert.deepEqual(linkOf(toPhoto, id(40), lengthOf), { kind: 'last', before: 1, whole: 5 });
-  assert.deepEqual(linkOf(fromPhoto, id(40), lengthOf), { kind: 'photo' });
+  assert.deepEqual(linkOf(fromPhoto, id(40), lengthOf), { kind: 'last', before: 1, whole: 5 });
+  // (A suite of before 0.6.152 that has a start photo starts on it.)
+  assert.deepEqual(linkOf({ ...suite, plans: [suite.plans[0], { ...suite.plans[1], photos: { start: source(2) } }] }, id(40), lengthOf), { kind: 'photo' });
   // The video cut before its end, or of a length nobody knows; the plan before still to make.
   assert.deepEqual(linkOf(withItemChanged(suite, id(15), { to: 3 }, { longest: 5 }), id(40), lengthOf), { kind: 'cut', before: 1 });
   assert.deepEqual(linkOf(suite, id(40)), { kind: 'cut', before: 1 });
@@ -337,7 +345,85 @@ test('what is left to create is read in the order of the film, each plan ready o
   // What stops a plan is said as under its text; a plan that starts on a photo of its own waits for nothing.
   const shortened = withItemChanged(made, id(11), { to: 3 }, { longest: 5.042 });
   assert.deepEqual(brief(seriesOf(shortened, lengthOf)), [[2, 2, 'cut', false, creationOf(shortened, id(13), lengthOf).reason, null]]);
-  const own = withPhoto(third, photo(4), 7.5, { id: id(15) }).montage;
+  // (0.6.152: a suite has no start photo; here the third is a take of its own, on its photo.)
+  const own = { ...third, plans: third.plans.map(plan => (plan.id === id(14) ? { ...plan, todo: { prompt: plan.todo.prompt }, photos: { start: source(4) } } : plan)) };
   assert.deepEqual(brief(seriesOf(withItemChanged(own, id(11), { prompt: '' })))[2].slice(2), ['photo', true, '', null]);
   assert.deepEqual(seriesOf(empty()), []);
+});
+
+test('a take to create longer than its model makes at once is made in equal parts, suites of one another (0.6.152)', () => {
+  // (Capture 74: « tirée plus loin que ce que le modèle sait créer d'un coup, la prise se coupe toute
+  // seule, en direct, en parties égales […]. Un seul texte pour toute la longueur, une seule photo de
+  // fin, au bout de la dernière partie. » LTX 2.5 makes 10,04 s of a clip, 9,67 s of a continuation.)
+  const limits = { create_video: 10.04, extend_video: 9.67 },
+    todo = (seconds, more = {}) => ({ id: id(40), kind: 'video', todo: { prompt: 'Il marche.', ...more }, from: 0, to: seconds, frame: 'fit', volume: 1 }),
+    parts = (seconds, more, given = limits) => Object.values(partsOf(todo(seconds, more), given));
+  // A new take: one clip as long as the model makes one; longer, its first clip and its suites, each
+  // within the shortest of the two.
+  assert.deepEqual([9, 10.04, 10.1, 19.3, 20, 60].map(seconds => parts(seconds)), [[1, 9], [1, 10.04], [2, 5.05], [2, 9.65], [3, 6.667], [7, 8.571]]);
+  // A suite: continuations only.
+  assert.deepEqual([9.67, 9.8, 20].map(seconds => parts(seconds, { suite: true })), [[1, 9.67], [2, 4.9], [3, 6.667]]);
+  // Nobody knows what its model makes: parts of twenty seconds at most.
+  assert.deepEqual([20, 30, 60].map(seconds => parts(seconds, {}, {})), [[1, 20], [2, 15], [3, 20]]);
+  // His suite pulled twenty seconds beyond a video of five, towards a photo: three parts of 6,67 s.
+  const film = withTake(empty(), clip(5, 5), { id: id(15) }),
+    pulled = withEndPulled(film, id(15), 25, { longest: 5, suiteId: id(40) }),
+    written = withItemChanged(pulled, id(40), { prompt: 'Il marche vers la mer.' }),
+    { montage } = withPhotoIn(written, photo(2), id(40), 'end'),
+    lengths = { [id(5)]: 5 },
+    lengthOf = wanted => lengths[wanted.runId] ?? null;
+  assert.deepEqual(seriesOf(montage, lengthOf, { limits }).map(item => [item.parts, item.part, item.ready]), [[3, 6.667, true]]);
+  // The first part asked: a continuation of the video, of a third of it; the photo is for the last.
+  assert.deepEqual(creationOf(montage, id(40), lengthOf, { limits }), { verb: 'extend_video', prompt: 'Il marche vers la mer.', duration: 6.7, from: 5, parts: 3, continues: source(5) });
+  // Made (its file holds the video first): the first part becomes its take; what is left stays to
+  // create, a suite of it, with the same text and the photo, and the take still ends at 25 s.
+  const part = (n, seconds, before) => record(n, 'video', { parameters: { frames: Math.round((before + seconds) * 24), fps: 24, continuation: { overlapFrames: 9, sourceFrames: Math.round(before * 24), newFrames: Math.round(seconds * 24) } } });
+  const first = withTodoMade(montage, id(40), part(21, 6.667, 5), { from: 5, limits, partId: id(41) });
+  assert.deepEqual(first.plans.map(plan => [plan.id, plan.at, plan.from, plan.to, isTodo(plan), plan.todo?.suite ?? null, plan.photos?.end?.runId ?? null]), [
+    [id(15), 0, 0, 5, false, null, null],
+    [id(41), 5, 5, 11.667, false, null, null],
+    [id(40), 11.667, 0, 13.333, true, true, id(2)],
+  ]);
+  assert.equal(first.plans[2].todo.prompt, 'Il marche vers la mer.');
+  assert.equal(montageSeconds(first), 25);
+  assert.deepEqual(validateMontage(first).plans, first.plans);
+  // The second goes on from the first part made; the last arrives on the photo.
+  lengths[id(21)] = 11.667;
+  assert.deepEqual(creationOf(first, id(40), lengthOf, { limits }), { verb: 'extend_video', prompt: 'Il marche vers la mer.', duration: 6.7, from: 11.667, parts: 2, continues: source(21) });
+  const second = withTodoMade(first, id(40), part(22, 6.667, 6.667), { from: 6.667, limits, partId: id(42) });
+  lengths[id(22)] = 13.333;
+  assert.deepEqual(creationOf(second, id(40), lengthOf, { limits }), { verb: 'extend_video', prompt: 'Il marche vers la mer.', duration: 6.7, end: { source: source(2) }, from: 13.333, continues: source(22) });
+  const last = withTodoMade(second, id(40), part(23, 6.667, 6.667), { from: 6.667, limits, partId: id(43) });
+  assert.deepEqual([last.plans.map(plan => plan.id), last.plans.some(isTodo), last.plans.at(-1).photos], [[id(15), id(41), id(42), id(40)], false, { end: source(2) }]);
+  // A new take in parts: its first clip on its start photo, without the end photo; the rest a suite of it.
+  const drawn = { ...empty(), plans: [{ ...todo(20), at: 0, photos: { start: source(1), end: source(2) } }] };
+  assert.deepEqual(creationOf(drawn, id(40), lengthOf, { limits }), { verb: 'create_video', prompt: 'Il marche.', duration: 6.7, format: '16:9', from: 0, parts: 3, start: { source: source(1) } });
+  const begun = withTodoMade(drawn, id(40), record(24, 'video', { parameters: { frames: 161, fps: 24 } }), { limits, partId: id(44) });
+  assert.deepEqual(begun.plans.map(plan => [plan.id, plan.photos ?? null, plan.todo?.suite ?? null]), [[id(44), { start: source(1) }, null], [id(40), { end: source(2) }, true]]);
+  // Without a name for the part made, the take to create becomes the take.
+  assert.deepEqual(withTodoMade(drawn, id(40), record(24, 'video', { parameters: { frames: 161, fps: 24 } }), { limits }).plans.map(plan => plan.id), [id(40)]);
+});
+
+test('a photo laid in a place of a take to create is its start or its end, never shared; a suite has its end only (0.6.152)', () => {
+  // (Captures 77 et 79.)
+  const film = withTake(empty(), clip(5, 5), { id: id(15) }),
+    suite = withEndPulled(film, id(15), 8, { longest: 5, suiteId: id(40) }),
+    { montage: drawn } = withTodoDrawn(suite, { id: id(41), at: 8, seconds: 4 });
+  assert.deepEqual(withPhotoIn(drawn, photo(1), id(41), 'start').montage.plans[2].photos, { start: source(1) });
+  assert.deepEqual(withPhotoIn(drawn, photo(1), id(40), 'end').montage.plans[1].photos, { end: source(1) });
+  // The two that touch at 8 s each keep their own: the end of the suite, the start of the other.
+  const both = withPhotoIn(withPhotoIn(drawn, photo(1), id(40), 'end').montage, photo(3), id(41), 'start').montage;
+  assert.deepEqual(both.plans.slice(1).map(plan => plan.photos), [{ end: source(1) }, { start: source(3) }]);
+  // Laid again in a place: it replaces the one there.
+  assert.deepEqual(withPhotoIn(both, photo(4), id(41), 'start').montage.plans[2].photos, { start: source(4) });
+  for (const [given, who, side, said] of [
+    [photo(1), id(40), 'start', /^Une suite part de la fin de sa vidéo/],
+    [clip(6, 2), id(41), 'start', /^Seule une image/],
+    [photo(1), id(15), 'end', /prise à créer/],
+    [photo(1), id(41), 'middle', /de début ou de fin/],
+  ]) {
+    const tried = withPhotoIn(drawn, given, who, side);
+    assert.equal(tried.montage, drawn);
+    assert.match(tried.reason, said);
+  }
 });

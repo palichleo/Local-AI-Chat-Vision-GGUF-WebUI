@@ -177,8 +177,10 @@ test('a take to create drawn in a hole stays there, and never goes on from what 
   assert.deepEqual(creationOf(written, id(21), lengthOf), { verb: 'create_video', prompt: 'Il se lève.', duration: 3, format: '16:9', from: 0 });
   // Only a suite pulled from the video goes on from it.
   assert.equal(linkOf({ ...written, plans: [written.plans[0], { ...written.plans[1], todo: { prompt: 'Il se lève.', suite: true } }] }, id(21), lengthOf).kind, 'suite');
-  // Within what a clip can be (cut in parts later: lot 3); drawn over a plan, it goes after it.
-  assert.deepEqual([withTodoDrawn(film, { id: id(22), at: 9, seconds: 0.3 }).montage.plans[1].to, withTodoDrawn(film, { id: id(22), at: 9, seconds: 40 }).montage.plans[1].to], [1, 20]);
+  // From a second to a minute (0.6.152: longer than its model makes, it is made in parts); drawn over a
+  // plan, it goes after it.
+  assert.deepEqual([9, 40, 90].map(seconds => withTodoDrawn(film, { id: id(22), at: 9, seconds }).montage.plans[1].to), [9, 40, 60]);
+  assert.equal(withTodoDrawn(film, { id: id(22), at: 9, seconds: 0.3 }).montage.plans[1].to, 1);
   assert.deepEqual(planStarts(withTodoDrawn(film, { id: id(22), at: 3, seconds: 2 }).montage), [0, 5]);
   assert.deepEqual(planStarts(withTodoDrawn(empty(), { id: id(22), at: 2, seconds: 5 }).montage), [2]);
   const full = { ...empty(), plans: Array.from({ length: MONTAGE_LIMITS.plans }, (_, n) => ({ ...film.plans[0], id: id(n + 100), at: n * 5 })) };

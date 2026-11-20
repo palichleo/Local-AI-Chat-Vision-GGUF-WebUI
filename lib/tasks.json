@@ -54,6 +54,11 @@
         "media": ["image"],
         "many": true,
         "description": "Images of a person, a character, an object or a place that must appear in the continuation, kept as they look: someone who enters the shot, or what the camera turns to. Not frames of the clip."
+      },
+      "end_image": {
+        "media": ["image"],
+        "hand": true,
+        "description": "Image the continuation must end on exactly, as its last frame. Asked by the user's own hand only (the Studio, the Bobine): never offered to the chat model."
       }
     }
   },

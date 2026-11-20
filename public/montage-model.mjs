@@ -381,7 +381,9 @@ export function clock(seconds) {
  *   (« griser clairement la suite de la vidéo », then « coupe sur la photo »).
  * Once created, the plan is a plan as the others, with the take that was made.
  */
-export const TODO_LIMITS = Object.freeze({ shortest: 1, longest: 20, usual: 5, prompt: 4000 });
+// (0.6.152) A take to create may be longer than its model makes at once (`longest`, a minute): it is
+// cut in equal parts, each within the model's own longest (`part` when nobody knows it).
+export const TODO_LIMITS = Object.freeze({ shortest: 1, longest: 60, part: 20, usual: 5, prompt: 4000 });
 export const isTodo = plan => Boolean(plan?.todo);
 export const todoPlans = montage => montage.plans.filter(isTodo);
 const tenth = value => Math.round(value * 10) / 10;
@@ -484,7 +486,9 @@ export function withPhoto(montage, record, seconds, { id } = {}) {
     length = plan.to - plan.from,
     local = at - start;
   if (isTodo(plan)) {
-    plans[index] = { ...plan, photos: { ...plan.photos, [local < length / 2 ? 'start' : 'end']: photo } };
+    // (0.6.152) A suite starts from the end of its video: its photo is the one it arrives on.
+    const side = local < length / 2 && !plan.todo.suite ? 'start' : 'end';
+    plans[index] = { ...plan, photos: { ...plan.photos, [side]: photo } };
     return { montage: { ...montage, plans }, chosen: plan.id };
   }
   if (plan.kind !== 'video') return refused('Une photo se pose au-dessus d’une vidéo ou d’une prise à créer, pas d’une image.');
@@ -495,6 +499,24 @@ export function withPhoto(montage, record, seconds, { id } = {}) {
   plans[index] = { ...plan, to: cut };
   plans.splice(index + 1, 0, todoPlan(id, length - local, { at: round(start + local), photos: { start: photo }, replaces: { source: plan.source, from: cut, to: plan.to } }));
   return { montage: { ...montage, plans: settled(plans) }, chosen: id };
+}
+
+/**
+ * (0.6.152, captures 77 et 79) A photo laid in a place of a take to create: its start (`side`
+ * 'start'), or its end. Never shared: it is that take's alone. A suite has no start photo.
+ * `{ montage, chosen }`, or the montage as it was and `reason`.
+ */
+export function withPhotoIn(montage, record, id, side) {
+  const refused = reason => ({ montage, reason });
+  if (trackOf(record) !== 'image') return refused('Seule une image se pose comme photo de début ou de fin.');
+  const plan = montage.plans.find(item => item.id === id);
+  if (!isTodo(plan)) return refused('Une photo se pose au début ou à la fin d’une prise à créer.');
+  if (side === 'start' && plan.todo.suite) return refused('Une suite part de la fin de sa vidéo : elle n’a que sa photo de fin.');
+  if (side !== 'start' && side !== 'end') return refused('Une photo est de début ou de fin.');
+  return {
+    montage: { ...montage, plans: montage.plans.map(item => (item === plan ? { ...plan, photos: { ...plan.photos, [side]: sourceOf(record) } } : item)) },
+    chosen: id,
+  };
 }
 
 /** `montage` without the start or the end photo of a plan. */
@@ -515,7 +537,7 @@ export function withoutPhoto(montage, id, side) {
  * from `from` seconds of its file: 0 for a clip of its own; where the clip it continues ends, for a
  * continuation, whose file holds that clip first.
  */
-export function withTodoMade(montage, id, record, { from = 0 } = {}) {
+export function withTodoMade(montage, id, record, { from = 0, limits = {}, partId = null } = {}) {
   montage = placed(montage);
   const whole = takeSeconds(record),
     index = montage.plans.findIndex(plan => plan.id === id),
@@ -524,6 +546,19 @@ export function withTodoMade(montage, id, record, { from = 0 } = {}) {
   const { todo: _todo, replaces: _replaces, ...rest } = plan,
     start = round(clamp(from, 0, Math.max(0, (whole ?? 0) - MONTAGE_LIMITS.shortest))),
     made = { ...rest, source: sourceOf(record), kind: 'video', from: start, to: round(Math.max(start + MONTAGE_LIMITS.shortest, whole ?? start + (plan.to - plan.from))) };
+  // (0.6.152) The first part of a take made in parts: it becomes that take (`partId`), with the photo
+  // it starts on; what is left of it stays to create under its own id, a suite of it, with its text
+  // and the photo it arrives on, as long as it was left.
+  const { count } = partsOf(plan, limits);
+  if (count > 1 && partId) {
+    const { photos: _photos, ...first } = made,
+      part = { ...first, id: partId, ...(plan.photos?.start ? { photos: { start: plan.photos.start } } : {}) },
+      // (To the millisecond, not the tenth: the take ends where it ended, part after part.)
+      left = { ...todoPlan(id, TODO_LIMITS.shortest, { at: endOf(part), todo: { prompt: plan.todo.prompt, suite: true } }), to: round(Math.max(TODO_LIMITS.shortest, plan.to - plan.from - (part.to - part.from))), frame: plan.frame, volume: plan.volume, ...(plan.photos?.end ? { photos: { end: plan.photos.end } } : {}) },
+      plans = [...montage.plans];
+    plans.splice(index, 1, part, left);
+    return { ...montage, plans: settled(moved(plans, gluedAfter(montage.plans, index).map(at => at + 1), round(endOf(left) - endOf(plan)))) };
+  }
   // (0.6.149) Its take is as long as it was made: what touches it follows.
   const plans = moved(
     montage.plans.map((item, at) => (at === index ? made : item)),
@@ -531,6 +566,25 @@ export function withTodoMade(montage, id, record, { from = 0 } = {}) {
     round(endOf(made) - endOf(plan)),
   );
   return { ...montage, plans: settled(plans) };
+}
+
+/**
+ * (0.6.152, capture 74) The parts a take to create is made in: `{ count, seconds }`, equal, each within
+ * what its model makes at once. `limits`: the longest the model makes, by verb (« create_video »,
+ * « extend_video »: a suite is made by continuations, a new take by a first clip and then by its suites,
+ * each part as long as the shortest of the two allows). Without them, parts of TODO_LIMITS.part at most.
+ * « Ce sont plusieurs suites de la même prise, à la chaîne […]. Un seul texte pour toute la longueur, une
+ * seule photo de fin, au bout de la dernière partie. »
+ */
+export function partsOf(plan, limits = {}) {
+  const seconds = plan.to - plan.from,
+    known = value => (value > 0 ? value : TODO_LIMITS.part),
+    suite = Boolean(plan.todo?.suite),
+    alone = known(limits[suite ? 'extend_video' : 'create_video']);
+  if (seconds <= alone + 1e-9) return { count: 1, seconds: round(seconds) };
+  const each = suite ? alone : Math.min(alone, known(limits.extend_video)),
+    count = Math.ceil(seconds / each - 1e-9);
+  return { count, seconds: round(seconds / count) };
 }
 
 /**
@@ -573,7 +627,7 @@ export function linkOf(montage, id, lengthOf = () => null) {
  *   be either.
  * `kind`: what it goes on from (linkOf).
  */
-export function seriesOf(montage, lengthOf = () => null) {
+export function seriesOf(montage, lengthOf = () => null, { limits = {} } = {}) {
   const items = [];
   montage.plans.forEach((plan, index) => {
     if (!isTodo(plan)) return;
@@ -581,7 +635,9 @@ export function seriesOf(montage, lengthOf = () => null) {
       link = linkOf(montage, plan.id, lengthOf),
       // (The plan before it is to make too: the last one read. Without its text it waits for nothing.)
       before = link.kind === 'wait' && prompt ? items.at(-1) : null,
-      reason = before ? (before.ready ? '' : 'Elle continue la prise d’avant, qui ne peut pas être créée.') : (creationOf(montage, plan.id, lengthOf).reason ?? '');
+      reason = before ? (before.ready ? '' : 'Elle continue la prise d’avant, qui ne peut pas être créée.') : (creationOf(montage, plan.id, lengthOf, { limits }).reason ?? ''),
+      // (0.6.152) How many parts it is made in, and how long each is.
+      parts = partsOf(plan, limits);
     items.push({
       id: plan.id,
       number: index + 1,
@@ -591,6 +647,8 @@ export function seriesOf(montage, lengthOf = () => null) {
       ready: !reason,
       reason,
       after: before?.ready ? before.id : null,
+      parts: parts.count,
+      part: parts.seconds,
     });
   });
   return items;
@@ -606,19 +664,23 @@ export function seriesOf(montage, lengthOf = () => null) {
  *   continuation itself (`continues`), whose file holds the video first: the plan shows it from `from`;
  * - else a clip of its own, from its text (and its end photo).
  */
-export function creationOf(montage, id, lengthOf = () => null) {
+export function creationOf(montage, id, lengthOf = () => null, { limits = {} } = {}) {
   const index = montage.plans.findIndex(plan => plan.id === id),
     plan = montage.plans[index];
   if (!isTodo(plan)) return { reason: 'Cette prise est déjà créée.' };
   const prompt = (plan.todo.prompt ?? '').trim();
   if (!prompt) return { reason: 'Écrivez ce qui se passe dans cette prise.' };
+  // (0.6.152) Made in parts: what is asked now is its first part; the photo it arrives on is the one
+  // of its last part.
+  const parts = partsOf(plan, limits);
   const wanted = {
     verb: 'create_video',
     prompt,
-    duration: tenth(plan.to - plan.from),
+    duration: tenth(parts.seconds),
     format: montage.format,
-    ...(plan.photos?.end ? { end: { source: plan.photos.end } } : {}),
+    ...(plan.photos?.end && parts.count === 1 ? { end: { source: plan.photos.end } } : {}),
     from: 0,
+    ...(parts.count > 1 ? { parts: parts.count } : {}),
   };
   const link = linkOf(montage, id, lengthOf),
     before = montage.plans[index - 1];
@@ -628,7 +690,8 @@ export function creationOf(montage, id, lengthOf = () => null) {
   if (link.kind === 'loose') return { reason: 'Cette suite n’est plus collée à la vidéo qu’elle continue : rapprochez-la, ou retirez-la.' };
   if (link.kind === 'cut')
     return { reason: 'La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une photo de début.' };
-  if (link.kind === 'last') return { ...wanted, start: { source: before.source, frame: 'last' } };
+  // (0.6.152) A suite towards its photo is a continuation that arrives on it (end_image on extend_video,
+  // his choice of 20/11 for the Bobine and the Studio), no longer a new clip from the last image.
   const { format: _format, ...rest } = wanted;
   return { ...rest, verb: 'extend_video', continues: before.source, from: link.whole };
 }

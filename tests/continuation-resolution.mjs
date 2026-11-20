@@ -708,3 +708,24 @@ test('video tools offer a picture format when the workflow sets its own size, ne
   assert.deepEqual(definitions.create_video.parameters.properties.format.enum.slice(0, 3), ['16:9', '9:16', '1:1']);
   assert.equal(definitions.extend_video?.parameters.properties.format, undefined);
 });
+
+test('a continuation asked by hand may arrive on an end image, in the slot of LTX 2.5; the chat model never passes one (0.6.152)', async () => {
+  // (His choice of 20/11 for the Bobine and the Studio, the chat unchanged: « la photo de fin d'une
+  // suite par end_image sur extend_video ». The engine of LTX 2.5 takes a clip and an end image.)
+  const shipped = validateNativeWorkflow(
+    JSON.parse(readFileSync(new URL('../runner/workflows/eaec4e2f-0649-4e56-9bd9-809dc9390452.json', import.meta.url), 'utf8')),
+  );
+  const tools = new ToolCatalog({ list: async () => [{ ...shipped, ready: true }] }),
+    kinds = { mediaOf: async source => (source.output === 'photo' ? 'image' : 'video') },
+    asked = { prompt: 'x', intention: 'y', source: { output: 'ltx-run' }, end_image: { output: 'photo' } };
+  const byHand = await tools.route('extend_video', asked, { ...kinds, byHand: true });
+  assert.deepEqual(byHand.args.references.map(reference => reference.input).sort(), ['end', 'source']);
+  // From the chat model: the end image is not taken (it is not in its tool either).
+  const fromChat = await tools.route('extend_video', asked, kinds);
+  assert.deepEqual(fromChat.args.references.map(reference => reference.input), ['source']);
+  const [extend] = (await tools.definitions()).filter(tool => tool.function.name === 'extend_video');
+  assert.equal(extend.function.parameters.properties.end_image, undefined);
+  // The Studio offers it on a continuation, as one of its slots.
+  const studio = await tools.studio();
+  assert.ok(studio.extend_video[0].roles.end_image.count >= 1);
+});

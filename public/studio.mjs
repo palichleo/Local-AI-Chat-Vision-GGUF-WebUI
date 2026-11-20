@@ -557,6 +557,8 @@ export function setupStudio({
   const kindsBar = () => (kindsEl ??= $('studio-kinds'));
   // (0.6.148) The Bobine (ex-Montage, public/montage.mjs): a page of its own beside the Studio, which
   // holds it here because it creates its takes as takes of the Studio. The page shows it (`bobine()`).
+  // (0.6.151) The model the takes of the Bobine are asked to: LTX 2.5, when it is ready here.
+  const bobineModel = verb => (info?.tools?.[verb] ?? []).find(tool => tool.family === 'ltx25' && !tool.unavailable) ?? null;
   const montage = setupMontage({
     api,
     node,
@@ -574,7 +576,12 @@ export function setupStudio({
     inputOf: record => outputSource(record),
     // (0.6.151) Every take of the Bobine, new or suite, is asked to LTX 2.5 by its name when it is
     // ready here (« Oui, LTX 2.5 », 20/11): it makes the length drawn, from a fraction of a second.
-    modelFor: verb => (info?.tools?.[verb] ?? []).find(tool => tool.family === 'ltx25' && !tool.unavailable)?.id ?? null,
+    modelFor: verb => bobineModel(verb)?.id ?? null,
+    // (0.6.152) The longest it makes at once: a take longer than it is made in equal parts.
+    longestFor: verb => {
+      const seconds = bobineModel(verb)?.lengths?.seconds ?? [];
+      return seconds.length ? Math.max(...seconds) : null;
+    },
     // (0.6.146) What happens in a plan, written by Moodix AI from its photos: the chat model comes
     // back first when it has left the card, as for « Améliorer »; the takes of the conversation shown
     // are named in the request, the others by their own conversation.

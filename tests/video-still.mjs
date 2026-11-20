@@ -199,7 +199,10 @@ test('a capable model is offered "first" and "last"; the local model keeps the f
   // The clip a continuation starts from is taken whole: no frame of it to name.
   assert.equal(tool(capable, 'extend_video').parameters.properties.source.properties.frame, undefined);
   assert.deepEqual(imageRoles('create_video'), ['start_image', 'end_image', 'reference']);
-  assert.deepEqual(imageRoles('extend_video'), ['reference']);
+  // (0.6.152) The end image of a continuation is taken from the user's own hand only (the Studio, the
+  // Bobine): a frame of a video may stand in for it there; it is never offered to a model (below).
+  assert.deepEqual(imageRoles('extend_video'), ['reference', 'end_image']);
+  assert.equal(tool(capable, 'extend_video').parameters.properties.end_image, undefined);
   // The local model: the definitions it had, with or without the list of what the project holds.
   const number = { type: 'integer', minimum: 0, maximum: 2, description: 'Frame of a video resource used as an image.' };
   const held = { images: 0, resources: [{ id: uid(1), type: 'video' }], outputs: [], takes: [{ take: 25, mediaType: 'video' }] };

@@ -27,6 +27,7 @@ import {
   isTodo,
   linkOf,
   montageSeconds,
+  partsOf,
   placed,
   planAt,
   planStarts,
@@ -39,6 +40,7 @@ import {
   withEndPulled,
   withItemChanged,
   withPhoto,
+  withPhotoIn,
   withPlanMoved,
   withPlanPlaced,
   withTake,
@@ -115,6 +117,9 @@ export function setupMontage({
   // answer of 20/11 « Oui, LTX 2.5 »: a take drawn of 1,90 s had gone to MiniMax H3 Omni, which
   // made 5,17 s of it in 201 s.
   modelFor = () => null,
+  // (0.6.152) The longest that model makes at once, by verb (seconds), or null: a take to create
+  // longer than it is made in equal parts (montage-model.mjs `partsOf`).
+  longestFor = () => null,
   // (0.6.146) What happens in a take to create, written by the chat model from its pictures:
   // `write({ verb, seconds, start, end, previous }, { signal })` gives { prompt }, or throws why not.
   write = null,
@@ -165,6 +170,8 @@ export function setupMontage({
   // (0.6.148) The model of each kind of take to create, as the server would choose it: { name, missing }.
   const models = new Map();
   const inSeries = () => filling?.stage === 'running' || filling?.stage === 'paused';
+  // (0.6.152) What the model of the takes makes at once: what a take to create is cut by.
+  const limits = () => ({ create_video: longestFor('create_video'), extend_video: longestFor('extend_video') });
   const busy = () => Boolean(making || writing || inSeries());
 
   const fresh = (format = '16:9') => ({
@@ -637,7 +644,19 @@ export function setupMontage({
         event.dataTransfer?.setData?.('text/plain', name);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
       };
-      tile.ondragend = () => (carried = null);
+      // (0.6.152) A photo carried lights up the places where it can go: the timeline is drawn with them.
+      if (track === 'image') {
+        const started = tile.ondragstart;
+        tile.ondragstart = event => {
+          started(event);
+          update({ panel: false });
+        };
+      }
+      tile.ondragend = () => {
+        const was = carried;
+        carried = null;
+        if (was && track === 'image') update({ panel: false });
+      };
       grid.append(tile);
     }
     if (!shown.length) grid.append(node('p', 'montage-none', all.length ? 'Aucune prise de ce type.' : 'Aucune prise dans ce projet.'));
@@ -720,7 +739,7 @@ export function setupMontage({
     const plan = itemOf(id);
     if (!plan || !estimate) return null;
     const probe = plan.todo.prompt.trim() ? montage : withItemChanged(montage, id, { prompt: 'Prise.' }),
-      wanted = creationOf(probe, id, lengthOf);
+      wanted = creationOf(probe, id, lengthOf, { limits: limits() });
     if (wanted.reason) return null;
     let args;
     try {
@@ -783,8 +802,8 @@ export function setupMontage({
     const { section, body } = block('is-settings', 'bobine-create'),
       lines = node('div', 'bobine-lines'),
       starts = planStarts(montage),
-      series = seriesOf(montage, lengthOf),
-      can = new Set(creatable());
+      series = seriesOf(montage, lengthOf, { limits: limits() }),
+      can = new Set(creatable().map(item => item.id));
     section.setAttribute('aria-label', 'À créer');
     live.models = new Map();
     live.states = new Map();
@@ -823,7 +842,11 @@ export function setupMontage({
         head = starts[index];
         update();
       };
-      line.append(top, node('span', 'bobine-line-what', whatOf(plan)), field);
+      // (0.6.152, capture 74) Made in parts: how many, of how long each, at the right of what it is.
+      const middle = node('div', 'bobine-line-middle');
+      middle.append(node('span', 'bobine-line-what', whatOf(plan)));
+      if (item.parts > 1) middle.append(node('span', 'bobine-line-parts', `${item.parts} × ${mono(item.part)} s`));
+      line.append(top, middle, field);
       if (reason) line.append(node('p', 'bobine-line-reason', reason));
       live.models.set(item.id, right);
       live.states.set(item.id, right);
@@ -863,7 +886,7 @@ export function setupMontage({
   /** What the button says: how many takes « Créer » makes, or where the creation is. */
   function sayGo() {
     if (!live.goMain || !montage) return;
-    const ready = creatable().length,
+    const ready = creatable().reduce((sum, item) => sum + item.parts, 0),
       running = inSeries(),
       count = running ? filling.ids.length : ready;
     live.goMain.disabled = writing ? true : running ? filling.stage === 'running' : !create || !ready || Boolean(making);
@@ -888,10 +911,10 @@ export function setupMontage({
    * and those that go on from one of them (a take whose model is missing leaves its suite aside too).
    */
   function creatable() {
-    const ids = [];
-    for (const item of seriesOf(montage, lengthOf))
-      if (item.ready && !modelMissing(item.id) && (!item.after || ids.includes(item.after))) ids.push(item.id);
-    return ids;
+    const ready = [];
+    for (const item of seriesOf(montage, lengthOf, { limits: limits() }))
+      if (item.ready && !modelMissing(item.id) && (!item.after || ready.some(other => other.id === item.after))) ready.push({ id: item.id, parts: item.parts });
+    return ready;
   }
 
   // Creating ----------------------------------------------------------------------------------------
@@ -902,7 +925,7 @@ export function setupMontage({
    */
   async function makePlan(id) {
     if (making || writing || !create) return null;
-    const wanted = creationOf(montage, id, lengthOf);
+    const wanted = creationOf(montage, id, lengthOf, { limits: limits() });
     if (wanted.reason) {
       failed.set(id, wanted.reason);
       return null;
@@ -950,7 +973,8 @@ export function setupMontage({
     const stopped = Boolean(filling?.stopping);
     making = null;
     if (record) {
-      montage = withTodoMade(montage, id, record, { from: wanted.from });
+      // (0.6.152) A take made in parts: its first part made, what is left of it stays to create.
+      montage = withTodoMade(montage, id, record, { from: wanted.from, limits: limits(), partId: newId() });
       pending = true;
       // Kept at once: the take exists, the bobine must say so.
       await keep();
@@ -961,7 +985,8 @@ export function setupMontage({
   /** (0.6.148) « Créer n prises »: at once, in the order of the bobine, one after the other. */
   async function createAll() {
     if (busy() || !create) return;
-    const ids = creatable();
+    // (0.6.152) A take made in parts is in the series once by part: « Créer 3 prises ».
+    const ids = creatable().flatMap(item => Array.from({ length: item.parts }, () => item.id));
     if (!ids.length) return;
     for (const id of ids) failed.delete(id);
     filling = { stage: 'running', ids, done: 0, pausing: false, stopping: false };
@@ -1174,27 +1199,67 @@ export function setupMontage({
       const track = node('div', 'montage-track'),
         lane = node('div', 'montage-lane montage-photos');
       track.dataset.track = 'photos';
+      // (0.6.152, captures 77 et 79) A photo being carried: every place where it can go lights up, the
+      // photos already laid are framed (it can replace them), and the end of the bobine offers to begin
+      // a new take on it. It goes in the place it is dropped on; none serves two takes.
+      const carrying = Boolean(carried) && trackOf(carried) === 'image';
+      lane.dataset.carrying = String(carrying);
+      const into = (target, laid) => {
+        target.ondragover = event => {
+          if (!carried || trackOf(carried) !== 'image') return;
+          event.preventDefault();
+          target.dataset.over = 'true';
+        };
+        target.ondragleave = () => delete target.dataset.over;
+        target.ondrop = event => {
+          if (!carried) return;
+          event.preventDefault();
+          event.stopPropagation?.();
+          const dropped = carried;
+          carried = null;
+          const done = laid(dropped);
+          if (done.reason) return notice(done.reason);
+          change(done.montage, { select: done.chosen });
+        };
+      };
       montage.plans.forEach((plan, index) => {
+        const todo = isTodo(plan),
+          span = `prise de ${mono(starts[index])} à ${mono(starts[index] + plan.to - plan.from)}`;
         for (const side of ['start', 'end']) {
-          const photo = plan.photos?.[side];
-          if (!photo) continue;
-          const record = recordOf(photo),
+          const photo = plan.photos?.[side],
+            // (A take to create shows its empty places: start and end, the end only for a suite.)
+            empty = !photo && todo && !(side === 'start' && plan.todo.suite);
+          if (!photo && !empty) continue;
+          const record = photo ? recordOf(photo) : null,
             picture = pictureOf(record),
-            pin = button('montage-photo is-' + side, '', () => {
+            pin = button('montage-photo is-' + side + (empty ? ' is-slot' : ''), '', () => {
               chosen = plan.id;
               update();
             });
           pin.dataset.plan = plan.id;
-          pin.dataset.missing = String(!record);
-          pin.setAttribute('aria-label', `${side === 'start' ? 'Photo de début' : 'Photo de fin'}, prise de ${mono(starts[index])} à ${mono(starts[index] + plan.to - plan.from)}`);
+          pin.dataset.missing = String(Boolean(photo) && !record);
+          pin.setAttribute('aria-label', `${side === 'start' ? 'Photo de début' : 'Photo de fin'}, ${span}${empty ? ' : glissez une image ici' : ''}`);
           pin.setAttribute('aria-pressed', String(chosen === plan.id));
           if (picture) pin.style.backgroundImage = `url("${picture}")`;
           if (side === 'start') pin.style.left = percent(starts[index]);
           else pin.style.right = `calc(${100 - (100 * (starts[index] + plan.to - plan.from)) / whole}% + 4px)`;
+          if (empty) pin.append(icon('image'));
           pin.append(node('span', 'montage-photo-side', side === 'start' ? 'Début' : 'Fin'));
+          if (todo) into(pin, dropped => withPhotoIn(montage, dropped, plan.id, side));
           lane.append(pin);
         }
       });
+      if (carrying) {
+        const fresh = button('montage-photo is-start is-slot is-new', '', null);
+        fresh.setAttribute('aria-label', 'Une nouvelle prise, qui part de cette photo, à la fin de la bobine');
+        fresh.style.left = `calc(${percent(total())} + 4px)`;
+        fresh.append(icon('image'), node('span', 'montage-photo-side', 'Début'));
+        into(fresh, dropped => {
+          const laid = withTodoDrawn(montage, { id: newId(), at: total(), seconds: TODO_LIMITS.usual });
+          return laid.reason ? laid : withPhotoIn(laid.montage, dropped, laid.chosen, 'start');
+        });
+        lane.append(fresh);
+      }
       lane.ondragover = event => {
         if (carried && trackOf(carried) === 'image') event.preventDefault();
       };
@@ -1259,6 +1324,15 @@ export function setupMontage({
           // What a take to create says: its text, on two lines.
           const words = node('span', 'montage-piece-kind', todo ? item.todo.prompt.trim().split('\n')[0].slice(0, 160) : '');
           piece.append(words, node('span', 'montage-piece-length', (suite ? '+' : '') + mono(item.to - item.from) + ' s'));
+          // (0.6.152, capture 74) Made in parts: where each part after the first begins, a suite.
+          if (todo) {
+            const { count } = partsOf(item, limits());
+            for (let part = 1; part < count; part++) {
+              const cut = node('span', 'bobine-part', '↳ Suite');
+              cut.style.left = (100 * part) / count + '%';
+              piece.append(cut);
+            }
+          }
           if (made) {
             const bar = node('span', 'montage-piece-bar'),
               done = node('span', 'montage-piece-bar-done');

@@ -6127,10 +6127,11 @@ test('the bobine asks its takes to LTX 2.5 by its name when the Studio has it re
   const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
     image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true },
     clip = { id: 'v', name: 'MiniMax H3 Omni', family: 'minimax', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
-    ltx = { id: 'l', name: 'LTX 2.5', family: 'ltx25', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
+    // (0.6.152) What it makes at once: a take longer than it is made in equal parts.
+    ltx = { id: 'l', name: 'LTX 2.5', family: 'ltx25', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true, lengths: { seconds: [0.375, 5.042, 10.042], standard: 5.042 } },
     stored = {
       schemaVersion: 1, id: 'm1', name: 'Film', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
-      plans: [{ id: 'a', at: 0, kind: 'video', todo: { prompt: 'Il lève les yeux.' }, from: 0, to: 2, frame: 'fit', volume: 1, photos: { start: { conversationId: 'c0', runId: 'p1', output: 0 } } }],
+      plans: [{ id: 'a', at: 0, kind: 'video', todo: { prompt: 'Il lève les yeux.' }, from: 0, to: 12, frame: 'fit', volume: 1, photos: { start: { conversationId: 'c0', runId: 'p1', output: 0 } } }],
     };
   const routes = new Proxy({}, {
     get: (_, route) =>
@@ -6144,17 +6145,19 @@ test('the bobine asks its takes to LTX 2.5 by its name when the Studio has it re
               ? () => ({ montages: [{ id: 'm1', name: 'Film' }] })
               : undefined,
   });
-  for (const [videos, named] of [
-    [[clip, ltx], 'l'],
-    [[clip, { ...ltx, unavailable: 'Un fichier de LTX 2.5 manque.' }], undefined],
-    [[clip], undefined],
+  // (Twelve seconds: two parts of six with LTX 2.5; nobody knows what the other makes: in one part.)
+  for (const [videos, named, parts] of [
+    [[clip, ltx], 'l', ['2 × 06.00 s']],
+    [[clip, { ...ltx, unavailable: 'Un fichier de LTX 2.5 manque.' }], undefined, []],
+    [[clip], undefined, []],
   ]) {
     const studio = await studioPage({ create_image: [image], create_video: videos }, routes, { runs: [photo] });
     try {
-      studio.studio.bobine().desk();
+      const desk = studio.studio.bobine().desk();
       await until(() => studio.asked.some(([route]) => route === 'tools/action'));
       const [, sent] = studio.asked.find(([route]) => route === 'tools/action');
       assert.equal(sent.arguments.workflow, named, videos.map(video => video.name + (video.unavailable ? ' (absent)' : '')).join(', '));
+      assert.deepEqual([sent.arguments.duration, desk.find('bobine-line-parts').map(item => item.textContent)], [parts.length ? 6 : 12, parts]);
     } finally {
       studio.restore();
     }

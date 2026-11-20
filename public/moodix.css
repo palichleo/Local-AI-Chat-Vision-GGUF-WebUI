@@ -19070,3 +19070,95 @@ body[data-view='bobine'] .chat-panel {
 #bobine-view .montage-frame[data-hole='true'] {
   background: #000;
 }
+
+/* ------------------------------------------------------------------ La Bobine, lot 3 (0.6.152) */
+/* Une prise plus longue que ce que son modèle fait d'un coup (capture 74) : une ligne de « À créer »,
+   « 2 × 04.50 S » à droite de ce qu'elle est ; sur la piste, chaque partie après la première est une
+   suite, en pointillés. */
+.bobine-line-middle {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.bobine-line-parts {
+  flex: none;
+  font: 400 12px/1.2 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.bobine-part {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 6px 0 0 7px;
+  border-left: 1px dashed rgba(238, 232, 222, 0.42);
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  pointer-events: none;
+}
+/* Les emplacements des photos (captures 77 et 79) : chaque prise à créer montre les siens, vides, au-dessus
+   de ses bords (le début et la fin ; la fin seulement pour une suite). Une photo prise les allume ; celles
+   déjà posées s'entourent ; l'emplacement sous la photo se remplit et dit « DÉBUT » ou « FIN ». Un trait
+   descend de chaque photo dans la prise qu'elle oriente. */
+#bobine-view .montage-track[data-track='photos'] > .montage-lane {
+  overflow: visible;
+}
+#bobine-view .montage-photo {
+  width: 64px;
+}
+#bobine-view .montage-photo::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  height: 10px;
+  border-left: 1px solid rgba(238, 232, 222, 0.42);
+  pointer-events: none;
+}
+.montage-photo.is-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(238, 232, 222, 0.28);
+  border-radius: 7px;
+  background: rgba(238, 232, 222, 0.02);
+  box-shadow: none;
+  color: rgba(238, 232, 222, 0.42);
+}
+.montage-photo.is-slot > svg {
+  width: 14px;
+  height: 14px;
+}
+.montage-photo.is-slot > .montage-photo-side {
+  display: none;
+}
+#bobine-view .montage-photo.is-slot::after {
+  border-left-style: dashed;
+}
+.montage-photos[data-carrying='true'] .montage-photo.is-slot {
+  border-color: rgba(208, 202, 221, 0.8);
+  color: rgba(208, 202, 221, 0.9);
+}
+.montage-photos[data-carrying='true'] .montage-photo:not(.is-slot) {
+  outline: 1px dashed rgba(208, 202, 221, 0.8);
+  outline-offset: 3px;
+}
+.montage-photo[data-over='true'] {
+  border-style: solid;
+  background-color: rgba(208, 202, 221, 0.18);
+}
+.montage-photo.is-slot[data-over='true'] > .montage-photo-side {
+  display: block;
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  right: calc(100% + 8px);
+  left: auto;
+}
+.montage-photo.is-new::after {
+  display: none;
+}
