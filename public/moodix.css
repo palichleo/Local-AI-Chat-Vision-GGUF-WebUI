@@ -2117,6 +2117,8 @@ dialog::backdrop {
 .generation-frame::after,
 .studio-frame.is-busy:not(.is-audio)::before,
 .studio-frame.is-busy:not(.is-audio)::after,
+.montage-piece.is-todo.is-making::before,
+.montage-piece.is-todo.is-making::after,
 .generation-original[aria-busy='true']::before {
   content: '';
   position: absolute;
@@ -2139,7 +2141,8 @@ dialog::backdrop {
   transition: opacity 0.9s ease;
 }
 .generation-frame::after,
-.studio-frame.is-busy:not(.is-audio)::after {
+.studio-frame.is-busy:not(.is-audio)::after,
+.montage-piece.is-todo.is-making::after {
   opacity: 0.7;
   animation-duration: 4.1s;
   animation-direction: alternate-reverse;
@@ -17761,4 +17764,250 @@ body:not([data-view='studio']) .ai-cursor {
   height: 9px;
   border-radius: 50%;
   background: var(--ink);
+}
+
+/* ------------------------------------------------------------------ Montage, étape 2 (0.6.142) */
+/* Maquettes M5 et M9 du 20/11. La piste des photos au-dessus des plans : une photo de début est
+   collée au bord gauche de son plan, une photo de fin au bord droit, jamais au-delà (sa règle : « le
+   bord droit de la photo ne doit pas dépasser le plan pour lequel c'est la photo de fin »). Le bord
+   collé est marqué d'un trait plein : il dit de quel côté du plan est la photo. */
+.montage-track[data-track='photos'] > .montage-lane {
+  height: 34px;
+}
+.montage-photo {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 48px;
+  padding: 0;
+  border: 1px solid rgba(238, 232, 222, 0.35);
+  background: #0c0b0f center / cover no-repeat;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+.montage-photo.is-start {
+  border-left: 2px solid var(--ink);
+  border-radius: 2px 7px 7px 2px;
+}
+.montage-photo.is-end {
+  border-right: 2px solid var(--ink);
+  border-radius: 7px 2px 2px 7px;
+}
+.montage-photo[aria-pressed='true'] {
+  border-color: var(--ink);
+}
+.montage-photo[data-missing='true'] {
+  border-style: dashed;
+}
+.montage-photo:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -4px;
+}
+.montage-photo-side {
+  position: absolute;
+  bottom: 3px;
+  font: 500 8px/1 var(--font-ui);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-shadow: 0 1px 3px #000;
+}
+.montage-photo.is-start > .montage-photo-side {
+  left: 4px;
+}
+.montage-photo.is-end > .montage-photo-side {
+  right: 4px;
+}
+/* Un plan à faire : hachuré, en pointillés, rien encore à montrer. */
+.montage-piece.is-todo {
+  border: 1px dashed rgba(238, 232, 222, 0.42);
+  background:
+    repeating-linear-gradient(135deg, rgba(238, 232, 222, 0.07) 0 6px, transparent 6px 12px),
+    #0c0b0f;
+}
+.montage-piece.is-todo::before {
+  content: none;
+}
+.montage-piece.is-todo[aria-pressed='true'] {
+  border-color: rgba(238, 232, 222, 0.9);
+  box-shadow: none;
+}
+/* Celui qui prend la place de la fin d'une vidéo la montre grisée jusqu'à ce qu'il soit fait
+   (« griser clairement la suite de la vidéo sur laquelle il a posé l'image »). */
+.montage-piece.is-todo.is-replacing:not(.is-making) {
+  background-color: #6b6a70;
+  background-size: cover;
+  background-position: center;
+  background-blend-mode: luminosity;
+}
+.montage-piece.is-todo.is-replacing:not(.is-making)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(135deg, rgba(238, 232, 222, 0.1) 0 6px, transparent 6px 12px),
+    rgba(12, 11, 15, 0.62);
+}
+/* En cours de création : le fond animé d'une génération (la règle de .generation-frame, plus haut), et sa barre. */
+.montage-piece.is-todo.is-making {
+  isolation: isolate;
+  border: 1px solid rgba(238, 232, 222, 0.5);
+  background: #10171e;
+}
+html[data-page-hidden='true'] .montage-piece.is-making::before,
+html[data-page-hidden='true'] .montage-piece.is-making::after {
+  animation-play-state: paused;
+  will-change: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .montage-piece.is-making::before,
+  .montage-piece.is-making::after {
+    animation: none;
+    will-change: auto;
+  }
+}
+.montage-piece.is-making > .montage-piece-kind {
+  bottom: 17px;
+  max-width: calc(100% - 20px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.montage-piece.is-making > .montage-piece-length {
+  display: none;
+}
+.montage-piece-bar {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 7px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(238, 232, 222, 0.18);
+  overflow: hidden;
+}
+.montage-piece-bar-done {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ink);
+  transition: width 0.5s linear;
+}
+.montage-piece.is-todo > .montage-piece-kind {
+  max-width: calc(100% - 64px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Ses réglages. */
+/* (Ce qu'il faut faire pour en avoir une, sur deux lignes à la droite de la sienne.) */
+.montage-none-yet {
+  max-width: 122px;
+  font: 400 11.5px/1.25 var(--font-ui);
+  color: var(--muted);
+  text-align: right;
+  text-wrap: balance;
+}
+/* Ses lignes prennent ce qu'il leur faut, son texte la place qui reste : il n'est jamais coupé par le pied. */
+.montage-rows.is-tight {
+  flex: none;
+  overflow: visible;
+}
+.montage-title.is-tight {
+  padding: 12px 18px 9px;
+}
+.montage-foot.is-tight {
+  padding: 8px 18px 12px;
+}
+.montage-chip {
+  flex: none;
+  width: 38px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #000 center / cover no-repeat;
+}
+.montage-off {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: 400 16px/1 var(--font-ui);
+  cursor: pointer;
+}
+.montage-off:enabled:hover {
+  background: rgba(238, 232, 222, 0.08);
+  color: var(--ink);
+}
+.montage-words {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 18px;
+  border-top: 1px solid rgba(238, 232, 222, 0.05);
+}
+.studio-desk textarea.montage-words-field {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: none;
+}
+.montage-reason {
+  flex: none;
+  margin: -3px 18px 8px;
+  font: 400 11.5px/1.4 var(--font-ui);
+  color: var(--muted);
+}
+.montage-reason[hidden] {
+  display: none;
+}
+.montage-action.is-go:enabled {
+  border-color: transparent;
+  background: #d8d2e2;
+  color: #16151a;
+}
+.montage-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* « Arrêter », pendant qu'un plan est créé : à côté d'« Exporter le film ». */
+.montage-halt {
+  flex: none;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: none;
+  color: var(--ink);
+  font: 500 13px/1 var(--font-ui);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.montage-halt:hover {
+  border-color: rgba(238, 232, 222, 0.3);
+}
+/* Une fenêtre basse (1280 × 720) : quatre pistes là où il y en avait trois, et les réglages d'un plan
+   à faire, resserrés pour que son texte garde deux lignes. */
+@media (max-height: 760px) {
+  .montage-lanes {
+    gap: 5px;
+    padding: 8px 0;
+  }
+  .montage-title.is-tight {
+    padding: 10px 18px 8px;
+  }
+  .montage-foot.is-tight {
+    padding: 8px 18px 10px;
+  }
+  .montage-rows.is-tight > .montage-row {
+    min-height: 32px;
+  }
 }

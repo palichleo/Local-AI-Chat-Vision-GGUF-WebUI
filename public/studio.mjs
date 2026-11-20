@@ -568,6 +568,11 @@ export function setupStudio({
     refresh: () => refresh(),
     ensureConversation: () => ensureConversation(),
     showTake: record => viewOutput(record, 0),
+    // (0.6.142) A plan to make is created as a take of the Studio is: the same request, in the
+    // conversation, one creation at a time. The montage stays on screen meanwhile (`montage`).
+    create: (wanted, hooks) => generate({ ...wanted, styles: [], edits: {}, montage: hooks ?? {} }),
+    halt: () => stop(),
+    inputOf: record => outputSource(record),
   });
   // The setting Moodix AI is changing wears a ring, those it has set a fine trace, while it works.
   // Once it has stopped, nothing is framed any more. (0.6.92: no mark on the settings it may change
@@ -2661,8 +2666,10 @@ export function setupStudio({
       // Where the creation will be kept once made: the mode it was asked in.
       asked = mode,
       former = legacy;
-    let made = null;
-    working = { label: 'Préparation…', fraction: null, controller };
+    let made = null,
+      result = null;
+    // (`montage`: asked by the montage, which shows it being made on its own timeline.)
+    working = { label: 'Préparation…', fraction: null, controller, montage: Boolean(onTake?.montage) };
     // Its conversation from its first instant (0.6.81): the page may show another meanwhile, the
     // creation is still this one's, and the page follows it there.
     const conversationId = former ? info.legacyId : await ensureConversation();
@@ -2709,6 +2716,7 @@ export function setupStudio({
             });
             timeWork(time);
             progress();
+            onTake?.montage?.onProgress?.(working.label, working.fraction);
           },
         });
         if (!done.record)
@@ -2739,6 +2747,7 @@ export function setupStudio({
             render();
           }
           progress();
+          onTake?.montage?.onProgress?.(working.label, working.fraction);
           await pause();
           job = await (await api('tools/job')).json();
           if (job?.id !== jobId) throw Error('La génération suivie a été remplacée par une autre tâche.');
@@ -2758,7 +2767,9 @@ export function setupStudio({
         await refresh().catch(() => {});
         // It stays on the screen, as the gallery lists it (with the addresses it is shown from).
         const record = made && runs.find(item => item.id === made);
-        if (record) {
+        result = record || null;
+        // (0.6.142) A plan of the montage is kept by the montage: the screen of the mode stays as it was.
+        if (record && !onTake?.montage) {
           kept[asked] = record;
           // Made from what was looked at: those settings are the user's now, nothing to come back to.
           endLook();
@@ -2773,6 +2784,13 @@ export function setupStudio({
       // The page's work is over; left meanwhile, the Studio goes to the conversation shown.
       if (!former) onWork(null);
       letGo();
+    }
+    // (0.6.142) Asked by the montage: the take made, or why there is none, said there and not on the form.
+    if (onTake?.montage) {
+      const said = failure;
+      failure = '';
+      if (!result) throw new Error(said || 'La génération a échoué.');
+      return result;
     }
   }
   function stop() {
@@ -4914,7 +4932,8 @@ export function setupStudio({
     const body = $('studio-body');
     if (!body) return;
     // (0.6.137) A creation begins or a proposal of Moodix AI arrives: the Studio is its mode again.
-    if (editing && (working || proposal)) {
+    // (0.6.142) Not for a plan the montage itself is having made: it shows it on its timeline.
+    if (editing && ((working && !working.montage) || proposal)) {
       editing = false;
       void montage.leave();
     }

@@ -6002,3 +6002,102 @@ test('drawn again, Réglages and Entrée stay where they were scrolled to; « Pl
     page.restore();
   }
 });
+
+test('a plan to make of the montage is created as a take of the Studio is, the montage staying on screen (0.6.142)', async () => {
+  // (Étape 2 du Montage, 20/11. A creation that began took the Studio back to its mode: the plan being
+  // made would have left the screen with its timeline.)
+  // (The photo is a take of another conversation of the project: named as the Studio names such a take.)
+  const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
+    clip = { id: 'v9', conversationId: 'c1', mediaType: 'video', workflowName: 'LTX 2.5', prompt: 'Il lève les yeux.', parameters: { frames: 121, fps: 24 }, outputs: [{ take: 9, originalUrl: '/media/v9' }] },
+    video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
+    // (Image, the mode the montage is opened from, has a form and a screen of its own to come back to.)
+    image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true };
+  const page = async outcome => {
+    const runs = [photo],
+      kept = [],
+      stored = {
+        schemaVersion: 1, id: 'm1', name: 'Film', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
+        plans: [{ id: 'a', kind: 'video', todo: { prompt: 'Il lève les yeux.' }, from: 0, to: 5, frame: 'fit', volume: 1, photos: { start: { conversationId: 'c0', runId: 'p1', output: 0 } } }],
+      };
+    const routes = new Proxy({}, {
+      get: (_, route) =>
+        typeof route !== 'string'
+          ? undefined
+          : route === 'tools/action'
+            ? () => ({ requestId: 'q', plan: { parameters: {} } })
+            : route === 'montages/save'
+              ? body => (kept.push(body.montage), { ...body.montage, createdAt: 'a', updatedAt: 'b' })
+              : /^montages\/[^/]+\/m1$/.test(route)
+                ? () => stored
+                : /^montages\/[^/]+$/.test(route)
+                  ? () => ({ montages: [{ id: 'm1', name: 'Film' }] })
+                  : undefined,
+    });
+    const seen = [];
+    const studio = await studioPage({ create_image: [image], create_video: [video] }, routes, {
+      runs,
+      run: async (proposed, { onProgress }) => {
+        onProgress('Étape 2 sur 8', 0.25);
+        seen.push({
+          mode: studio.body.dataset.mode,
+          pieces: studio.body.find('montage-piece').map(piece => piece.children[0].textContent),
+          status: studio.body.find('montage-status')[0].textContent,
+        });
+        if (outcome.record) runs.push(outcome.record);
+        return outcome;
+      },
+    });
+    const action = label => studio.body.find('montage-action').find(control => control.children[0]?.textContent === label);
+    // The mode the montage is opened from, and the way back to it.
+    const home = studio.body.dataset.mode,
+      back = async () => {
+        studio.page['studio-kinds'].children.find(tab => tab.dataset.mode === home).onclick();
+        await until(() => studio.body.dataset.mode === home);
+      };
+    studio.page['studio-kinds'].children[3].onclick();
+    await until(() => studio.body.find('montage-piece').length === 1);
+    // (Chosen on the timeline: its settings, and « Créer ce plan », are at the right.)
+    studio.body.find('montage-piece')[0].onclick();
+    return { ...studio, kept, seen, action, home, back };
+  };
+  let studio = await page({ record: clip });
+  try {
+    const { body, asked, kept, seen, action, home, back } = studio;
+    assert.equal(home, 'image');
+    assert.equal(body.find('montage-piece')[0].children[0].textContent, '1 · À FAIRE');
+    action('Créer ce plan').onclick();
+    await until(() => kept.length === 1);
+    // Asked as the Studio asks a clip: in the conversation, for the project, by the user's own hand.
+    const [, sent] = asked.find(([route]) => route === 'tools/action');
+    assert.deepEqual([sent.conversationId, sent.studio, sent.name], ['c1', true, 'create_video']);
+    assert.deepEqual(sent.arguments, { prompt: 'Il lève les yeux.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } });
+    // While it is made the montage is still the one on screen, and says it on its timeline.
+    assert.deepEqual(seen, [{ mode: 'montage', pieces: ['1 · EN COURS'], status: 'Création du plan 1 · Étape 2 sur 8 · 25 %' }]);
+    // Made: still the montage, whose plan is the plan of that take, kept as such.
+    assert.equal(body.dataset.mode, 'montage');
+    assert.equal(body.find('montage-piece')[0].children[0].textContent, '1 · PRISE 9');
+    assert.equal(body.find('montage-status')[0].textContent, 'Plan 1 créé');
+    assert.deepEqual([kept[0].plans[0].source, kept[0].plans[0].todo], [{ conversationId: 'c1', runId: 'v9', output: 0 }, undefined]);
+    // Back in the mode it was opened from: its screen is as it was (a clip is not put on the screen of Image).
+    await back();
+    assert.deepEqual(body.find('studio-frame-result'), []);
+  } finally {
+    studio.restore();
+  }
+  // Refused by the engine: said on the montage, where it was asked; the plan is still to make.
+  studio = await page({ record: null, error: 'Mémoire vidéo insuffisante.' });
+  try {
+    const { body, action } = studio;
+    action('Créer ce plan').onclick();
+    await until(() => /impossible/.test(body.find('montage-status')[0]?.textContent ?? ''));
+    assert.equal(body.find('montage-status')[0].textContent, 'Création impossible : Mémoire vidéo insuffisante.');
+    assert.equal(body.dataset.mode, 'montage');
+    assert.equal(body.find('montage-piece')[0].children[0].textContent, '1 · À FAIRE');
+    assert.equal(action('Créer ce plan').disabled, false, 'it can be tried again');
+    // Said on the montage only: the form of the mode has nothing to say of it.
+    await studio.back();
+    assert.deepEqual(body.find('studio-error'), []);
+  } finally {
+    studio.restore();
+  }
+});

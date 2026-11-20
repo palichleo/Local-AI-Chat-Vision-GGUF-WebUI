@@ -94,12 +94,21 @@ export function withTake(montage, record, { id, index, at = 0 } = {}) {
   return { ...montage, sounds: [...montage.sounds, sound] };
 }
 
-/** `montage` without the plan or the sound of this identifier. */
-export const withoutItem = (montage, id) => ({
-  ...montage,
-  plans: montage.plans.filter(plan => plan.id !== id),
-  sounds: montage.sounds.filter(sound => sound.id !== id),
-});
+/**
+ * `montage` without the plan or the sound of this identifier. A plan to make that took the place of
+ * the end of a video (0.6.142) gives it back: the video before it is whole again.
+ */
+export function withoutItem(montage, id) {
+  const at = montage.plans.findIndex(plan => plan.id === id),
+    gone = montage.plans[at],
+    before = montage.plans[at - 1],
+    back = gone?.replaces && before && sameSource(before.source, gone.replaces.source) && Math.abs(before.to - gone.replaces.from) < 0.002;
+  return {
+    ...montage,
+    plans: montage.plans.filter(plan => plan.id !== id).map(plan => (back && plan === before ? { ...plan, to: gone.replaces.to } : plan)),
+    sounds: montage.sounds.filter(sound => sound.id !== id),
+  };
+}
 
 /** `montage` with a plan moved by `step` places (-1: earlier, 1: later); the same when it cannot move. */
 export function withPlanMoved(montage, id, step) {
@@ -153,6 +162,13 @@ export function withItemChanged(montage, id, changes, { longest = null } = {}) {
     const next = { ...item },
       top = Math.min(longest ?? 36000, 36000),
       still = item.kind === 'image';
+    // (0.6.142) A plan to make has no take yet: a length wanted, within what a clip can be, and its text.
+    if (isTodo(item)) {
+      if (changes.to !== undefined) next.to = tenth(clamp(changes.to, TODO_LIMITS.shortest, TODO_LIMITS.longest));
+      if (typeof changes.prompt === 'string') next.todo = { ...item.todo, prompt: changes.prompt.slice(0, TODO_LIMITS.prompt) };
+      if (changes.frame === 'fit' || changes.frame === 'fill') next.frame = changes.frame;
+      return next;
+    }
     if (changes.to !== undefined) next.to = round(clamp(changes.to, next.from + MONTAGE_LIMITS.shortest, still ? MONTAGE_LIMITS.longest : top));
     if (changes.from !== undefined && !still) next.from = round(clamp(changes.from, 0, next.to - MONTAGE_LIMITS.shortest));
     if (next.to - next.from > MONTAGE_LIMITS.longest && item.kind) next.to = round(next.from + MONTAGE_LIMITS.longest);
@@ -167,9 +183,12 @@ export function withItemChanged(montage, id, changes, { longest = null } = {}) {
 /** What the head of the timeline says of a montage: « 4 plans · 14 s · 16:9 · 24 i/s ». */
 export function montageSummary(montage) {
   const count = montage.plans.length,
-    seconds = montageSeconds(montage);
+    todo = todoPlans(montage).length,
+    seconds = montageSeconds(montage),
+    plural = count > 1 ? 's' : '';
   return [
-    count ? `${count} plan${count > 1 ? 's' : ''}` : 'Aucun plan',
+    // (0.6.142) « 2 plans à faire », « 3 plans dont 1 à faire ».
+    !count ? 'Aucun plan' : todo === count ? `${count} plan${plural} à faire` : `${count} plan${plural}` + (todo ? ` dont ${todo} à faire` : ''),
     ...(count ? [shownSeconds(seconds)] : []),
     montage.format,
     montage.fps + ' i/s',
@@ -186,4 +205,151 @@ export function shownSeconds(seconds) {
 export function clock(seconds) {
   const whole = Math.max(0, Math.floor(seconds));
   return String(Math.floor(whole / 60)).padStart(2, '0') + ':' + String(whole % 60).padStart(2, '0');
+}
+
+// ------------------------------------------------------------------ plans to make (0.6.142)
+/**
+ * (0.6.142) The second step of the montage, his words of 20/11: « ce serait surtout de permettre à
+ * l'utilisateur de créer un plan ». A plan may be one **to make**: no take yet, a length wanted and
+ * what happens in it (`todo: { prompt }`), and the photos it goes by:
+ * - `photos.start`: the photo it starts on; `photos.end`: the photo it must arrive on. On the timeline
+ *   a start photo sits against the left edge of its plan and an end photo against its right edge,
+ *   never beyond (« le bord droit de la photo ne doit pas dépasser le plan pour lequel c'est la photo
+ *   de fin. et pour la photo du début c'est toujours le bord gauche »);
+ * - `replaces`: what of a take this plan takes the place of. A photo laid above a video cuts it
+ *   there: the video is kept up to the photo, its end is shown greyed until the new clip is made
+ *   (« griser clairement la suite de la vidéo », then « coupe sur la photo »).
+ * Once created, the plan is a plan as the others, with the take that was made.
+ */
+export const TODO_LIMITS = Object.freeze({ shortest: 1, longest: 20, usual: 5, prompt: 4000 });
+export const isTodo = plan => Boolean(plan?.todo);
+export const todoPlans = montage => montage.plans.filter(isTodo);
+const tenth = value => Math.round(value * 10) / 10;
+const sameSource = (a, b) => Boolean(a && b) && a.conversationId === b.conversationId && a.runId === b.runId && (a.output ?? 0) === (b.output ?? 0);
+const todoPlan = (id, seconds, more = {}) => ({
+  id,
+  kind: 'video',
+  todo: { prompt: '' },
+  from: 0,
+  to: tenth(clamp(seconds, TODO_LIMITS.shortest, TODO_LIMITS.longest)),
+  frame: 'fit',
+  volume: 1,
+  ...more,
+});
+
+/**
+ * A photo of the project laid on the track of the photos at `seconds` of the film. What it becomes is
+ * read where it is laid: `{ montage, chosen }` (the plan it now belongs to), or `{ montage, reason }`
+ * with the montage as it was and why, in the user's words.
+ * - on an empty film: a first plan to make, which starts on it;
+ * - after the end of the film: the photo the last plan to make arrives on when it has none (the plan
+ *   then ends there), else a new plan to make, from the end of the film to the photo, its end photo;
+ * - on a plan to make: its start photo on its first half, its end photo on the second;
+ * - on a video: the video is kept up to there and a plan to make takes the place of its end, starting
+ *   on the photo (the film cuts on it).
+ */
+export function withPhoto(montage, record, seconds, { id } = {}) {
+  const refused = reason => ({ montage, reason });
+  if (trackOf(record) !== 'image') return refused('Seule une image se pose comme photo de début ou de fin.');
+  const photo = sourceOf(record),
+    total = montageSeconds(montage),
+    at = tenth(Math.max(0, seconds)),
+    plans = [...montage.plans];
+  if (!plans.length) {
+    plans.push(todoPlan(id, TODO_LIMITS.usual, { photos: { start: photo } }));
+    return { montage: { ...montage, plans }, chosen: id };
+  }
+  if (at >= total) {
+    const last = plans.at(-1);
+    if (isTodo(last) && !last.photos?.end) {
+      const start = round(total - (last.to - last.from));
+      plans[plans.length - 1] = { ...last, to: tenth(clamp(at - start, TODO_LIMITS.shortest, TODO_LIMITS.longest)), photos: { ...last.photos, end: photo } };
+      return { montage: { ...montage, plans }, chosen: last.id };
+    }
+    if (plans.length >= MONTAGE_LIMITS.plans) return refused('Ce montage est plein.');
+    plans.push(todoPlan(id, at - total < TODO_LIMITS.shortest ? TODO_LIMITS.usual : at - total, { photos: { end: photo } }));
+    return { montage: { ...montage, plans }, chosen: id };
+  }
+  const { plan, index, start } = planAt(montage, at),
+    length = plan.to - plan.from,
+    local = at - start;
+  if (isTodo(plan)) {
+    plans[index] = { ...plan, photos: { ...plan.photos, [local < length / 2 ? 'start' : 'end']: photo } };
+    return { montage: { ...montage, plans }, chosen: plan.id };
+  }
+  if (plan.kind !== 'video') return refused('Une photo se pose au-dessus d’une vidéo ou d’un plan à faire, pas d’une image.');
+  if (local < 0.5) return refused('Posez la photo plus loin dans la vidéo : avant elle, il ne resterait rien de ce plan.');
+  if (length - local < TODO_LIMITS.shortest) return refused('Posez la photo plus tôt dans la vidéo, ou après la fin du film pour un nouveau plan.');
+  if (plans.length >= MONTAGE_LIMITS.plans) return refused('Ce montage est plein.');
+  const cut = round(plan.from + local);
+  plans[index] = { ...plan, to: cut };
+  plans.splice(index + 1, 0, todoPlan(id, length - local, { photos: { start: photo }, replaces: { source: plan.source, from: cut, to: plan.to } }));
+  return { montage: { ...montage, plans }, chosen: id };
+}
+
+/** `montage` without the start or the end photo of a plan. */
+export function withoutPhoto(montage, id, side) {
+  return {
+    ...montage,
+    plans: montage.plans.map(plan => {
+      if (plan.id !== id || !plan.photos?.[side]) return plan;
+      const { [side]: _gone, ...photos } = plan.photos,
+        { photos: _all, ...rest } = plan;
+      return Object.keys(photos).length ? { ...rest, photos } : rest;
+    }),
+  };
+}
+
+/**
+ * `montage` with a plan to make become the plan of the take that was made for it (`record`), shown
+ * from `from` seconds of its file: 0 for a clip of its own; where the clip it continues ends, for a
+ * continuation, whose file holds that clip first.
+ */
+export function withTodoMade(montage, id, record, { from = 0 } = {}) {
+  const whole = takeSeconds(record);
+  return {
+    ...montage,
+    plans: montage.plans.map(plan => {
+      if (plan.id !== id || !isTodo(plan)) return plan;
+      const { todo: _todo, replaces: _replaces, ...rest } = plan,
+        start = round(clamp(from, 0, Math.max(0, (whole ?? 0) - MONTAGE_LIMITS.shortest)));
+      return { ...rest, source: sourceOf(record), kind: 'video', from: start, to: round(Math.max(start + MONTAGE_LIMITS.shortest, whole ?? start + (plan.to - plan.from))) };
+    }),
+  };
+}
+
+/**
+ * What must be asked for a plan to make to be created, read on the montage: `{ verb, prompt, duration,
+ * format, start, end, continues, from }`, or `{ reason }` in the user's words when it cannot be yet.
+ * `lengthOf(source)`: the length of a take of the project, or null.
+ * - a start photo: a new clip that starts on it (`start: { source }`);
+ * - no start photo, after a video shown to its end: it continues that video. With an end photo, a new
+ *   clip from the last image of the video (`start: { source, frame: 'last' }`); without one, the
+ *   continuation itself (`continues`), whose file holds the video first: the plan shows it from `from`;
+ * - else a clip of its own, from its text (and its end photo).
+ */
+export function creationOf(montage, id, lengthOf = () => null) {
+  const index = montage.plans.findIndex(plan => plan.id === id),
+    plan = montage.plans[index];
+  if (!isTodo(plan)) return { reason: 'Ce plan est déjà fait.' };
+  const prompt = (plan.todo.prompt ?? '').trim();
+  if (!prompt) return { reason: 'Écrivez ce qui se passe dans ce plan.' };
+  const wanted = {
+    verb: 'create_video',
+    prompt,
+    duration: tenth(plan.to - plan.from),
+    format: montage.format,
+    ...(plan.photos?.end ? { end: { source: plan.photos.end } } : {}),
+    from: 0,
+  };
+  if (plan.photos?.start) return { ...wanted, start: { source: plan.photos.start } };
+  const before = montage.plans[index - 1];
+  if (isTodo(before)) return { reason: `Créez d’abord le plan ${index} : celui-ci le continue.` };
+  if (before?.kind !== 'video') return wanted;
+  const whole = lengthOf(before.source);
+  if (!(whole > 0) || Math.abs(before.to - whole) > 0.06)
+    return { reason: `Le plan ${index} est coupé avant la fin de sa prise : rendez-lui sa fin, ou posez une photo de début sur ce plan.` };
+  if (plan.photos?.end) return { ...wanted, start: { source: before.source, frame: 'last' } };
+  const { format: _format, ...rest } = wanted;
+  return { ...rest, verb: 'extend_video', continues: before.source, from: whole };
 }
