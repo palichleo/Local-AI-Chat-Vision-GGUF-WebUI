@@ -5701,6 +5701,7 @@ test('the Studio stays the conversation’s whose take it makes: another one sho
   const image = { id: 'w', name: 'Image', roles: {}, limits: sizes, direct: true, size: { width: 1024, height: 1024 }, settings: [], seeded: true };
   let finish,
     shown = 'c1',
+    place = 'p1',
     elsewhere = '';
   const works = [];
   const page = await studioPage(
@@ -5719,11 +5720,13 @@ test('the Studio stays the conversation’s whose take it makes: another one sho
         onWork: id => works.push(id),
         nameOf: id => (id === 'c1' ? 'Renard dans la neige' : 'Autre'),
         elsewhere: () => elsewhere,
+        project: () => place,
       },
     },
   );
   try {
     const { body, studio } = page;
+    assert.equal(studio.heldProject(), null);
     page.prompt().value = 'un phare';
     page.prompt().oninput();
     const made = body.find('studio-go')[0].onclick();
@@ -5732,7 +5735,10 @@ test('the Studio stays the conversation’s whose take it makes: another one sho
     assert.deepEqual(works, ['c1']);
     assert.equal(studio.heldFor(), 'c1');
     // Another conversation shown: the Studio is held, said so in place of its blocks.
+    // (0.6.160) Of another project: the Studio, and the Bobine with it, stay in the project of the work.
     shown = 'c2';
+    place = 'p2';
+    assert.equal(studio.heldProject(), 'p1');
     studio.conversationChanged();
     const [held] = body.find('studio-away');
     assert.ok(held, 'held by the take of c1');
@@ -5756,6 +5762,7 @@ test('the Studio stays the conversation’s whose take it makes: another one sho
     assert.deepEqual(works, ['c1', null]);
     assert.equal(studio.holds(), false);
     assert.equal(studio.heldFor(), null);
+    assert.equal(studio.heldProject(), null);
     assert.equal(body.find('studio-away').length, 0);
     assert.equal(page.prompt().value, '');
     // c1 opened again: its drafts as they were left.

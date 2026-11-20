@@ -92,7 +92,6 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
   const calls = [],
     queue = [],
     kept = new Map(stored.map(montage => [montage.id, montage])),
-    project = 'inbox',
     runs = [
       take(1, 'video', { parameters: { frames: 80, fps: 16 } }),
       take(2, 'video', { parameters: { frames: 48, fps: 16 } }),
@@ -100,7 +99,8 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
       take(4, 'audio', { workflowName: 'Musique (ACE-Step 1.5 XL)', parameters: { seconds: 30 } }),
       ...extra,
     ];
-  let made = 100,
+  let project = 'inbox',
+    made = 100,
     clock = 0,
     refreshed = 0,
     halted = 0;
@@ -166,6 +166,8 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
     notices,
     kept,
     saves: () => calls.filter(call => call.route === 'montages/save'),
+    // (0.6.160) Another project chosen on the page.
+    move: name => void (project = name),
     refreshed: () => refreshed,
     halted: () => halted,
     // The lanes of the takes and of the two audio tracks, in their order; the one of the photos, above them.
@@ -2325,4 +2327,271 @@ test('the styles of the Bobine: a take being made fills from the left, no moving
   assert.match(rule('#bobine-view .montage-frame-words'), /-webkit-line-clamp: 3;[\s\S]*overflow: hidden;/);
   assert.match(rule('#bobine-view .montage-frame-words[hidden]'), /display: none;/);
   assert.match(rule("#bobine-view .montage-frame[data-end='true'][data-tall='true'] > .montage-frame-words"), /bottom: 82px;/);
+});
+
+// ------------------------------------------------------------------ what was left of the review (0.6.160)
+/** A bobine kept: a video of 5 s (take 7), its suite of `seconds` to create, then `more`. */
+const suiteOf = (seconds, more = []) => ({
+  schemaVersion: 1, id: id(950), name: 'Le pêcheur', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
+  plans: [
+    { id: id(951), at: 0, kind: 'video', source: { conversationId: C, runId: id(7), output: 0 }, from: 0, to: 5, frame: 'fit', volume: 1 },
+    { id: id(952), at: 5, kind: 'video', todo: { prompt: 'Il marche vers la mer.', suite: true }, from: 0, to: seconds, frame: 'fit', volume: 1 },
+    ...more,
+  ],
+});
+/** That bobine on the page, with LTX 2.5 (10,04 s of a clip, 9,67 s of a continuation); `answer(n, frames)`: the clip made, `frames` long with what it continues. */
+async function parted(montage) {
+  const asked = [],
+    answers = [];
+  const f = await setup({
+    stored: [montage],
+    extra: [made(7, 120)],
+    modelFor: () => 'ltx-25',
+    longestFor: verb => ({ create_video: 10.04, extend_video: 9.67 })[verb],
+    create: wanted => (asked.push(structuredClone(wanted)), new Promise(resolve => answers.push(resolve))),
+  }).open();
+  await settle();
+  await settle();
+  const answer = async (n, frames) => {
+    f.runs.push(made(n, frames));
+    answers.shift()(f.runs.at(-1));
+    await settle();
+    await settle();
+  };
+  return { f, asked, answer };
+}
+
+test('the parts of a take are counted again as each is made: one made shorter than asked leaves nothing behind (0.6.160)', async () => {
+  // (Counted once, at « Créer »: 19 s in two parts of 9,5 s. The first made 9 s long, 10 s were left, more
+  // than a continuation makes at once: the second part made half of them, and the series ended with 5 s
+  // of the take still to create.)
+  const { f, asked, answer } = await parted(suiteOf(19));
+  assert.deepEqual([f.said('bobine-line-parts'), f.go()], [['2 × 09.50 s'], 'Créer 2 prises']);
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual([asked[0].args.duration, f.go()], [9.5, '1 sur 2']);
+  // 9 s made (its file: 14 s with the video): 10 s are left, two parts of 5 s. The series has three.
+  await answer(60, 336);
+  assert.deepEqual([f.go(), asked[1].args.duration, asked[1].args.source], ['2 sur 3', 5, { output: id(60) }]);
+  assert.deepEqual(f.ui.state().montage.plans.map(plan => [plan.at, plan.from, plan.to, Boolean(plan.todo)]), [[0, 0, 5, false], [5, 5, 14, false], [14, 0, 10, true]]);
+  await answer(61, 456);
+  assert.deepEqual([f.go(), asked[2].args.duration, asked[2].args.source], ['3 sur 3', 5, { output: id(61) }]);
+  await answer(62, 576);
+  assert.deepEqual([f.ui.state().filling, f.get('bobine-line').length, f.go(), asked.length], [null, 0, 'Créer', 3]);
+  assert.deepEqual(f.ui.state().montage.plans.map(plan => [plan.from, plan.to, Boolean(plan.todo)]), [[0, 5, false], [5, 14, false], [14, 19, false], [19, 24, false]]);
+});
+
+test('a part made much longer than asked: the take is whole sooner, and the series goes on to the takes after it (0.6.160)', async () => {
+  // (25 s in three parts, then a take of its own. The first part made 16 s long, the second ended the
+  // take: the third, still counted, was asked of a take already whole, refused, and the take after it
+  // never made.)
+  const own = { id: id(953), at: 30, kind: 'video', todo: { prompt: 'La mer, au matin.' }, from: 0, to: 3, frame: 'fit', volume: 1 };
+  const { f, asked, answer } = await parted(suiteOf(25, [own]));
+  assert.equal(f.go(), 'Créer 4 prises');
+  f.goMain().onclick();
+  await settle();
+  await answer(60, 504);
+  assert.deepEqual([f.go(), asked[1].args.duration], ['2 sur 3', 9]);
+  await answer(61, 720);
+  assert.deepEqual([f.go(), asked.length, asked[2].verb, asked[2].args.prompt], ['3 sur 3', 3, 'create_video', 'La mer, au matin.']);
+  await answer(62, 72);
+  assert.deepEqual([f.ui.state().filling, f.get('bobine-line').length, [...f.ui.state().failed]], [null, 0, []]);
+});
+
+test('a model that makes next to nothing each time is not asked without end: the series stops at twice its length (0.6.160)', async () => {
+  const { f, asked, answer } = await parted(suiteOf(19));
+  f.goMain().onclick();
+  await settle();
+  // Half a second each time, of 9,5 s asked: two parts foreseen, four made at most; what is left stays to create.
+  for (let part = 0; part < 4; part++) await answer(60 + part, 120 + 12 * (part + 1));
+  assert.deepEqual([asked.length, f.ui.state().filling, f.get('bobine-line').length, f.go()], [4, null, 1, 'Créer 2 prises']);
+});
+
+test('leaving the page while Moodix AI writes a take of the series ends the series there, and its line says why (0.6.160)', async () => {
+  // (Left while a take was made, the series goes on, the Studio keeping its conversation; left while
+  // Moodix AI wrote one, it ended there without a word.)
+  const { pens, write } = pen();
+  const { f, asked } = await series({ texts: ['', 'Il regarde la mer.'], write });
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual([pens.length, f.ui.state().writing.series], [1, true]);
+  await f.ui.leave();
+  for (let turn = 0; turn < 3; turn++) await settle();
+  assert.deepEqual([pens[0].signal.aborted, f.ui.state().filling, f.ui.state().writing], [true, null, null]);
+  pens[0].resolve({ prompt: 'Too late.' });
+  for (let turn = 0; turn < 3; turn++) await settle();
+  assert.deepEqual([asked.length, f.ui.state().montage.plans.map(plan => plan.todo.prompt)], [0, ['', 'Il regarde la mer.']]);
+  // Back on the page: said in its line, as what stops a take is. « Créer » takes it up again.
+  f.root = f.ui.desk();
+  assert.deepEqual([f.lines()[0][3], f.get('bobine-line')[0].dataset.state, f.go()], ['Série arrêtée : vous avez quitté la Bobine pendant que Moodix AI écrivait cette prise.', 'failed', 'Créer 2 prises']);
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual([pens.length, f.lines()[0][3], f.said('bobine-line-writing')], [2, '', ['Moodix AI écrit']]);
+  // The texts the Éclipse asks for, let go with the page too, are no series: nothing is said of them.
+  const { pens: others, write: eclipse } = pen();
+  const { f: g } = await series({ texts: ['', ''], write: eclipse });
+  g.get('bobine-go-agent')[0].onclick();
+  await settle();
+  await g.ui.leave();
+  assert.deepEqual([others[0].signal.aborted, [...g.ui.state().failed]], [true, []]);
+});
+
+test('another project chosen on the page while Moodix AI writes a take of a series: the series ends with its bobine (0.6.160)', async () => {
+  // (A take being made keeps the Studio, and the bobine, in its project. While Moodix AI wrote one,
+  // nothing did: its text was written in the bobine of the other project, kept there, its take asked there.)
+  const { pens, write } = pen();
+  const { f, asked } = await series({ texts: ['', 'Il regarde la mer.'], write });
+  f.goMain().onclick();
+  await settle();
+  f.move('p2');
+  f.ui.refreshed();
+  for (let turn = 0; turn < 4; turn++) await settle();
+  assert.deepEqual([pens[0].signal.aborted, f.ui.state().filling, f.ui.state().writing], [true, null, null]);
+  pens[0].resolve({ prompt: 'Too late.' });
+  for (let turn = 0; turn < 4; turn++) await settle();
+  assert.deepEqual([asked.length, f.saves().length, f.ui.state().montage.plans.map(plan => plan.todo.prompt)], [0, 0, ['', 'Il regarde la mer.']]);
+});
+
+test('a save refused is still to keep: tried again once on its own, and when the page is left (0.6.160)', async () => {
+  // (It was held for kept: leaving the page found nothing to keep, and the bobine stayed as the disk had it.)
+  const fail = { 'montages/save': 'Disque plein.' };
+  const f = await setup({ fail }).open();
+  f.get('montage-take')[0].ondblclick();
+  await f.later();
+  assert.deepEqual([f.saves().length, f.said('montage-status')], [1, ['Non gardée : Disque plein.']]);
+  // Once on its own, a moment later; not without end.
+  await f.later();
+  assert.equal(f.saves().length, 2);
+  await f.later();
+  await f.later();
+  assert.equal(f.saves().length, 2);
+  // The page left: kept then.
+  delete fail['montages/save'];
+  await f.ui.leave();
+  assert.deepEqual([f.saves().length, f.kept.size, f.saves().at(-1).body.montage.plans.length], [3, 1, 1]);
+  // A refusal that passes: kept on its own, and nothing said any more; a later refusal is tried again too.
+  const passing = { 'montages/save': 'Le serveur redémarre.' };
+  const g = await setup({ fail: passing }).open();
+  g.get('montage-take')[0].ondblclick();
+  await g.later();
+  delete passing['montages/save'];
+  await g.later();
+  assert.deepEqual([g.saves().length, g.kept.size, g.said('montage-status')], [2, 1, ['']]);
+  passing['montages/save'] = 'Disque plein.';
+  g.get('montage-take')[1].ondblclick();
+  await g.later();
+  await g.later();
+  assert.equal(g.saves().length, 4);
+});
+
+test('what a bobine could not keep is not kept in the name of the one that takes its place (0.6.160)', async () => {
+  const one = { schemaVersion: 1, id: id(900), name: 'Le renard', format: '16:9', width: 1344, height: 768, fps: 24, plans: [], sounds: [] },
+    two = { ...one, id: id(910), name: 'Le phare' };
+  // Another one opened: it is as the disk has it, nothing of it is to keep.
+  const fail = { 'montages/save': 'Disque plein.' };
+  const f = await setup({ stored: [one, two], fail }).open();
+  f.get('montage-take')[0].ondblclick();
+  await f.later();
+  f.pick(id(910));
+  for (let turn = 0; turn < 4; turn++) await settle();
+  assert.deepEqual([f.ui.state().montage.id, f.saves().length], [id(910), 2]);
+  delete fail['montages/save'];
+  await f.later();
+  await f.ui.leave();
+  assert.deepEqual(f.saves().map(call => call.body.montage.id), [id(900), id(900)]);
+  // A new one, never kept, taken out: no empty bobine is kept in its place.
+  const refused = { 'montages/save': 'Disque plein.' };
+  const g = await setup({ fail: refused }).open();
+  g.get('montage-take')[0].ondblclick();
+  await g.later();
+  g.pick('remove');
+  g.button('Supprimer').onclick();
+  for (let turn = 0; turn < 4; turn++) await settle();
+  assert.deepEqual([g.notices, g.ui.state().montage.plans.length], [['Bobine mise de côté.'], 0]);
+  delete refused['montages/save'];
+  await g.later();
+  await g.ui.leave();
+  assert.deepEqual([g.saves().length, g.kept.size], [1, 0]);
+  // « + Nouvelle bobine » after a refusal: the same.
+  const again = { 'montages/save': 'Disque plein.' };
+  const h = await setup({ fail: again }).open();
+  h.get('montage-take')[0].ondblclick();
+  await h.later();
+  h.pick('new');
+  for (let turn = 0; turn < 4; turn++) await settle();
+  delete again['montages/save'];
+  await h.later();
+  await h.ui.leave();
+  assert.equal(h.kept.size, 0);
+  // And the refusals of the one before are forgotten with it: the new one is tried again on its own too.
+  const k = await setup({ fail: { 'montages/save': 'Disque plein.' } }).open();
+  k.get('montage-take')[0].ondblclick();
+  await k.later();
+  k.pick('new');
+  for (let turn = 0; turn < 4; turn++) await settle();
+  assert.equal(k.saves().length, 2);
+  k.get('montage-take')[0].ondblclick();
+  await k.later();
+  await k.later();
+  assert.equal(k.saves().length, 4);
+});
+
+test('under a window open over the page, Ctrl+Z is the window’s: nothing of the bobine is undone (0.6.160)', async () => {
+  const f = await setup().open();
+  f.get('montage-take')[0].ondblclick();
+  // (Paramètres, a confirmation: a `dialog` open on the page.)
+  shown.querySelector = asked => (asked === 'dialog[open]' ? {} : null);
+  try {
+    f.pageKey('z', { ctrlKey: true });
+    assert.equal(f.ui.state().montage.plans.length, 1);
+    shown.querySelector = () => null;
+    f.pageKey('z', { ctrlKey: true });
+    assert.equal(f.ui.state().montage.plans.length, 0);
+  } finally {
+    delete shown.querySelector;
+  }
+});
+
+test('a bobine of the Archives is not opened in a project the Studio does not hold: said, nothing read (0.6.160)', async () => {
+  // (0.6.81: a work keeps the Studio, and the Bobine with it, in its project while the page shows
+  // another. The card of a bobine of that other project asked it there: « Bobine illisible : Cette
+  // bobine n’existe plus. », of a bobine that exists.)
+  const { readFile } = await import('node:fs/promises');
+  const { runInNewContext } = await import('node:vm');
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    begin = source.indexOf('async function openBobine('),
+    end = source.indexOf('// The line under the tab of the view', begin);
+  assert.ok(begin > 0 && end > begin);
+  const done = [],
+    state = { projectId: 'p2' };
+  let held = 'p1';
+  const sandbox = {
+    state,
+    studioUI: { heldProject: () => held, bobine: () => ({ wanted: id => done.push(['wanted', id]) }) },
+    notice: text => done.push(['notice', text]),
+    newConversation: async project => {
+      done.push(['new', project]);
+      state.projectId = project;
+    },
+    showBobine: () => done.push(['shown']),
+  };
+  runInNewContext(source.slice(begin, end) + '\nthis.open = openBobine;', sandbox);
+  await sandbox.open('p2', 'b1');
+  assert.deepEqual(done.splice(0), [['notice', 'Une création est en cours dans un autre projet : cette bobine s’ouvrira après elle, d’un nouveau clic.']]);
+  // Of the project the work is in: opened, as before.
+  await sandbox.open('p1', 'b2');
+  assert.deepEqual(done.splice(0), [['new', 'p1'], ['wanted', 'b2'], ['shown']]);
+  // Nothing held: in its project, a new conversation there first when the page is in another.
+  held = null;
+  await sandbox.open('p2', 'b1');
+  assert.deepEqual(done.splice(0), [['new', 'p2'], ['wanted', 'b1'], ['shown']]);
+  await sandbox.open('p2', 'b1');
+  assert.deepEqual(done.splice(0), [['wanted', 'b1'], ['shown']]);
+});
+
+test('what the download of 0.6.153 left behind is gone: the card of the chat is not the Bobine’s any more (0.6.160)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const read = name => readFile(new URL('../public/' + name, import.meta.url), 'utf8');
+  assert.doesNotMatch(await read('moodix.css'), /\.bobine-download/);
+  assert.doesNotMatch(await read('missing-file.mjs'), /onCancel/);
 });

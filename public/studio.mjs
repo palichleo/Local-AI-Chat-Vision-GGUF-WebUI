@@ -5762,6 +5762,8 @@ export function setupStudio({
     holds,
     /** The conversation whose work the Studio holds, or null. */
     heldFor: () => (heldIn && holds() ? heldIn.conversation : null),
+    /** (0.6.160) The project of that work, or null: the Studio and the Bobine are that project's meanwhile. */
+    heldProject: () => (heldIn && holds() ? heldIn.project : null),
     /** The few seconds the pointer of Moodix AI sets the Studio (it is locked, the page holds its places). */
     settingUp: () => aiWorking,
     /** A work held here may be over (the page asks again): left meanwhile, the Studio follows the page. */

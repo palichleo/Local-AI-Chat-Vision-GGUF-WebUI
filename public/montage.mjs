@@ -91,6 +91,10 @@ const plural = (count, one, many = one + 's') => `${count} ${count > 1 ? many : 
 const STEPS = 100,
   TYPED = 1500;
 // (0.6.155) How long the end of an export is said in the fil, and how often a download is asked about, in ms.
+// (0.6.160) How long after a save refused the page tries again on its own, once.
+const SAVE_AGAIN = 5000;
+// (0.6.160) Said in the line of the take Moodix AI was writing when the page was left: its series ended there.
+const LEFT_WRITING = 'Série arrêtée : vous avez quitté la Bobine pendant que Moodix AI écrivait cette prise.';
 const SAID = 4000,
   POLL = 1000;
 // (0.6.157) How long the suite shown under the end of a video is, in seconds (capture 72).
@@ -173,6 +177,7 @@ export function setupMontage({
     status = '',
     saving = null,
     pending = false,
+    retried = false, // (0.6.160) a save refused was already tried again on its own
     exporting = false,
     // (0.6.148) What the fil asks before it is done: « Renommer », « Supprimer ».
     asking = null,
@@ -319,6 +324,7 @@ export function setupMontage({
     status = '';
     failed.clear();
     forget();
+    unkept();
     try {
       const found = (await (await api('montages/' + encodeURIComponent(place))).json()).montages ?? [];
       if (project() !== place) return void (reading === mine && (reading = null));
@@ -352,6 +358,7 @@ export function setupMontage({
     archivedKey = archived ? contentKey(placed(archived)) : null;
     stored = true;
     forget();
+    unkept();
     chosen = null;
     head = 0;
     status = '';
@@ -368,6 +375,7 @@ export function setupMontage({
     try {
       const kept = await (await api('montages/save', { project: place, montage: sent })).json();
       stored = true;
+      retried = false;
       if (montage === sent) montage = { ...sent, createdAt: kept.createdAt, updatedAt: kept.updatedAt };
       listed(kept);
       // (0.6.154) Kept on its own, as before, but said only when it could not be: « Enregistrer » puts
@@ -375,8 +383,23 @@ export function setupMontage({
       if (status.startsWith('Non gardée')) status = '';
     } catch (error) {
       status = 'Non gardée : ' + error.message;
+      // (0.6.160) What could not be kept is still to keep. It was held for kept: leaving the page, which
+      // « keeps what is not kept yet », found nothing to keep, and the bobine stayed as the disk had it.
+      // Tried again on its own too, once, a moment later: a refusal that passes (the server starting
+      // again); after it, the next change, an export or leaving the page try.
+      pending = true;
+      if (!saving && !retried) {
+        retried = true;
+        saving = timers.set(() => void keep(), SAVE_AGAIN);
+      }
     }
     say();
+  }
+  /** (0.6.160) Another bobine comes on the page: what the one before could not keep is not kept in its name. */
+  function unkept() {
+    if (saving) timers.clear(saving);
+    saving = null;
+    pending = retried = false;
   }
   /** (0.6.155) The end of an export, said a few seconds in the fil, then nothing: only errors stay there. */
   function fades() {
@@ -577,6 +600,7 @@ export function setupMontage({
       montage = fresh();
       archivedKey = null;
       forget();
+      unkept();
       stored = false;
       chosen = null;
       head = 0;
@@ -1388,8 +1412,25 @@ export function setupMontage({
     const ids = creatable().flatMap(item => Array.from({ length: item.parts }, () => item.id));
     if (!ids.length) return;
     for (const id of ids) failed.delete(id);
-    filling = { stage: 'running', ids, done: 0, pausing: false, stopping: false };
+    // (`most`: how long the series may become, its parts counted again as they are made, recount.)
+    filling = { stage: 'running', ids, done: 0, pausing: false, stopping: false, most: ids.length * 2 };
     return run(filling);
+  }
+  /**
+   * (0.6.160) A part of a take was just made: the parts left to make are counted again on what is left of
+   * it. They were counted once, at « Créer »; but a model makes a part a little shorter or longer than it
+   * is asked. Shorter, what is left no longer fits in the parts foreseen: the series ended with a piece
+   * of the take still to create. Much longer, a part was asked of a take already whole, refused, and the
+   * series stopped before the takes after it.
+   */
+  function recount(series, id) {
+    const left = itemOf(id),
+      need = isTodo(left) ? partsOf(left, limits()).count : 0;
+    let have = 0;
+    while (series.ids[series.done + have] === id) have++;
+    // (Never without end: a model that made next to nothing each time would be asked again and again.)
+    const count = Math.min(need, have + Math.max(0, series.most - series.ids.length));
+    if (count !== have) series.ids.splice(series.done, have, ...Array.from({ length: count }, () => id));
   }
   /** The takes of the series not made yet, each in its turn; a pause waits for the end of the one being made. */
   async function run(series) {
@@ -1413,6 +1454,7 @@ export function setupMontage({
       // (Refused or stopped: the series ends there, what is made stays.)
       if (!record) break;
       series.done++;
+      recount(series, id);
     }
     if (filling === series) filling = null;
     draw();
@@ -1480,6 +1522,9 @@ export function setupMontage({
    */
   function pageKeys(event) {
     if (!root) return;
+    // (0.6.160) A window open over the page (Paramètres, a confirmation) has the keys: Ctrl+Z pressed in
+    // it undid a gesture of the bobine behind it, unseen.
+    if (page?.document?.querySelector?.('dialog[open]')) return;
     if (wand && event.key === 'Escape') return toggleWand(false);
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
     const { tagName, isContentEditable } = event.target ?? {};
@@ -2443,6 +2488,16 @@ export function setupMontage({
     /** The creations of the project were read again (one made, one removed): shown as they are now. Another project: its bobines. */
     refreshed() {
       if (root && readFor !== project()) {
+        // (0.6.160) Another project chosen on the page while Moodix AI writes a take of a series, or
+        // between two of its takes: nothing keeps the bobine in its project then (a take being made
+        // does, 0.6.81). The series ends with it: its text was written in the bobine of the other
+        // project, kept there, and its take asked there.
+        writing?.controller.abort();
+        writing = null;
+        if (filling && !making) {
+          filling.controller?.abort();
+          filling = null;
+        }
         montage = fresh();
         stored = false;
         void read();
@@ -2454,7 +2509,15 @@ export function setupMontage({
       stop();
       // (A creation in pause ends with the page; one running goes on, its take kept when made.)
       if (filling?.stage === 'paused') filling = null;
-      // (0.6.146) What Moodix AI is writing is let go.
+      // (0.6.146) What Moodix AI is writing is let go. (0.6.160) The text of a take of a series too, and
+      // the series ends there: the Studio keeps the bobine in its conversation while a take is made
+      // (0.6.81), not while one is written. But it ended without a word, while a series left a moment
+      // later, a take being made, went on: the line of that take says why now.
+      // (Ended now: not when the chat model, let go, answers at last.)
+      if (writing?.series) {
+        failed.set(writing.id, LEFT_WRITING);
+        filling = null;
+      }
       writing?.controller.abort();
       writing = null;
       // (0.6.153) The wand is put down, the enrichment asked let go.

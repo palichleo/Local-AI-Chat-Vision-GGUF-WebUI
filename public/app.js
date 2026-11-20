@@ -5519,6 +5519,10 @@ function showBobine() {
  */
 async function openBobine(project, id) {
   if (state.updating || state.closingApp || state.loadingHistory) return;
+  // (0.6.160) A work holds the Studio in another project (0.6.81), and the Bobine with it: this bobine
+  // was asked there, and « Bobine illisible : Cette bobine n’existe plus. » was said of one that exists.
+  const held = studioUI.heldProject();
+  if (held && held !== project) return notice('Une création est en cours dans un autre projet : cette bobine s’ouvrira après elle, d’un nouveau clic.');
   if ((state.projectId || 'inbox') !== project) await newConversation(project);
   if ((state.projectId || 'inbox') !== project) return;
   studioUI.bobine().wanted(id);

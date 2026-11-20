@@ -19265,7 +19265,7 @@ body[data-view='bobine'] .chat-panel {
   border-color: rgba(208, 202, 221, 0.9);
 }
 /* Un modèle absent (capture 89) : son nom en ambre dans la ligne, une phrase au-dessus du bouton, et
-   « Télécharger · 20,0 Go » à la place de « Créer » ; sa carte (celle du chat) à la place des lignes. */
+   « Télécharger · 20,0 Go » à la place de « Créer » (0.6.155 : téléchargé là, sans la carte du chat). */
 .bobine-missing {
   flex: none;
   margin: auto 0 0;
@@ -19274,18 +19274,6 @@ body[data-view='bobine'] .chat-panel {
 }
 .bobine-go-download {
   justify-content: center;
-}
-.bobine-download .missing-card {
-  margin: 0;
-  max-width: none;
-}
-/* (Sa carte, plus haute que la colonne : elle défile, ses boutons restent au bas, à portée.) */
-.bobine-download .missing-foot {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  padding-top: 10px;
-  background: linear-gradient(to bottom, transparent, #141318 12px);
 }
 
 /* ------------------------------------------------------------------ La Bobine, lot 5 (0.6.154) */

@@ -339,17 +339,24 @@ export function setupLibrary({
   }
   const keyOf = record => record.id + '|' + (record.outputs?.[0]?.originalUrl || '');
   // (0.6.154) A bobine: drawn again when it is put in the Archives again.
-  const reelKey = bobine => ['bobine', bobine.project, bobine.id, bobine.archived.at, bobine.name].join('|');
+  // (0.6.160) And when the picture of one of its takes comes (a clip whose small picture was just made).
+  const reelKey = bobine => ['bobine', bobine.project, bobine.id, bobine.archived.at, bobine.name, ...reelPictures(bobine)].join('|');
   /** (0.6.154) The bobines the filter keeps: of the project shown, every conversation, the kind « Tout » or « Bobines ». */
   const reelsShown = () =>
     filter.conversation !== 'all' || (filter.media !== 'all' && filter.media !== 'bobine')
       ? []
       : bobines.filter(bobine => filter.project === 'all' || bobine.project === filter.project);
   /** The picture of a take a bobine names, if it is still among the creations. */
+  // (0.6.160) Its small picture; without one, the file itself only when it is an image. The kind is that
+  // of the creation (mediaOf): the outputs of the sheet say no `mime`, and the address of a clip without
+  // its small picture was put in a picture, drawn broken.
   const pictureOf = source => {
-    const output = runs.find(run => run.id === source.runId && run.conversationId === source.conversationId)?.outputs?.[source.output];
-    return output?.thumbUrl || (output && !/^video|^audio/.test(String(output.mime ?? '')) ? output.originalUrl : '') || '';
+    const run = runs.find(run => run.id === source.runId && run.conversationId === source.conversationId),
+      output = run?.outputs?.[source.output];
+    return output?.thumbUrl || (output && mediaOf(run) === 'image' ? output.originalUrl : '') || '';
   };
+  /** The pictures of the first takes of a bobine, as its card shows them ('' : an empty place). */
+  const reelPictures = bobine => bobine.archived.pictures.slice(0, 2).map(pictureOf);
   /**
    * (0.6.154, capture 92) A bobine put in the Archives: a strip of film, its holes along it, the pictures
    * of its first takes, « BOBINE », its name, its length and its number of takes. A click opens it again
@@ -371,8 +378,9 @@ export function setupLibrary({
     // As wide as its pictures at the height of the row, inside the holes of the strip.
     card.style?.setProperty?.('--ratio', Math.min(3.2, Math.max(0.8, (cells * (wide > 0 && high > 0 ? wide / high : 16 / 9) * (ROW - 32)) / ROW)).toFixed(4));
     strip.setAttribute('aria-hidden', 'true');
+    const urls = reelPictures(bobine);
     for (let at = 0; at < cells; at++) {
-      const url = archived.pictures[at] ? pictureOf(archived.pictures[at]) : '';
+      const url = urls[at] ?? '';
       if (!url) {
         strip.append(node('span', 'library-reel-blank'));
         continue;

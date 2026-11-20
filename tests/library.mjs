@@ -937,6 +937,17 @@ test('(0.6.154) the bobines put in the Archives: among the takes at their date, 
   f.library.choose({ conversation: 'all' });
   kind('image').onclick();
   assert.deepEqual(tiles(grid), ['r1']);
+  // (0.6.160) A clip without its small picture: an empty place (its address was put in a picture, drawn
+  // broken); an image without one: the image itself. Its small picture made since: the card is drawn again.
+  const clips = [{ id: 'b3', name: 'Le clip', format: '16:9', project: 'inbox', archived: { at: '2026-11-16T09:00:00.000Z', seconds: 8, plans: 2, pictures: [{ conversationId: 'c2', runId: 'r2', output: 0 }, { conversationId: STUDIO_ID, runId: 'r4', output: 0 }] } }];
+  let seen = RUNS;
+  const g = fixture({ api: async () => Response.json({ runs: seen, bobines: clips }) });
+  await g.library.show();
+  const cells = () => find(card(g, 'b3'), 'library-reel').children.map(cell => [cell.tag, cell.className, cell.src ?? null]);
+  assert.deepEqual(cells(), [['span', 'library-reel-blank', null], ['img', '', RUNS[3].outputs[0].originalUrl]]);
+  seen = RUNS.map(run => (run.id === 'r2' ? { ...run, outputs: [{ ...run.outputs[0], thumbUrl: '/media/thumbnail/r2' }] } : run));
+  await g.library.refresh();
+  assert.deepEqual(cells(), [['img', '', '/media/thumbnail/r2'], ['img', '', RUNS[3].outputs[0].originalUrl]]);
   // None in the Archives: said.
   const bare = fixture();
   await bare.library.show();
