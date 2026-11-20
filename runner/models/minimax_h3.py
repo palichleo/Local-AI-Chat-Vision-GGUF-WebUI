@@ -16,6 +16,8 @@ import math
 import torch
 import torch.nn.functional as F
 
+from runner.models import attention8
+
 RENAMES = (
     ('token_refiner.blocks.', 'token_refiner.refiner_blocks.'),
     ('video_patch_proj.', 'proj_in.'),
@@ -208,14 +210,13 @@ class Int8Attention:
 
     def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None, measure=None):
         """`measure`, when given, is shown the keys and values (see SparseAttention)."""
-        import comfy_kitchen
-
         query, key, value = project(attn, hidden_states, rotary_emb)
         if measure is not None:
             measure(key, value)
         # The kernel reads [batch, heads, sequence, head]; the model keeps heads third.
         try:
-            result = comfy_kitchen.int8_attention(
+            # (Through runner.models.attention8: a row the kernel fails on is computed again.)
+            result = attention8.attend(
                 query.transpose(1, 2),
                 key.transpose(1, 2),
                 value.transpose(1, 2),
@@ -240,14 +241,12 @@ class Int8Attention:
         are read no more). The kernel holds no quantized queries and no answer of the whole
         sequence: a width and a half less. Pieces are whole blocks of the kernel's queries
         (128 rows share a scale), so the answer is the one of the whole call."""
-        import comfy_kitchen
-
         from runner.models.ladder import in_pieces
 
         keys, values = key.transpose(1, 2), value.transpose(1, 2)
 
         def piece(start, stop):
-            answer = comfy_kitchen.int8_attention(query[:, start:stop].transpose(1, 2), keys, values)
+            answer = attention8.attend(query[:, start:stop].transpose(1, 2), keys, values)
             query[:, start:stop] = answer.transpose(1, 2)
 
         rows = query.shape[1]

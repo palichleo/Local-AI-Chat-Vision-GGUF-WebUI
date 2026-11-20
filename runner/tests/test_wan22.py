@@ -542,6 +542,19 @@ class SamplingTests(unittest.TestCase):
             vae.write_bytes(b'another vae')
             self.assertFalse(pipeline.start_latents(config, str(vae), str(first), (768, 448, 81), encode)[1])
 
+    def test_latents_that_are_not_all_numbers_stop_the_job_before_the_decoder(self):
+        # (0.6.140) One token not a number, and the clip was kept: the picture for five frames, then
+        # black to the end. Said as a failure, nothing is kept.
+        latents = torch.randn(1, 16, 5, 4, 6)
+        self.assertIs(pipeline.whole(latents), latents)
+        for wrong in (float('nan'), float('inf'), float('-inf')):
+            broken = latents.clone()
+            broken[0, 3, 2, 1, 4] = wrong
+            with self.assertRaisesRegex(RuntimeError, 'pas des nombres ; elle n’a pas été enregistrée'):
+                pipeline.whole(broken)
+        # (The whole job runs on the card only: that it looks at its latents is read in its text.)
+        self.assertIn('latents = whole(sample(', Path(pipeline.__file__).read_text(encoding='utf-8'))
+
     def test_euler_steps_down_the_noise_levels_reach_the_video_the_model_points_to(self):
         torch.manual_seed(4)
         target, noise = torch.randn(1, 16, 3, 2, 2), torch.randn(1, 16, 3, 2, 2)

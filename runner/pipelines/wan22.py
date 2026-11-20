@@ -203,6 +203,21 @@ def sample(direction, noise, levels, step=None):
     return latents
 
 
+def whole(latents):
+    """The latents of the clip, every value of them a number; else the job stops here. Decoded,
+    one value that is not a number blackens every frame from its own to the last (the decoder
+    reads a frame with the ones before it), and the clip was kept as if it had been made: five
+    frames of the picture then 76 black ones, on 20/11 (see runner.models.attention8)."""
+    import torch
+
+    if not bool(torch.isfinite(latents).all()):
+        raise RuntimeError(
+            'Wan 2.2 : le calcul de cette vidéo a donné des valeurs qui ne sont pas des nombres ; elle n’a '
+            'pas été enregistrée. Relancez-la, avec une autre graine si cela se reproduit.'
+        )
+    return latents
+
+
 def start_video(picture, frames):
     """The video the model is given, [1, 3, frames, height, width]: the start image, then grey."""
     import torch
@@ -423,7 +438,7 @@ def generate(job, config, progress):
             preview.send(report, preview.WAN21, estimate)
 
         try:
-            latents = sample(direction, noise, levels, stepped)
+            latents = whole(sample(direction, noise, levels, stepped))
             cache = dict(experts=opened, residency=RESIDENCY.summary())
             progress(stage='video sampled', **cache)
         finally:

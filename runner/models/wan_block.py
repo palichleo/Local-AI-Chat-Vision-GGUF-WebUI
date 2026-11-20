@@ -24,6 +24,7 @@ import types
 import torch
 import torch.nn.functional as F
 
+from runner.models import attention8
 from runner.models.ltx25_block import _attention, _joined
 
 # A feed-forward runs this many tokens at a time (see the module's note).
@@ -70,7 +71,8 @@ def _block_forward(self, hidden_states, encoder_hidden_states, temb, rotary_emb)
         comfy_kitchen.apply_rope_(query, key, rotation_table(*rotary_emb))
     if self._int8_attention:
         # The kernel reads [batch, heads, tokens, head size]; the model keeps the heads third.
-        seen = comfy_kitchen.int8_attention(query.transpose(1, 2), key.transpose(1, 2), held.transpose(1, 2))
+        # (Through runner.models.attention8: a row the kernel fails on is computed again.)
+        seen = attention8.attend(query.transpose(1, 2), key.transpose(1, 2), held.transpose(1, 2))
         seen = seen.transpose(1, 2)
     else:
         seen = _attention(query, key, held)

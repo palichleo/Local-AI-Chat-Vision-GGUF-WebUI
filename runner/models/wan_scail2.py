@@ -25,6 +25,8 @@ gives each parameter of the diffusers model its tensor.
 
 import re
 
+from runner.models import attention8
+
 DIM = 5120
 LAYERS = 40
 HEADS = 40
@@ -175,15 +177,14 @@ class Int8SelfAttention:
     kernel, 19 with this one, the same scene at the same seed (measured, 14/11)."""
 
     def __call__(self, attn, hidden_states, encoder_hidden_states=None, attention_mask=None, rotary_emb=None):
-        import comfy_kitchen
-
         query = attn.norm_q(attn.to_q(hidden_states)).unflatten(2, (attn.heads, -1))
         key = attn.norm_k(attn.to_k(hidden_states)).unflatten(2, (attn.heads, -1))
         value = attn.to_v(hidden_states).unflatten(2, (attn.heads, -1))
         if rotary_emb is not None:
             query, key = turned(query, *rotary_emb), turned(key, *rotary_emb)
         # The kernel reads [batch, heads, tokens, head size]; the model keeps the heads third.
-        result = comfy_kitchen.int8_attention(query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2))
+        # (Through runner.models.attention8: a row the kernel fails on is computed again.)
+        result = attention8.attend(query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2))
         del query, key, value
         result = result.transpose(1, 2).flatten(2, 3).type_as(hidden_states)
         return attn.to_out[1](attn.to_out[0](result))

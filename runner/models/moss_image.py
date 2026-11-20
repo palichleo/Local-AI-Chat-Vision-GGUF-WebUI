@@ -27,6 +27,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from runner.models import attention8
+
 # The width of an attention head: the files do not write the count of heads, they are 128 wide.
 HEAD = 128
 EPS = 1e-6
@@ -197,7 +199,8 @@ def attend(q, k, v, q_norm, k_norm, turn, heads, fused=None, quantised=False):
         k = rotate(k_norm(k.reshape(split)), turn).transpose(1, 2)
     v = v.reshape(split).transpose(1, 2)
     if quantised:
-        out = fused.int8_attention(q.contiguous(), k.contiguous(), v.contiguous())
+        # (Through runner.models.attention8: a row the kernel fails on is computed again.)
+        out = attention8.attend(q.contiguous(), k.contiguous(), v.contiguous(), kernel=fused.int8_attention)
     else:
         out = F.scaled_dot_product_attention(q.to(v.dtype), k.to(v.dtype), v)
     return out.transpose(1, 2).flatten(2)
