@@ -636,11 +636,14 @@ export function setupMontage({
         : todo
           ? 'À créer' + (link.kind === 'suite' || link.kind === 'last' ? ' · suite de la ' + (takeLabel(before?.source) || 'prise à créer').toLowerCase() : '')
           : takeLabel(at.plan.source) || 'Prise introuvable';
-    // What happens in it, and the photo it arrives on.
-    media.words.textContent = todo ? at.plan.todo.prompt.trim() : '';
+    // What happens in it, and the photo it arrives on. (0.6.159, capture 87) Not while it is made: the
+    // preview shows what the engine draws, « EN COURS · 46 % », nothing else. Its text, three lines at
+    // most, leaves the place of its end photo only when there is one (moodix.css).
+    media.words.textContent = todo && !busy ? at.plan.todo.prompt.trim() : '';
     media.words.hidden = !media.words.textContent;
     const end = todo && at.plan.photos?.end ? recordOf(at.plan.photos.end) : null;
     media.end.hidden = !end;
+    frame.dataset.end = String(Boolean(end));
     if (end) {
       media.end.style.backgroundImage = `url("${pictureOf(end)}")`;
       media.end.children[0].textContent = 'Fin · ' + mono(at.start + (at.plan.to - at.plan.from));
@@ -983,6 +986,8 @@ export function setupMontage({
     // The frame has the shape of the film, as large as its block lets it be (moodix.css).
     frame.style.aspectRatio = `${montage.width} / ${montage.height}`;
     frame.style.setProperty?.('--ratio', String(montage.width / montage.height));
+    // (0.6.159) An upright film: the text of a take to create goes above its end photo, not beside it.
+    frame.dataset.tall = String(montage.height > montage.width);
     // (An empty bobine: its frame and the Éclipse, no words; capture 71.)
     blank.append(icon('eclipse'));
     Object.assign(video, { playsInline: true, preload: 'auto', hidden: true });
@@ -1126,7 +1131,7 @@ export function setupMontage({
         field = node('textarea', 'bobine-line-words'),
         reason =
           failed.get(item.id) ||
-          (item.reason && item.prompt
+          (item.reason && (item.prompt || item.blocked)
             ? item.reason
             : item.ready && !can.has(item.id) && !model?.missing
               ? 'Elle continue la prise d’avant, qui ne peut pas être créée.'
@@ -1647,7 +1652,9 @@ export function setupMontage({
       previous = String((before ? (isTodo(before) ? before.todo.prompt : recordOf(before.source)?.prompt) : '') ?? '').trim();
     if (!start && !end) return null;
     return {
-      verb: link.kind === 'suite' ? 'extend_video' : 'create_video',
+      // (0.6.159) A suite towards its photo too: it is made as a continuation since 0.6.152 (creationOf),
+      // and was still written as a clip of its own, the whole scene said again.
+      verb: link.kind === 'suite' || link.kind === 'last' ? 'extend_video' : 'create_video',
       seconds: Math.round((plan.to - plan.from) * 10) / 10,
       ...(start ? { start } : {}),
       ...(end ? { end } : {}),

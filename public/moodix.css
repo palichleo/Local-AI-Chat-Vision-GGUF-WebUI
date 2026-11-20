@@ -19551,3 +19551,59 @@ body[data-view='bobine'] .chat-panel {
 .bobine-edge-hint[hidden] {
   display: none;
 }
+
+/* ------------------------------------------------------------------ La Bobine, relecture du 20/11 (0.6.159) */
+/* Une prise en cours de création, sur la piste (capture 87) : elle garde son contour pointillé et son verre ;
+   un voile la remplit par la gauche à mesure qu'elle est faite, un trait sous ce qui est fait ; son texte sur
+   deux lignes, sa durée. Plus le fond animé de l'ancien Montage (0.6.142), qui restait là. */
+#bobine-view .montage-piece.is-todo.is-making {
+  border: 1px dashed rgba(238, 232, 222, 0.42);
+  background: rgba(238, 232, 222, 0.035);
+}
+#bobine-view .montage-piece.is-todo.is-making::before,
+#bobine-view .montage-piece.is-todo.is-making::after {
+  content: none;
+}
+#bobine-view .montage-piece.is-making > .montage-piece-bar {
+  inset: 0;
+  z-index: -1;
+  height: auto;
+  border-radius: 0;
+  background: none;
+}
+#bobine-view .montage-piece.is-making .montage-piece-bar-done {
+  border-radius: 0;
+  background: rgba(238, 232, 222, 0.1);
+  box-shadow: inset 0 -2px 0 rgba(238, 232, 222, 0.8);
+}
+#bobine-view .montage-piece.is-making > .montage-piece-length {
+  display: block;
+}
+#bobine-view .montage-piece.is-todo.is-making > .montage-piece-name:not(:empty) + .montage-piece-kind {
+  -webkit-line-clamp: 2;
+}
+/* Le texte d'une prise à créer, dans l'aperçu (capture 83) : sur une plaque sombre, trois lignes au plus ;
+   il ne laisse la place de la photo de fin que quand il y en a une, et passe au-dessus d'elle dans un
+   film en hauteur, où il n'avait plus qu'une colonne de quelques mots. */
+#bobine-view .montage-frame-words {
+  right: auto;
+  max-width: calc(100% - 28px);
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: rgba(10, 10, 12, 0.72);
+  text-shadow: none;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+#bobine-view .montage-frame-words[hidden] {
+  display: none;
+}
+#bobine-view .montage-frame[data-end='true'] > .montage-frame-words {
+  max-width: calc(100% - 144px);
+}
+#bobine-view .montage-frame[data-end='true'][data-tall='true'] > .montage-frame-words {
+  bottom: 82px;
+  max-width: calc(100% - 28px);
+}

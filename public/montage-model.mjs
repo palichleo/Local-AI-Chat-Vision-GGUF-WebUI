@@ -543,16 +543,18 @@ export function withTodoMade(montage, id, record, { from = 0, limits = {}, partI
     index = montage.plans.findIndex(plan => plan.id === id),
     plan = montage.plans[index];
   if (!isTodo(plan)) return montage;
-  const { todo: _todo, replaces: _replaces, ...rest } = plan,
+  // (0.6.159, capture 88) Made, it has no photo any more: its photos were those of a take to create
+  // (« Photos : toujours début ou fin d'une prise à créer »). Kept, they stayed on the track of the photos
+  // for ever, the bar of a take made having nothing to take them off with.
+  const { todo: _todo, replaces: _replaces, photos: _photos, ...rest } = plan,
     start = round(clamp(from, 0, Math.max(0, (whole ?? 0) - MONTAGE_LIMITS.shortest))),
     made = { ...rest, source: sourceOf(record), kind: 'video', from: start, to: round(Math.max(start + MONTAGE_LIMITS.shortest, whole ?? start + (plan.to - plan.from))) };
-  // (0.6.152) The first part of a take made in parts: it becomes that take (`partId`), with the photo
-  // it starts on; what is left of it stays to create under its own id, a suite of it, with its text
-  // and the photo it arrives on, as long as it was left.
+  // (0.6.152) The first part of a take made in parts: it becomes that take (`partId`); what is left of it
+  // stays to create under its own id, a suite of it, with its text and the photo it arrives on, as long
+  // as it was left.
   const { count } = partsOf(plan, limits);
   if (count > 1 && partId) {
-    const { photos: _photos, ...first } = made,
-      part = { ...first, id: partId, ...(plan.photos?.start ? { photos: { start: plan.photos.start } } : {}) },
+    const part = { ...made, id: partId },
       // (To the millisecond, not the tenth: the take ends where it ended, part after part.)
       left = { ...todoPlan(id, TODO_LIMITS.shortest, { at: endOf(part), todo: { prompt: plan.todo.prompt, suite: true } }), to: round(Math.max(TODO_LIMITS.shortest, plan.to - plan.from - (part.to - part.from))), frame: plan.frame, volume: plan.volume, ...(plan.photos?.end ? { photos: { end: plan.photos.end } } : {}) },
       plans = [...montage.plans];
@@ -620,7 +622,7 @@ export function linkOf(montage, id, lengthOf = () => null) {
 /**
  * (0.6.144) The plans to make of the montage, in the order of the film, as a series creates them one
  * after the other (« le modèle s'occupe de combler les trous »): `[{ id, number, seconds, prompt,
- * kind, ready, reason, after }]`.
+ * kind, ready, reason, blocked, after }]`.
  * - `ready`: what it needs is there now (creationOf), or will be once the plan to make right before
  *   it (`after`: its id), itself ready, is made: it goes on from it, and is created in its turn;
  * - else `reason`, in the user's words. A plan that goes on from one that cannot be created cannot
@@ -636,7 +638,11 @@ export function seriesOf(montage, lengthOf = () => null, { limits = {}, writable
       // (0.6.155) Without its text, Moodix AI writes it first when it can (`writable(plan)`): nothing
       // else stops it, it is read as written.
       written = Boolean(prompt) || writable(plan),
-      probe = prompt || !written ? montage : withItemChanged(montage, plan.id, { prompt: 'Prise.' }),
+      // (0.6.159) Without its text and stopped by something else (the video before it cut before its end,
+      // a suite no longer joined to its video): that is what is said, not « écrivez » (`blocked`). Writing
+      // its text changed nothing, and its line said nothing at all.
+      blocked = !prompt && (link.kind === 'cut' || link.kind === 'loose'),
+      probe = prompt || (!written && !blocked) ? montage : withItemChanged(montage, plan.id, { prompt: 'Prise.' }),
       // (The plan before it is to make too: the last one read. Without its text it waits for nothing.)
       before = link.kind === 'wait' && written ? items.at(-1) : null,
       reason = before ? (before.ready ? '' : 'Elle continue la prise d’avant, qui ne peut pas être créée.') : (creationOf(probe, plan.id, lengthOf, { limits }).reason ?? ''),
@@ -650,6 +656,7 @@ export function seriesOf(montage, lengthOf = () => null, { limits = {}, writable
       kind: link.kind,
       ready: !reason,
       reason,
+      blocked,
       after: before?.ready ? before.id : null,
       parts: parts.count,
       part: parts.seconds,

@@ -836,10 +836,14 @@ test('(0.6.147) GET /api/library and the Sortie: each take with the montages of 
       );
     }
     const take = name => ({ conversationId: talk, runId: made[name], output: 0 });
-    // A plan, the photo it starts on, a sound under it; another montage of the plan twice (said once), changed last.
+    // A plan, a take to create and the photo it starts on (0.6.159: only a take to create has photos), a
+    // sound under them; another montage of the plan twice (said once), changed last.
     const first = {
       ...newMontage({ name: 'Le pêcheur' }),
-      plans: [{ id: randomUUID(), kind: 'image', source: take('plan'), from: 0, to: 2, frame: 'fit', photos: { start: take('photo') } }],
+      plans: [
+        { id: randomUUID(), kind: 'image', source: take('plan'), from: 0, to: 2, frame: 'fit' },
+        { id: randomUUID(), kind: 'video', todo: { prompt: '' }, from: 0, to: 2, photos: { start: take('photo') } },
+      ],
       sounds: [{ id: randomUUID(), source: take('sound'), track: 'music', at: 0, from: 0, to: 2, volume: 1 }],
     };
     assert.equal((await call('montages/save', { project: 'inbox', montage: first })).status, 200);
@@ -863,7 +867,7 @@ test('(0.6.147) GET /api/library and the Sortie: each take with the montages of 
     const [shelved, ...others] = (await (await call('library?images=0')).json()).bobines;
     assert.deepEqual(
       [others, shelved.id, shelved.name, shelved.project, shelved.archived.seconds, shelved.archived.plans, shelved.archived.pictures],
-      [[], first.id, 'Le pêcheur', 'inbox', 2, 1, [take('plan')]],
+      [[], first.id, 'Le pêcheur', 'inbox', 4, 2, [take('plan')]],
     );
     // « Un fichier par prise » of a bobine with nothing made: refused in the user's words, nothing asked of the engine.
     const waiting = { ...newMontage({ name: 'À faire' }), plans: [{ id: randomUUID(), kind: 'video', todo: { prompt: '' }, from: 0, to: 2 }], sounds: [] };

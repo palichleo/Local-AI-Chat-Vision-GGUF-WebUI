@@ -1003,6 +1003,9 @@ test('« Créer 1 prise » asks the Studio for the clip, shows it being made, an
   assert.deepEqual([f.lines()[0][1], f.get('bobine-line')[0].dataset.state], ['En cours · 40 %', 'making']);
   assert.deepEqual([f.go(), f.goMain().disabled, f.get('bobine-go-fill')[0].style.width], ['1 sur 1 · 40 %', true, '40%']);
   assert.deepEqual([picture.src, picture.hidden, caption.textContent, frame.dataset.busy], ['/preview/a.jpg', false, 'En cours · 40 %', 'true']);
+  // (0.6.159, capture 87) No text over what is being made: it covered the frame, under « EN COURS ».
+  const [words] = find(frame, 'montage-frame-words');
+  assert.deepEqual([words.hidden, words.textContent], [true, '']);
   // Nothing else is changed meanwhile: not exported, not another bobine, not another format, no text.
   assert.deepEqual([f.get('montage-export')[0].disabled, f.get('montage-pick')[0].disabled, f.get('montage-format')[0].disabled, f.get('bobine-line-words')[0].disabled], [true, true, true, true]);
   f.plans()[1].onkeydown({ key: 'Delete' });
@@ -1014,7 +1017,9 @@ test('« Créer 1 prise » asks the Studio for the clip, shows it being made, an
   await settle();
   assert.deepEqual([f.plans()[0].className, f.names()[0], f.lengths()[0]], ['montage-piece', 'Prise 50', '05.04 s']);
   assert.deepEqual([f.ui.state().making, f.ui.state().filling, f.get('bobine-line').length], [null, null, 1]);
-  assert.deepEqual(f.ui.state().montage.plans[0], { id: f.ui.state().montage.plans[0].id, at: 0, kind: 'video', from: 0, to: 5.042, frame: 'fit', volume: 1, photos: { start: { conversationId: C, runId: id(3), output: 0 }, end: { conversationId: C, runId: id(5), output: 0 } }, source: { conversationId: C, runId: id(50), output: 0 } });
+  // (0.6.159, capture 88) Made, it has no photo any more: none is left above it on the track of the photos.
+  assert.deepEqual(f.ui.state().montage.plans[0], { id: f.ui.state().montage.plans[0].id, at: 0, kind: 'video', from: 0, to: 5.042, frame: 'fit', volume: 1, source: { conversationId: C, runId: id(50), output: 0 } });
+  assert.deepEqual(laid(f).map(pin => pin.dataset.plan), [f.ui.state().montage.plans[1].id]);
   assert.deepEqual([f.saves().at(-1).body.montage.plans[0].source.runId, f.ui.state().montage.plans[1].at], [id(50), 5.042]);
   // (0.6.149) The second is a clip of its own, towards its photo: nothing of the first is asked for it.
   assert.deepEqual([f.plans()[1].className, f.names()[1], f.lines()[0][2]], ['montage-piece is-todo', '', 'Nouvelle prise · photo de fin']);
@@ -2157,7 +2162,7 @@ test('« Créer » counts every take to create: Moodix AI writes those without t
   await settle();
   await settle();
   // Its turn: Moodix AI writes it from what it starts and arrives on, « MOODIX AI ÉCRIT » in its line; nothing is made meanwhile.
-  assert.deepEqual([pens.length, pens[0].wanted, f.said('bobine-line-writing'), asked.length, f.go()], [1, { verb: 'create_video', seconds: 2, start: { output: id(50), frame: 'last' }, end: { output: id(6) }, previous: 'Prise 50' }, ['Moodix AI écrit'], 1, '2 sur 2']);
+  assert.deepEqual([pens.length, pens[0].wanted, f.said('bobine-line-writing'), asked.length, f.go()], [1, { verb: 'extend_video', seconds: 2, start: { output: id(50), frame: 'last' }, end: { output: id(6) }, previous: 'Prise 50' }, ['Moodix AI écrit'], 1, '2 sur 2']);
   assert.deepEqual([f.get('bobine-halt').length, Boolean(f.button('Arrêter'))], [0, true], 'the stop of the series stops it');
   pens[0].resolve({ prompt: 'He looks at the sea.' });
   await settle();
@@ -2266,4 +2271,58 @@ test('the end of a video under the pointer shows, in light dots, the suite pulli
   f.pointer.up();
   // Not the start of a video, nor an image, nor a take to create.
   assert.deepEqual([grips()[0].onpointerenter, image.onpointerenter], [undefined, undefined]);
+});
+
+test('the preview says what happens in a take to create at rest, and leaves the place of its end photo only when it has one (0.6.159)', async () => {
+  // (His photo of 20/11: an upright film, the whole text in a column of a few words, over « EN COURS ».)
+  const f = await setup({ extra: photos(), create: async () => null }).open();
+  lay(f);
+  f.write(0, 'Il lève les yeux.');
+  f.write(1, 'Il regarde la mer.');
+  const frame = () => f.get('montage-frame')[0],
+    words = () => find(frame(), 'montage-frame-words')[0];
+  // The head on the first (its end photo): its text, the place of the photo left.
+  f.ui.seek(1);
+  assert.deepEqual([words().hidden, words().textContent, frame().dataset.end, frame().dataset.tall], [false, 'Il lève les yeux.', 'true', 'false']);
+  // Without an end photo: the whole width is its text's.
+  f.ui.select(f.ui.state().montage.plans[1].id);
+  f.pop().children.find(control => control.attributes['aria-label'] === 'Retirer la photo de fin').onclick();
+  f.ui.seek(6);
+  assert.deepEqual([words().textContent, frame().dataset.end], ['Il regarde la mer.', 'false']);
+  // An upright film: said to the frame, its text goes above the photo.
+  Object.assign(f.get('montage-format')[0], { value: '9:16' }).onchange();
+  assert.equal(frame().dataset.tall, 'true');
+});
+
+test('a suite without its text that its video stops says so in its line (0.6.159)', async () => {
+  // (Met while taking the captures of 0.6.155: the second clip shown 4 s of its 6,71 s; its suite, without
+  // a text, was left out of « Créer » and its line said nothing.)
+  const old = {
+    schemaVersion: 1, id: id(950), name: 'Le pêcheur', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
+    plans: [
+      { id: id(951), at: 0, kind: 'video', source: { conversationId: C, runId: id(1), output: 0 }, from: 0, to: 3, frame: 'fit', volume: 1 },
+      { id: id(952), at: 3, kind: 'video', todo: { prompt: '', suite: true }, from: 0, to: 4, frame: 'fit', volume: 1 },
+    ],
+  };
+  const f = await setup({ stored: [old], create: async () => null, write: async () => ({ prompt: 'x' }) }).open();
+  assert.deepEqual([f.lines().map(line => line[3]), f.go(), f.goMain().disabled], [['La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une photo de début.'], 'Créer', true]);
+});
+
+test('the styles of the Bobine: a take being made fills from the left, no moving ground; the text of the preview is three lines at most (0.6.159)', async () => {
+  // (His photos of 20/11: the take being made kept the moving ground of the Montage of 0.6.142, and the
+  // text covered the preview. What is drawn cannot be read here: the rules that draw it are.)
+  const { readFile } = await import('node:fs/promises');
+  const css = (await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const rule = selector => {
+    const at = css.lastIndexOf(selector + ' {');
+    assert.notEqual(at, -1, selector);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  assert.match(rule('#bobine-view .montage-piece.is-todo.is-making::before,\n#bobine-view .montage-piece.is-todo.is-making::after'), /content: none;/);
+  assert.match(rule('#bobine-view .montage-piece.is-todo.is-making'), /border: 1px dashed/);
+  assert.match(rule('#bobine-view .montage-piece.is-making > .montage-piece-bar'), /inset: 0;[\s\S]*z-index: -1;/);
+  assert.match(rule('#bobine-view .montage-piece.is-making > .montage-piece-length'), /display: block;/);
+  assert.match(rule('#bobine-view .montage-frame-words'), /-webkit-line-clamp: 3;[\s\S]*overflow: hidden;/);
+  assert.match(rule('#bobine-view .montage-frame-words[hidden]'), /display: none;/);
+  assert.match(rule("#bobine-view .montage-frame[data-end='true'][data-tall='true'] > .montage-frame-words"), /bottom: 82px;/);
 });

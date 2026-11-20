@@ -151,7 +151,8 @@ test('what is asked for a plan to make is read on the montage (0.6.142)', () => 
   // what touches it follows it (0.6.149); the clip of its own is as it was.
   const first = record(21, 'video', { parameters: { frames: 121, fps: 24 } });
   const made = withTodoMade(suited, id(11), first);
-  assert.deepEqual(made.plans[0], { id: id(11), at: 0, kind: 'video', from: 0, to: 5.042, frame: 'fit', volume: 1, photos: { start: source(1), end: source(2) }, source: source(21) });
+  // (0.6.159, capture 88) Made, it has no photo any more: they were those of the take to create.
+  assert.deepEqual(made.plans[0], { id: id(11), at: 0, kind: 'video', from: 0, to: 5.042, frame: 'fit', volume: 1, source: source(21) });
   assert.deepEqual(planStarts(made), [0, 5.042]);
   assert.deepEqual(validateMontage(made).plans, made.plans);
   const lengthOf = wanted => (wanted.runId === id(21) ? 5.042 : null);
@@ -207,10 +208,14 @@ test('the server keeps a plan to make as it is, and refuses what is none (0.6.14
     [{ replaces: { from: 1, to: 2 } }, /prise invalide/],
   ])
     assert.throws(tried(changes), said, JSON.stringify(changes).slice(0, 60));
-  // Nothing else is carried over; a plan made keeps its photos, an image may have some too.
+  // Nothing else is carried over. (0.6.159) A plan made has no photos: a bobine kept before, whose take
+  // made still carried those of its take to create (shown above it for ever), is read without them.
   assert.equal('extra' in validateMontage({ ...montage, plans: [{ ...plan, extra: 1 }] }).plans[0], false);
   const made = withTodoMade(montage, id(11), clip(21, 5));
-  assert.deepEqual(validateMontage(made).plans[0].photos, { start: source(1), end: source(2) });
+  assert.equal('photos' in made.plans[0], false);
+  const before = { ...made, plans: [{ ...made.plans[0], photos: { start: source(1), end: source(2) } }] };
+  assert.deepEqual(validateMontage(before).plans, validateMontage(made).plans);
+  assert.deepEqual(validateMontage(montage).plans[0].photos, { start: source(1), end: source(2) }, 'a take to create keeps its own');
   // A film is made of takes: nothing is assembled while a plan is to make.
   const mixed = withTake(montage, clip(5, 5), { id: id(15), index: 0 });
   await assert.rejects(assemblyOf(validateMontage(mixed), async () => 'D:/x.mp4'), /1 prise est encore à créer : créez-la ou retirez-la avant d’exporter le film\./);
@@ -345,6 +350,16 @@ test('what is left to create is read in the order of the film, each plan ready o
   // What stops a plan is said as under its text; a plan that starts on a photo of its own waits for nothing.
   const shortened = withItemChanged(made, id(11), { to: 3 }, { longest: 5.042 });
   assert.deepEqual(brief(seriesOf(shortened, lengthOf)), [[2, 2, 'cut', false, creationOf(shortened, id(13), lengthOf).reason, null]]);
+  // (0.6.159) Without its text too: what stops it is the video cut before its end, not its text, and that
+  // is what is said (`blocked`): its line said nothing, and « Créer » left it out without a word. A take
+  // without its text that nothing else stops is only asked for its text.
+  const CUT = 'La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une photo de début.',
+    mute = withItemChanged(shortened, id(13), { prompt: '  ' }),
+    [stuck] = seriesOf(mute, lengthOf),
+    [asked] = seriesOf(withItemChanged(made, id(13), { prompt: '' }), lengthOf);
+  assert.deepEqual([stuck.kind, stuck.ready, stuck.reason, stuck.blocked], ['cut', false, CUT, true]);
+  assert.deepEqual([asked.ready, asked.reason, asked.blocked], [false, 'Écrivez ce qui se passe dans cette prise.', false]);
+  assert.equal(seriesOf(shortened, lengthOf)[0].blocked, false, 'with its text, its reason is said as before');
   // (0.6.152: a suite has no start photo; here the third is a take of its own, on its photo.)
   const own = { ...third, plans: third.plans.map(plan => (plan.id === id(14) ? { ...plan, todo: { prompt: plan.todo.prompt }, photos: { start: source(4) } } : plan)) };
   assert.deepEqual(brief(seriesOf(withItemChanged(own, id(11), { prompt: '' })))[2].slice(2), ['photo', true, '', null]);
@@ -394,12 +409,13 @@ test('a take to create longer than its model makes at once is made in equal part
   lengths[id(22)] = 13.333;
   assert.deepEqual(creationOf(second, id(40), lengthOf, { limits }), { verb: 'extend_video', prompt: 'Il marche vers la mer.', duration: 6.7, end: { source: source(2) }, from: 13.333, continues: source(22) });
   const last = withTodoMade(second, id(40), part(23, 6.667, 6.667), { from: 6.667, limits, partId: id(43) });
-  assert.deepEqual([last.plans.map(plan => plan.id), last.plans.some(isTodo), last.plans.at(-1).photos], [[id(15), id(41), id(42), id(40)], false, { end: source(2) }]);
+  assert.deepEqual([last.plans.map(plan => plan.id), last.plans.some(isTodo), last.plans.at(-1).photos], [[id(15), id(41), id(42), id(40)], false, undefined]);
   // A new take in parts: its first clip on its start photo, without the end photo; the rest a suite of it.
   const drawn = { ...empty(), plans: [{ ...todo(20), at: 0, photos: { start: source(1), end: source(2) } }] };
   assert.deepEqual(creationOf(drawn, id(40), lengthOf, { limits }), { verb: 'create_video', prompt: 'Il marche.', duration: 6.7, format: '16:9', from: 0, parts: 3, start: { source: source(1) } });
   const begun = withTodoMade(drawn, id(40), record(24, 'video', { parameters: { frames: 161, fps: 24 } }), { limits, partId: id(44) });
-  assert.deepEqual(begun.plans.map(plan => [plan.id, plan.photos ?? null, plan.todo?.suite ?? null]), [[id(44), { start: source(1) }, null], [id(40), { end: source(2) }, true]]);
+  // (0.6.159) The part made has no photo; what is left keeps the photo it arrives on.
+  assert.deepEqual(begun.plans.map(plan => [plan.id, plan.photos ?? null, plan.todo?.suite ?? null]), [[id(44), null, null], [id(40), { end: source(2) }, true]]);
   // Without a name for the part made, the take to create becomes the take.
   assert.deepEqual(withTodoMade(drawn, id(40), record(24, 'video', { parameters: { frames: 161, fps: 24 } }), { limits }).plans.map(plan => plan.id), [id(40)]);
 });
