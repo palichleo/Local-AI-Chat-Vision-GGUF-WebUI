@@ -72,7 +72,7 @@ const take = (n, mediaType, more = {}) => ({
   ...more,
 });
 
-function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, thumbnail = () => {} } = {}) {
+function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {} } = {}) {
   const calls = [],
     queue = [],
     kept = new Map(stored.map(montage => [montage.id, montage])),
@@ -111,6 +111,7 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
     page,
     ...(create ? { create } : {}),
     ...(estimate ? { estimate } : {}),
+    ...(write ? { write } : {}),
     halt: () => void halted++,
     api,
     node: (tag, className, text) => new Fake(tag, className, text),
@@ -891,12 +892,13 @@ test('the end of a video pulled beyond its take shows its continuation to make, 
 });
 
 // (0.6.144) « Combler les trous »: his three photos laid, two plans to make, the second going on from the first.
-async function series({ times = { workflowName: 'LTX 2.5', seconds: 5.042, expected: { seconds: 108.4, exact: true } }, texts = ['Il lève les yeux.', 'Il regarde la mer.'], estimate = null } = {}) {
+async function series({ times = { workflowName: 'LTX 2.5', seconds: 5.042, expected: { seconds: 108.4, exact: true } }, texts = ['Il lève les yeux.', 'Il regarde la mer.'], estimate = null, write = null } = {}) {
   const asked = [],
     foreseen = [],
     answers = [];
   const f = await setup({
     extra: photos(),
+    ...(write ? { write } : {}),
     create: (wanted, hooks) => {
       asked.push({ wanted: structuredClone(wanted), hooks });
       return new Promise((resolve, reject) => answers.push({ resolve, reject }));
@@ -917,7 +919,7 @@ async function series({ times = { workflowName: 'LTX 2.5', seconds: 5.042, expec
     if (f.ui.state().chosen !== f.ui.state().montage.plans[plan].id) f.plans()[plan].onclick();
     Object.assign(f.get('montage-words-field')[0], { value: words }).oninput();
   });
-  const head = label => f.get('montage-fill').concat(f.get('montage-halt')).find(control => control.textContent === label),
+  const head = label => f.get('montage-agent').concat(f.get('montage-fill'), f.get('montage-halt')).find(control => control.textContent === label),
     lines = () => f.get('montage-series-item').map(entry => entry.children.map(part => part.textContent)),
     panel = () => f.said('montage-title-name').concat(f.said('montage-title-meta')),
     // « Combler les trous », then what it asks the server: all settled.
@@ -1126,4 +1128,130 @@ test('the agreement follows the montage: closed by a change, empty while the ser
   one.f.button('Supprimer ce montage').onclick();
   assert.match(one.f.notices.at(-1), /^Un plan est en cours de création/);
   assert.deepEqual([one.f.calls.some(call => call.route === 'montages/remove'), one.f.button('Confirmer la suppression')], [false, undefined]);
+});
+
+// (0.6.146) What Moodix AI is asked to write, each request answered by hand: [{ wanted, signal, resolve, reject }].
+function pen() {
+  const pens = [];
+  return {
+    pens,
+    write: (wanted, { signal }) => new Promise((resolve, reject) => pens.push({ wanted: structuredClone(wanted), signal, resolve, reject })),
+  };
+}
+
+test('« Agent » has Moodix AI write the plans that have no text, from their photos, then shows what will be created (0.6.146)', async () => {
+  // (Maquette M7, his words of 20/11: he lays photos, « et le modèle s'occupe de combler les trous ».
+  // His first words on trying 0.6.144: « j'ai pas le bouton agent ».)
+  let { pens, write } = pen();
+  let { f, asked, head, lines, panel } = await series({ texts: ['', ''], write });
+  // The button of the other modes, at the left of « Combler les trous ».
+  assert.deepEqual(f.get('montage-agent').concat(f.get('montage-fill')).map(control => [control.textContent, control.disabled]), [['Agent', false], ['Combler les trous', false]]);
+  head('Agent').onclick();
+  await settle();
+  // The first plan: from its photo to its photo, for its length.
+  assert.deepEqual(pens[0].wanted, { verb: 'create_video', seconds: 5, start: { output: id(3) }, end: { output: id(5) } });
+  assert.deepEqual([f.said('montage-status'), f.plans().map(piece => [piece.children[0].textContent, piece.className])], [
+    ['Moodix AI écrit le plan 1 · 1 sur 2'],
+    [['1 · MOODIX AI ÉCRIT', 'montage-piece is-todo is-writing'], ['2 · À FAIRE', 'montage-piece is-todo']],
+  ]);
+  // Its button says it is at work; the writing can be stopped; nothing else is offered meanwhile.
+  assert.deepEqual(f.get('montage-agent').concat(f.get('montage-halt')).map(control => [control.textContent, control.className, control.disabled]), [['Agent', 'montage-agent is-thinking', true], ['Arrêter', 'montage-halt', undefined]]);
+  assert.deepEqual([f.get('montage-fill').length, f.get('montage-pick')[0].disabled, f.ui.state().writing.id], [0, true, f.ui.state().montage.plans[0].id]);
+  // The montage is not changed under its hand, nor a plan created.
+  f.plans()[1].onkeydown({ key: 'Delete' });
+  assert.equal(f.plans().length, 2);
+  assert.match(f.notices.at(-1), /^Moodix AI écrit les plans/);
+  // Written: the second goes on from the photo the first arrives on, with what happens before it.
+  pens[0].resolve({ prompt: '  An old fisherman lifts his eyes.  ' });
+  await settle();
+  assert.deepEqual(pens[1].wanted, { verb: 'create_video', seconds: 2, start: { output: id(5) }, end: { output: id(6) }, previous: 'An old fisherman lifts his eyes.' });
+  assert.deepEqual([f.said('montage-status'), f.plans().map(piece => piece.children[0].textContent)], [['Moodix AI écrit le plan 2 · 2 sur 2'], ['1 · À FAIRE', '2 · MOODIX AI ÉCRIT']]);
+  pens[1].resolve({ prompt: 'He looks at the sea.' });
+  for (let turn = 0; turn < 4; turn++) await settle();
+  // Both are written and kept; what will be created is shown to be agreed on, and nothing is made.
+  assert.deepEqual(f.ui.state().montage.plans.map(plan => plan.todo.prompt), ['An old fisherman lifts his eyes.', 'He looks at the sea.']);
+  assert.equal(f.saves().at(-1).body.montage.plans[1].todo.prompt, 'He looks at the sea.');
+  assert.deepEqual([f.ui.state().writing, panel(), lines().map(line => line[1]), asked.length], [null, ['À créer · 2', '≈ 2 min 30 sur votre carte'], ['« An old fisherman lifts his eyes. »', '« He looks at the sea. »'], 0]);
+  assert.deepEqual(f.get('montage-agent').map(control => [control.className, control.disabled]), [['montage-agent', true]]);
+  // What the user wrote is left as it is: only the plan without text is written, the other is its story before.
+  ({ pens, write } = pen());
+  ({ f, head, panel } = await series({ texts: ['Il lève les yeux.', ''], write }));
+  head('Agent').onclick();
+  await settle();
+  assert.deepEqual([pens.length, pens[0].wanted.previous, f.said('montage-status')], [1, 'Il lève les yeux.', ['Moodix AI écrit le plan 2 · 1 sur 1']]);
+  pens[0].resolve({ prompt: 'He looks at the sea.' });
+  for (let turn = 0; turn < 4; turn++) await settle();
+  assert.deepEqual([f.ui.state().montage.plans.map(plan => plan.todo.prompt), panel()[0]], [['Il lève les yeux.', 'He looks at the sea.'], 'À créer · 2']);
+  // Every plan written already: what will be created is shown at once, Moodix AI is asked nothing.
+  ({ pens, write } = pen());
+  ({ f, head, panel } = await series({ write }));
+  head('Agent').onclick();
+  for (let turn = 0; turn < 3; turn++) await settle();
+  assert.deepEqual([pens.length, panel()[0]], [0, 'À créer · 2']);
+  // Without Moodix AI at hand (no `write`): no « Agent », « Combler les trous » alone.
+  ({ f } = await series());
+  assert.deepEqual([f.get('montage-agent').length, f.get('montage-fill').length], [0, 1]);
+});
+
+test('what Moodix AI cannot write is said; its writing is stopped at once, and ends with the mode (0.6.146)', async () => {
+  // Refused (a chat model that does not see images): said with the plan, which is left to the user; nothing is shown to launch.
+  let { pens, write } = pen();
+  let { f, head, lines, panel } = await series({ texts: ['', ''], write });
+  head('Agent').onclick();
+  await settle();
+  pens[0].reject(new Error('Ce modèle de chat ne voit pas les images : écrivez vous-même ce qui se passe dans ce plan.'));
+  for (let turn = 0; turn < 3; turn++) await settle();
+  assert.deepEqual([f.said('montage-status'), pens.length, f.ui.state().writing, f.ui.state().filling], [['Plan 1 non écrit : Ce modèle de chat ne voit pas les images : écrivez vous-même ce qui se passe dans ce plan.'], 1, null, null]);
+  assert.deepEqual([f.ui.state().montage.plans.map(plan => plan.todo.prompt), head('Agent').disabled], [['', ''], false]);
+  // An answer with nothing in it is no text.
+  head('Agent').onclick();
+  await settle();
+  pens[1].resolve({ prompt: '   ' });
+  for (let turn = 0; turn < 3; turn++) await settle();
+  assert.deepEqual(f.said('montage-status'), ['Plan 1 non écrit : Moodix AI n’a rien écrit.']);
+  // « Arrêter » while the second is written: its request is let go; what is written stays, nothing more is shown.
+  ({ pens, write } = pen());
+  ({ f, head, panel } = await series({ texts: ['', ''], write }));
+  head('Agent').onclick();
+  await settle();
+  pens[0].resolve({ prompt: 'An old fisherman lifts his eyes.' });
+  await settle();
+  head('Arrêter').onclick();
+  assert.deepEqual([pens[1].signal.aborted, f.halted()], [true, 0]);
+  pens[1].reject(Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' }));
+  for (let turn = 0; turn < 3; turn++) await settle();
+  assert.deepEqual([f.said('montage-status'), f.ui.state().montage.plans.map(plan => plan.todo.prompt), f.ui.state().filling], [['Écriture arrêtée · 1 plan écrit'], ['An old fisherman lifts his eyes.', ''], null]);
+  // Leaving the mode lets its request go; its answer, late, writes nothing.
+  ({ pens, write } = pen());
+  ({ f, head } = await series({ texts: ['', ''], write }));
+  head('Agent').onclick();
+  await settle();
+  await f.ui.leave();
+  assert.deepEqual([pens[0].signal.aborted, f.ui.state().writing], [true, null]);
+  pens[0].resolve({ prompt: 'Too late.' });
+  await settle();
+  assert.deepEqual(f.ui.state().montage.plans.map(plan => plan.todo.prompt), ['', '']);
+  // The continuation of a video: the end of that video, the words of a continuation, what its take shows before.
+  ({ pens, write } = pen());
+  const g = await setup({ create: async () => null, write }).open();
+  g.get('montage-take')[0].ondblclick();
+  g.press(find(g.root, 'montage-grip')[1], 500);
+  g.pointer.move(700);
+  g.pointer.up();
+  find(g.root, 'montage-agent')[0].onclick();
+  await settle();
+  assert.deepEqual(pens[0].wanted, { verb: 'extend_video', seconds: 2, start: { output: id(1), frame: 'last' }, previous: 'Prise 1' });
+  pens[0].reject(new Error('non'));
+  await settle();
+  // A plan with nothing to look at (no photo, nothing before it) is left to the user: said where what will be created is shown.
+  ({ pens, write } = pen());
+  ({ f, head, lines, panel } = await series({ texts: ['', ''], write }));
+  f.plans()[1].onkeydown({ key: 'Delete' });
+  if (f.ui.state().chosen !== f.ui.state().montage.plans[0].id) f.plans()[0].onclick();
+  for (const off of find(f.root, 'montage-off')) off.onclick();
+  for (const off of find(f.root, 'montage-off')) off.onclick();
+  assert.equal(f.ui.state().montage.plans[0].photos, undefined);
+  head('Agent').onclick();
+  for (let turn = 0; turn < 4; turn++) await settle();
+  assert.deepEqual([pens.length, panel(), lines()], [0, ['À créer · 0', 'Rien ne peut être créé pour l’instant'], [['Plan 1 · 5 s', 'Écrivez ce qui se passe dans ce plan.']]]);
 });

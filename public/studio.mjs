@@ -573,6 +573,14 @@ export function setupStudio({
     create: (wanted, hooks) => generate({ ...wanted, styles: [], edits: {}, montage: hooks ?? {} }),
     halt: () => stop(),
     inputOf: record => outputSource(record),
+    // (0.6.146) What happens in a plan, written by Moodix AI from its photos: the chat model comes
+    // back first when it has left the card, as for « Améliorer »; the takes of the conversation shown
+    // are named in the request, the others by their own conversation.
+    write: async (asked, { signal } = {}) => {
+      await releasing;
+      await waitForModel(api, signal, () => {});
+      return (await api('montages/describe', { ...asked, conversationId: place() }, { signal })).json();
+    },
     // (0.6.144) What a plan would be made with and in how long: the request of a creation, asked
     // only to be told (`estimate`), of which the server keeps nothing. No conversation is made for
     // it: the takes of the conversation shown are named in it, the others by their own.

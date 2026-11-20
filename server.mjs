@@ -18,6 +18,7 @@ import { listedSources } from './lib/listed-takes.mjs';
 import { stampRecord } from './lib/media-info.mjs';
 import { SEEN_NOTE, unseenResources } from './lib/seen-resources.mjs';
 import { askedSince, characterOf, characterPrompt, lastReplacement, withScenePrompt } from './lib/scene-prompt.mjs';
+import { planPrompt } from './lib/plan-prompt.mjs';
 import { passedImages, thinNote } from './lib/thin-prompt.mjs';
 import { capableOutputTool, outputToolFor, readOutput, takesToRead } from './lib/output-tools.mjs';
 import { sendResourceMedia } from './lib/resource-media.mjs';
@@ -708,6 +709,18 @@ export async function createApplication({
     const { path } = await generatedFile(outputDir, output.source);
     const frames = await generation.videoFrames(path, 3);
     return { urls: frames.map(frame => frame.url), video: true };
+  }
+  /**
+   * (0.6.146) An image of the outputs as the chat model is shown it when no small picture of it is
+   * kept yet: its file, as a data URL. Null for what is no image of the engine.
+   */
+  async function outputPicture(conversationId, runId, index = 0) {
+    const record = await gallery.get(conversationId, runId, { includeImages: false });
+    const output = record.outputs[index];
+    if (record.provider !== 'native' || !output?.source || (record.mediaType || 'image') !== 'image') return null;
+    const { path } = await generatedFile(outputDir, output.source);
+    const kind = /\.jpe?g$/i.test(path) ? 'jpeg' : /\.webp$/i.test(path) ? 'webp' : 'png';
+    return `data:image/${kind};base64,` + (await readFile(path)).toString('base64');
   }
   /** Width and height of the video a character is put in: as its record or its resource says. */
   async function sourceSize(source, conversationId) {
@@ -2140,6 +2153,50 @@ export async function createApplication({
                 : `Le modèle distant n’a pas répondu en ${Math.round(enrichTimeoutMs / 1000)} secondes. Réessayez dans un moment.`,
               504,
             );
+          throw error;
+        } finally {
+          res.off('close', onClose);
+          if (chat.activeRequest === controller) {
+            chat.activeRequest = null;
+            chat.busy = false;
+          }
+        }
+      }
+      // (0.6.146) What happens in a plan to make of a montage, written by the chat model from the
+      // photos of that plan (lib/plan-prompt.mjs): a request that does nothing else, held as the
+      // one that improves a prompt is. Nothing is created by it.
+      if (path === '/api/montages/describe') {
+        const seconds = Number(body.seconds),
+          source = value => value === undefined || (value && typeof value === 'object' && !Array.isArray(value));
+        if (!(seconds > 0 && seconds <= 120) || !['create_video', 'extend_video'].includes(body.verb)) throw problem('Demande invalide.');
+        if (!source(body.start) || !source(body.end) || (!body.start && !body.end)) throw problem('Ce plan n’a aucune photo à regarder.');
+        if (runtime.active) throw problem('La génération utilise le GPU.', 409);
+        if (chat.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
+        if (chat.busy) throw problem('Une réponse est déjà en cours.', 409);
+        const controller = new AbortController();
+        chat.activeRequest = controller;
+        chat.busy = true;
+        const onClose = () => controller.abort();
+        res.once('close', onClose);
+        try {
+          const written = await planPrompt(
+            { start: body.start, end: body.end, seconds, verb: body.verb, previous: typeof body.previous === 'string' ? body.previous : '', preferences: instructions },
+            {
+              engine: chat,
+              resources,
+              thumbnails,
+              outputFrames,
+              original: outputPicture,
+              conversationId: typeof body.conversationId === 'string' ? body.conversationId : null,
+              signal: controller.signal,
+              timeoutMs: enrichTimeoutMs,
+            },
+          );
+          if (!written.prompt) throw problem(written.reason, 502);
+          return send(200, { prompt: written.prompt });
+        } catch (error) {
+          if (error.name === 'TimeoutError')
+            throw problem(`Le modèle de chat n’a pas répondu en ${Math.round(enrichTimeoutMs / 1000)} secondes. Réessayez dans un moment.`, 504);
           throw error;
         } finally {
           res.off('close', onClose);

@@ -18147,3 +18147,46 @@ html[data-page-hidden='true'] .montage-piece.is-making::after {
   background-repeat: repeat-x;
   background-position: left center;
 }
+
+/* ------------------------------------------------------------------ Montage, étape 2, lot 4 (0.6.146) */
+/* Maquette M7. « Agent », en tête de la timeline, à gauche de « Combler les trous » : le bouton des autres
+   modes du Studio (#studio-view .studio-agent), à la hauteur des boutons de cette tête. Pendant que
+   Moodix AI écrit, sa marque tourne (.is-thinking .eclipse-shadow, plus haut). */
+.montage-agent {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid #262a33;
+  border-radius: 10px;
+  background: #14161b;
+  color: var(--ink);
+  font: 700 13px/1 var(--font-ui);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.montage-agent svg {
+  width: 17px;
+  height: 17px;
+}
+.montage-agent:enabled:hover {
+  background: var(--hover);
+}
+.montage-agent:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.montage-agent.is-thinking:disabled {
+  opacity: 1;
+}
+.montage-timeline-head > .montage-agent + .montage-fill,
+.montage-timeline-head > .montage-agent + .montage-halt {
+  margin-left: -8px;
+}
+/* Le plan que Moodix AI est en train d'écrire. */
+.montage-piece.is-todo.is-writing {
+  border-style: solid;
+  border-color: rgba(238, 232, 222, 0.55);
+}

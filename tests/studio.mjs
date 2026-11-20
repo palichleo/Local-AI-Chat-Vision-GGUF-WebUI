@@ -1073,7 +1073,7 @@ async function studioPage(tools, routes = {}, options = {}) {
       resource: options.resource ?? (id => ({ previewUrl: '/preview/' + id })),
     },
     viewOutput: options.viewOutput ?? (() => {}),
-    waitForModel: async () => {},
+    waitForModel: options.waitForModel ?? (async () => {}),
     blocked: () => '',
     onChange() {},
     // `null`: a conversation not begun; nothing said, « c1 ».
@@ -6158,6 +6158,50 @@ test('« Combler les trous » asks the server what a plan would be made with, as
     const [, real] = actions();
     assert.deepEqual([real.estimate, real.arguments, real.size], [undefined, actions()[0].arguments, { width: 1344, height: 768 }]);
     assert.equal(body.find('montage-piece')[0].children[0].textContent, '1 · PRISE 9');
+  } finally {
+    studio.restore();
+  }
+});
+
+test('« Agent » in the montage: the chat model is brought back, then asked what happens in the plan, in the conversation (0.6.146)', async () => {
+  const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
+    video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
+    image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true },
+    stored = {
+      schemaVersion: 1, id: 'm1', name: 'Film', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
+      plans: [{ id: 'a', kind: 'video', todo: { prompt: '' }, from: 0, to: 5, frame: 'fit', volume: 1, photos: { start: { conversationId: 'c0', runId: 'p1', output: 0 } } }],
+    },
+    order = [];
+  const routes = new Proxy({}, {
+    get: (_, route) =>
+      typeof route !== 'string'
+        ? undefined
+        : route === 'montages/describe'
+          ? () => (order.push('describe'), { prompt: 'An old fisherman lifts his eyes towards the sea.' })
+          : route === 'tools/action'
+            ? () => ({ workflowName: 'LTX 2.5', seconds: 5.042 })
+            : route === 'montages/save'
+              ? body => ({ ...body.montage, createdAt: 'a', updatedAt: 'b' })
+              : /^montages\/[^/]+\/m1$/.test(route)
+                ? () => stored
+                : /^montages\/[^/]+$/.test(route)
+                  ? () => ({ montages: [{ id: 'm1', name: 'Film' }] })
+                  : undefined,
+  });
+  const studio = await studioPage({ create_image: [image], create_video: [video] }, routes, { runs: [photo], waitForModel: async () => void order.push('model') });
+  const { body, asked } = studio;
+  try {
+    studio.page['studio-kinds'].children[3].onclick();
+    await until(() => body.find('montage-piece').length === 1);
+    body.find('montage-agent')[0].onclick();
+    await until(() => body.find('montage-series-item').length === 1);
+    // The chat model first (it may have left the card for a creation), then the request, in the
+    // conversation: the take of another conversation of the project is named with its own.
+    assert.deepEqual(order, ['model', 'describe']);
+    const [, sent] = asked.find(([route]) => route === 'montages/describe');
+    assert.deepEqual(sent, { verb: 'create_video', seconds: 5, start: { output: 'p1', conversation: 'c0' }, conversationId: 'c1' });
+    // Its text is the text of the plan, shown before anything is made; the montage is still on screen.
+    assert.deepEqual([body.find('montage-series-words')[0].textContent, body.dataset.mode], ['« An old fisherman lifts his eyes towards the sea. »', 'montage']);
   } finally {
     studio.restore();
   }

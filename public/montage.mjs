@@ -23,6 +23,10 @@
  * after the other. What will be made is said first, each plan with its model and the whole with its
  * time (`estimate`: asked to the server, nothing kept); nothing is made before « Lancer ». The series
  * can be paused after the plan being made, or stopped at once.
+ *
+ * (0.6.146) « Agent », as in the other modes of the Studio (maquette M7): here Moodix AI writes what
+ * happens in the plans to make that have no text, from their photos, one plan at a time (`write`);
+ * then what will be created is shown, to be agreed on.
  */
 import { FORMATS } from './formats.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
@@ -108,6 +112,9 @@ export function setupMontage({
   // (0.6.144) What a creation would be made with, and in how long, nothing being made nor kept:
   // `estimate({ verb, args })` gives { workflowName, seconds, expected: { seconds, exact }, missing }.
   estimate = null,
+  // (0.6.146) What happens in a plan, written by the chat model from its pictures: `write({ verb,
+  // seconds, start, end, previous }, { signal })` gives { prompt }, or throws why not.
+  write = null,
 }) {
   let root = null,
     kindsBar = null,
@@ -142,7 +149,9 @@ export function setupMontage({
     // 'paused', items, at, pausing, stopping }. An item: what seriesOf says of a plan, with its model
     // (`model`), the length that model makes (`makes`), its time (`expected`), where it is (`state`:
     // 'wait', 'making', 'made', 'failed') and its take once made.
-    filling = null;
+    filling = null,
+    // (0.6.146) Moodix AI is writing the plans: { id (the one it writes), at, of, controller }.
+    writing = null;
   const inSeries = () => filling?.stage === 'running' || filling?.stage === 'paused';
 
   const fresh = (format = '16:9') => ({
@@ -225,6 +234,8 @@ export function setupMontage({
   /** A change made by hand: shown at once, kept a moment later. */
   function change(next, { select, sliding = false } = {}) {
     if (next === montage) return;
+    // (0.6.146) Nor while Moodix AI writes the plans: its texts are written back in this montage.
+    if (writing) return void notice('Moodix AI écrit les plans : attendez la fin, ou arrêtez l’écriture.');
     // (0.6.144) Nor while a series of plans is created, even between two of them or in pause.
     if (inSeries())
       return void notice(
@@ -277,6 +288,7 @@ export function setupMontage({
   }
   async function remove() {
     // (0.6.144) Not under a plan being created: its take would have no montage to go to.
+    if (writing) return void notice('Moodix AI écrit les plans : attendez la fin, ou arrêtez l’écriture.');
     if (making || inSeries()) return void notice('Un plan est en cours de création : attendez sa fin, ou arrêtez-la.');
     if (!confirming) {
       confirming = true;
@@ -709,13 +721,13 @@ export function setupMontage({
       why = node('p', 'montage-reason'),
       // (« Prolonger », the word of the Studio for it: the continuation itself. Towards an end photo it is a new clip.)
       go = button('montage-action is-go', busy ? 'Création…' : link.kind === 'suite' ? 'Prolonger' : 'Créer ce plan', () => void makePlan(item.id));
-    Object.assign(field, { value: item.todo.prompt, rows: 3, maxLength: TODO_LIMITS.prompt, placeholder: suite ? 'Par exemple : il se lève et s’éloigne.' : 'Par exemple : il lève les yeux.', disabled: Boolean(making) });
+    Object.assign(field, { value: item.todo.prompt, rows: 3, maxLength: TODO_LIMITS.prompt, placeholder: suite ? 'Par exemple : il se lève et s’éloigne.' : 'Par exemple : il lève les yeux.', disabled: Boolean(making) || Boolean(writing) });
     field.setAttribute('aria-label', suite ? 'Ce qui se passe ensuite' : 'Ce qui se passe dans ce plan');
     // What stops it is said as it changes: the button is never drawn again under the hand that goes to it.
     const judge = () => {
       const wanted = creationOf(montage, item.id, lengthOf),
         reason = !create ? 'La création n’est pas disponible ici.' : (wanted.reason ?? '');
-      go.disabled = Boolean(reason) || Boolean(making);
+      go.disabled = Boolean(reason) || Boolean(making) || Boolean(writing);
       go.title = reason;
       why.textContent = busy ? '' : reason;
       why.hidden = busy || !reason;
@@ -755,7 +767,7 @@ export function setupMontage({
     return args;
   }
   async function makePlan(id) {
-    if (making || !create) return;
+    if (making || writing || !create) return;
     const wanted = creationOf(montage, id, lengthOf);
     if (wanted.reason) return notice(wanted.reason);
     const index = montage.plans.findIndex(plan => plan.id === id);
@@ -895,6 +907,100 @@ export function setupMontage({
     return section;
   }
 
+  /** (0.6.146) « Agent », as in the other modes of the Studio; while Moodix AI writes, its mark turns. */
+  function agentButton() {
+    const agent = button('montage-agent' + (writing ? ' is-thinking' : ''), 'Agent', () => void askAgent(), 'eclipse');
+    agent.disabled = Boolean(filling) || Boolean(writing);
+    agent.title = 'Moodix AI écrit ce qui se passe dans les plans à faire, d’après leurs photos, puis vous montre ce qui sera créé';
+    return agent;
+  }
+  /**
+   * (0.6.146) What Moodix AI is shown of a plan to make to write what happens in it: the picture it
+   * starts on (its start photo, else the end of the video it goes on from, else the photo the plan
+   * before it arrives on), the picture it ends on (its end photo), its length, and what happens in the
+   * plan before it. Null when it has nothing to look at.
+   */
+  function picturesFor(plan) {
+    const before = montage.plans[montage.plans.indexOf(plan) - 1],
+      link = linkOf(montage, plan.id, lengthOf),
+      named = (source, more = {}) => {
+        const record = recordOf(source);
+        return record ? { ...inputOf(record), ...more } : null;
+      },
+      start = plan.photos?.start
+        ? named(plan.photos.start)
+        : link.kind === 'suite' || link.kind === 'last'
+          ? named(before.source, { frame: 'last' })
+          : link.kind === 'wait' && before.photos?.end
+            ? named(before.photos.end)
+            : null,
+      end = plan.photos?.end ? named(plan.photos.end) : null,
+      previous = String((before ? (isTodo(before) ? before.todo.prompt : recordOf(before.source)?.prompt) : '') ?? '').trim();
+    if (!start && !end) return null;
+    return {
+      verb: link.kind === 'suite' ? 'extend_video' : 'create_video',
+      seconds: Math.round((plan.to - plan.from) * 10) / 10,
+      ...(start ? { start } : {}),
+      ...(end ? { end } : {}),
+      ...(previous ? { previous: previous.slice(0, 1200) } : {}),
+    };
+  }
+  /**
+   * (0.6.146) « Agent »: Moodix AI writes what happens in each plan to make that has no text yet, from
+   * its pictures, one plan at a time and in the order of the film (the story of a plan goes on from the
+   * one before it); what the user wrote is left as it is. Then what will be created is shown, as
+   * « Combler les trous » shows it: nothing is made before « Lancer ».
+   */
+  async function askAgent() {
+    if (making || filling || writing || !write) return;
+    const blank = montage.plans.filter(plan => isTodo(plan) && !plan.todo.prompt.trim()).map(plan => plan.id);
+    if (!blank.length) return fill();
+    stop();
+    const controller = new AbortController(),
+      mine = (writing = { id: null, at: 0, of: blank.length, controller });
+    let problem = '',
+      done = 0;
+    status = 'Moodix AI regarde vos plans…';
+    update();
+    await keep();
+    for (const id of blank) {
+      if (writing !== mine) return;
+      if (controller.signal.aborted) break;
+      const plan = itemOf(id),
+        number = montage.plans.indexOf(plan) + 1,
+        asked = plan ? picturesFor(plan) : null;
+      mine.at++;
+      // (Nothing to look at: left to the user, who is told so where what will be created is shown.)
+      if (!asked) continue;
+      mine.id = id;
+      status = `Moodix AI écrit le plan ${number} · ${mine.at} sur ${mine.of}`;
+      update();
+      try {
+        const written = String((await write(asked, { signal: controller.signal }))?.prompt ?? '').trim();
+        if (writing !== mine) return;
+        if (!written) throw new Error('Moodix AI n’a rien écrit.');
+        montage = withItemChanged(montage, id, { prompt: written });
+        pending = true;
+        done++;
+      } catch (error) {
+        if (writing !== mine) return;
+        if (!controller.signal.aborted) problem = `Plan ${number} non écrit : ${error.message}`;
+        break;
+      }
+    }
+    if (writing !== mine) return;
+    const stopped = controller.signal.aborted;
+    writing = null;
+    await keep();
+    if (stopped || problem) {
+      status = stopped ? `Écriture arrêtée · ${done} plan${done > 1 ? 's' : ''} écrit${done > 1 ? 's' : ''}` : problem;
+      return draw();
+    }
+    // What is written is read before anything is made: the agreement of « Combler les trous ».
+    draw();
+    return fill();
+  }
+
   /**
    * (0.6.144) « Combler les trous »: what would be created is read on the montage (seriesOf) and said,
    * each plan with the model that would make it and its time, asked to the server for those that need
@@ -902,7 +1008,7 @@ export function setupMontage({
    * brought to its own length. Nothing is made here: « Lancer » does.
    */
   async function fill() {
-    if (making || filling || !create) return;
+    if (making || filling || writing || !create) return;
     const items = seriesOf(montage, lengthOf).map(item => ({ ...item, model: '', makes: null, expected: null, state: 'wait', take: null }));
     if (!items.length) return;
     stop();
@@ -1021,7 +1127,10 @@ export function setupMontage({
         ? 'Assemble le film et l’ajoute aux prises du projet'
         : 'Posez au moins une prise pour exporter un film';
     headRow.append(node('span', 'montage-label', 'Montage'), pick, node('span', 'montage-summary', montageSummary(montage)), state);
-    if (filling?.stage === 'running') {
+    if (writing)
+      // (0.6.146) Moodix AI writes: its button says so, and the writing can be stopped.
+      headRow.append(agentButton(), button('montage-halt', 'Arrêter', () => writing?.controller.abort()));
+    else if (filling?.stage === 'running') {
       // (The plan being made is finished first: a pause never loses what the card is doing.)
       const pause = button('montage-halt', filling.pausing ? 'Pause demandée…' : 'Mettre en pause', () => {
         filling.pausing = true;
@@ -1043,6 +1152,7 @@ export function setupMontage({
       );
     else if (making) headRow.append(button('montage-halt', 'Arrêter', () => halt()));
     else if (waiting > 0 && create) {
+      if (write) headRow.append(agentButton());
       const all = button('montage-fill', 'Combler les trous', () => void fill());
       // (Greyed while what it would make is shown at the right, waiting for « Lancer ».)
       all.disabled = Boolean(filling);
@@ -1050,7 +1160,7 @@ export function setupMontage({
       headRow.append(all);
     }
     // (The montage shown is the one of the plans being created.)
-    pick.disabled = Boolean(making) || inSeries();
+    pick.disabled = Boolean(making) || inSeries() || Boolean(writing);
     headRow.append(go);
     live.bar = live.making = null;
     // A mark a second up to a minute, then every five or ten: the ruler never turns into a comb.
@@ -1137,13 +1247,15 @@ export function setupMontage({
           suite = link?.kind === 'suite' || link?.kind === 'last',
           // (0.6.144) Its turn has not come yet in the series being created.
           queued = todo && inSeries() && filling.items.some(entry => entry.id === item.id && entry.ready && entry.state === 'wait'),
+          // (0.6.146) Moodix AI is writing what happens in it.
+          penned = todo && writing?.id === item.id,
           label =
             id !== 'plans'
               ? (takeLabel(item.source) || KINDS[id]) + (record?.prompt ? ' · ' + String(record.prompt).split('\n')[0].slice(0, 60) : '')
               : todo
-                ? `${number} · ${busy ? 'EN COURS' : queued ? 'EN ATTENTE' : item.replaces ? 'SERA REMPLACÉ' : suite ? 'SUITE À CRÉER' : 'À FAIRE'}`
+                ? `${number} · ${busy ? 'EN COURS' : penned ? 'MOODIX AI ÉCRIT' : queued ? 'EN ATTENTE' : item.replaces ? 'SERA REMPLACÉ' : suite ? 'SUITE À CRÉER' : 'À FAIRE'}`
                 : `${number}${takeLabel(item.source, ' · ').toUpperCase()}`,
-          look = id !== 'plans' ? ' is-sound' : todo ? ' is-todo' + (item.replaces ? ' is-replacing' : '') + (suite ? ' is-suite' : '') + (busy ? ' is-making' : '') : '',
+          look = id !== 'plans' ? ' is-sound' : todo ? ' is-todo' + (item.replaces ? ' is-replacing' : '') + (suite ? ' is-suite' : '') + (penned ? ' is-writing' : '') + (busy ? ' is-making' : '') : '',
           piece = button('montage-piece' + look, '', () => {
             // (The click that ends a drag chooses nothing.)
             if (slid) return void (slid = false);
@@ -1417,16 +1529,20 @@ export function setupMontage({
       stop();
       // (0.6.144) A series in pause, or only shown, ends with the mode.
       filling = null;
+      // (0.6.146) So does what Moodix AI is writing: its request is let go.
+      writing?.controller.abort();
+      writing = null;
       root = parts = null;
       held = ghost = null;
       return keep();
     },
     // For the tests and the pointer of a later step: what is on the page, and the hands that change it.
-    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling }),
+    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing }),
     lay,
     makePlan,
     fill,
     launch,
+    askAgent,
     select: id => {
       chosen = id;
       draw();
