@@ -340,6 +340,30 @@ try {
   const counted = async () =>
       Object.fromEntries(((await send('Performance.getMetrics')).metrics ?? []).map(metric => [metric.name, metric.value])),
     costs = [];
+  /**
+   * (0.6.141) The lists this screen leaves as the browser draws them: a `<select>` in sight (it should
+   * be unseen behind its button), or a button of a list that looks as a button nobody dressed does (the
+   * grey one, read here from the browser itself). His word of 20/11, on « Format » and « Taille » of the
+   * Montage: « il faut un test pour éviter systématiquement ce style moche des listes ». The Settings
+   * had it on 17/11, the cards of a proposal before them: each screen had to think of it.
+   */
+  const RAW_LISTS = `(() => {
+    const seen = element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+    const look = style => [style.backgroundColor, style.borderTopStyle, style.borderTopWidth].join(' ');
+    const bare = document.createElement('button');
+    bare.style.cssText = 'all: revert; position: fixed; left: -999px; top: -999px;';
+    document.body.append(bare);
+    const plain = look(getComputedStyle(bare));
+    bare.remove();
+    const name = element => (element.getAttribute('aria-label') || element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 40);
+    const found = [];
+    for (const face of document.querySelectorAll('button.glass-select'))
+      if (seen(face) && look(getComputedStyle(face)) === plain) found.push('« ' + name(face) + ' » (' + face.className + ')');
+    for (const list of document.querySelectorAll('select:not(.glass-select-native)'))
+      if (seen(list)) found.push('« ' + name(list) + ' » (select ' + list.className + ')');
+    return found;
+  })()`,
+    rawLists = new Set();
   async function run(name, action, expected, { allowed = null, within = 0 } = {}) {
     step = name;
     const before = PERF ? await counted() : null,
@@ -355,6 +379,13 @@ try {
     // A video given the browser's controls during the step, were it for an instant.
     for (const video of (await js(`window.__browserControls?.splice(0) ?? []`)) ?? [])
       problems.push([name, 'lecteur', 'contrôles du navigateur sur une vidéo : ' + video]);
+    // (0.6.141) A list left as the browser draws it, on whatever screen this step shows: every list of
+    // the page is a button and a menu of ours (glass-menu.mjs), dressed. Said once, where first seen.
+    for (const list of (await js(RAW_LISTS)) ?? []) {
+      if (rawLists.has(list)) continue;
+      rawLists.add(list);
+      problems.push([name, 'liste', 'liste laissée à l’aspect du navigateur : ' + list]);
+    }
     results.push([name, done !== false && shown !== false]);
     if (PERF) {
       const after = await counted(),

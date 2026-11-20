@@ -4,6 +4,7 @@
  * change returns a new montage; none is made in place. The server checks what it is sent in any case.
  */
 import { FORMATS } from './formats.mjs';
+import { takeSeconds as lengthOf } from './take-length.mjs';
 
 /** Frames a second of a film. LTX 2.5 and MiniMax H3 draw 24; a take at another rate is brought to it. */
 export const MONTAGE_RATES = Object.freeze([24]);
@@ -57,11 +58,14 @@ export function trackOf(record) {
   const seconds = Number(record.parameters?.seconds) || 0;
   return /musi|ace-?step|song/i.test(record.workflowName || '') || seconds > 20 ? 'music' : 'effects';
 }
-/** The length of a creation in seconds, from its record; null for an image or when nothing says it. */
+/**
+ * The length of a creation in seconds, from its record; null for an image or when nothing says it.
+ * A clip continued is as long as its file, the clip it continues counted (take-length.mjs, 0.6.141:
+ * the frames it generated alone left the end of the take out of reach).
+ */
 export function takeSeconds(record) {
-  const p = record?.parameters ?? {};
-  if (Number(p.seconds) > 0) return Number(p.seconds);
-  return p.frames > 0 && p.fps > 0 ? round(p.frames / p.fps) : null;
+  const seconds = lengthOf(record);
+  return seconds > 0 ? round(seconds) : null;
 }
 
 const sourceOf = (record, output = 0) => ({ conversationId: record.conversationId, runId: record.id, output });

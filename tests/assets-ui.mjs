@@ -450,6 +450,10 @@ test('the window of a take says how long it took to make, apart from « Durée �
   await ui.viewOutput(take({ generation_duration_ms: 116300, runner_duration_ms: 116300 }), 0);
   shown = lines('media-metadata');
   assert.deepEqual([shown['Temps du moteur'], shown['Temps de génération']], ['1 min 56 s', undefined]);
+  // (0.6.141) A clip continued: « Durée » is that of its file, the clip it continues counted (121
+  // frames, then 232 more: 14,71 s; « 10.04 S » was read from the 241 it generated).
+  await ui.viewOutput(take({ frames: 241, continuation: { overlapFrames: 9, sourceFrames: 121, newFrames: 232 } }), 0);
+  assert.equal(lines('media-metadata')['Durée'], '14.71 S');
   // Nothing measured: said so.
   await ui.viewOutput(take({}), 0);
   assert.equal(lines('media-metadata')['Temps de génération'], 'Non mesuré');

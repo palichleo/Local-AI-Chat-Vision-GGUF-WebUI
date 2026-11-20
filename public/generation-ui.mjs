@@ -5,23 +5,14 @@ import { takeFlux } from './take-flux.mjs';
 import { formatOf } from './formats.mjs';
 import { clipPlayer } from './take-player.mjs';
 import { elapsedClock, madeIn } from './generation-time.mjs';
+import { clipSeconds } from './take-length.mjs';
 
 const KINDS = { image: 'IMAGE', video: 'VIDÉO', audio: 'SON' };
 /** A length as the Studio writes it everywhere (moodix-design.md 27): « 05.04 S » in capitals. */
 const twoFigures = value => (Math.round(Number(value) * 100) / 100).toFixed(2).padStart(5, '0');
 const figures = value => twoFigures(value) + ' S';
-/**
- * The length of a clip in seconds, from its settings. The file of a continuation holds the clip it
- * continues, then what it adds: its length is that of both (`continuation`, written by the engine),
- * not the frames it generated, overlap included (a suite of 5 s of a clip of 5 s read « 05.38 S »
- * while its file plays 10 s).
- */
-export function clipSeconds(p = {}) {
-  if (!(p.fps > 0)) return null;
-  const made = p.continuation;
-  if (made?.sourceFrames > 0 && made?.newFrames > 0) return (made.sourceFrames + made.newFrames) / p.fps;
-  return p.frames > 0 ? p.frames / p.fps : null;
-}
+// (The length of a clip, its continuation counted: take-length.mjs, read by every screen.)
+export { clipSeconds };
 /** What a card says of a creation: its kind, its format and its length (« VIDÉO · 16:9 · 05.04 S »). */
 export function cardMeta({ media = 'image', width, height, seconds, added = false } = {}) {
   const format =

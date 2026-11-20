@@ -4,6 +4,7 @@ import { dismissSettingsOnOutsideClick } from './settings-controls.mjs';
 import { formatOf } from './formats.mjs';
 import { setupTakePlayer } from './take-player.mjs';
 import { generationTime, takeTime } from './generation-time.mjs';
+import { takeSeconds } from './take-length.mjs';
 
 /**
  * The references and the large view of a creation. No panel any more (0.5.106): a reference is
@@ -329,7 +330,7 @@ export function setupAssets({
     const width = output.width ?? parameters.width,
       height = output.height ?? parameters.height,
       stage = $('media-stage'),
-      seconds = Number(parameters.seconds) > 0 ? Number(parameters.seconds) : parameters.frames > 0 && parameters.fps > 0 ? parameters.frames / parameters.fps : null;
+      seconds = takeSeconds({ parameters });
     // The stage at the shape of the take, known from its record, then from its file.
     stage.classList.toggle('is-audio', media === 'audio');
     if (media !== 'audio' && width > 0 && height > 0) shape(width, height);

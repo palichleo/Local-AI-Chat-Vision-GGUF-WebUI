@@ -83,7 +83,9 @@ const RUNS = [
     projectId: 'inbox',
     mediaType: 'video',
     prompt: 'Un clip',
-    parameters: { frames: 121, fps: 24 },
+    // (0.6.141) A clip continued: 121 frames, then 232 more. Its file plays 14,71 s; the 241 frames it
+    // generated, overlap included, read « 10.04 S ».
+    parameters: { frames: 241, fps: 24, continuation: { overlapFrames: 9, sourceFrames: 121, newFrames: 232 } },
     outputs: [output('c2', 'r2')],
   },
   { id: 'r3', conversationId: 'open', projectId: 'p1', mediaType: 'audio', prompt: 'Des vagues', outputs: [output('open', 'r3')] },
@@ -185,7 +187,7 @@ test('every project: each creation with its project and its conversation; a clic
   // plays (« PRISE n » and its kind, its stripes, ▶, its name and its length).
   assert.equal(walk(image).find(item => item.tag === 'img').src, '/media/thumbnail/r1');
   assert.equal(walk(clip).find(item => item.tag === 'video').src, '/media/generated/c2/r2/0?key=k#t=0.1');
-  assert.equal(find(clip, 'library-length').textContent, '05.04 S');
+  assert.equal(find(clip, 'library-length').textContent, '14.71 S');
   assert.equal(find(image, 'library-length'), undefined);
   assert.ok(find(sound, 'library-wave'));
   assert.deepEqual(find(sound, 'library-sound-head').children.map(item => item.textContent), ['SON', 'BRUITAGE']);

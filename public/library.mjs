@@ -11,6 +11,7 @@
  */
 import { healThumbnail, thumbnailOf } from './thumbnails.mjs';
 import { stillClip } from './take-player.mjs';
+import { takeSeconds } from './take-length.mjs';
 
 export const KINDS = [
   { id: 'all', icon: 'grid', label: 'Tout' },
@@ -47,12 +48,8 @@ export function lengthText(seconds) {
   if (seconds >= 60) return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
   return (Math.round(seconds * 100) / 100).toFixed(2).padStart(5, '0') + ' S';
 }
-/** The length of a creation, from its settings. */
-const secondsOf = record => {
-  const p = record.parameters ?? {};
-  if (Number(p.seconds) > 0) return Number(p.seconds);
-  return p.frames > 0 && p.fps > 0 ? p.frames / p.fps : null;
-};
+/** The length of a creation, from its settings: a clip continued is as long as its file (take-length.mjs). */
+const secondsOf = takeSeconds;
 /** The shape of a creation, width over height: its file, its settings, or that of its kind. */
 const ratioOf = (record, media) => {
   const output = record.outputs?.[0] ?? {},

@@ -5003,9 +5003,10 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   display: block;
   padding: 40px 0;
 }
-/* Fields: dark wells with fine borders. */
+/* Fields: dark wells with fine borders. A list is one of them (its button: glass-menu.mjs). */
 .studio-desk textarea,
 .studio-desk select,
+.studio-desk button.glass-select,
 .studio-desk input[type='number'],
 .studio-desk input[type='text'] {
   box-sizing: border-box;
@@ -15056,6 +15057,23 @@ button.glass-select {
 button.glass-select:disabled {
   cursor: default;
 }
+/* (0.6.141) Its dress when no screen gives it one: a dark field with a fine border, as in the
+   Settings. Without it a list was the grey button of the browser wherever a screen forgot to dress
+   it: the Settings on 17/11, the cards of a proposal, then the Montage and two settings of the
+   Studio on 20/11 (« on doit toujours utiliser nos belles listes »). `:where` weighs nothing: a
+   screen that dresses its lists keeps the last word on each property. */
+:where(button.glass-select) {
+  min-height: 34px;
+  padding: 7px 12px 7px 11px;
+  border: 1px solid rgba(238, 232, 222, 0.1);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: none;
+  color: var(--text-1);
+}
+:where(button.glass-select):is(:hover, :focus-visible):enabled {
+  border-color: rgba(238, 232, 222, 0.24);
+}
 .glass-select-text {
   min-width: 0;
   overflow: hidden;
@@ -17363,6 +17381,20 @@ body:not([data-view='studio']) .ai-cursor {
   width: 150px;
   text-align: right;
 }
+/* (0.6.141) Its format and its size: fields as its name is, at the right of their line. The three are
+   lower than the fields of the Studio: a line of these settings is 36 px high, and fields of 44 px
+   touched one another from line to line. */
+.studio-desk .montage-row-side > button.glass-select {
+  width: 150px;
+}
+.studio-desk .montage-row-side > button.glass-select,
+.studio-desk .montage-row-side > input.montage-name {
+  min-height: 30px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 13px;
+}
 .montage-two {
   display: inline-flex;
   border: 1px solid var(--line);
@@ -17443,6 +17475,8 @@ body:not([data-view='studio']) .ai-cursor {
   width: auto;
   max-width: 320px;
   height: 34px;
+  min-height: 0;
+  border-radius: 8px;
   padding: 0 4px;
   border: 0;
   background: none;

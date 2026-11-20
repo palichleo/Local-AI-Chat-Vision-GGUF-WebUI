@@ -297,3 +297,33 @@ test('no source of the page or of the server holds a control character (an escap
     assert.equal(at, -1, `${file.pathname.split('/').slice(-2).join('/')}: U+${text.charCodeAt(at).toString(16).padStart(4, '0')} at ${at}`);
   }
 });
+
+test('a list is dressed wherever it is drawn, and the check of the interface looks for one that is not (0.6.141)', async () => {
+  // His word of 20/11 on « Format » and « Taille » of the Montage, left as the grey button of the
+  // browser: « il faut un test pour éviter systématiquement ce style moche des listes. On doit toujours
+  // utiliser nos belles listes ». The button of a list had no dress of its own: each screen had to give
+  // it one (the Settings forgot on 17/11, the cards of a proposal before, then the Montage and two
+  // settings of the Studio).
+  const css = (await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const rule = /\n:where\(button\.glass-select\) \{\n([^}]*)\}/.exec(css);
+  assert.ok(rule, 'the dress of a list when no screen gives it one');
+  const dressed = Object.fromEntries([...rule[1].matchAll(/^\s*([a-z-]+):\s*([^;]+);/gm)].map(found => [found[1], found[2]]));
+  // What the browser would draw of its own: the fill, the border, the corners, the room, the ink.
+  for (const property of ['background', 'border', 'border-radius', 'padding', 'min-height', 'color']) assert.ok(dressed[property], property);
+  assert.doesNotMatch(dressed.background, /buttonface|revert|initial/i);
+  assert.match(dressed.border, /^1px solid /);
+  // It weighs nothing (`:where`): the screens that dress their lists keep the last word.
+  for (const screen of ['#settings button.glass-select {', '#messages .proposal-card .proposal-field button.glass-select {', '.montage-pick.glass-select {'])
+    assert.ok(css.includes(screen), screen);
+  // In the Studio a list is a field as the others (the Montage is one of its desks).
+  assert.match(css, /\.studio-desk select,\n\.studio-desk button\.glass-select,\n/);
+  // Every screen the check of the interface goes through is looked at, after each of its steps: a
+  // `<select>` in sight, or a button of a list that looks as a button nobody dressed.
+  const check = (await readFile(new URL('../scripts/check-ui.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  assert.match(check, /const RAW_LISTS = `/);
+  assert.match(check, /querySelectorAll\('button\.glass-select'\)/);
+  assert.match(check, /querySelectorAll\('select:not\(\.glass-select-native\)'\)/);
+  const run = check.slice(check.indexOf('async function run(name, action, expected'), check.indexOf('const view = name =>'));
+  assert.match(run, /await js\(RAW_LISTS\)/);
+  assert.match(run, /problems\.push\(\[name, 'liste', /);
+});

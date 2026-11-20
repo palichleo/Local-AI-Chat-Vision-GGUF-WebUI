@@ -58,6 +58,17 @@ test('a creation goes where its kind belongs: a clip or an image on the plans, a
   const full = { ...empty(), plans: Array.from({ length: MONTAGE_LIMITS.plans }, (_, n) => ({ id: id(n + 1) })) };
   assert.equal(withTake(full, clip(1, 5), { id: id(999) }), full);
   assert.equal(empty().plans.length, 0, 'the montage handed over is never changed in place');
+  // (0.6.141) A clip continued is laid whole, and its end can be pulled back to where its file ends:
+  // 121 frames continued by 232 play 14,71 s (« montage ne voit que 10 secondes », 20/11: the 241
+  // frames it generated).
+  const continuation = { overlapFrames: 9, sourceFrames: 121, newFrames: 232 };
+  const continued = record(9, 'video', { parameters: { frames: 241, fps: 24, continuation } });
+  assert.equal(takeSeconds(continued), 14.708);
+  const laid = withTake(empty(), continued, { id: id(18) });
+  assert.equal(laid.plans[0].to, 14.708);
+  const cut = withItemChanged(laid, id(18), { to: 10 }, { longest: takeSeconds(continued) });
+  assert.equal(withItemChanged(cut, id(18), { to: 99 }, { longest: takeSeconds(continued) }).plans[0].to, 14.708);
+  assert.deepEqual(kept(laid).plans, laid.plans);
 });
 
 test('plans follow one another: their starts, the one under the head, the length of the film (0.6.137)', () => {
