@@ -125,6 +125,32 @@ class RuleTests(Folder):
         graph = montage.graph(montage.validated(muted, self.root), [False, True, False])[1]
         self.assertIn('anullsrc=r=48000:cl=stereo,atrim=duration=1[a1]', graph)
 
+    def test_a_hole_before_a_plan_is_black_and_silent_as_long_as_it_is(self):
+        # (0.6.149, La Bobine) The first plan at 0.5 s, the second at 3 s: a hole of half a second before
+        # the first and one of a second after it (it ends at 2 s); the image, without an instant, follows.
+        asked = self.asked(sounds=[])
+        asked['plans'][0]['at'] = 0.5
+        asked['plans'][1]['at'] = 3
+        plan = montage.validated(asked, self.root)
+        self.assertEqual([item['at'] for item in plan['plans']], [0.5, 3, 4])
+        self.assertEqual((montage.seconds(plan), montage.holes(plan)), (5, [(0, 0.5), (1, 1)]))
+        inputs, filters, sound, total = montage.graph(plan, [False, True, False])
+        parts = filters.split(';')
+        self.assertEqual(parts[0], 'color=c=black:s=320x180:r=24:d=0.5,setsar=1,format=yuv420p[g0]')
+        self.assertEqual(parts[1], 'anullsrc=r=48000:cl=stereo,atrim=duration=0.5[h0]')
+        self.assertIn('color=c=black:s=320x180:r=24:d=1,setsar=1,format=yuv420p[g1]', parts)
+        self.assertEqual(parts[-1], '[g0][h0][v0][a0][g1][h1][v1][a1][v2][a2]concat=n=5:v=1:a=1[film][clips]')
+        # (A hole is made in the graph: no file is read for it.)
+        self.assertEqual((sound, total, inputs.count('-i')), ('[clips]', 5, 3))
+        # Without instants the plans follow one another, as before; one over the plan before it is refused.
+        self.assertEqual(montage.holes(montage.validated(self.asked(), self.root)), [])
+        asked['plans'][1]['at'] = 1.9
+        with self.assertRaisesRegex(ValueError, 'Plan 2: starts before the end of the plan before it'):
+            montage.validated(asked, self.root)
+        asked['plans'][1]['at'] = -1
+        with self.assertRaisesRegex(ValueError, 'invalid time'):
+            montage.validated(asked, self.root)
+
 
 class FilmTests(Folder):
     def test_the_film_is_one_file_of_the_outputs_with_its_manifest_at_its_size_rate_and_length(self):
@@ -163,6 +189,32 @@ class FilmTests(Folder):
         self.assertEqual(told[-1], dict(stage='film assembled', seconds=3.5, total=3.5))
         # The takes it is made of are as they were.
         self.assertEqual(probe(self.silent)['frames'], 32)
+
+    def test_a_hole_is_black_and_silent_in_the_film(self):
+        import av
+        import imageio.v3 as iio
+        import numpy as np
+
+        # (0.6.149) A clip of a second with its sound, a hole of a second, the same clip again.
+        asked = self.asked(sounds=[])
+        heard = dict(path=self.heard, kind='video', **{'from': 0, 'to': 1}, frame='fill', volume=1)
+        asked['plans'] = [dict(heard, at=0), dict(heard, at=2)]
+        result = montage.assemble(asked, self.config, lambda **data: None)
+        film = self.root / result['outputs'][0]['filename']
+        frames = iio.imread(film)
+        self.assertEqual(len(frames), 72, '1 s, a hole of 1 s, 1 s, at 24 frames a second')
+        self.assertEqual(result['metadata']['film_seconds'], 3)
+        colour = lambda index: frames[index][90, 160].astype(int).tolist()  # noqa: E731
+        self.assertTrue(all(abs(a - b) < 60 for a, b in zip(colour(12), (0, 128, 0))), colour(12))
+        self.assertTrue(max(colour(36)) < 30, 'black in the hole: ' + str(colour(36)))
+        self.assertTrue(all(abs(a - b) < 60 for a, b in zip(colour(60), (0, 128, 0))), colour(60))
+        with av.open(str(film)) as source:
+            rate = source.streams.audio[0].rate
+            samples = np.concatenate([frame.to_ndarray()[0] for frame in source.decode(audio=0)])
+        loud = lambda a, b: float(np.sqrt(np.mean(samples[int(a * rate) : int(b * rate)] ** 2)))  # noqa: E731
+        self.assertGreater(loud(0.2, 0.8), 0.05, 'the sound of the clip')
+        self.assertLess(loud(1.2, 1.8), 0.005, 'silent in the hole')
+        self.assertGreater(loud(2.2, 2.8), 0.05, 'the sound of the clip after the hole')
 
     def test_a_plan_asked_longer_than_its_clip_holds_its_last_picture_and_a_sound_must_be_one(self):
         import imageio.v3 as iio

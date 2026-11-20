@@ -27,25 +27,126 @@ export function usualSize(format) {
   return sizes.length ? sizes.reduce((best, item) => (points(item) < points(best) ? item : best)) : null;
 }
 
-/** How long the film is, in seconds: its plans end to end (a sound never makes it longer). */
-export const montageSeconds = montage => round(montage.plans.reduce((sum, plan) => sum + (plan.to - plan.from), 0));
-
-/** When each plan starts in the film, in seconds, in the order of the list. */
-export function planStarts(montage) {
-  let at = 0;
-  return montage.plans.map(plan => {
-    const start = at;
-    at = round(at + plan.to - plan.from);
-    return start;
+// ------------------------------------------------------------------ the instants (0.6.149)
+/**
+ * (0.6.149, La Bobine, lot 2) Each plan is at its instant of the bobine (`at`, in seconds), in the order
+ * of the list, none over the one before it; between two of them there may be a hole, black in the
+ * film (« Elle reste où on l'a dessinée, sans se coller à la fin : le trou d'avant reste »). What
+ * touches a plan follows it: a plan made shorter or longer takes with it those glued after it, a
+ * plan taken out leaves them where it was; what is pushed is pushed only as far as it must be.
+ */
+const NEAR = 0.002;
+const long = plan => plan.to - plan.from;
+const endOf = plan => round(plan.at + long(plan));
+/** Plans in their order, none over the one before it: what overlaps is pushed later, nothing else moves. */
+function settled(plans) {
+  let end = 0;
+  return plans.map(plan => {
+    const at = round(Math.max(Number.isFinite(plan.at) ? plan.at : end, end));
+    end = round(at + long(plan));
+    return at === plan.at ? plan : { ...plan, at };
   });
 }
-/** The plan shown at `seconds` of the film: { plan, index, start }, the last one at the very end; null without plans. */
+/** Whether the plan at `index` touches what is before it (the one before, or the start of the bobine). */
+const gluedBefore = (plans, index) => (index ? Math.abs(plans[index].at - endOf(plans[index - 1])) < NEAR : plans[0].at < NEAR);
+/** The plans right after the one at `index` that touch it, each touching the one before it. */
+function gluedAfter(plans, index) {
+  const chain = [];
+  for (let at = index + 1; at < plans.length && Math.abs(plans[at].at - endOf(plans[at - 1])) < NEAR; at++) chain.push(at);
+  return chain;
+}
+const moved = (plans, indices, delta) =>
+  delta ? plans.map((plan, at) => (indices.includes(at) ? { ...plan, at: round(Math.max(0, plan.at + delta)) } : plan)) : plans;
+
+/**
+ * `montage` with each plan at its instant. A bobine kept before 0.6.149 had none: its plans followed
+ * one another, and a plan to make without a start photo right after a video or another plan to make
+ * went on from it. They are laid end to end as they were shown, and those continuations are said
+ * as such (`todo.suite`): only a suite goes on from what is before it now.
+ */
+export function placed(montage) {
+  const plans = montage.plans ?? [];
+  const old = plans.some(plan => !Number.isFinite(plan.at));
+  const marked = old
+    ? plans.map((plan, index) => {
+        const before = plans[index - 1];
+        if (Number.isFinite(plan.at) || !isTodo(plan) || plan.todo.suite || plan.photos?.start || !before || before.kind !== 'video') return plan;
+        return { ...plan, todo: { ...plan.todo, suite: true } };
+      })
+    : plans;
+  const next = settled(marked);
+  return next.every((plan, index) => plan === plans[index]) ? montage : { ...montage, plans: next };
+}
+
+/** How long the film is, in seconds: to the end of its last plan (a sound never makes it longer). */
+export function montageSeconds(montage) {
+  const { plans } = placed(montage);
+  return plans.length ? endOf(plans.at(-1)) : 0;
+}
+
+/** When each plan starts in the film, in seconds, in the order of the list. */
+export const planStarts = montage => placed(montage).plans.map(plan => plan.at);
+
+/**
+ * The plan shown at `seconds` of the film: { plan, index, start }; the last one at its very end or
+ * beyond; null in a hole of the bobine, or without plans.
+ */
 export function planAt(montage, seconds) {
-  const starts = planStarts(montage);
-  if (!starts.length) return null;
-  let index = starts.length - 1;
-  while (index > 0 && starts[index] > seconds) index--;
-  return { plan: montage.plans[index], index, start: starts[index] };
+  const { plans } = placed(montage);
+  if (!plans.length) return null;
+  if (seconds >= endOf(plans.at(-1))) return { plan: plans.at(-1), index: plans.length - 1, start: plans.at(-1).at };
+  const index = plans.findIndex(plan => plan.at <= seconds + 1e-9 && seconds < endOf(plan));
+  return index < 0 ? null : { plan: plans[index], index, start: plans[index].at };
+}
+
+/**
+ * (0.6.149) The hole of the bobine around `seconds`: { from, to } (`to`: Infinity after its end), or
+ * null on a plan. Where a plan can be drawn, and where its ghost goes.
+ */
+export function holeAt(montage, seconds) {
+  const { plans } = placed(montage);
+  let from = 0;
+  for (const plan of plans) {
+    if (seconds < plan.at) return { from, to: plan.at };
+    if (seconds < endOf(plan)) return null;
+    from = endOf(plan);
+  }
+  return { from, to: Infinity };
+}
+
+/**
+ * Where a plan (or plans that stay together, `block`) laid at `seconds` goes among `plans`: on a
+ * plan, before it on its first half and after it on its second; in a hole, where it is laid, or
+ * against the edge of a neighbour within `near` seconds. What it then overlaps is pushed later.
+ */
+function laidAt(plans, block, seconds, near = 0) {
+  const length = block.reduce((sum, plan) => sum + long(plan), 0);
+  let start = Math.max(0, seconds),
+    index = plans.findIndex(plan => plan.at <= start && start < endOf(plan));
+  if (index >= 0) {
+    const on = plans[index];
+    // (Past its middle: after it.)
+    if (start > on.at + long(on) / 2) {
+      start = endOf(on);
+      index++;
+    } else start = on.at;
+  } else {
+    index = plans.filter(plan => plan.at < start).length;
+    const before = plans[index - 1],
+      after = plans[index];
+    if (near && before && start - endOf(before) <= near) start = endOf(before);
+    else if (near && after && after.at - (start + length) <= near && after.at - length >= (before ? endOf(before) : 0)) start = after.at - length;
+    else if (near && !before && start <= near) start = 0;
+  }
+  let at = start;
+  const laid = block.map(plan => {
+    const placedPlan = { ...plan, at: round(at) };
+    at += long(plan);
+    return placedPlan;
+  });
+  const next = [...plans];
+  next.splice(index, 0, ...laid);
+  return settled(next);
 }
 
 /**
@@ -71,82 +172,105 @@ export function takeSeconds(record) {
 const sourceOf = (record, output = 0) => ({ conversationId: record.conversationId, runId: record.id, output });
 
 /**
- * `montage` with a creation of the project laid on it: a video or an image as a plan (at `index`, the
- * end by default), a sound on its track from `at` seconds (the start by default). `id`: the identifier
- * of the new element. A take already there may be laid again: a film may show it twice.
+ * `montage` with a creation of the project laid on it: a video or an image as a plan, a sound on its
+ * track from `at` seconds (the start by default). A plan goes at the end of the bobine by default; at
+ * `index` among the others (it takes the place of the one there, which is pushed later with what
+ * touches it); or laid at `at` seconds (0.6.149, laidAt: in a hole it stays where it is laid, against
+ * a neighbour within `near` seconds). `id`: the identifier of the new element. A take already there
+ * may be laid again: a film may show it twice.
  */
-export function withTake(montage, record, { id, index, at = 0, track: lane } = {}) {
+export function withTake(montage, record, { id, index, at, track: lane, near = 0 } = {}) {
   const track = trackOf(record),
     length = takeSeconds(record);
+  // (A bobine that is full is handed back as it is.)
+  if ((track === 'video' || track === 'image' ? montage.plans.length >= MONTAGE_LIMITS.plans : montage.sounds.length >= MONTAGE_LIMITS.sounds)) return montage;
+  montage = placed(montage);
   if (track === 'video' || track === 'image') {
-    if (montage.plans.length >= MONTAGE_LIMITS.plans) return montage;
     const plan =
       track === 'image'
         ? { id, source: sourceOf(record), kind: 'image', from: 0, to: STILL_SECONDS, frame: 'fit' }
         : { id, source: sourceOf(record), kind: 'video', from: 0, to: clamp(length ?? STILL_SECONDS, MONTAGE_LIMITS.shortest, MONTAGE_LIMITS.longest), frame: 'fit', volume: 1 };
+    if (at !== undefined && index === undefined) return { ...montage, plans: laidAt(montage.plans, [plan], at, near) };
     const place = clamp(index ?? montage.plans.length, 0, montage.plans.length),
       plans = [...montage.plans];
-    plans.splice(place, 0, plan);
-    return { ...montage, plans };
+    plans.splice(place, 0, { ...plan, at: place < plans.length ? plans[place].at : montageSeconds(montage) });
+    return { ...montage, plans: settled(plans) };
   }
   if (montage.sounds.length >= MONTAGE_LIMITS.sounds) return montage;
   // (0.6.148) A sound goes on the track it is dropped on (« Piste audio 1 » or « 2 »), else on its own.
-  const sound = { id, source: sourceOf(record), track: lane === 'music' || lane === 'effects' ? lane : track, at: round(Math.max(0, at)), from: 0, to: Math.max(MONTAGE_LIMITS.shortest, length ?? STILL_SECONDS), volume: track === 'music' ? 0.6 : 1 };
+  const sound = { id, source: sourceOf(record), track: lane === 'music' || lane === 'effects' ? lane : track, at: round(Math.max(0, at ?? 0)), from: 0, to: Math.max(MONTAGE_LIMITS.shortest, length ?? STILL_SECONDS), volume: track === 'music' ? 0.6 : 1 };
   return { ...montage, sounds: [...montage.sounds, sound] };
 }
 
 /**
- * `montage` without the plan or the sound of this identifier. A plan to make that took the place of
- * the end of a video (0.6.142) gives it back: the video before it is whole again.
+ * `montage` without the plan or the sound of this identifier. The plans that touched it come back to
+ * where it was (0.6.149: those beyond a hole stay where they are). A plan to make that took the place
+ * of the end of a video (0.6.142) gives it back: the video before it is whole again.
  */
 export function withoutItem(montage, id) {
+  montage = placed(montage);
   const at = montage.plans.findIndex(plan => plan.id === id),
     gone = montage.plans[at],
     before = montage.plans[at - 1],
-    back = gone?.replaces && before && sameSource(before.source, gone.replaces.source) && Math.abs(before.to - gone.replaces.from) < 0.002;
-  return {
-    ...montage,
-    plans: montage.plans.filter(plan => plan.id !== id).map(plan => (back && plan === before ? { ...plan, to: gone.replaces.to } : plan)),
-    sounds: montage.sounds.filter(sound => sound.id !== id),
-  };
+    back = gone?.replaces && before && sameSource(before.source, gone.replaces.source) && Math.abs(before.to - gone.replaces.from) < NEAR && gluedBefore(montage.plans, at);
+  let plans = montage.plans;
+  if (gone) {
+    const growth = back ? gone.replaces.to - before.to : 0;
+    plans = moved(plans, gluedAfter(plans, at), growth - long(gone))
+      .map(plan => (back && plan.id === before.id ? { ...plan, to: gone.replaces.to } : plan))
+      .filter(plan => plan.id !== id);
+  }
+  return { ...montage, plans: settled(plans), sounds: montage.sounds.filter(sound => sound.id !== id) };
 }
 
-/** `montage` with a plan moved by `step` places (-1: earlier, 1: later); the same when it cannot move. */
+/**
+ * `montage` with a plan moved by `step` places (-1: earlier, 1: later): it and its neighbour change
+ * places, what was between them stays between them; the same when it cannot move.
+ */
 export function withPlanMoved(montage, id, step) {
+  montage = placed(montage);
   const from = montage.plans.findIndex(plan => plan.id === id),
     to = from + step;
   if (from < 0 || to < 0 || to >= montage.plans.length) return montage;
-  const plans = [...montage.plans];
-  plans.splice(to, 0, ...plans.splice(from, 1));
-  return { ...montage, plans };
+  const plans = [...montage.plans],
+    [first, second] = step > 0 ? [from, to] : [to, from],
+    [a, b] = [plans[first], plans[second]];
+  plans[first] = { ...b, at: a.at };
+  plans[second] = { ...a, at: round(endOf(b) - long(a)) };
+  return { ...montage, plans: settled(plans) };
 }
 
-/** `montage` with a plan put at `index` among the others (0: the first); the same when it is there already. */
-export function withPlanAt(montage, id, index) {
-  const from = montage.plans.findIndex(plan => plan.id === id);
-  if (from < 0) return montage;
-  const others = montage.plans.filter(plan => plan.id !== id),
-    to = clamp(index, 0, others.length);
-  if (to === from) return montage;
-  others.splice(to, 0, montage.plans[from]);
-  return { ...montage, plans: others };
-}
 /**
- * The place a plan dragged to `seconds` of the film takes among the others: after those whose
- * middle is before that time, in the montage as it was when the plan was pressed (`montage`, the
- * plan still in its place). Read on the film as it is being changed, the others closing the gap it
- * leaves, a long plan pressed near its end went after its neighbour at the first move.
+ * (0.6.149) `montage` with a plan dragged so that it starts at `seconds`, read on the bobine as it was
+ * when it was pressed (`montage`): it is lifted, with the suites to create joined after it (they go on
+ * from it), those that touched it come back to where it was, and it is laid there (laidAt: on a plan,
+ * before or after it by its middle; in a hole, where it is, or against a neighbour within `near`
+ * seconds). The same montage when nothing moves.
  */
-export function placeAt(montage, id, seconds) {
-  const starts = planStarts(montage);
-  return montage.plans.filter((plan, index) => plan.id !== id && starts[index] + (plan.to - plan.from) / 2 < seconds).length;
+export function withPlanPlaced(montage, id, seconds, { near = 0 } = {}) {
+  montage = placed(montage);
+  const index = montage.plans.findIndex(plan => plan.id === id);
+  if (index < 0) return montage;
+  const plans = montage.plans,
+    block = [index];
+  for (const at of gluedAfter(plans, index)) {
+    if (!(isTodo(plans[at]) && plans[at].todo.suite)) break;
+    block.push(at);
+  }
+  const lifted = block.map(at => plans[at]),
+    length = lifted.reduce((sum, plan) => sum + long(plan), 0),
+    others = moved(plans, gluedAfter(plans, block.at(-1)), -length).filter((_, at) => !block.includes(at));
+  const next = laidAt(others, lifted, seconds, near);
+  return JSON.stringify(next) === JSON.stringify(plans) ? montage : { ...montage, plans: next };
 }
+
 /**
- * Where a sound dragged to `seconds` starts: on a cut between two plans, at the start or the end of
- * the film when it is within `near` seconds of one; else where it is, to the tenth of a second.
+ * Where a sound dragged to `seconds` starts: on a cut of the film (a plan starts or ends there), at its
+ * start or its end, when it is within `near` seconds of one; else where it is, to the tenth of a second.
  */
 export function snapped(montage, seconds, near = 0.2) {
-  const cuts = [0, ...planStarts(montage).slice(1), montageSeconds(montage)],
+  const { plans } = placed(montage),
+    cuts = [0, ...plans.flatMap(plan => [plan.at, endOf(plan)])],
     close = cuts.find(cut => Math.abs(cut - seconds) <= near);
   return close ?? Math.max(0, Math.round(seconds * 10) / 10);
 }
@@ -158,6 +282,7 @@ export function snapped(montage, seconds, near = 0.2) {
  * 0 to 2, a sound never starts before the film.
  */
 export function withItemChanged(montage, id, changes, { longest = null } = {}) {
+  montage = placed(montage);
   const edit = item => {
     if (item.id !== id) return item;
     const next = { ...item },
@@ -178,7 +303,26 @@ export function withItemChanged(montage, id, changes, { longest = null } = {}) {
     if (changes.at !== undefined && item.track) next.at = round(Math.max(0, changes.at));
     return next;
   };
-  return { ...montage, plans: replacing(montage.plans.map(edit)), sounds: montage.sounds.map(edit) };
+  // (0.6.149) A plan: what touches its end follows it. Its start cut or given back moves its end when it
+  // touches what is before it (as before 0.6.149); after a hole, its start moves and its end stays.
+  const index = montage.plans.findIndex(plan => plan.id === id);
+  let plans = montage.plans;
+  if (index >= 0) {
+    const old = plans[index],
+      next = edit(old);
+    if (next.from !== old.from && !gluedBefore(plans, index)) {
+      const room = (index ? endOf(plans[index - 1]) : 0) - old.at,
+        shift = Math.max(next.from - old.from, room);
+      next.from = round(old.from + shift);
+      next.at = round(old.at + shift);
+    }
+    plans = moved(
+      plans.map((plan, at) => (at === index ? next : plan)),
+      gluedAfter(plans, index),
+      round(endOf(next) - endOf(old)),
+    );
+  }
+  return { ...montage, plans: settled(replacing(plans)), sounds: montage.sounds.map(edit) };
 }
 
 /**
@@ -266,16 +410,37 @@ export const SUITE_BEYOND = 0.5;
  * make already stops at the end of its take: that one is pulled by its own edge.
  */
 export function withEndPulled(montage, id, to, { longest = null, suiteId } = {}) {
+  montage = placed(montage);
   const within = withItemChanged(montage, id, { to }, { longest }),
     index = montage.plans.findIndex(plan => plan.id === id),
     plan = montage.plans[index],
     next = montage.plans[index + 1];
   if (!plan || isTodo(plan) || plan.kind !== 'video' || !(longest > 0) || !suiteId) return within;
-  if (to - longest < SUITE_BEYOND || (isTodo(next) && !next.photos?.start)) return within;
+  // (0.6.149) Its suite to make, joined after it: it has one already.
+  const suited = isTodo(next) && next.todo.suite && gluedBefore(montage.plans, index + 1);
+  if (to - longest < SUITE_BEYOND || suited) return within;
   if (montage.plans.length >= MONTAGE_LIMITS.plans) return within;
   const plans = [...within.plans];
-  plans.splice(index + 1, 0, todoPlan(suiteId, to - longest));
-  return { ...within, plans };
+  // (Marked as a suite: only a suite goes on from what is before it, 0.6.149.)
+  plans.splice(index + 1, 0, todoPlan(suiteId, to - longest, { at: endOf(plans[index]), todo: { prompt: '', suite: true } }));
+  return { ...within, plans: settled(plans) };
+}
+
+/**
+ * (0.6.149) `montage` with a plan to make drawn in a hole (« cliquer dans le vide et tirer dessine une
+ * nouvelle prise à créer, de la longueur tirée »), or laid there by a double click: at `at` seconds,
+ * `seconds` long, within what a clip can be. It stays where it is drawn, and never goes on from what
+ * is before or after it: it starts from its text, or from its photos. `{ montage, chosen }`, or the
+ * montage as it was and `reason`.
+ */
+export function withTodoDrawn(montage, { id, at, seconds = TODO_LIMITS.usual } = {}) {
+  montage = placed(montage);
+  if (montage.plans.length >= MONTAGE_LIMITS.plans) return { montage, reason: 'Cette bobine est pleine.' };
+  const start = round(Math.max(0, at)),
+    plans = [...montage.plans],
+    index = plans.filter(plan => plan.at < start).length;
+  plans.splice(index, 0, todoPlan(id, seconds, { at: start }));
+  return { montage: { ...montage, plans: settled(plans) }, chosen: id };
 }
 
 /**
@@ -283,35 +448,39 @@ export function withEndPulled(montage, id, to, { longest = null, suiteId } = {})
  * read where it is laid: `{ montage, chosen }` (the plan it now belongs to), or `{ montage, reason }`
  * with the montage as it was and why, in the user's words.
  * - on an empty film: a first plan to make, which starts on it;
- * - after the end of the film: the photo the last plan to make arrives on when it has none (the plan
- *   then ends there), else a new plan to make, from the end of the film to the photo, its end photo;
+ * - after the end of the film, or in a hole (0.6.149): the photo the plan to make before it arrives on
+ *   when it has none (the plan then ends there), else a new plan to make, from the end of the plan
+ *   before it to the photo, its end photo (it does not go on from that plan: only a suite does);
  * - on a plan to make: its start photo on its first half, its end photo on the second;
  * - on a video: the video is kept up to there and a plan to make takes the place of its end, starting
  *   on the photo (the film cuts on it).
  */
 export function withPhoto(montage, record, seconds, { id } = {}) {
+  montage = placed(montage);
   const refused = reason => ({ montage, reason });
   if (trackOf(record) !== 'image') return refused('Seule une image se pose comme photo de début ou de fin.');
   const photo = sourceOf(record),
-    total = montageSeconds(montage),
     at = tenth(Math.max(0, seconds)),
     plans = [...montage.plans];
   if (!plans.length) {
-    plans.push(todoPlan(id, TODO_LIMITS.usual, { photos: { start: photo } }));
+    plans.push(todoPlan(id, TODO_LIMITS.usual, { at: 0, photos: { start: photo } }));
     return { montage: { ...montage, plans }, chosen: id };
   }
-  if (at >= total) {
-    const last = plans.at(-1);
-    if (isTodo(last) && !last.photos?.end) {
-      const start = round(total - (last.to - last.from));
-      plans[plans.length - 1] = { ...last, to: tenth(clamp(at - start, TODO_LIMITS.shortest, TODO_LIMITS.longest)), photos: { ...last.photos, end: photo } };
-      return { montage: { ...montage, plans }, chosen: last.id };
+  const index = plans.findIndex(plan => plan.at <= at && at < endOf(plan));
+  if (index < 0) {
+    const after = plans.filter(plan => plan.at <= at).length,
+      last = plans[after - 1];
+    if (last && isTodo(last) && !last.photos?.end) {
+      plans[after - 1] = { ...last, to: tenth(clamp(at - last.at, TODO_LIMITS.shortest, TODO_LIMITS.longest)), photos: { ...last.photos, end: photo } };
+      return { montage: { ...montage, plans: settled(plans) }, chosen: last.id };
     }
     if (plans.length >= MONTAGE_LIMITS.plans) return refused('Cette bobine est pleine.');
-    plans.push(todoPlan(id, at - total < TODO_LIMITS.shortest ? TODO_LIMITS.usual : at - total, { photos: { end: photo } }));
-    return { montage: { ...montage, plans }, chosen: id };
+    const from = last ? endOf(last) : 0;
+    plans.splice(after, 0, todoPlan(id, at - from < TODO_LIMITS.shortest ? TODO_LIMITS.usual : at - from, { at: from, photos: { end: photo } }));
+    return { montage: { ...montage, plans: settled(plans) }, chosen: id };
   }
-  const { plan, index, start } = planAt(montage, at),
+  const plan = plans[index],
+    start = plan.at,
     length = plan.to - plan.from,
     local = at - start;
   if (isTodo(plan)) {
@@ -324,8 +493,8 @@ export function withPhoto(montage, record, seconds, { id } = {}) {
   if (plans.length >= MONTAGE_LIMITS.plans) return refused('Cette bobine est pleine.');
   const cut = round(plan.from + local);
   plans[index] = { ...plan, to: cut };
-  plans.splice(index + 1, 0, todoPlan(id, length - local, { photos: { start: photo }, replaces: { source: plan.source, from: cut, to: plan.to } }));
-  return { montage: { ...montage, plans }, chosen: id };
+  plans.splice(index + 1, 0, todoPlan(id, length - local, { at: round(start + local), photos: { start: photo }, replaces: { source: plan.source, from: cut, to: plan.to } }));
+  return { montage: { ...montage, plans: settled(plans) }, chosen: id };
 }
 
 /** `montage` without the start or the end photo of a plan. */
@@ -347,16 +516,21 @@ export function withoutPhoto(montage, id, side) {
  * continuation, whose file holds that clip first.
  */
 export function withTodoMade(montage, id, record, { from = 0 } = {}) {
-  const whole = takeSeconds(record);
-  return {
-    ...montage,
-    plans: montage.plans.map(plan => {
-      if (plan.id !== id || !isTodo(plan)) return plan;
-      const { todo: _todo, replaces: _replaces, ...rest } = plan,
-        start = round(clamp(from, 0, Math.max(0, (whole ?? 0) - MONTAGE_LIMITS.shortest)));
-      return { ...rest, source: sourceOf(record), kind: 'video', from: start, to: round(Math.max(start + MONTAGE_LIMITS.shortest, whole ?? start + (plan.to - plan.from))) };
-    }),
-  };
+  montage = placed(montage);
+  const whole = takeSeconds(record),
+    index = montage.plans.findIndex(plan => plan.id === id),
+    plan = montage.plans[index];
+  if (!isTodo(plan)) return montage;
+  const { todo: _todo, replaces: _replaces, ...rest } = plan,
+    start = round(clamp(from, 0, Math.max(0, (whole ?? 0) - MONTAGE_LIMITS.shortest))),
+    made = { ...rest, source: sourceOf(record), kind: 'video', from: start, to: round(Math.max(start + MONTAGE_LIMITS.shortest, whole ?? start + (plan.to - plan.from))) };
+  // (0.6.149) Its take is as long as it was made: what touches it follows.
+  const plans = moved(
+    montage.plans.map((item, at) => (at === index ? made : item)),
+    gluedAfter(montage.plans, index),
+    round(endOf(made) - endOf(plan)),
+  );
+  return { ...montage, plans: settled(plans) };
 }
 
 /**
@@ -369,15 +543,21 @@ export function withTodoMade(montage, id, record, { from = 0 } = {}) {
  *   its take;
  * - 'own': nothing to go on from; 'made': not a plan to make.
  * `before`: the number of the plan before it, as the page says it.
+ * (0.6.149) Only a suite (`todo.suite`, pulled from the end of a video) goes on from what is before
+ * it; any other plan to make starts from its text or its photos, even right after a video (« Une prise
+ * dessinée ne continue jamais »). A suite no longer joined to a video is 'loose'.
  */
 export function linkOf(montage, id, lengthOf = () => null) {
-  const index = montage.plans.findIndex(plan => plan.id === id),
-    plan = montage.plans[index];
+  const { plans } = placed(montage),
+    index = plans.findIndex(plan => plan.id === id),
+    plan = plans[index];
   if (!isTodo(plan)) return { kind: 'made' };
   if (plan.photos?.start) return { kind: 'photo' };
-  const before = montage.plans[index - 1];
+  if (!plan.todo.suite) return { kind: 'own' };
+  const before = plans[index - 1];
+  if (!before || !gluedBefore(plans, index)) return { kind: 'loose' };
   if (isTodo(before)) return { kind: 'wait', before: index };
-  if (before?.kind !== 'video') return { kind: 'own' };
+  if (before.kind !== 'video') return { kind: 'loose' };
   const whole = lengthOf(before.source);
   if (!(whole > 0) || Math.abs(before.to - whole) > 0.06) return { kind: 'cut', before: index };
   return { kind: plan.photos?.end ? 'last' : 'suite', before: index, whole };
@@ -445,6 +625,7 @@ export function creationOf(montage, id, lengthOf = () => null) {
   if (link.kind === 'photo') return { ...wanted, start: { source: plan.photos.start } };
   if (link.kind === 'wait') return { reason: 'Créez d’abord la prise d’avant : celle-ci la continue.' };
   if (link.kind === 'own') return wanted;
+  if (link.kind === 'loose') return { reason: 'Cette suite n’est plus collée à la vidéo qu’elle continue : rapprochez-la, ou retirez-la.' };
   if (link.kind === 'cut')
     return { reason: 'La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une photo de début.' };
   if (link.kind === 'last') return { ...wanted, start: { source: before.source, frame: 'last' } };

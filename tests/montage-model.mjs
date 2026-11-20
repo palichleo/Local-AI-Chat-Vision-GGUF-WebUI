@@ -4,9 +4,12 @@ import {
   MONTAGE_LIMITS,
   STILL_SECONDS,
   clock,
+  creationOf,
+  holeAt,
+  linkOf,
   montageSeconds,
   montageSummary,
-  placeAt,
+  placed,
   planAt,
   planStarts,
   shownSeconds,
@@ -15,9 +18,10 @@ import {
   trackOf,
   usualSize,
   withItemChanged,
-  withPlanAt,
   withPlanMoved,
+  withPlanPlaced,
   withTake,
+  withTodoDrawn,
   withoutItem,
 } from '../public/montage-model.mjs';
 import { newMontage, validateMontage } from '../lib/montages.mjs';
@@ -42,17 +46,25 @@ test('a creation goes where its kind belongs: a clip or an image on the plans, a
   montage = withTake(montage, record(4, 'audio', { workflowName: 'Musique', parameters: { seconds: 30 } }), { id: id(13) });
   montage = withTake(montage, record(5, 'audio', { workflowName: 'Bruitages', parameters: { seconds: 6 } }), { id: id(14), at: 2.26 });
   // A clip whole, an image for a few seconds; the music lower than a sound effect, each where it is laid.
+  // (0.6.149) Each at its instant: by default at the end of the bobine.
   assert.deepEqual(montage.plans, [
-    { id: id(11), source: { conversationId: C, runId: id(1), output: 0 }, kind: 'video', from: 0, to: 5, frame: 'fit', volume: 1 },
-    { id: id(12), source: { conversationId: C, runId: id(2), output: 0 }, kind: 'image', from: 0, to: STILL_SECONDS, frame: 'fit' },
+    { id: id(11), at: 0, source: { conversationId: C, runId: id(1), output: 0 }, kind: 'video', from: 0, to: 5, frame: 'fit', volume: 1 },
+    { id: id(12), at: 5, source: { conversationId: C, runId: id(2), output: 0 }, kind: 'image', from: 0, to: STILL_SECONDS, frame: 'fit' },
   ]);
   assert.deepEqual(montage.sounds.map(({ track, at, to, volume }) => [track, at, to, volume]), [['music', 0, 30, 0.6], ['effects', 2.26, 6, 1]]);
   assert.deepEqual(kept(montage).plans, montage.plans, 'the server takes it as it is');
   assert.deepEqual(kept(montage).sounds, montage.sounds);
-  // Laid between two plans, or before the first; the same take may be laid twice.
+  // Laid between two plans, or before the first: it takes the place of the one there, which goes later
+  // with what touches it; the same take may be laid twice.
   const between = withTake(montage, clip(7, 2), { id: id(15), index: 1 });
-  assert.deepEqual(between.plans.map(plan => plan.id), [id(11), id(15), id(12)]);
-  assert.deepEqual(withTake(between, clip(1, 5), { id: id(16), index: 0 }).plans.map(plan => plan.source.runId), [id(1), id(1), id(7), id(2)]);
+  assert.deepEqual(between.plans.map(plan => [plan.id, plan.at]), [[id(11), 0], [id(15), 5], [id(12), 7]]);
+  assert.deepEqual(withTake(between, clip(1, 5), { id: id(16), index: 0 }).plans.map(plan => [plan.source.runId, plan.at]), [[id(1), 0], [id(1), 5], [id(7), 10], [id(2), 12]]);
+  // (0.6.149) Laid at an instant: on a plan, before it on its first half, after it on its second; in
+  // the void after the bobine, where it is laid (a hole stays before it), or against the end within `near`.
+  assert.deepEqual(withTake(montage, clip(7, 2), { id: id(15), at: 2 }).plans.map(plan => [plan.id, plan.at]), [[id(15), 0], [id(11), 2], [id(12), 7]]);
+  assert.deepEqual(withTake(montage, clip(7, 2), { id: id(15), at: 3 }).plans.map(plan => [plan.id, plan.at]), [[id(11), 0], [id(15), 5], [id(12), 7]]);
+  assert.deepEqual(withTake(montage, clip(7, 2), { id: id(15), at: 11 }).plans.map(plan => plan.at), [0, 5, 11]);
+  assert.deepEqual(withTake(montage, clip(7, 2), { id: id(15), at: 8.2, near: 0.3 }).plans.map(plan => plan.at), [0, 5, 8]);
   // A clip whose length nobody knows is laid for a few seconds; a full montage takes nothing more.
   assert.equal(withTake(empty(), record(8, 'video'), { id: id(17) }).plans[0].to, STILL_SECONDS);
   const full = { ...empty(), plans: Array.from({ length: MONTAGE_LIMITS.plans }, (_, n) => ({ id: id(n + 1) })) };
@@ -79,30 +91,117 @@ test('plans follow one another: their starts, the one under the head, the length
   assert.deepEqual([planAt(montage, 6).start, planAt(montage, 6).plan.id], [5, id(12)]);
   assert.equal(planAt(empty(), 0), null);
   // Moved one place earlier or later; at an end it stays, as an unknown one does.
-  assert.deepEqual(withPlanMoved(montage, id(13), -1).plans.map(plan => plan.id), [id(11), id(13), id(12)]);
-  assert.deepEqual(withPlanMoved(montage, id(11), 1).plans.map(plan => plan.id), [id(12), id(11), id(13)]);
+  assert.deepEqual(withPlanMoved(montage, id(13), -1).plans.map(plan => [plan.id, plan.at]), [[id(11), 0], [id(13), 5], [id(12), 9]]);
+  assert.deepEqual(withPlanMoved(montage, id(11), 1).plans.map(plan => [plan.id, plan.at]), [[id(12), 0], [id(11), 3], [id(13), 8]]);
   for (const [which, step] of [[id(11), -1], [id(13), 1], [id(99), 1]]) assert.equal(withPlanMoved(montage, which, step), montage);
-  // (0.6.138) Dragged along the timeline: the place it takes among the others is after those whose
-  // middle (2,5 s, 6,5 s, 10 s) the pointer has passed, on the film as it was when it was pressed. A
-  // long plan pressed near its end stays where it is until then: read with the others closing the
-  // gap it leaves, it went after its neighbour at the first move (1,6 s was past « its middle »).
-  assert.deepEqual([0, 1.6, 4.9, 6.4, 6.6, 9.9, 10.1, 99].map(at => placeAt(montage, id(11), at)), [0, 0, 0, 0, 1, 1, 2, 2]);
-  assert.deepEqual([0, 2.4, 2.6, 7.9, 9.9, 10.1].map(at => placeAt(montage, id(12), at)), [0, 0, 1, 1, 1, 2]);
-  assert.deepEqual([0, 2.4, 2.6, 6.4, 6.6, 11].map(at => placeAt(montage, id(13), at)), [0, 0, 1, 1, 2, 2]);
-  // (Where it is pressed, it is at its own place: nothing moves before the pointer does.)
-  for (const [which, at, place] of [[id(11), 4.99, 0], [id(12), 5, 1], [id(12), 7.99, 1], [id(13), 8, 2]]) assert.equal(placeAt(montage, which, at), place);
-  assert.deepEqual(withPlanAt(montage, id(11), 2).plans.map(plan => plan.id), [id(12), id(13), id(11)]);
-  assert.deepEqual(withPlanAt(montage, id(13), 0).plans.map(plan => plan.id), [id(13), id(11), id(12)]);
-  assert.deepEqual(withPlanAt(montage, id(12), 99).plans.map(plan => plan.id), [id(11), id(13), id(12)]);
-  for (const [which, index] of [[id(11), 0], [id(12), 1], [id(13), 2], [id(99), 0]]) assert.equal(withPlanAt(montage, which, index), montage);
+  // (0.6.149) Dragged along the timeline so that it starts at an instant, read on the bobine as it was
+  // when it was pressed: lifted, those that touched it come back to where it was, then laid there.
+  // On a plan, before it on its first half and after it on its second; in the void, where it is.
+  const placedAt = (which, at, options) => withPlanPlaced(montage, which, at, options).plans.map(plan => [plan.id, plan.at]);
+  // (Pressed and moved a little, it stays where it is: the same bobine.)
+  for (const [which, at] of [[id(11), 0.08], [id(11), 1.4], [id(12), 5.2], [id(99), 3]]) assert.equal(withPlanPlaced(montage, which, at), montage, which + ' at ' + at);
+  // (The last one, in the void after the others: moved, a hole before it.)
+  assert.deepEqual(placedAt(id(13), 8.3), [[id(11), 0], [id(12), 5], [id(13), 8.3]]);
+  // (Lifted, 12 is at 0 to 3: past its middle, 11 goes after it.)
+  assert.deepEqual(placedAt(id(11), 1.6), [[id(12), 0], [id(11), 3], [id(13), 8]]);
+  assert.deepEqual(placedAt(id(13), 0), [[id(13), 0], [id(11), 4], [id(12), 9]]);
+  // In the void after the bobine: where it is laid, a hole before it; against its end within `near`.
+  assert.deepEqual(placedAt(id(11), 9), [[id(12), 0], [id(13), 3], [id(11), 9]]);
+  assert.deepEqual(placedAt(id(11), 7.3, { near: 0.5 }), [[id(12), 0], [id(13), 3], [id(11), 7]]);
   // A sound dragged near a cut of the film (5 s, 8 s), near its start (0) or its end (12), starts on
   // it; else where it is, to the tenth of a second, never before the film. How near: the timeline says.
   assert.deepEqual([0.15, 4.85, 5.15, 5.26, 7.9, 11.85, 12.1, 3.14, -2].map(at => snapped(montage, at)), [0, 5, 5, 5.3, 8, 12, 12, 3.1, 0]);
   assert.deepEqual([4.6, 5.45, 5.57].map(at => snapped(montage, at, 0.5)), [5, 5, 5.6]);
   assert.deepEqual([4.96, 4.94].map(at => snapped(montage, at, 0.05)), [5, 4.9]);
-  // Taken out: the others close the gap.
+  // Taken out: those that touched it come back to where it was.
   const without = withoutItem(montage, id(12));
   assert.deepEqual([without.plans.map(plan => plan.id), planStarts(without), montageSeconds(without)], [[id(11), id(13)], [0, 5], 9]);
+});
+
+test('a bobine may have holes: black in the film; what touches a plan follows it, what is beyond a hole stays (0.6.149)', () => {
+  let montage = empty();
+  for (const [n, seconds] of [[1, 5], [2, 3], [3, 4]]) montage = withTake(montage, clip(n, seconds), { id: id(10 + n) });
+  // The last one dragged to 14 s: a hole from 8 to 14 s; the bobine ends with it.
+  const holed = withPlanPlaced(montage, id(13), 14);
+  assert.deepEqual([planStarts(holed), montageSeconds(holed)], [[0, 5, 14], 18]);
+  assert.deepEqual([4, 8, 10, 13.9, 14, 17.9, 18].map(at => planAt(holed, at)?.index ?? null), [0, null, null, null, 2, 2, 2]);
+  assert.deepEqual([holeAt(holed, 9), holeAt(holed, 6), holeAt(holed, 20), holeAt(empty(), 3)], [{ from: 8, to: 14 }, null, { from: 18, to: Infinity }, { from: 0, to: Infinity }]);
+  // A sound stops on the cuts on both sides of the hole.
+  assert.deepEqual([8.1, 13.85, 18.1].map(at => snapped(holed, at)), [8, 14, 18]);
+  // The first made shorter: the second, which touches it, follows; the third, beyond the hole, stays.
+  const shorter = withItemChanged(holed, id(11), { to: 4 }, { longest: 5 });
+  assert.deepEqual(planStarts(shorter), [0, 4, 14]);
+  // Made longer than the hole is wide, what it reaches is pushed only as far as it must be.
+  const cut = withItemChanged(montage, id(12), { to: 1 }, { longest: 3 });
+  assert.deepEqual(planStarts(cut), [0, 5, 6]);
+  const apart = withPlanPlaced(cut, id(13), 6.5);
+  assert.deepEqual(planStarts(apart), [0, 5, 6.5]);
+  assert.deepEqual(planStarts(withItemChanged(apart, id(12), { to: 3 }, { longest: 3 })), [0, 5, 8]);
+  // Its start cut: one that touches what is before it keeps its place and ends earlier (those after it
+  // follow); one after a hole keeps its end, its start moves, never into the plan before it.
+  assert.deepEqual(planStarts(withItemChanged(holed, id(12), { from: 1 }, { longest: 3 })), [0, 5, 14]);
+  assert.deepEqual(withItemChanged(holed, id(12), { from: 1 }, { longest: 3 }).plans[1].to, 3);
+  assert.deepEqual(withItemChanged(montage, id(12), { from: 1 }, { longest: 3 }).plans.map(plan => plan.at), [0, 5, 7]);
+  const later = withItemChanged(holed, id(13), { from: 1 }, { longest: 4 });
+  assert.deepEqual([later.plans[2].at, later.plans[2].from, montageSeconds(later)], [15, 1, 18]);
+  const near = withPlanPlaced(withItemChanged(montage, id(13), { from: 3 }, { longest: 4 }), id(13), 10);
+  assert.deepEqual(near.plans[2].at, 10);
+  const back = withItemChanged(near, id(13), { from: 0 }, { longest: 4 });
+  assert.deepEqual([back.plans[2].at, back.plans[2].from], [8, 1]);
+  // Taken out: those that touched it come back to where it was; beyond the hole, nothing moves.
+  assert.deepEqual(planStarts(withoutItem(holed, id(12))), [0, 14]);
+  assert.deepEqual(planStarts(withoutItem(holed, id(11))), [0, 14]);
+  // A video dragged takes with it the suite to create joined after it: it goes on from it.
+  const suited = { ...montage, plans: [montage.plans[0], { id: id(20), at: 5, kind: 'video', todo: { prompt: '', suite: true }, from: 0, to: 2, frame: 'fit', volume: 1 }, { ...montage.plans[1], at: 7 }] };
+  const dragged = withPlanPlaced(suited, id(11), 12);
+  assert.deepEqual(dragged.plans.map(plan => [plan.id, plan.at]), [[id(12), 0], [id(11), 12], [id(20), 17]]);
+  assert.equal(linkOf(dragged, id(20), wanted => (wanted.runId === id(1) ? 5 : null)).kind, 'suite');
+  // The server keeps the instants as they are; a plan over the one before it is pushed after it.
+  assert.deepEqual(kept(holed).plans, holed.plans);
+  assert.deepEqual(kept({ ...holed, plans: holed.plans.map((plan, at) => (at === 2 ? { ...plan, at: 6 } : plan)) }).plans.map(plan => plan.at), [0, 5, 8]);
+});
+
+test('a take to create drawn in a hole stays there, and never goes on from what is around it (0.6.149)', () => {
+  // (« Elle reste où on l'a dessinée, sans se coller à la fin […]. Une prise dessinée ne continue jamais
+  // ce qui est avant ou après, même collée à une vidéo : elle part de son texte, ou de ses photos. »)
+  const film = withTake(empty(), clip(1, 5), { id: id(11) }),
+    lengthOf = wanted => (wanted.runId === id(1) ? 5 : null);
+  const { montage, chosen } = withTodoDrawn(film, { id: id(20), at: 8, seconds: 4 });
+  assert.deepEqual([chosen, planStarts(montage), montageSeconds(montage)], [id(20), [0, 8], 12]);
+  assert.deepEqual(montage.plans[1], { id: id(20), kind: 'video', todo: { prompt: '' }, from: 0, to: 4, frame: 'fit', volume: 1, at: 8 });
+  assert.deepEqual(holeAt(montage, 6), { from: 5, to: 8 });
+  // Drawn against the end of the video, it touches it and still starts from its own text.
+  const glued = withTodoDrawn(film, { id: id(21), at: 5, seconds: 3 }).montage,
+    written = withItemChanged(glued, id(21), { prompt: 'Il se lève.' });
+  assert.deepEqual(linkOf(written, id(21), lengthOf), { kind: 'own' });
+  assert.deepEqual(creationOf(written, id(21), lengthOf), { verb: 'create_video', prompt: 'Il se lève.', duration: 3, format: '16:9', from: 0 });
+  // Only a suite pulled from the video goes on from it.
+  assert.equal(linkOf({ ...written, plans: [written.plans[0], { ...written.plans[1], todo: { prompt: 'Il se lève.', suite: true } }] }, id(21), lengthOf).kind, 'suite');
+  // Within what a clip can be (cut in parts later: lot 3); drawn over a plan, it goes after it.
+  assert.deepEqual([withTodoDrawn(film, { id: id(22), at: 9, seconds: 0.3 }).montage.plans[1].to, withTodoDrawn(film, { id: id(22), at: 9, seconds: 40 }).montage.plans[1].to], [1, 20]);
+  assert.deepEqual(planStarts(withTodoDrawn(film, { id: id(22), at: 3, seconds: 2 }).montage), [0, 5]);
+  assert.deepEqual(planStarts(withTodoDrawn(empty(), { id: id(22), at: 2, seconds: 5 }).montage), [2]);
+  const full = { ...empty(), plans: Array.from({ length: MONTAGE_LIMITS.plans }, (_, n) => ({ ...film.plans[0], id: id(n + 100), at: n * 5 })) };
+  assert.deepEqual(withTodoDrawn(full, { id: id(22), at: 2000 }), { montage: full, reason: 'Cette bobine est pleine.' });
+  assert.deepEqual(kept(montage).plans, montage.plans);
+});
+
+test('a bobine kept before 0.6.149 is read end to end, the continuations it made said as suites (0.6.149)', () => {
+  // (Its plans had no instant: they followed one another; a plan to make without a start photo right
+  // after a video or another plan to make went on from it.)
+  const todo = (n, seconds, more = {}) => ({ id: id(n), kind: 'video', todo: { prompt: '' }, from: 0, to: seconds, frame: 'fit', volume: 1, ...more }),
+    video = withTake(empty(), clip(1, 5), { id: id(11) }).plans[0],
+    still = withTake(empty(), record(2, 'image'), { id: id(12) }).plans[0],
+    { at: _video, ...oldVideo } = video,
+    { at: _still, ...oldStill } = still;
+  const old = { ...empty(), plans: [oldVideo, todo(13, 2), todo(14, 2), oldStill, todo(15, 2), todo(16, 2, { photos: { start: { conversationId: C, runId: id(2), output: 0 } } })] };
+  const read = placed(old);
+  assert.deepEqual(planStarts(read), [0, 5, 7, 9, 12, 14]);
+  assert.deepEqual(read.plans.map(plan => plan.todo?.suite ?? null), [null, true, true, null, null, null]);
+  assert.deepEqual(kept(old).plans, read.plans, 'the server reads it the same');
+  // Read once: the same bobine after.
+  assert.equal(placed(read), read);
+  assert.equal(placed(empty()).plans.length, 0);
 });
 
 test('what is kept of a take stays within the take, and never shorter than a tenth of a second (0.6.137)', () => {

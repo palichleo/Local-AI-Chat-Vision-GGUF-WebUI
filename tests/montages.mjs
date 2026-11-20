@@ -53,12 +53,21 @@ test('a new montage is empty, at the usual size of its format, 24 frames a secon
 test('a montage is kept as it is said, plans end to end: nothing else is carried over (0.6.136)', () => {
   const kept = validateMontage({ ...film(), extra: 'x', plans: film().plans.map(plan => ({ ...plan, note: 'x' })) });
   assert.equal(kept.extra, undefined);
-  assert.deepEqual(kept.plans[0], { id: id(1), source: take(12), kind: 'video', from: 0, to: 5, frame: 'fit', volume: 1 });
-  assert.deepEqual(kept.plans[1], { id: id(2), source: take(14), kind: 'video', from: 1, to: 4, frame: 'fill', volume: 0.5 });
+  // (0.6.149) Without instants (a file of before), each is given its own, end to end.
+  assert.deepEqual(kept.plans[0], { id: id(1), at: 0, source: take(12), kind: 'video', from: 0, to: 5, frame: 'fit', volume: 1 });
+  assert.deepEqual(kept.plans[1], { id: id(2), at: 5, source: take(14), kind: 'video', from: 1, to: 4, frame: 'fill', volume: 0.5 });
   // An image starts at 0 and has no sound of its own.
-  assert.deepEqual(kept.plans[2], { id: id(3), source: take(9), kind: 'image', from: 0, to: 2, frame: 'fit' });
+  assert.deepEqual(kept.plans[2], { id: id(3), at: 8, source: take(9), kind: 'image', from: 0, to: 2, frame: 'fit' });
   assert.equal(montageSeconds(kept), 10);
   assert.deepEqual(planStarts(kept), [0, 5, 8]);
+  // (0.6.149) With them, each where it is said, a hole between two; one over the plan before it goes after it.
+  const holed = validateMontage(film({ plans: film().plans.map((plan, at) => ({ ...plan, at: [0, 7, 8.2][at] })) }));
+  assert.deepEqual([planStarts(holed), montageSeconds(holed)], [[0, 7, 10], 12]);
+  // A plan to make keeps the mark of a suite; anything else than yes or no is refused.
+  const todo = { id: id(6), at: 12, kind: 'video', todo: { prompt: 'Il se lève.', suite: true }, from: 0, to: 2, frame: 'fit', volume: 1 };
+  assert.deepEqual(validateMontage(film({ plans: [...film().plans, todo] })).plans[3], todo);
+  assert.equal('suite' in validateMontage(film({ plans: [...film().plans, { ...todo, todo: { prompt: '', suite: false } }] })).plans[3].todo, false);
+  assert.throws(() => validateMontage(film({ plans: [{ ...todo, todo: { prompt: '', suite: 'oui' } }] })), /Prise 1 : suite invalide/);
   // What the page computes by dragging is rounded to the millisecond: no 0.30000000000000004.
   const dragged = validateMontage(film({ plans: [{ id: id(1), source: take(1), kind: 'video', from: 0.1 + 0.2, to: 1.3004 }] }));
   assert.deepEqual([dragged.plans[0].from, dragged.plans[0].to, montageSeconds(dragged)], [0.3, 1.3, 1]);
@@ -81,6 +90,8 @@ test('what cannot be a montage is refused in the user’s words (0.6.136)', () =
     [{ plans: [{ ...plan, frame: 'stretch' }] }, /cadre invalide/],
     [{ plans: [{ ...plan, volume: 3 }] }, /volume invalide/],
     [{ plans: [{ ...plan, source: { conversationId: C, runId: '../x' } }] }, /Prise 1 : prise invalide/],
+    [{ plans: [{ ...plan, at: -1 }] }, /Prise 1 : durée invalide/],
+    [{ plans: [{ ...plan, at: '5' }] }, /Prise 1 : durée invalide/],
     [{ plans: [plan, { ...film().plans[1], id: plan.id }] }, /même identifiant/],
     [{ plans: Array.from({ length: MONTAGE_LIMITS.plans + 1 }, (_, n) => ({ ...plan, id: id(n + 1) })) }, /au plus 200 prises/],
     [{ sounds: [{ ...sound, track: 'voice' }] }, /Son 1 : piste inconnue/],
@@ -144,14 +155,19 @@ test('what the engine assembles is the montage with the file of each take (0.6.1
     height: 768,
     fps: 24,
     plans: [
-      { path: 'D:\\sorties\\00000012.mp4', kind: 'video', from: 0, to: 5, frame: 'fit', volume: 1 },
-      { path: 'D:\\sorties\\00000014.mp4', kind: 'video', from: 1, to: 4, frame: 'fill', volume: 0.5 },
-      { path: 'D:\\sorties\\00000009.mp4', kind: 'image', from: 0, to: 2, frame: 'fit', volume: 1 },
+      { path: 'D:\\sorties\\00000012.mp4', at: 0, kind: 'video', from: 0, to: 5, frame: 'fit', volume: 1 },
+      { path: 'D:\\sorties\\00000014.mp4', at: 5, kind: 'video', from: 1, to: 4, frame: 'fill', volume: 0.5 },
+      { path: 'D:\\sorties\\00000009.mp4', at: 8, kind: 'image', from: 0, to: 2, frame: 'fit', volume: 1 },
     ],
     // (A sound that starts after the end of the film, 10 s, is not part of it.)
     sounds: [{ path: 'D:\\sorties\\00000016.mp4', at: 0, from: 0, to: 30, volume: 0.4 }],
   });
   assert.deepEqual(asked, ['Prise 1', 'Prise 2', 'Prise 3', 'Son 1']);
+  // (0.6.149) With holes, each plan says its instant to the engine (runner/video/montage.py makes the
+  // holes black and silent); a sound in a hole is part of the film.
+  const holed = validateMontage(film({ plans: film().plans.map((plan, at) => ({ ...plan, at: [1, 7, 12][at] })), sounds: [late] }));
+  const withHoles = await assemblyOf(holed, fileOf);
+  assert.deepEqual([withHoles.plans.map(plan => plan.at), withHoles.sounds.map(sound => sound.at)], [[1, 7, 12], [12]]);
   await assert.rejects(assemblyOf(newMontage(), fileOf), /aucune prise/);
   // A take that is gone stops the export with the plan that names it.
   const gone = async (source, label) => {

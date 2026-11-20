@@ -18917,3 +18917,148 @@ body[data-view='bobine'] .chat-panel {
 #bobine-view .montage-over {
   left: 126px;
 }
+
+/* ------------------------------------------------------------------ La Bobine, lot 2 (0.6.149) */
+/* La timeline se zoome (−, + et « Voir toute la bobine » en haut à gauche, Ctrl + molette) et défile
+   alors sous les noms de ses pistes ; il reste toujours du vide après la fin, pour y dessiner. */
+#bobine-view .bobine-reel {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(238, 232, 222, 0.22) transparent;
+}
+#bobine-view .bobine-reel-inner {
+  position: relative;
+  flex: none;
+  width: calc(148px + (100% - 148px) * var(--zoom, 1));
+  min-width: 100%;
+  display: flex;
+  flex-direction: column;
+  /* (La dernière graduation ne fait pas défiler la bobine entière.) */
+  overflow-x: clip;
+}
+#bobine-view .bobine-rule-row {
+  flex: none;
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  align-items: center;
+  padding: 0 22px 0 18px;
+}
+#bobine-view .bobine-rule-row > .montage-ruler {
+  margin: 0;
+}
+#bobine-view .bobine-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+}
+.bobine-zoom-button {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.bobine-zoom-button svg {
+  width: 14px;
+  height: 14px;
+}
+.bobine-zoom-button:enabled:hover,
+.bobine-zoom-button:focus-visible {
+  background: rgba(238, 232, 222, 0.08);
+  color: var(--ink);
+}
+.bobine-zoom-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+/* (Zoomée, les noms des pistes et les boutons restent à gauche, sur un fond plein.) */
+#bobine-view .bobine-reel[data-zoomed='true'] :is(.montage-track-name, .bobine-zoom) {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  margin-left: -18px;
+  padding-left: 18px;
+  background: #131217;
+}
+/* Le vide de la piste Prises (captures 71, 75, 76) : une prise fantôme de 5 s suit la souris, avec un
+   « + » ; tirée, la prise dessinée et sa durée. */
+.bobine-ghost {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(238, 232, 222, 0.32);
+  border-radius: 8px;
+  background: rgba(238, 232, 222, 0.03);
+  color: rgba(238, 232, 222, 0.62);
+  pointer-events: none;
+}
+.bobine-ghost[hidden] {
+  display: none;
+}
+.bobine-ghost-plus {
+  font: 300 18px/1 var(--font-ui);
+}
+.bobine-ghost[data-drawn='true'] {
+  border-color: rgba(208, 202, 221, 0.72);
+  background: rgba(208, 202, 221, 0.07);
+}
+.bobine-ghost[data-drawn='true'] > .bobine-ghost-plus {
+  display: none;
+}
+.bobine-ghost-length {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: rgba(10, 10, 12, 0.72);
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.bobine-ghost-length:empty {
+  display: none;
+}
+.bobine-ghost[data-breathing='true'] > .bobine-ghost-plus {
+  animation: bobine-breathe 2.4s ease-in-out infinite;
+}
+@keyframes bobine-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bobine-ghost[data-breathing='true'] > .bobine-ghost-plus {
+    animation: none;
+  }
+}
+.bobine-desk[data-held='draw'] * {
+  cursor: crosshair !important;
+}
+/* Un trou de la bobine : noir dans l'aperçu, comme dans le film. */
+#bobine-view .montage-frame[data-hole='true'] {
+  background: #000;
+}

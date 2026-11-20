@@ -21,11 +21,13 @@ import { thumbnailOf } from './thumbnails.mjs';
 import {
   MONTAGE_LIMITS,
   MONTAGE_RATES,
+  TODO_LIMITS,
   creationOf,
+  holeAt,
   isTodo,
   linkOf,
   montageSeconds,
-  placeAt,
+  placed,
   planAt,
   planStarts,
   seriesOf,
@@ -37,9 +39,10 @@ import {
   withEndPulled,
   withItemChanged,
   withPhoto,
-  withPlanAt,
   withPlanMoved,
+  withPlanPlaced,
   withTake,
+  withTodoDrawn,
   withTodoMade,
   withoutItem,
   withoutPhoto,
@@ -59,6 +62,11 @@ const TRACKS = [
 ];
 // The timeline shows ten seconds at least: a first take does not fill it from side to side.
 const SHORTEST_SPAN = 10;
+// (0.6.149) « La bobine ne va jamais jusqu'au bout » : after its end, a quarter of it and five seconds
+// at least are left empty, to draw in; the timeline is zoomed up to sixteen times (Ctrl + molette).
+const ROOM_AFTER = 5;
+const ZOOM_MAX = 16;
+const ZOOM_STEP = 1.5;
 // How near a cut of the film a sound dragged stops on it, in pixels of the timeline.
 const NEAR_PIXELS = 8;
 /** « 06.04 », « 1:02.50 »: the instants and lengths of the page, in mono (maquette 70). */
@@ -141,7 +149,12 @@ export function setupMontage({
     // ids (in their order), done (how many are made), pausing, stopping }.
     filling = null,
     // (0.6.146) Moodix AI is writing the takes: { id (the one it writes), at, of, controller }.
-    writing = null;
+    writing = null,
+    // (0.6.149) How much the timeline is zoomed (1: the whole bobine), and how far it is scrolled.
+    zoom = 1,
+    scrolled = 0,
+    // (0.6.149) The take to create being drawn in a hole: { from, to } in seconds of the bobine.
+    drawing = null;
   // (0.6.148) Why a take to create could not be made, by its id: said in its line, in amber.
   const failed = new Map();
   // (0.6.148) The model of each kind of take to create, as the server would choose it: { name, missing }.
@@ -169,8 +182,13 @@ export function setupMontage({
   };
   const itemOf = id => montage.plans.find(plan => plan.id === id) ?? montage.sounds.find(sound => sound.id === id) ?? null;
   const total = () => montageSeconds(montage);
+  // (0.6.149) Room after the end, then to the ten seconds above: the scale changes seldom as the bobine is made.
   const span = () =>
-    held ?? Math.max(SHORTEST_SPAN, total(), ...montage.sounds.map(sound => sound.at + (sound.to - sound.from)));
+    held ??
+    Math.max(
+      SHORTEST_SPAN,
+      Math.ceil(Math.max(total() + Math.max(ROOM_AFTER, total() / 4), ...montage.sounds.map(sound => sound.at + (sound.to - sound.from))) / 10 - 1e-9) * 10,
+    );
   const percent = seconds => (100 * seconds) / span() + '%';
   const takeLabel = (source, before = '') => {
     const take = outputOf(source)?.take;
@@ -225,7 +243,8 @@ export function setupMontage({
     const found = await (await api(`montages/${encodeURIComponent(place)}/${id}`)).json();
     if (project() !== place) return;
     stop();
-    montage = found;
+    // (0.6.149) Each take at its instant (the server says them; a bobine of before, end to end).
+    montage = placed(found);
     stored = true;
     chosen = null;
     head = 0;
@@ -360,6 +379,8 @@ export function setupMontage({
     if (!media) return;
     const { video, picture, blank, frame } = media,
       at = montage.plans.length ? planAt(montage, Math.min(head, Math.max(0, total() - 0.001))) : null,
+      // (0.6.149) A hole of the bobine: black, as in the film; the empty bobine shows its Éclipse.
+      hole = Boolean(montage.plans.length) && !at,
       todo = Boolean(at) && isTodo(at.plan),
       link = todo ? linkOf(montage, at.plan.id, lengthOf) : null,
       before = todo ? montage.plans[at.index - 1] : null,
@@ -380,7 +401,8 @@ export function setupMontage({
       url = seen ? (seen.url ?? outputOf(seen.source)?.originalUrl) : null;
     frame.dataset.todo = String(todo);
     frame.dataset.busy = String(busy);
-    blank.hidden = Boolean(url);
+    frame.dataset.hole = String(hole);
+    blank.hidden = Boolean(url) || hole;
     picture.hidden = !(url && seen.kind === 'image');
     video.hidden = !(url && seen.kind === 'video');
     media.caption.textContent = !at
@@ -725,10 +747,15 @@ export function setupMontage({
   function whatOf(plan) {
     const link = linkOf(montage, plan.id, lengthOf),
       before = montage.plans[montage.plans.indexOf(plan) - 1],
-      // (After a take to create, it goes on from it once that one is made: « Suite de la prise à créer ».)
-      suite = ['suite', 'last', 'wait'].includes(link.kind) || (link.kind === 'cut' && !plan.photos?.start),
+      // (0.6.149) Only a suite goes on from the take before it (after a take to create, once that one is
+      // made: « Suite de la prise à créer »); one no longer joined to its video says so.
+      suite = Boolean(plan.todo.suite) && !plan.photos?.start,
       photos = [plan.photos?.start && !suite ? 'photo de début' : '', plan.photos?.end ? 'photo de fin' : ''].filter(Boolean);
-    const first = suite ? 'Suite de la ' + (takeLabel(before?.source) || 'prise à créer').toLowerCase() : 'Nouvelle prise';
+    const first = !suite
+      ? 'Nouvelle prise'
+      : link.kind === 'loose'
+        ? 'Suite détachée de sa vidéo'
+        : 'Suite de la ' + (takeLabel(before?.source) || 'prise à créer').toLowerCase();
     return [first, photos.length === 2 ? 'photos de début et de fin' : photos[0]].filter(Boolean).join(' · ');
   }
   const stateOf = id =>
@@ -1114,8 +1141,9 @@ export function setupMontage({
     // (It takes the keys when it is pressed: the space bar reads the film.)
     section.tabIndex = -1;
     live.bar = live.making = null;
-    // A mark a second up to a minute, then every five or ten: the ruler never turns into a comb.
-    const step = whole <= 60 ? 1 : whole <= 300 ? 5 : 10;
+    // A mark a second up to a minute shown, then every five or ten: the ruler never turns into a comb.
+    const seen = whole / zoom,
+      step = seen <= 60 ? 1 : seen <= 300 ? 5 : 10;
     for (let second = 0; second <= whole; second += step) {
       const major = second % (step * 5) === 0,
         tick = node('span', 'montage-tick' + (major ? ' is-major' : ''), major ? String(second).padStart(2, '0') + ' s' : '');
@@ -1191,9 +1219,11 @@ export function setupMontage({
           // (A take to create that takes the place of the end of a video shows it, greyed, until it is made.)
           record = recordOf(todo ? item.replaces?.source : item.source),
           picture = id === 'plans' ? pictureOf(record) : '',
-          // (0.6.143) A take to create that goes on from the video before it: its continuation, drawn joined to it.
+          // (0.6.143) A take to create that goes on from the video before it: its continuation, drawn joined
+          // to it. (0.6.149) Only a suite does; one no longer joined to its video is drawn apart.
           link = todo && id === 'plans' ? linkOf(montage, item.id, lengthOf) : null,
-          suite = link?.kind === 'suite' || link?.kind === 'last',
+          suite = todo && id === 'plans' && Boolean(item.todo.suite),
+          joined = suite && ['suite', 'last', 'wait'].includes(link?.kind),
           state = todo ? stateOf(item.id) : '',
           label =
             id !== 'plans'
@@ -1213,8 +1243,8 @@ export function setupMontage({
         piece.setAttribute('aria-pressed', String(chosen === item.id));
         // (Four pixels between two neighbours: the surface shows between them. A continuation takes
         // those of the video it continues: the two touch.)
-        piece.style.left = suite ? `calc(${percent(at)} - 4px)` : percent(at);
-        piece.style.width = suite ? percent(item.to - item.from) : `calc(${percent(item.to - item.from)} - 4px)`;
+        piece.style.left = joined ? `calc(${percent(at)} - 4px)` : percent(at);
+        piece.style.width = joined ? percent(item.to - item.from) : `calc(${percent(item.to - item.from)} - 4px)`;
         if (picture) piece.style.backgroundImage = `url("${picture}")`;
         piece.append(node('span', 'montage-piece-name', label));
         if (id === 'plans') {
@@ -1243,10 +1273,12 @@ export function setupMontage({
           const step = event.altKey && id === 'plans' ? { ArrowLeft: -1, ArrowRight: 1 }[event.key] : 0;
           if (step) change(withPlanMoved(montage, item.id, step), { select: item.id });
         };
-        // Dragged along its track: a take takes its place among the others, a sound its moment.
+        // Dragged along its track: a take goes where it is dropped (0.6.149: before or after the take it
+        // is dropped on, by its middle; in a hole, where it is, against a neighbour a few pixels away),
+        // with the suites to create that go on from it; a sound to its moment.
         piece.onpointerdown = event => {
           const pressed = montage,
-            first = item.at,
+            first = at,
             // (What is dragged is chosen, even when it ends where it was.)
             put = next => {
               if (next === montage && chosen === item.id) return;
@@ -1259,7 +1291,7 @@ export function setupMontage({
             move: (far, time, perPixel) =>
               put(
                 id === 'plans'
-                  ? withPlanAt(montage, item.id, placeAt(pressed, item.id, time))
+                  ? withPlanPlaced(pressed, item.id, first + far, { near: NEAR_PIXELS * perPixel })
                   : withItemChanged(montage, item.id, { at: snapped(montage, first + far, Math.max(0.1, NEAR_PIXELS * perPixel)) }),
               ),
           });
@@ -1310,9 +1342,15 @@ export function setupMontage({
           layer.append(bar);
         }
       });
+      // (0.6.149) In the void of the takes, after the bobine or in a hole (captures 71, 75, 76): a take to
+      // create of 5 s, a ghost, follows the pointer with a « + »; a double click lays it there; pressed
+      // and pulled, a take to create is drawn there, as long as it is pulled, within its hole.
+      if (id === 'plans') drawable(lane, timeAt);
       // A press on the lane itself, beside what it holds: the head goes there, what was chosen is let go.
       lane.onclick = event => {
-        if (event.target !== lane) return;
+        if (event.target !== lane && !live.shade?.contains?.(event.target)) return;
+        // (The click that ends a drawing chooses nothing.)
+        if (slid) return void (slid = false);
         if (chosen) {
           chosen = null;
           update();
@@ -1333,9 +1371,10 @@ export function setupMontage({
         carried = null;
         // (0.6.148) A sound goes on the track it is dropped on.
         if (id !== 'plans') return lay(dropped, { at: Math.round(time * 10) / 10, track: id });
-        // Before the first take whose middle is after where it is dropped.
-        const index = montage.plans.findIndex((plan, at) => starts[at] + (plan.to - plan.from) / 2 > time);
-        lay(dropped, { index: index < 0 ? montage.plans.length : index });
+        // (0.6.149) A take where it is dropped: on a take, before or after it by its middle; in a hole,
+        // there, against a neighbour a few pixels away.
+        const box = lane.getBoundingClientRect?.();
+        lay(dropped, { at: Math.round(time * 100) / 100, near: box?.width ? (NEAR_PIXELS * whole) / box.width : 0 });
       };
       track.append(node('span', 'montage-track-name', name), lane, layer);
       lanes.append(track);
@@ -1351,9 +1390,145 @@ export function setupMontage({
       over.append(tip);
     }
     lanes.append(over);
-    body.append(ruler, lanes);
-    live.head = headLine;
+    // (0.6.149) Zoomed, the bobine scrolls under the names of its tracks: −, + and « Voir toute la
+    // bobine » at the top left, and Ctrl + molette, around the pointer.
+    const reel = node('div', 'bobine-reel'),
+      inner = node('div', 'bobine-reel-inner'),
+      rule = node('div', 'bobine-rule-row'),
+      zooms = node('div', 'bobine-zoom');
+    for (const [glyph, tip, wanted, off] of [
+      ['minus', 'Zoom arrière', () => zoom / ZOOM_STEP, zoom <= 1],
+      ['plus', 'Zoom avant (Ctrl + molette)', () => zoom * ZOOM_STEP, zoom >= ZOOM_MAX],
+      ['whole', 'Voir toute la bobine', () => 1, zoom <= 1],
+    ]) {
+      const control = button('bobine-zoom-button', '', () => zoomTo(wanted()), glyph, tip);
+      control.disabled = off;
+      zooms.append(control);
+    }
+    inner.style.setProperty?.('--zoom', String(zoom));
+    reel.dataset.zoomed = String(zoom > 1);
+    // (How far it is scrolled is given back once it is on the page: draw, update.)
+    reel.onscroll = () => (scrolled = reel.scrollLeft);
+    reel.onwheel = event => {
+      if (event.ctrlKey) {
+        event.preventDefault?.();
+        return zoomTo(zoom * (event.deltaY < 0 ? 1.25 : 0.8), event.clientX);
+      }
+      // (Zoomed, the wheel scrolls it from side to side.)
+      if (zoom > 1 && Math.abs(event.deltaY) > Math.abs(event.deltaX ?? 0)) {
+        event.preventDefault?.();
+        reel.scrollLeft = scrolled = Math.max(0, (reel.scrollLeft ?? 0) + event.deltaY);
+      }
+    };
+    rule.append(zooms, ruler);
+    inner.append(rule, lanes);
+    reel.append(inner);
+    body.append(reel);
+    Object.assign(live, { head: headLine, reel });
     return section;
+  }
+
+  /**
+   * (0.6.149) The void of the takes (`lane`): a ghost of a take of 5 s follows the pointer in a hole,
+   * a double click lays it there, a press pulled draws a take to create, as long as it is pulled
+   * (within its hole and within what a clip can be: longer ones are cut in parts at the next step).
+   * Drawn takes stay where they are drawn and never go on from what is around them (withTodoDrawn).
+   */
+  function drawable(lane, timeAt) {
+    const usual = TODO_LIMITS.usual,
+      shade = node('span', 'bobine-ghost'),
+      length = node('span', 'bobine-ghost-length', ''),
+      empty = !montage.plans.length;
+    shade.append(node('span', 'bobine-ghost-plus', '+'), length);
+    const show = (from, seconds, drawn = false) => {
+      shade.hidden = false;
+      shade.dataset.drawn = String(drawn);
+      shade.style.left = percent(from);
+      shade.style.width = `calc(${percent(seconds)} - 4px)`;
+      length.textContent = drawn ? mono(seconds) + ' s' : '';
+    };
+    const hide = () => (empty ? show(0, usual) : (shade.hidden = true));
+    // Where the ghost goes for the pointer at `time`: in its hole, centred on it; null on a take.
+    const ghostAt = time => {
+      const hole = holeAt(montage, time);
+      if (!hole) return null;
+      let from = Math.max(hole.from, time - usual / 2);
+      from = hole.to - hole.from >= usual ? Math.min(from, hole.to - usual) : hole.from;
+      return Math.round(from * 10) / 10;
+    };
+    const inVoid = target => target === lane || shade.contains?.(target);
+    if (drawing) show(drawing.from, drawing.to - drawing.from, true);
+    else hide();
+    shade.dataset.breathing = String(empty);
+    lane.append(shade);
+    Object.assign(live, { shade, lane });
+    lane.onpointermove = event => {
+      if (held || drawing || busy()) return;
+      const from = inVoid(event.target) ? ghostAt(timeAt(event, lane)) : null;
+      if (from === null) hide();
+      else show(from, usual);
+    };
+    lane.onpointerleave = () => {
+      if (!drawing) hide();
+    };
+    lane.ondblclick = event => {
+      if (!inVoid(event.target) || busy()) return;
+      const from = ghostAt(timeAt(event, lane));
+      if (from !== null) drawn(from, usual);
+    };
+    lane.onpointerdown = event => {
+      if (!inVoid(event.target) || busy()) return;
+      const start = timeAt(event, lane),
+        hole = holeAt(montage, start);
+      if (!hole) return;
+      follow(event, lane, {
+        slack: 4,
+        kind: 'draw',
+        move: (far, time, perPixel) => {
+          const near = NEAR_PIXELS * perPixel;
+          let from = Math.max(hole.from, Math.min(start, time)),
+            to = Math.min(hole.to, Math.max(start, time));
+          // Against a neighbour a few pixels away; within what a clip can be.
+          if (from - hole.from <= near) from = hole.from;
+          if (to < hole.to && hole.to - to <= near) to = hole.to;
+          if (to - from > TODO_LIMITS.longest) {
+            if (time >= start) to = from + TODO_LIMITS.longest;
+            else from = to - TODO_LIMITS.longest;
+          }
+          drawing = { from: Math.round(from * 100) / 100, to: Math.round(to * 100) / 100 };
+          show(drawing.from, drawing.to - drawing.from, true);
+        },
+        done: () => {
+          const wanted = drawing;
+          drawing = null;
+          if (wanted) drawn(wanted.from, wanted.to - wanted.from);
+        },
+      });
+    };
+  }
+  /** A take to create laid at `from` seconds, `seconds` long, chosen: its line of « À créer » waits for its text. */
+  function drawn(from, seconds) {
+    const laid = withTodoDrawn(montage, { id: newId(), at: from, seconds });
+    if (laid.reason) return notice(laid.reason);
+    change(laid.montage, { select: laid.chosen });
+  }
+
+  /**
+   * (0.6.149) The timeline zoomed to `wanted` (1: the whole bobine, up to ZOOM_MAX), the instant under
+   * `clientX` (the pointer; by default the middle of what is shown) staying where it is on the screen.
+   */
+  function zoomTo(wanted, clientX = null) {
+    const next = Math.min(ZOOM_MAX, Math.max(1, Math.round(wanted * 100) / 100));
+    if (next === zoom || !parts) return;
+    const reelBox = live.reel?.getBoundingClientRect?.(),
+      x = clientX ?? (reelBox ? reelBox.left + reelBox.width / 2 : 0),
+      box = live.lane?.getBoundingClientRect?.(),
+      time = box?.width ? ((x - box.left) / box.width) * span() : head;
+    zoom = next;
+    if (zoom === 1) scrolled = 0;
+    update({ panel: false });
+    const after = live.lane?.getBoundingClientRect?.();
+    if (zoom > 1 && after?.width && live.reel) live.reel.scrollLeft = scrolled = Math.max(0, (live.reel.scrollLeft ?? 0) + after.left + (time / span()) * after.width - x);
   }
 
   /**
@@ -1405,6 +1580,8 @@ export function setupMontage({
       inside = focused && focused !== root && root.contains?.(focused);
     parts = { takes: takes(), screen: screen(), create: createPanel(), timeline: timeline() };
     root.replaceChildren(...(ownFil ? [filRoot] : []), parts.takes, parts.screen, parts.create, parts.timeline);
+    // (0.6.149) The timeline zoomed stays where it was scrolled: set once it is on the page.
+    if (live.reel) live.reel.scrollLeft = scrolled;
     fil();
     if (inside) refocus(focused, root);
     show();
@@ -1429,6 +1606,7 @@ export function setupMontage({
       parts[name] = next;
       if (focused && old.contains?.(focused)) refocus(focused, next);
     }
+    if (live.reel) live.reel.scrollLeft = scrolled;
     sayGo();
     show({ sync: false });
   }
@@ -1501,8 +1679,9 @@ export function setupMontage({
       return keep();
     },
     // For the tests and the pointer of a later step: what is on the page, and the hands that change it.
-    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed) }),
+    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling, writing, failed: new Map(failed), zoom, scrolled, drawing }),
     lay,
+    zoomTo,
     createAll,
     askAgent,
     select: id => {

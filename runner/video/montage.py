@@ -10,6 +10,10 @@ Each plan is brought to the film's size whole, with black on two sides (`fit`), 
 picture, what overflows cut equally on both sides (`fill`). Each has exactly its length, picture
 and sound: a clip shorter than asked holds its last picture, in silence, so that the plans that
 follow start where the montage says.
+
+(0.6.149, La Bobine) A plan may say its instant in the film (`at`): the plans are in their order, none
+over the one before it, and a hole between two (or before the first) is black and silent, as long
+as it is. Without instants, the plans follow one another.
 """
 
 import os
@@ -82,15 +86,23 @@ def validated(params, root):
         result['outputName'] = output_name(params['outputName'])
     for index, item in enumerate(plans):
         label = f'Plan {index + 1}'
-        fields(item, ('path', 'kind', 'from', 'to', 'frame', 'volume'), label=label)
+        known = ('path', 'at', 'kind', 'from', 'to', 'frame', 'volume')
+        fields(item, known, tuple(key for key in known if key != 'at'), label=label)
         if item['kind'] not in ('video', 'image') or item['frame'] not in ('fit', 'fill'):
             raise ValueError(label + ': invalid kind or frame')
         start, end = _seconds(item['from'], label), _seconds(item['to'], label)
         if not LIMITS['shortest'] <= end - start <= LIMITS['longest'] or (item['kind'] == 'image' and start):
             raise ValueError(label + ': invalid length')
+        # Its instant: after the end of the one before it (a millisecond of rounding allowed).
+        before = result['plans'][-1] if result['plans'] else None
+        follows = round(before['at'] + before['to'] - before['from'], 3) if before else 0.0
+        at = _seconds(item['at'], label) if 'at' in item else follows
+        if at < follows - 0.001:
+            raise ValueError(label + ': starts before the end of the plan before it')
         result['plans'].append(
             {
                 'path': _file(item['path'], root, MOVING if item['kind'] == 'video' else STILL, label),
+                'at': max(at, follows),
                 'kind': item['kind'],
                 'from': start,
                 'to': end,
@@ -117,8 +129,19 @@ def validated(params, root):
 
 
 def seconds(plan):
-    """How long the film is: its plans end to end."""
-    return round(sum(item['to'] - item['from'] for item in plan['plans']), 3)
+    """How long the film is: to the end of its last plan, each at its instant."""
+    last = plan['plans'][-1]
+    return round(last['at'] + last['to'] - last['from'], 3)
+
+
+def holes(plan):
+    """[(index of the plan after it, seconds)]: the holes of the film, black and silent."""
+    found, end = [], 0.0
+    for index, item in enumerate(plan['plans']):
+        if item['at'] - end > 0.0005:
+            found.append((index, round(item['at'] - end, 3)))
+        end = round(item['at'] + item['to'] - item['from'], 3)
+    return found
 
 
 def graph(plan, audible):
@@ -127,7 +150,14 @@ def graph(plan, audible):
     `audible[index]`: whether the file of that plan has a sound of its own."""
     width, height, fps, total = plan['width'], plan['height'], plan['fps'], seconds(plan)
     inputs, filters, joined = [], [], []
+    hole = dict(holes(plan))
     for index, item in enumerate(plan['plans']):
+        if index in hole:
+            # (0.6.149) A hole before this plan: black and silent, as long as it is, made in the graph.
+            length = _n(hole[index])
+            filters.append(f'color=c=black:s={width}x{height}:r={fps}:d={length},setsar=1,format=yuv420p[g{index}]')
+            filters.append(f'anullsrc=r={RATE}:cl=stereo,atrim=duration={length}[h{index}]')
+            joined.append(f'[g{index}][h{index}]')
         length = _n(item['to'] - item['from'])
         still = item['kind'] == 'image'
         inputs += (['-loop', '1', '-t', length] if still else []) + ['-i', item['path']]
@@ -152,7 +182,7 @@ def graph(plan, audible):
         else:
             filters.append(f'anullsrc=r={RATE}:cl=stereo,atrim=duration={length}[a{index}]')
         joined.append(f'[v{index}][a{index}]')
-    filters.append(''.join(joined) + f"concat=n={len(plan['plans'])}:v=1:a=1[film][clips]")
+    filters.append(''.join(joined) + f'concat=n={len(joined)}:v=1:a=1[film][clips]')
     mixed, first = ['[clips]'], len(plan['plans'])
     for index, item in enumerate(plan['sounds']):
         # What is left of the film when it starts: a sound never makes the film longer.
