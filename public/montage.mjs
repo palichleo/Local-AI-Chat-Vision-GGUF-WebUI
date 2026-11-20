@@ -18,6 +18,11 @@
  * (0.6.143) Maquette M6: the end of a video pulled beyond its take shows its continuation to make,
  * joined to it; what follows comes later in the film. Let go, the continuation is chosen: its text,
  * its length, « Prolonger ».
+ *
+ * (0.6.144) Maquettes M7 et M8: « Combler les trous » creates every plan to make that can be, one
+ * after the other. What will be made is said first, each plan with its model and the whole with its
+ * time (`estimate`: asked to the server, nothing kept); nothing is made before « Lancer ». The series
+ * can be paused after the plan being made, or stopped at once.
  */
 import { FORMATS } from './formats.mjs';
 import { thumbnailOf } from './thumbnails.mjs';
@@ -35,6 +40,7 @@ import {
   placeAt,
   planAt,
   planStarts,
+  seriesOf,
   shownSeconds,
   snapped,
   takeSeconds,
@@ -99,6 +105,9 @@ export function setupMontage({
   create = null,
   halt = () => {},
   inputOf = record => ({ output: record.id }),
+  // (0.6.144) What a creation would be made with, and in how long, nothing being made nor kept:
+  // `estimate({ verb, args })` gives { workflowName, seconds, expected: { seconds, exact }, missing }.
+  estimate = null,
 }) {
   let root = null,
     kindsBar = null,
@@ -128,7 +137,13 @@ export function setupMontage({
     // (0.6.143) While the end of a video is pulled beyond its take: its continuation, { id, at } (where it ends).
     pulling = null,
     // (0.6.142) The plan being created: { id, label, fraction }.
-    making = null;
+    making = null,
+    // (0.6.144) The series of plans being agreed on or created: { stage: 'asking' | 'ready' | 'running' |
+    // 'paused', items, at, pausing, stopping }. An item: what seriesOf says of a plan, with its model
+    // (`model`), the length that model makes (`makes`), its time (`expected`), where it is (`state`:
+    // 'wait', 'making', 'made', 'failed') and its take once made.
+    filling = null;
+  const inSeries = () => filling?.stage === 'running' || filling?.stage === 'paused';
 
   const fresh = (format = '16:9') => ({
     schemaVersion: 1,
@@ -210,8 +225,17 @@ export function setupMontage({
   /** A change made by hand: shown at once, kept a moment later. */
   function change(next, { select, sliding = false } = {}) {
     if (next === montage) return;
+    // (0.6.144) Nor while a series of plans is created, even between two of them or in pause.
+    if (inSeries())
+      return void notice(
+        filling.stage === 'paused'
+          ? 'La série est en pause : reprenez-la ou arrêtez-la avant de modifier le montage.'
+          : 'Des plans sont en cours de création : attendez leur fin, ou arrêtez la série.',
+      );
     // (0.6.142) The plan being created is written back in this montage when it is made.
     if (making) return void notice('Un plan est en cours de création : attendez sa fin, ou arrêtez-la.');
+    // (What was only shown to be agreed on described the montage as it was: closed.)
+    filling = null;
     // Another shape of film: the screen takes it. Anything else leaves the screen and the takes as they are.
     const reshaped = next.format !== montage.format || next.width !== montage.width || next.height !== montage.height;
     montage = next;
@@ -252,6 +276,8 @@ export function setupMontage({
     draw();
   }
   async function remove() {
+    // (0.6.144) Not under a plan being created: its take would have no montage to go to.
+    if (making || inSeries()) return void notice('Un plan est en cours de création : attendez sa fin, ou arrêtez-la.');
     if (!confirming) {
       confirming = true;
       return draw();
@@ -541,6 +567,8 @@ export function setupMontage({
         return out;
       };
     live.figures = [];
+    live.seriesState = live.seriesMeta = null;
+    if (filling) return seriesPanel(section, body);
     section.setAttribute('aria-label', item ? 'Élément choisi' : 'Réglages du montage');
     if (!item) {
       const name = node('input', 'montage-name');
@@ -710,6 +738,22 @@ export function setupMontage({
    * Studio as one of its takes (`create`), and the plan becomes the plan of that take. One at a time;
    * the montage is not changed meanwhile.
    */
+  /** (0.6.144) The size a plan is made at: the one of its film (a continuation keeps the size of its video, the server sees to it). */
+  const filmSize = () => ({ width: montage.width, height: montage.height });
+  /** The arguments a plan to make is asked with (creationOf): thrown, in the user's words, when a take it needs is gone. */
+  function argsOf(wanted) {
+    const named = (item, what) => {
+      const record = recordOf(item.source);
+      if (!record) throw new Error(`${what} n’est plus dans le projet.`);
+      return { ...inputOf(record), ...(item.frame ? { frame: item.frame } : {}) };
+    };
+    const args = { prompt: wanted.prompt, intention: 'Plan d’un montage, demandé dans le Studio.', duration: wanted.duration };
+    if (wanted.format) args.format = wanted.format;
+    if (wanted.start) args.start_image = named(wanted.start, wanted.start.frame ? 'La vidéo du plan précédent' : 'La photo de début');
+    if (wanted.end) args.end_image = named(wanted.end, 'La photo de fin');
+    if (wanted.continues) args.source = named({ source: wanted.continues }, 'La vidéo du plan précédent');
+    return args;
+  }
   async function makePlan(id) {
     if (making || !create) return;
     const wanted = creationOf(montage, id, lengthOf);
@@ -717,22 +761,16 @@ export function setupMontage({
     const index = montage.plans.findIndex(plan => plan.id === id);
     let args;
     try {
-      const named = (item, what) => {
-        const record = recordOf(item.source);
-        if (!record) throw new Error(`${what} n’est plus dans le projet.`);
-        return { ...inputOf(record), ...(item.frame ? { frame: item.frame } : {}) };
-      };
-      args = { prompt: wanted.prompt, intention: 'Plan d’un montage, demandé dans le Studio.', duration: wanted.duration };
-      if (wanted.format) args.format = wanted.format;
-      if (wanted.start) args.start_image = named(wanted.start, wanted.start.frame ? 'La vidéo du plan précédent' : 'La photo de début');
-      if (wanted.end) args.end_image = named(wanted.end, 'La photo de fin');
-      if (wanted.continues) args.source = named({ source: wanted.continues }, 'La vidéo du plan précédent');
+      args = argsOf(wanted);
     } catch (error) {
       return notice(error.message);
     }
     stop();
     await keep();
-    const said = (label, fraction) => `Création du plan ${index + 1}` + (label ? ' · ' + label : '') + (Number.isFinite(fraction) ? ` · ${Math.round(fraction * 100)} %` : '');
+    // (In a series: which one of how many, the plan itself saying on the timeline where it is.)
+    const series = filling?.stage === 'running' ? filling.items.filter(item => item.ready) : null,
+      name = series ? `Création ${series.findIndex(item => item.id === id) + 1} sur ${series.length}` : `Création du plan ${index + 1}`,
+      said = (label, fraction) => name + (label ? ' · ' + label : '') + (Number.isFinite(fraction) ? ` · ${Math.round(fraction * 100)} %` : '');
     making = { id, label: 'Préparation…', fraction: null };
     chosen = id;
     status = said(making.label, null);
@@ -741,7 +779,7 @@ export function setupMontage({
       problem = '';
     try {
       record = await create(
-        { verb: wanted.verb, args },
+        { verb: wanted.verb, args, size: filmSize() },
         {
           onProgress: (label, fraction) => {
             if (!making) return;
@@ -749,6 +787,9 @@ export function setupMontage({
             status = said(making.label, making.fraction);
             if (live.bar) live.bar.style.width = Math.round((making.fraction ?? 0) * 100) + '%';
             if (live.making) live.making.textContent = making.label;
+            // (Its line of the series, and the time that is left.)
+            if (live.seriesState) live.seriesState.textContent = stateOf({ state: 'making' });
+            if (live.seriesMeta && filling) live.seriesMeta.textContent = seriesTime(filling);
             say();
           },
         },
@@ -767,6 +808,172 @@ export function setupMontage({
     } else status = 'Création impossible : ' + problem;
     draw();
     return record;
+  }
+
+  /** « ≈ 45 s », « ≈ 4 min 30 »: a time that is foreseen, never to the second. */
+  const about = seconds => {
+    if (seconds < 60) return `≈ ${Math.max(5, Math.round(seconds / 5) * 5)} s`;
+    const rounded = Math.round(seconds / 10) * 10,
+      rest = rounded % 60;
+    return `≈ ${Math.floor(rounded / 60)} min` + (rest ? ' ' + String(rest).padStart(2, '0') : '');
+  };
+  const stateOf = item =>
+    item.state === 'made'
+      ? 'FAIT' + (item.take ? takeLabel({ conversationId: item.take.conversationId, runId: item.take.id, output: 0 }, ' · ').toUpperCase() : '')
+      : item.state === 'making'
+        ? 'EN COURS' + (Number.isFinite(making?.fraction) ? ` · ${Math.round(making.fraction * 100)} %` : '')
+        : item.state === 'failed'
+          ? 'NON CRÉÉ'
+          : 'EN ATTENTE';
+  /** What is said under the title of the series: its time before it starts, what is left of it once it runs. */
+  function seriesTime(series) {
+    const ready = series.items.filter(item => item.ready),
+      out = series.items.length - ready.length,
+      aside = out ? ` · ${out} plan${out > 1 ? 's' : ''} laissé${out > 1 ? 's' : ''} de côté` : '';
+    if (series.stage === 'asking') return 'Préparation…';
+    if (series.stage === 'paused') return `${ready.filter(item => item.state === 'made').length} sur ${ready.length} créés`;
+    if (series.stage === 'running') {
+      const left = ready.filter(item => item.state !== 'made');
+      if (left.some(item => !item.expected)) return 'Un plan après l’autre';
+      const seconds = left.reduce((sum, item) => sum + item.expected.seconds * (item.state === 'making' ? 1 - (making?.fraction ?? 0) : 1), 0);
+      return 'Un plan après l’autre · reste ' + about(seconds);
+    }
+    if (!ready.length) return 'Rien ne peut être créé pour l’instant';
+    const known = ready.filter(item => item.expected),
+      seconds = known.reduce((sum, item) => sum + item.expected.seconds, 0);
+    if (!known.length) return 'Durée inconnue : jamais créé ici à cette taille' + aside;
+    if (known.length < ready.length) return `${about(seconds)} pour ${known.length} plan${known.length > 1 ? 's' : ''}, inconnu pour ${ready.length - known.length}` + aside;
+    return `${about(seconds)} sur votre carte` + aside;
+  }
+  /**
+   * (0.6.144) The series in the place of the settings: what will be created, each plan with its model and
+   * its text, and what cannot be yet with its reason; then, once launched, where each one is.
+   */
+  function seriesPanel(section, body) {
+    const series = filling,
+      ready = series.items.filter(item => item.ready),
+      running = inSeries(),
+      title = node('div', 'montage-title is-tight'),
+      list = node('div', 'montage-rows montage-series'),
+      foot = node('div', 'montage-foot is-tight'),
+      meta = node('span', 'montage-title-meta', seriesTime(series));
+    section.setAttribute('aria-label', running ? 'Création en cours' : 'Plans à créer');
+    title.append(node('span', 'montage-title-name', series.stage === 'paused' ? 'En pause' : running ? 'Création en cours' : `À créer · ${ready.length}`), meta);
+    live.seriesMeta = meta;
+    for (const item of series.items) {
+      const entry = node('div', 'montage-series-item' + (item.ready ? '' : ' is-out')),
+        top = node('div', 'montage-series-top');
+      top.append(
+        node('span', 'montage-series-name', `Plan ${item.number} · ${shownSeconds(item.seconds)}`),
+        node('span', 'montage-series-model', item.ready ? item.model || (series.stage === 'asking' ? '…' : '') : ''),
+      );
+      entry.append(top, node('p', 'montage-series-words', item.ready ? `« ${item.prompt} »` : item.reason));
+      // (The model makes clips of its own lengths: said when it is not the one asked.)
+      if (item.ready && item.makes && Math.abs(item.makes - item.seconds) > 0.3) entry.append(node('p', 'montage-series-note', `Ce modèle en fera ${shownSeconds(item.makes)}.`));
+      if (running && item.ready) {
+        const state = node('span', 'montage-series-state', stateOf(item));
+        if (item.state === 'making') live.seriesState = state;
+        entry.append(state);
+      }
+      list.append(entry);
+    }
+    if (running) {
+      const last = ready.findLast(item => item.state === 'made' && item.take);
+      if (last) foot.append(button('montage-action is-quiet', 'Ouvrir la' + takeLabel({ conversationId: last.take.conversationId, runId: last.take.id, output: 0 }, ' ').toLowerCase(), () => showTake(last.take)));
+    } else {
+      const go = button('montage-action is-go', `Lancer (${ready.length})`, () => void launch());
+      go.disabled = series.stage !== 'ready' || !ready.length;
+      foot.append(
+        go,
+        button('montage-action is-quiet', 'Annuler', () => {
+          filling = null;
+          update();
+        }),
+      );
+    }
+    body.append(title, list, foot);
+    return section;
+  }
+
+  /**
+   * (0.6.144) « Combler les trous »: what would be created is read on the montage (seriesOf) and said,
+   * each plan with the model that would make it and its time, asked to the server for those that need
+   * nothing more (`estimate`); a plan that goes on from the one before it has its model, and its time
+   * brought to its own length. Nothing is made here: « Lancer » does.
+   */
+  async function fill() {
+    if (making || filling || !create) return;
+    const items = seriesOf(montage, lengthOf).map(item => ({ ...item, model: '', makes: null, expected: null, state: 'wait', take: null }));
+    if (!items.length) return;
+    stop();
+    const series = (filling = { stage: 'asking', items, pausing: false, stopping: false });
+    status = '';
+    update();
+    await keep();
+    for (const item of items) {
+      if (filling !== series) return;
+      if (!item.ready) continue;
+      const before = item.after ? items.find(other => other.id === item.after) : null;
+      if (before) {
+        if (!before.ready) Object.assign(item, { ready: false, reason: `Il continue le plan ${before.number}, qui ne peut pas être créé.` });
+        else
+          Object.assign(item, {
+            model: before.model,
+            expected: before.expected ? { seconds: Math.round(((before.expected.seconds * item.seconds) / (before.makes ?? before.seconds)) * 10) / 10, exact: false } : null,
+          });
+        continue;
+      }
+      if (!estimate) continue;
+      try {
+        const wanted = creationOf(montage, item.id, lengthOf),
+          seen = await estimate({ verb: wanted.verb, args: argsOf(wanted), size: filmSize() });
+        if (filling !== series) return;
+        if (seen?.missing) Object.assign(item, { ready: false, reason: `${seen.workflowName || 'Son modèle'} n’est pas prêt : un de ses fichiers manque.` });
+        else Object.assign(item, { model: seen?.workflowName ?? '', makes: seen?.seconds ?? null, expected: seen?.expected ?? null });
+      } catch (error) {
+        if (filling !== series) return;
+        Object.assign(item, { ready: false, reason: error.message });
+      }
+    }
+    if (filling !== series) return;
+    series.stage = 'ready';
+    update();
+  }
+  /** The series is over (all made, one refused, stopped): said once, and the settings come back. */
+  function endSeries(series, { stopped = false, refused = '' } = {}) {
+    if (filling !== series) return;
+    const ready = series.items.filter(item => item.ready),
+      made = ready.filter(item => item.state === 'made').length,
+      count = `${made} plan${made > 1 ? 's' : ''} créé${made > 1 ? 's' : ''}`;
+    filling = null;
+    status = stopped ? `Série arrêtée · ${count} sur ${ready.length}` : refused ? `${refused} · ${count} sur ${ready.length}` : count;
+    draw();
+  }
+  /** « Lancer », or « Reprendre » after a pause: the plans that are ready, one after the other, each in its turn. */
+  async function launch() {
+    const series = filling;
+    if (!series || !['ready', 'paused'].includes(series.stage) || making) return;
+    Object.assign(series, { stage: 'running', pausing: false });
+    for (const item of series.items) {
+      if (!item.ready || item.state === 'made') continue;
+      if (filling !== series) return;
+      if (series.stopping) break;
+      if (series.pausing) {
+        Object.assign(series, { stage: 'paused', pausing: false });
+        status = 'En pause';
+        return draw();
+      }
+      item.state = 'making';
+      const record = await makePlan(item.id);
+      if (filling !== series) return;
+      if (!record) {
+        item.state = 'failed';
+        // (What makePlan said of it, « Création impossible : … »; a plan it did not even ask for said nothing.)
+        return endSeries(series, series.stopping ? { stopped: true } : { refused: status.startsWith('Création impossible') ? status : `Plan ${item.number} non créé` });
+      }
+      Object.assign(item, { state: 'made', take: record });
+    }
+    endSeries(series, { stopped: series.stopping });
   }
 
   function timeline() {
@@ -814,7 +1021,36 @@ export function setupMontage({
         ? 'Assemble le film et l’ajoute aux prises du projet'
         : 'Posez au moins une prise pour exporter un film';
     headRow.append(node('span', 'montage-label', 'Montage'), pick, node('span', 'montage-summary', montageSummary(montage)), state);
-    if (making) headRow.append(button('montage-halt', 'Arrêter', () => halt()));
+    if (filling?.stage === 'running') {
+      // (The plan being made is finished first: a pause never loses what the card is doing.)
+      const pause = button('montage-halt', filling.pausing ? 'Pause demandée…' : 'Mettre en pause', () => {
+        filling.pausing = true;
+        update();
+      });
+      pause.disabled = filling.pausing;
+      pause.title = 'La série s’arrête après le plan en cours, et reprend quand vous voulez';
+      headRow.append(
+        pause,
+        button('montage-halt', 'Arrêter', () => {
+          filling.stopping = true;
+          halt();
+        }),
+      );
+    } else if (filling?.stage === 'paused')
+      headRow.append(
+        button('montage-halt is-go', 'Reprendre', () => void launch()),
+        button('montage-halt', 'Arrêter', () => endSeries(filling, { stopped: true })),
+      );
+    else if (making) headRow.append(button('montage-halt', 'Arrêter', () => halt()));
+    else if (waiting > 0 && create) {
+      const all = button('montage-fill', 'Combler les trous', () => void fill());
+      // (Greyed while what it would make is shown at the right, waiting for « Lancer ».)
+      all.disabled = Boolean(filling);
+      all.title = 'Crée les plans à faire, l’un après l’autre, après votre accord';
+      headRow.append(all);
+    }
+    // (The montage shown is the one of the plans being created.)
+    pick.disabled = Boolean(making) || inSeries();
     headRow.append(go);
     live.bar = live.making = null;
     // A mark a second up to a minute, then every five or ten: the ruler never turns into a comb.
@@ -899,16 +1135,20 @@ export function setupMontage({
           // (0.6.143) A plan to make that goes on from the video before it: its continuation, drawn joined to it.
           link = todo && id === 'plans' ? linkOf(montage, item.id, lengthOf) : null,
           suite = link?.kind === 'suite' || link?.kind === 'last',
+          // (0.6.144) Its turn has not come yet in the series being created.
+          queued = todo && inSeries() && filling.items.some(entry => entry.id === item.id && entry.ready && entry.state === 'wait'),
           label =
             id !== 'plans'
               ? (takeLabel(item.source) || KINDS[id]) + (record?.prompt ? ' · ' + String(record.prompt).split('\n')[0].slice(0, 60) : '')
               : todo
-                ? `${number} · ${busy ? 'EN COURS' : item.replaces ? 'SERA REMPLACÉ' : suite ? 'SUITE À CRÉER' : 'À FAIRE'}`
+                ? `${number} · ${busy ? 'EN COURS' : queued ? 'EN ATTENTE' : item.replaces ? 'SERA REMPLACÉ' : suite ? 'SUITE À CRÉER' : 'À FAIRE'}`
                 : `${number}${takeLabel(item.source, ' · ').toUpperCase()}`,
           look = id !== 'plans' ? ' is-sound' : todo ? ' is-todo' + (item.replaces ? ' is-replacing' : '') + (suite ? ' is-suite' : '') + (busy ? ' is-making' : '') : '',
           piece = button('montage-piece' + look, '', () => {
             // (The click that ends a drag chooses nothing.)
             if (slid) return void (slid = false);
+            // (0.6.144) What was shown to be agreed on gives its place back to what is chosen.
+            if (filling && !inSeries()) filling = null;
             chosen = chosen === item.id ? null : item.id;
             confirming = false;
             update();
@@ -1046,7 +1286,7 @@ export function setupMontage({
     if (pulling && itemOf(pulling.id)) {
       const later = montage.plans.findIndex(plan => plan.id === pulling.id) < montage.plans.length - 1,
         tip = node('span', 'montage-tip', `Au-delà de la prise : + ${shownSeconds(pulling.seconds)} à créer` + (later ? ' · ce qui suit se décale' : ''));
-      tip.style.left = `clamp(180px, ${percent(pulling.at)}, calc(100% - 180px))`;
+      tip.style.left = `clamp(190px, ${percent(pulling.at)}, calc(100% - 190px))`;
       over.append(tip);
     }
     lanes.append(over);
@@ -1175,14 +1415,18 @@ export function setupMontage({
     /** Leaving the mode or the page: nothing goes on playing, what is not kept yet is. */
     leave() {
       stop();
+      // (0.6.144) A series in pause, or only shown, ends with the mode.
+      filling = null;
       root = parts = null;
       held = ghost = null;
       return keep();
     },
     // For the tests and the pointer of a later step: what is on the page, and the hands that change it.
-    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making }),
+    state: () => ({ montage, stored, chosen, head, status, playing: Boolean(playing), list, making, filling }),
     lay,
     makePlan,
+    fill,
+    launch,
     select: id => {
       chosen = id;
       draw();

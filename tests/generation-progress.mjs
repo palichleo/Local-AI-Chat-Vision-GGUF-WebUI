@@ -87,3 +87,39 @@ test('history keeps the last successful timeline per key', async () => {
     { mark: 'done', at: 5 },
   ]);
 });
+
+test('how long a creation took here before says how long it will take: the same one, else the nearest one made by that model (0.6.144)', async () => {
+  // (Étape 2 du Montage, lot 3: before a series of plans the user agrees knowing the time. Only what
+  // was really made here is said; a size never made here has nothing to say.)
+  const history = new ProgressHistory(join(await mkdtemp(join(tmpdir(), 'timing-')), 'timing.json'));
+  const clip = (frames, more = {}) => ({ width: 1600, height: 896, frames, stage: 'final', ...more }),
+    made = (parameters, references, seconds) => history.save(timingKey('ltx', parameters, references), [{ mark: 'loading', at: 4 }, { mark: 'done', at: seconds }]);
+  assert.equal(await history.expected('ltx', clip(121), 2), null);
+  await made(clip(121), 2, 108.4);
+  // The same workflow, size, length and number of inputs: that time.
+  assert.deepEqual(await history.expected('ltx', clip(121), 2), { seconds: 108.4, exact: true });
+  // Another length at that size: the time of the nearest one, brought to this length.
+  assert.deepEqual(await history.expected('ltx', clip(49), 2), { seconds: 43.9, exact: false });
+  await made(clip(57), 2, 50);
+  assert.deepEqual(await history.expected('ltx', clip(49), 2), { seconds: 43, exact: false });
+  assert.deepEqual(await history.expected('ltx', clip(241), 2), { seconds: 215.9, exact: false });
+  // As many inputs first; with none made so, the nearest length whatever its inputs.
+  await made(clip(49), 0, 30);
+  assert.deepEqual(await history.expected('ltx', clip(49), 2), { seconds: 43, exact: false });
+  assert.deepEqual(await history.expected('ltx', clip(49), 1), { seconds: 30, exact: false });
+  // Another size: the nearest in pictures to make (their size by their number), brought to what is
+  // asked (57 pictures of 1600 × 896 in 50 s: 121 of 768 × 448, half as much to make, in 25,5 s).
+  assert.deepEqual(await history.expected('ltx', clip(121, { width: 768, height: 448 }), 2), { seconds: 25.5, exact: false });
+  // Another version of the workflow, another workflow: never made here, nothing is said.
+  assert.equal(await history.expected('ltx', clip(121, { stage: 'draft' }), 2), null);
+  assert.equal(await history.expected('wan', clip(121), 2), null);
+  // An image (no length): the same size only. A timeline that did not end is no time.
+  await made({ width: 1024, height: 1024 }, 0, 9.5);
+  assert.deepEqual(await history.expected('ltx', { width: 1024, height: 1024 }, 0), { seconds: 9.5, exact: true });
+  assert.equal(await history.expected('ltx', { width: 1024, height: 768 }, 0), null);
+  await history.save(timingKey('ltx', clip(33), 2), [{ mark: 'loading', at: 4 }]);
+  assert.deepEqual(await history.expected('ltx', clip(33), 2), { seconds: 28.9, exact: false });
+  // That size first: another size, though nearer in pictures to make, is not the one read.
+  await made(clip(161, { width: 1920, height: 1088 }), 2, 400);
+  assert.deepEqual(await history.expected('ltx', clip(241), 2), { seconds: 215.9, exact: false });
+});

@@ -573,6 +573,21 @@ export function setupStudio({
     create: (wanted, hooks) => generate({ ...wanted, styles: [], edits: {}, montage: hooks ?? {} }),
     halt: () => stop(),
     inputOf: record => outputSource(record),
+    // (0.6.144) What a plan would be made with and in how long: the request of a creation, asked
+    // only to be told (`estimate`), of which the server keeps nothing. No conversation is made for
+    // it: the takes of the conversation shown are named in it, the others by their own.
+    estimate: async wanted =>
+      (
+        await api('tools/action', {
+          conversationId: conversation() ?? globalThis.crypto.randomUUID(),
+          project: project(),
+          studio: true,
+          name: wanted.verb,
+          arguments: wanted.args,
+          ...(wanted.size ? { size: wanted.size } : {}),
+          estimate: true,
+        })
+      ).json(),
   });
   // The setting Moodix AI is changing wears a ring, those it has set a fine trace, while it works.
   // Once it has stopped, nothing is framed any more. (0.6.92: no mark on the settings it may change
@@ -2689,6 +2704,8 @@ export function setupStudio({
           name: wanted.verb,
           arguments: wanted.args,
           ...(wanted.styles.length ? { styles: wanted.styles } : {}),
+          // (0.6.144) A plan of the montage: at the size of its film, set by the server for the model it chooses.
+          ...(wanted.size ? { size: wanted.size } : {}),
         })
       ).json();
       working.requestId = proposed.requestId;

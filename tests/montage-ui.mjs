@@ -72,7 +72,7 @@ const take = (n, mediaType, more = {}) => ({
   ...more,
 });
 
-function setup({ stored = [], fail = {}, extra = [], create = null, thumbnail = () => {} } = {}) {
+function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, thumbnail = () => {} } = {}) {
   const calls = [],
     queue = [],
     kept = new Map(stored.map(montage => [montage.id, montage])),
@@ -110,6 +110,7 @@ function setup({ stored = [], fail = {}, extra = [], create = null, thumbnail = 
   const ui = setupMontage({
     page,
     ...(create ? { create } : {}),
+    ...(estimate ? { estimate } : {}),
     halt: () => void halted++,
     api,
     node: (tag, className, text) => new Fake(tag, className, text),
@@ -703,6 +704,8 @@ test('« Créer ce plan » asks the Studio for the clip, shows it being made, an
   assert.deepEqual(asked[0].wanted, {
     verb: 'create_video',
     args: { prompt: 'Il lève les yeux.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5, format: '16:9', start_image: { output: id(3) }, end_image: { output: id(5) } },
+    // (0.6.144) At the size of the film: a plan was made as a small draft of its model.
+    size: { width: 1344, height: 768 },
   });
   // Being made: said on the plan and in the head, with what stops it; nothing else is changed meanwhile.
   asked[0].hooks.onProgress('Étape 3 sur 8', 0.4);
@@ -739,7 +742,7 @@ test('« Créer ce plan » asks the Studio for the clip, shows it being made, an
   assert.equal(f.button('Créer ce plan'), undefined);
   f.button('Prolonger').onclick();
   await settle();
-  assert.deepEqual(asked[2].wanted, { verb: 'extend_video', args: { prompt: 'Il regarde la mer.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 2, source: { output: id(50) } } });
+  assert.deepEqual(asked[2].wanted, { verb: 'extend_video', args: { prompt: 'Il regarde la mer.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 2, source: { output: id(50) } }, size: { width: 1344, height: 768 } });
   f.runs.push(made(51, 49, { continuation: { overlapFrames: 9, sourceFrames: 121, newFrames: 40 } }));
   answer.resolve(f.runs.at(-1));
   await settle();
@@ -835,7 +838,7 @@ test('the end of a video pulled beyond its take shows its continuation to make, 
     ['montage-piece', '3 · PRISE 3Image3 s', '90%', 'calc(30% - 4px)'],
   ]);
   // What that does is said where the hand is; the video stays the one in hand.
-  assert.deepEqual([f.said('montage-tip'), f.get('montage-tip')[0].style.left], [['Au-delà de la prise : + 4 s à créer · ce qui suit se décale'], 'clamp(180px, 90%, calc(100% - 180px))']);
+  assert.deepEqual([f.said('montage-tip'), f.get('montage-tip')[0].style.left], [['Au-delà de la prise : + 4 s à créer · ce qui suit se décale'], 'clamp(190px, 90%, calc(100% - 190px))']);
   assert.deepEqual(f.said('montage-title-name'), ['Plan 1 · Prise 1']);
   // Pulled back within the take: gone, as if nothing had been asked.
   f.pointer.move(450);
@@ -885,4 +888,242 @@ test('the end of a video pulled beyond its take shows its continuation to make, 
   assert.deepEqual(alone.said('montage-tip'), ['Au-delà de la prise : + 4 s à créer']);
   alone.pointer.up();
   assert.deepEqual(alone.said('montage-title-name'), ['Plan 2 · suite à créer']);
+});
+
+// (0.6.144) « Combler les trous »: his three photos laid, two plans to make, the second going on from the first.
+async function series({ times = { workflowName: 'LTX 2.5', seconds: 5.042, expected: { seconds: 108.4, exact: true } }, texts = ['Il lève les yeux.', 'Il regarde la mer.'], estimate = null } = {}) {
+  const asked = [],
+    foreseen = [],
+    answers = [];
+  const f = await setup({
+    extra: photos(),
+    create: (wanted, hooks) => {
+      asked.push({ wanted: structuredClone(wanted), hooks });
+      return new Promise((resolve, reject) => answers.push({ resolve, reject }));
+    },
+    estimate: async wanted => {
+      foreseen.push(structuredClone(wanted));
+      if (estimate) return estimate(wanted);
+      if (times instanceof Error) throw times;
+      return structuredClone(times);
+    },
+  }).open();
+  for (const [at, x] of [[2, 0], [4, 500], [5, 700]]) {
+    f.get('montage-take')[at].ondragstart({ dataTransfer: { setData() {} } });
+    f.photos().ondrop(event(x));
+  }
+  texts.forEach((words, plan) => {
+    if (!words) return;
+    if (f.ui.state().chosen !== f.ui.state().montage.plans[plan].id) f.plans()[plan].onclick();
+    Object.assign(f.get('montage-words-field')[0], { value: words }).oninput();
+  });
+  const head = label => f.get('montage-fill').concat(f.get('montage-halt')).find(control => control.textContent === label),
+    lines = () => f.get('montage-series-item').map(entry => entry.children.map(part => part.textContent)),
+    panel = () => f.said('montage-title-name').concat(f.said('montage-title-meta')),
+    // « Combler les trous », then what it asks the server: all settled.
+    open = async () => {
+      head('Combler les trous').onclick();
+      await settle();
+      await settle();
+    };
+  return { f, asked, foreseen, answers, head, lines, panel, open };
+}
+
+test('« Combler les trous » says what will be created, with its model and its time, and makes nothing before « Lancer » (0.6.144)', async () => {
+  // (Maquette M7. On the card, 20/11, a continuation went to a model nobody had named: five minutes
+  // instead of one. Here the model and the time are said first, and agreed on.)
+  const { f, asked, foreseen, answers, head, lines, panel, open } = await series();
+  assert.equal(head('Combler les trous').disabled, false);
+  await open();
+  // Asked to the server for the plan that needs nothing more, as it will be asked for real; the second
+  // goes on from the first: its model, and its time brought to its length (108,4 s for 5,04 s: 43 s for 2 s).
+  assert.deepEqual(foreseen, [{ verb: 'create_video', args: { prompt: 'Il lève les yeux.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5, format: '16:9', start_image: { output: id(3) }, end_image: { output: id(5) } }, size: { width: 1344, height: 768 } }]);
+  assert.deepEqual(panel(), ['À créer · 2', '≈ 2 min 30 sur votre carte']);
+  assert.deepEqual(lines(), [
+    ['Plan 1 · 5 sLTX 2.5', '« Il lève les yeux. »'],
+    ['Plan 2 · 2 sLTX 2.5', '« Il regarde la mer. »'],
+  ]);
+  assert.deepEqual(find(f.root, 'montage-action').map(control => [control.textContent, control.disabled]), [['Lancer (2)', false], ['Annuler', undefined]]);
+  // Nothing is made, the montage is kept as it is, and the button waits for the answer.
+  assert.deepEqual([asked.length, f.saves().length, head('Combler les trous').disabled, f.ui.state().filling.stage], [0, 1, true, 'ready']);
+  // « Annuler »: the settings come back. Shown again, a plan chosen on the timeline closes it too.
+  f.button('Annuler').onclick();
+  assert.deepEqual([f.ui.state().filling, f.get('montage-series-item').length, head('Combler les trous').disabled], [null, 0, false]);
+  await open();
+  f.plans()[0].onclick();
+  assert.deepEqual([f.ui.state().filling, f.said('montage-title-name')], [null, ['Plan 1 · à faire']]);
+  // « Lancer »: the first plan is asked as a hand asks it; the second waits its turn.
+  await open();
+  assert.equal(foreseen.length, 3);
+  f.button('Lancer (2)').onclick();
+  await settle();
+  assert.deepEqual(asked.map(item => item.wanted), [foreseen[0]]);
+  assert.deepEqual(f.plans().map(piece => piece.children[0].textContent), ['1 · EN COURS', '2 · EN ATTENTE']);
+  assert.deepEqual([f.said('montage-status'), panel()], [['Création 1 sur 2 · Préparation…'], ['Création en cours', 'Un plan après l’autre · reste ≈ 2 min 30']]);
+  assert.deepEqual(f.get('montage-halt').map(control => [control.textContent, control.disabled]), [['Mettre en pause', false], ['Arrêter', undefined]]);
+  assert.deepEqual([f.get('montage-fill').length, f.get('montage-export')[0].disabled, f.get('montage-pick')[0].disabled], [0, true, true]);
+  assert.deepEqual(lines().map(line => line.at(-1)), ['EN COURS', 'EN ATTENTE']);
+  // Its progress: on the plan, in the head, on its line, and in the time that is left (half of 108 s, and 43 s).
+  asked[0].hooks.onProgress('Étape 4 sur 8', 0.5);
+  assert.deepEqual([f.said('montage-status'), panel(), lines()[0].at(-1)], [['Création 1 sur 2 · Étape 4 sur 8 · 50 %'], ['Création en cours', 'Un plan après l’autre · reste ≈ 1 min 40'], 'EN COURS · 50 %']);
+  // The montage is not changed meanwhile, nor set aside.
+  f.plans()[1].onkeydown({ key: 'Delete' });
+  assert.equal(f.plans().length, 2);
+  assert.match(f.notices.at(-1), /^Des plans sont en cours de création/);
+  // The first made: the second is asked in its turn, from the last image of the first.
+  f.runs.push(made(50, 121));
+  answers[0].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  assert.deepEqual(asked[1].wanted.args, { prompt: 'Il regarde la mer.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 2, format: '16:9', start_image: { output: id(50), frame: 'last' }, end_image: { output: id(6) } });
+  assert.deepEqual(f.plans().map(piece => piece.children[0].textContent), ['1 · PRISE 50', '2 · EN COURS']);
+  assert.deepEqual([f.said('montage-status'), lines().map(line => line.at(-1))], [['Création 2 sur 2 · Préparation…'], ['FAIT · PRISE 50', 'EN COURS']]);
+  f.button('Ouvrir la prise 50').onclick();
+  assert.deepEqual(f.calls.at(-1), { route: 'open', body: id(50) });
+  // The second made: the series is over, said once; the settings and « Exporter le film » are back.
+  f.runs.push(made(51, 49));
+  answers[1].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  assert.deepEqual([f.said('montage-status'), f.ui.state().filling, f.get('montage-series-item').length, f.get('montage-halt').length], [['2 plans créés'], null, 0, 0]);
+  assert.deepEqual([f.get('montage-export')[0].disabled, f.get('montage-fill').length, f.get('montage-pick')[0].disabled], [false, 0, false]);
+  assert.deepEqual(f.plans().map(piece => piece.children[0].textContent), ['1 · PRISE 50', '2 · PRISE 51']);
+});
+
+test('a series is paused after the plan being made, stopped at once, and ends on a refusal (0.6.144)', async () => {
+  // (Maquette M8: « Mettre en pause », « Arrêter ».)
+  let { f, asked, answers, head, lines, panel, open } = await series();
+  await open();
+  f.button('Lancer (2)').onclick();
+  await settle();
+  // « Mettre en pause »: asked, the plan being made goes to its end.
+  head('Mettre en pause').onclick();
+  assert.deepEqual(f.get('montage-halt').map(control => [control.textContent, control.disabled]), [['Pause demandée…', true], ['Arrêter', undefined]]);
+  f.runs.push(made(50, 121));
+  answers[0].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  assert.deepEqual([asked.length, f.ui.state().filling.stage, f.said('montage-status'), panel()], [1, 'paused', ['En pause'], ['En pause', '1 sur 2 créés']]);
+  assert.deepEqual([f.get('montage-halt').map(control => control.textContent), lines().map(line => line.at(-1))], [['Reprendre', 'Arrêter'], ['FAIT · PRISE 50', 'EN ATTENTE']]);
+  // In pause the montage is still the one of the series.
+  f.plans()[1].onkeydown({ key: 'Delete' });
+  assert.match(f.notices.at(-1), /^La série est en pause/);
+  // « Reprendre »: the second plan, in its turn. « Arrêter »: the creation is stopped, and the series with it.
+  head('Reprendre').onclick();
+  await settle();
+  assert.deepEqual([asked.length, f.said('montage-status')], [2, ['Création 2 sur 2 · Préparation…']]);
+  head('Arrêter').onclick();
+  assert.equal(f.halted(), 1);
+  answers[1].reject(new Error('Génération arrêtée.'));
+  await settle();
+  await settle();
+  assert.deepEqual([f.said('montage-status'), f.ui.state().filling, f.plans().map(piece => piece.children[0].textContent)], [['Série arrêtée · 1 plan créé sur 2'], null, ['1 · PRISE 50', '2 · SUITE À CRÉER']]);
+  // Stopped while in pause: nothing to stop on the card, the series ends there.
+  ({ f, asked, answers, head, open } = await series());
+  await open();
+  f.button('Lancer (2)').onclick();
+  await settle();
+  head('Mettre en pause').onclick();
+  f.runs.push(made(50, 121));
+  answers[0].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  head('Arrêter').onclick();
+  assert.deepEqual([f.halted(), asked.length, f.said('montage-status'), f.ui.state().filling], [0, 1, ['Série arrêtée · 1 plan créé sur 2'], null]);
+  // Refused by the engine: said with what was made, and the plans after it are not asked.
+  ({ f, asked, answers, open } = await series());
+  await open();
+  f.button('Lancer (2)').onclick();
+  await settle();
+  answers[0].reject(new Error('Mémoire vidéo insuffisante.'));
+  await settle();
+  await settle();
+  assert.deepEqual([asked.length, f.said('montage-status'), f.ui.state().filling], [1, ['Création impossible : Mémoire vidéo insuffisante. · 0 plan créé sur 2'], null]);
+  assert.deepEqual(f.plans().map(piece => piece.children[0].textContent), ['1 · À FAIRE', '2 · À FAIRE']);
+  // Leaving the mode ends a series in pause.
+  ({ f, answers, head, open } = await series());
+  await open();
+  f.button('Lancer (2)').onclick();
+  await settle();
+  head('Mettre en pause').onclick();
+  f.runs.push(made(50, 121));
+  answers[0].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  await f.ui.leave();
+  assert.equal(f.ui.state().filling, null);
+});
+
+test('what cannot be created is said with its reason and left aside; a time nobody knows is said unknown (0.6.144)', async () => {
+  // A plan without its text, and the one that goes on from it: nothing to launch, nothing asked to the server.
+  let { f, foreseen, lines, panel, open } = await series({ texts: ['', 'Il regarde la mer.'] });
+  await open();
+  assert.deepEqual([foreseen.length, panel()], [0, ['À créer · 0', 'Rien ne peut être créé pour l’instant']]);
+  assert.deepEqual(lines(), [
+    ['Plan 1 · 5 s', 'Écrivez ce qui se passe dans ce plan.'],
+    ['Plan 2 · 2 s', 'Il continue le plan 1, qui ne peut pas être créé.'],
+  ]);
+  assert.deepEqual(f.get('montage-series-item').map(entry => entry.className), ['montage-series-item is-out', 'montage-series-item is-out']);
+  assert.equal(f.button('Lancer (0)').disabled, true);
+  // The model of the first lacks a file: it cannot be created, nor the one that goes on from it.
+  ({ f, lines, panel, open } = await series({ times: { workflowName: 'LTX 2.5', missing: true } }));
+  await open();
+  assert.deepEqual([panel(), lines().map(line => line[1])], [['À créer · 0', 'Rien ne peut être créé pour l’instant'], ['LTX 2.5 n’est pas prêt : un de ses fichiers manque.', 'Il continue le plan 1, qui ne peut pas être créé.']]);
+  // The server refuses the request (no model for these inputs): its words.
+  ({ lines, open } = await series({ times: new Error('Aucun workflow ne correspond à ces entrées pour create_video.') }));
+  await open();
+  assert.deepEqual(lines().map(line => line[1]), ['Aucun workflow ne correspond à ces entrées pour create_video.', 'Il continue le plan 1, qui ne peut pas être créé.']);
+  // Never made here at that size: the model is said, the time is said unknown; it can be launched.
+  ({ f, lines, panel, open } = await series({ times: { workflowName: 'LTX 2.5', seconds: 5.042 } }));
+  await open();
+  assert.deepEqual([panel(), f.button('Lancer (2)').disabled], [['À créer · 2', 'Durée inconnue : jamais créé ici à cette taille'], false]);
+  // A model that makes clips of its own lengths: said under the plan (4,3 s for the 5 s asked).
+  ({ lines, panel, open } = await series({ times: { workflowName: 'MiniMax H3 Omni', seconds: 4.29, expected: { seconds: 300, exact: false } } }));
+  await open();
+  assert.deepEqual(lines()[0], ['Plan 1 · 5 sMiniMax H3 Omni', '« Il lève les yeux. »', 'Ce modèle en fera 4,3 s.']);
+  // (The second, 2 s after a clip of 4,29 s made in 300 s: 140 s. 440 s in all.)
+  assert.deepEqual(panel(), ['À créer · 2', '≈ 7 min 20 sur votre carte']);
+  // One plan ready, one left aside: said, and counted apart.
+  ({ f, lines, panel, open } = await series({ texts: ['Il lève les yeux.', ''] }));
+  await open();
+  assert.deepEqual([panel(), f.button('Lancer (1)').disabled], [['À créer · 1', '≈ 1 min 50 sur votre carte · 1 plan laissé de côté'], false]);
+  // No plan to make: no « Combler les trous ». No way to create (outside the Studio): none either.
+  const bare = await setup().open();
+  bare.get('montage-take')[0].ondblclick();
+  assert.equal(bare.get('montage-fill').length, 0);
+});
+
+test('the agreement follows the montage: closed by a change, empty while the server is asked, held while the series runs (0.6.144)', async () => {
+  // A change of the montage closes what was shown: it described the montage as it was.
+  let { f, panel, open } = await series();
+  await open();
+  f.plans()[1].onkeydown({ key: 'Delete' });
+  assert.deepEqual([f.ui.state().filling, f.plans().length], [null, 1]);
+  // While the series runs, a plan chosen on the timeline leaves it where it is.
+  ({ f, panel, open } = await series());
+  await open();
+  f.button('Lancer (2)').onclick();
+  await settle();
+  f.plans()[1].onclick();
+  assert.deepEqual([f.ui.state().filling.stage, panel()[0]], ['running', 'Création en cours']);
+  // While the server is asked: « Préparation… », nothing to launch yet. « Annuler » then: its answer, late, opens nothing.
+  let tell = null;
+  const late = await series({ estimate: () => new Promise(resolve => (tell = resolve)) });
+  late.head('Combler les trous').onclick();
+  await settle();
+  assert.deepEqual([late.panel(), late.f.button('Lancer (2)').disabled, late.lines()[0][0]], [['À créer · 2', 'Préparation…'], true, 'Plan 1 · 5 s…']);
+  late.f.button('Annuler').onclick();
+  tell({ workflowName: 'LTX 2.5' });
+  await settle();
+  assert.deepEqual([late.f.ui.state().filling, late.f.get('montage-series-item').length], [null, 0]);
+  // A montage is not set aside under a plan being created: its take would have no montage to go to.
+  const one = await series();
+  one.f.plans()[0].onclick();
+  one.f.button('Créer ce plan').onclick();
+  await settle();
+  one.f.plans()[0].onclick();
+  assert.deepEqual(one.f.said('montage-title-name'), ['Montage']);
+  one.f.button('Supprimer ce montage').onclick();
+  assert.match(one.f.notices.at(-1), /^Un plan est en cours de création/);
+  assert.deepEqual([one.f.calls.some(call => call.route === 'montages/remove'), one.f.button('Confirmer la suppression')], [false, undefined]);
 });

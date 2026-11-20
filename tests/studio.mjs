@@ -6070,6 +6070,8 @@ test('a plan to make of the montage is created as a take of the Studio is, the m
     // Asked as the Studio asks a clip: in the conversation, for the project, by the user's own hand.
     const [, sent] = asked.find(([route]) => route === 'tools/action');
     assert.deepEqual([sent.conversationId, sent.studio, sent.name], ['c1', true, 'create_video']);
+    // (0.6.144) At the size of its film, which the server sets for the model it chooses.
+    assert.deepEqual(sent.size, { width: 1344, height: 768 });
     assert.deepEqual(sent.arguments, { prompt: 'Il lève les yeux.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } });
     // While it is made the montage is still the one on screen, and says it on its timeline.
     assert.deepEqual(seen, [{ mode: 'montage', pieces: ['1 · EN COURS'], status: 'Création du plan 1 · Étape 2 sur 8 · 25 %' }]);
@@ -6097,6 +6099,65 @@ test('a plan to make of the montage is created as a take of the Studio is, the m
     // Said on the montage only: the form of the mode has nothing to say of it.
     await studio.back();
     assert.deepEqual(body.find('studio-error'), []);
+  } finally {
+    studio.restore();
+  }
+});
+
+test('« Combler les trous » asks the server what a plan would be made with, as it will be asked, nothing being made (0.6.144)', async () => {
+  // (Étape 2 du Montage, lot 3. The same request as a creation of the Studio, in its conversation, with
+  // `estimate`: the server answers the model and the time, and keeps nothing of it.)
+  const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
+    clip = { id: 'v9', conversationId: 'c1', mediaType: 'video', workflowName: 'LTX 2.5', prompt: 'Il lève les yeux.', parameters: { frames: 121, fps: 24 }, outputs: [{ take: 9, originalUrl: '/media/v9' }] },
+    video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
+    image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true },
+    runs = [photo],
+    stored = {
+      schemaVersion: 1, id: 'm1', name: 'Film', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
+      plans: [{ id: 'a', kind: 'video', todo: { prompt: 'Il lève les yeux.' }, from: 0, to: 5, frame: 'fit', volume: 1, photos: { start: { conversationId: 'c0', runId: 'p1', output: 0 } } }],
+    };
+  const routes = new Proxy({}, {
+    get: (_, route) =>
+      typeof route !== 'string'
+        ? undefined
+        : route === 'tools/action'
+          ? body => (body.estimate ? { workflowName: 'LTX 2.5', seconds: 5.042, expected: { seconds: 61, exact: true } } : { requestId: 'q', plan: { parameters: {} } })
+          : route === 'montages/save'
+            ? body => ({ ...body.montage, createdAt: 'a', updatedAt: 'b' })
+            : /^montages\/[^/]+\/m1$/.test(route)
+              ? () => stored
+              : /^montages\/[^/]+$/.test(route)
+                ? () => ({ montages: [{ id: 'm1', name: 'Film' }] })
+                : undefined,
+  });
+  let made = 0;
+  const studio = await studioPage({ create_image: [image], create_video: [video] }, routes, {
+    runs,
+    run: async () => {
+      made++;
+      runs.push(clip);
+      return { record: clip };
+    },
+  });
+  const { body, asked } = studio,
+    said = name => body.find(name).map(item => item.textContent || item.children.map(child => child.textContent).join('')),
+    actions = () => asked.filter(([route]) => route === 'tools/action').map(([, sent]) => sent);
+  try {
+    studio.page['studio-kinds'].children[3].onclick();
+    await until(() => body.find('montage-piece').length === 1);
+    body.find('montage-fill')[0].onclick();
+    await until(() => body.find('montage-series-model').some(model => model.textContent === 'LTX 2.5'));
+    // Asked once, as the creation will be: in the conversation, for the project, by the user's own hand.
+    assert.deepEqual(actions(), [
+      { conversationId: 'c1', project: actions()[0].project, studio: true, name: 'create_video', estimate: true, size: { width: 1344, height: 768 }, arguments: { prompt: 'Il lève les yeux.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } } },
+    ]);
+    assert.deepEqual([said('montage-title-name'), said('montage-title-meta'), made, body.dataset.mode], [['À créer · 1'], ['≈ 1 min sur votre carte'], 0, 'montage']);
+    // « Lancer »: the same request, for real this time.
+    body.find('montage-action').find(control => (control.children[0]?.textContent ?? control.textContent) === 'Lancer (1)').onclick();
+    await until(() => made === 1 && body.find('montage-status')[0]?.textContent === '1 plan créé');
+    const [, real] = actions();
+    assert.deepEqual([real.estimate, real.arguments, real.size], [undefined, actions()[0].arguments, { width: 1344, height: 768 }]);
+    assert.equal(body.find('montage-piece')[0].children[0].textContent, '1 · PRISE 9');
   } finally {
     studio.restore();
   }

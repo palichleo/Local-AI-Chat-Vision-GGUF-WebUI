@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { familyCatalog } from '../lib/families.mjs';
+import { ProgressHistory, timingKey } from '../lib/generation-progress.mjs';
 import { CAPABLE } from '../lib/model-wording.mjs';
 import {
   NativeWorkflowCatalog,
@@ -1410,4 +1411,89 @@ test('a policy saved is read again after a start, and a workflow whose file is m
   } finally {
     await rm(user, { recursive: true, force: true });
   }
+});
+
+test('what a creation would be made with, and in how long, is said without keeping anything of the request (0.6.144)', async () => {
+  // (Étape 2 du Montage, lot 3: « Combler les trous » says the model and the time of each plan before
+  // anything is made. On the card, 20/11, a continuation went to another model than expected: five
+  // minutes instead of one. Asked as server.mjs asks it: /api/tools/action with `estimate`.)
+  const ltx = variant('ltx25'),
+    w = world([ltx]),
+    history = new ProgressHistory(join(await mkdtemp(join(tmpdir(), 'foreseen-')), 'timing.json'));
+  w.runtime.timing = history;
+  const byHand = (name, args) =>
+    w.runtime.request(
+      [{ id: 'action' + randomUUID().slice(0, 8), type: 'function', function: { name, arguments: JSON.stringify(args) } }],
+      { conversationId: CONVERSATION, turnId: randomUUID(), messages: [], byHand: true },
+    );
+  const wanted = { prompt: 'Un renard court dans la neige.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5 };
+  let proposal = await byHand('create_video', wanted);
+  const { frames, fps } = proposal.plan.parameters;
+  // Never made here: its model and the length it would make, no time.
+  assert.deepEqual(await w.runtime.foreseen(proposal), { workflowName: ltx.name, seconds: Math.round((frames / fps) * 1000) / 1000 });
+  // A continuation: its frames count what it takes back of its video, its length is not said.
+  const held = randomUUID();
+  w.runtime.pending.set(held, { prepared: { workflow: { name: 'LTX 2.5' }, job: { parameters: { frames: 57, fps: 24, width: 1600, height: 896 } } }, args: { workflow_id: ltx.id }, references: [{ role: 'source_video' }] });
+  assert.deepEqual([await w.runtime.foreseen({ requestId: held }), w.runtime.pending.has(held)], [{ workflowName: 'LTX 2.5' }, false]);
+  // Nothing is kept of it: it can neither be changed nor made.
+  await assert.rejects(revise(w, proposal, { seed: 4 }));
+  await assert.rejects(w.runtime.execute({ requestId: proposal.requestId, permission: 'once', approvalToken: proposal.approvalToken, studio: true }));
+  assert.equal(w.jobs.length, 0);
+  // Made here before at this size and length: that time, said as exact; at another length, brought to this one.
+  await history.save(timingKey(ltx.id, proposal.plan.parameters, 0), [{ mark: 'loading', at: 3 }, { mark: 'done', at: 108.4 }]);
+  proposal = await byHand('create_video', wanted);
+  assert.deepEqual((await w.runtime.foreseen(proposal)).expected, { seconds: 108.4, exact: true });
+  proposal = await byHand('create_video', { ...wanted, duration: 2 });
+  const short = proposal.plan.parameters.frames;
+  assert.deepEqual((await w.runtime.foreseen(proposal)).expected, { seconds: Math.round(((108.4 * short) / frames) * 10) / 10, exact: false });
+  // A request that is no proposal (the files of its model are not there): its name, said as missing.
+  assert.deepEqual(await w.runtime.foreseen({ requestId: randomUUID(), workflowName: 'LTX 2.5', missing: { files: [] } }), { workflowName: 'LTX 2.5', missing: true });
+  // A proposal that is made stays one: asked for real, it is created as before.
+  proposal = await byHand('create_video', wanted);
+  assert.equal((await make(w, proposal, { studio: true })).parameters.frames, frames);
+});
+
+test('a plan of a montage is made at the size of its film, as a size chosen in the Studio is (0.6.144)', async () => {
+  // (Seen on the card, 20/11: asked without a size, the plan of a film of 1344 × 768 came out as a draft
+  // of 512 × 288, the small size of its model. As server.mjs does: /api/tools/action with `size`.)
+  const ltx = variant('ltx25'),
+    w = world([ltx]);
+  const byHand = (name, args) =>
+    w.runtime.request(
+      [{ id: 'action' + randomUUID().slice(0, 8), type: 'function', function: { name, arguments: JSON.stringify(args) } }],
+      { conversationId: CONVERSATION, turnId: randomUUID(), messages: [], byHand: true },
+    );
+  const wanted = { prompt: 'Un renard court dans la neige.', intention: 'Plan d’un montage, demandé dans le Studio.', duration: 5, format: '16:9' },
+    of = proposal => [proposal.plan.parameters.stage, proposal.plan.parameters.width, proposal.plan.parameters.height];
+  const plain = await byHand('create_video', wanted);
+  assert.deepEqual(of(plain), ['draft', 512, 288]);
+  // A large picture for its model: its final, at that very size; made so.
+  const film = await w.runtime.sized(plain, { width: 1344, height: 768 });
+  assert.deepEqual(of(film), ['final', 1344, 768]);
+  assert.deepEqual((({ stage, width, height }) => [stage, width, height])((await make(w, film, { studio: true })).parameters), ['final', 1344, 768]);
+  // The rule of the Studio (stageOf): more than one and a half times the draft of its model is a final,
+  // 768 × 448 included. The size its model proposes is its draft: left as it is, the same proposal.
+  assert.deepEqual(of(await w.runtime.sized(await byHand('create_video', wanted), { width: 768, height: 448 })), ['final', 768, 448]);
+  const same = await byHand('create_video', wanted);
+  assert.equal(await w.runtime.sized(same, { width: 512, height: 288 }), same);
+  // A size its model does not take, or none: left as proposed, and still to be made.
+  const odd = await byHand('create_video', wanted);
+  assert.deepEqual(of(await w.runtime.sized(odd, { width: 1000, height: 30 })), ['draft', 512, 288]);
+  // What is no size is not tried, and a continuation keeps the size of its video: nothing is asked again.
+  const tried = [],
+    change = w.runtime.revise.bind(w.runtime);
+  w.runtime.revise = async request => (tried.push(request), change(request));
+  for (const size of [undefined, {}, { width: 'x', height: 768 }, { width: -4, height: 768 }, { width: 1344.5, height: 768 }]) assert.equal(await w.runtime.sized(odd, size), odd);
+  const kept = await byHand('create_video', wanted);
+  w.runtime.pending.get(kept.requestId).sourceSize = { width: 1600, height: 896 };
+  assert.equal(await w.runtime.sized(kept, { width: 1344, height: 768 }), kept);
+  assert.equal(await w.runtime.sized({ requestId: randomUUID() }, { width: 1344, height: 768 }).then(made => made.plan), undefined, 'no proposal: as it came');
+  assert.equal(tried.length, 0);
+  w.runtime.revise = change;
+  // What is foreseen of it is what will be made: its final, at the size of the film.
+  const history = new ProgressHistory(join(await mkdtemp(join(tmpdir(), 'sized-')), 'timing.json'));
+  w.runtime.timing = history;
+  const sized = await w.runtime.sized(await byHand('create_video', wanted), { width: 1344, height: 768 });
+  await history.save(timingKey(ltx.id, sized.plan.parameters, 0), [{ mark: 'loading', at: 3 }, { mark: 'done', at: 87 }]);
+  assert.deepEqual((await w.runtime.foreseen(sized)).expected, { seconds: 87, exact: true });
 });

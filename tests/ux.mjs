@@ -233,6 +233,12 @@ test('no text of the interface is smaller than 12 px', async () => {
       css.slice(0, 40),
     );
   }
+  // (0.6.144) The second step of the montage wrote its sizes in the `font` shorthand, after a weight,
+  // which the reading above does not see: several texts were under 12 px. Read here for its rules.
+  const step = sheet.slice(sheet.indexOf('Montage, étape 2 (0.6.142)'));
+  assert.ok(step.length > 2000 && step.length < sheet.length / 2);
+  const under = [...step.matchAll(/([^{}]+)\{[^{}]*font:\s*\d+ ([\d.]+)px[^{}]*\}/g)].filter(([rule, , size]) => Number(size) < 12 && !(Number(size) === 10.5 && /letter-spacing: 0\.\d+em/.test(rule) && /text-transform: uppercase/.test(rule)));
+  assert.deepEqual(under.map(([, selector, size]) => selector.trim() + ' ' + size), []);
   // A bare <small> does not fall back on the browser's « smaller » (11,7 px in a 14 px page).
   assert.match(sheet, /\nsmall \{\s+font-size: var\(--size-1\);/);
   // One exception, decided on 16/11: the small capitals of the labels (« SORTIE », « PRISE 4 »,

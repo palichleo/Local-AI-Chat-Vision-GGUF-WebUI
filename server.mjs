@@ -2023,7 +2023,10 @@ export async function createApplication({
         // In a conversation the output buttons, and every creation of its Studio (`studio`); the
         // former Studio, which had no conversation, keeps its own identifier.
         const studio = body.studio === true || body.conversationId === STUDIO_ID;
-        if (typeof body.conversationId === 'string' && body.project !== undefined)
+        // (0.6.144) `estimate`: asked only to know what it would be made with and in how long (the
+        // montage, before a series of plans): answered, and nothing is kept of the request.
+        const estimate = studio && body.estimate === true;
+        if (typeof body.conversationId === 'string' && body.project !== undefined && !estimate)
           namedProjects.set(body.conversationId, projectOf(body.project));
         const allowed = studio ? STUDIO_VERBS : ['upscale', 'interpolate'];
         if (!allowed.includes(body.name)) throw problem('Action inconnue.');
@@ -2035,17 +2038,17 @@ export async function createApplication({
           type: 'function',
           function: { name: body.name, arguments: JSON.stringify(body.arguments) },
         };
-        return send(
-          200,
-          await runtime.request([call], {
-            conversationId: body.conversationId,
-            turnId: randomUUID(),
-            messages: [],
-            ...(body.styles !== undefined ? { styles: body.styles } : {}),
-            // The user's own hand (0.6.94): a workflow not offered to Moodix AI stays theirs.
-            byHand: true,
-          }),
-        );
+        const proposed = await runtime.request([call], {
+          conversationId: body.conversationId,
+          turnId: randomUUID(),
+          messages: [],
+          ...(body.styles !== undefined ? { styles: body.styles } : {}),
+          // The user's own hand (0.6.94): a workflow not offered to Moodix AI stays theirs.
+          byHand: true,
+        });
+        // (0.6.144) `size`: a plan of a montage, made at the size of its film (ToolRuntime.sized).
+        const sized = studio && body.size !== undefined ? await runtime.sized(proposed, body.size) : proposed;
+        return send(200, estimate ? await runtime.foreseen(sized) : sized);
       }
       // A Studio mode is opened: the chat model leaves the GPU before the first generation, whether
       // it is loaded or still loading. Never under an answer, a generation or a change of model, and

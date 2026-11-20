@@ -383,6 +383,39 @@ export function linkOf(montage, id, lengthOf = () => null) {
 }
 
 /**
+ * (0.6.144) The plans to make of the montage, in the order of the film, as a series creates them one
+ * after the other (« le modèle s'occupe de combler les trous »): `[{ id, number, seconds, prompt,
+ * kind, ready, reason, after }]`.
+ * - `ready`: what it needs is there now (creationOf), or will be once the plan to make right before
+ *   it (`after`: its id), itself ready, is made: it goes on from it, and is created in its turn;
+ * - else `reason`, in the user's words. A plan that goes on from one that cannot be created cannot
+ *   be either.
+ * `kind`: what it goes on from (linkOf).
+ */
+export function seriesOf(montage, lengthOf = () => null) {
+  const items = [];
+  montage.plans.forEach((plan, index) => {
+    if (!isTodo(plan)) return;
+    const prompt = (plan.todo.prompt ?? '').trim(),
+      link = linkOf(montage, plan.id, lengthOf),
+      // (The plan before it is to make too: the last one read. Without its text it waits for nothing.)
+      before = link.kind === 'wait' && prompt ? items.at(-1) : null,
+      reason = before ? (before.ready ? '' : `Il continue le plan ${index}, qui ne peut pas être créé.`) : (creationOf(montage, plan.id, lengthOf).reason ?? '');
+    items.push({
+      id: plan.id,
+      number: index + 1,
+      seconds: tenth(plan.to - plan.from),
+      prompt,
+      kind: link.kind,
+      ready: !reason,
+      reason,
+      after: before?.ready ? before.id : null,
+    });
+  });
+  return items;
+}
+
+/**
  * What must be asked for a plan to make to be created, read on the montage: `{ verb, prompt, duration,
  * format, start, end, continues, from }`, or `{ reason }` in the user's words when it cannot be yet.
  * `lengthOf(source)`: the length of a take of the project, or null.
