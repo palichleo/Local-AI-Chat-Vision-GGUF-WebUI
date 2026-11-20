@@ -96,6 +96,8 @@ const staticFiles = new Map([
   ['/fonts/JetBrainsMono-Variable.ttf', ['fonts/JetBrainsMono-Variable.ttf', 'font/ttf']],
   ['/studio-pointer.mjs', ['studio-pointer.mjs', 'text/javascript; charset=utf-8']],
   ['/studio-explain.mjs', ['studio-explain.mjs', 'text/javascript; charset=utf-8']],
+  ['/montage.mjs', ['montage.mjs', 'text/javascript; charset=utf-8']],
+  ['/montage-model.mjs', ['montage-model.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-search.mjs', ['settings-search.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-tabs.mjs', ['settings-tabs.mjs', 'text/javascript; charset=utf-8']],
   ['/help-tips.mjs', ['help-tips.mjs', 'text/javascript; charset=utf-8']],

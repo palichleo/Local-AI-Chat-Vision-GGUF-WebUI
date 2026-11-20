@@ -14,6 +14,7 @@ The top bar has three tabs, and the gear icon opens **Paramètres** (settings).
 
 - **Chat**: talk with Moodix AI, attach images or videos, and let it create. Images are made at once; every video and every sound waits on a proposal card until you agree.
 - **Studio**: create by hand. Choose **Image**, **Vidéo** or **Son**, write the prompt, add an image to modify, start, end and reference images, or a video and the character to put in it, set the format, resolution, duration, LoRAs and seed, then **Générer**. Each result joins the strip of takes at the bottom (**Sortie**), where a video can be continued (**Prolonger**) and an image modified (**Modifier**) or animated (**Animer**).
+- **Montage**, the fourth mode of the Studio: the takes of the project laid on a timeline by hand. Drag a take to the timeline or double-click it to lay it at the end (videos and images on **Plans**, sounds on **Musique** or **Bruitages**); choose a plan to keep only a part of it, frame it (**Ajuster** or **Remplir**), set its sound or move it; read the montage on the screen; **Exporter le film** assembles it (no model, no graphics card) and adds the film to the takes of the project. A montage is kept with its project; the takes it shows are never changed.
 - **Pellicule**: every creation, by day, filtered by project, by conversation and by kind (images, videos, sounds).
 
 A take, wherever it is shown, can also be upscaled (**Agrandir et affiner**) and a video given in-between frames (**Interpoler**).

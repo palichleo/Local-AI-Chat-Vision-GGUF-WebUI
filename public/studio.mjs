@@ -11,6 +11,7 @@ import { explanation, foldPrompt } from './studio-explain.mjs';
 import { clipPlayer, stillClip } from './take-player.mjs';
 import { elapsedClock } from './generation-time.mjs';
 import { SETTING_NAMES } from './setting-names.mjs';
+import { setupMontage } from './montage.mjs';
 
 /**
  * The Studio: the creation tools of the conversation, beside the chat. Four blocks that never
@@ -553,6 +554,21 @@ export function setupStudio({
   // Image · Vidéo · Son: drawn in the head of the screen, put back above it when there is none.
   let kindsEl = null;
   const kindsBar = () => (kindsEl ??= $('studio-kinds'));
+  // (0.6.137) « Montage », a fourth mode beside Image · Vidéo · Son: the takes of the project laid on
+  // a timeline, read and exported as one film (public/montage.mjs). It makes nothing itself; the
+  // three others stay as they were left behind it.
+  let editing = false;
+  const montage = setupMontage({
+    api,
+    node,
+    icon,
+    notice,
+    project: () => project(),
+    runs: () => runs,
+    refresh: () => refresh(),
+    ensureConversation: () => ensureConversation(),
+    showTake: record => viewOutput(record, 0),
+  });
   // The setting Moodix AI is changing wears a ring, those it has set a fine trace, while it works.
   // Once it has stopped, nothing is framed any more. (0.6.92: no mark on the settings it may change
   // any more; there would be one on almost every setting.)
@@ -4433,15 +4449,15 @@ export function setupStudio({
     const pill = $('studio-pill-text'),
       about = modeOf(mode);
     if (pill) {
-      pill.textContent = 'Studio · ' + about.label;
-      pill.parentElement?.querySelector?.('use')?.setAttribute('href', '#i-' + about.icon);
+      pill.textContent = 'Studio · ' + (editing ? 'Montage' : about.label);
+      pill.parentElement?.querySelector?.('use')?.setAttribute('href', '#i-' + (editing ? 'frames' : about.icon));
     }
     const bar = kindsBar();
     if (!bar) return;
     bar.removeAttribute('data-ai-active');
     bar.removeAttribute('data-ai-touched');
     aiTarget(bar, 'kind');
-    if (bar.children.length !== MODES.length) {
+    if (bar.children.length !== MODES.length + 1) {
       bar.replaceChildren(
         ...MODES.map(item => {
           const tab = node('button', 'kind-tab');
@@ -4461,18 +4477,34 @@ export function setupStudio({
           return tab;
         }),
       );
+      // (0.6.137) « Montage », after them.
+      const film = node('button', 'kind-tab');
+      film.type = 'button';
+      film.setAttribute('role', 'tab');
+      film.setAttribute('aria-label', 'Montage');
+      film.title = 'Montage';
+      film.dataset.tip = 'Montage';
+      film.dataset.mode = 'montage';
+      film.append(icon('frames'), node('span', 'kind-tab-name', 'Montage'));
+      film.onclick = () => {
+        chooseMontage();
+        if (globalThis.document?.body?.dataset?.view !== 'studio') openStudio();
+      };
+      bar.append(film);
       // The arrows go from one mode to the next, as in any row (or column) of tabs.
       bar.onkeydown = event => {
         const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
         if (!step || working) return;
         event.preventDefault();
-        const next = MODES[(MODES.findIndex(item => item.id === mode) + step + MODES.length) % MODES.length];
-        chooseMode(next.id);
-        for (const tab of bar.children) if (tab.dataset.mode === next.id) tab.focus?.();
+        const ring = [...MODES.map(item => item.id), 'montage'],
+          next = ring[(ring.indexOf(editing ? 'montage' : mode) + step + ring.length) % ring.length];
+        if (next === 'montage') chooseMontage();
+        else chooseMode(next);
+        for (const tab of bar.children) if (tab.dataset.mode === next) tab.focus?.();
       };
     }
     for (const tab of bar.children) {
-      const chosen = tab.dataset.mode === mode;
+      const chosen = tab.dataset.mode === (editing ? 'montage' : mode);
       tab.setAttribute('aria-selected', String(chosen));
       tab.tabIndex = chosen ? 0 : -1;
       tab.disabled = Boolean(working);
@@ -4486,8 +4518,21 @@ export function setupStudio({
     const bar = kindsBar();
     if (bar && !body.contains?.(bar)) body.parentElement?.insertBefore?.(bar, body);
   }
+  /** (0.6.137) « Montage »: the timeline of the project in the place of the form of a mode. */
+  function chooseMontage() {
+    if (working || aiWorking || editing) return;
+    if (ai) takeOver();
+    editing = true;
+    render();
+  }
   function chooseMode(id) {
-    if (working || mode === id || aiWorking) return;
+    if (working || aiWorking) return;
+    // (0.6.137) Back from « Montage »: the mode it was left in is as it was, another is chosen.
+    if (editing) {
+      editing = false;
+      void montage.leave();
+      if (mode === id) return render();
+    } else if (mode === id) return;
     if (ai) takeOver();
     setMode(id);
     release();
@@ -4868,6 +4913,11 @@ export function setupStudio({
     kinds();
     const body = $('studio-body');
     if (!body) return;
+    // (0.6.137) A creation begins or a proposal of Moodix AI arrives: the Studio is its mode again.
+    if (editing && (working || proposal)) {
+      editing = false;
+      void montage.leave();
+    }
     // The drafts are named after their conversation: at the first drawing, and when a new one gets
     // its identifier (its first take) while they are on the page.
     if (draftsKey === null || (draftsKey.startsWith('new|') && conversation())) draftsKey = draftKey();
@@ -4884,6 +4934,19 @@ export function setupStudio({
         flux = null;
       }
       body.replaceChildren(awayPanel());
+      return;
+    }
+    // (0.6.137) « Montage »: its own desk, the same four blocks (public/montage.mjs). It needs none of the
+    // tools of the Studio: shown while they are read, its takes come with them.
+    if (editing) {
+      if (flux) {
+        flux.flux.stop();
+        flux = null;
+      }
+      promptWatch?.disconnect();
+      promptWatch = null;
+      body.dataset.mode = 'montage';
+      body.replaceChildren(montage.desk(kindsBar()));
       return;
     }
     if (!info) {

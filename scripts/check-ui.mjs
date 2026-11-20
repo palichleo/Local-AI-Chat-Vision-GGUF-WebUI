@@ -571,6 +571,12 @@ try {
   await run('studio', () => click('#studio-open'), view('studio'));
   for (const mode of ['Vidéo', 'Son', 'Image'])
     await run('mode ' + mode, () => click(`#studio-kinds .kind-tab[aria-label="${mode}"]`), view('studio'));
+  // (0.6.137) « Montage », the fourth mode: the timeline in the place of the Sortie, the four blocks whole
+  // in the window, three tracks, nothing to export yet, the page not scrolling; then back to Image.
+  await run('mode Montage', () => click('#studio-kinds .kind-tab[aria-label="Montage"]'), () =>
+    js(`(() => { const desk = document.querySelector('#studio-view .studio-desk.is-montage'); if (!desk) return false; const blocks = [...desk.querySelectorAll('.studio-block')]; return blocks.length === 4 && blocks.every(block => { const box = block.getBoundingClientRect(); return box.width > 100 && box.height > 100 && box.bottom <= innerHeight + 1 && box.right <= innerWidth + 1; }) && document.querySelector('#studio-kinds .kind-tab[aria-selected="true"]')?.dataset.mode === 'montage' && desk.querySelectorAll('.montage-track').length === 3 && desk.querySelector('.montage-export').disabled && desk.querySelector('.montage-frame').getBoundingClientRect().height > 80 && document.documentElement.scrollHeight <= innerHeight + 1; })()`), { within: 2500 });
+  await run('retour au mode Image', () => click('#studio-kinds .kind-tab[aria-label="Image"]'), () =>
+    js(`!document.querySelector('#studio-view .studio-desk.is-montage') && document.querySelector('#studio-kinds .kind-tab[aria-selected="true"]')?.dataset.mode === 'image'`), { within: 1500 });
   await run('Agent', () => click('#studio-view .studio-agent'), () => js(`document.body.dataset.chat === 'open'`));
   await run('Échap (Agent)', () => key('Escape', 'Escape', 27), () => js(`document.body.dataset.chat !== 'open'`));
   // (0.6.95) A video proposed from the chat of the Agent: the pointer sets it in the Studio, and what

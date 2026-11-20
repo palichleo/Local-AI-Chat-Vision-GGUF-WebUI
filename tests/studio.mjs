@@ -712,7 +712,7 @@ test('another mode stops following the size of the frame it leaves', async () =>
     assert.equal(page['studio-body'].dataset.mode, 'image');
     assert.deepEqual(
       page['studio-kinds'].children.map(tab => tab.dataset.mode),
-      ['image', 'video', 'audio'],
+      ['image', 'video', 'audio', 'montage'],
     );
     const following = observers.at(-1);
     assert.ok(following.watched, 'the frame follows its stage');
@@ -1129,6 +1129,7 @@ test('Image, Vidéo and Son at the top of the screen: icons named, there from th
         ['tab', 'Image', 'Image', 'Image'],
         ['tab', 'Vidéo', 'Vidéo', 'Vidéo'],
         ['tab', 'Son', 'Son', 'Son'],
+        ['tab', 'Montage', 'Montage', 'Montage'],
       ],
       'an icon each and its name (shown beside it for the one chosen), for screen readers and in its tooltip',
     );
@@ -1146,6 +1147,21 @@ test('Image, Vidéo and Son at the top of the screen: icons named, there from th
     page['studio-kinds'].onkeydown({ key: 'ArrowDown', preventDefault() {} });
     assert.equal(body.dataset.mode, 'video');
     page['studio-kinds'].onkeydown({ key: 'ArrowLeft', preventDefault() {} });
+    assert.equal(body.dataset.mode, 'image');
+    // (0.6.137) « Montage », the fourth: the timeline of the project in the place of the form of a mode
+    // (public/montage.mjs, tests/montage-ui.mjs); the mode left is behind it as it was.
+    tabs[3].onclick();
+    assert.equal(body.dataset.mode, 'montage');
+    assert.deepEqual(tabs.map(tab => tab.attributes['aria-selected']), ['false', 'false', 'false', 'true']);
+    assert.match(String(body.children[0].className), /studio-desk is-montage/);
+    tabs[0].onclick();
+    assert.equal(body.dataset.mode, 'image');
+    assert.deepEqual(tabs.map(tab => tab.attributes['aria-selected']), ['true', 'false', 'false', 'false']);
+    assert.doesNotMatch(String(body.children[0].className), /is-montage/);
+    // The arrows reach it too: before Image one way, after Son the other.
+    page['studio-kinds'].onkeydown({ key: 'ArrowLeft', preventDefault() {} });
+    assert.equal(body.dataset.mode, 'montage');
+    page['studio-kinds'].onkeydown({ key: 'ArrowRight', preventDefault() {} });
     assert.equal(body.dataset.mode, 'image');
   } finally {
     restore();
@@ -2517,6 +2533,33 @@ test('a recorded proposal replayed: the pointer does what Moodix AI proposes, in
     assert.equal(body.find('studio-decline').length, 1);
     assert.equal(body.find('studio-shelf').length, 0);
     assert.equal(asked.filter(([route]) => route.startsWith('tools/')).length, 0);
+    studio.studio.decline();
+    assert.equal(await answer, 'deny');
+  } finally {
+    restore();
+  }
+});
+
+test('a proposal of Moodix AI that arrives while the Studio shows a montage takes it back to its mode (0.6.137)', async () => {
+  // (The montage hid the form: the pointer would have set a Studio nobody saw, « Générer » out of sight.)
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    said = [];
+  const studio = await studioPage(tools, {}, { runs, cursor: said, targets: true });
+  const { body, page, restore } = studio;
+  try {
+    page['studio-kinds'].children[3].onclick();
+    assert.equal(body.dataset.mode, 'montage');
+    assert.equal(body.find('montage-timeline').length, 1);
+    const answer = studio.studio.propose(structuredClone(recorded.request), new AbortController().signal);
+    await until(() => said.includes('attend votre accord'));
+    assert.equal(body.dataset.mode, 'video');
+    assert.equal(body.find('montage-timeline').length, 0);
+    assert.equal(studio.prompt().value, recorded.request.plan.prompt);
+    assert.deepEqual(
+      page['studio-kinds'].children.map(tab => tab.attributes['aria-selected']),
+      ['false', 'true', 'false', 'false'],
+    );
     studio.studio.decline();
     assert.equal(await answer, 'deny');
   } finally {
