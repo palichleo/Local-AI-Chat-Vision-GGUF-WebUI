@@ -38,8 +38,11 @@ test('Wan 2.2 is shipped as a model that animates an image, its settings the use
   );
   for (const name of Object.keys(p)) if (isSetting(name)) assert.equal(p[name].policy, 'fixed', name);
   assert.deepEqual(ownSettings(plain), plain);
-  // The values of the official configuration (wan/configs/wan_i2v_A14B.py): guidance, shift, rate.
-  assert.deepEqual([p.cfg.value, p.shift.value, p.fps.value, p.frames.default], [3.5, 5, 16, 81]);
+  // (0.6.139) With its step LoRAs (« Lightning », one for each of its two models): four steps and no
+  // guidance, where the official configuration takes forty steps at 3.5; its shift and its rate stay.
+  assert.deepEqual([p.steps.value, p.cfg.value, p.step_lora_strength.value, p.shift.value, p.fps.value, p.frames.default], [4, 1, 1, 5, 16, 81]);
+  assert.deepEqual(Object.keys(wan.components), ['model', 'modelLow', 'textEncoder', 'vae', 'stepLora', 'stepLoraLow']);
+  assert.deepEqual([wan.components.stepLora.file, wan.components.stepLoraLow.file].map(file => /high|low/.exec(file)[0]), ['high', 'low']);
   assert.match(p.negative_prompt.value, /^色调艳丽，过曝，静态/);
   // Every length is 4n + 1 frames, as the model draws them.
   assert.ok(p.frames.choices.every(count => count % 4 === 1));
@@ -144,5 +147,5 @@ test('a file of a shipped model has an identifier of its own family: none is sha
       if (entry.asset) owners.set(entry.asset, (owners.get(entry.asset) ?? new Set()).add(workflow.pipeline));
   const sharedIds = [...owners].filter(([, families]) => families.size > 1).map(([id, families]) => [id, [...families]]);
   assert.deepEqual(sharedIds, []);
-  assert.equal(new Set(Object.values(wan.components).map(component => component.asset)).size, 4);
+  assert.equal(new Set(Object.values(wan.components).map(component => component.asset)).size, 6);
 });

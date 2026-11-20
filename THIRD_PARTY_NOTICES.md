@@ -109,7 +109,7 @@ The licenses below were read at their source on 17 November 2026. A license can 
 | MOSS-SoundEffect v2 — `OpenMOSS-Team/MOSS-SoundEffect-v2.0`, with its Qwen3-1.7B text encoder | Apache-2.0 | |
 | ACE-Step 1.5 XL — `ACE-Step/acestep-v15-xl-sft-diffusers` | MIT | |
 | Wan 2.1 SCAIL-2 — `Comfy-Org/SCAIL-2`, with the UMT5 and CLIP encoders of `Comfy-Org/Wan-2.1`, the Wan VAE and the lightx2v LoRA of `Kijai/WanVideo_comfy` | MIT on the model page of `zai-org/SCAIL-2`, Apache-2.0 for its code, for Wan 2.1 and for lightx2v | `Kijai/WanVideo_comfy` declares no license of its own; its files are conversions of Apache-2.0 ones. |
-| Wan 2.2 image to video 14B — `obsxrver/ComfyUI-Native-INT8_ConvRot` (INT8 conversions of `Wan-AI/Wan2.2-I2V-A14B`), with the UMT5 encoder of `Comfy-Org/Wan-2.1` and the Wan VAE of `Kijai/WanVideo_comfy` | Apache-2.0 for Wan 2.2 and Wan 2.1 | `obsxrver/ComfyUI-Native-INT8_ConvRot` and `Kijai/WanVideo_comfy` declare no license of their own; their files are conversions of Apache-2.0 ones. |
+| Wan 2.2 image to video 14B — `obsxrver/ComfyUI-Native-INT8_ConvRot` (INT8 conversions of `Wan-AI/Wan2.2-I2V-A14B`), with the UMT5 encoder of `Comfy-Org/Wan-2.1`, the Wan VAE of `Kijai/WanVideo_comfy` and the two step LoRAs of `lightx2v/Wan2.2-Lightning` (I2V-A14B, 4 steps, rank 64) | Apache-2.0 for Wan 2.2, Wan 2.1 and Wan2.2-Lightning | `obsxrver/ComfyUI-Native-INT8_ConvRot` and `Kijai/WanVideo_comfy` declare no license of their own; their files are conversions of Apache-2.0 ones. |
 | SeedVR2 7B — `Comfy-Org/SeedVR2` | Apache-2.0 | |
 | Real-ESRGAN x2plus, x4plus — releases of `xinntao/Real-ESRGAN` | BSD-3-Clause | |
 | RIFE 4.26 — `Comfy-Org/Frame-Interpolation` | MIT | |

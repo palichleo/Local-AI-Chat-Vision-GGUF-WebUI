@@ -11,6 +11,12 @@ guidance of 3.5 (each step reads the prompt, then what to avoid, and goes 3.5 ti
 the second than the first does), 16 frames a second, 4n + 1 frames. The steps are Euler's, as
 for the other models here; the official code takes 40 of UniPC's.
 
+Each model has its step LoRA (components `stepLora` and `stepLoraLow`: lightx2v's « Lightning »,
+Apache-2.0), applied as the model runs, as SCAIL-2's are: with them four steps are enough, two
+for each model, and no guidance (1: the prompt alone, one pass a step). 81 frames at 768 x 448
+are then four passes where the official recipe takes forty. At a strength of 0 they are left
+out: the official recipe again, with its steps and its guidance.
+
 The start image fills the picture asked (what overflows is cut equally on both sides): the
 job's width and height are those of the video.
 """
@@ -21,9 +27,10 @@ from pathlib import Path
 
 from runner import hardware
 
-STEPS = 20
+# With the step LoRAs, as the application ships the model; without them: 20 to 40 steps, 3.5.
+STEPS = 4
 SHIFT = 5.0
-GUIDANCE = 3.5
+GUIDANCE = 1.0
 FPS = 16
 # What the official configuration asks the model to avoid (`sample_neg_prompt`), read when the
 # job gives nothing: garish colours, overexposure, a still picture, blurred details, subtitles,
@@ -36,6 +43,9 @@ AVOIDED = (
 # The component that holds each of the two models.
 COMPONENTS = dict(high='model', low='modelLow')
 SAID = dict(high='bruit fort', low='bruit faible')
+# The step LoRA of each, and the strength both are applied at.
+LORAS = dict(high='stepLora', low='stepLoraLow')
+LORA_STRENGTH = 1.0
 # As runner.pipelines.wan_scail2: RAM the weights leave free, what is locked beyond what is
 # copied, what is copied to the GPU ahead of the layers that read it.
 RAM_RESERVE_GIB = 4
@@ -86,8 +96,16 @@ def check(job, family):
         raise ValueError('Wan 2.2 needs one start image')
 
 
+def lora_of(job, kind):
+    """The step LoRA of one of the two models, {path, strength}; None when the job has none or
+    sets its strength to 0."""
+    path = job['components'].get(LORAS[kind])
+    strength = float(job['parameters'].get('step_lora_strength', LORA_STRENGTH))
+    return dict(path=path, strength=strength) if path and strength > 0 else None
+
+
 def preflight(job, config):
-    from runner.models import wan22
+    from runner.models import wan22, wan_scail2
     from runner.models.headers import header
 
     check(job, None)
@@ -102,6 +120,17 @@ def preflight(job, config):
                 f'Le fichier choisi pour le modèle « {SAID[kind]} » de Wan 2.2 est celui du modèle '
                 f'« {SAID[said]} » : échangez les deux fichiers dans les réglages de ce modèle.'
             )
+        lora = lora_of(job, kind)
+        if lora:
+            entries = header(lora['path'])
+            # A LoRA of another model (Wan 2.1's has layers this one lacks) is refused by name.
+            wan_scail2.validate_lora(entries, found)
+            said = wan22.expert(entries, lora['path'])
+            if said and said != kind:
+                raise ValueError(
+                    f'Le LoRA d’étapes choisi pour le modèle « {SAID[kind]} » de Wan 2.2 est celui du modèle '
+                    f'« {SAID[said]} » : échangez les deux fichiers dans les réglages de ce modèle.'
+                )
     # An image that cannot be read is refused here, before the chat model is unloaded.
     from PIL import Image
 
@@ -187,8 +216,8 @@ class _Expert:
     """One of the two models streamed from its file, opened with a share of its weights on the
     GPU and closed whole."""
 
-    def __init__(self, kind, path, names):
-        self.kind, self.path, self.names = kind, path, names
+    def __init__(self, kind, path, names, lora=None):
+        self.kind, self.path, self.names, self.lora = kind, path, names, lora
         self.stack = self.pool = self.model = None
         self.facts = {}
 
@@ -201,8 +230,16 @@ class _Expert:
 
         self.stack = ExitStack()
         store = self.stack.enter_context(open_store(self.path))
-        self.pool = WeightPool({'model': store}, budget, ahead_gib=AHEAD_GIB)
+        stores, adapters = {'model': store}, []
+        if self.lora:
+            stores['lora'] = self.stack.enter_context(open_store(self.lora['path']))
+            adapters.append(('lora', self.lora['strength']))
+        self.pool = WeightPool(stores, budget, adapters=adapters, ahead_gib=AHEAD_GIB)
         self.model = load_streamed(wan22.architecture(), self.names, self.pool)
+        # What a step LoRA adds to the biases and the norms, beside its pairs (runner.models.wan_scail2).
+        differences = sum(
+            wan_scail2.add_differences(self.model, self.pool, source, strength) for source, strength in adapters
+        )
         fused, fast = wan_block.fuse(self.model)
         if not fused:
             fast = wan_scail2.use_int8_attention(self.model)
@@ -222,6 +259,8 @@ class _Expert:
             pinned_model=store.pinned,
             fused_blocks=fused,
             attention='int8' if fast else 'pytorch',
+            lora_layers=self.pool.applied(),
+            lora_differences=differences,
         )
         return self
 
@@ -240,6 +279,8 @@ class _Expert:
         # The other model is read next, in this video or at the start of the one after: what was
         # locked in RAM of this one leaves now, for the other to have the whole share.
         RESIDENCY.forget(self.path)
+        if self.lora:
+            RESIDENCY.forget(self.lora['path'])
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -320,6 +361,8 @@ def generate(job, config, progress):
         # 3. The steps: the « high noise » model, then the « low noise » one.
         levels = scail.sigmas(steps, shift)
         plan = experts(levels)
+        # (A step LoRA is counted in the share of its model: the pool puts it on the card first.)
+        loras = {kind: lora_of(job, kind) for kind in COMPONENTS}
         room = max(0.0, hardware.free_bytes(torch) / GiB - working_gib(count) - AHEAD_GIB)
         state = dict(budget=min(config.get('cacheGiB', 16), room), open=None, rotary=None)
         noise = torch.randn(
@@ -335,7 +378,8 @@ def generate(job, config, progress):
                 current.close()
                 current = None
             if current is None:
-                current = state['open'] = _Expert(plan[index], paths[COMPONENTS[plan[index]]], names[plan[index]])
+                kind = plan[index]
+                current = state['open'] = _Expert(kind, paths[COMPONENTS[kind]], names[kind], loras[kind])
             if current.model is None:
                 progress(stage='loading video model', expert=current.kind)
                 progress(stage='sampling video', **current.open(state['budget']).facts)
@@ -409,6 +453,7 @@ def generate(job, config, progress):
         frames=frames,
         fps=p['fps'],
         steps_by_expert={kind: plan.count(kind) for kind in COMPONENTS},
+        step_loras=[kind for kind in COMPONENTS if loras[kind]],
         audio=False,
         timeline=timeline,
         weight_cache=cache,

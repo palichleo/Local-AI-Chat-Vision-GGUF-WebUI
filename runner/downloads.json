@@ -622,5 +622,27 @@
       "url": "https://spdx.org/licenses/Apache-2.0.html",
       "limits": "obsxrver/ComfyUI-Native-INT8_ConvRot ne déclare pas de licence propre ; ses fichiers sont des conversions de Wan 2.2 (Wan-AI/Wan2.2-I2V-A14B, Apache-2.0)."
     }
+  },
+  "wan2.2_i2v_lightning_4steps_rank64_high_noise.safetensors": {
+    "repo": "lightx2v/Wan2.2-Lightning",
+    "revision": "18bccf8884ec0a078eed79785eb4ef13ea16ce1e",
+    "path": "Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/high_noise_model.safetensors",
+    "size": 1226977424,
+    "sha256": "d176c808d6fc461999b68e321efcb7501b20b8c3797523ed0df14f7d1deff11e",
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://spdx.org/licenses/Apache-2.0.html"
+    }
+  },
+  "wan2.2_i2v_lightning_4steps_rank64_low_noise.safetensors": {
+    "repo": "lightx2v/Wan2.2-Lightning",
+    "revision": "18bccf8884ec0a078eed79785eb4ef13ea16ce1e",
+    "path": "Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/low_noise_model.safetensors",
+    "size": 1226977424,
+    "sha256": "024f21de095bc8fad9809ded3e9e49a2e170dcf27075da8145ba7d60d8aab7f9",
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://spdx.org/licenses/Apache-2.0.html"
+    }
   }
 }

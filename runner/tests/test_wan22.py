@@ -176,8 +176,23 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(wan22.expert(silent, 'D:\\models\\wan2.2_i2v_low_noise_14B_fp16.safetensors'), 'low')
         self.assertEqual(wan22.expert(silent, '/models/Wan2_2-I2V-A14B-HIGH_bf16.safetensors'), 'high')
         self.assertIsNone(wan22.expert(silent, '/models/high/wan22_a.safetensors'))
-        self.assertIsNone(wan22.expert(silent, '/models/wan22_high_lowvram.safetensors'))
+        self.assertIsNone(wan22.expert(silent, '/models/wan22_high_then_low.safetensors'))
         self.assertIsNone(wan22.expert({}, ''))
+        # (0.6.139) A step LoRA says nothing of itself: its name alone tells, as a word of its own.
+        # « flow », « slow », « lowvram » are no word about the model: a LoRA named so is not taken
+        # for the other model's and refused.
+        for name, said in (
+            ('wan2.2_i2v_lightning_4steps_rank64_high_noise.safetensors', 'high'),
+            ('wan2.2_i2v_lightning_4steps_rank64_low_noise.safetensors', 'low'),
+            ('Wan22-Lightning-I2V-HighNoise-rank64.safetensors', 'high'),
+            ('wan22 low noise.safetensors', 'low'),
+            ('wan22_high_lowvram.safetensors', 'high'),
+            ('wan22_flow_lightning_high.safetensors', 'high'),
+            ('wan22_flow_lightning.safetensors', None),
+            ('slow_motion_wan22.safetensors', None),
+            ('highlights_wan22.safetensors', None),
+        ):
+            self.assertEqual(wan22.expert({}, 'D:\\loras\\' + name), said, name)
 
 
 def job(**changes):
@@ -205,9 +220,18 @@ class RuleTests(unittest.TestCase):
         for made in (workflow['parameters'], manifest['template']['parameters']):
             self.assertEqual(made['negative_prompt']['value'], pipeline.AVOIDED)
             self.assertEqual(
-                [made[name]['value'] for name in ('steps', 'cfg', 'shift', 'fps')],
-                [pipeline.STEPS, pipeline.GUIDANCE, pipeline.SHIFT, pipeline.FPS],
+                [made[name]['value'] for name in ('steps', 'cfg', 'shift', 'fps', 'step_lora_strength')],
+                [pipeline.STEPS, pipeline.GUIDANCE, pipeline.SHIFT, pipeline.FPS, pipeline.LORA_STRENGTH],
             )
+        # (0.6.139) Shipped with its step LoRAs, one for each model: four steps, two each, and no
+        # guidance. Both files are asked for, as the two models are, and each is named for its model.
+        self.assertEqual((pipeline.STEPS, pipeline.GUIDANCE), (4, 1.0))
+        plan = pipeline.experts(scail.sigmas(pipeline.STEPS, pipeline.SHIFT))
+        self.assertEqual(plan, ['high', 'high', 'low', 'low'])
+        for kind, name in pipeline.LORAS.items():
+            self.assertTrue(manifest['components'][name]['required'], name)
+            self.assertEqual(manifest['components'][name]['folder'], 'loras')
+            self.assertEqual(wan22.expert({}, workflow['components'][name]['file']), kind)
         # The job the application sends for it is one the engine takes.
         folder = Path.cwd()
         sent = dict(
@@ -274,6 +298,150 @@ class RuleTests(unittest.TestCase):
                     self.assertEqual(opened.size, (64, 64))
                 with self.assertRaises(Exception):
                     pipeline.preflight(job(components=right, image=broken), {})
+
+
+LORA = 'diffusion_model.blocks.{}.{}.{}'
+
+
+def lora_header(layers=('self_attn.q', 'cross_attn.k', 'ffn.0'), blocks=(0, 39), more=None):
+    """The header of a step LoRA as lightx2v writes it: for a layer, an alpha and two matrices."""
+    found, model = {}, header()
+    for block in blocks:
+        for layer in layers:
+            wide, narrow = model[f'blocks.{block}.{layer}.weight']['shape']
+            found[LORA.format(block, layer, 'alpha')] = dict(dtype='I64', shape=[])
+            found[LORA.format(block, layer, 'lora_down.weight')] = dict(dtype='F32', shape=[64, narrow])
+            found[LORA.format(block, layer, 'lora_up.weight')] = dict(dtype='F32', shape=[wide, 64])
+    found.update(more or {})
+    return found
+
+
+class StepLoraTests(unittest.TestCase):
+    HIGH, LOW = 'C:/loras/lightning_high_noise.safetensors', 'C:/loras/lightning_low_noise.safetensors'
+
+    def test_each_model_has_its_step_lora_at_the_strength_set(self):
+        both = dict(stepLora=self.HIGH, stepLoraLow=self.LOW)
+        self.assertEqual(pipeline.lora_of(job(components=both), 'high'), dict(path=self.HIGH, strength=1.0))
+        self.assertEqual(pipeline.lora_of(job(components=both), 'low'), dict(path=self.LOW, strength=1.0))
+        weaker = job(components=both, parameters=dict(step_lora_strength=0.6))
+        self.assertEqual(pipeline.lora_of(weaker, 'low'), dict(path=self.LOW, strength=0.6))
+        # At 0 they are left out, as when a job has none: the official recipe, its steps, its guidance.
+        off = job(components=both, parameters=dict(step_lora_strength=0))
+        for without in (off, job(), job(components=dict(stepLora=''))):
+            self.assertIsNone(pipeline.lora_of(without, 'high'))
+            self.assertIsNone(pipeline.lora_of(without, 'low'))
+        one = job(components=dict(stepLora=self.HIGH))
+        self.assertEqual(pipeline.lora_of(one, 'high')['path'], self.HIGH)
+        self.assertIsNone(pipeline.lora_of(one, 'low'))
+
+    def test_a_step_lora_is_checked_against_its_model_before_anything_is_loaded(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as folder:
+            image = str(Path(folder) / 'start.png')
+            Image.new('RGB', (8, 8)).save(image)
+            headers = {'C:/high.safetensors': header('HIGH'), 'C:/low.safetensors': header('LOW')}
+            headers.update({self.HIGH: lora_header(), self.LOW: lora_header()})
+            read = []
+
+            def lookup(path):
+                read.append(path)
+                return headers[path]
+
+            def made(high, low=self.LOW, **parameters):
+                components = dict(model='C:/high.safetensors', modelLow='C:/low.safetensors')
+                components.update(stepLora=high, stepLoraLow=low)
+                return job(components=components, image=image, parameters=parameters)
+
+            with mock.patch('runner.models.headers.header', lookup):
+                pipeline.preflight(made(self.HIGH), {})
+                self.assertEqual(sorted(set(read)), sorted(headers))
+                # The two swapped: the clip would be drawn all the same, badly. Said by their names.
+                said = 'LoRA d’étapes choisi pour le modèle « bruit {} » de Wan 2.2 est celui du modèle « bruit {} »'
+                with self.assertRaisesRegex(ValueError, said.format('fort', 'faible')):
+                    pipeline.preflight(made(self.LOW, self.HIGH), {})
+                with self.assertRaisesRegex(ValueError, said.format('faible', 'fort')):
+                    pipeline.preflight(made(self.HIGH, self.HIGH), {})
+                # A name that tells nothing is taken as it is given.
+                headers['C:/loras/steps.safetensors'] = lora_header()
+                pipeline.preflight(made('C:/loras/steps.safetensors'), {})
+                # A LoRA of another model (Wan 2.1 reads its image in layers this one lacks), another
+                # kind of adapter, a file that is no LoRA of Wan: refused here, by what is wrong.
+                other = LORA.format(0, 'cross_attn.k_img', 'lora_down.weight')
+                other = {other: dict(dtype='F32', shape=[64, 5120])}
+                headers['C:/loras/wan21_high.safetensors'] = lora_header(more=other)
+                with self.assertRaisesRegex(ValueError, 'unsupported or orphan tensors .*k_img'):
+                    pipeline.preflight(made('C:/loras/wan21_high.safetensors'), {})
+                lokr = {'diffusion_model.blocks.0.self_attn.q.lokr_w1': dict(dtype='F32', shape=[4, 4])}
+                headers['C:/loras/lokr_high.safetensors'] = lokr
+                with self.assertRaisesRegex(ValueError, 'LoKr'):
+                    pipeline.preflight(made('C:/loras/lokr_high.safetensors'), {})
+                krea = {'transformer.single.0.lora_A.weight': dict(dtype='F32', shape=[8, 64])}
+                headers['C:/loras/krea_high.safetensors'] = krea
+                with self.assertRaisesRegex(ValueError, 'none of its layers belongs to this model'):
+                    pipeline.preflight(made('C:/loras/krea_high.safetensors'), {})
+                # What a step LoRA adds to a bias is taken with its pairs (the older ones carry one a layer).
+                bias = {'diffusion_model.blocks.0.self_attn.q.diff_b': dict(dtype='F32', shape=[5120])}
+                headers['C:/loras/older_high.safetensors'] = lora_header(more=bias)
+                pipeline.preflight(made('C:/loras/older_high.safetensors'), {})
+                # Left out (strength 0), they are not even read: files that are gone stop nothing.
+                del read[:]
+                pipeline.preflight(made('C:/gone.safetensors', 'C:/gone.safetensors', step_lora_strength=0), {})
+                self.assertEqual(sorted(read), ['C:/high.safetensors', 'C:/low.safetensors'])
+
+    def test_a_model_is_opened_with_its_own_step_lora_and_closes_it_with_itself(self):
+        from contextlib import contextmanager
+
+        opened, closed, pools, differences = [], [], [], []
+
+        @contextmanager
+        def open_store(path):
+            opened.append(path)
+            yield mock.Mock(pinned=False, keep=lambda *args, **more: 0)
+            closed.append('file ' + path)
+
+        def pool(stores, budget, adapters=(), ahead_gib=0):
+            made = mock.Mock(stores=stores, adapters=list(adapters), bytes=0, clear=lambda: closed.append('pool'))
+            made.applied.return_value = {source: 400 for source, _ in adapters}
+            made.streamed.return_value = {}
+            pools.append(made)
+            return made
+
+        def add(model, made, source, strength):
+            differences.append((source, strength))
+            return 3
+
+        for patch in (
+            mock.patch('runner.models.residency.open_store', open_store),
+            mock.patch('runner.models.pool.WeightPool', pool),
+            mock.patch('runner.models.pool.load_streamed', lambda architecture, names, made: 'model'),
+            mock.patch('runner.models.wan22.architecture', lambda: None),
+            mock.patch('runner.models.wan_block.fuse', lambda model: (40, True)),
+            mock.patch('runner.models.wan_scail2.add_differences', add),
+            mock.patch('runner.models.residency.RESIDENCY.forget', lambda path: closed.append('ram ' + path)),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+        expert = pipeline._Expert('high', 'C:/high.safetensors', {}, dict(path=self.HIGH, strength=0.8))
+        facts = expert.open(6.0).facts
+        self.assertEqual(opened, ['C:/high.safetensors', self.HIGH])
+        self.assertEqual((sorted(pools[0].stores), pools[0].adapters), (['lora', 'model'], [('lora', 0.8)]))
+        # Its pairs are applied as the model runs (the pool); what it adds to biases once, here.
+        self.assertEqual(differences, [('lora', 0.8)])
+        self.assertEqual((facts['lora_layers'], facts['lora_differences']), ({'lora': 400}, 3))
+        expert.close()
+        # Both files closed before the RAM they held is given back: the model's, then its LoRA's.
+        self.assertEqual(closed[0], 'pool')
+        self.assertEqual(sorted(closed[1:3]), sorted(['file ' + self.HIGH, 'file C:/high.safetensors']))
+        self.assertEqual(closed[3:], ['ram C:/high.safetensors', 'ram ' + self.HIGH])
+        # Without one: the model alone, nothing applied, nothing more to give back.
+        del opened[:], closed[:], differences[:]
+        alone = pipeline._Expert('low', 'C:/low.safetensors', {})
+        facts = alone.open(6.0).facts
+        self.assertEqual((opened, pools[1].adapters, differences), (['C:/low.safetensors'], [], []))
+        self.assertEqual((facts['lora_layers'], facts['lora_differences']), ({}, 0))
+        alone.close()
+        self.assertEqual(closed, ['pool', 'file C:/low.safetensors', 'ram C:/low.safetensors'])
 
 
 class ExpertTests(unittest.TestCase):

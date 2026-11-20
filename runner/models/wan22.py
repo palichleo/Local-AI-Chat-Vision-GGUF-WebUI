@@ -17,6 +17,8 @@ gives each parameter of the diffusers model its tensor (the same names as Wan 2.
 runner.models.wan_scail2).
 """
 
+import re
+
 from runner.models.wan_scail2 import _COMPANIONS, renamed
 
 DIM = 5120
@@ -94,10 +96,11 @@ def expert(header, path=''):
     metadata: « Wan2_2-I2V-A14B-HIGH »), else as its name does; None when neither tells."""
     said = str((header.get('__metadata__') or {}).get('model_type', ''))
     for text in (said, str(path).replace('\\', '/').rsplit('/', 1)[-1]):
-        lowered = text.lower()
-        tells = [kind for kind in EXPERTS if kind in lowered]
+        # As a word of its own (« high_noise », « -LOW_ », « HighNoise »): a step LoRA is told by its
+        # name alone, and « flow », « slow » or « lowvram » say nothing of the model it is for.
+        tells = set(re.findall(r'(?<![a-z])(high|low)(?:[ _-]?noise)?(?![a-z])', text.lower()))
         if len(tells) == 1:
-            return tells[0]
+            return tells.pop()
     return None
 
 

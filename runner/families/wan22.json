@@ -116,6 +116,30 @@
           "shape": [16, 16, 1, 1, 1]
         }
       ]
+    },
+    "stepLora": {
+      "label": "LoRA d’étapes (bruit fort)",
+      "folder": "loras",
+      "required": true,
+      "note": "Lightning de lightx2v pour le modèle « high noise » : avec lui et son pendant, quatre étapes suffisent.",
+      "signature": [
+        {
+          "key": "blocks\\.0\\.self_attn\\.q\\.lora_down\\.weight$",
+          "shape": [null, 5120]
+        }
+      ]
+    },
+    "stepLoraLow": {
+      "label": "LoRA d’étapes (bruit faible)",
+      "folder": "loras",
+      "required": true,
+      "note": "Lightning de lightx2v pour le modèle « low noise ». Les deux fichiers ont la même forme : seul leur nom les distingue.",
+      "signature": [
+        {
+          "key": "blocks\\.0\\.self_attn\\.q\\.lora_down\\.weight$",
+          "shape": [null, 5120]
+        }
+      ]
     }
   },
   "parameters": {
@@ -150,19 +174,25 @@
       "type": "integer",
       "min": 4,
       "max": 50,
-      "note": "20 par défaut. Le code de Wan en prend 40 : deux fois plus long, un peu plus fin."
+      "note": "4 avec les LoRA d’étapes : deux pour chaque modèle. Sans eux (intensité à 0) : 20, ou 40 comme le code de Wan."
     },
     "cfg": {
       "type": "number",
       "min": 1,
       "max": 10,
-      "note": "3,5 pour Wan 2.2. À 1, le prompt négatif n’est pas lu et chaque étape va deux fois plus vite, pour une vidéo moins fidèle au prompt."
+      "note": "1 avec les LoRA d’étapes : le prompt négatif n’est pas lu, une seule passe par étape. Sans eux : 3,5."
     },
     "shift": {
       "type": "number",
       "min": 1,
       "max": 12,
       "note": "5 pour Wan 2.2. Plus haut, davantage d’étapes vont à la composition et au mouvement, moins aux détails."
+    },
+    "step_lora_strength": {
+      "type": "number",
+      "min": 0,
+      "max": 2,
+      "note": "1 : quatre étapes suffisent. À 0, les LoRA d’étapes ne sont pas lus : mettez alors 20 étapes et un guidage de 3,5."
     },
     "frames": {
       "type": "integer",
@@ -202,6 +232,14 @@
       "vae": {
         "policy": "fixed",
         "asset": "select-local-video-vae"
+      },
+      "stepLora": {
+        "policy": "fixed",
+        "asset": "select-local-step-lora"
+      },
+      "stepLoraLow": {
+        "policy": "fixed",
+        "asset": "select-local-low-noise-step-lora"
       }
     },
     "parameters": {
@@ -228,15 +266,19 @@
       },
       "steps": {
         "policy": "fixed",
-        "value": 20
+        "value": 4
       },
       "cfg": {
         "policy": "fixed",
-        "value": 3.5
+        "value": 1
       },
       "shift": {
         "policy": "fixed",
         "value": 5
+      },
+      "step_lora_strength": {
+        "policy": "fixed",
+        "value": 1
       },
       "frames": {
         "policy": "model",

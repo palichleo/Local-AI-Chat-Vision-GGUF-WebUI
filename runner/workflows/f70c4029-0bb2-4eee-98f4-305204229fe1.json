@@ -26,6 +26,16 @@
       "policy": "fixed",
       "asset": "08c45f20-488a-4383-a3f2-8ce0a7e4c33c",
       "file": "Wan2_1_VAE_bf16.safetensors"
+    },
+    "stepLora": {
+      "policy": "fixed",
+      "asset": "5d18970e-69e9-4442-b551-9125bbb4194d",
+      "file": "wan2.2_i2v_lightning_4steps_rank64_high_noise.safetensors"
+    },
+    "stepLoraLow": {
+      "policy": "fixed",
+      "asset": "a6b3d39b-075f-4d73-b184-f38563a85f49",
+      "file": "wan2.2_i2v_lightning_4steps_rank64_low_noise.safetensors"
     }
   },
   "parameters": {
@@ -52,15 +62,19 @@
     },
     "steps": {
       "policy": "fixed",
-      "value": 20
+      "value": 4
     },
     "cfg": {
       "policy": "fixed",
-      "value": 3.5
+      "value": 1
     },
     "shift": {
       "policy": "fixed",
       "value": 5
+    },
+    "step_lora_strength": {
+      "policy": "fixed",
+      "value": 1
     },
     "frames": {
       "policy": "model",
