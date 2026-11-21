@@ -44,6 +44,7 @@ import { Gallery } from './lib/gallery.mjs';
 import { Thumbnails } from './lib/thumbnails.mjs';
 import { ToolRuntime, chatImageUrls, collectToolCalls, firstWholeCall, unreadAnswer } from './lib/tool-runtime.mjs';
 import { roomSettings } from './public/room.mjs';
+import { WATERMARKS, watermarkSetting } from './public/watermark.mjs';
 import { nativeFields } from './lib/native-messages.mjs';
 import { readSSE } from './public/stream.mjs';
 import { Engine, defaults, normalizeConfig, problem } from './lib/engine.mjs';
@@ -77,6 +78,8 @@ const staticFiles = new Map([
   ['/icon-512.png', ['icon-512.png', 'image/png']],
   ['/assets/moodix-mark.svg', ['assets/moodix-mark.svg', 'image/svg+xml']],
   ['/assets/moodix-mark-encre.svg', ['assets/moodix-mark-encre.svg', 'image/svg+xml']],
+  ['/assets/watermark-eclipse.svg', ['assets/watermark-eclipse.svg', 'image/svg+xml']],
+  ['/assets/watermark-eclipse-nom.svg', ['assets/watermark-eclipse-nom.svg', 'image/svg+xml']],
   ['/update-ui.mjs', ['update-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/project-navigation.mjs', ['project-navigation.mjs', 'text/javascript; charset=utf-8']],
@@ -106,6 +109,7 @@ const staticFiles = new Map([
   ['/take-length.mjs', ['take-length.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-search.mjs', ['settings-search.mjs', 'text/javascript; charset=utf-8']],
   ['/settings-tabs.mjs', ['settings-tabs.mjs', 'text/javascript; charset=utf-8']],
+  ['/watermark.mjs', ['watermark.mjs', 'text/javascript; charset=utf-8']],
   ['/help-tips.mjs', ['help-tips.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-ui.mjs', ['generation-ui.mjs', 'text/javascript; charset=utf-8']],
   ['/generation-time.mjs', ['generation-time.mjs', 'text/javascript; charset=utf-8']],
@@ -384,6 +388,8 @@ export async function createApplication({
     // Fond, éclairage, grain (Paramètres › Interface): read back too. Left out, they came back to
     // their defaults at every start, and the next preference saved wrote the file without them.
     if (saved?.room && typeof saved.room === 'object' && !Array.isArray(saved.room)) preferences.room = roomSettings(saved.room);
+    // (0.6.187) The watermark of the exports (Paramètres › Interface); not chosen, L'Éclipse (watermarkSetting).
+    if (WATERMARKS.includes(saved?.watermark)) preferences.watermark = saved.watermark;
   } catch {
     /* Missing or damaged preferences use the default appearance. */
   }
@@ -1526,6 +1532,8 @@ export async function createApplication({
           assemble: (request, options) => generation.assembleFilm(request, options),
           gallery,
           persist: preferences.saveHistory,
+          // (0.6.187) What goes out of Moodix carries the watermark of Paramètres › Interface.
+          watermark: watermarkSetting(preferences.watermark),
         });
         return send(200, galleryView(record));
       }
@@ -1547,6 +1555,7 @@ export async function createApplication({
               projectOf: projectFor,
             }),
             assemble: (request, options) => generation.assembleFilm(request, options),
+            watermark: watermarkSetting(preferences.watermark),
           }),
         );
       }
@@ -2413,7 +2422,7 @@ export async function createApplication({
           typeof body !== 'object' ||
           Array.isArray(body) ||
           !Object.keys(body).length ||
-          Object.keys(body).some(key => !['theme', 'saveHistory', 'room'].includes(key))
+          Object.keys(body).some(key => !['theme', 'saveHistory', 'room', 'watermark'].includes(key))
         )
           throw problem('Préférences invalides.');
         if ('theme' in body && !['dark', 'light'].includes(body.theme)) throw problem('Choisissez le mode jour ou nuit.');
@@ -2424,6 +2433,7 @@ export async function createApplication({
           if (!body.room || typeof body.room !== 'object' || Array.isArray(body.room)) throw problem('Réglages de l’interface invalides.');
           body.room = roomSettings(body.room);
         }
+        if ('watermark' in body && !WATERMARKS.includes(body.watermark)) throw problem('Watermark invalide.');
         if ((runtime.active || persistingGallery || clearingHistory) && 'saveHistory' in body)
           throw problem('Attendez la fin de la génération.', 409);
         if (savingPreferences) throw problem('Préférences en cours d’enregistrement.', 409);

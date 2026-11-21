@@ -323,5 +323,103 @@ class FilmTests(Folder):
             engine.assemble(self.asked(), dict(self.config, elsewhere=1), lambda **data: None)
 
 
+class WatermarkTests(Folder):
+    """(0.6.187) The watermark of what goes out of Moodix (watermark-maquette.md)."""
+
+    def test_the_pictures_of_the_watermarks_are_those_the_places_are_counted_from(self):
+        import numpy as np
+        from PIL import Image
+
+        # (0.6.187) Each picture as its table says it: its size, and its drawing (ivory) within it.
+        for name, sizes in montage.WATERMARKS.items():
+            for made, (wide, high, box) in sizes.items():
+                path = montage.WATERMARK_FOLDER / f'moodix-watermark-{name}-{made}.png'
+                pixels = np.asarray(Image.open(path).convert('RGBA')).astype(int)
+                self.assertEqual(pixels.shape[:2], (high, wide), path.name)
+                ys, xs = np.nonzero((pixels[..., 3] > 20) & (pixels[..., 0] > 120))
+                self.assertEqual((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1), box, path.name)
+                # Ivory at 85 %, nothing more opaque.
+                self.assertEqual(pixels[..., 3].max(), 217, path.name)
+
+    def test_the_watermark_is_4_percent_of_the_short_side_from_the_corner_or_where_tiktok_covers_nothing(self):
+        # 1920 × 1080: the file made for 1080 as it is, its drawing (45 → 124) 43.2 px from the edges.
+        path, wide, high, x, y = montage.watermark_place('eclipse', 1920, 1080)
+        self.assertTrue(path.endswith('moodix-watermark-eclipse-1080.png'))
+        self.assertEqual((wide, high), (169, 169))
+        self.assertEqual((x + 124, y + 124), (round(1920 - 43.2), round(1080 - 43.2)))
+        # 1920 × 1088 (the largest film of the Bobine): the one made for 2160, brought to 1088 / 2160.
+        path, wide, high, x, y = montage.watermark_place('eclipse-nom', 1920, 1088)
+        ratio = 1088 / 2160
+        self.assertTrue(path.endswith('moodix-watermark-eclipse-nom-2160.png'))
+        self.assertEqual((wide, high), (round(619 * ratio), round(272 * ratio)))
+        self.assertAlmostEqual(x + 534 * ratio, 1920 - 0.04 * 1088, delta=0.5)
+        self.assertAlmostEqual(y + 176 * ratio, 1088 - 0.04 * 1088, delta=0.5)
+        # A small square film: smaller still, from the corner all the same.
+        path, wide, high, x, y = montage.watermark_place('eclipse', 512, 512)
+        self.assertEqual((wide, high), (round(336 * 512 / 2160),) * 2)
+        self.assertAlmostEqual(x + 247 * 512 / 2160, 512 - 0.04 * 512, delta=0.5)
+        # 9:16 (and the 448 × 768 of MiniMax, within 4 % of it): at the top left, in the zone TikTok
+        # leaves free, at 150/1080 of the width and 270/1920 of the height.
+        for width, height in ((1088, 1920), (576, 1024), (448, 768)):
+            path, wide, high, x, y = montage.watermark_place('eclipse-nom', width, height)
+            ratio = width / (1080 if width == 1080 else 2160)
+            made = 1080 if width == 1080 else 2160
+            left, top = montage.WATERMARKS['eclipse-nom'][made][2][:2]
+            self.assertAlmostEqual(x + left * ratio, width * 150 / 1080, delta=0.5)
+            self.assertAlmostEqual(y + top * ratio, height * 270 / 1920, delta=0.5)
+        # 3:4 is not TikTok's: in the corner.
+        x, y = montage.watermark_place('eclipse', 768, 1024)[3:]
+        self.assertGreater(y, 1024 / 2)
+
+    def test_the_watermark_is_one_of_ours_and_laid_last_over_the_film(self):
+        with self.assertRaisesRegex(ValueError, 'Invalid watermark'):
+            montage.validated(self.asked(watermark='../../secret.png'), self.root)
+        plan = montage.validated(self.asked(watermark='eclipse'), self.root)
+        inputs, filters, sound, _ = montage.graph(plan, [False, True, False])
+        # After the three plans and the music: the fifth input, the picture of the watermark.
+        self.assertEqual(inputs.count('-i'), 5)
+        self.assertTrue(inputs[-1].endswith('moodix-watermark-eclipse-2160.png'))
+        self.assertIn('[3:a]atrim', filters, 'the music is still the fourth input')
+        self.assertIn('concat=n=3:v=1:a=1[plain][clips]', filters)
+        self.assertIn('[4:v]scale=', filters)
+        self.assertTrue(filters.split(';')[-2].startswith('[plain][mark]overlay='))
+        self.assertTrue(filters.split(';')[-2].endswith('[film]'))
+        self.assertEqual(sound, '[sound]')
+        # Without one, nothing of it.
+        inputs, filters, _, _ = montage.graph(montage.validated(self.asked(), self.root), [False, True, False])
+        self.assertEqual(inputs.count('-i'), 4)
+        self.assertNotIn('overlay', filters)
+
+    def test_a_film_with_the_watermark_has_it_in_the_corner_and_nowhere_else(self):
+        import imageio.v3 as iio
+        import numpy as np
+
+        # A blue film of 1080 × 1080 (the file made for 1080, as it is), then the same without it.
+        blue = lavfi(
+            self.root / 'video' / 'blue-1080.mp4',
+            'color=c=0x2040a0:size=1080x1080:rate=24:duration=1',
+            extra=('-c:v', 'libx264', '-pix_fmt', 'yuv420p'),
+        )
+        plan = dict(path=blue, kind='video', **{'from': 0, 'to': 1}, frame='fill', volume=1)
+        asked = dict(id='film-w', width=1080, height=1080, fps=24, plans=[plan])
+        films = {}
+        for mark in ('eclipse', None):
+            request = dict(asked, **({'watermark': mark} if mark else {}))
+            result = montage.assemble(request, self.config, lambda **data: None)
+            made = result['outputs'][0]
+            films[mark] = iio.imread(self.root / made['subfolder'] / made['filename']).astype(int)
+            self.assertEqual(result['metadata'].get('watermark'), mark)
+        marked, plain = films['eclipse'][12], films[None][12]
+        changed = np.abs(marked - plain).max(axis=2) > 24
+        ys, xs = np.nonzero(changed)
+        # Its drawing, 81 px wide, its right and bottom edges 43 px from those of the film (the shadow
+        # around it is soft: only the drawing and the near shadow change the blue that much).
+        self.assertTrue(len(xs), 'the watermark is in the film')
+        self.assertTrue(1080 - 43 - 81 - 12 <= xs.min() and xs.max() <= 1080 - 43 + 12, (xs.min(), xs.max()))
+        self.assertTrue(1080 - 43 - 81 - 12 <= ys.min() and ys.max() <= 1080 - 43 + 12, (ys.min(), ys.max()))
+        # The crescent (lower half of the disc) is ivory.
+        self.assertGreater(marked[1080 - 43 - 8, 1080 - 43 - 40].min(), 170, marked[1080 - 43 - 8, 1080 - 43 - 40])
+
+
 if __name__ == '__main__':
     unittest.main()

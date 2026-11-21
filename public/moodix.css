@@ -11995,6 +11995,65 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   outline: 2px solid var(--text-1);
   outline-offset: 2px;
 }
+/* (0.6.187) The watermark of the exports (watermark-maquette.md, capture 93): three pictures, each with
+   its watermark laid as the engine lays it (S, the short side: 7.5 % for L'Éclipse, the name at 4.5 %,
+   4 % from the corner, ivory at 85 % with its soft shadow, F = 4.5 % of S), the name under it. The
+   one chosen is outlined with the accent, its name in ivory. */
+.watermark-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.watermark-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: 400 13px/1.2 var(--font-ui);
+}
+.watermark-frame {
+  --s: 112px;
+  --f: calc(var(--s) * 0.045);
+  position: relative;
+  display: block;
+  width: 200px;
+  height: var(--s);
+  overflow: hidden;
+  border: 1px solid rgba(238, 232, 222, 0.16);
+  border-radius: 8px;
+  /* A dusk, as the picture of the maquette: never the grain on it. */
+  background:
+    radial-gradient(90% 55% at 68% 82%, rgba(222, 170, 178, 0.5), transparent 70%),
+    linear-gradient(180deg, #31476b 0%, #5d7399 42%, #9d94b0 68%, #c4a3aa 76%, #2a3144 77%, #171c29 100%);
+}
+.watermark-mark {
+  position: absolute;
+  right: calc(var(--s) * 0.0377);
+  bottom: calc(var(--s) * 0.0377);
+  width: calc(var(--s) * 0.0796);
+  height: auto;
+  opacity: 0.85;
+  filter: drop-shadow(0 calc(var(--f) * 0.03) calc(var(--f) * 0.06) rgba(0, 0, 0, 0.55))
+    drop-shadow(0 0 calc(var(--f) * 0.4) rgba(0, 0, 0, 0.32));
+  pointer-events: none;
+}
+.watermark-choice[data-watermark='eclipse-nom'] .watermark-mark {
+  right: calc(var(--s) * 0.04);
+  bottom: calc(var(--s) * 0.035);
+  width: calc(var(--s) * 0.21);
+}
+.watermark-choice[aria-checked='true'] {
+  color: var(--text-1);
+}
+.watermark-choice[aria-checked='true'] .watermark-frame {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
 .room-dose {
   display: flex;
   align-items: center;

@@ -14,6 +14,11 @@ follow start where the montage says.
 (0.6.149, La Bobine) A plan may say its instant in the film (`at`): the plans are in their order, none
 over the one before it, and a hole between two (or before the first) is black and silent, as long
 as it is. Without instants, the plans follow one another.
+
+(0.6.187) What goes out of Moodix may carry a watermark (`watermark`: L'Éclipse, or L'Éclipse and the
+name; claude_design/maquettes/watermark-maquette.md): one of the pictures of `watermark/`, ivory at
+85 % with its shadow, brought to the size of the film and laid over it, in the lower right corner, or
+at the top left in 9:16, where TikTok covers nothing. A take never has one: only the exports do.
 """
 
 import os
@@ -36,6 +41,33 @@ LONGEST_COMMAND = 30000
 # (0.6.154) A take of a bobine exported alone: `bobines/<the folder of its bobine>/<its number>.mp4`.
 FOLDER = re.compile(r'[^\x00-\x1f<>:"/\\|?*]{1,64}')
 NUMBERED = re.compile(r'\d{2,3}\.mp4')
+# (0.6.187) The watermarks, each made for a short side of 1080 and of 2160 (watermark-maquette.md):
+# {short side: (width, height, (left, top, right, bottom) of the drawing in it)}. Around the drawing,
+# a transparent margin for the shadow: the margins of the film are counted from the drawing.
+WATERMARKS = {
+    'eclipse': {1080: (169, 169, (45, 45, 124, 124)), 2160: (336, 336, (89, 89, 247, 247))},
+    'eclipse-nom': {1080: (311, 137, (44, 47, 267, 88)), 2160: (619, 272, (87, 95, 534, 176))},
+}
+WATERMARK_FOLDER = Path(__file__).resolve().parent / 'watermark'
+
+
+def watermark_place(name, width, height):
+    """(0.6.187) Where the watermark `name` goes on a film of that size: (its file, its width and height
+    once brought to the film, x, y of its top left corner). S, the short side of the film: the file made
+    for 1080 as it is, any other size from the one made for 2160, in the ratio S / 2160. Its drawing is
+    4 % of S from the right and the bottom; in 9:16 (TikTok covers the bottom and the right), at 150/1080
+    of the width from the left and 270/1920 of the height from the top."""
+    short = min(width, height)
+    made = 1080 if short == 1080 else 2160
+    wide, high, (left, top, right, bottom) = WATERMARKS[name][made]
+    ratio = short / made
+    path = WATERMARK_FOLDER / f'moodix-watermark-{name}-{made}.png'
+    sized = (max(2, round(wide * ratio)), max(2, round(high * ratio)))
+    if abs(width / height / (9 / 16) - 1) <= 0.04:
+        x, y = width * 150 / 1080 - left * ratio, height * 270 / 1920 - top * ratio
+    else:
+        x, y = width - 0.04 * short - right * ratio, height - 0.04 * short - bottom * ratio
+    return str(path), *sized, round(x), round(y)
 
 
 def _n(value):
@@ -94,7 +126,7 @@ def validated(params, root):
     """The assembly asked, every value checked, every file one of the folder of the outputs."""
     from runner.registry import fields, output_name, text
 
-    known = ('id', 'outputName', 'exportTo', 'width', 'height', 'fps', 'plans', 'sounds')
+    known = ('id', 'outputName', 'exportTo', 'watermark', 'width', 'height', 'fps', 'plans', 'sounds')
     fields(params, known, ('id', 'width', 'height', 'fps', 'plans'), 'film')
     text(params['id'], 'id')
     for side in ('width', 'height'):
@@ -115,6 +147,11 @@ def validated(params, root):
         if 'outputName' not in result:
             raise ValueError('An export names its temporary file')
         result['exportTo'] = export_place(params['exportTo'], root)
+    if 'watermark' in params:
+        # (0.6.187) One of ours, never a file named by the request.
+        if params['watermark'] not in WATERMARKS:
+            raise ValueError('Invalid watermark')
+        result['watermark'] = params['watermark']
     for index, item in enumerate(plans):
         label = f'Plan {index + 1}'
         known = ('path', 'at', 'kind', 'from', 'to', 'frame', 'volume')
@@ -213,7 +250,8 @@ def graph(plan, audible):
         else:
             filters.append(f'anullsrc=r={RATE}:cl=stereo,atrim=duration={length}[a{index}]')
         joined.append(f'[v{index}][a{index}]')
-    filters.append(''.join(joined) + f'concat=n={len(joined)}:v=1:a=1[film][clips]')
+    marked = plan.get('watermark')
+    filters.append(''.join(joined) + f"concat=n={len(joined)}:v=1:a=1[{'plain' if marked else 'film'}][clips]")
     mixed, first = ['[clips]'], len(plan['plans'])
     for index, item in enumerate(plan['sounds']):
         # What is left of the film when it starts: a sound never makes the film longer.
@@ -227,6 +265,14 @@ def graph(plan, audible):
             f"volume={item['volume']},{SOUND},adelay={round(item['at'] * 1000)}:all=1[s{index}]"
         )
         mixed.append(f'[s{index}]')
+    if marked:
+        # (0.6.187) Its picture, the last input, brought to the film and laid over every frame (a still:
+        # the overlay repeats it to the end).
+        path, wide, high, x, y = watermark_place(marked, width, height)
+        number = first + len(mixed) - 1
+        inputs += ['-i', path]
+        filters.append(f'[{number}:v]scale={wide}:{high}:flags=area,format=rgba[mark]')
+        filters.append(f'[plain][mark]overlay=x={x}:y={y}:format=auto,format=yuv420p[film]')
     if len(mixed) == 1:
         return inputs, ';'.join(filters), '[clips]', total
     # (normalize=0: each keeps the volume it was given, the mix does not lower them all.)
@@ -305,6 +351,8 @@ def assemble(params, config, progress):
             sounds=len(plan['sounds']),
             audio=True,
         )
+        if plan.get('watermark'):
+            metadata['watermark'] = plan['watermark']
         result = dict(jobId=plan['id'], outputs=[descriptor], metadata=metadata)
         if exported:
             # (0.6.154) A file of the folder of its bobine, not a creation: no manifest.
