@@ -13566,8 +13566,13 @@ body[data-setup='incomplete'] #resume-last {
     display: none;
   }
 }
+/* (0.6.186) In the group of « Générer », its words are lit whatever it is (the rule of the group comes after
+   the one that dims a button that cannot be pressed, and is as precise). Greyed for a model that cannot run
+   here, or while another conversation makes a creation, it looked ready; only one without a prompt was dim.
+   Dim as soon as it cannot be pressed, a creation under way apart: its bar says it. */
 #studio-view .studio-go.is-blank,
-#studio-view .studio-go-group .studio-go.is-blank :is(.studio-go-label, svg) {
+#studio-view .studio-go-group .studio-go.is-blank :is(.studio-go-label, svg),
+#studio-view .studio-go-group .studio-go:disabled:not([role='progressbar']) :is(.studio-go-label, svg) {
   color: rgba(238, 232, 222, 0.45);
 }
 #studio-view .studio-empty-strip {

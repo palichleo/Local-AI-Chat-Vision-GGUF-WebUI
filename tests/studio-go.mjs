@@ -46,6 +46,15 @@ test('hovered or focused, unavailable, under way, and in the light theme', () =>
   const dim = rule("#studio-view .studio-go.is-unavailable,\n#studio-view .studio-go:disabled:not([role='progressbar'])");
   assert.match(dim, /background: #121318;[^]*border-color: #22252c;[^]*color: var\(--text-4\);/);
   assert.match(css, /#studio-view \.studio-go:disabled:not\(\[role='progressbar'\]\)::before \{\n {2}display: none;/);
+  // (0.6.186, measured in the page on 21/11) In the group of the Salle obscure its words stayed lit when it
+  // was greyed for a model that cannot run here or for a creation made elsewhere: the rule of the group
+  // comes after the one above and is as precise. What cannot be pressed dims its words there, after it.
+  const held = "#studio-view .studio-go-group .studio-go:disabled:not([role='progressbar']) :is(.studio-go-label, svg)";
+  assert.match(
+    rule('#studio-view .studio-go.is-blank,\n#studio-view .studio-go-group .studio-go.is-blank :is(.studio-go-label, svg),\n' + held),
+    /color: rgba\(238, 232, 222, 0\.45\);/,
+  );
+  assert.ok(css.indexOf(held) > css.indexOf('#studio-view .studio-go-group:not(.is-checking) .studio-go {'), 'after the rule of the group');
   // Under way: the bar fills the whole height from the left, under the words; mono 14 px.
   assert.match(rule('.studio-go-bar'), /top: 0;[^]*bottom: 0;[^]*z-index: 0;[^]*width: calc\(var\(--studio-progress, 0\) \* 100%\);[^]*background: #2c313b;/);
   assert.match(rule("#studio-view .studio-go[role='progressbar'] .studio-go-label"), /font-family: var\(--font-mono\);[^]*font-size: var\(--size-3\);[^]*font-weight: 600;/);
