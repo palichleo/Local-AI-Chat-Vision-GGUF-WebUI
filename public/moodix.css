@@ -9,7 +9,6 @@
 
 :root {
   --success: #87ba97;
-  --success-hover: #b1d4bd;
   --success-tint: #87ba9714;
   --danger: #f0938d;
   --danger-bg: #2a191b;
@@ -22,7 +21,6 @@
 }
 :root[data-theme='light'] {
   --success: #287443;
-  --success-hover: #1c5b33;
   --success-tint: #2874430e;
   --danger: #b23535;
   --danger-bg: #f8e8e8;
@@ -32,12 +30,7 @@
   --overlay: #14202b66;
   --edge: #ffffffc0;
   --light-reflection: #ffffff35;
-  --ambient-reflection: #ffffff6b;
-  --raking-light: #ffffff22;
-  --grain-veil: #f2f3f4ee;
-  --side-veil: #e6e8ebe0;
   --surface-veil: #fafbfce8;
-  --dialog-veil: #e6e8ebe8;
 }
 * {
   box-sizing: border-box;
@@ -106,12 +99,6 @@ button svg {
   background: var(--sidebar);
   display: flex;
   flex-direction: column;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  text-decoration: none;
-  color: var(--ink);
 }
 .secondary,
 .primary {
@@ -671,14 +658,6 @@ fieldset {
   color: var(--muted);
   margin: 7px 0 0;
 }
-.settings-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 17px;
-}
-.settings-grid .field-group {
-  margin-bottom: 13px;
-}
 #custom-layers-field {
   margin-top: 7px;
 }
@@ -840,9 +819,6 @@ fieldset {
   }
   .settings-header h2 {
     font-size: 24px;
-  }
-  .settings-grid {
-    gap: 12px;
   }
   .settings-footer {
     gap: 8px;
@@ -1271,7 +1247,6 @@ fieldset {
 .generation-auto-label {
   margin-bottom: 24px !important;
 }
-.workflow-description,
 .field-group textarea {
   font: inherit;
   display: block;
@@ -1286,7 +1261,6 @@ fieldset {
   padding: 9px;
   min-height: 65px;
 }
-.workflow-description::placeholder,
 .field-group textarea::placeholder {
   color: var(--muted);
 }
@@ -1463,11 +1437,6 @@ fieldset {
     border-bottom: 1px solid var(--line);
   }
   
-  .sidebar .brand {
-    font-size: 20px;
-    padding: 0;
-    gap: 6px;
-  }
   
   
   
@@ -1519,13 +1488,6 @@ fieldset {
     flex-shrink: 0;
   }
 }
-@media (max-width: 370px) {
-  .sidebar .brand {
-    font-size: 18px;
-  }
-  
-  
-}
 @media (max-height: 650px) {
   
   .composer-region .welcome h1 {
@@ -1571,9 +1533,6 @@ fieldset {
 }
 .sidebar {
   border-right-color: var(--line);
-}
-.brand {
-  letter-spacing: -0.8px;
 }
 .welcome h1 {
   color: var(--ink);
@@ -1671,16 +1630,14 @@ dialog::backdrop {
 
 .field-group input,
 .field-group select,
-.field-group textarea,
-.workflow-description {
+.field-group textarea {
   background-color: var(--input);
   box-shadow: inset 0 1px 3px var(--inset-shadow);
   border-color: var(--line);
 }
 .field-group input:not([type='range']):not(:disabled):hover,
 .field-group select:not(:disabled):hover,
-.field-group textarea:hover,
-.workflow-description:hover {
+.field-group textarea:hover {
   border-color: var(--line-strong);
 }
 .field-group input[readonly] {
@@ -1732,17 +1689,11 @@ dialog::backdrop {
 
 /* A quiet blue accent on the same metal surface as Configuration. */
 :root {
-  --update-ink: #a9d1ef;
   --update-line: #38566d;
-  --update-tint: #172b3a;
-  --update-hover: #223e52;
   --update-light: #91c9f2;
 }
 :root[data-theme='light'] {
-  --update-ink: #265b80;
   --update-line: #9dbbd2;
-  --update-tint: #e0edf6;
-  --update-hover: #cddfed;
   --update-light: #427da7;
 }
 
@@ -2175,35 +2126,6 @@ dialog::backdrop {
 .generation-frame.has-preview::after,
 .studio-frame.is-busy.has-preview::after {
   opacity: 0.26;
-}
-/* Old-film grain: neither dust nor fine noise, a soft grain of two to three pixels that never
-   sits still. Fractal noise drawn once (an inline SVG), moved a few times a second. */
-
-@keyframes film-grain {
-  0% {
-    transform: translate(0, 0);
-  }
-  12.5% {
-    transform: translate(-6%, 4%);
-  }
-  25% {
-    transform: translate(5%, -7%);
-  }
-  37.5% {
-    transform: translate(-3%, 8%);
-  }
-  50% {
-    transform: translate(7%, 3%);
-  }
-  62.5% {
-    transform: translate(-8%, -4%);
-  }
-  75% {
-    transform: translate(4%, 6%);
-  }
-  87.5% {
-    transform: translate(-5%, -8%);
-  }
 }
 
 .generation-frame.has-image,
@@ -2782,9 +2704,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 #workflow-editor .history-toggle {
   font-size: var(--size-1);
   gap: 9px;
-}
-#workflow-editor .settings-grid {
-  align-items: start;
 }
 #workflow-editor textarea {
   width: 100%;
@@ -3592,69 +3511,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
    The dot says the state at a glance and, under the pointer, what it means; a workflow that
    needs something also wears a line of that colour on its left. The user's own (created or
    imported) are tinted violet. */
-:root {
-  --own: #b6a4ee;
-}
-:root[data-theme='light'] {
-  --own: #6a4fbf;
-}
-/* The dot is small; the area that shows its meaning under the pointer is not (7 px around it). */
-.workflow-state {
-  position: relative;
-  flex-shrink: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--muted);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 18%, transparent);
-  cursor: help;
-}
-.workflow-state::after {
-  content: '';
-  position: absolute;
-  inset: -8px;
-  border-radius: 50%;
-}
-.workflow-state:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-@keyframes workflow-downloading {
-  50% {
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--update-light) 10%, transparent);
-  }
-}
-#settings .workflow-settings .workflow-name {
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--size-1);
-  font-weight: 600;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.workflow-download {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.workflow-download svg {
-  width: 15px;
-  height: 15px;
-}
-.workflow-progress {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 3px;
-  background: color-mix(in srgb, var(--update-light) 18%, transparent);
-}
-.workflow-progress > span {
-  display: block;
-  height: 100%;
-  background: var(--update-light);
-  transition: width 0.6s linear;
-}
 
 /* « ? » in the top right corner of each block: its help shows at once under the pointer. */
 #settings .settings-block {
@@ -3718,11 +3574,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 }
 #settings #hf-token-status {
   margin: 8px 0 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  .workflow-progress > span {
-    transition: none;
-  }
 }
 
 /* The workflow editor fills the window of the settings: its head and its foot stay, its body
@@ -3845,9 +3696,7 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 
 /* Project workspace. Shared tokens and existing chat/settings controls stay in styles.css. */
 :root[data-theme='light'] {
-  --metal-sheen: #ffffffa0;
   --metal-edge: #ffffff60;
-  --glints: none;
 }
 body {
   height: 100dvh;
@@ -3869,13 +3718,6 @@ dialog,
   border-right: 1px solid var(--line);
   height: 100dvh;
   gap: 0;
-}
-.brand {
-  font-size: 22px;
-  padding: 0 9px;
-  gap: 10px;
-  font-weight: 650;
-  flex-shrink: 0;
 }
 
 .project-name {
@@ -4035,13 +3877,6 @@ dialog,
     border-bottom: 1px solid var(--line);
     background-color: var(--sidebar);
   }
-  .sidebar .brand {
-    display: flex;
-    flex-shrink: 0;
-    padding: 0;
-    font-size: 19px;
-    gap: 7px;
-  }
   
   
   
@@ -4070,10 +3905,6 @@ dialog,
 @media (max-width: 380px) {
   .sidebar {
     padding-inline: 10px;
-    gap: 5px;
-  }
-  .sidebar .brand {
-    font-size: 17px;
     gap: 5px;
   }
   
@@ -4127,13 +3958,6 @@ dialog,
 }
 
 /* Project deletion: the bin replaces the pencil; rename by double click or right click. */
-.project-delete {
-  color: var(--muted);
-}
-.project-delete:hover:enabled {
-  color: var(--danger);
-  background: var(--danger-bg);
-}
 #project-delete-dialog {
   position: fixed;
   inset: 0;
@@ -4157,18 +3981,6 @@ dialog,
   font-size: var(--size-1);
   line-height: 1.8;
   color: var(--muted);
-}
-.project-menu {
-  position: fixed;
-  z-index: 1000;
-  min-width: 160px;
-  padding: 5px;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  background: var(--surface-raised);
-  box-shadow: 0 12px 32px var(--shadow);
-  display: grid;
-  gap: 2px;
 }
 
 /* ============================================================ part 3: Moodix (was moodix.css) */
@@ -4213,12 +4025,6 @@ dialog,
   --fn-action: #e8402f;
   --fn-settings: #22a060;
   --fn-output: #f6c343;
-  /* The same functions as text on a dark ground: lighter, for 4.5:1 on a block. */
-  --fn-input-text: #9db4ff;
-  --fn-settings-text: #6fd39c;
-  --fn-output-text: #f6c343;
-  --fn-action-text: #ff8a7d;
-  --on-action: #0b0c0f;
 
   --bg: #0b0c0f;
   --sidebar: #0e0f13;
@@ -4250,7 +4056,6 @@ dialog,
   /* The small capitals of the labels (« SORTIE », « PRISE 4 »), with their spacing: 10,5 px (16/11). */
   --size-label: 10.5px;
   --accent: #eceef2;
-  --accent-hover: #ffffff;
   --link: #9db4ff;
   --button: #eceef2;
   --button-hover: #ffffff;
@@ -4263,17 +4068,10 @@ dialog,
 
   /* The metal of the former interface is gone: flat surfaces, no grain, no light. */
   --grain: none;
-  --glints: none;
-  --metal-sheen: transparent;
   --metal-edge: transparent;
-  --ambient-reflection: transparent;
-  --raking-light: transparent;
   --light-reflection: transparent;
   --edge: transparent;
-  --grain-veil: transparent;
-  --side-veil: transparent;
   --surface-veil: transparent;
-  --dialog-veil: transparent;
 
   --font-ui: 'Manrope', 'Segoe UI', system-ui, sans-serif;
   --font-display: 'Michroma', 'Manrope', 'Segoe UI', sans-serif;
@@ -4288,11 +4086,6 @@ dialog,
   --fn-action: #e8402f;
   --fn-settings: #1d8f55;
   --fn-output: #e0a91c;
-  --fn-input-text: #2449c4;
-  --fn-settings-text: #17723f;
-  --fn-output-text: #8a6200;
-  --fn-action-text: #b52a1c;
-  --on-action: #0b0c0f;
 
   --bg: #f3f4f7;
   --sidebar: #ebedf1;
@@ -4315,7 +4108,6 @@ dialog,
   --soft: var(--text-2);
   --muted: var(--text-2);
   --accent: #12141a;
-  --accent-hover: #000000;
   --link: #2449c4;
   --button: #12141a;
   --button-hover: #000000;
@@ -4418,17 +4210,6 @@ summary:focus-visible {
   border-right: 1px solid var(--line);
   border-bottom: 0;
   box-shadow: none;
-}
-
-/* The logo, MDX in white, and 7 px under it the four colours of Moodix in one rule as wide as it. */
-#sidebar .brand {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 6px 4px;
-  border-radius: 8px;
-  font-size: 0;
 }
 
 /* White letters, dark on the light theme (sidebar, switch, welcome). */
@@ -4958,7 +4739,6 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
 }
 .studio-block {
   --block: var(--line-strong);
-  --block-text: var(--muted);
   /* The padding of what the block holds (.studio-block-body), above its grain. */
   --block-pad: 16px;
   min-width: 0;
@@ -4972,34 +4752,23 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
 }
 .studio-block.is-input {
   --block: var(--fn-input);
-  --block-text: var(--fn-input-text);
   grid-area: in;
 }
 .studio-block.is-preview {
   --block: var(--fn-action);
-  --block-text: var(--fn-action-text);
   grid-area: prev;
   align-items: center;
   gap: 14px;
 }
 .studio-block.is-settings {
   --block: var(--fn-settings);
-  --block-text: var(--fn-settings-text);
   grid-area: set;
   gap: 14px;
 }
 .studio-block.is-output {
   --block: var(--fn-output);
-  --block-text: var(--fn-output-text);
   grid-area: out;
   --block-pad: 14px 16px;
-}
-.studio-block-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 18px;
 }
 
 .studio-desk.is-empty {
@@ -5426,27 +5195,6 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
 .studio-kinds {
   display: grid;
   gap: 6px;
-}
-.studio-kind {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-height: 44px;
-  padding: 8px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--field-line);
-  background: var(--field);
-  color: var(--ink);
-  text-align: left;
-}
-.studio-kind span {
-  font-size: var(--size-1);
-  color: var(--muted);
-}
-.studio-kind[aria-checked='true'] {
-  border-color: var(--fn-settings);
-  box-shadow: 0 0 0 1px var(--fn-settings);
 }
 
 /* The preview: a screen with the corners of a television. */
@@ -5892,44 +5640,6 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   }
 }
 
-/* Settings: in wells. */
-.studio-more {
-  min-height: 42px;
-  border-radius: 12px;
-  border: 0;
-  background: #181b21;
-  color: var(--soft);
-  text-align: left;
-  padding: 0 14px;
-  font-weight: 600;
-}
-:root[data-theme='light'] .studio-more {
-  background: var(--surface-raised);
-}
-.studio-more:hover:enabled {
-  background: var(--hover);
-}
-
-.studio-lora {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 40px;
-  grid-template-areas: 'name remove' 'slider amount';
-  gap: 6px;
-  padding: 8px;
-  border-radius: 12px;
-  background: var(--field);
-  border: 1px solid var(--field-line);
-}
-.studio-lora select {
-  grid-area: name;
-  min-height: 40px;
-}
-
-.studio-lora input[type='range'] {
-  grid-area: slider;
-  accent-color: var(--fn-settings);
-}
-
 /* The output: a row of results, newest last for a timeline. */
 .studio-strip {
   display: flex;
@@ -5954,31 +5664,6 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   .studio-item {
     flex-basis: 150px;
   }
-}
-.studio-thumb {
-  position: relative;
-  height: 96px;
-  border-radius: 14px;
-  overflow: hidden;
-  background: var(--surface-raised);
-  isolation: isolate;
-}
-@container studio (max-width: 639px) {
-  .studio-thumb {
-    height: 84px;
-  }
-}
-.studio-item.is-selected .studio-thumb,
-.studio-item.is-shown .studio-thumb {
-  box-shadow: 0 0 0 2px var(--fn-output);
-}
-.studio-thumb > img,
-.studio-thumb > video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  cursor: pointer;
 }
 .studio-thumb-wave {
   position: absolute;
@@ -6028,26 +5713,6 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   isolation: isolate;
 }
 
-.studio-block.is-input {
-  --scratch-1: 22%;
-  --scratch-2: 61%;
-  --scratch-3: 83%;
-}
-.studio-block.is-preview {
-  --scratch-1: 19%;
-  --scratch-2: 57%;
-  --scratch-3: 86%;
-}
-.studio-block.is-settings {
-  --scratch-1: 25%;
-  --scratch-2: 64%;
-  --scratch-3: 80%;
-}
-.studio-block.is-output {
-  --scratch-1: 21%;
-  --scratch-2: 59%;
-  --scratch-3: 84%;
-}
 /* What the block holds, above its grain, with the padding of the block: what scrolls in it (the
    prompt and its images, the settings) scrolls to the edge of the block, under a grain that stays. */
 .studio-block-body {
@@ -6476,12 +6141,6 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   align-self: stretch;
 }
 
-/* No title on the blocks: the colour of their top line says what they are for. */
-.studio-block-head {
-  justify-content: flex-end;
-  min-height: 18px;
-}
-
 /* The prompt (moodix-design.md 14): a box in sight, its buttons inside it at its bottom right,
    16 px from its right edge, never over its scroll bar; the text fades out under them. */
 .studio-prompt-field {
@@ -6675,36 +6334,9 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
 .studio-block.is-settings input[type='text'] {
   min-height: 40px;
 }
-.studio-more {
-  min-height: 38px;
-  flex: none;
-}
-
-.studio-lora {
-  grid-template-columns: minmax(0, 1fr) 64px 34px 30px;
-  grid-template-areas: 'name slider amount remove';
-  align-items: center;
-  gap: 6px;
-  padding: 4px 4px 4px 6px;
-}
-.studio-desk .studio-lora select {
-  min-height: 32px;
-  padding: 0 6px;
-  font-size: var(--size-2);
-  border-radius: 8px;
-}
-.studio-lora input[type='range'] {
-  width: 100%;
-  min-width: 0;
-}
 
 /* The LoRAs of the workflow: a row each, its name (with the tile of Moodix AI when the assistant
    may switch it), its strength, and whether it is on; off, it fades. */
-.studio-lora.is-workflow {
-  grid-template-columns: minmax(0, 1fr) 64px 34px 30px;
-  grid-template-areas: 'name slider amount switch';
-  min-height: 40px;
-}
 
 .studio-lora-label {
   overflow: hidden;
@@ -6725,9 +6357,6 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
 }
 .studio-lora-switch:disabled {
   cursor: default;
-}
-.studio-lora.is-off input[type='range'] {
-  opacity: 0.45;
 }
 
 /* The Sortie: one height, a row of pictures; their actions on the picture. */
@@ -6751,16 +6380,9 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
   flex-basis: 180px;
   gap: 4px;
 }
-.studio-thumb {
-  height: 80px;
-  flex: none;
-}
 @container studio (max-width: 639px) {
   .studio-item {
     flex-basis: 140px;
-  }
-  .studio-thumb {
-    height: 78px;
   }
 }
 
@@ -7000,10 +6622,6 @@ html[data-switch='open']::view-transition-old(chat) {
       scrollbar-width: none !important;
     }
   }
-}
-/* The head of the Sortie, at its top left: how many, then where from, in the same quiet words. */
-.studio-block.is-output .studio-block-head {
-  justify-content: flex-start;
 }
 
 /* ------------------------------------------------------------------ Réglages in blocks */
@@ -7834,13 +7452,11 @@ html[data-switch='open']::view-transition-old(chat) {
   --frame: #07080a;
   --window: #0b0c0f;
   --window-line: #1a1c21;
-  --title-line: #1a1d24;
 }
 :root[data-theme='light'] {
   --frame: #e6e8ed;
   --window: var(--bg);
   --window-line: var(--line-strong);
-  --title-line: var(--line);
 }
 html,
 body {
@@ -7890,40 +7506,6 @@ body {
     margin: 27px 27px 27px 0;
   }
 }
-/* The title bar: the first line of the window, the same in the Chat and the Studio. */
-
-.studio-pill {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  background: #1c1f26;
-  color: var(--text-2);
-  font-size: var(--size-1);
-  font-weight: 700;
-}
-.studio-pill[hidden] {
-  display: none;
-}
-.studio-pill svg {
-  width: 13px;
-  height: 13px;
-}
-/* The filet over the window (public/filet.mjs): beside it in the page, laid exactly on it,
-   above what it holds; it breathes, its opacity alone. */
-
-@keyframes mdx-breath {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
 
 /* ------------------------------------------------------------------ sidebar folded (0.5.99)
    Beside the logo, the button that folds the sidebar to its icons (64 px, on the frame); folded,
@@ -7959,9 +7541,6 @@ body {
     overflow: visible;
   }
   
-  :root[data-sidebar='collapsed'] #sidebar .brand {
-    display: none;
-  }
   /* The small logo, 24 px in its 36 px button, its top on the window's top edge too. */
   
   /* Its squares begin 3.45 px into the drawing (4.6 of 32): 2 px higher than the middle of its
@@ -8006,25 +7585,6 @@ body {
    white line 3 px wide on the inner left edge of the sidebar. The icon in a box of 24 px (its
    drawing fills about three quarters of it: in 18 px it looked 14 px) at 8 px from the edge of
    the line, 12 px from its word; the word at 44 px, where the track of the Studio's modes starts. */
-#sidebar {
-  --sidebar-inset: 14px;
-  --bar-ground: var(--sidebar);
-  --row-ink: var(--text-2);
-  --row-hover: #15171c;
-  --row-open: var(--text-1);
-}
-@media (min-width: 1100px) {
-  /* Wide, the sidebar lies on the frame, without a ground of its own. */
-  #sidebar {
-    --sidebar-inset: 12px;
-    --bar-ground: var(--frame);
-  }
-}
-:root[data-theme='light'] #sidebar {
-  --row-ink: var(--text-2);
-  --row-hover: #eef0f3;
-  --row-open: var(--text-1);
-}
 
 /* The word at the left of its line (a button centres its text: « Nouveau chat » was). */
 
@@ -8096,42 +7656,6 @@ body[data-view='library'] .library-view {
   font-size: var(--size-3);
 }
 /* The three filters on one line: the project and the conversation, the kind at the right. */
-
-/* A filter: its icon and its list in one frame, the ring of the focus around the frame. */
-
-.library-conversations {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 8px 12px;
-}
-.library-conversation {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text-3);
-  font-size: var(--size-2);
-  text-align: left;
-}
-.library-conversation svg {
-  width: 15px;
-  height: 15px;
-}
-
-.library-conversation time {
-  flex: none;
-  font-size: var(--size-1);
-}
-.library-conversation:hover:enabled,
-.library-conversation[aria-current='true'] {
-  border-color: var(--line-strong);
-  background: var(--hover);
-}
 
 /* Tout / Images / Vidéos / Sons: a dark track, the one in use white, as the modes of the Studio. */
 .library-kinds {
@@ -8717,12 +8241,10 @@ button.message-cited-item:focus-visible {
   --line: rgba(238, 232, 222, 0.08);
   --line-strong: rgba(238, 232, 222, 0.16);
   --field-line: rgba(238, 232, 222, 0.1);
-  --title-line: rgba(238, 232, 222, 0.06);
   --text-1: var(--ivory);
   --text-2: var(--grey-1);
   --text-3: var(--grey-2);
   --text-4: var(--grey-3);
-  --accent-hover: var(--accent);
   --link: var(--accent);
   --button: var(--accent);
   --button-hover: var(--accent);
@@ -8732,11 +8254,6 @@ button.message-cited-item:focus-visible {
   --fn-action: var(--accent);
   --fn-settings: var(--accent);
   --fn-output: var(--accent);
-  --fn-input-text: var(--accent);
-  --fn-settings-text: var(--accent);
-  --fn-output-text: var(--accent);
-  --fn-action-text: var(--accent);
-  --on-action: var(--on-accent);
   --window-line: rgba(238, 232, 222, 0.06);
   --focus: var(--accent);
   --font-ui: 'Jost', 'Segoe UI', system-ui, sans-serif;
@@ -10881,12 +10398,6 @@ body:not([data-view='chat']) .resume {
   margin: 0;
   color: var(--text-3);
   font: 400 12px/1 var(--font-ui);
-}
-.studio-slot-hint {
-  align-self: center;
-  max-width: 9em;
-  color: var(--text-3);
-  font: 400 13px/1.4 var(--font-ui);
 }
 #studio-view .studio-slot-pick {
   border: 1px dashed rgba(238, 232, 222, 0.18);
@@ -13911,53 +13422,6 @@ body:has(#settings[data-tab='interface'][open]) :is(#top, .workspace) {
   flex-direction: column;
   gap: 0;
 }
-.workflow-main {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-.workflow-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
-#settings .workflow-settings .workflow-name {
-  overflow: hidden;
-  color: var(--text-1);
-  font: 400 15px/1.2 var(--font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.workflow-kind {
-  flex: none;
-  color: var(--text-3);
-  font: 400 var(--size-label)/1 var(--font-mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.workflow-own {
-  flex: none;
-  align-self: center;
-  padding: 2px 6px;
-  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
-  border-radius: 4px;
-  color: var(--accent);
-  font: 400 var(--size-label)/1 var(--font-mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.workflow-line {
-  margin: 0;
-  overflow: hidden;
-  color: var(--text-3);
-  font: 400 13px/1.3 var(--font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.workflow-line.is-warning {
-  color: var(--warning);
-}
 
 /* Mise à jour (16/11, capture 48): « Version installée » and when it was looked for under it, the
    number in mono at the right; a version waiting in a frame (a dot of accent, Installer). The
@@ -15025,30 +14489,6 @@ body[data-setup='incomplete'] #resume-last {
 }
 .license-block[data-confirm] .license-limits {
   color: var(--text-1);
-}
-/* On the line of a workflow (settings): under its sentence, smaller, the line growing with it;
-   « LICENCE » beside the names, to take one row less. « Annuler » of the confirmation is neutral
-   (a text button is red by default: nothing is deleted here). */
-.workflow-main > .license-block {
-  margin: 5px 0 2px;
-}
-.workflow-main > .license-block:not([data-confirm]) {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  column-gap: 12px;
-}
-.workflow-main > .license-block:not([data-confirm]) .license-head {
-  margin: 0;
-}
-.workflow-main > .license-block .license-list {
-  gap: 4px;
-}
-.workflow-main > .license-block :is(.license-line, .license-limits) {
-  font-size: 12.5px;
-}
-.workflow-main > .license-block .license-limits {
-  max-width: 76ch;
 }
 
 /* The picture of a take that failed, under its veil (52): the frame no longer hides it. */
@@ -17166,12 +16606,6 @@ body:not([data-view='studio']) .ai-cursor {
   gap: 10px;
   overflow: hidden;
 }
-#studio-view .studio-block.montage-inspector {
-  align-self: stretch;
-}
-#studio-view .studio-block.montage-inspector > .studio-block-body {
-  overflow: hidden;
-}
 /* The foot is the timeline: no « Sortie » written above it. */
 #studio-view .studio-block.montage-timeline {
   padding: 0;
@@ -17253,7 +16687,6 @@ body:not([data-view='studio']) .ai-cursor {
   background: repeating-linear-gradient(90deg, rgba(238, 232, 222, 0.16) 0 2px, transparent 2px 5px);
 }
 .montage-take-number,
-.montage-take-kind,
 .montage-take-length {
   position: absolute;
   z-index: 1;
@@ -17265,18 +16698,12 @@ body:not([data-view='studio']) .ai-cursor {
   font: 500 9.5px/1 var(--font-ui);
   letter-spacing: 0.12em;
 }
-.montage-take-kind {
-  left: 6px;
-  bottom: 5px;
-  font: 400 10px/1 var(--font-ui);
-}
 .montage-take-length {
   right: 6px;
   bottom: 5px;
   font: 400 10px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-.montage-hint,
 .montage-none {
   margin: 0;
   font: 400 11.5px/1.4 var(--font-ui);
@@ -17289,10 +16716,6 @@ body:not([data-view='studio']) .ai-cursor {
 /* The screen. */
 .montage-screen > .studio-block-body {
   gap: 10px;
-}
-.montage-screen-head {
-  display: flex;
-  flex: none;
 }
 .montage-stage {
   flex: 1 1 auto;
@@ -17335,14 +16758,6 @@ body:not([data-view='studio']) .ai-cursor {
   border: 1px solid var(--line);
   border-radius: inherit;
   background: var(--surface);
-}
-.montage-blank-title {
-  font: 400 21px/1.1 var(--font-display);
-  color: var(--ink);
-}
-.montage-blank-text {
-  font: 400 12.5px/1.4 var(--font-ui);
-  color: var(--muted);
 }
 .montage-caption {
   position: absolute;
@@ -17392,189 +16807,12 @@ body:not([data-view='studio']) .ai-cursor {
   margin-left: -8px;
   color: var(--muted);
 }
-.montage-bar {
-  position: relative;
-  flex: 1 1 auto;
-  height: 14px;
-  cursor: pointer;
-}
-.montage-bar::before,
-.montage-bar-done {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 6px;
-  height: 2px;
-}
-.montage-bar::before {
-  right: 0;
-  background: rgba(238, 232, 222, 0.12);
-}
-.montage-bar-done {
-  background: var(--ink);
-}
-/* What is chosen: a plan, a sound, else the montage. */
-.montage-rows {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-.montage-title {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 15px 18px 12px;
-}
-.montage-title-name {
-  font: 500 16px/1.1 var(--font-ui);
-  color: var(--ink);
-}
-.montage-title-meta {
-  font: 400 11.5px/1.3 var(--font-ui);
-  color: var(--muted);
-}
-.montage-row {
-  flex: none;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  min-height: 36px;
-  padding: 0 18px;
-  border-top: 1px solid rgba(238, 232, 222, 0.05);
-}
-.montage-row-name {
-  font: 400 13.5px/1 var(--font-ui);
-  color: var(--muted);
-  white-space: nowrap;
-}
-.montage-row-side {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  min-width: 0;
-}
-.montage-figures {
-  font: 500 12.5px/1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-  white-space: nowrap;
-}
-.montage-range-box {
-  display: inline-flex;
-  width: 88px;
-}
-.studio-desk input.montage-name {
-  width: 150px;
-  text-align: right;
-}
-/* (0.6.141) Its format and its size: fields as its name is, at the right of their line. The three are
-   lower than the fields of the Studio: a line of these settings is 36 px high, and fields of 44 px
-   touched one another from line to line. */
-.studio-desk .montage-row-side > button.glass-select {
-  width: 150px;
-}
-.studio-desk .montage-row-side > button.glass-select,
-.studio-desk .montage-row-side > input.montage-name {
-  min-height: 30px;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 9px;
-  font-size: 13px;
-}
-.montage-two {
-  display: inline-flex;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.montage-choice {
-  padding: 6px 9px;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font: 400 12px/1 var(--font-ui);
-  cursor: pointer;
-}
-.montage-choice[aria-pressed='true'] {
-  background: rgba(238, 232, 222, 0.09);
-  color: var(--ink);
-}
-.montage-step {
-  height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: none;
-  color: var(--ink);
-  font: 400 12px/1 var(--font-ui);
-  cursor: pointer;
-}
-.montage-step:disabled {
-  color: var(--muted);
-  opacity: 0.5;
-  cursor: default;
-}
-.montage-foot {
-  flex: none;
-  display: flex;
-  gap: 8px;
-  padding: 10px 18px 14px;
-  border-top: 1px solid rgba(238, 232, 222, 0.05);
-}
-.montage-foot:empty {
-  display: none;
-}
-.montage-action {
-  flex: 1 1 auto;
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: none;
-  color: var(--ink);
-  font: 500 13px/1 var(--font-ui);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.montage-action.is-quiet {
-  color: var(--muted);
-}
-.montage-action:hover,
-.montage-step:not(:disabled):hover {
-  border-color: rgba(238, 232, 222, 0.3);
-}
 /* The timeline. */
 .montage-timeline > .studio-block-body {
   gap: 0;
   padding: 0;
 }
-.montage-timeline-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 48px;
-  padding: 0 18px;
-}
 /* The name of the montage is its title: the list of the montages of the project opens from it. */
-#studio-view .montage-timeline-head .montage-pick.glass-select {
-  width: auto;
-  max-width: 320px;
-  height: 34px;
-  min-height: 0;
-  border-radius: 8px;
-  padding: 0 4px;
-  border: 0;
-  background: none;
-  box-shadow: none;
-  color: var(--ink);
-  font: 400 21px/1 var(--font-display);
-}
-.montage-summary,
 .montage-status {
   font: 400 12.5px/1 var(--font-ui);
   color: var(--muted);
@@ -17673,18 +16911,6 @@ body:not([data-view='studio']) .ai-cursor {
 }
 .montage-track[data-track='plans'] > .montage-lane {
   height: 100%;
-}
-.montage-invite {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed rgba(238, 232, 222, 0.22);
-  border-radius: inherit;
-  font: 400 12px/1 var(--font-ui);
-  color: var(--muted);
-  pointer-events: none;
 }
 .montage-piece {
   position: absolute;
@@ -17987,117 +17213,12 @@ html[data-page-hidden='true'] .montage-piece.is-making::after {
   text-overflow: ellipsis;
 }
 /* Ses réglages. */
-/* (Ce qu'il faut faire pour en avoir une, sur deux lignes à la droite de la sienne.) */
-.montage-none-yet {
-  max-width: 128px;
-  font: 400 12px/1.2 var(--font-ui);
-  color: var(--muted);
-  text-align: right;
-  text-wrap: balance;
-}
-/* Ses lignes prennent ce qu'il leur faut, son texte la place qui reste : il n'est jamais coupé par le pied. */
-.montage-rows.is-tight {
-  flex: none;
-  overflow: visible;
-}
-.montage-title.is-tight {
-  padding: 12px 18px 9px;
-}
-.montage-foot.is-tight {
-  padding: 8px 18px 12px;
-}
-.montage-chip {
-  flex: none;
-  width: 38px;
-  height: 22px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: #000 center / cover no-repeat;
-}
-.montage-off {
-  flex: none;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--muted);
-  font: 400 16px/1 var(--font-ui);
-  cursor: pointer;
-}
-.montage-off:enabled:hover {
-  background: rgba(238, 232, 222, 0.08);
-  color: var(--ink);
-}
-.montage-words {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 9px 18px;
-  border-top: 1px solid rgba(238, 232, 222, 0.05);
-}
-.studio-desk textarea.montage-words-field {
-  flex: 1 1 auto;
-  height: auto;
-  min-height: 0;
-  padding: 7px 10px;
-  border-radius: 10px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  resize: none;
-}
-.montage-reason {
-  flex: none;
-  margin: -3px 18px 8px;
-  font: 400 12px/1.35 var(--font-ui);
-  color: var(--muted);
-}
-.montage-reason[hidden] {
-  display: none;
-}
-.montage-action.is-go:enabled {
-  border-color: transparent;
-  background: #d8d2e2;
-  color: #16151a;
-}
-.montage-action:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-/* « Arrêter », pendant qu'un plan est créé : à côté d'« Exporter le film ». */
-.montage-halt {
-  flex: none;
-  height: 34px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: none;
-  color: var(--ink);
-  font: 500 13px/1 var(--font-ui);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.montage-halt:hover {
-  border-color: rgba(238, 232, 222, 0.3);
-}
 /* Une fenêtre basse (1280 × 720) : quatre pistes là où il y en avait trois, et les réglages d'un plan
    à faire, resserrés pour que son texte garde deux lignes. */
 @media (max-height: 760px) {
   .montage-lanes {
     gap: 5px;
     padding: 8px 0;
-  }
-  .montage-title.is-tight {
-    padding: 10px 18px 8px;
-  }
-  .montage-foot.is-tight {
-    padding: 8px 18px 10px;
-  }
-  .montage-rows.is-tight > .montage-row {
-    min-height: 32px;
   }
 }
 
@@ -18115,114 +17236,8 @@ html[data-page-hidden='true'] .montage-piece.is-making::after {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
-/* Pendant qu'on tire le bord d'une vidéo au-delà de sa prise : ce que cela fait, dit au-dessus de la main. */
-.montage-tip {
-  position: absolute;
-  z-index: 2;
-  top: -6px;
-  transform: translate(-50%, -100%);
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: rgba(26, 24, 31, 0.97);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-  color: var(--ink);
-  font: 500 12px/1.2 var(--font-ui);
-  white-space: nowrap;
-}
 
 /* ------------------------------------------------------------------ Montage, étape 2, lot 3 (0.6.144) */
-/* Maquettes M7 et M8. « Combler les trous », en tête de la timeline : le bouton plein tant qu'il reste
-   des plans à faire (« Exporter le film » est alors grisé, il n'y a jamais deux boutons pleins). */
-.montage-fill {
-  flex: none;
-  height: 34px;
-  padding: 0 16px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  background: #d8d2e2;
-  color: #16151a;
-  font: 500 13px/1 var(--font-ui);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.montage-fill:disabled {
-  border-color: var(--line);
-  background: none;
-  color: var(--muted);
-  opacity: 0.55;
-  cursor: default;
-}
-/* « Reprendre », après une pause. */
-.montage-halt.is-go {
-  border-color: transparent;
-  background: #d8d2e2;
-  color: #16151a;
-}
-.montage-halt:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-/* Plusieurs boutons en tête : ils se suivent de près, l'état prend la place qui reste. */
-.montage-timeline-head > .montage-halt + .montage-halt,
-.montage-timeline-head > .montage-halt + .montage-export,
-.montage-timeline-head > .montage-fill + .montage-export {
-  margin-left: -8px;
-}
-/* La série, à la place des réglages : ce qui sera créé, chaque plan avec son modèle et son texte ; ce
-   qui ne peut pas l'être, avec sa raison ; puis, une fois lancée, où en est chacun. */
-.montage-series-item {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 10px 18px 11px;
-  border-top: 1px solid rgba(238, 232, 222, 0.05);
-}
-.montage-series-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10px;
-}
-.montage-series-name {
-  font: 500 13px/1.2 var(--font-ui);
-  color: var(--ink);
-  white-space: nowrap;
-}
-.montage-series-model {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font: 400 12px/1.2 var(--font-mono);
-  letter-spacing: 0.02em;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.montage-series-words,
-.montage-series-note {
-  margin: 0;
-  font: 400 12px/1.45 var(--font-ui);
-  color: rgba(238, 232, 222, 0.78);
-}
-.montage-series-words {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-.montage-series-note {
-  color: var(--muted);
-}
-.montage-series-item.is-out > .montage-series-top > .montage-series-name,
-.montage-series-item.is-out > .montage-series-words {
-  color: var(--muted);
-}
-.montage-series-state {
-  font: 500 10.5px/1 var(--font-ui);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink);
-}
 
 /* ------------------------------------------------------------------ Montage : les vignettes (0.6.145) */
 /* « C'est trop zoomé » (sa capture du 20/11 : une vidéo en portrait de 19,7 s). La vignette d'un plan
@@ -18236,42 +17251,6 @@ html[data-page-hidden='true'] .montage-piece.is-making::after {
 }
 
 /* ------------------------------------------------------------------ Montage, étape 2, lot 4 (0.6.146) */
-/* Maquette M7. « Agent », en tête de la timeline, à gauche de « Combler les trous » : le bouton des autres
-   modes du Studio (#studio-view .studio-agent), à la hauteur des boutons de cette tête. Pendant que
-   Moodix AI écrit, sa marque tourne (.is-thinking .eclipse-shadow, plus haut). */
-.montage-agent {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 14px;
-  border: 1px solid #262a33;
-  border-radius: 10px;
-  background: #14161b;
-  color: var(--ink);
-  font: 700 13px/1 var(--font-ui);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.montage-agent svg {
-  width: 17px;
-  height: 17px;
-}
-.montage-agent:enabled:hover {
-  background: var(--hover);
-}
-.montage-agent:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-.montage-agent.is-thinking:disabled {
-  opacity: 1;
-}
-.montage-timeline-head > .montage-agent + .montage-fill,
-.montage-timeline-head > .montage-agent + .montage-halt {
-  margin-left: -8px;
-}
 /* Le plan que Moodix AI est en train d'écrire. */
 .montage-piece.is-todo.is-writing {
   border-style: solid;

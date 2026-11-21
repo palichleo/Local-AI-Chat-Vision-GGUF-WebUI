@@ -198,10 +198,6 @@ export function setupNativeWorkflows(options) {
     svg.append(use);
     return svg;
   };
-  const formatSize = bytes =>
-    bytes >= 1024 ** 3
-      ? (bytes / 1024 ** 3).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' Go'
-      : Math.max(1, Math.round(bytes / 1024 ** 2)).toLocaleString('fr-FR') + ' Mo';
   const button = (text, action, className = 'secondary') => {
     const value = node('button', className, text);
     value.type = 'button';

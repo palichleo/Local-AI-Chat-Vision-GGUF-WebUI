@@ -663,13 +663,6 @@ export function setupStudio({
     control.oninput = () => oninput(control.value);
     return control;
   }
-  /** The head of a block: no title (the colour says the function), only what it holds. */
-  function blockHead(title, { extra } = {}) {
-    const head = node('div', 'studio-block-head');
-    if (title) head.append(node('h2', 'sr-only', title));
-    if (extra) head.append(extra);
-    return head;
-  }
 
   // ------------------------------------------------------------------ inputs (images)
   function exclusiveWith(workflow, role) {
