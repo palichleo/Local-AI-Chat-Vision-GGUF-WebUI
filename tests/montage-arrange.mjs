@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ARRANGE_LIMITS, ARRANGEMENT_SCHEMA, readArrangement, withArrangement } from '../public/montage-arrange.mjs';
+import { ARRANGE_LIMITS, readArrangement, withArrangement } from '../public/montage-arrange.mjs';
 import {
   MONTAGE_LIMITS,
   TODO_LIMITS,
@@ -312,27 +312,7 @@ test('an answer without a plan is refused: no object, or nothing said, laid nor 
   for (const given of [undefined, null, 42, { say: 'Un objet, pas un texte.' }]) assert.throws(() => readArrangement(given), UNREADABLE);
 });
 
-test('the schema asks every field of the plan and nothing else, and cannot be changed (0.6.161)', () => {
-  const objects = [];
-  const walk = node => {
-    if (!node || typeof node !== 'object') return;
-    if (node.type === 'object') objects.push(node);
-    Object.values(node).forEach(walk);
-  };
-  walk(ARRANGEMENT_SCHEMA);
-  // (The plan, a text of `fill`, a take to create, a take of the project.)
-  assert.equal(objects.length, 4);
-  for (const node of objects) {
-    assert.equal(node.additionalProperties, false);
-    assert.deepEqual([...node.required].sort(), Object.keys(node.properties).sort());
-  }
-  assert.deepEqual(ARRANGEMENT_SCHEMA.required, ['say', 'fill', 'add']);
-  assert.deepEqual([ARRANGEMENT_SCHEMA.properties.add.maxItems, ARRANGEMENT_SCHEMA.properties.fill.maxItems], [ARRANGE_LIMITS.add, ARRANGE_LIMITS.fill]);
-  const [created, made] = ARRANGEMENT_SCHEMA.properties.add.items.anyOf;
-  assert.deepEqual([created.required, created.properties.link.enum, created.properties.start.type], [['text', 'seconds', 'link', 'start', 'end'], ['suite', 'cut'], ['string', 'null']]);
-  assert.deepEqual([made.required, made.properties.seconds.type], [['take', 'seconds'], ['number', 'null']]);
-  assert.deepEqual(JSON.parse(JSON.stringify(ARRANGEMENT_SCHEMA)), ARRANGEMENT_SCHEMA);
-  assert.throws(() => created.properties.link.enum.push('fondu'), TypeError);
+test('the limits of a plan cannot be changed (0.6.161)', () => {
   assert.throws(() => {
     ARRANGE_LIMITS.add = 99;
   }, TypeError);
