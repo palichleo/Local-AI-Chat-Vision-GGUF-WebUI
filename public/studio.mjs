@@ -3656,10 +3656,26 @@ export function setupStudio({
     holdAt();
     const shown = request ? showRequest(request) : null;
     // (0.6.181) `place`: asked in the Bobine, where it goes there (the server kept it with its job).
-    working = { label: 'Génération en cours…', fraction: null, external: true, ...(shown ? { shown } : {}), ...(request?.bobine ? { place: request.bobine, tell: () => montage.busyChanged() } : {}) };
+    // (0.6.184) `asked`: its request, when it could not be shown (the tools of the Studio not read yet, or
+    // read before the engine was ready, when no model is offered): shown once they are (showLate).
+    working = { label: 'Génération en cours…', fraction: null, external: true, ...(shown ? { shown } : request ? { asked: request } : {}), ...(request?.bobine ? { place: request.bobine, tell: () => montage.busyChanged() } : {}) };
     render();
     working.tell?.();
     return true;
+  }
+  /**
+   * (0.6.184, seen on the card on 21/11) The work followed again whose request could not be shown: a page
+   * just reloaded follows its job at once, before the Studio has read its tools, and no model was known to
+   * show it with. The Studio stayed in Image, « En cours · 20 % » under the form of an image, while LTX 2.5
+   * made a video. Shown as soon as they are read with its model (load): the first reading of a page comes
+   * before the engine is ready, and offers no model yet.
+   */
+  function showLate() {
+    if (!working?.external || !working.asked) return;
+    const shown = showRequest(working.asked);
+    if (!shown) return;
+    working.shown = shown;
+    delete working.asked;
   }
   /**
    * The settings of `request` (a proposal, as the server makes it) in the draft of its mode, at once, as
@@ -5185,6 +5201,8 @@ export function setupStudio({
         unreadable = '';
         toolsAt = Date.now();
         toolsStale = false;
+        // (0.6.184) A work followed again before they were read: its settings, now (drawn by who asked).
+        showLate();
       })
       .finally(() => {
         loading = null;

@@ -5973,6 +5973,60 @@ test('followed again with its request, the Studio shows the settings it is made 
   }
 });
 
+test('followed again before its tools are read (a page just reloaded), the Studio shows the settings of the take once they are (0.6.184)', async () => {
+  // (Seen on the card on 21/11: the page reloaded during a take of the Bobine follows its job at once,
+  // before the Studio has read its models. It stayed in Image, « En cours · 20 % » under the form of an
+  // image, while LTX 2.5 made a video: what 0.6.96 and 0.6.177 had put right for a page that stays.)
+  const { clip, request } = proposalOf({ prompt: 'Un phare' });
+  const image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true };
+  const page = await studioPage({ create_image: [image], create_video: [clip] }, {}, { open: false });
+  const { studio } = page;
+  try {
+    assert.equal(studio.followAgain(request), true);
+    // Its tools read (the Studio opens, or reads ahead as the page does at launch): in Vidéo, its text, its seed.
+    await studio.open();
+    const ai = key => under(page.body).find(item => item.dataset?.ai === key);
+    assert.deepEqual([page.body.dataset.mode, page.prompt().value, ai('seed').value, studio.busy()], ['video', 'Un phare', '7', true]);
+    // Made: the settings of its take, as when its request was shown at once.
+    page.runs.push({ ...lighthouse, prompt: 'Un phare' });
+    await studio.settled({ record: lighthouse });
+    assert.deepEqual([page.prompt().value, ai('seed').value, studio.screenTake()], ['Un phare', '', { take: 3, media: 'video' }]);
+  } finally {
+    page.restore();
+  }
+  // Read ahead by the page (prefetch), the Studio not on screen: the same, drawn when it comes.
+  const ahead = await studioPage({ create_image: [image], create_video: [clip] }, {}, { open: false });
+  try {
+    ahead.studio.followAgain(request);
+    await ahead.studio.prefetch();
+    await ahead.studio.open();
+    assert.deepEqual([ahead.body.dataset.mode, ahead.prompt().value], ['video', 'Un phare']);
+    // Nothing made: the seed of before back, as for a request shown at once.
+    const ai = key => under(ahead.body).find(item => item.dataset?.ai === key);
+    await ahead.studio.settled({ error: 'La génération a échoué.' });
+    assert.equal(ai('seed').value, '');
+  } finally {
+    ahead.restore();
+  }
+  // Its tools read, but before the engine was ready: no model of video is offered yet (the first reading of a
+  // page). Nothing can be shown then; read again with its model, its settings are.
+  const tools = { create_image: [image], create_video: [] };
+  const early = await studioPage(tools);
+  try {
+    early.studio.followAgain(request);
+    assert.equal(early.body.dataset.mode, 'image');
+    tools.create_video = [clip];
+    early.studio.invalidate({ tools: true });
+    await early.studio.open();
+    await settle();
+    // (The page of the test hands the same list again: nothing new to draw for it. Drawn here.)
+    early.studio.render();
+    assert.deepEqual([early.body.dataset.mode, early.prompt().value], ['video', 'Un phare']);
+  } finally {
+    early.restore();
+  }
+});
+
 test('drawn again, Réglages and Entrée stay where they were scrolled to; « Plus de réglages » opened is brought into sight', async () => {
   // (0.6.102) Each drawing sent them back to their top, as the Sortie was before (0.6.92): a LoRA
   // switched, a setting changed, « Plus de réglages » opened at the foot of a long column.
