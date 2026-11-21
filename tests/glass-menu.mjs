@@ -284,6 +284,22 @@ test('the tip of a list goes to its button, and follows it when the page sets it
   assert.equal(face.dataset.tip, 'delta.safetensors');
 });
 
+test('(0.6.189) a choice that cannot be chosen says why at the right of its list, not over it (help-tips.mjs)', () => {
+  // The list is above the page (a popover): the bubble of the page, over the list, was under it.
+  const root = new Element('div'),
+    select = new Select([['ltx', 'LTX 2.5'], ['wan', 'Wan 2.2 · indisponible', true]], 'ltx'),
+    why = 'Wan 2.2 demande une carte graphique NVIDIA : son pilote n’en voit aucune sur cet ordinateur.';
+  select.options[1].getAttribute = name => (name === 'title' ? why : null);
+  root.append(select);
+  setupGlassSelects(root);
+  const [, face, menu] = root.children;
+  face.onclick();
+  const [free, greyed] = menu.children;
+  assert.deepEqual([greyed.className, greyed.attributes['aria-disabled'], greyed.dataset.tip, greyed.dataset.tipSide], ['glass-menu-item is-off', 'true', why, 'right']);
+  // A choice with nothing to say has no bubble, nor a side for one.
+  assert.deepEqual([free.dataset.tip, free.dataset.tipSide], [undefined, undefined]);
+});
+
 test('no source of the page or of the server holds a control character (an escape lost on its way into a file)', async () => {
   const folders = ['../public/', '../lib/', '../tests/', '../scripts/'];
   const files = [new URL('../server.mjs', import.meta.url)];

@@ -50,6 +50,10 @@ class Element {
     if (selector === 'dialog[open]') return this.tagName === 'DIALOG' && this.open;
     if (selector === '.home-button, .new-chat') return /\b(home-button|new-chat)\b/.test(this.className);
     if (selector === ':focus-visible') return true;
+    // (0.6.189) A list of glass, and a popover shown (above the page, as an open dialog).
+    if (selector === '.glass-menu') return this.className.split(' ').includes('glass-menu');
+    if (selector === ':popover-open') return this.popoverOpen === true;
+    if (selector.includes(', ')) return selector.split(', ').some(part => this.is(part));
     return false;
   }
   matches(selector) {
@@ -172,4 +176,105 @@ test('(0.6.155) data-tip-side="left": the bubble at the left of its control, at 
   // No room at its left: above it, as every bubble.
   body.fire('focusin', { target: edge });
   assert.deepEqual([bubble.style.left, bubble.style.top], ['120px', '106px']);
+});
+
+// (0.6.189, captures 94, 100, 101, 104) A list of glass lies above the page (a popover). Above its
+// choice, the bubble of a greyed one lay over the list, under it: its reason could not be read.
+function glassList(box) {
+  const list = new Element('div', { className: 'glass-menu', box });
+  list.popoverOpen = true;
+  return list;
+}
+
+test('(0.6.189) data-tip-side="right" on a choice of a list: 8 px at the right of the list, at the height of the choice; at its left without room at its right', () => {
+  const { body } = page();
+  const roomy = glassList({ left: 600, top: 300, right: 800, bottom: 460 }),
+    // Near the right edge of the window, as « + Ajouter » of the Bobine (104: 30 px from it).
+    edge = glassList({ left: 1040, top: 300, right: 1250, bottom: 460 });
+  const choice = new Element('button', { className: 'glass-menu-item is-off', attributes: { 'data-tip': 'Wan 2.2 demande une carte NVIDIA', 'data-tip-side': 'right' }, box: { left: 607, top: 380, right: 793, bottom: 416 } }),
+    last = new Element('button', { className: 'glass-menu-item is-off', attributes: { 'data-tip': 'Pas dans la Bobine', 'data-tip-side': 'right' }, box: { left: 1047, top: 380, right: 1243, bottom: 416 } });
+  roomy.append(choice);
+  edge.append(last);
+  body.append(roomy, edge);
+  setupHelpTips(body);
+  const bubble = body.children.find(child => child.className === 'help-bubble');
+  body.fire('focusin', { target: choice });
+  // 800 + 8: from the list itself, not from its choice (7 px inside it); its middle on the choice's (398).
+  assert.deepEqual([bubble.textContent, bubble.style.left, bubble.style.top], ['Wan 2.2 demande une carte NVIDIA', '808px', '385px']);
+  // 1250 + 8 + 120 passes the window (1280 - 8): at the left of the list, 1040 - 8 - 120.
+  body.fire('focusin', { target: last });
+  assert.deepEqual([bubble.textContent, bubble.style.left, bubble.style.top], ['Pas dans la Bobine', '912px', '385px']);
+});
+
+test('(0.6.189) data-tip-side="left" on a choice of a list (« Exporter », 0.6.155): 8 px at the left of the list; at its right without room at its left', () => {
+  const { body } = page();
+  const menu = glassList({ left: 919, top: 119, right: 1256, bottom: 254 }),
+    against = glassList({ left: 20, top: 119, right: 360, bottom: 254 });
+  const single = new Element('button', { className: 'glass-menu-item bobine-export-item is-off', attributes: { 'data-tip': '1 prise est encore à créer', 'data-tip-side': 'left' }, box: { left: 926, top: 126, right: 1249, bottom: 186 } }),
+    near = new Element('button', { className: 'glass-menu-item is-off', attributes: { 'data-tip': 'Trop près du bord', 'data-tip-side': 'left' }, box: { left: 27, top: 126, right: 353, bottom: 186 } });
+  menu.append(single);
+  against.append(near);
+  body.append(menu, against);
+  setupHelpTips(body);
+  const bubble = body.children.find(child => child.className === 'help-bubble');
+  // 919 - 8 - 120 (it touched the list: 7 px from its choice, 1 px from the list); its middle at 156.
+  body.fire('focusin', { target: single });
+  assert.deepEqual([bubble.style.left, bubble.style.top], ['791px', '143px']);
+  // 20 - 8 - 120 is out of the window: at the right of the list (above its choice, it was under the list).
+  body.fire('focusin', { target: near });
+  assert.deepEqual([bubble.style.left, bubble.style.top], ['368px', '143px']);
+});
+
+test('(0.6.189) no room at either side of a list: over its choice as every bubble, and in the list, above the page with it', () => {
+  const { body } = page();
+  const wide = glassList({ left: 100, top: 300, right: 1180, bottom: 460 });
+  const choice = new Element('button', { className: 'glass-menu-item is-off', attributes: { 'data-tip': 'Indisponible ici', 'data-tip-side': 'right' }, box: { left: 107, top: 380, right: 1173, bottom: 416 } });
+  wide.append(choice);
+  body.append(wide);
+  setupHelpTips(body);
+  const bubble = body.children.find(child => child.className === 'help-bubble');
+  body.fire('focusin', { target: choice });
+  assert.deepEqual([bubble.style.left, bubble.style.top], ['580px', '346px']);
+  // Left in the page, it was drawn under the list it lies on.
+  assert.equal(bubble.parentNode, wide);
+  // Hidden (a click, Échap, the focus gone), it is back in the page: a list replaces its choices as it
+  // closes, and took the bubble out of the page with them.
+  body.fire('pointerdown', { target: choice });
+  assert.deepEqual([bubble.hidden, bubble.parentNode], [true, body]);
+});
+
+test('(0.6.189) a « ? » in a small window shown above the page (a popover): its bubble goes into it, as into a dialog', () => {
+  const { body } = page();
+  const small = new Element('div', { className: 'studio-piece-window' });
+  small.popoverOpen = true;
+  const help = new Element('span', { className: 'help-tip', attributes: { 'data-help': 'Qui remplacer : le personnage de la vidéo.' } }),
+    outside = new Element('button', { attributes: { 'data-tip': 'Générer' } });
+  small.append(help);
+  body.append(small, outside);
+  setupHelpTips(body);
+  const bubble = body.children.find(child => child.className === 'help-bubble');
+  body.fire('focusin', { target: help });
+  assert.deepEqual([bubble.parentNode, bubble.textContent, bubble.hidden], [small, 'Qui remplacer : le personnage de la vidéo.', false]);
+  // The window closed, a bubble of the page is in the page again.
+  small.popoverOpen = false;
+  body.fire('focusin', { target: outside });
+  assert.deepEqual([bubble.parentNode, bubble.textContent], [body, 'Générer']);
+});
+
+test('(0.6.189) a browser that knows no popover still shows the bubble, in its dialog', () => {
+  const { body } = page();
+  const dialog = new Element('dialog', { id: 'settings' });
+  dialog.open = true;
+  const help = new Element('span', { attributes: { 'data-help': 'Le dossier des modèles.' } });
+  // As such a browser: « :popover-open » is no selector to it.
+  help.closest = function (selector) {
+    if (selector.includes(':popover-open')) throw new SyntaxError(`'${selector}' is not a valid selector.`);
+    return Element.prototype.closest.call(this, selector);
+  };
+  dialog.append(help);
+  body.append(dialog);
+  setupHelpTips(body);
+  const bubble = body.children.find(child => child.className === 'help-bubble');
+  body.fire('focusin', { target: help });
+  assert.deepEqual([bubble.parentNode, bubble.textContent, bubble.hidden], [dialog, 'Le dossier des modèles.', false]);
 });

@@ -142,9 +142,13 @@ function enhance(select, view) {
           item.setAttribute('aria-label', option.textContent + ', ' + note);
         }
         if (option.disabled) item.setAttribute('aria-disabled', 'true');
-        // Why it cannot be chosen, under the pointer.
+        // Why it cannot be chosen, under the pointer: (0.6.189) at the right of the list, where it can
+        // be read; over the list, the bubble of the page was under it (help-tips.mjs).
         const reason = option.getAttribute('title') || option.dataset.tip;
-        if (reason) item.dataset.tip = reason;
+        if (reason) {
+          item.dataset.tip = reason;
+          item.dataset.tipSide = 'right';
+        }
         item.onclick = () => choose(option);
         return item;
       }),

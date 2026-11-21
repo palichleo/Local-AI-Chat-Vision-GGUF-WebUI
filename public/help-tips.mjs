@@ -7,6 +7,8 @@
  * one (a dialog lies above the page). Every bubble is centred on its control, 8 px above it, under
  * it when there is no room above, and stays inside the window. (0.6.155) `data-tip-side="left"`: at its
  * left, at its height, when there is room there (a choice of a menu: above it, it hid what is above).
+ * (0.6.189) `data-tip-side="right"` too, and a choice of a list of glass beside the list itself; into an
+ * open popover too (a list, a small window), which lies above the page as a dialog.
  */
 export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 150 } = {}) {
   const page = root.ownerDocument ?? root,
@@ -47,6 +49,18 @@ export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 1
     if (target.dataset.help) return target.dataset.help;
     return target.dataset.tip || '';
   }
+  /**
+   * What holds `target` above the page: an open dialog, or (0.6.189) a list or a small window shown as
+   * a popover. The bubble goes into it: left in the page, it was drawn under it.
+   */
+  function above(target) {
+    try {
+      return target.closest?.('dialog[open], :popover-open') ?? null;
+    } catch {
+      // A browser that knows no popover: a dialog is all that lies above the page.
+      return target.closest?.('dialog[open]') ?? null;
+    }
+  }
   function place(target) {
     const set = (x, y) => {
       bubble.style.left = x + 'px';
@@ -63,9 +77,21 @@ export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 1
     let top = box.top - size.height - 8,
       left = box.left + box.width / 2 - size.width / 2;
     if (top < margin) top = box.bottom + 8;
-    if (target.dataset.tipSide === 'left' && box.left - size.width - 8 >= margin) {
-      left = box.left - size.width - 8;
-      top = box.top + box.height / 2 - size.height / 2;
+    // Beside it, at its height, on the side `data-tip-side` says, when there is room there. (0.6.189) A
+    // choice of one of our lists is measured on the list, 8 px from it, and takes the other side when
+    // its own has no room: over the list, its bubble lay under it (a list is above the page).
+    const side = target.dataset.tipSide;
+    if (side === 'left' || side === 'right') {
+      const list = target.closest?.('.glass-menu'),
+        edge = list ? list.getBoundingClientRect() : box,
+        at = { left: edge.left - size.width - 8, right: edge.right + 8 },
+        fits = { left: at.left >= margin, right: at.right + size.width <= width - margin },
+        other = side === 'left' ? 'right' : 'left',
+        chosen = fits[side] ? side : list && fits[other] ? other : '';
+      if (chosen) {
+        left = at[chosen];
+        top = box.top + box.height / 2 - size.height / 2;
+      }
     }
     left = Math.round(Math.max(margin, Math.min(left, width - size.width - margin)));
     top = Math.round(Math.max(margin, Math.min(top, height - size.height - margin)));
@@ -80,7 +106,7 @@ export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 1
     clearTimeout(timer);
     const text = textOf(target);
     if (!text || !target.isConnected) return hide();
-    const layer = target.closest?.('dialog[open]') ?? host;
+    const layer = above(target) ?? host;
     if (bubble.parentNode !== layer) layer.append(bubble);
     if (current !== target) current?.removeAttribute?.('aria-describedby');
     current = target;
@@ -97,6 +123,8 @@ export function setupHelpTips(root, { id = 'help-bubble', host = root, delay = 1
     current?.removeAttribute?.('aria-describedby');
     current = null;
     bubble.hidden = true;
+    // (0.6.189) Back in the page: a list replaces its choices as it closes, and took the bubble with them.
+    if (bubble.parentNode !== host) host.append(bubble);
   }
   const targetOf = node => node?.closest?.('[data-help], [data-tip]') ?? null;
   root.addEventListener('pointerover', event => {
