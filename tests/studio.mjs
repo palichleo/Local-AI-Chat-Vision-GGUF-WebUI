@@ -2148,6 +2148,261 @@ test('a model this computer cannot run is greyed in the list with its reason, an
   }
 });
 
+/**
+ * (0.6.188) The page as it is laid out, for what follows the prompt without drawing the Studio again
+ * (goable): « Générer » there is the one drawn last.
+ */
+const laidOutGo = selector =>
+  selector === '#studio-view .studio-go' ? (globalThis.document.getElementById('studio-body')?.find('studio-go')[0] ?? null) : null;
+/** (0.6.188) Wan 2.2 as lib/tool-catalog.mjs tells it to the Studio: its start image is required (runner/families/wan22.json). */
+const wanStudio = () => ({
+  id: 'wan',
+  name: 'Wan 2.2',
+  verb: 'create_video',
+  limits: sizes,
+  size: { width: 768, height: 448 },
+  settings: [],
+  seeded: true,
+  roles: {
+    start_image: { count: 1, media: ['image'], many: false, required: true },
+    end_image: { count: 0, media: [], many: false },
+    reference: { count: 0, media: [], many: true },
+  },
+  inputs: { start_image: 'start_image' },
+});
+
+test('« Générer » is greyed while an input its model cannot do without is missing: its tooltip says which, it comes back once given (0.6.188)', async () => {
+  // (0.6.188, capture 96) It stayed lit, and said what was missing only once pressed (request). What cannot be done
+  // is greyed with its reason written: the sentence request() says. SCAIL-2 needs the video and the character; the
+  // image to modify of Krea 2 is optional. Each as lib/tool-catalog.mjs tells it to the Studio.
+  const scail = {
+      id: 's',
+      name: 'SCAIL-2',
+      verb: 'replace_character',
+      follows: true,
+      seeded: true,
+      roles: {
+        source: { count: 1, media: ['video'], many: false, required: true },
+        reference: { count: 1, media: ['image'], many: false, required: true },
+      },
+      inputs: { driving_video: 'source', reference_image: 'reference' },
+      settings: [
+        { key: 'subject', type: 'string', maxLength: 200, default: 'person' },
+        { key: 'reference_subject', type: 'string', maxLength: 200, default: 'person' },
+      ],
+    },
+    krea = {
+      id: 'k',
+      name: 'Krea 2',
+      verb: 'create_image',
+      direct: true,
+      limits: sizes,
+      size: { width: 1024, height: 1024 },
+      settings: [],
+      seeded: true,
+      roles: { source: { count: 1, media: ['image'], many: false }, reference: { count: 0, media: [], many: true } },
+      inputs: { img2img: 'source' },
+    };
+  const page = await studioPage(
+    { create_image: [krea], create_video: [wanStudio()], replace_character: [scail] },
+    { 'tools/action': () => ({ requestId: 'q', plan: { parameters: {} } }) },
+    { querySelector: laidOutGo },
+  );
+  const { body, asked, restore } = page;
+  const go = () => body.find('studio-go')[0],
+    shown = () => [go().disabled, go().title],
+    ready = /^Générer \((Ctrl|⌘)\+Entrée\)$/,
+    type = text => {
+      page.prompt().value = text;
+      page.prompt().oninput();
+    },
+    drop = async (index, file) => {
+      body.find('studio-slot')[index].ondrop({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files: [file], setData() {} } });
+      await settle();
+    },
+    started = () => asked.filter(([route]) => route === 'tools/action').length;
+  try {
+    page.mode(1);
+    assert.equal(body.find('studio-model-pick')[0].value, 'wan');
+    // Nothing typed: the prompt is asked for first, as request() asks for it (55).
+    assert.deepEqual(shown(), [true, 'Écrivez un prompt pour générer']);
+    // Typed, it stays greyed while the start image is missing, and says so: as typed (goable, which lit it from the
+    // prompt alone), drawn again, and one key more.
+    type('Le vieux pêcheur lève lentement les yeux vers le large');
+    assert.deepEqual(shown(), [true, 'Ajoutez l’image de début.']);
+    page.studio.render();
+    assert.deepEqual(shown(), [true, 'Ajoutez l’image de début.']);
+    type('Le vieux pêcheur lève lentement les yeux vers le large.');
+    assert.deepEqual(shown(), [true, 'Ajoutez l’image de début.']);
+    // Asked all the same (Ctrl + Entrée): nothing starts, the sentence is said as before (request).
+    page.page['studio-view'].onkeydown({ key: 'Enter', ctrlKey: true, preventDefault() {} });
+    await settle();
+    assert.equal(started(), 0);
+    assert.equal(body.find('studio-error')[0].textContent, 'Ajoutez l’image de début.');
+    // The image dropped on its case (the Studio is drawn again): lit, and typing keeps it so. Taken back: greyed again.
+    await drop(0, { name: 'pecheur.png', type: 'image/png' });
+    assert.match(body.find('studio-slot')[0].className, /is-filled/);
+    // (What was asked for is given: its sentence is gone from under the button. It stayed there, the button lit.)
+    assert.deepEqual(body.find('studio-error'), []);
+    assert.equal(go().disabled, false);
+    assert.match(go().title, ready);
+    type('Le vieux pêcheur lève les yeux.');
+    assert.equal(go().disabled, false);
+    assert.match(go().title, ready);
+    body.find('studio-slot-remove')[0].onclick();
+    assert.deepEqual(shown(), [true, 'Ajoutez l’image de début.']);
+
+    // SCAIL-2: the video to follow, then the image of the character.
+    const pick = body.find('studio-model-pick')[0];
+    pick.value = 's';
+    pick.onchange();
+    assert.deepEqual(shown(), [true, 'Ajoutez la vidéo à suivre.']);
+    type('Une femme en haut blanc mange une pomme dans un verger.');
+    assert.deepEqual(shown(), [true, 'Ajoutez la vidéo à suivre.']);
+    await drop(0, { name: 'clip.mp4', type: 'video/mp4' });
+    assert.deepEqual(shown(), [true, 'Ajoutez l’image du personnage.']);
+    type('Une femme en haut blanc mange une pomme.');
+    assert.deepEqual(shown(), [true, 'Ajoutez l’image du personnage.']);
+    await drop(1, { name: 'perso.png', type: 'image/png' });
+    assert.equal(go().disabled, false);
+    assert.match(go().title, ready);
+
+    // Krea 2: its image to modify is optional, never asked for.
+    page.mode(0);
+    type('Un phare dans la brume');
+    assert.equal(go().disabled, false);
+    assert.match(go().title, ready);
+    page.studio.render();
+    assert.deepEqual([go().disabled, /is-filled/.test(body.find('studio-slot')[0].className)], [false, false]);
+    assert.match(go().title, ready);
+  } finally {
+    restore();
+  }
+});
+
+test('typing does not light « Générer » greyed while another conversation makes a creation (0.6.188)', async () => {
+  // (Read by the sub-agent of lot 3, 21/11.) The form greys it and says why (0.6.81); a key lit it again from the
+  // prompt alone, its tooltip back to « Générer »: its click was refused all the same.
+  let why = 'Une création est en cours dans « Renard dans la neige » : attendez sa fin.';
+  const image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true };
+  const page = await studioPage({ create_image: [image] }, {}, { querySelector: laidOutGo, extra: { elsewhere: () => why } });
+  try {
+    const go = () => page.body.find('studio-go')[0],
+      type = words => {
+        page.prompt().value = words;
+        page.prompt().oninput();
+      };
+    type('un phare');
+    page.studio.render();
+    assert.deepEqual([go().disabled, go().title], [true, why]);
+    type('un phare dans la tempête');
+    assert.deepEqual([go().disabled, go().title], [true, why]);
+    // Over elsewhere: the Studio is drawn again (busyChanged, 0.6.86), and what is typed lights it as before.
+    why = '';
+    page.studio.busyChanged();
+    type('un phare');
+    assert.equal(go().disabled, false);
+    assert.match(go().title, /^Générer \((Ctrl|⌘)\+Entrée\)$/);
+  } finally {
+    page.restore();
+  }
+});
+
+test('« Générer » is not greyed for an input a proposal of Moodix AI puts itself, a character being checked, the clip of a continuation; typing leaves « Libérer le GPU » alone (0.6.188)', async () => {
+  // A proposal puts its images itself, as it writes its prompt (55): its « Générer » is the answer. Refused, the
+  // Studio is the user's again, and so is the rule.
+  const { clip, request } = proposalOf();
+  clip.roles.start_image.required = true;
+  let page = await studioPage({ create_video: [clip] }, {}, { querySelector: laidOutGo });
+  try {
+    const answer = page.studio.propose(request, new AbortController().signal);
+    await settle();
+    assert.equal(page.studio.proposing(), true);
+    assert.equal(/is-filled/.test(page.body.find('studio-slot')[0].className), false);
+    const go = page.body.find('studio-go')[0];
+    assert.equal(go.disabled, false);
+    assert.match(go.title, /^Générer la proposition de Moodix AI \((Ctrl|⌘)\+Entrée\)$/);
+    page.studio.decline();
+    assert.equal(await answer, 'deny');
+    assert.equal(page.prompt().value, 'Un renard se lève');
+    assert.deepEqual([page.body.find('studio-go')[0].disabled, page.body.find('studio-go')[0].title], [true, 'Ajoutez l’image de début.']);
+  } finally {
+    page.restore();
+  }
+
+  // A character waits for its check: from Vidéo, « Générer » brings its question back (it is no answer there).
+  const image = { id: 'k', name: 'Krea 2', verb: 'create_image', direct: true, roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [] },
+    runs = [{ id: 'made', conversationId: 'c1', workflowId: 'k', prompt: 'A full-length photo of a player', parameters: {}, outputs: [{ originalUrl: '/made.png', thumbUrl: '/made.jpg' }] }];
+  page = await studioPage({ create_image: [image], create_video: [wanStudio()] }, {}, { runs, querySelector: laidOutGo });
+  try {
+    const check = page.studio.checkCharacter(runs[0], new AbortController().signal);
+    await settle();
+    page.mode(1);
+    page.prompt().value = 'une mouette au-dessus du port';
+    page.prompt().oninput();
+    page.studio.render();
+    assert.equal(page.body.find('studio-go')[0].disabled, false);
+    await page.body.find('studio-go')[0].onclick();
+    await settle();
+    assert.deepEqual([page.body.dataset.mode, page.body.find('studio-check-question').length], ['image', 1]);
+    await page.body.find('studio-go')[0].onclick();
+    assert.equal((await check).decision, 'ok');
+  } finally {
+    page.restore();
+  }
+
+  // A continuation: its clip is the one continued, never asked for (its source is required by extend_video).
+  const more = continuing();
+  page = await studioPage(more.tools, {}, { runs: more.runs, querySelector: laidOutGo });
+  try {
+    prolonger(page.body).onclick();
+    assert.equal(page.body.find('studio-go-label')[0].textContent, 'Générer la suite');
+    page.prompt().value = 'il s’arrête';
+    page.prompt().oninput();
+    assert.equal(page.body.find('studio-go')[0].disabled, false);
+    page.studio.render();
+    assert.equal(page.body.find('studio-go')[0].disabled, false);
+    assert.match(page.body.find('studio-go')[0].title, /^Générer \((Ctrl|⌘)\+Entrée\)$/);
+  } finally {
+    page.restore();
+  }
+
+  // A creation under way (one followed again after a reload): its bar says it, nothing of an input.
+  page = await studioPage({ create_video: [wanStudio()] }, {});
+  try {
+    page.mode(1);
+    page.prompt().value = 'Le vieux pêcheur lève les yeux';
+    page.prompt().oninput();
+    page.studio.followAgain();
+    const go = page.body.find('studio-go')[0];
+    assert.deepEqual([go.disabled, page.body.find('studio-go-label')[0].textContent], [true, 'En cours…']);
+    assert.notEqual(go.title, 'Ajoutez l’image de début.');
+    await page.studio.settled({ record: null });
+    assert.deepEqual([page.body.find('studio-go')[0].disabled, page.body.find('studio-go')[0].title], [true, 'Ajoutez l’image de début.']);
+  } finally {
+    page.restore();
+  }
+
+  // The card held by the last creation (54): « Libérer le GPU » takes the place of « Générer », and what is typed
+  // does not touch it (goable found it under the name of « Générer »).
+  page = await studioPage({ create_video: [wanStudio()] }, {}, { querySelector: laidOutGo, extra: { gpuBlocked: () => true } });
+  try {
+    page.mode(1);
+    const free = () => page.body.find('studio-go')[0],
+      held = 'La carte graphique est restée prise par la dernière génération : la libérer';
+    assert.match(free().className, /studio-recover/);
+    assert.deepEqual([free().disabled, free().title], [undefined, held]);
+    page.prompt().value = 'Le vieux pêcheur lève les yeux';
+    page.prompt().oninput();
+    assert.deepEqual([free().disabled, free().title], [undefined, held]);
+    page.prompt().value = '';
+    page.prompt().oninput();
+    assert.deepEqual([free().disabled, free().title], [undefined, held]);
+  } finally {
+    page.restore();
+  }
+});
+
 test('Ctrl + Entrée generates from anywhere in the Studio, and the button says so in its tooltip', async () => {
   const image = {
     id: 'w',

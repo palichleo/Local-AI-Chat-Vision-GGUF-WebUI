@@ -116,6 +116,21 @@ function missingInput(workflow, role, spec) {
   if (role === 'end_image') return 'Ajoutez l’image de fin.';
   return video ? 'Ajoutez une vidéo de référence.' : 'Ajoutez une image de référence.';
 }
+/**
+ * (0.6.188) The first input the model cannot do without that is not given yet, said as above; '' when none
+ * is missing. What is in its cases (`inputs`, by role) counts once it has a source (an image joined to a
+ * message has none). The clip a continuation starts from (`extending`) is not asked for: it is the one
+ * continued. « Générer » is greyed meanwhile, this sentence in its tooltip; pressed all the same (its
+ * keys), request() says it.
+ */
+function inputMissing(workflow, inputs, extending) {
+  for (const [role, spec] of Object.entries(workflow?.roles ?? {})) {
+    if (extending && role === 'source') continue;
+    if (spec.required && spec.count && !(inputs[role] ?? []).some(item => item?.source))
+      return missingInput(workflow, role, spec);
+  }
+  return '';
+}
 // What the values of a setting on a bar do, said under it (measured on Krea 2, 17/11).
 const BAR_HELP = { denoise: '0,6 garde la composition et change l’ambiance ; 0,7 laisse la composition changer.' };
 // Why a setting the model only reads with an input is greyed while the case of that input is empty.
@@ -731,6 +746,9 @@ export function setupStudio({
       width: resource.width,
       height: resource.height,
     };
+    // (0.6.188) What was said of the creation before it is no longer true (« Ajoutez l’image de début. »): gone,
+    // as when a take is put there (putCreation). It stayed under « Générer », lit again.
+    failure = '';
     followFormat(role);
     render();
   }
@@ -2413,11 +2431,17 @@ export function setupStudio({
   /** « Générer » as the prompt is typed: greyed while it is empty (55), without drawing the Studio again. */
   function goable() {
     const go = document.querySelector?.('#studio-view .studio-go');
-    if (!go || working || enriching || answering() || checking || current()?.unavailable) return;
-    const blank = !drafts[mode].prompt.trim();
-    go.disabled = blank;
+    // (0.6.188) Never « Libérer le GPU », which takes its place and its name while the card is held (54). Nor
+    // while another conversation makes a creation (0.6.81): greyed with that reason by the form, a key lit it
+    // again and its tooltip said « Générer » (its click was refused all the same).
+    if (!go || working || enriching || answering() || checking || current()?.unavailable || gpuBlocked() || elsewhere())
+      return;
+    const blank = !drafts[mode].prompt.trim(),
+      // (0.6.188) Nor lit by the prompt alone while an input its model cannot do without is missing.
+      missing = blank ? '' : inputMissing(current(), drafts[mode].inputs, extending);
+    go.disabled = blank || Boolean(missing);
     go.classList.toggle('is-blank', blank);
-    go.title = blank ? 'Écrivez un prompt pour générer' : `Générer (${MODIFIER}+Entrée)`;
+    go.title = blank ? 'Écrivez un prompt pour générer' : missing || `Générer (${MODIFIER}+Entrée)`;
   }
   function improvable() {
     const go = document.querySelector?.('#studio-view .studio-enrich-go');
@@ -2607,13 +2631,15 @@ export function setupStudio({
           : 'Création demandée dans le Studio.';
     // A continuation starts from its clip; the inputs it also takes (subject references) follow.
     if (extending) args.source = outputSource(extending);
+    // What the model cannot do without is asked for here, in the user's words (0.6.102: by its
+    // role; an image to modify was asked for as « l’image du personnage »). (0.6.188) « Générer » is
+    // greyed meanwhile and says the same (inputMissing): its keys still come here.
+    const lacking = inputMissing(workflow, draft.inputs, extending);
+    if (lacking) throw Error(lacking);
     for (const [role, spec] of Object.entries(workflow.roles)) {
       if (extending && role === 'source') continue;
       // Never an input without a source (an image of a proposal that was joined to its message).
       const chosen = (draft.inputs[role] ?? []).filter(item => item?.source).map(item => item.source);
-      // What the model cannot do without is asked for here, in the user's words (0.6.102: by its
-      // role; an image to modify was asked for as « l’image du personnage »).
-      if (spec.required && spec.count && !chosen.length) throw Error(missingInput(workflow, role, spec));
       if (!chosen.length || !spec.count) continue;
       // Several references go as a list; a single one (the character of a video) alone.
       args[role] = (spec.many ?? role === 'reference') ? chosen.slice(0, spec.count) : chosen[0];
@@ -4964,6 +4990,15 @@ export function setupStudio({
     if (blank && !working) {
       go.title = 'Écrivez un prompt pour générer';
       go.classList.add('is-blank');
+    }
+    // (0.6.188, capture 96) Nor without an input its model cannot do without (the start image of Wan 2.2, the video
+    // and the character of SCAIL-2): greyed, its tooltip says which, as request() says it once pressed. The prompt
+    // first, as there; not under a proposal of Moodix AI, which puts its images itself.
+    const missing =
+      !working && !blank && !answering() && !checking ? inputMissing(workflow, draft.inputs, extending) : '';
+    if (missing) {
+      go.disabled = true;
+      go.title = missing;
     }
     // The only model of this mode cannot run here: « Générer » is greyed and says why.
     if (workflow.unavailable) {
