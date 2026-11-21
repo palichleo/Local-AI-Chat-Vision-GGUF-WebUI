@@ -17924,6 +17924,21 @@ body[data-view='bobine'] .chat-panel {
 #bobine-view .bobine-create .bobine-waits {
   margin: 10px 0 0;
 }
+/* (0.6.182) The step and the time of the take being made, above the button, as the Studio says them under
+   « Générer »; in amber when the engine lacks video memory and tries again more slowly. */
+#bobine-view .bobine-create .bobine-stage {
+  flex: none;
+  margin: 10px 0 0;
+  font: 400 12.5px/1.4 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+#bobine-view .bobine-create .bobine-waits:not([hidden]) + .bobine-stage {
+  margin-top: 2px;
+}
+#bobine-view .bobine-create .bobine-stage[data-warned='true'] {
+  color: var(--warning);
+}
 #bobine-view .bobine-create .bobine-missing + .bobine-waits {
   margin-top: 4px;
 }

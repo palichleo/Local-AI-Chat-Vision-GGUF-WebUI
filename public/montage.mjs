@@ -173,8 +173,9 @@ export function setupMontage({
   // marked `refused`, its message that reason ('': nothing to say, the user said no himself).
   busyWith = () => '',
   // (0.6.181) A take to create of a bobine being made though this page did not ask for it (asked before a
-  // reload, the Studio follows it again): `followed()` gives { id, plan, fraction }, its bobine, its take to
-  // create and how far it is, or null. `busyChanged` tells it changed.
+  // reload, the Studio follows it again): `followed()` gives { id, plan, fraction, label, time }, its bobine,
+  // its take to create, how far it is, the step the engine is at and how long it has been (0.6.182), or null.
+  // `busyChanged` tells it changed.
   followed = () => null,
   inputOf = record => ({ output: record.id }),
   // (0.6.144) The model a creation would be made with, nothing being made nor kept: `estimate({ verb,
@@ -356,7 +357,7 @@ export function setupMontage({
     const going = followed();
     return going && going.id === montage.id && going.plan === id && isTodo(itemOf(id)) ? going : null;
   };
-  /** What makes the take to create `id` now, { fraction }: this page (making), or a work followed (goingOn). */
+  /** What makes the take to create `id` now, { fraction, label, time }: this page (making), or a work followed (goingOn). */
   const beingMade = id => (making?.id === id ? making : goingOn(id));
   /**
    * (0.6.181) The takes made for a take to create of this bobine that no page laid: reloaded or closed while
@@ -1567,11 +1568,15 @@ export function setupMontage({
     // (0.6.175) Why « Créer » is greyed by a work going on outside the Bobine, in the same place (sayGo).
     live.waiting = node('p', 'bobine-waits', '');
     live.waiting.hidden = true;
+    // (0.6.182) The step and the time of the take being made, above the button too (sayStep).
+    live.step = node('p', 'bobine-stage', '');
+    sayStep();
     body.append(
       node('h2', 'bobine-create-title', 'À créer'),
       lines,
       ...(said ? [node('p', 'bobine-missing', said)] : []),
       live.waiting,
+      live.step,
       ...(licences ? [licences] : []),
       row,
     );
@@ -1654,7 +1659,7 @@ export function setupMontage({
     stop();
     await keep();
     failed.delete(id);
-    making = { id, label: 'Préparation…', fraction: null, preview: null };
+    making = { id, label: 'Préparation…', fraction: null, preview: null, time: '' };
     chosen = id;
     head = planStarts(montage)[montage.plans.findIndex(plan => plan.id === id)] ?? head;
     status = '';
@@ -1671,10 +1676,12 @@ export function setupMontage({
         // (0.6.181) `place`: where its take goes here, kept by the server with it (layMissed).
         { verb: wanted.verb, args, size: filmSize(), place: { id: montage.id, plan: id, from: wanted.from } },
         {
-          onProgress: (label, fraction, preview) => {
+          // (0.6.182) `time`: how long it has been in the making, as the Studio counts and says it (« 1 min 12 s »).
+          onProgress: (label, fraction, preview, time) => {
             if (!making) return;
             Object.assign(making, {
               label: label || making.label,
+              time: time || making.time,
               fraction: Number.isFinite(fraction) ? fraction : making.fraction,
               preview: preview ?? making.preview,
             });
@@ -1711,6 +1718,22 @@ export function setupMontage({
     if (live.making) live.making.textContent = stateOf(id);
     const line = live.states?.get(id);
     if (line) line.textContent = stateOf(id);
+    sayStep();
+  }
+  /**
+   * (0.6.182, audit of 21/11, B1) Above the button, the step the engine is at for the take being made and
+   * how long it has been, as the Studio says them under « Générer »: the Bobine said « En cours · 40 % » and
+   * nothing else, minutes long. In amber when the engine lacks video memory and tries again more slowly,
+   * as the card of the Chat turns amber: said nowhere here, the take seemed to hang. Above the button and
+   * not in the line of the take: at 1280 × 720 the end of a line is under the fade of the list.
+   */
+  function sayStep() {
+    if (!live.step) return;
+    const { label = '', time = '' } = montage?.plans.map(plan => beingMade(plan.id)).find(Boolean) ?? {},
+      words = [label, time].filter(Boolean).join(' · ');
+    live.step.textContent = words;
+    live.step.hidden = !words;
+    live.step.dataset.warned = String(/^Mémoire vidéo insuffisante/.test(label));
   }
   /** (0.6.148) « Créer n prises »: at once, in the order of the bobine, one after the other. */
   async function createAll() {

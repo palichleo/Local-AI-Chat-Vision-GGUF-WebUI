@@ -6082,7 +6082,15 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
         const { onProgress } = hooks;
         // (0.6.176) A run of the test's own: stopped by its signal, as the page's is.
         if (outcome.run) return outcome.run(proposed, hooks);
-        onProgress('Étape 2 sur 8', 0.25);
+        // (0.6.182) With how long it has been in the making, as the server counts it. The count goes on by
+        // itself between two answers of the server: the Bobine hears each second of it, as the Studio shows it.
+        onProgress('Étape 2 sur 8', 0.25, null, { ms: 71800, running: true });
+        const stage = () => desk.find('bobine-stage')[0]?.textContent,
+          first = stage();
+        await until(() => stage() !== first);
+        const second = stage();
+        // (A step said while the count stays where it is: heard at once all the same.)
+        onProgress('Étape 3 sur 8', 0.25);
         seen.push({
           mode: studio.body.dataset.mode,
           prompt: studio.prompt().value,
@@ -6090,6 +6098,8 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
           bobine: hooks.bobine,
           // (0.6.181) And where its take goes there, for the server to keep with it.
           place: hooks.bobinePlace,
+          // (0.6.182) The step and the count of the Studio, said above the button of « À créer ».
+          step: [first, second, stage()],
           pieces: desk.find('montage-piece').map(piece => piece.children[0].textContent),
           button: desk.find('bobine-go-label')[0].textContent,
         });
@@ -6126,7 +6136,7 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
     assert.deepEqual(sent.arguments, { prompt: 'Il lève les yeux.', intention: 'Prise d’une bobine, demandée dans la Bobine.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } });
     // While it is made the bobine says it on the take and in its button; the Studio follows it, in Vidéo,
     // with the text it is made with (0.6.177: it showed Image and the draft of an image).
-    assert.deepEqual(seen, [{ mode: 'video', prompt: 'Il lève les yeux.', bobine: true, place: { id: 'm1', plan: 'a', from: 0 }, pieces: ['En cours · 25 %'], button: '1 sur 1 · 25 %' }]);
+    assert.deepEqual(seen, [{ mode: 'video', prompt: 'Il lève les yeux.', bobine: true, place: { id: 'm1', plan: 'a', from: 0 }, step: ['Étape 2 sur 8 · 1 min 11 s', 'Étape 2 sur 8 · 1 min 12 s', 'Étape 3 sur 8 · 1 min 12 s'], pieces: ['En cours · 25 %'], button: '1 sur 1 · 25 %' }]);
     // (In Vidéo from its first instant, before the server has said what it is made with.)
     assert.deepEqual(asking, ['video']);
     // Made: the take to create is the take made, kept as such; « À créer » is empty.
@@ -6247,8 +6257,10 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
     globalThis.document.body = { dataset: { view: 'bobine' } };
     assert.equal(studio.studio.followAgain({ ...request, bobine: place }), true);
     assert.deepEqual(said(), ['En cours', 'En cours', true]);
-    studio.studio.follow('Étape 4 sur 8', 0.5);
+    studio.studio.follow('Étape 4 sur 8', 0.5, null, { ms: 48000, running: true });
     assert.deepEqual(said(), ['En cours · 50 %', 'En cours · 50 %', true]);
+    // (0.6.182) Its step and its time above the button, as for a take the Bobine asked itself.
+    assert.deepEqual(desk.find('bobine-stage').map(line => line.textContent), ['Étape 4 sur 8 · 48 s']);
     const made = { ...clip, createdAt: '2026-11-20T03:05:00.000Z', bobine: place };
     runs.push(made);
     await studio.studio.settled({ record: made });

@@ -3344,6 +3344,70 @@ test('its take found being made after a reload says « En cours » on its take a
   assert.deepEqual([f.names(), f.lines(), f.saves().at(-1).body.montage.plans[0].source.runId, f.ui.state().past], [['Prise 50'], [], id(50), 1]);
 });
 
+test('the take being made says the step the engine is at and how long it has been, in amber when it lacks video memory (0.6.182)', async () => {
+  // (Audit of 21/11, B1. The Studio says « Étape 3 sur 8 · 1 min 12 s » under « Générer », the card of the
+  // Chat turns amber when the engine tries again for lack of video memory; the Bobine said « En cours · 40 % ».)
+  const { f, asked, answers } = await series();
+  // (Above the button, not in the line of the take: at 1280 × 720 the end of a line is under the fade of the list.)
+  const step = () => f.get('bobine-stage').map(line => [line.textContent, line.hidden, line.dataset.warned]),
+    // (What is drawn just before the row of the button.)
+    before = () => {
+      const all = under(f.root);
+      return all[all.indexOf(f.get('bobine-foot')[0]) - 1].className;
+    };
+  // Nothing is being made: nothing said.
+  assert.deepEqual(step(), [['', true, 'false']]);
+  f.goMain().onclick();
+  await settle();
+  // From its first instant, just above the row of the button.
+  assert.deepEqual([step(), before()], [[['Préparation…', false, 'false']], 'bobine-stage']);
+  // The step and the count of the Studio, as it says them; a step said without a time keeps the last one.
+  const [row] = f.get('bobine-stage');
+  asked[0].hooks.onProgress('Étape 3 sur 8', 0.4, null, '1 min 12 s');
+  assert.deepEqual(step(), [['Étape 3 sur 8 · 1 min 12 s', false, 'false']]);
+  asked[0].hooks.onProgress('Étape 4 sur 8', 0.5);
+  assert.deepEqual(step(), [['Étape 4 sur 8 · 1 min 12 s', false, 'false']]);
+  // The second goes by, the step unchanged; nothing is drawn again under the hands.
+  asked[0].hooks.onProgress('', 0.5, null, '1 min 13 s');
+  assert.deepEqual([step(), f.get('bobine-stage')[0] === row], [[['Étape 4 sur 8 · 1 min 13 s', false, 'false']], true]);
+  // The engine lacks video memory and tries again, more slowly: its words, in amber; back to ink after.
+  asked[0].hooks.onProgress('Mémoire vidéo insuffisante : nouvel essai, plus lent…', 0.5, null, '1 min 20 s');
+  assert.deepEqual(step(), [['Mémoire vidéo insuffisante : nouvel essai, plus lent… · 1 min 20 s', false, 'true']]);
+  asked[0].hooks.onProgress('Étape 5 sur 8', 0.6, null, '2 min 04 s');
+  assert.deepEqual(step(), [['Étape 5 sur 8 · 2 min 04 s', false, 'false']]);
+  // Made: the next one counts from nothing. The last one made: nothing said any more.
+  f.runs.push(made(50, 121));
+  answers[0].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  assert.deepEqual([step(), f.lines().length], [[['Préparation…', false, 'false']], 1]);
+  f.runs.push(made(51, 49));
+  answers[1].resolve(f.runs.at(-1));
+  await settle();
+  await settle();
+  assert.deepEqual([step(), f.ui.state().making], [[['', true, 'false']], null]);
+  // (What is drawn cannot be read here: the rules that draw it are. Never under 12 px; amber as a reason is.)
+  const { readFile } = await import('node:fs/promises');
+  const css = (await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const rule = selector => css.slice(css.lastIndexOf(selector + ' {'), css.indexOf('}', css.lastIndexOf(selector + ' {')));
+  assert.match(rule('#bobine-view .bobine-create .bobine-stage'), /font: 400 12\.5px\/1\.4 var\(--font-ui\);[\s\S]*color: var\(--muted\);/);
+  assert.match(rule("#bobine-view .bobine-create .bobine-stage[data-warned='true']"), /color: var\(--warning\);/);
+});
+
+test('a take found being made after a reload says its step and its time too (0.6.182)', async () => {
+  let going = { id: id(700), plan: id(701), fraction: 0.4, label: 'Étape 3 sur 8', time: '48 s' };
+  const f = await setup({ stored: [waiting()], followed: () => going }).open();
+  const step = () => f.get('bobine-stage').map(line => [line.textContent, line.hidden, line.dataset.warned]);
+  f.ui.busyChanged();
+  assert.deepEqual(step(), [['Étape 3 sur 8 · 48 s', false, 'false']]);
+  going = { ...going, label: 'Mémoire vidéo insuffisante : nouvel essai, plus lent…', time: '52 s' };
+  f.ui.busyChanged();
+  assert.deepEqual(step(), [['Mémoire vidéo insuffisante : nouvel essai, plus lent… · 52 s', false, 'true']]);
+  going = null;
+  f.ui.busyChanged();
+  assert.deepEqual(step(), [['', true, 'false']]);
+});
+
 test('a part laid by the page that asked for it is never laid again on what is left of its take (0.6.181)', async () => {
   // (What is left of a take made in parts keeps its id: the record of its first part names it too. In
   // pause after that part, nothing being made, the takes of the project are read again.)

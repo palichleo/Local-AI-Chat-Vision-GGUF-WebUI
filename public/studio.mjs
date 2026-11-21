@@ -588,7 +588,11 @@ export function setupStudio({
     // (0.6.175) Why a take of the Bobine cannot be created now: its « Créer » is greyed by it, and says it.
     busyWith: () => whyNot(),
     // (0.6.181) A take of a bobine followed again here (asked before a reload): which, and how far it is.
-    followed: () => (working?.external && !working.chat && working.place ? { ...working.place, fraction: working.fraction } : null),
+    // (0.6.182) With its step and how long it has been, as for a take the Bobine asked itself.
+    followed: () =>
+      working?.external && !working.chat && working.place
+        ? { ...working.place, fraction: working.fraction, label: working.label, time: working.time }
+        : null,
     inputOf: record => outputSource(record),
     // (0.6.151) Every take of the Bobine, new or suite, is asked to LTX 2.5 by its name when it is
     // ready here (« Oui, LTX 2.5 », 20/11): it makes the length drawn, from a fraction of a second.
@@ -2749,7 +2753,15 @@ export function setupStudio({
       // a card answered « Annuler »): a stop, wherever it came from, and said with one word.
       halted = false;
     // (`montage`: asked by the montage, which shows it being made on its own timeline.)
-    working = { label: 'Préparation…', fraction: null, controller, montage: Boolean(onTake?.montage) };
+    // (0.6.182) `tell`: what the Bobine hears of it, its step, how far it is, its picture so far, and how long it
+    // has been (the count of the Studio, as its own line under « Générer » says it).
+    working = {
+      label: 'Préparation…',
+      fraction: null,
+      controller,
+      montage: Boolean(onTake?.montage),
+      ...(onTake?.montage?.onProgress ? { tell: () => working && onTake.montage.onProgress(working.label, working.fraction, working.preview, working.time) } : {}),
+    };
     // Its conversation from its first instant (0.6.81): the page may show another meanwhile, the
     // creation is still this one's, and the page follows it there.
     const conversationId = former ? info.legacyId : await ensureConversation();
@@ -2807,7 +2819,7 @@ export function setupStudio({
             });
             timeWork(time);
             progress();
-            onTake?.montage?.onProgress?.(working.label, working.fraction, working.preview);
+            working.tell?.();
           },
         });
         if (!done.record) {
@@ -2840,7 +2852,7 @@ export function setupStudio({
             render();
           }
           progress();
-          onTake?.montage?.onProgress?.(working.label, working.fraction, working.preview);
+          working.tell?.();
           await pause();
           job = await (await api('tools/job')).json();
           if (job?.id !== jobId) throw Error('La génération suivie a été remplacée par une autre tâche.');
@@ -2918,6 +2930,8 @@ export function setupStudio({
     if (!working || timed !== working) return elapsed.stop();
     working.time = text;
     if (elapsedNode) elapsedNode.textContent = text;
+    // (0.6.182) A take of the Bobine: said there too, beside the step, second after second.
+    working.tell?.();
   });
   function timeWork(time) {
     if (!working) return;
@@ -3642,9 +3656,9 @@ export function setupStudio({
     holdAt();
     const shown = request ? showRequest(request) : null;
     // (0.6.181) `place`: asked in the Bobine, where it goes there (the server kept it with its job).
-    working = { label: 'Génération en cours…', fraction: null, external: true, ...(shown ? { shown } : {}), ...(request?.bobine ? { place: request.bobine } : {}) };
+    working = { label: 'Génération en cours…', fraction: null, external: true, ...(shown ? { shown } : {}), ...(request?.bobine ? { place: request.bobine, tell: () => montage.busyChanged() } : {}) };
     render();
-    if (working.place) montage.busyChanged();
+    working.tell?.();
     return true;
   }
   /**
@@ -3846,7 +3860,7 @@ export function setupStudio({
     timeWork(time);
     progress();
     // (0.6.181) A take of a bobine: its line there follows it.
-    if (working.place) montage.busyChanged();
+    working.tell?.();
   }
   /** The end of a generation approved here: its creation is shown on the screen. */
   async function settled(result) {
