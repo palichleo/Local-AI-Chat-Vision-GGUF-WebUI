@@ -241,6 +241,7 @@ function page({ id = ID, messages = asked(), job = null, runs = [], skipped = 0,
     },
     showStudio: () => seen.loaded.push('studio'),
     showLibrary: () => seen.loaded.push('pellicule'),
+    showBobine: () => seen.loaded.push('bobine'),
     renderNavigation: () => seen.loaded.push('fil'),
     node: (tag, className, text) => ({ tag, className, text }),
     storage,
@@ -590,6 +591,13 @@ test('a reload comes back where the tab was: its conversation and its view; a ne
   assert.equal(await reloaded.recovery.resumeTab(), true);
   assert.deepEqual(reloaded.seen.loaded, [ID, 'studio']);
   assert.equal(kept.has(TAB_KEY), false, 'read once');
+  // (0.6.183, seen on the card on 21/11) Reloaded in the Bobine: back in the Bobine. A page of its own since
+  // 0.6.148, it was forgotten here: the page came back in the Chat, and the take being made for the bobine
+  // was nowhere to be seen until « Bobine » was clicked.
+  page({ storage, state: { view: 'bobine' } }).recovery.rememberTab();
+  const inBobine = page({ storage, state: { conversationId: null, messages: [] } });
+  assert.equal(await inBobine.recovery.resumeTab(), true);
+  assert.deepEqual(inBobine.seen.loaded, [ID, 'bobine']);
   // A new tab: nothing kept, the welcome.
   assert.equal(await page({ storage, state: { conversationId: null } }).recovery.resumeTab(), false);
   // A conversation never saved is not kept, its project is.
@@ -623,6 +631,10 @@ test('at launch, a creation being made elsewhere is followed in its conversation
   assert.equal(seen.started.length, 1);
   assert.deepEqual(state.work, { kind: 'follow', conversationId: ID });
   finish();
+  // (0.6.183) From the Bobine: back in the Bobine, as from the Studio or the Archives.
+  const bobine = page({ id: OTHER, messages: stored[OTHER], job: running(), fresh: running(), follow: async () => (await gate, { content: '{}' }), state: { stored, view: 'bobine' } });
+  await bobine.recovery.followElsewhere();
+  assert.deepEqual(bobine.seen.loaded, [ID, OTHER, 'bobine']);
   // In a new tab, on the welcome: back to a new conversation of its project.
   const welcome = page({ id: null, messages: [], job: running(), fresh: running(), state: { stored, projectId: 'space' } });
   await welcome.recovery.followElsewhere();

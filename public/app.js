@@ -5176,6 +5176,7 @@ state.recovery = setupTakeRecovery({
   newConversation,
   showStudio,
   showLibrary,
+  showBobine,
   renderNavigation: () => projectUI.render(),
   scrollToBottom,
   node,

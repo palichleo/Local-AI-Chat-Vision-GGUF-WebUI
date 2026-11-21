@@ -165,6 +165,7 @@ export function setupTakeRecovery({
   newConversation = async () => {},
   showStudio = () => {},
   showLibrary = () => {},
+  showBobine = () => {},
   renderNavigation = () => {},
   scrollToBottom = () => {},
   onChange = () => {},
@@ -578,6 +579,9 @@ export function setupTakeRecovery({
       renderNavigation();
     }
     if (kept.view === 'studio') showStudio();
+    // (The Bobine, a page of its own since 0.6.148, was forgotten here: reloaded there, the page came back in
+    // the Chat, and the take being made for the bobine was nowhere to be seen until « Bobine » was clicked.)
+    else if (kept.view === 'bobine') showBobine();
     else if (kept.view === 'library') showLibrary();
     return true;
   }
@@ -601,6 +605,7 @@ export function setupTakeRecovery({
     if (back.conversationId) await loadConversation(back.conversationId);
     else await newConversation(back.projectId);
     if (back.view === 'studio') showStudio();
+    else if (back.view === 'bobine') showBobine();
     else if (back.view === 'library') showLibrary();
   }
   return { waiting, complete, rememberTab, resumeTab, followElsewhere, following: () => following };
