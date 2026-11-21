@@ -6034,13 +6034,15 @@ test('drawn again, Réglages and Entrée stay where they were scrolled to; « Pl
   }
 });
 
-test('a take to create of the bobine is made as a take of the Studio is, the bobine its own page (0.6.142, 0.6.148)', async () => {
+test('a take to create of the bobine is made as a take of the Studio is, which follows it as it does a take of the Chat (0.6.142, 0.6.148, 0.6.177)', async () => {
   // (0.6.148) The Bobine (ex-Montage) is a page of its own beside the Studio, no fourth mode of it; the
-  // Studio holds it all the same, because it creates its takes as its own. « Créer 1 prise » makes it at
-  // once, the Studio staying in the mode it was left in.
+  // Studio holds it all the same, because it creates its takes as its own. « Créer 1 prise » makes it at once.
+  // (0.6.177, « studio ne suit pas exactement ce que fait bobine […] ça affiche Krea2 dans studio ») The Studio
+  // stayed in the mode it was left in, a choice of the time the montage was one of its modes: it now follows
+  // the take, in Vidéo with what it is made with, then shows it made, as for a take asked in the Chat.
   // (The photo is a take of another conversation of the project: named as the Studio names such a take.)
   const photo = { id: 'p1', conversationId: 'c0', mediaType: 'image', prompt: 'Un pêcheur', parameters: {}, outputs: [{ take: 3, originalUrl: '/media/p1', thumbUrl: '/thumb/p1' }] },
-    clip = { id: 'v9', conversationId: 'c1', mediaType: 'video', workflowName: 'LTX 2.5', prompt: 'Il lève les yeux.', parameters: { frames: 121, fps: 24 }, outputs: [{ take: 9, originalUrl: '/media/v9' }] },
+    clip = { id: 'v9', conversationId: 'c1', mediaType: 'video', workflowId: 'v', workflowName: 'Clip', prompt: 'Il lève les yeux.', parameters: { frames: 121, fps: 24 }, outputs: [{ take: 9, originalUrl: '/media/v9' }] },
     video = { id: 'v', name: 'Clip', roles: {}, limits: sizes, size: { width: 768, height: 448 }, settings: [], seeded: true },
     image = { id: 'i', name: 'Image', roles: {}, limits: sizes, size: { width: 1024, height: 1024 }, settings: [], seeded: true };
   const page = async (outcome, extra = {}) => {
@@ -6055,7 +6057,7 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
         typeof route !== 'string'
           ? undefined
           : route === 'tools/action'
-            ? body => (body.estimate ? { workflowName: 'LTX 2.5', seconds: 5.042 } : { requestId: 'q', plan: { parameters: {} } })
+            ? body => (body.estimate ? { workflowName: 'LTX 2.5', seconds: 5.042 } : (asking.push(studio.body.dataset.mode), proposalOf({ prompt: body.arguments.prompt }).request))
             : route === 'tools/execute' && outcome.job
               ? () => outcome.job
             : route === 'montages/save'
@@ -6066,7 +6068,9 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
                   ? () => ({ montages: [{ id: 'm1', name: 'Film' }] })
                   : undefined,
     });
-    const seen = [];
+    const seen = [],
+      // (0.6.177) The mode the Studio shows as the take is asked to the server.
+      asking = [];
     let desk = null;
     const studio = await studioPage({ create_image: [image], create_video: [video] }, routes, {
       runs,
@@ -6078,6 +6082,7 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
         onProgress('Étape 2 sur 8', 0.25);
         seen.push({
           mode: studio.body.dataset.mode,
+          prompt: studio.prompt().value,
           pieces: desk.find('montage-piece').map(piece => piece.children[0].textContent),
           button: desk.find('bobine-go-label')[0].textContent,
         });
@@ -6089,11 +6094,11 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
     desk = studio.studio.bobine().desk();
     await until(() => desk.find('montage-piece').length === 1 && desk.find('bobine-line-right')[0]?.textContent === 'LTX 2.5');
     const actions = () => studio.asked.filter(([route]) => route === 'tools/action').map(([, sent]) => sent);
-    return { ...studio, desk, kept, seen, actions };
+    return { ...studio, desk, kept, seen, asking, actions };
   };
   let studio = await page({ record: clip });
   try {
-    const { body, page: view, desk, kept, seen, actions } = studio;
+    const { body, page: view, desk, kept, seen, asking, actions } = studio;
     // The Studio: Image · Vidéo · Son again, in its mode.
     assert.deepEqual(view['studio-kinds'].children.map(tab => tab.dataset.mode), ['image', 'video', 'audio']);
     assert.equal(body.dataset.mode, 'image');
@@ -6103,22 +6108,43 @@ test('a take to create of the bobine is made as a take of the Studio is, the bob
       { conversationId: 'c1', project: actions()[0].project, studio: true, name: 'create_video', estimate: true, size: { width: 1344, height: 768 }, arguments: { prompt: 'Prise.', intention: 'Prise d’une bobine, demandée dans la Bobine.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } } },
     ]);
     assert.deepEqual([desk.find('montage-piece')[0].children[0].textContent, desk.find('bobine-go-label')[0].textContent], ['', 'Créer 1 prise']);
+    // What the user was writing in the Studio, in Image.
+    studio.prompt().value = 'mon brouillon';
+    studio.prompt().oninput();
     desk.find('bobine-go-main')[0].onclick();
     await until(() => kept.some(montage => !montage.plans[0].todo));
     // Asked as the Studio asks a clip: in the conversation, for the project, by the user's own hand, at the size of the film.
     const sent = actions().at(-1);
     assert.deepEqual([sent.conversationId, sent.studio, sent.name, sent.estimate, sent.size], ['c1', true, 'create_video', undefined, { width: 1344, height: 768 }]);
     assert.deepEqual(sent.arguments, { prompt: 'Il lève les yeux.', intention: 'Prise d’une bobine, demandée dans la Bobine.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } });
-    // While it is made the bobine says it on the take and in its button; the Studio stays in its mode.
-    assert.deepEqual(seen, [{ mode: 'image', pieces: ['En cours · 25 %'], button: '1 sur 1 · 25 %' }]);
-    // Made: the take to create is the take made, kept as such; « À créer » is empty, the Studio's screen as it was.
+    // While it is made the bobine says it on the take and in its button; the Studio follows it, in Vidéo,
+    // with the text it is made with (0.6.177: it showed Image and the draft of an image).
+    assert.deepEqual(seen, [{ mode: 'video', prompt: 'Il lève les yeux.', pieces: ['En cours · 25 %'], button: '1 sur 1 · 25 %' }]);
+    // (In Vidéo from its first instant, before the server has said what it is made with.)
+    assert.deepEqual(asking, ['video']);
+    // Made: the take to create is the take made, kept as such; « À créer » is empty.
     await until(() => desk.find('montage-piece')[0].children[0].textContent === 'Prise 9');
     assert.deepEqual([kept.at(-1).plans[0].source, kept.at(-1).plans[0].todo, desk.find('bobine-line').length], [{ conversationId: 'c1', runId: 'v9', output: 0 }, undefined, 0]);
-    assert.deepEqual([body.dataset.mode, body.find('studio-frame-result')], ['image', []]);
+    // (0.6.177) The Studio shows the take made, the newest of the conversation, as after a take of the Chat;
+    // what the user was writing in Image is still there.
+    assert.deepEqual([body.dataset.mode, studio.studio.screenTake(), studio.prompt().value], ['video', { take: 9, media: 'video' }, 'Il lève les yeux.']);
+    studio.mode(0);
+    assert.deepEqual([body.dataset.mode, studio.prompt().value], ['image', 'mon brouillon']);
   } finally {
     studio.restore();
   }
-  // Refused by the engine: said in its line of « À créer », in amber; it can be tried again; the form of the Studio says nothing.
+  // Made by a model the Studio does not list (its settings cannot be taken): on the screen all the same.
+  studio = await page({ record: { ...clip, id: 'v10', workflowId: 'x', workflowName: 'Autre modèle', outputs: [{ take: 10, originalUrl: '/media/v10', thumbUrl: '/thumb/v10' }] } });
+  try {
+    const { body, desk } = studio;
+    desk.find('bobine-go-main')[0].onclick();
+    await until(() => desk.find('montage-piece')[0].children[0].textContent === 'Prise 10');
+    assert.deepEqual([body.dataset.mode, studio.studio.screenTake()], ['video', { take: 10, media: 'video' }]);
+  } finally {
+    studio.restore();
+  }
+  // Refused by the engine: said in its line of « À créer », in amber; it can be tried again; the form of the Studio
+  // says nothing, and the Studio is as it was before the take (0.6.177).
   studio = await page({ record: null, error: 'Mémoire vidéo insuffisante.' });
   try {
     const { body, desk } = studio;

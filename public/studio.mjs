@@ -2725,6 +2725,16 @@ export function setupStudio({
     // (The user said no to what it costs: nothing to say again in the Bobine.)
     if (!mayBegin()) return refuse('');
     failure = '';
+    // (0.6.177, « studio ne suit pas exactement ce que fait bobine ») A take of the Bobine is followed here as
+    // a take of the Chat is (watch): the Studio kept as it is, then the mode of the take at once, and its
+    // settings once the server has said them. It stayed in the mode it was left in: « Krea 2 », the prompt of
+    // an image, a screen at the wrong format, while LTX 2.5 made a video for the Bobine.
+    let followed = null;
+    if (onTake?.montage && !legacy && info) {
+      leaveLook();
+      followed = { before: asItIs() };
+      mode = MODE_OF_VERB[wanted.verb] ?? mode;
+    }
     const controller = new AbortController(),
       // Where the creation will be kept once made: the mode it was asked in.
       asked = mode,
@@ -2772,6 +2782,11 @@ export function setupStudio({
         working.requestId = proposed.requestId;
       }
       controller.signal.throwIfAborted();
+      if (followed) {
+        // What it is made with: its model, its text, its format, its length, its photos (the Flux starts from them).
+        showRequest({ tool: wanted.verb, ...proposed });
+        render();
+      }
       if (run && !former) {
         // In the conversation: followed and written there like a creation of the chat.
         const done = await run(proposed, {
@@ -2845,13 +2860,24 @@ export function setupStudio({
         // It stays on the screen, as the gallery lists it (with the addresses it is shown from).
         const record = made && runs.find(item => item.id === made);
         result = record || null;
-        // (0.6.142) A plan of the montage is kept by the montage: the screen of the mode stays as it was.
-        if (record && !onTake?.montage) {
-          kept[asked] = record;
-          // Made from what was looked at: those settings are the user's now, nothing to come back to.
-          endLook();
+        if (followed) {
+          // (0.6.177) As after a take of the Chat (unwatch, showMade): the Studio as it was, then, made, the
+          // take on its screen with its settings, the newest of the conversation. Not made: as it was.
+          asItWas(followed.before);
+          if (record) {
+            // (The newest take of the conversation: `settle` shows its mode, and its settings when the Studio has its model.)
+            pinned = null;
+            settle();
+          }
+        } else {
+          // (0.6.142) In the Studio of before the conversations, a take of the bobine leaves the screen of the mode as it was.
+          if (record && !onTake?.montage) {
+            kept[asked] = record;
+            // Made from what was looked at: those settings are the user's now, nothing to come back to.
+            endLook();
+          }
+          settledHere();
         }
-        settledHere();
       } finally {
         settling = false;
       }
@@ -3706,17 +3732,7 @@ export function setupStudio({
     // Not over a work of its own, a proposal or Moodix AI setting it, nor a prompt being improved.
     if (!take?.running || holds() || working || enriching || !info || legacy || away()) return;
     leaveLook();
-    const before = {
-        mode,
-        drafts: structuredClone(drafts),
-        advanced,
-        kept: { ...kept },
-        pinned,
-        extending,
-        // What a model showed first, for « Enregistrer » (paintSave): not the settings of this take.
-        presetShown: { ...presetShown },
-        baselines: { ...baselines },
-      };
+    const before = asItIs();
     showRequest(take.request);
     working = {
       label: take.label || 'Génération en cours…',
@@ -3742,8 +3758,26 @@ export function setupStudio({
     working = null;
     // (Its count with it: the next work counts from its own go.)
     elapsed.stop();
-    putBack(before);
+    asItWas(before);
     failure = '';
+  }
+  /** The Studio as it is, kept to be put back (asItWas): before a take it follows, of the Chat or of the Bobine. */
+  function asItIs() {
+    return {
+      mode,
+      drafts: structuredClone(drafts),
+      advanced,
+      kept: { ...kept },
+      pinned,
+      extending,
+      // What a model showed first, for « Enregistrer » (paintSave): not the settings of the take followed.
+      presetShown: { ...presetShown },
+      baselines: { ...baselines },
+    };
+  }
+  /** The Studio as `before` kept it (asItIs), with what its models had shown first. Nothing is drawn. */
+  function asItWas(before) {
+    putBack(before);
     for (const item of MODES) presetShown[item.id] = before.presetShown[item.id];
     for (const key of Object.keys(baselines)) if (!(key in before.baselines)) delete baselines[key];
   }
