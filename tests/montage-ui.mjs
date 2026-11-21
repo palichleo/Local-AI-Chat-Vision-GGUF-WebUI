@@ -63,6 +63,15 @@ class Fake {
     this.paused = false;
     return Promise.resolve();
   }
+  // (0.6.169) Its classes as the page changes them (a take carried, the Flux on the preview).
+  get classList() {
+    const names = () => String(this.className).split(' ').filter(Boolean);
+    return {
+      add: (...more) => (this.className = [...new Set([...names(), ...more])].join(' ')),
+      remove: (...less) => (this.className = names().filter(name => !less.includes(name)).join(' ')),
+      contains: name => names().includes(name),
+    };
+  }
 }
 // The document of the page: what has the keys. How wide a lane of the timeline is, in pixels.
 const shown = { activeElement: null };
@@ -87,7 +96,7 @@ const take = (n, mediaType, more = {}) => ({
 const INTENTION = 'Prise d’une bobine, demandée dans la Bobine.',
   FILM = { width: 1344, height: 768 };
 
-function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null, downloads = null, arrange = null } = {}) {
+function setup({ stored = [], fail = {}, extra = [], create = null, estimate = null, write = null, thumbnail = () => {}, width = 1000, modelFor = null, longestFor = null, enrich = null, downloads = null, arrange = null, dragImage = null, win = null, canvas = false } = {}) {
   WIDTH = width;
   const calls = [],
     queue = [],
@@ -134,7 +143,8 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
   };
   const notices = [],
     heard = new Map(),
-    page = { document: shown, addEventListener: (type, listener) => heard.set(type, listener), removeEventListener: type => heard.delete(type) };
+    // (0.6.169) `win`: what a page has besides (its images of the screen, what the Flux draws with).
+    page = { document: shown, addEventListener: (type, listener) => heard.set(type, listener), removeEventListener: type => heard.delete(type), ...win };
   shown.activeElement = null;
   const ui = setupMontage({
     page,
@@ -145,9 +155,11 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
     ...(longestFor ? { longestFor } : {}),
     ...(enrich ? { enrich } : {}),
     ...(arrange ? { arrange } : {}),
+    ...(dragImage ? { dragImage } : {}),
     halt: () => void halted++,
     api,
-    node: (tag, className, text) => new Fake(tag, className, text),
+    // (`canvas`: a canvas that draws, for the Flux.)
+    node: (tag, className, text) => Object.assign(new Fake(tag, className, text), canvas && tag === 'canvas' ? { getContext: () => null } : {}),
     icon: name => new Fake('svg', 'icon-' + name),
     notice: text => notices.push(text),
     project: () => project,
@@ -572,9 +584,10 @@ test('the bobine is read in the preview: the head moves, each take is shown in i
   f.pointer.up();
   assert.equal(f.pointer.held(), 0);
   await f.later();
-  // A press on a lane beside what it holds puts the head there too, and lets go of what was chosen;
-  // the space bar reads the bobine from anywhere, except where a key is typed or a button pressed.
-  const [lane] = f.lanes();
+  // A press on a lane beside what it holds puts the head there too, and lets go of what was chosen (on
+  // an audio track: in the void of the takes, a click lays a take, 0.6.169); the space bar reads the
+  // bobine from anywhere, except where a key is typed or a button pressed.
+  const lane = f.lanes()[1];
   assert.notEqual(f.ui.state().chosen, null);
   lane.onclick({ clientX: 800, target: lane });
   assert.deepEqual([f.ui.state().head, f.ui.state().chosen], [6, null]);
@@ -766,7 +779,7 @@ test('a take dragged to the timeline is laid where it is dropped; a sound on the
   assert.equal(f.plans().length, 5);
 });
 
-test('in the void, a ghost of 5 s follows the pointer; a double click lays it, a press pulled draws a take to create (0.6.149)', async () => {
+test('in the void, a ghost of 5 s follows the pointer; a click lays it (0.6.169), a press pulled draws a take to create (0.6.149)', async () => {
   // (Captures 71, 75 et 76. A video of five seconds: the timeline shows ten, on 1000 pixels.)
   const empty = await setup().open();
   // An empty bobine: the ghost at its start, breathing.
@@ -787,8 +800,9 @@ test('in the void, a ghost of 5 s follows the pointer; a double click lays it, a
   assert.equal(shade().style.left, '50%');
   lane.onpointerleave();
   assert.equal(shade().hidden, true);
-  // A double click lays it there: a take to create of five seconds, chosen; its line waits for its text.
-  lane.ondblclick({ clientX: 900, target: lane });
+  // A click lays it there (0.6.169, his words of 21/11: « Je ne veux plus de double click pour ajouter une
+  // prise vide, mais un simple click. »): a take to create of five seconds, chosen; its line waits for its text.
+  lane.onclick({ clientX: 900, target: lane });
   assert.deepEqual(plans(), [[0, 5, false], [6.5, 5, true]]);
   assert.deepEqual([f.ui.state().chosen, f.lines()], [f.ui.state().montage.plans[1].id, [['06.50 → 11.50', '', 'Nouvelle prise', '']]]);
   // Pressed in the hole between them and pulled: drawn there, as long as it is pulled, within the hole;
@@ -818,12 +832,18 @@ test('in the void, a ghost of 5 s follows the pointer; a double click lays it, a
   assert.deepEqual(f.ui.state().drawing, { from: 11.5, to: 19 });
   f.pointer.up();
   assert.deepEqual(plans().at(-1), [11.5, 7.5, true]);
-  // A click alone draws nothing: it moves the head (to the end of the bobine, the most it can go).
+  // A press let go without moving draws nothing: the click after it lays a take of five seconds there.
   await f.later();
   f.pressVoid(990);
   f.pointer.up();
+  assert.equal(f.ui.state().montage.plans.length, 4);
   f.lanes()[0].onclick({ clientX: 990, target: f.lanes()[0] });
-  assert.deepEqual([f.ui.state().montage.plans.length, f.ui.state().head], [4, 19]);
+  assert.deepEqual(plans().at(-1), [27.2, 5, true]);
+  assert.equal(f.ui.state().chosen, f.ui.state().montage.plans.at(-1).id);
+  // (The second click of a double click, on the take just laid, keeps it chosen: one take, not two.)
+  f.plans().at(-1).onclick({ detail: 2 });
+  assert.deepEqual([f.ui.state().montage.plans.length, f.ui.state().chosen], [5, f.ui.state().montage.plans.at(-1).id]);
+  f.ui.undo();
   // A drawn take never goes on from what is before it: a clip of its own, from its text.
   assert.deepEqual(f.lines().map(line => line[2]), ['Nouvelle prise', 'Nouvelle prise', 'Nouvelle prise']);
   await f.later();
@@ -1204,12 +1224,12 @@ test('when LTX 2.5 is here, every take of the bobine is asked to it by its name,
   }).open();
   f.get('montage-take')[0].ondblclick();
   // A suite pulled from the video (ten seconds shown on 1000 pixels), then a take laid in the void
-  // after it by a double click (twenty seconds shown now).
+  // after it by a click (twenty seconds shown now).
   f.press(find(f.root, 'montage-grip')[1], 500);
   f.pointer.move(700);
   f.pointer.up();
   await f.later();
-  f.lanes()[0].ondblclick({ clientX: 600, target: f.lanes()[0] });
+  f.lanes()[0].onclick({ clientX: 600, target: f.lanes()[0] });
   f.write(0, 'Il se retourne.');
   f.write(1, 'La brume se lève.');
   await settle();
@@ -1221,7 +1241,7 @@ test('when LTX 2.5 is here, every take of the bobine is asked to it by its name,
   assert.deepEqual(asked[0], { verb: 'extend_video', args: { prompt: 'Il se retourne.', intention: INTENTION, duration: 2, workflow: 'ltx-25', source: { output: id(1) } }, size: FILM });
   // Without it, nothing is named: the server chooses, as for any creation.
   const g = await setup({ create: wanted => (asked.push(structuredClone(wanted)), new Promise(() => {})) }).open();
-  g.lanes()[0].ondblclick({ clientX: 300, target: g.lanes()[0] });
+  g.lanes()[0].onclick({ clientX: 300, target: g.lanes()[0] });
   g.write(0, 'La brume se lève.');
   g.goMain().onclick();
   await settle();
@@ -1938,9 +1958,9 @@ test('« Annuler » and « Rétablir » in the fil, Ctrl+Z and Ctrl+Maj+Z: each 
 test('a text typed in a row is one step, a pause makes another; the volume slid is one (0.6.154)', async () => {
   const f = await setup().open();
   f.get('montage-take')[0].ondblclick();
-  f.lanes()[0].ondblclick({ clientX: 800, target: f.lanes()[0] });
+  f.lanes()[0].onclick({ clientX: 800, target: f.lanes()[0] });
   const before = f.ui.state().past;
-  assert.equal(f.get('bobine-line-words').length, 1, 'a take to create, drawn by a double click');
+  assert.equal(f.get('bobine-line-words').length, 1, 'a take to create, laid by a click');
   const prompt = () => f.ui.state().montage.plans.find(plan => plan.todo).todo.prompt;
   for (const words of ['Il', 'Il lève', 'Il lève les yeux.']) f.write(0, words);
   assert.equal(f.ui.state().past, before + 1);
@@ -2198,7 +2218,7 @@ test('« Créer » counts every take to create: Moodix AI writes those without t
   // Nothing to look at (a take drawn, without photo): not counted; without Moodix AI at hand, those without text neither.
   const { pens: none, write: blind } = pen();
   const k = await setup({ write: blind, create: async () => null }).open();
-  k.lanes()[0].ondblclick({ clientX: 300, target: k.lanes()[0] });
+  k.lanes()[0].onclick({ clientX: 300, target: k.lanes()[0] });
   assert.deepEqual([k.go(), k.goMain().disabled, none.length], ['Créer', true, 0]);
   const { f: m } = await series({ texts: ['Il lève les yeux.', ''] });
   assert.equal(m.go(), 'Créer 1 prise');
@@ -2325,7 +2345,9 @@ test('the styles of the Bobine: a take being made fills from the left, no moving
   assert.match(rule('#bobine-view .montage-piece.is-todo.is-making'), /border: 1px dashed/);
   assert.match(rule('#bobine-view .montage-piece.is-making > .montage-piece-bar'), /inset: 0;[\s\S]*z-index: -1;/);
   assert.match(rule('#bobine-view .montage-piece.is-making > .montage-piece-length'), /display: block;/);
-  assert.match(rule('#bobine-view .montage-frame-words'), /-webkit-line-clamp: 3;[\s\S]*overflow: hidden;/);
+  // (0.6.169) Cut inside its plate, not by it: no fourth line half shown in its margin.
+  assert.doesNotMatch(rule('#bobine-view .montage-frame-words'), /line-clamp|overflow/);
+  assert.match(rule('#bobine-view .montage-frame-text'), /-webkit-line-clamp: 3;[\s\S]*overflow: hidden;/);
   assert.match(rule('#bobine-view .montage-frame-words[hidden]'), /display: none;/);
   assert.match(rule("#bobine-view .montage-frame[data-end='true'][data-tall='true'] > .montage-frame-words"), /bottom: 82px;/);
 });
@@ -2859,4 +2881,252 @@ test('another bobine: what was asked in the one before is not said again to Mood
   enter();
   await settle();
   assert.deepEqual([asked[1].request, asked[1].previous, asked[1].plans], ['Un film sur la mer.', [], 0]);
+});
+
+// ------------------------------------------------------------------ his returns of 21/11 (0.6.169)
+test('a click on a take of « Prises » opens it once the time of a double click is past; a double click lays it, unopened (0.6.169)', async () => {
+  // (His words of 21/11: « un click simple dans un média à gauche dans bobine doit l'ouvrir en grand. Le
+  // double click doit le mettre dans la timeline. »)
+  const f = await setup().open();
+  const tile = () => f.get('montage-take')[0],
+    opened = () => f.calls.filter(call => call.route === 'open').map(call => call.body);
+  tile().onclick({ detail: 1 });
+  assert.deepEqual([opened(), f.plans().length], [[], 0]);
+  await f.later();
+  assert.deepEqual([opened(), f.plans().length], [[id(1)], 0]);
+  // The two clicks of a double click, then the double click: laid at the end, not opened.
+  tile().onclick({ detail: 1 });
+  tile().onclick({ detail: 2 });
+  tile().ondblclick();
+  await f.later();
+  assert.deepEqual([opened(), f.plans().length], [[id(1)], 1]);
+  // Entrée lays it (the click a button gets from that key is not let through: it would open it too).
+  let taken = false;
+  tile().onkeydown({ key: 'Enter', preventDefault: () => (taken = true) });
+  await f.later();
+  assert.deepEqual([opened(), f.plans().length, taken], [[id(1)], 2, true]);
+  // A drag begun meanwhile opens nothing.
+  tile().onclick({ detail: 1 });
+  tile().ondragstart({ dataTransfer: { setData() {} } });
+  tile().ondragend();
+  await f.later();
+  assert.deepEqual(opened(), [id(1)]);
+});
+
+test('a take carried over the timeline is drawn where it would go, the takes it pushes making room; nothing changes until it is dropped (0.6.169)', async () => {
+  // (« On ne voit pas où on le drop. » Eight seconds of takes: twenty on 2000 pixels, a second is 100.)
+  const ghosts = [];
+  const f = await setup({ width: 2000, dragImage: (...given) => ghosts.push(given) }).open();
+  for (const at of [0, 1]) f.get('montage-take')[at].ondblclick();
+  const tile = f.get('montage-take')[2],
+    transfer = { setData() {} },
+    lefts = () => f.plans().map(piece => piece.style.left),
+    shadows = () => f.get('bobine-drop'),
+    starts = () => f.ui.state().montage.plans.map(plan => plan.at);
+  // Small under the hand, at the size of a take of the track (the Studio draws it, studio.mjs); dimmed at
+  // its place; the desk says what is carried, for the tracks that take it to light up.
+  tile.ondragstart({ dataTransfer: transfer });
+  assert.deepEqual(ghosts.map(given => given.slice(1)), [[transfer, 'image', 3, { width: 85, height: 48 }]]);
+  assert.deepEqual([ghosts[0][0], tile.className, f.root.dataset.carrying], [tile, 'montage-take is-carried', 'image']);
+  // Over the first half of the first take: its shadow before it, the two others pushed later; the bobine as it was.
+  f.lanes()[0].ondragover(event(100));
+  assert.deepEqual(shadows().map(shadow => [shadow.className, shadow.style.left, shadow.style.width, shadow.textContent]), [['bobine-drop', '0%', 'calc(15% - 4px)', 'Prise 3']]);
+  assert.deepEqual([lefts(), starts()], [['15%', '40%'], [0, 5]]);
+  // In the void after the bobine: there, and nothing pushed; out of the timeline, gone, everything in its place.
+  f.lanes()[0].ondragover(event(1500));
+  assert.deepEqual([shadows().map(shadow => shadow.style.left), lefts()], [['75%'], ['0%', '25%']]);
+  f.lanes()[0].ondragleave({ relatedTarget: null });
+  assert.deepEqual([shadows().length, lefts()], [0, ['0%', '25%']]);
+  // Dropped where it was shown: laid there, its shadow gone.
+  f.lanes()[0].ondragover(event(100));
+  f.lanes()[0].ondrop(event(100));
+  assert.deepEqual([f.names(), starts(), shadows().length], [['Prise 3', 'Prise 1', 'Prise 2'], [0, 3, 8], 0]);
+  tile.ondragend();
+  assert.deepEqual([tile.className, f.root.dataset.carrying], ['montage-take', undefined]);
+  // A sound over a track of sounds: a strip there; the takes do not move.
+  const sound = f.get('montage-take')[3];
+  sound.ondragstart({ dataTransfer: transfer });
+  assert.deepEqual([ghosts.at(-1).slice(2), f.root.dataset.carrying], [['audio', 4, { width: 106, height: 29 }], 'sound']);
+  f.lanes()[1].ondragover(event(200));
+  assert.deepEqual([shadows().map(shadow => [shadow.className, shadow.style.left]), lefts()], [[['bobine-drop is-sound', '10%']], ['0%', '15%', '40%']]);
+  sound.ondragend();
+  assert.equal(shadows().length, 0);
+});
+
+test('the clip after the one shown is loaded beforehand in a second player: no black between two takes (0.6.169)', async () => {
+  // (« Entre 2 prises il y a un petit temps mort dans lequel c'est noir. » Two clips of 5 and 3 s.)
+  const f = await setup({ width: 2000 }).open();
+  for (const at of [0, 1]) f.get('montage-take')[at].ondblclick();
+  const [frame] = f.get('montage-frame'),
+    players = frame.children.filter(child => child.tagName === 'VIDEO');
+  assert.equal(players.length, 2);
+  const [first, second] = players;
+  // The first shows take 1; the second holds take 2 already, at its start, hidden, silent, paused.
+  assert.deepEqual([first.src, first.hidden, second.src, second.hidden, second.muted, second.paused, second.currentTime, second.preload], ['/media/1', false, '/media/2', true, true, true, 0, 'auto']);
+  let given = 0,
+    held = second.src;
+  Object.defineProperty(second, 'src', { get: () => held, set: next => (given++, (held = next)) });
+  f.get('montage-play')[0].onclick();
+  await f.later({ ms: 4000 });
+  assert.deepEqual([first.paused, first.hidden, second.hidden], [false, false, true]);
+  // Past the cut: the second is shown as it was loaded, its address not given again; the first waits, hidden.
+  await f.later({ ms: 1500 });
+  assert.deepEqual([f.said('montage-caption'), given, second.hidden, second.paused, second.muted, second.currentTime], [['Prise 2'], 0, false, false, false, 0.5]);
+  assert.deepEqual([first.hidden, first.paused], [true, true]);
+});
+
+test('read with the images of the screen when the page has them: the head moves at each one, a pause lets go of the next (0.6.169)', async () => {
+  let made = 0;
+  const frames = new Map(),
+    f = await setup({ width: 2000, win: { requestAnimationFrame: work => (frames.set(++made, work), made), cancelAnimationFrame: at => frames.delete(at) } }).open(),
+    run = () => {
+      const now = [...frames.values()];
+      frames.clear();
+      for (const work of now) work();
+    };
+  f.get('montage-take')[0].ondblclick();
+  f.get('montage-play')[0].onclick();
+  assert.equal(frames.size, 1);
+  await f.later({ ms: 1000 });
+  run();
+  assert.deepEqual([f.ui.state().head, f.said('montage-clock'), frames.size], [1, ['01.00'], 1]);
+  f.get('montage-play')[0].onclick();
+  assert.deepEqual([f.ui.state().playing, frames.size], [false, 0]);
+});
+
+test('a take being made shows the Flux of the Studio in the preview, from its start photo, with its end photo (0.6.169)', async () => {
+  // (« Quand une scène est en cours de création, on n'a pas l'animation du Studio […] Ça serait bien de
+  // l'avoir en plus de l'image de fin en bas à droite si y'en a une. ») What it draws is take-flux.mjs's.
+  const pictures = [],
+    asked = [];
+  let answer = null;
+  class Picture {
+    constructor() {
+      pictures.push(this);
+    }
+  }
+  shown.documentElement = { dataset: {} };
+  const f = await setup({
+    extra: photos(),
+    canvas: true,
+    win: { performance: { now: () => 0 }, requestAnimationFrame: () => 1, cancelAnimationFrame() {}, setTimeout: () => 1, clearTimeout() {}, Image: Picture },
+    create: (wanted, hooks) => {
+      asked.push(hooks);
+      return new Promise(resolve => (answer = resolve));
+    },
+  }).open();
+  lay(f);
+  f.write(0, 'Il lève les yeux.');
+  f.goMain().onclick();
+  await settle();
+  const [frame] = f.get('montage-frame');
+  // From its start photo, once it is there.
+  assert.deepEqual([pictures.map(picture => picture.src), frame.className], [['/media/3'], 'montage-frame']);
+  Object.assign(pictures[0], { naturalWidth: 1344, naturalHeight: 768 }).onload();
+  const [end] = find(frame, 'montage-frame-end');
+  assert.deepEqual([frame.className, find(frame, 'take-flux').length, end.hidden, f.said('montage-caption')], ['montage-frame has-flux', 1, false, ['En cours']]);
+  // Then from what the engine shows of it.
+  asked[0].onProgress('Étape 3 sur 8', 0.4, '/preview/a.jpg');
+  assert.deepEqual(pictures.map(picture => picture.src), ['/media/3', '/preview/a.jpg']);
+  // Made: the Flux is gone with it.
+  f.runs.push(made(50, 121));
+  answer(f.runs.at(-1));
+  await settle();
+  await settle();
+  assert.deepEqual([frame.className, find(frame, 'take-flux').length, find(f.get('montage-frame')[0], 'take-flux').length], ['montage-frame', 0, 0]);
+  // Without a start photo, the colours of the photo it arrives on until the engine shows something, not grey.
+  const g = await setup({
+    extra: photos(),
+    canvas: true,
+    win: { performance: { now: () => 0 }, requestAnimationFrame: () => 1, cancelAnimationFrame() {}, setTimeout: () => 1, clearTimeout() {}, Image: Picture },
+    create: () => new Promise(() => {}),
+  }).open();
+  g.lanes()[0].onclick({ clientX: 250, target: g.lanes()[0] });
+  g.get('montage-take')[5].ondragstart({ dataTransfer: { setData() {} } });
+  g.photos().ondrop(event(500));
+  assert.deepEqual(g.ui.state().montage.plans.map(plan => [plan.at, plan.to, Object.keys(plan.photos ?? {})]), [[0, 5, ['end']]]);
+  g.write(0, 'Il arrive au ponton.');
+  g.goMain().onclick();
+  await settle();
+  assert.equal(pictures.at(-1).src, '/thumb/6');
+  delete shown.documentElement;
+});
+
+test('the text of a take to create in the preview: cut, the end of its last line fades out (0.6.169)', async () => {
+  // (His photo 2 of 21/11: cut at three lines, it ended on « j... » and showed half of a fourth.)
+  const f = await setup({ extra: photos() }).open();
+  lay(f);
+  // (The first take without its end photo: its text has the whole width of the frame.)
+  laid(f)[0].onclick();
+  f.button('Retirer la photo de fin').onclick();
+  const [frame] = f.get('montage-frame'),
+    [words] = find(frame, 'montage-frame-words'),
+    [text] = find(words, 'montage-frame-text'),
+    // (Ten seconds on 1000 pixels: the first take from 0 to 5, the second from 5 to 7.)
+    look = x => {
+      f.press(f.get('montage-ruler')[0], x);
+      f.pointer.up();
+    };
+  // Three lines of 21 px shown; a long text takes three of them on the whole width, five beside an end photo.
+  Object.defineProperty(text, 'clientHeight', { value: 63 });
+  Object.defineProperty(text, 'scrollHeight', { get: () => (text.textContent.length < 40 ? 42 : frame.dataset.end === 'true' ? 105 : 63) });
+  f.write(0, 'From a low position behind a fractured basalt slab, an old fisherman crosses the wet planks.');
+  f.write(1, 'Ease the camera sideways just enough to reveal the boat drifting from the pier, the mist lifting.');
+  look(100);
+  assert.deepEqual([words.hidden, text.textContent.slice(0, 6), frame.dataset.end, words.dataset.more], [false, 'From a', 'false', 'false']);
+  // Beside its end photo, it goes on: it says so (moodix.css fades its end), measured once that place is kept.
+  look(600);
+  assert.deepEqual([text.textContent.slice(0, 6), frame.dataset.end, words.dataset.more], ['Ease t', 'true', 'true']);
+  // Shorter, measured again: it does not.
+  f.write(1, 'Il lève les yeux.');
+  look(600);
+  assert.deepEqual([text.textContent, words.dataset.more], ['Il lève les yeux.', 'false']);
+});
+
+test('the styles of his returns of 21/11: the row under the preview as high as what it holds, the Flux under the words, a take carried (0.6.169)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const css = (await readFile(new URL('../public/moodix.css', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const rule = selector => {
+    const at = css.lastIndexOf(selector + ' {');
+    assert.notEqual(at, -1, selector);
+    return css.slice(at, css.indexOf('}', at));
+  };
+  // (Measured at 1440 × 900: at 24 px, the field of Moodix AI went 16 px under the block of the preview.)
+  assert.match(rule('#bobine-view .montage-transport'), /height: 40px;/);
+  assert.match(rule('#bobine-view .montage-frame > .take-flux'), /z-index: 1;/);
+  assert.match(rule('#bobine-view .montage-frame > :is(.montage-caption, .montage-frame-words, .montage-frame-end)'), /z-index: 2;/);
+  assert.match(rule('#bobine-view .montage-frame.has-flux > :is(img, video)'), /visibility: hidden;/);
+  assert.match(rule("#bobine-view .montage-frame-words[data-more='true'] > .montage-frame-text"), /\bmask-image: linear-gradient\(#000, #000\), linear-gradient\(to left, transparent, #000 96px\);/);
+  // (Its own rule, not the one of the motion reduced that names it too.)
+  assert.match(css, /\n\.bobine-drop \{\n  position: absolute;[^}]*pointer-events: none;/);
+  assert.match(rule('#bobine-view .montage-take.is-carried > :is(img, video)'), /opacity: 0.35;/);
+  // (The bar of the take chosen stayed at its place while the takes slid, and took the drop for itself.)
+  assert.match(rule('.bobine-desk[data-carrying] :is(.montage-pop, .bobine-edge-hint)'), /opacity: 0;\n  pointer-events: none;/);
+});
+
+test('the takes a change moves slide from where they were to their place; a take that comes appears softly (0.6.169)', async () => {
+  // (« Globalement essaie d'améliorer la fluidité, l'impression de “c'est fluide et ça colle tout seul”. »)
+  // The page here has no layout: a take is where its left says, on a lane of 1000 pixels.
+  const played = [],
+    { getBoundingClientRect } = Fake.prototype;
+  Fake.prototype.animate = function (frames, options) {
+    played.push([String(this.className), frames, options.duration]);
+  };
+  Fake.prototype.getBoundingClientRect = function () {
+    const at = /^([\d.]+)%$/.exec(String(this.style.left ?? ''));
+    return { left: at ? (Number(at[1]) * WIDTH) / 100 : 0, width: WIDTH };
+  };
+  try {
+    const f = await setup().open();
+    for (const at of [0, 1]) f.get('montage-take')[at].ondblclick();
+    // (The second, laid after the first: it came, softly.)
+    assert.deepEqual(played.at(-1), ['montage-piece', [{ opacity: 0, transform: 'scale(0.97)' }, { opacity: 1, transform: 'none' }], 180]);
+    played.length = 0;
+    // The first taken away: the second slides from five seconds (250 pixels, twenty seconds shown) to the start.
+    f.plans()[0].onkeydown({ key: 'Delete' });
+    assert.deepEqual([f.plans().map(piece => piece.style.left), played], [['0%'], [['montage-piece', [{ transform: 'translateX(250px)' }, { transform: 'none' }], 180]]]);
+  } finally {
+    delete Fake.prototype.animate;
+    Fake.prototype.getBoundingClientRect = getBoundingClientRect;
+  }
 });

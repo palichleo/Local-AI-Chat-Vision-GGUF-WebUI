@@ -17477,6 +17477,10 @@ body[data-view='bobine'] .chat-panel {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* (0.6.169, sa capture du 21/11) Aussi haute que ce qu'elle tient : le bouton de lecture et le champ de
+     Moodix AI font 40 px. À 24 px (la règle du Montage), le champ dépassait de 16 px sous le bloc de l'aperçu,
+     sur la timeline (mesuré à 1440 × 900). */
+  height: 40px;
 }
 #bobine-view .montage-play {
   flex: none;
@@ -18559,10 +18563,26 @@ body[data-view='bobine'] .chat-panel {
   border-radius: 6px;
   background: rgba(10, 10, 12, 0.72);
   text-shadow: none;
+}
+/* (0.6.169, sa photo 2 du 21/11) Coupé sur la plaque, le texte finissait par des points et laissait voir le
+   haut d'une quatrième ligne dans la marge : il est coupé à l'intérieur de la plaque, et la fin de sa
+   troisième ligne s'efface en fondu, comme le texte de Moodix AI dans le Studio. */
+#bobine-view .montage-frame-text {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
+}
+#bobine-view .montage-frame-words[data-more='true'] > .montage-frame-text {
+  -webkit-mask-image: linear-gradient(#000, #000), linear-gradient(to left, transparent, #000 96px);
+  mask-image: linear-gradient(#000, #000), linear-gradient(to left, transparent, #000 96px);
+  -webkit-mask-size: 100% calc(100% - 1.45em), 100% 1.45em;
+  mask-size: 100% calc(100% - 1.45em), 100% 1.45em;
+  -webkit-mask-position: top left, bottom left;
+  mask-position: top left, bottom left;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 #bobine-view .montage-frame-words[hidden] {
   display: none;
@@ -18833,4 +18853,106 @@ body[data-view='bobine'] .chat-panel {
 #bobine-view .bobine-desk textarea.bobine-ask-words {
   width: auto;
   transition: none;
+}
+
+/* ------------------------------------------------------------------ La Bobine, ses retours du 21/11 (0.6.169) */
+/* Une prise en cours de création, dans l'aperçu : le Flux du Studio (take-flux.mjs) sur ce qui est fait,
+   sous son texte et sa photo de fin. Plus de pointillés autour : le Flux dit qu'elle se fait. */
+#bobine-view .montage-frame > .take-flux {
+  z-index: 1;
+}
+#bobine-view .montage-frame > :is(.montage-caption, .montage-frame-words, .montage-frame-end) {
+  z-index: 2;
+}
+#bobine-view .montage-frame.has-flux > :is(img, video) {
+  visibility: hidden;
+}
+#bobine-view .montage-frame.has-flux {
+  outline: 0;
+}
+/* Une prise glissée depuis « Prises » (« aussi intuitif que dans Studio ») : elle s'estompe à sa place,
+   petite sous la main (studio.mjs, dragGhost) ; les pistes qui la prennent s'éclairent ; sur la timeline,
+   son ombre là où elle irait, et les prises qu'elle pousserait glissent déjà. */
+#bobine-view .montage-take > :is(img, video) {
+  transition: opacity 160ms ease;
+}
+#bobine-view .montage-take.is-carried > :is(img, video) {
+  opacity: 0.35;
+}
+#bobine-view .montage-lane {
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+.bobine-desk:is([data-carrying='video'], [data-carrying='image']) .montage-track[data-track='plans'] > .montage-lane,
+.bobine-desk[data-carrying='sound'] .montage-track:is([data-track='music'], [data-track='effects']) > .montage-lane {
+  background-color: rgba(238, 232, 222, 0.025);
+  box-shadow: inset 0 0 0 1px rgba(238, 232, 222, 0.14);
+}
+.bobine-desk[data-carrying] .montage-track[data-track='plans'] .montage-piece,
+.bobine-desk[data-carrying] .montage-photos > .montage-photo {
+  transition:
+    left 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    right 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.bobine-drop {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  overflow: hidden;
+  border: 1px dashed rgba(238, 232, 222, 0.62);
+  border-radius: 9px;
+  background: rgba(238, 232, 222, 0.06) center / cover no-repeat;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  opacity: 0.78;
+  pointer-events: none;
+  transition:
+    left 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.bobine-drop.is-sound {
+  border-radius: 7px;
+  box-shadow: none;
+}
+.bobine-drop.is-sound > .montage-piece-name {
+  top: 4px;
+}
+/* (Vu dans la copie de démonstration : la petite barre de la prise choisie restait où elle était, sur la
+   prise qui glissait à sa place, et prenait le dépôt pour elle. Le temps du glisser, elle s'efface.) */
+.bobine-desk[data-carrying] :is(.montage-pop, .bobine-edge-hint) {
+  opacity: 0;
+  pointer-events: none;
+}
+/* Tirée contre sa voisine, une prise s'y tient : le bord qui touche luit, à peine. */
+#bobine-view .montage-piece[data-snap] {
+  --ring: 0 0 0 0 transparent;
+}
+#bobine-view .montage-piece[aria-pressed='true'][data-snap] {
+  --ring: inset 0 0 0 1px var(--ink);
+}
+#bobine-view .montage-piece[data-snap='start'] {
+  box-shadow:
+    var(--ring),
+    -5px 0 10px -5px rgba(238, 232, 222, 0.85);
+}
+#bobine-view .montage-piece[data-snap='end'] {
+  box-shadow:
+    var(--ring),
+    5px 0 10px -5px rgba(238, 232, 222, 0.85);
+}
+#bobine-view .montage-piece[data-snap='start end'] {
+  box-shadow:
+    var(--ring),
+    -5px 0 10px -5px rgba(238, 232, 222, 0.85),
+    5px 0 10px -5px rgba(238, 232, 222, 0.85);
+}
+@media (prefers-reduced-motion: reduce) {
+  #bobine-view .montage-take > :is(img, video),
+  #bobine-view .montage-lane,
+  .bobine-desk[data-carrying] .montage-track[data-track='plans'] .montage-piece,
+  .bobine-desk[data-carrying] .montage-photos > .montage-photo,
+  .bobine-drop {
+    transition: none;
+  }
 }

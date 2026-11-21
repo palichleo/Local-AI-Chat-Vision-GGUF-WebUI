@@ -569,6 +569,8 @@ export function setupStudio({
     refresh: () => refresh(),
     ensureConversation: () => ensureConversation(),
     showTake: record => viewOutput(record, 0),
+    // (0.6.169) A take carried from its « Prises » as the Sortie carries one: small, tilted, under the hand.
+    dragImage: (tile, transfer, media, take, size) => dragGhost(tile, transfer, media, take, size),
     // (0.6.142) A take to create is created as a take of the Studio is: the same request, in the
     // conversation, one creation at a time. The bobine stays on screen meanwhile (`montage`).
     create: (wanted, hooks) => generate({ ...wanted, styles: [], edits: {}, montage: hooks ?? {} }),
@@ -4354,14 +4356,15 @@ export function setupStudio({
    * What the hand carries (studio-maquette.md, « Glisser »; 16/11): the picture at the size of a slot
    * of the inputs (one on the screen gives it, 52 px otherwise) and 104 %, tilted by −3°, with its
    * shadow and « PRISE n » at its top left; a sound, its grey stripes. Drawn at once on a canvas from
-   * the picture the tile already holds: nothing is loaded while the drag starts.
+   * the picture the tile already holds: nothing is loaded while the drag starts. (0.6.169) `size`: the
+   * Bobine gives its own, that of a take on its track.
    */
-  function dragGhost(pick, transfer, media, take = null) {
+  function dragGhost(pick, transfer, media, take = null, size = null) {
     const page = globalThis.document;
     if (!transfer?.setDragImage || !page?.createElement || !page.body) return;
-    const slot = page.querySelector?.('#studio-view .studio-slot')?.getBoundingClientRect?.(),
-      width = Math.round((slot?.width || 52) * 1.04),
-      height = Math.round((slot?.height || 52) * 1.04),
+    const slot = size ? null : page.querySelector?.('#studio-view .studio-slot')?.getBoundingClientRect?.(),
+      width = Math.round((size?.width || slot?.width || 52) * 1.04),
+      height = Math.round((size?.height || slot?.height || 52) * 1.04),
       // Room around it for the tilt and the shadow.
       room = 16,
       full = [width + room * 2, height + room * 2],

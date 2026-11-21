@@ -25,6 +25,7 @@ import { withArrangement } from './montage-arrange.mjs';
 import { licenseBlock, restrictedOf } from './model-licenses.mjs';
 import { licenseSentence } from './models-page.mjs';
 import { closePopup, openPopup } from './glass-menu.mjs';
+import { takeFlux } from './take-flux.mjs';
 import {
   MONTAGE_LIMITS,
   MONTAGE_RATES,
@@ -102,6 +103,16 @@ const SAID = 4000,
   POLL = 1000;
 // (0.6.157) How long the suite shown under the end of a video is, in seconds (capture 72).
 const HINT = 2;
+// (0.6.169) How long a click on a take of « Prises » waits before it opens it: the time of a double click,
+// which lays it on the bobine instead, in milliseconds.
+const DOUBLE_CLICK = 240;
+// (0.6.169) The identifier of the take being carried over the timeline, laid there to show where it goes.
+const CARRIED = 'carried';
+// (0.6.169) How long the takes of the timeline slide to their new place, in milliseconds.
+const SLIDE = 180;
+const SLIDING = 'cubic-bezier(0.2, 0.8, 0.2, 1)';
+// (0.6.169) How far the take in the hand must jump, in pixels, to slide there rather than follow it.
+const JUMP = 24;
 /** (0.6.154) Every key in its order, at every depth: two bobines alike say the same. */
 const sorted = value =>
   Array.isArray(value)
@@ -132,6 +143,9 @@ export function setupMontage({
   ensureConversation,
   // Opens a take with its details, as a click in the Sortie of the Studio does.
   showTake = () => {},
+  // (0.6.169) What the hand carries from « Prises », as in the Studio: `dragImage(tile, dataTransfer,
+  // media, take, { width, height })` draws the take small, tilted, under the pointer.
+  dragImage = null,
   newId = () => globalThis.crypto.randomUUID(),
   // How long a change waits before it is kept (several made in a row are kept once).
   saveDelay = 500,
@@ -241,7 +255,12 @@ export function setupMontage({
     archiving = false,
     exportMenu = null,
     wantedId = null,
-    reading = null;
+    reading = null,
+    // (0.6.169) The click on a take of « Prises » that waits to open it (a second one lays it instead); the
+    // take dragged along its track; where the take carried from « Prises » would go, as last shown.
+    opening = null,
+    moving = null,
+    landing = '';
   // (What contentKey said of the bobine shown, kept while it is the same.)
   let keyed = { of: null, key: '' };
   // (0.6.154) Annuler, Rétablir (Ctrl+Z, Ctrl+Maj+Z): the bobine as it was before each change, and as it
@@ -640,15 +659,73 @@ export function setupMontage({
 
   // Reading the film in the preview --------------------------------------------------------------
   function stop() {
-    if (playing) timers.clear(playing.timer);
+    if (playing) playing.frame ? page.cancelAnimationFrame?.(playing.frame) : timers.clear(playing.timer);
     playing = null;
-    media?.video.pause?.();
+    for (const player of media?.players ?? []) player.pause?.();
     for (const sound of media?.sounds.values() ?? []) sound.pause?.();
   }
-  /** Puts in the preview what the film shows at `head`, the clip and the sounds at their place. */
-  function show({ sync = true } = {}) {
+  /**
+   * (0.6.169) The player of the preview that holds the clip at `url`: two take turns, the one shown and
+   * the one that loads the next clip of the bobine meanwhile (`ahead`). Changed under the eyes, the
+   * address of a single player showed black between two takes, the time the next clip was loaded.
+   */
+  function playerOf(url) {
+    const { video, spare } = media;
+    if (video.dataset.url === url || spare.dataset.url !== url) return video;
+    // The next clip is ready in the other one: it is shown, the one before waits for the clip after.
+    video.pause?.();
+    video.hidden = true;
+    media.video = spare;
+    media.spare = video;
+    return spare;
+  }
+  /** (0.6.169) The clip after the take shown, loaded in the player not shown, at the instant it starts. */
+  function ahead(index) {
+    const next = montage.plans[index + 1],
+      url = next && !isTodo(next) && next.kind === 'video' ? outputOf(next.source)?.originalUrl : null;
+    if (next && !isTodo(next) && next.kind === 'image') {
+      // (A picture after it: asked to the browser now, there when its turn comes.)
+      const picture = outputOf(next.source)?.originalUrl;
+      if (picture && media.warm.dataset.url !== picture) Object.assign(media.warm, { src: picture }).dataset.url = picture;
+    }
+    if (!url || url === media.video.dataset.url) return;
+    const { spare } = media;
+    if (spare.dataset.url !== url) {
+      Object.assign(spare, { src: url, preload: 'auto' }).dataset.url = url;
+      spare.currentTime = next.from;
+    } else if (spare.paused !== false && Math.abs((spare.currentTime ?? 0) - next.from) > 0.05) spare.currentTime = next.from;
+    spare.muted = true;
+    spare.pause?.();
+    spare.hidden = true;
+  }
+  /**
+   * (0.6.169) A take being made, in the preview: the Flux of the Studio (take-flux.mjs), from the picture
+   * it starts on, then from what the engine shows of it; its end photo stays at the bottom right.
+   */
+  function fluxOf(frame, from) {
+    if (!making || !frame) {
+      media?.flux?.stop();
+      if (media) media.flux = media.fluxFrom = null;
+      return;
+    }
+    if (!media.flux) {
+      media.flux = takeFlux(frame, { node, win: page });
+      media.fluxFrom = null;
+      if (!from) media.flux.neutral();
+    }
+    if (from && from !== media.fluxFrom) {
+      media.fluxFrom = from;
+      media.flux.source(from);
+    }
+    if (Number.isFinite(making.fraction)) media.flux.progress(making.fraction);
+  }
+  /**
+   * Puts in the preview what the film shows at `head`, the clip and the sounds at their place. `tick`: a
+   * moment of the film being read, sixty a second: only the time is said again, nothing else changed.
+   */
+  function show({ sync = true, tick = false } = {}) {
     if (!media) return;
-    const { video, picture, blank, frame } = media,
+    const { picture, blank, frame } = media,
       at = montage.plans.length ? planAt(montage, Math.min(head, Math.max(0, total() - 0.001))) : null,
       // (0.6.149) A hole of the bobine: black, as in the film; the empty bobine shows its Éclipse.
       hole = Boolean(montage.plans.length) && !at,
@@ -670,36 +747,52 @@ export function setupMontage({
                 ? { source: before.source, kind: 'video', last: true }
                 : null,
       url = seen ? (seen.url ?? outputOf(seen.source)?.originalUrl) : null;
-    frame.dataset.todo = String(todo);
-    frame.dataset.busy = String(busy);
-    frame.dataset.hole = String(hole);
+    // (0.6.169) Said again only when it changes: sixty times a second while the film is read.
+    const put = (where, key, value) => {
+      if (where[key] !== value) where[key] = value;
+    };
+    put(frame.dataset, 'todo', String(todo));
+    put(frame.dataset, 'busy', String(busy));
+    put(frame.dataset, 'hole', String(hole));
     blank.hidden = Boolean(url) || hole;
-    picture.hidden = !(url && seen.kind === 'image');
-    video.hidden = !(url && seen.kind === 'video');
-    media.caption.textContent = !at
+    const said = !at
       ? ''
       : busy
         ? 'En cours' + (Number.isFinite(making.fraction) ? ` · ${Math.round(making.fraction * 100)} %` : '')
         : todo
           ? 'À créer' + (link.kind === 'suite' || link.kind === 'last' ? ' · suite de la ' + (takeLabel(before?.source) || 'prise à créer').toLowerCase() : '')
           : takeLabel(at.plan.source) || 'Prise introuvable';
+    if (media.caption.textContent !== said) media.caption.textContent = said;
     // What happens in it, and the photo it arrives on. (0.6.159, capture 87) Not while it is made: the
     // preview shows what the engine draws, « EN COURS · 46 % », nothing else. Its text, three lines at
-    // most, leaves the place of its end photo only when there is one (moodix.css).
-    media.words.textContent = todo && !busy ? at.plan.todo.prompt.trim() : '';
-    media.words.hidden = !media.words.textContent;
+    // most, leaves the place of its end photo only when there is one (moodix.css). (0.6.169) Longer, its
+    // last line fades out, as the other texts of the page do: cut, a fourth line showed half under it.
+    const words = todo && !busy ? at.plan.todo.prompt.trim() : '';
+    if (media.text.textContent !== words) {
+      media.text.textContent = words;
+      media.measured = false;
+    }
+    media.words.hidden = !words;
     const end = todo && at.plan.photos?.end ? recordOf(at.plan.photos.end) : null;
     media.end.hidden = !end;
-    frame.dataset.end = String(Boolean(end));
+    put(frame.dataset, 'end', String(Boolean(end)));
     if (end) {
-      media.end.style.backgroundImage = `url("${pictureOf(end)}")`;
-      media.end.children[0].textContent = 'Fin · ' + mono(at.start + (at.plan.to - at.plan.from));
+      put(media.end.style, 'backgroundImage', `url("${pictureOf(end)}")`);
+      const label = 'Fin · ' + mono(at.start + (at.plan.to - at.plan.from));
+      if (media.end.children[0].textContent !== label) media.end.children[0].textContent = label;
+    }
+    // (Measured once the place of the end photo is kept, which narrows it; again at each look but those of
+    // the film being read, the frame having perhaps changed size.)
+    if (words && (!media.measured || !tick) && media.text.clientHeight > 0) {
+      put(media.words.dataset, 'more', String(media.text.scrollHeight > media.text.clientHeight + 1));
+      media.measured = true;
     }
     if (url && seen.kind === 'image') {
       if (picture.dataset.url !== url) Object.assign(picture, { src: url }).dataset.url = url;
-      video.pause?.();
+      media.video.pause?.();
     } else if (url) {
-      const wanted = seen.last ? Math.max(0, before.to - 0.05) : at.plan.from + (head - at.start);
+      const video = playerOf(url),
+        wanted = seen.last ? Math.max(0, before.to - 0.05) : at.plan.from + (head - at.start);
       if (video.dataset.url !== url) Object.assign(video, { src: url }).dataset.url = url;
       const volume = todo ? 0 : (at.plan.volume ?? 1);
       video.volume = Math.min(1, volume);
@@ -708,7 +801,18 @@ export function setupMontage({
       if (sync || seen.last || Math.abs((video.currentTime ?? 0) - wanted) > 0.35) video.currentTime = wanted;
       if (playing && !todo) void video.play?.()?.catch?.(() => {});
       else video.pause?.();
-    } else video.pause?.();
+    } else media.video.pause?.();
+    picture.hidden = !(url && seen.kind === 'image');
+    media.video.hidden = !(url && seen.kind === 'video');
+    media.spare.hidden = true;
+    // (0.6.169) The clip after it waits in the other player; a take being made shows the Flux of the Studio.
+    if (at) ahead(at.index);
+    // (Its colours until the engine shows something: its start photo; or else the clip it goes on from, or
+    // the photo it arrives on, rather than grey.)
+    fluxOf(
+      busy ? frame : null,
+      busy ? making.preview || (seen?.kind === 'image' ? url : null) || (seen?.last ? pictureOf(recordOf(before.source)) : null) || (end ? pictureOf(end) : null) : null,
+    );
     for (const sound of montage.sounds) {
       const url = outputOf(sound.source)?.originalUrl,
         inside = head >= sound.at && head < sound.at + (sound.to - sound.from);
@@ -724,12 +828,17 @@ export function setupMontage({
       void player.play?.()?.catch?.(() => {});
     }
     for (const [id, player] of media.sounds) if (!montage.sounds.some(sound => sound.id === id)) player.pause?.();
-    say();
+    if (tick) sayTime();
+    else say();
   }
   function play() {
     if (playing) return stop(), show();
     if (!montage.plans.length) return;
     if (head >= total() - 0.05) head = 0;
+    // (0.6.169) At each image of the screen when the page has them: the head glides, and a take ends
+    // where it ends (twenty times a second, a clip went on 50 ms past its cut).
+    const smooth = typeof page?.requestAnimationFrame === 'function',
+      next = () => (smooth ? (playing.frame = page.requestAnimationFrame(tick)) : (playing.timer = timers.set(tick, 50)));
     const tick = () => {
       // Another page of the application is shown: the film does not go on playing behind it.
       const view = globalThis.document?.body?.dataset?.view;
@@ -741,10 +850,11 @@ export function setupMontage({
         stop();
         return show();
       }
-      playing.timer = timers.set(tick, 50);
-      show({ sync: false });
+      next();
+      show({ sync: false, tick: true });
     };
-    playing = { at: now(), timer: timers.set(tick, 50) };
+    playing = { at: now() };
+    next();
     show();
   }
   function seek(seconds) {
@@ -754,10 +864,17 @@ export function setupMontage({
 
   // What is said without drawing everything again: the clock, the head, the state, the button.
   const live = {};
+  /** (0.6.169) The time alone: what a moment of the film being read changes. */
+  function sayTime() {
+    const time = mono(head),
+      whole = ' / ' + mono(total()),
+      left = percent(head);
+    if (live.clock && live.clock.textContent !== time) live.clock.textContent = time;
+    if (live.whole && live.whole.textContent !== whole) live.whole.textContent = whole;
+    if (live.head && live.head.style.left !== left) live.head.style.left = left;
+  }
   function say() {
-    if (live.clock) live.clock.textContent = mono(head);
-    if (live.whole) live.whole.textContent = ' / ' + mono(total());
-    if (live.head) live.head.style.left = percent(head);
+    sayTime();
     if (live.play) {
       live.play.disabled = !montage.plans.length;
       live.play.setAttribute('aria-label', playing ? 'Mettre en pause' : 'Lire la bobine');
@@ -962,7 +1079,7 @@ export function setupMontage({
         tile = button('montage-take', '', null);
       tile.dataset.kind = track;
       tile.dataset.id = record.id;
-      tile.title = name + ' : glissez-la sur la bobine, ou double-cliquez pour la poser à la fin';
+      tile.title = name + ' : cliquez pour l’ouvrir en grand, double-cliquez pour la poser à la fin, ou glissez-la sur la bobine';
       tile.setAttribute('aria-label', name);
       const picture = pictureOf(record);
       if (picture) tile.append(Object.assign(node('img'), { src: picture, alt: '', loading: 'lazy', draggable: false }));
@@ -984,27 +1101,50 @@ export function setupMontage({
         node('span', 'montage-take-number', Number.isInteger(output.take) ? 'Prise ' + output.take : ''),
         node('span', 'montage-take-length', track === 'image' ? 'Image' : seconds ? mono(seconds) + ' s' : ''),
       );
-      tile.ondblclick = () => lay(record);
+      // (0.6.169, his words of 21/11) « Un click simple dans un média à gauche doit l'ouvrir en grand. Le
+      // double click doit le mettre dans la timeline. » The click waits the time of a double click: the
+      // second one lays it, the take not opened.
+      tile.onclick = event => {
+        if ((event?.detail ?? 1) > 1) return;
+        if (opening) timers.clear(opening);
+        opening = timers.set(() => {
+          opening = null;
+          showTake(record);
+        }, DOUBLE_CLICK);
+      };
+      tile.ondblclick = () => {
+        if (opening) timers.clear(opening);
+        opening = null;
+        lay(record);
+      };
       tile.onkeydown = event => {
-        if (event.key === 'Enter') lay(record);
+        if (event.key !== 'Enter') return;
+        // (Entrée lays it, as before: not the click a button gets from it, which would open it too.)
+        event.preventDefault?.();
+        lay(record);
       };
       tile.draggable = true;
       tile.ondragstart = event => {
+        if (opening) timers.clear(opening);
+        opening = null;
         carried = record;
         event.dataTransfer?.setData?.('text/plain', name);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+        // (0.6.169) « Aussi intuitif que dans Studio »: carried small, at the size of a take of the track,
+        // tilted, as the Studio carries its takes; the tile stays where it was, dimmed; the tracks it can
+        // go on light up (moodix.css), and the timeline shows where it would go (carry).
+        dragImage?.(tile, event.dataTransfer, track === 'music' || track === 'effects' ? 'audio' : track, output.take, carriedSize(record));
+        tile.classList?.add?.('is-carried');
+        if (root) root.dataset.carrying = track === 'music' || track === 'effects' ? 'sound' : track;
+        // (0.6.152) A photo carried lights up the places where it can go: the timeline is drawn with them.
+        if (track === 'image') update({ panel: false });
       };
-      // (0.6.152) A photo carried lights up the places where it can go: the timeline is drawn with them.
-      if (track === 'image') {
-        const started = tile.ondragstart;
-        tile.ondragstart = event => {
-          started(event);
-          update({ panel: false });
-        };
-      }
       tile.ondragend = () => {
         const was = carried;
         carried = null;
+        tile.classList?.remove?.('is-carried');
+        if (root) delete root.dataset.carrying;
+        uncarry();
         if (was && track === 'image') update({ panel: false });
       };
       grid.append(tile);
@@ -1013,6 +1153,19 @@ export function setupMontage({
     body.append(headRow, filters, grid);
     return section;
   }
+  /**
+   * (0.6.169) The size a take carried from « Prises » is drawn at under the pointer: that of a take on
+   * the track of the takes, at its own format; a sound, a strip of a sound.
+   */
+  function carriedSize(record) {
+    const lane = live.lane?.getBoundingClientRect?.(),
+      tall = Math.round(Math.min(64, Math.max(36, (lane?.height || 56) - 8))),
+      track = trackOf(record);
+    if (track === 'music' || track === 'effects') return { width: Math.round(tall * 2.2), height: Math.round(tall * 0.6) };
+    const { width, height } = record.outputs?.[0] ?? {},
+      ratio = width > 0 && height > 0 ? width / height : 16 / 9;
+    return { width: Math.round(tall * Math.min(2, Math.max(0.6, ratio))), height: tall };
+  }
 
   function screen() {
     const { section, body } = block('is-preview', 'montage-screen'),
@@ -1020,9 +1173,13 @@ export function setupMontage({
       frame = node('div', 'montage-frame'),
       blank = node('div', 'montage-blank'),
       video = node('video'),
+      // (0.6.169) The player that loads the next clip while the one shown is read; the picture after it.
+      spare = node('video'),
+      warm = node('img'),
       picture = node('img'),
       caption = node('span', 'montage-caption'),
       words = node('p', 'montage-frame-words'),
+      text = node('span', 'montage-frame-text'),
       end = node('span', 'montage-frame-end'),
       transport = node('div', 'montage-transport'),
       playButton = button('montage-play', '', play, 'play'),
@@ -1037,12 +1194,15 @@ export function setupMontage({
     frame.dataset.tall = String(montage.height > montage.width);
     // (An empty bobine: its frame and the Éclipse, no words; capture 71.)
     blank.append(icon('eclipse'));
-    Object.assign(video, { playsInline: true, preload: 'auto', hidden: true });
+    for (const player of [video, spare]) Object.assign(player, { playsInline: true, preload: 'auto', hidden: true });
     Object.assign(picture, { alt: '', hidden: true });
+    Object.assign(warm, { alt: '', hidden: true });
     end.append(node('span', 'montage-frame-end-label', ''));
     end.hidden = true;
     words.hidden = true;
-    frame.append(blank, picture, video, caption, words, end);
+    words.append(text);
+    // (The player of the next clip after what is said over the frame: the page puts it under, moodix.css.)
+    frame.append(blank, picture, video, caption, words, end, spare);
     // (0.6.148, capture 82) The format of the bobine, under the preview at the right of the time: it
     // decides the size of all that will be created; the takes laid follow their own frame setting.
     format.setAttribute('aria-label', 'Format de la bobine');
@@ -1060,7 +1220,8 @@ export function setupMontage({
     stage.append(frame);
     body.append(stage, transport);
     stop();
-    media = { video, picture, blank, caption, words, end, frame, sounds: new Map() };
+    media?.flux?.stop();
+    media = { video, spare, players: [video, spare], warm, picture, blank, caption, words, text, end, frame, sounds: new Map(), flux: null, fluxFrom: null, measured: false };
     // (0.6.162) Drawn again while a line of Moodix AI is said under it: its text stays above that line.
     frame.dataset.asked = askedState();
     Object.assign(live, { clock: time, whole, play: playButton });
@@ -2082,7 +2243,9 @@ export function setupMontage({
     section.setAttribute('aria-label', 'Timeline de la bobine');
     // (It takes the keys when it is pressed: the space bar reads the film.)
     section.tabIndex = -1;
-    live.bar = live.making = live.pop = null;
+    live.bar = live.making = live.pop = live.drop = null;
+    // (0.6.169) Drawn again under a take carried: where it goes is shown again at the next move.
+    landing = '';
     live.pieces = new Map();
     // A mark a second up to a minute shown, then every five or ten: the ruler never turns into a comb.
     const seen = whole / zoom,
@@ -2234,9 +2397,11 @@ export function setupMontage({
                 ? state || (item.replaces ? 'Sera remplacé' : suite ? '↳ Suite' : '')
                 : takeLabel(item.source) || 'Prise introuvable',
           look = id !== 'plans' ? ' is-sound' : todo ? ' is-todo' + (item.replaces ? ' is-replacing' : '') + (suite ? ' is-suite' : '') + (writing?.id === item.id ? ' is-writing' : '') + (made ? ' is-making' : '') + (failed.has(item.id) && !state.startsWith('En') ? ' is-failed' : '') : '',
-          piece = button('montage-piece' + look, '', () => {
+          piece = button('montage-piece' + look, '', event => {
             // (The click that ends a drag chooses nothing.)
             if (slid) return void (slid = false);
+            // (0.6.169) Nor the second of a double click: the first laid it in the void, chosen.
+            if ((event?.detail ?? 1) > 1) return;
             // (0.6.153) With the wand, a take to create with a text is enriched.
             if (wand && todo) return void enrichOne(item.id);
             chosen = chosen === item.id ? null : item.id;
@@ -2260,6 +2425,18 @@ export function setupMontage({
         // (Four pixels between two neighbours: the surface shows between them. A continuation takes
         // those of the video it continues: the two touch.)
         piece.style.left = joined ? `calc(${percent(at)} - 4px)` : percent(at);
+        piece.dataset.joined = String(joined);
+        // (0.6.169) Dragged against a neighbour, it holds there: the edge that touches says so, lightly.
+        if (id === 'plans' && moving === item.id) {
+          const index = montage.plans.indexOf(item),
+            before = montage.plans[index - 1],
+            after = montage.plans[index + 1],
+            touches = [
+              before && Math.abs(starts[index - 1] + (before.to - before.from) - at) < 0.002 ? 'start' : '',
+              after && Math.abs(starts[index + 1] - (at + item.to - item.from)) < 0.002 ? 'end' : '',
+            ].filter(Boolean);
+          if (touches.length) piece.dataset.snap = touches.join(' ');
+        }
         piece.style.width = joined ? percent(item.to - item.from) : `calc(${percent(item.to - item.from)} - 4px)`;
         if (picture) piece.style.backgroundImage = `url("${picture}")`;
         piece.append(node('span', 'montage-piece-name', label));
@@ -2313,12 +2490,16 @@ export function setupMontage({
             };
           follow(event, lane, {
             // A sound stops on a cut of the film when it is within a few pixels of one.
-            move: (far, time, perPixel) =>
+            move: (far, time, perPixel) => {
+              // (0.6.169) It follows the hand; the others slide out of its way (slide).
+              moving = item.id;
               put(
                 id === 'plans'
                   ? withPlanPlaced(pressed, item.id, first + far, { near: NEAR_PIXELS * perPixel })
                   : withItemChanged(montage, item.id, { at: snapped(montage, first + far, Math.max(0.1, NEAR_PIXELS * perPixel)) }),
-              ),
+              );
+            },
+            done: () => (moving = null),
           });
         };
         // Its two edges: what is kept of the take, from its start (a clip) and to its end.
@@ -2379,34 +2560,51 @@ export function setupMontage({
         }
       });
       // (0.6.149) In the void of the takes, after the bobine or in a hole (captures 71, 75, 76): a take to
-      // create of 5 s, a ghost, follows the pointer with a « + »; a double click lays it there; pressed
-      // and pulled, a take to create is drawn there, as long as it is pulled, within its hole.
+      // create of 5 s, a ghost, follows the pointer with a « + »; (0.6.169, his words of 21/11) a simple
+      // click lays it there, no longer a double one; pressed and pulled, a take to create is drawn there,
+      // as long as it is pulled, within its hole.
+      let tap = null;
       if (id === 'plans') {
-        drawable(lane, timeAt);
+        tap = drawable(lane, timeAt);
         live.hint = node('span', 'bobine-edge-hint');
         live.hint.hidden = true;
         lane.append(live.hint);
       }
       // A press on the lane itself, beside what it holds: the head goes there, what was chosen is let go.
+      // (0.6.169) On the track of the takes, where its ghost is, it lays a take to create.
       lane.onclick = event => {
         if (event.target !== lane && !live.shade?.contains?.(event.target)) return;
         // (The click that ends a drawing chooses nothing.)
         if (slid) return void (slid = false);
+        if (tap?.(event)) return;
         if (chosen) {
           chosen = null;
           update();
         }
         seek(timeAt(event, lane));
       };
+      const fits = () => {
+        const kind = carried ? trackOf(carried) : '';
+        return id === 'plans' ? kind === 'video' || kind === 'image' : kind === 'music' || kind === 'effects';
+      };
       lane.ondragover = event => {
-        if (!carried) return;
-        const kind = trackOf(carried),
-          fits = id === 'plans' ? ['video', 'image'].includes(kind) : kind === 'music' || kind === 'effects';
-        if (fits) event.preventDefault();
+        if (!carried || !fits()) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+        // (0.6.169) « On ne voit pas où on le drop »: it is drawn where it would go, the others making room.
+        carry(id, lane, timeAt(event, lane));
+      };
+      lane.ondragleave = event => {
+        if (event?.relatedTarget && lane.contains?.(event.relatedTarget)) return;
+        uncarry();
       };
       lane.ondrop = event => {
         if (!carried) return;
         event.preventDefault();
+        // (Laid where it was shown: the others are already where they go.)
+        landing = '';
+        live.drop?.remove?.();
+        live.drop = null;
         const dropped = carried,
           time = timeAt(event, lane);
         carried = null;
@@ -2465,9 +2663,10 @@ export function setupMontage({
 
   /**
    * (0.6.149) The void of the takes (`lane`): a ghost of a take of 5 s follows the pointer in a hole,
-   * a double click lays it there, a press pulled draws a take to create, as long as it is pulled
-   * (within its hole and within what a clip can be: longer ones are cut in parts at the next step).
-   * Drawn takes stay where they are drawn and never go on from what is around them (withTodoDrawn).
+   * a click lays it there (0.6.169: a simple one, his words of 21/11), a press pulled draws a take to
+   * create, as long as it is pulled (within its hole and within what a clip can be: longer ones are cut
+   * in parts at the next step). Drawn takes stay where they are drawn and never go on from what is
+   * around them (withTodoDrawn). Gives what a click there does: whether it laid one.
    */
   function drawable(lane, timeAt) {
     const usual = TODO_LIMITS.usual,
@@ -2475,6 +2674,7 @@ export function setupMontage({
       length = node('span', 'bobine-ghost-length', ''),
       empty = !montage.plans.length;
     shade.append(node('span', 'bobine-ghost-plus', '+'), length);
+    shade.title = 'Cliquez pour poser une prise à créer de 5 s ; tirez pour la dessiner plus longue ou plus courte';
     const show = (from, seconds, drawn = false) => {
       shade.hidden = false;
       shade.dataset.drawn = String(drawn);
@@ -2506,11 +2706,6 @@ export function setupMontage({
     lane.onpointerleave = () => {
       if (!drawing) hide();
     };
-    lane.ondblclick = event => {
-      if (!inVoid(event.target) || busy()) return;
-      const from = ghostAt(timeAt(event, lane));
-      if (from !== null) drawn(from, usual);
-    };
     lane.onpointerdown = event => {
       if (!inVoid(event.target) || busy()) return;
       const start = timeAt(event, lane),
@@ -2540,6 +2735,68 @@ export function setupMontage({
         },
       });
     };
+    return event => {
+      if (!inVoid(event.target) || busy() || held || drawing) return false;
+      const from = ghostAt(timeAt(event, lane));
+      if (from === null) return false;
+      drawn(from, usual);
+      return true;
+    };
+  }
+  /**
+   * (0.6.169) The take carried from « Prises » over the track `track` (`lane`), the pointer at `time`
+   * seconds: drawn where it would be laid (withTake, as the drop lays it), and on the track of the takes
+   * those it would push later slide there already. Nothing is changed in the bobine.
+   */
+  function carry(track, lane, time) {
+    if (!carried) return;
+    const sound = track !== 'plans',
+      box = lane.getBoundingClientRect?.(),
+      near = box?.width ? (NEAR_PIXELS * span()) / box.width : 0,
+      next = sound
+        ? withTake(montage, carried, { id: CARRIED, at: Math.round(time * 10) / 10, track })
+        : withTake(montage, carried, { id: CARRIED, at: Math.round(time * 100) / 100, near }),
+      laid = (sound ? next.sounds : next.plans).find(item => item.id === CARRIED);
+    // (A bobine that is full takes nothing more.)
+    if (!laid) return uncarry();
+    const key = `${track}|${laid.at}|${laid.to - laid.from}`;
+    if (key === landing) return;
+    landing = key;
+    let shadow = live.drop;
+    if (!shadow || shadow.dataset.track !== track) {
+      shadow?.remove?.();
+      const picture = pictureOf(carried),
+        take = carried.outputs?.[0]?.take;
+      shadow = live.drop = node('span', 'bobine-drop' + (sound ? ' is-sound' : ''));
+      shadow.dataset.track = track;
+      shadow.setAttribute('aria-hidden', 'true');
+      if (picture && !sound) shadow.style.backgroundImage = `url("${picture}")`;
+      shadow.append(node('span', 'montage-piece-name', Number.isInteger(take) ? 'Prise ' + take : ''));
+      lane.append(shadow);
+    }
+    shadow.style.left = percent(laid.at);
+    shadow.style.width = `calc(${percent(laid.to - laid.from)} - 4px)`;
+    slideTo(sound ? montage : next);
+  }
+  /** (0.6.169) Nothing carried over the timeline any more: the takes go back to their place. */
+  function uncarry() {
+    live.drop?.remove?.();
+    live.drop = null;
+    if (!landing) return;
+    landing = '';
+    slideTo(montage);
+  }
+  /** (0.6.169) The takes of the track, and their photos, put where `next` has them (moodix.css slides them). */
+  function slideTo(next) {
+    const starts = new Map(placed(next).plans.map(plan => [plan.id, plan]));
+    for (const [id, [piece, ...pins]] of live.pieces ?? []) {
+      const plan = starts.get(id);
+      if (!plan || !piece) continue;
+      piece.style.left = piece.dataset.joined === 'true' ? `calc(${percent(plan.at)} - 4px)` : percent(plan.at);
+      for (const pin of pins)
+        if (String(pin.className).includes('is-start')) pin.style.left = percent(plan.at);
+        else pin.style.right = `calc(${100 - (100 * (plan.at + plan.to - plan.from)) / span()}% + 4px)`;
+    }
   }
   /** A take to create laid at `from` seconds, `seconds` long, chosen: its line of « À créer » waits for its text. */
   function drawn(from, seconds) {
@@ -2655,10 +2912,51 @@ export function setupMontage({
     });
     bar.dataset.inside = String(over);
   }
+  /**
+   * (0.6.169) Where each take of the timeline and its photos are on the screen now, and at what scale; null
+   * when nothing will slide (an edge pulled or a take drawn: what touches it follows the hand; the motion
+   * reduced), the page not measured for nothing.
+   */
+  function placesNow() {
+    if (['trim', 'draw'].includes(root?.dataset?.held)) return null;
+    if (page?.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches || page?.document?.documentElement?.dataset?.motion === 'fige') return null;
+    const places = new Map();
+    for (const [id, elements] of live.pieces ?? [])
+      elements.forEach((element, at) => {
+        const box = element?.getBoundingClientRect?.();
+        if (box?.width > 0) places.set(id + '|' + at, box.left);
+      });
+    return { places, span: span(), zoom };
+  }
+  /**
+   * (0.6.169) « C'est fluide et ça colle tout seul » : the takes a change moves slide from where they were
+   * to their place (a take laid before them, one taken away, one dragged among them), the one in the hand
+   * too when it jumps past a neighbour; a take that comes appears softly. Not when the scale changed, nor
+   * when placesNow measured nothing.
+   */
+  function slide(before) {
+    if (!before?.places.size || before.span !== span() || before.zoom !== zoom) return;
+    for (const [id, elements] of live.pieces ?? []) {
+      elements.forEach((element, at) => {
+        if (typeof element?.animate !== 'function') return;
+        const box = element.getBoundingClientRect(),
+          was = before.places.get(id + '|' + at);
+        if (!(box.width > 0)) return;
+        if (was === undefined) {
+          if (!held) element.animate([{ opacity: 0, transform: 'scale(0.97)' }, { opacity: 1, transform: 'none' }], { duration: SLIDE, easing: SLIDING });
+          return;
+        }
+        // (The take in the hand follows it as it goes; it slides only when it jumps, past a neighbour.)
+        const shift = was - box.left;
+        if (Math.abs(shift) > (id === moving ? JUMP : 0.5)) element.animate([{ transform: `translateX(${shift}px)` }, { transform: 'none' }], { duration: SLIDE, easing: SLIDING });
+      });
+    }
+  }
   function update({ panel = true } = {}) {
     if (!root || !montage) return;
     if (!parts || !root.replaceChild) return draw();
-    const focused = page?.document?.activeElement;
+    const focused = page?.document?.activeElement,
+      before = placesNow();
     for (const [name, make] of [
       ['create', createPanel],
       ['timeline', timeline],
@@ -2671,6 +2969,7 @@ export function setupMontage({
       if (focused && old.contains?.(focused)) refocus(focused, next);
     }
     if (live.reel) live.reel.scrollLeft = scrolled;
+    slide(before);
     sayGo();
     sayAsk();
     show({ sync: false });
@@ -2759,6 +3058,11 @@ export function setupMontage({
     /** Leaving the page: nothing goes on playing, what is not kept yet is. */
     leave() {
       stop();
+      // (0.6.169) Nothing goes on moving behind another page: the Flux of a take being made, a take opened late.
+      media?.flux?.stop();
+      if (media) media.flux = media.fluxFrom = null;
+      if (opening) timers.clear(opening);
+      opening = null;
       // (A creation in pause ends with the page; one running goes on, its take kept when made.)
       if (filling?.stage === 'paused') filling = null;
       // (0.6.146) What Moodix AI is writing is let go. (0.6.160) The text of a take of a series too, and
