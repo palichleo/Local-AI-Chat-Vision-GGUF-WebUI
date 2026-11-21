@@ -110,8 +110,12 @@ const DOUBLE_CLICK = 240;
 const CARRIED = 'carried';
 // (0.6.169) How long the takes of the timeline slide to their new place, in milliseconds.
 const SLIDE = 180;
-const SLIDING = 'cubic-bezier(0.2, 0.8, 0.2, 1)';
-// (0.6.169) How far the take in the hand must jump, in pixels, to slide there rather than follow it.
+// (0.6.173, « ça saute ») At its fastest at once, then slower and slower: a sixth of the way at the first
+// image of the screen. (The curve of 0.6.169 went more than a third of the way at the first, two thirds
+// at the second: a jump, then a crawl.) moodix.css has the same for a take carried from « Prises ».
+const SLIDING = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+// (0.6.169) How far the take in the hand must jump, in pixels, to slide there rather than follow it
+// (0.6.173: further than the hand itself went, which may go fast).
 const JUMP = 24;
 /** (0.6.154) Every key in its order, at every depth: two bobines alike say the same. */
 const sorted = value =>
@@ -120,6 +124,8 @@ const sorted = value =>
     : value && typeof value === 'object'
       ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sorted(value[key])]))
       : value;
+/** (0.6.173) Two bobines with the same takes and the same sounds at the same places: nothing to draw again from one to the other. */
+const alike = (one, other) => JSON.stringify(sorted([one.plans, one.sounds])) === JSON.stringify(sorted([other.plans, other.sounds]));
 /** (0.6.154) What a bobine is made of, as one text: its version in the Archives is compared by it. */
 const contentKey = ({ name, format, width, height, fps, plans, sounds }) => JSON.stringify(sorted({ name, format, width, height, fps, plans, sounds }));
 /** (0.6.154) « 01 À 05 »: the numbers of the files of the takes exported one by one. */
@@ -260,7 +266,13 @@ export function setupMontage({
     // take dragged along its track; where the take carried from « Prises » would go, as last shown.
     opening = null,
     moving = null,
-    landing = '';
+    landing = '',
+    // (0.6.173) How far the hand that drags a take went at its last move, in pixels.
+    strode = 0;
+  // (0.6.173) The slides going on: for a take or a photo of the timeline (`id|rank`), where it left from
+  // and where it goes on the screen, and since when. The timeline is drawn again at each change (a take
+  // that follows the hand: at each move): a slide goes on from where it was, it does not begin again.
+  const flights = new Map();
   // (What contentKey said of the bobine shown, kept while it is the same.)
   let keyed = { of: null, key: '' };
   // (0.6.154) Annuler, Rétablir (Ctrl+Z, Ctrl+Maj+Z): the bobine as it was before each change, and as it
@@ -2488,21 +2500,32 @@ export function setupMontage({
             first = at,
             // (What is dragged is chosen, even when it ends where it was.)
             put = next => {
+              // (0.6.173, « ça zozote ») The bobine as it is already, read again from the one pressed:
+              // nothing is drawn again. (It was at every move of the pointer, and every slide began
+              // again with it: the takes waited where they were while the hand moved, then jumped.)
+              if (next !== montage && alike(next, montage)) next = montage;
               if (next === montage && chosen === item.id) return;
               chosen = item.id;
               if (next === montage) update();
               else change(next);
             };
+          let reach = 0;
           follow(event, lane, {
             // A sound stops on a cut of the film when it is within a few pixels of one.
             move: (far, time, perPixel) => {
               // (0.6.169) It follows the hand; the others slide out of its way (slide).
               moving = item.id;
+              // (0.6.173) How far the hand went since its last move: what goes as far follows it.
+              const hand = perPixel ? far / perPixel : 0;
+              strode = hand - reach;
+              reach = hand;
               put(
                 id === 'plans'
                   ? withPlanPlaced(pressed, item.id, first + far, { near: NEAR_PIXELS * perPixel })
                   : withItemChanged(montage, item.id, { at: snapped(montage, first + far, Math.max(0.1, NEAR_PIXELS * perPixel)) }),
               );
+              // (Counted once: what is drawn again for another reason finds a hand that did not move.)
+              strode = 0;
             },
             done: () => (moving = null),
           });
@@ -2940,22 +2963,41 @@ export function setupMontage({
    * to their place (a take laid before them, one taken away, one dragged among them), the one in the hand
    * too when it jumps past a neighbour; a take that comes appears softly. Not when the scale changed, nor
    * when placesNow measured nothing.
+   * (0.6.173, « ça zozote, ça saute quand on drag des prises ») The timeline is drawn again at each change,
+   * so at each move of a hand that drags a take: a slide going on then goes on (`flights`), from where it
+   * left and at the time it has reached. It began again each time, and never went further than its first
+   * image while the hand moved: the takes waited where they were, then jumped once the hand stopped.
    */
   function slide(before) {
-    if (!before?.places.size || before.span !== span() || before.zoom !== zoom) return;
+    if (!before?.places.size || before.span !== span() || before.zoom !== zoom) return void flights.clear();
+    const at = now();
+    for (const [key, flight] of flights) if (at - flight.since >= SLIDE) flights.delete(key);
     for (const [id, elements] of live.pieces ?? []) {
-      elements.forEach((element, at) => {
+      elements.forEach((element, rank) => {
         if (typeof element?.animate !== 'function') return;
-        const box = element.getBoundingClientRect(),
-          was = before.places.get(id + '|' + at);
+        const key = id + '|' + rank,
+          box = element.getBoundingClientRect(),
+          was = before.places.get(key);
         if (!(box.width > 0)) return;
         if (was === undefined) {
+          flights.delete(key);
           if (!held) element.animate([{ opacity: 0, transform: 'scale(0.97)' }, { opacity: 1, transform: 'none' }], { duration: SLIDE, easing: SLIDING });
           return;
         }
-        // (The take in the hand follows it as it goes; it slides only when it jumps, past a neighbour.)
-        const shift = was - box.left;
-        if (Math.abs(shift) > (id === moving ? JUMP : 0.5)) element.animate([{ transform: `translateX(${shift}px)` }, { transform: 'none' }], { duration: SLIDE, easing: SLIDING });
+        // (The take in the hand follows it as it goes; it slides only when it jumps, past a neighbour:
+        // when it goes further than the hand itself did.)
+        const to = box.left,
+          slack = id === moving ? Math.abs(strode) + JUMP : 0.5,
+          going = flights.get(key);
+        let flight = null;
+        // Going where it went already (the take in the hand: as the hand goes): the same slide, further on.
+        if (going && Math.abs(to - going.to) <= slack) flight = { from: going.from + (to - going.to), to, since: going.since };
+        // Going elsewhere: a slide from where it is now.
+        else if (Math.abs(to - was) > slack) flight = { from: was, to, since: at };
+        if (!flight) return void flights.delete(key);
+        flights.set(key, flight);
+        const motion = element.animate([{ transform: `translateX(${flight.from - to}px)` }, { transform: 'none' }], { duration: SLIDE, easing: SLIDING });
+        if (motion && at > flight.since) motion.currentTime = at - flight.since;
       });
     }
   }

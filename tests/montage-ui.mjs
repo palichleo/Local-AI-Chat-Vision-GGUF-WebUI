@@ -208,6 +208,8 @@ function setup({ stored = [], fail = {}, extra = [], create = null, estimate = n
       for (const work of queue.splice(0)) await work?.();
       await settle();
     },
+    /** (0.6.173) Time goes by, nothing else: a slide going on. */
+    tick: ms => void (clock += ms),
     root: null,
     get: name => find(f.root, name),
     said: name => find(f.root, name).map(item => item.textContent),
@@ -3125,6 +3127,65 @@ test('the takes a change moves slide from where they were to their place; a take
     // The first taken away: the second slides from five seconds (250 pixels, twenty seconds shown) to the start.
     f.plans()[0].onkeydown({ key: 'Delete' });
     assert.deepEqual([f.plans().map(piece => piece.style.left), played], [['0%'], [['montage-piece', [{ transform: 'translateX(250px)' }, { transform: 'none' }], 180]]]);
+  } finally {
+    delete Fake.prototype.animate;
+    Fake.prototype.getBoundingClientRect = getBoundingClientRect;
+  }
+});
+
+test('a take dragged: a slide going on goes on when the timeline is drawn again, nothing is drawn again for nothing, the take in the hand follows it however fast (0.6.173)', async () => {
+  // (« Maintenant la timeline a un bug, ça zozote. Ça saute quand on drag des prises. » Measured in the
+  // page: the timeline was drawn again at each move of the pointer, and each slide began again with it;
+  // the takes waited where they were as long as the hand moved, then jumped once it stopped.)
+  const played = [],
+    { getBoundingClientRect } = Fake.prototype;
+  Fake.prototype.animate = function (frames, options) {
+    const motion = { currentTime: 0 };
+    played.push([this.dataset.id, frames[0].transform, options.duration, motion]);
+    return motion;
+  };
+  Fake.prototype.getBoundingClientRect = function () {
+    const at = /^([\d.]+)%$/.exec(String(this.style.left ?? ''));
+    return { left: at ? (Number(at[1]) * WIDTH) / 100 : 0, width: WIDTH };
+  };
+  // Each slide played since the last look: [where it leaves from, the time it has reached already].
+  const slides = () => Object.fromEntries(played.splice(0).map(([id, from, , motion]) => [id, [from, motion.currentTime]]));
+  try {
+    const f = await setup().open();
+    for (const at of [0, 1]) f.get('montage-take')[at].ondblclick();
+    const [first, second] = f.plans().map(piece => piece.dataset.id);
+    played.length = 0;
+    // The first (5 s: 250 pixels, twenty seconds shown) pulled to the right over the second (3 s).
+    f.press(f.plans()[0], 100);
+    // Its start before the middle of the second, come back to the start: it stays before it. (Chosen: drawn again.)
+    f.pointer.move(150);
+    assert.deepEqual([f.plans().map(piece => piece.style.left), slides()], [['0%', pc(5, 20)], {}]);
+    // Past that middle: it jumps after the second, further than the hand went; the second slides to the start.
+    f.pointer.move(180);
+    assert.deepEqual(f.plans().map(piece => [piece.dataset.id, piece.style.left]), [
+      [second, '0%'],
+      [first, pc(3, 20)],
+    ]);
+    assert.deepEqual(slides(), { [first]: ['translateX(-150px)', 0], [second]: ['translateX(250px)', 0] });
+    // The hand goes on, the bobine stays as it is: nothing is drawn again, the slides go on by themselves.
+    const drawn = f.plans();
+    f.tick(60);
+    f.pointer.move(183);
+    assert.deepEqual([f.plans().map((piece, at) => piece === drawn[at]), slides(), f.saves().length], [[true, true], {}, 0]);
+    // Beyond the second, in the void: it follows the hand, so the timeline is drawn again. Both slides go
+    // on from where they left, at the time they have reached; the one of the take in the hand ends where
+    // the hand has taken it.
+    f.pointer.move(260);
+    assert.deepEqual(f.plans().map(piece => piece.style.left), ['0%', pc(3.2, 20)]);
+    assert.deepEqual(slides(), { [first]: ['translateX(-150px)', 60], [second]: ['translateX(250px)', 60] });
+    // The slides over: the take follows the hand, however fast it goes (80 pixels at once), without sliding.
+    f.tick(200);
+    f.pointer.move(340);
+    assert.deepEqual([f.plans().map(piece => piece.style.left), slides()], [['0%', pc(4.8, 20)], {}]);
+    // Back over the second in one move, further than the hand went: a jump again, from where it is.
+    f.pointer.move(150);
+    assert.deepEqual(slides(), { [first]: ['translateX(240px)', 0], [second]: ['translateX(-250px)', 0] });
+    f.pointer.up();
   } finally {
     delete Fake.prototype.animate;
     Fake.prototype.getBoundingClientRect = getBoundingClientRect;
