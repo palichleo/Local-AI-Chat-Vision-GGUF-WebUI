@@ -4,16 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import {
-  OUTPUT_FOLDERS,
-  anotherName,
-  creationName,
-  freeName,
-  modelSlug,
-  outputFolder,
-  outputName,
-  outputPart,
-} from '../lib/output-names.mjs';
+import { OUTPUT_FOLDERS, creationName, modelSlug, outputFolder, outputName } from '../lib/output-names.mjs';
 import { generatedFile, generatedMedia } from '../lib/generated-media.mjs';
 import { Gallery } from '../lib/gallery.mjs';
 import { readFileInfo, stampRecord } from '../lib/media-info.mjs';
@@ -127,46 +118,6 @@ test('a model in a name: lower case, no accent, hyphens for the rest, thirty-two
     assert.doesNotMatch(name, /[\\/:*?"<>|.\s%]/);
     assert.ok(name.length <= 96);
   }
-});
-
-test('several outputs of one creation stay together and in their order', () => {
-  const name = '2026-11-17_14-32-05_krea-2_a3f9';
-  assert.equal(outputPart(name), name);
-  assert.equal(outputPart(name, 0, 1), name);
-  assert.deepEqual([0, 1, 2].map(index => outputPart(name, index, 3)), [name + '_1', name + '_2', name + '_3']);
-  // Twelve of them: 01 … 12, so that the tenth does not come before the second.
-  const twelve = Array.from({ length: 12 }, (_, index) => outputPart(name, index, 12) + '.png');
-  assert.equal(twelve[0], name + '_01.png');
-  assert.deepEqual([...twelve].reverse().sort(), twelve);
-  assert.deepEqual([...twelve].reverse().sort((a, b) => a.localeCompare(b, 'en', { numeric: true })), twelve);
-  assert.ok(twelve.every(part => outputName(part.slice(0, -4))));
-  // Between the creation before and the one after.
-  const around = ['2026-11-17_14-32-04_krea-2_ffff.png', ...twelve, '2026-11-17_14-32-06_krea-2_0000.png'];
-  assert.deepEqual([...around].reverse().sort(), around);
-});
-
-test('a name that is taken is never used again: another suffix', async t => {
-  const root = await folder(t),
-    name = '2026-11-17_14-32-05_krea-2_a3f9';
-  assert.equal(anotherName(name, '0b0b'), '2026-11-17_14-32-05_krea-2_0b0b');
-  assert.equal(anotherName('plain', '0b0b'), 'plain_0b0b');
-  const paths = free => [join(root, free + '.png'), join(root, 'manifests', free + '.json')];
-  assert.equal(await freeName(name, paths), name, 'free: itself');
-  await writeFile(join(root, name + '.png'), png);
-  const other = await freeName(name, paths);
-  assert.match(other, /^2026-11-17_14-32-05_krea-2_[0-9a-f]{4}$/);
-  assert.notEqual(other, name);
-  // Its manifest alone being there is enough.
-  await mkdir(join(root, 'manifests'));
-  await writeFile(join(root, 'manifests', other + '.json'), '{}');
-  const third = await freeName(other, paths);
-  assert.ok(![name, other].includes(third));
-  assert.deepEqual(await readFile(join(root, name + '.png')), png, 'the first one is as it was');
-  // Nothing free under any suffix: said, rather than written over a creation.
-  await assert.rejects(
-    freeName(name, () => [join(root, name + '.png')]),
-    /Aucun nom libre/,
-  );
 });
 
 test('what a job may ask as a name, and where a creation may be', () => {

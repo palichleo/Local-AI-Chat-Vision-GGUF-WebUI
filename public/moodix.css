@@ -29,7 +29,6 @@
   --inset-shadow: #2838480d;
   --overlay: #14202b66;
   --edge: #ffffffc0;
-  --light-reflection: #ffffff35;
   --surface-veil: #fafbfce8;
 }
 * {
@@ -94,11 +93,6 @@ button svg {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-.sidebar {
-  background: var(--sidebar);
-  display: flex;
-  flex-direction: column;
 }
 .secondary,
 .primary {
@@ -752,13 +746,10 @@ fieldset {
   }
 }
 @media (max-width: 850px) {
-  
-  
-  
   .welcome {
     padding: 85px 20px 24px;
   }
-  
+
   .welcome h1 {
     font-size: 36px;
   }
@@ -787,7 +778,7 @@ fieldset {
   .welcome {
     padding: 80px 21px 24px;
   }
-  
+
   .welcome h1 {
     font-size: 38px;
   }
@@ -1200,7 +1191,6 @@ fieldset {
     width: 250px;
     padding: 20px 12px;
   }
-  
 }
 @media (max-width: 900px) {
   body:has(.gallery:not([hidden])) {
@@ -1219,10 +1209,6 @@ fieldset {
   body:has(.gallery:not([hidden])) .workspace {
     height: 100dvh;
   }
-  body:has(.gallery:not([hidden])) .sidebar {
-    height: 100dvh;
-  }
-  
 }
 
 .path-input {
@@ -1273,7 +1259,6 @@ fieldset {
     padding: 8px;
     font-size: var(--size-1);
   }
-  
 }
 
 /* Conversation entry and sidebar controls. */
@@ -1420,32 +1405,12 @@ fieldset {
   margin-top: 0;
 }
 @media (max-width: 850px) {
-  
-  
   .composer-region {
     padding-left: 20px;
     padding-right: 20px;
   }
 }
 @media (max-width: 640px) {
-  .sidebar {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    height: auto;
-    border-bottom: 1px solid var(--line);
-  }
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
   .composer-region {
     padding: 0 14px 14px;
   }
@@ -1479,9 +1444,6 @@ fieldset {
     height: 100dvh;
     overflow: auto;
   }
-  body:has(.gallery:not([hidden])) .sidebar {
-    height: auto;
-  }
   body:has(.gallery:not([hidden])) .workspace {
     height: auto;
     min-height: 340px;
@@ -1489,7 +1451,6 @@ fieldset {
   }
 }
 @media (max-height: 650px) {
-  
   .composer-region .welcome h1 {
     font-size: 27px;
   }
@@ -1524,15 +1485,11 @@ fieldset {
 }
 
 /* One original raster tile, shared by every material. Veils keep grain behind the text. */
-.sidebar,
 .gallery {
   background-color: var(--sidebar);
   background-size:
     auto,
     1024px 1024px;
-}
-.sidebar {
-  border-right-color: var(--line);
 }
 .welcome h1 {
   color: var(--ink);
@@ -1592,26 +1549,6 @@ fieldset {
 .attachments {
   position: relative;
   z-index: 1;
-}
-.composer::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0;
-  background: radial-gradient(
-    ellipse 190px 100px at var(--light-x, 50%) var(--light-y, 50%),
-    var(--light-reflection),
-    transparent 80%
-  );
-  transition: opacity 0.2s ease-out;
-}
-@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  .composer[data-material-lit]::after {
-    opacity: 1;
-  }
 }
 dialog::backdrop {
   background: var(--overlay);
@@ -1675,17 +1612,10 @@ dialog::backdrop {
 .attachment {
   border-color: var(--line-strong);
 }
-@media (max-width: 640px) {
-  .sidebar {
-    border-bottom-color: var(--line);
-  }
-}
 
 .composer:has(textarea:focus-visible) {
   outline-offset: 3px;
 }
-
-/* Quiet chrome; destructive actions also remain reachable by keyboard and touch. */
 
 /* A quiet blue accent on the same metal surface as Configuration. */
 :root {
@@ -2004,12 +1934,9 @@ dialog::backdrop {
     height: auto;
     min-height: 100dvh;
   }
-  .sidebar,
   .workspace {
     height: 100dvh;
   }
-
-  
 }
 @media (max-width: 640px) {
   body {
@@ -2626,9 +2553,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
     padding: 16px;
     border-radius: 12px;
   }
-  
-  
-  
 }
 
 /* Video proposals use the same surface as settings, with readable effective inputs. */
@@ -3505,12 +3429,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 #settings #workflow-list > :not(.workflow-card) {
   grid-column: 1 / -1;
 }
-/* The address on a line of its own, the families kept on Atelier's engine side by side below. */
-
-/* A card on one line: its state (a coloured dot), its name, « ? » for its details, its actions.
-   The dot says the state at a glance and, under the pointer, what it means; a workflow that
-   needs something also wears a line of that colour on its left. The user's own (created or
-   imported) are tinted violet. */
 
 /* « ? » in the top right corner of each block: its help shows at once under the pointer. */
 #settings .settings-block {
@@ -3684,7 +3602,6 @@ html[data-page-hidden='true'] .generation-progress > span::after,
 #settings #workflow-list {
     grid-template-columns: minmax(0, 1fr);
   }
-  
 }
 @media (prefers-reduced-motion: reduce) {
   .settings-tab {
@@ -3702,22 +3619,12 @@ body {
   height: 100dvh;
   flex-wrap: nowrap;
 }
-.sidebar,
 dialog,
 .composer,
 .secondary,
 .theme-button,
 .suggestions button {
   background-size: auto;
-}
-.sidebar {
-  width: 252px;
-  flex: 0 0 252px;
-  padding: 27px 16px 16px;
-  background-color: var(--sidebar);
-  border-right: 1px solid var(--line);
-  height: 100dvh;
-  gap: 0;
 }
 
 .project-name {
@@ -3740,8 +3647,6 @@ dialog,
   font-size: var(--size-1);
   box-shadow: 0 6px 26px var(--shadow);
 }
-
-/* The Studio is styled in moodix.css. */
 
 /* With room for both, the panel takes its place beside the page, which narrows: nothing of the
    page is left under it (the Studio's « Retour » was). On a narrower window it stays a sheet
@@ -3845,11 +3750,6 @@ dialog,
 }
 
 @media (max-width: 1150px) {
-  .sidebar {
-    width: 230px;
-    flex-basis: 230px;
-    padding-inline: 12px;
-  }
   .workspace {
     height: 100dvh;
   }
@@ -3860,37 +3760,10 @@ dialog,
     min-height: 0;
     height: 100dvh;
   }
-  .sidebar {
-    position: relative;
-    z-index: 45;
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    height: 62px;
-    min-height: 62px;
-    width: 100%;
-    flex: 0 0 62px;
-    padding: 10px 15px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    background-color: var(--sidebar);
-  }
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+
   .workspace {
     height: auto;
   }
-  
 
   .composer-region {
     padding-bottom: 12px;
@@ -3899,16 +3772,6 @@ dialog,
     right: 14px;
     max-width: calc(100% - 28px);
   }
-  
-}
-
-@media (max-width: 380px) {
-  .sidebar {
-    padding-inline: 10px;
-    gap: 5px;
-  }
-  
-  
 }
 
 /* Model start/stop: same size as the other sidebar icons, left of the settings. */
@@ -4069,7 +3932,6 @@ dialog,
   /* The metal of the former interface is gone: flat surfaces, no grain, no light. */
   --grain: none;
   --metal-edge: transparent;
-  --light-reflection: transparent;
   --edge: transparent;
   --surface-veil: transparent;
 
@@ -4077,7 +3939,6 @@ dialog,
   --font-display: 'Michroma', 'Manrope', 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
   --pad: 24px;
-  --sidebar-width: 248px;
   font-family: var(--font-ui);
 }
 :root[data-theme='light'] {
@@ -4145,14 +4006,10 @@ kbd {
 .secondary,
 .theme-button,
 .suggestions button,
-.sidebar,
 .gallery,
 dialog {
   background-image: none;
   box-shadow: none;
-}
-.composer::after {
-  display: none;
 }
 dialog {
   background-color: var(--sidebar);
@@ -4187,68 +4044,6 @@ select:focus-visible,
 summary:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 3px;
-}
-
-/* ------------------------------------------------------------------ sidebar */
-#sidebar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 18px;
-  flex: 0 0 var(--sidebar-width);
-  width: var(--sidebar-width);
-  height: 100dvh;
-  min-height: 0;
-  padding: 20px 14px 14px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  background: var(--sidebar);
-  border-right: 1px solid var(--line);
-  border-bottom: 0;
-  box-shadow: none;
-}
-
-/* White letters, dark on the light theme (sidebar, switch, welcome). */
-
-/* « PROJETS »: in the font of the sidebar, small capitals of a label. */
-
-/* The project the library shows (0.5.126): its line on the ground of a line under the pointer, its
-   name in white. The page « Bibliothèque » keeps its white line. */
-
-/* Narrower than 1100 px: the sidebar is a drawer, opened by the menu button of the top bar. */
-@media (max-width: 1099px) {
-  #sidebar {
-    position: fixed;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    z-index: 60;
-    width: min(300px, 86vw);
-    flex: none;
-    transform: translateX(-102%);
-    visibility: hidden;
-    transition:
-      transform 0.4s ease,
-      visibility 0s linear 0.4s;
-    box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
-  }
-  body[data-nav-open='true'] #sidebar {
-    transform: none;
-    visibility: visible;
-    transition: transform 0.4s ease;
-  }
-  
-  
-}
-@media (prefers-reduced-motion: reduce) {
-  #sidebar,
-  body[data-nav-open='true'] #sidebar {
-    transition: none;
-  }
 }
 
 /* ------------------------------------------------------------------ workspace and top bar */
@@ -4573,8 +4368,6 @@ body[data-view='studio']:not([data-chat='open']) .chat-panel {
 #studio-view .studio-go-group .studio-go {
   margin-left: 0;
 }
-/* The bar with its formats just too narrow for one line: « Agent » keeps its icon (its name in
-   its tooltip). */
 
 /* Nothing to make here: the chat stays at hand, under the message. */
 .studio-desk.is-empty .studio-agent {
@@ -6548,8 +6341,6 @@ html[data-switch='open']::view-transition-old(chat) {
   }
 }
 
-/* « ∞ » of « Générations par message » in the middle of its box, level with − and +. */
-
 /* Scroll bars: thin and quiet, a thumb without track nor arrows. */
 :root {
   --scroll-thumb: rgba(255, 255, 255, 0.1);
@@ -6571,7 +6362,6 @@ html[data-switch='open']::view-transition-old(chat) {
    would make the page recompute its styles at each move of the pointer. */
 .chat-area:hover,
 #studio-view:hover,
-#sidebar:hover,
 #prompt:hover,
 .studio-block.is-settings > .studio-block-body:hover,
 .studio-strip:hover,
@@ -6607,7 +6397,6 @@ html[data-switch='open']::view-transition-old(chat) {
   }
   .chat-area:hover::-webkit-scrollbar-thumb,
   #studio-view:hover::-webkit-scrollbar-thumb,
-  #sidebar:hover::-webkit-scrollbar-thumb,
   #prompt:hover::-webkit-scrollbar-thumb,
   .studio-block.is-settings > .studio-block-body:hover::-webkit-scrollbar-thumb,
   .studio-strip:hover::-webkit-scrollbar-thumb,
@@ -7466,22 +7255,6 @@ body {
   position: relative;
   background: var(--frame);
 }
-@media (min-width: 1100px) {
-  :root {
-    --sidebar-width: 232px;
-  }
-  /* The sidebar and the window, one height: the logo where it always was (20 px, then the 6 px of
-     its box and the 1.5 px drawn empty above the letters in mdx-white.png: the letters begin at
-     27.5 px), the window's top edge on them (.workspace below); at the foot, the actions 27 px from
-     the bottom of the frame, on the window's bottom edge. */
-  #sidebar {
-    padding: 20px 12px 27px;
-    background: transparent;
-    border-right: 0;
-  }
-  /* At 232 px « Nouvelle conversation » went on two lines: one, a little tighter. */
-  
-}
 .workspace {
   position: relative;
   box-sizing: border-box;
@@ -7507,102 +7280,7 @@ body {
   }
 }
 
-/* ------------------------------------------------------------------ sidebar folded (0.5.99)
-   Beside the logo, the button that folds the sidebar to its icons (64 px, on the frame); folded,
-   the small logo is that button. Wide windows only: under 1100 px it is the drawer, always
-   unfolded, without the button. The width moves in 180 ms and the buttons follow it (they stretch
-   across the sidebar): their icons stay where they are, the words fade in the first 80 ms (and
-   come back in the last 80 ms), on one line. Rows keep their height: nothing moves up or down. */
-
-@media (min-width: 1100px) {
-  #sidebar {
-    z-index: 40;
-    transition:
-      flex-basis 180ms ease,
-      width 180ms ease;
-  }
-  
-  /* On the line of the logo, at its right. */
-  
-  
-  
-  
-  
-  /* The words clipped in their own box as the width moves (the button itself does not clip:
-     its tooltip goes out of it), on one line. */
-  
-  
-
-  /* Folded: icons only, centred, 40 × 36. */
-  :root[data-sidebar='collapsed'] {
-    --sidebar-width: 64px;
-  }
-  :root[data-sidebar='collapsed'] #sidebar {
-    overflow: visible;
-  }
-  
-  /* The small logo, 24 px in its 36 px button, its top on the window's top edge too. */
-  
-  /* Its squares begin 3.45 px into the drawing (4.6 of 32): 2 px higher than the middle of its
-     button, they begin at 27.5 px too, like the letters unfolded, on the window's top edge. Hovered,
-     the mark gives way to the icon, which stays in the middle of the button's ground. */
-  
-  
-  
-  /* The words fade out, still there for screen readers (the button's name). */
-  
-  
-  
-  /* The projects and conversations come back with the sidebar unfolded. */
-  
-  /* The Studio card in a column: its icon (36 × 34), then the track of Image, Vidéo, Son (34 × 28). */
-  
-  
-  :root[data-sidebar='collapsed'] #studio-kinds.kind-tabs {
-    flex-direction: column;
-    padding: 1px;
-  }
-  :root[data-sidebar='collapsed'] #studio-kinds .kind-tab {
-    flex: none;
-    width: 34px;
-  }
-  /* The actions at the foot, in a column. */
-  
-  
-  /* Each icon's name at its right, on hover and on keyboard focus: the one tooltip of the page
-     (help-tips.mjs), no more its own here. */
-}
-@media (min-width: 1100px) and (prefers-reduced-motion: reduce) {
-  #sidebar {
-    transition: none;
-  }
-}
-
-/* ------------------------------------------------------------------ sidebar, rows (0.5.108)
-   Every line of the sidebar alike: « Nouveau chat » and the pages (Accueil, Chat, Studio,
-   Bibliothèque), 36 px, 10 px corners, an icon of 18 px and its word, no border, no ground; a
-   ground #15171C under the pointer. The page open has no ground: its word in white, 800, and a
-   white line 3 px wide on the inner left edge of the sidebar. The icon in a box of 24 px (its
-   drawing fills about three quarters of it: in 18 px it looked 14 px) at 8 px from the edge of
-   the line, 12 px from its word; the word at 44 px, where the track of the Studio's modes starts. */
-
-/* The word at the left of its line (a button centres its text: « Nouveau chat » was). */
-
-/* The Studio and its modes, without a card: the line of the Studio like the others, the track of
-   Image, Vidéo, Son always under it, from the word; the mode chosen white in the Studio alone. */
-
-#sidebar #studio-kinds.kind-tabs {
-  margin: 0 0 2px 44px;
-}
-
-/* The foot: the model at the left, Configuration at the right, without a box around them; one
-   under the other when the sidebar is folded. */
-
-/* ⏻ whatever the state, in a line of 1.75 px; it never turns. */
-
-/* What the model is doing, in a dot of 7 px at the top right of the icon, ringed with 2 px of the
-   ground around it: stopped grey, starting amber (breathing), ready green, set aside while a
-   creation is made amber. Its name and tooltip are the button's, unchanged. */
+/* The model starting: the dot of ⏻ in the top bar breathes (#top .engine-button, part 4). */
 
 @keyframes mdx-engine-wait {
   0%,
@@ -7612,23 +7290,6 @@ body {
   50% {
     opacity: 0.4;
   }
-}
-
-/* The gear in the colour of its button, as ⏻: an older rule (styles.css) gave it its own, dimmer
-   (#9AA0AB) and deaf to the hover. */
-
-/* Folded: icons alone, 40 × 36, one under the other, the line of the page open kept; its icon
-   white. The track of the modes in a column under the Studio. */
-@media (min-width: 1100px) {
-  
-  
-  
-  :root[data-sidebar='collapsed'] #sidebar #studio-kinds.kind-tabs {
-    align-self: center;
-    width: 36px;
-    margin: 0 0 2px;
-  }
-  
 }
 
 /* The library (Bibliothèque, 0.5.123): a page of its own in the window, its title in the title
@@ -7655,7 +7316,6 @@ body[data-view='library'] .library-view {
   color: var(--text-2);
   font-size: var(--size-3);
 }
-/* The three filters on one line: the project and the conversation, the kind at the right. */
 
 /* Tout / Images / Vidéos / Sons: a dark track, the one in use white, as the modes of the Studio. */
 .library-kinds {
@@ -17236,8 +16896,6 @@ html[data-page-hidden='true'] .montage-piece.is-making::after {
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
-
-/* ------------------------------------------------------------------ Montage, étape 2, lot 3 (0.6.144) */
 
 /* ------------------------------------------------------------------ Montage : les vignettes (0.6.145) */
 /* « C'est trop zoomé » (sa capture du 20/11 : une vidéo en portrait de 19,7 s). La vignette d'un plan

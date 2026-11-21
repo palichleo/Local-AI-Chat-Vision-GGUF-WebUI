@@ -555,16 +555,12 @@ test('the workflows are listed once for a whole answer, whatever the number of v
 });
 
 test('under the preview: 1:1, 16:9 and 9:16, and a fourth format takes the place of « ··· »', async () => {
-  const { shownFormats, resultCount } = await import('../public/studio.mjs');
+  const { shownFormats } = await import('../public/studio.mjs');
   const all = ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9'];
   assert.deepEqual(shownFormats(all, '16:9'), { main: ['1:1', '16:9', '9:16'], extra: null });
   assert.deepEqual(shownFormats(all, '4:3'), { main: ['1:1', '16:9', '9:16'], extra: '4:3' });
   // A model that cannot make a square shows the two others.
   assert.deepEqual(shownFormats(['16:9', '9:16', '21:9'], '21:9'), { main: ['16:9', '9:16'], extra: '21:9' });
-  // The count of the Sortie, in the words of the choice beside it.
-  assert.equal(resultCount(0), '');
-  assert.equal(resultCount(1), '1 résultat');
-  assert.equal(resultCount(3), '3 résultats');
 });
 
 test('a proposal of Moodix AI read in the Studio’s terms, with what the assistant may change', async () => {

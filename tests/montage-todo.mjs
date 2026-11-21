@@ -8,7 +8,6 @@ import {
   linkOf,
   montageSeconds,
   partsOf,
-  montageSummary,
   planStarts,
   seriesOf,
   todoPlans,
@@ -122,11 +121,6 @@ test('a plan to make has a length a clip can have, a text, and photos that can b
   assert.equal('photos' in withoutPhoto(one, id(11), 'start').plans[0], false);
   assert.deepEqual(withoutPhoto(one, id(11), 'end').plans, one.plans);
   assert.deepEqual(validateMontage(withoutPhoto(one, id(11), 'start')).plans, withoutPhoto(one, id(11), 'start').plans);
-  // What the head of the timeline says.
-  assert.equal(montageSummary(montage), '1 prise à créer · 5 s · 16:9 · 24 i/s');
-  const mixed = withTake(montage, clip(5, 5), { id: id(15) });
-  assert.equal(montageSummary(mixed), '2 prises dont 1 à créer · 10 s · 16:9 · 24 i/s');
-  assert.equal(montageSummary(withTake(empty(), clip(5, 5), { id: id(15) })), '1 prise · 5 s · 16:9 · 24 i/s');
 });
 
 test('what is asked for a plan to make is read on the montage (0.6.142)', () => {

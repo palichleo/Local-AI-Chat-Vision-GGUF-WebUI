@@ -303,11 +303,6 @@ export function proposedValues(request, offered = []) {
   };
 }
 
-/** A count of results, written like the choice beside it: « 1 résultat », « 3 résultats ». */
-export function resultCount(count) {
-  return count ? `${count} résultat${count > 1 ? 's' : ''}` : '';
-}
-
 export function setupStudio({
   api,
   node,
@@ -359,7 +354,7 @@ export function setupStudio({
   mark = null,
   // « Agent »: opens the chat of Moodix AI, as the band at the foot of the Studio did.
   openAgent = () => {},
-  // Brings the Studio on screen (as « Studio » of the sidebar does): a mode chosen from elsewhere.
+  // Brings the Studio on screen (as « Studio » of the top bar does): a mode chosen from elsewhere.
   openStudio = () => {},
   // The take of the Chat being made in the conversation shown (0.6.96): { request, running, label,
   // fraction, preview, ended }, or null. Its other view, the Studio follows it (watch).
@@ -4508,21 +4503,12 @@ export function setupStudio({
     block.replaceChildren(body);
     return block;
   }
-  /** Image / Vidéo / Son, at the top left. */
   /**
-   * Image / Vidéo / Son, under « Studio » in the sidebar (moodix-design.md 7 bis 19): three tabs,
-   * their icons only, their names for screen readers and in their tooltips. Each does what the
-   * selector at the top of the Studio did (chooseMode); from the Chat or the home, the Studio
-   * opens in that mode.
+   * Image / Vidéo / Son, at the top left of the Studio: three tabs, their icons, their names for
+   * screen readers and in their tooltips. Each chooses its mode (chooseMode); from elsewhere, the
+   * Studio opens in that mode.
    */
   function kinds() {
-    // The pill of the title bar: « Studio · Image », with the icon of the mode.
-    const pill = $('studio-pill-text'),
-      about = modeOf(mode);
-    if (pill) {
-      pill.textContent = 'Studio · ' + about.label;
-      pill.parentElement?.querySelector?.('use')?.setAttribute('href', '#i-' + about.icon);
-    }
     const bar = kindsBar();
     if (!bar) return;
     bar.removeAttribute('data-ai-active');
@@ -4536,7 +4522,7 @@ export function setupStudio({
           tab.setAttribute('role', 'tab');
           tab.setAttribute('aria-label', item.label);
           tab.title = item.label;
-          // Its name at its right when the sidebar is folded (moodix.css).
+          // Its name in the one tooltip of the page (help-tips.mjs).
           tab.dataset.tip = item.label;
           tab.dataset.mode = item.id;
           // Its name beside its icon when it is the one chosen (moodix.css).
@@ -5716,7 +5702,7 @@ export function setupStudio({
     const menu = document.querySelector?.('#studio-view .studio-format-menu');
     if (menu) closePopup(menu);
   });
-  // The modes under « Studio » in the sidebar are there from the start: seen from the Chat too.
+  // The modes of the Studio are there from the start.
   kinds();
   return {
     open,

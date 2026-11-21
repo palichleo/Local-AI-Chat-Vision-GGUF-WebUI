@@ -170,7 +170,7 @@ export function explanation({ node, icon, said = '', request = {}, purpose = '' 
     measure();
   };
   say();
-  // Measured again when its width changes (the window, the sidebar folded).
+  // Measured again when its width changes (the window).
   if (typeof ResizeObserver === 'function') {
     watch = new ResizeObserver(() => measure());
     watch.observe(line);

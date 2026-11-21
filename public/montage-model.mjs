@@ -340,20 +340,6 @@ function replacing(plans) {
   });
 }
 
-/** What the head of the timeline says of a montage: « 4 plans · 14 s · 16:9 · 24 i/s ». */
-export function montageSummary(montage) {
-  const count = montage.plans.length,
-    todo = todoPlans(montage).length,
-    seconds = montageSeconds(montage),
-    plural = count > 1 ? 's' : '';
-  return [
-    // (0.6.142) « 2 plans à faire », « 3 plans dont 1 à faire ».
-    !count ? 'Aucune prise' : todo === count ? `${count} prise${plural} à créer` : `${count} prise${plural}` + (todo ? ` dont ${todo} à créer` : ''),
-    ...(count ? [shownSeconds(seconds)] : []),
-    montage.format,
-    montage.fps + ' i/s',
-  ].join(' · ');
-}
 /** Seconds as the page says them: « 14 s », « 2,5 s », « 1 min 05 s ». */
 export function shownSeconds(seconds) {
   const whole = Math.round(seconds * 10) / 10;
