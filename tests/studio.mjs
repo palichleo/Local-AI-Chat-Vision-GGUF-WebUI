@@ -6083,6 +6083,8 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
         seen.push({
           mode: studio.body.dataset.mode,
           prompt: studio.prompt().value,
+          // (0.6.180) Said to the page: it writes « Bobine · Vidéo : … » in the conversation, for the model.
+          bobine: hooks.bobine,
           pieces: desk.find('montage-piece').map(piece => piece.children[0].textContent),
           button: desk.find('bobine-go-label')[0].textContent,
         });
@@ -6119,7 +6121,7 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
     assert.deepEqual(sent.arguments, { prompt: 'Il lève les yeux.', intention: 'Prise d’une bobine, demandée dans la Bobine.', duration: 5, format: '16:9', start_image: { output: 'p1', conversation: 'c0' } });
     // While it is made the bobine says it on the take and in its button; the Studio follows it, in Vidéo,
     // with the text it is made with (0.6.177: it showed Image and the draft of an image).
-    assert.deepEqual(seen, [{ mode: 'video', prompt: 'Il lève les yeux.', pieces: ['En cours · 25 %'], button: '1 sur 1 · 25 %' }]);
+    assert.deepEqual(seen, [{ mode: 'video', prompt: 'Il lève les yeux.', bobine: true, pieces: ['En cours · 25 %'], button: '1 sur 1 · 25 %' }]);
     // (In Vidéo from its first instant, before the server has said what it is made with.)
     assert.deepEqual(asking, ['video']);
     // Made: the take to create is the take made, kept as such; « À créer » is empty.
@@ -6161,8 +6163,8 @@ test('a take to create of the bobine is made as a take of the Studio is, which f
   // take was noted « Échec · Génération arrêtée. » (or « annulée »), where the Bobine's own « Arrêter » notes nothing.
   for (const outcome of [
     { run: (proposed, { signal }) => new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')))), stop: true },
-    { record: null, failed: true, error: 'Génération annulée.', cancelled: true },
-    { job: { id: 'j', state: 'cancelled', error: 'Génération annulée.' } },
+    { record: null, failed: true, error: 'Génération arrêtée.', cancelled: true },
+    { job: { id: 'j', state: 'cancelled', error: 'Génération arrêtée.' } },
   ]) {
     studio = await page(outcome);
     try {

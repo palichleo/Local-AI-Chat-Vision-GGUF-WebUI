@@ -173,12 +173,14 @@ export function setupGenerationUI({
       label = node('span', 'sr-only', 'Préparation de la génération…'),
       progress = node('div', 'generation-progress');
     if (request.mediaType === 'video') {
-      label.textContent =
-        'En attente de confirmation · ' + (request.plan?.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale');
+      // (0.6.180) A take of the Studio or of the Bobine (`compact`) is accepted by its click: nothing to confirm.
+      if (!compact)
+        label.textContent =
+          'En attente de confirmation · ' + (request.plan?.stage === 'draft' ? 'Brouillon vidéo' : 'Vidéo finale');
       // A clip in progress has the size of its format from the start.
       figure.classList.add('is-video');
     } else if (request.mediaType === 'audio') {
-      label.textContent = 'En attente de confirmation · Son';
+      if (!compact) label.textContent = 'En attente de confirmation · Son';
       figure.classList.add('is-audio');
     }
     progress.setAttribute('role', 'progressbar');

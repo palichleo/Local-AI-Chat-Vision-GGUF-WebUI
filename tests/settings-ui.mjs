@@ -95,9 +95,11 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
     console,
     AbortController,
     AbortSignal,
+    // (What the page defers while a generation runs: the button that stops, 0.6.180.)
+    queueMicrotask,
     crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
     setupProjectNavigation: () => ({ render() {}, sync() {}, refresh: async () => {}, useLibrary() {} }),
-    setupGenerationUI: () => ({ clear() {}, restore() {} }),
+    setupGenerationUI: () => ({ clear() {}, restore() {}, held() {} }),
     // The miniature of the chat (0.6.81): no work here, it shows nothing (unless a test gives its own).
     setupMiniature: () => miniature ?? { element: null, work: null, running: false, begin() {}, end() {}, take() {}, place() {}, forget() {} },
     // What the page finds of a creation made while no page followed it (0.6.82): nothing here.
@@ -237,6 +239,29 @@ async function settingsUI({ request, refresh = async () => {}, saved = () => {},
     },
   };
 }
+
+test('the button that stops says what it stops: a generation, the answer of Moodix, a message that waits (0.6.180)', async () => {
+  // (Audit of 21/11, B4: « Interrompre la réponse » stopped a take of the Bobine too, where the Studio says « Arrêter la génération ».)
+  const ui = await settingsUI();
+  const says = () => ui.$('cancel').title;
+  ui.state.generating = true;
+  ui.updateControls();
+  assert.equal(says(), 'Interrompre la réponse');
+  // A generation runs on the card: that is what the button stops.
+  ui.state.status = { ...ui.state.status, toolJob: { id: 'j', state: 'running' } };
+  ui.updateControls();
+  assert.equal(says(), 'Arrêter la génération');
+  ui.state.generating = false;
+  ui.updateControls();
+  assert.equal(says(), 'Arrêter la génération');
+  // The card still held by the last generation, over: nothing of it to stop.
+  ui.state.status.toolJob.blocked = true;
+  ui.updateControls();
+  assert.equal(says(), 'Interrompre la réponse');
+  ui.state.waitingForModel = true;
+  ui.updateControls();
+  assert.equal(says(), 'Annuler le message en attente');
+});
 
 test('an older settings load cannot unlock the next dialog', async () => {
   const pending = [];

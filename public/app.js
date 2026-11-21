@@ -25,7 +25,7 @@ import { takeContent } from './generation-runtime.mjs';
 import { setupAssets } from './assets-ui.mjs';
 import { clipPlayer } from './take-player.mjs';
 import { setupCopy } from './copy.mjs';
-import { STUDIO_LINE, STUDIO_NOTE, callNote, closedCalls, conversationTitle, lastExchange, settledNotes, spokenText } from './transcript.mjs';
+import { BOBINE_NOTE, STUDIO_LINE, STUDIO_NOTE, callNote, closedCalls, conversationTitle, lastExchange, settledNotes, spokenText } from './transcript.mjs';
 import { setupSettingsGuard } from './settings-guard.mjs';
 import { setupContextMeter } from './context-meter.mjs';
 import { installFromButton, compactSession } from './update-ui.mjs';
@@ -1422,7 +1422,13 @@ function updateControls() {
   // Interrompre only while something runs: Moodix thinking or writing, a generation (16/11). A
   // proposal waiting for the user (a card, the Studio) runs nothing: a new message declines it.
   $('cancel').hidden = Boolean(away) || proposing || (!state.generating && (!toolBusy || s.toolJob.blocked));
-  const cancelLabel = state.waitingForModel ? 'Annuler le message en attente' : 'Interrompre la réponse';
+  // (0.6.180) A generation under way: the button stops it, and says so, as the Studio's « Arrêter » does. It
+  // said « Interrompre la réponse » all the same, for a take of the Bobine too.
+  const cancelLabel = state.waitingForModel
+    ? 'Annuler le message en attente'
+    : toolBusy && !s.toolJob.blocked
+      ? 'Arrêter la génération'
+      : 'Interrompre la réponse';
   // The model loading under a message sent: « EN ATTENTE » and « Annuler », in words (51).
   $('cancel').classList.toggle('is-word', Boolean(state.waitingForModel));
   // Before the first message (etats-maquette.md, 50): no engine or no LLM, the card in place of
@@ -3066,7 +3072,7 @@ async function runOutputAction(record, index, action) {
       history.push({
         role: 'tool',
         tool_call_id: request.call.id,
-        content: JSON.stringify({ status: 'error', message: signal.aborted ? 'Génération annulée.' : error.message }),
+        content: JSON.stringify({ status: 'error', message: signal.aborted ? 'Génération arrêtée.' : error.message }),
       });
       throw error;
     }
@@ -4713,7 +4719,9 @@ async function replaceWithCharacter(request, { view, signal, talkId = state.conv
  * conversation: a line for the model (the user made it by hand), its call and its result. The
  * conversation shows it as a card.
  */
-async function runInStudio(proposal, { signal, onProgress, conversationId = state.conversationId }) {
+async function runInStudio(proposal, { signal, onProgress, conversationId = state.conversationId, bobine = false }) {
+  // (0.6.180) Where it was asked, as the model reads it: « Studio · Vidéo : … », or « Bobine · Vidéo : … ».
+  const [place, note] = bobine ? ['Bobine', BOBINE_NOTE] : ['Studio', STUDIO_NOTE];
   // The conversation the Studio asked it in: written there wherever the user is meanwhile (0.6.81).
   const talkId = conversationId;
   if (shownHere(talkId)) $('welcome').hidden = true;
@@ -4747,9 +4755,9 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
           role: 'user',
           internal: true,
           content:
-            `Studio · ${kinds[proposal.mediaType || 'image'] ?? 'Image'} : ${String(proposal.plan?.prompt || proposal.args?.prompt || '')}`.slice(0, 4000) +
+            `${place} · ${kinds[proposal.mediaType || 'image'] ?? 'Image'} : ${String(proposal.plan?.prompt || proposal.args?.prompt || '')}`.slice(0, 4000) +
             '\n\n' +
-            STUDIO_NOTE,
+            note,
         },
         { role: 'assistant', content: '', tool_calls: [proposal.call] },
       ]),
@@ -4804,7 +4812,7 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
     return result;
   }
   const prompt = String(proposal.plan?.prompt || proposal.args?.prompt || result.record.prompt || ''),
-    said = `Studio · ${kinds[result.record.mediaType || 'image'] ?? 'Image'} : ${prompt}`.slice(0, 4000);
+    said = `${place} · ${kinds[result.record.mediaType || 'image'] ?? 'Image'} : ${prompt}`.slice(0, 4000);
   const talk = holderOf(talkId);
   // A conversation begun in the Studio still gets the global instructions with its first message.
   if (!talk.messages?.length) talk.conversationInstructions ??= state.globalInstructions || '';
@@ -4813,7 +4821,7 @@ async function runInStudio(proposal, { signal, onProgress, conversationId = stat
     {
       role: 'user',
       internal: true,
-      content: said + '\n\n' + STUDIO_NOTE,
+      content: said + '\n\n' + note,
     },
     { role: 'assistant', content: '', tool_calls: [proposal.call] },
     { role: 'tool', tool_call_id: proposal.call.id, content: result.content },

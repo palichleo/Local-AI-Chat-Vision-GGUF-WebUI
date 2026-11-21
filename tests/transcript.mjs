@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import {
+  BOBINE_NOTE,
   FAILED_NOTE,
   FAILED_SETTLED,
+  STUDIO_LINE,
   STUDIO_NOTE,
   callNote,
   conversationTitle,
@@ -34,8 +36,8 @@ test('a call the model wrote as text is not read back from the history', () => {
 
 test('a generation that left no media is told in the user’s words, not the model’s', () => {
   assert.equal(
-    callNote(call('create_video'), result({ status: 'error', message: 'Génération annulée.' })),
-    'Vidéo : génération non aboutie (Génération annulée).',
+    callNote(call('create_video'), result({ status: 'error', message: 'Génération arrêtée.' })),
+    'Vidéo : génération non aboutie (Génération arrêtée).',
   );
   assert.equal(
     callNote(
@@ -252,6 +254,14 @@ test('a conversation is named by its words; a creation of the Studio by its prom
   assert.equal(conversationTitle('Studio · Son : \n\n' + STUDIO_NOTE), '', 'no prompt: no name');
   assert.equal(conversationTitle('Studio · Image : un lac\n\n' + STUDIO_NOTE.slice(0, 12)), 'un lac');
   assert.equal(conversationTitle('Bonjour, Studio · Image : rien'), 'Bonjour, Studio · Image : rien');
+  // (0.6.180) A take asked in the Bobine is written so for the model (« Bobine · Vidéo : … », with its own
+  // note): read as a line of the Studio is, its prompt alone names the conversation.
+  const take = 'Bobine · Vidéo : He raises his eyes.';
+  assert.deepEqual([STUDIO_LINE.test(take), STUDIO_LINE.test('Studio · Vidéo : un renard'), STUDIO_LINE.test('Bobine : un renard')], [true, true, false]);
+  assert.equal(conversationTitle(take + '\n\n' + BOBINE_NOTE), 'He raises his eyes.');
+  assert.equal(conversationTitle(take + '\n\n' + BOBINE_NOTE.slice(0, 20)), 'He raises his eyes.');
+  assert.equal(withoutStudioNote(take + '\n\n' + BOBINE_NOTE), take);
+  assert.notEqual(BOBINE_NOTE, STUDIO_NOTE);
   assert.equal(conversationTitle(undefined), '');
 });
 

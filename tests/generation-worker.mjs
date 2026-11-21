@@ -39,7 +39,7 @@ test('abort kills and reaps only the owned child, and a new worker starts by its
     const controller = new AbortController();
     const request = w.request('hang', {}, { signal: controller.signal });
     controller.abort();
-    await assert.rejects(request, /annul|abort/i);
+    await assert.rejects(request, /arrêt|abort/i);
     assert.ok(old.exitCode !== null || old.signalCode !== null, 'the busy worker is gone');
     // Cancelling was the user's choice, not a failure: generation stays available meanwhile.
     assert.equal(w.status().recovering, true);

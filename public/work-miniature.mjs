@@ -149,7 +149,7 @@ export function setupMiniature({
                 : phase === 'failed'
                   ? stageText
                   : phase === 'stopped'
-                    ? 'Génération annulée'
+                    ? 'Génération arrêtée'
                     : 'Moodix a répondu';
     title.textContent = work?.title || 'Nouvelle conversation';
     kind.textContent = phase === 'answer' || phase === 'answered' ? '' : kindText;
@@ -238,7 +238,9 @@ export function setupMiniature({
       picture = timeText = madeTime = '';
       stageText = 'Préparation…';
       // A video or a sound waits for the user on its card (or in the Studio); an image is made at once.
-      phase = ['video', 'audio'].includes(asked.mediaType) && !asked.autoAllow ? 'waiting' : 'making';
+      // (0.6.180) Nor one of the Studio or of the Bobine (`compact`): accepted by its click, it said « En
+      // attente de votre accord » until its first step.
+      phase = ['video', 'audio'].includes(asked.mediaType) && !asked.autoAllow && !event.compact ? 'waiting' : 'making';
       if (phase === 'making') startFlux(asked);
       else stopFlux();
     } else if (event.type === 'progress') {

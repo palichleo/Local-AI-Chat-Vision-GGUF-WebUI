@@ -194,7 +194,7 @@ test('the miniature says a failure, a cancellation, and an answer made of words 
   mini.take({ type: 'start', request: video });
   mini.take({ type: 'progress', request: video, text: 'Génération · 1/8', fraction: 0.1 });
   mini.take({ type: 'stopped' });
-  assert.equal(said(), 'Génération annulée');
+  assert.equal(said(), 'Génération arrêtée');
 
   // A turn of words alone, over while the user was away.
   mini.begin(WORK);
@@ -281,6 +281,10 @@ test('a take waiting for the user in the Studio of its conversation says so, wit
   // A video waiting on its card says what it always said.
   mini.take({ type: 'start', request: video });
   assert.equal(said(), 'En attente de votre accord');
+  // (0.6.180) One of the Studio or of the Bobine (a compact card) was accepted by its click: it is being
+  // prepared, nothing waits for the user. It said « En attente de votre accord » until its first step.
+  mini.take({ type: 'start', compact: true, request: video });
+  assert.deepEqual([mini.phase, said()], ['making', 'Préparation…']);
 });
 
 /**

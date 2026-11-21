@@ -116,10 +116,14 @@ const TAKEN = '(?:la prise \\d+|la sortie [0-9a-f]{8}-)';
 const DIRECT_ACTION = new RegExp(
   `^(?:(?:Upscale|Interpolation) de la sortie [0-9a-f]{8}-|Agrandir et affiner ${TAKEN}|Interpoler ${TAKEN})`,
 );
-// What it writes for the model when the user makes something in the Studio.
-export const STUDIO_LINE = /^Studio · (?:Image|Vidéo|Son) : /;
+// What it writes for the model when the user makes something in the Studio, or (0.6.180) in the Bobine:
+// « Studio · Image : un renard », « Bobine · Vidéo : il lève les yeux ».
+export const STUDIO_LINE = /^(?:Studio|Bobine) · (?:Image|Vidéo|Son) : /;
 // The words it adds after that line, for the model only: not what the user reads.
 export const STUDIO_NOTE = '(Créée dans le Studio : l’utilisateur a réglé et lancé cette génération lui-même.)';
+export const BOBINE_NOTE = '(Créée dans la Bobine, le montage : l’utilisateur a écrit et lancé cette prise lui-même.)';
+/** Whether `tail` is one of those notes, or its beginning (a title keeps 120 characters). */
+const noteBegun = tail => [STUDIO_NOTE, BOBINE_NOTE].some(note => note.startsWith(tail));
 /**
  * A title without those words, even cut short (a title keeps 120 characters): « Studio · Image :
  * un renard », not the line and the note joined (the titles saved before 0.5.125).
@@ -128,7 +132,7 @@ export function withoutStudioNote(text) {
   const value = String(text ?? '');
   if (!STUDIO_LINE.test(value)) return value;
   const at = value.lastIndexOf('\n\n(');
-  return (at >= 0 && STUDIO_NOTE.startsWith(value.slice(at + 2)) ? value.slice(0, at) : value).trimEnd();
+  return (at >= 0 && noteBegun(value.slice(at + 2)) ? value.slice(0, at) : value).trimEnd();
 }
 /**
  * What names a conversation from a message: its words; for a creation of the Studio, its prompt
@@ -140,7 +144,7 @@ export function conversationTitle(text) {
   if (!STUDIO_LINE.test(value)) return value;
   const prompt = value.replace(STUDIO_LINE, ''),
     at = prompt.lastIndexOf('\n\n(');
-  return (at >= 0 && STUDIO_NOTE.startsWith(prompt.slice(at + 2)) ? prompt.slice(0, at) : prompt).trim();
+  return (at >= 0 && noteBegun(prompt.slice(at + 2)) ? prompt.slice(0, at) : prompt).trim();
 }
 const written = message =>
   typeof message.content === 'string'

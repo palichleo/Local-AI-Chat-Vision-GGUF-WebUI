@@ -2792,6 +2792,8 @@ export function setupStudio({
         const done = await run(proposed, {
           signal: controller.signal,
           conversationId,
+          // (0.6.180) Asked in the Bobine: written so in the conversation, for the model.
+          bobine: Boolean(onTake?.montage),
           onProgress: (label, fraction, preview, time) => {
             if (!working) return;
             Object.assign(working, {

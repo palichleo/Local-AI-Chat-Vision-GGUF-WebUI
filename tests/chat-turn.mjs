@@ -1222,7 +1222,7 @@ test('an action on a take stopped by the user withdraws its take; failed, the ta
   // Its call keeps a result all the same.
   assert.deepEqual(roles(stopped.state.messages), ['user', 'assistant', 'user', 'assistant', 'tool']);
   assert.equal(stopped.state.messages[2].content, 'Interpoler la prise 4 pour une vidéo plus fluide.');
-  assert.deepEqual(JSON.parse(stopped.state.messages[4].content), { status: 'error', message: 'Génération annulée.' });
+  assert.deepEqual(JSON.parse(stopped.state.messages[4].content), { status: 'error', message: 'Génération arrêtée.' });
   assert.doesNotThrow(() => accepted(nextMessage(stopped.state.messages)));
 
   // Failed by itself: the take stays and says what failed, the notice too.
@@ -1849,7 +1849,7 @@ test('a creation of the Studio is kept as it starts, and taken back when it make
   await first.started;
   assert.deepEqual(roles((await store.read(ID)).messages), ['user', 'assistant', 'tool']);
   assert.ok(fresh.state.historyItems.some(item => item.id === ID), 'listed, in its project');
-  first.finish({ content: '{}', images: [], failed: true, error: 'Génération annulée.' });
+  first.finish({ content: '{}', images: [], failed: true, error: 'Génération arrêtée.' });
   await begun;
   // Said why (0.6.103): the server looks at the disk, and keeps it in its bin with that reason.
   assert.deepEqual(deleted, [{ confirm: true, id: ID, reason: 'studio-empty' }]);

@@ -40,9 +40,10 @@ const take = (id, callId, { createdAt = '2026-11-18T10:00:00.000Z', mediaType, n
 });
 /** A conversation saved while its creation was being made: its call closed as left without a result. */
 const asked = (made = call()) => closedCalls([{ role: 'user', content: 'Un bateau rouge' }, { role: 'assistant', content: '', tool_calls: [made] }]);
-const studioAsked = made =>
+// (0.6.180) `place`: a take asked in the Bobine is written « Bobine · … », and found again the same way.
+const studioAsked = (made, place = 'Studio') =>
   closedCalls([
-    { role: 'user', internal: true, content: 'Studio · Image : un bateau rouge\n\n' + STUDIO_NOTE },
+    { role: 'user', internal: true, content: place + ' · Image : un bateau rouge\n\n' + STUDIO_NOTE },
     { role: 'assistant', content: '', tool_calls: [made] },
   ]);
 
@@ -83,6 +84,9 @@ test('the calls left without what they made are found: unanswered, without a res
     [],
   );
   assert.equal(openCalls(studioAsked(call('call_st')))[0].studio, true);
+  // (0.6.180) Asked in the Bobine, written « Bobine · … »: found again as a creation of the Studio is.
+  assert.equal(openCalls(studioAsked(call('call_st'), 'Bobine'))[0].studio, true);
+  assert.equal(openCalls(studioAsked(call('call_st'), 'Atelier'))[0].studio, false);
   assert.deepEqual([askedOf(series), askedOf(call()), askedOf({ function: { name: 'create_image', arguments: '{' } })], [3, 1, 1]);
 });
 
