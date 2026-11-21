@@ -3130,3 +3130,55 @@ test('the takes a change moves slide from where they were to their place; a take
     Fake.prototype.getBoundingClientRect = getBoundingClientRect;
   }
 });
+
+test('while the bobine cannot change, a take carried over it shows nowhere to go, nothing pushed (0.6.170)', async () => {
+  // (Found in the review of 0.6.169: shown and pushed all the same, then refused, the takes stayed pushed.)
+  const f = await setup({ create: () => new Promise(() => {}) }).open();
+  for (const at of [0, 1]) f.get('montage-take')[at].ondblclick();
+  f.lanes()[0].onclick({ clientX: 900, target: f.lanes()[0] });
+  f.write(0, 'Il regarde la mer.');
+  const lefts = () => f.plans().map(piece => piece.style.left),
+    still = lefts(),
+    tile = f.get('montage-take')[2];
+  // Shown where it would go, the takes after it pushed; then a creation begins before it is dropped.
+  tile.ondragstart({ dataTransfer: { setData() {} } });
+  f.lanes()[0].ondragover(event(100));
+  assert.equal(f.get('bobine-drop').length, 1);
+  assert.notDeepEqual(lefts(), still);
+  f.goMain().onclick();
+  await settle();
+  // (Drawn again for the creation: what was shown is gone with it.)
+  assert.deepEqual([f.get('bobine-drop').length, lefts()], [0, still]);
+  // Carried again meanwhile: nothing shown, nothing pushed; dropped, refused, said.
+  f.lanes()[0].ondragover(event(100));
+  assert.deepEqual([f.get('bobine-drop').length, lefts()], [0, still]);
+  f.lanes()[0].ondrop(event(100));
+  assert.deepEqual([f.plans().length, lefts(), f.notices.at(-1)], [3, still, 'Des prises sont en cours de création : attendez la fin, ou arrêtez.']);
+  tile.ondragend();
+});
+
+test('in a hole of the bobine, the clip after it is loaded beforehand too (0.6.170)', async () => {
+  // (A from 0 to 5, a hole, then B from 8, C and D after it: the hole is black, not the time B loads.)
+  const f = await setup({ extra: [made(7, 48), made(8, 48)] }).open();
+  f.get('montage-take')[0].ondblclick();
+  f.get('montage-take')[1].ondragstart({ dataTransfer: { setData() {} } });
+  f.lanes()[0].ondrop(event(800));
+  for (const at of [4, 5]) f.get('montage-take')[at].ondblclick();
+  assert.deepEqual(f.ui.state().montage.plans.map(plan => plan.at), [0, 8, 11, 13]);
+  const whole = 800 / parseFloat(f.plans()[1].style.left),
+    [frame] = f.get('montage-frame'),
+    players = frame.children.filter(child => child.tagName === 'VIDEO'),
+    look = seconds => {
+      f.press(f.get('montage-ruler')[0], (seconds / whole) * 1000);
+      f.pointer.up();
+    },
+    held = () => players.map(player => [player.src, player.hidden]).sort();
+  // On D, then on C: the two players hold C and D, neither B.
+  look(14);
+  look(12);
+  assert.deepEqual(held(), [['/media/7', false], ['/media/8', true]]);
+  // In the hole before B: B waits in the player not shown, at its start.
+  look(6);
+  assert.deepEqual([frame.dataset.hole, held()], ['true', [['/media/2', true], ['/media/7', true]]]);
+  assert.equal(players.find(player => player.src === '/media/2').currentTime, 0);
+});

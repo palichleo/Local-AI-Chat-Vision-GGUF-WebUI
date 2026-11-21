@@ -806,7 +806,12 @@ export function setupMontage({
     media.video.hidden = !(url && seen.kind === 'video');
     media.spare.hidden = true;
     // (0.6.169) The clip after it waits in the other player; a take being made shows the Flux of the Studio.
+    // (0.6.170) In a hole, the clip after the hole: black is the hole, not the time it loads.
     if (at) ahead(at.index);
+    else if (hole) {
+      const after = planStarts(montage).findIndex(start => start > head);
+      if (after >= 0) ahead(after - 1);
+    }
     // (Its colours until the engine shows something: its start photo; or else the clip it goes on from, or
     // the photo it arrives on, rather than grey.)
     fluxOf(
@@ -2606,14 +2611,13 @@ export function setupMontage({
         live.drop?.remove?.();
         live.drop = null;
         const dropped = carried,
-          time = timeAt(event, lane);
+          time = timeAt(event, lane),
+          box = lane.getBoundingClientRect?.();
         carried = null;
-        // (0.6.148) A sound goes on the track it is dropped on.
-        if (id !== 'plans') return lay(dropped, { at: Math.round(time * 10) / 10, track: id });
-        // (0.6.149) A take where it is dropped: on a take, before or after it by its middle; in a hole,
-        // there, against a neighbour a few pixels away.
-        const box = lane.getBoundingClientRect?.();
-        lay(dropped, { at: Math.round(time * 100) / 100, near: box?.width ? (NEAR_PIXELS * whole) / box.width : 0 });
+        // (0.6.148) A sound goes on the track it is dropped on. (0.6.149) A take where it is dropped: on a
+        // take, before or after it by its middle; in a hole, there, against a neighbour a few pixels away.
+        if (id !== 'plans') lay(dropped, { at: Math.round(time * 10) / 10, track: id });
+        else lay(dropped, { at: Math.round(time * 100) / 100, near: box?.width ? (NEAR_PIXELS * whole) / box.width : 0 });
       };
       track.append(node('span', 'montage-track-name', name), lane, layer);
       lanes.append(track);
@@ -2749,7 +2753,10 @@ export function setupMontage({
    * those it would push later slide there already. Nothing is changed in the bobine.
    */
   function carry(track, lane, time) {
-    if (!carried) return;
+    // (0.6.170) Not while the bobine cannot change (a take being made, Moodix AI writing or arranging):
+    // the drop says why, nothing is shown that it would refuse. (What begins such a state draws the
+    // timeline again: what was shown before is gone with it.)
+    if (!carried || refusal()) return uncarry();
     const sound = track !== 'plans',
       box = lane.getBoundingClientRect?.(),
       near = box?.width ? (NEAR_PIXELS * span()) / box.width : 0,
