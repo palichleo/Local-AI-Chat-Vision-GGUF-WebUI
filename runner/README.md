@@ -14,7 +14,7 @@ A family (`runner/families/*.json`) describes a model: its components, its setti
 | MOSS Image | images: posters, layouts, written text | yes |
 | LTX 2.5 | videos with sound, continuations | yes |
 | MiniMax H3 | videos with sound, continuations | yes |
-| Wan 2.1 SCAIL-2 | a character replaced in a video | yes |
+| Wan 2.1 SCAIL-2 | a character replaced in a video; the character of an image animated by a video (`mode: animate`, 0.6.185: the engine only, not asked by the application yet) | yes |
 | Wan 2.2 | an image animated (image to video, two models) | yes |
 | SeedVR2 | image upscaling and restoration | yes |
 | Real-ESRGAN (image, video) | upscaling | no |

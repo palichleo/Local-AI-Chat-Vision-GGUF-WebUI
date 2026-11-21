@@ -143,8 +143,10 @@ def order(frames, count):
 
 
 def coloured(frame, ranked, height, width, background=WHITE):
-    """[3, height, width] from -1 to 1: the masks of a frame in their colours on `background`
-    (white over a driving video whose character is replaced, black over the reference)."""
+    """[3, height, width] from -1 to 1: the masks of a frame in their colours on `background`:
+    white where the model is to show what is behind them, black where it is not (to replace a
+    character, white around the person of the video and black around the one of the reference;
+    the other way round to animate one, runner.pipelines.wan_scail2.backgrounds)."""
     import torch
     import torch.nn.functional as F
 

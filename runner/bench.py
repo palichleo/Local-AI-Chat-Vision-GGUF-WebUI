@@ -17,6 +17,12 @@ each phase cost, what stayed on the GPU and what was kept in RAM.
     python -s -m runner.bench wan22 --model HIGH.safetensors --model-low LOW.safetensors \\
         --text-encoder T.safetensors --vae V.safetensors --reference start_image=FILE --out FOLDER \\
         [--step-lora HIGH_LORA --step-lora-low LOW_LORA: four steps] [--frames 81] [--size 768x448]
+    python -s -m runner.bench wan_scail2 --model M.safetensors --text-encoder T.safetensors \\
+        --clip-vision C.safetensors --vae V.safetensors --lora STEP_LORA:0.8 --lora DPO_LORA:1 \\
+        --segmenter SAM.safetensors --segmenter-tokenizer TOKENIZER_FOLDER \\
+        --reference driving_video=VIDEO --reference reference_image=IMAGE --out FOLDER \\
+        [--mode animate: the character of the image moves as the video does, in its own scene] \\
+        [--subject girl] [--reference-subject robot] [--frames 81]
 
     Common: [--runs 3] [--seed 1] [--size WxH] [--steps 8] [--frames 124] [--prompt "..."]
             [--new-prompts N] [--gpu-gib N] [--ram-reserve-gib N]
@@ -196,7 +202,7 @@ def wan_scail2_job(args, run):
         frames=args.frames,
         fps=float(probe(driving)['fps']),
         audio=True,
-        mode='replace',
+        mode=args.mode,
     )
     if args.segment_frames:
         parameters['segment_frames'] = args.segment_frames
@@ -286,6 +292,12 @@ def main(argv=None):
     parser.add_argument('--subject', help='SCAIL-2: who to follow in the video ("girl, handkerchief")')
     parser.add_argument('--reference-subject', help='SCAIL-2: who to draw from the reference image')
     parser.add_argument('--segment-frames', type=int, help='SCAIL-2: frames of a segment, 81 unless the card is small')
+    parser.add_argument(
+        '--mode',
+        choices=('replace', 'animate'),
+        default='replace',
+        help='SCAIL-2: replace the person of the video, or animate the character of the image',
+    )
     parser.add_argument('--keep', action='store_true', help='leave the model on the GPU between runs, as the Studio')
     parser.add_argument('--gpu-gib', type=float, help='ceiling on the weights kept on the GPU')
     parser.add_argument('--ram-reserve-gib', type=float, help='RAM the resident files must leave free')

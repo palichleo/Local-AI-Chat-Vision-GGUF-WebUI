@@ -1,4 +1,5 @@
-"""Wan 2.1 SCAIL-2: the character of a reference image drawn in place of the one of a video.
+"""Wan 2.1 SCAIL-2: the character of a reference image drawn in place of the one of a video, or
+moved by the motion of a video.
 
 The video is made a segment at a time (81 frames, see runner.video.scail.plan): the model reads,
 in one sequence, the reference image, the frames to draw and the driving video at half its
@@ -6,13 +7,25 @@ size, each with the coloured masks that say which character is which. A segment 
 is given the last five frames of the one before, encoded again: it keeps them as they are at
 every step, draws what follows, and those five frames are left out when the segments are joined.
 
-Sampled as the distilled workflow does: six Euler steps without guidance, the noise levels moved
-by a shift of 5, the model's LoRAs (lightx2v, DPO) applied as it runs. The reference is shown on
-black outside its mask and the image encoder sees the whole of it, as ComfyUI's node does: the
-same seed then gives the same video.
+Two modes (`mode`), those of the official implementation (github.com/zai-org/SCAIL-2, Apache-2.0:
+`generate.py`, with `--replace_flag` or without; the masks as zai-org/SCAIL-Pose makes them):
+- `replace`, the default: the character takes the place of a person of the video, whose scene,
+  framing and sound stay. The mask of the reference is black around its character (nothing of
+  the image's scene is to be seen), the one of the video white around the person (its scene is).
+- `animate`: the character of the image moves as the person of the video does, in the scene of
+  the image. The masks the other way round: white around the character of the reference, black
+  around the person of the video. The reference is encoded whole, and the model is told where
+  it sits otherwise (runner.models.wan_scail2.rotations: the video starts after it in time).
 
-The video lasts as long as the driving video, up to the frames asked, plays at its rate and
-has its shape: the width and the height of the job say how many pixels, not which way round.
+Sampled as the distilled workflow does: six Euler steps without guidance, the noise levels moved
+by a shift of 5, the model's LoRAs (lightx2v, DPO) applied as it runs. To replace a character the
+reference is shown on black outside its mask and the image encoder sees the whole of it, as
+ComfyUI's node does: the same seed then gives the same video.
+
+The video lasts as long as the driving video, up to the frames asked, and plays at its rate. It
+has the shape of what it shows: the driving video's when a character is replaced, the image's
+when one is animated. The width and the height of the job say how many pixels, not which way
+round.
 
 The model's own LoRAs are two of its files (components `stepLora`, the distillation that makes
 six steps enough, and `identityLora`), each with its strength; a job's `loras` come after them.
@@ -29,7 +42,7 @@ from runner import hardware
 
 STEPS = 6
 SHIFT = 5.0
-MODES = ('replace',)
+MODES = ('replace', 'animate')
 # As runner.pipelines.minimax_h3: RAM the weights kept between two videos leave free, what is
 # locked beyond what is copied, what is copied to the GPU ahead of the layers that read it.
 RAM_RESERVE_GIB = 4
@@ -124,6 +137,30 @@ def masks_given(job):
     return _one(job, MASKS[0]) is not None
 
 
+def replacing(job):
+    """Whether the job replaces a person of the video (the default) rather than animating the
+    character of the image."""
+    return job['parameters'].get('mode', 'replace') == 'replace'
+
+
+def backgrounds(job):
+    """(around the characters in the mask of the reference, around those in the masks of the
+    video): white where what is behind them is to be seen, black where it is not, as
+    zai-org/SCAIL-Pose makes the masks. A character replaced is drawn in the scene of the video,
+    one animated in the scene of the image."""
+    from runner.video import identity
+
+    return (identity.BLACK, identity.WHITE) if replacing(job) else (identity.WHITE, identity.BLACK)
+
+
+def image_size(path):
+    """(width, height) of an image, read from its header."""
+    from PIL import Image
+
+    with Image.open(path) as image:
+        return image.size
+
+
 def size_like(source_width, source_height, width, height):
     """(width, height) of a video with the shape of its source and about the pixels of
     width x height, both multiples of 32: a portrait video followed stays a portrait."""
@@ -135,7 +172,9 @@ def size_like(source_width, source_height, width, height):
 def clip(job):
     """(frames, frames a second, width, height) of the video to make: as long as the driving
     video up to the frames the job asks, 4n + 1 of them, at the driving video's own rate (each
-    frame drawn follows one frame of it) and in its shape."""
+    frame drawn follows one frame of it) and in the shape of what it shows: the driving video's
+    to replace a character, the image's to animate one (the official code turns the video the
+    way the image is)."""
     from runner.video.stream import probe
 
     p = job['parameters']
@@ -144,7 +183,8 @@ def clip(job):
     count = (available - 1) // 4 * 4 + 1
     if count < 5:
         raise ValueError('La vidéo à suivre est trop courte : il faut au moins 5 images.')
-    width, height = size_like(found['width'], found['height'], p['width'], p['height'])
+    shape = (found['width'], found['height']) if replacing(job) else image_size(_one(job, 'reference_image'))
+    width, height = size_like(*shape, p['width'], p['height'])
     return count, float(found['fps']), width, height
 
 
@@ -236,7 +276,8 @@ def read_halved(path, count, width, height, flat=False):
 def find_masks(job, raw, width, height, progress):
     """(pose, pose masks, reference mask, what was found): the driving video at half its size,
     its coloured masks likewise and the mask of the reference image `raw` cut to the shape of
-    the generation, the subjects found by SAM 3.1 from the job's words."""
+    the generation, the subjects found by SAM 3.1 from the job's words. Each mask is on the
+    background of the job's mode (`backgrounds`)."""
     import torch
 
     from runner.models import sam3
@@ -244,6 +285,7 @@ def find_masks(job, raw, width, height, progress):
 
     p, paths = job['parameters'], job['components']
     wanted, drawn = p.get('subject') or SUBJECT, p.get('reference_subject') or SUBJECT
+    behind_reference, behind_video = backgrounds(job)
     model = sam3.load(paths['segmenter'])
     one = follower = None
     try:
@@ -255,7 +297,7 @@ def find_masks(job, raw, width, height, progress):
             raise ValueError(
                 f'Aucun sujet « {drawn} » n’a été trouvé dans l’image de référence. Décrivez-le autrement.'
             )
-        shown = identity.coloured(one.frames[0], ranked, raw.shape[-2], raw.shape[-1], identity.BLACK)
+        shown = identity.coloured(one.frames[0], ranked, raw.shape[-2], raw.shape[-1], behind_reference)
         reference_mask = scail.cover(shown, width, height, flat=True)
         # The video: every frame is read once, for the pose and for the masks.
         pose = []
@@ -275,7 +317,10 @@ def find_masks(job, raw, width, height, progress):
                 f'Aucun sujet « {wanted} » n’a été trouvé dans la vidéo à suivre. Décrivez-le autrement.'
             )
         pose_mask = torch.stack(
-            [scail.halved(identity.coloured(frame, order, height, width)[None])[0] for frame in follower.frames]
+            [
+                scail.halved(identity.coloured(frame, order, height, width, behind_video)[None])[0]
+                for frame in follower.frames
+            ]
         )
         facts = dict(
             subject=wanted,
@@ -301,6 +346,57 @@ def read_image(path):
 
     with Image.open(path) as image:
         return _picture(np.array(image.convert('RGB')))
+
+
+def reference_shown(job, raw, mask, width, height):
+    """The reference image `raw` as the model is given it, [3, height, width]: cut to the shape
+    of the video, then on black outside its characters to replace one (as ComfyUI's node does),
+    whole to animate one, since its scene is the one the video shows (zai-org/SCAIL-2 encodes
+    the image as it is)."""
+    from runner.video import scail
+
+    cut = scail.cover(raw, width, height)
+    return scail.matte(cut, mask) if replacing(job) else cut
+
+
+def reference_streams(reference, mask, encode):
+    """(reference, its masks) as the model reads them: the latents of the reference with the
+    four channels that say it is given, [1, 20, 1, height / 8, width / 8], and its coloured mask
+    in 28 channels, [1, 28, 1, height / 8, width / 8]. `encode` is the VAE's: pixels [batch, 3,
+    frames, height, width] to latents [batch, 16, latent frames, height / 8, width / 8]."""
+    from runner.video import scail
+
+    return scail.given(encode(reference[None, :, None])[0])[None], scail.mask_latents(mask[None])[None]
+
+
+def pose_streams(pose, mask, rows, encode):
+    """(pose, its masks) for the frames `rows` of the driving video and of its masks, both read
+    at half the size of the video: [1, 20, latent frames, height / 16, width / 16] and
+    [1, 28, latent frames, height / 16, width / 16]."""
+    from runner.video import scail
+
+    stream = scail.given(encode(pose[rows].permute(1, 0, 2, 3)[None])[0])[None]
+    return stream, scail.mask_latents(mask[rows])[None]
+
+
+def velocity_of(job, model, given, frames, rows, columns):
+    """`velocity(stream, level)` for `sample`: the model's prediction for the latents of a
+    segment of `frames` latent frames of `rows` x `columns` tokens, beside what it is `given`
+    (text, image, reference, pose, reference masks, pose masks: runner.models.wan_scail2.forward).
+    The rotary positions, which say where the reference sits and when the video starts in the
+    job's mode, are made once for every step."""
+    import torch
+
+    from runner.models import wan_scail2
+
+    replace = replacing(job)
+    rotary = wan_scail2.rotations(model.rope, frames, rows, columns, replace, dtype=torch.bfloat16)
+
+    def velocity(stream, level):
+        timestep = torch.tensor([level * 1000], device=stream.device)
+        return wan_scail2.forward(model, stream, timestep, *given, replace, rotary)
+
+    return velocity
 
 
 def marks(latents, history):
@@ -441,7 +537,8 @@ def generate(job, config, progress):
     if not torch.cuda.is_available():
         raise RuntimeError('Native Wan 2.1 SCAIL-2 requires CUDA')
     check(job, None)
-    # The length, the rate and the shape are the driving video's: the job is told what was made.
+    # The length and the rate are the driving video's, the shape the one of what the video shows
+    # (`clip`): the job is told what was made.
     count, rate, width, height = clip(job)
     job = dict(job, parameters=dict(job['parameters'], frames=count, fps=rate, width=width, height=height))
     p, paths = job['parameters'], job['components']
@@ -516,11 +613,17 @@ def generate(job, config, progress):
             progress(stage='finding subjects')
             pose, pose_mask, reference_mask, subjects = find_masks(job, raw, width, height, progress)
             progress(stage='subjects found', **subjects)
-        reference = scail.matte(scail.cover(raw, width, height), reference_mask)
+        # Alone to replace a character, with its scene to animate one.
+        reference = reference_shown(job, raw, reference_mask, width, height)
         del raw
         vae = wan_vae.load(paths['vae'])
-        reference_stream = scail.given(wan_vae.encode(vae, reference[None, :, None].cuda())[0])[None].to(**kind)
-        reference_masks = scail.mask_latents(reference_mask[None])[None].to(**kind)
+
+        def encode(pixels):
+            return wan_vae.encode(vae, pixels.cuda())
+
+        reference_stream, reference_masks = (
+            value.to(**kind) for value in reference_streams(reference, reference_mask, encode)
+        )
         del reference, reference_mask
         text, image = text.to(**kind), image.to(**kind)
         free_card()
@@ -536,9 +639,7 @@ def generate(job, config, progress):
         try:
             for index, (first, count) in enumerate(segments):
                 rows = slice(first, first + count)
-                pose_stream = scail.given(wan_vae.encode(vae, pose[rows].permute(1, 0, 2, 3)[None].cuda())[0])
-                pose_stream = pose_stream[None].to(**kind)
-                pose_masks = scail.mask_latents(pose_mask[rows])[None].to(**kind)
+                pose_stream, pose_masks = (value.to(**kind) for value in pose_streams(pose, pose_mask, rows, encode))
                 frames = pose_stream.shape[2]
                 # One seed for every segment, as the workflow's sampler is run again with its own.
                 noise = torch.randn(
@@ -549,26 +650,8 @@ def generate(job, config, progress):
                     if loaded.model is None:
                         progress(stage='loading video model')
                         progress(stage='sampling video', **loaded.open(budget).facts)
-                    model = loaded.model
-                    rotary = wan_scail2.rotations(
-                        model.rope, frames, height // 16, width // 16, True, dtype=torch.bfloat16
-                    )
-
-                    def velocity(stream, level):
-                        timestep = torch.tensor([level * 1000], device='cuda')
-                        return wan_scail2.forward(
-                            model,
-                            stream,
-                            timestep,
-                            text,
-                            image,
-                            reference_stream,
-                            pose_stream,
-                            reference_masks,
-                            pose_masks,
-                            True,
-                            rotary,
-                        )
+                    given = (text, image, reference_stream, pose_stream, reference_masks, pose_masks)
+                    velocity = velocity_of(job, loaded.model, given, frames, height // 16, width // 16)
 
                     def stepped(number, estimate):
                         progress(
