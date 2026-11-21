@@ -946,13 +946,13 @@ test('photos dragged to their track become takes to create, each against the edg
   // The start photo against the left edge of its take, an end photo against the right edge of its own
   // (seven seconds: the timeline shows twenty).
   assert.deepEqual(pins(), [
-    ['montage-photo is-start', '0%', null, 'Photo de début, prise de 00.00 à 05.00'],
-    ['montage-photo is-end', null, 'calc(75% + 4px)', 'Photo de fin, prise de 00.00 à 05.00'],
-    ['montage-photo is-end', null, 'calc(65% + 4px)', 'Photo de fin, prise de 05.00 à 07.00'],
+    ['montage-photo is-start', '0%', null, 'Image de début, prise de 00.00 à 05.00'],
+    ['montage-photo is-end', null, 'calc(75% + 4px)', 'Image de fin, prise de 00.00 à 05.00'],
+    ['montage-photo is-end', null, 'calc(65% + 4px)', 'Image de fin, prise de 05.00 à 07.00'],
   ]);
   assert.deepEqual(laid(f).map(pin => [pin.style.backgroundImage, pin.textContent]), [['url("/thumb/3")', 'Début'], ['url("/thumb/5")', 'Fin'], ['url("/thumb/6")', 'Fin']]);
   // (0.6.152) Its empty place beside them: the start of the second.
-  assert.deepEqual(find(f.root, 'is-slot').map(slot => slot.attributes['aria-label']), ['Photo de début, prise de 05.00 à 07.00 : glissez une image ici']);
+  assert.deepEqual(find(f.root, 'is-slot').map(slot => slot.attributes['aria-label']), ['Image de début, prise de 05.00 à 07.00 : glissez une image ici']);
   // No film while a take is to create: said in the menu of « Exporter » (0.6.154, capture 91).
   const [go] = f.get('montage-export');
   assert.equal(go.disabled, false);
@@ -965,11 +965,11 @@ test('photos dragged to their track become takes to create, each against the edg
   // « À créer »: a line for each, in the order of the bobine. (0.6.149) The second does not go on from
   // the first: a clip of its own, towards its photo.
   assert.deepEqual(f.lines(), [
-    ['00.00 → 05.00', '', 'Nouvelle prise · photos de début et de fin', ''],
-    ['05.00 → 07.00', '', 'Nouvelle prise · photo de fin', ''],
+    ['00.00 → 05.00', '', 'Nouvelle prise · images de début et de fin', ''],
+    ['05.00 → 07.00', '', 'Nouvelle prise · image de fin', ''],
   ]);
   // The last laid is the one chosen: its line says it, its bar is above it.
-  assert.deepEqual([f.get('bobine-line').map(line => line.attributes['aria-pressed']), f.popLabels()], [['false', 'true'], ['Retirer la photo de fin', 'Retirer de la bobine (Suppr)']]);
+  assert.deepEqual([f.get('bobine-line').map(line => line.attributes['aria-pressed']), f.popLabels()], [['false', 'true'], ['Retirer l’image de fin', 'Retirer de la bobine (Suppr)']]);
   assert.deepEqual([f.go(), f.goMain().disabled], ['Créer', true]);
   // Written in its line: « À créer » stays under the hand, the take shows its text, the button counts.
   const [panel] = f.get('bobine-create'),
@@ -991,13 +991,13 @@ test('photos dragged to their track become takes to create, each against the edg
   assert.deepEqual([f.ui.state().montage.plans[1].to, f.lines()[1][0]], [3.5, '05.00 → 08.50']);
   // A photo clicked chooses its take; one taken off from its bar leaves the other.
   laid(f)[0].onclick();
-  assert.deepEqual([f.ui.state().chosen, f.popLabels()], [f.ui.state().montage.plans[0].id, ['Retirer la photo de début', 'Retirer la photo de fin', 'Retirer de la bobine (Suppr)']]);
-  f.button('Retirer la photo de fin').onclick();
-  assert.deepEqual(pins().map(pin => pin[3]), ['Photo de début, prise de 00.00 à 05.00', 'Photo de fin, prise de 05.00 à 08.50']);
+  assert.deepEqual([f.ui.state().chosen, f.popLabels()], [f.ui.state().montage.plans[0].id, ['Retirer l’image de début', 'Retirer l’image de fin', 'Retirer de la bobine (Suppr)']]);
+  f.button('Retirer l’image de fin').onclick();
+  assert.deepEqual(pins().map(pin => pin[3]), ['Image de début, prise de 00.00 à 05.00', 'Image de fin, prise de 05.00 à 08.50']);
   // A clip dropped there is no photo: said, nothing changed. All of it is kept, as any change.
   carry(0);
   f.photos().ondrop(event(100));
-  assert.equal(f.notices.at(-1), 'Seule une image se pose comme photo de début ou de fin.');
+  assert.equal(f.notices.at(-1), 'Seule une image se pose en début ou en fin de prise.');
   assert.equal(f.plans().length, 2);
   await f.later();
   assert.equal(f.saves().at(-1).body.montage.plans[1].todo.prompt, 'Il regarde la mer.');
@@ -1054,7 +1054,7 @@ test('« Créer 1 prise » asks the Studio for the clip, shows it being made, an
   assert.deepEqual(laid(f).map(pin => pin.dataset.plan), [f.ui.state().montage.plans[1].id]);
   assert.deepEqual([f.saves().at(-1).body.montage.plans[0].source.runId, f.ui.state().montage.plans[1].at], [id(50), 5.042]);
   // (0.6.149) The second is a clip of its own, towards its photo: nothing of the first is asked for it.
-  assert.deepEqual([f.plans()[1].className, f.names()[1], f.lines()[0][2]], ['montage-piece is-todo', '', 'Nouvelle prise · photo de fin']);
+  assert.deepEqual([f.plans()[1].className, f.names()[1], f.lines()[0][2]], ['montage-piece is-todo', '', 'Nouvelle prise · image de fin']);
   f.write(0, 'Il regarde la mer.');
   f.goMain().onclick();
   await settle();
@@ -1062,14 +1062,14 @@ test('« Créer 1 prise » asks the Studio for the clip, shows it being made, an
   // Refused by the engine: said in its line, in amber; the take is still to create and can be tried again.
   answer.reject(new Error('Mémoire vidéo insuffisante.'));
   await settle();
-  assert.deepEqual([f.lines(), f.get('bobine-line')[0].dataset.state], [[['05.04 → 07.04', 'Échec', 'Nouvelle prise · photo de fin', 'Mémoire vidéo insuffisante.']], 'failed']);
+  assert.deepEqual([f.lines(), f.get('bobine-line')[0].dataset.state], [[['05.04 → 07.04', 'Échec', 'Nouvelle prise · image de fin', 'Mémoire vidéo insuffisante.']], 'failed']);
   assert.deepEqual([f.plans()[1].className, f.names()[1], f.ui.state().making, f.go(), f.goMain().disabled], ['montage-piece is-todo is-failed', 'Échec', null, 'Créer 1 prise', false]);
   // Its suite pulled from the end of the take made (fifty pixels a second: 5,04 s is at 252): the
   // continuation itself, whose file holds the take first; the take after it goes later.
   f.press(find(f.plans()[0], 'montage-grip')[1], 252);
   f.pointer.move(352);
   f.pointer.up();
-  assert.deepEqual([f.names(), f.lines().map(line => line.slice(0, 3))], [['Prise 50', '↳ Suite', 'Échec'], [['05.04 → 07.04', '', 'Suite de la prise 50'], ['07.04 → 09.04', 'Échec', 'Nouvelle prise · photo de fin']]]);
+  assert.deepEqual([f.names(), f.lines().map(line => line.slice(0, 3))], [['Prise 50', '↳ Suite', 'Échec'], [['05.04 → 07.04', '', 'Suite de la prise 50'], ['07.04 → 09.04', 'Échec', 'Nouvelle prise · image de fin']]]);
   f.write(0, 'Il se retourne.');
   // Both are made, one after the other: the suite first, as the Studio prolongs a clip.
   assert.equal(f.go(), 'Créer 2 prises');
@@ -1087,10 +1087,45 @@ test('« Créer 1 prise » asks the Studio for the clip, shows it being made, an
   assert.deepEqual(asked[3].wanted.args.end_image, { output: id(6) });
   answer.resolve(null);
   await settle();
-  assert.deepEqual(f.lines()[0].slice(1), ['Échec', 'Nouvelle prise · photo de fin', 'La création n’a pas pu commencer.']);
+  assert.deepEqual(f.lines()[0].slice(1), ['Échec', 'Nouvelle prise · image de fin', 'La création n’a pas pu commencer.']);
   // Taken out, every take is made: the film can be exported.
   f.plans()[2].onkeydown({ key: 'Delete' });
   assert.equal(f.get('montage-export')[0].disabled, false);
+});
+
+test('a take to create whose images are gone says which, in the words of the Bobine: « image de début », « image de fin » (0.6.190)', async () => {
+  // (0.6.190, capture 104) « Image » in the Bobine, no longer « Photo ». The track keeps its name (PHOTOS), and the
+  // data their keys (`photos`).
+  const photo = n => ({ conversationId: C, runId: id(n), output: 0 }),
+    asked = [],
+    create = async wanted => (asked.push(wanted), null),
+    stored = (prompt, photos) => ({
+      schemaVersion: 1, id: id(960), name: 'Le phare', format: '16:9', width: 1344, height: 768, fps: 24, sounds: [],
+      plans: [{ id: id(961), kind: 'video', todo: { prompt }, from: 0, to: 5, frame: 'fit', volume: 1, photos }],
+    }),
+    reasons = f => f.lines().map(line => line[3]);
+  // Its two images taken out of the project since (the takes 42 and 43): « Créer » says which; nothing is asked.
+  let f = await setup({ stored: [stored('Le phare s’allume.', { start: photo(42), end: photo(43) })], create }).open();
+  await settle();
+  assert.deepEqual([f.go(), f.goMain().disabled], ['Créer 1 prise', false]);
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual(reasons(f), ['L’image de début n’est plus dans le projet.']);
+  f.get('bobine-line')[0].onclick({ target: f.get('bobine-line')[0] });
+  if (f.ui.state().chosen !== id(961)) f.get('bobine-line')[0].onclick({ target: f.get('bobine-line')[0] });
+  assert.deepEqual(f.popLabels().slice(0, 2), ['Retirer l’image de début', 'Retirer l’image de fin']);
+  f.button('Retirer l’image de début').onclick();
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual(reasons(f), ['L’image de fin n’est plus dans le projet.']);
+  // Without its text, Moodix AI would write it from its image, gone too: said in the same words.
+  f = await setup({ stored: [stored('', { start: photo(42) })], create, write: async () => ({ prompt: 'Le phare s’allume.' }) }).open();
+  await settle();
+  assert.deepEqual([f.go(), f.goMain().disabled], ['Créer 1 prise', false]);
+  f.goMain().onclick();
+  await settle();
+  assert.deepEqual(reasons(f), ['Moodix AI n’a rien à regarder : posez une image de début ou de fin, ou écrivez ce qui se passe.']);
+  assert.equal(asked.length, 0);
 });
 
 test('a photo laid above a video cuts it there: its end is greyed until the new clip is made (0.6.142, 0.6.148)', async () => {
@@ -1105,14 +1140,14 @@ test('a photo laid above a video cuts it there: its end is greyed until the new 
     ['montage-piece is-todo is-replacing', 'Sera remplacé', 'url("/thumb/1")'],
   ]);
   assert.deepEqual([f.lengths(), laid(f).map(pin => [pin.className, pin.style.left])], [['03.00 s', '02.00 s'], [['montage-photo is-start', '30%']]]);
-  assert.deepEqual(f.lines(), [['03.00 → 05.00', '', 'Nouvelle prise · photo de début', '']]);
+  assert.deepEqual(f.lines(), [['03.00 → 05.00', '', 'Nouvelle prise · image de début', '']]);
   // In the preview, a take to create is the photo it starts on, veiled; without one, the empty frame.
   const [frame] = f.get('montage-frame'),
     [blank, picture, video, caption] = frame.children;
   f.ui.seek(4);
   assert.deepEqual([picture.src, picture.hidden, video.hidden, caption.textContent, frame.dataset.todo], ['/media/3', false, true, 'À créer', 'true']);
-  assert.deepEqual(f.popLabels(), ['Retirer la photo de début', 'Retirer, et rendre sa fin à la vidéo']);
-  f.button('Retirer la photo de début').onclick();
+  assert.deepEqual(f.popLabels(), ['Retirer l’image de début', 'Retirer, et rendre sa fin à la vidéo']);
+  f.button('Retirer l’image de début').onclick();
   f.ui.seek(4);
   assert.deepEqual([blank.hidden, picture.hidden, caption.textContent], [false, true, 'À créer']);
   // (0.6.149) Without its photo it is a clip of its own, from its text: it does not go on from the video.
@@ -1126,7 +1161,7 @@ test('a photo laid above a video cuts it there: its end is greyed until the new 
   // Too near the end of the video, nothing would be replaced: said, nothing changed.
   carry(2);
   f.photos().ondrop(event(450));
-  assert.match(f.notices.at(-1), /^Posez la photo plus tôt/);
+  assert.match(f.notices.at(-1), /^Posez l’image plus tôt/);
   assert.equal(f.plans().length, 1);
 });
 
@@ -1201,7 +1236,7 @@ test('the end of a video pulled beyond its take shows its suite to create, joine
   f.get('montage-take')[4].ondragstart({ dataTransfer: { setData() {} } });
   // (The bobine is 11,5 s long now, still twenty shown: 7,5 s, on the second half of the suite.)
   f.photos().ondrop(event(750));
-  assert.deepEqual([f.plans()[1].className, f.lines()[0][2]], ['montage-piece is-todo is-suite', 'Suite de la prise 1 · photo de fin']);
+  assert.deepEqual([f.plans()[1].className, f.lines()[0][2]], ['montage-piece is-todo is-suite', 'Suite de la prise 1 · image de fin']);
   // Taken out: the bobine as it was.
   f.button('Retirer de la bobine (Suppr)').onclick();
   assert.deepEqual(look(), [
@@ -1344,6 +1379,7 @@ test('a photo carried lights up the places where it can go; it goes in the one i
   // A photo carried lights them up, with a place at the end of the bobine to begin a new take; a clip does not.
   carry(2);
   assert.deepEqual([f.photos().dataset.carrying, f.get('is-new').map(item => item.style.left)], ['true', ['calc(55% + 4px)']]);
+  assert.equal(f.get('is-new')[0].attributes['aria-label'], 'Une nouvelle prise, qui part de cette image, à la fin de la bobine');
   f.get('montage-take')[2].ondragend();
   carry(0);
   assert.deepEqual([f.photos().dataset.carrying, f.get('is-new').length], ['false', 0]);
@@ -1658,12 +1694,12 @@ test('what Moodix AI cannot write is said; its writing is stopped at once, and e
   f.plans()[1].onkeydown({ key: 'Delete' });
   f.plans()[0].onclick();
   if (f.ui.state().chosen !== f.ui.state().montage.plans[0].id) f.plans()[0].onclick();
-  f.button('Retirer la photo de début').onclick();
-  f.button('Retirer la photo de fin').onclick();
+  f.button('Retirer l’image de début').onclick();
+  f.button('Retirer l’image de fin').onclick();
   assert.equal(f.ui.state().montage.plans[0].photos, undefined);
   agent().onclick();
   for (let turn = 0; turn < 4; turn++) await settle();
-  assert.deepEqual([pens.length, f.said('montage-status'), f.ui.state().writing], [0, ['Moodix AI n’a rien à regarder : posez une photo de début ou de fin, ou écrivez vous-même.'], null]);
+  assert.deepEqual([pens.length, f.said('montage-status'), f.ui.state().writing], [0, ['Moodix AI n’a rien à regarder : posez une image de début ou de fin, ou écrivez vous-même.'], null]);
 });
 
 test('the wand: what has a text is enriched by Moodix AI, one take after another, until Échap; Ctrl+Z gives the text back (0.6.153)', async () => {
@@ -2258,7 +2294,7 @@ test('the bar of a take to create never lies over its photos nor their places: c
     };
   // The second take chosen (5 s to 7 s): its bar centred over it, half its width kept inside the track.
   f.ui.select(f.ui.state().montage.plans[1].id);
-  // (6 s of a timeline of 20; its trash and « Retirer la photo de fin », a rule between them.)
+  // (6 s of a timeline of 20; its trash and « Retirer l’image de fin », a rule between them.)
   assert.deepEqual([f.pop().style.left, f.pop().style['--half']], ['clamp(var(--half), 30%, calc(100% - var(--half)))', '42px']);
   // (0.6.158) Where it goes in the take when it is narrow: at its start, under its text, far from its length.
   assert.equal(f.pop().style['--take'], '25%');
@@ -2277,8 +2313,8 @@ test('an empty bobine: its ghost has its two places of photo, at rest; a photo t
   const f = await setup().open();
   const slots = () => find(f.photos(), 'is-ghost');
   assert.deepEqual(slots().map(slot => [slot.className, slot.attributes['aria-label'], slot.style.left ?? null, slot.style.right ?? null]), [
-    ['montage-photo is-start is-slot is-ghost', 'Photo de début d’une nouvelle prise : glissez une image ici', '0%', null],
-    ['montage-photo is-end is-slot is-ghost', 'Photo de fin d’une nouvelle prise : glissez une image ici', null, 'calc(50% + 4px)'],
+    ['montage-photo is-start is-slot is-ghost', 'Image de début d’une nouvelle prise : glissez une image ici', '0%', null],
+    ['montage-photo is-end is-slot is-ghost', 'Image de fin d’une nouvelle prise : glissez une image ici', null, 'calc(50% + 4px)'],
   ]);
   // A photo dropped on the end: a take to create of 5 s at 0 that arrives on it, chosen; the ghost's places are gone.
   f.get('montage-take')[2].ondragstart({ dataTransfer: { setData() {} } });
@@ -2328,7 +2364,7 @@ test('the preview says what happens in a take to create at rest, and leaves the 
   assert.deepEqual([words().hidden, words().textContent, frame().dataset.end, frame().dataset.tall], [false, 'Il lève les yeux.', 'true', 'false']);
   // Without an end photo: the whole width is its text's.
   f.ui.select(f.ui.state().montage.plans[1].id);
-  f.pop().children.find(control => control.attributes['aria-label'] === 'Retirer la photo de fin').onclick();
+  f.pop().children.find(control => control.attributes['aria-label'] === 'Retirer l’image de fin').onclick();
   f.ui.seek(6);
   assert.deepEqual([words().textContent, frame().dataset.end], ['Il regarde la mer.', 'false']);
   // An upright film: said to the frame, its text goes above the photo.
@@ -2347,7 +2383,7 @@ test('a suite without its text that its video stops says so in its line (0.6.159
     ],
   };
   const f = await setup({ stored: [old], create: async () => null, write: async () => ({ prompt: 'x' }) }).open();
-  assert.deepEqual([f.lines().map(line => line[3]), f.go(), f.goMain().disabled], [['La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une photo de début.'], 'Créer', true]);
+  assert.deepEqual([f.lines().map(line => line[3]), f.go(), f.goMain().disabled], [['La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une image de début.'], 'Créer', true]);
 });
 
 test('the styles of the Bobine: a take being made fills from the left, no moving ground; the text of the preview is three lines at most (0.6.159)', async () => {
@@ -2756,8 +2792,8 @@ test('the detail of what was laid: what Moodix AI said, and each adjustment with
     find(box(), 'bobine-ask-notes')[0].children.map(item => item.children.map(part => part.textContent)),
     [
       ['Le 3e ajout du plan n’a ni texte ni prise : il est laissé de côté.'],
-      ['05.00 → 09.00', 'Elle commence sur la prise 5 : une suite ne commence pas sur une photo, c’est un nouveau plan.'],
-      ['09.00 → 14.00', 'La prise 42 n’est pas dans ce projet : pas de photo de fin.'],
+      ['05.00 → 09.00', 'Elle commence sur la prise 5 : une suite ne commence pas sur une image, c’est un nouveau plan.'],
+      ['09.00 → 14.00', 'La prise 42 n’est pas dans ce projet : pas d’image de fin.'],
     ],
   );
   // « Annuler » is still there, unfolded; folded again by the same link.
@@ -3077,7 +3113,7 @@ test('the text of a take to create in the preview: cut, the end of its last line
   lay(f);
   // (The first take without its end photo: its text has the whole width of the frame.)
   laid(f)[0].onclick();
-  f.button('Retirer la photo de fin').onclick();
+  f.button('Retirer l’image de fin').onclick();
   const [frame] = f.get('montage-frame'),
     [words] = find(frame, 'montage-frame-words'),
     [text] = find(words, 'montage-frame-text'),

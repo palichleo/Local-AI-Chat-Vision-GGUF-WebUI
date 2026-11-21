@@ -60,8 +60,9 @@ function named(ref) {
 }
 /** « a », « a et b », « a, b et c ». */
 const listed = items => (items.length < 2 ? (items[0] ?? '') : items.slice(0, -1).join(', ') + ' et ' + items.at(-1));
+// (0.6.190) « comme sujet », no longer « en référence »: the inputs a creation looks at are its subjects.
 const asReferences = refs =>
-  refs.length ? `, avec ${listed(refs.map(ref => named(ref) || 'une image'))} en référence${refs.length > 1 ? 's' : ''}` : '';
+  refs.length ? `, avec ${listed(refs.map(ref => named(ref) || 'une image'))} comme sujet${refs.length > 1 ? 's' : ''}` : '';
 
 /**
  * The sentence of the application for a proposal (`request`: what the server sent, local_tool_request):

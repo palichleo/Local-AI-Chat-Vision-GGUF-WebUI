@@ -453,7 +453,9 @@ test('the user gives an input another role: a subject reference becomes the firs
   const loras = request => runtime.pending.get(request.requestId).prepared.job.loras.map(lora => lora.id);
   assert.deepEqual(loras(first), ['reference-slots']);
   assert.equal(first.plan.references[0].role, 'msr_image');
-  assert.equal(first.plan.references[0].roleLabel, 'Référence de sujet');
+  // (0.6.190) The name of its role is « Sujet » (runner/families/ltx25.json): on the card, and in its list « Rôle ».
+  assert.equal(first.plan.references[0].roleLabel, 'Sujet');
+  assert.equal(first.plan.editable.references[0].find(option => option.role === 'msr_image').label, 'Sujet');
   assert.deepEqual(first.plan.editable.references[0].map(option => option.role).sort(), [
     'end_image',
     'msr_image',

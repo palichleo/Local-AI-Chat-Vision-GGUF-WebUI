@@ -248,7 +248,7 @@ test('no text of the interface is smaller than 12 px', async () => {
   assert.ok(labels.length > 10);
   for (const rule of labels) assert.match(rule, /letter-spacing: 0\.\d+em/, rule);
   // (21/11, decision 2 of the simple interface) The words that name a piece are no labels: 12 px, under
-  // the images of a card of the Chat (« DÉBUT », « RÉF. 1 »), on the track PHOTOS of the Bobine (« Début »,
+  // the images of a card of the Chat (« DÉBUT », « SUJET 1 »), on the track PHOTOS of the Bobine (« Début »,
   // « Fin ») and under a slot a take is carried over (« FIN », « REMPLACER »).
   const naming = [
     /\n\.proposal-input figcaption \{[^}]*\}/,

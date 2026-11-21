@@ -237,7 +237,7 @@
       "as": "reference",
       "media": "image",
       "max": 9,
-      "label": "Image de référence"
+      "label": "Sujet"
     },
     "start_image": {
       "as": "start_image",

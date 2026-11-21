@@ -71,10 +71,11 @@ test('where a photo is laid says what it becomes (0.6.142)', () => {
   for (const other of [clip(5, 5), record(6, 'audio', { parameters: { seconds: 9 } })]) {
     const tried = withPhoto(ended, other, 2, { id: id(15) });
     assert.equal(tried.montage, ended);
-    assert.match(tried.reason, /^Seule une image/);
+    // (0.6.190) « Image », no longer « photo », in the words of the Bobine.
+    assert.equal(tried.reason, 'Seule une image se pose en début ou en fin de prise.');
   }
   const still = withTake(empty(), photo(7), { id: id(17) });
-  assert.match(withPhoto(still, photo(8), 1, { id: id(18) }).reason, /pas d’une image\.$/);
+  assert.match(withPhoto(still, photo(8), 1, { id: id(18) }).reason, /^Une image se pose au-dessus d’une vidéo ou d’une prise à créer, pas d’une autre image\.$/);
   assert.equal(withPhoto(still, photo(8), 1, { id: id(18) }).montage, still);
   // A full montage takes no plan more.
   const full = { ...empty(), plans: Array.from({ length: MONTAGE_LIMITS.plans }, (_, n) => ({ id: id(n + 100), source: source(5), kind: 'video', from: 0, to: 1, frame: 'fit', volume: 1 })) };
@@ -101,8 +102,8 @@ test('a photo laid above a video cuts it there: the film will cut on the photo (
   const cut = withPhoto(part, photo(2), 3, { id: id(16) }).montage;
   assert.deepEqual([shape(cut), cut.plans[1].replaces], [[['video', 2, 5, null, null], ['à faire', 0, 4, id(2), null]], { source: source(5), from: 5, to: 9 }]);
   // Too near its start, nothing of it would be left; too near its end, nothing to replace.
-  assert.match(withPhoto(laid, photo(2), 0.3, { id: id(16) }).reason, /^Posez la photo plus loin/);
-  assert.match(withPhoto(laid, photo(2), 9.5, { id: id(16) }).reason, /^Posez la photo plus tôt/);
+  assert.match(withPhoto(laid, photo(2), 0.3, { id: id(16) }).reason, /^Posez l’image plus loin dans la vidéo : avant elle, il ne resterait rien de cette prise\.$/);
+  assert.match(withPhoto(laid, photo(2), 9.5, { id: id(16) }).reason, /^Posez l’image plus tôt dans la vidéo, ou après la fin pour une nouvelle prise\.$/);
   assert.equal(withPhoto(laid, photo(2), 9.5, { id: id(16) }).montage, laid);
 });
 
@@ -347,7 +348,7 @@ test('what is left to create is read in the order of the film, each plan ready o
   // (0.6.159) Without its text too: what stops it is the video cut before its end, not its text, and that
   // is what is said (`blocked`): its line said nothing, and « Créer » left it out without a word. A take
   // without its text that nothing else stops is only asked for its text.
-  const CUT = 'La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une photo de début.',
+  const CUT = 'La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une image de début.',
     mute = withItemChanged(shortened, id(13), { prompt: '  ' }),
     [stuck] = seriesOf(mute, lengthOf),
     [asked] = seriesOf(withItemChanged(made, id(13), { prompt: '' }), lengthOf);
@@ -458,10 +459,10 @@ test('a photo laid in a place of a take to create is its start or its end, never
   // Laid again in a place: it replaces the one there.
   assert.deepEqual(withPhotoIn(both, photo(4), id(41), 'start').montage.plans[2].photos, { start: source(4) });
   for (const [given, who, side, said] of [
-    [photo(1), id(40), 'start', /^Une suite part de la fin de sa vidéo/],
-    [clip(6, 2), id(41), 'start', /^Seule une image/],
-    [photo(1), id(15), 'end', /prise à créer/],
-    [photo(1), id(41), 'middle', /de début ou de fin/],
+    [photo(1), id(40), 'start', /^Une suite part de la fin de sa vidéo : elle n’a que son image de fin\.$/],
+    [clip(6, 2), id(41), 'start', /^Seule une image se pose en début ou en fin de prise\.$/],
+    [photo(1), id(15), 'end', /^Une image se pose au début ou à la fin d’une prise à créer\.$/],
+    [photo(1), id(41), 'middle', /^Une image est de début ou de fin\.$/],
   ]) {
     const tried = withPhotoIn(drawn, given, who, side);
     assert.equal(tried.montage, drawn);

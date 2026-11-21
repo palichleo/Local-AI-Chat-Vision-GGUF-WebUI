@@ -456,7 +456,10 @@ test('a reference that depends on a LoRA switches it on, or is refused in plain 
   assert.equal(workflowSchema(workflow).properties.loras, undefined, 'not offered to the model');
   const without = structuredClone(workflow);
   without.loras[0].enabled = { policy: 'off' };
-  await assert.rejects(resolve([{ input: 'subject-1', image: 0 }], without), /référence de sujet.*LoRA/);
+  // (0.6.190) Said of the subject, by the name of its case.
+  await assert.rejects(resolve([{ input: 'subject-1', image: 0 }], without), {
+    message: 'LTX 2.5 ne peut pas utiliser de sujet : le LoRA nécessaire n’est pas activé dans ce workflow.',
+  });
 });
 
 test('an optional component whose file is absent is left out; the workflow still runs', async () => {

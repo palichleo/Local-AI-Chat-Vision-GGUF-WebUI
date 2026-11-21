@@ -49,10 +49,11 @@ const MAIN = new Set(['frames', 'width', 'height', 'seed']);
 // Sound settings that matter to every take: shown in the main area too.
 const SOUND_MAIN = ['seconds', 'language'];
 const ADVANCED_FIRST = ['frames', 'fps', 'audio', 'width', 'height'];
+// (0.6.190) Said of « sujets », the cases that receive a character, an object or a place.
 const HELP = {
   msr_frames:
-    'Chaque référence de sujet est montrée au modèle comme un court plan fixe de ce nombre d’images, avant la vidéo : plus long, elle pèse un peu plus et coûte un peu plus de calcul.',
-  msr_strength: 'À quel point la vidéo suit les références de sujet (1 : au plus près).',
+    'Chaque sujet est montré au modèle comme un court plan fixe de ce nombre d’images, avant la vidéo : plus long, il pèse un peu plus et coûte un peu plus de calcul.',
+  msr_strength: 'À quel point la vidéo suit ses sujets (1 : au plus près).',
 };
 // Settings that only matter with a subject reference, and the role that brings one.
 const SUBJECT_ROLE = 'msr_image';
@@ -61,6 +62,11 @@ const numeric = value => typeof value === 'number' && Number.isFinite(value);
 // The places of the inputs in a card: the frames of the clip, the video followed; the rest are references.
 const PLACES = { start_image: 'DÉBUT', end_image: 'FIN' };
 const SOURCES = new Set(['source_video', 'driving_video', 'source_image', 'img2img']);
+// (0.6.190) What a source is for, said over it in a card instead of « SOURCE »: the end of the name the
+// server gives its role (« Image à modifier », « Vidéo à prolonger », « Vidéo à suivre »), in capitals;
+// by its role alone when the proposal names none.
+const DOING = { img2img: 'À MODIFIER', source_image: 'À AGRANDIR', source_video: 'À PROLONGER', driving_video: 'À SUIVRE' };
+const doing = (label, role) => /(?:^|\s)(à\s.+)$/i.exec(String(label ?? ''))?.[1].toUpperCase() ?? DOING[role] ?? 'ENTRÉE';
 const seconds = value => value.toFixed(2).replace('.', ',') + ' s';
 // A limit as it is said to the user: « 0,6 ».
 const decimal = value => String(value).replace('.', ',');
@@ -75,7 +81,7 @@ const decimal = value => String(value).replace('.', ',');
  * length in one click (2 · 4 · 6 · 8 · 10 s), the version and the seed under « Paramètres avancés »,
  * the prompt folded with « Revenir au prompt de Moodix », the choice of Moodix marked « proposé »;
  * the two folds are given back (`folds`: their name and their panel) for the card to place. Its
- * inputs are pictures (DÉBUT and FIN in the shape of the format, a rule, RÉF. 1…), « + » where the
+ * inputs are pictures (DÉBUT and FIN in the shape of the format, a rule, SUJET 1…), « + » where the
  * workflow takes one more (`onAdd(role)`: « Créations du projet » opens under them, in the card);
  * each case says its role (`data-role`) for an image dropped or pasted on it; a changed value turns
  * to the accent (`is-changed`). `form.shelf`: the place of « Créations du projet ».
@@ -518,13 +524,17 @@ export function renderProposal(container, request, { node, onStage, card = false
 
   /**
    * The inputs of a card as pictures (captures 11 and 12): the video followed, DÉBUT and FIN in the
-   * shape of the format, a rule, then the references (RÉF. 1…); « + » where the workflow takes one
+   * shape of the format, a rule, then the subjects (SUJET 1…); « + » where the workflow takes one
    * more: « Créations du projet » opens in the card, and the image chosen goes in that case.
    */
   function showMedia() {
     if (!media) return;
     const roleOf = index => roleControls.find(item => item.index === index)?.control.value ?? plan.references[index].role,
-      placed = (plan.references || []).map((ref, index) => ({ ref, role: roleOf(index) })),
+      // (0.6.190) The name the server gives that role (« Vidéo à prolonger »): a source says with it what is done with it.
+      nameOf = (index, role) =>
+        editable.references?.[index]?.find(option => option.role === role)?.label ??
+        (role === plan.references[index].role ? plan.references[index].roleLabel : ''),
+      placed = (plan.references || []).map((ref, index) => ({ ref, role: roleOf(index), name: nameOf(index, roleOf(index)) })),
       slots = request.inputRoles || [],
       ratio = numeric(size.width) && numeric(size.height) && size.height > 0 ? size.width / size.height : 16 / 9;
     const referenceRole = slots.find(role => !SOURCES.has(role) && !PLACES[role]) ?? 'reference',
@@ -557,7 +567,7 @@ export function renderProposal(container, request, { node, onStage, card = false
       return box;
     };
     const frames = [];
-    for (const { ref, role } of placed.filter(item => SOURCES.has(item.role))) frames.push(tile(ref, 'SOURCE', { role }));
+    for (const { ref, role, name } of placed.filter(item => SOURCES.has(item.role))) frames.push(tile(ref, doing(name, role), { role }));
     for (const [role, label] of Object.entries(PLACES)) {
       const found = placed.find(item => item.role === role);
       if (found) frames.push(tile(found.ref, label, { role }));
@@ -566,9 +576,9 @@ export function renderProposal(container, request, { node, onStage, card = false
     }
     const references = placed.filter(item => !SOURCES.has(item.role) && !PLACES[item.role]),
       room = Math.min(3, slots.filter(role => !SOURCES.has(role) && !PLACES[role]).length);
-    const refs = references.map(({ ref, role }, index) => tile(ref, 'RÉF. ' + (index + 1), { shape: 0, role }));
+    const refs = references.map(({ ref, role }, index) => tile(ref, 'SUJET ' + (index + 1), { shape: 0, role }));
     if (references.length < room)
-      refs.push(tile(null, '', { shape: 0, role: referenceRole, add: 'Ajouter une image de référence' }));
+      refs.push(tile(null, '', { shape: 0, role: referenceRole, add: 'Ajouter un sujet' }));
     media.replaceChildren(...frames, ...(frames.length && refs.length ? [node('span', 'proposal-media-rule')] : []), ...refs);
     media.hidden = !frames.length && !refs.length;
     emptyRoles = empties;

@@ -53,7 +53,9 @@ const ROLES = {
   source: 'Image à modifier',
   start_image: 'Image de début',
   end_image: 'Image de fin',
-  reference: 'Référence',
+  // (0.6.190) « Sujet », no longer « Référence »: the case receives a character, an object or a place;
+  // #ref and « Références du projet » are files, and keep their name.
+  reference: 'Sujet',
 };
 // Each input image says what it is with a picto, never a word (moodix-design.md 13): its name is
 // in its tooltip and for screen readers. A reference shows « @ », and « @1 » once given.
@@ -106,7 +108,7 @@ function settingValue(setting, value) {
 /**
  * (0.6.102) What the Studio says when an input the model cannot do without is missing, by its role:
  * the video to follow and the character of a replacement, the image to modify, the start and end
- * images, a reference.
+ * images, a subject (0.6.190: « Ajoutez un sujet. », no longer « une image de référence »).
  */
 function missingInput(workflow, role, spec) {
   const video = spec.media?.includes('video');
@@ -114,7 +116,7 @@ function missingInput(workflow, role, spec) {
   if (role === 'source') return video ? 'Ajoutez la vidéo à prolonger.' : 'Ajoutez l’image à modifier.';
   if (role === 'start_image') return 'Ajoutez l’image de début.';
   if (role === 'end_image') return 'Ajoutez l’image de fin.';
-  return video ? 'Ajoutez une vidéo de référence.' : 'Ajoutez une image de référence.';
+  return 'Ajoutez un sujet.';
 }
 /**
  * (0.6.188) The first input the model cannot do without that is not given yet, said as above; '' when none
@@ -210,7 +212,8 @@ const twoFigures = value => (Math.round(Number(value) * 100) / 100).toFixed(2).p
 // A length as everywhere: « 05.17 S » (16/11: no small « s » in the settings any more).
 const seconds = value => twoFigures(value) + ' S';
 // The name a slot shows while something that it takes is carried (studio-maquette.md, « Glisser »).
-const SHORT = { start_image: 'Début', end_image: 'Fin', reference: 'Réf.', source: 'Image', source_video: 'Vidéo' };
+// (0.6.190) « Sujet 2 », no longer « Réf. 2 ».
+const SHORT = { start_image: 'Début', end_image: 'Fin', reference: 'Sujet', source: 'Image', source_video: 'Vidéo' };
 const figures = value => twoFigures(value) + ' S';
 /** The length of a sound in the Sortie (capture 23): « 08.00 S », « 1:45 » from a minute. */
 const soundFigures = value => {
@@ -893,13 +896,14 @@ export function setupStudio({
       // take of the project is dragged to it from the Sortie).
       openPicker(role, index, media);
     });
-    // Named for the hand that carries something here (moodix.css): « FIN », « RÉF. 2 », « CHANGER ».
+    // Named for the hand that carries something here (moodix.css): « FIN », « SUJET 2 », « CHANGER ».
     // (0.6.187) « Changer », no longer « Remplacer »: in 12 px, as every word that names a piece now, the
     // longer word went past its case of 52 px, cut by the column under « Fin » (« REMPLACEI ») and over
     // the name of the case beside a reference (measured in the page on 21/11).
     tile.dataset.media = media;
     tile.dataset.name = value ? 'Changer' : (SHORT[role] ?? label) + (role === 'reference' ? ' ' + (index + 1) : '');
-    pick.title = refused || (value ? label + ' · glissez-la vers un autre emplacement pour changer son rôle' : tip);
+    // (0.6.190) « Sujet 1 · glissez-le » (le sujet); the image or the video of the other cases, « glissez-la ».
+    pick.title = refused || (value ? label + (role === 'reference' ? ' · glissez-le' : ' · glissez-la') + ' vers un autre emplacement pour changer son rôle' : tip);
     pick.setAttribute('aria-label', value ? label + ' · ' + value.name : refused ? label + ' · ' + refused : add);
     pick.disabled = Boolean(working);
     if (refused) pick.setAttribute('aria-disabled', 'true');
@@ -1078,7 +1082,7 @@ export function setupStudio({
     return block;
   }
   /**
-   * Bloc Références: a tray, no time; each image with its number (« @1 »), one empty slot at a
+   * Bloc Sujets (« Références » until 0.6.190): a tray, no time; each image with its number (« @1 »), one empty slot at a
    * time, and « n/3 » at the end of the line (the model's own most).
    */
   function referencesBlock(workflow) {
@@ -1095,7 +1099,7 @@ export function setupStudio({
       row = node('div', 'studio-references-row'),
       name = place => (most > 1 ? ROLES.reference + ' ' + (place + 1) : ROLES.reference);
     block.setAttribute('role', 'group');
-    block.setAttribute('aria-label', most > 1 ? 'Références' : 'Référence');
+    block.setAttribute('aria-label', most > 1 ? 'Sujets' : 'Sujet');
     shown.forEach((item, place) =>
       row.append(
         slot(workflow, 'reference', place, {
@@ -1112,14 +1116,14 @@ export function setupStudio({
       row.append(
         slot(workflow, 'reference', shown.length, {
           label: name(shown.length),
-          add: most > 1 ? 'Ajouter la référence ' + (shown.length + 1) : 'Ajouter la référence',
-          tip: 'Référence : personnage, objet ou décor · glisser, coller ou cliquer',
+          add: most > 1 ? 'Ajouter le sujet ' + (shown.length + 1) : 'Ajouter le sujet',
+          tip: 'Sujet : personnage, objet ou décor · glisser, coller ou cliquer',
         }),
       );
-    const head = node('p', 'studio-input-title', most > 1 ? 'Références' : 'Référence');
+    const head = node('p', 'studio-input-title', most > 1 ? 'Sujets' : 'Sujet');
     if (most > 1) {
       const count = node('span', 'studio-references-count', shown.length + '/' + most);
-      count.title = shown.length + ' référence' + (shown.length > 1 ? 's' : '') + ' sur ' + most;
+      count.title = shown.length + ' sujet' + (shown.length > 1 ? 's' : '') + ' sur ' + most;
       head.append(count);
     }
     block.append(head, row);
@@ -1172,7 +1176,7 @@ export function setupStudio({
     }
     if (!labels.length) return null;
     // An empty slot says how it is given on hover only (« … · glisser, coller ou cliquer »), as
-    // Début, Fin and Références (16/11).
+    // Début, Fin and Sujets (16/11).
     block.append(node('p', 'studio-input-title', workflow.follows ? 'Vidéo et personnage' : labels.length > 1 ? 'Images' : labels[0]));
     block.setAttribute('role', 'group');
     block.setAttribute(
@@ -3092,11 +3096,11 @@ export function setupStudio({
     }
     draft.prompt = text;
   }
-  // Where a take goes, said by the pointer: « pose la prise 26 en fin ».
+  // Where a take goes, said by the pointer: « pose la prise 26 en fin », « pose la prise 2 comme sujet » (0.6.190).
   const WHERE = {
     start_image: 'en début',
     end_image: 'en fin',
-    reference: 'en référence',
+    reference: 'comme sujet',
     source: 'à modifier',
     source_video: 'en vidéo à suivre',
   };

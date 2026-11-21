@@ -419,6 +419,63 @@ test('a take made with LoRAs of the user names them among its settings, by their
   assert.equal(texts[texts.indexOf('LoRA') + 1], '70sSCiFiKrea2Raw · 0,8\nkrea2_detail_slider · 1');
 });
 
+test('the window of a take names what it was made from by the role it played: « Sujet », no more « Référence » (0.6.190)', async t => {
+  // (0.6.190, capture 107) A subject is the case that receives a character, an object or a place. What a take
+  // modifies, enlarges or follows says so; a role the page does not know is an « Entrée », never a guess.
+  const { ui, $ } = await fixture(t);
+  const made = (n, mediaType = 'image') => ({
+    id: 'take-' + n,
+    conversationId: 'conversation',
+    mediaType,
+    workflowName: 'Krea 2',
+    prompt: 'Prise ' + n,
+    parameters: {},
+    outputs: [{ source: { filename: n + '.png' }, take: n }],
+  });
+  const list = [made(1), made(2), made(3), made(5, 'video')];
+  const lines = () => {
+    const texts = $('media-metadata').children.map(item => item.textContent);
+    return Object.fromEntries(texts.flatMap((text, at) => (at % 2 ? [] : [[text, texts[at + 1]]])));
+  };
+  const open = async (workflowName, references, mediaType = 'video') => {
+    const shown = {
+      id: 'shown',
+      conversationId: 'conversation',
+      mediaType,
+      workflowName,
+      prompt: 'Un phare',
+      createdAt: '2026-11-21T10:00:00Z',
+      parameters: { seed: 7, width: 1344, height: 768, references },
+      outputs: [
+        mediaType === 'video'
+          ? { source: { filename: 'clip.mp4', subfolder: 'video' }, originalUrl: '/clip.mp4', take: 9 }
+          : { source: { filename: 'image.png' }, analysisDataUrl: 'data:image/png;base64,AA==', take: 9 },
+      ],
+    };
+    await ui.viewOutput(shown, 0, undefined, { list: () => [shown, ...list], at: () => 0 });
+    return lines();
+  };
+  const from = (role, n) => ({ role, output_id: 'take-' + n });
+  // LTX 2.5: its start image, then its subject.
+  let shown = await open('LTX 2.5', [from('start_image', 1), from('msr_image', 2)]);
+  assert.deepEqual([shown['Image de début'], shown['Sujet'], 'Référence' in shown], ['PRISE 1', 'PRISE 2', false]);
+  // MiniMax H3: its two subjects on one line.
+  shown = await open('MiniMax H3 Omni', [from('reference_image', 2), from('reference_image', 3)]);
+  assert.equal(shown['Sujet'], 'PRISE 2, PRISE 3');
+  // SCAIL-2: the video it follows, and who it puts in it.
+  shown = await open('Wan 2.1 SCAIL-2', [from('driving_video', 5), from('reference_image', 2)]);
+  assert.deepEqual([shown['Vidéo suivie'], shown['Sujet']], ['PRISE 5', 'PRISE 2']);
+  // Krea 2 modifies an image, SeedVR2 enlarges one: neither is a subject.
+  shown = await open('Krea 2', [from('img2img', 3)], 'image');
+  assert.deepEqual([shown['Image modifiée'], 'Sujet' in shown], ['PRISE 3', false]);
+  shown = await open('Upscale SeedVR2', [from('source_image', 1)], 'image');
+  assert.deepEqual([shown['Image agrandie'], 'Sujet' in shown], ['PRISE 1', false]);
+  // A role it does not know: an input, without a guess.
+  shown = await open('Autre', [from('mask_image', 1)], 'image');
+  assert.deepEqual([shown['Entrée'], 'Sujet' in shown, 'Référence' in shown], ['PRISE 1', false, false]);
+  $('original-close').onclick();
+});
+
 test('the window of a take says how long it took to make, apart from « Durée », the length of its clip (0.6.93)', async t => {
   const { ui, $ } = await fixture(t);
   const take = parameters => ({

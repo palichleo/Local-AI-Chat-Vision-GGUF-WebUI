@@ -255,8 +255,8 @@ test('the card of a continuation by LTX 2.5 shows and takes what the model may p
   for (const [role, said] of [
     ['start_image', /LTX 2\.5 ne prend pas d’image de début pour la suite d’une vidéo\./],
     ['end_image', /LTX 2\.5 ne prend pas d’image de fin pour la suite d’une vidéo\./],
-    ['msr_image', /LTX 2\.5 ne prend pas de référence de sujet pour la suite d’une vidéo\./],
-    ['reference', /LTX 2\.5 ne prend pas de référence de sujet pour la suite d’une vidéo\./],
+    ['msr_image', /LTX 2\.5 ne prend pas de sujet pour la suite d’une vidéo\./],
+    ['reference', /LTX 2\.5 ne prend pas de sujet pour la suite d’une vidéo\./],
     ['nowhere', /LTX 2\.5 ne prend pas d’image à cet endroit\./],
   ])
     await assert.rejects(revise(runtime, proposal, { add: { role, source: { resource: IMAGE } } }), said, role);
@@ -285,9 +285,11 @@ test('inputs a family does not combine are refused on the card as they are to th
     one.plan.editable.references[0].map(option => option.role),
     ['start_image', 'end_image', 'reference_image'],
   );
+  // (0.6.190) Named « Sujet » in the list « Rôle » of the card.
+  assert.equal(one.plan.editable.references[0].find(option => option.role === 'reference_image').label, 'Sujet');
   await assert.rejects(
     revise(runtime, one, { add: { role: 'start_image', source: { resource: TWO } } }),
-    /MiniMax H3 ne prend pas ces entrées ensemble : image de référence et image de début\./,
+    /MiniMax H3 ne prend pas ces entrées ensemble : sujet et image de début\./,
   );
   const two = await revise(runtime, one, { add: { role: 'reference_image', source: { resource: TWO } } });
   assert.deepEqual(rolesOf(two), ['reference_image', 'reference_image']);
@@ -298,7 +300,7 @@ test('inputs a family does not combine are refused on the card as they are to th
   ]);
   await assert.rejects(
     revise(runtime, two, { references: [{ index: 0, role: 'start_image' }] }),
-    /MiniMax H3 ne prend pas ces entrées ensemble : image de référence et image de début\./,
+    /MiniMax H3 ne prend pas ces entrées ensemble : sujet et image de début\./,
   );
   const framed = await revise(runtime, two, {
     references: [
@@ -311,7 +313,7 @@ test('inputs a family does not combine are refused on the card as they are to th
   assert.deepEqual(framed.inputRoles, ['start_image', 'end_image']);
   await assert.rejects(
     revise(runtime, framed, { add: { role: 'reference_image', source: { resource: THREE } } }),
-    /MiniMax H3 ne prend pas ces entrées ensemble : image de référence, image de début et image de fin\./,
+    /MiniMax H3 ne prend pas ces entrées ensemble : sujet, image de début et image de fin\./,
   );
 
   // A continuation: references go with its clip, never a first or a last frame.

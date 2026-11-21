@@ -2588,7 +2588,8 @@ function userMessage(text, images, videos = []) {
       img.src = image.view || image.url;
       img.alt = image.name;
       img.decoding = 'async';
-      // Each under its label, as the references of a proposal (« RÉF. 1 »).
+      // Each under its label, « RÉF. 1 »: a file joined to a message is a reference of the project (the subjects
+      // of a proposal say « SUJET 1 » since 0.6.190).
       const figure = node('figure', 'message-ref');
       figure.append(img, node('figcaption', '', `RÉF. ${index + 1}`));
       previews.append(figure);

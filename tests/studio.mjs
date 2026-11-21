@@ -1817,18 +1817,23 @@ test('the input images: pictos and no word, start and end on a line of time, ref
     // Two blocks: the start and the end, the references below; none says « is-flash » yet.
     const [frames, references] = body.find('studio-input-block');
     assert.equal(frames.attributes['aria-label'], 'Début et fin');
-    assert.equal(references.attributes['aria-label'], 'Références');
+    // (0.6.190) « Sujets », no longer « Références »: the case receives a character, an object or a place
+    // (#ref and « Références du projet » are files, and keep their name).
+    assert.equal(references.attributes['aria-label'], 'Sujets');
+    assert.equal(references.find('studio-input-title')[0].textContent, 'Sujets');
     assert.doesNotMatch(frames.className, /is-flash/);
     // No word under the images: their names are for screen readers and in the tooltips.
     assert.deepEqual(body.find('studio-slot-label'), []);
     assert.deepEqual(
       picks().map(pick => pick.attributes['aria-label']),
-      ['Ajouter l’image de début', 'Ajouter l’image de fin', 'Ajouter la référence 1'],
+      ['Ajouter l’image de début', 'Ajouter l’image de fin', 'Ajouter le sujet 1'],
     );
     assert.equal(picks()[1].title, 'Image de fin (facultatif) · glisser, coller ou cliquer');
+    assert.equal(picks()[2].title, 'Sujet : personnage, objet ou décor · glisser, coller ou cliquer');
     // (0.6.187) What each case is named for the hand that carries a take over it: its short name; « Changer »
     // once it holds something (« Remplacer » was cut in 12 px, longer than its case).
-    assert.deepEqual(slots().map(tile => tile.dataset.name), ['Début', 'Fin', 'Réf. 1']);
+    // (0.6.190) « Sujet 1 », no longer « Réf. 1 ».
+    assert.deepEqual(slots().map(tile => tile.dataset.name), ['Début', 'Fin', 'Sujet 1']);
     // Empty, the start and the end show their pictos, a reference « @ ».
     assert.equal(picks()[0].children[0].tag, 'svg');
     assert.equal(picks()[2].children[0].textContent, '@');
@@ -1850,6 +1855,7 @@ test('the input images: pictos and no word, start and end on a line of time, ref
     await drop(0, 'a.png');
     assert.equal(slots()[0].find('studio-slot-badge').length, 1);
     assert.equal(picks()[0].attributes['aria-label'], 'Image de début · #ref1 · a.png');
+    assert.equal(picks()[0].title, 'Image de début · glissez-la vers un autre emplacement pour changer son rôle');
     assert.deepEqual(slots().map(tile => tile.dataset.name).slice(0, 2), ['Changer', 'Fin']);
     const [swap] = body.find('studio-swap');
     assert.equal(swap.attributes['aria-label'], 'Inverser début et fin');
@@ -1864,6 +1870,11 @@ test('the input images: pictos and no word, start and end on a line of time, ref
     await drop(3, 'c.png');
     assert.deepEqual(badges(), ['@1', '@2']);
     assert.equal(body.find('studio-references-count')[0].textContent, '2/3');
+    assert.equal(body.find('studio-references-count')[0].title, '2 sujets sur 3');
+    assert.match(picks()[2].attributes['aria-label'], /^Sujet 1 · /);
+    // (0.6.190) « glissez-le » : the subject, no longer « la » of « la référence ».
+    assert.equal(picks()[2].title, 'Sujet 1 · glissez-le vers un autre emplacement pour changer son rôle');
+    assert.deepEqual([picks()[4].attributes['aria-label'], slots()[4].dataset.name], ['Ajouter le sujet 3', 'Sujet 3']);
     assert.equal(slots().length, 5, 'start, end, two references and one empty slot');
     // @1 taken back: the next one becomes @1, no hole.
     body.find('studio-references')[0].find('studio-slot-remove')[0].onclick();
@@ -1873,6 +1884,7 @@ test('the input images: pictos and no word, start and end on a line of time, ref
       '/preview/c.png',
     );
     assert.equal(body.find('studio-references-count')[0].textContent, '1/3');
+    assert.equal(body.find('studio-references-count')[0].title, '1 sujet sur 3');
 
     // Another model: its blocks say so for a moment (a light line); a start image only, the line
     // ends with the length, no « ⇄ ».
@@ -2880,6 +2892,47 @@ test('a recorded proposal replayed: the pointer does what Moodix AI proposes, in
     assert.equal(await answer, 'deny');
   } finally {
     restore();
+  }
+});
+
+test('a model that cannot do without a subject asks for « un sujet »; Moodix AI lays a take there « comme sujet » (0.6.190)', async () => {
+  // (0.6.190) The case that receives a character, an object or a place is a « Sujet », no longer a « Référence »
+  // (#ref and « Références du projet » are files, and keep their name).
+  const omni = {
+    id: 'omni',
+    name: 'MiniMax H3 Omni',
+    verb: 'create_video',
+    limits: sizes,
+    size: { width: 768, height: 448 },
+    settings: [],
+    seeded: true,
+    roles: { reference: { count: 3, media: ['image'], many: true, required: true } },
+  };
+  const page = await studioPage({ create_video: [omni] }, {}, { querySelector: laidOutGo });
+  try {
+    page.mode(1);
+    page.prompt().value = 'Le vieux pêcheur lève les yeux vers le large.';
+    page.prompt().oninput();
+    const [go] = page.body.find('studio-go');
+    assert.deepEqual([go.disabled, go.title], [true, 'Ajoutez un sujet.']);
+  } finally {
+    page.restore();
+  }
+  // A take Moodix AI lays in that case: its pointer says where, in the same word.
+  const recorded = await recordedProposal(),
+    { tools, runs } = replayStudio(),
+    said = [];
+  Object.assign(recorded.request.plan.references[0], { input: 'subject-1', role: 'msr_image', roleLabel: 'Sujet' });
+  const replay = await studioPage(tools, {}, { runs, cursor: said, targets: true });
+  try {
+    const answer = replay.studio.propose(structuredClone(recorded.request), new AbortController().signal);
+    await until(() => said.includes('attend votre accord'));
+    assert.ok(said.includes('pose la prise 1 comme sujet'), said.join(' | '));
+    assert.equal(replay.body.find('studio-references')[0].find('studio-slot')[0].children[0].children[0].src, '/portrait.webp');
+    replay.studio.decline();
+    assert.equal(await answer, 'deny');
+  } finally {
+    replay.restore();
   }
 });
 
@@ -4416,10 +4469,10 @@ test('Moodix AI continues a clip of the disk (« #ref1 »): the Studio shows tha
     const shown = screenOf(body.find('studio-frame-result')[0]);
     assert.deepEqual([shown.tag, shown.src, shown.poster], ['video', '/media/view/original', '/media/view/preview']);
     assert.equal(body.find('studio-go-label')[0].textContent, 'Générer la suite');
-    // Not the cases of a new video (« Début et fin », « Références »), which have nothing to do with it.
+    // Not the cases of a new video (« Début et fin », « Sujets »), which have nothing to do with it.
     const titles = body.find('studio-input-title').map(title => title.textContent);
     assert.equal(titles.includes('Début et fin'), false, titles.join(' | '));
-    assert.equal(titles.some(title => title.startsWith('Références')), false, titles.join(' | '));
+    assert.equal(titles.some(title => title.startsWith('Sujet')), false, titles.join(' | '));
     // Nor an empty case for « the video to follow »: the clip continued is named above, it is not asked again.
     assert.deepEqual(body.find('studio-slot').map(tile => tile.dataset.slot), [], titles.join(' | '));
     assert.equal(page.prompt().value, request.plan.prompt);
@@ -4678,11 +4731,11 @@ test('when Moodix AI wrote nothing the Studio says the proposal in a sentence of
   });
   assert.equal(
     proposalSentence(video([take(2, 'start_image'), take(3, 'end_image'), { label: '#ref1', role: 'msr_image' }])),
-    'Une vidéo de 5 secondes en 16:9 avec LTX 2.5, qui part de la prise 2 et finit sur la prise 3, avec #ref1 en référence.',
+    'Une vidéo de 5 secondes en 16:9 avec LTX 2.5, qui part de la prise 2 et finit sur la prise 3, avec #ref1 comme sujet.',
   );
   assert.equal(
     proposalSentence(video([take(4, 'end_image'), take(5, 'msr_image'), take(6, 'msr_image')])),
-    'Une vidéo de 5 secondes en 16:9 avec LTX 2.5, qui finit sur la prise 4, avec la prise 5 et la prise 6 en références.',
+    'Une vidéo de 5 secondes en 16:9 avec LTX 2.5, qui finit sur la prise 4, avec la prise 5 et la prise 6 comme sujets.',
   );
   // A continuation: what it adds, its frames less those it takes again from the clip.
   assert.equal(
@@ -5068,7 +5121,7 @@ test('the images of a proposal change role as the server offers, said by its own
     let answer = studio.propose(structuredClone(recorded.request), new AbortController().signal);
     await rested();
     assert.deepEqual(shown(), ['/portrait.webp', null, null]);
-    // To « Référence »: a role the server offers, under its own name.
+    // To « Sujet »: a role the server offers, under its own name.
     drag(0, 2);
     assert.equal(error(), null);
     assert.deepEqual(shown(), [null, null, '/portrait.webp', null]);

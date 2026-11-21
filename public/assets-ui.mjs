@@ -274,11 +274,19 @@ export function setupAssets({
         end_image: 'Image de fin',
         source_video: 'Vidéo suivie',
         source: 'Image modifiée',
+        // (0.6.190, capture 107) The case that receives a character, an object or a place: « Sujet », no longer
+        // « Référence ». What a take modifies, enlarges or follows is named so, never a subject.
+        msr_image: 'Sujet',
+        reference_image: 'Sujet',
+        img2img: 'Image modifiée',
+        source_image: 'Image agrandie',
+        driving_video: 'Vidéo suivie',
       },
       lines = new Map();
     for (const ref of parameters.references ?? []) {
       if (!ref?.output_id) continue;
-      const label = names[ref.role] ?? 'Référence',
+      // (0.6.190) A role this page does not know: an input, not a guess.
+      const label = names[ref.role] ?? 'Entrée',
         made = list.find(item => item.id === ref.output_id),
         take = made?.outputs?.[ref.output_index ?? 0]?.take,
         value = Number.isInteger(take) ? 'PRISE ' + take : 'Une création';

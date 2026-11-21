@@ -1335,8 +1335,10 @@ export function setupMontage({
       model = modelFor(wanted.verb);
     if (model) args.workflow = model;
     if (wanted.format) args.format = wanted.format;
-    if (wanted.start) args.start_image = named(wanted.start, wanted.start.frame ? 'La vidéo d’avant' : 'La photo de début');
-    if (wanted.end) args.end_image = named(wanted.end, 'La photo de fin');
+    // (0.6.190) « L’image de début », no longer « La photo de début »: « image » in every word of the Bobine
+    // (capture 104); the track keeps its name (PHOTOS), the data their keys (photos).
+    if (wanted.start) args.start_image = named(wanted.start, wanted.start.frame ? 'La vidéo d’avant' : 'L’image de début');
+    if (wanted.end) args.end_image = named(wanted.end, 'L’image de fin');
     if (wanted.continues) args.source = named({ source: wanted.continues }, 'La vidéo continuée');
     return args;
   }
@@ -1381,20 +1383,20 @@ export function setupMontage({
       if (model && !span.dataset.state) span.textContent = model.name;
     }
   }
-  /** What a line of « À créer » says of what it is: « Suite de la prise 24 · photo de fin », « Nouvelle prise ». */
+  /** What a line of « À créer » says of what it is: « Suite de la prise 24 · image de fin » (0.6.190), « Nouvelle prise ». */
   function whatOf(plan) {
     const link = linkOf(montage, plan.id, lengthOf),
       before = montage.plans[montage.plans.indexOf(plan) - 1],
       // (0.6.149) Only a suite goes on from the take before it (after a take to create, once that one is
       // made: « Suite de la prise à créer »); one no longer joined to its video says so.
       suite = Boolean(plan.todo.suite) && !plan.photos?.start,
-      photos = [plan.photos?.start && !suite ? 'photo de début' : '', plan.photos?.end ? 'photo de fin' : ''].filter(Boolean);
+      photos = [plan.photos?.start && !suite ? 'image de début' : '', plan.photos?.end ? 'image de fin' : ''].filter(Boolean);
     const first = !suite
       ? 'Nouvelle prise'
       : link.kind === 'loose'
         ? 'Suite détachée de sa vidéo'
         : 'Suite de la ' + (takeLabel(before?.source) || 'prise à créer').toLowerCase();
-    return [first, photos.length === 2 ? 'photos de début et de fin' : photos[0]].filter(Boolean).join(' · ');
+    return [first, photos.length === 2 ? 'images de début et de fin' : photos[0]].filter(Boolean).join(' · ');
   }
   const stateOf = id =>
     beingMade(id)
@@ -1811,7 +1813,7 @@ export function setupMontage({
     const plan = itemOf(id),
       asked = plan ? picturesFor(plan) : null;
     if (!write || !asked) {
-      failed.set(id, 'Moodix AI n’a rien à regarder : posez une photo de début ou de fin, ou écrivez ce qui se passe.');
+      failed.set(id, 'Moodix AI n’a rien à regarder : posez une image de début ou de fin, ou écrivez ce qui se passe.');
       return false;
     }
     const controller = (series.controller = new AbortController());
@@ -2088,7 +2090,7 @@ export function setupMontage({
     writing = null;
     await keep();
     // (0.6.155) Stopped by the user: nothing to say.
-    status = stopped ? '' : problem || (unseen && !done ? 'Moodix AI n’a rien à regarder : posez une photo de début ou de fin, ou écrivez vous-même.' : '');
+    status = stopped ? '' : problem || (unseen && !done ? 'Moodix AI n’a rien à regarder : posez une image de début ou de fin, ou écrivez vous-même.' : '');
     draw();
   }
 
@@ -2352,8 +2354,9 @@ export function setupMontage({
       volume.onchange = () => update();
       bar.append(volume, figure, part());
     } else if (isTodo(item)) {
-      if (item.photos?.start) bar.append(button('montage-pop-button', '', () => change(withoutPhoto(montage, item.id, 'start')), 'start', 'Retirer la photo de début'));
-      if (item.photos?.end) bar.append(button('montage-pop-button', '', () => change(withoutPhoto(montage, item.id, 'end')), 'end', 'Retirer la photo de fin'));
+      // (0.6.190) « Retirer l’image de début », no longer « la photo »: « image » in every word of the Bobine.
+      if (item.photos?.start) bar.append(button('montage-pop-button', '', () => change(withoutPhoto(montage, item.id, 'start')), 'start', 'Retirer l’image de début'));
+      if (item.photos?.end) bar.append(button('montage-pop-button', '', () => change(withoutPhoto(montage, item.id, 'end')), 'end', 'Retirer l’image de fin'));
       if (item.photos?.start || item.photos?.end) bar.append(part());
     } else {
       if (item.kind === 'video') {
@@ -2456,7 +2459,8 @@ export function setupMontage({
             });
           pin.dataset.plan = plan.id;
           pin.dataset.missing = String(Boolean(photo) && !record);
-          pin.setAttribute('aria-label', `${side === 'start' ? 'Photo de début' : 'Photo de fin'}, ${span}${empty ? ' : glissez une image ici' : ''}`);
+          // (0.6.190) « Image de début », no longer « Photo de début »; the track keeps its name (PHOTOS).
+          pin.setAttribute('aria-label', `${side === 'start' ? 'Image de début' : 'Image de fin'}, ${span}${empty ? ' : glissez une image ici' : ''}`);
           pin.setAttribute('aria-pressed', String(chosen === plan.id));
           if (picture) pin.style.backgroundImage = `url("${picture}")`;
           if (side === 'start') pin.style.left = percent(starts[index]);
@@ -2476,7 +2480,7 @@ export function setupMontage({
       if (!montage.plans.length)
         for (const side of ['start', 'end']) {
           const slot = button(`montage-photo is-${side} is-slot is-ghost`, '', null);
-          slot.setAttribute('aria-label', `${side === 'start' ? 'Photo de début' : 'Photo de fin'} d’une nouvelle prise : glissez une image ici`);
+          slot.setAttribute('aria-label', `${side === 'start' ? 'Image de début' : 'Image de fin'} d’une nouvelle prise : glissez une image ici`);
           if (side === 'start') slot.style.left = percent(0);
           else slot.style.right = `calc(${100 - (100 * TODO_LIMITS.usual) / whole}% + 4px)`;
           slot.append(icon('image'), node('span', 'montage-photo-side', side === 'start' ? 'Début' : 'Fin'));
@@ -2488,7 +2492,7 @@ export function setupMontage({
         }
       else if (carrying) {
         const fresh = button('montage-photo is-start is-slot is-new', '', null);
-        fresh.setAttribute('aria-label', 'Une nouvelle prise, qui part de cette photo, à la fin de la bobine');
+        fresh.setAttribute('aria-label', 'Une nouvelle prise, qui part de cette image, à la fin de la bobine');
         fresh.style.left = `calc(${percent(total())} + 4px)`;
         fresh.append(icon('image'), node('span', 'montage-photo-side', 'Début'));
         into(fresh, dropped => {

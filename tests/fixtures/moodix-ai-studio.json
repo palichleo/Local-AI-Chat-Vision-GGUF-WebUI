@@ -44,7 +44,7 @@
           [
             { "role": "start_image", "label": "Image de début" },
             { "role": "end_image", "label": "Image de fin" },
-            { "role": "msr_image", "label": "Référence de sujet" }
+            { "role": "msr_image", "label": "Sujet" }
           ]
         ]
       },

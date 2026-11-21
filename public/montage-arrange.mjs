@@ -198,9 +198,10 @@ function addRead(item, index, problems) {
     if (take !== undefined) problems.push(`${which} n’a ni texte ni prise : il est laissé de côté.`);
     return [];
   }
+  // (0.6.190) « image », no longer « photo », in what is said to the user.
   const photo = (side, label) => {
     const number = numberOf(item[side]);
-    if (number === undefined) problems.push(`${which} a une photo de ${label} illisible (${cited(item[side])}) : elle est laissée de côté.`);
+    if (number === undefined) problems.push(`${which} a une image de ${label} illisible (${cited(item[side])}) : elle est laissée de côté.`);
     return number ?? null;
   };
   return [{ text, seconds, link: linkRead(item.link), start: photo('start', 'début'), end: photo('end', 'fin') }];
@@ -266,11 +267,12 @@ function todoLaid(montage, item, { recordOf, newId, tell, lengthOf }) {
     text = textOf(item.text, ARRANGE_LIMITS.text),
     wanted = Number.isFinite(item.seconds) ? item.seconds : null,
     seconds = clamp(wanted ?? TODO_LIMITS.usual, TODO_LIMITS.shortest, TODO_LIMITS.longest);
+  // (0.6.190) « image », no longer « photo », in what is said to the user.
   const photoOf = (number, label) => {
     if (!Number.isInteger(number)) return null;
     const record = recordOf(number);
-    if (!record) tell(id, `La prise ${number} n’est pas dans ce projet : pas de photo de ${label}.`);
-    else if (trackOf(record) !== 'image') tell(id, `La prise ${number} n’est pas une image : elle ne peut pas être sa photo de ${label}.`);
+    if (!record) tell(id, `La prise ${number} n’est pas dans ce projet : pas d’image de ${label}.`);
+    else if (trackOf(record) !== 'image') tell(id, `La prise ${number} n’est pas une image : elle ne peut pas être son image de ${label}.`);
     else return record;
     return null;
   };
@@ -278,7 +280,7 @@ function todoLaid(montage, item, { recordOf, newId, tell, lengthOf }) {
     end = photoOf(item.end, 'fin');
   let suite = item.link === 'suite';
   if (suite && start) {
-    tell(id, `Elle commence sur la prise ${item.start} : une suite ne commence pas sur une photo, c’est un nouveau plan.`);
+    tell(id, `Elle commence sur la prise ${item.start} : une suite ne commence pas sur une image, c’est un nouveau plan.`);
     suite = false;
   }
   // (Without a length, the usual one, unsaid: it is no repair.)

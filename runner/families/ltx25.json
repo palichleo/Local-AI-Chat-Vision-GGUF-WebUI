@@ -228,7 +228,7 @@
       "as": "reference",
       "media": "image",
       "max": 2,
-      "label": "Référence de sujet",
+      "label": "Sujet",
       "requiresLora": true
     },
     "source_video": {

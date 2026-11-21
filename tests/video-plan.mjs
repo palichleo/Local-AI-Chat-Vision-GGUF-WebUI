@@ -53,7 +53,7 @@ function proposal(overrides = {}) {
       prompt: 'A tiger runs',
       parameters: { width: 384, height: 256, frames: 121, fps: 24, seed: 7, audio: true, steps: 8 },
       references: [
-        { input: 'subject-1', role: 'msr_image', roleLabel: 'Référence de sujet', label: 'Upscale SeedVR2' },
+        { input: 'subject-1', role: 'msr_image', roleLabel: 'Sujet', label: 'Upscale SeedVR2' },
       ],
       editable: {
         prompt: true,
@@ -62,7 +62,7 @@ function proposal(overrides = {}) {
           [
             { role: 'start_image', label: 'Image de début' },
             { role: 'end_image', label: 'Image de fin' },
-            { role: 'msr_image', label: 'Référence de sujet' },
+            { role: 'msr_image', label: 'Sujet' },
           ],
         ],
         parameters: [
@@ -142,6 +142,9 @@ test('subject-reference settings show only while an input is a subject reference
   const wrapper = label => all(box).find(item => item.tag === 'label' && item.children[0]?.textContent === label);
   assert.equal(wrapper('Longueur des références (images)').hidden, false);
   assert.match(text(wrapper('Longueur des références (images)')), /court plan fixe/);
+  // (0.6.190) What they do, said of « sujets »: the cases that receive a character, an object or a place.
+  assert.match(text(wrapper('Longueur des références (images)')), /Chaque sujet est montré au modèle comme un court plan fixe de ce nombre d’images, avant la vidéo : plus long, il pèse un peu plus/);
+  assert.match(text(wrapper('Force des références')), /À quel point la vidéo suit ses sujets \(1 : au plus près\)\./);
   const role = all(box).find(item => item.attributes['aria-label'] === 'Rôle de Upscale SeedVR2');
   role.value = 'start_image';
   role.onchange();
@@ -277,7 +280,7 @@ test('in the card of the conversation: the length in one click, version and seed
   request.inputRoles = ['start_image', 'end_image', 'source_video', 'msr_image', 'msr_image'];
   request.plan.references[0].preview = '/media/ref.png';
   const form = renderProposal(box, request, { node, card: true });
-  // The inputs as pictures: DÉBUT and FIN to give, a rule, RÉF. 1, and one more the workflow takes.
+  // The inputs as pictures: DÉBUT and FIN to give, a rule, SUJET 1 (0.6.190), and one more the workflow takes.
   const media = all(box).find(item => item.className === 'proposal-media');
   assert.deepEqual(
     media.children.map(item => [item.className, item.children[1]?.textContent ?? '']),
@@ -285,11 +288,12 @@ test('in the card of the conversation: the length in one click, version and seed
       ['proposal-input is-empty', 'DÉBUT'],
       ['proposal-input is-empty', 'FIN'],
       ['proposal-media-rule', ''],
-      ['proposal-input is-reference', 'RÉF. 1'],
+      ['proposal-input is-reference', 'SUJET 1'],
       ['proposal-input is-empty is-reference', ''],
     ],
   );
   assert.equal(media.children[3].children[0].children[0].src, '/media/ref.png');
+  assert.equal(media.children[4].children[0].attributes['aria-label'], 'Ajouter un sujet');
   assert.equal(media.children[0].children[0].disabled, true, 'nothing to join an image with: greyed');
   // The prompt is folded at the foot of the card, with its way back to the prompt of Moodix.
   assert.equal(labelled(box, 'Prompt'), undefined);
@@ -381,4 +385,67 @@ test('an image made from another: « Débruitage » among the advanced settings 
   renderProposal(alone, image(false), { node });
   assert.equal(labelled(alone, 'Débruitage'), undefined);
   assert.ok(labelled(alone, 'Largeur'));
+});
+
+test('in a card a source says what is done with it, « À MODIFIER », « À PROLONGER », « À SUIVRE »; a subject is « SUJET 1 » (0.6.190)', () => {
+  // (0.6.190, captures 105 and 107) « SOURCE » said nothing of what the model does with it. The end of the name the
+  // server gives its role does (runner/families: « Image à modifier », « Vidéo à prolonger », « Vidéo à suivre »),
+  // by its role alone when the proposal names none. The data keep their keys: only the word shown changes.
+  const captions = request => {
+    const box = node('section');
+    renderProposal(box, request, { node, card: true });
+    return all(box)
+      .find(item => item.className === 'proposal-media')
+      .children.map(item => item.children[1]?.textContent ?? '');
+  };
+  const card = (mediaType, workflowName, inputRoles, references, options) => ({
+    mediaType,
+    workflowName,
+    inputRoles,
+    plan: {
+      prompt: 'x',
+      parameters: { width: 768, height: 448, frames: 121, fps: 24, seed: 7 },
+      references,
+      editable: {
+        prompt: true,
+        stages: [],
+        references: options ?? references.map(ref => [{ role: ref.role, label: ref.roleLabel }]),
+        parameters: [],
+      },
+    },
+  });
+  // Krea 2: the image it modifies.
+  assert.deepEqual(captions(card('image', 'Krea 2', ['img2img'], [{ input: 'source', role: 'img2img', roleLabel: 'Image à modifier', label: '#ref1' }])), ['À MODIFIER']);
+  // MiniMax H3: the clip it continues, then a subject, and a case for one more.
+  assert.deepEqual(
+    captions(
+      card('video', 'MiniMax H3 Omni', ['source_video', 'reference_image', 'reference_image'], [
+        { input: 'source', role: 'source_video', roleLabel: 'Vidéo à prolonger', label: 'Prise 4' },
+        { input: 'subject-1', role: 'reference_image', roleLabel: 'Sujet', label: 'Prise 2' },
+      ]),
+    ),
+    ['À PROLONGER', '', 'SUJET 1', ''],
+  );
+  // SCAIL-2: the video it follows, then who is put in it.
+  assert.deepEqual(
+    captions(
+      card('video', 'Wan 2.1 SCAIL-2', ['driving_video', 'reference_image'], [
+        { input: 'video', role: 'driving_video', roleLabel: 'Vidéo à suivre', label: 'Prise 5' },
+        { input: 'character', role: 'reference_image', roleLabel: 'Personnage', label: 'Prise 2' },
+      ]),
+    ),
+    ['À SUIVRE', '', 'SUJET 1'],
+  );
+  // RIFE and Real-ESRGAN: the same role as a continuation, other names, other words; read in the list « Rôle » of
+  // the card, else in the name sent with the input.
+  assert.deepEqual(
+    captions(card('video', 'Interpoler (RIFE 4.26)', ['source_video'], [{ input: 'source', role: 'source_video', label: 'Prise 4' }], [[{ role: 'source_video', label: 'Vidéo à fluidifier' }]])),
+    ['À FLUIDIFIER'],
+  );
+  assert.deepEqual(
+    captions(card('video', 'Upscale vidéo (Real-ESRGAN ×2)', ['source_video'], [{ input: 'source', role: 'source_video', roleLabel: 'Vidéo à agrandir', label: 'Prise 4' }], [])),
+    ['À AGRANDIR'],
+  );
+  // Its name unknown (its role alone): the word of its role all the same.
+  assert.deepEqual(captions(card('image', 'Krea 2', ['img2img'], [{ input: 'source', role: 'img2img', label: '#ref1' }], [])), ['À MODIFIER']);
 });

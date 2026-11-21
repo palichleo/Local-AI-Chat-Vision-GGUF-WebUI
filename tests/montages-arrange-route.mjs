@@ -146,3 +146,24 @@ test('the plan of a request written in the Bobine is asked to the chat model, wi
   assert.equal(sent.length, before + 1);
   answers.length = 0;
 });
+
+test('a plan with nothing to look at is refused in the words of the Bobine: « aucune image », no more « photo » (0.6.190)', async t => {
+  const data = await folder(t);
+  const app = await createApplication({
+    port: 0,
+    dataDir: data,
+    outputDir: join(data, 'output'),
+    openUrl: () => {},
+    spawnProcess: () => {
+      throw Error('llama.cpp started');
+    },
+  });
+  t.after(() => app.close());
+  const boot = await (await fetch(app.url + '/api/bootstrap')).json(),
+    refused = await fetch(app.url + '/api/montages/describe', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + boot.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seconds: 5, verb: 'create_video' }),
+    });
+  assert.deepEqual([refused.status, (await refused.json()).error], [400, 'Ce plan n’a aucune image à regarder.']);
+});

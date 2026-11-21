@@ -106,7 +106,7 @@ test('the text of a plan is the answer of the chat model, the prompt alone; why 
   }
   // No picture within reach, a refusal, a few words for an answer.
   const none = engine();
-  assert.deepEqual(await planPrompt({ start: { output: 'gone' }, seconds: 5, verb: 'create_video' }, { ...places, engine: none }), { reason: 'Les photos de cette prise sont introuvables.' });
+  assert.deepEqual(await planPrompt({ start: { output: 'gone' }, seconds: 5, verb: 'create_video' }, { ...places, engine: none }), { reason: 'Les images de cette prise sont introuvables.' });
   assert.equal(none.asked.length, 0);
   assert.deepEqual(await planPrompt({ start: { output: 'photo' }, seconds: 5, verb: 'create_video' }, { ...places, engine: engine({ ok: false, status: 500 }) }), { reason: 'Le modèle de chat a refusé la demande (500).' });
   assert.deepEqual(await planPrompt({ start: { output: 'photo' }, seconds: 5, verb: 'create_video' }, { ...places, engine: engine(answer('<think>hmm</think>A man looks up.')) }), { reason: 'Le modèle de chat a répondu trop court. Réessayez.' });

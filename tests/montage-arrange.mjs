@@ -183,9 +183,9 @@ test('a take is named « prise 3 », « take 3 », « #3 » or 3; nothing, null;
   ]) {
     assert.deepEqual(read('start', name), {
       arrangement: { say: '', fill: [], add: [todo('La mer.', { seconds: null })] },
-      problems: [`Le 1er ajout du plan a une photo de début illisible (${shown}) : elle est laissée de côté.`],
+      problems: [`Le 1er ajout du plan a une image de début illisible (${shown}) : elle est laissée de côté.`],
     });
-    assert.deepEqual(read('end', name).problems, [`Le 1er ajout du plan a une photo de fin illisible (${shown}) : elle est laissée de côté.`]);
+    assert.deepEqual(read('end', name).problems, [`Le 1er ajout du plan a une image de fin illisible (${shown}) : elle est laissée de côté.`]);
   }
   // A take of the project, by the same names.
   for (const name of ['prise 9', 'Take 9', '#9', 9, 'video prise 9', 'image prise 9']) assert.deepEqual(readArrangement(JSON.stringify({ add: [{ take: name }] })).arrangement.add, [{ take: 9, seconds: null }]);
@@ -395,7 +395,7 @@ test('after a take to create, a suite waits for it (0.6.161)', () => {
 test('a suite that starts on a photo is a new shot on that photo (0.6.161)', () => {
   const result = arranged(withTake(empty(), clip(5, 5), { id: id(10) }), [todo('Le phare s’allume.', { link: 'suite', start: 1, end: 3 })]);
   assert.deepEqual(shape(result.montage)[1], ['à créer', 5, 5, 'Le phare s’allume.', false, 1, 3]);
-  assert.deepEqual([links(result), said(result)], [['photo'], [[id(500), 'Elle commence sur la prise 1 : une suite ne commence pas sur une photo, c’est un nouveau plan.']]]);
+  assert.deepEqual([links(result), said(result)], [['photo'], [[id(500), 'Elle commence sur la prise 1 : une suite ne commence pas sur une image, c’est un nouveau plan.']]]);
 });
 
 test('a photo that is not of the project, or no image, is left out, and said (0.6.161)', () => {
@@ -411,12 +411,12 @@ test('a photo that is not of the project, or no image, is left out, and said (0.
   assert.equal(result.montage.plans.some(item => item.photos), false);
   assert.deepEqual(links(result), ['own', 'wait']);
   assert.deepEqual(said(result), [
-    [id(500), 'La prise 42 n’est pas dans ce projet : pas de photo de début.'],
-    [id(500), 'La prise 5 n’est pas une image : elle ne peut pas être sa photo de fin.'],
-    [id(501), 'La prise 7 n’est pas une image : elle ne peut pas être sa photo de début.'],
-    [id(501), 'La prise 8 n’est pas une image : elle ne peut pas être sa photo de fin.'],
+    [id(500), 'La prise 42 n’est pas dans ce projet : pas d’image de début.'],
+    [id(500), 'La prise 5 n’est pas une image : elle ne peut pas être son image de fin.'],
+    [id(501), 'La prise 7 n’est pas une image : elle ne peut pas être son image de début.'],
+    [id(501), 'La prise 8 n’est pas une image : elle ne peut pas être son image de fin.'],
   ]);
-  assert.deepEqual(said(arranged(empty(), [todo('La nuit tombe.', { end: 42 })])), [[id(500), 'La prise 42 n’est pas dans ce projet : pas de photo de fin.']]);
+  assert.deepEqual(said(arranged(empty(), [todo('La nuit tombe.', { end: 42 })])), [[id(500), 'La prise 42 n’est pas dans ce projet : pas d’image de fin.']]);
 });
 
 test('a take of the project is laid as it is: a video whole, an image for its seconds; a sound or an unknown take is not (0.6.161)', () => {

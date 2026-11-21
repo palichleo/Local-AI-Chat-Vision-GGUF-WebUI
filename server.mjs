@@ -685,7 +685,7 @@ export async function createApplication({
         name: Number.isInteger(output.take) ? 'Prise ' + output.take : record.workflowName,
       };
     },
-    // The picture of an input of a proposal, for its card (DÉBUT, FIN, RÉF. n): the image the user
+    // The picture of an input of a proposal, for its card (DÉBUT, FIN, SUJET n): the image the user
     // joined, the preview of a reference, the thumbnail of a take (an image take itself until it has
     // one). Null for anything else: the card shows its name.
     previewOf: (ref, conversationId, media) => {
@@ -2238,7 +2238,8 @@ export async function createApplication({
         const seconds = Number(body.seconds),
           source = value => value === undefined || (value && typeof value === 'object' && !Array.isArray(value));
         if (!(seconds > 0 && seconds <= 120) || !['create_video', 'extend_video'].includes(body.verb)) throw problem('Demande invalide.');
-        if (!source(body.start) || !source(body.end) || (!body.start && !body.end)) throw problem('Ce plan n’a aucune photo à regarder.');
+        // (0.6.190) « image », no longer « photo »: the words of the Bobine.
+        if (!source(body.start) || !source(body.end) || (!body.start && !body.end)) throw problem('Ce plan n’a aucune image à regarder.');
         if (runtime.active) throw problem('La génération utilise le GPU.', 409);
         if (chat.state !== 'ready') throw problem('Le moteur n’est pas prêt. Configure-le puis démarre-le.', 503);
         if (chat.busy) throw problem('Une réponse est déjà en cours.', 409);

@@ -444,9 +444,10 @@ export function withTodoDrawn(montage, { id, at, seconds = TODO_LIMITS.usual } =
  *   on the photo (the film cuts on it).
  */
 export function withPhoto(montage, record, seconds, { id } = {}) {
+  // (0.6.190) What is refused is said of an « image », no longer of a « photo » (the words of the Bobine, capture 104).
   montage = placed(montage);
   const refused = reason => ({ montage, reason });
-  if (trackOf(record) !== 'image') return refused('Seule une image se pose comme photo de début ou de fin.');
+  if (trackOf(record) !== 'image') return refused('Seule une image se pose en début ou en fin de prise.');
   const photo = sourceOf(record),
     at = tenth(Math.max(0, seconds)),
     plans = [...montage.plans];
@@ -477,9 +478,9 @@ export function withPhoto(montage, record, seconds, { id } = {}) {
     plans[index] = { ...plan, photos: { ...plan.photos, [side]: photo } };
     return { montage: { ...montage, plans }, chosen: plan.id };
   }
-  if (plan.kind !== 'video') return refused('Une photo se pose au-dessus d’une vidéo ou d’une prise à créer, pas d’une image.');
-  if (local < 0.5) return refused('Posez la photo plus loin dans la vidéo : avant elle, il ne resterait rien de cette prise.');
-  if (length - local < TODO_LIMITS.shortest) return refused('Posez la photo plus tôt dans la vidéo, ou après la fin pour une nouvelle prise.');
+  if (plan.kind !== 'video') return refused('Une image se pose au-dessus d’une vidéo ou d’une prise à créer, pas d’une autre image.');
+  if (local < 0.5) return refused('Posez l’image plus loin dans la vidéo : avant elle, il ne resterait rien de cette prise.');
+  if (length - local < TODO_LIMITS.shortest) return refused('Posez l’image plus tôt dans la vidéo, ou après la fin pour une nouvelle prise.');
   if (plans.length >= MONTAGE_LIMITS.plans) return refused('Cette bobine est pleine.');
   const cut = round(plan.from + local);
   plans[index] = { ...plan, to: cut };
@@ -494,11 +495,11 @@ export function withPhoto(montage, record, seconds, { id } = {}) {
  */
 export function withPhotoIn(montage, record, id, side) {
   const refused = reason => ({ montage, reason });
-  if (trackOf(record) !== 'image') return refused('Seule une image se pose comme photo de début ou de fin.');
+  if (trackOf(record) !== 'image') return refused('Seule une image se pose en début ou en fin de prise.');
   const plan = montage.plans.find(item => item.id === id);
-  if (!isTodo(plan)) return refused('Une photo se pose au début ou à la fin d’une prise à créer.');
-  if (side === 'start' && plan.todo.suite) return refused('Une suite part de la fin de sa vidéo : elle n’a que sa photo de fin.');
-  if (side !== 'start' && side !== 'end') return refused('Une photo est de début ou de fin.');
+  if (!isTodo(plan)) return refused('Une image se pose au début ou à la fin d’une prise à créer.');
+  if (side === 'start' && plan.todo.suite) return refused('Une suite part de la fin de sa vidéo : elle n’a que son image de fin.');
+  if (side !== 'start' && side !== 'end') return refused('Une image est de début ou de fin.');
   return {
     montage: { ...montage, plans: montage.plans.map(item => (item === plan ? { ...plan, photos: { ...plan.photos, [side]: sourceOf(record) } } : item)) },
     chosen: id,
@@ -696,7 +697,7 @@ export function creationOf(montage, id, lengthOf = () => null, { limits = {} } =
   if (link.kind === 'own') return wanted;
   if (link.kind === 'loose') return { reason: 'Cette suite n’est plus collée à la vidéo qu’elle continue : rapprochez-la, ou retirez-la.' };
   if (link.kind === 'cut')
-    return { reason: 'La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une photo de début.' };
+    return { reason: 'La vidéo d’avant est coupée avant sa fin : rendez-lui sa fin, ou posez une image de début.' };
   // (0.6.152) A suite towards its photo is a continuation that arrives on it (end_image on extend_video,
   // his choice of 20/11 for the Bobine and the Studio), no longer a new clip from the last image.
   const { format: _format, ...rest } = wanted;

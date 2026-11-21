@@ -9741,7 +9741,7 @@ body:not([data-view='chat']) .resume {
   opacity: 0.5;
   cursor: default;
 }
-/* The word under an image of the card names it (« DÉBUT », « RÉF. 1 »): 12 px, as every word that
+/* The word under an image of the card names it (« DÉBUT », « SUJET 1 »): 12 px, as every word that
    names a piece (21/11); not a label of 10,5 px. */
 .proposal-input figcaption {
   min-height: 12px;
@@ -10809,7 +10809,9 @@ body[data-view='studio'][data-chat='open'] .chat-panel {
   color: var(--accent);
   /* (21/11) A word that names a piece: 12 px, not a label of 10,5 px. */
   font: 400 var(--size-1)/1 var(--font-mono);
-  letter-spacing: 0.1em;
+  /* (0.6.190) 0.05em, no longer 0.1em: « SUJET 2 » and « CHANGER », seven signs, were 58,8 px under cases of
+     52 px set 8 px apart, and read as one word (« CHANGERSUJET 2 »). 54,6 px now: 5 px between two names. */
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   white-space: nowrap;
   pointer-events: none;
