@@ -6010,7 +6010,7 @@ body[data-view='studio'][data-chat='open'] .workspace:not(:has(#messages:empty))
 .studio-prompt-field .studio-enrich > * {
   pointer-events: auto;
 }
-/* « Améliorer le prompt » (moodix-design.md 7 bis 16): a square of 36 px, 8 px corners, in the
+/* « Enrichir le prompt » (moodix-design.md 7 bis 16): a square of 36 px, 8 px corners, in the
    box of the prompt, 16 px from its right edge and 12 px from its foot; the wand of the design,
    17 px, 2 px strokes; no blue. Waiting for a few words, it is barely there; ready, a dark tile;
    at work, white, the wand turned into a dark ring that turns slowly (still with less motion). */
@@ -9741,10 +9741,12 @@ body:not([data-view='chat']) .resume {
   opacity: 0.5;
   cursor: default;
 }
+/* The word under an image of the card names it (« DÉBUT », « RÉF. 1 »): 12 px, as every word that
+   names a piece (21/11); not a label of 10,5 px. */
 .proposal-input figcaption {
   min-height: 12px;
   color: var(--text-3);
-  font: 400 var(--size-label)/1 var(--font-mono);
+  font: 400 var(--size-1)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -10030,7 +10032,7 @@ body:not([data-view='chat']) .resume {
 #studio-view .studio-prompt-field:not(.is-folded) .studio-prompt-more svg {
   transform: rotate(-90deg);
 }
-/* Shown whole, its arrow (turned up) and « Améliorer » under its last line, not over it. */
+/* Shown whole, its arrow (turned up) and « Enrichir » under its last line, not over it. */
 #studio-view .studio-block.is-input .studio-prompt-field:not(.is-folded):has(> .studio-prompt-more:not([hidden])) {
   padding-bottom: 54px;
 }
@@ -10800,9 +10802,13 @@ body[data-view='studio'][data-chat='open'] .chat-panel {
   content: attr(data-name);
   position: absolute;
   top: calc(100% + 5px);
-  left: 0;
+  /* (0.6.187) Centred under its case: in 12 px a name is as wide as the case or a little more (« CHANGER »),
+     and from the left it ran into the name of the case beside it. */
+  left: 50%;
+  transform: translateX(-50%);
   color: var(--accent);
-  font: 400 var(--size-label)/1 var(--font-mono);
+  /* (21/11) A word that names a piece: 12 px, not a label of 10,5 px. */
+  font: 400 var(--size-1)/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -16781,10 +16787,11 @@ body:not([data-view='studio']) .ai-cursor {
   outline: 2px solid var(--ink);
   outline-offset: -4px;
 }
+/* « Début », « Fin »: a word that names a piece, in 12 px (21/11). */
 .montage-photo-side {
   position: absolute;
   bottom: 3px;
-  font: 500 10.5px/1 var(--font-ui);
+  font: 500 var(--size-1)/1 var(--font-ui);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--ink);

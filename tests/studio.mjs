@@ -1826,6 +1826,9 @@ test('the input images: pictos and no word, start and end on a line of time, ref
       ['Ajouter l’image de début', 'Ajouter l’image de fin', 'Ajouter la référence 1'],
     );
     assert.equal(picks()[1].title, 'Image de fin (facultatif) · glisser, coller ou cliquer');
+    // (0.6.187) What each case is named for the hand that carries a take over it: its short name; « Changer »
+    // once it holds something (« Remplacer » was cut in 12 px, longer than its case).
+    assert.deepEqual(slots().map(tile => tile.dataset.name), ['Début', 'Fin', 'Réf. 1']);
     // Empty, the start and the end show their pictos, a reference « @ ».
     assert.equal(picks()[0].children[0].tag, 'svg');
     assert.equal(picks()[2].children[0].textContent, '@');
@@ -1847,6 +1850,7 @@ test('the input images: pictos and no word, start and end on a line of time, ref
     await drop(0, 'a.png');
     assert.equal(slots()[0].find('studio-slot-badge').length, 1);
     assert.equal(picks()[0].attributes['aria-label'], 'Image de début · #ref1 · a.png');
+    assert.deepEqual(slots().map(tile => tile.dataset.name).slice(0, 2), ['Changer', 'Fin']);
     const [swap] = body.find('studio-swap');
     assert.equal(swap.attributes['aria-label'], 'Inverser début et fin');
     swap.onclick();
@@ -2265,7 +2269,7 @@ test('« Agent », right of « Générer » in the Double verre, opens the chat 
   }
 });
 
-test('« Améliorer le prompt » rewrites what is typed, which can be taken back; three LoRAs at most', async () => {
+test('« Enrichir le prompt » rewrites what is typed, which can be taken back; three LoRAs at most', async () => {
   const image = {
     id: 'w',
     name: 'Image',
@@ -2277,14 +2281,23 @@ test('« Améliorer le prompt » rewrites what is typed, which can be taken back
     settings: [],
     seeded: true,
   };
+  // The chat model answers when the test says (answer): meanwhile, the wand says it is at work.
+  let answer = null;
   const studio = await studioPage(
     { create_image: [image] },
-    { 'studio/enrich': ({ prompt }) => ({ prompt: 'A lighthouse at dusk. (' + prompt + ')' }) },
+    {
+      'studio/enrich': ({ prompt }) =>
+        new Promise(resolve => (answer = () => resolve({ prompt: 'A lighthouse at dusk. (' + prompt + ')' }))),
+    },
   );
   const { body, asked, restore } = studio;
   try {
     const wand = () => body.find('studio-enrich-go')[0];
-    assert.equal(wand().children.at(-1).textContent, 'Améliorer le prompt');
+    // « Enrichir », the word of the Bobine too (21/11): its name for screen readers, in it and on it.
+    assert.deepEqual(
+      [wand().children.at(-1).textContent, wand().attributes['aria-label']],
+      ['Enrichir le prompt', 'Enrichir le prompt'],
+    );
     // Fewer than three letters: the wand waits, and says why.
     assert.equal(wand().disabled, true);
     assert.equal(wand().title, 'Écrivez d’abord quelques mots');
@@ -2302,8 +2315,16 @@ test('« Améliorer le prompt » rewrites what is typed, which can be taken back
     studio.prompt().oninput();
     // Ready: it says what it does, and its keys.
     studio.studio.render();
-    assert.match(wand().title, /^Améliorer le prompt avec Moodix AI \((Ctrl|⌘)\+E\)$/);
-    await body.find('studio-enrich-go')[0].onclick();
+    assert.match(wand().title, /^Enrichir le prompt avec Moodix AI \((Ctrl|⌘)\+E\)$/);
+    const asking = body.find('studio-enrich-go')[0].onclick();
+    await settle();
+    // At work: greyed, its name and its tooltip say what Moodix AI is doing.
+    assert.deepEqual(
+      [wand().children.at(-1).textContent, wand().attributes['aria-label'], wand().title, wand().disabled],
+      ['Enrichissement du prompt…', 'Enrichissement du prompt…', 'Moodix AI enrichit votre texte…', true],
+    );
+    answer();
+    await asking;
     assert.deepEqual(asked.find(([route]) => route === 'studio/enrich')[1], {
       prompt: 'un phare',
       verb: 'create_image',
@@ -2333,6 +2354,22 @@ test('« Améliorer le prompt » rewrites what is typed, which can be taken back
   } finally {
     restore();
   }
+});
+
+test('the wand says « Enrichir » everywhere (21/11): its old words are nowhere in the application', async () => {
+  // Except « Améliorer le prompt avant chaque image » on the page Modèles, which is no wand: the text encoder
+  // of the model rewrites the prompt there; its name is not decided yet (simple interface, point 4 of 21/11).
+  const { readFile, readdir } = await import('node:fs/promises'),
+    root = new URL('../', import.meta.url),
+    files = ['server.mjs', 'README.md'],
+    old = /Améliorer le prompt|Amélioration du prompt|« Améliorer »|réécrit votre texte/;
+  for (const folder of ['public/', 'lib/', 'scripts/'])
+    for (const name of await readdir(new URL(folder, root)))
+      if (/\.(m?js|css|html)$/.test(name)) files.push(folder + name);
+  assert.ok(files.length > 100, 'the files of the application are read');
+  const saying = [];
+  for (const name of files) if (old.test(await readFile(new URL(name, root), 'utf8'))) saying.push(name);
+  assert.deepEqual(saying, ['public/native-workflow-ui.mjs']);
 });
 
 test('Ctrl+E improves the prompt from the Studio; an image pasted or dropped on its column goes to the first free slot', async () => {
@@ -4964,7 +5001,7 @@ test('what comes back late is not written elsewhere: a prompt improved for a con
   const event = files => ({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files, setData() {} } }),
     slots = () => body.find('studio-slot').map(tile => [tile.dataset.slot, tile.children[0].children[0]?.src ?? null]);
   try {
-    // « Améliorer le prompt » in the first conversation; the chat model takes its time.
+    // « Enrichir le prompt » in the first conversation; the chat model takes its time.
     page.prompt().value = 'un chat roux';
     page.prompt().oninput();
     void body.find('studio-enrich-go')[0].onclick();
@@ -5767,7 +5804,7 @@ test('the Studio stays the conversation’s whose take it makes: another one sho
     await settle();
     assert.equal(page.prompt().value, 'un phare');
     // A work goes on in another conversation (the page says it): « Générer » is greyed, why on it,
-    // and on the line of the step; « Améliorer le prompt » too.
+    // and on the line of the step; « Enrichir le prompt » too.
     elsewhere = 'Génération en cours dans « Autre » : attendez sa fin.';
     studio.render();
     const [go] = body.find('studio-go');

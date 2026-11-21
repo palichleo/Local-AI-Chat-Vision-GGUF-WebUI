@@ -447,7 +447,7 @@ export function setupStudio({
   // same objects from one conversation to the next, so what was asked for one and comes back later
   // (a prompt being improved, a file being imported) is told apart by this count, and not written.
   let draftsEpoch = 0,
-    // The count when « Améliorer le prompt » was asked: it holds settle for its own conversation only.
+    // The count when « Enrichir le prompt » was asked: it holds settle for its own conversation only.
     enrichEpoch = -1;
   // The take opened from the chat on the screen (« Afficher dans le Studio »): it stays there.
   let pinned = null,
@@ -603,7 +603,7 @@ export function setupStudio({
       return seconds.length ? Math.max(...seconds) : null;
     },
     // (0.6.146) What happens in a plan, written by Moodix AI from its photos: the chat model comes
-    // back first when it has left the card, as for « Améliorer »; the takes of the conversation shown
+    // back first when it has left the card, as for « Enrichir le prompt »; the takes of the conversation shown
     // are named in the request, the others by their own conversation.
     // (0.6.153) Enrichir: the text of a take detailed by the chat model, as the wand of the Studio does.
     enrich: async (asked, { signal = new AbortController().signal } = {}) => {
@@ -875,9 +875,12 @@ export function setupStudio({
       // take of the project is dragged to it from the Sortie).
       openPicker(role, index, media);
     });
-    // Named for the hand that carries something here (moodix.css): « FIN », « RÉF. 2 », « REMPLACER ».
+    // Named for the hand that carries something here (moodix.css): « FIN », « RÉF. 2 », « CHANGER ».
+    // (0.6.187) « Changer », no longer « Remplacer »: in 12 px, as every word that names a piece now, the
+    // longer word went past its case of 52 px, cut by the column under « Fin » (« REMPLACEI ») and over
+    // the name of the case beside a reference (measured in the page on 21/11).
     tile.dataset.media = media;
-    tile.dataset.name = value ? 'Remplacer' : (SHORT[role] ?? label) + (role === 'reference' ? ' ' + (index + 1) : '');
+    tile.dataset.name = value ? 'Changer' : (SHORT[role] ?? label) + (role === 'reference' ? ' ' + (index + 1) : '');
     pick.title = refused || (value ? label + ' · glissez-la vers un autre emplacement pour changer son rôle' : tip);
     pick.setAttribute('aria-label', value ? label + ' · ' + value.name : refused ? label + ' · ' + refused : add);
     pick.disabled = Boolean(working);
@@ -2381,7 +2384,7 @@ export function setupStudio({
   }
 
   // ------------------------------------------------------------------ the prompt, improved
-  // « Améliorer le prompt » asks for a few words first (moodix-design.md 17).
+  // « Enrichir le prompt » asks for a few words first (moodix-design.md 17).
   const IMPROVE_MIN = 3;
   /**
    * A character put in a video: the video and the image handed over, from which the prompt is
@@ -2402,8 +2405,8 @@ export function setupStudio({
         ? 'Ajoutez d’abord la vidéo et le personnage'
         : drafts[mode].prompt.trim().length < IMPROVE_MIN
           ? 'Écrivez d’abord quelques mots'
-          : 'Améliorer le prompt avec Moodix AI (' + MODIFIER + '+E)';
-  /** Whether « Améliorer » has what it needs: a few words, or the pictures a prompt is written from. */
+          : 'Enrichir le prompt avec Moodix AI (' + MODIFIER + '+E)';
+  /** Whether « Enrichir » has what it needs: a few words, or the pictures a prompt is written from. */
   const improves = () =>
     current()?.follows ? Boolean(sceneInputs()) : drafts[mode].prompt.trim().length >= IMPROVE_MIN;
   /** The button follows what is typed, without drawing the Studio again (the field keeps its focus). */
@@ -2540,12 +2543,12 @@ export function setupStudio({
   function enrichRow() {
     const draft = drafts[mode],
       row = node('div', 'studio-enrich'),
-      label = enriching ? 'Amélioration du prompt…' : 'Améliorer le prompt',
+      label = enriching ? 'Enrichissement du prompt…' : 'Enrichir le prompt',
       make = aiTarget(button('studio-enrich-go', '', enrich, 'wand'), 'enrich');
     make.append(node('span', 'sr-only', label));
     make.setAttribute('aria-label', label);
     make.setAttribute('aria-keyshortcuts', MODIFIER === '⌘' ? 'Meta+E' : 'Control+E');
-    make.title = enriching ? 'Moodix AI réécrit votre texte…' : improveTitle();
+    make.title = enriching ? 'Moodix AI enrichit votre texte…' : improveTitle();
     if (enriching) {
       make.classList.add('is-working');
       make.setAttribute('aria-busy', 'true');
@@ -4773,7 +4776,7 @@ export function setupStudio({
             : 'Décrivez votre son…',
       value => {
         draft.prompt = value;
-        // « Améliorer le prompt » waits for a few words; « Générer », for one.
+        // « Enrichir le prompt » waits for a few words; « Générer », for one.
         improvable();
         goable();
       },
@@ -5784,7 +5787,7 @@ export function setupStudio({
       event.preventDefault();
       void generate();
     } else if (String(event.key).toLowerCase() === 'e' && !event.shiftKey && mode !== 'audio' && info?.enabled) {
-      // « Améliorer le prompt » (moodix-design.md 17): Ctrl+E, ⌘+E on a Mac.
+      // « Enrichir le prompt » (moodix-design.md 17): Ctrl+E, ⌘+E on a Mac.
       event.preventDefault();
       void enrich();
     }

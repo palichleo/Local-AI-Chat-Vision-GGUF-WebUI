@@ -1102,7 +1102,7 @@ test('14 · OpenRouter: a browser that reads the page of return ahead neither en
   }
 });
 
-test('13 · « Améliorer le prompt » with a remote model that reflects within any length it is given (as Ernie on OpenRouter)', async t => {
+test('13 · « Enrichir le prompt » with a remote model that reflects within any length it is given (as Ernie on OpenRouter)', async t => {
   const sent = [];
   const base = await serve(t, async (req, res) => {
     const chunks = [];

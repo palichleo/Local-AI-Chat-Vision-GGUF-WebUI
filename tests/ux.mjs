@@ -247,6 +247,16 @@ test('no text of the interface is smaller than 12 px', async () => {
   const labels = [...sheet.matchAll(/[^{}]*\{[^{}]*var\(--size-label\)[^{}]*\}/g)].map(([rule]) => rule);
   assert.ok(labels.length > 10);
   for (const rule of labels) assert.match(rule, /letter-spacing: 0\.\d+em/, rule);
+  // (21/11, decision 2 of the simple interface) The words that name a piece are no labels: 12 px, under
+  // the images of a card of the Chat (« DÉBUT », « RÉF. 1 »), on the track PHOTOS of the Bobine (« Début »,
+  // « Fin ») and under a slot a take is carried over (« FIN », « REMPLACER »).
+  const naming = [
+    /\n\.proposal-input figcaption \{[^}]*\}/,
+    /\n\.montage-photo-side \{[^}]*\}/,
+    /\{[^{}]*content: attr\(data-name\);[^}]*\}/,
+  ];
+  for (const rule of naming)
+    assert.match(sheet.match(rule)?.[0] ?? '', /\n {2}font: \d+ var\(--size-1\)\/1 /, String(rule));
 });
 
 test('the context meter ignores stale counts; its details are in its tooltip', async () => {
