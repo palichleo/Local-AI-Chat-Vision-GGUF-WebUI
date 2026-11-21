@@ -5,8 +5,12 @@
  * réglages par défaut » puts the defaults in hand. Grain « Aucun » fades Dose, Mouvement, Filtres.
  * Éclairage (18/11, lumiere-irisee-maquette.md): « Lumière », Dernière prise (the default) or
  * Irisée; « Sources », those of the light of the last take, faded and out of reach with Irisée.
+ * (0.6.187) Watermark (watermark-maquette.md, capture 93): the one of the videos that go out of Moodix,
+ * Aucun · L'Éclipse · L'Éclipse et le nom, each shown on a picture with its watermark laid; L'Éclipse by
+ * default. Set here only (decision of 21/11), kept with the room.
  */
 import { DEFAULTS, FILTERS, GRAINS, LIGHTINGS, LIGHTS, ROOMS, applyRoom, roomSettings } from './room.mjs';
+import { WATERMARKS, WATERMARK_DEFAULT, WATERMARK_NAMES, watermarkSetting } from './watermark.mjs';
 
 const ROOM_NAMES = { salle: 'Salle', ecran: 'Écran éteint', nuit: 'Nuit américaine', velours: 'Velours', tirage: 'Tirage', lavande: 'Lavande' };
 const LIGHTING_NAMES = { prise: 'Dernière prise', irisee: 'Irisée' };
@@ -22,7 +26,9 @@ const FILTER_NAMES = { diffusion: 'Diffusion', lumiere: 'Lumière', centre: 'Cen
 
 export function setupInterfaceSettings({ $, node, api, root = globalThis.document?.documentElement }) {
   let saved = roomSettings(),
-    current = roomSettings();
+    current = roomSettings(),
+    savedMark = WATERMARK_DEFAULT,
+    mark = WATERMARK_DEFAULT;
   const same = (a, b) => JSON.stringify(roomSettings(a)) === JSON.stringify(roomSettings(b));
 
   /**
@@ -82,6 +88,27 @@ export function setupInterfaceSettings({ $, node, api, root = globalThis.documen
     // No grain: its dose, its motion and its filters fade.
     const none = current.grain === 'aucun';
     for (const row of $('settings-panel-interface')?.querySelectorAll?.('.room-grain-more') ?? []) row.classList.toggle('is-faded', none);
+    // (0.6.187) The three watermarks, each on its picture, its name under it (moodix.css, .watermark-choice).
+    $('watermark-choices').replaceChildren(
+      ...WATERMARKS.map(id => {
+        const choice = node('button', 'watermark-choice'),
+          frame = node('span', 'watermark-frame');
+        choice.type = 'button';
+        choice.dataset.watermark = id;
+        choice.setAttribute('role', 'radio');
+        choice.setAttribute('aria-checked', String(mark === id));
+        if (id !== 'aucun') {
+          const laid = node('img', 'watermark-mark');
+          laid.src = `/assets/watermark-${id}.svg`;
+          laid.alt = '';
+          laid.draggable = false;
+          frame.append(laid);
+        }
+        choice.append(frame, node('span', 'watermark-name', WATERMARK_NAMES[id]));
+        choice.onclick = () => change({}, id);
+        return choice;
+      }),
+    );
   }
   /**
    * The choice that has the focus, as a way to give it back once the choices are drawn again (its
@@ -90,14 +117,15 @@ export function setupInterfaceSettings({ $, node, api, root = globalThis.documen
    */
   function held() {
     const active = globalThis.document?.activeElement;
-    for (const id of ['room-choices', 'room-lighting', 'room-light', 'room-grain', 'room-motion', 'room-filters']) {
+    for (const id of ['room-choices', 'room-lighting', 'room-light', 'room-grain', 'room-motion', 'room-filters', 'watermark-choices']) {
       const at = active ? [...($(id).children ?? [])].indexOf(active) : -1;
       if (at >= 0) return () => $(id).children[at]?.focus?.();
     }
     return null;
   }
-  function change(patch) {
+  function change(patch, watermark = mark) {
     current = roomSettings({ ...current, ...patch });
+    mark = watermarkSetting(watermark);
     if (root) applyRoom(current, root);
     // Made on the keyboard, a choice keeps the focus, on the button drawn in its place: lost, it
     // went back to the top of the settings at each choice.
@@ -106,26 +134,33 @@ export function setupInterfaceSettings({ $, node, api, root = globalThis.documen
     back?.();
   }
   $('room-dose').oninput = () => change({ dose: Number($('room-dose').value) });
-  $('room-reset').onclick = () => change({ ...DEFAULTS, filters: [...DEFAULTS.filters] });
+  $('room-reset').onclick = () => change({ ...DEFAULTS, filters: [...DEFAULTS.filters] }, WATERMARK_DEFAULT);
 
   return {
-    /** The room kept (the preferences), put on the page. */
-    load(value) {
+    /** The room and the watermark kept (the preferences), put on the page. */
+    load(value, watermark) {
       saved = roomSettings(value);
       current = roomSettings(value);
+      savedMark = mark = watermarkSetting(watermark);
       if (root) applyRoom(current, root);
       paint();
     },
-    dirty: () => !same(current, saved),
-    /** Kept with the other preferences. */
+    dirty: () => !same(current, saved) || mark !== savedMark,
+    /** Kept with the other preferences: what changed of them. */
     async save() {
-      if (same(current, saved)) return;
-      const { preferences } = await (await api('preferences', { room: current })).json();
-      saved = roomSettings(preferences.room);
+      const changed = {
+        ...(same(current, saved) ? {} : { room: current }),
+        ...(mark === savedMark ? {} : { watermark: mark }),
+      };
+      if (!Object.keys(changed).length) return;
+      const { preferences } = await (await api('preferences', changed)).json();
+      if ('room' in changed) saved = roomSettings(preferences.room);
+      if ('watermark' in changed) savedMark = watermarkSetting(preferences.watermark);
     },
     /** Closed without « Enregistrer »: the page as it was. */
     revert() {
       current = roomSettings(saved);
+      mark = savedMark;
       if (root) applyRoom(current, root);
       paint();
     },

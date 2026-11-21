@@ -5998,8 +5998,8 @@ try {
   if (initial.version) $('settings-version').textContent = initial.version;
   void checkUpdates();
   applyTheme(initial.preferences?.theme);
-  // The room kept (Paramètres › Interface), on the page from the start.
-  interfaceUI.load(initial.preferences?.room);
+  // The room and the watermark kept (Paramètres › Interface), on the page from the start.
+  interfaceUI.load(initial.preferences?.room, initial.preferences?.watermark);
   state.saveHistory = initial.preferences?.saveHistory === true;
   await projectUI.refresh().catch(error => notice('Projets indisponibles : ' + error.message));
   await refreshHistory();
