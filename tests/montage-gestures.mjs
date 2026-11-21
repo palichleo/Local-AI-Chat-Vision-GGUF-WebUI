@@ -8,7 +8,8 @@ import { newMontage, validateMontage } from '../lib/montages.mjs';
 // (public/montage-arrange.mjs), drawn at random from a fixed seed: after each of them, the bobine must be
 // one the server keeps (lib/montages.mjs validateMontage) — the page keeps it a moment later, and one the
 // server refuses is not kept at all any more — and its plans one after the other, none over the one before.
-// The first run found takes brought to their shortest (0.1 s) refused by a rounding of the server.
+// The first run found takes brought to their shortest (0.1 s) refused by a rounding of the server; long
+// walks, a take made in parts on a bobine nearly full going beyond its 200 takes.
 
 /** Numbers drawn from `seed`, always the same (mulberry32). */
 function drawn(seed) {
@@ -134,8 +135,9 @@ function walk(seed, runs, steps) {
 }
 
 test('whatever the gestures of the Bobine and the plans of Moodix AI, the server keeps the bobine (relecture du 21/11)', () => {
-  // About 36 000 gestures in all, a second or so.
+  // About 36 000 gestures in all, a second or so; then a few long walks, up to the limits of a bobine.
   let done = 0;
   for (const seed of [1, 2, 3]) done += walk(seed, 200, 60);
-  assert.equal(done, 36000);
+  done += walk(5, 6, 700);
+  assert.equal(done, 40200);
 });

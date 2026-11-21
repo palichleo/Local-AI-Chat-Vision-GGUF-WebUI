@@ -552,8 +552,11 @@ export function withTodoMade(montage, id, record, { from = 0, limits = {}, partI
   // (0.6.152) The first part of a take made in parts: it becomes that take (`partId`); what is left of it
   // stays to create under its own id, a suite of it, with its text and the photo it arrives on, as long
   // as it was left.
+  // (Relecture du 21/11) A bobine full has no room for what is left: the take made takes its place whole.
+  // creationOf refuses it before (the bobine is not changed while a take is made); a take more, there,
+  // was one beyond what the server keeps, and nothing of the bobine was kept any more.
   const { count } = partsOf(plan, limits);
-  if (count > 1 && partId) {
+  if (count > 1 && partId && montage.plans.length < MONTAGE_LIMITS.plans) {
     const part = { ...made, id: partId },
       // (To the millisecond, not the tenth: the take ends where it ended, part after part.)
       left = { ...todoPlan(id, TODO_LIMITS.shortest, { at: endOf(part), todo: { prompt: plan.todo.prompt, suite: true } }), to: round(Math.max(TODO_LIMITS.shortest, plan.to - plan.from - (part.to - part.from))), frame: plan.frame, volume: plan.volume, ...(plan.photos?.end ? { photos: { end: plan.photos.end } } : {}) },
@@ -684,6 +687,13 @@ export function creationOf(montage, id, lengthOf = () => null, { limits = {} } =
   // (0.6.152) Made in parts: what is asked now is its first part; the photo it arrives on is the one
   // of its last part.
   const parts = partsOf(plan, limits);
+  // (Relecture du 21/11) Each part becomes a take of the bobine: it needs room for them all. Created
+  // without, the bobine went beyond its 200 takes, and the server refused it whole from then on.
+  const over = montage.plans.length + parts.count - 1 - MONTAGE_LIMITS.plans;
+  if (parts.count > 1 && over > 0)
+    return {
+      reason: `Elle se crée en ${parts.count} parties, une prise chacune, et la bobine est pleine (${MONTAGE_LIMITS.plans} prises au plus) : retirez-en ${over}.`,
+    };
   const wanted = {
     verb: 'create_video',
     prompt,

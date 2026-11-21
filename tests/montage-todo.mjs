@@ -420,6 +420,37 @@ test('a take to create longer than its model makes at once is made in equal part
   assert.deepEqual(withTodoMade(drawn, id(40), record(24, 'video', { parameters: { frames: 161, fps: 24 } }), { limits }).plans.map(plan => plan.id), [id(40)]);
 });
 
+test('a take made in parts needs room for them in the bobine: never one beyond its 200 takes (relecture du 21/11)', () => {
+  // (Found by gestures drawn at random: its first part made, what was left of it was a take more, the
+  // 201st, and the server refused the whole bobine from then on.)
+  const limits = { create_video: 10.04, extend_video: 9.67 },
+    // `takes` takes of a second, then a take to create of 20 s: three parts, one take each.
+    bobine = takes => ({
+      ...empty(),
+      plans: [
+        ...Array.from({ length: takes }, (_, at) => ({ id: id(1000 + at), at, source: source(5), kind: 'video', from: 0, to: 1, frame: 'fit', volume: 1 })),
+        { id: id(40), at: takes, kind: 'video', todo: { prompt: 'Il marche.' }, from: 0, to: 20, frame: 'fit', volume: 1 },
+      ],
+    }),
+    lengthOf = () => 1,
+    made = record(24, 'video', { parameters: { frames: 161, fps: 24 } });
+  // Room for its three parts: 197 takes, the take to create, two more.
+  const room = bobine(MONTAGE_LIMITS.plans - 3);
+  assert.equal(creationOf(room, id(40), lengthOf, { limits }).parts, 3);
+  assert.equal(validateMontage(withTodoMade(room, id(40), made, { limits, partId: id(44) })).plans.length, MONTAGE_LIMITS.plans - 1);
+  // One take more: no room for the last part. Said before anything is made, in its line of the series.
+  const full = bobine(MONTAGE_LIMITS.plans - 2),
+    reason = 'Elle se crée en 3 parties, une prise chacune, et la bobine est pleine (200 prises au plus) : retirez-en 1.';
+  assert.deepEqual(creationOf(full, id(40), lengthOf, { limits }), { reason });
+  assert.deepEqual(seriesOf(full, lengthOf, { limits }).map(item => [item.ready, item.reason]), [[false, reason]]);
+  // Made all the same, on a bobine already full: the take made takes its place whole, and the server keeps it.
+  const brim = bobine(MONTAGE_LIMITS.plans - 1),
+    kept = validateMontage(withTodoMade(brim, id(40), made, { limits, partId: id(44) }));
+  assert.deepEqual([kept.plans.length, kept.plans.at(-1).id, kept.plans.some(isTodo)], [MONTAGE_LIMITS.plans, id(40), false]);
+  // A take in one part only needs no room more.
+  assert.equal(creationOf(brim, id(40), lengthOf, { limits: { create_video: 30 } }).reason, undefined);
+});
+
 test('a photo laid in a place of a take to create is its start or its end, never shared; a suite has its end only (0.6.152)', () => {
   // (Captures 77 et 79.)
   const film = withTake(empty(), clip(5, 5), { id: id(15) }),
